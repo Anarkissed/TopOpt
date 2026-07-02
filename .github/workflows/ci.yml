@@ -1,0 +1,63 @@
+# Canonical CI definition. Also reachable as ci/ci.yml (symlink): GitHub
+# Actions only executes workflow files physically located in
+# .github/workflows/, so the real file must live here.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/.vcpkg
+      VCPKG_DISABLE_METRICS: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential ninja-build pkg-config curl zip unzip tar \
+            autoconf automake libtool bison \
+            libgl1-mesa-dev libglu1-mesa-dev libx11-dev libxext-dev \
+            libxi-dev libxmu-dev libxft-dev libxrandr-dev
+
+      # Pinned to release 2026.06.24 (commit matches builtin-baseline in
+      # core/vcpkg.json). OCCT >= 7.8 is not available from apt on
+      # ubuntu-latest and lib3mf is not packaged at all, hence vcpkg.
+      - name: Check out vcpkg (2026.06.24)
+        run: |
+          git clone --depth 1 --branch 2026.06.24 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-x64-linux-dynamic-${{ hashFiles('core/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-x64-linux-dynamic-
+
+      # x64-linux-dynamic: OCCT is LGPL 2.1 and must stay dynamically
+      # linked (ARCHITECTURE.md §4/§10).
+      - name: Configure (vcpkg installs OCCT, Eigen, lib3mf)
+        run: >
+          cmake -S core -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic
+          -DTOPOPT_REQUIRE_DEPS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      # --no-tests=ignore: the suite is intentionally empty at M1.1.
+      # The first task that adds a test should flip this to --no-tests=error.
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --no-tests=ignore

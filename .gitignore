@@ -1,0 +1,17 @@
+# CMake / build trees
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+_deps/
+
+# vcpkg
+vcpkg_installed/
+.vcpkg/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

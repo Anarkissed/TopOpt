@@ -1,0 +1,10 @@
+{
+  "name": "topopt-core",
+  "version": "0.1.0",
+  "dependencies": [
+    "eigen3",
+    "lib3mf",
+    "opencascade"
+  ],
+  "builtin-baseline": "cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3"
+}
