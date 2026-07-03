@@ -26,4 +26,8 @@ enable_testing()
 
 add_executable(test_materials tests/unit/test_materials.cpp)
 target_link_libraries(test_materials PRIVATE topopt)
+# Inject the absolute path to the committed seed materials.json so the on-disk
+# load test (M1.2b) does not depend on the working directory.
+target_compile_definitions(test_materials PRIVATE
+  MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
 add_test(NAME materials_loader COMMAND test_materials)

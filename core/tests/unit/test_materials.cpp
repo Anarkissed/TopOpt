@@ -195,6 +195,46 @@ int main() {
     CHECK(threw, "missing file rejected");
   }
 
+  // --- Duplicate top-level material name rejected (M1.2b) ----------------
+  // JSON syntax permits repeated object keys, so a materials set can name the
+  // same material twice. Both bodies below are individually valid, so the only
+  // reason to reject is the repeated top-level name.
+  {
+    std::string json = "{\"PLA\":{" + std::string(kPLA) + "}," +
+                       "\"PLA\":{" + std::string(kPLA) + "}}";
+    bool threw = false;
+    std::string what;
+    try {
+      parse_materials(json);
+    } catch (const MaterialError& e) {
+      threw = true;
+      what = e.what();
+    }
+    CHECK(threw, "duplicate top-level material name rejected");
+    CHECK(what.find("duplicate material name") != std::string::npos,
+          "duplicate-name error names the cause");
+  }
+
+  // --- On-disk load of the committed materials.json succeeds (M1.2b) -----
+  // The human-seeded seed file at core/src/materials/materials.json
+  // (ARCHITECTURE §6) must load and validate cleanly. CMake injects its
+  // absolute path via MATERIALS_JSON_PATH so the test is independent of the
+  // working directory.
+  {
+    bool threw = false;
+    std::string what;
+    MaterialLibrary lib;
+    try {
+      lib = load_materials_file(MATERIALS_JSON_PATH);
+    } catch (const MaterialError& e) {
+      threw = true;
+      what = e.what();
+    }
+    CHECK(!threw, ("committed materials.json loads without error: " + what)
+                      .c_str());
+    CHECK(!lib.empty(), "committed materials.json yields a non-empty library");
+  }
+
   if (g_failures == 0) {
     std::printf("materials loader: all %d checks passed\n", g_checks);
     return 0;
