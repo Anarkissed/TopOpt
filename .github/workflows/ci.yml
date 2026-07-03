@@ -57,7 +57,7 @@ jobs:
       - name: Build
         run: cmake --build build
 
-      # --no-tests=ignore: the suite is intentionally empty at M1.1.
-      # The first task that adds a test should flip this to --no-tests=error.
+      # --no-tests=error: the suite is non-empty as of M1.2, so a run that
+      # registers zero tests (e.g. a misconfigured build) is now a failure.
       - name: Test
-        run: ctest --test-dir build --output-on-failure --no-tests=ignore
+        run: ctest --test-dir build --output-on-failure --no-tests=error

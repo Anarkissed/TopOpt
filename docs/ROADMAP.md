@@ -12,7 +12,7 @@
 - [x] M1.1 Repo scaffold: CMake project, `core/` layout per ARCHITECTURE §3,
       CI workflow that builds and runs an empty ctest suite on Linux with
       OCCT + Eigen + lib3mf installed. Green pipeline is the deliverable.
-- [ ] M1.2 `materials/` loader: parse materials.json, strict schema
+- [x] M1.2 `materials/` loader: parse materials.json, strict schema
       validation per ARCHITECTURE §6, reject bad files. Unit tests incl.
       malformed inputs.
 - [ ] M1.3 STL import + watertight/manifold check. Fixtures: golden cube,
