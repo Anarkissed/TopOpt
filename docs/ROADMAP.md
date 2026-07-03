@@ -15,6 +15,8 @@
 - [x] M1.2 `materials/` loader: parse materials.json, strict schema
       validation per ARCHITECTURE §6, reject bad files. Unit tests incl.
       malformed inputs.
+- [ ] M1.2b Add loader tests: duplicate top-level material name rejected;
+      on-disk load of the committed core/src/materials/materials.json succeeds.
 - [ ] M1.3 STL import + watertight/manifold check. Fixtures: golden cube,
       sphere, and a deliberately broken (open) mesh that must be rejected
       with a diagnostic.

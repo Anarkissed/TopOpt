@@ -1,0 +1,98 @@
+{
+  "PLA": {
+    "youngs_modulus_mpa": 3500,
+    "yield_strength_mpa": 55,
+    "density_g_cm3": 1.24,
+    "z_knockdown": 0.55,
+    "poisson": 0.33,
+    "family": "fdm"
+  },
+  "PETG": {
+    "youngs_modulus_mpa": 2000,
+    "yield_strength_mpa": 45,
+    "density_g_cm3": 1.27,
+    "z_knockdown": 0.70,
+    "poisson": 0.37,
+    "family": "fdm"
+  },
+  "ASA": {
+    "youngs_modulus_mpa": 2200,
+    "yield_strength_mpa": 40,
+    "density_g_cm3": 1.07,
+    "z_knockdown": 0.60,
+    "poisson": 0.35,
+    "family": "fdm"
+  },
+  "ABS": {
+    "youngs_modulus_mpa": 2100,
+    "yield_strength_mpa": 37,
+    "density_g_cm3": 1.05,
+    "z_knockdown": 0.55,
+    "poisson": 0.35,
+    "family": "fdm"
+  },
+  "PC": {
+    "youngs_modulus_mpa": 2200,
+    "yield_strength_mpa": 55,
+    "density_g_cm3": 1.19,
+    "z_knockdown": 0.60,
+    "poisson": 0.37,
+    "family": "fdm"
+  },
+  "PA12": {
+    "youngs_modulus_mpa": 1600,
+    "yield_strength_mpa": 38,
+    "density_g_cm3": 1.01,
+    "z_knockdown": 0.75,
+    "poisson": 0.39,
+    "family": "fdm"
+  },
+  "PA12_CF": {
+    "youngs_modulus_mpa": 4500,
+    "yield_strength_mpa": 60,
+    "density_g_cm3": 1.10,
+    "z_knockdown": 0.40,
+    "poisson": 0.38,
+    "family": "fdm"
+  },
+  "PETG_CF": {
+    "youngs_modulus_mpa": 3800,
+    "yield_strength_mpa": 50,
+    "density_g_cm3": 1.29,
+    "z_knockdown": 0.50,
+    "poisson": 0.36,
+    "family": "fdm"
+  },
+  "PP": {
+    "youngs_modulus_mpa": 1100,
+    "yield_strength_mpa": 22,
+    "density_g_cm3": 0.90,
+    "z_knockdown": 0.65,
+    "poisson": 0.42,
+    "family": "fdm"
+  },
+  "HIPS": {
+    "youngs_modulus_mpa": 1800,
+    "yield_strength_mpa": 28,
+    "density_g_cm3": 1.04,
+    "z_knockdown": 0.55,
+    "poisson": 0.35,
+    "family": "fdm"
+  },
+  "Resin_Standard": {
+    "youngs_modulus_mpa": 2200,
+    "yield_strength_mpa": 40,
+    "density_g_cm3": 1.15,
+    "z_knockdown": 1.0,
+    "poisson": 0.40,
+    "family": "resin"
+  },
+  "Resin_Tough": {
+    "youngs_modulus_mpa": 1500,
+    "yield_strength_mpa": 32,
+    "density_g_cm3": 1.12,
+    "z_knockdown": 1.0,
+    "poisson": 0.40,
+    "family": "resin"
+  }
+}
