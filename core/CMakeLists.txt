@@ -16,8 +16,14 @@ if(TOPOPT_REQUIRE_DEPS)
   find_package(lib3mf CONFIG REQUIRED)
 endif()
 
-add_library(topopt src/version.cpp)
+add_library(topopt
+  src/version.cpp
+  src/materials/materials.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
 enable_testing()
+
+add_executable(test_materials tests/unit/test_materials.cpp)
+target_link_libraries(test_materials PRIVATE topopt)
+add_test(NAME materials_loader COMMAND test_materials)
