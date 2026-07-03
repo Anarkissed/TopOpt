@@ -7,3 +7,4 @@ Append-only. Entries are written by the human maintainer (Nadim) only.
 - 2026-07-03: Re handoff 002 (Blocked): PR #1 merged by Nadim. Standing
   process: agents work on branches and open PRs; the human merges after
   reviewer audit.
+- 2026-07-03: Re handoff 003: workers must obtain CI evidence via branch + PR (per run 002's precedent) before handoff; local-only evidence is not sufficient for rule 5.
