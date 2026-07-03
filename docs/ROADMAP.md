@@ -9,7 +9,7 @@
 
 ## M1 — Import & voxelize
 
-- [ ] M1.1 Repo scaffold: CMake project, `core/` layout per ARCHITECTURE §3,
+- [x] M1.1 Repo scaffold: CMake project, `core/` layout per ARCHITECTURE §3,
       CI workflow that builds and runs an empty ctest suite on Linux with
       OCCT + Eigen + lib3mf installed. Green pipeline is the deliverable.
 - [ ] M1.2 `materials/` loader: parse materials.json, strict schema
