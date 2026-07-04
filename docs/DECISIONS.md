@@ -17,3 +17,4 @@ Append-only. Entries are written by the human maintainer (Nadim) only.
   and committed by the human maintainer only. Agents consume fixtures and
   assert against expected_values.json; they never create, edit, or regenerate
   fixture files.
+- 2026-07-04: Re handoff 005 (Blocked): sphere fixture erratum confirmed and corrected by maintainer; mesh_volume_mm3 recomputed from on-disk vertices (option 1). Fixture-value provenance rule: expected values must be computed from the committed file bytes, not from pre-export precision.
