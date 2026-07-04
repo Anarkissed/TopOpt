@@ -13,15 +13,20 @@ namespace topopt {
 //   Interior   - solid, all six face-neighbours are also solid.
 //   Surface    - solid, on the boundary of the solid (at least one face-
 //                neighbour is Empty or lies outside the grid).
-//   UserTagged - solid, claimed by a later stage (e.g. M1.6 LOAD/FIXTURE face
-//                tagging). The voxelizer never emits this; it exists so the
-//                grid can store a user tag per voxel (ROADMAP M1.5:
-//                "interior / surface / user-tagged").
+//   UserTagged - solid, claimed by a later stage. The voxelizer never emits
+//                this; it exists so the grid can store a generic user tag per
+//                voxel (ROADMAP M1.5: "interior / surface / user-tagged").
+//   Load       - solid, on a face the user tagged as a load-application face
+//                (ROADMAP M1.6). The voxelizer never emits this.
+//   Fixture    - solid, on a face the user tagged as a mounting/fixture face
+//                (ROADMAP M1.6). The voxelizer never emits this.
 enum class VoxelTag : std::uint8_t {
   Empty = 0,
   Interior = 1,
   Surface = 2,
   UserTagged = 3,
+  Load = 4,
+  Fixture = 5,
 };
 
 // A dense, axis-aligned voxel grid with cubic voxels (one hex FEA element per
