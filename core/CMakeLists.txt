@@ -26,7 +26,8 @@ add_library(topopt
   src/materials/materials.cpp
   src/io/stl.cpp
   src/mesh/mesh.cpp
-  src/voxel/voxelize.cpp)
+  src/voxel/voxelize.cpp
+  src/fea/hex_element.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
@@ -70,6 +71,15 @@ target_link_libraries(test_voxel PRIVATE topopt)
 target_compile_definitions(test_voxel PRIVATE
   STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
 add_test(NAME voxelize COMMAND test_voxel)
+
+# Hex element stiffness test (M2.1). Pure C++/std (no OCCT, no Eigen), so it
+# builds and runs in every configuration. Asserts against the human-authored
+# reference fixture, whose directory is injected here.
+add_executable(test_fea tests/unit/test_fea.cpp)
+target_link_libraries(test_fea PRIVATE topopt)
+target_compile_definitions(test_fea PRIVATE
+  FEA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/fea")
+add_test(NAME hex_element COMMAND test_fea)
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
 # the case in CI, which configures with -DTOPOPT_REQUIRE_DEPS=ON).

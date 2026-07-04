@@ -33,7 +33,7 @@
 
 ## M2 — FEA (isotropic)
 
-- [ ] M2.1 Hex element: 8-node stiffness matrix for given E, ν. Test against
+- [x] M2.1 Hex element: 8-node stiffness matrix for given E, ν. Test against
       known reference matrix values.
 - [ ] M2.2 Global assembly + Dirichlet BCs + point/distributed loads on
       tagged voxels. Small hand-checkable 2×1×1 problem solved exactly.
