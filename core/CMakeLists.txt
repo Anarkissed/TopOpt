@@ -25,7 +25,8 @@ add_library(topopt
   src/version.cpp
   src/materials/materials.cpp
   src/io/stl.cpp
-  src/mesh/mesh.cpp)
+  src/mesh/mesh.cpp
+  src/voxel/voxelize.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
@@ -61,6 +62,14 @@ target_link_libraries(test_stl PRIVATE topopt)
 target_compile_definitions(test_stl PRIVATE
   STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
 add_test(NAME stl_import COMMAND test_stl)
+
+add_executable(test_voxel tests/unit/test_voxel.cpp)
+target_link_libraries(test_voxel PRIVATE topopt)
+# The voxelizer test drives the STL cube/sphere fixtures (no OCCT needed), so it
+# reuses the same injected fixture directory as the STL test.
+target_compile_definitions(test_voxel PRIVATE
+  STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
+add_test(NAME voxelize COMMAND test_voxel)
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
 # the case in CI, which configures with -DTOPOPT_REQUIRE_DEPS=ON).
