@@ -18,7 +18,9 @@ endif()
 
 add_library(topopt
   src/version.cpp
-  src/materials/materials.cpp)
+  src/materials/materials.cpp
+  src/io/stl.cpp
+  src/mesh/mesh.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
@@ -31,3 +33,11 @@ target_link_libraries(test_materials PRIVATE topopt)
 target_compile_definitions(test_materials PRIVATE
   MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
 add_test(NAME materials_loader COMMAND test_materials)
+
+add_executable(test_stl tests/unit/test_stl.cpp)
+target_link_libraries(test_stl PRIVATE topopt)
+# Inject the absolute path to the committed STL fixtures so the import tests do
+# not depend on the working directory ctest runs from.
+target_compile_definitions(test_stl PRIVATE
+  STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
+add_test(NAME stl_import COMMAND test_stl)
