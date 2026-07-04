@@ -1,6 +1,9 @@
 #pragma once
 
 #include <array>
+#include <vector>
+
+#include "topopt/voxel.hpp"
 
 namespace topopt {
 
@@ -42,5 +45,72 @@ struct Hex8Stiffness {
 // inputs.
 Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
                              double element_size);
+
+// ---------------------------------------------------------------------------
+// Global linear-elastic system over a voxel grid (ROADMAP M2.2).
+//
+// Nodes sit at voxel corners: a grid of nx*ny*nz voxels has
+// (nx+1)*(ny+1)*(nz+1) nodes. The global id of node (a,b,c) (0<=a<=nx,
+// 0<=b<=ny, 0<=c<=nz) is (c*(ny+1)+b)*(nx+1)+a. Each node owns 3 translational
+// DOFs; the global DOF of component comp (0=x, 1=y, 2=z) at node n is
+// 3*n + comp.
+//
+// Each solid voxel (tag != Empty) contributes one isotropic Hex8 element. The
+// element's eight corner nodes are listed in the Hex8 convention documented
+// above (bottom face CCW then top face CCW), so global assembly is consistent
+// with the element matrix.
+
+// Number of nodes in the corner-node grid of `grid`.
+int fea_node_count(const VoxelGrid& grid);
+
+// Global node id of corner (a,b,c). No bounds checking.
+int fea_node_index(const VoxelGrid& grid, int a, int b, int c);
+
+// The eight global corner-node ids of voxel (i,j,k), in Hex8 node order.
+std::array<int, 8> fea_element_nodes(const VoxelGrid& grid, int i, int j, int k);
+
+// The distinct corner nodes of every voxel carrying `tag`, sorted ascending.
+// This bridges M1.6 face tags (Load / Fixture) to the DOFs a caller loads or
+// constrains — "loads on tagged voxels".
+std::vector<int> fea_tagged_nodes(const VoxelGrid& grid, VoxelTag tag);
+
+// Fix a single DOF (node, component) to a prescribed displacement `value`
+// (usually 0). component is 0=x, 1=y, 2=z.
+struct DirichletBC {
+  int node = 0;
+  int component = 0;
+  double value = 0.0;
+};
+
+// A nodal force `value` applied to (node, component). A point load is one
+// entry; a distributed load is the same force split across several nodes.
+struct NodalLoad {
+  int node = 0;
+  int component = 0;
+  double value = 0.0;
+};
+
+// Nodal displacement solution, DOF-ordered (size 3*fea_node_count).
+struct FeaSolution {
+  std::vector<double> u;
+  double at(int node, int component) const {
+    return u[static_cast<std::size_t>(3 * node + component)];
+  }
+};
+
+// Assemble the global stiffness of all solid voxels (isotropic Hex8 with the
+// given material and the grid's `spacing` as element edge), apply the loads and
+// Dirichlet BCs, and solve K u = f with a sparse direct factorisation
+// (ARCHITECTURE §4: SimplicialLDLT is acceptable for small problems; the CG
+// solver for large voxel systems is M2.3). Prescribed non-zero displacements
+// are supported.
+//
+// Throws std::invalid_argument if a BC/load references a node or component out
+// of range, or if the constrained system is singular (the model is not
+// sufficiently supported to remove rigid-body motion). Material errors (E<=0,
+// nu not in (-1,0.5), spacing<=0) propagate from hex8_stiffness.
+FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
+                      double poisson, const std::vector<DirichletBC>& bcs,
+                      const std::vector<NodalLoad>& loads);
 
 }  // namespace topopt

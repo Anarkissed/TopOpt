@@ -19,6 +19,10 @@ else()
   # a dependency-light local checkout is usable. CI always has OCCT (DEPS=ON),
   # so step_import always runs in the pipeline that is the source of truth.
   find_package(OpenCASCADE CONFIG QUIET)
+  # Same for Eigen: the global FEA assembly/solve (M2.2) needs it, so build that
+  # translation unit and its test only when Eigen is present. CI has Eigen
+  # (DEPS=ON), so fea_assembly always runs in the pipeline.
+  find_package(Eigen3 CONFIG QUIET)
 endif()
 
 add_library(topopt
@@ -44,6 +48,14 @@ if(OpenCASCADE_FOUND)
     TKMesh                       # BRepMesh tessellation
     TKTopAlgo TKGeomAlgo TKPrim  # BRepGProp volume, topology exploration
     TKBRep TKGeomBase TKG3d TKG2d TKMath TKernel)
+endif()
+
+# Global FEA assembly + Dirichlet BCs + loads + direct solve (M2.2). Uses Eigen
+# (ARCHITECTURE §4) for the sparse system; the public API stays Eigen-free, so
+# Eigen links PRIVATE. Compiled only when Eigen is found (always in CI).
+if(Eigen3_FOUND)
+  target_sources(topopt PRIVATE src/fea/assembly.cpp)
+  target_link_libraries(topopt PRIVATE Eigen3::Eigen)
 endif()
 
 enable_testing()
@@ -80,6 +92,15 @@ target_link_libraries(test_fea PRIVATE topopt)
 target_compile_definitions(test_fea PRIVATE
   FEA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/fea")
 add_test(NAME hex_element COMMAND test_fea)
+
+# Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
+# fixture) and needs the fea_solve implementation, so it is gated on Eigen like
+# assembly.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+if(Eigen3_FOUND)
+  add_executable(test_assembly tests/unit/test_assembly.cpp)
+  target_link_libraries(test_assembly PRIVATE topopt)
+  add_test(NAME fea_assembly COMMAND test_assembly)
+endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
 # the case in CI, which configures with -DTOPOPT_REQUIRE_DEPS=ON).
