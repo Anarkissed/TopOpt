@@ -45,16 +45,25 @@
 
 ## M3 — SIMP (isotropic)
 
-- [ ] M3.1 Density field + SIMP-penalized stiffness (p=3), compliance +
+- [ ] M3.1 Void-DOF safety gate (prerequisite for all SIMP FEA). Before any
+      SIMP task calls fea_solve_cg on a density field: pin or filter free DOFs
+      whose K_ff diagonal is zero/near-zero (nodes attached only to void/near-
+      void voxels), and add a null-space / zero-pivot guard to the CG path so an
+      under-constrained or singular system throws instead of silently returning
+      a garbage or NaN field (Jacobi preconditioner divides by the zero
+      diagonal). Test: a grid with an interior void node throws or is correctly
+      filtered; a fully-solid grid is unaffected (existing fea_cg/fea_assembly
+      still green). No later M3 task may call the solver until this box is checked.
+- [ ] M3.2 Density field + SIMP-penalized stiffness (p=3), compliance +
       sensitivities. Finite-difference check of sensitivities on a tiny grid.
-- [ ] M3.2 Density filter (radius ≥ 1.5 voxels) + Optimality Criteria update.
+- [ ] M3.3 Density filter (radius ≥ 1.5 voxels) + Optimality Criteria update.
       2D-equivalent slice reproduces the classic 99-line MBB result pattern.
-- [ ] M3.3 Full 3D loop with volume-fraction target + convergence criteria.
+- [ ] M3.4 Full 3D loop with volume-fraction target + convergence criteria.
       **Gate V2** on 3D MBB + cantilever vs fixtures/benchmarks.json.
-- [ ] M3.4 Marching cubes on final density (threshold 0.5) + cleanup.
+- [ ] M3.5 Marching cubes on final density (threshold 0.5) + cleanup.
       **Gate V3** property suite wired to run on every optimizer output in
       all future tests.
-- [ ] M3.5 Multi-variant runner: one job → volume fractions [0.7, 0.5, 0.3]
+- [ ] M3.6 Multi-variant runner: one job → volume fractions [0.7, 0.5, 0.3]
       → three meshes + per-variant compliance report.
 
 ## M4 — Anisotropy & orientation
