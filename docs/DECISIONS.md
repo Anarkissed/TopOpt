@@ -18,3 +18,4 @@ Append-only. Entries are written by the human maintainer (Nadim) only.
   assert against expected_values.json; they never create, edit, or regenerate
   fixture files.
 - 2026-07-04: Re handoff 005 (Blocked): sphere fixture erratum confirmed and corrected by maintainer; mesh_volume_mm3 recomputed from on-disk vertices (option 1). Fixture-value provenance rule: expected values must be computed from the committed file bytes, not from pre-export precision.
+- 2026-07-04: Re handoff 007: cube fixture renamed to cube.step by maintainer (byte-identical); expected_values.json key updated to match. Mid-run unblocking occurred this run; preferred pattern remains block → human resolves → fresh run.
