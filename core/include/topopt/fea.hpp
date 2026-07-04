@@ -113,4 +113,36 @@ FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
                       double poisson, const std::vector<DirichletBC>& bcs,
                       const std::vector<NodalLoad>& loads);
 
+// Convergence diagnostics for the iterative solver fea_solve_cg. `iterations`
+// is the number of CG iterations performed; `residual` is the final relative
+// residual ||f_f - K_ff u_f|| / ||f_f|| reported by the solver; `converged` is
+// true iff `residual` reached the requested tolerance within the iteration cap.
+struct CgInfo {
+  bool converged = false;
+  int iterations = 0;
+  double residual = 0.0;
+};
+
+// Solve the same global linear-elastic system as fea_solve, but with a Jacobi
+// (diagonal) preconditioned Conjugate Gradient iterative solver — ARCHITECTURE
+// §4's designated solver for voxel FEA. Intended for large grids (e.g. 64^3)
+// where the sparse direct factorisation of fea_solve is too expensive in time
+// and memory.
+//
+// `tolerance` is the CG stopping criterion on the relative residual. If
+// `max_iterations > 0` it caps the iteration count; otherwise Eigen's default
+// cap (twice the free-DOF count) is used. If `info` is non-null it receives the
+// iteration count and final residual (also on the throwing path below).
+//
+// Throws std::runtime_error if CG does not reach `tolerance` within the
+// iteration cap — a guard against silently returning an unconverged field
+// (CG on a consistent system converges to *a* answer regardless). BC/load range
+// validation and material errors match fea_solve. Prescribed non-zero
+// displacements are supported.
+FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
+                         double poisson, const std::vector<DirichletBC>& bcs,
+                         const std::vector<NodalLoad>& loads,
+                         double tolerance = 1e-8, int max_iterations = 0,
+                         CgInfo* info = nullptr);
+
 }  // namespace topopt
