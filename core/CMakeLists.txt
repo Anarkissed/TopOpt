@@ -100,6 +100,13 @@ if(Eigen3_FOUND)
   add_executable(test_assembly tests/unit/test_assembly.cpp)
   target_link_libraries(test_assembly PRIVATE topopt)
   add_test(NAME fea_assembly COMMAND test_assembly)
+
+  # Jacobi-preconditioned CG solver test (M2.3). Builds its grids in code (incl.
+  # a 64^3 convergence gate) and needs fea_solve_cg, so it is gated on Eigen like
+  # assembly.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_cg tests/unit/test_cg.cpp)
+  target_link_libraries(test_cg PRIVATE topopt)
+  add_test(NAME fea_cg COMMAND test_cg)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always

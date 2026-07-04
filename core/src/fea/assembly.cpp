@@ -13,8 +13,10 @@
 #include <cstddef>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
+#include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 
@@ -62,12 +64,29 @@ std::vector<int> fea_tagged_nodes(const VoxelGrid& grid, VoxelTag tag) {
   return nodes;
 }
 
-FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
-                      double poisson, const std::vector<DirichletBC>& bcs,
-                      const std::vector<NodalLoad>& loads) {
-  using SpMat = Eigen::SparseMatrix<double>;
-  using Vec = Eigen::VectorXd;
+namespace {
 
+using SpMat = Eigen::SparseMatrix<double>;
+using Vec = Eigen::VectorXd;
+
+// The constrained linear system reduced to its free DOFs: solve
+// K_ff u_f = rf, then scatter u_f back into the full field `up` (which already
+// carries the prescribed displacements) at the `freedofs` positions. Both
+// fea_solve (direct) and fea_solve_cg (iterative) share this assembly + BC
+// reduction; only the linear solve differs.
+struct ReducedSystem {
+  SpMat Kff;             // nf x nf, symmetric positive (semi-)definite
+  Vec rf;                // nf, reduced right-hand side
+  std::vector<int> freedofs;
+  Vec up;                // ndof, full field seeded with prescribed values
+  int ndof = 0;
+};
+
+ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
+                               double poisson,
+                               const std::vector<DirichletBC>& bcs,
+                               const std::vector<NodalLoad>& loads,
+                               const char* who) {
   const int num_nodes = fea_node_count(grid);
   const int ndof = 3 * num_nodes;
 
@@ -97,7 +116,7 @@ FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
   Vec f = Vec::Zero(ndof);
   for (const NodalLoad& l : loads) {
     if (l.node < 0 || l.node >= num_nodes || l.component < 0 || l.component > 2)
-      throw std::invalid_argument("fea_solve: load index out of range");
+      throw std::invalid_argument(std::string(who) + ": load index out of range");
     f[3 * l.node + l.component] += l.value;
   }
 
@@ -107,7 +126,7 @@ FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
   for (const DirichletBC& bc : bcs) {
     if (bc.node < 0 || bc.node >= num_nodes || bc.component < 0 ||
         bc.component > 2)
-      throw std::invalid_argument("fea_solve: BC index out of range");
+      throw std::invalid_argument(std::string(who) + ": BC index out of range");
     const int dof = 3 * bc.node + bc.component;
     fixed[static_cast<std::size_t>(dof)] = 1;
     up[dof] = bc.value;
@@ -117,31 +136,46 @@ FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
   // DOFs of K_ff u_f = f_f - (K u_prescribed)_f.
   const Vec rhs_full = f - K * up;
 
-  std::vector<int> freedofs;
-  freedofs.reserve(static_cast<std::size_t>(ndof));
+  ReducedSystem out;
+  out.ndof = ndof;
+  out.up = up;
+  out.freedofs.reserve(static_cast<std::size_t>(ndof));
   for (int d = 0; d < ndof; ++d)
-    if (!fixed[static_cast<std::size_t>(d)]) freedofs.push_back(d);
-  const int nf = static_cast<int>(freedofs.size());
+    if (!fixed[static_cast<std::size_t>(d)]) out.freedofs.push_back(d);
+  const int nf = static_cast<int>(out.freedofs.size());
 
-  Vec u = up;
   if (nf > 0) {
     // Selection matrix P (nf x ndof): P * v keeps the free entries of v.
     SpMat P(nf, ndof);
     std::vector<Eigen::Triplet<double>> ptrips;
     ptrips.reserve(static_cast<std::size_t>(nf));
-    for (int r = 0; r < nf; ++r) ptrips.emplace_back(r, freedofs[r], 1.0);
+    for (int r = 0; r < nf; ++r) ptrips.emplace_back(r, out.freedofs[r], 1.0);
     P.setFromTriplets(ptrips.begin(), ptrips.end());
 
     // Materialise each product into an explicit sparse matrix (K_ff = P K P^T)
     // rather than chaining the whole expression, which keeps Eigen on the plain
     // sparse*sparse path.
     const SpMat KPt = K * P.transpose();  // ndof x nf
-    SpMat Kff = P * KPt;                   // nf x nf, symmetric
-    Kff.makeCompressed();
-    const Vec rf = P * rhs_full;
+    out.Kff = P * KPt;                     // nf x nf, symmetric
+    out.Kff.makeCompressed();
+    out.rf = P * rhs_full;
+  }
+  return out;
+}
 
+}  // namespace
+
+FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
+                      double poisson, const std::vector<DirichletBC>& bcs,
+                      const std::vector<NodalLoad>& loads) {
+  ReducedSystem s =
+      assemble_reduced(grid, youngs_modulus, poisson, bcs, loads, "fea_solve");
+  const int nf = static_cast<int>(s.freedofs.size());
+
+  Vec u = s.up;
+  if (nf > 0) {
     Eigen::SimplicialLDLT<SpMat> solver;
-    solver.compute(Kff);
+    solver.compute(s.Kff);
     if (solver.info() != Eigen::Success)
       throw std::invalid_argument(
           "fea_solve: singular system (insufficient constraints to remove "
@@ -164,15 +198,63 @@ FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
           "fea_solve: singular system (insufficient constraints to remove "
           "rigid-body motion)");
 
-    const Vec xf = solver.solve(rf);
+    const Vec xf = solver.solve(s.rf);
     if (solver.info() != Eigen::Success || !xf.allFinite())
       throw std::invalid_argument("fea_solve: solve failed (singular system)");
 
-    for (int r = 0; r < nf; ++r) u[freedofs[r]] = xf[r];
+    for (int r = 0; r < nf; ++r) u[s.freedofs[r]] = xf[r];
   }
 
   FeaSolution sol;
-  sol.u.assign(u.data(), u.data() + ndof);
+  sol.u.assign(u.data(), u.data() + s.ndof);
+  return sol;
+}
+
+FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
+                         double poisson, const std::vector<DirichletBC>& bcs,
+                         const std::vector<NodalLoad>& loads, double tolerance,
+                         int max_iterations, CgInfo* info) {
+  ReducedSystem s = assemble_reduced(grid, youngs_modulus, poisson, bcs, loads,
+                                     "fea_solve_cg");
+  const int nf = static_cast<int>(s.freedofs.size());
+
+  CgInfo diag;  // no free DOFs -> nothing to solve, trivially converged
+  diag.converged = true;
+
+  Vec u = s.up;
+  if (nf > 0) {
+    // Jacobi (diagonal) preconditioned CG — ARCHITECTURE §4's solver for voxel
+    // FEA. DiagonalPreconditioner is exactly M = diag(K_ff), i.e. Jacobi. K_ff
+    // is symmetric, so the solver views both triangles.
+    Eigen::ConjugateGradient<SpMat, Eigen::Lower | Eigen::Upper,
+                             Eigen::DiagonalPreconditioner<double>>
+        cg;
+    cg.setTolerance(tolerance);
+    if (max_iterations > 0) cg.setMaxIterations(max_iterations);
+    cg.compute(s.Kff);
+    if (cg.info() != Eigen::Success) {
+      if (info) *info = diag;
+      throw std::runtime_error(
+          "fea_solve_cg: preconditioner setup failed on K_ff");
+    }
+
+    const Vec xf = cg.solve(s.rf);
+    diag.iterations = static_cast<int>(cg.iterations());
+    diag.residual = cg.error();
+    diag.converged = (cg.info() == Eigen::Success) && xf.allFinite();
+    if (info) *info = diag;
+    if (!diag.converged)
+      throw std::runtime_error(
+          "fea_solve_cg: CG did not reach the requested tolerance within "
+          "max_iterations");
+
+    for (int r = 0; r < nf; ++r) u[s.freedofs[r]] = xf[r];
+  } else if (info) {
+    *info = diag;
+  }
+
+  FeaSolution sol;
+  sol.u.assign(u.data(), u.data() + s.ndof);
   return sol;
 }
 

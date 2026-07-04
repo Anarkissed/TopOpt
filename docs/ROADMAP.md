@@ -37,7 +37,7 @@
       known reference matrix values.
 - [x] M2.2 Global assembly + Dirichlet BCs + point/distributed loads on
       tagged voxels. Small hand-checkable 2×1×1 problem solved exactly.
-- [ ] M2.3 CG solver w/ Jacobi preconditioner over Eigen; converges on
+- [x] M2.3 CG solver w/ Jacobi preconditioner over Eigen; converges on
       64³ problems in CI time budget (< 5 min).
 - [ ] M2.4 **Gate V1**: cantilever + simply-supported beam vs Euler–Bernoulli,
       ≤ 2% error, convergence across 3 resolutions. Von Mises stress field
