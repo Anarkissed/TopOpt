@@ -20,7 +20,7 @@
 - [x] M1.3 STL import + watertight/manifold check. Fixtures: golden cube,
       sphere, and a deliberately broken (open) mesh that must be rejected
       with a diagnostic.
-- [ ] M1.4 STEP import via OCCT + tessellation with controllable deflection.
+- [x] M1.4 STEP import via OCCT + tessellation with controllable deflection.
       Fixtures: STEP cube (volume exact to 1e-6 relative), cylinder
       (volume within 0.1% at fine deflection, convergence shown at 3
       deflection values).
