@@ -79,4 +79,12 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(test_step PRIVATE
     STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step")
   add_test(NAME step_import COMMAND test_step)
+
+  # STEP face -> voxel tagging test (M1.6). Drives the STEP cube fixture, so it
+  # needs OCCT to import the solid and read its per-face triangulation.
+  add_executable(test_tag tests/unit/test_tag.cpp)
+  target_link_libraries(test_tag PRIVATE topopt)
+  target_compile_definitions(test_tag PRIVATE
+    STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step")
+  add_test(NAME face_tag COMMAND test_tag)
 endif()

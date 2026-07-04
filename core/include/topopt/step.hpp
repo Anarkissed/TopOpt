@@ -1,9 +1,12 @@
 #pragma once
 
+#include <cstddef>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "topopt/mesh.hpp"
+#include "topopt/voxel.hpp"
 
 namespace topopt {
 
@@ -34,6 +37,13 @@ struct StepTessellation {
 // for check_watertight and the divergence-theorem signed_volume.
 struct StepModel {
   TriangleMesh mesh;
+  // Per-triangle B-rep face id, parallel to `mesh.triangles`
+  // (triangle_face[t] is the face triangle t was tessellated from). Face ids
+  // are the 0-based TopExp_Explorer(TopAbs_FACE) order, so they run
+  // [0, face_count) — the same ordering face_count enumerates. This is what
+  // lets a caller select "a STEP face" (ROADMAP M1.6) after the per-face
+  // triangulations have been welded into one mesh.
+  std::vector<int> triangle_face;
   double brep_volume = 0.0;  // exact solid volume, mm^3 (OCCT BRepGProp)
   int solid_count = 0;       // TopAbs_SOLID count in the shape
   int face_count = 0;        // B-rep faces (TopAbs_FACE) across all solids
@@ -46,5 +56,24 @@ struct StepModel {
 // §5: STEP ──OCCT──▶ tessellated surface).
 StepModel import_step_file(const std::string& path,
                            const StepTessellation& tess = {});
+
+// Tag every solid voxel of `grid` that lies against B-rep face `face_id` of
+// `model` with `tag` (ROADMAP M1.6). `tag` MUST be VoxelTag::Load or
+// VoxelTag::Fixture. `grid` must have been voxelized from `model.mesh` (same
+// coordinate frame); the face's tessellation triangles are read from
+// `model` via `triangle_face`.
+//
+// A solid voxel is "against" the face iff its centre is within half a voxel
+// edge (+ a numeric epsilon) of the closest point on one of that face's
+// triangles. For a planar face flush with the solid boundary this selects
+// exactly the one-voxel-thick slab of surface voxels adjacent to the face
+// (interior voxels sit >= 1.5 voxels from the boundary and are never within
+// half a voxel of it). Returns the number of voxels tagged.
+//
+// Throws std::invalid_argument if `tag` is not Load/Fixture, `face_id` is
+// outside [0, model.face_count), or `model.triangle_face` is not parallel to
+// `model.mesh.triangles`.
+std::size_t tag_step_face(VoxelGrid& grid, const StepModel& model, int face_id,
+                          VoxelTag tag);
 
 }  // namespace topopt

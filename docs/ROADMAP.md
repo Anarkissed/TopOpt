@@ -27,7 +27,7 @@
 - [x] M1.5 Solid voxelizer: surface mesh → filled voxel grid at resolution N.
       Tests: cube voxel count exact; sphere volume within 2% at 128³;
       grid stores per-voxel tags (interior / surface / user-tagged).
-- [ ] M1.6 Face tagging: given a STEP face ID, tag its voxels as
+- [x] M1.6 Face tagging: given a STEP face ID, tag its voxels as
       LOAD or FIXTURE. Test: cube fixture — tag one face, assert tagged
       voxel set is exactly the expected slab.
 
