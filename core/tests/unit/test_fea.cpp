@@ -300,6 +300,96 @@ int main() {
     CHECK(scale_worst <= scale_tol, "K(E,h) = E*h*K_ref within tolerance");
   }
 
+  // ==========================================================================
+  // hex8_stress: element stress recovery from nodal displacements (M2.4). Impose
+  // known uniform-strain fields on a unit-cube element and check the recovered
+  // Cauchy stress and von Mises against closed form. A linear displacement field
+  // gives constant strain, so the centroid sample is exact. Node local coords
+  // (edge h=1) follow the Hex8 order documented in fea.hpp.
+  // ==========================================================================
+  {
+    using topopt::Hex8Stress;
+    using topopt::hex8_stress;
+    const double X[8] = {0, 1, 1, 0, 0, 1, 1, 0};
+    const double Y[8] = {0, 0, 1, 1, 0, 0, 1, 1};
+    const double E = 200.0, nu = 0.3, h = 1.0;
+    const double c = E / ((1.0 + nu) * (1.0 - 2.0 * nu));
+    const double G = E / (2.0 * (1.0 + nu));
+    auto approx = [](double a, double b, double tol) {
+      return std::fabs(a - b) <= tol;
+    };
+
+    // (a) Uniaxial STRAIN field u_x = a*X  (eps_xx = a, all other strains 0).
+    {
+      const double a = 1e-3;
+      std::array<double, 24> ue{};
+      for (int n = 0; n < 8; ++n) ue[static_cast<std::size_t>(3 * n)] = a * X[n];
+      const Hex8Stress st = hex8_stress(E, nu, h, ue);
+      const double sxx = c * (1.0 - nu) * a;
+      const double syy = c * nu * a;  // = szz
+      const double s = 1e-9 * std::fabs(sxx);
+      CHECK(approx(st.sigma[0], sxx, s), "uniaxial-strain: sxx = c(1-nu)eps");
+      CHECK(approx(st.sigma[1], syy, s), "uniaxial-strain: syy = c*nu*eps");
+      CHECK(approx(st.sigma[2], syy, s), "uniaxial-strain: szz = c*nu*eps");
+      CHECK(approx(st.sigma[3], 0.0, s) && approx(st.sigma[4], 0.0, s) &&
+                approx(st.sigma[5], 0.0, s),
+            "uniaxial-strain: shear stresses zero");
+      const double vm = std::fabs(sxx - syy);  // syy=szz, shears 0
+      CHECK(approx(st.von_mises, vm, 1e-9 * vm),
+            "uniaxial-strain: von Mises = |sxx - syy|");
+    }
+
+    // (b) Pure shear field u_x = g*Y  (engineering gamma_xy = g, others 0).
+    {
+      const double g = 2e-3;
+      std::array<double, 24> ue{};
+      for (int n = 0; n < 8; ++n) ue[static_cast<std::size_t>(3 * n)] = g * Y[n];
+      const Hex8Stress st = hex8_stress(E, nu, h, ue);
+      const double sxy = G * g;
+      const double s = 1e-9 * std::fabs(sxy);
+      CHECK(approx(st.sigma[0], 0.0, s) && approx(st.sigma[1], 0.0, s) &&
+                approx(st.sigma[2], 0.0, s),
+            "pure-shear: normal stresses zero");
+      CHECK(approx(st.sigma[3], sxy, s), "pure-shear: sxy = G*gamma");
+      CHECK(approx(st.sigma[4], 0.0, s) && approx(st.sigma[5], 0.0, s),
+            "pure-shear: other shear stresses zero");
+      const double vm = std::sqrt(3.0) * std::fabs(sxy);
+      CHECK(approx(st.von_mises, vm, 1e-9 * vm),
+            "pure-shear: von Mises = sqrt(3)|sxy|");
+    }
+
+    // (c) Rigid translation of all nodes -> zero strain -> zero stress.
+    {
+      std::array<double, 24> ue{};
+      for (int n = 0; n < 8; ++n) {
+        ue[static_cast<std::size_t>(3 * n + 0)] = 0.7;
+        ue[static_cast<std::size_t>(3 * n + 1)] = -0.3;
+        ue[static_cast<std::size_t>(3 * n + 2)] = 1.1;
+      }
+      const Hex8Stress st = hex8_stress(E, nu, h, ue);
+      double mx = 0.0;
+      for (double sv : st.sigma) mx = std::max(mx, std::fabs(sv));
+      CHECK(mx <= 1e-9 && st.von_mises <= 1e-9,
+            "rigid translation gives zero stress");
+    }
+
+    // (d) Argument validation mirrors hex8_stiffness.
+    {
+      std::array<double, 24> ue{};
+      auto throws_s = [&](double E_, double nu_, double h_) {
+        try {
+          hex8_stress(E_, nu_, h_, ue);
+        } catch (const std::invalid_argument&) {
+          return true;
+        }
+        return false;
+      };
+      CHECK(throws_s(0.0, 0.3, 1.0), "stress: E == 0 rejected");
+      CHECK(throws_s(1.0, 0.5, 1.0), "stress: poisson == 0.5 rejected");
+      CHECK(throws_s(1.0, 0.3, 0.0), "stress: element_size == 0 rejected");
+    }
+  }
+
   // --- Argument validation ---------------------------------------------------
   {
     auto throws = [](double E, double nu, double h) {

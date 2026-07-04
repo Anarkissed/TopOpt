@@ -258,4 +258,25 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
   return sol;
 }
 
+std::vector<double> fea_von_mises_field(const VoxelGrid& grid,
+                                        double youngs_modulus, double poisson,
+                                        const FeaSolution& sol) {
+  std::vector<double> field(grid.voxel_count(), 0.0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+        std::array<double, 24> ue;
+        for (int a = 0; a < 8; ++a)
+          for (int c = 0; c < 3; ++c)
+            ue[static_cast<std::size_t>(3 * a + c)] = sol.at(en[a], c);
+        // Evaluate stress at the element centroid (natural coords 0,0,0).
+        const Hex8Stress st =
+            hex8_stress(youngs_modulus, poisson, grid.spacing, ue);
+        field[grid.index(i, j, k)] = st.von_mises;
+      }
+  return field;
+}
+
 }  // namespace topopt

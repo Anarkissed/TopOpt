@@ -107,6 +107,15 @@ if(Eigen3_FOUND)
   add_executable(test_cg tests/unit/test_cg.cpp)
   target_link_libraries(test_cg PRIVATE topopt)
   add_test(NAME fea_cg COMMAND test_cg)
+
+  # V1 validation gate (M2.4): cantilever + simply-supported beams vs
+  # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises
+  # stress field output. Builds its beam grids in code (no fixture) and drives
+  # fea_solve_cg / fea_von_mises_field, so it is gated on Eigen. CI configures
+  # with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_beam tests/validation/test_beam.cpp)
+  target_link_libraries(test_beam PRIVATE topopt)
+  add_test(NAME beam_validation COMMAND test_beam)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
