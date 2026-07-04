@@ -139,20 +139,16 @@ int main() {
     CHECK(r.watertight, "sphere is watertight");
     CHECK(r.boundary_edges == 0, "sphere has 0 boundary edges");
 
-    // NOTE: the sphere mesh volume is intentionally NOT pinned to the fixture
-    // value here. expected_values.json states mesh_volume_mm3 =
-    // 4047.044679978858 with volume_rel_tolerance = 1e-9, but the committed
-    // sphere_r10mm.stl stores vertices at only ~7 significant figures (max
-    // |r-10| = 5.4e-7). Recomputing the divergence-theorem volume from those
-    // committed vertices gives 4047.04479204495 — a 2.77e-8 relative
-    // difference, ~28x the stated 1e-9 tolerance. The fixture's 16-digit value
-    // was evidently computed from higher-precision vertices than were written
-    // to disk, so no correct importer can reproduce it from this file at 1e-9.
-    // This is a fixture inconsistency (value vs geometry+tolerance); only the
-    // human maintainer may reconcile it. See handoff 005 "## Blocked". The cube
-    // fixture (exact-coordinate geometry) pins signed_volume() at 1e-9 above,
-    // so volume correctness is still under test.
-    CHECK(signed_volume(s.mesh) > 0.0, "sphere mesh has positive volume");
+    // Mesh (not analytic) signed volume, pinned to the fixture's on-disk value.
+    // expected_values.json states mesh_volume_mm3 = 4047.044792044954 with
+    // volume_rel_tolerance = 1e-9. That value was corrected by the maintainer
+    // (see the file's "_erratum" and DECISIONS.md 2026-07-04, resolving handoff
+    // 005 "## Blocked"): it is now computed from the committed sphere's on-disk
+    // vertices (stored at ~7 significant figures), so a correct divergence-
+    // theorem importer reproduces it exactly at 1e-9. This asserts the MESH
+    // volume, not the analytic sphere volume (4188.79...), per the fixture note.
+    CHECK(rel_close(signed_volume(s.mesh), 4047.044792044954, 1e-9),
+          "sphere mesh volume is 4047.044792044954 mm^3");
 
     Vec3 lo, hi;
     bounding_box(s.mesh, lo, hi);
