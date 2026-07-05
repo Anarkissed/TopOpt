@@ -39,3 +39,11 @@ Eigen-free public API. Approved by Nadim.
 - 2026-07-05: Re handoff 014: rejected for missing CI evidence (second occurrence). Worker prompt and handoff template amended to require the CI URL explicitly.
 - 2026-07-05: Maintainer adds passive-region (keep-in/keep-out) capability to M3 scope: separate design mask, face-based selection reusing M1.6, per task M3.x. App-side selection UI lands in M7.
 -2026-07-05: added core/tests/fixtures/benchmark.json for the requirements of step m3.4 
+- 2026-07-06: CI-evidence process changed by maintainer. Superseding the
+  2026-07-03/-04 entries: obtaining the green CI run is now the MAINTAINER's
+  step, not the worker's. Workers deliver local ctest evidence and leave the
+  handoff's CI fields blank; the maintainer pushes the branch, opens the PR,
+  confirms green, and pastes the run URL into the handoff before merge.
+  Nothing merges without a green CI run; agents check the ROADMAP box on
+  local green, and a red CI on push becomes the next run's priority task
+  per startup rule 4. Runs are no longer rejected for absent CI evidence.

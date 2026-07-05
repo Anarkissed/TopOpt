@@ -50,14 +50,9 @@ DEFINITION OF DONE:
   sequential number.
 - Commit message: "<task-id>: <imperative summary>" plus a body listing
   files touched and tests added.
-
-FINAL STEP (before writing the handoff — not optional, not deferrable):
-  git push -u origin HEAD
-  gh pr create --fill
-  gh pr checks --watch   (or poll `gh run list` until the run completes)
-Paste the green run URL and PR URL into the handoff. If ANY of these
-commands fails or is blocked, paste the exact error text under
-"## Blocked" — "pending" is never an acceptable value for the CI field.
+- All tests pass locally via `ctest` (paste the raw final output). CI is run
+  by the maintainer after handoff; leave the handoff's CI fields as
+  "maintainer to fill" — do not attempt to push or open a PR.
 
 If you finish early, stop. Do not start the next task. One task per run.
 ```
@@ -80,8 +75,8 @@ WHY. No adjectives like "robust" or "comprehensive".>
 ```
 <final ctest summary output — the actual terminal text>
 ```
-CI run (required): <green Actions run URL>
-PR: <PR URL>
+CI run: <maintainer fills after push>
+PR: <maintainer fills>
 New tests added:
 - <test name>: <what it proves>
 
