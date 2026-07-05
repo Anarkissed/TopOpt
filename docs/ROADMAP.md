@@ -45,7 +45,7 @@
 
 ## M3 — SIMP (isotropic)
 
-- [ ] M3.1 Void-DOF safety gate (prerequisite for all SIMP FEA). Before any
+- [x] M3.1 Void-DOF safety gate (prerequisite for all SIMP FEA). Before any
       SIMP task calls fea_solve_cg on a density field: pin or filter free DOFs
       whose K_ff diagonal is zero/near-zero (nodes attached only to void/near-
       void voxels), and add a null-space / zero-pivot guard to the CG path so an

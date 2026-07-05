@@ -86,6 +86,21 @@ std::vector<NodalLoad> tip_load_z(const VoxelGrid& g, double total) {
   return loads;
 }
 
+// One solid voxel followed by one empty voxel along +x. The four nodes on the
+// far (a == 2) face touch only the empty voxel, so their DOFs have a zero K_ff
+// diagonal -> "void DOFs" that the M3.1 gate must filter (or, if loaded, reject).
+VoxelGrid make_cube_with_void_tail(double h) {
+  VoxelGrid g;
+  g.nx = 2;
+  g.ny = 1;
+  g.nz = 1;
+  g.spacing = h;
+  g.origin = topopt::Vec3{0.0, 0.0, 0.0};
+  g.tags.assign(2, VoxelTag::Empty);
+  g.set_tag(0, 0, 0, VoxelTag::Interior);  // voxel (1,0,0) stays Empty
+  return g;
+}
+
 }  // namespace
 
 int main() {
@@ -246,6 +261,114 @@ int main() {
     CHECK(sol.at(tip, 2) < 0.0, "64^3: tip deflects in the load (-z) sense");
     std::printf("64^3 cantilever: %d CG iterations, residual %.3e\n",
                 info.iterations, info.residual);
+  }
+
+  // ==========================================================================
+  // 6. M3.1 VOID-DOF GATE — filtering. A node attached only to void voxels has
+  //    a zero K_ff diagonal; the Jacobi preconditioner would divide by it. The
+  //    gate must pin (drop) such DOFs and still solve the real structure. Grid A
+  //    is one solid voxel with a dangling empty voxel (4 void nodes on its far
+  //    face); its solution on the solid nodes must equal the lone-cube solve
+  //    (Grid B), and the void nodes must come back exactly 0 (not NaN/garbage).
+  // ==========================================================================
+  {
+    const double E = 1500.0, nu = 0.3, h = 1.0;
+    VoxelGrid gA = make_cube_with_void_tail(h);
+    std::vector<DirichletBC> bcsA = clamp_x0_face(gA);  // clamp a==0 face
+    std::vector<NodalLoad> loadsA;                      // -z load on a==1 face
+    for (int c = 0; c <= 1; ++c)
+      for (int b = 0; b <= 1; ++b)
+        loadsA.push_back({topopt::fea_node_index(gA, 1, b, c), 2, -0.25});
+
+    CgInfo infoA;
+    FeaSolution solA =
+        topopt::fea_solve_cg(gA, E, nu, bcsA, loadsA, 1e-12, 0, &infoA);
+    CHECK(infoA.converged, "void gate: CG converges with dangling void nodes");
+
+    bool all_finite = true;
+    for (double v : solA.u)
+      if (!std::isfinite(v)) all_finite = false;
+    CHECK(all_finite,
+          "void gate: field is finite (no NaN from a zero Jacobi pivot)");
+
+    bool void_zero = true;
+    for (int c = 0; c <= 1; ++c)
+      for (int b = 0; b <= 1; ++b) {
+        const int n = topopt::fea_node_index(gA, 2, b, c);
+        for (int comp = 0; comp < 3; ++comp)
+          if (!near(solA.at(n, comp), 0.0, 1e-14)) void_zero = false;
+      }
+    CHECK(void_zero, "void gate: filtered void DOFs return 0, not garbage");
+
+    // Reference: the lone solid cube, same clamp + load on the matching nodes.
+    VoxelGrid gB = make_solid_grid(1, 1, 1, h);
+    std::vector<DirichletBC> bcsB = clamp_x0_face(gB);
+    std::vector<NodalLoad> loadsB;
+    for (int c = 0; c <= 1; ++c)
+      for (int b = 0; b <= 1; ++b)
+        loadsB.push_back({topopt::fea_node_index(gB, 1, b, c), 2, -0.25});
+    FeaSolution solB =
+        topopt::fea_solve_cg(gB, E, nu, bcsB, loadsB, 1e-12, 0, nullptr);
+
+    double maxu = 0.0, maxdiff = 0.0;
+    for (int c = 0; c <= 1; ++c)
+      for (int b = 0; b <= 1; ++b)
+        for (int a = 0; a <= 1; ++a) {
+          const int nA = topopt::fea_node_index(gA, a, b, c);
+          const int nB = topopt::fea_node_index(gB, a, b, c);
+          for (int comp = 0; comp < 3; ++comp) {
+            maxu = std::max(maxu, std::fabs(solB.at(nB, comp)));
+            maxdiff = std::max(
+                maxdiff, std::fabs(solA.at(nA, comp) - solB.at(nB, comp)));
+          }
+        }
+    CHECK(maxu > 0.0, "void gate: reference lone-cube solve is nonzero");
+    CHECK(maxdiff <= 1e-6 * maxu,
+          "void gate: filtering void DOFs preserves the real solution");
+  }
+
+  // ==========================================================================
+  // 7. M3.1 VOID-DOF GATE — under-constrained. A load on a void DOF (a node
+  //    with no stiffness) has no equilibrium; the gate must throw, not "solve".
+  // ==========================================================================
+  {
+    const double E = 1500.0, nu = 0.3, h = 1.0;
+    VoxelGrid gA = make_cube_with_void_tail(h);
+    std::vector<DirichletBC> bcsA = clamp_x0_face(gA);
+    std::vector<NodalLoad> loadsA{
+        {topopt::fea_node_index(gA, 2, 0, 0), 2, -1.0}};  // load a void node
+    CgInfo info;
+    info.iterations = -1;  // sentinel: an early structural rejection leaves 0
+    bool threw = false;
+    try {
+      topopt::fea_solve_cg(gA, E, nu, bcsA, loadsA, 1e-10, 0, &info);
+    } catch (const std::runtime_error&) {
+      threw = true;
+    }
+    CHECK(threw, "void gate: load on an unsupported void DOF throws");
+    CHECK(!info.converged && info.iterations == 0,
+          "void gate: rejects before any CG iteration (structural singularity)");
+  }
+
+  // ==========================================================================
+  // 8. M3.1 VOID-DOF GATE — no stiffness. An all-void grid has no stiffness
+  //    anywhere; the gate rejects it instead of returning a zero/garbage field.
+  // ==========================================================================
+  {
+    VoxelGrid g;
+    g.nx = 1;
+    g.ny = 1;
+    g.nz = 1;
+    g.spacing = 1.0;
+    g.origin = topopt::Vec3{0.0, 0.0, 0.0};
+    g.tags.assign(1, VoxelTag::Empty);
+    bool threw = false;
+    try {
+      topopt::fea_solve_cg(g, 1000.0, 0.3, {}, {}, 1e-10, 0, nullptr);
+    } catch (const std::runtime_error&) {
+      threw = true;
+    }
+    CHECK(threw, "void gate: an all-void grid (no stiffness) throws");
   }
 
   if (g_failures == 0) {
