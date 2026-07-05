@@ -52,4 +52,17 @@ Eigen-free public API. Approved by Nadim.
   beta-continuation as post-M6 task M6.x (cheap variant, no robust
   formulation). Retention assertion flip bound to M3.7 completion. V3's
   min-feature gate remains report-only on optimizer output until M6.x lands.
-- the constitutive convention in this fixture is locked for the entire M4 pipeline
+- 2026-07-07: M4.1 fixture committed: fixtures/fea/hex_stiffness_ti_reference.json
+  (transversely isotropic H8 reference, maintainer's reviewer via independent
+  NumPy implementation; verified symmetry, 6 rigid modes, quadrature exactness,
+  SPD constitutive law, exact isotropic reduction at k=1). The 3-to-5-constant
+  constitutive convention in this fixture (E_t = k*E0, G_t = k*G_p, nu_pt = nu,
+  layer normal +Z) is LOCKED for the entire M4 pipeline — element,
+  sensitivities, self-weight, and orientation scoring must all share it.
+- 2026-07-07: Gate V5 fixture committed: fixtures/orient/hook.stl +
+  expected_values.json (parametric J-hook, maintainer's reviewer, values
+  computed from committed bytes per the 2026-07-04 provenance rule). Ground
+  truth is ORDINAL (flat [0,0,1] must rank first; upright [0,1,0] strictly
+  worse), not numeric — the M4.4 scorer defines its own scale. The z_knockdown
+  mechanism requirement (isotropic counterfactual) is part of the fixture and
+  must be tested, not just the final ordering.
