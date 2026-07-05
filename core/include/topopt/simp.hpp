@@ -205,4 +205,52 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                  const std::vector<NodalLoad>& loads,
                                  const SimpOptions& options);
 
+// ---------------------------------------------------------------------------
+// Multi-variant runner (ROADMAP M3.6).
+//
+// One job (grid + material + BCs + loads + shared loop options) is optimized at
+// several requested volume fractions (e.g. [0.7, 0.5, 0.3]), producing one
+// design + printable mesh per fraction plus each variant's compliance. This is
+// the §5 pipeline's "SIMP loop (target volume fraction; repeat per requested
+// variant) -> marching cubes -> mesh cleanup" stage restricted to the isotropic
+// optimizer: it runs simp_optimize once per fraction and extracts the cleaned
+// isosurface of each result, so a caller gets the three meshes and the
+// per-variant compliance report from a single call. (Orientation, settings and
+// export are later milestones; this task is the variant fan-out only.)
+
+// One optimized variant: the full SIMP result at a requested volume fraction and
+// the cleaned marching-cubes surface extracted from its physical density.
+struct SimpVariant {
+  double requested_volume_fraction = 0.0;  // the SimpOptions.volume_fraction used
+  SimpOptimizeResult optimization;         // full SIMP result (compliance, ...)
+  TriangleMesh mesh;                       // cleaned isosurface (largest component)
+};
+
+// Result of a multi-variant run: one SimpVariant per requested volume fraction,
+// in the same order as the input `volume_fractions`.
+struct MultiVariantResult {
+  std::vector<SimpVariant> variants;
+
+  // The per-variant compliance report: the final compliance of each variant, in
+  // the requested order (variants[i].optimization.compliance).
+  std::vector<double> compliances() const;
+};
+
+// Run simp_optimize once per entry of `volume_fractions` (each overriding
+// options.volume_fraction; every other options field is shared across variants),
+// extract and clean a marching-cubes mesh at `iso` (0.5 for M3.5/M3.6) from each
+// result's physical density, and return one SimpVariant per fraction in input
+// order. The input `options.volume_fraction` is ignored — each variant uses its
+// own fraction.
+//
+// Throws std::invalid_argument if `volume_fractions` is empty or any entry is
+// not in (0, 1] (plus everything simp_optimize / make_density_filter validate);
+// propagates simp_optimize's std::runtime_error if any variant's penalized CG
+// solve fails to converge.
+MultiVariantResult simp_optimize_variants(
+    const VoxelGrid& grid, const SimpParams& params,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads,
+    const SimpOptions& options, const std::vector<double>& volume_fractions,
+    double iso = 0.5);
+
 }  // namespace topopt
