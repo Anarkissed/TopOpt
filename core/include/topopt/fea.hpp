@@ -165,6 +165,27 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
                          double tolerance = 1e-8, int max_iterations = 0,
                          CgInfo* info = nullptr);
 
+// Heterogeneous-material variant of fea_solve_cg: each solid voxel (i,j,k) uses
+// its own Young's modulus youngs_per_voxel[grid.index(i,j,k)] (Poisson ratio and
+// cubic voxel edge = grid.spacing shared). Because the isotropic element
+// stiffness is exactly linear in E, this assembles E_voxel * K_unit per element
+// (K_unit = hex8_stiffness(1, poisson, spacing)). It is the assembly primitive
+// SIMP needs to realise density-penalized stiffness E(rho)=rho^p*E0 (ROADMAP
+// M3.2) and goes through the same M3.1 void-DOF safety gate and Jacobi-CG solve
+// as the uniform overload above.
+//
+// `youngs_per_voxel` must have size grid.voxel_count(); entries for Empty voxels
+// are ignored (those voxels contribute no element). Throws std::invalid_argument
+// if the vector size mismatches, a solid voxel's modulus is not > 0, or a BC/load
+// index is out of range; throws std::runtime_error on CG non-convergence or a
+// void-gate structural rejection (as the uniform overload).
+FeaSolution fea_solve_cg(const VoxelGrid& grid,
+                         const std::vector<double>& youngs_per_voxel,
+                         double poisson, const std::vector<DirichletBC>& bcs,
+                         const std::vector<NodalLoad>& loads,
+                         double tolerance = 1e-8, int max_iterations = 0,
+                         CgInfo* info = nullptr);
+
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
 // stress at its Hex8 element centroid, recovered from the displacement solution

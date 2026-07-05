@@ -86,13 +86,22 @@ ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
                                double poisson,
                                const std::vector<DirichletBC>& bcs,
                                const std::vector<NodalLoad>& loads,
-                               const char* who) {
+                               const char* who,
+                               const std::vector<double>* elem_youngs = nullptr) {
   const int num_nodes = fea_node_count(grid);
   const int ndof = 3 * num_nodes;
 
-  // Element stiffness is identical for every voxel (uniform material, cubic
-  // voxel edge). hex8_stiffness validates the material and throws on bad input.
-  const Hex8Stiffness Ke = hex8_stiffness(youngs_modulus, poisson, grid.spacing);
+  // Uniform path: one element stiffness for every voxel. Graded path (SIMP,
+  // M3.2): each solid voxel scales the unit-modulus element by its own Young's
+  // modulus, since the isotropic Hex8 stiffness is exactly linear in E
+  // (K(E) = E * K(1)). hex8_stiffness validates poisson/spacing (and, on the
+  // uniform path, the modulus) and throws on bad input.
+  const bool graded = (elem_youngs != nullptr);
+  if (graded && elem_youngs->size() != grid.voxel_count())
+    throw std::invalid_argument(
+        std::string(who) + ": per-voxel modulus vector size != voxel_count");
+  const Hex8Stiffness Ke =
+      hex8_stiffness(graded ? 1.0 : youngs_modulus, poisson, grid.spacing);
 
   // --- Assemble the global stiffness from every solid voxel -----------------
   std::vector<Eigen::Triplet<double>> trips;
@@ -101,13 +110,23 @@ ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         if (!grid.solid(i, j, k)) continue;
+        // factor == 1.0 on the uniform path -> Ke entries are scattered exactly
+        // (multiply by 1.0 is bit-exact), so uniform assembly is unchanged.
+        double factor = 1.0;
+        if (graded) {
+          factor = (*elem_youngs)[grid.index(i, j, k)];
+          if (!(factor > 0.0))
+            throw std::invalid_argument(
+                std::string(who) +
+                ": per-voxel Young's modulus must be > 0 on a solid voxel");
+        }
         const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
         int edof[24];
         for (int a = 0; a < 8; ++a)
           for (int c = 0; c < 3; ++c) edof[3 * a + c] = 3 * en[a] + c;
         for (int r = 0; r < 24; ++r)
           for (int c = 0; c < 24; ++c)
-            trips.emplace_back(edof[r], edof[c], Ke(r, c));
+            trips.emplace_back(edof[r], edof[c], factor * Ke(r, c));
       }
   SpMat K(ndof, ndof);
   K.setFromTriplets(trips.begin(), trips.end());
@@ -208,59 +227,13 @@ std::vector<int> void_dof_survivors(const SpMat& Kff, const Vec& rf,
   return kept;
 }
 
-}  // namespace
-
-FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
-                      double poisson, const std::vector<DirichletBC>& bcs,
-                      const std::vector<NodalLoad>& loads) {
-  ReducedSystem s =
-      assemble_reduced(grid, youngs_modulus, poisson, bcs, loads, "fea_solve");
-  const int nf = static_cast<int>(s.freedofs.size());
-
-  Vec u = s.up;
-  if (nf > 0) {
-    Eigen::SimplicialLDLT<SpMat> solver;
-    solver.compute(s.Kff);
-    if (solver.info() != Eigen::Success)
-      throw std::invalid_argument(
-          "fea_solve: singular system (insufficient constraints to remove "
-          "rigid-body motion)");
-
-    // Rank check on the factorisation itself: a rigid-body (zero-energy) mode
-    // shows up as a near-zero pivot in the LDLT diagonal D, independent of
-    // whether the load happens to be orthogonal to that mode (which would leave
-    // the residual small and undetectable otherwise).
-    const Vec d = solver.vectorD();
-    double dmax = 0.0;
-    double dmin = std::numeric_limits<double>::max();
-    for (int i = 0; i < d.size(); ++i) {
-      const double ad = std::fabs(d[i]);
-      dmax = std::max(dmax, ad);
-      dmin = std::min(dmin, ad);
-    }
-    if (!(dmax > 0.0) || dmin <= 1e-12 * dmax)
-      throw std::invalid_argument(
-          "fea_solve: singular system (insufficient constraints to remove "
-          "rigid-body motion)");
-
-    const Vec xf = solver.solve(s.rf);
-    if (solver.info() != Eigen::Success || !xf.allFinite())
-      throw std::invalid_argument("fea_solve: solve failed (singular system)");
-
-    for (int r = 0; r < nf; ++r) u[s.freedofs[r]] = xf[r];
-  }
-
-  FeaSolution sol;
-  sol.u.assign(u.data(), u.data() + s.ndof);
-  return sol;
-}
-
-FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
-                         double poisson, const std::vector<DirichletBC>& bcs,
-                         const std::vector<NodalLoad>& loads, double tolerance,
-                         int max_iterations, CgInfo* info) {
-  ReducedSystem s = assemble_reduced(grid, youngs_modulus, poisson, bcs, loads,
-                                     "fea_solve_cg");
+// Solve an already-assembled, BC-reduced system K_ff u_f = rf with the Jacobi
+// (diagonal) preconditioned CG solver, applying the M3.1 void-DOF safety gate
+// first, and scatter the result back into the full field. Shared by both
+// fea_solve_cg overloads (uniform material and per-voxel graded material); only
+// the assembly that produced `s` differs.
+FeaSolution solve_reduced_cg(const ReducedSystem& s, double tolerance,
+                             int max_iterations, CgInfo* info) {
   const int nf = static_cast<int>(s.freedofs.size());
 
   CgInfo diag;  // no free DOFs -> nothing to solve, trivially converged
@@ -339,6 +312,74 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
   FeaSolution sol;
   sol.u.assign(u.data(), u.data() + s.ndof);
   return sol;
+}
+
+}  // namespace
+
+FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
+                      double poisson, const std::vector<DirichletBC>& bcs,
+                      const std::vector<NodalLoad>& loads) {
+  ReducedSystem s =
+      assemble_reduced(grid, youngs_modulus, poisson, bcs, loads, "fea_solve");
+  const int nf = static_cast<int>(s.freedofs.size());
+
+  Vec u = s.up;
+  if (nf > 0) {
+    Eigen::SimplicialLDLT<SpMat> solver;
+    solver.compute(s.Kff);
+    if (solver.info() != Eigen::Success)
+      throw std::invalid_argument(
+          "fea_solve: singular system (insufficient constraints to remove "
+          "rigid-body motion)");
+
+    // Rank check on the factorisation itself: a rigid-body (zero-energy) mode
+    // shows up as a near-zero pivot in the LDLT diagonal D, independent of
+    // whether the load happens to be orthogonal to that mode (which would leave
+    // the residual small and undetectable otherwise).
+    const Vec d = solver.vectorD();
+    double dmax = 0.0;
+    double dmin = std::numeric_limits<double>::max();
+    for (int i = 0; i < d.size(); ++i) {
+      const double ad = std::fabs(d[i]);
+      dmax = std::max(dmax, ad);
+      dmin = std::min(dmin, ad);
+    }
+    if (!(dmax > 0.0) || dmin <= 1e-12 * dmax)
+      throw std::invalid_argument(
+          "fea_solve: singular system (insufficient constraints to remove "
+          "rigid-body motion)");
+
+    const Vec xf = solver.solve(s.rf);
+    if (solver.info() != Eigen::Success || !xf.allFinite())
+      throw std::invalid_argument("fea_solve: solve failed (singular system)");
+
+    for (int r = 0; r < nf; ++r) u[s.freedofs[r]] = xf[r];
+  }
+
+  FeaSolution sol;
+  sol.u.assign(u.data(), u.data() + s.ndof);
+  return sol;
+}
+
+FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
+                         double poisson, const std::vector<DirichletBC>& bcs,
+                         const std::vector<NodalLoad>& loads, double tolerance,
+                         int max_iterations, CgInfo* info) {
+  ReducedSystem s = assemble_reduced(grid, youngs_modulus, poisson, bcs, loads,
+                                     "fea_solve_cg");
+  return solve_reduced_cg(s, tolerance, max_iterations, info);
+}
+
+FeaSolution fea_solve_cg(const VoxelGrid& grid,
+                         const std::vector<double>& youngs_per_voxel,
+                         double poisson, const std::vector<DirichletBC>& bcs,
+                         const std::vector<NodalLoad>& loads, double tolerance,
+                         int max_iterations, CgInfo* info) {
+  // youngs_modulus arg is unused on the graded path (each solid voxel supplies
+  // its own modulus); pass 1.0 so hex8_stiffness builds the unit-modulus element.
+  ReducedSystem s = assemble_reduced(grid, 1.0, poisson, bcs, loads,
+                                     "fea_solve_cg", &youngs_per_voxel);
+  return solve_reduced_cg(s, tolerance, max_iterations, info);
 }
 
 std::vector<double> fea_von_mises_field(const VoxelGrid& grid,
