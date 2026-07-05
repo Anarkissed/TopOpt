@@ -46,6 +46,24 @@ struct Hex8Stiffness {
 Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
                              double element_size);
 
+// Transversely isotropic 8-node hexahedral element stiffness (ROADMAP M4.1).
+// The plane of isotropy is the FDM print-layer plane (x, y); the layer-normal
+// (build) axis is z. The in-plane engineering constants are the full isotropic
+// (E, nu) values; the z axis is knocked down by `z_knockdown` = k, in (0, 1]
+// (materials.json `z_knockdown` per ARCHITECTURE §4/§6; resins use 1.0):
+//   E_x = E_y = E,   E_z = k * E,   nu_xy = nu,
+//   G_xy = E / (2 (1 + nu)),        G_yz = G_zx = k * G_xy.
+// It is built by softening the compliance (z axial + the two transverse shears)
+// and inverting; the in-plane compliance block is untouched, so E_x, nu_xy and
+// G_xy are exactly the isotropic values and E_z is exactly k*E. k = 1 collapses
+// to the isotropic hex8_stiffness(E, nu, element_size) (to floating-point
+// roundoff), so isotropic mode is preserved. Same DOF order, Voigt convention
+// and 2x2x2 quadrature as hex8_stiffness. Throws std::invalid_argument on
+// non-physical material inputs (same checks as hex8_stiffness) and if
+// z_knockdown is not in (0, 1].
+Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
+                                        double element_size, double z_knockdown);
+
 // Cauchy stress recovered at one point of a Hex8 element from its nodal
 // displacements. `sigma` is Voigt order [xx, yy, zz, xy, yz, zx] with TRUE shear
 // stresses (tau, not doubled). `von_mises` is the scalar von Mises equivalent

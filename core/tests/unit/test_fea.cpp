@@ -390,6 +390,187 @@ int main() {
     }
   }
 
+  // ==========================================================================
+  // hex8_stiffness_transverse: transversely isotropic element (M4.1). Layer
+  // plane = xy, layer-normal (build) axis = z, knocked down by k = z_knockdown.
+  //
+  // The 6x6 constitutive matrix D is recovered from the element stiffness Ke
+  // without any private API: a uniform (constant) strain field eps applied as
+  // nodal displacements u = eps . x is represented exactly by the trilinear
+  // element, so its strain energy is 0.5 * Vol * eps^T D eps = 0.5 * u^T Ke u.
+  // With Vol = h^3 this gives the quadratic form q(eps) = eps^T D eps =
+  // (u^T Ke u)/h^3, from which every D entry follows:
+  //   D_ii = q(e_i),  D_ij = (q(e_i+e_j) - q(e_i) - q(e_j)) / 2.
+  // ==========================================================================
+  {
+    using topopt::hex8_stiffness_transverse;
+
+    // Unit-cube node coordinates (edge h = 1), Hex8 order per fea.hpp.
+    const double NX[8] = {0, 1, 1, 0, 0, 1, 1, 0};
+    const double NY[8] = {0, 0, 1, 1, 0, 0, 1, 1};
+    const double NZ[8] = {0, 0, 0, 0, 1, 1, 1, 1};
+
+    // q(eps) = eps^T D eps recovered from Ke via a uniform-strain nodal field
+    // (h = 1, so Vol = 1). eps is Voigt [xx,yy,zz,gxy,gyz,gzx], engineering
+    // shear (tensor off-diagonals are half the engineering shear).
+    auto qform = [&](const Hex8Stiffness& Ke, const double eps[6]) {
+      const double exx = eps[0], eyy = eps[1], ezz = eps[2];
+      const double exy = 0.5 * eps[3], eyz = 0.5 * eps[4], ezx = 0.5 * eps[5];
+      std::array<double, 24> u{};
+      for (int n = 0; n < 8; ++n) {
+        const double x = NX[n], y = NY[n], z = NZ[n];
+        u[static_cast<std::size_t>(3 * n + 0)] = exx * x + exy * y + ezx * z;
+        u[static_cast<std::size_t>(3 * n + 1)] = exy * x + eyy * y + eyz * z;
+        u[static_cast<std::size_t>(3 * n + 2)] = ezx * x + eyz * y + ezz * z;
+      }
+      double q = 0.0;
+      for (int r = 0; r < 24; ++r) {
+        double s = 0.0;
+        for (int col = 0; col < 24; ++col)
+          s += Ke(r, col) * u[static_cast<std::size_t>(col)];
+        q += u[static_cast<std::size_t>(r)] * s;
+      }
+      return q;  // Vol = h^3 = 1
+    };
+
+    // Recover the full symmetric 6x6 D from Ke.
+    auto recover_D = [&](const Hex8Stiffness& Ke, double D[6][6]) {
+      double qi[6];
+      for (int i = 0; i < 6; ++i) {
+        double e[6] = {};
+        e[i] = 1.0;
+        qi[i] = qform(Ke, e);
+        D[i][i] = qi[i];
+      }
+      for (int i = 0; i < 6; ++i)
+        for (int j = i + 1; j < 6; ++j) {
+          double e[6] = {};
+          e[i] = 1.0;
+          e[j] = 1.0;
+          const double dij = 0.5 * (qform(Ke, e) - qi[i] - qi[j]);
+          D[i][j] = dij;
+          D[j][i] = dij;
+        }
+    };
+
+    const double E = 3500.0, nu = 0.33;  // PLA-scale, ARCHITECTURE §6 seed
+    const double c = E / ((1.0 + nu) * (1.0 - 2.0 * nu));
+    const double G = E / (2.0 * (1.0 + nu));
+
+    // (a) Reconstruction sanity: the isotropic element recovers the isotropic D.
+    {
+      double Diso[6][6];
+      recover_D(hex8_stiffness(E, nu, 1.0), Diso);
+      const double t = 1e-8 * c;
+      CHECK(std::fabs(Diso[0][0] - c * (1.0 - nu)) <= t &&
+                std::fabs(Diso[2][2] - c * (1.0 - nu)) <= t,
+            "recover_D: isotropic normal-diagonal = c(1-nu)");
+      CHECK(std::fabs(Diso[0][1] - c * nu) <= t &&
+                std::fabs(Diso[0][2] - c * nu) <= t,
+            "recover_D: isotropic normal-offdiagonal = c*nu");
+      CHECK(std::fabs(Diso[3][3] - G) <= t && std::fabs(Diso[4][4] - G) <= t &&
+                std::fabs(Diso[5][5] - G) <= t,
+            "recover_D: isotropic shear-diagonal = G");
+    }
+
+    // (b) z_knockdown = 1.0 reproduces the isotropic element entrywise.
+    {
+      const Hex8Stiffness Ki = hex8_stiffness(E, nu, 1.0);
+      const Hex8Stiffness Kt = hex8_stiffness_transverse(E, nu, 1.0, 1.0);
+      double kmax = 0.0, worst = 0.0;
+      for (int r = 0; r < 24; ++r)
+        for (int col = 0; col < 24; ++col) {
+          kmax = std::max(kmax, std::fabs(Ki(r, col)));
+          worst = std::max(worst, std::fabs(Ki(r, col) - Kt(r, col)));
+        }
+      CHECK(worst <= 1e-9 * kmax,
+            "z_knockdown=1 reproduces isotropic element (isotropic mode)");
+    }
+
+    // (c) Knocked-down element (k = 0.55, PLA seed): transverse-isotropic
+    // structure of D, in-plane block preserved, z + transverse shears softened.
+    {
+      const double k = 0.55;
+      double Di[6][6], Dt[6][6];
+      recover_D(hex8_stiffness(E, nu, 1.0), Di);
+      recover_D(hex8_stiffness_transverse(E, nu, 1.0, k), Dt);
+      const double t = 1e-7 * c;
+
+      // Symmetry about the z axis: (x,y) interchangeable.
+      CHECK(std::fabs(Dt[0][0] - Dt[1][1]) <= t &&
+                std::fabs(Dt[0][2] - Dt[1][2]) <= t &&
+                std::fabs(Dt[0][2] - Dt[2][0]) <= t,
+            "transverse: D is symmetric about the z (layer-normal) axis");
+
+      // In-plane shear (xy) unchanged; transverse shears (yz, zx) = k * G.
+      CHECK(std::fabs(Dt[3][3] - G) <= t, "transverse: G_xy unchanged (= G)");
+      CHECK(std::fabs(Dt[4][4] - k * G) <= t &&
+                std::fabs(Dt[5][5] - k * G) <= t,
+            "transverse: G_yz = G_zx = k * G");
+
+      // z-normal stiffness strictly softer than isotropic; z != in-plane.
+      CHECK(Dt[2][2] < Di[2][2] - t, "transverse: D_zz softened below isotropic");
+      CHECK(Dt[2][2] < Dt[0][0] - t, "transverse: D_zz < D_xx (anisotropic)");
+
+      // Engineering constants from the compliance S = N^{-1} of the normal
+      // block N = [[a,b,c],[b,a,c],[c,c,d]] (a=Dxx,b=Dxy,c=Dxz,d=Dzz):
+      //   E_x = 1/S_xx,  E_z = 1/S_zz,  nu_xy = -S_xy/S_xx.
+      const double a = Dt[0][0], b = Dt[0][1], cc = Dt[0][2], d = Dt[2][2];
+      const double det = a * (a * d - cc * cc) - b * (b * d - cc * cc) +
+                         cc * (b * cc - a * cc);
+      const double Sxx = (a * d - cc * cc) / det;
+      const double Szz = (a * a - b * b) / det;
+      const double Sxy = -(b * d - cc * cc) / det;
+      const double Ex = 1.0 / Sxx, Ez = 1.0 / Szz, nuxy = -Sxy / Sxx;
+      CHECK(std::fabs(Ex - E) <= 1e-6 * E, "transverse: in-plane E_x = E");
+      CHECK(std::fabs(Ez - k * E) <= 1e-6 * E,
+            "transverse: z-axis E_z = k * E (the knockdown)");
+      CHECK(std::fabs(nuxy - nu) <= 1e-7, "transverse: in-plane nu_xy = nu");
+    }
+
+    // (d) Scaling law K(E,h,k) = E*h*K(1,1,k) for fixed nu, k (as isotropic).
+    {
+      const double k = 0.7;  // PETG seed
+      const double E2 = 210000.0, h2 = 0.5;
+      const Hex8Stiffness Ku = hex8_stiffness_transverse(1.0, nu, 1.0, k);
+      const Hex8Stiffness Ks = hex8_stiffness_transverse(E2, nu, h2, k);
+      double umax = 0.0, worst = 0.0;
+      for (int r = 0; r < 24; ++r)
+        for (int col = 0; col < 24; ++col) {
+          umax = std::max(umax, std::fabs(Ku(r, col)));
+          worst = std::max(worst, std::fabs(Ks(r, col) - E2 * h2 * Ku(r, col)));
+        }
+      CHECK(worst <= 1e-9 * (E2 * h2 * umax),
+            "transverse: K(E,h,k) = E*h*K(1,1,k)");
+    }
+
+    // (e) Argument validation: material checks mirror hex8_stiffness, plus the
+    // z_knockdown range (0, 1].
+    {
+      auto throws_t = [](double E_, double nu_, double h_, double k_) {
+        try {
+          hex8_stiffness_transverse(E_, nu_, h_, k_);
+        } catch (const std::invalid_argument&) {
+          return true;
+        }
+        return false;
+      };
+      CHECK(throws_t(0.0, 0.3, 1.0, 0.5), "transverse: E == 0 rejected");
+      CHECK(throws_t(1.0, 0.5, 1.0, 0.5), "transverse: poisson == 0.5 rejected");
+      CHECK(throws_t(1.0, 0.3, 0.0, 0.5), "transverse: element_size == 0 rejected");
+      CHECK(throws_t(1.0, 0.3, 1.0, 0.0), "transverse: z_knockdown == 0 rejected");
+      CHECK(throws_t(1.0, 0.3, 1.0, -0.1), "transverse: negative z_knockdown rejected");
+      CHECK(throws_t(1.0, 0.3, 1.0, 1.5), "transverse: z_knockdown > 1 rejected");
+      bool ok = true;
+      try {
+        hex8_stiffness_transverse(1.0, 0.3, 1.0, 1.0);
+      } catch (...) {
+        ok = false;
+      }
+      CHECK(ok, "transverse: z_knockdown == 1 accepted");
+    }
+  }
+
   // --- Argument validation ---------------------------------------------------
   {
     auto throws = [](double E, double nu, double h) {

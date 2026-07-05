@@ -85,7 +85,7 @@
 
 ## M4 — Anisotropy & orientation
 
-- [ ] M4.1 Transversely isotropic hex element (z_knockdown on the layer
+- [x] M4.1 Transversely isotropic hex element (z_knockdown on the layer
       normal axis). Isotropic mode preserved; V1 must still pass in
       isotropic mode.
 - [ ] M4.2 Self-weight loading mode (gravity × density × voxel volume).

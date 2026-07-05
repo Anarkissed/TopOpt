@@ -12,29 +12,12 @@ constexpr double kXi[8] = {-1, +1, +1, -1, -1, +1, +1, -1};
 constexpr double kEta[8] = {-1, -1, +1, +1, -1, -1, +1, +1};
 constexpr double kZeta[8] = {-1, -1, -1, -1, +1, +1, +1, +1};
 
-}  // namespace
-
-Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
-                             double element_size) {
-  const double E = youngs_modulus;
-  const double nu = poisson;
-  const double h = element_size;
-  if (!(E > 0.0))
-    throw std::invalid_argument("hex8_stiffness: youngs_modulus must be > 0");
-  if (!(h > 0.0))
-    throw std::invalid_argument("hex8_stiffness: element_size must be > 0");
-  if (!(nu > -1.0 && nu < 0.5))
-    throw std::invalid_argument("hex8_stiffness: poisson must be in (-1, 0.5)");
-
-  // Isotropic constitutive matrix D (Voigt [xx,yy,zz,gxy,gyz,gzx], engineering
-  // shear). Off-shear block only; shear rows are diagonal.
-  const double c = E / ((1.0 + nu) * (1.0 - 2.0 * nu));
-  double D[6][6] = {};
-  D[0][0] = D[1][1] = D[2][2] = c * (1.0 - nu);
-  D[0][1] = D[0][2] = D[1][0] = D[1][2] = D[2][0] = D[2][1] = c * nu;
-  const double G = c * (1.0 - 2.0 * nu) / 2.0;  // = E / (2 (1 + nu))
-  D[3][3] = D[4][4] = D[5][5] = G;
-
+// Integrate the element stiffness Ke = ∫ B^T D B dV of a cubic Hex8 of edge
+// `h` with full 2x2x2 Gauss quadrature (exact for the trilinear hexahedron).
+// `D` is the 6x6 constitutive matrix in Voigt order [xx,yy,zz,gxy,gyz,gzx] with
+// engineering shear. Both the isotropic and the transversely isotropic elements
+// differ only in D, so they share this integrator.
+Hex8Stiffness integrate_hex8(const double D[6][6], double h) {
   // Full 2x2x2 Gauss rule (exact for the trilinear hexahedron), weights = 1.
   const double gp = 1.0 / std::sqrt(3.0);
   const double pts[2] = {-gp, +gp};
@@ -99,6 +82,82 @@ Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
       }
 
   return Ke;
+}
+
+}  // namespace
+
+Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
+                             double element_size) {
+  const double E = youngs_modulus;
+  const double nu = poisson;
+  const double h = element_size;
+  if (!(E > 0.0))
+    throw std::invalid_argument("hex8_stiffness: youngs_modulus must be > 0");
+  if (!(h > 0.0))
+    throw std::invalid_argument("hex8_stiffness: element_size must be > 0");
+  if (!(nu > -1.0 && nu < 0.5))
+    throw std::invalid_argument("hex8_stiffness: poisson must be in (-1, 0.5)");
+
+  // Isotropic constitutive matrix D (Voigt [xx,yy,zz,gxy,gyz,gzx], engineering
+  // shear). Off-shear block only; shear rows are diagonal.
+  const double c = E / ((1.0 + nu) * (1.0 - 2.0 * nu));
+  double D[6][6] = {};
+  D[0][0] = D[1][1] = D[2][2] = c * (1.0 - nu);
+  D[0][1] = D[0][2] = D[1][0] = D[1][2] = D[2][0] = D[2][1] = c * nu;
+  const double G = c * (1.0 - 2.0 * nu) / 2.0;  // = E / (2 (1 + nu))
+  D[3][3] = D[4][4] = D[5][5] = G;
+
+  return integrate_hex8(D, h);
+}
+
+Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
+                                        double element_size,
+                                        double z_knockdown) {
+  const double E = youngs_modulus;
+  const double nu = poisson;
+  const double h = element_size;
+  const double k = z_knockdown;
+  if (!(E > 0.0))
+    throw std::invalid_argument(
+        "hex8_stiffness_transverse: youngs_modulus must be > 0");
+  if (!(h > 0.0))
+    throw std::invalid_argument(
+        "hex8_stiffness_transverse: element_size must be > 0");
+  if (!(nu > -1.0 && nu < 0.5))
+    throw std::invalid_argument(
+        "hex8_stiffness_transverse: poisson must be in (-1, 0.5)");
+  if (!(k > 0.0 && k <= 1.0))
+    throw std::invalid_argument(
+        "hex8_stiffness_transverse: z_knockdown must be in (0, 1]");
+
+  // Transversely isotropic D, layer plane = xy, layer normal = z. Derived by
+  // softening the isotropic COMPLIANCE S (strain = S*stress) and inverting:
+  //   S[zz][zz]  : 1/E   -> 1/(kE)   (z axial modulus E_z = k*E)
+  //   S[yz][yz], S[zx][zx] : 1/G -> 1/(kG)  (transverse shears G_yz=G_zx=k*G)
+  // with the in-plane block (S[xx],S[yy],S[xy] and their couplings) left at the
+  // isotropic values, so E_x=E_y=E, nu_xy=nu, G_xy=G are unchanged. The normal
+  // 3x3 block N of S (factored as (1/E)*M) inverts in closed form; writing the
+  // stiffness normal block directly as E*M^{-1} makes k=1 collapse
+  // algebraically to the isotropic D (c(1-nu) on the diagonal, c*nu off).
+  //
+  //       [ 1   -nu  -nu ]                          [ 1/k - nu^2   nu/k+nu^2  nu+nu^2 ]
+  //   M = [ -nu  1   -nu ] ,  E*M^{-1} = (E/detM) * [ nu/k+nu^2    1/k-nu^2   nu+nu^2 ]
+  //       [ -nu -nu  1/k ]                          [ nu+nu^2      nu+nu^2    1-nu^2  ]
+  //   detM = (1+nu) * ((1-nu)/k - 2 nu^2)  (> 0 for nu in (-1,0.5), k in (0,1]).
+  const double nu2 = nu * nu;
+  const double detM = (1.0 + nu) * ((1.0 - nu) / k - 2.0 * nu2);
+  const double s = E / detM;
+  const double G = E / (2.0 * (1.0 + nu));
+
+  double D[6][6] = {};
+  D[0][0] = D[1][1] = s * (1.0 / k - nu2);
+  D[2][2] = s * (1.0 - nu2);
+  D[0][1] = D[1][0] = s * (nu / k + nu2);
+  D[0][2] = D[2][0] = D[1][2] = D[2][1] = s * (nu + nu2);
+  D[3][3] = G;             // in-plane shear (xy) — unchanged
+  D[4][4] = D[5][5] = k * G;  // transverse shears (yz, zx) — knocked down
+
+  return integrate_hex8(D, h);
 }
 
 Hex8Stress hex8_stress(double youngs_modulus, double poisson,
