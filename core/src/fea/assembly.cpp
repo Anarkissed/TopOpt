@@ -163,6 +163,51 @@ ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
   return out;
 }
 
+// M3.1 void-DOF safety gate. In a density/topology grid a node whose incident
+// voxels are all void carries no stiffness, so its K_ff diagonal is (near) zero
+// — the "zero pivot" the Jacobi (diagonal) preconditioner would divide by,
+// poisoning the CG field with NaN/Inf. Because K_ff is symmetric positive
+// semi-definite, a zero diagonal entry forces its entire row and column to zero,
+// so the DOF is fully decoupled from the structure and can be pinned (dropped
+// from the solve) without changing any other DOF.
+//
+// Returns the indices (into the reduced free-DOF numbering of K_ff/rf) of the
+// surviving non-void free DOFs; a dropped DOF keeps its prescribed value.
+// Throws std::runtime_error if the system is genuinely under-constrained:
+//   * every free DOF is void (no stiffness anywhere), or
+//   * a void DOF carries a nonzero load (an unsupported DOF cannot be in
+//     equilibrium — the reduced system is singular for that RHS).
+std::vector<int> void_dof_survivors(const SpMat& Kff, const Vec& rf,
+                                    const char* who) {
+  const int nf = static_cast<int>(Kff.rows());
+  const Vec diag = Kff.diagonal();  // structural zeros read back as 0
+  double dmax = 0.0;
+  for (int i = 0; i < nf; ++i) dmax = std::max(dmax, std::fabs(diag[i]));
+  if (nf > 0 && !(dmax > 0.0))
+    throw std::runtime_error(
+        std::string(who) +
+        ": singular system (no stiffness — every free DOF is void)");
+
+  const double diag_tol = 1e-12 * dmax;  // relative: solid diagonals are O(dmax)
+  double rmax = 0.0;
+  for (int i = 0; i < nf; ++i) rmax = std::max(rmax, std::fabs(rf[i]));
+  const double load_tol = 1e-9 * rmax;
+
+  std::vector<int> kept;
+  kept.reserve(static_cast<std::size_t>(nf));
+  for (int i = 0; i < nf; ++i) {
+    if (std::fabs(diag[i]) > diag_tol) {
+      kept.push_back(i);
+    } else if (std::fabs(rf[i]) > load_tol) {
+      throw std::runtime_error(
+          std::string(who) +
+          ": under-constrained system (load applied to a void DOF with no "
+          "stiffness — no equilibrium possible)");
+    }
+  }
+  return kept;
+}
+
 }  // namespace
 
 FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
@@ -223,32 +268,70 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
 
   Vec u = s.up;
   if (nf > 0) {
+    // --- M3.1 void-DOF safety gate ------------------------------------------
+    // Drop free DOFs whose stiffness diagonal is (near) zero — nodes attached
+    // only to void voxels, the zero pivot the Jacobi preconditioner would divide
+    // by — or reject a genuinely under-constrained system. This is a structural
+    // rejection detected before any CG iteration, so report zero iterations.
+    std::vector<int> kept;
+    try {
+      kept = void_dof_survivors(s.Kff, s.rf, "fea_solve_cg");
+    } catch (...) {
+      diag.converged = false;
+      diag.iterations = 0;
+      diag.residual = 0.0;
+      if (info) *info = diag;
+      throw;
+    }
+    const int ng = static_cast<int>(kept.size());
+
+    // Reduce onto the surviving (non-void) free DOFs. When nothing is filtered
+    // (a fully solid grid), Ksolve/rsolve alias K_ff/rf unchanged, so solid
+    // problems — and the M2.2/M2.3 tests — are bit-for-bit unaffected.
+    const SpMat* Ksolve = &s.Kff;
+    const Vec* rsolve = &s.rf;
+    SpMat Kgg;
+    Vec rg;
+    if (ng != nf) {
+      SpMat Q(ng, nf);  // selection: keep the surviving free DOFs
+      std::vector<Eigen::Triplet<double>> qtrips;
+      qtrips.reserve(static_cast<std::size_t>(ng));
+      for (int r = 0; r < ng; ++r) qtrips.emplace_back(r, kept[r], 1.0);
+      Q.setFromTriplets(qtrips.begin(), qtrips.end());
+      const SpMat KQt = s.Kff * Q.transpose();  // nf x ng
+      Kgg = Q * KQt;                             // ng x ng, symmetric
+      Kgg.makeCompressed();
+      rg = Q * s.rf;
+      Ksolve = &Kgg;
+      rsolve = &rg;
+    }
+
     // Jacobi (diagonal) preconditioned CG — ARCHITECTURE §4's solver for voxel
-    // FEA. DiagonalPreconditioner is exactly M = diag(K_ff), i.e. Jacobi. K_ff
-    // is symmetric, so the solver views both triangles.
+    // FEA. DiagonalPreconditioner is exactly M = diag(K), i.e. Jacobi. The
+    // matrix is symmetric, so the solver views both triangles.
     Eigen::ConjugateGradient<SpMat, Eigen::Lower | Eigen::Upper,
                              Eigen::DiagonalPreconditioner<double>>
         cg;
     cg.setTolerance(tolerance);
     if (max_iterations > 0) cg.setMaxIterations(max_iterations);
-    cg.compute(s.Kff);
+    cg.compute(*Ksolve);
     if (cg.info() != Eigen::Success) {
       if (info) *info = diag;
       throw std::runtime_error(
           "fea_solve_cg: preconditioner setup failed on K_ff");
     }
 
-    const Vec xf = cg.solve(s.rf);
+    const Vec xg = cg.solve(*rsolve);
     diag.iterations = static_cast<int>(cg.iterations());
     diag.residual = cg.error();
-    diag.converged = (cg.info() == Eigen::Success) && xf.allFinite();
+    diag.converged = (cg.info() == Eigen::Success) && xg.allFinite();
     if (info) *info = diag;
     if (!diag.converged)
       throw std::runtime_error(
           "fea_solve_cg: CG did not reach the requested tolerance within "
           "max_iterations");
 
-    for (int r = 0; r < nf; ++r) u[s.freedofs[r]] = xf[r];
+    for (int r = 0; r < ng; ++r) u[s.freedofs[kept[r]]] = xg[r];
   } else if (info) {
     *info = diag;
   }
