@@ -55,6 +55,10 @@ endif()
 # Eigen links PRIVATE. Compiled only when Eigen is found (always in CI).
 if(Eigen3_FOUND)
   target_sources(topopt PRIVATE src/fea/assembly.cpp)
+  # SIMP density interpolation + penalized compliance/sensitivities (M3.2). It
+  # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
+  # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
+  target_sources(topopt PRIVATE src/simp/simp.cpp)
   target_link_libraries(topopt PRIVATE Eigen3::Eigen)
 endif()
 
@@ -116,6 +120,15 @@ if(Eigen3_FOUND)
   add_executable(test_beam tests/validation/test_beam.cpp)
   target_link_libraries(test_beam PRIVATE topopt)
   add_test(NAME beam_validation COMMAND test_beam)
+
+  # SIMP compliance + sensitivity test (M3.2). Builds its tiny grids in code (no
+  # fixture) and drives simp_compliance (density field, penalized stiffness,
+  # compliance, finite-difference sensitivity check), so it is gated on Eigen
+  # like assembly.cpp / simp.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so
+  # it always runs.
+  add_executable(test_simp tests/unit/test_simp.cpp)
+  target_link_libraries(test_simp PRIVATE topopt)
+  add_test(NAME simp COMMAND test_simp)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
