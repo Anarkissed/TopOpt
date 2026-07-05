@@ -52,3 +52,4 @@ Eigen-free public API. Approved by Nadim.
   beta-continuation as post-M6 task M6.x (cheap variant, no robust
   formulation). Retention assertion flip bound to M3.7 completion. V3's
   min-feature gate remains report-only on optimizer output until M6.x lands.
+- the constitutive convention in this fixture is locked for the entire M4 pipeline
