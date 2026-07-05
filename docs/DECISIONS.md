@@ -47,3 +47,8 @@ Eigen-free public API. Approved by Nadim.
   Nothing merges without a green CI run; agents check the ROADMAP box on
   local green, and a red CI on push becomes the next run's priority task
   per startup rule 4. Runs are no longer rejected for absent CI evidence.
+- 2026-07-06: Min-feature-size strategy decided by maintainer: report-only
+  warning at M5 (M5.2b) now; single-field Heaviside projection with
+  beta-continuation as post-M6 task M6.x (cheap variant, no robust
+  formulation). Retention assertion flip bound to M3.7 completion. V3's
+  min-feature gate remains report-only on optimizer output until M6.x lands.

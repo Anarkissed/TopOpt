@@ -77,7 +77,11 @@
       with a FrozenVoid channel produces a design with the channel empty and
       compliance worse than unconstrained; FrozenSolid voxels end at rho=1;
       Load/Fixture voxels are implicitly FrozenSolid (V3 retention becomes
-      structural, not emergent).
+      structural, not emergent). 
+      Completion requirement: property_v3 group 4 turns ON the retention
+      assertion (gate_load_fixture_retained()) on real optimizer output —
+      Load/Fixture pinning makes it structural, so the gate must be asserted,
+      not just reported, before this box is checked.
 
 ## M4 — Anisotropy & orientation
 
@@ -101,6 +105,11 @@
       per rule boundary.
 - [ ] M5.2 Job report: single JSON per run — variants, volume saved, max
       stress, margin, orientation, settings. Schema-validated in tests.
+- [ ] M5.2b Min-feature print warning: the per-variant job report includes
+      min_feature_violations (from check_v3) and a human-readable warning
+      when it is > 0 (e.g. "N features may be thinner than 2 voxels /
+      reliably printable width — consider a higher volume fraction variant
+      or finer resolution"). Report-only: does not gate or modify geometry.
 - [ ] M5.3 `minimize_plastic` end-to-end: self-weight + auto volume-fraction
       ladder, stopping when margin < 1.5. Integration test on bracket
       fixture.
@@ -112,6 +121,18 @@
 - [ ] M6.2 `topopt-cli run job.json`: the canonical headless entry point
       driving the full pipeline. Integration test = the demo job checked
       into fixtures.
+- [ ] M6.3 (post-M6, before M7 ships) Minimum length scale via single-field
+      Heaviside projection: design -> density filter -> tanh projection
+      (sharpness beta) -> analysis, with the projection derivative chained
+      into the sensitivities, and beta-continuation (double beta every ~50
+      iterations, beta 1 -> 64, re-converging at each step). Cheap variant
+      ONLY: no robust eroded/nominal/dilated three-solve formulation; thin-
+      gap protection comes from M3.7 FrozenVoid regions, and M5.2b's warning
+      remains the backstop for residual thresholding artifacts. BLOCKS ON:
+      maintainer regenerates fixtures/benchmarks.json with the identical
+      projection + beta schedule via the independent reference implementation
+      BEFORE this task starts (fixture discipline). Expect 1.5-3x compute per
+      optimization; measure on-device before and after.
 
 ## M7 — iPad shell (human-led; agent tasks added ad hoc by Nadim)
 
