@@ -51,6 +51,13 @@ DEFINITION OF DONE:
 - Commit message: "<task-id>: <imperative summary>" plus a body listing
   files touched and tests added.
 
+FINAL STEP (before writing the handoff — not optional, not deferrable):
+  git push -u origin HEAD
+  gh pr create --fill
+  gh pr checks --watch   (or poll `gh run list` until the run completes)
+Paste the green run URL and PR URL into the handoff. If ANY of these
+commands fails or is blocked, paste the exact error text under
+"## Blocked" — "pending" is never an acceptable value for the CI field.
 
 If you finish early, stop. Do not start the next task. One task per run.
 ```
