@@ -29,6 +29,25 @@ enum class VoxelTag : std::uint8_t {
   Fixture = 5,
 };
 
+// Per-voxel design mask for passive regions (ROADMAP M3.7). This is a SEPARATE
+// classification from VoxelTag, stored in its own grid-indexed array, so a
+// masked voxel keeps its Interior/Surface/Load/Fixture tag: a frozen voxel may
+// also be Load or Fixture.
+//   Active      - a free design variable: density is updated by the OC step.
+//   FrozenSolid - "keep-in": density pinned to 1 and excluded from the OC update
+//                 (the voxel is always full material).
+//   FrozenVoid  - "keep-out": density pinned to 0, excluded from the design AND
+//                 from the FEA stiffness (the voxel contributes no element).
+// Empty voxels are never design variables, so their mask entry is ignored.
+enum class MaskValue : std::uint8_t {
+  Active = 0,
+  FrozenSolid = 1,
+  FrozenVoid = 2,
+};
+
+// A design mask: one MaskValue per grid voxel (grid-indexed, size voxel_count()).
+using DesignMask = std::vector<MaskValue>;
+
 // A dense, axis-aligned voxel grid with cubic voxels (one hex FEA element per
 // voxel, ARCHITECTURE.md §4). Voxel (i,j,k) occupies the box
 // [origin + (i,j,k)*spacing, origin + (i+1,j+1,k+1)*spacing]; its centre is
@@ -85,6 +104,12 @@ struct VoxelGrid {
 // undefined fill. Throws std::invalid_argument if resolution < 1 or the mesh is
 // empty / degenerate (zero-volume bounding box).
 VoxelGrid voxelize(const TriangleMesh& mesh, int resolution);
+
+// An all-Active design mask sized to `grid` (size grid.voxel_count()): every
+// voxel is a free design variable, so the mask-aware SIMP path reproduces the
+// unconstrained optimizer. This is the neutral base a caller fills in with
+// mask_step_face selections (ROADMAP M3.7).
+DesignMask make_active_mask(const VoxelGrid& grid);
 
 // ---------------------------------------------------------------------------
 // Marching cubes on a density field + Gate V3 property suite (ROADMAP M3.5).

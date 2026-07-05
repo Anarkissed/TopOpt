@@ -65,7 +65,7 @@
       all future tests.
 - [x] M3.6 Multi-variant runner: one job → volume fractions [0.7, 0.5, 0.3]
       → three meshes + per-variant compliance report.
-- [ ] M3.7 Passive regions (keep-in / keep-out). A per-voxel design mask
+- [x] M3.7 Passive regions (keep-in / keep-out). A per-voxel design mask
       (Active / FrozenSolid / FrozenVoid) as a separate array, NOT new
       VoxelTag values (a frozen voxel may also be Load/Fixture). FrozenSolid:
       rho pinned 1, excluded from OC update; FrozenVoid: rho pinned 0,

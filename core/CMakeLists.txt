@@ -172,6 +172,17 @@ if(Eigen3_FOUND)
   add_executable(test_variants tests/unit/test_variants.cpp)
   target_link_libraries(test_variants PRIVATE topopt)
   add_test(NAME variants COMMAND test_variants)
+
+  # Passive regions (M3.7): the per-voxel design mask (Active / FrozenSolid /
+  # FrozenVoid) applied through the mask-aware make_density_filter + simp_optimize
+  # overloads — keep-out channels come out void and worsen compliance, keep-in
+  # regions stay full material, Load/Fixture voxels are structurally retained, and
+  # the filter does not bleed across mask boundaries. Drives simp_optimize, so it
+  # is gated on Eigen like the other optimizer tests. CI configures with
+  # -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_mask tests/property/test_mask.cpp)
+  target_link_libraries(test_mask PRIVATE topopt)
+  add_test(NAME passive_regions COMMAND test_mask)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
@@ -190,4 +201,13 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(test_tag PRIVATE
     STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step")
   add_test(NAME face_tag COMMAND test_tag)
+
+  # mask_step_face test (M3.7): the M1.6 slab selection generalized with a voxel
+  # depth, writing a design mask instead of grid tags. Drives the STEP cube
+  # fixture (mask_step_face lives in the OCCT-gated step.cpp), so it needs OCCT.
+  add_executable(test_mask_face tests/unit/test_mask_face.cpp)
+  target_link_libraries(test_mask_face PRIVATE topopt)
+  target_compile_definitions(test_mask_face PRIVATE
+    STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step")
+  add_test(NAME mask_face COMMAND test_mask_face)
 endif()

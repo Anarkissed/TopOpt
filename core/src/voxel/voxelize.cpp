@@ -31,6 +31,10 @@ std::size_t VoxelGrid::solid_count() const {
   return n;
 }
 
+DesignMask make_active_mask(const VoxelGrid& grid) {
+  return DesignMask(grid.voxel_count(), MaskValue::Active);
+}
+
 namespace {
 
 // A ray/triangle crossing in one column: the z where the triangle plane meets

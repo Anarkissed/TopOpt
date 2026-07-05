@@ -242,4 +242,54 @@ std::size_t tag_step_face(VoxelGrid& grid, const StepModel& model, int face_id,
   return tagged;
 }
 
+std::size_t mask_step_face(const VoxelGrid& grid, const StepModel& model,
+                           int face_id, MaskValue mask_value, int depth_voxels,
+                           DesignMask& mask) {
+  if (depth_voxels < 1)
+    throw std::invalid_argument("mask_step_face: depth_voxels must be >= 1");
+  if (face_id < 0 || face_id >= model.face_count)
+    throw std::invalid_argument("mask_step_face: face_id out of range");
+  if (mask.size() != grid.voxel_count())
+    throw std::invalid_argument("mask_step_face: mask size != voxel_count");
+  if (model.triangle_face.size() != model.mesh.triangles.size())
+    throw std::invalid_argument(
+        "mask_step_face: triangle_face is not parallel to mesh.triangles");
+
+  // Depth generalization of tag_step_face: a voxel in layer L against a flush
+  // planar face has its centre (L + 0.5) edges from the face, so the first
+  // `depth_voxels` layers are exactly the solid voxels whose centre is within
+  // (depth_voxels - 0.5) edges of the face. Compare squared distances (no sqrt);
+  // the epsilon absorbs FP noise at the layer boundary (depth 1 -> 0.5 h, the
+  // M1.6 half-voxel threshold).
+  const double h = grid.spacing;
+  const double thr = (static_cast<double>(depth_voxels) - 0.5) * h;
+  const double thr2 = thr * thr;
+  const double eps = 1e-9 * h * h;
+
+  std::size_t selected = 0;
+  for (int k = 0; k < grid.nz; ++k) {
+    for (int j = 0; j < grid.ny; ++j) {
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;  // mask only material voxels
+        const Vec3 centre = grid.voxel_center(i, j, k);
+        bool against = false;
+        for (std::size_t t = 0;
+             t < model.mesh.triangles.size() && !against; ++t) {
+          if (model.triangle_face[t] != face_id) continue;
+          const auto& tri = model.mesh.triangles[t];
+          const Vec3& a = model.mesh.vertices[static_cast<std::size_t>(tri[0])];
+          const Vec3& b = model.mesh.vertices[static_cast<std::size_t>(tri[1])];
+          const Vec3& c = model.mesh.vertices[static_cast<std::size_t>(tri[2])];
+          if (point_tri_dist2(centre, a, b, c) <= thr2 + eps) against = true;
+        }
+        if (against) {
+          mask[grid.index(i, j, k)] = mask_value;
+          ++selected;
+        }
+      }
+    }
+  }
+  return selected;
+}
+
 }  // namespace topopt
