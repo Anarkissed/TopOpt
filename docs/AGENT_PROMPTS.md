@@ -42,6 +42,7 @@ RULES (violating any of these makes the run a failure):
 DEFINITION OF DONE:
 - All tests pass locally via `ctest` (paste the raw final output in your
   handoff — the actual text, not a summary in your own words).
+- A green CI run URL from a PR on this work, pasted in the handoff's Test evidence section. A handoff without this URL is an incomplete run.  
 - CI configuration untouched or strictly extended (never weakened).
 - ROADMAP.md: check exactly one box (your task). No other ROADMAP edits.
 - A handoff file exists at docs/handoffs/NNN-<task-id>-<slug>.md following
@@ -49,6 +50,7 @@ DEFINITION OF DONE:
   sequential number.
 - Commit message: "<task-id>: <imperative summary>" plus a body listing
   files touched and tests added.
+
 
 If you finish early, stop. Do not start the next task. One task per run.
 ```
@@ -71,6 +73,8 @@ WHY. No adjectives like "robust" or "comprehensive".>
 ```
 <final ctest summary output — the actual terminal text>
 ```
+CI run (required): <green Actions run URL>
+PR: <PR URL>
 New tests added:
 - <test name>: <what it proves>
 

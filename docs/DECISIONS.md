@@ -35,3 +35,5 @@ diagonal free DOFs and add a null-space/zero-pivot guard to the CG path. No M3
 task may call the solver before M3.1 is green. This is a ROADMAP sequencing
 change only; no change to ARCHITECTURE.md §4 (solver choice unchanged) or the
 Eigen-free public API. Approved by Nadim.
+
+- 2026-07-05: Re handoff 014: rejected for missing CI evidence (second occurrence). Worker prompt and handoff template amended to require the CI URL explicitly.
