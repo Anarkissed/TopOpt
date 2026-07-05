@@ -86,4 +86,60 @@ struct VoxelGrid {
 // empty / degenerate (zero-volume bounding box).
 VoxelGrid voxelize(const TriangleMesh& mesh, int resolution);
 
+// ---------------------------------------------------------------------------
+// Marching cubes on a density field + Gate V3 property suite (ROADMAP M3.5).
+//
+// After the SIMP loop (M3.4) produces a physical density field, M3.5 extracts a
+// printable surface (marching cubes at threshold 0.5) and runs the ARCHITECTURE
+// §7 V3 property checks on the result. This is the "property checks" pipeline
+// stage (§5) that every optimizer output must pass before export.
+
+// Marching cubes over a grid-indexed density field (size grid.voxel_count()),
+// samples at voxel centres, background-padded so the surface closes at the grid
+// boundary. Thin wrapper over the mesh/ marching_cubes with the grid's geometry.
+// Throws std::invalid_argument if density.size() != grid.voxel_count().
+TriangleMesh marching_cubes(const VoxelGrid& grid,
+                            const std::vector<double>& density, double iso = 0.5);
+
+// Result of the Gate V3 property suite. `passes` is the conjunction of the four
+// ARCHITECTURE §7 V3 gates; the individual fields expose why.
+struct V3Report {
+  TriangleMesh mesh;         // cleaned isosurface (largest component)
+  WatertightReport watertight;  // gate 1: closed + 2-manifold
+  int mesh_components_raw = 0;   // components of the raw MC output (pre-cleanup)
+  int mesh_components = 0;       // gate 2: components of the cleaned mesh (== 1)
+  bool load_fixture_retained = false;  // gate 3: all Load/Fixture voxels rho>=0.9
+  double min_load_fixture_density = 1.0;  // min rho over Load/Fixture voxels
+  int load_fixture_voxels = 0;            // number of Load/Fixture voxels checked
+  int min_feature_violations = 0;  // gate 4: solid voxels not in any 2x2x2 block
+  bool passes = false;
+
+  // Gate accessors (each true iff that §7 V3 gate holds).
+  bool gate_watertight() const { return watertight.watertight; }
+  bool gate_single_component() const {
+    return !mesh.triangles.empty() && mesh_components == 1;
+  }
+  bool gate_load_fixture_retained() const { return load_fixture_retained; }
+  bool gate_min_feature() const { return min_feature_violations == 0; }
+};
+
+// The minimum retained-density threshold for Load/Fixture voxels (§7 V3: ">=
+// 0.9"). A voxel counts as a feature-support voxel when its tag is Load or
+// Fixture (M1.6). With no such voxels the retention gate is vacuously satisfied.
+constexpr double kV3RetentionThreshold = 0.9;
+
+// Number of solid voxels (density > iso) that are NOT covered by any fully-solid
+// 2x2x2 block of voxels — i.e. features thinner than 2 voxels in some direction
+// (§7 V3: "Minimum feature size >= 2 voxels"). 0 means every solid voxel sits in
+// at least one solid 2x2x2 block. Throws std::invalid_argument on size mismatch.
+int min_feature_violations(const VoxelGrid& grid,
+                           const std::vector<double>& density, double iso = 0.5);
+
+// Run the full Gate V3 property suite on an optimizer output: extract + clean
+// the marching-cubes surface and evaluate all four §7 V3 gates. `iso` is the
+// density threshold (0.5 for M3.5). Throws std::invalid_argument if
+// density.size() != grid.voxel_count().
+V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
+                  double iso = 0.5);
+
 }  // namespace topopt

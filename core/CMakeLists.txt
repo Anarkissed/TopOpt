@@ -151,6 +151,17 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_gate_v2 PRIVATE
     BENCH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
   add_test(NAME gate_v2 COMMAND test_gate_v2)
+
+  # Gate V3 property suite (M3.5): marching cubes on the final density
+  # (threshold 0.5) + mesh cleanup, and the §7 V3 property checks (watertight,
+  # single connected component, Load/Fixture retention, min feature size) run on
+  # a real SIMP optimizer output. The marching-cubes / cleanup / property
+  # functions live in the always-built mesh + voxel TUs, but the end-to-end run
+  # drives simp_optimize, so the test is gated on Eigen like the other optimizer
+  # tests. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_v3 tests/property/test_v3.cpp)
+  target_link_libraries(test_v3 PRIVATE topopt)
+  add_test(NAME property_v3 COMMAND test_v3)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
