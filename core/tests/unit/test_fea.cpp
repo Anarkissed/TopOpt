@@ -571,6 +571,85 @@ int main() {
     }
   }
 
+  // ==========================================================================
+  // hex8_stiffness_transverse vs the independent golden fixture (M4.1). The
+  // file core/tests/fixtures/fea/hex_stiffness_ti_reference.json holds reference
+  // stiffness matrices for the transversely isotropic element on a UNIT CUBE
+  // (edge h=1), authored by the maintainer via an independent NumPy
+  // implementation (same provenance/discipline as the isotropic fixture). Its
+  // locked mapping (E_t=k*E0, nu_pt=nu, G_t=k*G_p, layer normal +Z) is exactly
+  // the one hex8_stiffness_transverse implements. Assert entrywise agreement for
+  // all three committed cases at the fixture's stated comparison_tolerance, plus
+  // the required_properties isotropic-reduction clause. This test reads the
+  // fixture; it does not edit it.
+  // ==========================================================================
+  {
+    using topopt::hex8_stiffness_transverse;
+    const std::string ti_path =
+        std::string(FEA_FIXTURE_DIR) + "/hex_stiffness_ti_reference.json";
+    Json ti_root = load_json(ti_path);
+    const Json& ti_cases = ti_root.at("cases");
+
+    struct TiSpec {
+      const char* key;
+      double E;
+      double nu;
+      double k;
+    };
+    // The three committed cases; each is the unit cube (E=1, h=1). Values from
+    // each case's youngs_modulus / poisson / z_knockdown.
+    const TiSpec ti_specs[] = {
+        {"E1_nu0.30_k0.55", 1.0, 0.30, 0.55},
+        {"E1_nu0.30_k1.00", 1.0, 0.30, 1.00},
+        {"E1_nu0.35_k0.70", 1.0, 0.35, 0.70},
+    };
+
+    for (const TiSpec& ts : ti_specs) {
+      const Json& c = ti_cases.at(ts.key);
+      // Assert we drive the element with the numbers the fixture was generated
+      // for (E, nu, k).
+      CHECK(c.at("youngs_modulus").num == ts.E,
+            "TI fixture youngs_modulus matches");
+      CHECK(c.at("poisson").num == ts.nu, "TI fixture poisson matches");
+      CHECK(c.at("z_knockdown").num == ts.k, "TI fixture z_knockdown matches");
+
+      const std::array<double, 576> ref = read_matrix(c.at("K"));
+      const double ref_max = max_abs(ref);
+      // Fixture "comparison_tolerance": |K_ij - ref_ij| <= 1e-10 * max|ref|.
+      const double tol = 1e-10 * ref_max;
+
+      const Hex8Stiffness Ke = hex8_stiffness_transverse(ts.E, ts.nu, 1.0, ts.k);
+      double worst = 0.0;
+      int violations = 0;
+      for (int r = 0; r < 24; ++r)
+        for (int col = 0; col < 24; ++col) {
+          double d = std::fabs(Ke(r, col) -
+                               ref[static_cast<std::size_t>(r) * 24 + col]);
+          worst = std::max(worst, d);
+          if (d > tol) ++violations;
+        }
+      CHECK(violations == 0, "TI: every K entry matches the reference within tol");
+      CHECK(worst <= tol, "TI: worst-case entry error within fixture tolerance");
+    }
+
+    // required_properties.isotropic_reduction: "K(E,nu,k=1,h) equals the
+    // isotropic element K(E,nu,h) entrywise within 1e-12 * max|K| — this is what
+    // preserves Gate V1 in isotropic mode." Assert the k=1.00 case against the
+    // ISOTROPIC hex8_stiffness for the same (E, nu, h).
+    {
+      const Hex8Stiffness Kt = hex8_stiffness_transverse(1.0, 0.30, 1.0, 1.00);
+      const Hex8Stiffness Ki = hex8_stiffness(1.0, 0.30, 1.0);
+      double kmax = 0.0, worst = 0.0;
+      for (int r = 0; r < 24; ++r)
+        for (int col = 0; col < 24; ++col) {
+          kmax = std::max(kmax, std::fabs(Ki(r, col)));
+          worst = std::max(worst, std::fabs(Kt(r, col) - Ki(r, col)));
+        }
+      CHECK(worst <= 1e-12 * kmax,
+            "TI: k=1 reduces to the isotropic element within 1e-12*max|K|");
+    }
+  }
+
   // --- Argument validation ---------------------------------------------------
   {
     auto throws = [](double E, double nu, double h) {
