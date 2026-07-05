@@ -56,7 +56,7 @@
       still green). No later M3 task may call the solver until this box is checked.
 - [x] M3.2 Density field + SIMP-penalized stiffness (p=3), compliance +
       sensitivities. Finite-difference check of sensitivities on a tiny grid.
-- [ ] M3.3 Density filter (radius ≥ 1.5 voxels) + Optimality Criteria update.
+- [x] M3.3 Density filter (radius ≥ 1.5 voxels) + Optimality Criteria update.
       2D-equivalent slice reproduces the classic 99-line MBB result pattern.
 - [ ] M3.4 Full 3D loop with volume-fraction target + convergence criteria.
       **Gate V2** on 3D MBB + cantilever vs fixtures/benchmarks.json.
