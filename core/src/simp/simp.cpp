@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace topopt {
@@ -355,6 +356,49 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                       options.cg_tolerance, options.cg_max_iterations);
   result.compliance = fc.compliance;
   result.volume_fraction = phys_volfrac(result.physical_density);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-variant runner (ROADMAP M3.6). Runs simp_optimize per requested volume
+// fraction and extracts a cleaned printable mesh from each result's physical
+// density (§5 "marching cubes -> mesh cleanup").
+
+std::vector<double> MultiVariantResult::compliances() const {
+  std::vector<double> out;
+  out.reserve(variants.size());
+  for (const SimpVariant& v : variants) out.push_back(v.optimization.compliance);
+  return out;
+}
+
+MultiVariantResult simp_optimize_variants(
+    const VoxelGrid& grid, const SimpParams& params,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads,
+    const SimpOptions& options, const std::vector<double>& volume_fractions,
+    double iso) {
+  if (volume_fractions.empty())
+    throw std::invalid_argument(
+        "simp_optimize_variants: volume_fractions must be non-empty");
+  for (double vf : volume_fractions)
+    if (!(vf > 0.0 && vf <= 1.0))
+      throw std::invalid_argument(
+          "simp_optimize_variants: each volume fraction must be in (0, 1]");
+
+  MultiVariantResult result;
+  result.variants.reserve(volume_fractions.size());
+  for (double vf : volume_fractions) {
+    SimpOptions opt = options;
+    opt.volume_fraction = vf;  // each variant targets its own fraction
+
+    SimpVariant variant;
+    variant.requested_volume_fraction = vf;
+    variant.optimization = simp_optimize(grid, params, bcs, loads, opt);
+    // §5 pipeline: marching cubes on the final physical density, then mesh
+    // cleanup (keep the largest component) down to the single printable body.
+    variant.mesh = keep_largest_component(
+        marching_cubes(grid, variant.optimization.physical_density, iso));
+    result.variants.push_back(std::move(variant));
+  }
   return result;
 }
 

@@ -63,7 +63,7 @@
 - [x] M3.5 Marching cubes on final density (threshold 0.5) + cleanup.
       **Gate V3** property suite wired to run on every optimizer output in
       all future tests.
-- [ ] M3.6 Multi-variant runner: one job → volume fractions [0.7, 0.5, 0.3]
+- [x] M3.6 Multi-variant runner: one job → volume fractions [0.7, 0.5, 0.3]
       → three meshes + per-variant compliance report.
 - [ ] M3.7 Passive regions (keep-in / keep-out). A per-voxel design mask
       (Active / FrozenSolid / FrozenVoid) as a separate array, NOT new

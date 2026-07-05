@@ -162,6 +162,16 @@ if(Eigen3_FOUND)
   add_executable(test_v3 tests/property/test_v3.cpp)
   target_link_libraries(test_v3 PRIVATE topopt)
   add_test(NAME property_v3 COMMAND test_v3)
+
+  # Multi-variant runner (M3.6): one job -> several volume fractions -> one
+  # design + printable mesh per fraction + the per-variant compliance report
+  # (simp_optimize_variants). Drives simp_optimize per fraction and the
+  # marching-cubes / cleanup / check_v3 path, so it is gated on Eigen like the
+  # other optimizer tests. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it
+  # always runs.
+  add_executable(test_variants tests/unit/test_variants.cpp)
+  target_link_libraries(test_variants PRIVATE topopt)
+  add_test(NAME variants COMMAND test_variants)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
