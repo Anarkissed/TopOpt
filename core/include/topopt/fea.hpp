@@ -46,6 +46,26 @@ struct Hex8Stiffness {
 Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
                              double element_size);
 
+// Cauchy stress recovered at one point of a Hex8 element from its nodal
+// displacements. `sigma` is Voigt order [xx, yy, zz, xy, yz, zx] with TRUE shear
+// stresses (tau, not doubled). `von_mises` is the scalar von Mises equivalent
+//   sqrt( 1/2[(sxx-syy)^2 + (syy-szz)^2 + (szz-sxx)^2] + 3(txy^2+tyz^2+tzx^2) ).
+struct Hex8Stress {
+  std::array<double, 6> sigma{};
+  double von_mises = 0.0;
+};
+
+// Recover the stress at natural coordinates (xi, eta, zeta) in [-1, 1]^3 of a
+// cubic Hex8 element of edge `element_size` for an isotropic material (E, nu),
+// from the element's 24 nodal displacements `u_elem` (DOF order matching
+// hex8_stiffness: node-major interleaved, node order bottom-CCW then top-CCW).
+// Defaults to the element centroid (0, 0, 0). Throws std::invalid_argument on
+// non-physical material inputs (same checks as hex8_stiffness).
+Hex8Stress hex8_stress(double youngs_modulus, double poisson,
+                       double element_size,
+                       const std::array<double, 24>& u_elem, double xi = 0.0,
+                       double eta = 0.0, double zeta = 0.0);
+
 // ---------------------------------------------------------------------------
 // Global linear-elastic system over a voxel grid (ROADMAP M2.2).
 //
@@ -144,5 +164,14 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
                          const std::vector<NodalLoad>& loads,
                          double tolerance = 1e-8, int max_iterations = 0,
                          CgInfo* info = nullptr);
+
+// Per-voxel von Mises stress field, one value per grid cell (indexed like the
+// grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
+// stress at its Hex8 element centroid, recovered from the displacement solution
+// `sol` (as returned by fea_solve / fea_solve_cg) with the same material.
+// Empty voxels receive 0. Material errors propagate from hex8_stress.
+std::vector<double> fea_von_mises_field(const VoxelGrid& grid,
+                                        double youngs_modulus, double poisson,
+                                        const FeaSolution& sol);
 
 }  // namespace topopt
