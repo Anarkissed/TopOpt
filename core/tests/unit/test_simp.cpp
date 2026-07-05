@@ -33,6 +33,8 @@ using topopt::DirichletBC;
 using topopt::FeaSolution;
 using topopt::NodalLoad;
 using topopt::SimpCompliance;
+using topopt::SimpOptimizeResult;
+using topopt::SimpOptions;
 using topopt::SimpParams;
 using topopt::VoxelGrid;
 using topopt::VoxelTag;
@@ -457,6 +459,108 @@ int main() {
     CHECK(oc_throws(1.5, 0.2, 1e-3), "oc: volume_fraction > 1 throws");
     CHECK(oc_throws(0.5, 0.0, 1e-3), "oc: move <= 0 throws");
     CHECK(oc_throws(0.5, 0.2, 0.0), "oc: density_min <= 0 throws");
+  }
+
+  // ==========================================================================
+  // 8. Full SIMP loop simp_optimize (M3.4): drives the filter + penalized
+  //    compliance + OC update to a volume-fraction target with convergence
+  //    criteria. Here on a tiny cantilever (the fixture-based Gate V2 lives in
+  //    tests/validation/test_gate_v2.cpp). Checks the loop's contract:
+  //    reduces compliance, meets the volume target, reports a self-consistent
+  //    final state, and honours both convergence criteria (change tol + cap).
+  // ==========================================================================
+  {
+    VoxelGrid g = make_solid_grid(8, 4, 4, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -1.0);
+
+    SimpParams p;
+    p.youngs_modulus = 1.0;
+    p.poisson = 0.3;
+    p.penalty = 3.0;
+    p.density_min = 1e-3;
+
+    SimpOptions opt;
+    opt.volume_fraction = 0.4;
+    opt.filter_radius = 1.5;
+    opt.move = 0.2;
+    opt.max_iterations = 25;
+    opt.change_tol = 0.0;  // no early stop: run the full cap
+    opt.cg_tolerance = 1e-9;
+
+    // 8a. A full run to the iteration cap.
+    SimpOptimizeResult r = topopt::simp_optimize(g, p, bcs, loads, opt);
+    CHECK(r.iterations == opt.max_iterations,
+          "optimize: change_tol 0 runs the full iteration cap");
+    CHECK(!r.converged,
+          "optimize: not flagged converged when stopped by the cap");
+    CHECK(r.history.size() == static_cast<std::size_t>(r.iterations),
+          "optimize: one history entry per iteration");
+    CHECK(near(r.history.front().compliance, r.initial_compliance, 0.0),
+          "optimize: initial_compliance == first history compliance");
+    CHECK(r.compliance > 0.0, "optimize: final compliance is positive");
+    CHECK(r.compliance < r.initial_compliance,
+          "optimize: compliance is reduced from the uniform start");
+    CHECK(near(r.volume_fraction, opt.volume_fraction, 1e-3),
+          "optimize: achieved physical volume fraction meets the target");
+
+    // 8b. Self-consistency of the reported final state:
+    //     physical_density == filter(design) and compliance ==
+    //     compliance(physical_density).
+    DensityFilter f = topopt::make_density_filter(g, opt.filter_radius);
+    std::vector<double> xphys = f.filter_density(r.design);
+    bool phys_ok = xphys.size() == r.physical_density.size();
+    for (std::size_t e = 0; phys_ok && e < xphys.size(); ++e)
+      if (!near(xphys[e], r.physical_density[e], 1e-12)) phys_ok = false;
+    CHECK(phys_ok, "optimize: physical_density == filter(design)");
+    SimpCompliance recomputed = topopt::simp_compliance(
+        g, p, r.physical_density, bcs, loads, opt.cg_tolerance, 0);
+    CHECK(near(r.compliance, recomputed.compliance,
+               1e-5 * std::fabs(recomputed.compliance)),
+          "optimize: compliance == compliance(physical_density)");
+    // Design variables stay in the admissible box [density_min, 1].
+    bool box_ok = true;
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) {
+          const double v = r.design[g.index(i, j, k)];
+          if (v < p.density_min - 1e-12 || v > 1.0 + 1e-12) box_ok = false;
+        }
+    CHECK(box_ok, "optimize: design variables stay in [density_min, 1]");
+
+    // 8c. Convergence criterion: a large change tolerance stops after the first
+    //     step (an OC step moves any voxel by at most `move` = 0.2 < 1.0).
+    SimpOptions early = opt;
+    early.change_tol = 1.0;
+    SimpOptimizeResult re = topopt::simp_optimize(g, p, bcs, loads, early);
+    CHECK(re.iterations == 1,
+          "optimize: a loose change_tol stops after one iteration");
+    CHECK(re.converged, "optimize: early stop is flagged converged");
+    CHECK(re.history.size() == 1, "optimize: early-stop history has one entry");
+
+    // 8d. Argument validation.
+    auto opt_throws = [&](const SimpOptions& o) {
+      try {
+        topopt::simp_optimize(g, p, bcs, loads, o);
+      } catch (const std::invalid_argument&) {
+        return true;
+      } catch (...) {
+        return false;
+      }
+      return false;
+    };
+    SimpOptions o0 = opt; o0.volume_fraction = 0.0;
+    SimpOptions o1 = opt; o1.volume_fraction = 1.5;
+    SimpOptions o2 = opt; o2.move = 0.0;
+    SimpOptions o3 = opt; o3.max_iterations = 0;
+    SimpOptions o4 = opt; o4.change_tol = -0.1;
+    SimpOptions o5 = opt; o5.filter_radius = 0.0;
+    CHECK(opt_throws(o0), "optimize: volume_fraction <= 0 throws");
+    CHECK(opt_throws(o1), "optimize: volume_fraction > 1 throws");
+    CHECK(opt_throws(o2), "optimize: move <= 0 throws");
+    CHECK(opt_throws(o3), "optimize: max_iterations < 1 throws");
+    CHECK(opt_throws(o4), "optimize: change_tol < 0 throws");
+    CHECK(opt_throws(o5), "optimize: filter_radius <= 0 throws");
   }
 
   if (g_failures == 0) {

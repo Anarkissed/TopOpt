@@ -279,4 +279,83 @@ std::vector<double> oc_update(const VoxelGrid& grid, const DensityFilter& filter
   return candidate(0.5 * (l1 + l2));
 }
 
+// ---------------------------------------------------------------------------
+// Full volume-fraction-targeted SIMP loop (ROADMAP M3.4). Assembles the M3.2
+// compliance/gradient, the M3.3 density filter and OC update into the classic
+// minimum-compliance loop with two convergence criteria: a design-change
+// tolerance and a hard iteration cap.
+
+SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 const SimpOptions& options) {
+  validate_params(params);  // E0 > 0, penalty > 0, density_min in (0, 1]
+  if (!(options.volume_fraction > 0.0 && options.volume_fraction <= 1.0))
+    throw std::invalid_argument("simp_optimize: volume_fraction must be in (0, 1]");
+  if (!(options.move > 0.0))
+    throw std::invalid_argument("simp_optimize: move must be > 0");
+  if (options.max_iterations < 1)
+    throw std::invalid_argument("simp_optimize: max_iterations must be >= 1");
+  if (options.change_tol < 0.0)
+    throw std::invalid_argument("simp_optimize: change_tol must be >= 0");
+
+  // make_density_filter validates filter_radius > 0.
+  const DensityFilter filter = make_density_filter(grid, options.filter_radius);
+  const double n_design = static_cast<double>(grid.solid_count());
+
+  // Physical volume fraction of a grid-indexed physical density field.
+  auto phys_volfrac = [&](const std::vector<double>& xphys) {
+    double vol = 0.0;
+    for (double v : xphys) vol += v;
+    return n_design > 0.0 ? vol / n_design : 0.0;
+  };
+
+  // Initial design: uniform at the target volume fraction on every solid voxel.
+  std::vector<double> x = simp_uniform_density(grid, options.volume_fraction);
+
+  SimpOptimizeResult result;
+  result.history.reserve(static_cast<std::size_t>(options.max_iterations));
+
+  for (int it = 0; it < options.max_iterations; ++it) {
+    const std::vector<double> xphys = filter.filter_density(x);
+    const SimpCompliance c = simp_compliance(grid, params, xphys, bcs, loads,
+                                             options.cg_tolerance,
+                                             options.cg_max_iterations);
+    if (!c.cg.converged)
+      throw std::runtime_error(
+          "simp_optimize: penalized CG solve did not converge");
+
+    const std::vector<double> x_new =
+        oc_update(grid, filter, x, c.dcompliance, options.volume_fraction,
+                  options.move, params.density_min);
+
+    double change = 0.0;
+    for (std::size_t e = 0; e < x.size(); ++e)
+      change = std::max(change, std::fabs(x_new[e] - x[e]));
+
+    x = x_new;
+    result.iterations = it + 1;
+    result.history.push_back(
+        {c.compliance, change, phys_volfrac(filter.filter_density(x))});
+    if (it == 0) result.initial_compliance = c.compliance;
+
+    if (change < options.change_tol) {
+      result.converged = true;
+      break;
+    }
+  }
+
+  // Report a self-consistent final state: physical_density = filter(design) and
+  // compliance = compliance(physical_density) via one final solve on the
+  // converged field (so callers/property checks see matching values).
+  result.design = x;
+  result.physical_density = filter.filter_density(x);
+  const SimpCompliance fc =
+      simp_compliance(grid, params, result.physical_density, bcs, loads,
+                      options.cg_tolerance, options.cg_max_iterations);
+  result.compliance = fc.compliance;
+  result.volume_fraction = phys_volfrac(result.physical_density);
+  return result;
+}
+
 }  // namespace topopt
