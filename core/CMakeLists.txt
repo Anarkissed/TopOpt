@@ -138,6 +138,19 @@ if(Eigen3_FOUND)
   add_executable(test_mbb tests/validation/test_mbb.cpp)
   target_link_libraries(test_mbb PRIVATE topopt)
   add_test(NAME mbb_validation COMMAND test_mbb)
+
+  # Gate V2 validation (M3.4): the full 3D volume-fraction-targeted SIMP loop
+  # (simp_optimize) on the 3D cantilever + clamped-beam benchmarks vs the
+  # human-authored reference values in tests/fixtures/benchmarks.json. Drives
+  # make_density_filter / simp_compliance / oc_update / simp_optimize, so it is
+  # gated on Eigen like simp.cpp. The fixture directory is injected so the test
+  # does not depend on the working directory ctest runs from. CI configures with
+  # -DTOPOPT_REQUIRE_DEPS=ON, so it always runs in the pipeline.
+  add_executable(test_gate_v2 tests/validation/test_gate_v2.cpp)
+  target_link_libraries(test_gate_v2 PRIVATE topopt)
+  target_compile_definitions(test_gate_v2 PRIVATE
+    BENCH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
+  add_test(NAME gate_v2 COMMAND test_gate_v2)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always

@@ -144,4 +144,65 @@ std::vector<double> oc_update(const VoxelGrid& grid, const DensityFilter& filter
                               double volume_fraction, double move = 0.2,
                               double density_min = 1e-3);
 
+// ---------------------------------------------------------------------------
+// Full volume-fraction-targeted SIMP optimization loop (ROADMAP M3.4).
+//
+// Ties the M3.2 penalized compliance/sensitivities together with the M3.3
+// density filter and Optimality-Criteria update into the classic minimum-
+// compliance SIMP loop (ARCHITECTURE §4). Starting from a uniform design at the
+// target volume fraction, each iteration:
+//   1. xPhys = filter.filter_density(x)         (physical/analysis density)
+//   2. (c, dc/dxPhys) = simp_compliance(xPhys)  (penalized solve + gradient)
+//   3. x = oc_update(x, dc/dxPhys, volfrac)     (constraint on physical volume)
+// and stops when the design change max_e |x_new - x| falls below `change_tol`
+// (converged) or after `max_iterations` (the iteration cap). The volume
+// constraint is enforced on the physical (filtered) density by oc_update every
+// step, so the achieved physical volume fraction tracks the target throughout.
+
+struct SimpOptions {
+  double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
+  double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
+  double move = 0.2;             // OC move limit
+  int max_iterations = 60;       // hard iteration cap (a convergence criterion)
+  double change_tol = 0.01;      // stop when max_e |x_new - x| < change_tol
+  double cg_tolerance = 1e-8;    // penalized-FEA CG tolerance (tight: §V2 gate)
+  int cg_max_iterations = 0;     // 0 -> Eigen CG default (2 * n_dof)
+};
+
+// One recorded step of the SIMP trajectory.
+struct SimpIteration {
+  double compliance = 0.0;       // compliance of xPhys at the START of the step
+  double change = 0.0;           // max_e |x_new - x| produced by this step's OC
+  double volume_fraction = 0.0;  // achieved physical volume fraction after the step
+};
+
+// Result of simp_optimize. `design`, `physical_density` and `compliance` are
+// mutually consistent: compliance == compliance(physical_density) (a final solve
+// on the converged field), and physical_density == filter(design).
+struct SimpOptimizeResult {
+  std::vector<double> design;            // final design variable x (grid-indexed)
+  std::vector<double> physical_density;  // final xPhys = filter(x) (grid-indexed)
+  double compliance = 0.0;               // compliance of physical_density
+  double initial_compliance = 0.0;       // compliance of the uniform start design
+  double volume_fraction = 0.0;          // achieved physical volume fraction
+  int iterations = 0;                    // OC updates performed
+  bool converged = false;                // stopped on change_tol (not the cap)
+  std::vector<SimpIteration> history;    // per-iteration trajectory (size iterations)
+};
+
+// Run the full SIMP loop above and return the optimized design. The initial
+// design is uniform at options.volume_fraction on every solid voxel (Empty
+// voxels stay 0 and are not design variables). Solves route through the M3.1
+// void-gated Jacobi-CG path (fea_solve_cg via simp_compliance).
+//
+// Throws std::invalid_argument if the params are non-physical (simp_compliance
+// rules), volume_fraction not in (0, 1], move <= 0, max_iterations < 1,
+// change_tol < 0, or filter_radius <= 0 (make_density_filter). Throws
+// std::runtime_error if a penalized CG solve fails to converge (so the caller
+// never optimizes on a garbage field).
+SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 const SimpOptions& options);
+
 }  // namespace topopt
