@@ -121,6 +121,19 @@ struct DensityFilter {
 // (ARCHITECTURE §4: >= 1.5). Throws std::invalid_argument if radius <= 0.
 DensityFilter make_density_filter(const VoxelGrid& grid, double radius);
 
+// Mask-aware density filter (ROADMAP M3.7). Identical weights to the overload
+// above, but only Active solid voxels (mask[e] == MaskValue::Active) are
+// design/filter voxels: FrozenSolid, FrozenVoid and Empty voxels are excluded
+// from every Active voxel's neighbourhood, so the filter does not average
+// (bleed) physical density across a mask boundary. Frozen/Empty voxels get an
+// empty filter row (weight_sum 0) and map to 0 under filter_density — the
+// mask-aware SIMP loop pins their physical density separately (FrozenSolid -> 1,
+// FrozenVoid -> 0). With an all-Active mask this reproduces the plain overload
+// bit-for-bit (which delegates here). Throws std::invalid_argument if radius <= 0
+// or mask.size() != grid.voxel_count().
+DensityFilter make_density_filter(const VoxelGrid& grid, double radius,
+                                  const DesignMask& mask);
+
 // One Optimality-Criteria design update (ROADMAP M3.3) for the volume-constrained
 // minimum-compliance problem. Inputs (all grid-indexed; Empty voxels ignored):
 //   density       current design x_e in [density_min, 1],
@@ -204,6 +217,40 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                  const std::vector<DirichletBC>& bcs,
                                  const std::vector<NodalLoad>& loads,
                                  const SimpOptions& options);
+
+// ---------------------------------------------------------------------------
+// Passive regions: mask-aware SIMP optimization (ROADMAP M3.7).
+//
+// The same minimum-compliance loop as simp_optimize above, with per-voxel
+// passive regions applied through `mask` (grid-indexed, size voxel_count()):
+//   * FrozenSolid voxels: physical density pinned to 1 and excluded from the OC
+//     update (kept full material);
+//   * FrozenVoid voxels: physical density pinned to 0, excluded from the design
+//     AND from the FEA stiffness (they contribute no element — realised by
+//     solving on an analysis grid where FrozenVoid voxels are treated as Empty,
+//     so the M3.1 void-DOF gate handles any nodes left attached only to void);
+//   * Active voxels: free design variables, updated by the OC step subject to
+//     the volume constraint volume_fraction * (number of Active voxels).
+// Load and Fixture voxels (M1.6) are treated as implicitly FrozenSolid whatever
+// their mask entry, so they are retained at density 1 — the §7 V3 Load/Fixture
+// retention gate becomes structural rather than emergent. The density filter
+// does not bleed across mask boundaries (make_density_filter mask overload).
+//
+// The returned `design` and `physical_density` carry the pins (FrozenSolid 1,
+// FrozenVoid 0), so unlike the unconstrained overload physical_density is NOT
+// filter(design) at frozen voxels; `volume_fraction` is the achieved fraction
+// over the Active voxels. With an all-Active mask and no Load/Fixture voxels the
+// result matches the unconstrained overload.
+//
+// Throws std::invalid_argument for the same argument errors as simp_optimize,
+// plus mask.size() != grid.voxel_count(); std::runtime_error if a penalized CG
+// solve fails to converge or the FrozenVoid pattern leaves the structure
+// under-constrained (M3.1 void gate).
+SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 const SimpOptions& options,
+                                 const DesignMask& mask);
 
 // ---------------------------------------------------------------------------
 // Multi-variant runner (ROADMAP M3.6).

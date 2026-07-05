@@ -10,13 +10,13 @@
 //
 // Coverage strategy: each gate's check is exercised with controlled synthetic
 // fields that make it both PASS and FAIL (so a broken check is caught), plus a
-// genuine end-to-end run of check_v3 on a real SIMP optimizer output for the two
-// gates the M3.4 loop satisfies emergently (watertight + single component). The
-// retention and min-feature gates are NOT asserted on raw optimizer output: at
-// M3.5 retention is emergent (ROADMAP M3.7 makes Load/Fixture voxels structural)
-// and SIMP designs at this resolution contain sub-2-voxel features — asserting
-// those gates on raw output would be asserting behaviour the optimizer does not
-// yet provide. They are covered by the synthetic pass/fail cases instead.
+// genuine end-to-end run of check_v3 on a real SIMP optimizer output. Since
+// M3.7, Load/Fixture voxels are implicitly FrozenSolid in the mask-aware
+// optimizer, so the group-4 end-to-end run is driven through that path and the
+// Load/Fixture retention gate (gate 3) is asserted structurally — not just the
+// two mesh gates (watertight + single component). The min-feature gate is still
+// NOT asserted on optimizer output (SIMP designs at this resolution contain
+// sub-2-voxel features); it is covered by the synthetic pass/fail cases instead.
 //
 // No third-party test framework (ARCHITECTURE §4); same self-contained CHECK
 // harness as test_gate_v2.cpp, public API only.
@@ -252,10 +252,12 @@ int main() {
   }
 
   // =========================================================================
-  // Group 4 — the property suite on a real SIMP optimizer output. The M3.4
-  // loop satisfies the two mesh gates (watertight + single component) on every
-  // output; those are asserted here. Retention/min-feature are reported (and
-  // covered synthetically above), not asserted on raw output.
+  // Group 4 — the property suite on a real SIMP optimizer output. Driven
+  // through the M3.7 mask-aware optimizer (all-Active caller mask), so Load and
+  // Fixture voxels are implicitly FrozenSolid: the two mesh gates (watertight +
+  // single component) AND the Load/Fixture retention gate hold structurally and
+  // are all asserted here. Min-feature is reported (and covered synthetically
+  // above), not asserted on optimizer output.
   // =========================================================================
   {
     const int nx = 24, ny = 8, nz = 8;
@@ -293,7 +295,11 @@ int main() {
     opt.change_tol = 0.0;
     opt.cg_tolerance = 1e-8;
 
-    const SimpOptimizeResult res = topopt::simp_optimize(g, p, bcs, loads, opt);
+    // Mask-aware optimize with an all-Active caller mask: Load/Fixture voxels
+    // are implicitly FrozenSolid (ROADMAP M3.7), so retention is structural.
+    const topopt::DesignMask mask = topopt::make_active_mask(g);
+    const SimpOptimizeResult res =
+        topopt::simp_optimize(g, p, bcs, loads, opt, mask);
     const V3Report r = topopt::check_v3(g, res.physical_density, 0.5);
 
     std::printf(
@@ -312,6 +318,10 @@ int main() {
           "V3(output): cleaned optimizer output mesh is one component");
     CHECK(r.load_fixture_voxels == 2 * ny * nz,
           "V3(output): all tagged Load/Fixture voxels are scanned");
+    // M3.7 completion requirement: the Load/Fixture retention gate is now
+    // asserted on real optimizer output (structural, not just reported).
+    CHECK(r.gate_load_fixture_retained() && r.min_load_fixture_density >= 0.9,
+          "V3(output): Load/Fixture voxels retained at density >= 0.9");
   }
 
   if (g_failures == 0) {

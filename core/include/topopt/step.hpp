@@ -76,4 +76,26 @@ StepModel import_step_file(const std::string& path,
 std::size_t tag_step_face(VoxelGrid& grid, const StepModel& model, int face_id,
                           VoxelTag tag);
 
+// Set the design mask (ROADMAP M3.7) of the solid voxels lying against B-rep
+// face `face_id` of `model`, to a depth of `depth_voxels` layers, to
+// `mask_value`. This is the M1.6 slab selection generalized with a voxel depth:
+// a solid voxel is selected iff its centre is within (depth_voxels - 0.5) voxel
+// edges (+ a numeric epsilon) of the closest point on that face's tessellation
+// triangles. For a planar face flush with the solid boundary this picks exactly
+// the first `depth_voxels` voxel layers against the face (depth_voxels == 1
+// reproduces tag_step_face's one-voxel slab). `grid` must have been voxelized
+// from `model.mesh` (same coordinate frame).
+//
+// Unlike tag_step_face this does NOT modify the grid's tags — the design mask is
+// a separate array — so a selected voxel keeps its Load/Fixture tag. `mask` is
+// written in place and must be grid-indexed (size grid.voxel_count(); typically
+// make_active_mask(grid)). Returns the number of voxels whose mask entry was set.
+//
+// Throws std::invalid_argument if depth_voxels < 1, `face_id` is outside
+// [0, model.face_count), mask.size() != grid.voxel_count(), or
+// model.triangle_face is not parallel to model.mesh.triangles.
+std::size_t mask_step_face(const VoxelGrid& grid, const StepModel& model,
+                           int face_id, MaskValue mask_value, int depth_voxels,
+                           DesignMask& mask);
+
 }  // namespace topopt

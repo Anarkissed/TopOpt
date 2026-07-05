@@ -121,9 +121,22 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
 // Density filter (ROADMAP M3.3). Precompute the convolution weights
 // H_ei = max(0, radius - dist(e,i)) over solid voxels within `radius` (voxel
 // units) and store them in CSR form keyed by grid voxel index.
-DensityFilter make_density_filter(const VoxelGrid& grid, double radius) {
+DensityFilter make_density_filter(const VoxelGrid& grid, double radius,
+                                  const DesignMask& mask) {
   if (!(radius > 0.0))
     throw std::invalid_argument("make_density_filter: radius must be > 0");
+  if (mask.size() != grid.voxel_count())
+    throw std::invalid_argument("make_density_filter: mask size != voxel_count");
+
+  // A design/filter voxel is a solid voxel whose mask entry is Active. Frozen
+  // (FrozenSolid/FrozenVoid) and Empty voxels are excluded from every Active
+  // voxel's neighbourhood, so physical density never averages across a mask
+  // boundary (ROADMAP M3.7 "no bleed"). With an all-Active mask this is exactly
+  // "grid.solid()", so the plain overload below delegates here bit-for-bit.
+  auto is_active = [&](int i, int j, int k) {
+    return grid.solid(i, j, k) &&
+           mask[grid.index(i, j, k)] == MaskValue::Active;
+  };
 
   DensityFilter f;
   f.voxel_count = grid.voxel_count();
@@ -142,7 +155,7 @@ DensityFilter make_density_filter(const VoxelGrid& grid, double radius) {
       for (int i = 0; i < grid.nx; ++i) {
         const std::size_t e = grid.index(i, j, k);
         f.row_start[e] = f.neighbor.size();
-        if (!grid.solid(i, j, k)) continue;  // Empty voxel: empty row, Hs = 0
+        if (!is_active(i, j, k)) continue;  // non-design voxel: empty row, Hs = 0
         double hs = 0.0;
         for (int dk = -R; dk <= R; ++dk)
           for (int dj = -R; dj <= R; ++dj)
@@ -151,7 +164,7 @@ DensityFilter make_density_filter(const VoxelGrid& grid, double radius) {
               if (ii < 0 || ii >= grid.nx || jj < 0 || jj >= grid.ny ||
                   kk < 0 || kk >= grid.nz)
                 continue;
-              if (!grid.solid(ii, jj, kk)) continue;  // design voxels only
+              if (!is_active(ii, jj, kk)) continue;  // active design voxels only
               const double dist = std::sqrt(
                   static_cast<double>(di * di + dj * dj + dk * dk));
               const double h = radius - dist;
@@ -164,6 +177,12 @@ DensityFilter make_density_filter(const VoxelGrid& grid, double radius) {
       }
   f.row_start[f.voxel_count] = f.neighbor.size();
   return f;
+}
+
+DensityFilter make_density_filter(const VoxelGrid& grid, double radius) {
+  // All-Active mask => is_active == grid.solid(), so this reproduces the
+  // pre-M3.7 filter (same neighbour set, order and weights) bit-for-bit.
+  return make_density_filter(grid, radius, make_active_mask(grid));
 }
 
 std::vector<double> DensityFilter::filter_density(
@@ -356,6 +375,204 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                       options.cg_tolerance, options.cg_max_iterations);
   result.compliance = fc.compliance;
   result.volume_fraction = phys_volfrac(result.physical_density);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Passive regions: mask-aware SIMP optimization (ROADMAP M3.7).
+
+namespace {
+
+// The effective mask actually optimized: the caller's mask with every Load and
+// Fixture voxel forced to FrozenSolid (M1.6 tags are implicitly "keep-in", so
+// the §7 V3 retention gate is structural). Empty voxels are left as-is (ignored).
+DesignMask effective_mask(const VoxelGrid& grid, const DesignMask& mask) {
+  DesignMask eff = mask;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const VoxelTag t = grid.tag(i, j, k);
+        if (t == VoxelTag::Load || t == VoxelTag::Fixture)
+          eff[grid.index(i, j, k)] = MaskValue::FrozenSolid;
+      }
+  return eff;
+}
+
+// The analysis grid for FEA: FrozenVoid voxels become Empty so they contribute
+// no element (excluded from the stiffness); every other voxel keeps its tag. The
+// M3.1 void-DOF gate then handles any node left attached only to void.
+VoxelGrid analysis_grid_for_mask(const VoxelGrid& grid, const DesignMask& eff) {
+  VoxelGrid a = grid;
+  for (std::size_t e = 0; e < a.tags.size(); ++e)
+    if (eff[e] == MaskValue::FrozenVoid) a.tags[e] = VoxelTag::Empty;
+  return a;
+}
+
+// Pin the physical density of frozen voxels: FrozenSolid -> 1, FrozenVoid -> 0.
+// Active/Empty entries (already the filtered value / 0) are left untouched.
+void apply_mask_pins(const DesignMask& eff, std::vector<double>& xphys) {
+  for (std::size_t e = 0; e < xphys.size(); ++e) {
+    if (eff[e] == MaskValue::FrozenSolid) xphys[e] = 1.0;
+    else if (eff[e] == MaskValue::FrozenVoid) xphys[e] = 0.0;
+  }
+}
+
+// One Optimality-Criteria update restricted to Active voxels. FrozenSolid (x=1)
+// and FrozenVoid (x=0) entries of `density` are carried through unchanged; only
+// Active voxels move. The volume constraint is enforced on the physical density
+// of the Active voxels: sum_active xPhys(x_new) == volume_fraction * n_active
+// (the Active budget). `filter` is the mask-aware filter (Active-only), so both
+// the compliance and volume sensitivities are already confined to Active voxels.
+std::vector<double> oc_update_masked(const VoxelGrid& grid,
+                                     const DensityFilter& filter,
+                                     const DesignMask& eff,
+                                     const std::vector<double>& density,
+                                     const std::vector<double>& dcompliance,
+                                     double volume_fraction, double move,
+                                     double density_min) {
+  const std::size_t N = grid.voxel_count();
+  const std::vector<double> dc = filter.filter_sensitivity(dcompliance);
+  std::vector<double> ones(N, 0.0);
+  std::size_t n_active = 0;
+  for (std::size_t e = 0; e < N; ++e)
+    if (eff[e] == MaskValue::Active) {
+      ones[e] = 1.0;
+      ++n_active;
+    }
+  const std::vector<double> dv = filter.filter_sensitivity(ones);
+  const double target = volume_fraction * static_cast<double>(n_active);
+
+  // Candidate design for a trial multiplier: Active voxels take the OC step
+  // (with move limit + box bounds); frozen voxels keep their pinned x (1 or 0).
+  auto candidate = [&](double lambda) {
+    std::vector<double> xnew = density;  // preserves FrozenSolid=1, FrozenVoid=0
+    for (std::size_t e = 0; e < N; ++e) {
+      if (eff[e] != MaskValue::Active) continue;
+      const double xe = density[e];
+      double be = 0.0;
+      if (dv[e] > 0.0) be = -dc[e] / (lambda * dv[e]);
+      if (be < 0.0) be = 0.0;
+      double xt = xe * std::sqrt(be);
+      const double lo = std::max(density_min, xe - move);
+      const double hi = std::min(1.0, xe + move);
+      if (xt < lo) xt = lo;
+      if (xt > hi) xt = hi;
+      xnew[e] = xt;
+    }
+    return xnew;
+  };
+
+  // Physical volume of the Active voxels (filter_density is 0 on frozen/empty,
+  // so summing the whole field sums the Active voxels only).
+  auto phys_vol = [&](const std::vector<double>& xnew) {
+    const std::vector<double> xp = filter.filter_density(xnew);
+    double v = 0.0;
+    for (double val : xp) v += val;
+    return v;
+  };
+
+  double l1 = 0.0, l2 = 1.0;
+  while (l2 < 1e30 && phys_vol(candidate(l2)) > target) l2 *= 2.0;
+  for (int it = 0; it < 100 && (l2 - l1) > 1e-6 * (l1 + l2); ++it) {
+    const double lmid = 0.5 * (l1 + l2);
+    if (phys_vol(candidate(lmid)) > target)
+      l1 = lmid;
+    else
+      l2 = lmid;
+  }
+  return candidate(0.5 * (l1 + l2));
+}
+
+}  // namespace
+
+SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 const SimpOptions& options,
+                                 const DesignMask& mask) {
+  validate_params(params);
+  if (!(options.volume_fraction > 0.0 && options.volume_fraction <= 1.0))
+    throw std::invalid_argument("simp_optimize: volume_fraction must be in (0, 1]");
+  if (!(options.move > 0.0))
+    throw std::invalid_argument("simp_optimize: move must be > 0");
+  if (options.max_iterations < 1)
+    throw std::invalid_argument("simp_optimize: max_iterations must be >= 1");
+  if (options.change_tol < 0.0)
+    throw std::invalid_argument("simp_optimize: change_tol must be >= 0");
+  if (mask.size() != grid.voxel_count())
+    throw std::invalid_argument("simp_optimize: mask size != voxel_count");
+
+  // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
+  // analysis grid (FrozenVoid removed), and the Active-voxel budget.
+  const DesignMask eff = effective_mask(grid, mask);
+  const DensityFilter filter =
+      make_density_filter(grid, options.filter_radius, eff);
+  const VoxelGrid analysis = analysis_grid_for_mask(grid, eff);
+  double n_active = 0.0;
+  for (MaskValue m : eff)
+    if (m == MaskValue::Active) n_active += 1.0;
+
+  // Achieved Active-voxel physical volume fraction of a filtered field (the
+  // filter is 0 on frozen/empty, so the whole-field sum is the Active sum).
+  auto active_volfrac = [&](const std::vector<double>& xphys_active) {
+    double vol = 0.0;
+    for (double v : xphys_active) vol += v;
+    return n_active > 0.0 ? vol / n_active : 0.0;
+  };
+
+  // Initial design: Active voxels at the target fraction, FrozenSolid at 1,
+  // FrozenVoid at 0, Empty at 0.
+  std::vector<double> x(grid.voxel_count(), 0.0);
+  for (std::size_t e = 0; e < x.size(); ++e) {
+    if (eff[e] == MaskValue::Active) x[e] = options.volume_fraction;
+    else if (eff[e] == MaskValue::FrozenSolid) x[e] = 1.0;
+    // FrozenVoid / Empty stay 0
+  }
+
+  SimpOptimizeResult result;
+  result.history.reserve(static_cast<std::size_t>(options.max_iterations));
+
+  for (int it = 0; it < options.max_iterations; ++it) {
+    std::vector<double> xphys = filter.filter_density(x);
+    apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
+    const SimpCompliance c =
+        simp_compliance(analysis, params, xphys, bcs, loads,
+                        options.cg_tolerance, options.cg_max_iterations);
+    if (!c.cg.converged)
+      throw std::runtime_error(
+          "simp_optimize: penalized CG solve did not converge");
+
+    const std::vector<double> x_new =
+        oc_update_masked(grid, filter, eff, x, c.dcompliance,
+                         options.volume_fraction, options.move,
+                         params.density_min);
+
+    double change = 0.0;
+    for (std::size_t e = 0; e < x.size(); ++e)
+      change = std::max(change, std::fabs(x_new[e] - x[e]));
+
+    x = x_new;
+    result.iterations = it + 1;
+    result.history.push_back(
+        {c.compliance, change, active_volfrac(filter.filter_density(x))});
+    if (it == 0) result.initial_compliance = c.compliance;
+
+    if (change < options.change_tol) {
+      result.converged = true;
+      break;
+    }
+  }
+
+  // Self-consistent final state (pins applied to the physical density) via one
+  // final solve on the converged field.
+  result.design = x;
+  result.physical_density = filter.filter_density(x);
+  apply_mask_pins(eff, result.physical_density);
+  const SimpCompliance fc =
+      simp_compliance(analysis, params, result.physical_density, bcs, loads,
+                      options.cg_tolerance, options.cg_max_iterations);
+  result.compliance = fc.compliance;
+  result.volume_fraction = active_volfrac(filter.filter_density(x));
   return result;
 }
 
