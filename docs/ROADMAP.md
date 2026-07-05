@@ -60,7 +60,7 @@
       2D-equivalent slice reproduces the classic 99-line MBB result pattern.
 - [x] M3.4 Full 3D loop with volume-fraction target + convergence criteria.
       **Gate V2** on 3D MBB + cantilever vs fixtures/benchmarks.json.
-- [ ] M3.5 Marching cubes on final density (threshold 0.5) + cleanup.
+- [x] M3.5 Marching cubes on final density (threshold 0.5) + cleanup.
       **Gate V3** property suite wired to run on every optimizer output in
       all future tests.
 - [ ] M3.6 Multi-variant runner: one job → volume fractions [0.7, 0.5, 0.3]

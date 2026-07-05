@@ -202,4 +202,89 @@ VoxelGrid voxelize(const TriangleMesh& mesh, int resolution) {
   return grid;
 }
 
+// ---------------------------------------------------------------------------
+// Marching cubes wrapper + Gate V3 property suite (ROADMAP M3.5).
+// ---------------------------------------------------------------------------
+
+TriangleMesh marching_cubes(const VoxelGrid& grid,
+                            const std::vector<double>& density, double iso) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "marching_cubes: density size != grid.voxel_count()");
+  return marching_cubes(grid.nx, grid.ny, grid.nz, grid.spacing, grid.origin,
+                        density, iso);
+}
+
+int min_feature_violations(const VoxelGrid& grid,
+                           const std::vector<double>& density, double iso) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "min_feature_violations: density size != grid.voxel_count()");
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  auto solid = [&](int i, int j, int k) {
+    return density[grid.index(i, j, k)] > iso;
+  };
+  // Mark every voxel that belongs to at least one fully-solid 2x2x2 block. A
+  // block with min corner (i,j,k) exists for i in [0,nx-2] etc.; if all 8 of its
+  // voxels are solid, all 8 are "thick enough". Any solid voxel left unmarked is
+  // part of a feature thinner than 2 voxels in some direction.
+  std::vector<char> covered(grid.voxel_count(), 0);
+  for (int k = 0; k + 1 < nz; ++k)
+    for (int j = 0; j + 1 < ny; ++j)
+      for (int i = 0; i + 1 < nx; ++i) {
+        bool full = true;
+        for (int dk = 0; dk < 2 && full; ++dk)
+          for (int dj = 0; dj < 2 && full; ++dj)
+            for (int di = 0; di < 2 && full; ++di)
+              if (!solid(i + di, j + dj, k + dk)) full = false;
+        if (!full) continue;
+        for (int dk = 0; dk < 2; ++dk)
+          for (int dj = 0; dj < 2; ++dj)
+            for (int di = 0; di < 2; ++di)
+              covered[grid.index(i + di, j + dj, k + dk)] = 1;
+      }
+  int violations = 0;
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        if (solid(i, j, k) && !covered[grid.index(i, j, k)]) ++violations;
+  return violations;
+}
+
+V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
+                  double iso) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument("check_v3: density size != grid.voxel_count()");
+
+  V3Report r;
+
+  // Gate 1 + 2: marching cubes -> cleanup -> watertight + single component.
+  const TriangleMesh raw = marching_cubes(grid, density, iso);
+  r.mesh_components_raw = count_components(raw);
+  r.mesh = keep_largest_component(raw);
+  r.watertight = check_watertight(r.mesh);
+  r.mesh_components = count_components(r.mesh);
+
+  // Gate 3: Load/Fixture voxels retained at density >= 0.9.
+  r.min_load_fixture_density = 1.0;
+  r.load_fixture_voxels = 0;
+  bool retained = true;
+  for (std::size_t idx = 0; idx < grid.tags.size(); ++idx) {
+    const VoxelTag t = grid.tags[idx];
+    if (t != VoxelTag::Load && t != VoxelTag::Fixture) continue;
+    ++r.load_fixture_voxels;
+    const double d = density[idx];
+    if (d < r.min_load_fixture_density) r.min_load_fixture_density = d;
+    if (d < kV3RetentionThreshold) retained = false;
+  }
+  r.load_fixture_retained = retained;  // vacuously true if no such voxels
+
+  // Gate 4: minimum feature size >= 2 voxels.
+  r.min_feature_violations = min_feature_violations(grid, density, iso);
+
+  r.passes = r.gate_watertight() && r.gate_single_component() &&
+             r.gate_load_fixture_retained() && r.gate_min_feature();
+  return r;
+}
+
 }  // namespace topopt
