@@ -75,4 +75,73 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<NodalLoad>& loads,
                                double tolerance = 1e-8, int max_iterations = 0);
 
+// ---------------------------------------------------------------------------
+// Density filter + Optimality-Criteria update (ROADMAP M3.3).
+//
+// ARCHITECTURE §4 locks a "density filter (radius >= 1.5 voxels)" as the SIMP
+// mesh-independence regularizer and an "Optimality Criteria updater" as the
+// design updater. Both are provided here as reusable operators; the full
+// volume-fraction-targeted loop with convergence criteria is M3.4.
+
+// Precomputed linear density filter over a voxel grid's design (solid) voxels.
+// The physical density of design voxel e is the weighted average of the design
+// densities of the solid voxels i whose centre lies within `radius` voxels of e:
+//     xPhys_e = ( sum_i H_ei x_i ) / ( sum_i H_ei ),
+//     H_ei    = max(0, radius - dist(e,i))      (dist in voxel units)
+// `radius` is in voxel units (ARCHITECTURE §4: ">= 1.5 voxels"), independent of
+// the grid spacing. Empty voxels are not design variables: they are excluded
+// from every neighbourhood and map to 0. The map x -> xPhys is linear (xPhys =
+// M x with M_ei = H_ei / sum_k H_ek); H is symmetric, so filtering an
+// objective/constraint sensitivity from physical space back to design space is
+// the transpose M^T (the chain rule d/dx = M^T d/dxPhys).
+//
+// Weights are stored in compressed sparse row form keyed by grid voxel index.
+struct DensityFilter {
+  std::size_t voxel_count = 0;         // == grid.voxel_count()
+  std::vector<std::size_t> row_start;  // CSR row offsets, size voxel_count + 1
+  std::vector<std::size_t> neighbor;   // neighbour voxel indices (solid only)
+  std::vector<double> weight;          // H_ei for each neighbour entry
+  std::vector<double> weight_sum;      // Hs_e = sum_i H_ei (0 for Empty voxels)
+
+  // Forward filter: design densities x (grid-indexed) -> physical densities
+  // xPhys (grid-indexed; 0 on Empty voxels). Throws std::invalid_argument if
+  // x.size() != voxel_count.
+  std::vector<double> filter_density(const std::vector<double>& x) const;
+
+  // Adjoint (transpose) filter for the chain rule: given a sensitivity in
+  // physical space `dfdxphys` (grid-indexed; d f / d xPhys), return the
+  // sensitivity in design space d f / d x (grid-indexed; 0 on Empty voxels).
+  // Used to filter both the compliance and volume sensitivities before the OC
+  // update. Throws std::invalid_argument if dfdxphys.size() != voxel_count.
+  std::vector<double> filter_sensitivity(
+      const std::vector<double>& dfdxphys) const;
+};
+
+// Build the density filter for `grid` with neighbourhood `radius` in voxel units
+// (ARCHITECTURE §4: >= 1.5). Throws std::invalid_argument if radius <= 0.
+DensityFilter make_density_filter(const VoxelGrid& grid, double radius);
+
+// One Optimality-Criteria design update (ROADMAP M3.3) for the volume-constrained
+// minimum-compliance problem. Inputs (all grid-indexed; Empty voxels ignored):
+//   density       current design x_e in [density_min, 1],
+//   dcompliance   the physical-space compliance sensitivity dc/dxPhys_e (<= 0),
+//                 as returned by simp_compliance evaluated on the filtered field.
+// The update filters dc/dxPhys and the (unit) volume sensitivity through `filter`
+// (chain rule), then advances the design by the classic OC step
+//     x_new_e = clamp( x_e * sqrt( -dc_e / (lambda * dv_e) ),
+//                       [x_e - move, x_e + move] intersect [density_min, 1] ),
+// where the Lagrange multiplier lambda is found by bisection so the *physical*
+// volume sum_e xPhys(x_new)_e equals volume_fraction * (number of design voxels)
+// (the constraint is enforced on the filtered density, matching the density-
+// filter OC updater). Returns the grid-indexed updated design (Empty voxels 0).
+//
+// Throws std::invalid_argument on a size mismatch, a non-physical parameter
+// (volume_fraction not in (0,1], move <= 0, density_min not in (0,1]), or a
+// filter whose voxel_count does not match the grid.
+std::vector<double> oc_update(const VoxelGrid& grid, const DensityFilter& filter,
+                              const std::vector<double>& density,
+                              const std::vector<double>& dcompliance,
+                              double volume_fraction, double move = 0.2,
+                              double density_min = 1e-3);
+
 }  // namespace topopt

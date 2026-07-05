@@ -28,6 +28,7 @@
 #include <vector>
 
 using topopt::CgInfo;
+using topopt::DensityFilter;
 using topopt::DirichletBC;
 using topopt::FeaSolution;
 using topopt::NodalLoad;
@@ -302,6 +303,160 @@ int main() {
           "empty: Empty voxel has exactly zero sensitivity");
     CHECK(r.dcompliance[g.index(1, 0, 0)] < 0.0,
           "empty: loaded solid voxel has a negative sensitivity");
+  }
+
+  // ==========================================================================
+  // 6. Density filter (M3.3): partition-of-unity, finite support at `radius`,
+  //    the adjoint (transpose) identity for the sensitivity chain rule, and
+  //    exclusion of Empty voxels.
+  // ==========================================================================
+  {
+    // 6a. Filtering a constant field returns the same constant (the weights
+    //     sum to Hs, so sum_i H_ei x_i / Hs_e = c for x == c). This is the
+    //     mesh-independence filter's basic consistency property.
+    VoxelGrid g = make_solid_grid(5, 5, 1, 1.0);
+    DensityFilter f = topopt::make_density_filter(g, 1.5);
+    std::vector<double> c(g.voxel_count(), 0.7);
+    std::vector<double> fc = f.filter_density(c);
+    bool const_ok = true;
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i)
+        if (!near(fc[g.index(i, j, 0)], 0.7, 1e-12)) const_ok = false;
+    CHECK(const_ok, "filter: constant field is preserved (partition of unity)");
+
+    // 6b. Finite support: a unit spike at the centre spreads only to voxels
+    //     strictly within `radius`. A face neighbour (dist 1 < 1.5) is nonzero,
+    //     a diagonal (dist sqrt2 ~ 1.414 < 1.5) is nonzero, but a knight/edge
+    //     voxel at dist 2 and a corner at dist 2*sqrt2 are outside the radius.
+    std::vector<double> spike(g.voxel_count(), 0.0);
+    spike[g.index(2, 2, 0)] = 1.0;
+    std::vector<double> fs = f.filter_density(spike);
+    CHECK(fs[g.index(2, 2, 0)] > 0.0, "filter: spike self is nonzero");
+    CHECK(fs[g.index(3, 2, 0)] > 0.0, "filter: face neighbour (dist 1) nonzero");
+    CHECK(fs[g.index(3, 3, 0)] > 0.0,
+          "filter: diagonal neighbour (dist sqrt2) nonzero");
+    CHECK(near(fs[g.index(4, 2, 0)], 0.0, 0.0),
+          "filter: voxel at dist 2 is outside radius 1.5");
+    CHECK(near(fs[g.index(0, 0, 0)], 0.0, 0.0),
+          "filter: far corner is outside radius 1.5");
+
+    // 6c. Adjoint identity <M x, s> == <x, M^T s>: filter_sensitivity must be
+    //     the exact transpose of filter_density (this is what makes the chain
+    //     rule d/dx = M^T d/dxPhys correct). Use two deterministic fields.
+    std::vector<double> x(g.voxel_count(), 0.0), s(g.voxel_count(), 0.0);
+    for (std::size_t e = 0; e < g.voxel_count(); ++e) {
+      x[e] = 0.1 + 0.03 * static_cast<double>(e);
+      s[e] = 1.0 - 0.02 * static_cast<double>(e);
+    }
+    std::vector<double> Mx = f.filter_density(x);
+    std::vector<double> Mts = f.filter_sensitivity(s);
+    double lhs = 0.0, rhs = 0.0;
+    for (std::size_t e = 0; e < g.voxel_count(); ++e) {
+      lhs += Mx[e] * s[e];
+      rhs += x[e] * Mts[e];
+    }
+    CHECK(near(lhs, rhs, 1e-9 * (std::fabs(lhs) + 1.0)),
+          "filter: filter_sensitivity is the transpose of filter_density");
+
+    // 6d. Empty voxels are not design variables: they map to 0 and are excluded
+    //     from neighbours (a solid voxel next to a void has smaller Hs than an
+    //     interior one, but still filters a constant to itself).
+    VoxelGrid gh = make_solid_grid(3, 3, 1, 1.0);
+    gh.set_tag(1, 1, 0, VoxelTag::Empty);
+    DensityFilter fh = topopt::make_density_filter(gh, 1.5);
+    std::vector<double> ch(gh.voxel_count(), 0.5);
+    std::vector<double> fch = fh.filter_density(ch);
+    CHECK(near(fch[gh.index(1, 1, 0)], 0.0, 0.0),
+          "filter: Empty voxel filters to 0");
+    CHECK(near(fch[gh.index(0, 0, 0)], 0.5, 1e-12),
+          "filter: constant preserved on solid voxels beside a void");
+
+    // 6e. Argument validation.
+    bool threw = false;
+    try {
+      topopt::make_density_filter(g, 0.0);
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    CHECK(threw, "filter: radius <= 0 throws");
+  }
+
+  // ==========================================================================
+  // 7. Optimality-Criteria update (M3.3): the volume constraint is met on the
+  //    filtered density, the move limit and box bounds are respected, the step
+  //    responds monotonically to the sensitivity, and Empty voxels stay 0.
+  // ==========================================================================
+  {
+    // 7a. Volume constraint: with a near-identity filter (radius 0.5 => each
+    //     voxel only itself), a uniform design and uniform sensitivity, the
+    //     updated *physical* volume must equal volfrac * n_design.
+    VoxelGrid g = make_solid_grid(4, 4, 1, 1.0);
+    DensityFilter idf = topopt::make_density_filter(g, 0.5);
+    std::vector<double> x = topopt::simp_uniform_density(g, 0.4);
+    std::vector<double> dc(g.voxel_count(), -1.0);  // dc/dxPhys < 0
+    const double volfrac = 0.55, move = 0.2, dmin = 1e-3;
+    std::vector<double> xnew =
+        topopt::oc_update(g, idf, x, dc, volfrac, move, dmin);
+    std::vector<double> xp = idf.filter_density(xnew);
+    double vol = 0.0;
+    for (std::size_t e = 0; e < g.voxel_count(); ++e) vol += xp[e];
+    const double n_design = static_cast<double>(g.voxel_count());
+    CHECK(near(vol / n_design, volfrac, 5e-3),
+          "oc: filtered volume fraction equals the target");
+
+    // 7b. Move limit and box bounds respected on every design voxel.
+    bool bounds_ok = true, move_ok = true;
+    for (std::size_t e = 0; e < g.voxel_count(); ++e) {
+      if (xnew[e] < dmin - 1e-12 || xnew[e] > 1.0 + 1e-12) bounds_ok = false;
+      if (std::fabs(xnew[e] - x[e]) > move + 1e-9) move_ok = false;
+    }
+    CHECK(bounds_ok, "oc: updated densities stay in [density_min, 1]");
+    CHECK(move_ok, "oc: updated densities respect the move limit");
+
+    // 7c. Monotone response to the sensitivity: a voxel with a more negative
+    //     dc (adding material helps more) must receive at least as much
+    //     density as one with a less negative dc, starting from equal density.
+    VoxelGrid line = make_solid_grid(4, 1, 1, 1.0);
+    DensityFilter lidf = topopt::make_density_filter(line, 0.5);
+    std::vector<double> lx = topopt::simp_uniform_density(line, 0.5);
+    std::vector<double> ldc(line.voxel_count(), 0.0);
+    ldc[line.index(0, 0, 0)] = -4.0;
+    ldc[line.index(1, 0, 0)] = -3.0;
+    ldc[line.index(2, 0, 0)] = -2.0;
+    ldc[line.index(3, 0, 0)] = -1.0;
+    std::vector<double> lxn =
+        topopt::oc_update(line, lidf, lx, ldc, 0.5, 0.2, 1e-3);
+    CHECK(lxn[line.index(0, 0, 0)] > lxn[line.index(1, 0, 0)] &&
+              lxn[line.index(1, 0, 0)] > lxn[line.index(2, 0, 0)] &&
+              lxn[line.index(2, 0, 0)] > lxn[line.index(3, 0, 0)],
+          "oc: density is monotone in the compliance sensitivity");
+
+    // 7d. Empty voxels are excluded from the design and stay exactly 0.
+    VoxelGrid gh = make_solid_grid(3, 3, 1, 1.0);
+    gh.set_tag(1, 1, 0, VoxelTag::Empty);
+    DensityFilter fh = topopt::make_density_filter(gh, 1.5);
+    std::vector<double> hx = topopt::simp_uniform_density(gh, 0.5);
+    std::vector<double> hdc(gh.voxel_count(), -1.0);
+    std::vector<double> hxn =
+        topopt::oc_update(gh, fh, hx, hdc, 0.5, 0.2, 1e-3);
+    CHECK(near(hxn[gh.index(1, 1, 0)], 0.0, 0.0),
+          "oc: Empty voxel stays exactly 0");
+
+    // 7e. Argument validation.
+    auto oc_throws = [&](double vf, double mv, double dm) {
+      try {
+        topopt::oc_update(g, idf, x, dc, vf, mv, dm);
+      } catch (const std::invalid_argument&) {
+        return true;
+      } catch (...) {
+        return false;
+      }
+      return false;
+    };
+    CHECK(oc_throws(0.0, 0.2, 1e-3), "oc: volume_fraction <= 0 throws");
+    CHECK(oc_throws(1.5, 0.2, 1e-3), "oc: volume_fraction > 1 throws");
+    CHECK(oc_throws(0.5, 0.0, 1e-3), "oc: move <= 0 throws");
+    CHECK(oc_throws(0.5, 0.2, 0.0), "oc: density_min <= 0 throws");
   }
 
   if (g_failures == 0) {

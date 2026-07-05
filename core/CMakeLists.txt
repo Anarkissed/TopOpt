@@ -129,6 +129,15 @@ if(Eigen3_FOUND)
   add_executable(test_simp tests/unit/test_simp.cpp)
   target_link_libraries(test_simp PRIVATE topopt)
   add_test(NAME simp COMMAND test_simp)
+
+  # MBB validation gate (M3.3): a 2D-equivalent MBB slice driven through the
+  # density filter + Optimality-Criteria update reproduces the classic 99-line
+  # MBB result pattern. Builds its grid in code (no fixture) and drives
+  # make_density_filter / oc_update / simp_compliance, so it is gated on Eigen
+  # like simp.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_mbb tests/validation/test_mbb.cpp)
+  target_link_libraries(test_mbb PRIVATE topopt)
+  add_test(NAME mbb_validation COMMAND test_mbb)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
