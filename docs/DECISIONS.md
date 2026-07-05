@@ -37,3 +37,5 @@ change only; no change to ARCHITECTURE.md §4 (solver choice unchanged) or the
 Eigen-free public API. Approved by Nadim.
 
 - 2026-07-05: Re handoff 014: rejected for missing CI evidence (second occurrence). Worker prompt and handoff template amended to require the CI URL explicitly.
+- 2026-07-05: Maintainer adds passive-region (keep-in/keep-out) capability to M3 scope: separate design mask, face-based selection reusing M1.6, per task M3.x. App-side selection UI lands in M7.
+-2026-07-05: added core/tests/fixtures/benchmark.json for the requirements of step m3.4 

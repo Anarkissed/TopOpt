@@ -65,6 +65,19 @@
       all future tests.
 - [ ] M3.6 Multi-variant runner: one job → volume fractions [0.7, 0.5, 0.3]
       → three meshes + per-variant compliance report.
+- [ ] M3.7 Passive regions (keep-in / keep-out). A per-voxel design mask
+      (Active / FrozenSolid / FrozenVoid) as a separate array, NOT new
+      VoxelTag values (a frozen voxel may also be Load/Fixture). FrozenSolid:
+      rho pinned 1, excluded from OC update; FrozenVoid: rho pinned 0,
+      excluded from design and from FEA stiffness. Density filter must not
+      bleed across mask boundaries (frozen voxels excluded from neighbor
+      averaging of active voxels' physical density). Selection plumbing:
+      mask_step_face(grid, model, face_id, mask_value, depth_voxels) — the
+      M1.6 slab selection generalized with a voxel depth. Tests: a cantilever
+      with a FrozenVoid channel produces a design with the channel empty and
+      compliance worse than unconstrained; FrozenSolid voxels end at rho=1;
+      Load/Fixture voxels are implicitly FrozenSolid (V3 retention becomes
+      structural, not emergent).
 
 ## M4 — Anisotropy & orientation
 
