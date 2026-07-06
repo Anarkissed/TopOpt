@@ -110,7 +110,7 @@
       when it is > 0 (e.g. "N features may be thinner than 2 voxels /
       reliably printable width — consider a higher volume fraction variant
       or finer resolution"). Report-only: does not gate or modify geometry.
-- [ ] M5.3 `minimize_plastic` end-to-end: self-weight + auto volume-fraction
+- [x] M5.3 `minimize_plastic` end-to-end: self-weight + auto volume-fraction
       ladder, stopping when margin < 1.5. Integration test on bracket
       fixture.
 

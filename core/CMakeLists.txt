@@ -62,6 +62,11 @@ if(Eigen3_FOUND)
   # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/simp/simp.cpp)
+  # minimize_plastic end-to-end driver (M5.3): self-weight + volume-fraction
+  # ladder stopping at margin < 1.5. Drives simp_optimize / simp_compliance, so
+  # it is gated on Eigen like simp.cpp. CI has Eigen (DEPS=ON), so it always
+  # builds in CI.
+  target_sources(topopt PRIVATE src/simp/minimize_plastic.cpp)
   target_link_libraries(topopt PRIVATE Eigen3::Eigen)
 endif()
 
@@ -236,6 +241,20 @@ if(Eigen3_FOUND)
   add_executable(test_mask tests/property/test_mask.cpp)
   target_link_libraries(test_mask PRIVATE topopt)
   add_test(NAME passive_regions COMMAND test_mask)
+
+  # minimize_plastic end-to-end driver (M5.3): self-weight + descending
+  # volume-fraction ladder stopping at the first rung whose worst-case stress
+  # margin < 1.5, assembling the M5.2 job report per accepted variant. Builds a
+  # cantilever-bracket grid in code (DECISIONS.md reserves tests/fixtures/ to the
+  # maintainer) and drives minimize_plastic (simp_optimize), so it is gated on
+  # Eigen like the other optimizer tests. The settings rule table's absolute path
+  # is injected (like test_settings) so the real table is used. CI configures
+  # with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_minimize_plastic tests/validation/test_minimize_plastic.cpp)
+  target_link_libraries(test_minimize_plastic PRIVATE topopt)
+  target_compile_definitions(test_minimize_plastic PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME minimize_plastic COMMAND test_minimize_plastic)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
