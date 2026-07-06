@@ -138,6 +138,20 @@ if(Eigen3_FOUND)
   target_link_libraries(test_v4 PRIVATE topopt)
   add_test(NAME gate_v4 COMMAND test_v4)
 
+  # V5 validation gate (M4.4): orientation scoring (score_orientations /
+  # max_interlayer_tension) on the hook fixture — the support proxy combined with
+  # the z_knockdown-penalized max tension across layer planes must rank the
+  # correct build direction first. Imports hook.stl, voxelizes, tags the load
+  # case, drives fea_solve + hex8_stress to build the stress field, then scores.
+  # Needs the FEA solve, so it is gated on Eigen; the fixture directory is
+  # injected so the test does not depend on the working directory. CI configures
+  # with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_v5 tests/validation/test_v5.cpp)
+  target_link_libraries(test_v5 PRIVATE topopt)
+  target_compile_definitions(test_v5 PRIVATE
+    ORIENT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/orient")
+  add_test(NAME gate_v5 COMMAND test_v5)
+
   # SIMP compliance + sensitivity test (M3.2). Builds its tiny grids in code (no
   # fixture) and drives simp_compliance (density field, penalized stiffness,
   # compliance, finite-difference sensitivity check), so it is gated on Eigen
