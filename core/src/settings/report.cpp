@@ -99,7 +99,12 @@ void emit_variant(std::string& out, const VariantReport& v,
   out += in2 + "},\n";
   out += in2 + "\"settings\": ";
   emit_settings(out, v.settings, in2);
-  out += "\n";
+  out += ",\n";
+  // M5.2b — min-feature print warning (report-only).
+  out += in2 + "\"min_feature_violations\": " +
+         std::to_string(v.min_feature_violations) + ",\n";
+  out += in2 + "\"min_feature_warning\": " +
+         str_json(v.min_feature_warning) + "\n";
   out += indent + "}";
 }
 
@@ -475,6 +480,31 @@ void validate_job_report_json(const std::string& json_text) {
     require_string(settings, "infill_pattern", ctx + ".settings");
     require_string(settings, "print_mode", ctx + ".settings");
     require_string(settings, "warning", ctx + ".settings");
+
+    // M5.2b min-feature warning (report-only). Optional for backward
+    // compatibility; when present, min_feature_violations is a non-negative
+    // integer, min_feature_warning is a string, and a non-empty warning
+    // requires a positive violation count (no warning without violations).
+    bool violations_positive = false;
+    const JsonValue* mfv = find_field(v, "min_feature_violations");
+    if (mfv != nullptr) {
+      if (mfv->type != JsonValue::Type::Number)
+        throw ReportError(ctx + ": min_feature_violations must be a number");
+      if (std::floor(mfv->num) != mfv->num)
+        throw ReportError(ctx + ": min_feature_violations must be an integer");
+      if (mfv->num < 0.0)
+        throw ReportError(ctx + ": min_feature_violations must be >= 0");
+      violations_positive = mfv->num > 0.0;
+    }
+    const JsonValue* mfw = find_field(v, "min_feature_warning");
+    if (mfw != nullptr) {
+      if (mfw->type != JsonValue::Type::String)
+        throw ReportError(ctx + ": min_feature_warning must be a string");
+      if (!mfw->str.empty() && !violations_positive)
+        throw ReportError(
+            ctx +
+            ": non-empty min_feature_warning requires min_feature_violations > 0");
+    }
   }
 }
 

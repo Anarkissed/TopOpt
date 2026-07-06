@@ -72,6 +72,14 @@ struct VariantReport {
   Vec3 orientation{0.0, 0.0, 0.0};
   // Recommended slicer settings for this variant (M5.1 engine output).
   SlicerSettings settings;
+  // M5.2b — print-reliability warning. `min_feature_violations` is the variant's
+  // check_v3 min_feature_violations count (solid regions thinner than 2 voxels,
+  // ARCHITECTURE §7 V3 gate 4). `min_feature_warning` is the human-readable
+  // warning surfaced when that count exceeds the rules.json threshold
+  // (settings min_feature_warning_text); "" when there is no warning. Report-only:
+  // does not gate or modify geometry.
+  int min_feature_violations = 0;
+  std::string min_feature_warning;
 };
 
 // The whole run's report: the material used and one entry per requested variant.

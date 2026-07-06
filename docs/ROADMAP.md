@@ -105,7 +105,7 @@
       per rule boundary.
 - [x] M5.2 Job report: single JSON per run — variants, volume saved, max
       stress, margin, orientation, settings. Schema-validated in tests.
-- [ ] M5.2b Min-feature print warning: the per-variant job report includes
+- [x] M5.2b Min-feature print warning: the per-variant job report includes
       min_feature_violations (from check_v3) and a human-readable warning
       when it is > 0 (e.g. "N features may be thinner than 2 voxels /
       reliably printable width — consider a higher volume fraction variant
