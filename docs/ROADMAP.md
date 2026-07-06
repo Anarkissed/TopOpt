@@ -103,7 +103,7 @@
       part size; outputs = walls, top/bottom layers, infill % + pattern name.
       Rules table lives in `settings/rules.json` (human-tunable). Unit tests
       per rule boundary.
-- [ ] M5.2 Job report: single JSON per run — variants, volume saved, max
+- [x] M5.2 Job report: single JSON per run — variants, volume saved, max
       stress, margin, orientation, settings. Schema-validated in tests.
 - [ ] M5.2b Min-feature print warning: the per-variant job report includes
       min_feature_violations (from check_v3) and a human-readable warning
