@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <stdexcept>
 #include <vector>
 
 using topopt::DirichletBC;
