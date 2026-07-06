@@ -18,7 +18,10 @@
 #include <vector>
 
 using topopt::flat_face_normals;
+using topopt::max_interlayer_tension;
 using topopt::orientation_candidates;
+using topopt::OrientationScore;
+using topopt::score_orientations;
 using topopt::support_overhang_voxels;
 using topopt::TriangleMesh;
 using topopt::Vec3;
@@ -305,15 +308,185 @@ void test_support_overhang() {
   }
 }
 
+// A grid-indexed uniform stress field: every voxel carries the same Voigt tensor.
+std::vector<std::array<double, 6>> uniform_stress(const VoxelGrid& g,
+                                                  const std::array<double, 6>& s) {
+  return std::vector<std::array<double, 6>>(g.voxel_count(), s);
+}
+
+// Find the OrientationScore whose build_dir is parallel to `d` (either sign
+// treated as distinct: exact direction match within tol).
+const OrientationScore& find_dir(const std::vector<OrientationScore>& v,
+                                 const Vec3& d) {
+  const double dl = length(d);
+  const Vec3 u{d.x / dl, d.y / dl, d.z / dl};
+  for (const OrientationScore& os : v)
+    if (dot(os.build_dir, u) > 1.0 - 1e-6) return os;
+  std::fprintf(stderr, "FAIL: direction not found in scored set\n");
+  ++g_failures;
+  return v.front();
+}
+
+void test_max_interlayer_tension() {
+  // Uniform field: sigma_xx=0, sigma_yy=10, sigma_zz=1, no shear. The tension
+  // across the layer planes is the normal component along the build direction.
+  VoxelGrid g = solid_grid(2, 2, 2, 1.0);
+  const std::vector<std::array<double, 6>> s =
+      uniform_stress(g, {0.0, 10.0, 1.0, 0.0, 0.0, 0.0});
+
+  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, 0, 1}) - 1.0) < 1e-12,
+        "build +z reads sigma_zz = 1");
+  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, 1, 0}) - 10.0) < 1e-12,
+        "build +y reads sigma_yy = 10");
+  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{1, 0, 0}) - 0.0) < 1e-12,
+        "build +x reads sigma_xx = 0");
+  // Sign of the direction does not matter (n.sigma.n is even in n).
+  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, -1, 0}) - 10.0) < 1e-12,
+        "build -y reads sigma_yy = 10 (even in n)");
+  // Non-unit build_dir is normalized internally.
+  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, 5, 0}) - 10.0) < 1e-12,
+        "non-unit build_dir normalized");
+
+  // Compression across the layers counts as zero interlayer tension (max(0,.)).
+  const std::vector<std::array<double, 6>> comp =
+      uniform_stress(g, {0.0, -7.0, 0.0, 0.0, 0.0, 0.0});
+  CHECK(max_interlayer_tension(g, comp, Vec3{0, 1, 0}) == 0.0,
+        "compression across layers -> 0 interlayer tension");
+
+  // Shear enters via the 2*n_a*n_b*tau terms. Pure shear sigma_xy=4, dir in the
+  // xy diagonal (1,1,0)/sqrt2: n.sigma.n = 2*(1/2)*(1/2)*... = 4.
+  const std::vector<std::array<double, 6>> sh =
+      uniform_stress(g, {0.0, 0.0, 0.0, 4.0, 0.0, 0.0});
+  CHECK(std::fabs(max_interlayer_tension(g, sh, Vec3{1, 1, 0}) - 4.0) < 1e-12,
+        "pure xy shear -> tension along the +45 deg xy diagonal");
+  CHECK(max_interlayer_tension(g, sh, Vec3{1, -1, 0}) == 0.0,
+        "pure xy shear -> compression (0) along the -45 deg xy diagonal");
+
+  // Only solid voxels are read: put a huge stress in an Empty voxel and confirm
+  // it is ignored.
+  VoxelGrid gp = solid_grid(2, 2, 2, 1.0);
+  gp.set_tag(0, 0, 0, VoxelTag::Empty);
+  std::vector<std::array<double, 6>> mixed =
+      uniform_stress(gp, {0.0, 2.0, 0.0, 0.0, 0.0, 0.0});
+  mixed[gp.index(0, 0, 0)] = {0.0, 999.0, 0.0, 0.0, 0.0, 0.0};
+  CHECK(std::fabs(max_interlayer_tension(gp, mixed, Vec3{0, 1, 0}) - 2.0) < 1e-12,
+        "Empty voxel stress is ignored");
+
+  // Argument validation.
+  bool threw = false;
+  try {
+    max_interlayer_tension(g, s, Vec3{0, 0, 0});
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  CHECK(threw, "max_interlayer_tension: zero-length build_dir throws");
+  threw = false;
+  try {
+    max_interlayer_tension(g, uniform_stress(solid_grid(3, 1, 1, 1.0),
+                                             {0, 0, 0, 0, 0, 0}),
+                           Vec3{0, 0, 1});
+  } catch (const std::invalid_argument&) {
+    threw = true;
+  }
+  CHECK(threw, "max_interlayer_tension: stress size mismatch throws");
+}
+
+void test_score_orientations() {
+  // Solid 2x2x2 box: support_overhang_voxels is 0 for every axis direction (M4.3),
+  // so ranking is driven purely by the stress (interlayer-tension) term here.
+  VoxelGrid g = solid_grid(2, 2, 2, 1.0);
+  const std::vector<std::array<double, 6>> s =
+      uniform_stress(g, {0.0, 10.0, 1.0, 0.0, 0.0, 0.0});
+  const std::vector<Vec3> cands = {Vec3{1, 0, 0}, Vec3{0, 1, 0}, Vec3{0, 0, 1}};
+
+  const double k = 0.55;  // PLA
+  std::vector<OrientationScore> r = score_orientations(g, s, cands, k);
+  CHECK(r.size() == 3, "one score per candidate");
+
+  const OrientationScore& sx = find_dir(r, Vec3{1, 0, 0});
+  const OrientationScore& sy = find_dir(r, Vec3{0, 1, 0});
+  const OrientationScore& sz = find_dir(r, Vec3{0, 0, 1});
+
+  // Raw terms: interlayer tension is sigma_nn (x:0, z:1, y:10); support all 0.
+  CHECK(sx.support_voxels == 0 && sy.support_voxels == 0 && sz.support_voxels == 0,
+        "solid box: no overhangs for any axis candidate");
+  CHECK(std::fabs(sx.interlayer_tension - 0.0) < 1e-12 &&
+            std::fabs(sz.interlayer_tension - 1.0) < 1e-12 &&
+            std::fabs(sy.interlayer_tension - 10.0) < 1e-12,
+        "interlayer tension per candidate matches sigma_nn");
+
+  // z_knockdown penalty = tension * (1/k - 1); responds to the material.
+  const double knock = 1.0 / k - 1.0;
+  CHECK(std::fabs(sy.stress_penalty - 10.0 * knock) < 1e-12,
+        "stress_penalty = interlayer_tension * (1/k - 1)");
+  CHECK(sy.stress_penalty > sz.stress_penalty && sz.stress_penalty > sx.stress_penalty,
+        "penalty orders x < z < y (follows interlayer tension)");
+
+  // Ranking: lowest interlayer tension wins -> +x best, then +z, then +y.
+  CHECK(dot(r.front().build_dir, Vec3{1, 0, 0}) > 1.0 - 1e-6,
+        "best candidate is +x (zero interlayer tension)");
+  CHECK(sx.score < sz.score && sz.score < sy.score,
+        "combined score orders x < z < y");
+  // Sorted best-first.
+  CHECK(r[0].score <= r[1].score && r[1].score <= r[2].score,
+        "result is sorted ascending by score");
+
+  // Mechanism: at z_knockdown = 1.0 (resin) the stress term loses its preference
+  // (penalty 0 for every candidate). With support also 0 here, all scores tie 0.
+  std::vector<OrientationScore> r1 = score_orientations(g, s, cands, 1.0);
+  for (const OrientationScore& os : r1) {
+    CHECK(os.stress_penalty == 0.0, "k=1: stress_penalty is 0 (no preference)");
+    CHECK(os.score == 0.0, "k=1: no support here -> score 0 for all");
+  }
+
+  // Support term alone can still rank: give +z real overhangs via geometry so the
+  // support proxy separates candidates, and zero the stress so only support acts.
+  // A floating 3x3 shelf on a central pillar (as in the M4.3 support test).
+  VoxelGrid gs = empty_grid(3, 3, 3, 1.0);
+  gs.set_tag(1, 1, 0, VoxelTag::Interior);       // pillar
+  for (int j = 0; j < 3; ++j)
+    for (int i = 0; i < 3; ++i) gs.set_tag(i, j, 2, VoxelTag::Interior);  // shelf
+  const std::vector<std::array<double, 6>> zero =
+      uniform_stress(gs, {0, 0, 0, 0, 0, 0});
+  std::vector<OrientationScore> rs =
+      score_orientations(gs, zero, {Vec3{0, 0, 1}, Vec3{0, 0, -1}}, 0.55);
+  CHECK(dot(rs.front().build_dir, Vec3{0, 0, -1}) > 1.0 - 1e-6,
+        "support term alone prefers -z (shelf on the plate, no overhang)");
+
+  // Argument validation.
+  auto throws = [&](double kk, double sw, double stw,
+                    const std::vector<std::array<double, 6>>& st,
+                    const std::vector<Vec3>& cs) {
+    try {
+      score_orientations(g, st, cs, kk, sw, stw);
+    } catch (const std::invalid_argument&) {
+      return true;
+    }
+    return false;
+  };
+  CHECK(throws(0.55, 1.0, 1.0, s, {}), "empty candidates throws");
+  CHECK(throws(0.0, 1.0, 1.0, s, cands), "k = 0 throws");
+  CHECK(throws(1.5, 1.0, 1.0, s, cands), "k > 1 throws");
+  CHECK(throws(0.55, -1.0, 1.0, s, cands), "negative support_weight throws");
+  CHECK(throws(0.55, 1.0, -1.0, s, cands), "negative stress_weight throws");
+  CHECK(throws(0.55, 1.0, 1.0,
+               uniform_stress(solid_grid(3, 1, 1, 1.0), {0, 0, 0, 0, 0, 0}),
+               cands),
+        "stress size mismatch throws");
+}
+
 }  // namespace
 
 int main() {
   test_flat_face_normals();
   test_orientation_candidates();
   test_support_overhang();
+  test_max_interlayer_tension();
+  test_score_orientations();
 
   if (g_failures == 0) {
-    std::printf("orientation candidates + support proxy (M4.3): all %d checks passed\n",
+    std::printf("orientation candidates + support proxy + scoring (M4.3/M4.4): "
+                "all %d checks passed\n",
                 g_checks);
     return 0;
   }

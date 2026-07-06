@@ -93,7 +93,7 @@
 - [x] M4.3 Orientation candidates: 6 axis-aligned + face-normal-aligned +
       coarse sphere sampling (≤ 26 dirs). Support-volume proxy metric
       (overhang voxel count > 45°).
-- [ ] M4.4 Orientation scoring: combine support proxy + max tensile stress
+- [x] M4.4 Orientation scoring: combine support proxy + max tensile stress
       across layer planes (knocked down). **Gate V5** hook fixture ranks
       correct orientation first.
 
