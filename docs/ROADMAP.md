@@ -90,7 +90,7 @@
       isotropic mode.
 - [x] M4.2 Self-weight loading mode (gravity × density × voxel volume).
       **Gate V4** column test.
-- [ ] M4.3 Orientation candidates: 6 axis-aligned + face-normal-aligned +
+- [x] M4.3 Orientation candidates: 6 axis-aligned + face-normal-aligned +
       coarse sphere sampling (≤ 26 dirs). Support-volume proxy metric
       (overhang voxel count > 45°).
 - [ ] M4.4 Orientation scoring: combine support proxy + max tensile stress
