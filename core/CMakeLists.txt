@@ -121,6 +121,15 @@ if(Eigen3_FOUND)
   target_link_libraries(test_beam PRIVATE topopt)
   add_test(NAME beam_validation COMMAND test_beam)
 
+  # V4 validation gate (M4.2): self-weight loading (self_weight_loads) and the
+  # column-under-gravity axial-stress check. Builds its grids in code (no
+  # fixture) and drives self_weight_loads / fea_solve / hex8_stress, so it is
+  # gated on Eigen. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always
+  # runs.
+  add_executable(test_v4 tests/validation/test_v4.cpp)
+  target_link_libraries(test_v4 PRIVATE topopt)
+  add_test(NAME gate_v4 COMMAND test_v4)
+
   # SIMP compliance + sensitivity test (M3.2). Builds its tiny grids in code (no
   # fixture) and drives simp_compliance (density field, penalized stiffness,
   # compliance, finite-difference sensitivity check), so it is gated on Eigen
