@@ -67,3 +67,4 @@ Eigen-free public API. Approved by Nadim.
   mechanism requirement (isotropic counterfactual) is part of the fixture and
   must be tested, not just the final ordering.
 - 2026-07-08: settings/rules.json is human-seeded (maintainer commits initial table, drafted by reviewer); agents implement the engine and may propose rule changes only via Blocked. The margin_definition in rules.json semantics_locked is binding on M5.2/M5.3's margin computation.
+- 2026-07-09: M7 task ladder committed from the Claude Design export; /app/ verification standard = xcodebuild test output + maintainer device QA; design HTML is the visual source of truth

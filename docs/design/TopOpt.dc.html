@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    html, body { margin: 0; padding: 0; background: #060608; overflow: hidden; -webkit-font-smoothing: antialiased; }
+    * { box-sizing: border-box; }
+    input, select, button { font-family: inherit; }
+    input:focus, select:focus { outline: none; }
+    select option { background: #1c1c22; color: #f2f2f5; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; background: transparent; }
+    input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.18); }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #fff; margin-top: -7px; box-shadow: 0 1px 6px rgba(0,0,0,0.5); }
+    @keyframes toastUp { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+    @keyframes sheetIn { from { opacity: 0; transform: translate(-50%, -46%) scale(0.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pulseBar { 0% { opacity: 0.65; } 50% { opacity: 1; } 100% { opacity: 0.65; } }
+  </style>
+  <script src="./viewer3d.js"></script>
+</helmet>
+
+<div style="position:fixed; inset:0; background:#060608; color:#f2f2f5; font-family:-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif; overflow:hidden;">
+
+  <!-- ambient glows -->
+  <div style="position:absolute; inset:0; pointer-events:none; background:radial-gradient(900px 500px at 75% -10%, rgba(10,132,255,0.10), transparent 60%), radial-gradient(800px 600px at -5% 100%, rgba(94,92,230,0.08), transparent 55%);"></div>
+
+  <!-- ============ 3D VIEWER (workspace / running / results) ============ -->
+  <sc-if value="{{ showViewer }}" hint-placeholder-val="{{ false }}">
+    <canvas ref="{{ canvasRef }}" style="position:absolute; inset:0; width:100%; height:100%; display:block;"></canvas>
+  </sc-if>
+
+  <!-- ============ HOME ============ -->
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute; inset:0; background:#060608; overflow:auto; animation:fadeIn 0.25s ease;">
+      <div style="position:absolute; inset:0; pointer-events:none; background:radial-gradient(900px 500px at 75% -10%, rgba(10,132,255,0.10), transparent 60%), radial-gradient(800px 600px at -5% 100%, rgba(94,92,230,0.08), transparent 55%);"></div>
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:34px 52px 10px;">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div style="width:40px; height:40px; border-radius:12px; background:linear-gradient(140deg, rgba(255,255,255,0.16), rgba(255,255,255,0.05)); border:1px solid rgba(255,255,255,0.14); display:grid; place-items:center; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);">
+            <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 1.5 L18 6 L18 14 L10 18.5 L2 14 L2 6 Z" fill="none" stroke="#f2f2f5" stroke-width="1.4" stroke-linejoin="round"></path><path d="M10 1.5 L10 10 M10 10 L18 6 M10 10 L2 6" fill="none" stroke="rgba(242,242,245,0.5)" stroke-width="1.2"></path></svg>
+          </div>
+          <div>
+            <div style="font-size:22px; font-weight:700; letter-spacing:-0.4px;">TopOpt</div>
+            <div style="font-size:12.5px; color:rgba(242,242,245,0.45); margin-top:1px;">Topology optimization for 3D printing</div>
+          </div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="padding:8px 14px; border-radius:999px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); font-size:13px; color:rgba(242,242,245,0.6); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);">iPad Pro 13″</div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(290px, 1fr)); gap:22px; padding:28px 52px 60px;">
+        <!-- new tile -->
+        <div onClick="{{ newTopOpt }}" style="min-height:252px; border-radius:24px; border:1.5px dashed rgba(255,255,255,0.18); background:rgba(255,255,255,0.03); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; cursor:pointer;" style-hover="background:rgba(255,255,255,0.06); border-color:rgba(255,255,255,0.3);" style-active="transform:scale(0.98);">
+          <div style="width:56px; height:56px; border-radius:50%; background:{{ accent }}; display:grid; place-items:center; box-shadow:0 8px 28px rgba(10,132,255,0.35);">
+            <svg width="24" height="24" viewBox="0 0 24 24"><path d="M12 5 v14 M5 12 h14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"></path></svg>
+          </div>
+          <div style="font-size:16px; font-weight:600;">New TopOpt</div>
+          <div style="font-size:12.5px; color:rgba(242,242,245,0.4);">Import STEP or STL</div>
+        </div>
+
+        <!-- project cards -->
+        <sc-for list="{{ projects }}" as="proj" hint-placeholder-count="3">
+          <div onClick="{{ proj.open }}" style="min-height:252px; border-radius:24px; overflow:hidden; background:rgba(255,255,255,0.045); border:1px solid rgba(255,255,255,0.09); cursor:pointer; display:flex; flex-direction:column; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);" style-hover="background:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.16);" style-active="transform:scale(0.985);">
+            <div style="flex:1; min-height:160px; background:radial-gradient(320px 180px at 50% 60%, rgba(120,140,180,0.10), transparent 70%); position:relative;">
+              <canvas ref="{{ proj.thumbRef }}" style="position:absolute; inset:0; width:100%; height:100%;"></canvas>
+            </div>
+            <div style="padding:14px 18px 16px; border-top:1px solid rgba(255,255,255,0.07); display:flex; align-items:center; justify-content:space-between; gap:10px;">
+              <div style="min-width:0;">
+                <div style="font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ proj.name }}</div>
+                <div style="font-size:12px; color:rgba(242,242,245,0.42); margin-top:2px;">{{ proj.meta }}</div>
+              </div>
+              <div style="flex:none; font-size:11.5px; font-weight:600; padding:5px 10px; border-radius:999px; background:{{ proj.badgeBg }}; color:{{ proj.badgeColor }}; white-space:nowrap;">{{ proj.status }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ IMPORT SHEET ============ -->
+  <sc-if value="{{ importOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeImport }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:fadeIn 0.2s ease;"></div>
+    <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:540px; border-radius:28px; background:rgba(30,30,36,0.78); border:1px solid rgba(255,255,255,0.13); backdrop-filter:blur(40px) saturate(170%); -webkit-backdrop-filter:blur(40px) saturate(170%); box-shadow:0 24px 80px rgba(0,0,0,0.6); padding:30px 30px 26px; animation:sheetIn 0.28s cubic-bezier(0.2,0.9,0.3,1);">
+      <div style="font-size:20px; font-weight:700; letter-spacing:-0.3px;">New TopOpt</div>
+      <div style="font-size:13px; color:rgba(242,242,245,0.45); margin-top:3px;">Import a model and choose your print material.</div>
+
+      <div style="margin-top:22px; display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.09);">
+        <div style="width:42px; height:42px; border-radius:11px; background:rgba(10,132,255,0.16); display:grid; place-items:center;">
+          <svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 2 L16.5 5.75 L16.5 13.25 L10 17 L3.5 13.25 L3.5 5.75 Z" fill="none" stroke="{{ accent }}" stroke-width="1.5" stroke-linejoin="round"></path></svg>
+        </div>
+        <div style="flex:1;">
+          <div style="font-size:14.5px; font-weight:600;">Wall_Bracket_v4.step</div>
+          <div style="font-size:12px; color:rgba(242,242,245,0.42); margin-top:1px;">2.1 MB · 1 solid body · watertight ✓</div>
+        </div>
+        <button onClick="{{ browseFiles }}" style="padding:9px 16px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.07); color:#f2f2f5; font-size:13px; font-weight:600; cursor:pointer;" style-hover="background:rgba(255,255,255,0.12);">Browse…</button>
+      </div>
+
+      <div style="margin-top:20px; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.8px; color:rgba(242,242,245,0.4);">Print process</div>
+      <div style="margin-top:10px; display:flex; background:rgba(0,0,0,0.3); border-radius:12px; padding:3px; border:1px solid rgba(255,255,255,0.07);">
+        <button onClick="{{ pickFdm }}" style="flex:1; padding:10px 0; border:none; border-radius:9px; font-size:14px; font-weight:600; cursor:pointer; background:{{ fdmSegBg }}; color:{{ fdmSegColor }};">Filament (FDM)</button>
+        <button onClick="{{ pickSla }}" style="flex:1; padding:10px 0; border:none; border-radius:9px; font-size:14px; font-weight:600; cursor:pointer; background:{{ slaSegBg }}; color:{{ slaSegColor }};">Resin (SLA)</button>
+      </div>
+
+      <div style="margin-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div style="opacity:{{ filamentOpacity }};">
+          <div style="font-size:12px; color:rgba(242,242,245,0.45); margin-bottom:6px;">Filament</div>
+          <select value="{{ filament }}" onChange="{{ setFilament }}" disabled="{{ filamentDisabled }}" style="width:100%; padding:11px 12px; border-radius:12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.11); color:#f2f2f5; font-size:14px; appearance:none; -webkit-appearance:none; background-image:linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.5) 50%), linear-gradient(135deg, rgba(255,255,255,0.5) 50%, transparent 50%); background-position:calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size:5px 5px, 5px 5px; background-repeat:no-repeat;">
+            <sc-for list="{{ filamentOptions }}" as="opt" hint-placeholder-count="4">
+              <option value="{{ opt }}">{{ opt }}</option>
+            </sc-for>
+          </select>
+        </div>
+        <div style="opacity:{{ resinOpacity }};">
+          <div style="font-size:12px; color:rgba(242,242,245,0.45); margin-bottom:6px;">Resin</div>
+          <select value="{{ resin }}" onChange="{{ setResin }}" disabled="{{ resinDisabled }}" style="width:100%; padding:11px 12px; border-radius:12px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.11); color:#f2f2f5; font-size:14px; appearance:none; -webkit-appearance:none; background-image:linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.5) 50%), linear-gradient(135deg, rgba(255,255,255,0.5) 50%, transparent 50%); background-position:calc(100% - 18px) 50%, calc(100% - 13px) 50%; background-size:5px 5px, 5px 5px; background-repeat:no-repeat;">
+            <sc-for list="{{ resinOptions }}" as="opt" hint-placeholder-count="4">
+              <option value="{{ opt }}">{{ opt }}</option>
+            </sc-for>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-top:26px; display:flex; gap:12px; justify-content:flex-end;">
+        <button onClick="{{ closeImport }}" style="padding:12px 22px; border-radius:999px; border:1px solid rgba(255,255,255,0.13); background:transparent; color:rgba(242,242,245,0.75); font-size:14.5px; font-weight:600; cursor:pointer;" style-hover="background:rgba(255,255,255,0.06);">Cancel</button>
+        <button onClick="{{ startProject }}" style="padding:12px 28px; border-radius:999px; border:none; background:{{ accent }}; color:#fff; font-size:14.5px; font-weight:700; cursor:pointer; box-shadow:0 6px 24px rgba(10,132,255,0.4);" style-hover="filter:brightness(1.12);" style-active="transform:scale(0.97);">Continue</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ WORKSPACE OVERLAY ============ -->
+  <sc-if value="{{ isWorkspace }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; pointer-events:none; animation:fadeIn 0.25s ease;">
+
+      <!-- top-left: back + name -->
+      <div style="position:absolute; top:22px; left:24px; display:flex; align-items:center; gap:12px; pointer-events:auto;">
+        <button onClick="{{ backHome }}" style="width:42px; height:42px; border-radius:999px; border:1px solid rgba(255,255,255,0.12); background:rgba(28,28,34,0.6); backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%); color:#f2f2f5; cursor:pointer; display:grid; place-items:center;" style-hover="background:rgba(255,255,255,0.12);">
+          <svg width="17" height="17" viewBox="0 0 17 17"><path d="M10.5 3 L5.5 8.5 L10.5 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </button>
+        <div style="display:flex; align-items:center; gap:10px; padding:9px 16px; border-radius:999px; background:rgba(28,28,34,0.6); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%);">
+          <span style="font-size:14.5px; font-weight:650;">{{ projectName }}</span>
+          <span style="width:1px; height:14px; background:rgba(255,255,255,0.15);"></span>
+          <span style="font-size:12.5px; color:rgba(242,242,245,0.5);">{{ materialChip }}</span>
+        </div>
+      </div>
+
+      <!-- top-right: optimize -->
+      <div style="position:absolute; top:22px; right:24px; display:flex; align-items:center; gap:10px; pointer-events:auto;">
+        <button onClick="{{ optimize }}" disabled="{{ optimizeDisabled }}" style="padding:12px 24px; border-radius:999px; border:none; background:{{ optimizeBg }}; color:{{ optimizeColor }}; font-size:14.5px; font-weight:700; cursor:pointer; box-shadow:{{ optimizeShadow }}; display:flex; align-items:center; gap:8px;" style-hover="filter:brightness(1.1);">
+          <svg width="15" height="15" viewBox="0 0 15 15"><path d="M7.5 1.5 L9 5.5 L13.5 6 L10.2 9 L11.2 13.5 L7.5 11.2 L3.8 13.5 L4.8 9 L1.5 6 L6 5.5 Z" fill="currentColor"></path></svg>
+          Optimize
+        </button>
+      </div>
+
+      <!-- left panel: selections -->
+      <div style="position:absolute; top:82px; left:24px; width:308px; max-height:calc(100% - 210px); border-radius:22px; background:rgba(24,24,30,0.62); border:1px solid rgba(255,255,255,0.11); backdrop-filter:blur(36px) saturate(170%); -webkit-backdrop-filter:blur(36px) saturate(170%); box-shadow:0 12px 44px rgba(0,0,0,0.4); pointer-events:auto; display:flex; flex-direction:column; overflow:hidden;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:15px 16px 12px;">
+          <div style="display:flex; align-items:center; gap:9px;">
+            <svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.5 4 a1.5 1.5 0 0 1 1.5 -1.5 h3 l1.5 2 h5.5 a1.5 1.5 0 0 1 1.5 1.5 v6.5 a1.5 1.5 0 0 1 -1.5 1.5 h-11.5 a1.5 1.5 0 0 1 -1.5 -1.5 Z" fill="none" stroke="rgba(242,242,245,0.7)" stroke-width="1.3"></path></svg>
+            <span style="font-size:14px; font-weight:700;">Selections</span>
+          </div>
+          <button onClick="{{ addGroup }}" style="width:28px; height:28px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.07); color:#f2f2f5; cursor:pointer; display:grid; place-items:center;" style-hover="background:rgba(255,255,255,0.14);">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1.5 v9 M1.5 6 h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
+          </button>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 108px; padding:0 16px 7px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.8px; color:rgba(242,242,245,0.35); border-bottom:1px solid rgba(255,255,255,0.07);">
+          <span>Faces</span><span>Forces</span>
+        </div>
+
+        <div style="overflow:auto; flex:1;">
+          <sc-if value="{{ noGroups }}" hint-placeholder-val="{{ false }}">
+            <div style="padding:22px 18px; font-size:12.5px; line-height:1.55; color:rgba(242,242,245,0.4);">Choose <b style="color:rgba(242,242,245,0.7);">Faces</b> below, then tap the model to select anchor or load faces. Groups appear here.</div>
+          </sc-if>
+          <sc-for list="{{ groupRows }}" as="g" hint-placeholder-count="0">
+            <div onClick="{{ g.select }}" style="display:grid; grid-template-columns:1fr 108px; gap:6px; padding:11px 12px 11px 16px; border-bottom:1px solid rgba(255,255,255,0.05); cursor:pointer; background:{{ g.rowBg }}; border-left:3px solid {{ g.rowEdge }};">
+              <div style="min-width:0;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span style="flex:none; width:11px; height:11px; border-radius:4px; background:{{ g.color }}; box-shadow:0 0 8px {{ g.glow }};"></span>
+                  <input value="{{ g.name }}" onChange="{{ g.rename }}" onClick="{{ stopClick }}" style="min-width:0; flex:1; background:transparent; border:none; color:#f2f2f5; font-size:13.5px; font-weight:600; padding:2px 0;"></input>
+                </div>
+                <div style="font-size:11.5px; color:rgba(242,242,245,0.4); margin-top:3px; padding-left:19px;">{{ g.faceLabel }}</div>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start; justify-content:center;">
+                <sc-for list="{{ g.arrowChips }}" as="ch" hint-placeholder-count="0">
+                  <span style="display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:650; padding:3px 9px; border-radius:999px; background:{{ ch.bg }}; color:{{ ch.color }};">
+                    <svg width="9" height="9" viewBox="0 0 9 9"><path d="M1.5 7.5 L7.5 1.5 M3.5 1.5 h4 v4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    {{ ch.label }}
+                  </span>
+                </sc-for>
+                <sc-if value="{{ g.noArrows }}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size:11px; color:rgba(242,242,245,0.32);">anchor only</span>
+                </sc-if>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <div style="padding:11px 16px; border-top:1px solid rgba(255,255,255,0.07); font-size:11.5px; line-height:1.5; color:rgba(242,242,245,0.38);">{{ panelHint }}</div>
+      </div>
+
+      <!-- bottom-center: tools -->
+      <div style="position:absolute; bottom:26px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:10px; pointer-events:auto;">
+        <div style="font-size:12.5px; color:rgba(242,242,245,0.55); background:rgba(20,20,26,0.55); padding:6px 14px; border-radius:999px; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.07);">{{ toolHint }}</div>
+        <div style="display:flex; gap:4px; padding:5px; border-radius:999px; background:rgba(24,24,30,0.62); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(36px) saturate(170%); -webkit-backdrop-filter:blur(36px) saturate(170%); box-shadow:0 12px 44px rgba(0,0,0,0.45);">
+          <button onClick="{{ setOrbit }}" style="display:flex; align-items:center; gap:8px; padding:11px 20px; border-radius:999px; border:none; cursor:pointer; font-size:13.5px; font-weight:650; background:{{ orbitBg }}; color:{{ orbitColor }};">
+            <svg width="15" height="15" viewBox="0 0 15 15"><circle cx="7.5" cy="7.5" r="3" fill="none" stroke="currentColor" stroke-width="1.4"></circle><path d="M13.8 7.5 c0 1.8 -2.8 3.2 -6.3 3.2 s-6.3 -1.4 -6.3 -3.2" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"></path></svg>
+            Orbit
+          </button>
+          <button onClick="{{ setFace }}" style="display:flex; align-items:center; gap:8px; padding:11px 20px; border-radius:999px; border:none; cursor:pointer; font-size:13.5px; font-weight:650; background:{{ faceBg }}; color:{{ faceColor }};">
+            <svg width="15" height="15" viewBox="0 0 15 15"><path d="M2 4.5 L7.5 1.5 L13 4.5 L13 10.5 L7.5 13.5 L2 10.5 Z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"></path><path d="M2 4.5 L7.5 7.5 L13 4.5 M7.5 7.5 V13.5" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.55"></path></svg>
+            Faces
+          </button>
+          <button onClick="{{ setForce }}" style="display:flex; align-items:center; gap:8px; padding:11px 20px; border-radius:999px; border:none; cursor:pointer; font-size:13.5px; font-weight:650; background:{{ forceBg }}; color:{{ forceColor }};">
+            <svg width="15" height="15" viewBox="0 0 15 15"><path d="M2.5 12.5 L11.5 3.5 M6 3.5 h5.5 v5.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            Force
+          </button>
+        </div>
+      </div>
+
+      <!-- bottom-right: unit toggle -->
+      <div style="position:absolute; bottom:31px; right:24px; display:flex; padding:3px; border-radius:999px; background:rgba(24,24,30,0.62); border:1px solid rgba(255,255,255,0.11); backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); pointer-events:auto;">
+        <button onClick="{{ setKg }}" style="padding:8px 15px; border:none; border-radius:999px; font-size:12.5px; font-weight:700; cursor:pointer; background:{{ kgBg }}; color:{{ kgColor }};">kg</button>
+        <button onClick="{{ setLbs }}" style="padding:8px 15px; border:none; border-radius:999px; font-size:12.5px; font-weight:700; cursor:pointer; background:{{ lbsBg }}; color:{{ lbsColor }};">lbs</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ WEIGHT DIALOG ============ -->
+  <sc-if value="{{ weightOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; background:rgba(0,0,0,0.35); animation:fadeIn 0.15s ease;"></div>
+    <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:380px; border-radius:24px; background:rgba(32,32,38,0.82); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(40px) saturate(170%); -webkit-backdrop-filter:blur(40px) saturate(170%); box-shadow:0 24px 80px rgba(0,0,0,0.6); padding:26px; animation:sheetIn 0.25s cubic-bezier(0.2,0.9,0.3,1);">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="width:12px; height:12px; border-radius:4px; background:{{ weightGroupColor }};"></span>
+        <span style="font-size:17px; font-weight:700;">Force on {{ weightGroupName }}</span>
+      </div>
+      <div style="font-size:12.5px; color:rgba(242,242,245,0.45); margin-top:5px; line-height:1.5;">Weight is shared across all {{ weightFaceCount }} faces in this group, along the arrow you drew.</div>
+      <div style="margin-top:18px; display:flex; gap:10px; align-items:stretch;">
+        <input value="{{ weightVal }}" onChange="{{ setWeightVal }}" type="number" inputMode="decimal" style="flex:1; min-width:0; padding:13px 16px; border-radius:14px; background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.13); color:#fff; font-size:22px; font-weight:700; text-align:center;"></input>
+        <div style="display:flex; padding:3px; border-radius:14px; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.08);">
+          <button onClick="{{ setKg }}" style="padding:0 16px; border:none; border-radius:11px; font-size:13.5px; font-weight:700; cursor:pointer; background:{{ kgBg }}; color:{{ kgColor }};">kg</button>
+          <button onClick="{{ setLbs }}" style="padding:0 16px; border:none; border-radius:11px; font-size:13.5px; font-weight:700; cursor:pointer; background:{{ lbsBg }}; color:{{ lbsColor }};">lbs</button>
+        </div>
+      </div>
+      <div style="margin-top:22px; display:flex; gap:10px; justify-content:flex-end; align-items:center;">
+        <sc-if value="{{ weightEditing }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ removeArrow }}" style="margin-right:auto; padding:11px 18px; border-radius:999px; border:1px solid rgba(255,69,58,0.35); background:rgba(255,69,58,0.1); color:#FF453A; font-size:14px; font-weight:650; cursor:pointer;" style-hover="background:rgba(255,69,58,0.2);">Remove</button>
+        </sc-if>
+        <button onClick="{{ cancelWeight }}" style="padding:11px 20px; border-radius:999px; border:1px solid rgba(255,255,255,0.13); background:transparent; color:rgba(242,242,245,0.75); font-size:14px; font-weight:600; cursor:pointer;" style-hover="background:rgba(255,255,255,0.06);">Cancel</button>
+        <button onClick="{{ confirmWeight }}" style="padding:11px 26px; border-radius:999px; border:none; background:{{ accent }}; color:#fff; font-size:14px; font-weight:700; cursor:pointer; box-shadow:0 6px 20px rgba(10,132,255,0.35);" style-hover="filter:brightness(1.12);">{{ weightConfirmLabel }}</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ RUNNING ============ -->
+  <sc-if value="{{ isRunning }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; pointer-events:none; animation:fadeIn 0.3s ease;">
+      <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:430px; border-radius:26px; background:rgba(24,24,30,0.66); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(40px) saturate(170%); -webkit-backdrop-filter:blur(40px) saturate(170%); box-shadow:0 24px 80px rgba(0,0,0,0.55); padding:30px 32px 28px; pointer-events:auto; text-align:center;">
+        <div style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:1.2px; color:{{ accent }}; animation:pulseBar 1.8s ease infinite;">Optimizing</div>
+        <div style="font-size:44px; font-weight:800; letter-spacing:-1px; margin-top:10px;">{{ progressPct }}%</div>
+        <div style="font-size:13.5px; color:rgba(242,242,245,0.55); margin-top:4px;">{{ stageLabel }}</div>
+        <div style="margin-top:18px; height:5px; border-radius:3px; background:rgba(255,255,255,0.1); overflow:hidden;">
+          <div style="height:100%; border-radius:3px; background:{{ accent }}; width:{{ progressW }}; transition:width 0.15s linear;"></div>
+        </div>
+        <div style="margin-top:8px; font-size:11.5px; color:rgba(242,242,245,0.35);">SIMP · 128³ voxel grid · {{ materialChip }}</div>
+        <div style="margin-top:22px; display:flex; gap:10px; justify-content:center;">
+          <button onClick="{{ runBackground }}" style="padding:12px 22px; border-radius:999px; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.06); color:#f2f2f5; font-size:14px; font-weight:600; cursor:pointer;" style-hover="background:rgba(255,255,255,0.12);">Run in Background</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ RESULTS ============ -->
+  <sc-if value="{{ isResults }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; inset:0; pointer-events:none; animation:fadeIn 0.3s ease;">
+
+      <!-- top-left -->
+      <div style="position:absolute; top:22px; left:24px; display:flex; align-items:center; gap:12px; pointer-events:auto;">
+        <button onClick="{{ backHome }}" style="width:42px; height:42px; border-radius:999px; border:1px solid rgba(255,255,255,0.12); background:rgba(28,28,34,0.6); backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%); color:#f2f2f5; cursor:pointer; display:grid; place-items:center;" style-hover="background:rgba(255,255,255,0.12);">
+          <svg width="17" height="17" viewBox="0 0 17 17"><path d="M10.5 3 L5.5 8.5 L10.5 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </button>
+        <div style="display:flex; align-items:center; gap:10px; padding:9px 16px; border-radius:999px; background:rgba(28,28,34,0.6); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%);">
+          <span style="font-size:14.5px; font-weight:650;">{{ projectName }}</span>
+          <span style="width:1px; height:14px; background:rgba(255,255,255,0.15);"></span>
+          <span style="font-size:12.5px; color:{{ okGreen }}; font-weight:650;">Optimized ✓</span>
+        </div>
+      </div>
+
+      <!-- top-right: stress + export -->
+      <div style="position:absolute; top:22px; right:24px; display:flex; align-items:center; gap:10px; pointer-events:auto;">
+        <button onClick="{{ toggleStress }}" style="display:flex; align-items:center; gap:9px; padding:10px 17px; border-radius:999px; border:1px solid {{ stressBorder }}; background:{{ stressBg }}; color:#f2f2f5; font-size:13.5px; font-weight:650; cursor:pointer; backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%);" style-hover="filter:brightness(1.15);">
+          <span style="width:12px; height:12px; border-radius:50%; background:conic-gradient(#1c3caa, #00aadc, #3cbe6e, #fadc3c, #ff4632, #1c3caa); box-shadow:0 0 8px rgba(255,120,60,0.5);"></span>
+          Stress
+        </button>
+        <button onClick="{{ openExport }}" style="display:flex; align-items:center; gap:8px; padding:12px 24px; border-radius:999px; border:none; background:{{ accent }}; color:#fff; font-size:14.5px; font-weight:700; cursor:pointer; box-shadow:0 6px 24px rgba(10,132,255,0.4);" style-hover="filter:brightness(1.12);">
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1.5 V9 M4 6 L7 9 L10 6 M2 12.5 h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          Export .3mf
+        </button>
+      </div>
+
+      <!-- bottom-left: savings folder tags -->
+      <div style="position:absolute; bottom:26px; left:24px; display:flex; gap:8px; align-items:flex-end; pointer-events:auto;">
+        <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="3">
+          <button onClick="{{ t.pick }}" style="display:flex; flex-direction:column; align-items:flex-start; gap:3px; padding:{{ t.pad }}; border-radius:18px 18px 14px 14px; border:1px solid {{ t.border }}; background:{{ t.bg }}; color:#f2f2f5; cursor:pointer; backdrop-filter:blur(34px) saturate(170%); -webkit-backdrop-filter:blur(34px) saturate(170%); box-shadow:{{ t.shadow }}; transition:all 0.18s ease;">
+            <span style="font-size:{{ t.big }}; font-weight:800; letter-spacing:-0.5px; color:{{ t.mainColor }};">{{ t.label }}</span>
+            <span style="font-size:11.5px; color:rgba(242,242,245,0.5); font-weight:600;">{{ t.sub }}</span>
+          </button>
+        </sc-for>
+      </div>
+
+      <!-- bottom-center: media player -->
+      <div style="position:absolute; bottom:30px; left:50%; transform:translateX(-50%); display:flex; align-items:center; gap:9px; padding:7px 12px; border-radius:999px; background:rgba(24,24,30,0.66); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(36px) saturate(170%); -webkit-backdrop-filter:blur(36px) saturate(170%); box-shadow:0 12px 44px rgba(0,0,0,0.5); pointer-events:auto;">
+        <button onClick="{{ togglePlay }}" style="width:34px; height:34px; border-radius:50%; border:none; background:#fff; color:#0a0a0e; cursor:pointer; display:grid; place-items:center; flex:none;" style-active="transform:scale(0.94);">
+          <sc-if value="{{ playing }}" hint-placeholder-val="{{ false }}">
+            <svg width="12" height="12" viewBox="0 0 15 15"><path d="M4 2.5 v10 M11 2.5 v10" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>
+          </sc-if>
+          <sc-if value="{{ notPlaying }}" hint-placeholder-val="{{ true }}">
+            <svg width="12" height="12" viewBox="0 0 15 15"><path d="M4 2 L12.5 7.5 L4 13 Z" fill="currentColor"></path></svg>
+          </sc-if>
+        </button>
+        <input type="range" min="0" max="1" step="0.001" value="{{ playT }}" onChange="{{ onScrub }}" style="width:150px;"></input>
+        <span style="font-size:11px; font-variant-numeric:tabular-nums; color:rgba(242,242,245,0.55); width:58px; text-align:center;">{{ timeLabel }}</span>
+        <button onClick="{{ saveVideo }}" title="Save video" style="width:32px; height:32px; border-radius:50%; border:1px solid rgba(255,255,255,0.14); background:rgba(255,255,255,0.07); color:#f2f2f5; cursor:pointer; display:grid; place-items:center; flex:none;" style-hover="background:rgba(255,255,255,0.14);">
+          <svg width="13" height="13" viewBox="0 0 14 14"><path d="M7 1.5 V8.5 M4 6 L7 9 L10 6 M2 12.5 h10" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </button>
+      </div>
+
+      <!-- bottom-right: model / orientation -->
+      <div style="position:absolute; bottom:26px; right:24px; display:flex; flex-direction:column; align-items:flex-end; gap:12px; pointer-events:auto;">
+        <sc-if value="{{ orientOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="width:280px; border-radius:20px; background:rgba(24,24,30,0.72); border:1px solid rgba(255,255,255,0.12); backdrop-filter:blur(36px) saturate(170%); -webkit-backdrop-filter:blur(36px) saturate(170%); box-shadow:0 12px 44px rgba(0,0,0,0.5); padding:18px 18px 16px; animation:sheetIn 0.22s cubic-bezier(0.2,0.9,0.3,1); transform:none;">
+            <div style="font-size:14px; font-weight:700;">Recommended orientation</div>
+            <div style="font-size:12.5px; line-height:1.55; color:rgba(242,242,245,0.55); margin-top:6px;">Tilt 36° about Z. Load paths align with layer direction; minimal supports (est. 3.8 cm³) under the wall overhang.</div>
+            <div style="display:flex; gap:14px; margin-top:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.08);">
+              <div><div style="font-size:11px; color:rgba(242,242,245,0.4);">Print time</div><div style="font-size:13.5px; font-weight:700; margin-top:1px;">{{ printTime }}</div></div>
+              <div><div style="font-size:11px; color:rgba(242,242,245,0.4);">Layer shear</div><div style="font-size:13.5px; font-weight:700; margin-top:1px; color:{{ okGreen }};">Low ✓</div></div>
+            </div>
+          </div>
+        </sc-if>
+        <button onClick="{{ toggleOrient }}" style="width:50px; height:50px; border-radius:16px; border:1px solid {{ orientBorder }}; background:{{ orientBg }}; color:#f2f2f5; cursor:pointer; display:grid; place-items:center; backdrop-filter:blur(30px) saturate(160%); -webkit-backdrop-filter:blur(30px) saturate(160%);" style-hover="filter:brightness(1.15);">
+          <svg width="21" height="21" viewBox="0 0 21 21"><path d="M10.5 2 L18 6.25 L18 14.75 L10.5 19 L3 14.75 L3 6.25 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"></path><path d="M10.5 2 V10.5 M10.5 10.5 L18 6.25 M10.5 10.5 L3 6.25" fill="none" stroke="currentColor" stroke-width="1.1" opacity="0.55"></path></svg>
+        </button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ EXPORT SHEET ============ -->
+  <sc-if value="{{ exportOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeExport }}" style="position:absolute; inset:0; background:rgba(0,0,0,0.45); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); animation:fadeIn 0.2s ease;"></div>
+    <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); width:440px; border-radius:26px; background:rgba(30,30,36,0.8); border:1px solid rgba(255,255,255,0.13); backdrop-filter:blur(40px) saturate(170%); -webkit-backdrop-filter:blur(40px) saturate(170%); box-shadow:0 24px 80px rgba(0,0,0,0.6); padding:28px; animation:sheetIn 0.26s cubic-bezier(0.2,0.9,0.3,1); text-align:center;">
+      <div style="width:66px; height:66px; margin:0 auto; border-radius:18px; background:rgba(10,132,255,0.14); border:1px solid rgba(10,132,255,0.3); display:grid; place-items:center;">
+        <svg width="30" height="30" viewBox="0 0 30 30"><path d="M15 3 L26 9.25 L26 20.75 L15 27 L4 20.75 L4 9.25 Z" fill="none" stroke="{{ accent }}" stroke-width="1.7" stroke-linejoin="round"></path><path d="M15 3 V15 M15 15 L26 9.25 M15 15 L4 9.25" fill="none" stroke="{{ accent }}" stroke-width="1.3" opacity="0.6"></path></svg>
+      </div>
+      <div style="font-size:19px; font-weight:750; margin-top:16px;">{{ exportName }}</div>
+      <div style="font-size:12.5px; color:rgba(242,242,245,0.5); margin-top:5px;">{{ exportMeta }}</div>
+      <div style="margin-top:14px; display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:650; color:{{ okGreen }}; background:rgba(48,209,88,0.1); border:1px solid rgba(48,209,88,0.25); padding:6px 13px; border-radius:999px;">
+        <svg width="11" height="11" viewBox="0 0 11 11"><path d="M1.5 6 L4.2 8.7 L9.5 2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        Watertight · orientation embedded · ready to slice
+      </div>
+      <div style="margin-top:24px; display:flex; gap:10px; justify-content:center;">
+        <button onClick="{{ closeExport }}" style="padding:12px 22px; border-radius:999px; border:1px solid rgba(255,255,255,0.13); background:transparent; color:rgba(242,242,245,0.75); font-size:14px; font-weight:600; cursor:pointer;" style-hover="background:rgba(255,255,255,0.06);">Cancel</button>
+        <button onClick="{{ doExport }}" style="padding:12px 30px; border-radius:999px; border:none; background:{{ accent }}; color:#fff; font-size:14.5px; font-weight:700; cursor:pointer; box-shadow:0 6px 24px rgba(10,132,255,0.4);" style-hover="filter:brightness(1.12);">Export .3mf</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ TOAST ============ -->
+  <sc-if value="{{ toastOn }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute; bottom:96px; left:50%; transform:translateX(-50%); padding:12px 22px; border-radius:999px; background:rgba(40,40,48,0.85); border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); font-size:13.5px; font-weight:600; box-shadow:0 12px 40px rgba(0,0,0,0.5); animation:toastUp 0.25s cubic-bezier(0.2,0.9,0.3,1); white-space:nowrap; z-index:50;">{{ toastMsg }}</div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: { &quot;width&quot;: &quot;1366px&quot;, &quot;height&quot;: &quot;1024px&quot; },
+  &quot;accentColor&quot;: { &quot;editor&quot;: &quot;color&quot;, &quot;default&quot;: &quot;#0A84FF&quot;, &quot;tsType&quot;: &quot;string&quot;, &quot;options&quot;: [&quot;#0A84FF&quot;, &quot;#64D2FF&quot;, &quot;#BF5AF2&quot;, &quot;#30D158&quot;], &quot;section&quot;: &quot;Appearance&quot; }
+}">
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      screen: 'home',            // home | workspace | running | results
+      importOpen: false,
+      process: 'fdm',
+      filament: 'PLA — Matte Black',
+      resin: 'Tough 2000',
+      unit: 'kg',
+      projectName: 'Wall Bracket v4',
+      groups: [],
+      nextColor: 0,
+      activeGroupId: null,
+      tool: 'orbit',
+      weightDlg: null,           // {groupId, dir}
+      weightVal: '2.5',
+      progress: 0,
+      optimizing: false,         // background run
+      optimized: false,
+      resultTab: 1,
+      playT: 1,
+      playing: false,
+      stressOn: false,
+      orientOpen: false,
+      exportOpen: false,
+      toast: null,
+      exported: false
+    };
+    this.COLORS = [
+      { hex: '#FF453A', rgb: [255, 69, 58] },
+      { hex: '#0A84FF', rgb: [10, 132, 255] },
+      { hex: '#30D158', rgb: [48, 209, 88] },
+      { hex: '#FF9F0A', rgb: [255, 159, 10] },
+      { hex: '#BF5AF2', rgb: [191, 90, 242] }
+    ];
+    this.SAVINGS = [0.3, 0.5, 0.7];
+    this._thumbRefs = {};
+    this.canvasRef = (el) => {
+      if (el) {
+        this.viewer = new window.TopoViewer(el);
+        this.viewer.onPickFace = (keys) => this._pickFace(keys);
+        this.viewer.onArrow = (gid, dir) => this.setState({ weightDlg: { groupId: gid, dir } });
+        this.viewer.onArrowAdjust = (gid, ai, dir) => {
+          const groups = this.state.groups.map(g => g.id === gid
+            ? { ...g, arrows: g.arrows.map((a, i) => i === ai ? { ...a, dir } : a) } : g);
+          this.setState({ groups });
+        };
+        this.viewer.onArrowTap = (gid, ai) => {
+          const g = this.state.groups.find(x => x.id === gid);
+          const a = g && g.arrows[ai];
+          if (a) this.setState({ weightDlg: { groupId: gid, dir: a.dir, arrowIndex: ai }, weightVal: String(a.weight), unit: a.unit });
+        };
+        this._sync();
+      } else if (this.viewer) {
+        this.viewer.destroy();
+        this.viewer = null;
+      }
+    };
+    this.stopClick = (e) => e.stopPropagation();
+  }
+
+  componentWillUnmount() {
+    clearInterval(this._prog);
+    clearInterval(this._play);
+    clearTimeout(this._toastT);
+    if (this.viewer) this.viewer.destroy();
+  }
+
+  componentDidUpdate() { this._sync(); }
+
+  _sync() {
+    const v = this.viewer, s = this.state;
+    if (!v) return;
+    v.setGroups(s.groups.map(g => ({
+      id: g.id, color: g.color, colorRGB: g.colorRGB,
+      faceKeys: new Set(g.faces),
+      arrows: g.arrows.map(a => ({ dir: a.dir, label: a.weight + ' ' + a.unit }))
+    })));
+    v.setMode(s.screen === 'workspace' ? s.tool : 'orbit');
+    v.setShowArrows(s.screen === 'workspace');
+    v.setStress(s.screen === 'results' ? s.stressOn : false);
+    v.setAmbient(s.screen === 'running');
+    v.setOrientMode(s.screen === 'results' && s.orientOpen);
+    if (s.screen === 'results') {
+      const ease = (t) => t * t * (3 - 2 * t);
+      v.setThreshold(this.SAVINGS[s.resultTab] * ease(s.playT));
+    } else {
+      v.setThreshold(0);
+    }
+  }
+
+  // ---------- face / force editing ----------
+  _pickFace(keys) {
+    const s = this.state;
+    let groups = s.groups.map(g => ({ ...g, faces: [...g.faces], arrows: [...g.arrows] }));
+    let active = groups.find(g => g.id === s.activeGroupId);
+    if (!active) {
+      active = this._makeGroup(groups.length);
+      groups.push(active);
+    }
+    const inActive = keys.every(k => active.faces.includes(k));
+    if (inActive) {
+      active.faces = active.faces.filter(k => !keys.includes(k));
+    } else {
+      for (const g of groups) if (g !== active) g.faces = g.faces.filter(k => !keys.includes(k));
+      active.faces = [...new Set([...active.faces, ...keys])];
+    }
+    groups = groups.filter(g => g.faces.length || g.id === active.id);
+    this.setState({ groups, activeGroupId: active.id, nextColor: Math.max(s.nextColor, this._colorCursor) });
+  }
+
+  _makeGroup(n) {
+    const c = this.COLORS[this.state.nextColor % this.COLORS.length];
+    this._colorCursor = this.state.nextColor + 1;
+    return {
+      id: 'g' + Date.now() + n,
+      name: 'Group ' + String.fromCharCode(65 + (this.state.groups.length % 26)),
+      color: c.hex, colorRGB: c.rgb, faces: [], arrows: []
+    };
+  }
+
+  _toast(msg) {
+    clearTimeout(this._toastT);
+    this.setState({ toast: msg });
+    this._toastT = setTimeout(() => this.setState({ toast: null }), 2400);
+  }
+
+  // ---------- optimization run ----------
+  _startRun() {
+    const s = this.state;
+    if (this.viewer) {
+      const loads = [], anchors = [];
+      for (const g of s.groups) {
+        const vg = this.viewer.groups.find(x => x.id === g.id);
+        if (!vg || !vg.faceKeys.size) continue;
+        const cen = this.viewer.groupCentroid(vg);
+        if (g.arrows.length) {
+          const w = g.arrows.reduce((a, b) => a + (parseFloat(b.weight) || 1), 0);
+          loads.push({ p: cen.p, w });
+        } else {
+          anchors.push(cen.p);
+        }
+      }
+      this.viewer.setLoadCase(loads, anchors.length ? anchors : null);
+    }
+    this.setState({ screen: 'running', progress: 0, optimizing: true, optimized: false, playing: false, playT: 1, exported: false });
+    clearInterval(this._prog);
+    this._prog = setInterval(() => {
+      const p = Math.min(100, this.state.progress + 0.55 + Math.random() * 0.75);
+      if (p >= 100) {
+        clearInterval(this._prog);
+        const next = this.state.screen === 'running' ? 'results' : this.state.screen;
+        this.setState({ progress: 100, optimizing: false, optimized: true, screen: next, resultTab: 1, playT: 1, playing: false });
+        if (next !== 'results') this._toast('Optimization complete — Wall Bracket v4');
+      } else {
+        this.setState({ progress: p });
+      }
+    }, 90);
+  }
+
+  _stage(p) {
+    if (p < 14) return 'Voxelizing geometry…';
+    if (p < 32) return 'Assembling stiffness matrix…';
+    if (p < 84) return 'SIMP iteration ' + Math.floor(4 + (p - 32) * 1.7) + ' — compliance converging';
+    return 'Extracting smooth isosurface…';
+  }
+
+  // ---------- playback ----------
+  _togglePlay() {
+    if (this.state.playing) {
+      clearInterval(this._play);
+      this.setState({ playing: false });
+      return;
+    }
+    let t = this.state.playT >= 0.999 ? 0 : this.state.playT;
+    this.setState({ playing: true, playT: t });
+    clearInterval(this._play);
+    this._play = setInterval(() => {
+      t += 0.0058;
+      if (t >= 1) {
+        clearInterval(this._play);
+        this.setState({ playT: 1, playing: false });
+      } else {
+        this.setState({ playT: t });
+      }
+    }, 33);
+  }
+
+  // ---------- render ----------
+  renderVals() {
+    const s = this.state;
+    const accent = this.props.accentColor ?? '#0A84FF';
+    const okGreen = '#30D158';
+    const glassSel = 'rgba(255,255,255,0.14)';
+    const seg = (on) => on ? { bg: 'rgba(255,255,255,0.16)', color: '#fff' } : { bg: 'transparent', color: 'rgba(242,242,245,0.55)' };
+
+    // home projects
+    const mkThumb = (id, opts) => {
+      if (!this._thumbRefs[id]) {
+        this._thumbRefs[id] = (el) => {
+          if (!el || el._topo) return;
+          el._topo = true;
+          const v = new window.TopoViewer(el, { interactive: false, ...opts });
+          requestAnimationFrame(() => { v._resize(); v.render(); });
+        };
+      }
+      return this._thumbRefs[id];
+    };
+    const badge = (st) => st.startsWith('Exported') ? { bg: 'rgba(48,209,88,0.12)', c: okGreen }
+      : st.startsWith('Optimiz') ? { bg: 'rgba(10,132,255,0.14)', c: accent }
+        : st === 'Ready' ? { bg: 'rgba(10,132,255,0.14)', c: accent }
+          : { bg: 'rgba(255,255,255,0.08)', c: 'rgba(242,242,245,0.6)' };
+
+    const projects = [];
+    if (s.optimizing || s.optimized) {
+      const st = s.optimizing ? 'Optimizing · ' + Math.round(s.progress) + '%' : (s.exported ? 'Exported −' + this.SAVINGS[s.resultTab] * 100 + '%' : 'Ready');
+      const b = badge(st);
+      projects.push({
+        id: 'current', name: s.projectName, meta: this._matShort() + ' · Just now', status: st, badgeBg: b.bg, badgeColor: b.c,
+        thumbRef: mkThumb('current', { yaw: 1.1, pitch: 0.5, dist: 40, threshold: s.optimized ? 0.5 : 0 }),
+        open: () => this.setState({ screen: s.optimizing ? 'running' : 'results' })
+      });
+    }
+    const demos = [
+      { id: 'p1', name: 'Camera Gimbal Mount', meta: 'PETG · Edited 2d ago', status: 'Exported −50%', t: { yaw: 0.6, pitch: 0.55, dist: 40, threshold: 0.5 } },
+      { id: 'p2', name: 'Sensor Bracket', meta: 'PLA-CF · Edited 5d ago', status: 'Exported −70%', t: { yaw: 2.3, pitch: 0.35, dist: 42, threshold: 0.7 } },
+      { id: 'p3', name: 'Battery Tray', meta: 'ASA · Edited 1w ago', status: 'Draft', t: { yaw: 4.1, pitch: 0.6, dist: 40, threshold: 0 } }
+    ];
+    for (const d of demos) {
+      const b = badge(d.status);
+      projects.push({
+        id: d.id, name: d.name, meta: d.meta, status: d.status, badgeBg: b.bg, badgeColor: b.c,
+        thumbRef: mkThumb(d.id, d.t),
+        open: () => { this.setState({ projectName: d.name }); this._toast('Opening “' + d.name + '” — prototype loads the demo model'); setTimeout(() => this.setState({ importOpen: true }), 400); }
+      });
+    }
+
+    // workspace groups table
+    const groupRows = s.groups.map(g => {
+      const active = g.id === s.activeGroupId;
+      return {
+        name: g.name,
+        color: g.color,
+        glow: g.color + '66',
+        rowBg: active ? 'rgba(255,255,255,0.06)' : 'transparent',
+        rowEdge: active ? g.color : 'transparent',
+        faceLabel: g.faces.length + (g.faces.length === 1 ? ' face' : ' faces'),
+        noArrows: g.arrows.length === 0,
+        arrowChips: g.arrows.map(a => ({ label: a.weight + ' ' + a.unit, bg: g.color + '22', color: g.color })),
+        select: () => this.setState({ activeGroupId: g.id }),
+        rename: (e) => {
+          const groups = s.groups.map(x => x.id === g.id ? { ...x, name: e.target.value } : x);
+          this.setState({ groups });
+        }
+      };
+    });
+
+    const hasForce = s.groups.some(g => g.arrows.length && g.faces.length);
+    const toolHints = {
+      orbit: 'Drag to orbit · pinch or scroll to zoom',
+      face: 'Tap to select a face — tap inside a hole to grab the whole hole · tap again to deselect',
+      arrow: 'Tap a coloured face to press straight into it · drag to aim (snaps 45°) · tap an arrow tip to edit'
+    };
+
+    const oSeg = seg(s.tool === 'orbit'), fSeg = seg(s.tool === 'face'), aSeg = seg(s.tool === 'arrow');
+    const kg = seg(s.unit === 'kg'), lbs = seg(s.unit === 'lbs');
+
+    // weight dialog
+    const wg = s.weightDlg ? s.groups.find(g => g.id === s.weightDlg.groupId) : null;
+
+    // results tabs
+    const BASE_G = 284;
+    const tabs = this.SAVINGS.map((sv, i) => {
+      const active = i === s.resultTab;
+      return {
+        label: '−' + Math.round(sv * 100) + '%',
+        sub: Math.round(BASE_G * (1 - sv)) + ' g · ' + (active ? 'selected' : 'plastic'),
+        active,
+        pad: active ? '14px 22px' : '11px 18px',
+        big: active ? '20px' : '16px',
+        mainColor: active ? accent : 'rgba(242,242,245,0.85)',
+        bg: active ? 'rgba(24,28,40,0.75)' : 'rgba(24,24,30,0.55)',
+        border: active ? accent + '88' : 'rgba(255,255,255,0.11)',
+        shadow: active ? '0 12px 40px rgba(10,132,255,0.25)' : '0 8px 30px rgba(0,0,0,0.35)',
+        pick: () => { clearInterval(this._play); this.setState({ resultTab: i, playT: 1, playing: false }); }
+      };
+    });
+
+    const dur = 6;
+    const cur = s.playT * dur;
+    const fmt = (t) => '0:0' + Math.min(9, Math.floor(t));
+    const savePct = Math.round(this.SAVINGS[s.resultTab] * 100);
+
+    return {
+      // shell
+      canvasRef: this.canvasRef,
+      accent, okGreen,
+      isHome: s.screen === 'home',
+      isWorkspace: s.screen === 'workspace',
+      isRunning: s.screen === 'running',
+      isResults: s.screen === 'results',
+      showViewer: s.screen !== 'home',
+      toastOn: !!s.toast, toastMsg: s.toast || '',
+
+      // home
+      projects,
+      newTopOpt: () => this.setState({ importOpen: true, projectName: 'Wall Bracket v4' }),
+
+      // import
+      importOpen: s.importOpen,
+      closeImport: () => this.setState({ importOpen: false }),
+      browseFiles: () => this._toast('Files picker — demo model preloaded in this prototype'),
+      pickFdm: () => this.setState({ process: 'fdm' }),
+      pickSla: () => this.setState({ process: 'sla' }),
+      fdmSegBg: s.process === 'fdm' ? glassSel : 'transparent',
+      fdmSegColor: s.process === 'fdm' ? '#fff' : 'rgba(242,242,245,0.5)',
+      slaSegBg: s.process === 'sla' ? glassSel : 'transparent',
+      slaSegColor: s.process === 'sla' ? '#fff' : 'rgba(242,242,245,0.5)',
+      filamentOptions: ['PLA — Matte Black', 'PLA-CF — Carbon', 'PETG — Clear', 'ABS — Grey', 'ASA — White', 'PA-CF Nylon', 'Polycarbonate'],
+      resinOptions: ['Standard Grey', 'Tough 2000', 'Durable', 'Rigid 10K', 'Grey Pro'],
+      filament: s.filament, resin: s.resin,
+      setFilament: (e) => this.setState({ filament: e.target.value }),
+      setResin: (e) => this.setState({ resin: e.target.value }),
+      filamentDisabled: s.process !== 'fdm', resinDisabled: s.process !== 'sla',
+      filamentOpacity: s.process === 'fdm' ? 1 : 0.35,
+      resinOpacity: s.process === 'sla' ? 1 : 0.35,
+      startProject: () => this.setState({
+        importOpen: false, screen: 'workspace', groups: [], activeGroupId: null,
+        nextColor: 0, tool: 'face', optimized: false, optimizing: false, exported: false, stressOn: false, orientOpen: false
+      }),
+
+      // workspace
+      projectName: s.projectName,
+      materialChip: this._matShort(),
+      backHome: () => { this.setState({ screen: 'home', orientOpen: false, playing: false }); clearInterval(this._play); },
+      groupRows,
+      noGroups: s.groups.length === 0,
+      addGroup: () => {
+        const g = this._makeGroup(0);
+        this.setState({ groups: [...s.groups, g], activeGroupId: g.id, nextColor: s.nextColor + 1, tool: 'face' });
+      },
+      stopClick: this.stopClick,
+      panelHint: hasForce
+        ? 'Groups with no arrows are treated as fixed anchors. Ready to optimize.'
+        : 'Tip: leave anchor groups without arrows — they’re treated as fixed. Add at least one force to optimize.',
+      toolHint: toolHints[s.tool],
+      setOrbit: () => this.setState({ tool: 'orbit' }),
+      setFace: () => this.setState({ tool: 'face' }),
+      setForce: () => {
+        if (!s.groups.some(g => g.faces.length)) { this._toast('Select faces first — forces attach to a face group'); return; }
+        this.setState({ tool: 'arrow' });
+      },
+      orbitBg: oSeg.bg, orbitColor: oSeg.color,
+      faceBg: fSeg.bg, faceColor: fSeg.color,
+      forceBg: aSeg.bg, forceColor: aSeg.color,
+      setKg: () => this.setState({ unit: 'kg' }),
+      setLbs: () => this.setState({ unit: 'lbs' }),
+      kgBg: kg.bg, kgColor: kg.color, lbsBg: lbs.bg, lbsColor: lbs.color,
+      optimize: () => { if (hasForce) this._startRun(); else this._toast('Add at least one force arrow first'); },
+      optimizeDisabled: !hasForce,
+      optimizeBg: hasForce ? accent : 'rgba(255,255,255,0.08)',
+      optimizeColor: hasForce ? '#fff' : 'rgba(242,242,245,0.35)',
+      optimizeShadow: hasForce ? '0 6px 24px rgba(10,132,255,0.4)' : 'none',
+
+      // weight dialog
+      weightOpen: !!s.weightDlg,
+      weightGroupColor: wg ? wg.color : '#fff',
+      weightGroupName: wg ? wg.name : '',
+      weightFaceCount: wg ? wg.faces.length : 0,
+      weightVal: s.weightVal,
+      setWeightVal: (e) => this.setState({ weightVal: e.target.value }),
+      cancelWeight: () => this.setState({ weightDlg: null }),
+      weightEditing: !!(s.weightDlg && s.weightDlg.arrowIndex != null),
+      weightConfirmLabel: (s.weightDlg && s.weightDlg.arrowIndex != null) ? 'Save' : 'Add Force',
+      confirmWeight: () => {
+        if (!wg) { this.setState({ weightDlg: null }); return; }
+        const w = parseFloat(s.weightVal) || 1;
+        const ai = s.weightDlg.arrowIndex;
+        const groups = s.groups.map(g => {
+          if (g.id !== wg.id) return g;
+          if (ai != null) return { ...g, arrows: g.arrows.map((a, i) => i === ai ? { ...a, weight: w, unit: s.unit } : a) };
+          return { ...g, arrows: [...g.arrows, { dir: s.weightDlg.dir, weight: w, unit: s.unit }] };
+        });
+        this.setState({ groups, weightDlg: null });
+      },
+      removeArrow: () => {
+        if (!wg || s.weightDlg.arrowIndex == null) { this.setState({ weightDlg: null }); return; }
+        const ai = s.weightDlg.arrowIndex;
+        const groups = s.groups.map(g => g.id === wg.id
+          ? { ...g, arrows: g.arrows.filter((a, i) => i !== ai) } : g);
+        this.setState({ groups, weightDlg: null });
+      },
+
+      // running
+      progressPct: Math.round(s.progress),
+      progressW: Math.round(s.progress) + '%',
+      stageLabel: this._stage(s.progress),
+      runBackground: () => this.setState({ screen: 'home' }),
+
+      // results
+      tabs,
+      playing: s.playing, notPlaying: !s.playing,
+      togglePlay: () => this._togglePlay(),
+      playT: s.playT,
+      onScrub: (e) => { clearInterval(this._play); this.setState({ playT: parseFloat(e.target.value), playing: false }); },
+      timeLabel: fmt(cur) + ' / ' + fmt(dur),
+      saveVideo: () => this._toast('Video saved to Photos — ' + s.projectName + ' −' + savePct + '%.mp4'),
+      stressOn: s.stressOn,
+      toggleStress: () => this.setState({ stressOn: !s.stressOn }),
+      stressBg: s.stressOn ? 'rgba(10,132,255,0.22)' : 'rgba(28,28,34,0.6)',
+      stressBorder: s.stressOn ? accent + '99' : 'rgba(255,255,255,0.12)',
+      orientOpen: s.orientOpen,
+      toggleOrient: () => this.setState({ orientOpen: !s.orientOpen }),
+      orientBg: s.orientOpen ? 'rgba(10,132,255,0.22)' : 'rgba(28,28,34,0.6)',
+      orientBorder: s.orientOpen ? accent + '99' : 'rgba(255,255,255,0.12)',
+      printTime: ['4h 05m', '3h 10m', '2h 20m'][s.resultTab],
+
+      // export
+      exportOpen: s.exportOpen,
+      openExport: () => this.setState({ exportOpen: true }),
+      closeExport: () => this.setState({ exportOpen: false }),
+      exportName: s.projectName.replace(/ /g, '_') + '_-' + savePct + 'pct.3mf',
+      exportMeta: (4.6 - s.resultTab * 0.9).toFixed(1) + ' MB · ' + this._matShort() + ' profile · ' + Math.round(284 * (1 - this.SAVINGS[s.resultTab])) + ' g',
+      doExport: () => {
+        this.setState({ exportOpen: false, exported: true });
+        this._toast('Exported to Files · ready to print');
+      }
+    };
+  }
+
+  _matShort() {
+    return this.state.process === 'fdm' ? this.state.filament.split(' — ')[0] : this.state.resin;
+  }
+}
+
+</script>
+</body>
+</html>

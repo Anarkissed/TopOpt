@@ -5,7 +5,7 @@
 > reword, add, or remove tasks — if a task is wrong or too big, write a
 > `## Blocked` handoff and stop.
 >
-> Active milestone: **M5**
+> Active milestone: **M6**
 
 ## M1 — Import & voxelize
 
@@ -134,6 +134,83 @@
       BEFORE this task starts (fixture discipline). Expect 1.5-3x compute per
       optimization; measure on-device before and after.
 
-## M7 — iPad shell (human-led; agent tasks added ad hoc by Nadim)
+## M7 — iPad app (design: docs/design/TopOpt_dc.html)
 
-- [ ] M7.x — defined later, one at a time, explicitly.
+> M7 rules of engagement: tasks below are explicitly M7-scoped, so workers MAY
+> touch /app/ for them (worker rule 9). M7.0x tasks are core/ tasks — normal
+> rules, full Linux CI coverage. /app/ code is NOT covered by Linux CI: its
+> verification standard is `xcodebuild test` on the maintainer's Mac (raw
+> output pasted in the handoff) plus maintainer device QA; the reviewer audits
+> diffs as usual. The committed design export docs/design/TopOpt_dc.html is
+> the visual source of truth — match it, do not reinterpret it.
+
+- [ ] M7.0a Core: progress + cancellation. `SimpOptions` gains an optional
+      progress callback (iteration, compliance, change) and a polled
+      cancellation flag checked once per OC iteration; `simp_optimize` returns
+      a cancelled status cleanly (no partial UB), and `minimize_plastic`
+      forwards per-rung progress (rung index, rung count, iteration) and
+      cancellation. Tests: callback invocation counts, monotone iteration
+      numbers, cancel mid-run leaves a valid (rejected) result, zero overhead
+      when callback absent. Pure core; no /app/.
+- [ ] M7.0b Core: visualization data exposure. `MinimizePlasticVariant` gains
+      (a) the printed-voxel von Mises field (grid-indexed, zeros elsewhere),
+      (b) the extracted+cleaned variant mesh (already computed inside
+      check_v3 — expose, don't recompute), (c) `support_volume_voxels` for the
+      analysed build direction (M4.3 proxy), and (d) `mass_grams` =
+      density_g_cm3 × printed volume (spacing-aware). Tests: field/mesh
+      consistency with check_v3, mass arithmetic on a known cube, support
+      count matches count_overhang_voxels. Pure core; no /app/.
+- [ ] M7.1 App scaffold + bridge. Xcode project in /app/ (iPad SwiftUI target
+      "TopOpt", Swift/C++ interop enabled), core built into the app via CMake
+      (static lib or xcframework; OCCT/lib3mf dylibs handled per §10 LGPL
+      dynamic-linking), plus a `TopOptKit` Swift wrapper exposing: load
+      materials.json, import STEP/STL, voxelize, tag faces, run
+      minimize_plastic (with M7.0a progress), export. Deliverable: app builds
+      and shows a bridge smoke result (material count + imported-mesh triangle
+      count); a macOS unit-test target exercises the wrapper headlessly —
+      raw `xcodebuild test` output in the handoff.
+- [ ] M7.2 Design system. Extract the tokens from docs/design/TopOpt_dc.html
+      (dark glass palette, accent, surface blur/opacity, radii, type scale,
+      spacing) into DesignSystem.swift + reusable views: GlassPanel,
+      GlassSheet, PillButton, SegmentedGlass, Toast, ProgressBar. SwiftUI
+      previews for each; maintainer QA against the HTML side by side.
+- [ ] M7.3 Home + import flow. Home screen ("New TopOpt", recent projects
+      grid), import sheet: UIDocumentPicker (STEP/STL), Filament(FDM)/Resin
+      (SLA) segment, material dropdown populated from materials.json via the
+      bridge, Cancel/Continue → workspace. Import errors (non-watertight STL
+      etc.) surface the core diagnostic in a toast.
+- [ ] M7.4 Metal viewer v1. Render the imported tessellated mesh (bridge
+      supplies vertices/normals/face ids), orbit + pinch-zoom camera matching
+      the design's hint copy, matcap-style shading on the dark stage. No
+      selection yet. Maintainer QA on device for feel.
+- [ ] M7.5 Face selection + groups. Face-pick via id buffer render pass;
+      selection groups exactly per design (auto-named A/B/C…, color-coded,
+      rename, remove, active-group highlight, face-count chips); "tap inside a
+      hole selects the hole's face loop" (adjacent-face walk over the B-rep
+      face adjacency the bridge exposes). Groups map to Fixture/Load/Frozen
+      tagging via mask_step_face / tag_step_face.
+- [ ] M7.6 Force arrows + weight. Arrow tool per design: tap a grouped face →
+      arrow pressing into it, drag to aim; weight dialog (kg/lbs) → Newtons
+      (kg × 9.81) distributed over the group's tagged nodes; arrow chips with
+      edit/remove. Fixture group required before Optimize enables.
+- [ ] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
+      M7.0a progress driving the bar (per-rung + per-iteration); Cancel;
+      "Run in Background" via BGProcessingTask with local notification on
+      completion; failure states (CG non-convergence, all-rungs-rejected)
+      rendered as design-consistent sheets, not alerts.
+- [ ] M7.8 Results screen. Variant tabs (−% labels + mass_grams from M7.0b),
+      variant mesh display with the morph/threshold scrub, stress overlay
+      toggle (von Mises field → vertex colors, shared scale across variants),
+      orientation sheet: M4.4 score_orientations result phrased per design,
+      support estimate from support_volume_voxels (cm³ via spacing), "Layer
+      shear" = the variant's max interlayer tension. PRINT TIME — maintainer
+      decision required before this task starts: (a) rough heuristic
+      (printed volume ÷ nominal flow rate, labelled "est."), or (b) omit in
+      v1. Record in DECISIONS.md.
+- [ ] M7.9 Export + share. Export .3mf sheet per design (M6.1 exporter via
+      bridge), UIActivityViewController share, embed the M5.2 JSON report in
+      the 3MF metadata + optional "Save report" as .json.
+- [ ] M7.10 Maintainer QA milestone (human, no agent): full-flow device pass,
+      performance profile on target iPad (128³ end-to-end timing vs the M6.3
+      projection cost decision), accessibility pass (Dynamic Type on sheets,
+      VoiceOver labels on tools), App Store asset checklist.
