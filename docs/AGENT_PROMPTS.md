@@ -54,6 +54,16 @@ DEFINITION OF DONE:
   by the maintainer after handoff; leave the handoff's CI fields as
   "maintainer to fill" — do not attempt to push or open a PR.
 - Any file that names a std exception type (invalid_argument, runtime_error, etc.) must directly include <stdexcept> — libc++ hides this omission locally; libstdc++ in CI does not.
+- Portability check: any file you created or modified that names a std
+  exception type (std::invalid_argument, std::runtime_error,
+  std::out_of_range, std::logic_error, etc.) MUST directly #include
+  <stdexcept> — do not rely on transitive includes. On macOS, libc++ pulls
+  <stdexcept> in through <vector> and friends, so the omission compiles
+  cleanly on your machine and then breaks the Linux CI build (this exact
+  failure occurred in runs 020 and 022). Before finishing, verify with:
+    grep -lE 'std::(invalid_argument|runtime_error|out_of_range|logic_error)' \
+      <your changed files> | xargs -r grep -L '#include <stdexcept>'
+  This command must print nothing.
 
 If you finish early, stop. Do not start the next task. One task per run.
 ```
