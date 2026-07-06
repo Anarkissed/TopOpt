@@ -5,7 +5,7 @@
 > reword, add, or remove tasks — if a task is wrong or too big, write a
 > `## Blocked` handoff and stop.
 >
-> Active milestone: **M4**
+> Active milestone: **M5**
 
 ## M1 — Import & voxelize
 
