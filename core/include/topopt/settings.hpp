@@ -71,6 +71,17 @@ struct FieldClamp {
   int hi = 0;
 };
 
+// M5.2b — min-feature print warning (settings/rules.json min_feature_warning).
+// Report-only text emitted per variant: when a variant's check_v3
+// min_feature_violations count is at or above `threshold`, the job report
+// carries `message_template` with the "{count}" placeholder replaced by the
+// count. Never gates or modifies geometry (ARCHITECTURE §2). The section is
+// optional in the table; when absent, `message_template` is "" (no warning).
+struct MinFeatureWarning {
+  std::string message_template;  // "" when the section is absent
+  int threshold = 1;             // warn when violations >= threshold (> 0 default)
+};
+
 // The parsed rule table. A faithful in-memory image of settings/rules.json's
 // engine-relevant sections (metadata / comment keys are ignored on load).
 struct SettingsRules {
@@ -83,6 +94,7 @@ struct SettingsRules {
   FieldClamp clamp_bottom_layers;
   FieldClamp clamp_infill_percent;
   std::vector<ResinBand> resin_bands;
+  MinFeatureWarning min_feature_warning;  // M5.2b (optional; report-only)
 };
 
 // Thrown for any failure to load or apply the rule table: unreadable file,
@@ -119,5 +131,14 @@ SlicerSettings recommend_settings(const SettingsRules& rules,
                                   const std::string& family,
                                   double worst_case_stress_margin,
                                   double max_part_dimension_mm);
+
+// M5.2b — format the per-variant min-feature print warning. `violations` is the
+// variant's check_v3 min_feature_violations count (solid regions thinner than 2
+// voxels, ARCHITECTURE §7 V3 gate 4). Returns "" when `violations` is below
+// rules.min_feature_warning.threshold (no warning) or no template is configured;
+// otherwise rules.min_feature_warning.message_template with every "{count}"
+// occurrence replaced by `violations`. Report-only: never gates or modifies
+// geometry. Throws SettingsError if `violations` is negative.
+std::string min_feature_warning_text(const SettingsRules& rules, int violations);
 
 }  // namespace topopt
