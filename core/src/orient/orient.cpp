@@ -9,6 +9,7 @@
 
 #include "topopt/orient.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -206,6 +207,87 @@ int support_overhang_voxels(const VoxelGrid& grid, const Vec3& build_dir) {
         if (!supported) ++count;
       }
   return count;
+}
+
+double max_interlayer_tension(const VoxelGrid& grid,
+                              const std::vector<std::array<double, 6>>& stress,
+                              const Vec3& build_dir) {
+  const double blen = length(build_dir);
+  if (blen < 1e-12)
+    throw std::invalid_argument(
+        "max_interlayer_tension: build_dir is zero length");
+  if (stress.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "max_interlayer_tension: stress size must equal grid.voxel_count()");
+  const Vec3 n{build_dir.x / blen, build_dir.y / blen, build_dir.z / blen};
+
+  double worst = 0.0;  // max(0, n.sigma.n): only tension counts
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::array<double, 6>& s = stress[grid.index(i, j, k)];
+        // n.sigma.n with Voigt [xx,yy,zz,xy,yz,zx] and TRUE shear stresses.
+        const double t = n.x * n.x * s[0] + n.y * n.y * s[1] +
+                         n.z * n.z * s[2] + 2.0 * n.x * n.y * s[3] +
+                         2.0 * n.y * n.z * s[4] + 2.0 * n.z * n.x * s[5];
+        if (t > worst) worst = t;
+      }
+  return worst;
+}
+
+std::vector<OrientationScore> score_orientations(
+    const VoxelGrid& grid, const std::vector<std::array<double, 6>>& stress,
+    const std::vector<Vec3>& candidates, double z_knockdown,
+    double support_weight, double stress_weight) {
+  if (candidates.empty())
+    throw std::invalid_argument("score_orientations: no candidates");
+  if (!(z_knockdown > 0.0) || z_knockdown > 1.0)
+    throw std::invalid_argument(
+        "score_orientations: z_knockdown must be in (0, 1]");
+  if (support_weight < 0.0 || stress_weight < 0.0)
+    throw std::invalid_argument("score_orientations: weights must be >= 0");
+  if (stress.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "score_orientations: stress size must equal grid.voxel_count()");
+
+  // The knockdown penalty factor: extra inter-layer risk over isotropic. 0 at
+  // k = 1 (resin) so the stress term then carries no orientation preference.
+  const double knock = 1.0 / z_knockdown - 1.0;
+
+  // Per-candidate raw terms, plus the maxima used to normalize each term.
+  std::vector<OrientationScore> out;
+  out.reserve(candidates.size());
+  double max_support = 0.0;
+  double max_penalty = 0.0;
+  for (const Vec3& dir : candidates) {
+    OrientationScore os;
+    os.build_dir = normalized(dir);
+    os.support_voxels = support_overhang_voxels(grid, dir);
+    os.interlayer_tension = max_interlayer_tension(grid, stress, dir);
+    os.stress_penalty = os.interlayer_tension * knock;
+    if (os.support_voxels > max_support)
+      max_support = static_cast<double>(os.support_voxels);
+    if (os.stress_penalty > max_penalty) max_penalty = os.stress_penalty;
+    out.push_back(os);
+  }
+
+  // Combine normalized terms (each in [0, 1]; a term whose max is 0 drops out).
+  for (OrientationScore& os : out) {
+    const double support_norm =
+        max_support > 0.0 ? static_cast<double>(os.support_voxels) / max_support
+                          : 0.0;
+    const double penalty_norm =
+        max_penalty > 0.0 ? os.stress_penalty / max_penalty : 0.0;
+    os.score = support_weight * support_norm + stress_weight * penalty_norm;
+  }
+
+  // Best (lowest score) first; stable so ties keep the input candidate order.
+  std::stable_sort(out.begin(), out.end(),
+                   [](const OrientationScore& a, const OrientationScore& b) {
+                     return a.score < b.score;
+                   });
+  return out;
 }
 
 }  // namespace topopt
