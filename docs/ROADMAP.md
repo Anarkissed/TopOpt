@@ -99,7 +99,7 @@
 
 ## M5 — Variants & settings
 
-- [ ] M5.1 Settings rule engine: inputs = material, worst-case stress margin,
+- [x] M5.1 Settings rule engine: inputs = material, worst-case stress margin,
       part size; outputs = walls, top/bottom layers, infill % + pattern name.
       Rules table lives in `settings/rules.json` (human-tunable). Unit tests
       per rule boundary.

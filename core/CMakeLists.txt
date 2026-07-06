@@ -32,7 +32,8 @@ add_library(topopt
   src/mesh/mesh.cpp
   src/voxel/voxelize.cpp
   src/fea/hex_element.cpp
-  src/orient/orient.cpp)
+  src/orient/orient.cpp
+  src/settings/settings.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
@@ -104,6 +105,18 @@ add_test(NAME hex_element COMMAND test_fea)
 add_executable(test_orient tests/unit/test_orient.cpp)
 target_link_libraries(test_orient PRIVATE topopt)
 add_test(NAME orientation COMMAND test_orient)
+
+# Settings rule engine (M5.1). Pure C++/std (no OCCT, no Eigen): the engine
+# consumes settings/rules.json and maps material + stress margin + part size to
+# walls/top-bottom layers/infill + pattern (FDM) or a solid-print directive
+# (resin). Runs in every configuration; the committed human-seeded rule table's
+# absolute path is injected so the real-table boundary tests do not depend on
+# the working directory.
+add_executable(test_settings tests/unit/test_settings.cpp)
+target_link_libraries(test_settings PRIVATE topopt)
+target_compile_definitions(test_settings PRIVATE
+  SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+add_test(NAME settings COMMAND test_settings)
 
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
