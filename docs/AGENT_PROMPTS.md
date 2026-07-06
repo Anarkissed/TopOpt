@@ -53,6 +53,7 @@ DEFINITION OF DONE:
 - All tests pass locally via `ctest` (paste the raw final output). CI is run
   by the maintainer after handoff; leave the handoff's CI fields as
   "maintainer to fill" — do not attempt to push or open a PR.
+- Any file that names a std exception type (invalid_argument, runtime_error, etc.) must directly include <stdexcept> — libc++ hides this omission locally; libstdc++ in CI does not.
 
 If you finish early, stop. Do not start the next task. One task per run.
 ```
