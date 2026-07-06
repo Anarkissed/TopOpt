@@ -33,7 +33,8 @@ add_library(topopt
   src/voxel/voxelize.cpp
   src/fea/hex_element.cpp
   src/orient/orient.cpp
-  src/settings/settings.cpp)
+  src/settings/settings.cpp
+  src/settings/report.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
@@ -117,6 +118,14 @@ target_link_libraries(test_settings PRIVATE topopt)
 target_compile_definitions(test_settings PRIVATE
   SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
 add_test(NAME settings COMMAND test_settings)
+
+# Job report (M5.2). Pure C++/std (no OCCT, no Eigen): the report data model is
+# serialized to a single JSON document and schema-validated. Runs in every
+# configuration like the other pure-C++/std tests; no fixture injection (the
+# test builds its reports and JSON documents in code).
+add_executable(test_report tests/unit/test_report.cpp)
+target_link_libraries(test_report PRIVATE topopt)
+add_test(NAME report COMMAND test_report)
 
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
