@@ -36,15 +36,15 @@ jobs:
           git clone --depth 1 --branch 2026.06.24 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
        - name: Guard stdexcept includes
-            run: |
-              bad=$(grep -rlE 'std::(invalid_argument|runtime_error|out_of_range|logic_error)' \
-                    core --include='*.cpp' --include='*.hpp' \
-                    | xargs -r grep -L '#include <stdexcept>' || true)
-              if [ -n "$bad" ]; then
-                echo "Files using std exception types without #include <stdexcept>:"; echo "$bad"
-                echo "(libc++ includes it transitively; libstdc++ does not - this WILL fail the Linux build)"
-                exit 1
-            fi
+        run: |
+          bad=$(grep -rlE 'std::(invalid_argument|runtime_error|out_of_range|logic_error)' \
+                core --include='*.cpp' --include='*.hpp' \
+                | xargs -r grep -L '#include <stdexcept>' || true)
+          if [ -n "$bad" ]; then
+            echo "Files using std exception types without #include <stdexcept>:"; echo "$bad"
+            echo "(libc++ includes it transitively; libstdc++ does not - this WILL fail the Linux build)"
+            exit 1
+          fi
       - name: Restore vcpkg binary cache
         uses: actions/cache@v4
         with:
