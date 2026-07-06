@@ -412,6 +412,21 @@ SettingsRules parse_settings_rules(const std::string& json_text) {
   }
   validate_band_order(rules.resin_bands, "resin.margin_bands");
 
+  // --- min-feature warning section (M5.2b, optional; report-only) ---
+  // Absent -> defaults (empty template, threshold 1), so tables that predate
+  // M5.2b still parse. When present, `template` is a required string and
+  // `threshold`, if given, an integer.
+  const JsonValue* mfw = find_field(root, "min_feature_warning");
+  if (mfw != nullptr) {
+    if (mfw->type != JsonValue::Type::Object)
+      throw SettingsError("rules.json: 'min_feature_warning' must be an object");
+    rules.min_feature_warning.message_template =
+        require_string(*mfw, "template", "min_feature_warning");
+    if (find_field(*mfw, "threshold"))
+      rules.min_feature_warning.threshold =
+          require_int(*mfw, "threshold", "min_feature_warning");
+  }
+
   return rules;
 }
 
@@ -506,6 +521,25 @@ SlicerSettings recommend_settings(const SettingsRules& rules,
   out.infill_percent =
       clamp_field(out.infill_percent, rules.clamp_infill_percent);
 
+  return out;
+}
+
+std::string min_feature_warning_text(const SettingsRules& rules,
+                                     int violations) {
+  if (violations < 0)
+    throw SettingsError("min_feature_warning_text: violations must be >= 0");
+  const MinFeatureWarning& w = rules.min_feature_warning;
+  if (violations < w.threshold || w.message_template.empty())
+    return std::string();
+  // Substitute every "{count}" occurrence with the violation count.
+  const std::string token = "{count}";
+  const std::string count = std::to_string(violations);
+  std::string out = w.message_template;
+  std::string::size_type p = 0;
+  while ((p = out.find(token, p)) != std::string::npos) {
+    out.replace(p, token.size(), count);
+    p += count.size();
+  }
   return out;
 }
 

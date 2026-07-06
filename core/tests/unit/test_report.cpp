@@ -388,6 +388,113 @@ void test_validator_rejects() {
         "null margin accepted");
 }
 
+// --- M5.2b min-feature print warning field --------------------------------
+
+void test_min_feature_emitted() {
+  JobReport r;
+  r.material = "PLA";
+
+  // A variant with violations + a warning (as the pipeline would fill from
+  // settings min_feature_warning_text).
+  VariantReport v0;
+  v0.volume_fraction = 0.3;
+  v0.max_stress_mpa = 20.0;
+  v0.max_interlayer_tension_mpa = 5.0;
+  v0.margin = compute_stress_margin(55.0, 0.55, 20.0, 5.0);
+  v0.orientation = Vec3{0.0, 0.0, 1.0};
+  v0.settings = fdm_settings();
+  v0.min_feature_violations = 3;
+  v0.min_feature_warning = "3 region(s) may be thinner than 2 voxels.";
+  r.variants.push_back(v0);
+
+  // A clean variant: no violations, no warning (the defaults).
+  VariantReport v1;
+  v1.volume_fraction = 0.5;
+  v1.max_stress_mpa = 10.0;
+  v1.max_interlayer_tension_mpa = 2.0;
+  v1.margin = compute_stress_margin(55.0, 0.55, 10.0, 2.0);
+  v1.orientation = Vec3{0.0, 0.0, 1.0};
+  v1.settings = fdm_settings();
+  r.variants.push_back(v1);
+
+  std::string json = job_report_json(r);
+  CHECK(contains(json, "\"min_feature_violations\": 3"),
+        "violation count emitted");
+  CHECK(contains(json, "3 region(s) may be thinner than 2 voxels."),
+        "warning text emitted");
+  CHECK(contains(json, "\"min_feature_violations\": 0"),
+        "clean variant emits 0 violations");
+  CHECK(contains(json, "\"min_feature_warning\": \"\""),
+        "clean variant emits empty warning");
+  CHECK(!throws_report_error([&] { validate_job_report_json(json); }),
+        "report with min-feature fields validates");
+}
+
+void test_min_feature_validator() {
+  auto rejects = [](const std::string& doc) {
+    return throws_report_error([&] { validate_job_report_json(doc); });
+  };
+
+  // Non-integer violation count.
+  CHECK(rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" },
+        "min_feature_violations": 2.5, "min_feature_warning": "" } ] })"),
+        "non-integer min_feature_violations rejected");
+
+  // Negative violation count.
+  CHECK(rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" },
+        "min_feature_violations": -1, "min_feature_warning": "" } ] })"),
+        "negative min_feature_violations rejected");
+
+  // Non-string warning.
+  CHECK(rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" },
+        "min_feature_violations": 3, "min_feature_warning": 5 } ] })"),
+        "non-string min_feature_warning rejected");
+
+  // A non-empty warning with zero violations is inconsistent.
+  CHECK(rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" },
+        "min_feature_violations": 0, "min_feature_warning": "thin!" } ] })"),
+        "warning without violations rejected");
+
+  // Positive control: a non-empty warning with a positive count is accepted.
+  CHECK(!rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" },
+        "min_feature_violations": 2, "min_feature_warning": "2 thin regions" } ] })"),
+        "warning with positive count accepted");
+
+  // Positive control: the fields may be omitted entirely (backward compatible).
+  CHECK(!rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" } } ] })"),
+        "omitted min-feature fields accepted (backward compatible)");
+}
+
 }  // namespace
 
 int main() {
@@ -402,6 +509,8 @@ int main() {
   test_string_escaping();
   test_validator_accepts_canonical();
   test_validator_rejects();
+  test_min_feature_emitted();
+  test_min_feature_validator();
 
   if (g_failures == 0) {
     std::printf("job report (M5.2): all %d checks passed\n", g_checks);

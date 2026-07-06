@@ -16,6 +16,7 @@
 #include <string>
 
 using topopt::load_settings_rules_file;
+using topopt::min_feature_warning_text;
 using topopt::parse_settings_rules;
 using topopt::recommend_settings;
 using topopt::SettingsError;
@@ -350,6 +351,104 @@ void test_parse_errors() {
         "mini large: 7 clamped to 6");
 }
 
+// --- M5.2b min-feature print warning --------------------------------------
+//
+// The report-only warning text is driven by settings/rules.json's
+// min_feature_warning section (template + threshold). Verified against the
+// committed real table and synthetic tables (custom threshold, absent section,
+// malformed section).
+void test_min_feature_warning() {
+  auto has = [](const std::string& hay, const std::string& needle) {
+    return hay.find(needle) != std::string::npos;
+  };
+  const SettingsRules& r = real_rules();
+
+  // The committed table parses: threshold 1 and a non-empty template that
+  // carries the "{count}" placeholder.
+  CHECK(r.min_feature_warning.threshold == 1, "real table threshold 1");
+  CHECK(!r.min_feature_warning.message_template.empty(),
+        "real table has a min-feature template");
+  CHECK(has(r.min_feature_warning.message_template, "{count}"),
+        "real template carries {count} placeholder");
+
+  // Below threshold (0 violations with threshold 1) -> no warning.
+  CHECK(min_feature_warning_text(r, 0).empty(), "0 violations -> no warning");
+
+  // At/above threshold -> template with {count} replaced by the count, and the
+  // literal placeholder gone.
+  std::string w1 = min_feature_warning_text(r, 1);
+  CHECK(!w1.empty(), "1 violation -> warning present");
+  CHECK(has(w1, "1 region"), "warning names the count (1)");
+  CHECK(!has(w1, "{count}"), "placeholder substituted (1)");
+  std::string w3 = min_feature_warning_text(r, 3);
+  CHECK(has(w3, "3 region"), "warning names the count (3)");
+  CHECK(!has(w3, "{count}"), "placeholder substituted (3)");
+
+  // Negative violations are rejected.
+  CHECK(throws_settings_error([&] { min_feature_warning_text(r, -1); }),
+        "negative violations throws");
+
+  // A table WITHOUT a min_feature_warning section: defaults (threshold 1, empty
+  // template). Parsing succeeds (backward compatible) and, with no template,
+  // no warning is produced even for a positive count.
+  SettingsRules no_section = parse_settings_rules(R"({
+    "fdm": {
+      "margin_bands": [
+        {"margin_below": null, "walls": 2, "top_layers": 4, "bottom_layers": 3,
+         "infill_percent": 15, "infill_pattern": "grid"}
+      ],
+      "size_modifiers": {"small": {}, "medium": {}, "large": {}},
+      "clamps": {"walls": [2,6], "top_layers": [3,8], "bottom_layers": [3,8],
+                 "infill_percent": [10,60]}
+    },
+    "resin": {"margin_bands": [{"margin_below": null, "print_mode": "solid"}]}
+  })");
+  CHECK(no_section.min_feature_warning.message_template.empty(),
+        "absent section -> empty template");
+  CHECK(no_section.min_feature_warning.threshold == 1,
+        "absent section -> default threshold 1");
+  CHECK(min_feature_warning_text(no_section, 5).empty(),
+        "empty template -> no warning even at 5 violations");
+
+  // A custom threshold (3) and a template with two {count} placeholders: below
+  // threshold is silent; at threshold both placeholders are substituted.
+  SettingsRules custom = parse_settings_rules(R"({
+    "fdm": {
+      "margin_bands": [
+        {"margin_below": null, "walls": 2, "top_layers": 4, "bottom_layers": 3,
+         "infill_percent": 15, "infill_pattern": "grid"}
+      ],
+      "size_modifiers": {"small": {}, "medium": {}, "large": {}},
+      "clamps": {"walls": [2,6], "top_layers": [3,8], "bottom_layers": [3,8],
+                 "infill_percent": [10,60]}
+    },
+    "resin": {"margin_bands": [{"margin_below": null, "print_mode": "solid"}]},
+    "min_feature_warning": {"template": "{count} thin / {count} total",
+                            "threshold": 3}
+  })");
+  CHECK(custom.min_feature_warning.threshold == 3, "custom threshold 3 parsed");
+  CHECK(min_feature_warning_text(custom, 2).empty(),
+        "below custom threshold -> no warning");
+  CHECK(min_feature_warning_text(custom, 3) == "3 thin / 3 total",
+        "both {count} placeholders substituted");
+
+  // Malformed sections are rejected: non-object, and a non-string template.
+  CHECK(throws_settings_error([] {
+          parse_settings_rules(R"({
+            "fdm": {"margin_bands": [{"margin_below": null, "walls": 2,
+              "top_layers": 4, "bottom_layers": 3, "infill_percent": 15,
+              "infill_pattern": "grid"}],
+              "size_modifiers": {"small": {}, "medium": {}, "large": {}},
+              "clamps": {"walls": [2,6], "top_layers": [3,8],
+                         "bottom_layers": [3,8], "infill_percent": [10,60]}},
+            "resin": {"margin_bands": [{"margin_below": null,
+                                        "print_mode": "solid"}]},
+            "min_feature_warning": {"template": 3}
+          })");
+        }),
+        "non-string min-feature template throws");
+}
+
 }  // namespace
 
 int main() {
@@ -361,6 +460,7 @@ int main() {
     test_input_validation();
     test_parse_real_table();
     test_parse_errors();
+    test_min_feature_warning();
   } catch (const std::exception& e) {
     std::fprintf(stderr, "UNEXPECTED EXCEPTION: %s\n", e.what());
     return 1;
