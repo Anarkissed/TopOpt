@@ -66,3 +66,4 @@ Eigen-free public API. Approved by Nadim.
   worse), not numeric — the M4.4 scorer defines its own scale. The z_knockdown
   mechanism requirement (isotropic counterfactual) is part of the fixture and
   must be tested, not just the final ordering.
+- 2026-07-08: settings/rules.json is human-seeded (maintainer commits initial table, drafted by reviewer); agents implement the engine and may propose rule changes only via Blocked. The margin_definition in rules.json semantics_locked is binding on M5.2/M5.3's margin computation.

@@ -1,0 +1,86 @@
+{
+  "_comment": "Slicer-settings rule table for M5.1 (ARCHITECTURE §3 settings/, §9 M5). Seeded by the human maintainer (drafted by the maintainer's reviewer, DECISIONS.md 2026-07-08). Values are engineering heuristics and human-tunable: agents implement the engine against this file and test its rule boundaries, but MUST NOT change values or structure — proposed rule changes go through a Blocked handoff. Walls/layer counts assume a 0.4 mm nozzle / ~0.2 mm layer FDM baseline.",
+  "semantics_locked": {
+    "inputs": "material family ('fdm' | 'resin' from materials.json), worst_case_stress_margin (dimensionless, see margin_definition), max_part_dimension_mm (largest bounding-box edge of the variant mesh).",
+    "margin_definition": "worst_case_stress_margin = min(in_plane_margin, interlayer_margin) for the CHOSEN build orientation, where in_plane_margin = yield_strength_mpa / max_von_mises_stress and interlayer_margin = (z_knockdown * yield_strength_mpa) / max_interlayer_tension (M4.4 field, chosen build_dir). Resin (z_knockdown = 1): the two coincide. The engine consumes the number; computing it is pipeline wiring (M5.2/M5.3), and this definition is locked so both sides agree.",
+    "size_classes": "small: max_part_dimension_mm <= 50; medium: <= 150; large: > 150.",
+    "evaluation_order": "family gate -> first margin band whose margin_below exceeds the input margin (bands are ordered ascending; the last band has margin_below = null meaning +infinity) -> size modifiers (additive) -> clamps. Deterministic; no other inputs.",
+    "band_boundary_rule": "A margin exactly equal to a band's margin_below belongs to the NEXT band (bands are [previous, margin_below) half-open). Engine tests must pin this boundary behavior."
+  },
+  "fdm": {
+    "margin_bands": [
+      {
+        "margin_below": 1.2,
+        "walls": 6,
+        "top_layers": 7,
+        "bottom_layers": 6,
+        "infill_percent": 60,
+        "infill_pattern": "gyroid",
+        "warning": "Predicted stress margin is below 1.2x even at maximum reinforcement - this variant may fail under the specified load. Consider a higher volume fraction variant, a stronger material, or revised loads."
+      },
+      {
+        "margin_below": 1.5,
+        "walls": 5,
+        "top_layers": 6,
+        "bottom_layers": 5,
+        "infill_percent": 50,
+        "infill_pattern": "gyroid"
+      },
+      {
+        "margin_below": 2.0,
+        "walls": 4,
+        "top_layers": 5,
+        "bottom_layers": 4,
+        "infill_percent": 40,
+        "infill_pattern": "gyroid"
+      },
+      {
+        "margin_below": 4.0,
+        "walls": 3,
+        "top_layers": 5,
+        "bottom_layers": 4,
+        "infill_percent": 25,
+        "infill_pattern": "gyroid"
+      },
+      {
+        "margin_below": null,
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 15,
+        "infill_pattern": "grid"
+      }
+    ],
+    "size_modifiers": {
+      "small": { "infill_percent": 5 },
+      "medium": {},
+      "large": { "top_layers": 1, "walls": 1 }
+    },
+    "clamps": {
+      "walls": [2, 6],
+      "top_layers": [3, 8],
+      "bottom_layers": [3, 8],
+      "infill_percent": [10, 60]
+    },
+    "_rationale": "Walls carry most of the load in FDM parts, so bands raise walls before infill. Gyroid is near-isotropic and self-supporting, hence the structural default; grid is cheaper to print and acceptable for high-margin parts. Large parts get +1 top layer (bridging over sparse infill) and +1 wall (long moment arms); small parts get +5% infill because it costs little absolute material."
+  },
+  "resin": {
+    "note": "Walls/top/bottom/infill are FDM concepts; SLA/DLP parts print effectively solid. The engine returns solid-print guidance and no FDM fields.",
+    "margin_bands": [
+      {
+        "margin_below": 1.5,
+        "print_mode": "solid",
+        "warning": "Predicted stress margin is below 1.5x. Standard resins are brittle (yield here is effectively fracture); consider a tough resin or a higher volume fraction variant."
+      },
+      {
+        "margin_below": null,
+        "print_mode": "solid"
+      }
+    ]
+  },
+  "min_feature_warning": {
+    "_comment": "M5.2b: report-only, never gates or modifies geometry.",
+    "template": "{count} region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+    "threshold": 1
+  }
+}
