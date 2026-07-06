@@ -88,7 +88,7 @@
 - [x] M4.1 Transversely isotropic hex element (z_knockdown on the layer
       normal axis). Isotropic mode preserved; V1 must still pass in
       isotropic mode.
-- [ ] M4.2 Self-weight loading mode (gravity × density × voxel volume).
+- [x] M4.2 Self-weight loading mode (gravity × density × voxel volume).
       **Gate V4** column test.
 - [ ] M4.3 Orientation candidates: 6 axis-aligned + face-normal-aligned +
       coarse sphere sampling (≤ 26 dirs). Support-volume proxy metric

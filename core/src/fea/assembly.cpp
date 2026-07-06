@@ -64,6 +64,54 @@ std::vector<int> fea_tagged_nodes(const VoxelGrid& grid, VoxelTag tag) {
   return nodes;
 }
 
+std::vector<NodalLoad> self_weight_loads(const VoxelGrid& grid, double density,
+                                         double gravity, Vec3 direction) {
+  if (density < 0.0)
+    throw std::invalid_argument("self_weight_loads: density must be >= 0");
+  if (gravity < 0.0)
+    throw std::invalid_argument("self_weight_loads: gravity must be >= 0");
+  const double len = std::sqrt(direction.x * direction.x +
+                               direction.y * direction.y +
+                               direction.z * direction.z);
+  if (!(len > 1e-12))
+    throw std::invalid_argument(
+        "self_weight_loads: direction must have non-zero length");
+  const double dhat[3] = {direction.x / len, direction.y / len,
+                          direction.z / len};
+
+  // Body force of one solid voxel, lumped equally to its eight corner nodes.
+  // For a cubic trilinear hex under a uniform body force the consistent load
+  // vector is V/8 on each node, so this equal lumping is the consistent load.
+  const double per_node = gravity * density * grid.voxel_volume() / 8.0;
+
+  const int num_nodes = fea_node_count(grid);
+  std::vector<std::array<double, 3>> nodef(
+      static_cast<std::size_t>(num_nodes), std::array<double, 3>{0.0, 0.0, 0.0});
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+        for (int a = 0; a < 8; ++a) {
+          std::array<double, 3>& nf = nodef[static_cast<std::size_t>(en[a])];
+          nf[0] += per_node * dhat[0];
+          nf[1] += per_node * dhat[1];
+          nf[2] += per_node * dhat[2];
+        }
+      }
+
+  // Emit one entry per (node, non-zero component). Axis-aligned directions
+  // (e.g. the default -z) leave the other two components exactly zero, so no
+  // spurious loads are produced.
+  std::vector<NodalLoad> loads;
+  for (int n = 0; n < num_nodes; ++n)
+    for (int c = 0; c < 3; ++c) {
+      const double v = nodef[static_cast<std::size_t>(n)][static_cast<std::size_t>(c)];
+      if (v != 0.0) loads.push_back({n, c, v});
+    }
+  return loads;
+}
+
 namespace {
 
 using SpMat = Eigen::SparseMatrix<double>;

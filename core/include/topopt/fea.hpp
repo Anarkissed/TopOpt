@@ -128,6 +128,31 @@ struct NodalLoad {
   double value = 0.0;
 };
 
+// Self-weight body load (ROADMAP M4.2 / ARCHITECTURE §5: "load = gravity x
+// density x voxel volume, applied per solid voxel, direction = chosen print
+// orientation's build-plate normal"). Every solid voxel (tag != Empty) carries
+// a body force of magnitude `gravity * density * grid.voxel_volume()` acting in
+// the unit `direction`, lumped equally to the voxel's eight corner nodes (1/8
+// each) and accumulated over shared nodes. For a cubic trilinear hex under a
+// uniform body force the consistent (energy) load vector puts an equal share on
+// each of the eight nodes, so this equal 1/8 lumping IS the consistent load.
+// The result is one NodalLoad per (node, non-zero component), ready to pass to
+// fea_solve / fea_solve_cg.
+//
+// `direction` is the direction the weight pulls (opposite the build-plate
+// normal); the default is -z, i.e. gravity down the grid z axis. It need not be
+// unit length — it is normalised internally. `density` and `gravity` are in
+// caller-chosen consistent units (force = mass-density x acceleration x volume);
+// the loader's density_g_cm3 and a chosen g fix the unit system. The layer
+// normal for the transversely isotropic element (M4.1) is a separate concern;
+// this function only builds the load vector.
+//
+// Throws std::invalid_argument if density < 0, gravity < 0, or `direction` has
+// (near) zero length.
+std::vector<NodalLoad> self_weight_loads(const VoxelGrid& grid, double density,
+                                         double gravity,
+                                         Vec3 direction = Vec3{0.0, 0.0, -1.0});
+
 // Nodal displacement solution, DOF-ordered (size 3*fea_node_count).
 struct FeaSolution {
   std::vector<double> u;
