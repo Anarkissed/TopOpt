@@ -31,7 +31,8 @@ add_library(topopt
   src/io/stl.cpp
   src/mesh/mesh.cpp
   src/voxel/voxelize.cpp
-  src/fea/hex_element.cpp)
+  src/fea/hex_element.cpp
+  src/orient/orient.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
@@ -96,6 +97,13 @@ target_link_libraries(test_fea PRIVATE topopt)
 target_compile_definitions(test_fea PRIVATE
   FEA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/fea")
 add_test(NAME hex_element COMMAND test_fea)
+
+# Orientation candidate generation + support-volume proxy metric (M4.3). Pure
+# C++/std (no OCCT, no Eigen): builds its meshes and voxel grids in code, so it
+# runs in every configuration like the hex-element test.
+add_executable(test_orient tests/unit/test_orient.cpp)
+target_link_libraries(test_orient PRIVATE topopt)
+add_test(NAME orientation COMMAND test_orient)
 
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
