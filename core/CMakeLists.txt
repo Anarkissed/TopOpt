@@ -23,6 +23,11 @@ else()
   # translation unit and its test only when Eigen is present. CI has Eigen
   # (DEPS=ON), so fea_assembly always runs in the pipeline.
   find_package(Eigen3 CONFIG QUIET)
+  # Same for lib3mf: the 3MF export/import (M6.1) needs it, so build that
+  # translation unit and its round-trip test only when lib3mf is present. CI has
+  # lib3mf (DEPS=ON), so the 3MF round-trip always runs in the pipeline; the STL
+  # export/round-trip is pure C++/std and builds regardless.
+  find_package(lib3mf CONFIG QUIET)
 endif()
 
 add_library(topopt
@@ -68,6 +73,16 @@ if(Eigen3_FOUND)
   # builds in CI.
   target_sources(topopt PRIVATE src/simp/minimize_plastic.cpp)
   target_link_libraries(topopt PRIVATE Eigen3::Eigen)
+endif()
+
+# 3MF export/import (M6.1) requires lib3mf. Compile it into the library and link
+# lib3mf only when it is present. lib3mf is BSD (ARCHITECTURE §10) and its
+# imported target is SHARED (dynamic). CI has lib3mf (DEPS=ON), so the 3MF
+# translation unit and its round-trip test always build in the pipeline. STL
+# export is pure C++/std and already lives in the always-built src/io/stl.cpp.
+if(lib3mf_FOUND)
+  target_sources(topopt PRIVATE src/io/threemf.cpp)
+  target_link_libraries(topopt PRIVATE lib3mf::lib3mf)
 endif()
 
 enable_testing()
@@ -131,6 +146,18 @@ add_test(NAME settings COMMAND test_settings)
 add_executable(test_report tests/unit/test_report.cpp)
 target_link_libraries(test_report PRIVATE topopt)
 add_test(NAME report COMMAND test_report)
+
+# STL export round-trip (M6.1). Pure C++/std (no OCCT, no Eigen, no lib3mf): the
+# STL writer lives in the always-built src/io/stl.cpp, and the test builds its
+# meshes via marching cubes and round-trips them through write_stl_file /
+# read_stl_file. Runs in every configuration. EXPORT_TMP_DIR (the build dir) is
+# injected so the test writes its temporary files independent of the working
+# directory ctest runs from.
+add_executable(test_export tests/unit/test_export.cpp)
+target_link_libraries(test_export PRIVATE topopt)
+target_compile_definitions(test_export PRIVATE
+  EXPORT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME export_stl COMMAND test_export)
 
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
@@ -282,4 +309,18 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(test_mask_face PRIVATE
     STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step")
   add_test(NAME mask_face COMMAND test_mask_face)
+endif()
+
+# 3MF export/import round-trip (M6.1). Requires lib3mf (the writer/reader live in
+# the lib3mf-gated src/io/threemf.cpp). Builds its meshes via marching cubes and
+# round-trips them through write_3mf_file / read_3mf_file, asserting the same
+# mesh-level V3 properties + volume-within-0.5% as the STL test. EXPORT_TMP_DIR
+# (the build dir) is injected for the temporary files. CI configures with
+# -DTOPOPT_REQUIRE_DEPS=ON (lib3mf present), so it always runs in the pipeline.
+if(lib3mf_FOUND)
+  add_executable(test_3mf tests/unit/test_3mf.cpp)
+  target_link_libraries(test_3mf PRIVATE topopt)
+  target_compile_definitions(test_3mf PRIVATE
+    EXPORT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME export_3mf COMMAND test_3mf)
 endif()
