@@ -164,29 +164,75 @@ int main() {
   CHECK(planar == 8, "l-bracket: 8 planar faces");
   CHECK(cylindrical == 2, "l-bracket: 2 cylindrical faces");
 
-  // NOT asserted: expected_values.json's analytic_volume_mm3 (59531.68...),
-  // bounding_box and geometry text. Those values do NOT match the committed
-  // l-bracket.step bytes (the committed bracket is a 60x40x8 plate, z in
-  // [0, 8], with an 8x40x60 wall — B-rep volume 35525.84..., bbox
-  // [-30,-20,0]..[30,20,60]), so per the fixture-provenance rule (DECISIONS.md
-  // 2026-07-04, values must come from the committed bytes) they are an
-  // erratum, reported for maintainer correction in handoff 030 (## Blocked).
-  // Asserting the maintainer's stale numbers would fail against the committed
-  // model; asserting agent-computed replacements would violate fixture
-  // provenance. The topology facts above and every cli_run_invariants
-  // behavioral check below hold for the committed bytes and ARE asserted.
-  CHECK(run.model.brep_volume > 0.0, "l-bracket: B-rep volume is positive");
+  // expected_values.json analytic_volume_mm3 at brep_volume_rel_tolerance
+  // (values corrected by the maintainer 2026-07-10 — see the fixture's
+  // _erratum note and handoff 030's addendum).
+  const double analytic_volume = 35525.840734641024;  // expected_values.json
+  CHECK(std::fabs(run.model.brep_volume - analytic_volume) <=
+            1e-6 * analytic_volume,  // brep_volume_rel_tolerance
+        "l-bracket: B-rep volume matches analytic within 1e-6 relative");
 
-  // Tessellated volume approaches the B-rep volume FROM ABOVE (the curved
-  // surfaces are holes — expected_values.json tessellated_volume_note; the
-  // note's reasoning is geometry-independent even though its baseline number
-  // is part of the erratum above).
+  // Bounding box (expected_values.json): [-30,-20,0] .. [30,20,60]. The box
+  // extremes lie on planar faces, so tessellated vertices reach them exactly.
+  {
+    Vec3 lo{1e30, 1e30, 1e30}, hi{-1e30, -1e30, -1e30};
+    for (const Vec3& v : run.model.mesh.vertices) {
+      lo.x = std::min(lo.x, v.x); lo.y = std::min(lo.y, v.y);
+      lo.z = std::min(lo.z, v.z);
+      hi.x = std::max(hi.x, v.x); hi.y = std::max(hi.y, v.y);
+      hi.z = std::max(hi.z, v.z);
+    }
+    CHECK(std::fabs(lo.x + 30.0) <= 1e-6 && std::fabs(lo.y + 20.0) <= 1e-6 &&
+              std::fabs(lo.z - 0.0) <= 1e-6,
+          "l-bracket: bounding-box min (-30, -20, 0)");
+    CHECK(std::fabs(hi.x - 30.0) <= 1e-6 && std::fabs(hi.y - 20.0) <= 1e-6 &&
+              std::fabs(hi.z - 60.0) <= 1e-6,
+          "l-bracket: bounding-box max (30, 20, 60)");
+  }
+
+  // Hole facts (expected_values.json hole_axes): both holes run through the
+  // mounting plate z in [0, 8], centered at (x, y) = (-17, 0) and (9, 0). Each
+  // cylindrical face's tessellation spans exactly that z range (its rim edges
+  // lie on the plate's planar faces), and the midpoint of its vertex bounding
+  // box recovers the axis center to within the chordal sampling error (well
+  // under 0.1 mm at the default deflection, vs 26 mm center separation).
+  {
+    int at_minus17 = 0, at_9 = 0;
+    for (int f = 0; f < run.model.face_count; ++f) {
+      if (run.model.faces[static_cast<std::size_t>(f)].kind !=
+          StepSurfaceKind::Cylinder)
+        continue;
+      Vec3 lo{1e30, 1e30, 1e30}, hi{-1e30, -1e30, -1e30};
+      for (std::size_t t = 0; t < run.model.triangle_face.size(); ++t) {
+        if (run.model.triangle_face[t] != f) continue;
+        for (int c = 0; c < 3; ++c) {
+          const Vec3& v = run.model.mesh.vertices[static_cast<std::size_t>(
+              run.model.mesh.triangles[t][static_cast<std::size_t>(c)])];
+          lo.x = std::min(lo.x, v.x); lo.y = std::min(lo.y, v.y);
+          lo.z = std::min(lo.z, v.z);
+          hi.x = std::max(hi.x, v.x); hi.y = std::max(hi.y, v.y);
+          hi.z = std::max(hi.z, v.z);
+        }
+      }
+      CHECK(std::fabs(lo.z - 0.0) <= 1e-6 && std::fabs(hi.z - 8.0) <= 1e-6,
+            "hole face spans exactly the plate thickness z in [0, 8]");
+      const double cx = 0.5 * (lo.x + hi.x);
+      const double cy = 0.5 * (lo.y + hi.y);
+      if (std::fabs(cx + 17.0) <= 0.1 && std::fabs(cy) <= 0.1) ++at_minus17;
+      if (std::fabs(cx - 9.0) <= 0.1 && std::fabs(cy) <= 0.1) ++at_9;
+    }
+    CHECK(at_minus17 == 1 && at_9 == 1,
+          "one hole centered at (-17, 0) and one at (9, 0)");
+  }
+
+  // Tessellated volume approaches the analytic volume FROM ABOVE (the curved
+  // surfaces are holes — expected_values.json tessellated_volume_note).
   {
     const double vol = signed_volume(run.model.mesh);
-    CHECK(vol >= run.model.brep_volume - 1e-9 * run.model.brep_volume,
-          "tessellated volume is not below B-rep (holes shrink, solid grows)");
-    CHECK(vol <= run.model.brep_volume * 1.005,
-          "tessellated volume within 0.5% above B-rep at default deflection");
+    CHECK(vol >= analytic_volume - 1e-9 * analytic_volume,
+          "tessellated volume is not below analytic (holes shrink, solid grows)");
+    CHECK(vol <= analytic_volume * 1.005,
+          "tessellated volume within 0.5% above analytic at default deflection");
   }
 
   // --- Run invariants (expected_values.json cli_run_invariants) ---------------

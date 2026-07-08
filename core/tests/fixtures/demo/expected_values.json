@@ -1,5 +1,6 @@
 {
-  "_comment": "Ground truth for the M6.2 demo job (maintainer-authored; geometry facts verified from the committed l-bracket.step bytes per the provenance rule, DECISIONS.md 2026-07-04). The CLI integration test asserts the geometry facts exactly and the run facts as BEHAVIORAL INVARIANTS - no compliance or stress values are pinned (they depend on iteration count and solver tolerances; the physics gates V1-V5 already pin the numerics elsewhere).",
+  "_comment": "Ground truth for the M6.2 demo job (maintainer-authored; geometry facts verified from the committed l-bracket.step bytes per the provenance rule, DECISIONS.md 2026-07-04). The CLI integration test asserts the geometry facts exactly and the run facts as BEHAVIORAL INVARIANTS - no compliance or stress values are pinned.",
+  "_erratum": "2026-07-10: volume, bounding box, hole z-range and geometry description corrected. The original values were fabricated by a faulty reviewer analysis that mistook STEP surface-placement origins (AXIS2_PLACEMENT_3D anchor points, which may sit off the solid) for topological vertices, inventing a 16 mm plate and an 84 mm wall that never existed. Found by agent run 030 (handoff 030, Blocked), which measured the committed bytes via OCCT and correctly declined both to assert the stale values and to author replacements. Values below are computed from the file's topological vertices and match run 030's OCCT measurements to all printed digits. Lesson recorded: golden values must come from the committed bytes READ CORRECTLY - vertex-level extraction or kernel measurement, never all-points sweeps.",
   "l-bracket.step": {
     "schema": "AP242",
     "units": "millimetre",
@@ -8,22 +9,22 @@
     "planar_faces": 8,
     "cylindrical_faces": 2,
     "cylindrical_radius_mm": 2.5,
-    "hole_axes": "both +Z, centers (x,y) = (-17,0) and (9,0), through the mounting plate z in [-16, 0]",
-    "analytic_volume_mm3": 59531.68146928204,
+    "hole_axes": "both +Z, centers (x,y) = (-17,0) and (9,0), through the mounting plate z in [0, 8]",
+    "analytic_volume_mm3": 35525.840734641024,
     "brep_volume_rel_tolerance": 1e-6,
-    "bounding_box_min": [-30.0, -20.0, -16.0],
-    "bounding_box_max": [30.0, 20.0, 68.0],
-    "geometry": "L-bracket: mounting plate 60 x 40 x 16 (z in [-16,0]) with two O5 through-holes; upright wall 8 thick (x in [22,30]) x 40 deep x 84 tall (z in [-16,68]).",
-    "tessellated_volume_note": "OPPOSITE of the cylinder fixture: the curved surfaces here are HOLES, so chordal tessellation makes the holes smaller and the SOLID volume LARGER than analytic. Tessellated volume approaches 59531.68... FROM ABOVE as deflection tightens; do not assert 'below analytic'."
+    "bounding_box_min": [-30.0, -20.0, 0.0],
+    "bounding_box_max": [30.0, 20.0, 60.0],
+    "geometry": "L-bracket: mounting plate 60 x 40 x 8 (z in [0,8]) with two O5 through-holes; upright wall 8 thick (x in [22,30]) x 40 deep x 60 tall (z in [0,60]).",
+    "tessellated_volume_note": "OPPOSITE of the cylinder fixture: the curved surfaces here are HOLES, so chordal tessellation makes the holes smaller and the SOLID volume LARGER than analytic. Tessellated volume approaches 35525.84... FROM ABOVE as deflection tightens; do not assert 'below analytic'."
   },
   "cli_run_invariants": {
     "fixture_face_match": "the cylindrical selector matches exactly 2 faces",
-    "expected_outcome": "accept-all: real PLA under self-weight at this scale has an enormous margin on every rung (handoff 028's warning states this explicitly), so ALL THREE ladder rungs are accepted, stopped_on_margin = false, and the report holds exactly 3 variants with volume fractions descending [0.7, 0.5, 0.3] (each within 0.01 of its request).",
+    "expected_outcome": "accept-all: real PLA under self-weight at this scale has an enormous margin on every rung (handoff 028's warning states this explicitly; run 030 measured ~2.5e3), so ALL THREE ladder rungs are accepted, stopped_on_margin = false, and the report holds exactly 3 variants with volume fractions descending [0.7, 0.5, 0.3] (each within 0.01 of its request).",
     "orientation": "every variant reports build direction [0, 0, 1] (unit negation of the job's gravity direction)",
     "margins": "every variant's worst-case margin > margin_stop (1.5) by a large factor; the margin fields are numbers or null per the M5.2 schema - do not pin values",
-    "settings_prediction": "with margins far above 4.0 and max part dimension 84 mm (size class medium, no modifier), every variant gets rules.json's final band exactly: walls 2, top_layers 4, bottom_layers 3, infill 15% grid - a strong, fully determined check of the rules wiring",
+    "settings_prediction": "with margins far above 4.0 and max part dimension 60 mm (size class medium, no modifier), every variant gets rules.json's final band exactly: walls 2, top_layers 4, bottom_layers 3, infill 15% grid - a strong, fully determined check of the rules wiring",
     "report": "the written report.json passes validate_job_report; material = 'PLA'; min_feature fields present per M5.2b",
-    "meshes": "one exported mesh per accepted variant (3 files), each re-importable with the M6.1 reader: watertight, single connected component, nonzero volume, volume within 0.5% of the in-memory variant mesh",
+    "meshes": "one exported mesh per accepted variant (3 files), each re-importable with the M6.1 reader: watertight, single connected component, nonzero |volume|, |volume| within 0.5% of the in-memory variant mesh",
     "determinism": "two CLI runs on this job produce byte-identical report.json"
   }
 }
