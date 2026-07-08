@@ -563,6 +563,309 @@ int main() {
     CHECK(opt_throws(o5), "optimize: filter_radius <= 0 throws");
   }
 
+  // ==========================================================================
+  // 9. Heaviside projection + beta continuation (M6.3). The exact analytic
+  //    spot values live in fixtures/benchmarks.json and are asserted in
+  //    test_gate_v2; here the projection functions are checked against their
+  //    mathematical properties and finite differences (independent ground
+  //    truth), and the staged simp_optimize loop against its contract.
+  // ==========================================================================
+  {
+    const double eta = 0.5;
+
+    // 9a. Function properties at eta = 0.5: fixed points 0 / 0.5 / 1, strict
+    //     monotonicity, the symmetry project(x) + project(1-x) = 1, and
+    //     sharpening with beta (higher beta pushes sub-threshold values down).
+    for (double beta : {1.0, 8.0, 32.0}) {
+      CHECK(near(topopt::heaviside_project(0.0, beta, eta), 0.0, 1e-12),
+            "projection: project(0) == 0");
+      CHECK(near(topopt::heaviside_project(0.5, beta, eta), 0.5, 1e-12),
+            "projection: project(eta) == eta at eta = 0.5");
+      CHECK(near(topopt::heaviside_project(1.0, beta, eta), 1.0, 1e-12),
+            "projection: project(1) == 1");
+      CHECK(topopt::heaviside_project(0.3, beta, eta) <
+                topopt::heaviside_project(0.5, beta, eta) &&
+            topopt::heaviside_project(0.5, beta, eta) <
+                topopt::heaviside_project(0.7, beta, eta),
+            "projection: strictly monotone in rho_tilde");
+      CHECK(near(topopt::heaviside_project(0.3, beta, eta) +
+                     topopt::heaviside_project(0.7, beta, eta),
+                 1.0, 1e-12),
+            "projection: project(x) + project(1-x) == 1 at eta = 0.5");
+      CHECK(topopt::heaviside_project_derivative(0.5, beta, eta) > 0.0,
+            "projection: derivative positive at the threshold");
+    }
+    CHECK(topopt::heaviside_project(0.3, 32.0, eta) <
+              topopt::heaviside_project(0.3, 1.0, eta),
+          "projection: higher beta pushes sub-threshold density toward 0");
+    CHECK(topopt::heaviside_project(0.7, 32.0, eta) >
+              topopt::heaviside_project(0.7, 1.0, eta),
+          "projection: higher beta pushes super-threshold density toward 1");
+
+    // 9b. Derivative vs central finite difference of the value.
+    {
+      const double h = 1e-6;
+      double worst = 0.0;
+      for (double beta : {1.0, 8.0}) {
+        for (double rt : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+          const double fd = (topopt::heaviside_project(rt + h, beta, eta) -
+                             topopt::heaviside_project(rt - h, beta, eta)) /
+                            (2.0 * h);
+          const double an = topopt::heaviside_project_derivative(rt, beta, eta);
+          const double rel = std::fabs(fd - an) / std::max(std::fabs(an), 1e-30);
+          worst = std::max(worst, rel);
+          CHECK(rel < 1e-6,
+                "projection: derivative matches central finite difference");
+        }
+      }
+      std::printf("projection derivative FD: worst relative error %.3e\n",
+                  worst);
+    }
+
+    // 9c. Argument validation of the projection functions.
+    {
+      auto proj_throws = [](double rt, double beta, double e) {
+        try {
+          topopt::heaviside_project(rt, beta, e);
+        } catch (const std::invalid_argument&) {
+          return true;
+        } catch (...) {
+          return false;
+        }
+        return false;
+      };
+      CHECK(proj_throws(0.5, 0.0, 0.5), "projection: beta <= 0 throws");
+      CHECK(proj_throws(0.5, 8.0, 0.0), "projection: eta <= 0 throws");
+      CHECK(proj_throws(0.5, 8.0, 1.0), "projection: eta >= 1 throws");
+    }
+  }
+
+  // ==========================================================================
+  // 10. M6.3 GATE (chain rule): the projected compliance gradient — the
+  //     projection derivative chained BEFORE the filter transpose,
+  //     dc/dx = H^T((dc/drho_bar * drho_bar/drho_tilde)/Hs) — matches a
+  //     central finite difference of the composed objective
+  //     c(project(filter(x))) on a tiny non-uniform grid. Likewise for the
+  //     projected volume V(x) = sum_e project(filter(x))_e whose design-space
+  //     gradient is H^T(drho_bar/drho_tilde / Hs). These are the two
+  //     sensitivities the projected OC update consumes.
+  // ==========================================================================
+  {
+    SimpParams p;
+    p.youngs_modulus = 2100.0;
+    p.poisson = 0.3;
+    p.penalty = 3.0;
+    p.density_min = 1e-3;
+    const double beta = 8.0, eta = 0.5;
+
+    VoxelGrid g = make_solid_grid(4, 2, 2, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -4.0);
+    DensityFilter f = topopt::make_density_filter(g, 1.5);
+
+    // Deterministic non-uniform design in [0.4, 0.9]: filtered and projected
+    // values stay strictly inside (density_min, 1), so the clamp is inactive
+    // and the composed objective is smooth.
+    const std::size_t N = g.voxel_count();
+    std::vector<double> x(N, 0.0);
+    for (std::size_t e = 0; e < N; ++e)
+      x[e] = 0.4 + 0.5 * (static_cast<double>(e) / static_cast<double>(N - 1));
+
+    const double tol = 1e-13;
+    const int maxit = 8000;
+    auto composed = [&](const std::vector<double>& xd) {
+      std::vector<double> xt = f.filter_density(xd);
+      std::vector<double> xb(xt.size(), 0.0);
+      for (std::size_t e = 0; e < xt.size(); ++e)
+        xb[e] = topopt::heaviside_project(xt[e], beta, eta);
+      return topopt::simp_compliance(g, p, xb, bcs, loads, tol, maxit);
+    };
+    auto proj_volume = [&](const std::vector<double>& xd) {
+      std::vector<double> xt = f.filter_density(xd);
+      double v = 0.0;
+      for (std::size_t e = 0; e < xt.size(); ++e)
+        v += topopt::heaviside_project(xt[e], beta, eta);
+      return v;
+    };
+
+    // Analytic design-space gradients per the locked chain.
+    const std::vector<double> xtilde = f.filter_density(x);
+    SimpCompliance base = composed(x);
+    CHECK(base.cg.converged, "projected chain: base CG converged");
+    std::vector<double> dc_phys(N, 0.0), dproj(N, 0.0);
+    for (std::size_t e = 0; e < N; ++e) {
+      dproj[e] = topopt::heaviside_project_derivative(xtilde[e], beta, eta);
+      dc_phys[e] = base.dcompliance[e] * dproj[e];
+    }
+    const std::vector<double> dc = f.filter_sensitivity(dc_phys);
+    const std::vector<double> dv = f.filter_sensitivity(dproj);
+
+    const double h = 1e-4;
+    const std::size_t probes[] = {0, 3, 7, 11, N - 1};
+    double worst_c = 0.0, worst_v = 0.0;
+    for (std::size_t e : probes) {
+      std::vector<double> xp = x, xm = x;
+      xp[e] += h;
+      xm[e] -= h;
+      const double fd_c =
+          (composed(xp).compliance - composed(xm).compliance) / (2.0 * h);
+      const double rel_c =
+          std::fabs(fd_c - dc[e]) / std::max(std::fabs(dc[e]), 1e-30);
+      worst_c = std::max(worst_c, rel_c);
+      CHECK(rel_c < 1e-3,
+            "projected chain: dc/dx matches FD of c(project(filter(x)))");
+      const double fd_v = (proj_volume(xp) - proj_volume(xm)) / (2.0 * h);
+      const double rel_v =
+          std::fabs(fd_v - dv[e]) / std::max(std::fabs(dv[e]), 1e-30);
+      worst_v = std::max(worst_v, rel_v);
+      CHECK(rel_v < 1e-6,
+            "projected chain: dV/dx matches FD of the projected volume");
+    }
+    std::printf(
+        "projected chain FD: worst compliance rel %.3e, volume rel %.3e\n",
+        worst_c, worst_v);
+  }
+
+  // ==========================================================================
+  // 11. Staged projected simp_optimize (M6.3): beta continuation mechanics,
+  //     per-stage move limits, self-consistent projected final state, the
+  //     projected volume constraint, mask pins under projection, and argument
+  //     validation. A short synthetic schedule keeps this a unit test; the
+  //     locked 6x50 benchmark schedule is exercised by test_gate_v2.
+  // ==========================================================================
+  {
+    VoxelGrid g = make_solid_grid(8, 4, 4, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -1.0);
+
+    SimpParams p;
+    p.youngs_modulus = 1.0;
+    p.poisson = 0.3;
+    p.penalty = 3.0;
+    p.density_min = 1e-3;
+
+    SimpOptions opt;
+    opt.volume_fraction = 0.4;
+    opt.filter_radius = 1.5;
+    opt.move = 0.2;          // ignored in projected mode (per-stage moves)
+    opt.max_iterations = 60; // ignored in projected mode (per-stage iterations)
+    opt.change_tol = 0.0;
+    opt.cg_tolerance = 1e-9;
+    opt.projection = {{1.0, 0.2, 6}, {2.0, 0.1, 5}, {4.0, 0.05, 4}};
+    opt.projection_eta = 0.5;
+
+    // 11a. Default options run the legacy (unprojected) loop: the projection
+    //      schedule is empty by default.
+    CHECK(SimpOptions{}.projection.empty(),
+          "projected optimize: projection disabled by default");
+
+    SimpOptimizeResult r = topopt::simp_optimize(g, p, bcs, loads, opt);
+
+    // 11b. Iteration accounting: sum of stage iterations, one history entry
+    //      per iteration, no convergence flag at change_tol 0.
+    CHECK(r.iterations == 15,
+          "projected optimize: iterations == sum of stage iterations");
+    CHECK(r.history.size() == 15,
+          "projected optimize: one history entry per iteration");
+    CHECK(!r.converged, "projected optimize: change_tol 0 never converges");
+
+    // 11c. Per-stage move limits honoured (0.2 / 0.1 / 0.05).
+    bool moves_ok = true;
+    for (std::size_t it = 0; it < r.history.size(); ++it) {
+      const double mv = it < 6 ? 0.2 : (it < 11 ? 0.1 : 0.05);
+      if (r.history[it].change > mv + 1e-9) moves_ok = false;
+    }
+    CHECK(moves_ok, "projected optimize: per-stage move limits respected");
+
+    // 11d. Self-consistent projected final state: physical_density ==
+    //      project(filter(design)) at the LAST stage's beta, compliance ==
+    //      compliance(physical_density), volume_fraction == mean projected
+    //      density == target (the constraint is on the projected field).
+    DensityFilter f = topopt::make_density_filter(g, opt.filter_radius);
+    std::vector<double> xt = f.filter_density(r.design);
+    bool phys_ok = xt.size() == r.physical_density.size();
+    double vol = 0.0;
+    for (std::size_t e = 0; phys_ok && e < xt.size(); ++e) {
+      const double xb = topopt::heaviside_project(xt[e], 4.0, 0.5);
+      if (!near(xb, r.physical_density[e], 1e-12)) phys_ok = false;
+      vol += xb;
+    }
+    CHECK(phys_ok,
+          "projected optimize: physical_density == project(filter(design))");
+    CHECK(near(vol / static_cast<double>(g.voxel_count()), r.volume_fraction,
+               1e-12),
+          "projected optimize: volume_fraction is the projected fraction");
+    CHECK(near(r.volume_fraction, opt.volume_fraction, 1e-2),
+          "projected optimize: projected volume fraction meets the target");
+    SimpCompliance rc = topopt::simp_compliance(
+        g, p, r.physical_density, bcs, loads, opt.cg_tolerance, 0);
+    CHECK(near(r.compliance, rc.compliance, 1e-5 * std::fabs(rc.compliance)),
+          "projected optimize: compliance == compliance(physical_density)");
+    CHECK(r.compliance > 0.0 && r.compliance < r.initial_compliance,
+          "projected optimize: compliance reduced from the uniform start");
+
+    // 11e. change_tol still ends a stage early (each stage re-converges, then
+    //      continuation moves on): a huge tolerance stops every stage after
+    //      one iteration.
+    SimpOptions early = opt;
+    early.change_tol = 1.0;
+    SimpOptimizeResult re = topopt::simp_optimize(g, p, bcs, loads, early);
+    CHECK(re.iterations == 3,
+          "projected optimize: loose change_tol runs one iteration per stage");
+    CHECK(re.converged,
+          "projected optimize: early stop of the last stage flags converged");
+
+    // 11f. Masked overload under projection: FrozenVoid stays exactly 0,
+    //      FrozenSolid exactly 1 in the projected physical density; the run
+    //      completes with the same iteration accounting.
+    topopt::DesignMask mask = topopt::make_active_mask(g);
+    for (int j = 0; j < g.ny; ++j)  // a keep-out channel through mid-x
+      mask[g.index(4, j, 2)] = topopt::MaskValue::FrozenVoid;
+    mask[g.index(1, 1, 1)] = topopt::MaskValue::FrozenSolid;
+    SimpOptimizeResult rm = topopt::simp_optimize(g, p, bcs, loads, opt, mask);
+    CHECK(rm.iterations == 15,
+          "projected masked: iterations == sum of stage iterations");
+    bool pins_ok = true;
+    for (int j = 0; j < g.ny; ++j)
+      if (!near(rm.physical_density[g.index(4, j, 2)], 0.0, 0.0))
+        pins_ok = false;
+    CHECK(pins_ok, "projected masked: FrozenVoid physical density pinned 0");
+    CHECK(near(rm.physical_density[g.index(1, 1, 1)], 1.0, 0.0),
+          "projected masked: FrozenSolid physical density pinned 1");
+
+    // 11g. Argument validation of the projection schedule (both overloads).
+    auto opt_throws = [&](const SimpOptions& o) {
+      try {
+        topopt::simp_optimize(g, p, bcs, loads, o);
+      } catch (const std::invalid_argument&) {
+        return true;
+      } catch (...) {
+        return false;
+      }
+      return false;
+    };
+    auto opt_throws_masked = [&](const SimpOptions& o) {
+      try {
+        topopt::simp_optimize(g, p, bcs, loads, o, mask);
+      } catch (const std::invalid_argument&) {
+        return true;
+      } catch (...) {
+        return false;
+      }
+      return false;
+    };
+    SimpOptions b0 = opt; b0.projection[1].beta = 0.0;
+    SimpOptions b1 = opt; b1.projection[0].move = 0.0;
+    SimpOptions b2 = opt; b2.projection[2].iterations = 0;
+    SimpOptions b3 = opt; b3.projection_eta = 1.0;
+    CHECK(opt_throws(b0), "projected optimize: stage beta <= 0 throws");
+    CHECK(opt_throws(b1), "projected optimize: stage move <= 0 throws");
+    CHECK(opt_throws(b2), "projected optimize: stage iterations < 1 throws");
+    CHECK(opt_throws(b3), "projected optimize: eta outside (0,1) throws");
+    CHECK(opt_throws_masked(b0), "projected masked: stage beta <= 0 throws");
+    CHECK(opt_throws_masked(b3), "projected masked: bad eta throws");
+  }
+
   if (g_failures == 0) {
     std::printf("simp: all %d checks passed\n", g_checks);
     return 0;
