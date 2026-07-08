@@ -121,6 +121,7 @@
 - [x] M6.2 `topopt-cli run job.json`: the canonical headless entry point
       driving the full pipeline. Integration test = the demo job checked
       into fixtures.
+- [x] M6.2b Re-enable exact volume/bbox assertions in cli_demo against the corrected expected_values.json; flip marching-cubes winding to outward and tighten M6.1/M6.2 volume comparisons to sign-exact."
 - [ ] M6.3 (post-M6, before M7 ships) Minimum length scale via single-field
       Heaviside projection: design -> density filter -> tanh projection
       (sharpness beta) -> analysis, with the projection derivative chained
