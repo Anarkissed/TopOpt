@@ -233,8 +233,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 //     the volume constraint volume_fraction * (number of Active voxels).
 // Load and Fixture voxels (M1.6) are treated as implicitly FrozenSolid whatever
 // their mask entry, so they are retained at density 1 — the §7 V3 Load/Fixture
-// retention gate becomes structural rather than emergent. The density filter
-// does not bleed across mask boundaries (make_density_filter mask overload).
+// retention gate becomes structural rather than emergent. Empty voxels are
+// never design variables: their mask entry is ignored (voxel.hpp) and they are
+// excluded from the Active-voxel budget, so a part that does not fill its
+// bounding grid still targets volume_fraction of the PART, not of the grid.
+// The density filter does not bleed across mask boundaries
+// (make_density_filter mask overload).
 //
 // The returned `design` and `physical_density` carry the pins (FrozenSolid 1,
 // FrozenVoid 0), so unlike the unconstrained overload physical_density is NOT

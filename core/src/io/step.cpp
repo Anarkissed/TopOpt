@@ -4,12 +4,15 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <stdexcept>
 #include <utility>
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRep_Tool.hxx>
 #include <GProp_GProps.hxx>
+#include <GeomAbs_SurfaceType.hxx>
 #include <IFSelect_ReturnStatus.hxx>
 #include <Poly_Triangulation.hxx>
 #include <STEPControl_Reader.hxx>
@@ -20,6 +23,7 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
@@ -89,8 +93,29 @@ StepModel import_step_file(const std::string& path,
     ++model.solid_count;
   if (model.solid_count == 0)
     throw StepError("STEP file contains no solid: " + path);
-  for (TopExp_Explorer e(shape, TopAbs_FACE); e.More(); e.Next())
+  // Per-face surface classification (M6.2 geometric face selection): one
+  // StepFaceInfo per face, in the same TopExp order as triangle_face below.
+  // BRepAdaptor_Surface sees through the face's trimming to the underlying
+  // surface type; only the classes the job schema selects on are distinguished.
+  for (TopExp_Explorer e(shape, TopAbs_FACE); e.More(); e.Next()) {
     ++model.face_count;
+    const BRepAdaptor_Surface surf(TopoDS::Face(e.Current()),
+                                   /*restriction=*/Standard_False);
+    StepFaceInfo info;
+    switch (surf.GetType()) {
+      case GeomAbs_Plane:
+        info.kind = StepSurfaceKind::Plane;
+        break;
+      case GeomAbs_Cylinder:
+        info.kind = StepSurfaceKind::Cylinder;
+        info.cylinder_radius_mm = surf.Cylinder().Radius();
+        break;
+      default:
+        info.kind = StepSurfaceKind::Other;
+        break;
+    }
+    model.faces.push_back(info);
+  }
 
   GProp_GProps props;
   BRepGProp::VolumeProperties(shape, props);

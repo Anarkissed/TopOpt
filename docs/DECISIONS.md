@@ -69,3 +69,10 @@ Eigen-free public API. Approved by Nadim.
 - 2026-07-08: settings/rules.json is human-seeded (maintainer commits initial table, drafted by reviewer); agents implement the engine and may propose rule changes only via Blocked. The margin_definition in rules.json semantics_locked is binding on M5.2/M5.3's margin computation.
 - 2026-07-09: M7 task ladder committed from the Claude Design export; /app/ verification standard = xcodebuild test output + maintainer device QA; design HTML is the visual source of truth
 - 2026-07-09: M6.2 demo fixture committed (bracket modeled by maintainer, job/expected values by reviewer from committed bytes). job.json defines the CLI input schema; face selection is geometric by locked rule — the CLI must never expose raw OCCT face indices.
+- 2026-07-10: Re handoff 030 (Blocked): demo fixture erratum confirmed —
+  reviewer's original expected_values geometry was wrong (placement origins
+  misread as vertices); the committed l-bracket.step was correct all along.
+  Regenerated from topological vertices, matching run 030's OCCT measurements.
+  Also: §3 layout amended — core/src/cli/ added for the M6.2 executable and
+  job driver. MC winding decision: exported meshes are currently wound inward;
+  flip to outward as a small follow-up task before M6.3.
