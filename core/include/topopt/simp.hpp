@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept>
 #include <vector>
 
 #include "topopt/fea.hpp"
@@ -158,6 +159,51 @@ std::vector<double> oc_update(const VoxelGrid& grid, const DensityFilter& filter
                               double density_min = 1e-3);
 
 // ---------------------------------------------------------------------------
+// Single-field Heaviside projection + beta continuation (ROADMAP M6.3).
+//
+// Minimum-length-scale control via the smoothed Heaviside threshold of Wang/
+// Lazarov/Sigmund (2011), single-field ("cheap") variant — no robust eroded/
+// nominal/dilated three-solve formulation. The analysis chain becomes
+//     x (design) --density filter--> rho_tilde --projection--> rho_bar
+//       --clamp[rho_min,1]--> E = rho_bar^p * E0,
+// with (eta = 0.5 threshold, beta = sharpness):
+//     rho_bar = (tanh(beta*eta) + tanh(beta*(rho_tilde - eta)))
+//             / (tanh(beta*eta) + tanh(beta*(1 - eta))).
+// The formulation (schedule, move limits, OC ratio guard, volume constraint on
+// the PROJECTED density, derivative chained BEFORE the filter transpose) is
+// locked by tests/fixtures/benchmarks.json "formulation_locked" and gated by
+// test_gate_v2 (Gate V2, projected).
+
+// The projection value rho_bar(rho_tilde) above. Monotone increasing, fixes
+// 0 -> 0 and 1 -> 1, and rho_bar(eta) = eta at eta = 0.5. Throws
+// std::invalid_argument if beta <= 0 (or not finite) or eta outside (0, 1).
+double heaviside_project(double rho_tilde, double beta, double eta = 0.5);
+
+// Its derivative d rho_bar / d rho_tilde
+//     = beta * sech^2(beta*(rho_tilde - eta))
+//     / (tanh(beta*eta) + tanh(beta*(1 - eta)))    (> 0, underflows toward 0
+// far from the threshold at high beta — see the OC guard note on
+// SimpOptions::projection). Same validation as heaviside_project.
+double heaviside_project_derivative(double rho_tilde, double beta,
+                                    double eta = 0.5);
+
+// One stage of the beta-continuation schedule: run `iterations` OC updates at
+// sharpness `beta` with OC move limit `move`, then continue with the next
+// stage (re-converging at each step).
+struct ProjectionStage {
+  double beta = 1.0;    // projection sharpness for this stage (> 0)
+  double move = 0.2;    // OC move limit for this stage (> 0)
+  int iterations = 50;  // OC iterations in this stage (>= 1)
+};
+
+// The locked continuation schedule of benchmarks.json "formulation_locked":
+// beta in {1, 2, 4, 8, 16, 32} (doubling), exactly 50 OC iterations per stage
+// (300 total), move 0.2 for beta <= 8, damped to 0.1 at beta = 16 and 0.05 at
+// beta = 32 (undamped high-beta moves produce structure-splitting oscillation;
+// beta = 64 is excluded — measured, continuation destroys the structure).
+std::vector<ProjectionStage> heaviside_continuation_schedule();
+
+// ---------------------------------------------------------------------------
 // Full volume-fraction-targeted SIMP optimization loop (ROADMAP M3.4).
 //
 // Ties the M3.2 penalized compliance/sensitivities together with the M3.3
@@ -180,6 +226,26 @@ struct SimpOptions {
   double change_tol = 0.01;      // stop when max_e |x_new - x| < change_tol
   double cg_tolerance = 1e-8;    // penalized-FEA CG tolerance (tight: §V2 gate)
   int cg_max_iterations = 0;     // 0 -> Eigen CG default (2 * n_dof)
+
+  // Heaviside projection + beta continuation (M6.3). EMPTY (the default)
+  // disables projection entirely: the loop is the unchanged M3.4 formulation
+  // above and `move` / `max_iterations` govern it. Non-empty: the loop runs
+  // the stages in order — each stage runs its own `iterations` OC updates at
+  // its own `beta` and `move` (stopping a stage early when the design change
+  // drops below change_tol, then continuing with the next stage), and `move` /
+  // `max_iterations` above are NOT consulted. The analysis density becomes
+  // rho_bar = heaviside_project(filter(x), stage beta, projection_eta); the
+  // volume constraint is enforced on the PROJECTED density; the compliance and
+  // volume sensitivities chain the projection derivative BEFORE the filter
+  // transpose; and the OC ratio -dc/(lambda*dv) is computed with UNCLAMPED dv,
+  // holding the design variable (ratio treated as 1) where it is non-finite
+  // (0/0 at high beta: a voxel whose whole filter neighbourhood has zero
+  // projection derivative). All locked by benchmarks.json "formulation_locked"
+  // — in particular, dv must never be clamped at an absolute floor (measured:
+  // that drags exactly the should-not-move voxels to the bound and destroys
+  // the design at beta >= 32).
+  std::vector<ProjectionStage> projection;
+  double projection_eta = 0.5;  // projection threshold, in (0, 1)
 };
 
 // One recorded step of the SIMP trajectory.
@@ -191,7 +257,10 @@ struct SimpIteration {
 
 // Result of simp_optimize. `design`, `physical_density` and `compliance` are
 // mutually consistent: compliance == compliance(physical_density) (a final solve
-// on the converged field), and physical_density == filter(design).
+// on the converged field), and physical_density == filter(design) — or, when a
+// projection schedule is set (M6.3), physical_density ==
+// heaviside_project(filter(design), last stage's beta, projection_eta) and
+// `volume_fraction` is the achieved PROJECTED volume fraction.
 struct SimpOptimizeResult {
   std::vector<double> design;            // final design variable x (grid-indexed)
   std::vector<double> physical_density;  // final xPhys = filter(x) (grid-indexed)

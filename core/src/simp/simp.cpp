@@ -34,6 +34,35 @@ double clamp_density(const SimpParams& p, double density) {
   return std::min(1.0, std::max(p.density_min, density));
 }
 
+// Shared validation of the Heaviside projection parameters (M6.3).
+void validate_projection_args(double beta, double eta) {
+  if (!(beta > 0.0) || !std::isfinite(beta))
+    throw std::invalid_argument(
+        "heaviside_project: beta must be finite and > 0");
+  if (!(eta > 0.0 && eta < 1.0))
+    throw std::invalid_argument("heaviside_project: eta must be in (0, 1)");
+}
+
+// Validate a SimpOptions projection schedule (empty = projection disabled; the
+// eta and per-stage parameters are then never consulted).
+void validate_projection_options(const SimpOptions& o) {
+  if (o.projection.empty()) return;
+  if (!(o.projection_eta > 0.0 && o.projection_eta < 1.0))
+    throw std::invalid_argument(
+        "simp_optimize: projection_eta must be in (0, 1)");
+  for (const ProjectionStage& s : o.projection) {
+    if (!(s.beta > 0.0) || !std::isfinite(s.beta))
+      throw std::invalid_argument(
+          "simp_optimize: projection stage beta must be finite and > 0");
+    if (!(s.move > 0.0))
+      throw std::invalid_argument(
+          "simp_optimize: projection stage move must be > 0");
+    if (s.iterations < 1)
+      throw std::invalid_argument(
+          "simp_optimize: projection stage iterations must be >= 1");
+  }
+}
+
 }  // namespace
 
 double simp_youngs(const SimpParams& params, double density) {
@@ -49,6 +78,35 @@ std::vector<double> simp_uniform_density(const VoxelGrid& grid, double value) {
       for (int i = 0; i < grid.nx; ++i)
         if (grid.solid(i, j, k)) density[grid.index(i, j, k)] = value;
   return density;
+}
+
+// ---------------------------------------------------------------------------
+// Single-field Heaviside projection (ROADMAP M6.3). The tanh threshold of
+// Wang/Lazarov/Sigmund (2011) and its derivative, exactly as locked by
+// tests/fixtures/benchmarks.json "formulation_locked" (eta = 0.5 there; the
+// projected analysis chain and its use inside simp_optimize live below).
+
+double heaviside_project(double rho_tilde, double beta, double eta) {
+  validate_projection_args(beta, eta);
+  const double denom =
+      std::tanh(beta * eta) + std::tanh(beta * (1.0 - eta));
+  return (std::tanh(beta * eta) + std::tanh(beta * (rho_tilde - eta))) / denom;
+}
+
+double heaviside_project_derivative(double rho_tilde, double beta, double eta) {
+  validate_projection_args(beta, eta);
+  const double denom =
+      std::tanh(beta * eta) + std::tanh(beta * (1.0 - eta));
+  const double ch = std::cosh(beta * (rho_tilde - eta));
+  return beta / (ch * ch * denom);  // beta * sech^2(...) / denom
+}
+
+std::vector<ProjectionStage> heaviside_continuation_schedule() {
+  // Locked by benchmarks.json "formulation_locked": beta doubling 1 -> 32,
+  // exactly 50 OC iterations per stage, move damped to 0.1 / 0.05 at the two
+  // sharpest stages. beta = 64 is excluded (measured: destroys the structure).
+  return {{1.0, 0.2, 50},  {2.0, 0.2, 50}, {4.0, 0.2, 50},
+          {8.0, 0.2, 50},  {16.0, 0.1, 50}, {32.0, 0.05, 50}};
 }
 
 SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
@@ -300,10 +358,140 @@ std::vector<double> oc_update(const VoxelGrid& grid, const DensityFilter& filter
 }
 
 // ---------------------------------------------------------------------------
-// Full volume-fraction-targeted SIMP loop (ROADMAP M3.4). Assembles the M3.2
-// compliance/gradient, the M3.3 density filter and OC update into the classic
-// minimum-compliance loop with two convergence criteria: a design-change
-// tolerance and a hard iteration cap.
+// Full volume-fraction-targeted SIMP loop (ROADMAP M3.4), staged for the M6.3
+// Heaviside-projection beta continuation. Assembles the M3.2 compliance/
+// gradient, the M3.3 density filter and OC update into the classic minimum-
+// compliance loop with two convergence criteria: a design-change tolerance and
+// a per-stage iteration cap. An empty projection schedule runs a single
+// unprojected stage — exactly the pre-M6.3 loop.
+
+namespace {
+
+// One executed stage of the loop: the pre-M6.3 loop is a single stage with
+// project == false, move/iterations from the top-level options.
+struct StagePlan {
+  bool project = false;
+  double beta = 0.0;
+  double move = 0.2;
+  int iterations = 0;
+};
+
+std::vector<StagePlan> build_stage_plan(const SimpOptions& options) {
+  std::vector<StagePlan> plan;
+  if (options.projection.empty()) {
+    plan.push_back({false, 0.0, options.move, options.max_iterations});
+  } else {
+    plan.reserve(options.projection.size());
+    for (const ProjectionStage& ps : options.projection)
+      plan.push_back({true, ps.beta, ps.move, ps.iterations});
+  }
+  return plan;
+}
+
+std::size_t total_stage_iterations(const std::vector<StagePlan>& plan) {
+  std::size_t n = 0;
+  for (const StagePlan& st : plan) n += static_cast<std::size_t>(st.iterations);
+  return n;
+}
+
+// Project the design (solid) voxels of a filtered field in place; Empty
+// voxels stay exactly 0.
+void project_solid(const VoxelGrid& grid, std::vector<double>& x, double beta,
+                   double eta) {
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i)
+        if (grid.solid(i, j, k)) {
+          const std::size_t e = grid.index(i, j, k);
+          x[e] = heaviside_project(x[e], beta, eta);
+        }
+}
+
+// Projected Optimality-Criteria update (M6.3). Same bisection structure as
+// oc_update, with the three locked differences (benchmarks.json
+// "formulation_locked" / "oc_guard_locked"):
+//   * both sensitivities chain the projection derivative BEFORE the filter
+//     transpose: dc/dx = H^T((dc/drho_bar * drho_bar/drho_tilde)/Hs), and the
+//     volume sensitivity is H^T(drho_bar/drho_tilde / Hs);
+//   * the volume constraint is enforced on the PROJECTED candidate density;
+//   * the elementwise OC ratio -dc/(lambda*dv) uses UNCLAMPED dv — dc and dv
+//     both carry the projection-derivative factor, so their ratio stays
+//     well-conditioned where either alone underflows; where the ratio is
+//     non-finite (0/0: a voxel whose whole filter neighbourhood has zero
+//     projection derivative) the design variable is HELD (Be = 1). Clamping
+//     dv at an absolute floor instead drags exactly the should-not-move
+//     voxels to the bound at move-limit speed and destroys the design at
+//     beta >= 32 (measured during fixture generation).
+// `xtilde` is the current filtered design filter_density(density).
+std::vector<double> oc_update_projected(
+    const VoxelGrid& grid, const DensityFilter& filter,
+    const std::vector<double>& density, const std::vector<double>& xtilde,
+    const std::vector<double>& dcompliance, double beta, double eta,
+    double volume_fraction, double move, double density_min) {
+  const std::size_t N = grid.voxel_count();
+  std::vector<double> dc_phys(N, 0.0), dproj(N, 0.0);
+  std::size_t n_design = 0;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t e = grid.index(i, j, k);
+        dproj[e] = heaviside_project_derivative(xtilde[e], beta, eta);
+        dc_phys[e] = dcompliance[e] * dproj[e];
+        ++n_design;
+      }
+  const std::vector<double> dc = filter.filter_sensitivity(dc_phys);
+  const std::vector<double> dv = filter.filter_sensitivity(dproj);
+  const double target = volume_fraction * static_cast<double>(n_design);
+
+  auto candidate = [&](double lambda) {
+    std::vector<double> xnew(N, 0.0);
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          if (!grid.solid(i, j, k)) continue;
+          const std::size_t e = grid.index(i, j, k);
+          const double xe = density[e];
+          double be = -dc[e] / (lambda * dv[e]);  // UNCLAMPED dv (locked)
+          if (!std::isfinite(be)) be = 1.0;       // 0/0 -> hold this voxel
+          if (be < 0.0) be = 0.0;                 // guard rounding
+          double xt = xe * std::sqrt(be);
+          const double lo = std::max(density_min, xe - move);
+          const double hi = std::min(1.0, xe + move);
+          if (xt < lo) xt = lo;
+          if (xt > hi) xt = hi;
+          xnew[e] = xt;
+        }
+    return xnew;
+  };
+
+  // PROJECTED volume of a candidate, summed over design voxels (the volume
+  // constraint is on rho_bar, and the OC bisection tests the projected volume
+  // of the candidate design — locked).
+  auto proj_vol = [&](const std::vector<double>& xnew) {
+    const std::vector<double> xp = filter.filter_density(xnew);
+    double v = 0.0;
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i)
+          if (grid.solid(i, j, k))
+            v += heaviside_project(xp[grid.index(i, j, k)], beta, eta);
+    return v;
+  };
+
+  double l1 = 0.0, l2 = 1.0;
+  while (l2 < 1e30 && proj_vol(candidate(l2)) > target) l2 *= 2.0;
+  for (int it = 0; it < 100 && (l2 - l1) > 1e-6 * (l1 + l2); ++it) {
+    const double lmid = 0.5 * (l1 + l2);
+    if (proj_vol(candidate(lmid)) > target)
+      l1 = lmid;
+    else
+      l2 = lmid;
+  }
+  return candidate(0.5 * (l1 + l2));
+}
+
+}  // namespace
 
 SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
                                  const std::vector<DirichletBC>& bcs,
@@ -318,10 +506,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     throw std::invalid_argument("simp_optimize: max_iterations must be >= 1");
   if (options.change_tol < 0.0)
     throw std::invalid_argument("simp_optimize: change_tol must be >= 0");
+  validate_projection_options(options);
 
   // make_density_filter validates filter_radius > 0.
   const DensityFilter filter = make_density_filter(grid, options.filter_radius);
   const double n_design = static_cast<double>(grid.solid_count());
+  const std::vector<StagePlan> plan = build_stage_plan(options);
+  const double eta = options.projection_eta;
 
   // Physical volume fraction of a grid-indexed physical density field.
   auto phys_volfrac = [&](const std::vector<double>& xphys) {
@@ -334,42 +525,63 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   std::vector<double> x = simp_uniform_density(grid, options.volume_fraction);
 
   SimpOptimizeResult result;
-  result.history.reserve(static_cast<std::size_t>(options.max_iterations));
+  result.history.reserve(total_stage_iterations(plan));
 
-  for (int it = 0; it < options.max_iterations; ++it) {
-    const std::vector<double> xphys = filter.filter_density(x);
-    const SimpCompliance c = simp_compliance(grid, params, xphys, bcs, loads,
-                                             options.cg_tolerance,
-                                             options.cg_max_iterations);
-    if (!c.cg.converged)
-      throw std::runtime_error(
-          "simp_optimize: penalized CG solve did not converge");
+  for (const StagePlan& st : plan) {
+    bool stage_converged = false;
+    for (int it = 0; it < st.iterations; ++it) {
+      std::vector<double> xphys = filter.filter_density(x);
+      if (st.project) project_solid(grid, xphys, st.beta, eta);
+      const SimpCompliance c = simp_compliance(grid, params, xphys, bcs, loads,
+                                               options.cg_tolerance,
+                                               options.cg_max_iterations);
+      if (!c.cg.converged)
+        throw std::runtime_error(
+            "simp_optimize: penalized CG solve did not converge");
 
-    const std::vector<double> x_new =
-        oc_update(grid, filter, x, c.dcompliance, options.volume_fraction,
-                  options.move, params.density_min);
+      std::vector<double> x_new;
+      if (st.project) {
+        // dproj needs the UNprojected filtered field: recompute it (xphys was
+        // projected in place above).
+        const std::vector<double> xtilde = filter.filter_density(x);
+        x_new = oc_update_projected(grid, filter, x, xtilde, c.dcompliance,
+                                    st.beta, eta, options.volume_fraction,
+                                    st.move, params.density_min);
+      } else {
+        x_new = oc_update(grid, filter, x, c.dcompliance,
+                          options.volume_fraction, st.move,
+                          params.density_min);
+      }
 
-    double change = 0.0;
-    for (std::size_t e = 0; e < x.size(); ++e)
-      change = std::max(change, std::fabs(x_new[e] - x[e]));
+      double change = 0.0;
+      for (std::size_t e = 0; e < x.size(); ++e)
+        change = std::max(change, std::fabs(x_new[e] - x[e]));
 
-    x = x_new;
-    result.iterations = it + 1;
-    result.history.push_back(
-        {c.compliance, change, phys_volfrac(filter.filter_density(x))});
-    if (it == 0) result.initial_compliance = c.compliance;
+      x = x_new;
+      if (result.iterations == 0) result.initial_compliance = c.compliance;
+      ++result.iterations;
+      std::vector<double> xafter = filter.filter_density(x);
+      if (st.project) project_solid(grid, xafter, st.beta, eta);
+      result.history.push_back({c.compliance, change, phys_volfrac(xafter)});
 
-    if (change < options.change_tol) {
-      result.converged = true;
-      break;
+      if (change < options.change_tol) {
+        stage_converged = true;
+        break;
+      }
     }
+    // The stage either re-converged (change_tol) or ran its cap; continuation
+    // proceeds either way. The loop is `converged` iff its LAST stage was.
+    result.converged = stage_converged;
   }
 
-  // Report a self-consistent final state: physical_density = filter(design) and
-  // compliance = compliance(physical_density) via one final solve on the
-  // converged field (so callers/property checks see matching values).
+  // Report a self-consistent final state: physical_density = filter(design)
+  // (projected at the final stage's beta when projecting) and compliance =
+  // compliance(physical_density) via one final solve on the converged field
+  // (so callers/property checks see matching values).
   result.design = x;
   result.physical_density = filter.filter_density(x);
+  if (plan.back().project)
+    project_solid(grid, result.physical_density, plan.back().beta, eta);
   const SimpCompliance fc =
       simp_compliance(grid, params, result.physical_density, bcs, loads,
                       options.cg_tolerance, options.cg_max_iterations);
@@ -493,6 +705,80 @@ std::vector<double> oc_update_masked(const VoxelGrid& grid,
   return candidate(0.5 * (l1 + l2));
 }
 
+// Project the Active voxels of a filtered field in place (M6.3). Frozen and
+// Empty voxels are left untouched (their physical density is pinned / 0
+// separately), mirroring the mask-aware filter's Active-only domain.
+void project_active(const DesignMask& eff, std::vector<double>& x, double beta,
+                    double eta) {
+  for (std::size_t e = 0; e < x.size(); ++e)
+    if (eff[e] == MaskValue::Active)
+      x[e] = heaviside_project(x[e], beta, eta);
+}
+
+// Projected Optimality-Criteria update restricted to Active voxels (M6.3):
+// oc_update_masked with the same three locked differences as
+// oc_update_projected (derivative chained before the filter transpose, volume
+// constraint on the projected Active density, unclamped-dv ratio with
+// 0/0 -> hold). `xtilde` is the current mask-aware filtered design.
+std::vector<double> oc_update_masked_projected(
+    const VoxelGrid& grid, const DensityFilter& filter, const DesignMask& eff,
+    const std::vector<double>& density, const std::vector<double>& xtilde,
+    const std::vector<double>& dcompliance, double beta, double eta,
+    double volume_fraction, double move, double density_min) {
+  const std::size_t N = grid.voxel_count();
+  std::vector<double> dc_phys(N, 0.0), dproj(N, 0.0);
+  std::size_t n_active = 0;
+  for (std::size_t e = 0; e < N; ++e)
+    if (eff[e] == MaskValue::Active) {
+      dproj[e] = heaviside_project_derivative(xtilde[e], beta, eta);
+      dc_phys[e] = dcompliance[e] * dproj[e];
+      ++n_active;
+    }
+  const std::vector<double> dc = filter.filter_sensitivity(dc_phys);
+  const std::vector<double> dv = filter.filter_sensitivity(dproj);
+  const double target = volume_fraction * static_cast<double>(n_active);
+
+  auto candidate = [&](double lambda) {
+    std::vector<double> xnew = density;  // preserves FrozenSolid=1, FrozenVoid=0
+    for (std::size_t e = 0; e < N; ++e) {
+      if (eff[e] != MaskValue::Active) continue;
+      const double xe = density[e];
+      double be = -dc[e] / (lambda * dv[e]);  // UNCLAMPED dv (locked)
+      if (!std::isfinite(be)) be = 1.0;       // 0/0 -> hold this voxel
+      if (be < 0.0) be = 0.0;                 // guard rounding
+      double xt = xe * std::sqrt(be);
+      const double lo = std::max(density_min, xe - move);
+      const double hi = std::min(1.0, xe + move);
+      if (xt < lo) xt = lo;
+      if (xt > hi) xt = hi;
+      xnew[e] = xt;
+    }
+    return xnew;
+  };
+
+  // PROJECTED volume of the Active voxels of a candidate (the mask-aware
+  // filter is 0 on frozen/empty voxels, which are excluded from the sum).
+  auto proj_vol = [&](const std::vector<double>& xnew) {
+    const std::vector<double> xp = filter.filter_density(xnew);
+    double v = 0.0;
+    for (std::size_t e = 0; e < N; ++e)
+      if (eff[e] == MaskValue::Active)
+        v += heaviside_project(xp[e], beta, eta);
+    return v;
+  };
+
+  double l1 = 0.0, l2 = 1.0;
+  while (l2 < 1e30 && proj_vol(candidate(l2)) > target) l2 *= 2.0;
+  for (int it = 0; it < 100 && (l2 - l1) > 1e-6 * (l1 + l2); ++it) {
+    const double lmid = 0.5 * (l1 + l2);
+    if (proj_vol(candidate(lmid)) > target)
+      l1 = lmid;
+    else
+      l2 = lmid;
+  }
+  return candidate(0.5 * (l1 + l2));
+}
+
 }  // namespace
 
 SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
@@ -511,6 +797,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     throw std::invalid_argument("simp_optimize: change_tol must be >= 0");
   if (mask.size() != grid.voxel_count())
     throw std::invalid_argument("simp_optimize: mask size != voxel_count");
+  validate_projection_options(options);
 
   // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
   // analysis grid (FrozenVoid removed), and the Active-voxel budget.
@@ -518,6 +805,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   const DensityFilter filter =
       make_density_filter(grid, options.filter_radius, eff);
   const VoxelGrid analysis = analysis_grid_for_mask(grid, eff);
+  const std::vector<StagePlan> plan = build_stage_plan(options);
+  const double eta = options.projection_eta;
   double n_active = 0.0;
   for (MaskValue m : eff)
     if (m == MaskValue::Active) n_active += 1.0;
@@ -540,49 +829,71 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   }
 
   SimpOptimizeResult result;
-  result.history.reserve(static_cast<std::size_t>(options.max_iterations));
+  result.history.reserve(total_stage_iterations(plan));
 
-  for (int it = 0; it < options.max_iterations; ++it) {
-    std::vector<double> xphys = filter.filter_density(x);
-    apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
-    const SimpCompliance c =
-        simp_compliance(analysis, params, xphys, bcs, loads,
-                        options.cg_tolerance, options.cg_max_iterations);
-    if (!c.cg.converged)
-      throw std::runtime_error(
-          "simp_optimize: penalized CG solve did not converge");
+  for (const StagePlan& st : plan) {
+    bool stage_converged = false;
+    for (int it = 0; it < st.iterations; ++it) {
+      std::vector<double> xphys = filter.filter_density(x);
+      if (st.project) project_active(eff, xphys, st.beta, eta);
+      apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
+      const SimpCompliance c =
+          simp_compliance(analysis, params, xphys, bcs, loads,
+                          options.cg_tolerance, options.cg_max_iterations);
+      if (!c.cg.converged)
+        throw std::runtime_error(
+            "simp_optimize: penalized CG solve did not converge");
 
-    const std::vector<double> x_new =
-        oc_update_masked(grid, filter, eff, x, c.dcompliance,
-                         options.volume_fraction, options.move,
-                         params.density_min);
+      std::vector<double> x_new;
+      if (st.project) {
+        // dproj needs the UNprojected filtered field: recompute it (xphys was
+        // projected + pinned in place above).
+        const std::vector<double> xtilde = filter.filter_density(x);
+        x_new = oc_update_masked_projected(grid, filter, eff, x, xtilde,
+                                           c.dcompliance, st.beta, eta,
+                                           options.volume_fraction, st.move,
+                                           params.density_min);
+      } else {
+        x_new = oc_update_masked(grid, filter, eff, x, c.dcompliance,
+                                 options.volume_fraction, st.move,
+                                 params.density_min);
+      }
 
-    double change = 0.0;
-    for (std::size_t e = 0; e < x.size(); ++e)
-      change = std::max(change, std::fabs(x_new[e] - x[e]));
+      double change = 0.0;
+      for (std::size_t e = 0; e < x.size(); ++e)
+        change = std::max(change, std::fabs(x_new[e] - x[e]));
 
-    x = x_new;
-    result.iterations = it + 1;
-    result.history.push_back(
-        {c.compliance, change, active_volfrac(filter.filter_density(x))});
-    if (it == 0) result.initial_compliance = c.compliance;
+      x = x_new;
+      if (result.iterations == 0) result.initial_compliance = c.compliance;
+      ++result.iterations;
+      std::vector<double> xafter = filter.filter_density(x);
+      if (st.project) project_active(eff, xafter, st.beta, eta);
+      result.history.push_back(
+          {c.compliance, change, active_volfrac(xafter)});
 
-    if (change < options.change_tol) {
-      result.converged = true;
-      break;
+      if (change < options.change_tol) {
+        stage_converged = true;
+        break;
+      }
     }
+    // Continuation proceeds stage by stage; `converged` reports the LAST one.
+    result.converged = stage_converged;
   }
 
-  // Self-consistent final state (pins applied to the physical density) via one
-  // final solve on the converged field.
+  // Self-consistent final state (projected at the final stage's beta when
+  // projecting, pins applied to the physical density) via one final solve on
+  // the converged field.
   result.design = x;
   result.physical_density = filter.filter_density(x);
+  if (plan.back().project)
+    project_active(eff, result.physical_density, plan.back().beta, eta);
+  std::vector<double> xfinal_unpinned = result.physical_density;
   apply_mask_pins(eff, result.physical_density);
   const SimpCompliance fc =
       simp_compliance(analysis, params, result.physical_density, bcs, loads,
                       options.cg_tolerance, options.cg_max_iterations);
   result.compliance = fc.compliance;
-  result.volume_fraction = active_volfrac(filter.filter_density(x));
+  result.volume_fraction = active_volfrac(xfinal_unpinned);
   return result;
 }
 
