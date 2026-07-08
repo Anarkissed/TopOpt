@@ -1,9 +1,12 @@
 #include "topopt/stl.hpp"
 
 #include <cctype>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <ostream>
 #include <iterator>
 #include <map>
 #include <sstream>
@@ -152,6 +155,110 @@ TriangleMesh import_stl_file(const std::string& path) {
                    " non-manifold edge(s) in " + path);
   }
   return parsed.mesh;
+}
+
+namespace {
+
+// --- Little-endian byte encoding (binary STL is defined little-endian) --------
+// Mirror of the decoders above: assemble the bytes explicitly so the writer is
+// correct regardless of the host's byte order.
+
+void append_le_u32(std::string& out, uint32_t v) {
+  out.push_back(static_cast<char>(v & 0xFF));
+  out.push_back(static_cast<char>((v >> 8) & 0xFF));
+  out.push_back(static_cast<char>((v >> 16) & 0xFF));
+  out.push_back(static_cast<char>((v >> 24) & 0xFF));
+}
+
+void append_le_float(std::string& out, float f) {
+  uint32_t bits;
+  std::memcpy(&bits, &f, sizeof(bits));
+  append_le_u32(out, bits);
+}
+
+// Facet normal from the triangle winding (right-hand rule). Returns a zero
+// vector for a degenerate (zero-area) triangle rather than a NaN.
+Vec3 facet_normal(const Vec3& a, const Vec3& b, const Vec3& c) {
+  const Vec3 u{b.x - a.x, b.y - a.y, b.z - a.z};
+  const Vec3 v{c.x - a.x, c.y - a.y, c.z - a.z};
+  Vec3 n{u.y * v.z - u.z * v.y, u.z * v.x - u.x * v.z, u.x * v.y - u.y * v.x};
+  const double len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+  if (len > 0.0) {
+    n.x /= len;
+    n.y /= len;
+    n.z /= len;
+  }
+  return n;
+}
+
+void write_binary_stl(std::ostream& out, const TriangleMesh& mesh) {
+  // 80-byte header. It must NOT begin with "solid" or the auto-detector would
+  // misread the file as ASCII; a descriptive tag both documents the file and
+  // avoids that ambiguity.
+  std::string header = "topopt binary STL export";
+  header.resize(80, '\0');
+  out.write(header.data(), 80);
+
+  std::string body;
+  body.reserve(mesh.triangles.size() * 50);
+  append_le_u32(body, static_cast<uint32_t>(mesh.triangles.size()));
+  for (const auto& tri : mesh.triangles) {
+    const Vec3& a = mesh.vertices[static_cast<std::size_t>(tri[0])];
+    const Vec3& b = mesh.vertices[static_cast<std::size_t>(tri[1])];
+    const Vec3& c = mesh.vertices[static_cast<std::size_t>(tri[2])];
+    const Vec3 n = facet_normal(a, b, c);
+    append_le_float(body, static_cast<float>(n.x));
+    append_le_float(body, static_cast<float>(n.y));
+    append_le_float(body, static_cast<float>(n.z));
+    for (const Vec3* v : {&a, &b, &c}) {
+      append_le_float(body, static_cast<float>(v->x));
+      append_le_float(body, static_cast<float>(v->y));
+      append_le_float(body, static_cast<float>(v->z));
+    }
+    body.push_back('\0');  // 2-byte attribute byte count, 0
+    body.push_back('\0');
+  }
+  out.write(body.data(), static_cast<std::streamsize>(body.size()));
+}
+
+// Full-precision (17 significant digits round-trips an IEEE-754 double) ASCII
+// float formatting.
+std::string ascii_num(double x) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.17g", x);
+  return buf;
+}
+
+void write_ascii_stl(std::ostream& out, const TriangleMesh& mesh) {
+  out << "solid topopt\n";
+  for (const auto& tri : mesh.triangles) {
+    const Vec3& a = mesh.vertices[static_cast<std::size_t>(tri[0])];
+    const Vec3& b = mesh.vertices[static_cast<std::size_t>(tri[1])];
+    const Vec3& c = mesh.vertices[static_cast<std::size_t>(tri[2])];
+    const Vec3 n = facet_normal(a, b, c);
+    out << "  facet normal " << ascii_num(n.x) << ' ' << ascii_num(n.y) << ' '
+        << ascii_num(n.z) << "\n    outer loop\n";
+    for (const Vec3* v : {&a, &b, &c}) {
+      out << "      vertex " << ascii_num(v->x) << ' ' << ascii_num(v->y) << ' '
+          << ascii_num(v->z) << '\n';
+    }
+    out << "    endloop\n  endfacet\n";
+  }
+  out << "endsolid topopt\n";
+}
+
+}  // namespace
+
+void write_stl_file(const std::string& path, const TriangleMesh& mesh,
+                    StlFormat format) {
+  std::ofstream f(path, std::ios::binary);
+  if (!f) throw StlError("cannot open STL file for writing: " + path);
+  if (format == StlFormat::Binary) {
+    write_binary_stl(f, mesh);
+  } else {
+    write_ascii_stl(f, mesh);
+  }
+  if (!f) throw StlError("failed writing STL file: " + path);
 }
 
 }  // namespace topopt

@@ -36,4 +36,16 @@ StlMesh read_stl_file(const std::string& path);
 // entry point (ARCHITECTURE.md §5: import -> watertight check).
 TriangleMesh import_stl_file(const std::string& path);
 
+// Write `mesh` to an STL file (ROADMAP M6.1, secondary export format;
+// ARCHITECTURE §4 "STL secondary"). `format` selects the on-disk encoding:
+// Binary (default) stores each coordinate as a 32-bit float (the standard STL
+// precision); Ascii writes full double precision. Each facet's normal is
+// computed from its winding (a degenerate triangle gets a zero normal);
+// topopt's own reader ignores it, but other tools expect it. Vertex order and
+// triangle winding are preserved verbatim, so a mesh that is watertight before
+// export re-imports (read_stl_file, which welds by exact coordinate) watertight.
+// Throws StlError if the file cannot be opened for writing.
+void write_stl_file(const std::string& path, const TriangleMesh& mesh,
+                    StlFormat format = StlFormat::Binary);
+
 }  // namespace topopt
