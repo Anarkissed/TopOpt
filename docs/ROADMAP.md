@@ -116,7 +116,7 @@
 
 ## M6 — Export & CLI
 
-- [ ] M6.1 3MF export (lib3mf) + STL export. Round-trip: export → re-import →
+- [x] M6.1 3MF export (lib3mf) + STL export. Round-trip: export → re-import →
       V3 properties hold, volume within 0.5%.
 - [ ] M6.2 `topopt-cli run job.json`: the canonical headless entry point
       driving the full pipeline. Integration test = the demo job checked
