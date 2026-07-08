@@ -136,7 +136,7 @@ from the handoff's claims:
    layout, or technology table — even if tests pass?
 6. HANDOFF ACCURACY: List any claim in the handoff not supported by the
    diff, and anything significant in the diff missing from the handoff
-   (especially from "What I did NOT do").
+   (especially from "What I did NOT do").`
 
 Verdict: ACCEPT / ACCEPT WITH NOTES / REJECT, with the single most
 important reason. If REJECT, state the exact remediation task to feed the
