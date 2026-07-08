@@ -126,7 +126,7 @@
       Heaviside projection: design -> density filter -> tanh projection
       (sharpness beta) -> analysis, with the projection derivative chained
       into the sensitivities, and beta-continuation (double beta every ~50
-      iterations, beta 1 -> 64, re-converging at each step). Cheap variant
+      iterations, beta 1 → 32, move schedule per benchmarks.json, re-converging at each step). Cheap variant
       ONLY: no robust eroded/nominal/dilated three-solve formulation; thin-
       gap protection comes from M3.7 FrozenVoid regions, and M5.2b's warning
       remains the backstop for residual thresholding artifacts. BLOCKS ON:
