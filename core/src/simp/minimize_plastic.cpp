@@ -157,22 +157,46 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                                               opt.cg_max_iterations);
 
     // Peak stresses over the PRINTED material (physical density > iso), using
-    // the material's solid modulus. Empty/void voxels stay at zero stress.
+    // the material's solid modulus. Empty/void voxels stay at zero stress. The
+    // per-voxel von Mises is also retained grid-indexed (M7.0b field (a)), and
+    // the printed voxels are counted for the M7.0b mass (field (d)).
     std::vector<std::array<double, 6>> stress(grid.voxel_count(),
                                               std::array<double, 6>{});
+    variant.von_mises_field.assign(grid.voxel_count(), 0.0);
+    std::size_t printed_voxels = 0;
     double max_von_mises = 0.0;
     for (int k = 0; k < grid.nz; ++k)
       for (int j = 0; j < grid.ny; ++j)
         for (int i = 0; i < grid.nx; ++i) {
           if (!grid.solid(i, j, k)) continue;
           if (!(rho[grid.index(i, j, k)] > kIso)) continue;
+          ++printed_voxels;
           const std::array<double, 24> ue = element_dofs(grid, sc.solution, i, j, k);
           const Hex8Stress st = hex8_stress(params.youngs_modulus,
                                             params.poisson, grid.spacing, ue);
           stress[grid.index(i, j, k)] = st.sigma;
+          variant.von_mises_field[grid.index(i, j, k)] = st.von_mises;
           if (st.von_mises > max_von_mises) max_von_mises = st.von_mises;
         }
     const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+
+    // M7.0b field (d): printed mass = material density (g/cm^3) * printed volume.
+    // Volumes are mm^3 (mm-MPa unit system); 1 cm^3 = 1000 mm^3, so divide by
+    // 1000 to land in grams. Spacing-aware via grid.voxel_volume().
+    variant.mass_grams = material.density_g_cm3 *
+                         (static_cast<double>(printed_voxels) *
+                          grid.voxel_volume()) /
+                         1000.0;
+
+    // M7.0b field (c): support-volume proxy for the analysed build direction
+    // over THIS variant's printed geometry. The M4.3 proxy is defined on grid
+    // tags, so mark non-printed voxels Empty in a copy and count overhangs on
+    // the printed shape (per-variant, unlike the fixed original solid grid).
+    VoxelGrid printed_grid = grid;
+    for (std::size_t idx = 0; idx < printed_grid.tags.size(); ++idx)
+      if (!(rho[idx] > kIso)) printed_grid.tags[idx] = VoxelTag::Empty;
+    variant.support_volume_voxels =
+        support_overhang_voxels(printed_grid, build_dir);
 
     // Worst-case stress margin (M5.2 locked definition).
     const StressMargin margin = compute_stress_margin(
