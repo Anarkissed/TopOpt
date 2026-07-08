@@ -39,7 +39,8 @@ add_library(topopt
   src/fea/hex_element.cpp
   src/orient/orient.cpp
   src/settings/settings.cpp
-  src/settings/report.cpp)
+  src/settings/report.cpp
+  src/cli/job.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
@@ -83,6 +84,9 @@ endif()
 if(lib3mf_FOUND)
   target_sources(topopt PRIVATE src/io/threemf.cpp)
   target_link_libraries(topopt PRIVATE lib3mf::lib3mf)
+  # Lets the M6.2 job runner (src/cli/run_job.cpp) call the 3MF writer; without
+  # lib3mf it rejects mesh_format "3mf" with a diagnostic instead.
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_3MF)
 endif()
 
 enable_testing()
@@ -158,6 +162,17 @@ target_link_libraries(test_export PRIVATE topopt)
 target_compile_definitions(test_export PRIVATE
   EXPORT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME export_stl COMMAND test_export)
+
+# Job-file schema (M6.2). Pure C++/std (no OCCT, no Eigen, no lib3mf): the
+# parser lives in the always-built src/cli/job.cpp, so the schema test runs in
+# every configuration. The committed demo fixture's directory is injected — the
+# fixture DEFINES the schema (DECISIONS.md 2026-07-09) and the test asserts the
+# on-disk job parses to exactly its committed values.
+add_executable(test_job tests/unit/test_job.cpp)
+target_link_libraries(test_job PRIVATE topopt)
+target_compile_definitions(test_job PRIVATE
+  DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
+add_test(NAME job_schema COMMAND test_job)
 
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
@@ -323,4 +338,45 @@ if(lib3mf_FOUND)
   target_compile_definitions(test_3mf PRIVATE
     EXPORT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME export_3mf COMMAND test_3mf)
+endif()
+
+# topopt-cli (M6.2): the canonical headless entry point driving the full §5
+# pipeline (STEP import -> watertight -> voxelize -> geometric fixture-face
+# selection -> minimize_plastic -> report + mesh export). The job runner
+# (src/cli/run_job.cpp) drives import_step_file AND minimize_plastic, so both
+# OCCT and Eigen are required; the 3MF output path additionally uses lib3mf via
+# TOPOPT_HAVE_3MF (above) and is rejected with a diagnostic when absent. CI
+# configures with -DTOPOPT_REQUIRE_DEPS=ON (all three present), so the CLI and
+# its integration test always build and run in the pipeline.
+if(OpenCASCADE_FOUND AND Eigen3_FOUND)
+  target_sources(topopt PRIVATE src/cli/run_job.cpp)
+
+  add_executable(topopt_cli src/cli/main.cpp)
+  set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)
+  target_link_libraries(topopt_cli PRIVATE topopt)
+  # Dev/CI defaults for --materials / --rules: the committed files. The flags
+  # override them; the integration test passes both explicitly.
+  target_compile_definitions(topopt_cli PRIVATE
+    TOPOPT_CLI_DEFAULT_MATERIALS="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    TOPOPT_CLI_DEFAULT_RULES="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+
+  # M6.2 integration test: the maintainer-authored demo job in
+  # tests/fixtures/demo/ end-to-end, asserting the geometry facts and run
+  # invariants of tests/fixtures/demo/expected_values.json, plus cross-process
+  # determinism through the real topopt-cli binary. With lib3mf (always in CI)
+  # it runs the pristine 3MF fixture job; without it (some local builds) it
+  # runs a byte-patched STL copy written to the build dir — the fixture is
+  # never modified.
+  add_executable(test_cli tests/validation/test_cli.cpp)
+  target_link_libraries(test_cli PRIVATE topopt)
+  target_compile_definitions(test_cli PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  if(lib3mf_FOUND)
+    target_compile_definitions(test_cli PRIVATE TOPOPT_HAVE_3MF)
+  endif()
+  add_test(NAME cli_demo COMMAND test_cli)
 endif()

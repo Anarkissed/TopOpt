@@ -30,6 +30,20 @@ struct StepTessellation {
   double angular_deflection = 0.5;
 };
 
+// The class of a B-rep face's underlying surface, for GEOMETRIC face selection
+// (M6.2; DECISIONS.md 2026-07-09: jobs select faces by surface properties,
+// never by raw OCCT face index — enumeration order is not stable across OCCT
+// versions). Only the classes the job schema selects on are distinguished;
+// everything else is Other.
+enum class StepSurfaceKind { Plane, Cylinder, Other };
+
+// Per-face surface geometry: the surface class and, for a cylinder, its radius
+// (mm — the STEP length unit is converted to millimetres on import).
+struct StepFaceInfo {
+  StepSurfaceKind kind = StepSurfaceKind::Other;
+  double cylinder_radius_mm = 0.0;  // meaningful iff kind == Cylinder
+};
+
 // A STEP model imported via OCCT: exact B-rep measures plus a triangle mesh
 // tessellated at the requested deflection. `brep_volume` and the counts come
 // from the exact solid and do NOT depend on tessellation; `mesh` is the
@@ -47,6 +61,10 @@ struct StepModel {
   double brep_volume = 0.0;  // exact solid volume, mm^3 (OCCT BRepGProp)
   int solid_count = 0;       // TopAbs_SOLID count in the shape
   int face_count = 0;        // B-rep faces (TopAbs_FACE) across all solids
+  // Per-face surface geometry, indexed by face id (size face_count, same
+  // TopExp_Explorer(TopAbs_FACE) order as triangle_face). This is what lets a
+  // caller select faces geometrically (M6.2 job fixture_faces selectors).
+  std::vector<StepFaceInfo> faces;
 };
 
 // Import a STEP file (AP203/AP214/AP242) via OCCT and tessellate it at the given

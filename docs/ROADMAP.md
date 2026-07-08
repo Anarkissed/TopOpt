@@ -118,7 +118,7 @@
 
 - [x] M6.1 3MF export (lib3mf) + STL export. Round-trip: export → re-import →
       V3 properties hold, volume within 0.5%.
-- [ ] M6.2 `topopt-cli run job.json`: the canonical headless entry point
+- [x] M6.2 `topopt-cli run job.json`: the canonical headless entry point
       driving the full pipeline. Integration test = the demo job checked
       into fixtures.
 - [ ] M6.3 (post-M6, before M7 ships) Minimum length scale via single-field

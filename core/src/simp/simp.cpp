@@ -392,8 +392,18 @@ DesignMask effective_mask(const VoxelGrid& grid, const DesignMask& mask) {
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         const VoxelTag t = grid.tag(i, j, k);
-        if (t == VoxelTag::Load || t == VoxelTag::Fixture)
+        if (t == VoxelTag::Empty) {
+          // Empty voxels are never design variables — their caller-supplied
+          // mask entry is ignored (voxel.hpp). Normalizing them to FrozenVoid
+          // here keeps them out of the Active-voxel budget: on a part that
+          // does not fill its bounding grid (e.g. an imported model), an
+          // Empty-counting budget makes volume_fraction * n_active exceed the
+          // reachable volume, so the OC bisection saturates and every rung
+          // collapses to the same all-solid design.
+          eff[grid.index(i, j, k)] = MaskValue::FrozenVoid;
+        } else if (t == VoxelTag::Load || t == VoxelTag::Fixture) {
           eff[grid.index(i, j, k)] = MaskValue::FrozenSolid;
+        }
       }
   return eff;
 }
