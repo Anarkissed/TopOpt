@@ -20,6 +20,7 @@
 
 #include "topopt/fea.hpp"
 #include "topopt/materials.hpp"
+#include "topopt/orient.hpp"
 #include "topopt/pipeline.hpp"
 #include "topopt/report.hpp"
 #include "topopt/settings.hpp"
@@ -182,6 +183,88 @@ void check_v3_on_accepted(const MinimizePlasticResult& r) {
   }
 }
 
+// A fully solid n x n x n cube clamped (and Fixture-tagged) on its i == 0 face.
+// Used by the M7.0b visualization-data scenario, where a known all-solid shape
+// gives hand-computable mass and a support-free build direction.
+VoxelGrid solid_cube(std::vector<DirichletBC>& bcs, int n, double h) {
+  VoxelGrid g;
+  g.nx = n;
+  g.ny = n;
+  g.nz = n;
+  g.spacing = h;
+  g.origin = Vec3{0.0, 0.0, 0.0};
+  g.tags.assign(static_cast<std::size_t>(n) * n * n, VoxelTag::Interior);
+  for (int k = 0; k < n; ++k)
+    for (int j = 0; j < n; ++j) g.set_tag(0, j, k, VoxelTag::Fixture);
+  bcs.clear();
+  for (int c = 0; c <= n; ++c)
+    for (int b = 0; b <= n; ++b) {
+      const int node = topopt::fea_node_index(g, 0, b, c);
+      bcs.push_back({node, 0, 0.0});
+      bcs.push_back({node, 1, 0.0});
+      bcs.push_back({node, 2, 0.0});
+    }
+  return g;
+}
+
+// M7.0b — the visualization data exposed on every evaluated NON-cancelled
+// variant: (a) printed-voxel von Mises field, (b) the extracted+cleaned variant
+// mesh, (c) the support-volume proxy, (d) printed mass. Each is recomputed here
+// independently from the variant's own converged density and compared, so these
+// checks fail against a stub that leaves the fields default. `build_dir` is the
+// analysed build direction (the unit negation of the run's gravity direction).
+void check_viz_fields(const MinimizePlasticResult& r, const VoxelGrid& g,
+                      const Material& mat, const Vec3& build_dir) {
+  const double iso = 0.5;
+  for (const MinimizePlasticVariant& ev : r.evaluated) {
+    if (ev.optimization.cancelled) continue;  // carve-out checked in scenario H
+    const std::vector<double>& rho = ev.optimization.physical_density;
+
+    // (a) von Mises field: grid-indexed, zero on non-printed voxels, nonzero on
+    // loaded printed material (the same iso 0.5 the mesh is extracted at).
+    CHECK(ev.von_mises_field.size() == g.voxel_count(),
+          "viz(a): von_mises_field is grid-indexed (size voxel_count)");
+    bool zero_off_printed = true, any_printed_positive = false;
+    std::size_t printed = 0;
+    for (std::size_t idx = 0; idx < rho.size(); ++idx) {
+      const bool is_printed = rho[idx] > iso;
+      if (is_printed) ++printed;
+      if (!is_printed && ev.von_mises_field[idx] != 0.0) zero_off_printed = false;
+      if (is_printed && ev.von_mises_field[idx] > 0.0) any_printed_positive = true;
+    }
+    CHECK(zero_off_printed, "viz(a): von Mises is zero off the printed material");
+    CHECK(any_printed_positive,
+          "viz(a): at least one printed voxel carries nonzero von Mises");
+
+    // (b) mesh(): exposes the variant's OWN v3 mesh (same object, not a copy or
+    // a recompute), which itself equals an independent check_v3 on the density.
+    CHECK(&ev.mesh() == &ev.v3.mesh,
+          "viz(b): mesh() aliases v3.mesh (exposed, not duplicated)");
+    const topopt::V3Report indep = topopt::check_v3(g, rho, iso);
+    CHECK(ev.v3.mesh.vertices.size() == indep.mesh.vertices.size() &&
+              ev.v3.mesh.triangles.size() == indep.mesh.triangles.size(),
+          "viz(b): the variant mesh matches an independent check_v3");
+
+    // (c) support_volume_voxels: the M4.3 overhang proxy over the PRINTED
+    // subgrid (non-printed voxels removed), for the analysed build direction.
+    VoxelGrid printed_grid = g;
+    for (std::size_t idx = 0; idx < printed_grid.tags.size(); ++idx)
+      if (!(rho[idx] > iso)) printed_grid.tags[idx] = VoxelTag::Empty;
+    const int want_support =
+        topopt::support_overhang_voxels(printed_grid, build_dir);
+    CHECK(ev.support_volume_voxels == want_support,
+          "viz(c): support_volume_voxels == M4.3 overhang proxy on printed grid");
+
+    // (d) mass_grams: density (g/cm^3) * printed volume (mm^3) / 1000. Recompute
+    // in the driver's operation order so the comparison is exact.
+    const double want_mass = mat.density_g_cm3 *
+                             (static_cast<double>(printed) * g.voxel_volume()) /
+                             1000.0;
+    CHECK(std::fabs(ev.mass_grams - want_mass) <= 1e-9 * (1.0 + want_mass),
+          "viz(d): mass_grams = density * printed volume (spacing-aware)");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -226,6 +309,9 @@ int main() {
             "A: each rung is strong enough");
     check_stop_invariant(r, o.margin_stop, "A");
     check_v3_on_accepted(r);
+    // M7.0b: the visualization data on every (accepted, non-cancelled) rung is
+    // consistent with an independent recompute (build_dir = -gravity_direction).
+    check_viz_fields(r, g, material, Vec3{0, 0, 1});
     // Lower volume fraction => a weaker arm => a lower margin (monotone), which
     // is what makes a descending-ladder mixed walk crossable.
     for (std::size_t v = 0; v < r.evaluated.size(); ++v)
@@ -529,6 +615,15 @@ int main() {
           "H1: the cancelled rung stopped at the flagged iteration");
     CHECK(rc.report.variants.size() == 1,
           "H1: the report carries exactly the accepted prefix");
+    // M7.0b carve-out: a cancelled rung ships NO visualization data (its
+    // per-rung analysis is skipped), while the accepted prefix rung carries it.
+    CHECK(rc.evaluated[1].von_mises_field.empty() &&
+              rc.evaluated[1].support_volume_voxels == 0 &&
+              rc.evaluated[1].mass_grams == 0.0 && rc.evaluated[1].mesh().empty(),
+          "H1: the cancelled rung's visualization fields stay default");
+    CHECK(!rc.evaluated[0].von_mises_field.empty() &&
+              rc.evaluated[0].mass_grams > 0.0 && !rc.evaluated[0].mesh().empty(),
+          "H1: the accepted prefix rung still carries visualization data");
     bool valid = true;
     try {
       topopt::validate_job_report_json(topopt::job_report_json(rc.report));
@@ -559,6 +654,55 @@ int main() {
       valid2 = false;
     }
     CHECK(valid2, "H2: the empty cancelled report still validates");
+  }
+
+  // =========================================================================
+  // Scenario I — M7.0b visualization data on a known solid cube. A 6x6x6 cube
+  // run at volume fraction 1.0 keeps every voxel printed, giving a
+  // hand-computable mass and a support-free build direction (a solid box resting
+  // on the plate has no unsupported overhangs). Exercises the exact-value end of
+  // the viz fields that check_viz_fields' recompute cannot pin on its own.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const int n = 6;
+    const double h = 2.0;
+    const VoxelGrid g = solid_cube(bcs, n, h);
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;            // accept-all
+    o.volume_fraction_ladder = {1.0};   // keep all material => fully printed
+    o.simp.max_iterations = 20;
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+
+    CHECK(r.evaluated.size() == 1 && r.evaluated[0].accepted,
+          "I: the vf=1.0 rung is evaluated and accepted");
+    const MinimizePlasticVariant& ev = r.evaluated[0];
+
+    // vf = 1.0 over an all-Active/Frozen grid forces every voxel to full density.
+    std::size_t printed = 0;
+    for (double d : ev.optimization.physical_density)
+      if (d > 0.5) ++printed;
+    CHECK(printed == g.solid_count(),
+          "I: vf=1.0 prints every solid voxel of the cube");
+
+    // (d) hand-computed mass: 216 voxels * 8 mm^3 = 1728 mm^3 = 1.728 cm^3,
+    // * 1.24 g/cm^3 = 2.14272 g.
+    const double want_mass = 1.24 * 216.0 * 8.0 / 1000.0;
+    CHECK(std::fabs(ev.mass_grams - want_mass) <= 1e-9 * (1.0 + want_mass),
+          "I: mass_grams matches the hand-computed cube mass (2.14272 g)");
+
+    // (c) a fully solid cube built along +z has no unsupported overhangs.
+    CHECK(ev.support_volume_voxels == 0,
+          "I: a fully solid cube needs no support along its build axis");
+
+    // (a,b) full recompute consistency (build_dir = +z here).
+    check_viz_fields(r, g, material, Vec3{0, 0, 1});
+
+    std::printf("[I known-cube] printed=%zu mass=%.6g g support=%d "
+                "mesh_tris=%zu\n",
+                printed, ev.mass_grams, ev.support_volume_voxels,
+                ev.mesh().triangles.size());
   }
 
   if (g_failures == 0) {

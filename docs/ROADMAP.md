@@ -153,7 +153,7 @@
       cancellation. Tests: callback invocation counts, monotone iteration
       numbers, cancel mid-run leaves a valid (rejected) result, zero overhead
       when callback absent. Pure core; no /app/.
-- [ ] M7.0b Core: visualization data exposure. `MinimizePlasticVariant` gains
+- [x] M7.0b Core: visualization data exposure. `MinimizePlasticVariant` gains
       (a) the printed-voxel von Mises field (grid-indexed, zeros elsewhere),
       (b) the extracted+cleaned variant mesh (already computed inside
       check_v3 — expose, don't recompute), (c) `support_volume_voxels` for the

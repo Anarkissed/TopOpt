@@ -120,6 +120,32 @@ struct MinimizePlasticVariant {
   // The driver appends only accepted variants to the JobReport, and stops after
   // the first rejected (too-weak) rung.
   bool accepted = false;
+
+  // --- M7.0b visualization data (for the app results screen) ---------------
+  // Populated for every evaluated NON-cancelled rung, alongside `v3`/`report`.
+  // A cancelled rung's analysis is skipped, so these stay default-constructed
+  // there (see MinimizePlasticResult::cancelled).
+
+  // (a) Per-voxel von Mises stress over the PRINTED material, grid-indexed
+  // (size grid.voxel_count()), in MPa. Nonzero only on printed voxels (physical
+  // density > 0.5, the M3.5 iso — the same threshold the variant mesh is
+  // extracted at); zero on void and Empty voxels. This is the field the stress
+  // solve already computes for the peak-stress reduction, retained per voxel.
+  std::vector<double> von_mises_field;
+  // (c) Support-volume proxy (M4.3 support_overhang_voxels) for the analysed
+  // build direction (report.orientation), evaluated over THIS variant's printed
+  // geometry (voxels with density > 0.5): the count of printed voxels that would
+  // need support material. Spacing-aware volume = value * grid.voxel_volume().
+  int support_volume_voxels = 0;
+  // (d) Printed mass in grams = material density (g/cm^3) * printed volume,
+  // spacing-aware: (# printed voxels) * grid.voxel_volume() (mm^3) / 1000.
+  double mass_grams = 0.0;
+
+  // (b) The extracted + cleaned variant isosurface, exposed for display. It is
+  // ALREADY computed by check_v3 (stored in `v3.mesh`); this accessor exposes it
+  // without recomputing marching cubes or copying the mesh. Empty for a
+  // cancelled rung (its `v3` is default-constructed).
+  const TriangleMesh& mesh() const { return v3.mesh; }
 };
 
 // The result of a minimize_plastic run.
@@ -136,11 +162,12 @@ struct MinimizePlasticResult {
   bool stopped_on_margin = false;
   // True iff options.cancel was observed during a rung's optimization (M7.0a).
   // The cancelled rung is the last `evaluated` entry, rejected, with
-  // optimization.cancelled true; its per-rung analysis (v3, report line) is
-  // NOT computed — a cancel aborts the run, so the stress solve, V3 suite and
-  // settings for the half-optimized rung are skipped and those fields stay
-  // default-constructed. The accepted prefix and the assembled `report` are
-  // complete and valid as usual.
+  // optimization.cancelled true; its per-rung analysis (v3, report line, and
+  // the M7.0b visualization fields von_mises_field / support_volume_voxels /
+  // mass_grams / mesh()) is NOT computed — a cancel aborts the run, so the
+  // stress solve, V3 suite and settings for the half-optimized rung are skipped
+  // and those fields stay default-constructed. The accepted prefix and the
+  // assembled `report` are complete and valid as usual.
   bool cancelled = false;
   // The assembled job report: the material name and one VariantReport per
   // ACCEPTED rung (report.variants[i] == evaluated[i].report for the accepted
