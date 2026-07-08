@@ -26,6 +26,7 @@
 #include "topopt/simp.hpp"
 #include "topopt/voxel.hpp"
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -421,6 +422,143 @@ int main() {
     MinimizePlasticOptions badd = o;
     badd.gravity_direction = Vec3{0, 0, 0};
     CHECK(throws_invalid(badd), "F: zero gravity_direction throws");
+  }
+
+  // =========================================================================
+  // Scenario G — per-rung progress forwarding (M7.0a): the driver forwards
+  // (rung index, rung count, iteration) once per OC iteration of every rung,
+  // and the callback has no effect on the outcome. A short ladder + a small
+  // iteration cap keep this fast; accept-all gravity so both rungs run fully.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;  // accept-all (scenario A)
+    o.volume_fraction_ladder = {0.7, 0.5};
+    o.simp.max_iterations = 6;
+
+    const MinimizePlasticResult base =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+    CHECK(!base.cancelled,
+          "G: an un-cancelled run reports cancelled == false");
+
+    struct Rec {
+      std::size_t rung;
+      std::size_t count;
+      int iteration;
+    };
+    std::vector<Rec> recs;
+    MinimizePlasticOptions ocb = o;
+    ocb.progress = [&recs](std::size_t r, std::size_t n, int it) {
+      recs.push_back({r, n, it});
+    };
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, ocb);
+
+    // The callback changed nothing observable.
+    CHECK(topopt::job_report_json(r.report) ==
+              topopt::job_report_json(base.report),
+          "G: progress callback does not change the report");
+
+    // Per-rung accounting: every record carries the ladder size as the count;
+    // rung indices are non-decreasing 0..n-1; within each rung the iteration
+    // numbers are 1..k strictly monotone with k = that rung's iterations.
+    std::size_t total = 0;
+    for (const MinimizePlasticVariant& ev : r.evaluated)
+      total += static_cast<std::size_t>(ev.optimization.iterations);
+    CHECK(recs.size() == total,
+          "G: one invocation per OC iteration across the whole ladder");
+    bool counts_ok = true, rungs_ok = true, iters_ok = true;
+    std::size_t prev_rung = 0;
+    int expect_it = 1;
+    for (std::size_t i = 0; i < recs.size(); ++i) {
+      if (recs[i].count != o.volume_fraction_ladder.size()) counts_ok = false;
+      if (recs[i].rung >= o.volume_fraction_ladder.size()) rungs_ok = false;
+      if (recs[i].rung < prev_rung) rungs_ok = false;
+      if (recs[i].rung != prev_rung) expect_it = 1;  // new rung restarts at 1
+      if (recs[i].iteration != expect_it) iters_ok = false;
+      ++expect_it;
+      prev_rung = recs[i].rung;
+    }
+    CHECK(counts_ok, "G: every record carries rung_count == ladder size");
+    CHECK(rungs_ok, "G: rung indices are non-decreasing and in range");
+    CHECK(iters_ok, "G: per-rung iteration numbers are 1..k monotone");
+    // Both rungs actually reported (the forwarding is per rung, not just the
+    // first one).
+    bool saw0 = false, saw1 = false;
+    for (const Rec& rec : recs) {
+      if (rec.rung == 0) saw0 = true;
+      if (rec.rung == 1) saw1 = true;
+    }
+    CHECK(saw0 && saw1, "G: progress reported for every evaluated rung");
+  }
+
+  // =========================================================================
+  // Scenario H — cancellation (M7.0a): a cancel flag raised mid-run stops the
+  // ladder; the cancelled rung is rejected, no later rung runs, and the
+  // result (incl. the report of the accepted prefix) stays valid.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;  // accept-all, so only the cancel can reject
+    o.volume_fraction_ladder = {0.7, 0.5, 0.3};
+    o.simp.max_iterations = 6;
+
+    // H1: cancel during rung 1 (the second rung), iteration 2.
+    std::atomic<bool> stop{false};
+    MinimizePlasticOptions oc = o;
+    oc.cancel = &stop;
+    oc.progress = [&stop](std::size_t r, std::size_t, int it) {
+      if (r == 1 && it == 2) stop.store(true);
+    };
+    const MinimizePlasticResult rc =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, oc);
+    CHECK(rc.cancelled, "H1: mid-run cancel sets result.cancelled");
+    CHECK(!rc.stopped_on_margin, "H1: a cancel is not a margin stop");
+    CHECK(rc.evaluated.size() == 2,
+          "H1: no rung after the cancelled one is evaluated");
+    CHECK(rc.evaluated[0].accepted,
+          "H1: the rung completed before the cancel stays accepted");
+    CHECK(!rc.evaluated[1].accepted,
+          "H1: the cancelled rung is rejected (valid rejected result)");
+    CHECK(rc.evaluated[1].optimization.cancelled &&
+              rc.evaluated[1].optimization.iterations == 2,
+          "H1: the cancelled rung stopped at the flagged iteration");
+    CHECK(rc.report.variants.size() == 1,
+          "H1: the report carries exactly the accepted prefix");
+    bool valid = true;
+    try {
+      topopt::validate_job_report_json(topopt::job_report_json(rc.report));
+    } catch (const std::exception&) {
+      valid = false;
+    }
+    CHECK(valid, "H1: the cancelled run's report still validates");
+
+    // H2: cancel pre-set before the run: the first rung is cancelled at zero
+    // iterations, rejected, and the report is empty but valid.
+    std::atomic<bool> pre{true};
+    MinimizePlasticOptions op = o;
+    op.cancel = &pre;
+    const MinimizePlasticResult rp =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, op);
+    CHECK(rp.cancelled, "H2: pre-set cancel flag cancels the run");
+    CHECK(rp.evaluated.size() == 1 && !rp.evaluated[0].accepted,
+          "H2: exactly one (rejected) rung evaluated");
+    CHECK(rp.evaluated[0].optimization.cancelled &&
+              rp.evaluated[0].optimization.iterations == 0,
+          "H2: the first rung was cancelled before any OC iteration");
+    CHECK(rp.report.variants.empty(),
+          "H2: nothing accepted => empty report");
+    bool valid2 = true;
+    try {
+      topopt::validate_job_report_json(topopt::job_report_json(rp.report));
+    } catch (const std::exception&) {
+      valid2 = false;
+    }
+    CHECK(valid2, "H2: the empty cancelled report still validates");
   }
 
   if (g_failures == 0) {

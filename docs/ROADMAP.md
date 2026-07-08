@@ -145,7 +145,7 @@
 > diffs as usual. The committed design export docs/design/TopOpt_dc.html is
 > the visual source of truth — match it, do not reinterpret it.
 
-- [ ] M7.0a Core: progress + cancellation. `SimpOptions` gains an optional
+- [x] M7.0a Core: progress + cancellation. `SimpOptions` gains an optional
       progress callback (iteration, compliance, change) and a polled
       cancellation flag checked once per OC iteration; `simp_optimize` returns
       a cancelled status cleanly (no partial UB), and `minimize_plastic`

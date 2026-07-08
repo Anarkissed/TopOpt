@@ -21,6 +21,7 @@
 #include "topopt/voxel.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -864,6 +865,173 @@ int main() {
     CHECK(opt_throws(b3), "projected optimize: eta outside (0,1) throws");
     CHECK(opt_throws_masked(b0), "projected masked: stage beta <= 0 throws");
     CHECK(opt_throws_masked(b3), "projected masked: bad eta throws");
+  }
+
+  // ==========================================================================
+  // 12. Progress callback + polled cancellation (M7.0a). The callback fires
+  //     once per completed OC iteration with (iteration, compliance, change)
+  //     mirroring the history entry; the cancel flag is polled once per OC
+  //     iteration (at its start), and a cancelled run still returns a valid,
+  //     self-consistent result. Absent callback/flag must not change the
+  //     trajectory (the zero-overhead contract, checked behaviorally).
+  // ==========================================================================
+  {
+    VoxelGrid g = make_solid_grid(6, 3, 3, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -1.0);
+
+    SimpParams p;
+    p.youngs_modulus = 1.0;
+    p.poisson = 0.3;
+    p.penalty = 3.0;
+    p.density_min = 1e-3;
+
+    SimpOptions opt;
+    opt.volume_fraction = 0.4;
+    opt.filter_radius = 1.5;
+    opt.move = 0.2;
+    opt.max_iterations = 8;
+    opt.change_tol = 0.0;  // run the full cap (deterministic iteration count)
+    opt.cg_tolerance = 1e-9;
+
+    // 12a. Defaults: no callback, no cancel flag; a plain run is not cancelled.
+    CHECK(!SimpOptions{}.progress, "progress: absent by default");
+    CHECK(SimpOptions{}.cancel == nullptr, "cancel: null by default");
+    const SimpOptimizeResult r0 = topopt::simp_optimize(g, p, bcs, loads, opt);
+    CHECK(!r0.cancelled, "cancel: un-cancelled run reports cancelled == false");
+    CHECK(r0.iterations == 8, "progress: baseline runs the full cap");
+
+    // 12b. Callback accounting: one invocation per OC iteration, iteration
+    //      numbers 1..N strictly monotone, payload mirrors the history entry.
+    struct Rec {
+      int iteration;
+      double compliance;
+      double change;
+    };
+    std::vector<Rec> recs;
+    SimpOptions optcb = opt;
+    optcb.progress = [&recs](int it, double c, double ch) {
+      recs.push_back({it, c, ch});
+    };
+    const SimpOptimizeResult r1 = topopt::simp_optimize(g, p, bcs, loads, optcb);
+    CHECK(recs.size() == static_cast<std::size_t>(r1.iterations),
+          "progress: invocation count == iterations performed");
+    bool monotone = true, mirrors = true;
+    for (std::size_t i = 0; i < recs.size(); ++i) {
+      if (recs[i].iteration != static_cast<int>(i) + 1) monotone = false;
+      if (recs[i].compliance != r1.history[i].compliance ||
+          recs[i].change != r1.history[i].change)
+        mirrors = false;
+    }
+    CHECK(monotone, "progress: iteration numbers are 1..N strictly monotone");
+    CHECK(mirrors, "progress: payload mirrors the history entry exactly");
+
+    // 12c. The callback has no effect on the trajectory: bit-identical result
+    //      with and without it (the observable half of "zero overhead when
+    //      callback absent" — the data passed is computed for history anyway).
+    CHECK(r1.design == r0.design && r1.physical_density == r0.physical_density,
+          "progress: trajectory bit-identical with and without callback");
+    CHECK(r1.compliance == r0.compliance && r1.iterations == r0.iterations,
+          "progress: compliance/iterations identical with and without callback");
+
+    // 12d. Cancel pre-set before the run: zero iterations, cancelled, and a
+    //      valid self-consistent result (uniform start design, physical_density
+    //      == filter(design), compliance == compliance(physical_density)).
+    std::atomic<bool> pre{true};
+    SimpOptions optpre = opt;
+    optpre.cancel = &pre;
+    const SimpOptimizeResult rp = topopt::simp_optimize(g, p, bcs, loads, optpre);
+    CHECK(rp.cancelled, "cancel: pre-set flag cancels the run");
+    CHECK(rp.iterations == 0 && rp.history.empty(),
+          "cancel: pre-set flag => zero OC iterations");
+    CHECK(!rp.converged, "cancel: a cancelled run is not converged");
+    bool uniform_ok = true;
+    for (std::size_t e = 0; e < rp.design.size(); ++e)
+      if (rp.design[e] != opt.volume_fraction) uniform_ok = false;
+    CHECK(uniform_ok, "cancel: zero-iteration design is the uniform start");
+    DensityFilter f12 = topopt::make_density_filter(g, opt.filter_radius);
+    CHECK(rp.physical_density == f12.filter_density(rp.design),
+          "cancel: cancelled result keeps physical_density == filter(design)");
+    const SimpCompliance rpc = topopt::simp_compliance(
+        g, p, rp.physical_density, bcs, loads, opt.cg_tolerance, 0);
+    CHECK(near(rp.compliance, rpc.compliance, 1e-9 * std::fabs(rpc.compliance)),
+          "cancel: cancelled compliance == compliance(physical_density)");
+
+    // 12e. Cancel mid-run from the callback: the flag set at iteration 3 is
+    //      observed at the START of iteration 4, so exactly 3 iterations ran,
+    //      and they are the same first 3 iterations as the uncancelled run.
+    std::atomic<bool> mid{false};
+    SimpOptions optmid = opt;
+    optmid.cancel = &mid;
+    optmid.progress = [&mid](int it, double, double) {
+      if (it == 3) mid.store(true);
+    };
+    const SimpOptimizeResult rm = topopt::simp_optimize(g, p, bcs, loads, optmid);
+    CHECK(rm.cancelled, "cancel: mid-run flag cancels the run");
+    CHECK(rm.iterations == 3 && rm.history.size() == 3,
+          "cancel: flag at iteration 3 => exactly 3 iterations performed");
+    bool prefix_ok = true;
+    for (std::size_t i = 0; i < rm.history.size(); ++i)
+      if (rm.history[i].compliance != r0.history[i].compliance ||
+          rm.history[i].change != r0.history[i].change)
+        prefix_ok = false;
+    CHECK(prefix_ok,
+          "cancel: a cancelled trajectory is a prefix of the uncancelled one");
+    CHECK(rm.physical_density == f12.filter_density(rm.design),
+          "cancel: mid-run cancelled result is self-consistent");
+
+    // 12f. Masked overload: same callback accounting and cancellation; the
+    //      mask pins (FrozenSolid 1 / FrozenVoid 0) hold in a cancelled result.
+    topopt::DesignMask mask = topopt::make_active_mask(g);
+    mask[g.index(3, 1, 1)] = topopt::MaskValue::FrozenVoid;
+    mask[g.index(1, 1, 1)] = topopt::MaskValue::FrozenSolid;
+    std::size_t masked_calls = 0;
+    SimpOptions optmk = opt;
+    optmk.progress = [&masked_calls](int, double, double) { ++masked_calls; };
+    const SimpOptimizeResult rk =
+        topopt::simp_optimize(g, p, bcs, loads, optmk, mask);
+    CHECK(masked_calls == static_cast<std::size_t>(rk.iterations),
+          "progress(masked): invocation count == iterations performed");
+    std::atomic<bool> mcancel{false};
+    SimpOptions optmc = opt;
+    optmc.cancel = &mcancel;
+    optmc.progress = [&mcancel](int it, double, double) {
+      if (it == 2) mcancel.store(true);
+    };
+    const SimpOptimizeResult rmc =
+        topopt::simp_optimize(g, p, bcs, loads, optmc, mask);
+    CHECK(rmc.cancelled && rmc.iterations == 2,
+          "cancel(masked): flag at iteration 2 => exactly 2 iterations");
+    CHECK(rmc.physical_density[g.index(3, 1, 1)] == 0.0,
+          "cancel(masked): FrozenVoid pinned 0 in a cancelled result");
+    CHECK(rmc.physical_density[g.index(1, 1, 1)] == 1.0,
+          "cancel(masked): FrozenSolid pinned 1 in a cancelled result");
+
+    // 12g. Projection schedule (M6.3): iteration numbers stay globally
+    //      monotone across stages, and a mid-stage cancel stops the
+    //      continuation (no later stage runs).
+    SimpOptions optpj = opt;
+    optpj.projection = {{1.0, 0.2, 3}, {2.0, 0.2, 3}};
+    std::vector<int> pj_its;
+    optpj.progress = [&pj_its](int it, double, double) { pj_its.push_back(it); };
+    const SimpOptimizeResult rj = topopt::simp_optimize(g, p, bcs, loads, optpj);
+    CHECK(rj.iterations == 6 && pj_its.size() == 6,
+          "progress(projected): one invocation per iteration across stages");
+    bool pj_monotone = true;
+    for (std::size_t i = 0; i < pj_its.size(); ++i)
+      if (pj_its[i] != static_cast<int>(i) + 1) pj_monotone = false;
+    CHECK(pj_monotone,
+          "progress(projected): iteration numbers monotone across stages");
+    std::atomic<bool> pjc{false};
+    SimpOptions optpjc = optpj;
+    optpjc.cancel = &pjc;
+    optpjc.progress = [&pjc](int it, double, double) {
+      if (it == 4) pjc.store(true);  // first iteration of stage 2
+    };
+    const SimpOptimizeResult rjc =
+        topopt::simp_optimize(g, p, bcs, loads, optpjc);
+    CHECK(rjc.cancelled && rjc.iterations == 4,
+          "cancel(projected): mid-stage cancel stops the continuation");
   }
 
   if (g_failures == 0) {

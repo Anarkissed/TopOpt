@@ -530,6 +530,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
+      // M7.0a: cancellation is polled once per OC iteration, at its start, so
+      // a cancel request is honoured before the next (expensive) FEA solve.
+      if (options.cancel && options.cancel->load()) {
+        result.cancelled = true;
+        break;
+      }
       std::vector<double> xphys = filter.filter_density(x);
       if (st.project) project_solid(grid, xphys, st.beta, eta);
       const SimpCompliance c = simp_compliance(grid, params, xphys, bcs, loads,
@@ -563,6 +569,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       std::vector<double> xafter = filter.filter_density(x);
       if (st.project) project_solid(grid, xafter, st.beta, eta);
       result.history.push_back({c.compliance, change, phys_volfrac(xafter)});
+      if (options.progress)
+        options.progress(result.iterations, c.compliance, change);
 
       if (change < options.change_tol) {
         stage_converged = true;
@@ -570,8 +578,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       }
     }
     // The stage either re-converged (change_tol) or ran its cap; continuation
-    // proceeds either way. The loop is `converged` iff its LAST stage was.
+    // proceeds either way. The loop is `converged` iff its LAST stage was
+    // (a cancelled stage never is).
     result.converged = stage_converged;
+    if (result.cancelled) break;
   }
 
   // Report a self-consistent final state: physical_density = filter(design)
@@ -834,6 +844,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
+      // M7.0a: cancellation is polled once per OC iteration, at its start (as
+      // in the unconstrained overload above).
+      if (options.cancel && options.cancel->load()) {
+        result.cancelled = true;
+        break;
+      }
       std::vector<double> xphys = filter.filter_density(x);
       if (st.project) project_active(eff, xphys, st.beta, eta);
       apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
@@ -870,14 +886,18 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (st.project) project_active(eff, xafter, st.beta, eta);
       result.history.push_back(
           {c.compliance, change, active_volfrac(xafter)});
+      if (options.progress)
+        options.progress(result.iterations, c.compliance, change);
 
       if (change < options.change_tol) {
         stage_converged = true;
         break;
       }
     }
-    // Continuation proceeds stage by stage; `converged` reports the LAST one.
+    // Continuation proceeds stage by stage; `converged` reports the LAST one
+    // (a cancelled stage never is).
     result.converged = stage_converged;
+    if (result.cancelled) break;
   }
 
   // Self-consistent final state (projected at the final stage's beta when

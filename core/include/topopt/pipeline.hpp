@@ -1,5 +1,8 @@
 #pragma once
 
+#include <atomic>
+#include <cstddef>
+#include <functional>
 #include <stdexcept>  // the driver throws std::invalid_argument (see below)
 #include <string>
 #include <vector>
@@ -78,8 +81,27 @@ struct MinimizePlasticOptions {
   Vec3 gravity_direction{0.0, 0.0, -1.0};
   // Shared SIMP loop options (filter radius, move limit, iteration cap, CG
   // tolerances). `volume_fraction` is overridden by each ladder rung and is
-  // ignored here.
+  // ignored here. `simp.progress` and `simp.cancel` are also overridden by
+  // the driver — use the two fields below instead.
   SimpOptions simp;
+
+  // Per-rung progress + cancellation (M7.0a). Both optional, absent by
+  // default; when absent the run is unchanged.
+  //
+  // `progress` is forwarded from the optimizer once per completed OC
+  // iteration of every rung as (rung index [0-based, ladder order], rung
+  // count [= volume_fraction_ladder.size()], iteration [1-based within the
+  // rung, monotone]). It must not throw; it runs on the optimizing thread.
+  //
+  // `cancel` is a caller-owned flag polled once per OC iteration (SimpOptions
+  // contract). When observed true, the rung being optimized stops cleanly and
+  // is reported as a REJECTED terminal rung (accepted == false, its
+  // optimization.cancelled true); no later rung runs and the result's
+  // `cancelled` is set. The pointee must outlive the minimize_plastic call.
+  std::function<void(std::size_t rung_index, std::size_t rung_count,
+                     int iteration)>
+      progress;
+  const std::atomic<bool>* cancel = nullptr;
 };
 
 // One ladder rung actually evaluated by the driver.
@@ -104,13 +126,22 @@ struct MinimizePlasticVariant {
 struct MinimizePlasticResult {
   // Every rung the driver actually ran, in ladder order: an accepted prefix
   // (each margin >= margin_stop) followed by AT MOST ONE rejected terminal rung
-  // (margin < margin_stop) at which the driver stopped. No rung after the
-  // terminal one is evaluated.
+  // (margin < margin_stop, or cancelled — see `cancelled` below) at which the
+  // driver stopped. No rung after the terminal one is evaluated.
   std::vector<MinimizePlasticVariant> evaluated;
   // True iff a rung fell below margin_stop and the driver stopped early (so the
   // last `evaluated` entry is the rejected terminal rung). False iff the whole
-  // ladder was accepted (every rung margin >= margin_stop).
+  // ladder was accepted (every rung margin >= margin_stop) or the run was
+  // cancelled (a cancel is not a margin stop).
   bool stopped_on_margin = false;
+  // True iff options.cancel was observed during a rung's optimization (M7.0a).
+  // The cancelled rung is the last `evaluated` entry, rejected, with
+  // optimization.cancelled true; its per-rung analysis (v3, report line) is
+  // NOT computed — a cancel aborts the run, so the stress solve, V3 suite and
+  // settings for the half-optimized rung are skipped and those fields stay
+  // default-constructed. The accepted prefix and the assembled `report` are
+  // complete and valid as usual.
+  bool cancelled = false;
   // The assembled job report: the material name and one VariantReport per
   // ACCEPTED rung (report.variants[i] == evaluated[i].report for the accepted
   // prefix). validate_job_report_json(job_report_json(report)) always passes.

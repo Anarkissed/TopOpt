@@ -114,13 +114,39 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   result.report.material = material_name;
 
   // --- Walk the ladder -----------------------------------------------------
-  for (double vf : ladder) {
+  for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
+    const double vf = ladder[rung];
     SimpOptions opt = options.simp;
     opt.volume_fraction = vf;
+
+    // M7.0a: the driver owns the optimizer's progress/cancel hooks (any set on
+    // options.simp are overridden — pipeline.hpp). Per-rung progress forwards
+    // (rung index, rung count, iteration); the cancel flag is polled by the
+    // optimizer once per OC iteration.
+    opt.cancel = options.cancel;
+    opt.progress = nullptr;
+    if (options.progress) {
+      const std::size_t rung_count = ladder.size();
+      opt.progress = [&options, rung, rung_count](int iteration, double,
+                                                  double) {
+        options.progress(rung, rung_count, iteration);
+      };
+    }
 
     MinimizePlasticVariant variant;
     variant.requested_volume_fraction = vf;
     variant.optimization = simp_optimize(grid, params, bcs, loads, opt, mask);
+
+    if (variant.optimization.cancelled) {
+      // Cancelled mid-rung: report this rung as the rejected terminal rung and
+      // stop. The per-rung analysis (stress solve, V3 suite, settings) is
+      // skipped — the caller asked to abort, and the half-optimized field is
+      // not shipped (pipeline.hpp `cancelled` contract).
+      variant.accepted = false;
+      result.evaluated.push_back(std::move(variant));
+      result.cancelled = true;
+      break;
+    }
 
     const std::vector<double>& rho = variant.optimization.physical_density;
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <functional>
 #include <stdexcept>
 #include <vector>
 
@@ -246,6 +248,27 @@ struct SimpOptions {
   // the design at beta >= 32).
   std::vector<ProjectionStage> projection;
   double projection_eta = 0.5;  // projection threshold, in (0, 1)
+
+  // Progress + cancellation (M7.0a). Both are optional and absent by default;
+  // when absent the loop's behavior and per-iteration work are unchanged (the
+  // only added cost is one null check per OC iteration).
+  //
+  // `progress` is invoked once per COMPLETED OC iteration with the 1-based
+  // global iteration number (monotone across projection stages), the
+  // compliance of the analysis density at the START of that iteration, and
+  // the design change it produced — the same values recorded in
+  // SimpOptimizeResult::history. The callback must not throw; it runs on the
+  // optimizing thread.
+  //
+  // `cancel` is a caller-owned flag polled once per OC iteration, at its
+  // start (so a cancel request is honoured before the next FEA solve). When
+  // observed true the loop stops: no further iterations run, the result's
+  // `cancelled` is true, `converged` is false, and the returned fields are
+  // still mutually consistent (SimpOptimizeResult contract) — a cancelled
+  // run pays one final consistency solve on the partially-optimized field.
+  // The pointee must outlive the simp_optimize call.
+  std::function<void(int iteration, double compliance, double change)> progress;
+  const std::atomic<bool>* cancel = nullptr;
 };
 
 // One recorded step of the SIMP trajectory.
@@ -269,6 +292,12 @@ struct SimpOptimizeResult {
   double volume_fraction = 0.0;          // achieved physical volume fraction
   int iterations = 0;                    // OC updates performed
   bool converged = false;                // stopped on change_tol (not the cap)
+  // True iff the run stopped because options.cancel was observed true (M7.0a).
+  // A cancelled result is still valid and self-consistent (fields above hold
+  // for the state at the cancelled iteration; history has `iterations`
+  // entries), but it is a partial optimization: converged is false and
+  // initial_compliance is 0 when cancelled before the first iteration.
+  bool cancelled = false;
   std::vector<SimpIteration> history;    // per-iteration trajectory (size iterations)
 };
 
