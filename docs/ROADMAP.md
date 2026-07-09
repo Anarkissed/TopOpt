@@ -251,3 +251,27 @@
       drop straight in). Lives in the appearance surface (with M7.8). Persists
       the choice per project. Tests: import validates the image; selection
       drives the renderer.
+- [ ] M7.Za STL selection honesty (small — recommend pulling forward to
+      M7.1b's error-text cleanup): when a user taps a face in Faces mode on an
+      STL (a mesh with no B-rep face ids), show a clear message instead of
+      silently doing nothing — e.g. "Face selection needs a STEP file. STL
+      models have no faces; full STL region tools are coming." Applies
+      wherever face-tap returns nil for a faceless mesh. No selection logic
+      change; purely the missing signpost.
+
+- [ ] M7.Zb STL region selection (deferred to end): give STL/faceless meshes a
+      real way to mark Fixture / Load / Frozen regions, feeding the SAME
+      SelectionModel + tagging path M7.5 built for STEP faces (so downstream
+      optimization is identical regardless of input format). Provide at least
+      one of, ideally building up to all three:
+        - coplanar-cluster grouping: auto-cluster adjacent triangles within an
+          angle tolerance into pseudo-faces, so an STL gets face-like regions
+          that tap-select like STEP faces (best default for mechanical parts);
+        - paint select: drag across the surface to tag triangles into the
+          active group;
+        - box/volume select: position a box; triangles inside join the group.
+      Maps groups to voxel tagging via the existing tag path (and mask path
+      once M7.5b bridges it). Tests: coplanar clustering recovers the expected
+      region count on a known STL; painted/boxed triangle sets tag the right
+      voxels. This makes STL a first-class input, not just an optimize-with-
+      defaults fallback.
