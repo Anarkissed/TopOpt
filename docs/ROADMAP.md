@@ -170,6 +170,24 @@
       and shows a bridge smoke result (material count + imported-mesh triangle
       count); a macOS unit-test target exercises the wrapper headlessly —
       raw `xcodebuild test` output in the handoff.
+- [ ] M7.1b iOS dependency slice (STEP-on-device). The app currently links
+      OCCT only for macOS, so STEP import fails on iOS/simulator with "requires
+      OpenCASCADE"; STL works (no OCCT dependency). Build the C++ dependencies
+      for iOS so STEP import (and lib3mf export, for M7.9) work on device and
+      simulator. BUILD SYSTEM ONLY — iOS CMake toolchain (arm64-apple-ios
+      device + arm64 simulator), cross-compile scripts under app/scripts/, and
+      SwiftPM/xcodeproj binary-target wiring; no Swift view code, no /core/
+      source, no fixtures. OCCT dynamically linked, LGPL §10 preserved (no
+      static archive, no modified OCCT sources); package as xcframeworks. The
+      existing macOS test path (app suite + 25-test core suite) must still
+      build and pass — no regression to maintainer verification. NOTE: the
+      agent cannot run Xcode or cross-compile iOS libs — deliverable is
+      scripts + wiring + exact maintainer instructions; ending Blocked awaiting
+      maintainer build output is a successful run. Gate (maintainer): build the
+      iPad target, run in the simulator, import l-bracket.step, succeeds with
+      no "requires OpenCASCADE" toast. Also fix the user-facing error text so a
+      failed/unsupported import reads in plain language, not "requires
+      OpenCASCADE."
 - [x] M7.2 Design system. Extract the tokens from docs/design/TopOpt_dc.html
       (dark glass palette, accent, surface blur/opacity, radii, type scale,
       spacing) into DesignSystem.swift + reusable views: GlassPanel,
