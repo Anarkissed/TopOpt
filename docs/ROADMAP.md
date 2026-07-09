@@ -215,3 +215,16 @@
       performance profile on target iPad (128³ end-to-end timing vs the M6.3
       projection cost decision), accessibility pass (Dynamic Type on sheets,
       VoiceOver labels on tools), App Store asset checklist.
+- [ ] M7.11a Matcap rendering: replace the analytic clay shading with sampled
+      matcap (material-capture) textures — load a matcap PNG into a Metal
+      texture, sample it by the view-space normal (n.xy → UV), so shine,
+      metalness, opacity-feel and rim are captured by the image. Ship 3–4
+      built-in matcaps (clay, brushed metal, glossy plastic, translucent).
+      Flat-normal clay from M7.4b stays the default/fallback. Tests: the
+      normal→UV mapping is correct and clamped; built-in matcaps load.
+- [ ] M7.11b Material picker UI: a panel to choose the active matcap from the
+      built-ins and to IMPORT a user matcap PNG (UIDocumentPicker, the
+      standard format other DCC apps use — Blender/ZBrush/Sketchfab matcaps
+      drop straight in). Lives in the appearance surface (with M7.8). Persists
+      the choice per project. Tests: import validates the image; selection
+      drives the renderer.
