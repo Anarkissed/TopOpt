@@ -100,6 +100,92 @@ public enum MeshGeometry {
         }
         return out
     }
+
+    /// Read a flattened xyz vertex at an index, `.zero` if out of range.
+    private static func position(_ idx: Int32, in vertices: [Float], vertexCount: Int) -> SIMD3<Float> {
+        guard idx >= 0, Int(idx) < vertexCount else { return .zero }
+        let b = Int(idx) * 3
+        return SIMD3<Float>(vertices[b], vertices[b + 1], vertices[b + 2])
+    }
+
+    /// Geometric per-triangle face normals: for each triangle, the normalized
+    /// cross product of its two edges, constant across the face (the crisp CAD
+    /// look). Exactly one entry per triangle, in triangle order; a degenerate or
+    /// out-of-range triangle yields `(0,0,1)`. Triangle winding sets the sign (the
+    /// core meshes wind outward).
+    public static func faceNormals(vertices: [Float], indices: [Int32]) -> [SIMD3<Float>] {
+        let vertexCount = vertices.count / 3
+        var out = [SIMD3<Float>]()
+        out.reserveCapacity(indices.count / 3)
+        var t = 0
+        while t + 2 < indices.count {
+            let p0 = position(indices[t], in: vertices, vertexCount: vertexCount)
+            let p1 = position(indices[t + 1], in: vertices, vertexCount: vertexCount)
+            let p2 = position(indices[t + 2], in: vertices, vertexCount: vertexCount)
+            t += 3
+            let n = simd_cross(p1 - p0, p2 - p0)
+            let len = simd_length(n)
+            out.append(len > 1e-12 ? n / len : SIMD3<Float>(0, 0, 1))
+        }
+        return out
+    }
+
+    /// Flat-shade expansion: unshare vertices so each triangle carries its own
+    /// constant face normal. Flat shading needs unshared vertices — you cannot
+    /// force per-face normals onto a shared-vertex index buffer — so every triangle
+    /// emits its three positions, each paired with the triangle's face normal.
+    /// The result has exactly `3 * triangleCount` vertices and is drawn
+    /// non-indexed.
+    public static func flatShaded(vertices: [Float], indices: [Int32]) -> FlatMesh {
+        let vertexCount = vertices.count / 3
+        let normals = faceNormals(vertices: vertices, indices: indices)
+        var pos = [Float]()
+        var nor = [Float]()
+        pos.reserveCapacity(indices.count * 3)
+        nor.reserveCapacity(indices.count * 3)
+        var t = 0
+        var tri = 0
+        while t + 2 < indices.count {
+            let fn = normals[tri]
+            tri += 1
+            for k in 0..<3 {
+                let p = position(indices[t + k], in: vertices, vertexCount: vertexCount)
+                pos.append(p.x); pos.append(p.y); pos.append(p.z)
+                nor.append(fn.x); nor.append(fn.y); nor.append(fn.z)
+            }
+            t += 3
+        }
+        return FlatMesh(positions: pos, normals: nor)
+    }
+}
+
+/// A flat-shaded render buffer: unshared vertices (`3 * triangleCount`), each
+/// carrying its triangle's constant geometric face normal. This is what the M7.4
+/// viewer draws by default — mechanical CAD parts read with flat faces and crisp
+/// edges, which the shared-vertex smooth normals blur away.
+public struct FlatMesh {
+    /// Flattened xyz positions, one per emitted vertex (`3 * 3 * triangleCount`).
+    public let positions: [Float]
+    /// Flattened xyz face normals, matching `positions` (constant per triangle).
+    public let normals: [Float]
+
+    public var vertexCount: Int { positions.count / 3 }
+
+    /// Positions and normals interleaved as `[px,py,pz,nx,ny,nz]` per vertex (the
+    /// stride-24 layout the Metal vertex shader reads), drawn non-indexed.
+    public func interleaved() -> [Float] {
+        let n = vertexCount
+        var out = [Float](repeating: 0, count: n * 6)
+        for v in 0..<n {
+            out[v * 6] = positions[v * 3]
+            out[v * 6 + 1] = positions[v * 3 + 1]
+            out[v * 6 + 2] = positions[v * 3 + 2]
+            out[v * 6 + 3] = normals[v * 3]
+            out[v * 6 + 4] = normals[v * 3 + 1]
+            out[v * 6 + 5] = normals[v * 3 + 2]
+        }
+        return out
+    }
 }
 
 /// Render-ready mesh: positions + derived normals + indices (+ optional per-
@@ -115,19 +201,26 @@ public struct ViewerMesh {
     public let faceIDs: [Int32]
     /// Axis-aligned bounds (drives camera framing).
     public let bounds: MeshBounds
+    /// The flat-shaded render buffer (unshared vertices + per-face normals). This
+    /// is what the viewer draws by default: mechanical CAD parts keep flat faces
+    /// and crisp edges. The smooth `normals` above stay available for a future
+    /// organic/optimized mesh that wants smoothing, but are unused by default.
+    public let flat: FlatMesh
 
     public var vertexCount: Int { positions.count / 3 }
     public var triangleCount: Int { indices.count / 3 }
     public var isEmpty: Bool { indices.isEmpty }
 
-    /// Build from the bridge's flattened buffers: derives normals and bounds and
-    /// converts the signed indices to the unsigned form a Metal index buffer wants.
+    /// Build from the bridge's flattened buffers: derives the flat render buffer
+    /// (default) and the smooth normals (available), the bounds, and converts the
+    /// signed indices to the unsigned form a Metal index buffer wants.
     public init(vertices: [Float], indices: [Int32], faceIDs: [Int32]) {
         self.positions = vertices
         self.normals = MeshGeometry.vertexNormals(vertices: vertices, indices: indices)
         self.indices = indices.map { UInt32(bitPattern: $0) }
         self.faceIDs = faceIDs
         self.bounds = MeshGeometry.bounds(vertices: vertices)
+        self.flat = MeshGeometry.flatShaded(vertices: vertices, indices: indices)
     }
 
     /// Positions and normals interleaved as `[px,py,pz,nx,ny,nz]` per vertex — the

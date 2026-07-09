@@ -45,18 +45,19 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 
 fragment float4 viewer_fragment(VOut in [[stage_in]]) {
     float3 N = normalize(in.vnormal);
-    // View-space analytic studio light: a soft key from upper-right, a cool fill,
-    // and a fresnel rim tinted toward the app accent — a matcap look without a
-    // matcap texture asset. Front faces have N.z > 0 (eye looks down −Z).
-    float3 L    = normalize(float3(0.35, 0.55, 0.75));
-    float  key  = clamp(dot(N, L), 0.0, 1.0);
-    float  fill = clamp(dot(N, float3(-0.4, -0.2, 0.5)) * 0.5 + 0.5, 0.0, 1.0);
-    float3 base = float3(0.60, 0.64, 0.70);
-    float3 shade = base * (0.20 + 0.62 * key + 0.20 * fill);
-    float  rim  = pow(1.0 - clamp(N.z, 0.0, 1.0), 3.0);
-    float3 accent = float3(0.04, 0.52, 1.0);
-    float3 color = shade + accent * rim * 0.35;
-    return float4(color, 1.0);
+    // Modern CAD-viewer "neutral clay": a soft half-Lambert key + a gentle
+    // hemisphere fill over a light neutral base, with a faint cool fresnel — matte,
+    // not glossy plastic. Analytic (no matcap texture asset). Front faces have
+    // N.z > 0 (eye looks down −Z). Face normals are constant per triangle (flat).
+    float3 clay = float3(0.78, 0.77, 0.75);
+    float3 key  = normalize(float3(0.30, 0.60, 0.72));
+    float  half = clamp(dot(N, key) * 0.5 + 0.5, 0.0, 1.0);   // soft wrap
+    float  fill = clamp(dot(N, float3(-0.45, -0.25, 0.40)) * 0.5 + 0.5, 0.0, 1.0);
+    float  lighting = 0.60 + 0.42 * half + 0.12 * fill;        // gentle gradient
+    float3 color = clay * lighting;
+    float  fres = pow(1.0 - clamp(N.z, 0.0, 1.0), 4.0) * 0.10; // faint cool rim
+    color += float3(0.10, 0.12, 0.16) * fres;
+    return float4(clamp(color, 0.0, 1.0), 1.0);
 }
 """
 
@@ -77,8 +78,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private let depthState: MTLDepthStencilState
 
     private var vertexBuffer: MTLBuffer?
-    private var indexBuffer: MTLBuffer?
-    private var indexCount = 0
+    private var vertexDrawCount = 0
     private var aspect: Float = 1
 
     /// The camera the gestures drive. Mutated on the main thread; the draw reads it.
@@ -128,22 +128,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         super.init()
     }
 
-    /// Upload a mesh's interleaved vertex/normal + index buffers and frame it.
+    /// Upload the mesh's flat-shaded (unshared-vertex, per-face-normal) interleaved
+    /// buffer and frame it. Flat shading is drawn non-indexed — each triangle has
+    /// its own three vertices carrying its constant face normal.
     func setMesh(_ mesh: ViewerMesh) {
         guard !mesh.isEmpty else {
             vertexBuffer = nil
-            indexBuffer = nil
-            indexCount = 0
+            vertexDrawCount = 0
             return
         }
-        let interleaved = mesh.interleaved()
+        let interleaved = mesh.flat.interleaved()
         vertexBuffer = interleaved.withUnsafeBytes {
             device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
         }
-        indexBuffer = mesh.indices.withUnsafeBytes {
-            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
-        }
-        indexCount = mesh.indices.count
+        vertexDrawCount = mesh.flat.vertexCount
         camera.frame(mesh.bounds)
     }
 
@@ -152,8 +150,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
-        guard indexCount > 0,
-              let vbuf = vertexBuffer, let ibuf = indexBuffer,
+        guard vertexDrawCount > 0,
+              let vbuf = vertexBuffer,
               let rpd = view.currentRenderPassDescriptor,
               let drawable = view.currentDrawable,
               let cmd = queue.makeCommandBuffer(),
@@ -180,9 +178,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setCullMode(.none)  // v1: show both sides regardless of winding
         enc.setVertexBuffer(vbuf, offset: 0, index: 0)
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
-        enc.drawIndexedPrimitives(type: .triangle, indexCount: indexCount,
-                                  indexType: .uint32, indexBuffer: ibuf,
-                                  indexBufferOffset: 0)
+        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
         enc.endEncoding()
         cmd.present(drawable)
         cmd.commit()

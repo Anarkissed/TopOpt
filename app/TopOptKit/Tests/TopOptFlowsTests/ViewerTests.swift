@@ -84,6 +84,58 @@ final class ViewerTests: XCTestCase {
         XCTAssertEqual(n[2], 1, accuracy: 1e-6)
     }
 
+    // MARK: flat (per-face) normals — the viewer default
+
+    func testFaceNormalOfSingleTriangleIsGeometric() {
+        // Triangle in z=0 wound CCW → geometric face normal +z, one per triangle.
+        let verts: [Float] = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+        let fn = MeshGeometry.faceNormals(vertices: verts, indices: [0, 1, 2])
+        XCTAssertEqual(fn.count, 1)
+        XCTAssertEqual(fn[0].x, 0, accuracy: 1e-6)
+        XCTAssertEqual(fn[0].y, 0, accuracy: 1e-6)
+        XCTAssertEqual(fn[0].z, 1, accuracy: 1e-6)
+    }
+
+    func testFlatBufferHasThreeVerticesPerTriangle() {
+        let flat = MeshGeometry.flatShaded(vertices: Self.cubeVerts, indices: Self.cubeTris)
+        XCTAssertEqual(flat.vertexCount, 3 * 12)          // 3 unshared verts / triangle
+        XCTAssertEqual(flat.positions.count, 3 * 12 * 3)
+        XCTAssertEqual(flat.normals.count, 3 * 12 * 3)
+        XCTAssertEqual(flat.interleaved().count, 3 * 12 * 6)
+        // And the ViewerMesh's default render buffer is the flat one.
+        let mesh = ViewerMesh(vertices: Self.cubeVerts, indices: Self.cubeTris, faceIDs: [])
+        XCTAssertEqual(mesh.flat.vertexCount, 3 * 12)
+    }
+
+    func testFlatNormalsAreConstantPerTriangleAndEqualFaceNormal() {
+        let verts = Self.cubeVerts
+        let faces = MeshGeometry.faceNormals(vertices: verts, indices: Self.cubeTris)
+        let flat = MeshGeometry.flatShaded(vertices: verts, indices: Self.cubeTris)
+        XCTAssertEqual(faces.count, 12)
+        for tri in 0..<12 {
+            let expected = faces[tri]
+            for corner in 0..<3 {
+                let v = tri * 3 + corner
+                let n = SIMD3<Float>(flat.normals[v * 3], flat.normals[v * 3 + 1], flat.normals[v * 3 + 2])
+                XCTAssertEqual(n.x, expected.x, accuracy: 1e-6, "tri \(tri) corner \(corner)")
+                XCTAssertEqual(n.y, expected.y, accuracy: 1e-6)
+                XCTAssertEqual(n.z, expected.z, accuracy: 1e-6)
+                XCTAssertEqual(simd_length(n), 1, accuracy: 1e-5)  // crisp unit face normal
+            }
+        }
+    }
+
+    func testCubeYieldsSixDistinctFaceNormals() {
+        let faces = MeshGeometry.faceNormals(vertices: Self.cubeVerts, indices: Self.cubeTris)
+        XCTAssertEqual(faces.count, 12)
+        // Round to collapse the two coplanar triangles per box face into one key.
+        func key(_ n: SIMD3<Float>) -> String {
+            func r(_ f: Float) -> Int { Int((f * 100).rounded()) }
+            return "\(r(n.x)),\(r(n.y)),\(r(n.z))"
+        }
+        XCTAssertEqual(Set(faces.map(key)).count, 6)
+    }
+
     // MARK: ViewerMesh
 
     func testViewerMeshShape() {
