@@ -51,9 +51,11 @@ fragment float4 viewer_fragment(VOut in [[stage_in]]) {
     // N.z > 0 (eye looks down −Z). Face normals are constant per triangle (flat).
     float3 clay = float3(0.78, 0.77, 0.75);
     float3 key  = normalize(float3(0.30, 0.60, 0.72));
-    float  half = clamp(dot(N, key) * 0.5 + 0.5, 0.0, 1.0);   // soft wrap
+    // NB: avoid the name `half` — it is a reserved 16-bit-float type in MSL and
+    // makes makeLibrary fail (which silently blanks the whole stage).
+    float  keyWrap = clamp(dot(N, key) * 0.5 + 0.5, 0.0, 1.0);   // soft wrap
     float  fill = clamp(dot(N, float3(-0.45, -0.25, 0.40)) * 0.5 + 0.5, 0.0, 1.0);
-    float  lighting = 0.60 + 0.42 * half + 0.12 * fill;        // gentle gradient
+    float  lighting = 0.60 + 0.42 * keyWrap + 0.12 * fill;       // gentle gradient
     float3 color = clay * lighting;
     float  fres = pow(1.0 - clamp(N.z, 0.0, 1.0), 4.0) * 0.10; // faint cool rim
     color += float3(0.10, 0.12, 0.16) * fres;
@@ -87,16 +89,22 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
 
+    static var lastInitError: String?
+
     init?(device: MTLDevice) {
-        guard let queue = device.makeCommandQueue() else { return nil }
+        guard let queue = device.makeCommandQueue() else {
+            Self.lastInitError = "makeCommandQueue nil"; return nil
+        }
         let library: MTLLibrary
         do {
             library = try device.makeLibrary(source: viewerShaderSource, options: nil)
         } catch {
-            return nil
+            Self.lastInitError = "makeLibrary: \(error)"; return nil
         }
         guard let vfn = library.makeFunction(name: "viewer_vertex"),
-              let ffn = library.makeFunction(name: "viewer_fragment") else { return nil }
+              let ffn = library.makeFunction(name: "viewer_fragment") else {
+            Self.lastInitError = "makeFunction nil"; return nil
+        }
 
         let vd = MTLVertexDescriptor()
         vd.attributes[0].format = .float3          // position
@@ -118,8 +126,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         dsd.depthCompareFunction = .less
         dsd.isDepthWriteEnabled = true
 
-        guard let pipe = try? device.makeRenderPipelineState(descriptor: pd),
-              let depth = device.makeDepthStencilState(descriptor: dsd) else { return nil }
+        let pipe: MTLRenderPipelineState
+        do {
+            pipe = try device.makeRenderPipelineState(descriptor: pd)
+        } catch {
+            Self.lastInitError = "makeRenderPipelineState: \(error)"; return nil
+        }
+        guard let depth = device.makeDepthStencilState(descriptor: dsd) else {
+            Self.lastInitError = "makeDepthStencilState nil"; return nil
+        }
 
         self.device = device
         self.queue = queue
@@ -150,20 +165,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
-        guard vertexDrawCount > 0,
-              let vbuf = vertexBuffer,
-              let rpd = view.currentRenderPassDescriptor,
-              let drawable = view.currentDrawable,
-              let cmd = queue.makeCommandBuffer(),
-              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else {
-            // Nothing to draw (empty stage): still present a cleared frame.
-            if let drawable = view.currentDrawable, let cmd = queue.makeCommandBuffer() {
-                cmd.present(drawable)
-                cmd.commit()
-            }
-            return
+        guard let cmd = queue.makeCommandBuffer() else { return }
+        if let rpd = view.currentRenderPassDescriptor {
+            encode(into: rpd, aspect: aspect, into: cmd)
         }
+        if let drawable = view.currentDrawable { cmd.present(drawable) }
+        cmd.commit()
+    }
 
+    /// Encode the mesh draw into an arbitrary render pass. Shared by the on-screen
+    /// `draw(in:)` and the headless `renderOffscreen` verification path. No-op when
+    /// there is no mesh (the pass still clears).
+    private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, into cmd: MTLCommandBuffer) {
+        guard vertexDrawCount > 0, let vbuf = vertexBuffer,
+              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
         let mvp = camera.projectionMatrix(aspect: aspect) * camera.viewMatrix()
         let n = camera.normalMatrix()
         let normal4 = simd_float4x4(columns: (
@@ -180,8 +195,44 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
         enc.endEncoding()
-        cmd.present(drawable)
+    }
+
+    /// Render the current mesh + camera to an offscreen BGRA texture and return the
+    /// raw pixel bytes (B,G,R,A per pixel, row-major). Used by headless tests to
+    /// verify the pipeline actually rasterizes the mesh — no MTKView/display needed.
+    /// Returns nil if there is nothing to draw or a Metal resource can't be made.
+    func renderOffscreen(size: Int, clear: MTLClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)) -> [UInt8]? {
+        guard vertexDrawCount > 0 else { return nil }
+        let cdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.colorFormat, width: size, height: size, mipmapped: false)
+        cdesc.usage = [.renderTarget, .shaderRead]
+        cdesc.storageMode = .shared
+        let ddesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.depthFormat, width: size, height: size, mipmapped: false)
+        ddesc.usage = [.renderTarget]
+        ddesc.storageMode = .private
+        guard let color = device.makeTexture(descriptor: cdesc),
+              let depth = device.makeTexture(descriptor: ddesc),
+              let cmd = queue.makeCommandBuffer() else { return nil }
+
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = color
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].clearColor = clear
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.depthAttachment.texture = depth
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        rpd.depthAttachment.storeAction = .dontCare
+
+        encode(into: rpd, aspect: 1, into: cmd)
         cmd.commit()
+        cmd.waitUntilCompleted()
+
+        var pixels = [UInt8](repeating: 0, count: size * size * 4)
+        color.getBytes(&pixels, bytesPerRow: size * 4,
+                       from: MTLRegionMake2D(0, 0, size, size), mipmapLevel: 0)
+        return pixels
     }
 }
 

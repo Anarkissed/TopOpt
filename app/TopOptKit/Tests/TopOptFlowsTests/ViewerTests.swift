@@ -12,6 +12,9 @@ import XCTest
 import simd
 import TopOptKit
 @testable import TopOptFlows
+#if canImport(MetalKit)
+import Metal
+#endif
 
 final class ViewerTests: XCTestCase {
 
@@ -264,6 +267,35 @@ final class ViewerTests: XCTestCase {
         XCTAssertEqual(simd_length(n.columns.2), 1, accuracy: 1e-5)
         XCTAssertEqual(simd_dot(n.columns.0, n.columns.1), 0, accuracy: 1e-5)
     }
+
+    // MARK: renderer actually rasterizes the mesh (GPU offscreen)
+
+    #if canImport(MetalKit)
+    func testRendererRasterizesMeshToPixels() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("no Metal device on this host")
+        }
+        guard let renderer = MeshRenderer(device: device) else {
+            XCTFail("MeshRenderer init failed: \(MeshRenderer.lastInitError ?? "unknown")")
+            return
+        }
+        let mesh = ViewerMesh(vertices: Self.cubeVerts, indices: Self.cubeTris, faceIDs: [])
+        renderer.setMesh(mesh)  // uploads buffer + frames the camera
+        guard let px = renderer.renderOffscreen(size: 128) else {
+            XCTFail("renderOffscreen produced no image")
+            return
+        }
+        // Count pixels brighter than the near-black clear: the clay mesh should
+        // cover a large chunk of the framed viewport.
+        var lit = 0
+        var i = 0
+        while i + 2 < px.count {
+            if Int(px[i]) + Int(px[i + 1]) + Int(px[i + 2]) > 60 { lit += 1 }
+            i += 4
+        }
+        XCTAssertGreaterThan(lit, 500, "mesh did not rasterize (only \(lit) lit px of \(128 * 128))")
+    }
+    #endif
 
     // MARK: AppModel geometry seam (workspace viewer gets a mesh)
 
