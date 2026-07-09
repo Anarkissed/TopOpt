@@ -170,7 +170,7 @@
       and shows a bridge smoke result (material count + imported-mesh triangle
       count); a macOS unit-test target exercises the wrapper headlessly —
       raw `xcodebuild test` output in the handoff.
-- [ ] M7.2 Design system. Extract the tokens from docs/design/TopOpt_dc.html
+- [x] M7.2 Design system. Extract the tokens from docs/design/TopOpt_dc.html
       (dark glass palette, accent, surface blur/opacity, radii, type scale,
       spacing) into DesignSystem.swift + reusable views: GlassPanel,
       GlassSheet, PillButton, SegmentedGlass, Toast, ProgressBar. SwiftUI

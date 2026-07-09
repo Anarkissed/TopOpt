@@ -28,6 +28,10 @@ let package = Package(
     platforms: [.macOS(.v13), .iOS(.v16)],
     products: [
         .library(name: "TopOptKit", targets: ["TopOptKit"]),
+        // The M7.2 SwiftUI design system (tokens + reusable glass views). Pure
+        // SwiftUI, no C++ interop / core dependency, so it builds on every slice
+        // and its tokens are unit-testable headlessly (TopOptDesignTests).
+        .library(name: "TopOptDesign", targets: ["TopOptDesign"]),
     ],
     targets: [
         // The CMake-built core, per-platform, selected automatically by Xcode.
@@ -69,6 +73,15 @@ let package = Package(
             name: "TopOptKitTests",
             dependencies: ["TopOptKit"],
             swiftSettings: [.interoperabilityMode(.Cxx)]
+        ),
+        // M7.2 design system: SwiftUI-only, no C++ interop (so it needs none of
+        // the bridge's Cxx build settings and stays cross-platform).
+        .target(
+            name: "TopOptDesign"
+        ),
+        .testTarget(
+            name: "TopOptDesignTests",
+            dependencies: ["TopOptDesign"]
         ),
     ],
     cxxLanguageStandard: .cxx17
