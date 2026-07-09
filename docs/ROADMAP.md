@@ -229,6 +229,11 @@
 - [ ] M7.9 Export + share. Export .3mf sheet per design (M6.1 exporter via
       bridge), UIActivityViewController share, embed the M5.2 JSON report in
       the 3MF metadata + optional "Save report" as .json.
+- [ ] M7.9b Sample model affordance + document types: import sheet offers
+      "Load sample model" (imports the bundled sample_cube.stl) so a first-run
+      user with no files isn't dead-ended; register .stl/.step document types
+      (CFBundleDocumentTypes / UTImportedTypeDeclarations) so files open into
+      TopOpt from Files/AirDrop.
 - [ ] M7.10 Maintainer QA milestone (human, no agent): full-flow device pass,
       performance profile on target iPad (128³ end-to-end timing vs the M6.3
       projection cost decision), accessibility pass (Dynamic Type on sheets,
