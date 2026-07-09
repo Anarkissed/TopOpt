@@ -39,12 +39,26 @@ package. Run once (and after any `/core/` change) before building or testing:
 ./app/scripts/build_core.sh
 ```
 
-This produces `app/TopOptKit/vendor/lib/libtopopt.a` (macOS host slice) and
-package-relative symlinks to the core headers and the Homebrew OpenCASCADE
-headers/libraries, so `Package.swift` carries no machine-specific absolute
-paths. OpenCASCADE is dynamically linked (LGPL 2.1, ARCHITECTURE §4/§10);
-lib3mf is not required for M7.1 (3MF export is wired in M7.9 — STL export is
-pure C++).
+This produces `app/TopOptKit/vendor/TopOptCore.xcframework` — a multi-platform
+static-library xcframework with three slices, so Xcode links the right one per
+platform (a single static `.a` cannot: iOS device and simulator are distinct
+platforms):
+
+| Slice | Arch | OpenCASCADE | Notes |
+|-------|------|-------------|-------|
+| `macos-arm64` | arm64 | yes | full pipeline incl. STEP import; runs the tests |
+| `ios-arm64_x86_64-simulator` | arm64 + x86_64 | no | OCCT-free |
+| `ios-arm64` (device) | arm64 | no | OCCT-free |
+
+OpenCASCADE is not available for iOS (Homebrew ships macOS only), so the iOS
+slices are **OCCT-free**: STEP import and STEP face-tagging are macOS-only and
+return a clear "not available on this platform" error on iOS. Everything else —
+materials.json, STL import/export, voxelize, FEA, SIMP, `minimize_plastic` —
+works on all platforms (Eigen is header-only and compiled into every slice).
+OpenCASCADE is dynamically linked on macOS only (LGPL 2.1, ARCHITECTURE §4/§10);
+lib3mf is not required for M7.1 (3MF export is M7.9 — STL export is pure C++).
+The script vendors only package-relative paths, so `Package.swift` carries no
+machine-specific absolute paths.
 
 ## Testing the bridge (the M7 verification standard)
 
@@ -64,13 +78,14 @@ cancellation), and STL export round-trip.
 ## Building / running the iPad app (device QA)
 
 Open `app/TopOpt.xcodeproj` in Xcode and run the **TopOpt** scheme on an iPad
-(or the iOS simulator). The app depends on the local `TopOptKit` package; run
-`build_core.sh` first so the package can link the core.
+simulator or device. The app depends on the local `TopOptKit` package; run
+`build_core.sh` first so the package can link the core xcframework. The app
+target has C++ interoperability enabled (`SWIFT_OBJC_INTEROP_MODE = objcxx`),
+required because TopOptKit is built with C++ interop.
 
-An **iOS device slice** of the core additionally needs OpenCASCADE (and, for
-M7.9, lib3mf) built for `arm64-apple-ios`; supply that build to CMake with an
-iOS toolchain and repoint the package's `vendor/` (or package an
-`.xcframework`). That cross-build is a maintainer/device-QA step and is not
-available in the headless CI/dev environment, where only the macOS host slice
-and the `xcodebuild test` path above are exercised.
+For a device run, select your development Team under Signing & Capabilities
+(the app uses automatic signing). STEP import is unavailable on device/simulator
+(no iOS OpenCASCADE) — import STL parts there; STEP works in the macOS tests.
+Bringing STEP to iOS would need an `arm64-apple-ios` build of OpenCASCADE fed to
+`build_core.sh`'s iOS slices (currently OCCT-disabled) — a separate effort.
 ```

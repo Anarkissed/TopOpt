@@ -8,6 +8,7 @@
 #include <cctype>
 #include <exception>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -75,10 +76,19 @@ bool has_suffix_ci(const std::string& s, const std::string& suffix) {
   return true;
 }
 
-// Import any supported geometry by file extension (STEP via OCCT, else STL).
+// Import any supported geometry by file extension. STEP requires OpenCASCADE,
+// which is linked only in the desktop (macOS) build (ARCHITECTURE §4/§10);
+// TOPOPT_BRIDGE_HAS_OCCT is defined there. On platforms without it a .step/.stp
+// path is rejected with a clear message and STL remains fully available.
 topopt::TriangleMesh import_any(const std::string& path) {
   if (has_suffix_ci(path, ".step") || has_suffix_ci(path, ".stp")) {
+#ifdef TOPOPT_BRIDGE_HAS_OCCT
     return topopt::import_step_file(path).mesh;
+#else
+    throw std::runtime_error(
+        "STEP import requires OpenCASCADE, which is not available on this "
+        "platform; import an STL instead");
+#endif
   }
   return topopt::read_stl_file(path).mesh;
 }
@@ -117,6 +127,7 @@ ImportedMesh import_stl(const std::string& path, BridgeError& err) {
 
 ImportedMesh import_step(const std::string& path, double linear_deflection,
                          BridgeError& err) {
+#ifdef TOPOPT_BRIDGE_HAS_OCCT
   try {
     topopt::StepTessellation tess;
     if (linear_deflection > 0.0) tess.linear_deflection = linear_deflection;
@@ -127,6 +138,14 @@ ImportedMesh import_step(const std::string& path, double linear_deflection,
     err.message = e.what();
     return ImportedMesh{};
   }
+#else
+  (void)path;
+  (void)linear_deflection;
+  err.ok = false;
+  err.message =
+      "STEP import requires OpenCASCADE, which is not available on this platform";
+  return ImportedMesh{};
+#endif
 }
 
 void export_stl(const std::string& path, const ImportedMesh& mesh,
@@ -160,6 +179,7 @@ VoxelSummary voxelize_mesh(const std::string& path, int resolution,
 
 int64_t tag_step_face(const std::string& step_path, int face_id,
                       bool as_fixture, int resolution, BridgeError& err) {
+#ifdef TOPOPT_BRIDGE_HAS_OCCT
   try {
     topopt::StepModel model = topopt::import_step_file(step_path);
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
@@ -171,6 +191,17 @@ int64_t tag_step_face(const std::string& step_path, int face_id,
     err.message = e.what();
     return 0;
   }
+#else
+  (void)step_path;
+  (void)face_id;
+  (void)as_fixture;
+  (void)resolution;
+  err.ok = false;
+  err.message =
+      "STEP face tagging requires OpenCASCADE, which is not available on this "
+      "platform";
+  return 0;
+#endif
 }
 
 OptimizeResult run_minimize_plastic(const std::string& stl_path,

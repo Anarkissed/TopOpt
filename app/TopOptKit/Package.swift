@@ -7,21 +7,17 @@
 // verification standard is `xcodebuild test` on this package (raw output in the
 // handoff), since /app/ is not covered by Linux CI (ROADMAP M7 rules).
 //
-// The core is built into this package via CMake as a static library and vendored
-// under `vendor/` by `../scripts/build_core.sh` (run it before building):
-//   vendor/include      -> ../../core/include        (core public headers)
-//   vendor/occt-include  -> $(brew --prefix opencascade)/include/opencascade
-//   vendor/lib/libtopopt.a  (CMake output, copied)
-//   vendor/occt-lib      -> $(brew --prefix opencascade)/lib
-//
-// Link-search paths must be ABSOLUTE: a linker `-L` unsafeFlag is resolved
-// against the linker's working directory, which is the package root only when
-// building the package directly (`xcodebuild test` here) — NOT when an app
-// target links TopOptKit as a dependency, where a relative `-Lvendor/lib` yields
-// `ld: library 'topopt' not found`. We derive the absolute package directory
-// from this manifest's own path (`#filePath`), so the flags stay machine-
-// independent (no hard-coded user/Homebrew paths; ARCHITECTURE §4/§10 OCCT is
-// dynamically linked).
+// The core is built into this package by CMake as a multi-platform static-library
+// xcframework (`vendor/TopOptCore.xcframework`: macOS-arm64 with OpenCASCADE, plus
+// OCCT-free iOS simulator + device slices) by `../scripts/build_core.sh` — run it
+// before building. The xcframework lets Xcode pick the right slice per platform,
+// which a single `-L` static lib cannot (iOS device and simulator are distinct
+// platforms). STEP import needs OpenCASCADE and so is macOS-only: the bridge
+// compiles it only where TOPOPT_BRIDGE_HAS_OCCT is defined (below), and the OCCT
+// libraries are linked only on macOS. OCCT is dynamically linked (LGPL 2.1,
+// ARCHITECTURE §4/§10). The manifest carries no machine-specific absolute paths:
+// the only absolute path (the OCCT lib dir, macOS-only) is derived from this
+// manifest's own location via #filePath and the package-relative vendor tree.
 import Foundation
 import PackageDescription
 
@@ -34,16 +30,22 @@ let package = Package(
         .library(name: "TopOptKit", targets: ["TopOptKit"]),
     ],
     targets: [
+        // The CMake-built core, per-platform, selected automatically by Xcode.
+        .binaryTarget(name: "TopOptCore", path: "vendor/TopOptCore.xcframework"),
         .target(
             name: "TopOptBridge",
+            dependencies: ["TopOptCore"],
             cxxSettings: [
                 .headerSearchPath("../../vendor/include"),
-                .headerSearchPath("../../vendor/occt-include"),
-                // -stdlib=libc++ so the C++ standard-library include path
-                // (<sdk>/usr/include/c++/v1) reaches the module build even under
-                // Xcode's explicit-modules dependency scanner, where the module
-                // is compiled as C++ (requires cplusplus) but the libc++ search
-                // path can otherwise be absent -> "'cstdint' file not found".
+                // STEP import/tagging is compiled only where OpenCASCADE is
+                // linked (the macOS core slice); elsewhere the bridge returns a
+                // clear "not available on this platform" error.
+                .define("TOPOPT_BRIDGE_HAS_OCCT", .when(platforms: [.macOS])),
+                // -stdlib=libc++ so the C++ standard-library include path reaches
+                // the module build under Xcode's explicit-modules scanner, where
+                // the module is compiled as C++ (requires cplusplus) but the
+                // libc++ search path can otherwise be absent -> "'cstdint' file
+                // not found".
                 .unsafeFlags(["-std=c++17", "-stdlib=libc++"]),
             ]
         ),
@@ -52,13 +54,15 @@ let package = Package(
             dependencies: ["TopOptBridge"],
             swiftSettings: [.interoperabilityMode(.Cxx)],
             linkerSettings: [
+                // OpenCASCADE is linked only on macOS (the only slice that
+                // contains the STEP importer). Absolute -L path derived from the
+                // manifest location so it resolves when an app links TopOptKit.
                 .unsafeFlags([
-                    "-L\(packageDir)/vendor/lib", "-ltopopt",
                     "-L\(packageDir)/vendor/occt-lib",
                     "-lTKDESTEP", "-lTKXSBase", "-lTKDE", "-lTKMesh",
                     "-lTKTopAlgo", "-lTKGeomAlgo", "-lTKPrim", "-lTKBRep",
                     "-lTKGeomBase", "-lTKG3d", "-lTKG2d", "-lTKMath", "-lTKernel",
-                ]),
+                ], .when(platforms: [.macOS])),
             ]
         ),
         .testTarget(
