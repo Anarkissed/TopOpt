@@ -29,7 +29,12 @@ let package = Package(
             cxxSettings: [
                 .headerSearchPath("../../vendor/include"),
                 .headerSearchPath("../../vendor/occt-include"),
-                .unsafeFlags(["-std=c++17"]),
+                // -stdlib=libc++ so the C++ standard-library include path
+                // (<sdk>/usr/include/c++/v1) reaches the module build even under
+                // Xcode's explicit-modules dependency scanner, where the module
+                // is compiled as C++ (requires cplusplus) but the libc++ search
+                // path can otherwise be absent -> "'cstdint' file not found".
+                .unsafeFlags(["-std=c++17", "-stdlib=libc++"]),
             ]
         ),
         .target(

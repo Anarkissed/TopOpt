@@ -1,20 +1,20 @@
 // Explicit module map for the TopOptBridge C++ facade (ROADMAP M7.1).
 //
-// Why this file exists: without it, SwiftPM auto-generates a module map with no
-// language requirement —
-//     module TopOptBridge { umbrella "…/include" export * }
-// — and a clean Clang dependency scan is then free to build the module in C
-// mode. TopOptBridge.hpp includes the C++-only headers <cstdint>/<string>/
-// <vector>, which are not on the C include path, so the module build fails with
-//     fatal error: 'cstdint' file not found
-//     could not build module 'TopOptBridge'
-// on some Xcode/clang invocations (the maintainer's Mac) while compiling fine on
-// others. `requires cplusplus` forces the module to be built as C++ in every
-// context, making the configuration build-environment-independent. The Swift
-// side already imports it in C++ mode (interoperabilityMode(.Cxx) on the
-// TopOptKit and TopOptKitTests targets), which satisfies the requirement.
+// `requires cplusplus` marks the module C++-only, so the Clang dependency
+// scanner builds it as C++ (the header uses <cstdint>/<string>/<vector>). We
+// name the single public header explicitly rather than `umbrella "."`: an
+// umbrella *directory* that contains this module map is reported by Clang as
+// "Umbrella for module 'TopOptBridge' already covers this directory" (it
+// collides with SwiftPM/Xcode's implicit module-map inference for the include
+// directory), and that malformed-map warning can make the build fall back to a
+// generated map without the C++ requirement. An explicit `header` avoids the
+// collision. The Swift consumers import in C++ mode
+// (interoperabilityMode(.Cxx) on TopOptKit + TopOptKitTests), satisfying the
+// requirement; the C++ standard-library search path is supplied by the target's
+// `-stdlib=libc++` in Package.swift so the module build finds <cstdint> even
+// under Xcode's explicit-modules dependency scanner.
 module TopOptBridge {
-    umbrella "."
+    header "TopOptBridge.hpp"
     requires cplusplus
     export *
 }
