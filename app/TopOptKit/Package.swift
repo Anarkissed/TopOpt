@@ -13,9 +13,19 @@
 //   vendor/occt-include  -> $(brew --prefix opencascade)/include/opencascade
 //   vendor/lib/libtopopt.a  (CMake output, copied)
 //   vendor/occt-lib      -> $(brew --prefix opencascade)/lib
-// All paths below are package-relative, so this manifest carries no machine-
-// specific absolute paths (ARCHITECTURE §4/§10: OCCT is dynamically linked).
+//
+// Link-search paths must be ABSOLUTE: a linker `-L` unsafeFlag is resolved
+// against the linker's working directory, which is the package root only when
+// building the package directly (`xcodebuild test` here) — NOT when an app
+// target links TopOptKit as a dependency, where a relative `-Lvendor/lib` yields
+// `ld: library 'topopt' not found`. We derive the absolute package directory
+// from this manifest's own path (`#filePath`), so the flags stay machine-
+// independent (no hard-coded user/Homebrew paths; ARCHITECTURE §4/§10 OCCT is
+// dynamically linked).
+import Foundation
 import PackageDescription
+
+let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 
 let package = Package(
     name: "TopOptKit",
@@ -43,8 +53,8 @@ let package = Package(
             swiftSettings: [.interoperabilityMode(.Cxx)],
             linkerSettings: [
                 .unsafeFlags([
-                    "-Lvendor/lib", "-ltopopt",
-                    "-Lvendor/occt-lib",
+                    "-L\(packageDir)/vendor/lib", "-ltopopt",
+                    "-L\(packageDir)/vendor/occt-lib",
                     "-lTKDESTEP", "-lTKXSBase", "-lTKDE", "-lTKMesh",
                     "-lTKTopAlgo", "-lTKGeomAlgo", "-lTKPrim", "-lTKBRep",
                     "-lTKGeomBase", "-lTKG3d", "-lTKG2d", "-lTKMath", "-lTKernel",
