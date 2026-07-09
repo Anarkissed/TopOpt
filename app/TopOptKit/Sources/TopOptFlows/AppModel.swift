@@ -36,6 +36,10 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var selectedResinMaterial: String?
     /// The successfully-imported (watertight) file, or nil until one is picked.
     @Published public private(set) var importedFile: ImportedFile?
+    /// The imported part's geometry (flattened buffers + face ids), retained so
+    /// the M7.4 workspace viewer has a mesh to render. Set together with
+    /// `importedFile` on a watertight accept; cleared on reject / new import.
+    @Published public private(set) var importedMesh: ImportedMesh?
 
     // MARK: Materials (loaded once from the bundle via the bridge)
 
@@ -113,6 +117,7 @@ public final class AppModel: ObservableObject {
     /// keeps the loaded materials and their default selections.
     public func newTopOpt() {
         importedFile = nil
+        importedMesh = nil
         importSheetPresented = true
     }
 
@@ -135,12 +140,14 @@ public final class AppModel: ObservableObject {
             // Hard failure from the core (unreadable / unparseable / STEP without
             // OCCT): surface its diagnostic verbatim.
             importedFile = nil
+            importedMesh = nil
             toast = "\(name): \(error)"
             return false
         }
         guard mesh.watertight else {
             // Parses but is open / non-manifold — the core cannot optimize it.
             importedFile = nil
+            importedMesh = nil
             toast = "“\(name)” isn’t watertight (open or non-manifold surface). "
                   + "TopOpt needs a closed solid — repair the mesh and re-import."
             return false
@@ -149,6 +156,7 @@ public final class AppModel: ObservableObject {
                                     triangleCount: mesh.triangleCount,
                                     faceCount: mesh.faceCount,
                                     watertight: mesh.watertight)
+        importedMesh = mesh
         return true
     }
 

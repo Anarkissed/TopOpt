@@ -1,0 +1,252 @@
+// Headless macOS tests for the M7.4 Metal viewer's pure logic: mesh geometry
+// (bounds + smooth normals), the render-ready ViewerMesh, and the OrbitCamera
+// (framing, orbit/zoom clamping, and the view/projection matrices). The Metal
+// draw itself (MetalMeshView) needs a GPU + display and is maintainer device QA;
+// everything asserted here is GPU-free simd math, the M7 /app/ verification
+// standard being `xcodebuild test` on this package.
+//
+// Also checks that AppModel retains the imported geometry so the workspace viewer
+// has something to render (M7.4 data seam).
+
+import XCTest
+import simd
+import TopOptKit
+@testable import TopOptFlows
+
+final class ViewerTests: XCTestCase {
+
+    // A unit cube [0,1]³ with outward-wound triangles (so smooth normals point out).
+    private static let cubeCorners: [SIMD3<Float>] = [
+        SIMD3(0, 0, 0), SIMD3(1, 0, 0), SIMD3(1, 1, 0), SIMD3(0, 1, 0),  // z = 0
+        SIMD3(0, 0, 1), SIMD3(1, 0, 1), SIMD3(1, 1, 1), SIMD3(0, 1, 1),  // z = 1
+    ]
+    private static let cubeTris: [Int32] = [
+        1, 2, 6, 1, 6, 5,   // +x
+        0, 4, 7, 0, 7, 3,   // -x
+        3, 7, 6, 3, 6, 2,   // +y
+        0, 1, 5, 0, 5, 4,   // -y
+        4, 5, 6, 4, 6, 7,   // +z
+        0, 3, 2, 0, 2, 1,   // -z
+    ]
+    private static var cubeVerts: [Float] {
+        cubeCorners.flatMap { [$0.x, $0.y, $0.z] }
+    }
+
+    // MARK: bounds
+
+    func testBoundsOfUnitCube() {
+        let b = MeshGeometry.bounds(vertices: Self.cubeVerts)
+        XCTAssertFalse(b.isEmpty)
+        XCTAssertEqual(b.min, SIMD3<Float>(0, 0, 0))
+        XCTAssertEqual(b.max, SIMD3<Float>(1, 1, 1))
+        XCTAssertEqual(b.center, SIMD3<Float>(0.5, 0.5, 0.5))
+        XCTAssertEqual(b.radius, sqrt(0.75), accuracy: 1e-5)  // half the space diagonal
+    }
+
+    func testBoundsOfEmptyIsEmpty() {
+        let b = MeshGeometry.bounds(vertices: [])
+        XCTAssertTrue(b.isEmpty)
+        XCTAssertEqual(b.radius, 0, accuracy: 1e-6)
+    }
+
+    // MARK: normals
+
+    func testSingleTriangleNormal() {
+        // Triangle in the z=0 plane wound CCW → normal +z.
+        let verts: [Float] = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+        let n = MeshGeometry.vertexNormals(vertices: verts, indices: [0, 1, 2])
+        XCTAssertEqual(n.count, 9)
+        for v in 0..<3 {
+            XCTAssertEqual(n[v * 3], 0, accuracy: 1e-6)
+            XCTAssertEqual(n[v * 3 + 1], 0, accuracy: 1e-6)
+            XCTAssertEqual(n[v * 3 + 2], 1, accuracy: 1e-6)
+        }
+    }
+
+    func testCubeNormalsPointOutwardAndAreUnit() {
+        let verts = Self.cubeVerts
+        let normals = MeshGeometry.vertexNormals(vertices: verts, indices: Self.cubeTris)
+        XCTAssertEqual(normals.count, verts.count)
+        let center = SIMD3<Float>(0.5, 0.5, 0.5)
+        for v in 0..<8 {
+            let n = SIMD3<Float>(normals[v * 3], normals[v * 3 + 1], normals[v * 3 + 2])
+            XCTAssertEqual(simd_length(n), 1, accuracy: 1e-5, "normal \(v) not unit")
+            let outward = Self.cubeCorners[v] - center
+            XCTAssertGreaterThan(simd_dot(n, outward), 0, "normal \(v) faces inward")
+        }
+    }
+
+    func testNormalsIgnoreOutOfRangeIndices() {
+        // A stray index past the vertex count must not trap; the good triangle wins.
+        let verts: [Float] = [0, 0, 0, 1, 0, 0, 0, 1, 0]
+        let n = MeshGeometry.vertexNormals(vertices: verts, indices: [0, 1, 2, 0, 1, 99])
+        XCTAssertEqual(n.count, 9)
+        XCTAssertEqual(n[2], 1, accuracy: 1e-6)
+    }
+
+    // MARK: ViewerMesh
+
+    func testViewerMeshShape() {
+        let mesh = ViewerMesh(vertices: Self.cubeVerts, indices: Self.cubeTris, faceIDs: [])
+        XCTAssertEqual(mesh.vertexCount, 8)
+        XCTAssertEqual(mesh.triangleCount, 12)
+        XCTAssertEqual(mesh.indices.count, 36)
+        XCTAssertFalse(mesh.isEmpty)
+        XCTAssertEqual(mesh.interleaved().count, 8 * 6)
+        XCTAssertEqual(mesh.bounds.max, SIMD3<Float>(1, 1, 1))
+        // Interleave preserves position then normal for vertex 0.
+        let inter = mesh.interleaved()
+        XCTAssertEqual(inter[0], mesh.positions[0])
+        XCTAssertEqual(inter[3], mesh.normals[0])
+    }
+
+    func testViewerMeshEmpty() {
+        let mesh = ViewerMesh(vertices: [], indices: [], faceIDs: [])
+        XCTAssertTrue(mesh.isEmpty)
+        XCTAssertEqual(mesh.vertexCount, 0)
+        XCTAssertTrue(mesh.bounds.isEmpty)
+    }
+
+    // MARK: OrbitCamera framing
+
+    func testFrameCentersAndFits() {
+        var cam = OrbitCamera()
+        let b = MeshGeometry.bounds(vertices: Self.cubeVerts)
+        cam.frame(b)
+        XCTAssertEqual(cam.target.x, 0.5, accuracy: 1e-5)
+        XCTAssertEqual(cam.target.y, 0.5, accuracy: 1e-5)
+        XCTAssertEqual(cam.target.z, 0.5, accuracy: 1e-5)
+        let expected = b.radius / sin(cam.fovY * 0.5) * 1.15
+        XCTAssertEqual(cam.distance, expected, accuracy: 1e-4)
+        // Distance sits within the zoom limits framing established.
+        XCTAssertGreaterThanOrEqual(cam.distance, cam.minDistance)
+        XCTAssertLessThanOrEqual(cam.distance, cam.maxDistance)
+    }
+
+    func testFrameEmptyMeshStaysUsable() {
+        var cam = OrbitCamera()
+        cam.frame(MeshBounds(min: .zero, max: .zero, isEmpty: true))
+        XCTAssertEqual(cam.target, .zero)
+        XCTAssertTrue(cam.distance.isFinite)
+        XCTAssertGreaterThan(cam.distance, 0)
+    }
+
+    // MARK: OrbitCamera orbit / zoom
+
+    func testOrbitTurnsAzimuthBySensitivity() {
+        var cam = OrbitCamera(azimuth: 0, elevation: 0)
+        cam.orbit(dx: 100, dy: 0)
+        XCTAssertEqual(cam.azimuth, -100 * OrbitCamera.orbitSensitivity, accuracy: 1e-6)
+        XCTAssertEqual(cam.elevation, 0, accuracy: 1e-6)
+    }
+
+    func testElevationClampsAtPoles() {
+        var cam = OrbitCamera(elevation: 0)
+        cam.orbit(dx: 0, dy: 100_000)
+        XCTAssertEqual(cam.elevation, OrbitCamera.maxElevation, accuracy: 1e-6)
+        cam.orbit(dx: 0, dy: -1_000_000)
+        XCTAssertEqual(cam.elevation, -OrbitCamera.maxElevation, accuracy: 1e-6)
+    }
+
+    func testInitClampsElevation() {
+        XCTAssertEqual(OrbitCamera(elevation: 10).elevation, OrbitCamera.maxElevation, accuracy: 1e-6)
+        XCTAssertEqual(OrbitCamera(elevation: -10).elevation, -OrbitCamera.maxElevation, accuracy: 1e-6)
+    }
+
+    func testZoomClampsToLimits() {
+        var cam = OrbitCamera()
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        cam.zoom(1e-9)
+        XCTAssertEqual(cam.distance, cam.minDistance, accuracy: 1e-6)
+        cam.zoom(1e9)
+        XCTAssertEqual(cam.distance, cam.maxDistance, accuracy: 1e-4)
+    }
+
+    func testZoomIgnoresNonPositiveFactor() {
+        var cam = OrbitCamera()
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let d = cam.distance
+        cam.zoom(0)
+        cam.zoom(-2)
+        XCTAssertEqual(cam.distance, d, accuracy: 1e-6)
+    }
+
+    // MARK: OrbitCamera matrices
+
+    func testEyeIsDistanceFromTarget() {
+        var cam = OrbitCamera(azimuth: 0.7, elevation: 0.3)
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        XCTAssertEqual(simd_length(cam.eye - cam.target), cam.distance, accuracy: 1e-4)
+    }
+
+    func testViewMatrixMapsEyeAndTarget() {
+        var cam = OrbitCamera(azimuth: 0.9, elevation: -0.4)
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let v = cam.viewMatrix()
+        let eyeV = v * SIMD4<Float>(cam.eye, 1)
+        XCTAssertEqual(eyeV.x, 0, accuracy: 1e-3)
+        XCTAssertEqual(eyeV.y, 0, accuracy: 1e-3)
+        XCTAssertEqual(eyeV.z, 0, accuracy: 1e-3)
+        let tgtV = v * SIMD4<Float>(cam.target, 1)
+        XCTAssertEqual(tgtV.x, 0, accuracy: 1e-3)
+        XCTAssertEqual(tgtV.y, 0, accuracy: 1e-3)
+        XCTAssertEqual(tgtV.z, -cam.distance, accuracy: 1e-3)  // straight ahead down −Z
+    }
+
+    func testTargetProjectsToClipCenter() {
+        var cam = OrbitCamera(azimuth: 0.2, elevation: 0.2)
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let mvp = cam.projectionMatrix(aspect: 1.6) * cam.viewMatrix()
+        let clip = mvp * SIMD4<Float>(cam.target, 1)
+        XCTAssertGreaterThan(clip.w, 0)  // in front of the camera
+        XCTAssertEqual(clip.x / clip.w, 0, accuracy: 1e-4)
+        XCTAssertEqual(clip.y / clip.w, 0, accuracy: 1e-4)
+    }
+
+    func testNormalMatrixColumnsAreOrthonormal() {
+        var cam = OrbitCamera(azimuth: 1.1, elevation: -0.6)
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let n = cam.normalMatrix()
+        XCTAssertEqual(simd_length(n.columns.0), 1, accuracy: 1e-5)
+        XCTAssertEqual(simd_length(n.columns.1), 1, accuracy: 1e-5)
+        XCTAssertEqual(simd_length(n.columns.2), 1, accuracy: 1e-5)
+        XCTAssertEqual(simd_dot(n.columns.0, n.columns.1), 0, accuracy: 1e-5)
+    }
+
+    // MARK: AppModel geometry seam (workspace viewer gets a mesh)
+
+    private static let repoRoot: URL = {
+        var u = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { u.deleteLastPathComponent() }
+        return u
+    }()
+    private static func core(_ rel: String) -> String {
+        repoRoot.appendingPathComponent("core/\(rel)").path
+    }
+
+    @MainActor
+    func testAppModelRetainsImportedGeometry() {
+        let m = AppModel(materialsPath: Self.core("src/materials/materials.json"))
+        XCTAssertNil(m.importedMesh)
+        let ok = m.importFile(atPath: Self.core("tests/fixtures/stl/cube_10mm.stl"))
+        XCTAssertTrue(ok)
+        XCTAssertNotNil(m.importedMesh)
+        XCTAssertEqual(m.importedMesh?.triangleCount, 12)
+        // The retained geometry builds a non-empty ViewerMesh for the stage.
+        let vm = ViewerMesh(vertices: m.importedMesh!.vertices,
+                            indices: m.importedMesh!.indices,
+                            faceIDs: m.importedMesh!.faceIDs)
+        XCTAssertEqual(vm.triangleCount, 12)
+        XCTAssertFalse(vm.bounds.isEmpty)
+    }
+
+    @MainActor
+    func testAppModelClearsGeometryOnReject() {
+        let m = AppModel(materialsPath: Self.core("src/materials/materials.json"))
+        XCTAssertTrue(m.importFile(atPath: Self.core("tests/fixtures/stl/cube_10mm.stl")))
+        XCTAssertNotNil(m.importedMesh)
+        // A non-watertight import is rejected and must clear the prior geometry.
+        XCTAssertFalse(m.importFile(atPath: Self.core("tests/fixtures/stl/broken_open_cube.stl")))
+        XCTAssertNil(m.importedMesh)
+    }
+}

@@ -180,7 +180,7 @@
       (SLA) segment, material dropdown populated from materials.json via the
       bridge, Cancel/Continue → workspace. Import errors (non-watertight STL
       etc.) surface the core diagnostic in a toast.
-- [ ] M7.4 Metal viewer v1. Render the imported tessellated mesh (bridge
+- [x] M7.4 Metal viewer v1. Render the imported tessellated mesh (bridge
       supplies vertices/normals/face ids), orbit + pinch-zoom camera matching
       the design's hint copy, matcap-style shading on the dark stage. No
       selection yet. Maintainer QA on device for feel.
