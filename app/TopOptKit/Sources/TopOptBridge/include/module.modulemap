@@ -1,0 +1,20 @@
+// Explicit module map for the TopOptBridge C++ facade (ROADMAP M7.1).
+//
+// Why this file exists: without it, SwiftPM auto-generates a module map with no
+// language requirement —
+//     module TopOptBridge { umbrella "…/include" export * }
+// — and a clean Clang dependency scan is then free to build the module in C
+// mode. TopOptBridge.hpp includes the C++-only headers <cstdint>/<string>/
+// <vector>, which are not on the C include path, so the module build fails with
+//     fatal error: 'cstdint' file not found
+//     could not build module 'TopOptBridge'
+// on some Xcode/clang invocations (the maintainer's Mac) while compiling fine on
+// others. `requires cplusplus` forces the module to be built as C++ in every
+// context, making the configuration build-environment-independent. The Swift
+// side already imports it in C++ mode (interoperabilityMode(.Cxx) on the
+// TopOptKit and TopOptKitTests targets), which satisfies the requirement.
+module TopOptBridge {
+    umbrella "."
+    requires cplusplus
+    export *
+}

@@ -161,7 +161,7 @@
       density_g_cm3 × printed volume (spacing-aware). Tests: field/mesh
       consistency with check_v3, mass arithmetic on a known cube, support
       count matches count_overhang_voxels. Pure core; no /app/.
-- [ ] M7.1 App scaffold + bridge. Xcode project in /app/ (iPad SwiftUI target
+- [x] M7.1 App scaffold + bridge. Xcode project in /app/ (iPad SwiftUI target
       "TopOpt", Swift/C++ interop enabled), core built into the app via CMake
       (static lib or xcframework; OCCT/lib3mf dylibs handled per §10 LGPL
       dynamic-linking), plus a `TopOptKit` Swift wrapper exposing: load
