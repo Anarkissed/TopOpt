@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A00000000000000000000012 /* TopOptKit in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000011 /* TopOptKit */; };
 		A00000000000000000000014 /* materials.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* materials.json */; };
+		A00000000000000000000015 /* TopOptFlows in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000016 /* TopOptFlows */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000012 /* TopOptKit in Frameworks */,
+				A00000000000000000000015 /* TopOptFlows in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,6 +72,7 @@
 			name = TopOpt;
 			packageProductDependencies = (
 				A00000000000000000000011 /* TopOptKit */,
+				A00000000000000000000016 /* TopOptFlows */,
 			);
 			productName = TopOpt;
 			productReference = A00000000000000000000005 /* TopOpt.app */;
@@ -274,6 +277,10 @@
 		A00000000000000000000011 /* TopOptKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = TopOptKit;
+		};
+		A00000000000000000000016 /* TopOptFlows */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = TopOptFlows;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

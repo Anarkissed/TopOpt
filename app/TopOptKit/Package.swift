@@ -32,6 +32,10 @@ let package = Package(
         // SwiftUI, no C++ interop / core dependency, so it builds on every slice
         // and its tokens are unit-testable headlessly (TopOptDesignTests).
         .library(name: "TopOptDesign", targets: ["TopOptDesign"]),
+        // The M7.3 home + import flow (AppModel + Home/Import/Workspace screens).
+        // Composes TopOptKit (bridge) + TopOptDesign; its flow logic is unit-
+        // testable headlessly (TopOptFlowsTests).
+        .library(name: "TopOptFlows", targets: ["TopOptFlows"]),
     ],
     targets: [
         // The CMake-built core, per-platform, selected automatically by Xcode.
@@ -82,6 +86,18 @@ let package = Package(
         .testTarget(
             name: "TopOptDesignTests",
             dependencies: ["TopOptDesign"]
+        ),
+        // M7.3 flow: depends on TopOptKit, so it must also enable C++ interop
+        // (a Swift module built with Cxx interop forces its consumers to enable it).
+        .target(
+            name: "TopOptFlows",
+            dependencies: ["TopOptKit", "TopOptDesign"],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
+        ),
+        .testTarget(
+            name: "TopOptFlowsTests",
+            dependencies: ["TopOptFlows"],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
     ],
     cxxLanguageStandard: .cxx17

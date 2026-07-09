@@ -175,7 +175,7 @@
       spacing) into DesignSystem.swift + reusable views: GlassPanel,
       GlassSheet, PillButton, SegmentedGlass, Toast, ProgressBar. SwiftUI
       previews for each; maintainer QA against the HTML side by side.
-- [ ] M7.3 Home + import flow. Home screen ("New TopOpt", recent projects
+- [x] M7.3 Home + import flow. Home screen ("New TopOpt", recent projects
       grid), import sheet: UIDocumentPicker (STEP/STL), Filament(FDM)/Resin
       (SLA) segment, material dropdown populated from materials.json via the
       bridge, Cancel/Continue → workspace. Import errors (non-watertight STL
