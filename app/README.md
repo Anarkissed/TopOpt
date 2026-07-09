@@ -51,18 +51,45 @@ platforms):
 | Slice | Arch | OpenCASCADE | Notes |
 |-------|------|-------------|-------|
 | `macos-arm64` | arm64 | yes | full pipeline incl. STEP import; runs the tests |
-| `ios-arm64_x86_64-simulator` | arm64 + x86_64 | no | OCCT-free |
-| `ios-arm64` (device) | arm64 | no | OCCT-free |
+| `ios-*-simulator` | arm64 (+x86_64 if OCCT-free) | if cross-built | see "STEP on iOS" below |
+| `ios-arm64` (device) | arm64 | if cross-built | see "STEP on iOS" below |
 
-OpenCASCADE is not available for iOS (Homebrew ships macOS only), so the iOS
-slices are **OCCT-free**: STEP import and STEP face-tagging are macOS-only and
-return a clear "not available on this platform" error on iOS. Everything else —
-materials.json, STL import/export, voxelize, FEA, SIMP, `minimize_plastic` —
-works on all platforms (Eigen is header-only and compiled into every slice).
-OpenCASCADE is dynamically linked on macOS only (LGPL 2.1, ARCHITECTURE §4/§10);
-lib3mf is not required for M7.1 (3MF export is M7.9 — STL export is pure C++).
-The script vendors only package-relative paths, so `Package.swift` carries no
-machine-specific absolute paths.
+By default the iOS slices are **OCCT-free**: STEP import and STEP face-tagging
+return a clear "not available on this platform" error on iOS, while everything
+else — materials.json, STL import/export, voxelize, FEA, SIMP,
+`minimize_plastic` — works on all platforms (Eigen is header-only and compiled
+into every slice). To enable STEP on iOS, cross-build OpenCASCADE for iOS first
+(next section); `build_core.sh` then detects it and builds the iOS slices WITH
+OCCT. OpenCASCADE is dynamically linked on every platform (LGPL 2.1,
+ARCHITECTURE §4/§10) — Homebrew dylibs on macOS, embedded dynamic-framework
+xcframeworks on iOS. The script vendors only package-relative paths, so
+`Package.swift` carries no machine-specific absolute paths.
+
+## STEP on iOS — cross-building the OCCT frameworks (M7.1b)
+
+`scripts/build_occt_ios.sh` cross-compiles OpenCASCADE (and, for M7.9, lib3mf)
+for iOS device (arm64) + simulator (arm64) and packages each library as an
+embedded **dynamic-framework `.xcframework`** under `TopOptKit/vendor/occt-ios/`
+(LGPL 2.1 dynamic linking — nothing is statically archived or source-modified).
+It uses the hand-written CMake toolchain `scripts/ios.toolchain.cmake` (no new
+third-party dependency).
+
+```sh
+./app/scripts/build_occt_ios.sh     # once, per OCCT version — slow (full OCCT build)
+./app/scripts/build_core.sh         # now builds the iOS core slices WITH OCCT
+```
+
+`Package.swift` auto-detects `vendor/occt-ios/*.xcframework`: when present it
+declares a binaryTarget per OCCT toolkit, links + embeds them on iOS, and defines
+`TOPOPT_BRIDGE_HAS_OCCT` on iOS. When absent (the default, before the script has
+run) the manifest is the pre-M7.1b macOS-only behavior, so **the macOS test path
+never regresses**. Order matters: run `build_occt_ios.sh` *before*
+`build_core.sh` so the two agree on whether iOS has OCCT.
+
+> This is the heavy, environment-specific step. See the M7.1b handoff
+> (`docs/handoffs/`) for the exact commands, expected output, likely failure
+> points (OCCT iOS CMake flags, min-iOS version, simulator-vs-device arch,
+> framework code signing) and the fallback if OCCT will not cross-build.
 
 ## Testing the bridge (the M7 verification standard)
 
@@ -98,8 +125,9 @@ target has C++ interoperability enabled (`SWIFT_OBJC_INTEROP_MODE = objcxx`),
 required because TopOptKit is built with C++ interop.
 
 For a device run, select your development Team under Signing & Capabilities
-(the app uses automatic signing). STEP import is unavailable on device/simulator
-(no iOS OpenCASCADE) — import STL parts there; STEP works in the macOS tests.
-Bringing STEP to iOS would need an `arm64-apple-ios` build of OpenCASCADE fed to
-`build_core.sh`'s iOS slices (currently OCCT-disabled) — a separate effort.
+(the app uses automatic signing). STEP import on device/simulator requires the
+iOS OpenCASCADE frameworks — run `build_occt_ios.sh` then `build_core.sh` (see
+"STEP on iOS" above). Without them the iOS slices are OCCT-free and a STEP
+import returns the core's "not available on this platform" diagnostic; STL
+import and the rest of the pipeline work regardless.
 ```
