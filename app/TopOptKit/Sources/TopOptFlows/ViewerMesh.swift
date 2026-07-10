@@ -238,4 +238,33 @@ public struct ViewerMesh {
         }
         return out
     }
+
+    /// The outward model-space normal of B-rep face `faceID`: the area-weighted
+    /// average of its triangles' geometric normals, normalized. Nil if the face id
+    /// is absent, or the mesh carries no face ids (STL). Used by M7.6 gravity setup
+    /// to turn a tapped "floor" face into the gravity direction (MOD-F1 D2).
+    public func faceNormal(_ faceID: Int32) -> SIMD3<Float>? {
+        guard !faceIDs.isEmpty else { return nil }
+        let vc = vertexCount
+        var accum = SIMD3<Float>.zero
+        var found = false
+        var t = 0
+        while t + 2 < indices.count {
+            let tri = t / 3
+            if tri < faceIDs.count, faceIDs[tri] == faceID {
+                let i0 = Int(indices[t]), i1 = Int(indices[t + 1]), i2 = Int(indices[t + 2])
+                if i0 < vc, i1 < vc, i2 < vc {
+                    let p0 = SIMD3<Float>(positions[i0 * 3], positions[i0 * 3 + 1], positions[i0 * 3 + 2])
+                    let p1 = SIMD3<Float>(positions[i1 * 3], positions[i1 * 3 + 1], positions[i1 * 3 + 2])
+                    let p2 = SIMD3<Float>(positions[i2 * 3], positions[i2 * 3 + 1], positions[i2 * 3 + 2])
+                    accum += simd_cross(p1 - p0, p2 - p0)   // ‖·‖ == 2 × area, outward winding
+                    found = true
+                }
+            }
+            t += 3
+        }
+        guard found else { return nil }
+        let len = simd_length(accum)
+        return len > 1e-12 ? accum / len : nil
+    }
 }

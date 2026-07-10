@@ -202,6 +202,15 @@ public struct SelectionModel: Equatable, Sendable {
         if groups.contains(where: { $0.id == id }) { activeGroupID = id }
     }
 
+    /// Clear the active selection so the next tapped face starts a fresh group
+    /// (M7.6: committing an Anchor, or "Change" gravity, deselects — proto
+    /// `S.activeId = null`). Any now-empty non-active group is dropped, matching the
+    /// invariant kept by `pickFaces`.
+    public mutating func clearActive() {
+        activeGroupID = nil
+        groups.removeAll { $0.faces.isEmpty }
+    }
+
     /// Remove a group entirely. If it was the active group, the active selection
     /// clears (a subsequent tap starts a fresh group). No-op for an unknown id.
     public mutating func remove(_ id: UUID) {
