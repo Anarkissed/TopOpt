@@ -240,10 +240,14 @@
       arrow rendering per D6; Optimize enabled only w/ ≥1 anchor + ≥1 load, label
       summarizes. Calls M7.6-core's bridge signatures. Headless tests for the
       data model; UI is maintainer device QA.
+<<<<<<< Updated upstream
 - [ ] M7.6-ring (deferred, v2) Constrained single-DOF rotation ring for custom
       load directions: 15° detents, haptic ticks, second ring after first
       commits, never a freehand drag. After M7.6-app is solid.
 - [ ] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
+=======
+- [x] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
+>>>>>>> Stashed changes
       M7.0a progress driving the bar (per-rung + per-iteration); Cancel;
       "Run in Background" via BGProcessingTask with local notification on
       completion; failure states (CG non-convergence, all-rungs-rejected)
@@ -269,6 +273,53 @@
       performance profile on target iPad (128³ end-to-end timing vs the M6.3
       projection cost decision), accessibility pass (Dynamic Type on sheets,
       VoiceOver labels on tools), App Store asset checklist.
+      
+      ## Future milestones — optimizer capability & ML (parked; do not start until current output reviewed)
+
+- [ ] M7.dom  Design-domain expansion (additive optimization) — PHYSICS, NOT ML.
+      Let SIMP add material beyond the imported part so it can grow ribs/gussets/
+      buttresses a user wouldn't draw. Core already has the mechanism (M3.7 masks:
+      FrozenSolid=keep, FrozenVoid=exclude, Active=optimizer's choice). Add:
+      (a) voxelize a user-defined design volume larger than the import, part
+          embedded and tagged FrozenSolid; (b) UI to size that volume + paint
+          keep-out zones; (c) surrounding space defaults Active.
+      Acceptance test: a THIN L-bracket wrapped in a corner design box grows a
+      gusset along the inner-corner load path; keep-out stays empty; original
+      part never removed. This is the "discovers structure the user couldn't"
+      feature — fully FEA-verified, NO ML required. Build BEFORE any ML work.
+
+- [ ] M7.mma  MMA optimizer updater + real constraints. Replace Optimality
+      Criteria with the Method of Moving Asymptotes (Svanberg 1987) to enable
+      stress constraints and multi-load-case optimization. Highest-value core
+      upgrade; slots into the existing benchmark-fixture harness (regenerate
+      references, same gates). Not ML — just a better, constraint-capable engine.
+      Foundation for everything below.
+
+- [ ] M7.ml  ML-accelerated optimization (ML PROPOSES, PHYSICS CERTIFIES).
+      A Core ML surrogate (runs on Apple silicon Neural Engine) predicts a near-
+      optimal density layout as a WARM START; SIMP/MMA then refines it with real
+      FEA to a verified result. Physics may also be folded into TRAINING
+      (physics-informed loss) so the model's proposals respect equilibrium.
+      NON-NEGOTIABLE, NON-REMOVABLE CONSTRAINT: every design shown to a user is
+      certified by a real FEA pass against real material properties BEFORE
+      display. The ML output is NEVER the source of truth — it only saves
+      iterations. A design that fails its certifying FEA is rejected/re-refined,
+      never shipped. Verify: on benchmark parts the ML-warm-started result
+      matches pure-SIMP compliance within tolerance AND passes the same V-gates;
+      an intentionally-bad surrogate output is caught and rejected by the
+      certifying pass (the safety net is tested, not assumed).
+      Build only AFTER M7.dom + M7.mma, and only if reviewed output shows SPEED/
+      FRICTION is the real limiter (ML removes friction; it does not add
+      capability M7.dom hasn't already delivered).
+
+- [ ] M7.trust  Honesty & confidence UI. Every result surfaces: (a) it was
+      FEA-verified against modeled material properties at the chosen orientation;
+      (b) a confidence/margin indicator (worst-case stress margin from the
+      report); (c) a clear recommendation for load-bearing parts: "Verified
+      against modeled properties. Real prints vary (layer adhesion, moisture,
+      printer) — test-print and load-test before relying on this part for
+      safety-critical use." Applies to ALL results (SIMP or ML). This is honesty,
+      not a disclaimer to bury — it's a first-class part of the result screen.
 - [ ] M7.11a Matcap rendering: replace the analytic clay shading with sampled
       matcap (material-capture) textures — load a matcap PNG into a Metal
       texture, sample it by the view-space normal (n.xy → UV), so shine,
@@ -306,3 +357,8 @@
       region count on a known STL; painted/boxed triangle sets tag the right
       voxels. This makes STL a first-class input, not just an optimize-with-
       defaults fallback.
+
+
+- [ ] M7.zz-ring (deferred, Consider whether this is absolutely necessary and how best to implenment before taking this on) Constrained single-DOF rotation ring for custom
+      load directions: 15° detents, haptic ticks, second ring after first
+      commits, never a freehand drag. After M7.6-app is solid. 
