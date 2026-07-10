@@ -136,6 +136,11 @@ struct OptimizeVariant {
   double worst_case_margin = 0.0;
   bool accepted = false;
   bool v3_passes = false;
+  // M5.2b min-feature: REPORT-ONLY (DECISIONS 2026-07-06). Carried so the app can
+  // surface the same advisory warning the JobReport does; it never gates
+  // acceptance (`accepted` is strength-margin only).
+  int32_t min_feature_violations = 0;
+  std::string min_feature_warning;  // empty when violations == 0
 };
 
 struct OptimizeResult {

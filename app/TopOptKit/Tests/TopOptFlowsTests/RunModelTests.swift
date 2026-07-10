@@ -77,14 +77,30 @@ final class RunModelTests: XCTestCase {
     func testFailureMessages() {
         XCTAssertEqual(RunFailure.solver("CG did not converge").message, "CG did not converge")
         XCTAssertEqual(RunFailure.solver("x").title, "Optimization couldn’t finish")
-        XCTAssertEqual(RunFailure.allRungsRejected.title, "No printable variant found")
-        XCTAssertTrue(RunFailure.allRungsRejected.message.contains("printability"))
+        let f = RunFailure.allRejectedOnMargin(worstMargin: 0.90, minFeatureViolations: 952)
+        XCTAssertEqual(f.title, "Not strong enough to print")
+        XCTAssertTrue(f.message.contains("0.90×"), "names the worst-case margin")
+        XCTAssertTrue(f.message.contains("1.5×"), "names the safety minimum")
+        XCTAssertTrue(f.message.contains("952"), "names the advisory violation count")
+        XCTAssertTrue(f.message.contains("advisory"))
+        // With no violations the advisory clause is omitted.
+        XCTAssertFalse(RunFailure.allRejectedOnMargin(worstMargin: 1.2, minFeatureViolations: 0)
+                        .message.contains("advisory"))
     }
 
     // MARK: - orchestration (synchronous scheduler + stub runner)
 
     private func accepted(count: Int = 1) -> OptimizeOutcome {
         OptimizeOutcome(variants: [], stoppedOnMargin: true, cancelled: false, acceptedCount: count)
+    }
+
+    /// A stub variant with a chosen margin / acceptance / thin-feature count.
+    private func variant(margin: Double, accepted: Bool, violations: Int = 0) -> OptimizeVariant {
+        OptimizeVariant(requestedVolumeFraction: 0.7, achievedVolumeFraction: 0.7,
+                        massGrams: 10, supportVolumeVoxels: 0, meshTriangleCount: 100,
+                        worstCaseMargin: margin, accepted: accepted, v3Passes: true,
+                        minFeatureViolations: violations,
+                        minFeatureWarning: violations > 0 ? "\(violations) thin features" : "")
     }
 
     func testSuccessStoresOutcomeAndClearsProgress() {
@@ -113,12 +129,33 @@ final class RunModelTests: XCTestCase {
         XCTAssertEqual(lastSeen, RunProgress(rung: 0, rungCount: 3, iteration: 4))
     }
 
-    func testAllRungsRejectedIsAFailureSheet() {
+    func testAllRejectedOnMarginIsAFailureSheetWithNumbers() {
+        // Every rung rejected on strength: the terminal rung's margin (< 1.5) and
+        // its advisory thin-feature count flow into the sheet.
         let model = RunModel(scheduler: SynchronousRunScheduler())
-        model.runner = { _, _ in self.accepted(count: 0) }
+        model.runner = { _, _ in
+            OptimizeOutcome(variants: [self.variant(margin: 0.9, accepted: false, violations: 952)],
+                            stoppedOnMargin: true, cancelled: false, acceptedCount: 0)
+        }
         model.start(request())
         XCTAssertEqual(model.phase, .failed)
-        XCTAssertEqual(model.failure, .allRungsRejected)
+        XCTAssertEqual(model.failure, .allRejectedOnMargin(worstMargin: 0.9, minFeatureViolations: 952))
+    }
+
+    func testMinFeatureViolationsDoNotBlockAcceptance() {
+        // A variant with thin-feature violations but a passing margin is ACCEPTED
+        // (core policy: min-feature is report-only, never gates). The run SUCCEEDS,
+        // and the violation count is surfaced on the outcome, not turned into a
+        // failure — this is the exact CLI-vs-app discrepancy the fix targets.
+        let model = RunModel(scheduler: SynchronousRunScheduler())
+        model.runner = { _, _ in
+            OptimizeOutcome(variants: [self.variant(margin: 2500, accepted: true, violations: 1334)],
+                            stoppedOnMargin: false, cancelled: false, acceptedCount: 1)
+        }
+        model.start(request())
+        XCTAssertEqual(model.phase, .succeeded)
+        XCTAssertNil(model.failure)
+        XCTAssertEqual(model.outcome?.variants.first?.minFeatureViolations, 1334)
     }
 
     func testSolverThrowIsAFailureSheetWithDiagnostic() {

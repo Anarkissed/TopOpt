@@ -58,10 +58,16 @@ public struct OptimizeVariant {
     public let worstCaseMargin: Double
     public let accepted: Bool
     public let v3Passes: Bool
+    /// M5.2b min-feature violation count (solid regions thinner than 2 voxels).
+    /// REPORT-ONLY (DECISIONS 2026-07-06): advisory, never gates `accepted`.
+    public let minFeatureViolations: Int
+    /// The human-readable min-feature warning, or "" when there are none.
+    public let minFeatureWarning: String
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 massGrams: Double, supportVolumeVoxels: Int, meshTriangleCount: Int,
-                worstCaseMargin: Double, accepted: Bool, v3Passes: Bool) {
+                worstCaseMargin: Double, accepted: Bool, v3Passes: Bool,
+                minFeatureViolations: Int = 0, minFeatureWarning: String = "") {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         self.massGrams = massGrams
@@ -70,6 +76,8 @@ public struct OptimizeVariant {
         self.worstCaseMargin = worstCaseMargin
         self.accepted = accepted
         self.v3Passes = v3Passes
+        self.minFeatureViolations = minFeatureViolations
+        self.minFeatureWarning = minFeatureWarning
     }
 }
 
@@ -252,7 +260,9 @@ public enum TopOptKit {
                 meshTriangleCount: Int(v.mesh_triangle_count),
                 worstCaseMargin: v.worst_case_margin,
                 accepted: v.accepted,
-                v3Passes: v.v3_passes))
+                v3Passes: v.v3_passes,
+                minFeatureViolations: Int(v.min_feature_violations),
+                minFeatureWarning: String(v.min_feature_warning)))
         }
         return OptimizeOutcome(variants: variants,
                                stoppedOnMargin: raw.stopped_on_margin,

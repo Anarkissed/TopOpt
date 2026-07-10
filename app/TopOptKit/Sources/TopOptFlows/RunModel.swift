@@ -92,26 +92,42 @@ public enum RunFailure: Equatable, Sendable {
     /// The core threw — e.g. CG non-convergence / singular system (the M3.1 guard).
     /// The associated string is the core diagnostic.
     case solver(String)
-    /// Every volume-fraction rung was rejected on V3/printability or margin
-    /// (`acceptedCount == 0`), so there is no variant to show.
-    case allRungsRejected
+    /// No variant met the strength-margin gate (`acceptedCount == 0`). Acceptance
+    /// is strength-margin ONLY (core policy: `variant.accepted = worst_case >=
+    /// margin_stop`; min-feature is report-only, DECISIONS 2026-07-06), so a
+    /// genuine all-rejected is always a strength failure. Carries the strongest
+    /// (terminal) rung's worst-case margin and its advisory thin-feature count so
+    /// the sheet can name the failing check and the numbers.
+    case allRejectedOnMargin(worstMargin: Double, minFeatureViolations: Int)
+
+    /// The strength-margin minimum every accepted variant must clear (core
+    /// `MinimizePlasticOptions.margin_stop` default / ROADMAP M5.3).
+    public static let marginStop = 1.5
 
     /// Sheet headline.
     public var title: String {
         switch self {
         case .solver: return "Optimization couldn’t finish"
-        case .allRungsRejected: return "No printable variant found"
+        case .allRejectedOnMargin: return "Not strong enough to print"
         }
     }
 
-    /// Sheet body copy.
+    /// Sheet body copy — names the failing check and the numbers.
     public var message: String {
         switch self {
         case .solver(let diagnostic):
             return diagnostic
-        case .allRungsRejected:
-            return "Every volume-fraction target failed the printability or strength "
-                 + "checks. Try a coarser resolution, a stronger material, or fewer loads."
+        case .allRejectedOnMargin(let worstMargin, let violations):
+            let margin = String(format: "%.2f", worstMargin)
+            var body = "The strongest variant’s worst-case stress margin was "
+                     + "\(margin)× — below the \(String(format: "%.1f", Self.marginStop))× "
+                     + "safety minimum, so it isn’t strong enough to print. "
+                     + "Try a stronger material, a coarser resolution, or a lighter load."
+            if violations > 0 {
+                body += " (The \(violations) thin-feature warning"
+                      + "\(violations == 1 ? "" : "s") are advisory and did not cause this.)"
+            }
+            return body
         }
     }
 }
@@ -367,7 +383,12 @@ public final class RunModel: ObservableObject {
             if o.cancelled {
                 phase = .cancelled
             } else if o.acceptedCount == 0 {
-                failure = .allRungsRejected
+                // The terminal (last evaluated) rung is the one that failed the
+                // margin gate and stopped the ladder — report its numbers.
+                let terminal = o.variants.last
+                failure = .allRejectedOnMargin(
+                    worstMargin: terminal?.worstCaseMargin ?? 0,
+                    minFeatureViolations: terminal?.minFeatureViolations ?? 0)
                 phase = .failed
             } else {
                 progress = nil
