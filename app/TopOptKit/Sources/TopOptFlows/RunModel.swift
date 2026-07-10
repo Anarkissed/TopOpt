@@ -1,0 +1,398 @@
+// RunModel.swift — the M7.7 "run screen" state machine.
+//
+// Tapping Optimize hands the declared job to the core's minimize_plastic
+// (ROADMAP M5.3) on a BACKGROUND queue, drives the progress bar from the M7.0a
+// per-iteration callback, supports Cancel and "Run in Background" (a completion
+// notification), and classifies the two failure modes the design renders as
+// sheets — CG non-convergence (the core throws) and all-rungs-rejected — instead
+// of alerts.
+//
+// The M7 /app/ verification standard is `xcodebuild test` on this package: all of
+// the run LOGIC lives here (pure `RunProgress` math + `RunFailure` classification
+// + the phase transitions) and is exercised headlessly through injected seams (a
+// synchronous scheduler, a stub runner, a notifier spy). The SwiftUI RunScreen
+// over this model, plus the real BGProcessingTask registration in the app target,
+// are maintainer device QA — they carry no logic this file doesn't already test.
+
+import Foundation
+import TopOptKit
+
+/// A fully-specified minimize_plastic run — the inputs `TopOptKit.minimizePlastic`
+/// needs, gathered from the workspace (imported file, chosen material, resolution).
+public struct RunRequest: Equatable, Sendable {
+    /// The STL/STEP path the core reads.
+    public let modelPath: String
+    public let material: String
+    public let materialsPath: String
+    public let rulesPath: String
+    public let resolution: Int
+    /// The project title, used in the completion-notification copy.
+    public let projectName: String
+
+    public init(modelPath: String, material: String, materialsPath: String,
+                rulesPath: String, resolution: Int, projectName: String) {
+        self.modelPath = modelPath
+        self.material = material
+        self.materialsPath = materialsPath
+        self.rulesPath = rulesPath
+        self.resolution = resolution
+        self.projectName = projectName
+    }
+}
+
+/// A snapshot of a running optimization, from the M7.0a callback (rung index,
+/// rung count, OC iteration). The percentage + stage label are derived here so the
+/// bar math is unit-tested, not buried in the view.
+public struct RunProgress: Equatable, Sendable {
+    /// 0-based index of the current volume-fraction rung.
+    public let rung: Int
+    /// Total rungs in the ladder (clamped ≥ 1).
+    public let rungCount: Int
+    /// 1-based OC iteration within the current rung (0 before the first callback).
+    public let iteration: Int
+
+    public init(rung: Int, rungCount: Int, iteration: Int) {
+        self.rungCount = Swift.max(1, rungCount)
+        self.rung = Swift.min(Swift.max(0, rung), self.rungCount - 1)
+        self.iteration = Swift.max(0, iteration)
+    }
+
+    /// Iteration count at which the within-rung ramp reaches ~63% of the rung's
+    /// span. SIMP/OC converges in tens–low-hundreds of iterations and the core
+    /// exposes no iteration ceiling, so the bar ramps asymptotically within a rung
+    /// (honest: it never claims a rung is done until the next rung begins) and
+    /// steps cleanly at each rung boundary.
+    static let iterationScale = 60.0
+
+    /// Fraction complete, in `0 ..< 1`. Completed rungs contribute their full
+    /// share; the current rung contributes a bounded ramp in its own share. Never
+    /// reaches 1 — only a resolved run (`succeeded`) shows 100%.
+    public var fractionComplete: Double {
+        let perRung = 1.0 / Double(rungCount)
+        let completed = Double(rung) * perRung
+        let within = perRung * (1.0 - exp(-Double(iteration) / Self.iterationScale))
+        return Swift.min(0.999, completed + within)
+    }
+
+    /// Whole-percent form for the big "NN%" readout.
+    public var percent: Int { Int((fractionComplete * 100).rounded()) }
+
+    /// The design's stage line (docs/design/TopOpt.dc.html `_stage`). The only
+    /// signal the core emits is the per-OC-iteration tick, so the honest label
+    /// names the rung and iteration rather than inventing voxelize/assemble phases.
+    public var stageLabel: String {
+        rungCount > 1
+            ? "Variant \(rung + 1) of \(rungCount) · SIMP iteration \(iteration)"
+            : "SIMP iteration \(iteration)"
+    }
+}
+
+/// A run failure the design renders as a sheet (ROADMAP M7.7: "not alerts").
+public enum RunFailure: Equatable, Sendable {
+    /// The core threw — e.g. CG non-convergence / singular system (the M3.1 guard).
+    /// The associated string is the core diagnostic.
+    case solver(String)
+    /// Every volume-fraction rung was rejected on V3/printability or margin
+    /// (`acceptedCount == 0`), so there is no variant to show.
+    case allRungsRejected
+
+    /// Sheet headline.
+    public var title: String {
+        switch self {
+        case .solver: return "Optimization couldn’t finish"
+        case .allRungsRejected: return "No printable variant found"
+        }
+    }
+
+    /// Sheet body copy.
+    public var message: String {
+        switch self {
+        case .solver(let diagnostic):
+            return diagnostic
+        case .allRungsRejected:
+            return "Every volume-fraction target failed the printability or strength "
+                 + "checks. Try a coarser resolution, a stronger material, or fewer loads."
+        }
+    }
+}
+
+/// Where the run phase transitions between: idle → running → one of succeeded /
+/// cancelled / failed.
+public enum RunPhase: Equatable, Sendable {
+    case idle
+    case running
+    case succeeded
+    case cancelled
+    case failed
+
+    /// The optimization is in flight (the progress card is shown).
+    public var isRunning: Bool { self == .running }
+}
+
+/// Thread-safe cancellation flag. The optimize runs on a background queue and its
+/// progress callback (also on that queue) reads this directly to decide whether to
+/// keep going, so cancellation needs no cross-thread hop and no data race.
+final class CancelToken: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+    var isCancelled: Bool { lock.lock(); defer { lock.unlock() }; return cancelled }
+    func cancel() { lock.lock(); cancelled = true; lock.unlock() }
+}
+
+/// Runs the optimize off the main thread and hops UI updates back. Injected so the
+/// tests drive everything synchronously; production uses a background queue + main.
+public protocol RunScheduler {
+    func runInBackground(_ work: @escaping () -> Void)
+    func runOnMain(_ work: @escaping () -> Void)
+}
+
+/// Production scheduler: a user-initiated background queue + the main queue.
+public struct GCDRunScheduler: RunScheduler {
+    private let queue: DispatchQueue
+    public init(queue: DispatchQueue = DispatchQueue(label: "app.topopt.optimize", qos: .userInitiated)) {
+        self.queue = queue
+    }
+    public func runInBackground(_ work: @escaping () -> Void) { queue.async(execute: work) }
+    public func runOnMain(_ work: @escaping () -> Void) { DispatchQueue.main.async(execute: work) }
+}
+
+/// Test scheduler: run everything inline on the caller (the test's main thread).
+public struct SynchronousRunScheduler: RunScheduler {
+    public init() {}
+    public func runInBackground(_ work: @escaping () -> Void) { work() }
+    public func runOnMain(_ work: @escaping () -> Void) { work() }
+}
+
+/// Side effects for the "Run in Background" affordance (ROADMAP M7.7). Injected so
+/// the model is tested with a spy; the real implementation posts a local
+/// notification (and the app target registers the BGProcessingTask).
+public protocol RunNotifier {
+    /// The user chose to keep the run going in the background.
+    func willRunInBackground()
+    /// The (backgrounded) run finished — post the completion notification.
+    func runDidComplete(summary: String)
+}
+
+/// A notifier that does nothing (the default, and what headless tests use through
+/// the spy). The workspace substitutes `LocalRunNotifier` on device.
+public struct SilentRunNotifier: RunNotifier {
+    public init() {}
+    public func willRunInBackground() {}
+    public func runDidComplete(summary: String) {}
+}
+
+#if canImport(UserNotifications)
+import UserNotifications
+#endif
+#if canImport(UIKit)
+import UIKit
+#endif
+
+/// The on-device "Run in Background" seam (ROADMAP M7.7): holds a background-
+/// execution assertion so the in-flight run keeps going after the user leaves the
+/// app, and posts a local notification when it finishes. All system objects are
+/// touched lazily (only once the user backgrounds a run, always on the main
+/// thread since RunModel is `@MainActor`), so constructing this off-device — or in
+/// a SwiftUI preview — is harmless.
+///
+/// Our run is an in-memory computation, so an execution assertion
+/// (`beginBackgroundTask`) is the fitting primitive to let it finish; a
+/// `BGTaskScheduler`/BGProcessingTask cold-launch registration (for deferrable,
+/// restartable work) is a maintainer device-QA decision, not wired here.
+public final class LocalRunNotifier: RunNotifier {
+    #if canImport(UIKit)
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    #endif
+
+    public init() {}
+
+    public func willRunInBackground() {
+        #if canImport(UserNotifications)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        #endif
+        #if canImport(UIKit)
+        endAssertion()
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "app.topopt.optimize") { [weak self] in
+            self?.endAssertion()   // iOS reclaiming time — release cleanly
+        }
+        #endif
+    }
+
+    public func runDidComplete(summary: String) {
+        #if canImport(UserNotifications)
+        let content = UNMutableNotificationContent()
+        content.title = "TopOpt"
+        content.body = summary
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        #endif
+        #if canImport(UIKit)
+        endAssertion()
+        #endif
+    }
+
+    #if canImport(UIKit)
+    private func endAssertion() {
+        guard backgroundTask != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTask)
+        backgroundTask = .invalid
+    }
+    #endif
+}
+
+/// The run-screen state machine (ROADMAP M7.7).
+@MainActor
+public final class RunModel: ObservableObject {
+
+    /// The current run phase; drives whether the progress card / a failure sheet
+    /// is shown.
+    @Published public private(set) var phase: RunPhase = .idle
+    /// The latest progress snapshot while running (nil before the first callback).
+    @Published public private(set) var progress: RunProgress?
+    /// The failure to render as a sheet when `phase == .failed`.
+    @Published public private(set) var failure: RunFailure?
+    /// Whether the user asked to keep the run going in the background.
+    @Published public private(set) var runningInBackground = false
+
+    /// The successful outcome, kept for the M7.8 results screen to consume.
+    public private(set) var outcome: OptimizeOutcome?
+
+    /// The optimize call. Injected for tests; defaults to the real bridge.
+    public typealias Runner = (RunRequest,
+                               _ progress: @escaping (_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)
+                               throws -> OptimizeOutcome
+    var runner: Runner
+
+    private let scheduler: RunScheduler
+    private let notifier: RunNotifier
+    private var token = CancelToken()
+
+    public init(scheduler: RunScheduler = GCDRunScheduler(),
+                notifier: RunNotifier = SilentRunNotifier(),
+                runner: @escaping Runner = RunModel.bridgeRunner) {
+        self.scheduler = scheduler
+        self.notifier = notifier
+        self.runner = runner
+    }
+
+    /// The default runner: drive `minimize_plastic` with the M7.0a progress
+    /// callback (which doubles as the cancellation signal — returning `false`
+    /// stops the run).
+    public static func bridgeRunner(_ request: RunRequest,
+                                    _ progress: @escaping (Int, Int, Int) -> Bool) throws -> OptimizeOutcome {
+        try TopOptKit.minimizePlastic(
+            stlPath: request.modelPath, material: request.material,
+            materialsPath: request.materialsPath, rulesPath: request.rulesPath,
+            resolution: request.resolution, progress: progress)
+    }
+
+    // MARK: - Lifecycle
+
+    /// Start an optimize on a background queue. No-op if one is already running.
+    public func start(_ request: RunRequest) {
+        guard phase != .running else { return }
+        phase = .running
+        progress = nil
+        failure = nil
+        outcome = nil
+        runningInBackground = false
+
+        let token = CancelToken()
+        self.token = token
+        let runner = self.runner
+        let scheduler = self.scheduler
+
+        scheduler.runInBackground { [weak self] in
+            let result: Result<OptimizeOutcome, Error>
+            do {
+                let o = try runner(request) { rung, count, iter in
+                    // Publish the snapshot on main (fire-and-forget); the keep-going
+                    // decision reads the token directly — thread-safe, no hop.
+                    scheduler.runOnMain { self?.publish(RunProgress(rung: rung, rungCount: count, iteration: iter)) }
+                    return !token.isCancelled
+                }
+                result = .success(o)
+            } catch {
+                result = .failure(error)
+            }
+            scheduler.runOnMain { self?.finish(request, result) }
+        }
+    }
+
+    /// Request cancellation of the in-flight run (the callback returns `false` on
+    /// its next tick; the core returns a cancelled outcome cleanly, M7.0a).
+    public func cancel() {
+        guard phase == .running else { return }
+        token.cancel()
+    }
+
+    /// Keep the run going in the background: flag it and let the notifier arrange
+    /// the completion notification (the app target also holds a BGProcessingTask).
+    public func runInBackground() {
+        guard phase == .running else { return }
+        runningInBackground = true
+        notifier.willRunInBackground()
+    }
+
+    /// Dismiss a failure sheet back to idle (the workspace stays put so the user
+    /// can adjust the load case and retry).
+    public func dismissFailure() {
+        guard phase == .failed else { return }
+        phase = .idle
+        failure = nil
+    }
+
+    /// Reset after consuming a success (e.g. once M7.8 has taken the outcome).
+    public func reset() {
+        phase = .idle
+        progress = nil
+        failure = nil
+        outcome = nil
+        runningInBackground = false
+    }
+
+    // MARK: - Main-thread transitions
+
+    private func publish(_ snapshot: RunProgress) {
+        guard phase == .running else { return }   // ignore ticks after cancel/reset
+        progress = snapshot
+    }
+
+    private func finish(_ request: RunRequest, _ result: Result<OptimizeOutcome, Error>) {
+        guard phase == .running else { return }    // a reset raced ahead — drop it
+        switch result {
+        case .success(let o):
+            outcome = o
+            if o.cancelled {
+                phase = .cancelled
+            } else if o.acceptedCount == 0 {
+                failure = .allRungsRejected
+                phase = .failed
+            } else {
+                progress = nil
+                phase = .succeeded
+            }
+        case .failure(let error):
+            failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
+            phase = .failed
+        }
+        if runningInBackground {
+            notifier.runDidComplete(summary: completionSummary(request))
+        }
+    }
+
+    private func completionSummary(_ request: RunRequest) -> String {
+        switch phase {
+        case .succeeded:
+            let n = outcome?.acceptedCount ?? 0
+            return "\(request.projectName): \(n) variant\(n == 1 ? "" : "s") ready"
+        case .cancelled:
+            return "\(request.projectName): optimization cancelled"
+        case .failed:
+            return "\(request.projectName): optimization couldn’t finish"
+        default:
+            return request.projectName
+        }
+    }
+}

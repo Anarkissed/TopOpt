@@ -12,6 +12,7 @@ import TopOptBridge
 public struct TopOptError: Error, CustomStringConvertible {
     public let message: String
     public var description: String { message }
+    public init(message: String) { self.message = message }
 }
 
 /// A material record from materials.json (ARCHITECTURE §6).
@@ -57,6 +58,19 @@ public struct OptimizeVariant {
     public let worstCaseMargin: Double
     public let accepted: Bool
     public let v3Passes: Bool
+
+    public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
+                massGrams: Double, supportVolumeVoxels: Int, meshTriangleCount: Int,
+                worstCaseMargin: Double, accepted: Bool, v3Passes: Bool) {
+        self.requestedVolumeFraction = requestedVolumeFraction
+        self.achievedVolumeFraction = achievedVolumeFraction
+        self.massGrams = massGrams
+        self.supportVolumeVoxels = supportVolumeVoxels
+        self.meshTriangleCount = meshTriangleCount
+        self.worstCaseMargin = worstCaseMargin
+        self.accepted = accepted
+        self.v3Passes = v3Passes
+    }
 }
 
 /// The outcome of a minimize_plastic run (ROADMAP M5.3 / M7.7).
@@ -65,6 +79,14 @@ public struct OptimizeOutcome {
     public let stoppedOnMargin: Bool
     public let cancelled: Bool
     public let acceptedCount: Int
+
+    public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
+                cancelled: Bool, acceptedCount: Int) {
+        self.variants = variants
+        self.stoppedOnMargin = stoppedOnMargin
+        self.cancelled = cancelled
+        self.acceptedCount = acceptedCount
+    }
 }
 
 /// The M7.1 bridge smoke summary: material count + imported-mesh triangle count.

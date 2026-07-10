@@ -55,22 +55,39 @@ public final class AppModel: ObservableObject {
     // MARK: Dependencies (injected for tests; default to the real bridge)
 
     private let materialsPath: String?
+    private let rulesPath: String?
     private let materialsLoader: (String) throws -> [Material]
     private let importer: (String) throws -> ImportedMesh
 
     /// - Parameters:
     ///   - materialsPath: path to materials.json (defaults to the app bundle's
     ///     copy; nil leaves the dropdowns empty until `loadMaterials` is given one).
+    ///   - rulesPath: path to the settings rules.json (defaults to the bundle's
+    ///     copy); needed to build a run request (ROADMAP M7.7).
     ///   - materialsLoader: injectable loader (defaults to `TopOptKit.loadMaterials`).
     ///   - importer: injectable mesh import (defaults to `TopOptKit.importMesh`).
     public init(
         materialsPath: String? = Bundle.main.path(forResource: "materials", ofType: "json"),
+        rulesPath: String? = Bundle.main.path(forResource: "rules", ofType: "json"),
         materialsLoader: @escaping (String) throws -> [Material] = { try TopOptKit.loadMaterials(path: $0) },
         importer: @escaping (String) throws -> ImportedMesh = { try TopOptKit.importMesh(path: $0) }
     ) {
         self.materialsPath = materialsPath
+        self.rulesPath = rulesPath
         self.materialsLoader = materialsLoader
         self.importer = importer
+    }
+
+    /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
+    /// file / material / config path is missing (Optimize is gated on these, so nil
+    /// only happens if wiring is incomplete).
+    public func makeRunRequest(resolution: Int) -> RunRequest? {
+        guard let file = importedFile, let material = selectedMaterial,
+              let materialsPath, let rulesPath else { return nil }
+        return RunRequest(modelPath: file.path, material: material,
+                          materialsPath: materialsPath, rulesPath: rulesPath,
+                          resolution: resolution,
+                          projectName: projectName.isEmpty ? file.name : projectName)
     }
 
     // MARK: - Materials
