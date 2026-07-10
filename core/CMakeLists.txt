@@ -182,6 +182,14 @@ if(Eigen3_FOUND)
   target_link_libraries(test_assembly PRIVATE topopt)
   add_test(NAME fea_assembly COMMAND test_assembly)
 
+  # Uniform-traction surface load test (M7.6-core / MOD-F1 D7). Builds its grids
+  # in code (no fixture) and drives traction_loads, which lives in assembly.cpp,
+  # so it is gated on Eigen the same way. CI configures with
+  # -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_traction tests/unit/test_traction.cpp)
+  target_link_libraries(test_traction PRIVATE topopt)
+  add_test(NAME traction_loads COMMAND test_traction)
+
   # Jacobi-preconditioned CG solver test (M2.3). Builds its grids in code (incl.
   # a 64^3 convergence gate) and needs fea_solve_cg, so it is gated on Eigen like
   # assembly.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.

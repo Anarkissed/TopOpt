@@ -204,6 +204,39 @@ int64_t tag_step_face(const std::string& step_path, int face_id,
 #endif
 }
 
+int64_t mask_step_face(const std::string& step_path, int face_id,
+                       int mask_value, int depth_voxels, int resolution,
+                       BridgeError& err) {
+#ifdef TOPOPT_BRIDGE_HAS_OCCT
+  try {
+    if (mask_value < 0 || mask_value > 2)
+      throw std::invalid_argument(
+          "mask_value must be 0 (Active), 1 (FrozenSolid), or 2 (FrozenVoid)");
+    topopt::StepModel model = topopt::import_step_file(step_path);
+    topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
+    topopt::DesignMask mask = topopt::make_active_mask(g);
+    const auto mv = static_cast<topopt::MaskValue>(mask_value);
+    return static_cast<int64_t>(
+        topopt::mask_step_face(g, model, face_id, mv, depth_voxels, mask));
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    return 0;
+  }
+#else
+  (void)step_path;
+  (void)face_id;
+  (void)mask_value;
+  (void)depth_voxels;
+  (void)resolution;
+  err.ok = false;
+  err.message =
+      "STEP face masking requires OpenCASCADE, which is not available on this "
+      "platform";
+  return 0;
+#endif
+}
+
 OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     const std::string& material_name,
                                     const std::string& materials_path,

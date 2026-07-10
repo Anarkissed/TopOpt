@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <stdexcept>
 #include <vector>
 
 #include "topopt/voxel.hpp"
@@ -152,6 +153,32 @@ struct NodalLoad {
 std::vector<NodalLoad> self_weight_loads(const VoxelGrid& grid, double density,
                                          double gravity,
                                          Vec3 direction = Vec3{0.0, 0.0, -1.0});
+
+// Uniform-traction surface load over the exposed faces of the voxels carrying
+// `tag` (ROADMAP M7.6-core / MOD-F1 D7: "a load group hands the solver a
+// uniform traction over the combined area of its selected faces ... consistent
+// nodal loads, never a centroid point force"). The loaded surface is every
+// cell-face of a `tag` voxel whose axis-neighbour is not solid (Empty or off-
+// grid) — i.e. the exposed boundary of the tagged region. The tag is typically
+// VoxelTag::Load (the selection's tagged slab from tag_step_face), but any tag
+// is accepted.
+//
+// `total_force` is the resultant spread as a uniform traction over that
+// surface. Because the voxels are cubic every free face has the same area, so
+// each free face carries total_force / face_count, distributed to its four
+// corner nodes 1/4 each — the consistent (energy) load vector of a bilinear
+// quad under a uniform traction. Contributions accumulate over shared nodes, so
+// the emitted nodal loads sum EXACTLY to `total_force` and the load is genuinely
+// distributed, never lumped at a centroid. `total_force`'s direction is applied
+// uniformly to every free face regardless of that face's own normal (a fixed-
+// direction traction: the UI's Gravity / Push / Pull, ROADMAP M7.6-app).
+//
+// Returns one NodalLoad per (node, non-zero component), ready to pass to
+// fea_solve / fea_solve_cg. A zero `total_force` yields no loads. Throws
+// std::invalid_argument if the tagged region has no exposed face — nothing to
+// load (the tag is carried by no voxel, or only by fully-interior voxels).
+std::vector<NodalLoad> traction_loads(const VoxelGrid& grid, VoxelTag tag,
+                                      Vec3 total_force);
 
 // Nodal displacement solution, DOF-ordered (size 3*fea_node_count).
 struct FeaSolution {

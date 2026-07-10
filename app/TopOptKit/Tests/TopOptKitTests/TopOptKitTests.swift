@@ -117,6 +117,47 @@ final class TopOptKitTests: XCTestCase {
                                                        resolution: 12))
     }
 
+    func testMaskStepFace() throws {
+        let mesh = try TopOptKit.importMesh(path: Self.lbracketSTEP)
+        // At a usable resolution some face's boundary slab is non-empty, so a
+        // depth-1 FrozenSolid mask over the faces marks voxels (exercises the
+        // mask_step_face bridge M7.6-app freezes load/anchor shells through).
+        var depth1 = 0
+        for f in 0..<mesh.faceCount {
+            depth1 += try TopOptKit.maskStepFace(stepPath: Self.lbracketSTEP,
+                                                 faceID: f, mask: .frozenSolid,
+                                                 depthVoxels: 1, resolution: 24)
+        }
+        XCTAssertGreaterThan(depth1, 0)
+
+        // A single face masked to depth 2 covers at least as many voxels as
+        // depth 1 (the deeper slab is a superset), and is > 0 for some face.
+        var deeperFound = false
+        for f in 0..<mesh.faceCount {
+            let d1 = try TopOptKit.maskStepFace(stepPath: Self.lbracketSTEP,
+                                                faceID: f, mask: .frozenVoid,
+                                                depthVoxels: 1, resolution: 24)
+            let d2 = try TopOptKit.maskStepFace(stepPath: Self.lbracketSTEP,
+                                                faceID: f, mask: .frozenVoid,
+                                                depthVoxels: 2, resolution: 24)
+            XCTAssertGreaterThanOrEqual(d2, d1)
+            if d2 > 0 { deeperFound = true }
+        }
+        XCTAssertTrue(deeperFound)
+    }
+
+    func testMaskStepFaceOutOfRangeThrows() {
+        XCTAssertThrowsError(try TopOptKit.maskStepFace(stepPath: Self.lbracketSTEP,
+                                                        faceID: 100000, mask: .frozenSolid,
+                                                        depthVoxels: 1, resolution: 12))
+    }
+
+    func testMaskStepFaceBadDepthThrows() {
+        XCTAssertThrowsError(try TopOptKit.maskStepFace(stepPath: Self.lbracketSTEP,
+                                                        faceID: 0, mask: .frozenSolid,
+                                                        depthVoxels: 0, resolution: 12))
+    }
+
     // MARK: export
 
     func testExportSTLRoundTrip() throws {

@@ -220,7 +220,7 @@
       hole selects the hole's face loop" (adjacent-face walk over the B-rep
       face adjacency the bridge exposes). Groups map to Fixture/Load/Frozen
       tagging via mask_step_face / tag_step_face.
-- [ ] M7.6-core Core/bridge: traction loads + passive BC shell (MOD-F1 D7).
+- [x] M7.6-core Core/bridge: traction loads + passive BC shell (MOD-F1 D7).
       Forward mask_step_face so load/anchor faces freeze as an N-voxel passive
       shell (M3.7 design-mask); add a uniform-traction load path over a group's
       combined face area (consistent nodal loads, not a centroid point force) —

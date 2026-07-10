@@ -114,6 +114,98 @@ std::vector<NodalLoad> self_weight_loads(const VoxelGrid& grid, double density,
 
 namespace {
 
+// Is the axis-neighbour of voxel (i,j,k) across the given face solid? `axis` is
+// 0=x, 1=y, 2=z; `positive` picks the +axis face. Off-grid counts as not solid
+// (an exposed boundary face).
+inline bool neighbour_solid(const VoxelGrid& g, int i, int j, int k, int axis,
+                            bool positive) {
+  const int d = positive ? 1 : -1;
+  int ni = i, nj = j, nk = k;
+  if (axis == 0)
+    ni += d;
+  else if (axis == 1)
+    nj += d;
+  else
+    nk += d;
+  if (ni < 0 || nj < 0 || nk < 0 || ni >= g.nx || nj >= g.ny || nk >= g.nz)
+    return false;
+  return g.solid(ni, nj, nk);
+}
+
+// The four corner nodes of one cell-face of voxel (i,j,k). `axis`/`positive`
+// pick the face as in neighbour_solid. Order is irrelevant to a uniform
+// traction (each corner gets an equal 1/4 share).
+inline std::array<int, 4> face_corner_nodes(const VoxelGrid& g, int i, int j,
+                                            int k, int axis, bool positive) {
+  if (axis == 0) {
+    const int a = positive ? i + 1 : i;  // x = i or i+1 plane
+    return {fea_node_index(g, a, j, k), fea_node_index(g, a, j + 1, k),
+            fea_node_index(g, a, j + 1, k + 1), fea_node_index(g, a, j, k + 1)};
+  }
+  if (axis == 1) {
+    const int b = positive ? j + 1 : j;  // y plane
+    return {fea_node_index(g, i, b, k), fea_node_index(g, i + 1, b, k),
+            fea_node_index(g, i + 1, b, k + 1), fea_node_index(g, i, b, k + 1)};
+  }
+  const int c = positive ? k + 1 : k;  // z plane
+  return {fea_node_index(g, i, j, c), fea_node_index(g, i + 1, j, c),
+          fea_node_index(g, i + 1, j + 1, c), fea_node_index(g, i, j + 1, c)};
+}
+
+}  // namespace
+
+std::vector<NodalLoad> traction_loads(const VoxelGrid& grid, VoxelTag tag,
+                                      Vec3 total_force) {
+  // Collect the exposed (free) faces of the tagged region: a cell-face of a
+  // `tag` voxel whose axis-neighbour is not solid.
+  std::vector<std::array<int, 4>> faces;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (grid.tag(i, j, k) != tag) continue;
+        for (int axis = 0; axis < 3; ++axis)
+          for (int s = 0; s < 2; ++s) {
+            const bool positive = (s == 1);
+            if (!neighbour_solid(grid, i, j, k, axis, positive))
+              faces.push_back(face_corner_nodes(grid, i, j, k, axis, positive));
+          }
+      }
+  if (faces.empty())
+    throw std::invalid_argument(
+        "traction_loads: tagged region has no exposed face to load");
+
+  // Uniform traction over cubic (equal-area) faces: each free face carries
+  // total_force / face_count, split 1/4 to each of its four corner nodes. The
+  // per-node-per-face share is total_force / (face_count * 4); accumulating it
+  // over every incident face makes the emitted loads sum to total_force.
+  const double denom = static_cast<double>(faces.size()) * 4.0;
+  const double f[3] = {total_force.x / denom, total_force.y / denom,
+                       total_force.z / denom};
+
+  const int num_nodes = fea_node_count(grid);
+  std::vector<std::array<double, 3>> nodef(
+      static_cast<std::size_t>(num_nodes), std::array<double, 3>{0.0, 0.0, 0.0});
+  for (const auto& fc : faces)
+    for (int a = 0; a < 4; ++a) {
+      std::array<double, 3>& nf = nodef[static_cast<std::size_t>(fc[a])];
+      nf[0] += f[0];
+      nf[1] += f[1];
+      nf[2] += f[2];
+    }
+
+  // One entry per (node, non-zero component); an axis-aligned resultant leaves
+  // the other two components exactly zero, so no spurious loads are produced.
+  std::vector<NodalLoad> loads;
+  for (int n = 0; n < num_nodes; ++n)
+    for (int c = 0; c < 3; ++c) {
+      const double v = nodef[static_cast<std::size_t>(n)][static_cast<std::size_t>(c)];
+      if (v != 0.0) loads.push_back({n, c, v});
+    }
+  return loads;
+}
+
+namespace {
+
 using SpMat = Eigen::SparseMatrix<double>;
 using Vec = Eigen::VectorXd;
 
