@@ -25,6 +25,12 @@
 // checkout, CI, OCCT-free machine) the lists resolve to EMPTY: macOS build/tests
 // stay green and no iOS binaryTargets are declared. That is the committed default.
 //
+// DISK-GATED (M7.1c hardening follow-up): even when the JSON IS present, a
+// framework is declared only if its vendor/occt-ios/<name>.xcframework exists on
+// disk (see loadGeneratedFrameworks). So a committed or stale JSON is harmless —
+// on a fresh checkout the git-ignored vendor/ tree is absent, so the list gates
+// to empty and the build stays OCCT-free/green regardless of what the JSON says.
+//
 // CACHE NOTE: SwiftPM caches the *compiled manifest* keyed on THIS FILE's
 // contents, NOT on files the manifest reads. Because the list now lives outside
 // this file, changing the JSON does NOT change that cache key — so
@@ -46,7 +52,21 @@ func loadGeneratedFrameworks() -> (occt: [String], lib3mf: [String]) {
     guard let data = FileManager.default.contents(atPath: path),
           let g = try? JSONDecoder().decode(GeneratedFrameworks.self, from: data)
     else { return ([], []) }
-    return (g.occt ?? [], g.lib3mf ?? [])
+    // DISK PRESENCE IS THE REAL GATE. Only declare a framework whose .xcframework
+    // actually exists under vendor/. The JSON is a per-machine hint; gating on the
+    // file on disk means a committed or stale JSON is HARMLESS — on a fresh
+    // checkout / CI the git-ignored vendor/ tree is absent, so the list filters to
+    // empty -> OCCT-free -> macOS/CI build stays green. Without this, a committed
+    // list points binaryTargets at absent artifacts and `swift build` fails with
+    // "local binary target 'TKBO' … does not contain a binary artifact" (the
+    // post-M7.1c breakage a maintainer hit by force-committing the JSON).
+    let fm = FileManager.default
+    func onDisk(_ names: [String]?, _ subdir: String) -> [String] {
+        (names ?? []).filter {
+            fm.fileExists(atPath: packageDir + "/vendor/\(subdir)/\($0).xcframework")
+        }
+    }
+    return (onDisk(g.occt, "occt-ios"), onDisk(g.lib3mf, "lib3mf-ios"))
 }
 let (iosOCCTFrameworks, iosLib3mfFrameworks) = loadGeneratedFrameworks()
 

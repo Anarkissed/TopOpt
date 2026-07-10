@@ -274,14 +274,23 @@ PLIST
 # caches and (b) bump Package.swift's mtime. Bumping mtime does NOT change file
 # contents, so `git status` stays clean and Package.swift remains committed-empty.
 invalidate_manifest_cache() {
-  rm -rf "$HOME/Library/Caches/org.swift.swiftpm/manifests" \
-         "$HOME/Library/org.swift.swiftpm/cache/manifests" \
+  # Purge SwiftPM's on-disk caches WHOLESALE. Purging only the manifests subdir was
+  # not enough to flip Xcode/SwiftPM resolution in practice; removing the whole
+  # org.swift.swiftpm cache trees is what reliably makes the manifest re-evaluate
+  # and pick up the JSON. This package has no remote SwiftPM dependencies, so a
+  # full purge only costs a manifest recompile — nothing to re-download.
+  rm -rf "$HOME/Library/Caches/org.swift.swiftpm" \
+         "$HOME/Library/org.swift.swiftpm" \
          "$PKG_DIR/.build/manifest.db" 2>/dev/null || true
-  touch "$PKG_DIR/Package.swift"
-  echo "==> invalidated SwiftPM manifest cache (purged manifest cache + touched Package.swift)"
+  touch "$PKG_DIR/Package.swift"   # mtime bump only -> git status stays clean
+  echo "==> invalidated SwiftPM manifest cache (purged ~/Library/{Caches/,}org.swift.swiftpm + touched Package.swift)"
   echo "    Package.swift contents are unchanged (git status stays clean)."
-  echo "    Xcode keeps its OWN resolved-package state; if it was already open,"
-  echo "    run File > Packages > Reset Package Caches once."
+  echo "    IMPORTANT for Xcode: Xcode holds its OWN in-memory + DerivedData package"
+  echo "    resolution that an on-disk purge does NOT reach while it is running. So:"
+  echo "      • QUIT Xcode before running this script, then reopen — reliable; or"
+  echo "      • if Xcode was already open, run File > Packages > Reset Package Caches."
+  echo "    Otherwise Xcode keeps compiling the OCCT-off manifest and STEP stays"
+  echo "    disabled (the 'requires OpenCASCADE' toast) even with the JSON written."
 }
 
 # Write the produced framework names into the GIT-IGNORED generated JSON that
