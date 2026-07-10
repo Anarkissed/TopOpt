@@ -159,6 +159,31 @@ public enum TopOptKit {
         return Int(n)
     }
 
+    /// Passive-region design mask value (ROADMAP M3.7), matching
+    /// topopt::MaskValue: keep a region always full (`frozenSolid`) or always
+    /// empty (`frozenVoid`), or leave it a free design variable (`active`).
+    public enum MaskValue: Int32 {
+        case active = 0
+        case frozenSolid = 1
+        case frozenVoid = 2
+    }
+
+    /// Mask the voxels within `depthVoxels` layers of B-rep face `faceID` of a
+    /// STEP part as a passive region, returning the number masked (ROADMAP M3.7
+    /// / M7.6-core D7). This freezes a load/anchor face as an N-voxel passive
+    /// shell so the optimizer cannot remove the surface the boundary conditions
+    /// sit on.
+    public static func maskStepFace(stepPath: String, faceID: Int,
+                                    mask: MaskValue, depthVoxels: Int,
+                                    resolution: Int) throws -> Int {
+        var err = topoptbridge.BridgeError()
+        let n = topoptbridge.mask_step_face(std.string(stepPath), Int32(faceID),
+                                            mask.rawValue, Int32(depthVoxels),
+                                            Int32(resolution), &err)
+        try throwIfFailed(err)
+        return Int(n)
+    }
+
     /// Run minimize_plastic (ROADMAP M5.3) with M7.0a progress + cancellation.
     /// The `progress` closure is invoked once per OC iteration of every rung; it
     /// returns `true` to continue or `false` to request cancellation.

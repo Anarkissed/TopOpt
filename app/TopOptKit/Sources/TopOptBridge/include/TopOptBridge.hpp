@@ -98,6 +98,19 @@ VoxelSummary voxelize_mesh(const std::string& path, int resolution,
 int64_t tag_step_face(const std::string& step_path, int face_id,
                       bool as_fixture, int resolution, BridgeError& err);
 
+// Passive-region masking (ROADMAP M3.7 / M7.6-core D7). Imports the STEP file,
+// voxelizes at `resolution`, and sets the design mask of the voxels within
+// `depth_voxels` layers of B-rep face `face_id` to `mask_value`, returning the
+// number of voxels masked. `mask_value` matches topopt::MaskValue: 0 = Active,
+// 1 = FrozenSolid (keep-in), 2 = FrozenVoid (keep-out). This is how the app
+// freezes load/anchor faces as an N-voxel passive shell so the optimizer cannot
+// remove the surfaces the boundary conditions sit on (MOD-F1 D7). Mirrors
+// tag_step_face (stateless: re-imports + re-voxelizes per call). On failure
+// (bad mask_value/depth/face_id, or STEP unavailable) returns 0 and sets `err`.
+int64_t mask_step_face(const std::string& step_path, int face_id,
+                       int mask_value, int depth_voxels, int resolution,
+                       BridgeError& err);
+
 // ---------------------------------------------------------------------------
 // minimize_plastic (ROADMAP M5.3) with M7.0a progress + cancellation.
 //
