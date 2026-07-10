@@ -188,6 +188,18 @@
       no "requires OpenCASCADE" toast. Also fix the user-facing error text so a
       failed/unsupported import reads in plain language, not "requires
       OpenCASCADE."
+- [x] M7.1c Harden the iOS-OCCT manifest wiring (build system only). The
+      generated framework list lived inside the committed Package.swift, so a
+      stray `git add -A` re-committed the per-machine populated list and broke
+      macOS/CI (see run 039). Move the list OUT into a git-ignored file
+      (occt-frameworks.generated.json) that Package.swift reads at manifest-eval
+      time; absent file (fresh checkout/CI) → empty list → OCCT-free default,
+      macOS build/tests green, no iOS binaryTargets declared. build_occt_ios.sh
+      writes that git-ignored file (not Package.swift) and, because the list is no
+      longer part of the manifest's content-hash cache key, explicitly
+      invalidates the SwiftPM manifest cache (purge + mtime bump) so Xcode
+      re-evaluates. Package.swift stays committed with no list and UNMODIFIED in
+      git status after regenerating. No /core/, no Swift view code, no bridge.
 - [x] M7.2 Design system. Extract the tokens from docs/design/TopOpt_dc.html
       (dark glass palette, accent, surface blur/opacity, radii, type scale,
       spacing) into DesignSystem.swift + reusable views: GlassPanel,

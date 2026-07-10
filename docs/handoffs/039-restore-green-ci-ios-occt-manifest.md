@@ -158,3 +158,150 @@ Not blocking this restore-green run, but flagged for a maintainer decision:
    generated block is empty; a pre-commit hook; or moving the generated list to a
    separate git-ignored `.swift` file the manifest `include`s. Any of these
    touches build/CI plumbing beyond a restore-green fix, so it is left for you.
+
+---
+
+## M7.1c: git-ignored generated OCCT manifest
+
+Follow-up hardening task in the same session (separate from the run-039 revert
+above), on the same branch `restore-green-ios-occt-manifest`. Implements the
+Blocked #1 recommendation structurally. **Build-system only — no /core/, no Swift
+view code, no bridge, no fixtures, no test-assertion edits. M7.6 not started.**
+
+### Problem
+Run 039 fixed the symptom (emptied the committed list) but the *design* stayed
+fragile: the generated iOS-OCCT framework list lived as a value INSIDE the
+committed `Package.swift`, so any `git add -A` after running `build_occt_ios.sh`
+re-commits the per-machine populated list and re-breaks the macOS/CI build.
+
+### What I did
+Moved the generated list OUT of `Package.swift` into a separate, git-ignored file
+the manifest reads at evaluation time.
+
+- **`app/TopOptKit/Package.swift`** — removed the in-file `let iosOCCTFrameworks
+  = [...]` / `let iosLib3mfFrameworks = [...]` generated block. Package.swift now
+  reads `occt-frameworks.generated.json` (in the package dir) via
+  `FileManager`/`JSONDecoder` at manifest-eval time:
+  `let (iosOCCTFrameworks, iosLib3mfFrameworks) = loadGeneratedFrameworks()`.
+  Absent or malformed JSON → `([], [])` (OCCT-free). Everything downstream
+  (`iosBinaryNames`, `hasIOSOCCT`, `occtPlatforms`, `iosBinaryTargets`, the
+  `TopOptOCCT` product) is unchanged — it just derives from the JSON-loaded
+  arrays now. **The committed Package.swift contains NO framework list**, so a
+  stray commit cannot repopulate it.
+  - Why a JSON data file (not a generated `.swift`): SwiftPM compiles only
+    `Package.swift` as the manifest; a sibling `.swift` file is never read. A data
+    file read via Foundation at eval time is the mechanism that works (the M7.1b
+    wiring already read `vendor/` via `FileManager` at eval time; only its cache
+    invalidation was wrong — see below).
+- **`app/.gitignore`** — added `TopOptKit/occt-frameworks.generated.json` (next to
+  the existing `TopOptKit/vendor/` ignore). Committed default is "file absent".
+- **`app/scripts/build_occt_ios.sh`** — `write_manifest_list` now writes the
+  git-ignored JSON (`{"occt":[…],"lib3mf":[…]}`) from the actual
+  `vendor/occt-ios` / `vendor/lib3mf-ios` contents, instead of `sed`-ing
+  Package.swift. It then calls a new **`invalidate_manifest_cache`** step.
+  RELINK_ONLY and the final "Next steps" banner reworded accordingly.
+
+### The cache-bust (the critical, non-obvious part)
+SwiftPM caches the compiled manifest keyed on **Package.swift's contents**, NOT on
+files the manifest reads. Under M7.1b the list lived in Package.swift, so
+rewriting it *was itself* the content change that busted the cache. Now the list
+is external, so writing the JSON alone would NOT invalidate the cache and
+SwiftPM/Xcode would keep resolving the stale (empty) list. So `build_occt_ios.sh`
+now explicitly, after writing the JSON:
+1. **purges the on-disk SwiftPM manifest caches**
+   (`~/Library/Caches/org.swift.swiftpm/manifests`,
+   `~/Library/org.swift.swiftpm/cache/manifests`, `TopOptKit/.build/manifest.db`), and
+2. **`touch`es Package.swift** to bump its mtime.
+
+`touch` changes only mtime, not contents, so **`git status` stays clean** —
+Package.swift remains committed-empty and UNMODIFIED. (Xcode keeps its own
+resolved-package state in DerivedData; the script prints that a still-open Xcode
+needs File ▸ Packages ▸ Reset Package Caches once — the same residual M7.1b
+caveat, now the only manual step.)
+
+### Verification (raw, what I ran)
+```
+# 1. OCCT-free default (no JSON): manifest declares only the base binary target
+$ ls app/TopOptKit/occt-frameworks.generated.json   # (absent)
+$ swift package dump-package | jq '[.targets[]|select(.type=="binary").name]'
+['TopOptCore']
+
+# 2. Regenerate locally (writes JSON + busts cache), then re-dump
+$ RELINK_ONLY=1 ./app/scripts/build_occt_ios.sh
+==> wrote 47 OCCT + 0 lib3mf framework names into occt-frameworks.generated.json
+==> invalidated SwiftPM manifest cache (purged manifest cache + touched Package.swift)
+$ swift package dump-package | (count binary targets)
+48 binary targets; TopOptCore present: True ; TKDESTEP present: True
+$ git status --short          # JSON absent from status (ignored); note Package.swift
+ M app/.gitignore
+ M app/TopOptKit/Package.swift          # <- only the committed M7.1c reader edit
+ M app/scripts/build_occt_ios.sh
+$ git diff app/TopOptKit/Package.swift | grep '"TK'   # framework names injected?
+(none)                                                # the script did NOT touch contents
+$ git check-ignore app/TopOptKit/occt-frameworks.generated.json
+app/TopOptKit/occt-frameworks.generated.json          # ignored ✓
+
+# 3. Remove JSON (clean-machine state) -> OCCT-free again
+$ rm app/TopOptKit/occt-frameworks.generated.json && (purge cache + touch)
+$ swift package dump-package | (binary targets)
+['TopOptCore']
+```
+NOTE on step 2's `git status`: `Package.swift` shows ` M` there ONLY because of my
+own uncommitted M7.1c reader edit (this run's committed change). The invariant
+that matters — *the script does not modify Package.swift's contents* — is proven
+by `git diff Package.swift | grep '"TK'` returning nothing: no framework list is
+ever injected. After this run's commit lands, re-running the script on a clean
+tree leaves `git status` fully clean.
+
+### Test evidence (raw, pasted, unedited) — macOS package suite, OCCT-free default
+```
+Test Suite 'TopOptDesignTests.xctest' passed …
+	 Executed 17 tests, with 0 failures (0 unexpected) in 0.011 (0.016) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed …
+	 Executed 70 tests, with 0 failures (0 unexpected) in 0.104 (0.124) seconds
+Test Suite 'TopOptKitTests.xctest' passed …
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.302 (0.306) seconds
+** TEST SUCCEEDED **
+```
+(103 = 17 design + 70 flows + 16 kit.) iOS Simulator app build (OCCT-free
+default): `** BUILD SUCCEEDED **`. Core `ctest` unchanged — no /core/ file touched
+by M7.1c; the run-039 core result (25/25, 100%) stands.
+
+CI run: <maintainer fills>   PR: <maintainer fills>
+New tests added: none (build-system change; no product code). See "constraints".
+
+### Maintainer steps — exactly what to run and what you should see
+1. `git checkout restore-green-ios-occt-manifest` (this branch).
+2. Fresh/OCCT-free check — no generated file yet:
+   - `swift package dump-package` → binary targets = **just `TopOptCore`**.
+   - `xcodebuild test -scheme TopOptKit-Package -destination 'platform=macOS'` →
+     **`** TEST SUCCEEDED **`, 103 tests**.
+   - `git status --short` → **`Package.swift` NOT listed** (unmodified).
+3. Turn on iOS OCCT (you already have the 47 xcframeworks under
+   `vendor/occt-ios/`): `RELINK_ONLY=1 ./app/scripts/build_occt_ios.sh`
+   - You should see `wrote 47 OCCT … into occt-frameworks.generated.json` and
+     `invalidated SwiftPM manifest cache …`.
+   - `git status --short` → **`occt-frameworks.generated.json` does NOT appear**
+     (git-ignored) and **`Package.swift` still NOT listed** (unmodified).
+4. `./app/scripts/build_core.sh` → iOS slices "Eigen + OCCT".
+5. `open app/TopOpt.xcodeproj`, pick an iPad **simulator**, ⌘R.
+   - If Xcode was already open from before, do **File ▸ Packages ▸ Reset Package
+     Caches** once (Xcode's own cache; can't be scripted — same as M7.1b).
+   - You should now see the **TopOptOCCT** product carrying the frameworks, and
+     `ls TopOpt.app/Frameworks | grep TK` → 47 after a build.
+6. Import `tests/fixtures/step/l-bracket.step` → imports with **no "requires
+   OpenCASCADE" toast**. (Same device gate as M7.1b; unchanged by M7.1c.)
+
+### What I did NOT do (M7.1c)
+- **Did NOT start M7.6.** Still the next task, now on a doubly-hardened baseline.
+- **Did NOT change the `TopOptOCCT` product / bridge / core / any Swift view or
+  test.** Only the manifest's *source* of the list, the .gitignore, and the
+  generating script changed.
+- **Did NOT add an automated guard test** that the committed manifest is
+  OCCT-free. It is now structurally impossible for the list to live in
+  Package.swift, which is stronger than a test; a belt-and-suspenders CI check
+  (`swift package dump-package` binary-target count on a clean checkout) is still
+  available to the maintainer but is CI plumbing, out of this task's scope.
+- **Did NOT verify Xcode's in-app cache invalidation** (no GUI Xcode here). The
+  CLI cache-bust is verified (step 2/3 above flip the dump-package result); the
+  Xcode Reset-Package-Caches caveat remains documented, unchanged from M7.1b.

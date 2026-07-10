@@ -263,45 +263,59 @@ PLIST
 }
 
 # =============================================================================
-# Write the produced framework names into Package.swift's generated region. This
-# is what makes Xcode pick them up: SwiftPM caches the compiled manifest keyed on
-# Package.swift's CONTENTS, so a change to vendor/ alone does NOT invalidate the
-# cache (that was the original M7.1b app-linkage bug — the frameworks were on disk
-# but the manifest was never re-evaluated). Rewriting these arrays changes the
-# manifest content, so SwiftPM/Xcode re-evaluate and the `TopOptOCCT` product then
-# carries the frameworks into the app. The committed value is empty (OCCT-free);
-# this local edit is regenerated like vendor/ — do not commit it.
+# Force SwiftPM/Xcode to re-evaluate Package.swift (which re-reads the generated
+# JSON below). CRITICAL for M7.1c: the framework list now lives OUTSIDE
+# Package.swift, in occt-frameworks.generated.json. SwiftPM caches the compiled
+# manifest keyed on Package.swift's CONTENTS, not on files it reads, so writing
+# the JSON alone does NOT bust that cache — SwiftPM/Xcode would keep resolving the
+# stale (empty) list. (Under M7.1b the list lived inside Package.swift, so
+# rewriting it was itself the content change that busted the cache; that is gone
+# now, so we must invalidate explicitly.) We (a) purge SwiftPM's on-disk manifest
+# caches and (b) bump Package.swift's mtime. Bumping mtime does NOT change file
+# contents, so `git status` stays clean and Package.swift remains committed-empty.
+invalidate_manifest_cache() {
+  rm -rf "$HOME/Library/Caches/org.swift.swiftpm/manifests" \
+         "$HOME/Library/org.swift.swiftpm/cache/manifests" \
+         "$PKG_DIR/.build/manifest.db" 2>/dev/null || true
+  touch "$PKG_DIR/Package.swift"
+  echo "==> invalidated SwiftPM manifest cache (purged manifest cache + touched Package.swift)"
+  echo "    Package.swift contents are unchanged (git status stays clean)."
+  echo "    Xcode keeps its OWN resolved-package state; if it was already open,"
+  echo "    run File > Packages > Reset Package Caches once."
+}
+
+# Write the produced framework names into the GIT-IGNORED generated JSON that
+# Package.swift reads at manifest-evaluation time (occt-frameworks.generated.json).
+# The list is NO LONGER inside Package.swift (M7.1c), so a stray `git add -A`
+# cannot re-commit a populated list and break the macOS/CI build (run 039); the
+# committed default is "JSON absent" == OCCT-free. This file is regenerated like
+# vendor/ — do not commit it (it is in app/.gitignore).
 write_manifest_list() {
-  local manifest="$PKG_DIR/Package.swift"
-  [[ -f "$manifest" ]] || { echo "warn: no $manifest to update"; return 0; }
+  local json="$PKG_DIR/occt-frameworks.generated.json"
   OCCT_DIR="$VENDOR/occt-ios" LIB3MF_DIR="$VENDOR/lib3mf-ios" \
-  python3 - "$manifest" <<'PY'
-import os, re, sys
-manifest = sys.argv[1]
+  python3 - "$json" <<'PY'
+import json, os, sys
+out = sys.argv[1]
 def names(d):
     if not os.path.isdir(d): return []
     return sorted(n[:-len(".xcframework")] for n in os.listdir(d) if n.endswith(".xcframework"))
-def lit(ns): return "[" + ", ".join('"%s"' % n for n in ns) + "]"
 occt = names(os.environ["OCCT_DIR"]); l3mf = names(os.environ["LIB3MF_DIR"])
-s = open(manifest).read()
-s, n1 = re.subn(r'let iosOCCTFrameworks: \[String\] = \[[^\]]*\]',
-                'let iosOCCTFrameworks: [String] = ' + lit(occt), s, count=1)
-s, n2 = re.subn(r'let iosLib3mfFrameworks: \[String\] = \[[^\]]*\]',
-                'let iosLib3mfFrameworks: [String] = ' + lit(l3mf), s, count=1)
-if n1 != 1 or n2 != 1:
-    sys.stderr.write("error: could not find the generated arrays in Package.swift\n"); sys.exit(1)
-open(manifest, "w").write(s)
-print("==> wrote %d OCCT + %d lib3mf framework names into Package.swift" % (len(occt), len(l3mf)))
+with open(out, "w") as f:
+    json.dump({"occt": occt, "lib3mf": l3mf}, f, indent=2)
+    f.write("\n")
+print("==> wrote %d OCCT + %d lib3mf framework names into %s"
+      % (len(occt), len(l3mf), os.path.basename(out)))
 PY
+  invalidate_manifest_cache
 }
 
 # --- drive --------------------------------------------------------------------
 # Fast path: if the xcframeworks already exist (e.g. you built them earlier and
-# only need to (re)wire the manifest), RELINK_ONLY=1 rewrites Package.swift's
-# generated list from vendor/ and exits — no multi-slice OCCT rebuild.
+# only need to (re)wire the manifest), RELINK_ONLY=1 writes the git-ignored
+# occt-frameworks.generated.json from vendor/ and exits — no multi-slice OCCT rebuild.
 if [[ "${RELINK_ONLY:-0}" == "1" ]]; then
   [[ -d "$VENDOR/occt-ios" ]] || { echo "error: RELINK_ONLY set but $VENDOR/occt-ios is missing — run a full build first"; exit 1; }
-  echo "==> RELINK_ONLY: rewriting Package.swift's framework list from existing vendor/ (no rebuild)"
+  echo "==> RELINK_ONLY: writing occt-frameworks.generated.json from existing vendor/ (no rebuild)"
   write_manifest_list
   echo "==> done. Now run ./app/scripts/build_core.sh, then build the app."
   exit 0
@@ -325,7 +339,9 @@ cat <<DONE
 ==> OCCT iOS slices ready.
     xcframeworks : $VENDOR/occt-ios/*.xcframework
     install trees: $WORK/install/occt-<sdk>/  (headers + OpenCASCADEConfig.cmake)
-    Package.swift generated framework list updated (local edit; do not commit).
+    framework list: $PKG_DIR/occt-frameworks.generated.json
+                    (git-ignored; Package.swift stays committed-empty and shows
+                    UNMODIFIED in git status — verify with: git status --short)
 
 Next:
   1. ./app/scripts/build_core.sh        # builds the iOS core slices WITH OCCT
@@ -334,5 +350,6 @@ Next:
   2. Build/run the TopOpt app on an iPad simulator/device and import a .step file.
      Package.swift's TopOptOCCT product now carries vendor/occt-ios/*.xcframework;
      the app links + embeds them and TOPOPT_BRIDGE_HAS_OCCT is defined on iOS.
-     If Xcode was already open, let it re-resolve packages (the manifest changed).
+     The manifest cache was invalidated above; if Xcode was already open, run
+     File > Packages > Reset Package Caches once so it re-reads the framework list.
 DONE
