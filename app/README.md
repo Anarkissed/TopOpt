@@ -76,20 +76,33 @@ third-party dependency).
 
 ```sh
 ./app/scripts/build_occt_ios.sh     # once, per OCCT version — slow (full OCCT build)
-./app/scripts/build_core.sh         # now builds the iOS core slices WITH OCCT
+./app/scripts/build_core.sh         # builds the iOS core slices WITH OCCT
 ```
 
-`Package.swift` auto-detects `vendor/occt-ios/*.xcframework`: when present it
-declares a binaryTarget per OCCT toolkit, links + embeds them on iOS, and defines
-`TOPOPT_BRIDGE_HAS_OCCT` on iOS. When absent (the default, before the script has
-run) the manifest is the pre-M7.1b macOS-only behavior, so **the macOS test path
-never regresses**. Order matters: run `build_occt_ios.sh` *before*
-`build_core.sh` so the two agree on whether iOS has OCCT.
+How the app links them (this is the part that has to be reproducible, not a
+manual Xcode "+"): `build_occt_ios.sh` writes the list of frameworks it produced
+into a generated region of `Package.swift` (`iosOCCTFrameworks`). Editing the
+manifest's **contents** is what forces SwiftPM/Xcode to re-evaluate it — merely
+dropping xcframeworks into `vendor/` does **not** (SwiftPM caches the compiled
+manifest keyed on the file's contents, so a stale OCCT-free manifest survives a
+clean *build*; that was the original bug where the frameworks were on disk but
+nothing linked them). The generated list then feeds the **`TopOptOCCT`** SwiftPM
+product (a shim target + one binaryTarget per framework); the app's Xcode target
+depends on that product, so Xcode links **and embeds** the 47 OCCT frameworks
+into `TopOpt.app/Frameworks/` and defines `TOPOPT_BRIDGE_HAS_OCCT` on iOS.
 
-> This is the heavy, environment-specific step. See the M7.1b handoff
-> (`docs/handoffs/`) for the exact commands, expected output, likely failure
-> points (OCCT iOS CMake flags, min-iOS version, simulator-vs-device arch,
-> framework code signing) and the fallback if OCCT will not cross-build.
+The committed `iosOCCTFrameworks` is empty, so a fresh checkout and the macOS
+test path build OCCT-free with no iOS binaries declared — **the macOS test path
+never regresses**. Treat a populated list like `vendor/` (regenerated, not
+committed). The simulator build is **arm64-only** (`EXCLUDED_ARCHS` drops
+`x86_64`) to match the arm64 OCCT slices; an Intel Mac would need x86_64 OCCT +
+core slices too. Order matters: run `build_occt_ios.sh` *before* `build_core.sh`.
+
+Verified on this toolchain (Release, iOS-simulator arm64): 47 frameworks embedded,
+47 `@rpath/TK…` load commands in the app binary, STEP importer linked in, no
+"not available" fallback. See the M7.1b handoff (`docs/handoffs/`) for the exact
+commands, what to confirm in Xcode's "Frameworks, Libraries, and Embedded
+Content" pane, likely failure points, and fallbacks.
 
 ## Testing the bridge (the M7 verification standard)
 

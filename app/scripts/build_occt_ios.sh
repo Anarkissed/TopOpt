@@ -262,28 +262,77 @@ PLIST
   echo "==> packaged lib3mf.xcframework -> $outdir"
 }
 
+# =============================================================================
+# Write the produced framework names into Package.swift's generated region. This
+# is what makes Xcode pick them up: SwiftPM caches the compiled manifest keyed on
+# Package.swift's CONTENTS, so a change to vendor/ alone does NOT invalidate the
+# cache (that was the original M7.1b app-linkage bug — the frameworks were on disk
+# but the manifest was never re-evaluated). Rewriting these arrays changes the
+# manifest content, so SwiftPM/Xcode re-evaluate and the `TopOptOCCT` product then
+# carries the frameworks into the app. The committed value is empty (OCCT-free);
+# this local edit is regenerated like vendor/ — do not commit it.
+write_manifest_list() {
+  local manifest="$PKG_DIR/Package.swift"
+  [[ -f "$manifest" ]] || { echo "warn: no $manifest to update"; return 0; }
+  OCCT_DIR="$VENDOR/occt-ios" LIB3MF_DIR="$VENDOR/lib3mf-ios" \
+  python3 - "$manifest" <<'PY'
+import os, re, sys
+manifest = sys.argv[1]
+def names(d):
+    if not os.path.isdir(d): return []
+    return sorted(n[:-len(".xcframework")] for n in os.listdir(d) if n.endswith(".xcframework"))
+def lit(ns): return "[" + ", ".join('"%s"' % n for n in ns) + "]"
+occt = names(os.environ["OCCT_DIR"]); l3mf = names(os.environ["LIB3MF_DIR"])
+s = open(manifest).read()
+s, n1 = re.subn(r'let iosOCCTFrameworks: \[String\] = \[[^\]]*\]',
+                'let iosOCCTFrameworks: [String] = ' + lit(occt), s, count=1)
+s, n2 = re.subn(r'let iosLib3mfFrameworks: \[String\] = \[[^\]]*\]',
+                'let iosLib3mfFrameworks: [String] = ' + lit(l3mf), s, count=1)
+if n1 != 1 or n2 != 1:
+    sys.stderr.write("error: could not find the generated arrays in Package.swift\n"); sys.exit(1)
+open(manifest, "w").write(s)
+print("==> wrote %d OCCT + %d lib3mf framework names into Package.swift" % (len(occt), len(l3mf)))
+PY
+}
+
 # --- drive --------------------------------------------------------------------
+# Fast path: if the xcframeworks already exist (e.g. you built them earlier and
+# only need to (re)wire the manifest), RELINK_ONLY=1 rewrites Package.swift's
+# generated list from vendor/ and exits — no multi-slice OCCT rebuild.
+if [[ "${RELINK_ONLY:-0}" == "1" ]]; then
+  [[ -d "$VENDOR/occt-ios" ]] || { echo "error: RELINK_ONLY set but $VENDOR/occt-ios is missing — run a full build first"; exit 1; }
+  echo "==> RELINK_ONLY: rewriting Package.swift's framework list from existing vendor/ (no rebuild)"
+  write_manifest_list
+  echo "==> done. Now run ./app/scripts/build_core.sh, then build the app."
+  exit 0
+fi
+
 for sdk in "${SLICES[@]}"; do
   occt_build_slice "$sdk"
   wrap_slice_frameworks "$sdk"
 done
+
 package_occt_xcframeworks
 
 if [[ "$BUILD_LIB3MF" == "1" ]]; then
   build_lib3mf || echo "warn: lib3mf stage failed (non-fatal for M7.1b STEP goal); see log above"
 fi
 
+write_manifest_list
+
 cat <<DONE
 
 ==> OCCT iOS slices ready.
     xcframeworks : $VENDOR/occt-ios/*.xcframework
     install trees: $WORK/install/occt-<sdk>/  (headers + OpenCASCADEConfig.cmake)
+    Package.swift generated framework list updated (local edit; do not commit).
 
 Next:
-  1. ./app/scripts/build_core.sh        # now builds the iOS core slices WITH
-                                        # OCCT (STEP compiled in) because it
-                                        # detects $WORK/install/occt-*/
-  2. Package.swift auto-wires vendor/occt-ios/*.xcframework on iOS (it globs the
-     dir), links + embeds them, and defines TOPOPT_BRIDGE_HAS_OCCT on iOS.
-  3. Build/run the TopOpt app on an iPad simulator and import a .step file.
+  1. ./app/scripts/build_core.sh        # builds the iOS core slices WITH OCCT
+                                        # (STEP compiled in) — it detects
+                                        # $WORK/install/occt-<sdk>/
+  2. Build/run the TopOpt app on an iPad simulator/device and import a .step file.
+     Package.swift's TopOptOCCT product now carries vendor/occt-ios/*.xcframework;
+     the app links + embeds them and TOPOPT_BRIDGE_HAS_OCCT is defined on iOS.
+     If Xcode was already open, let it re-resolve packages (the manifest changed).
 DONE
