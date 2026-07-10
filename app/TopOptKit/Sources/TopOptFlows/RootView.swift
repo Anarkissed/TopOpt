@@ -29,6 +29,10 @@ public struct RootView: View {
         }
         .toast($model.toast)
         .task { model.loadMaterials() }
+        // The design is a dark-glass system: pin the scheme so default-coloured text
+        // stays light and `Material` backings render dark, regardless of the device's
+        // light/dark setting (otherwise labels + glass go unreadable in light mode).
+        .preferredColorScheme(.dark)
     }
 
     private var importOverlay: some View {

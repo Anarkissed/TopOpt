@@ -207,6 +207,7 @@ public struct WorkspacePlaceholder: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(DS.Color.accent.color)
                 Text("Which way is down?").dsStyle(DS.TypeScale.headline)
+                    .foregroundStyle(DS.Color.textPrimary.color)
             }
             Text("Tap the face that points at the floor in real life. Drag to orbit, pinch to zoom.")
                 .dsStyle(DS.TypeScale.caption)
@@ -588,10 +589,10 @@ public struct WorkspacePlaceholder: View {
         HStack(alignment: .bottom) {
             Text(hint)
                 .dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.textSecondary.color)
+                .foregroundStyle(DS.Color.textPrimary.opacity(0.72).color)
                 .padding(.vertical, 8).padding(.horizontal, DS.Space.l)
-                .background(.ultraThinMaterial, in: Capsule())
-                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.07).color, lineWidth: 1))
+                .background(Capsule().fill(DS.Surface.bar.color))
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             Spacer()
             optimizeButton
         }
