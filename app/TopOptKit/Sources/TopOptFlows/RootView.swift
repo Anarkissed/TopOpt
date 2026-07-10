@@ -19,7 +19,11 @@ public struct RootView: View {
             case .home:
                 HomeView(model: model)
             case .workspace:
-                WorkspacePlaceholder(model: model)
+                if let project = model.project {
+                    WorkspacePlaceholder(model: model, project: project)
+                } else {
+                    HomeView(model: model)   // no active project — shouldn't happen
+                }
             }
 
             if model.importSheetPresented {

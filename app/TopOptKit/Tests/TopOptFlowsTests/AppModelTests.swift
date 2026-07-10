@@ -211,6 +211,8 @@ final class AppModelTests: XCTestCase {
         _ = RootView(model: m)
         _ = HomeView(model: m)
         _ = ImportSheet(model: m)
-        _ = WorkspacePlaceholder(model: m)
+        let project = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                                   importedFile: nil, importedMesh: nil)
+        _ = WorkspacePlaceholder(model: m, project: project)
     }
 }
