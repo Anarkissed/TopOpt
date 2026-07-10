@@ -227,7 +227,7 @@
       if the core lacks a traction-assembly entry point, add it in /core/ with
       tests (known face + total force → expected nodal distribution; nodal loads
       sum to applied force). Supersedes M7.5b. Merge before M7.6-app starts.
-- [ ] M7.6-app Full Swift force/gravity experience (MOD-F1 D1-D6; match
+- [x] M7.6-app Full Swift force/gravity experience (MOD-F1 D1-D6; match
       docs/design/TopOpt_force_proto.html and MOD_force_gravity_rework.md, do
       not reinterpret). Data model: gravity as a model-space unit vector from a
       tapped face normal; per-group Anchor|Load role; per-load direction

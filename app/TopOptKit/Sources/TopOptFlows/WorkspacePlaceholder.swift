@@ -24,6 +24,7 @@
 // (see the handoff); the interaction + data are complete and driven from the model.
 
 import SwiftUI
+import simd
 import TopOptKit
 import TopOptDesign
 
@@ -40,6 +41,13 @@ public struct WorkspacePlaceholder: View {
     @State private var typingWeight: UUID?
     @State private var weightText = ""
     @State private var scrubBase: Double?
+    /// The latest camera→screen projection the viewer publishes, so the floating
+    /// overlays + arrows track the 3D selection as the camera moves (M7.6 D3–D6).
+    @State private var projection: CameraProjection?
+    /// Snap the settle instead of animating it, for reduced-motion users (D2).
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let identityQuat = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
 
     public init(model: AppModel) { self.model = model }
 
@@ -55,9 +63,17 @@ public struct WorkspacePlaceholder: View {
             DS.Color.background.color.ignoresSafeArea()
             MetalMeshView(mesh: viewerMesh,
                           selection: selection,
-                          faceToolActive: true,   // D1: tap always selects (routed by phase)
-                          onPickFace: handlePick)
+                          faceTints: roleTints,                 // D3/D5: anchor faces tint green
+                          settleRotation: settleQuat,           // D2: settle onto the floor
+                          settleAnimated: !reduceMotion,
+                          showGround: showGround,
+                          faceToolActive: true,                 // D1: tap always selects (routed by phase)
+                          onPickFace: handlePick,
+                          onMiss: handleMiss,                   // D-happy-path: empty tap drops pending
+                          onProjection: { projection = $0 })
                 .ignoresSafeArea()
+
+            arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrows
 
             chrome
             if force.phase == .setup {
@@ -66,10 +82,28 @@ public struct WorkspacePlaceholder: View {
                 if force.gravityIsSet { gravityChip }
                 if viewerMesh != nil { selectionsPanel }
             }
-            activeControls
+            floatingControls.ignoresSafeArea()                  // D3/D4/D5: beside the selection
             bottomBar
         }
         .task(id: meshID) { rebuildMesh() }
+    }
+
+    // MARK: derived render inputs
+
+    /// The settle rotation to display (identity until gravity is set).
+    private var settleQuat: simd_quatf { force.settleRotation ?? Self.identityQuat }
+    /// Draw the ground grid + contact shadow once gravity is set and we're editing.
+    private var showGround: Bool { force.phase == .edit && force.gravityIsSet }
+    /// Per-face tint (rgba) — anchors green (`ForceModel.tint`), loads/pending the
+    /// group palette — so the 3D highlight matches the panel (D3/D5).
+    private var roleTints: [FaceID: SIMD4<Float>] {
+        var tints: [FaceID: SIMD4<Float>] = [:]
+        for g in selection.groups {
+            let c = force.tint(for: g)
+            let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1)
+            for f in g.faces { tints[f] = v }
+        }
+        return tints
     }
 
     private func rebuildMesh() {
@@ -97,7 +131,49 @@ public struct WorkspacePlaceholder: View {
         force.sync(groups: selection.groups)
     }
 
+    /// A tap on empty space: drop the active pending group and deselect (proto
+    /// empty-tap). Only in edit — in setup an empty tap just misses.
+    private func handleMiss() {
+        guard force.phase == .edit else { return }
+        selection.clearActive()
+        force.sync(groups: selection.groups)
+    }
+
     private var activeGroup: SelectionGroup? { selection.activeGroup }
+
+    // MARK: model → world → screen (via the published camera projection)
+
+    private var meshCenter: SIMD3<Float> { viewerMesh?.bounds.center ?? .zero }
+
+    /// A model-space point in its settled world position (rotation about the centre).
+    private func settledWorld(_ modelPoint: SIMD3<Float>) -> SIMD3<Float> {
+        let c = meshCenter
+        return c + settleQuat.act(modelPoint - c)
+    }
+
+    /// A group's model-space centroid (mean of its faces' centroids).
+    private func groupCentroidModel(_ g: SelectionGroup) -> SIMD3<Float>? {
+        guard let mesh = viewerMesh else { return nil }
+        var sum = SIMD3<Float>.zero, n = 0
+        for f in g.faces { if let c = mesh.faceCentroid(f) { sum += c; n += 1 } }
+        return n > 0 ? sum / Float(n) : nil
+    }
+
+    /// A group's model-space outward normal (mean of its faces' normals).
+    private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
+        guard let mesh = viewerMesh else { return nil }
+        var acc = SIMD3<Float>.zero, found = false
+        for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; found = true } }
+        guard found else { return nil }
+        let len = simd_length(acc)
+        return len > 1e-6 ? acc / len : nil
+    }
+
+    /// A group's centroid projected to the screen, or nil (no projection / behind).
+    private func groupScreen(_ g: SelectionGroup) -> CGPoint? {
+        guard let proj = projection, let cm = groupCentroidModel(g) else { return nil }
+        return proj.project(settledWorld(cm))
+    }
 
     // MARK: top-left chrome (back + project / material chip)
 
@@ -286,25 +362,80 @@ public struct WorkspacePlaceholder: View {
         force.sync(groups: selection.groups)
     }
 
-    // MARK: active-group controls (Anchor|Load chip · snap row · weight pill)
+    // MARK: in-scene force arrows (D6)
 
-    /// Bottom-centre control cluster for the active selection. In-scene floating at
-    /// the projected group centroid is a renderer follow-up (see the file header);
-    /// this presents the same controls at the foot of the stage.
-    @ViewBuilder private var activeControls: some View {
-        if force.phase == .edit, let g = activeGroup {
-            let kind = force.kind(for: g.id)
-            VStack(spacing: DS.Space.sm) {
-                Spacer()
-                if kind.isPending {
-                    anchorLoadChip(g)
-                } else if kind.isLoad {
-                    loadControls(g)
+    /// Every load group's arrow, projected into the stage: tapered shaft + head in
+    /// the group colour, tip at the application point when the force presses into
+    /// the face else tail at it (D6). Non-active loads also show their weight.
+    private var arrowsOverlay: some View {
+        Canvas { ctx, _ in
+            guard let mesh = viewerMesh, let proj = projection, force.phase == .edit else { return }
+            let step = max(mesh.bounds.radius, 1e-3) * 0.35
+            for g in selection.groups where force.kind(for: g.id).isLoad {
+                guard let cm = groupCentroidModel(g), let nm = groupNormalModel(g) else { continue }
+                let worldN = simd_normalize(settleQuat.act(nm))
+                let dir = ForceModel.directionVector(force.kind(for: g.id).loadDirection ?? .gravity,
+                                                     groupNormal: worldN)
+                let base = settledWorld(cm)
+                guard let pBase = proj.project(base),
+                      let pStep = proj.project(base + dir * step) else { continue }
+                var ux = pStep.x - pBase.x, uy = pStep.y - pBase.y
+                let mag = max(1e-3, hypot(ux, uy)); ux /= mag; uy /= mag
+                let len: CGFloat = 74
+                let into = ForceModel.arrowTipAtApplicationPoint(direction: dir, faceNormal: worldN)
+                let tail = into ? CGPoint(x: pBase.x - ux * len, y: pBase.y - uy * len) : pBase
+                let tip  = into ? pBase : CGPoint(x: pBase.x + ux * len, y: pBase.y + uy * len)
+                drawArrow(ctx, from: tail, to: tip, color: g.color.color)
+                if g.id != selection.activeGroupID {
+                    let label = Text(force.formattedWeight(kg: force.kind(for: g.id).weightKg ?? 0))
+                        .font(.system(size: 12, weight: .heavy))
+                        .foregroundColor(g.color.color)
+                    ctx.draw(label, at: CGPoint(x: tail.x, y: tail.y - 13))
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .padding(.bottom, 96)
-            .allowsHitTesting(true)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// A tapered arrow polygon from `a` (tail) to `b` (tip) — the prototype's shaft
+    /// widths + arrowhead.
+    private func drawArrow(_ ctx: GraphicsContext, from a: CGPoint, to b: CGPoint, color: Color) {
+        let dx = b.x - a.x, dy = b.y - a.y
+        let len = max(1, hypot(dx, dy))
+        let ux = dx / len, uy = dy / len, px = -uy, py = ux
+        let head = min(16, len * 0.4), w0: CGFloat = 5.5, w1: CGFloat = 2.2
+        let hb = CGPoint(x: b.x - ux * head, y: b.y - uy * head)
+        var path = Path()
+        path.move(to: CGPoint(x: a.x + px * w0, y: a.y + py * w0))
+        path.addLine(to: CGPoint(x: hb.x + px * w1, y: hb.y + py * w1))
+        path.addLine(to: CGPoint(x: hb.x + px * head * 0.55, y: hb.y + py * head * 0.55))
+        path.addLine(to: b)
+        path.addLine(to: CGPoint(x: hb.x - px * head * 0.55, y: hb.y - py * head * 0.55))
+        path.addLine(to: CGPoint(x: hb.x - px * w1, y: hb.y - py * w1))
+        path.addLine(to: CGPoint(x: a.x - px * w0, y: a.y - py * w0))
+        path.closeSubpath()
+        ctx.fill(path, with: .color(color))
+    }
+
+    // MARK: floating active-group controls (D3/D4/D5) — beside the selection
+
+    /// The Anchor|Load chip (pending) or snap row + weight pill (load) for the active
+    /// group, floated at its projected centroid; falls back to the foot of the stage
+    /// when there is no usable projection yet.
+    @ViewBuilder private var floatingControls: some View {
+        if force.phase == .edit, let g = activeGroup {
+            let kind = force.kind(for: g.id)
+            let cluster = Group {
+                if kind.isPending { anchorLoadChip(g) }
+                else if kind.isLoad { loadControls(g) }
+            }
+            if let pt = groupScreen(g) {
+                cluster.position(x: pt.x, y: max(64, pt.y - 76))   // just above the centroid
+            } else {
+                cluster
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .padding(.bottom, 96)
+            }
         }
     }
 

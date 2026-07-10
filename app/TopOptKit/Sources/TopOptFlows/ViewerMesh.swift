@@ -267,4 +267,29 @@ public struct ViewerMesh {
         let len = simd_length(accum)
         return len > 1e-12 ? accum / len : nil
     }
+
+    /// The model-space centroid of B-rep face `faceID`: the mean of its triangles'
+    /// corner positions. Nil if the face id is absent / the mesh has no face ids.
+    /// Feeds M7.6 overlay + arrow placement (the group centroid).
+    public func faceCentroid(_ faceID: Int32) -> SIMD3<Float>? {
+        guard !faceIDs.isEmpty else { return nil }
+        let vc = vertexCount
+        var sum = SIMD3<Float>.zero
+        var count = 0
+        var t = 0
+        while t + 2 < indices.count {
+            let tri = t / 3
+            if tri < faceIDs.count, faceIDs[tri] == faceID {
+                for k in 0..<3 {
+                    let i = Int(indices[t + k])
+                    if i < vc {
+                        sum += SIMD3<Float>(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2])
+                        count += 1
+                    }
+                }
+            }
+            t += 3
+        }
+        return count > 0 ? sum / Float(count) : nil
+    }
 }

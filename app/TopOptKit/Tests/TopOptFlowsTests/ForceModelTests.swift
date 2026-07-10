@@ -297,6 +297,18 @@ final class ForceModelTests: XCTestCase {
         XCTAssertNil(mesh.faceNormal(0))   // STL: no B-rep face ids
     }
 
+    func testFaceCentroidAveragesFaceVertices() {
+        // Face 0 = the unit square on y=0 (two triangles); its centroid is (0.5,0,0.5).
+        let verts: [Float] = [0, 0, 0,  1, 0, 0,  1, 0, 1,  0, 0, 1]
+        let indices: [Int32] = [0, 1, 2,  0, 2, 3]
+        let mesh = ViewerMesh(vertices: verts, indices: indices, faceIDs: [0, 0])
+        let c = try! XCTUnwrap(mesh.faceCentroid(0))
+        XCTAssertEqual(c.x, 0.5, accuracy: 1e-5)
+        XCTAssertEqual(c.y, 0, accuracy: 1e-5)
+        XCTAssertEqual(c.z, 0.5, accuracy: 1e-5)
+        XCTAssertNil(mesh.faceCentroid(9))
+    }
+
     func testPanelKindLabel() {
         let (_, ids) = groups([1, 2, 3])
         var fm = ForceModel()

@@ -11,7 +11,56 @@
 // is unit-tested headlessly; MetalMeshView drives an instance from gestures.
 
 import Foundation
+import CoreGraphics
 import simd
+
+/// A snapshot of the viewer camera's world→clip transform plus the on-screen
+/// viewport, so SwiftUI overlays can position themselves at 3D points (M7.6 D3–D6:
+/// the Anchor|Load chip, snap row, weight pill and force arrows float beside the
+/// selection). `MetalMeshView` publishes one of these each time the camera orbits
+/// or zooms; overlays call `project` to turn a world point into a view-space point.
+///
+/// Pure value-type math (no MetalKit), so `project` is unit-tested headlessly (the
+/// M7 /app/ standard). `viewportSize` is in SwiftUI points (the MTKView's bounds),
+/// and the returned point is in the same top-left-origin, y-down space SwiftUI
+/// lays out in.
+public struct CameraProjection: Equatable, Sendable {
+    /// projection · view (world → Metal clip space).
+    public let viewProjection: simd_float4x4
+    /// The on-screen size of the stage, in points.
+    public let viewportSize: CGSize
+
+    public init(viewProjection: simd_float4x4, viewportSize: CGSize) {
+        self.viewProjection = viewProjection
+        self.viewportSize = viewportSize
+    }
+
+    /// Build from an `OrbitCamera` and the viewport (points), matching exactly what
+    /// the renderer uses to draw (aspect from the viewport).
+    public init(camera: OrbitCamera, viewportSize: CGSize) {
+        let aspect = viewportSize.height > 0 ? Float(viewportSize.width / viewportSize.height) : 1
+        self.viewProjection = camera.projectionMatrix(aspect: aspect) * camera.viewMatrix()
+        self.viewportSize = viewportSize
+    }
+
+    /// Whether the viewport has a drawable area.
+    public var isUsable: Bool { viewportSize.width > 0 && viewportSize.height > 0 }
+
+    /// Project a world point to a view-space point (points, top-left origin, y down).
+    /// Returns nil when the point is behind the camera (`w <= 0`) or the viewport is
+    /// degenerate.
+    public func project(_ world: SIMD3<Float>) -> CGPoint? {
+        guard isUsable else { return nil }
+        let clip = viewProjection * SIMD4<Float>(world, 1)
+        guard clip.w > 1e-6 else { return nil }
+        let ndcX = clip.x / clip.w                       // [-1, 1]
+        let ndcY = clip.y / clip.w                       // [-1, 1], +y up
+        let x = (ndcX * 0.5 + 0.5) * Float(viewportSize.width)
+        let y = (1 - (ndcY * 0.5 + 0.5)) * Float(viewportSize.height)   // flip to y-down
+        guard x.isFinite, y.isFinite else { return nil }
+        return CGPoint(x: CGFloat(x), y: CGFloat(y))
+    }
+}
 
 public struct OrbitCamera: Equatable {
     /// The point the camera looks at (set to the model centre by `frame`).
