@@ -155,6 +155,19 @@ final class SelectionModelTests: XCTestCase {
         XCTAssertEqual(m.groups.count, 1)
     }
 
+    func testClearActiveDeselectsAndDropsEmptyGroups() {
+        var m = SelectionModel()
+        m.pickFaces([1, 2])             // Group A (has faces)
+        let empty = m.addGroup()        // Group B, active + empty
+        m.clearActive()
+        XCTAssertNil(m.activeGroupID)
+        XCTAssertEqual(m.groups.count, 1, "the empty group is dropped on clear")
+        XCTAssertFalse(m.groups.contains { $0.id == empty })
+        // The non-empty group survives; a later pick starts a fresh group.
+        m.pickFace(7)
+        XCTAssertEqual(m.groups.count, 2)
+    }
+
     // MARK: highlight lookups
 
     func testColourAndGroupForFace() {

@@ -21,32 +21,6 @@ import TopOptDesign
 /// per-triangle `ImportedMesh.faceIDs` the bridge supplies (STL has none).
 public typealias FaceID = Int32
 
-/// The workspace's active interaction tool (design bottom-centre segment). `.force`
-/// is inert until M7.6 (arrows); M7.5 ships Orbit + Faces.
-public enum WorkspaceTool: String, CaseIterable, Sendable {
-    case orbit
-    case face
-    case force
-
-    /// The design's bottom-centre tool-hint copy (`toolHints`).
-    public var hint: String {
-        switch self {
-        case .orbit: return "Drag to orbit · pinch or scroll to zoom"
-        case .face:  return "Tap to select a face — tap inside a hole to grab the whole hole · tap again to deselect"
-        case .force: return "Tap a coloured face to press straight into it · drag to aim (snaps 45°) · tap an arrow tip to edit"
-        }
-    }
-
-    /// The segment button label from the design.
-    public var title: String {
-        switch self {
-        case .orbit: return "Orbit"
-        case .face:  return "Faces"
-        case .force: return "Force"
-        }
-    }
-}
-
 /// How a selection group is applied to the voxel grid at optimize time. In the
 /// design a group with force arrows is a Load and an arrow-less group is a fixed
 /// anchor (Fixture); Frozen (keep-in/keep-out passive regions, M3.7) is the third
@@ -200,6 +174,15 @@ public struct SelectionModel: Equatable, Sendable {
     /// Make a group active (design group-row `select`). No-op for an unknown id.
     public mutating func setActive(_ id: UUID) {
         if groups.contains(where: { $0.id == id }) { activeGroupID = id }
+    }
+
+    /// Clear the active selection so the next tapped face starts a fresh group
+    /// (M7.6: committing an Anchor, or "Change" gravity, deselects — proto
+    /// `S.activeId = null`). Any now-empty non-active group is dropped, matching the
+    /// invariant kept by `pickFaces`.
+    public mutating func clearActive() {
+        activeGroupID = nil
+        groups.removeAll { $0.faces.isEmpty }
     }
 
     /// Remove a group entirely. If it was the active group, the active selection

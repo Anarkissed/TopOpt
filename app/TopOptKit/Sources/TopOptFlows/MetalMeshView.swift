@@ -19,10 +19,11 @@
 
 import SwiftUI
 import TopOptDesign
+import simd
 
 #if canImport(MetalKit)
 import MetalKit
-import simd
+import QuartzCore
 
 // ---------------------------------------------------------------------------
 // GPU uniforms — must match the `Uniforms` layout in the shaders below.
@@ -92,6 +93,31 @@ vertex IDOut id_vertex(IDIn in [[stage_in]], constant Uniforms& u [[buffer(1)]])
 fragment uint id_fragment(IDOut in [[stage_in]]) { return in.faceid; }
 """
 
+// The ground pass (M7.6 D2): the settle ground grid + soft contact shadow, drawn
+// on the world floor plane the part rests on after gravity is set. Per-vertex
+// colour+alpha (grid fades with distance; the shadow disc fades to its rim), so it
+// needs alpha blending; MVP is the plain camera view·projection (the ground is
+// world-space — the *part* rotates onto it, not the reverse).
+private let groundShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct GIn  { float3 position [[attribute(0)]]; float4 color [[attribute(1)]]; };
+struct GOut { float4 position [[position]]; float4 color; };
+struct GUniforms { float4x4 mvp; };
+
+vertex GOut ground_vertex(GIn in [[stage_in]], constant GUniforms& u [[buffer(1)]]) {
+    GOut o;
+    o.position = u.mvp * float4(in.position, 1.0);
+    o.color = in.color;
+    return o;
+}
+
+fragment float4 ground_fragment(GOut in [[stage_in]]) {
+    return float4(in.color.rgb * in.color.a, in.color.a);   // premultiplied
+}
+"""
+
 /// The sentinel face id written to the id target's background (no face under the
 /// pixel). Face ids are non-negative, so `UInt32.max` never collides.
 private let idBackground: UInt32 = .max
@@ -126,6 +152,27 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
     /// The camera the gestures drive. Mutated on the main thread; the draw reads it.
     var camera = OrbitCamera()
+
+    // MARK: settle (M7.6 D2) — a rotation about the model centre so gravity points
+    // at world −Y, optionally animated. Rotation about the centre keeps the camera
+    // target (the centre) fixed, so framing is unaffected.
+    private let groundPipeline: MTLRenderPipelineState?
+    private let groundDepthState: MTLDepthStencilState
+    private var modelCenter = SIMD3<Float>.zero
+    /// The currently-displayed model rotation (animates toward `settleTo`).
+    private var modelRotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    private var settleFrom = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    private var settleTo = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    private var settleStart: CFTimeInterval = 0
+    private var settleDuration: CFTimeInterval = 0
+    /// True while the settle animation is running (drives continuous redraw).
+    private(set) var isSettling = false
+    /// Whether to draw the ground grid + contact shadow (set once gravity is set).
+    var showGround = false
+    private var groundLineBuffer: MTLBuffer?
+    private var groundLineCount = 0
+    private var groundShadowBuffer: MTLBuffer?
+    private var groundShadowCount = 0
 
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
@@ -206,11 +253,48 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             idPipe = try? device.makeRenderPipelineState(descriptor: ipd)
         }
 
+        // Ground pass pipeline (optional: if it fails, the settle still works, just
+        // without the grid/shadow). Alpha-blended, position + rgba per vertex.
+        var groundPipe: MTLRenderPipelineState? = nil
+        if let gLib = try? device.makeLibrary(source: groundShaderSource, options: nil),
+           let gvf = gLib.makeFunction(name: "ground_vertex"),
+           let gff = gLib.makeFunction(name: "ground_fragment") {
+            let gvd = MTLVertexDescriptor()
+            gvd.attributes[0].format = .float3     // position
+            gvd.attributes[0].offset = 0
+            gvd.attributes[0].bufferIndex = 0
+            gvd.attributes[1].format = .float4     // rgba
+            gvd.attributes[1].offset = MemoryLayout<Float>.stride * 3
+            gvd.attributes[1].bufferIndex = 0
+            gvd.layouts[0].stride = MemoryLayout<Float>.stride * 7
+            let gpd = MTLRenderPipelineDescriptor()
+            gpd.vertexFunction = gvf
+            gpd.fragmentFunction = gff
+            gpd.vertexDescriptor = gvd
+            gpd.colorAttachments[0].pixelFormat = Self.colorFormat
+            gpd.colorAttachments[0].isBlendingEnabled = true          // premultiplied alpha
+            gpd.colorAttachments[0].rgbBlendOperation = .add
+            gpd.colorAttachments[0].alphaBlendOperation = .add
+            gpd.colorAttachments[0].sourceRGBBlendFactor = .one
+            gpd.colorAttachments[0].sourceAlphaBlendFactor = .one
+            gpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            gpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            gpd.depthAttachmentPixelFormat = Self.depthFormat
+            groundPipe = try? device.makeRenderPipelineState(descriptor: gpd)
+        }
+        // Ground depth: test against the part (so it is occluded) but do not write
+        // depth (the translucent ground must not block anything behind it).
+        let gdsd = MTLDepthStencilDescriptor()
+        gdsd.depthCompareFunction = .less
+        gdsd.isDepthWriteEnabled = false
+
         self.device = device
         self.queue = queue
         self.pipeline = pipe
         self.depthState = depth
         self.idPipeline = idPipe
+        self.groundPipeline = groundPipe
+        self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
         super.init()
     }
 
@@ -238,6 +322,132 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         buildIDBuffer()
         buildTintBuffer(faceTint: [:], activeFaces: [])
         camera.frame(mesh.bounds)
+
+        // A fresh part starts un-settled (gravity is set afterward).
+        modelCenter = mesh.bounds.center
+        let identity = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+        modelRotation = identity; settleFrom = identity; settleTo = identity
+        isSettling = false
+        buildGround()
+    }
+
+    // MARK: settle + ground (M7.6 D2)
+
+    /// Begin (or snap) the settle to `rotation`. `duration <= 0` snaps immediately
+    /// (reduced-motion). Rebuilds the ground for the new resting pose.
+    func beginSettle(to rotation: simd_quatf, duration: CFTimeInterval) {
+        settleFrom = modelRotation
+        settleTo = rotation
+        settleDuration = Swift.max(0, duration)
+        settleStart = CACurrentMediaTime()
+        if settleDuration <= 0 {
+            modelRotation = rotation
+            isSettling = false
+        } else {
+            isSettling = true
+        }
+        buildGround()
+    }
+
+    /// Advance the settle animation to the current time; returns true while still
+    /// animating. A gentle ease-out with slight overshoot (proto `easeSettle`).
+    @discardableResult
+    private func stepSettle() -> Bool {
+        guard isSettling, settleDuration > 0 else { return false }
+        let raw = Float((CACurrentMediaTime() - settleStart) / settleDuration)
+        let t = Swift.min(1, Swift.max(0, raw))
+        let c: Float = 1.70158 * 0.6
+        let e = t - 1
+        let eased = 1 + ((c + 1) * e + c) * e * e     // cubic ease-out w/ overshoot
+        modelRotation = simd_slerp(settleFrom, settleTo, eased)
+        if t >= 1 {
+            modelRotation = settleTo
+            isSettling = false
+            return false
+        }
+        return true
+    }
+
+    /// The model matrix: rotate about the model centre (keeps the centre fixed).
+    private func modelMatrix() -> simd_float4x4 {
+        let r = simd_float4x4(modelRotation)
+        return Self.translation(modelCenter) * r * Self.translation(-modelCenter)
+    }
+
+    private static func translation(_ t: SIMD3<Float>) -> simd_float4x4 {
+        var m = matrix_identity_float4x4
+        m.columns.3 = SIMD4<Float>(t, 1)
+        return m
+    }
+
+    /// Rebuild the ground grid + contact shadow for the settled bounding box (the
+    /// mesh bbox transformed by `settleTo`), on the world floor plane at its min-Y.
+    private func buildGround() {
+        groundLineBuffer = nil; groundLineCount = 0
+        groundShadowBuffer = nil; groundShadowCount = 0
+        guard let mesh, !mesh.isEmpty else { return }
+        // Settled AABB from the 8 bbox corners under the target rotation.
+        let mn = mesh.bounds.min, mx = mesh.bounds.max
+        let rot = simd_float4x4(settleTo)
+        let model = Self.translation(modelCenter) * rot * Self.translation(-modelCenter)
+        var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var hi = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for xi in [mn.x, mx.x] { for yi in [mn.y, mx.y] { for zi in [mn.z, mx.z] {
+            let w = model * SIMD4<Float>(xi, yi, zi, 1)
+            let p = SIMD3<Float>(w.x, w.y, w.z)
+            lo = simd_min(lo, p); hi = simd_max(hi, p)
+        }}}
+        let fy = lo.y - 0.001
+        let cx = (lo.x + hi.x) * 0.5, cz = (lo.z + hi.z) * 0.5
+        let extent = Swift.max(hi.x - lo.x, hi.z - lo.z)
+        guard extent > 1e-5 else { return }
+        let radius = extent * 1.6
+        let step = extent / 6
+
+        // Grid lines (each: 2 vertices of pos+rgba, stride 7). Fade with distance.
+        var lines: [Float] = []
+        let base = SIMD3<Float>(0.63, 0.71, 0.86)
+        func push(_ p: SIMD3<Float>, _ a: Float) {
+            lines.append(p.x); lines.append(p.y); lines.append(p.z)
+            lines.append(base.x); lines.append(base.y); lines.append(base.z); lines.append(a)
+        }
+        var k = -radius
+        while k <= radius + 1e-4 {
+            let a = (1 - abs(k) / radius) * 0.12
+            push(SIMD3<Float>(cx + k, fy, cz - radius), a); push(SIMD3<Float>(cx + k, fy, cz + radius), a)
+            push(SIMD3<Float>(cx - radius, fy, cz + k), a); push(SIMD3<Float>(cx + radius, fy, cz + k), a)
+            k += step
+        }
+        groundLineCount = lines.count / 7
+        if groundLineCount > 0 {
+            groundLineBuffer = lines.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+        }
+
+        // Contact shadow: a triangle fan (expanded to a triangle list) on the floor,
+        // dark at the centre fading to transparent at the rim.
+        let sRadius = extent * 0.62
+        let segs = 40
+        var shadow: [Float] = []
+        let dark = SIMD3<Float>(0, 0, 0)
+        func vtx(_ x: Float, _ z: Float, _ a: Float) {
+            shadow.append(x); shadow.append(fy); shadow.append(z)
+            shadow.append(dark.x); shadow.append(dark.y); shadow.append(dark.z); shadow.append(a)
+        }
+        for i in 0..<segs {
+            let a0 = Float(i) / Float(segs) * 2 * .pi
+            let a1 = Float(i + 1) / Float(segs) * 2 * .pi
+            vtx(cx, cz, 0.5)                                            // centre (dark)
+            vtx(cx + cos(a0) * sRadius, cz + sin(a0) * sRadius, 0)      // rim (clear)
+            vtx(cx + cos(a1) * sRadius, cz + sin(a1) * sRadius, 0)
+        }
+        groundShadowCount = shadow.count / 7
+        if groundShadowCount > 0 {
+            groundShadowBuffer = shadow.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+        }
     }
 
     /// Rebuild the per-vertex tint buffer from the selection: each grouped face's
@@ -283,12 +493,19 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
+        let wasSettling = isSettling
+        if wasSettling { stepSettle() }
         guard let cmd = queue.makeCommandBuffer() else { return }
         if let rpd = view.currentRenderPassDescriptor {
             encode(into: rpd, aspect: aspect, into: cmd)
         }
         if let drawable = view.currentDrawable { cmd.present(drawable) }
         cmd.commit()
+        // The settle finished this frame → return to on-demand drawing (battery).
+        if wasSettling && !isSettling {
+            view.isPaused = true
+            view.enableSetNeedsDisplay = true
+        }
     }
 
     /// Encode the shaded mesh draw into an arbitrary render pass. Shared by the
@@ -304,18 +521,44 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setVertexBuffer(tbuf, offset: 0, index: 2)
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
+
+        // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
+        // blends, depth-tested so the part occludes it, depth-write off.
+        if showGround, let gpipe = groundPipeline {
+            var gmvp = groundMVP(aspect: aspect)
+            enc.setRenderPipelineState(gpipe)
+            enc.setDepthStencilState(groundDepthState)
+            enc.setVertexBytes(&gmvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            if let sbuf = groundShadowBuffer, groundShadowCount > 0 {
+                enc.setVertexBuffer(sbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: groundShadowCount)
+            }
+            if let lbuf = groundLineBuffer, groundLineCount > 0 {
+                enc.setVertexBuffer(lbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: groundLineCount)
+            }
+        }
         enc.endEncoding()
     }
 
     private func makeUniforms(aspect: Float) -> ViewerUniforms {
-        let mvp = camera.projectionMatrix(aspect: aspect) * camera.viewMatrix()
-        let n = camera.normalMatrix()
+        // Apply the settle rotation to the model, so the mesh (and the id pass)
+        // transform with the part as it rotates onto the ground.
+        let model = modelMatrix()
+        let view = camera.viewMatrix()
+        let mvp = camera.projectionMatrix(aspect: aspect) * view * model
+        let vm = view * model                                   // normals: rotation of view·model
         let normal4 = simd_float4x4(columns: (
-            SIMD4<Float>(n.columns.0, 0),
-            SIMD4<Float>(n.columns.1, 0),
-            SIMD4<Float>(n.columns.2, 0),
+            SIMD4<Float>(vm.columns.0.x, vm.columns.0.y, vm.columns.0.z, 0),
+            SIMD4<Float>(vm.columns.1.x, vm.columns.1.y, vm.columns.1.z, 0),
+            SIMD4<Float>(vm.columns.2.x, vm.columns.2.y, vm.columns.2.z, 0),
             SIMD4<Float>(0, 0, 0, 1)))
         return ViewerUniforms(mvp: mvp, normalMatrix: normal4)
+    }
+
+    /// The ground's MVP: plain camera view·projection (world-space floor).
+    private func groundMVP(aspect: Float) -> simd_float4x4 {
+        camera.projectionMatrix(aspect: aspect) * camera.viewMatrix()
     }
 
     /// Render the current mesh + camera to an offscreen BGRA texture and return the
@@ -417,19 +660,42 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 
 // ---------------------------------------------------------------------------
 // SwiftUI wrapper around MTKView, cross-platform (UIKit on iOS, AppKit on macOS).
+
+/// The inputs the workspace hands the viewer each SwiftUI update. Bundled so the
+/// two platform representables (and the Coordinator) share one signature.
+struct MeshViewInputs {
+    var mesh: ViewerMesh?
+    var selection: SelectionModel?
+    /// Per-face tint (rgba) — role-aware (anchor green); overrides the palette.
+    var faceTints: [FaceID: SIMD4<Float>]?
+    /// The settle rotation to display (gravity → world −Y); identity = un-settled.
+    var settleRotation: simd_quatf
+    /// Animate the settle (false = snap, for reduced-motion).
+    var settleAnimated: Bool
+    /// Draw the ground grid + contact shadow (gravity set, edit phase).
+    var showGround: Bool
+    var faceToolActive: Bool
+    var onPickFace: ((FaceID) -> Void)?
+    /// Tap that hit no face (drop the pending group, M7.6).
+    var onMiss: (() -> Void)?
+    /// Published each time the camera changes, so overlays can project 3D points.
+    var onProjection: ((CameraProjection) -> Void)?
+}
+
 #if os(iOS)
 public struct MetalMeshView: UIViewRepresentable {
-    private let mesh: ViewerMesh?
-    private let selection: SelectionModel?
-    private let faceToolActive: Bool
-    private let onPickFace: ((FaceID) -> Void)?
+    let inputs: MeshViewInputs
 
     public init(mesh: ViewerMesh?, selection: SelectionModel? = nil,
-                faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil) {
-        self.mesh = mesh
-        self.selection = selection
-        self.faceToolActive = faceToolActive
-        self.onPickFace = onPickFace
+                faceTints: [FaceID: SIMD4<Float>]? = nil,
+                settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
+                showGround: Bool = false, faceToolActive: Bool = false,
+                onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
+                onProjection: ((CameraProjection) -> Void)? = nil) {
+        inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
+            settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
+            faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
+            onProjection: onProjection)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -450,23 +716,23 @@ public struct MetalMeshView: UIViewRepresentable {
     }
 
     public func updateUIView(_ view: MTKView, context: Context) {
-        context.coordinator.apply(mesh: mesh, selection: selection,
-                                  faceToolActive: faceToolActive, onPickFace: onPickFace, to: view)
+        context.coordinator.apply(inputs, to: view)
     }
 }
 #elseif os(macOS)
 public struct MetalMeshView: NSViewRepresentable {
-    private let mesh: ViewerMesh?
-    private let selection: SelectionModel?
-    private let faceToolActive: Bool
-    private let onPickFace: ((FaceID) -> Void)?
+    let inputs: MeshViewInputs
 
     public init(mesh: ViewerMesh?, selection: SelectionModel? = nil,
-                faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil) {
-        self.mesh = mesh
-        self.selection = selection
-        self.faceToolActive = faceToolActive
-        self.onPickFace = onPickFace
+                faceTints: [FaceID: SIMD4<Float>]? = nil,
+                settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
+                showGround: Bool = false, faceToolActive: Bool = false,
+                onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
+                onProjection: ((CameraProjection) -> Void)? = nil) {
+        inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
+            settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
+            faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
+            onProjection: onProjection)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -487,8 +753,7 @@ public struct MetalMeshView: NSViewRepresentable {
     }
 
     public func updateNSView(_ view: MTKView, context: Context) {
-        context.coordinator.apply(mesh: mesh, selection: selection,
-                                  faceToolActive: faceToolActive, onPickFace: onPickFace, to: view)
+        context.coordinator.apply(inputs, to: view)
     }
 }
 #endif
@@ -511,51 +776,97 @@ extension MetalMeshView {
         }
     }
 
+    /// A comparable key for the highlight state, so it rebuilds only on change.
+    private struct TintKey: Equatable {
+        let tint: [FaceID: SIMD4<Float>]
+        let active: Set<FaceID>
+    }
+
     public final class Coordinator: NSObject {
         var renderer: MeshRenderer?
         private var appliedSignature: [Float]?
-        private var appliedSelection: SelectionModel?
+        private var appliedTint: TintKey?
+        private var lastSettleVector: SIMD4<Float>?
+        private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
+        private var onMiss: (() -> Void)?
+        private var onProjection: ((CameraProjection) -> Void)?
 
-        /// Upload a new mesh (and frame it) and/or refresh the selection highlight
-        /// only when they actually change; keep the tap seam current.
-        func apply(mesh: ViewerMesh?, selection: SelectionModel?,
-                   faceToolActive: Bool, onPickFace: ((FaceID) -> Void)?, to view: MTKView) {
+        /// Upload a new mesh / refresh the highlight / drive the settle / publish the
+        /// camera projection — each only when it actually changes.
+        func apply(_ inputs: MeshViewInputs, to view: MTKView) {
             guard let renderer else { return }
-            self.faceToolActive = faceToolActive
-            self.onPickFace = onPickFace
+            faceToolActive = inputs.faceToolActive
+            onPickFace = inputs.onPickFace
+            onMiss = inputs.onMiss
+            onProjection = inputs.onProjection
 
-            let sig = mesh.map(meshSignature)
             var dirty = false
+            let sig = inputs.mesh.map(meshSignature)
             if sig != appliedSignature {
                 appliedSignature = sig
-                if let mesh { renderer.setMesh(mesh) }
-                appliedSelection = nil   // force a highlight rebuild for the new mesh
+                if let mesh = inputs.mesh { renderer.setMesh(mesh) }
+                appliedTint = nil            // rebuild highlight for the new mesh
+                lastSettleVector = nil       // re-apply settle for the new mesh
                 dirty = true
             }
-            if selection != appliedSelection {
-                appliedSelection = selection
-                applyHighlights(selection)
+
+            // Settle (M7.6 D2): animate/snap to the gravity rotation on change.
+            let sv = inputs.settleRotation.vector
+            if sv != lastSettleVector {
+                lastSettleVector = sv
+                renderer.beginSettle(to: inputs.settleRotation,
+                                     duration: inputs.settleAnimated ? 0.8 : 0)
+                if renderer.isSettling {     // run continuous frames until it lands
+                    view.isPaused = false
+                    view.enableSetNeedsDisplay = false
+                }
                 dirty = true
             }
+
+            if renderer.showGround != inputs.showGround {
+                renderer.showGround = inputs.showGround
+                dirty = true
+            }
+
+            // Highlight tint (role-aware if provided, else the group palette).
+            let tint = inputs.faceTints ?? derivedTint(inputs.selection)
+            let active = Set(inputs.selection?.activeGroup?.faces ?? [])
+            let key = TintKey(tint: tint, active: active)
+            if key != appliedTint {
+                appliedTint = key
+                renderer.setHighlights(faceTint: tint, activeFaces: active)
+                dirty = true
+            }
+
             if dirty { redraw(view) }
+            // Publish the camera projection (deduped). The async pass catches the
+            // post-layout viewport when the first update ran before layout.
+            publishProjection(from: view)
+            DispatchQueue.main.async { [weak self] in self?.publishProjection(from: view) }
         }
 
-        private func applyHighlights(_ selection: SelectionModel?) {
-            guard let renderer else { return }
-            guard let selection else {
-                renderer.setHighlights(faceTint: [:], activeFaces: [])
-                return
-            }
+        private func derivedTint(_ selection: SelectionModel?) -> [FaceID: SIMD4<Float>] {
+            guard let selection else { return [:] }
             var tint: [FaceID: SIMD4<Float>] = [:]
             for g in selection.groups {
                 let c = g.color
                 let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1)
                 for f in g.faces { tint[f] = v }
             }
-            let active = Set(selection.activeGroup?.faces ?? [])
-            renderer.setHighlights(faceTint: tint, activeFaces: active)
+            return tint
+        }
+
+        /// Compute + publish the camera→screen projection when it has changed.
+        private func publishProjection(from view: MTKView) {
+            guard let renderer, let onProjection else { return }
+            let size = view.bounds.size
+            guard size.width > 0, size.height > 0 else { return }
+            let proj = CameraProjection(camera: renderer.camera, viewportSize: size)
+            guard proj != lastPublished else { return }
+            lastPublished = proj
+            onProjection(proj)
         }
 
         private func redraw(_ view: MTKView) {
@@ -567,9 +878,10 @@ extension MetalMeshView {
         }
 
         /// Resolve a tap at `location` (view coordinates, origin top-left) to a face
-        /// id — id pass first, CPU `FacePicker` as fallback — and report it.
+        /// id — id pass first, CPU `FacePicker` as fallback. Reports the hit, or
+        /// `onMiss` when the tap hit empty space (M7.6: drop the pending group).
         private func pick(at location: CGPoint, in view: MTKView) {
-            guard faceToolActive, let renderer, let onPickFace else { return }
+            guard faceToolActive, let renderer else { return }
             let size = view.bounds.size
             guard size.width > 0, size.height > 0 else { return }
             let normalized = CGPoint(x: location.x / size.width, y: location.y / size.height)
@@ -579,7 +891,7 @@ extension MetalMeshView {
                     FacePicker.pick(mesh: $0, camera: renderer.camera,
                                     aspect: Float(size.width / size.height), point: normalized)
                 }
-            if let faceID { onPickFace(faceID) }
+            if let faceID { onPickFace?(faceID) } else { onMiss?() }
         }
 
         #if os(iOS)
@@ -588,14 +900,14 @@ extension MetalMeshView {
             let t = g.translation(in: view)
             renderer?.camera.orbit(dx: Float(t.x), dy: Float(t.y))
             g.setTranslation(.zero, in: view)
-            redraw(view)
+            redraw(view); publishProjection(from: view)
         }
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
             guard let view = g.view as? MTKView, g.scale > 0 else { return }
             renderer?.camera.zoom(Float(1 / g.scale))  // spread (scale>1) → closer
             g.scale = 1
-            redraw(view)
+            redraw(view); publishProjection(from: view)
         }
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
@@ -608,14 +920,14 @@ extension MetalMeshView {
             let t = g.translation(in: view)
             renderer?.camera.orbit(dx: Float(t.x), dy: Float(-t.y))  // AppKit y is up
             g.setTranslation(.zero, in: view)
-            redraw(view)
+            redraw(view); publishProjection(from: view)
         }
 
         @objc func handleMagnify(_ g: NSMagnificationGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
             renderer?.camera.zoom(Float(1 / (1 + g.magnification)))
             g.magnification = 0
-            redraw(view)
+            redraw(view); publishProjection(from: view)
         }
 
         @objc func handleClick(_ g: NSClickGestureRecognizer) {
@@ -631,17 +943,12 @@ extension MetalMeshView {
 
 #else  // !canImport(MetalKit) — keep the workspace compiling everywhere.
 public struct MetalMeshView: View {
-    private let mesh: ViewerMesh?
-    private let selection: SelectionModel?
-    private let faceToolActive: Bool
-    private let onPickFace: ((FaceID) -> Void)?
     public init(mesh: ViewerMesh?, selection: SelectionModel? = nil,
-                faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil) {
-        self.mesh = mesh
-        self.selection = selection
-        self.faceToolActive = faceToolActive
-        self.onPickFace = onPickFace
-    }
+                faceTints: [FaceID: SIMD4<Float>]? = nil,
+                settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
+                settleAnimated: Bool = false, showGround: Bool = false,
+                faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil,
+                onMiss: (() -> Void)? = nil, onProjection: ((CameraProjection) -> Void)? = nil) {}
     public var body: some View { DS.Color.background.color }
 }
 #endif
