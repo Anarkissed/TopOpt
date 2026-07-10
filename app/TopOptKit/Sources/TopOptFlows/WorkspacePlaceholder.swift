@@ -69,11 +69,10 @@ public struct WorkspacePlaceholder: View {
                           showGround: showGround,
                           faceToolActive: true,                 // D1: tap always selects (routed by phase)
                           onPickFace: handlePick,
-                          onMiss: handleMiss,                   // D-happy-path: empty tap drops pending
                           onProjection: { projection = $0 })
                 .ignoresSafeArea()
 
-            arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrows
+            arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
 
             chrome
             if force.phase == .setup {
@@ -82,7 +81,7 @@ public struct WorkspacePlaceholder: View {
                 if force.gravityIsSet { gravityChip }
                 if viewerMesh != nil { selectionsPanel }
             }
-            floatingControls.ignoresSafeArea()                  // D3/D4/D5: beside the selection
+            loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
             bottomBar
         }
         .task(id: meshID) { rebuildMesh() }
@@ -116,8 +115,9 @@ public struct WorkspacePlaceholder: View {
     // MARK: tap routing (D1/D2)
 
     /// Tapped-face callback from the viewer. In the gravity-setup phase a tap picks
-    /// the floor-facing face and sets gravity; otherwise it toggles the tapped
-    /// face's whole loop (the hole, or just the face) into the active group.
+    /// the floor-facing face and sets gravity; otherwise it routes into the selection
+    /// via `WorkspaceTap` — re-selecting a set group, or growing/starting one — and
+    /// never removes anything (removal is the panel trash only).
     private func handlePick(_ faceID: FaceID) {
         guard let mesh = viewerMesh else { return }
         if force.phase == .setup {
@@ -127,15 +127,8 @@ public struct WorkspacePlaceholder: View {
             }
             return
         }
-        selection.pickFaces(FaceTopology.loop(fromFace: faceID, in: mesh))
-        force.sync(groups: selection.groups)
-    }
-
-    /// A tap on empty space: drop the active pending group and deselect (proto
-    /// empty-tap). Only in edit — in setup an empty tap just misses.
-    private func handleMiss() {
-        guard force.phase == .edit else { return }
-        selection.clearActive()
+        let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
+        WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force)
         force.sync(groups: selection.groups)
     }
 
@@ -364,33 +357,39 @@ public struct WorkspacePlaceholder: View {
 
     // MARK: in-scene force arrows (D6)
 
-    /// Every load group's arrow, projected into the stage: tapered shaft + head in
-    /// the group colour, tip at the application point when the force presses into
-    /// the face else tail at it (D6). Non-active loads also show their weight.
+    /// The load groups (drawn as arrows, with tappable weight pills at their tails).
+    private var loadGroups: [SelectionGroup] {
+        selection.groups.filter { force.kind(for: $0.id).isLoad }
+    }
+
+    /// A load's arrow endpoints on screen: tip at the application point when the
+    /// force presses into the face, else tail at it (D6). Nil if it can't project.
+    private func loadArrowGeometry(_ g: SelectionGroup, mesh: ViewerMesh,
+                                   proj: CameraProjection) -> (tail: CGPoint, tip: CGPoint)? {
+        guard let cm = groupCentroidModel(g), let nm = groupNormalModel(g) else { return nil }
+        let worldN = simd_normalize(settleQuat.act(nm))
+        let dir = ForceModel.directionVector(force.kind(for: g.id).loadDirection ?? .gravity,
+                                             groupNormal: worldN)
+        let base = settledWorld(cm)
+        let step = max(mesh.bounds.radius, 1e-3) * 0.35
+        guard let pBase = proj.project(base), let pStep = proj.project(base + dir * step) else { return nil }
+        var ux = pStep.x - pBase.x, uy = pStep.y - pBase.y
+        let mag = max(1e-3, hypot(ux, uy)); ux /= mag; uy /= mag
+        let len: CGFloat = 74
+        let into = ForceModel.arrowTipAtApplicationPoint(direction: dir, faceNormal: worldN)
+        let tail = into ? CGPoint(x: pBase.x - ux * len, y: pBase.y - uy * len) : pBase
+        let tip  = into ? pBase : CGPoint(x: pBase.x + ux * len, y: pBase.y + uy * len)
+        return (tail, tip)
+    }
+
+    /// Every load group's arrow shaft, projected into the stage (tapered, group
+    /// colour). The tappable weight pill at each tail lives in `loadOverlays`.
     private var arrowsOverlay: some View {
         Canvas { ctx, _ in
             guard let mesh = viewerMesh, let proj = projection, force.phase == .edit else { return }
-            let step = max(mesh.bounds.radius, 1e-3) * 0.35
-            for g in selection.groups where force.kind(for: g.id).isLoad {
-                guard let cm = groupCentroidModel(g), let nm = groupNormalModel(g) else { continue }
-                let worldN = simd_normalize(settleQuat.act(nm))
-                let dir = ForceModel.directionVector(force.kind(for: g.id).loadDirection ?? .gravity,
-                                                     groupNormal: worldN)
-                let base = settledWorld(cm)
-                guard let pBase = proj.project(base),
-                      let pStep = proj.project(base + dir * step) else { continue }
-                var ux = pStep.x - pBase.x, uy = pStep.y - pBase.y
-                let mag = max(1e-3, hypot(ux, uy)); ux /= mag; uy /= mag
-                let len: CGFloat = 74
-                let into = ForceModel.arrowTipAtApplicationPoint(direction: dir, faceNormal: worldN)
-                let tail = into ? CGPoint(x: pBase.x - ux * len, y: pBase.y - uy * len) : pBase
-                let tip  = into ? pBase : CGPoint(x: pBase.x + ux * len, y: pBase.y + uy * len)
-                drawArrow(ctx, from: tail, to: tip, color: g.color.color)
-                if g.id != selection.activeGroupID {
-                    let label = Text(force.formattedWeight(kg: force.kind(for: g.id).weightKg ?? 0))
-                        .font(.system(size: 12, weight: .heavy))
-                        .foregroundColor(g.color.color)
-                    ctx.draw(label, at: CGPoint(x: tail.x, y: tail.y - 13))
+            for g in loadGroups {
+                if let geo = loadArrowGeometry(g, mesh: mesh, proj: proj) {
+                    drawArrow(ctx, from: geo.tail, to: geo.tip, color: g.color.color)
                 }
             }
         }
@@ -417,26 +416,49 @@ public struct WorkspacePlaceholder: View {
         ctx.fill(path, with: .color(color))
     }
 
-    // MARK: floating active-group controls (D3/D4/D5) — beside the selection
+    // MARK: floating controls at each arrow (D3/D4/D5) — tappable to re-select
 
-    /// The Anchor|Load chip (pending) or snap row + weight pill (load) for the active
-    /// group, floated at its projected centroid; falls back to the foot of the stage
-    /// when there is no usable projection yet.
-    @ViewBuilder private var floatingControls: some View {
-        if force.phase == .edit, let g = activeGroup {
-            let kind = force.kind(for: g.id)
-            let cluster = Group {
-                if kind.isPending { anchorLoadChip(g) }
-                else if kind.isLoad { loadControls(g) }
-            }
-            if let pt = groupScreen(g) {
-                cluster.position(x: pt.x, y: max(64, pt.y - 76))   // just above the centroid
-            } else {
-                cluster
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                    .padding(.bottom, 96)
+    /// The interactive overlays anchored to the 3D selection:
+    ///   * the active PENDING group → the Anchor | Load chip at its centroid;
+    ///   * every LOAD → a weight pill at its arrow tail — the active one is the full
+    ///     scrub/type pill + snap row, the others are dim pills you TAP to re-select
+    ///     (so a set force is edited by tapping its arrow, never via the list only).
+    /// Nothing here removes a group; removal is the panel trash icon only.
+    private var loadOverlays: some View {
+        GeometryReader { geo in
+            let W = geo.size.width, H = geo.size.height
+            ZStack(alignment: .topLeading) {
+                if force.phase == .edit, let mesh = viewerMesh, let proj = projection {
+                    if let g = activeGroup, force.kind(for: g.id).isPending {
+                        let pt = groupScreen(g)
+                        anchorLoadChip(g)
+                            .position(x: pt?.x ?? W / 2,
+                                      y: pt.map { clamp($0.y - 60, H) } ?? H - 150)
+                    }
+                    ForEach(loadGroups) { g in
+                        if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
+                            let active = g.id == selection.activeGroupID
+                            Group {
+                                if active {
+                                    VStack(spacing: DS.Space.xs) {
+                                        weightPill(g)
+                                        snapRow(g)
+                                    }
+                                } else {
+                                    dimPill(g).onTapGesture { selection.setActive(g.id) }
+                                }
+                            }
+                            .position(x: arrow.tail.x, y: clamp(arrow.tail.y - (active ? 26 : 0), H))
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /// Keep a floated overlay on-screen vertically.
+    private func clamp(_ y: CGFloat, _ height: CGFloat) -> CGFloat {
+        Swift.min(Swift.max(y, 70), Swift.max(80, height - 80))
     }
 
     private func anchorLoadChip(_ g: SelectionGroup) -> some View {
@@ -456,13 +478,6 @@ public struct WorkspacePlaceholder: View {
                     .background(Capsule().fill(DS.Color.accent.color))
             }
             .buttonStyle(.plain)
-            Button { removeGroup(g.id) } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                    .padding(DS.Space.sm)
-            }
-            .buttonStyle(.plain)
         }
         .padding(5)
         .background(Capsule().fill(DS.Surface.panel.color)
@@ -478,33 +493,42 @@ public struct WorkspacePlaceholder: View {
         .padding(.vertical, 10).padding(.horizontal, DS.Space.l)
     }
 
-    private func loadControls(_ g: SelectionGroup) -> some View {
+    /// The Gravity / Push / Pull snap row for the active load (no delete here —
+    /// removal is the panel trash only).
+    private func snapRow(_ g: SelectionGroup) -> some View {
         let dir = force.kind(for: g.id).loadDirection ?? .gravity
-        return VStack(spacing: DS.Space.s) {
-            weightPill(g)
-            HStack(spacing: DS.Space.xxs) {
-                ForEach(LoadDirection.allCases, id: \.self) { d in
-                    Button { force.setDirection(g.id, d) } label: {
-                        Text(d.title)
-                            .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
-                            .foregroundStyle((d == dir ? DS.Color.textPrimary : DS.Color.textSecondary).color)
-                            .padding(.vertical, 8).padding(.horizontal, DS.Space.ml)
-                            .background(Capsule().fill(d == dir ? DS.Color.fillSelected.color : .clear))
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button { removeGroup(g.id) } label: {
-                    Image(systemName: "xmark").font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                        .padding(.vertical, 8).padding(.horizontal, DS.Space.m)
+        return HStack(spacing: DS.Space.xxs) {
+            ForEach(LoadDirection.allCases, id: \.self) { d in
+                Button { force.setDirection(g.id, d) } label: {
+                    Text(d.title)
+                        .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                        .foregroundStyle((d == dir ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                        .padding(.vertical, 7).padding(.horizontal, DS.Space.m)
+                        .background(Capsule().fill(d == dir ? DS.Color.fillSelected.color : .clear))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(4)
-            .background(Capsule().fill(DS.Surface.panel.color)
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(DS.Shadow.panel)
         }
+        .padding(4)
+        .background(Capsule().fill(DS.Surface.panel.color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+    }
+
+    /// A non-active load's weight pill: dim, with a colour dot, tappable to re-select
+    /// that load for editing (the fix for "I had to use the list on the left").
+    private func dimPill(_ g: SelectionGroup) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(g.color.color).frame(width: 7, height: 7)
+            Text(force.formattedWeight(kg: force.kind(for: g.id).weightKg ?? 0))
+                .font(.system(size: 12.5, weight: .heavy))
+                .foregroundStyle(g.color.color)
+        }
+        .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
+        .background(Capsule().fill(DS.Surface.bar.color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+        .opacity(0.9)
+        .contentShape(Capsule())
     }
 
     @ViewBuilder private func weightPill(_ g: SelectionGroup) -> some View {
@@ -583,7 +607,7 @@ public struct WorkspacePlaceholder: View {
             if k.isPending { return "Tap more faces to grow the selection, then choose Anchor or Load" }
             if k.isLoad { return "Scrub the weight left–right · tap it to type · Push / Pull follow the face" }
         }
-        return "Tap faces to select · tap a group to edit it · drag to orbit"
+        return "Tap a face to select · tap a set arrow to edit its load · drag to orbit"
     }
 
     private var optimizeButton: some View {
