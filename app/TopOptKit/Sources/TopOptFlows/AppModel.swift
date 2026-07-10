@@ -26,6 +26,14 @@ public final class AppModel: ObservableObject {
     /// The name shown in the workspace chrome once a project is opened.
     @Published public private(set) var projectName = ""
 
+    /// The workspace's current project state (mesh + selection groups + force/
+    /// gravity + run), OWNED here so it survives navigation (M7.x-persist-a). Nil on
+    /// Home before any project is opened.
+    @Published public private(set) var project: ProjectModel?
+    /// Live projects keyed by their `RecentProject.id`, so opening a recent within
+    /// this launch restores the exact in-progress state rather than an empty one.
+    private var projectsById: [UUID: ProjectModel] = [:]
+
     // MARK: Import draft (valid only while the sheet is open)
 
     /// The chosen print process; selects the material family offered.
@@ -55,22 +63,54 @@ public final class AppModel: ObservableObject {
     // MARK: Dependencies (injected for tests; default to the real bridge)
 
     private let materialsPath: String?
+    private let rulesPath: String?
     private let materialsLoader: (String) throws -> [Material]
     private let importer: (String) throws -> ImportedMesh
+    /// Cross-launch persistence layer (M7.x-persist-b) and the clock used for
+    /// `savedAt` (injected for deterministic tests).
+    private let store: ProjectStore
+    private let now: () -> Date
 
     /// - Parameters:
     ///   - materialsPath: path to materials.json (defaults to the app bundle's
     ///     copy; nil leaves the dropdowns empty until `loadMaterials` is given one).
+    ///   - rulesPath: path to the settings rules.json (defaults to the bundle's
+    ///     copy); needed to build a run request (ROADMAP M7.7).
     ///   - materialsLoader: injectable loader (defaults to `TopOptKit.loadMaterials`).
     ///   - importer: injectable mesh import (defaults to `TopOptKit.importMesh`).
+    ///   - store: on-disk project store (defaults to Application Support).
+    ///   - now: clock for save timestamps (defaults to `Date()`).
     public init(
         materialsPath: String? = Bundle.main.path(forResource: "materials", ofType: "json"),
+        rulesPath: String? = Bundle.main.path(forResource: "rules", ofType: "json"),
         materialsLoader: @escaping (String) throws -> [Material] = { try TopOptKit.loadMaterials(path: $0) },
-        importer: @escaping (String) throws -> ImportedMesh = { try TopOptKit.importMesh(path: $0) }
+        importer: @escaping (String) throws -> ImportedMesh = { try TopOptKit.importMesh(path: $0) },
+        store: ProjectStore = ProjectStore(),
+        now: @escaping () -> Date = { Date() }
     ) {
         self.materialsPath = materialsPath
+        self.rulesPath = rulesPath
         self.materialsLoader = materialsLoader
         self.importer = importer
+        self.store = store
+        self.now = now
+        // Seed the recents grid from disk (lazy: projects are re-imported only when
+        // opened). persist-b.
+        recentProjects = store.loadAllSnapshots().map {
+            RecentProject(id: $0.id, name: $0.name, materialName: $0.material, process: $0.process)
+        }
+    }
+
+    /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
+    /// file / material / config path is missing (Optimize is gated on these, so nil
+    /// only happens if wiring is incomplete).
+    public func makeRunRequest(resolution: Int) -> RunRequest? {
+        guard let project, let file = project.importedFile,
+              let materialsPath, let rulesPath else { return nil }
+        return RunRequest(modelPath: file.path, material: project.material,
+                          materialsPath: materialsPath, rulesPath: rulesPath,
+                          resolution: resolution,
+                          projectName: project.name.isEmpty ? file.name : project.name)
     }
 
     // MARK: - Materials
@@ -174,26 +214,83 @@ public final class AppModel: ObservableObject {
             return
         }
         let name = projectDisplayName(from: file.name)
-        let project = RecentProject(name: name, materialName: material, process: process)
-        recentProjects.insert(project, at: 0)
+        let recent = RecentProject(name: name, materialName: material, process: process)
+        // Build the project's live working state and key it by the recent's id so
+        // returning to it from Home restores the full setup (M7.x-persist-a).
+        let pm = ProjectModel(id: recent.id, name: name, material: material,
+                              process: process, importedFile: file, importedMesh: importedMesh)
+        projectsById[recent.id] = pm
+        project = pm
+        recentProjects.insert(recent, at: 0)
         projectName = name
         importSheetPresented = false
         screen = .workspace
+        persist(pm)   // copy the model into the store + write the initial snapshot (persist-b)
     }
 
     // MARK: - Recents / navigation
 
-    /// Open a recent project into the workspace.
-    public func open(_ project: RecentProject) {
-        projectName = project.name
-        process = project.process
-        selectMaterial(project.materialName)
+    /// Open a recent project into the workspace. Its live state this launch is
+    /// restored intact; otherwise it is rebuilt from disk (re-importing the copied
+    /// model); a recent with neither opens an empty workspace for its material.
+    public func open(_ recent: RecentProject) {
+        projectName = recent.name
+        process = recent.process
+        selectMaterial(recent.materialName)
+        if let pm = projectsById[recent.id] {
+            project = pm
+        } else if let restored = restoreFromDisk(recent) {
+            projectsById[recent.id] = restored
+            project = restored
+        } else {
+            project = ProjectModel(id: recent.id, name: recent.name,
+                                   material: recent.materialName, process: recent.process,
+                                   importedFile: nil, importedMesh: nil)
+            projectsById[recent.id] = project
+        }
         screen = .workspace
     }
 
-    /// Return to Home from the workspace.
+    /// Return to Home from the workspace, saving the project's current state first.
     public func backHome() {
+        persistCurrentProject()
         screen = .home
+    }
+
+    // MARK: - Persistence (M7.x-persist-b)
+
+    /// Write the current project's latest state to disk. Called on leaving the
+    /// workspace and from the app's scene-phase → background hook, so edits survive
+    /// relaunch even without navigating Home. No-op if there is no persistable
+    /// project (e.g. an empty/legacy one with no model).
+    public func persistCurrentProject() {
+        guard let project else { return }
+        persist(project)
+    }
+
+    /// Save one project (copy its model into the store on first save, write the
+    /// snapshot) and refresh its recents entry. Failures are surfaced as a toast but
+    /// never crash the flow.
+    private func persist(_ project: ProjectModel) {
+        guard let snapshot = project.snapshot(savedAt: now()) else { return }
+        do {
+            try store.save(snapshot, modelSource: project.modelSourceURL)
+        } catch {
+            toast = "Couldn’t save “\(project.name)”: \(error.localizedDescription)"
+        }
+    }
+
+    /// Rebuild a project from its on-disk snapshot, re-importing the copied model.
+    /// Returns nil if there is no snapshot or the re-import fails (the caller falls
+    /// back to an empty workspace).
+    private func restoreFromDisk(_ recent: RecentProject) -> ProjectModel? {
+        guard let snap = store.snapshot(id: recent.id) else { return nil }
+        let path = store.modelPath(id: snap.id, fileName: snap.modelFileName)
+        guard let mesh = try? importer(path) else { return nil }
+        let file = ImportedFile(name: snap.originalFileName, path: path,
+                                triangleCount: mesh.triangleCount, faceCount: mesh.faceCount,
+                                watertight: mesh.watertight)
+        return ProjectModel(restoring: snap, importedFile: file, importedMesh: mesh)
     }
 
     // MARK: - internals

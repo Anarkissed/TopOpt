@@ -243,7 +243,7 @@
 - [ ] M7.6-ring (deferred, v2) Constrained single-DOF rotation ring for custom
       load directions: 15° detents, haptic ticks, second ring after first
       commits, never a freehand drag. After M7.6-app is solid.
-- [ ] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
+- [x] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
       M7.0a progress driving the bar (per-rung + per-iteration); Cancel;
       "Run in Background" via BGProcessingTask with local notification on
       completion; failure states (CG non-convergence, all-rungs-rejected)

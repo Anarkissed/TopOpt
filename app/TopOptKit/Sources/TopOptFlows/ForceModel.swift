@@ -31,7 +31,7 @@ import TopOptDesign
 
 /// The global weight display unit (design's kg / lbs segment). Storage is always
 /// kgf; this only changes presentation and the scrub step.
-public enum WeightUnit: String, CaseIterable, Sendable {
+public enum WeightUnit: String, CaseIterable, Sendable, Codable {
     case kg
     case lbs
     /// The segment button label ("kg" / "lbs").
@@ -40,7 +40,7 @@ public enum WeightUnit: String, CaseIterable, Sendable {
 
 /// A load's direction affordance (design snap row, D4). The world-space vector is
 /// derived from this + the group's face normal via `ForceModel.directionVector`.
-public enum LoadDirection: String, CaseIterable, Sendable {
+public enum LoadDirection: String, CaseIterable, Sendable, Codable {
     case gravity
     case push
     case pull
@@ -56,7 +56,7 @@ public enum LoadDirection: String, CaseIterable, Sendable {
 
 /// A selection group's role in the load case (design `g.kind`). A group is
 /// `.pending` from creation until the user taps Anchor or Load (D3).
-public enum GroupKind: Equatable, Sendable {
+public enum GroupKind: Equatable, Sendable, Codable {
     /// Faces selected, role not yet declared (design `kind:'pending'`).
     case pending
     /// A clamped/fixed mounting region (design `kind:'anchor'`).
@@ -82,13 +82,13 @@ public enum GroupKind: Equatable, Sendable {
 
 /// Which step the workspace is in. Setup shows the "which way is down?" prompt and
 /// disables Optimize; edit is the normal selection/force state (design `S.phase`).
-public enum GravityPhase: Equatable, Sendable {
+public enum GravityPhase: Equatable, Sendable, Codable {
     case setup
     case edit
 }
 
 /// The force & gravity state layered over the M7.5 `SelectionModel`.
-public struct ForceModel: Equatable, Sendable {
+public struct ForceModel: Equatable, Sendable, Codable {
 
     // MARK: design constants (traced to the prototype)
 

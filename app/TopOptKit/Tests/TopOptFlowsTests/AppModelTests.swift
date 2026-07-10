@@ -27,9 +27,21 @@ final class AppModelTests: XCTestCase {
     private static var cubeSTL: String { core("tests/fixtures/stl/cube_10mm.stl") }
     private static var brokenSTL: String { core("tests/fixtures/stl/broken_open_cube.stl") }
 
-    /// A model wired to the real committed materials.json + real bridge importer.
+    /// An isolated on-disk store per test, so persistence (M7.x-persist-b) never
+    /// touches the real Application Support or leaks state between tests.
+    private var tempDir: URL!
+    override func setUpWithError() throws {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("topopt-appmodel-tests-\(UUID().uuidString)", isDirectory: true)
+    }
+    override func tearDownWithError() throws {
+        if let tempDir { try? FileManager.default.removeItem(at: tempDir) }
+    }
+
+    /// A model wired to the real committed materials.json + real bridge importer,
+    /// with an isolated per-test project store.
     private func realModel() -> AppModel {
-        AppModel(materialsPath: Self.materialsPath)
+        AppModel(materialsPath: Self.materialsPath, store: ProjectStore(rootDir: tempDir))
     }
 
     // MARK: materials
@@ -61,7 +73,8 @@ final class AppModelTests: XCTestCase {
         // Injected loader that throws — the dropdowns stay empty and a toast shows.
         struct LoadFailure: Error {}
         let m = AppModel(materialsPath: "/no/such/materials.json",
-                         materialsLoader: { _ in throw LoadFailure() })
+                         materialsLoader: { _ in throw LoadFailure() },
+                         store: ProjectStore(rootDir: tempDir))
         m.loadMaterials()
         XCTAssertTrue(m.fdmMaterials.isEmpty)
         XCTAssertTrue(m.resinMaterials.isEmpty)
@@ -211,6 +224,8 @@ final class AppModelTests: XCTestCase {
         _ = RootView(model: m)
         _ = HomeView(model: m)
         _ = ImportSheet(model: m)
-        _ = WorkspacePlaceholder(model: m)
+        let project = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                                   importedFile: nil, importedMesh: nil)
+        _ = WorkspacePlaceholder(model: m, project: project)
     }
 }
