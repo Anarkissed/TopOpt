@@ -170,7 +170,7 @@
       and shows a bridge smoke result (material count + imported-mesh triangle
       count); a macOS unit-test target exercises the wrapper headlessly —
       raw `xcodebuild test` output in the handoff.
-- [ ] M7.1b iOS dependency slice (STEP-on-device). The app currently links
+- [x] M7.1b iOS dependency slice (STEP-on-device). The app currently links
       OCCT only for macOS, so STEP import fails on iOS/simulator with "requires
       OpenCASCADE"; STL works (no OCCT dependency). Build the C++ dependencies
       for iOS so STEP import (and lib3mf export, for M7.9) work on device and
@@ -202,7 +202,7 @@
       supplies vertices/normals/face ids), orbit + pinch-zoom camera matching
       the design's hint copy, matcap-style shading on the dark stage. No
       selection yet. Maintainer QA on device for feel.
-- [ ] M7.5 Face selection + groups. Face-pick via id buffer render pass;
+- [x] M7.5 Face selection + groups. Face-pick via id buffer render pass;
       selection groups exactly per design (auto-named A/B/C…, color-coded,
       rename, remove, active-group highlight, face-count chips); "tap inside a
       hole selects the hole's face loop" (adjacent-face walk over the B-rep
