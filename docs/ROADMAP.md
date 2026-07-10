@@ -240,7 +240,7 @@
       arrow rendering per D6; Optimize enabled only w/ ≥1 anchor + ≥1 load, label
       summarizes. Calls M7.6-core's bridge signatures. Headless tests for the
       data model; UI is maintainer device QA.
-- [x] M7.6-ring (deferred, v2) Constrained single-DOF rotation ring for custom
+- [ ] M7.6-ring (deferred, v2) Constrained single-DOF rotation ring for custom
       load directions: 15° detents, haptic ticks, second ring after first
       commits, never a freehand drag. After M7.6-app is solid.
 - [ ] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
