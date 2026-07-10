@@ -44,6 +44,13 @@ public struct WorkspacePlaceholder: View {
     /// The latest camera→screen projection the viewer publishes, so the floating
     /// overlays + arrows track the 3D selection as the camera moves (M7.6 D3–D6).
     @State private var projection: CameraProjection?
+    /// The active load's constrained rotation-ring aim, while the gizmo is up
+    /// (M7.6-ring, D4 v2); nil when not aiming.
+    @State private var aiming: RingAiming?
+    /// The load being aimed, and its custom direction before aiming began (to
+    /// restore on Cancel).
+    @State private var aimingLoadID: UUID?
+    @State private var aimPrevCustom: SIMD3<Float>?
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -82,6 +89,7 @@ public struct WorkspacePlaceholder: View {
                 if viewerMesh != nil { selectionsPanel }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
+            ringGizmo.ignoresSafeArea()                         // D4 v2: constrained rotation ring
             bottomBar
         }
         .task(id: meshID) { rebuildMesh() }
@@ -369,8 +377,9 @@ public struct WorkspacePlaceholder: View {
                                    proj: CameraProjection) -> (tail: CGPoint, tip: CGPoint)? {
         guard let cm = groupCentroidModel(g), let nm = groupNormalModel(g) else { return nil }
         let worldN = simd_normalize(settleQuat.act(nm))
-        let dir = ForceModel.directionVector(force.kind(for: g.id).loadDirection ?? .gravity,
-                                             groupNormal: worldN)
+        // Honor a custom ring aim (D4 v2) when present, else the snap direction.
+        let dir = force.resolvedDirection(for: g.id, groupNormal: worldN)
+            ?? ForceModel.directionVector(force.kind(for: g.id).loadDirection ?? .gravity, groupNormal: worldN)
         let base = settledWorld(cm)
         let step = max(mesh.bounds.radius, 1e-3) * 0.35
         guard let pBase = proj.project(base), let pStep = proj.project(base + dir * step) else { return nil }
@@ -498,22 +507,87 @@ public struct WorkspacePlaceholder: View {
     /// removal is the panel trash only).
     private func snapRow(_ g: SelectionGroup) -> some View {
         let dir = force.kind(for: g.id).loadDirection ?? .gravity
+        let isCustom = force.customDirection(for: g.id) != nil
         return HStack(spacing: DS.Space.xxs) {
             ForEach(LoadDirection.allCases, id: \.self) { d in
+                let on = d == dir && !isCustom
                 Button { force.setDirection(g.id, d) } label: {
                     Text(d.title)
                         .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
-                        .foregroundStyle((d == dir ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                        .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textSecondary).color)
                         .padding(.vertical, 7).padding(.horizontal, DS.Space.m)
-                        .background(Capsule().fill(d == dir ? DS.Color.fillSelected.color : .clear))
+                        .background(Capsule().fill(on ? DS.Color.fillSelected.color : .clear))
                 }
                 .buttonStyle(.plain)
             }
+            // D4 v2: the constrained rotation ring for a custom direction.
+            Button { beginAiming(g) } label: {
+                Text("Aim")
+                    .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                    .foregroundStyle((isCustom ? DS.Color.textPrimary : DS.Color.textSecondary).color)
+                    .padding(.vertical, 7).padding(.horizontal, DS.Space.m)
+                    .background(Capsule().fill(isCustom ? DS.Color.fillSelected.color : .clear))
+            }
+            .buttonStyle(.plain)
         }
         .padding(4)
         .background(Capsule().fill(DS.Surface.panel.color)
             .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+    }
+
+    // MARK: constrained rotation ring (D4 v2)
+
+    /// The rotation-ring gizmo, shown at the active load's arrow base while aiming.
+    @ViewBuilder private var ringGizmo: some View {
+        if let id = aimingLoadID, let aim = aiming,
+           let g = selection.groups.first(where: { $0.id == id }),
+           let center = groupScreen(g) {
+            RotationRingGizmo(center: center, aiming: aim, tint: g.color.color,
+                              onRotate: updateAim, onSet: commitRing, onCancel: cancelAim)
+        }
+    }
+
+    /// Begin aiming: seed a two-ring aim from the load's current direction, remember
+    /// its previous custom aim (for Cancel).
+    private func beginAiming(_ g: SelectionGroup) {
+        guard let nm = groupNormalModel(g) else { return }
+        let worldN = simd_normalize(settleQuat.act(nm))
+        let base = force.resolvedDirection(for: g.id, groupNormal: worldN) ?? SIMD3<Float>(0, -1, 0)
+        aimPrevCustom = force.customDirection(for: g.id)
+        aiming = RingAiming(base: base, primaryAxis: worldN)
+        aimingLoadID = g.id
+    }
+
+    /// Live drag → rotate the active ring and preview the aimed direction on the arrow.
+    private func updateAim(_ angle: Float) {
+        guard var aim = aiming, let id = aimingLoadID else { return }
+        aim.rotateActive(toRadians: angle)
+        aiming = aim
+        force.setCustomDirection(id, aim.previewDirection)
+    }
+
+    /// Set: commit ring 1 (revealing the orthogonal ring 2), or on ring 2 finalize
+    /// the custom direction and dismiss the gizmo (D4: second ring only after commit).
+    private func commitRing() {
+        guard var aim = aiming, let id = aimingLoadID else { return }
+        if aim.isOnSecondRing {
+            force.setCustomDirection(id, aim.committedDirection)
+            aiming = nil; aimingLoadID = nil; aimPrevCustom = nil
+        } else {
+            aim.commitFirst()
+            aiming = aim
+            force.setCustomDirection(id, aim.committedDirection)
+        }
+    }
+
+    /// Cancel: restore the direction the load had before aiming and dismiss.
+    private func cancelAim() {
+        if let id = aimingLoadID {
+            if let prev = aimPrevCustom { force.setCustomDirection(id, prev) }
+            else { force.clearCustomDirection(id) }
+        }
+        aiming = nil; aimingLoadID = nil; aimPrevCustom = nil
     }
 
     /// A non-active load's weight pill: dim, with a colour dot, tappable to re-select

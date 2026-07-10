@@ -122,6 +122,11 @@ public struct ForceModel: Equatable, Sendable {
     /// A group with no entry here is `.pending`.
     private var kinds: [UUID: GroupKind] = [:]
 
+    /// Per-load custom aim direction from the rotation ring (M7.6-ring, D4 v2),
+    /// stored as a world-space unit vector. When present it overrides the
+    /// Gravity/Push/Pull snap; choosing a snap preset clears it.
+    private var customAim: [UUID: SIMD3<Float>] = [:]
+
     public init() {}
 
     /// Whether a gravity direction has been chosen (stays true across re-entering
@@ -171,10 +176,28 @@ public struct ForceModel: Equatable, Sendable {
     }
 
     /// Change a load's direction via the snap row (no-op unless it is a load).
+    /// Choosing a snap preset clears any custom ring aim (D4: the last constrained
+    /// affordance the user picks wins).
     public mutating func setDirection(_ id: UUID, _ direction: LoadDirection) {
         guard case let .load(_, kg) = kinds[id] else { return }
         kinds[id] = .load(direction: direction, weightKg: kg)
+        customAim[id] = nil
     }
+
+    // MARK: - custom ring aim (D4 v2)
+
+    /// Aim a load with the rotation ring: store a world-space custom direction that
+    /// overrides its snap. No-op unless the group is a load and `dir` is non-zero.
+    public mutating func setCustomDirection(_ id: UUID, _ dir: SIMD3<Float>) {
+        guard case .load = kinds[id], let n = RotationRing.safeNormalize(dir) else { return }
+        customAim[id] = n
+    }
+
+    /// The load's custom ring-aim direction (world space), or nil if none set.
+    public func customDirection(for id: UUID) -> SIMD3<Float>? { customAim[id] }
+
+    /// Drop a load's custom aim, reverting it to its snap direction.
+    public mutating func clearCustomDirection(_ id: UUID) { customAim[id] = nil }
 
     /// Set a load's weight (kgf), clamped (no-op unless it is a load).
     public mutating func setWeight(_ id: UUID, kg: Double) {
@@ -182,14 +205,15 @@ public struct ForceModel: Equatable, Sendable {
         kinds[id] = .load(direction: dir, weightKg: clampWeight(kg))
     }
 
-    /// Forget a removed group's role.
-    public mutating func clearKind(_ id: UUID) { kinds[id] = nil }
+    /// Forget a removed group's role (and any custom aim).
+    public mutating func clearKind(_ id: UUID) { kinds[id] = nil; customAim[id] = nil }
 
-    /// Drop role entries for groups that no longer exist (call after the selection
-    /// changes so removed groups don't linger as stale anchors/loads).
+    /// Drop role/aim entries for groups that no longer exist (call after the
+    /// selection changes so removed groups don't linger as stale anchors/loads).
     public mutating func sync(groups: [SelectionGroup]) {
         let live = Set(groups.map { $0.id })
         kinds = kinds.filter { live.contains($0.key) }
+        customAim = customAim.filter { live.contains($0.key) }
     }
 
     private func clampWeight(_ kg: Double) -> Double {
@@ -230,11 +254,20 @@ public struct ForceModel: Equatable, Sendable {
     /// A kgf weight as a force magnitude in Newtons (D7, kgf → N).
     public func forceNewtons(kg: Double) -> Double { kg * Self.gravityAccel }
 
+    /// A load's resolved world-space unit direction: its custom ring aim if one is
+    /// set (D4 v2), otherwise its snap direction (Gravity/Push/Pull). Nil unless the
+    /// group is a load.
+    public func resolvedDirection(for id: UUID, groupNormal n: SIMD3<Float>) -> SIMD3<Float>? {
+        guard case let .load(direction, _) = kinds[id] else { return nil }
+        if let custom = customAim[id] { return custom }
+        return Self.directionVector(direction, groupNormal: n)
+    }
+
     /// The load's force vector in Newtons (direction × magnitude), or nil if the
     /// group is not a load. This is what M7.7 hands the core traction path.
     public func loadForceVectorNewtons(_ id: UUID, groupNormal n: SIMD3<Float>) -> SIMD3<Float>? {
-        guard case let .load(direction, kg) = kinds[id] else { return nil }
-        let dir = Self.directionVector(direction, groupNormal: n)
+        guard case let .load(_, kg) = kinds[id],
+              let dir = resolvedDirection(for: id, groupNormal: n) else { return nil }
         return dir * Float(forceNewtons(kg: kg))
     }
 
@@ -292,7 +325,9 @@ public struct ForceModel: Equatable, Sendable {
     public func panelKindLabel(for id: UUID) -> String {
         switch kind(for: id) {
         case .anchor: return "Anchor"
-        case let .load(direction, kg): return "\(formattedWeight(kg: kg)) · \(direction.rawValue)"
+        case let .load(direction, kg):
+            let dirLabel = customAim[id] != nil ? "custom" : direction.rawValue
+            return "\(formattedWeight(kg: kg)) · \(dirLabel)"
         case .pending: return "Pending…"
         }
     }
