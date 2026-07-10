@@ -282,6 +282,17 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
+    // Self-weight body load in mm-MPa-consistent units. The material density from
+    // materials.json is g/cm^3 and lengths are mm, so density*gravity must be in
+    // N/mm^3: fold the g/cm^3 -> t/mm^3 factor (1e-9) into standard gravity in
+    // mm/s^2, exactly as the CLI does (core/src/cli/run_job.cpp:
+    // options.gravity = magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3; job.hpp §109).
+    // Without this the default opts.gravity (9.81, unconverted) makes the body
+    // force ~1e6x too large, so every rung's margin collapses to ~0 and the whole
+    // ladder is (wrongly) rejected on strength. Direction: gravity pulls -Z.
+    constexpr double kGramPerCm3ToTonnePerMm3 = 1e-9;
+    opts.gravity = 9810.0 * kGramPerCm3ToTonnePerMm3;
+    opts.gravity_direction = topopt::Vec3{0.0, 0.0, -1.0};
     // The forwarder relays the payload to the caller's function pointer FIRST,
     // then mirrors the caller's bool flag into the atomic the driver polls at
     // the start of the next OC iteration. Calling progress first means a cancel
@@ -310,6 +321,9 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
       ov.worst_case_margin = v.report.margin.worst_case;
       ov.accepted = v.accepted;
       ov.v3_passes = v.v3.passes;
+      ov.min_feature_violations =
+          static_cast<int32_t>(v.report.min_feature_violations);
+      ov.min_feature_warning = v.report.min_feature_warning;
       result.variants.push_back(ov);
     }
   } catch (const std::exception& e) {

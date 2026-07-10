@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A00000000000000000000012 /* TopOptKit in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000011 /* TopOptKit */; };
 		A00000000000000000000014 /* materials.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* materials.json */; };
+		A00000000000000000000021 /* rules.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* rules.json */; };
 		A00000000000000000000015 /* TopOptFlows in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000016 /* TopOptFlows */; };
 		A00000000000000000000018 /* TopOptOCCT in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000017 /* TopOptOCCT */; };
 /* End PBXBuildFile section */
@@ -16,6 +17,7 @@
 /* Begin PBXFileReference section */
 		A00000000000000000000005 /* TopOpt.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TopOpt.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A00000000000000000000013 /* materials.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = materials.json; path = ../core/src/materials/materials.json; sourceTree = SOURCE_ROOT; };
+		A00000000000000000000020 /* rules.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = rules.json; path = ../core/src/settings/rules.json; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -41,6 +43,7 @@
 			children = (
 				A00000000000000000000006 /* TopOpt */,
 				A00000000000000000000013 /* materials.json */,
+				A00000000000000000000020 /* rules.json */,
 				A00000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -124,6 +127,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A00000000000000000000014 /* materials.json in Resources */,
+				A00000000000000000000021 /* rules.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -10,6 +10,9 @@ import TopOptDesign
 
 public struct RootView: View {
     @ObservedObject var model: AppModel
+    /// Autosave the in-progress project when the app leaves the foreground, so
+    /// edits survive relaunch even without navigating Home (M7.x-persist-b).
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(model: AppModel) { self.model = model }
 
@@ -19,7 +22,11 @@ public struct RootView: View {
             case .home:
                 HomeView(model: model)
             case .workspace:
-                WorkspacePlaceholder(model: model)
+                if let project = model.project {
+                    WorkspacePlaceholder(model: model, project: project)
+                } else {
+                    HomeView(model: model)   // no active project — shouldn't happen
+                }
             }
 
             if model.importSheetPresented {
@@ -29,6 +36,9 @@ public struct RootView: View {
         }
         .toast($model.toast)
         .task { model.loadMaterials() }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase != .active { model.persistCurrentProject() }
+        }
         // The design is a dark-glass system: pin the scheme so default-coloured text
         // stays light and `Material` backings render dark, regardless of the device's
         // light/dark setting (otherwise labels + glass go unreadable in light mode).

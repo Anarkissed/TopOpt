@@ -18,7 +18,7 @@ public enum Screen: Equatable, Sendable {
 
 /// The print process the part will be made with. Drives which material family the
 /// import sheet offers (ARCHITECTURE §6: materials carry `family` "fdm"/"resin").
-public enum ProcessKind: String, CaseIterable, Hashable, Sendable {
+public enum ProcessKind: String, CaseIterable, Hashable, Sendable, Codable {
     case fdm
     case resin
 

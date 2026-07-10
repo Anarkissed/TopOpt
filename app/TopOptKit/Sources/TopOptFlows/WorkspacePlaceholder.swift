@@ -30,13 +30,12 @@ import TopOptDesign
 
 public struct WorkspacePlaceholder: View {
     @ObservedObject var model: AppModel
-    /// The render-ready mesh, built once from the retained import; nil until a part
-    /// is present.
-    @State private var viewerMesh: ViewerMesh?
-    /// The face-selection groups (design `groups` + `activeGroupId`).
-    @State private var selection = SelectionModel()
-    /// The force & gravity state layered over the selection (roles/direction/weight).
-    @State private var force = ForceModel()
+    /// The per-project working state, OWNED by AppModel so it survives navigation
+    /// (M7.x-persist-a). The mesh / selection groups / force load case / run all
+    /// live here; the workspace forwards to them via the computed properties below
+    /// so its call sites are unchanged from the old `@State`.
+    @ObservedObject var project: ProjectModel
+
     /// The load group whose weight is being typed (nil = none / scrub mode).
     @State private var typingWeight: UUID?
     @State private var weightText = ""
@@ -47,15 +46,34 @@ public struct WorkspacePlaceholder: View {
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    // Forwarders onto the project's persistent state. The `nonmutating set`
+    // mutates the ProjectModel (a reference), so `selection.mutate()` /
+    // `force = …` etc. behave exactly as the previous `@State` did — republishing
+    // and re-rendering — while the storage now outlives the view.
+    private var viewerMesh: ViewerMesh? {
+        get { project.viewerMesh }
+        nonmutating set { project.viewerMesh = newValue }
+    }
+    private var selection: SelectionModel {
+        get { project.selection }
+        nonmutating set { project.selection = newValue }
+    }
+    private var force: ForceModel {
+        get { project.force }
+        nonmutating set { project.force = newValue }
+    }
+    private var run: RunModel { project.run }
+
     private static let identityQuat = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
 
-    public init(model: AppModel) { self.model = model }
+    /// Voxel resolution for the run. The design copy references 128³; the on-device
+    /// value is a maintainer performance decision (ROADMAP M7.10 / M6.3 projection
+    /// cost), so this stays a single tunable constant rather than being scattered.
+    private static let runResolution = 64
 
-    /// Identity that changes when a different part is imported, so the viewer mesh
-    /// is rebuilt only then (not on every SwiftUI update).
-    private var meshID: String {
-        guard let m = model.importedMesh else { return "none" }
-        return "\(m.vertexCount)-\(m.triangleCount)"
+    public init(model: AppModel, project: ProjectModel) {
+        self.model = model
+        self.project = project
     }
 
     public var body: some View {
@@ -83,8 +101,24 @@ public struct WorkspacePlaceholder: View {
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
             bottomBar
+            RunScreen(model: run,                               // M7.7: progress card + failure sheets
+                      materialName: project.material,
+                      resolution: Self.runResolution,
+                      onRetry: startRun)
+                .ignoresSafeArea()
         }
-        .task(id: meshID) { rebuildMesh() }
+    }
+
+    /// Start the M7.7 optimize run for the current load case. Gated on the same
+    /// `canOptimize` the button uses; nil request only if a file/material is
+    /// somehow missing (Optimize is disabled in that case).
+    private func startRun() {
+        guard force.canOptimize(in: selection.groups) else { return }
+        guard let request = model.makeRunRequest(resolution: Self.runResolution) else {
+            model.toast = "Can’t start — import a model and choose a material first."
+            return
+        }
+        run.start(request)
     }
 
     // MARK: derived render inputs
@@ -103,13 +137,6 @@ public struct WorkspacePlaceholder: View {
             for f in g.faces { tints[f] = v }
         }
         return tints
-    }
-
-    private func rebuildMesh() {
-        guard let m = model.importedMesh else { viewerMesh = nil; return }
-        viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs)
-        selection = SelectionModel()   // a fresh part starts with no groups
-        force = ForceModel()           // …and in the gravity-setup phase
     }
 
     // MARK: tap routing (D1/D2)
@@ -183,9 +210,9 @@ public struct WorkspacePlaceholder: View {
             .buttonStyle(.plain)
 
             HStack(spacing: DS.Space.sm) {
-                Text(model.projectName).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
                 Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
-                Text(model.selectedMaterial ?? "")
+                Text(project.material)
                     .dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
             }
@@ -615,8 +642,7 @@ public struct WorkspacePlaceholder: View {
         let ok = force.canOptimize(in: selection.groups)
         return Button {
             guard ok else { return }
-            model.toast = "Load case ready — \(force.optimizeSummary(in: selection.groups)) "
-                        + "(\(force.formattedWeight(kg: force.totalLoadKg(in: selection.groups))) total). Run is next."
+            startRun()
         } label: {
             VStack(spacing: 1) {
                 Text("Optimize").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
@@ -638,5 +664,5 @@ public struct WorkspacePlaceholder: View {
 #Preview("Workspace — force & gravity") {
     let m = AppModel(materialsPath: nil)
     m.open(RecentProject(name: "Shelf Bracket v2", materialName: "PLA", process: .fdm))
-    return WorkspacePlaceholder(model: m)
+    return WorkspacePlaceholder(model: m, project: m.project!)
 }
