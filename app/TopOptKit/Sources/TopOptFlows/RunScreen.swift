@@ -34,7 +34,7 @@ public struct RunScreen: View {
         ZStack {
             switch model.phase {
             case .running:
-                runningCard
+                if model.isMinimized { minimizedChip } else { runningCard }
             case .failed:
                 failureSheet
             default:
@@ -42,6 +42,38 @@ public struct RunScreen: View {
             }
         }
         .animation(DS.Motion.sheetIn, value: model.phase)
+        .animation(DS.Motion.sheetIn, value: model.isMinimized)
+    }
+
+    // MARK: - Minimized chip ("Run in Background")
+
+    /// A bottom pill shown while the run continues in the background; the workspace
+    /// behind it is fully interactive. Tap to re-open the full card.
+    private var minimizedChip: some View {
+        VStack {
+            Spacer()
+            Button { model.restore() } label: {
+                HStack(spacing: DS.Space.sm) {
+                    ProgressView().controlSize(.small).tint(DS.Color.accent.color)
+                    Text("Optimizing \(model.progress?.percent ?? 0)%")
+                        .dsStyle(DS.TypeScale.bodyStrong)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .monospacedDigit()
+                    Text("Tap to view")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                }
+                .padding(.vertical, DS.Space.sm)
+                .padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Surface.sheet.color))
+                .overlay(Capsule().strokeBorder(DS.Color.strokeSheet.color, lineWidth: 1))
+                .dsShadow(.panel)
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, DS.Space.xl6)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 
     // MARK: - Running card (design RUNNING)

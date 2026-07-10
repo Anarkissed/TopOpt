@@ -193,18 +193,49 @@ final class RunModelTests: XCTestCase {
         func runDidComplete(summary: String) { completions.append(summary) }
     }
 
-    func testRunInBackgroundNotifiesOnCompletion() {
+    func testRunInBackgroundMinimizesAndNotifiesOnCompletion() {
         let spy = NotifierSpy()
         let model = RunModel(scheduler: SynchronousRunScheduler(), notifier: spy)
+        var minimizedDuringRun = false
         model.runner = { _, progress in
             _ = progress(0, 3, 1)
-            model.runInBackground()                   // user backgrounds mid-run
+            model.runInBackground()                   // user leaves the run screen mid-run
             XCTAssertTrue(model.runningInBackground)
+            minimizedDuringRun = model.isMinimized    // the card is dismissed; run keeps going
             return self.accepted(count: 3)
         }
         model.start(request())
-        XCTAssertEqual(spy.willCount, 1)
-        XCTAssertEqual(spy.completions, ["Cube: 3 variants ready"])
+        XCTAssertTrue(minimizedDuringRun, "card is dismissed while the run continues")
+        XCTAssertEqual(spy.willCount, 1)              // background assertion armed
+        XCTAssertEqual(spy.completions, ["Cube: 3 variants ready"])  // notified on completion
+        XCTAssertFalse(model.isMinimized, "restored on completion so the result can surface")
+    }
+
+    func testRestoreReopensAMinimizedRun() {
+        let model = RunModel(scheduler: SynchronousRunScheduler())
+        var reopenedMidRun = false
+        model.runner = { _, progress in
+            model.runInBackground()
+            XCTAssertTrue(model.isMinimized)
+            model.restore()                           // tap the chip
+            reopenedMidRun = !model.isMinimized
+            _ = progress(0, 1, 1)
+            return self.accepted()
+        }
+        model.start(request())
+        XCTAssertTrue(reopenedMidRun)
+    }
+
+    func testMinimizedFailureIsRestoredSoTheSheetShows() {
+        let model = RunModel(scheduler: SynchronousRunScheduler())
+        model.runner = { _, _ in
+            model.runInBackground()                   // minimized, then it fails
+            return OptimizeOutcome(variants: [self.variant(margin: 0.5, accepted: false)],
+                                   stoppedOnMargin: true, cancelled: false, acceptedCount: 0)
+        }
+        model.start(request())
+        XCTAssertEqual(model.phase, .failed)
+        XCTAssertFalse(model.isMinimized)             // un-minimized so the failure sheet appears
     }
 
     func testForegroundRunDoesNotNotify() {

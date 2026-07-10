@@ -270,6 +270,11 @@ public final class RunModel: ObservableObject {
     @Published public private(set) var failure: RunFailure?
     /// Whether the user asked to keep the run going in the background.
     @Published public private(set) var runningInBackground = false
+    /// While running, whether the progress card is dismissed ("Run in Background"):
+    /// the run keeps executing on the background queue and the workspace shows a
+    /// small re-open chip instead of the full-screen card. Cleared when the run
+    /// resolves so a failure sheet / success can surface.
+    @Published public private(set) var isMinimized = false
 
     /// The successful outcome, kept for the M7.8 results screen to consume.
     public private(set) var outcome: OptimizeOutcome?
@@ -313,6 +318,7 @@ public final class RunModel: ObservableObject {
         failure = nil
         outcome = nil
         runningInBackground = false
+        isMinimized = false
 
         let token = CancelToken()
         self.token = token
@@ -343,12 +349,20 @@ public final class RunModel: ObservableObject {
         token.cancel()
     }
 
-    /// Keep the run going in the background: flag it and let the notifier arrange
-    /// the completion notification (the app target also holds a BGProcessingTask).
+    /// Keep the run going in the background: dismiss the progress card (the run
+    /// continues on the background queue), take a background-execution assertion,
+    /// and arm the completion notification. The workspace shows a re-open chip.
     public func runInBackground() {
         guard phase == .running else { return }
         runningInBackground = true
+        isMinimized = true
         notifier.willRunInBackground()
+    }
+
+    /// Re-open the full progress card for a minimized in-flight run.
+    public func restore() {
+        guard phase == .running else { return }
+        isMinimized = false
     }
 
     /// Dismiss a failure sheet back to idle (the workspace stays put so the user
@@ -398,6 +412,7 @@ public final class RunModel: ObservableObject {
             failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
             phase = .failed
         }
+        isMinimized = false   // resolved: let a failure sheet / success surface
         if runningInBackground {
             notifier.runDidComplete(summary: completionSummary(request))
         }
