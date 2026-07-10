@@ -36,7 +36,7 @@ public enum GroupRole: String, CaseIterable, Sendable {
 
 /// One selection group: an auto-named, colour-coded set of B-rep faces (the
 /// design's `groups[]` entry). The colour is a slot in `DS.Color.groupPalette`.
-public struct SelectionGroup: Identifiable, Equatable, Sendable {
+public struct SelectionGroup: Identifiable, Equatable, Sendable, Codable {
     public let id: UUID
     /// User-editable label; auto-seeded "Group A", "Group B", … (design `name`).
     public var name: String
@@ -80,7 +80,7 @@ public struct SelectionGroup: Identifiable, Equatable, Sendable {
 
 /// The selection-groups state machine (design component `state.groups` +
 /// `activeGroupId` + `nextColor` and their transitions).
-public struct SelectionModel: Equatable, Sendable {
+public struct SelectionModel: Equatable, Sendable, Codable {
     /// The groups, in creation order (the Selections panel's row order).
     public private(set) var groups: [SelectionGroup] = []
     /// The active group new taps add to and the highlight follows (design

@@ -20,9 +20,20 @@ final class ProjectModelTests: XCTestCase {
     private static var rulesPath: String { core("src/settings/rules.json") }
     private static var cubeSTL: String { core("tests/fixtures/stl/cube_10mm.stl") }
 
+    /// Isolated per-test store so persist-b writes never touch Application Support.
+    private var tempDir: URL!
+    override func setUpWithError() throws {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("topopt-projectmodel-tests-\(UUID().uuidString)", isDirectory: true)
+    }
+    override func tearDownWithError() throws {
+        if let tempDir { try? FileManager.default.removeItem(at: tempDir) }
+    }
+
     /// Import a model + open a workspace project, returning (model, project, recent).
     private func openedProject() throws -> (AppModel, ProjectModel, RecentProject) {
-        let m = AppModel(materialsPath: Self.materialsPath, rulesPath: Self.rulesPath)
+        let m = AppModel(materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+                         store: ProjectStore(rootDir: tempDir))
         m.loadMaterials()
         m.newTopOpt()
         m.selectMaterial("PLA")
@@ -104,7 +115,7 @@ final class ProjectModelTests: XCTestCase {
     func testLegacyRecentWithoutLiveProjectOpensEmpty() throws {
         // A recent not created this launch (no live project) opens an empty
         // workspace for its material — the seam M7.x-persist-b will fill from disk.
-        let m = AppModel(materialsPath: Self.materialsPath)
+        let m = AppModel(materialsPath: Self.materialsPath, store: ProjectStore(rootDir: tempDir))
         m.loadMaterials()
         let recent = RecentProject(name: "From Last Launch", materialName: "PETG", process: .fdm)
         m.open(recent)

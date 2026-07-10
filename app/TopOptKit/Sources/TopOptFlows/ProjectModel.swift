@@ -58,6 +58,38 @@ public final class ProjectModel: ObservableObject {
         self.run = run ?? ProjectModel.makeRun()
     }
 
+    /// Rebuild a project from a persisted snapshot + its re-imported model
+    /// (M7.x-persist-b). The mesh is re-imported by the caller (AppModel has the
+    /// importer); the selection groups + force/gravity load case come straight off
+    /// the snapshot.
+    public convenience init(restoring snapshot: ProjectSnapshot,
+                            importedFile: ImportedFile, importedMesh: ImportedMesh,
+                            run: RunModel? = nil) {
+        self.init(id: snapshot.id, name: snapshot.name, material: snapshot.material,
+                  process: snapshot.process, importedFile: importedFile,
+                  importedMesh: importedMesh, run: run)
+        self.selection = snapshot.selection
+        self.force = snapshot.force
+    }
+
+    /// A persistable snapshot of this project, or nil if there is no model to copy
+    /// (an empty/legacy project can't be persisted). The model file is stored under
+    /// a stable `model.<ext>` name so re-import dispatches by extension.
+    public func snapshot(savedAt: Date) -> ProjectSnapshot? {
+        guard let file = importedFile else { return nil }
+        let ext = (file.name as NSString).pathExtension.lowercased()
+        let modelFileName = ext.isEmpty ? "model" : "model.\(ext)"
+        return ProjectSnapshot(id: id, name: name, material: material, process: process,
+                               modelFileName: modelFileName, originalFileName: file.name,
+                               savedAt: savedAt, selection: selection, force: force)
+    }
+
+    /// The URL of the imported model file to copy into the store on first save.
+    public var modelSourceURL: URL? {
+        guard let path = importedFile?.path else { return nil }
+        return URL(fileURLWithPath: path)
+    }
+
     /// The run's notifier is the on-device local-notification one where available;
     /// tests inject their own `run`.
     private static func makeRun() -> RunModel {
