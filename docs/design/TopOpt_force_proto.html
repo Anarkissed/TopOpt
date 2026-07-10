@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>TopOpt — force & gravity prototype</title>
+<style>
+  html, body { margin:0; padding:0; background:#060608; overflow:hidden; height:100%;
+    font-family:-apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+    color:#f2f2f5; -webkit-font-smoothing:antialiased; }
+  * { box-sizing:border-box; touch-action:none; -webkit-user-select:none; user-select:none; }
+  #stage { position:fixed; inset:0; display:block; }
+  .glows { position:fixed; inset:0; pointer-events:none;
+    background:radial-gradient(900px 500px at 75% -10%, rgba(10,132,255,0.10), transparent 60%),
+               radial-gradient(800px 600px at -5% 100%, rgba(94,92,230,0.08), transparent 55%); }
+  #hud { position:fixed; inset:0; pointer-events:none; }
+  #hud > * { pointer-events:auto; }
+
+  .glass { background:rgba(24,24,30,0.62); border:1px solid rgba(255,255,255,0.11);
+    backdrop-filter:blur(30px) saturate(170%); -webkit-backdrop-filter:blur(30px) saturate(170%);
+    box-shadow:0 12px 44px rgba(0,0,0,0.45); }
+
+  /* wordmark + groups panel */
+  #panel { position:fixed; top:22px; left:22px; width:250px; border-radius:20px; overflow:hidden; }
+  #panel .hd { display:flex; align-items:center; justify-content:space-between; padding:13px 15px 11px; border-bottom:1px solid rgba(255,255,255,0.07); }
+  #panel .hd .t { font-size:14px; font-weight:700; letter-spacing:-0.2px; }
+  #panel .hd .sub { font-size:10.5px; color:rgba(242,242,245,0.4); margin-top:1px; }
+  .seg { display:flex; padding:2px; border-radius:999px; background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.08); }
+  .seg button { padding:5px 10px; border:none; border-radius:999px; font-size:11px; font-weight:700; cursor:pointer;
+    background:transparent; color:rgba(242,242,245,0.5); font-family:inherit; }
+  .seg button.on { background:rgba(255,255,255,0.16); color:#fff; }
+  #rows { max-height:44vh; overflow-y:auto; }
+  .row { display:flex; align-items:center; gap:9px; padding:10px 14px; cursor:pointer;
+    border-bottom:1px solid rgba(255,255,255,0.05); border-left:3px solid transparent; }
+  .row.on { background:rgba(255,255,255,0.06); }
+  .row .dot { flex:none; width:11px; height:11px; border-radius:4px; }
+  .row .nm { font-size:13px; font-weight:600; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .kind { font-size:11px; color:rgba(242,242,245,0.45); white-space:nowrap; }
+  #empty { padding:16px 15px 18px; font-size:11.5px; line-height:1.55; color:rgba(242,242,245,0.38); }
+
+  /* gravity banner + chip */
+  #banner { position:fixed; top:26px; left:50%; transform:translateX(-50%); border-radius:20px;
+    padding:14px 22px 13px; text-align:center; max-width:min(480px, 88vw); }
+  #banner .t { font-size:15.5px; font-weight:700; letter-spacing:-0.2px; }
+  #banner .t svg { vertical-align:-2px; margin-right:6px; }
+  #banner .s { font-size:12px; color:rgba(242,242,245,0.5); margin-top:3px; line-height:1.5; }
+  #gchip { position:fixed; top:22px; right:22px; border-radius:999px; display:flex; align-items:center;
+    gap:9px; padding:9px 9px 9px 15px; font-size:12.5px; font-weight:650; }
+  #gchip svg { flex:none; }
+  #gchip button { border:none; border-radius:999px; padding:6px 13px; font-size:11.5px; font-weight:700;
+    background:rgba(255,255,255,0.1); color:#f2f2f5; cursor:pointer; font-family:inherit; }
+  #gchip button:hover { background:rgba(255,255,255,0.16); }
+
+  /* floating selection chip */
+  #chip { position:fixed; left:0; top:0; display:flex; gap:5px; padding:5px; border-radius:999px;
+    transform:translate(-50%, -140%); white-space:nowrap; }
+  #chip button { display:flex; align-items:center; gap:7px; border:none; border-radius:999px;
+    padding:10px 17px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; color:#fff; }
+  #chip .anchor { background:rgba(48,209,88,0.2); color:#4ADE80; }
+  #chip .anchor:hover { background:rgba(48,209,88,0.32); }
+  #chip .load { background:#0A84FF; box-shadow:0 6px 20px rgba(10,132,255,0.4); }
+  #chip .load:hover { filter:brightness(1.12); }
+  #chip .x, #ctl .x { background:transparent; color:rgba(242,242,245,0.45); padding:10px 11px; }
+  #chip .x:hover, #ctl .x:hover { color:#FF453A; }
+
+  /* active-load controls: snap row (+ remove) */
+  #ctl { position:fixed; left:0; top:0; display:flex; gap:4px; padding:4px; border-radius:999px;
+    transform:translate(-50%, 16px); white-space:nowrap; }
+  #ctl button { border:none; border-radius:999px; padding:9px 14px; font-size:12px; font-weight:700;
+    cursor:pointer; font-family:inherit; background:transparent; color:rgba(242,242,245,0.55); }
+  #ctl button.on { background:rgba(255,255,255,0.16); color:#fff; }
+
+  /* weight pills */
+  .pill { position:fixed; left:0; top:0; transform:translate(-50%,-50%); border-radius:999px;
+    padding:8px 15px; font-size:14px; font-weight:800; letter-spacing:-0.2px; cursor:ew-resize;
+    background:rgba(24,24,30,0.78); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px);
+    box-shadow:0 8px 28px rgba(0,0,0,0.5); white-space:nowrap; }
+  .pill.dim { opacity:0.85; font-size:12.5px; padding:6px 12px; }
+  .pill input { width:64px; background:transparent; border:none; color:#fff; font:inherit; text-align:center; outline:none; }
+  .anchorBadge { position:fixed; left:0; top:0; transform:translate(-50%,-50%); display:flex; align-items:center;
+    gap:6px; border-radius:999px; padding:6px 12px; font-size:11.5px; font-weight:700; color:#4ADE80;
+    background:rgba(20,26,22,0.75); border:1px solid rgba(48,209,88,0.35);
+    backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); cursor:pointer; }
+
+  /* bottom hint + optimize */
+  #hint { position:fixed; bottom:26px; left:50%; transform:translateX(-50%); font-size:12.5px;
+    color:rgba(242,242,245,0.55); padding:8px 16px; border-radius:999px; max-width:86vw; text-align:center; }
+  #opt { position:fixed; bottom:22px; right:22px; border:none; border-radius:999px; padding:13px 26px;
+    font-size:14.5px; font-weight:750; font-family:inherit; cursor:pointer; text-align:center; }
+  #opt .sub { display:block; font-size:10.5px; font-weight:600; opacity:0.75; margin-top:1px; }
+  #opt.ok { background:#0A84FF; color:#fff; box-shadow:0 6px 24px rgba(10,132,255,0.4); }
+  #opt.no { background:rgba(255,255,255,0.07); color:rgba(242,242,245,0.35); border:1px solid rgba(255,255,255,0.08); cursor:default; }
+
+  #toast { position:fixed; bottom:82px; left:50%; transform:translateX(-50%); padding:11px 21px;
+    border-radius:999px; background:rgba(40,40,48,0.88); border:1px solid rgba(255,255,255,0.14);
+    backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); font-size:13px; font-weight:600;
+    box-shadow:0 12px 40px rgba(0,0,0,0.5); white-space:nowrap; opacity:0; transition:opacity 0.2s, transform 0.25s; z-index:60; }
+  #toast.on { opacity:1; transform:translate(-50%,-6px); }
+  .hidden { display:none !important; }
+  @media (prefers-reduced-motion: reduce) { #toast { transition:none; } }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div class="glows"></div>
+<div id="hud">
+
+  <div id="panel" class="glass">
+    <div class="hd">
+      <div>
+        <div class="t">TopOpt</div>
+        <div class="sub">Force &amp; gravity prototype</div>
+      </div>
+      <div class="seg">
+        <button id="uKg" class="on">kg</button>
+        <button id="uLb">lbs</button>
+      </div>
+    </div>
+    <div id="rows"></div>
+    <div id="empty">Tap faces on the model to select them — a chip will ask whether they're an <b style="color:#4ADE80">anchor</b> or a <b style="color:#6db4ff">load</b>.</div>
+  </div>
+
+  <div id="banner" class="glass">
+    <div class="t"><svg width="15" height="15" viewBox="0 0 15 15"><path d="M7.5 1.5 v9 M3.5 7 l4 4 4-4" fill="none" stroke="#0A84FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13.5 h11" stroke="rgba(242,242,245,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>Which way is down?</div>
+    <div class="s">Tap the face that points at the floor in real life. Drag to orbit, pinch or scroll to zoom.</div>
+  </div>
+
+  <div id="gchip" class="glass hidden">
+    <svg width="13" height="13" viewBox="0 0 15 15"><path d="M7.5 1.5 v9 M3.5 7 l4 4 4-4" fill="none" stroke="#0A84FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 13.5 h11" stroke="rgba(242,242,245,0.6)" stroke-width="1.5" stroke-linecap="round"/></svg>
+    <span>Gravity set</span>
+    <button id="gchange">Change</button>
+  </div>
+
+  <div id="chip" class="glass hidden">
+    <button class="anchor" id="mkAnchor">
+      <svg width="13" height="13" viewBox="0 0 13 13"><rect x="2.5" y="5.5" width="8" height="6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 5.5 V4 a2 2 0 0 1 4 0 v1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      Anchor</button>
+    <button class="load" id="mkLoad">
+      <svg width="13" height="13" viewBox="0 0 13 13"><path d="M6.5 1.5 v7 M3 5.5 l3.5 3.5 3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Load</button>
+    <button class="x" id="chipX">✕</button>
+  </div>
+
+  <div id="ctl" class="glass hidden">
+    <button data-d="gravity">⬇ Gravity</button>
+    <button data-d="push">Push</button>
+    <button data-d="pull">Pull</button>
+    <button class="x" id="ctlX">✕</button>
+  </div>
+
+  <div id="hint" class="glass"></div>
+  <button id="opt" class="no">Optimize<span class="sub">set gravity first</span></button>
+  <div id="toast"></div>
+</div>
+
+<script>
+'use strict';
+/* ---------------- tiny vec / quat ---------------- */
+const V = {
+  add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],
+  sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],
+  mul:(a,s)=>[a[0]*s,a[1]*s,a[2]*s],
+  dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+  cross:(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]],
+  len:a=>Math.hypot(a[0],a[1],a[2]),
+  norm(a){ const l=V.len(a)||1; return [a[0]/l,a[1]/l,a[2]/l]; }
+};
+const Q = {
+  id:()=>[0,0,0,1],
+  fromUnit(a,b){                     // rotates unit vec a onto unit vec b
+    const d=V.dot(a,b);
+    if (d>0.999999) return Q.id();
+    if (d<-0.999999){                // opposite: rotate 180° about any orthogonal axis
+      let ax=V.cross([1,0,0],a); if (V.len(ax)<1e-6) ax=V.cross([0,0,1],a);
+      ax=V.norm(ax); return [ax[0],ax[1],ax[2],0];
+    }
+    const c=V.cross(a,b), q=[c[0],c[1],c[2],1+d], l=Math.hypot(q[0],q[1],q[2],q[3]);
+    return q.map(x=>x/l);
+  },
+  rot(q,v){                          // rotate vec by quat
+    const [x,y,z,w]=q, u=[x,y,z];
+    const t=V.mul(V.cross(u,v),2);
+    return V.add(v, V.add(V.mul(t,w), V.cross(u,t)));
+  },
+  slerp(a,b,t){
+    let d=a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3], bb=b;
+    if (d<0){ d=-d; bb=b.map(x=>-x); }
+    if (d>0.9995){ const r=a.map((x,i)=>x+(bb[i]-x)*t), l=Math.hypot(...r); return r.map(x=>x/l); }
+    const th=Math.acos(d), s=Math.sin(th);
+    const wa=Math.sin((1-t)*th)/s, wb=Math.sin(t*th)/s;
+    return a.map((x,i)=>x*wa+bb[i]*wb);
+  }
+};
+
+/* ---------------- mesh: shelf bracket, imported "wrong" ---------------- */
+const polys=[];                       // {pts:[v3..], face:id, n:v3}  (base/model space)
+function quadFace(id, corners, n, div){
+  const [a,b,c,d]=corners;            // a→b→c→d CCW seen from outside
+  for(let i=0;i<div;i++) for(let j=0;j<div;j++){
+    const f=(p,q,t)=>V.add(V.mul(p,1-t),V.mul(q,t));
+    const u0=i/div,u1=(i+1)/div,v0=j/div,v1=(j+1)/div;
+    const P=(u,v)=>f(f(a,b,u), f(d,c,u), v);
+    polys.push({pts:[P(u0,v0),P(u1,v0),P(u1,v1),P(u0,v1)], face:id, n});
+  }
+}
+function box(id,[x0,y0,z0],[x1,y1,z1],skip=[]){
+  const P=(x,y,z)=>[x,y,z];
+  const F={
+    '+x':[[P(x1,y0,z0),P(x1,y1,z0),P(x1,y1,z1),P(x1,y0,z1)],[1,0,0]],
+    '-x':[[P(x0,y0,z1),P(x0,y1,z1),P(x0,y1,z0),P(x0,y0,z0)],[-1,0,0]],
+    '+y':[[P(x0,y1,z0),P(x0,y1,z1),P(x1,y1,z1),P(x1,y1,z0)],[0,1,0]],
+    '-y':[[P(x0,y0,z1),P(x0,y0,z0),P(x1,y0,z0),P(x1,y0,z1)],[0,-1,0]],
+    '+z':[[P(x0,y0,z1),P(x1,y0,z1),P(x1,y1,z1),P(x0,y1,z1)],[0,0,1]],
+    '-z':[[P(x1,y0,z0),P(x0,y0,z0),P(x0,y1,z0),P(x1,y1,z0)],[0,0,-1]],
+  };
+  for (const k in F){ if (skip.includes(k)) continue; quadFace(id+k, F[k][0], F[k][1], 2); }
+}
+box('plate', [-30,0,0], [30,90,8]);
+box('shelf', [-30,82,8], [30,90,88], ['-z']);
+(function gusset(){                    // triangular prism under the shelf
+  const A=[82,8], B=[82,66], C=[24,8], xs=-7, xe=7;
+  const p=(x,yz)=>[x,yz[0],yz[1]];
+  polys.push({pts:[p(xs,A),p(xs,B),p(xs,C)], face:'gus-x', n:[-1,0,0]});
+  polys.push({pts:[p(xe,C),p(xe,B),p(xe,A)], face:'gus+x', n:[1,0,0]});
+  const e=V.sub([0,C[0],C[1]],[0,B[0],B[1]]);
+  const nHyp=V.norm(V.cross(e,[1,0,0]));
+  quadFace('gusHyp', [p(xs,B),p(xe,B),p(xe,C),p(xs,C)], nHyp, 2);
+})();
+
+// bake an awkward "as imported" orientation into the base mesh
+(function bake(){
+  const cz=Math.cos(-1.25), sz=Math.sin(-1.25), cx=Math.cos(0.5), sx=Math.sin(0.5);
+  const R=v=>{
+    let [x,y,z]=v;
+    let x1=x*cz - y*sz, y1=x*sz + y*cz;              // rot Z
+    let y2=y1*cx - z*sx, z2=y1*sx + z*cx;            // rot X
+    return [x1,y2,z2];
+  };
+  // rotate about the bbox centre
+  let mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];
+  for(const p of polys) for(const v of p.pts) for(let i=0;i<3;i++){ mn[i]=Math.min(mn[i],v[i]); mx[i]=Math.max(mx[i],v[i]); }
+  const c=V.mul(V.add(mn,mx),0.5);
+  for(const p of polys){
+    p.pts=p.pts.map(v=>V.add(R(V.sub(v,c)),c));
+    p.n=V.norm(R(p.n));
+  }
+})();
+// per-logical-face centroid + normal (model space)
+const faceInfo={};
+for(const p of polys){
+  const fi = faceInfo[p.face] || (faceInfo[p.face]={c:[0,0,0], n:p.n, k:0});
+  for(const v of p.pts){ fi.c=V.add(fi.c,v); fi.k++; }
+}
+for(const id in faceInfo) faceInfo[id].c = V.mul(faceInfo[id].c, 1/faceInfo[id].k);
+
+/* ---------------- state ---------------- */
+const PALETTE=['#FF453A','#FF9F0A','#BF5AF2','#0A84FF','#FFD60A'];
+const ANCHOR_C='#30D158';
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const S = {
+  phase:'gravity',          // gravity | edit
+  quat:Q.id(), quatFrom:Q.id(), quatTo:Q.id(), animT:1,
+  settled:false,
+  groups:[],                // {id,name,color,faces:Set,kind,dir,kg}
+  activeId:null,
+  unit:'kg', nextColor:0,
+  cam:{yaw:0.85, pitch:0.42, dist:330},
+};
+const KG2LB=2.20462;
+
+/* ---------------- canvas / camera ---------------- */
+const cv=document.getElementById('stage'), ctx=cv.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){ DPR=Math.min(2,devicePixelRatio||1); W=innerWidth; H=innerHeight;
+  cv.width=W*DPR; cv.height=H*DPR; cv.style.width=W+'px'; cv.style.height=H+'px'; }
+addEventListener('resize',resize); resize();
+
+let camPos=[0,0,0], camR=[1,0,0], camU=[0,1,0], camF=[0,0,1], target=[0,45,30];
+function updateCam(){
+  const {yaw,pitch,dist}=S.cam;
+  const cp=Math.cos(pitch), off=[Math.sin(yaw)*cp, Math.sin(pitch), Math.cos(yaw)*cp];
+  camPos=V.add(target, V.mul(off,dist));
+  camF=V.norm(V.sub(target,camPos));
+  camR=V.norm(V.cross(camF,[0,1,0]));
+  camU=V.cross(camR,camF);
+}
+function proj(v){
+  const p=V.sub(v,camPos);
+  const z=V.dot(p,camF); if (z<5) return null;
+  const F=H*1.15;
+  return [W/2 + V.dot(p,camR)*F/z, H/2 - V.dot(p,camU)*F/z, z];
+}
+
+/* ---------------- helpers ---------------- */
+const $=id=>document.getElementById(id);
+const groupOf = f => S.groups.find(g=>g.faces.has(f));
+const active = () => S.groups.find(g=>g.id===S.activeId) || null;
+function hex2rgb(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; }
+function mix(a,b,t){ return a.map((x,i)=>Math.round(x+(b[i]-x)*t)); }
+let toastT=null;
+function toast(m){ const t=$('toast'); t.textContent=m; t.classList.add('on');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('on'),2600); }
+function fmtW(kg){
+  const v = S.unit==='kg' ? kg : kg*KG2LB;
+  return (v<10 ? v.toFixed(1) : Math.round(v)) + ' ' + S.unit;
+}
+function groupWorld(g){                     // centroid + avg normal in world
+  let c=[0,0,0], n=[0,0,0];
+  for(const f of g.faces){ c=V.add(c,faceInfo[f].c); n=V.add(n,faceInfo[f].n); }
+  c=V.mul(c,1/g.faces.size);
+  return { c:Q.rot(S.quat,c), n:V.norm(Q.rot(S.quat, V.len(n)<1e-6? faceInfo[[...g.faces][0]].n : n)) };
+}
+function loadDir(g,w){
+  if (g.dir==='gravity') return [0,-1,0];
+  return g.dir==='push' ? V.mul(w.n,-1) : w.n;
+}
+
+/* ---------------- interactions on canvas ---------------- */
+let drawn=[];                                // projected polys, back→front
+function hitFace(x,y){
+  for(let i=drawn.length-1;i>=0;i--){
+    const d=drawn[i], p=d.s; let inside=false;
+    for(let a=0,b=p.length-1; a<p.length; b=a++){
+      if (((p[a][1]>y)!==(p[b][1]>y)) && (x < (p[b][0]-p[a][0])*(y-p[a][1])/(p[b][1]-p[a][1])+p[a][0])) inside=!inside;
+    }
+    if (inside) return d.face;
+  }
+  return null;
+}
+const ptrs=new Map(); let dragged=false, pinch0=0;
+cv.addEventListener('pointerdown',e=>{ ptrs.set(e.pointerId,[e.clientX,e.clientY]); dragged=false;
+  if (ptrs.size===2){ const a=[...ptrs.values()]; pinch0=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]); }
+  cv.setPointerCapture(e.pointerId); });
+cv.addEventListener('pointermove',e=>{
+  if (!ptrs.has(e.pointerId)){
+    cv.style.cursor = hitFace(e.clientX,e.clientY) ? 'pointer' : 'grab'; return;
+  }
+  const prev=ptrs.get(e.pointerId); ptrs.set(e.pointerId,[e.clientX,e.clientY]);
+  if (ptrs.size===2){
+    const a=[...ptrs.values()], d=Math.hypot(a[0][0]-a[1][0],a[0][1]-a[1][1]);
+    if (pinch0>0) S.cam.dist=Math.min(900,Math.max(120,S.cam.dist*pinch0/d));
+    pinch0=d; dragged=true; return;
+  }
+  const dx=e.clientX-prev[0], dy=e.clientY-prev[1];
+  if (Math.abs(dx)+Math.abs(dy)>2) dragged=true;
+  if (dragged){ S.cam.yaw-=dx*0.008; S.cam.pitch=Math.min(1.35,Math.max(-0.5,S.cam.pitch+dy*0.007)); }
+});
+function endPtr(e){ ptrs.delete(e.pointerId);
+  if (!dragged && ptrs.size===0) tap(e.clientX,e.clientY); }
+cv.addEventListener('pointerup',endPtr);
+cv.addEventListener('pointercancel',e=>ptrs.delete(e.pointerId));
+cv.addEventListener('wheel',e=>{ S.cam.dist=Math.min(900,Math.max(120,S.cam.dist*(1+e.deltaY*0.0012))); e.preventDefault(); },{passive:false});
+
+function tap(x,y){
+  const f=hitFace(x,y);
+  if (S.phase==='gravity'){
+    if (!f) return;
+    setGravity(f); return;
+  }
+  if (!f){                                   // empty space: drop active
+    const a=active();
+    if (a && a.kind==='pending' && a.faces.size===0) S.groups=S.groups.filter(g=>g!==a);
+    S.activeId=null; sync(); return;
+  }
+  const owner=groupOf(f), a=active();
+  if (owner && owner!==a){ S.activeId=owner.id; }
+  else if (owner && owner===a){
+    a.faces.delete(f);
+    if (a.faces.size===0){ S.groups=S.groups.filter(g=>g!==a); S.activeId=null; }
+  }
+  else if (a){ a.faces.add(f); }
+  else {
+    const g={ id:'g'+Date.now(), name:'Group '+String.fromCharCode(65+S.groups.length%26),
+      color:PALETTE[S.nextColor++ % PALETTE.length], faces:new Set([f]), kind:'pending', dir:'gravity', kg:2.5 };
+    S.groups.push(g); S.activeId=g.id;
+  }
+  sync();
+}
+
+function setGravity(f){
+  const n=faceInfo[f].n;                     // model-space outward normal → real-world "down"
+  S.gravityFace=f;
+  S.quatFrom=S.quat.slice();
+  S.quatTo=Q.fromUnit(n,[0,-1,0]);
+  S.animT = reduceMotion ? 1 : 0;
+  if (reduceMotion) S.quat=S.quatTo.slice();
+  S.phase='edit'; S.settled=reduceMotion;
+  toast('Gravity set — the part now rests the way it will in real life');
+  sync();
+}
+
+/* ---------------- overlays ---------------- */
+$('gchange').onclick=()=>{ S.phase='gravity'; S.activeId=null; sync(); };
+$('mkAnchor').onclick=()=>{ const a=active(); if(!a) return; a.kind='anchor'; a.color=ANCHOR_C; S.activeId=null; sync(); };
+$('mkLoad').onclick=()=>{ const a=active(); if(!a) return; a.kind='load'; a.dir='gravity'; sync();
+  toast('Load added along gravity — scrub the weight, or pick Push / Pull'); };
+$('chipX').onclick=()=>{ const a=active(); if(a){ S.groups=S.groups.filter(g=>g!==a); S.activeId=null; sync(); } };
+$('ctlX').onclick=()=>{ const a=active(); if(a){ S.groups=S.groups.filter(g=>g!==a); S.activeId=null; sync(); } };
+for(const b of document.querySelectorAll('#ctl [data-d]'))
+  b.onclick=()=>{ const a=active(); if(!a) return; a.dir=b.dataset.d;
+    if (navigator.vibrate) navigator.vibrate(8); sync(); };
+$('uKg').onclick=()=>{ S.unit='kg'; sync(); };
+$('uLb').onclick=()=>{ S.unit='lbs'; sync(); };
+$('opt').onclick=()=>{
+  const L=S.groups.filter(g=>g.kind==='load'), A=S.groups.filter(g=>g.kind==='anchor');
+  if (!L.length || !A.length || S.groups.some(g=>g.kind==='pending')) return;
+  const tot=L.reduce((s,g)=>s+g.kg,0);
+  toast(`Prototype ends here — solver would get ${A.length} anchor${A.length>1?'s':''} · ${L.length} load${L.length>1?'s':''} (${fmtW(tot)} total)`);
+};
+
+// weight pill scrub / type
+let scrub=null;
+function pillDown(e,g){
+  e.stopPropagation();
+  scrub={g, x0:e.clientX, kg0:g.kg, moved:false, el:e.currentTarget};
+  e.currentTarget.setPointerCapture(e.pointerId);
+}
+addEventListener('pointermove',e=>{
+  if (!scrub) return;
+  const dx=e.clientX-scrub.x0;
+  if (Math.abs(dx)>4) scrub.moved=true;
+  if (scrub.moved){
+    const stepKg = S.unit==='kg' ? 0.05 : 0.05/KG2LB;
+    scrub.g.kg=Math.min(500,Math.max(0.1, scrub.kg0 + dx*stepKg));
+    sync();
+  }
+});
+addEventListener('pointerup',()=>{
+  if (!scrub) return;
+  const s=scrub; scrub=null;
+  if (!s.moved) typeWeight(s.g, s.el);
+});
+function typeWeight(g, el){
+  const disp=S.unit==='kg'?g.kg:g.kg*KG2LB;
+  el.innerHTML=`<input type="number" inputmode="decimal" step="0.1" value="${disp.toFixed(1)}"> ${S.unit}`;
+  const inp=el.querySelector('input');
+  inp.focus(); inp.select();
+  const commit=()=>{ const v=parseFloat(inp.value);
+    if (!isNaN(v)&&v>0) g.kg = S.unit==='kg'? v : v/KG2LB;
+    el.textContent=fmtW(g.kg); sync(); };
+  inp.addEventListener('blur',commit);
+  inp.addEventListener('keydown',ev=>{ if(ev.key==='Enter') inp.blur(); ev.stopPropagation(); });
+  inp.addEventListener('pointerdown',ev=>ev.stopPropagation());
+}
+
+/* ---------------- HUD sync (structure; positions set per-frame) ---------------- */
+const rowsEl=$('rows');
+const pillEls=new Map();     // groupId -> element (pill or anchor badge)
+function sync(){
+  // gravity banner / chip
+  $('banner').classList.toggle('hidden', S.phase!=='gravity');
+  $('gchip').classList.toggle('hidden', S.phase==='gravity' || !S.gravityFace);
+  // unit seg
+  $('uKg').classList.toggle('on',S.unit==='kg');
+  $('uLb').classList.toggle('on',S.unit==='lbs');
+  // groups panel
+  rowsEl.innerHTML='';
+  $('empty').classList.toggle('hidden', S.groups.length>0 || S.phase==='gravity');
+  if (S.phase==='gravity') $('empty').classList.add('hidden');
+  for(const g of S.groups){
+    const r=document.createElement('div');
+    r.className='row'+(g.id===S.activeId?' on':'');
+    r.style.borderLeftColor = g.id===S.activeId ? g.color : 'transparent';
+    const kind = g.kind==='anchor' ? 'Anchor' : g.kind==='load' ? fmtW(g.kg)+' · '+({gravity:'gravity',push:'push',pull:'pull'})[g.dir] : 'Pending…';
+    r.innerHTML=`<span class="dot" style="background:${g.color}; box-shadow:0 0 8px ${g.color}66"></span>
+      <span class="nm">${g.name}</span><span class="kind">${kind}</span>`;
+    r.onclick=()=>{ S.activeId=g.id; sync(); };
+    rowsEl.appendChild(r);
+  }
+  // snap row highlight
+  for(const b of document.querySelectorAll('#ctl [data-d]')){
+    const a=active();
+    b.classList.toggle('on', !!a && a.kind==='load' && a.dir===b.dataset.d);
+  }
+  // pills / badges: create-or-update per group
+  const alive=new Set();
+  for(const g of S.groups){
+    if (g.kind==='pending') continue;
+    alive.add(g.id);
+    let el=pillEls.get(g.id);
+    if (!el){
+      el=document.createElement('div');
+      document.getElementById('hud').appendChild(el);
+      pillEls.set(g.id,el);
+      el.addEventListener('pointerdown',e=>{
+        const gg=S.groups.find(x=>x.id===el.dataset.g);
+        if (!gg) return;
+        if (gg.kind==='load'){ S.activeId=gg.id; sync(); pillDown(e,gg); }
+        else { S.activeId=gg.id; sync(); }
+      });
+    }
+    el.dataset.g=g.id;
+    if (g.kind==='load'){
+      el.className='pill'+(g.id===S.activeId?'':' dim');
+      el.style.color=g.color;
+      if (!el.querySelector('input')) el.textContent=fmtW(g.kg);
+    } else {
+      el.className='anchorBadge';
+      el.innerHTML='<svg width="11" height="11" viewBox="0 0 13 13"><rect x="2.5" y="5.5" width="8" height="6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 5.5 V4 a2 2 0 0 1 4 0 v1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Anchor';
+    }
+  }
+  for(const [id,el] of pillEls) if(!alive.has(id)){ el.remove(); pillEls.delete(id); }
+  // optimize
+  const L=S.groups.filter(g=>g.kind==='load').length, A=S.groups.filter(g=>g.kind==='anchor').length,
+        P=S.groups.some(g=>g.kind==='pending');
+  const ok = L>0 && A>0 && !P && S.phase==='edit';
+  const opt=$('opt');
+  opt.className = ok ? 'ok' : 'no';
+  opt.innerHTML = 'Optimize<span class="sub">'+(
+    S.phase==='gravity' ? 'set gravity first' :
+    P ? 'finish the pending group' :
+    !A && !L ? 'needs an anchor and a load' :
+    !A ? 'needs an anchor' : !L ? 'needs a load' :
+    `${A} anchor${A>1?'s':''} · ${L} load${L>1?'s':''}`)+'</span>';
+  // hint
+  const a=active();
+  $('hint').textContent =
+    S.phase==='gravity' ? 'Tap the face that points at the floor · drag to orbit' :
+    a && a.kind==='pending' ? 'Tap more faces to grow the selection, then choose Anchor or Load' :
+    a && a.kind==='load' ? 'Scrub the weight left–right · tap it to type · Push / Pull follow the face' :
+    'Tap faces to select · tap a group to edit it · drag to orbit';
+}
+
+/* ---------------- render ---------------- */
+const easeSettle=t=>{ const c=1.70158*0.6; t-=1; return 1+((c+1)*t+c)*t*t; }; // gentle overshoot
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  // settle animation
+  if (S.animT<1){
+    S.animT=Math.min(1,S.animT+dt/0.8);
+    S.quat=Q.slerp(S.quatFrom,S.quatTo,easeSettle(S.animT));
+    if (S.animT>=1){ S.quat=S.quatTo.slice(); S.settled=true; sync(); }
+  }
+  // transform
+  const tv=[]; let mn=[1e9,1e9,1e9],mx=[-1e9,-1e9,-1e9];
+  for(const p of polys){
+    const pts=p.pts.map(v=>Q.rot(S.quat,v));
+    for(const v of pts) for(let i=0;i<3;i++){ mn[i]=Math.min(mn[i],v[i]); mx[i]=Math.max(mx[i],v[i]); }
+    tv.push({pts, n:V.norm(Q.rot(S.quat,p.n)), face:p.face});
+  }
+  target=V.mul(V.add(mn,mx),0.5);
+  updateCam();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.clearRect(0,0,W,H);
+
+  // ground grid + contact shadow
+  if (S.settled && S.phase==='edit'){
+    const fy=mn[1]-0.5, cx=target[0], cz=target[2], R=150, step=25;
+    // shadow
+    const c0=proj([cx,fy,cz]);
+    if (c0){
+      const px=proj([cx+(mx[0]-mn[0])*0.55, fy, cz]), pz=proj([cx, fy, cz+(mx[2]-mn[2])*0.55]);
+      const rx=px?Math.hypot(px[0]-c0[0],px[1]-c0[1]):60, rz=pz?Math.hypot(pz[0]-c0[0],pz[1]-c0[1]):40;
+      const g=ctx.createRadialGradient(c0[0],c0[1],0,c0[0],c0[1],Math.max(rx,rz));
+      g.addColorStop(0,'rgba(0,0,0,0.5)'); g.addColorStop(1,'rgba(0,0,0,0)');
+      ctx.save(); ctx.translate(c0[0],c0[1]); ctx.scale(1, Math.max(0.25, rz/Math.max(rx,1)));
+      ctx.translate(-c0[0],-c0[1]); ctx.fillStyle=g;
+      ctx.beginPath(); ctx.arc(c0[0],c0[1],Math.max(rx,rz),0,7); ctx.fill(); ctx.restore();
+    }
+    ctx.lineWidth=1;
+    for(let k=-R;k<=R;k+=step){
+      const a=1-Math.abs(k)/R;
+      ctx.strokeStyle=`rgba(160,180,220,${0.10*a})`;
+      let p1=proj([cx+k,fy,cz-R]), p2=proj([cx+k,fy,cz+R]);
+      if(p1&&p2){ ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.stroke(); }
+      p1=proj([cx-R,fy,cz+k]); p2=proj([cx+R,fy,cz+k]);
+      if(p1&&p2){ ctx.beginPath(); ctx.moveTo(p1[0],p1[1]); ctx.lineTo(p2[0],p2[1]); ctx.stroke(); }
+    }
+  }
+
+  // mesh (painter)
+  const L=V.norm([0.45,0.85,0.35]), base=[146,151,164];
+  drawn=[];
+  const vis=[];
+  for(const p of tv){
+    const c=V.mul(p.pts.reduce((s,v)=>V.add(s,v),[0,0,0]),1/p.pts.length);
+    if (V.dot(p.n, V.sub(c,camPos))>0) continue;               // backface
+    const s=p.pts.map(proj); if (s.some(x=>!x)) continue;
+    vis.push({p,s,z:s.reduce((a,b)=>a+b[2],0)/s.length});
+  }
+  vis.sort((a,b)=>b.z-a.z);
+  for(const d of vis){
+    const g=groupOf(d.p.face);
+    let col=base;
+    if (g){
+      const t = g.id===S.activeId ? 0.7 : 0.55;
+      col=mix(base, hex2rgb(g.color), t);
+    } else if (S.phase==='gravity'){ col=mix(base,[110,150,210],0.12); }
+    const nl=V.dot(d.p.n,L);
+    const sh=0.34+0.62*Math.max(0,nl)+0.10*Math.max(0,-V.dot(d.p.n,camF));
+    ctx.fillStyle=`rgb(${col.map(x=>Math.min(255,Math.round(x*sh))).join(',')})`;
+    ctx.strokeStyle=ctx.fillStyle; ctx.lineWidth=0.75;
+    ctx.beginPath(); ctx.moveTo(d.s[0][0],d.s[0][1]);
+    for(let i=1;i<d.s.length;i++) ctx.lineTo(d.s[i][0],d.s[i][1]);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    drawn.push({s:d.s, face:d.p.face});
+  }
+
+  // arrows + overlay positions
+  const chip=$('chip'), ctl=$('ctl');
+  let chipShown=false, ctlShown=false;
+  for(const g of S.groups){
+    const w=groupWorld(g);
+    const sc=proj(w.c);
+    if (g.kind==='pending'){
+      if (g.id===S.activeId && sc && S.phase==='edit'){
+        chip.style.left=sc[0]+'px'; chip.style.top=sc[1]+'px'; chipShown=true;
+      }
+      continue;
+    }
+    const el=pillEls.get(g.id);
+    if (g.kind==='anchor'){
+      if (el && sc){ el.style.left=sc[0]+'px'; el.style.top=(sc[1])+'px'; el.classList.remove('hidden'); }
+      else if (el) el.classList.add('hidden');
+      continue;
+    }
+    // load arrow
+    const dir=loadDir(g,w), Ln=40;
+    const into=V.dot(dir,w.n)<-0.001;
+    const tail = into ? V.sub(w.c,V.mul(dir,Ln)) : w.c;
+    const tip  = into ? w.c : V.add(w.c,V.mul(dir,Ln));
+    const a=proj(tail), b=proj(tip);
+    if (a&&b){
+      const dx=b[0]-a[0], dy=b[1]-a[1], len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len, px=-uy, py=ux;
+      const head=Math.min(16,len*0.4), w0=5.5, w1=2.2;
+      const hb=[b[0]-ux*head, b[1]-uy*head];
+      ctx.save();
+      ctx.shadowColor=g.color; ctx.shadowBlur=g.id===S.activeId?14:7;
+      ctx.fillStyle=g.color;
+      ctx.beginPath();
+      ctx.moveTo(a[0]+px*w0, a[1]+py*w0); ctx.lineTo(hb[0]+px*w1, hb[1]+py*w1);
+      ctx.lineTo(hb[0]+px*head*0.55, hb[1]+py*head*0.55); ctx.lineTo(b[0],b[1]);
+      ctx.lineTo(hb[0]-px*head*0.55, hb[1]-py*head*0.55); ctx.lineTo(hb[0]-px*w1, hb[1]-py*w1);
+      ctx.lineTo(a[0]-px*w0, a[1]-py*w0); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      if (el){
+        el.style.left=(a[0]-ux*22)+'px'; el.style.top=(a[1]-uy*22)+'px'; el.classList.remove('hidden');
+        if (!el.querySelector('input') && !scrub) el.textContent=fmtW(g.kg);
+      }
+      if (g.id===S.activeId){
+        ctl.style.left=(a[0]-ux*22)+'px'; ctl.style.top=(a[1]-uy*22+18)+'px'; ctlShown=true;
+      }
+    } else if (el) el.classList.add('hidden');
+  }
+  chip.classList.toggle('hidden',!chipShown);
+  ctl.classList.toggle('hidden',!ctlShown);
+
+  requestAnimationFrame(frame);
+}
+sync();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
