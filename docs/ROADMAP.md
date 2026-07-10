@@ -220,10 +220,29 @@
       hole selects the hole's face loop" (adjacent-face walk over the B-rep
       face adjacency the bridge exposes). Groups map to Fixture/Load/Frozen
       tagging via mask_step_face / tag_step_face.
-- [ ] M7.6 Force arrows + weight. Arrow tool per design: tap a grouped face →
-      arrow pressing into it, drag to aim; weight dialog (kg/lbs) → Newtons
-      (kg × 9.81) distributed over the group's tagged nodes; arrow chips with
-      edit/remove. Fixture group required before Optimize enables.
+- [ ] M7.6-core Core/bridge: traction loads + passive BC shell (MOD-F1 D7).
+      Forward mask_step_face so load/anchor faces freeze as an N-voxel passive
+      shell (M3.7 design-mask); add a uniform-traction load path over a group's
+      combined face area (consistent nodal loads, not a centroid point force) —
+      if the core lacks a traction-assembly entry point, add it in /core/ with
+      tests (known face + total force → expected nodal distribution; nodal loads
+      sum to applied force). Supersedes M7.5b. Merge before M7.6-app starts.
+- [ ] M7.6-app Full Swift force/gravity experience (MOD-F1 D1-D6; match
+      docs/design/TopOpt_force_proto.html and MOD_force_gravity_rework.md, do
+      not reinterpret). Data model: gravity as a model-space unit vector from a
+      tapped face normal; per-group Anchor|Load role; per-load direction
+      (Gravity/Push/Pull) + weight (store kgf). UI: delete Orbit/Faces/Force
+      modes (drag orbits, tap selects); post-import "which way is down?" gravity
+      prompt → model settles onto a ground grid + contact shadow (reduced-motion
+      = snap); persistent gravity chip w/ Change; Anchor|Load chip beside a
+      selection (delete the implicit-anchor explainer); snap row
+      (Gravity/Push/Pull); in-place weight pill (scrub + tap-to-type, kg/lbs);
+      arrow rendering per D6; Optimize enabled only w/ ≥1 anchor + ≥1 load, label
+      summarizes. Calls M7.6-core's bridge signatures. Headless tests for the
+      data model; UI is maintainer device QA.
+- [ ] M7.6-ring (deferred, v2) Constrained single-DOF rotation ring for custom
+      load directions: 15° detents, haptic ticks, second ring after first
+      commits, never a freehand drag. After M7.6-app is solid.
 - [ ] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
       M7.0a progress driving the bar (per-rung + per-iteration); Cancel;
       "Run in Background" via BGProcessingTask with local notification on
