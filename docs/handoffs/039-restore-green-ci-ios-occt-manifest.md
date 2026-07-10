@@ -305,3 +305,96 @@ New tests added: none (build-system change; no product code). See "constraints".
 - **Did NOT verify Xcode's in-app cache invalidation** (no GUI Xcode here). The
   CLI cache-bust is verified (step 2/3 above flip the dump-package result); the
   Xcode Reset-Package-Caches caveat remains documented, unchanged from M7.1b.
+
+---
+
+## M7.1c follow-up (post-merge): disk-gated manifest + STEP-cache diagnosis
+
+Branch `harden-ios-occt-existence-check`. After M7.1c merged (PR #39), the
+maintainer built the iPad simulator and STEP STILL toasted "STEP import requires
+OpenCASCADE, which is not available on this platform." Diagnosed two independent
+problems and fixed the design-level one; the other is an Xcode-cache operator step.
+
+### Evidence gathered (headless, this machine)
+- A CLEAN app build (after `rm -rf ~/Library/Caches/org.swift.swiftpm
+  ~/Library/org.swift.swiftpm`, JSON + vendor present) → `TopOpt.debug.dylib` has
+  **47 `@rpath/TK*.framework` load commands**, the `import_step_file` symbol, and
+  the "not available" fallback string is **ABSENT** ⇒ the bridge compiled WITH
+  `TOPOPT_BRIDGE_HAS_OCCT` and OCCT links. STEP works from a clean resolve.
+  (Note: the app is a Swift *debug dylib* build — the real code + load commands
+  live in `TopOpt.debug.dylib`, NOT the thin `TopOpt` launcher; inspect the dylib.)
+- The core iOS-sim slice (`vendor/TopOptCore.xcframework/ios-arm64-simulator/
+  libtopopt.a`) has 14 undefined OCCT symbols incl. `STEPControl_Reader::ReadFile`
+  and defines `topopt::import_step_file` — same as the macOS slice. Core is OCCT-on.
+
+### Problem 1 — the maintainer's live STEP failure = STALE XCODE MANIFEST CACHE
+`bridge.cpp` emits that exact toast only on the `#ifndef TOPOPT_BRIDGE_HAS_OCCT`
+path, and that define is driven solely by the manifest seeing a non-empty
+framework list. M7.1c moved the list OUT of Package.swift, so writing the JSON no
+longer changes Package.swift's content hash — and Xcode keys its manifest cache on
+that hash, so Xcode kept resolving the pre-JSON, OCCT-free manifest and compiled
+the bridge OCCT-OFF. The run-039 script's `touch` + partial `/manifests`-only
+purge did not reach Xcode's resolution. **This is an operator/caching issue, not a
+code bug — the plumbing is correct (clean build above proves STEP works).**
+
+Fix (script): `invalidate_manifest_cache` now purges the WHOLE
+`~/Library/Caches/org.swift.swiftpm` + `~/Library/org.swift.swiftpm` (measured:
+that is what actually flips resolution; the subdir-only purge did not), and the
+banner now says to QUIT Xcode before running the script (or Reset Package Caches
+if already open), because an on-disk purge can't reach Xcode's in-memory state.
+
+### Problem 2 — the committed JSON broke CI/fresh-checkout (a NEW regression)
+The maintainer's commit `f9b0368` **force-committed** `occt-frameworks.generated.json`
+(47 frameworks). On a fresh checkout / CI the git-ignored `vendor/occt-ios/` is
+absent, so those binaryTargets point at missing artifacts. Proven:
+```
+$ (vendor/occt-ios moved aside; committed JSON present)
+$ swift build
+error: local binary target 'TKBO' at '.../vendor/occt-ios/TKBO.xcframework'
+       does not contain a binary artifact.   (…one per framework)
+```
+So `main` was red for fresh checkouts — exactly the class M7.1c meant to prevent.
+
+Fix (manifest, the important one): **disk-gate the list.** `loadGeneratedFrameworks`
+now declares a framework only if its `vendor/occt-ios/<name>.xcframework` exists on
+disk. The JSON is a per-machine hint; disk presence is the real gate. A committed
+or stale JSON is therefore HARMLESS — on a fresh checkout vendor/ is absent, the
+list filters to empty, OCCT-free, build green. Also `git rm --cached` the JSON to
+return it to generated-artifact status (working copy kept; still git-ignored).
+
+### Verification (raw, this machine)
+```
+# Problem-2 fix — committed/stale JSON present but vendor/occt-ios ABSENT:
+$ swift package dump-package | (binary targets)   -> ['TopOptCore']   (OCCT-free)
+$ swift build                                      -> Build complete!  (no missing-artifact error)
+# OCCT-on still works — JSON + vendor BOTH present:
+$ swift package dump-package | (binary targets)   -> 48 targets; TKDESTEP: True
+# macOS test path (OCCT-free default):
+$ xcodebuild test -scheme TopOptKit-Package -destination 'platform=macOS'
+  Executed 17 + 70 + 16 = 103 tests, 0 failures.  ** TEST SUCCEEDED **
+# Clean OCCT-on app build (JSON + vendor present, caches purged):
+  TopOpt.debug.dylib: 47 TK load commands; fallback string ABSENT.  ** BUILD SUCCEEDED **
+```
+
+### Maintainer — get STEP working on the simulator NOW (no code change needed)
+Your plumbing is correct; you just need Xcode to re-resolve with the JSON present:
+1. `git checkout harden-ios-occt-existence-check` (or merge it) and
+   `./app/scripts/build_core.sh` (iOS slices WITH OCCT — you have vendor/occt-ios).
+2. Ensure the JSON exists: `RELINK_ONLY=1 ./app/scripts/build_occt_ios.sh`
+   (it also purges the caches now).
+3. **QUIT Xcode fully**, then reopen `app/TopOpt.xcodeproj` (or, if you keep it
+   open, File ▸ Packages ▸ Reset Package Caches). This is the step that was
+   missing — Xcode was compiling the cached OCCT-off manifest.
+4. Build & run on the iPad simulator → import `l-bracket.step` → **no toast**.
+   Confirm in the built product: `ls TopOpt.app/Frameworks | grep -c TK` → 47.
+
+### What I did NOT do (follow-up)
+- **Did NOT change the `TopOptOCCT` product structure.** iOS-only xcframeworks in
+  that product still can't be built for macOS, so the macOS test path must stay
+  OCCT-free (hide the JSON or vendor/) — unchanged, pre-existing constraint.
+- **Did NOT add a headless XCTest** for STEP-on-iOS (needs the iOS runtime + a
+  booted sim; it is the maintainer device gate).
+- **Did NOT eliminate the Xcode manual step.** Under the M7.1c "Package.swift stays
+  committed-clean" constraint, the list can't live in the file, so there is no
+  scripted way to force Xcode's in-memory re-resolve — quit/Reset is irreducible.
+- **Did NOT start M7.6.**
