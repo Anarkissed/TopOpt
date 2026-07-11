@@ -184,7 +184,7 @@ final class TopOptKitTests: XCTestCase {
             resolution: 6
         ) { rung, rungCount, iteration in
             invocations += 1
-            XCTAssertEqual(rungCount, 3)                 // default ladder [0.7,0.5,0.3]
+            XCTAssertEqual(rungCount, 4)                 // recommendation ladder (4 rungs)
             if let prev = lastIterByRung[rung], iteration != prev + 1 { monotone = false }
             lastIterByRung[rung] = iteration
             return true                                   // never cancel

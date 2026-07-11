@@ -95,6 +95,14 @@ topopt::TriangleMesh import_any(const std::string& path) {
   return topopt::read_stl_file(path).mesh;
 }
 
+// The recommendation ladder (recommendation-driven variants): finer + lower than
+// the old fixed {0.7, 0.5, 0.3}, so minimize_plastic's margin-SAFE prefix ADAPTS
+// to the part + load case (a stronger part keeps lighter rungs, a weaker one shows
+// fewer/heavier ones) and the lightest safe rung is the recommendation the app
+// surfaces. minimize_plastic stops at the first rung below margin_stop, so this
+// never returns an unsafe variant — it just walks further down for strong parts.
+std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
+
 // MinimizePlasticResult + grid -> the flat OptimizeResult the Swift side reads.
 // Shared by both run entry points (self-weight and the user load case) so the
 // M7.0b/M7.8 field mapping has one source of truth.
@@ -352,6 +360,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     constexpr double kGramPerCm3ToTonnePerMm3 = 1e-9;
     opts.gravity = 9810.0 * kGramPerCm3ToTonnePerMm3;
     opts.gravity_direction = topopt::Vec3{0.0, 0.0, -1.0};
+    opts.volume_fraction_ladder = reduction_ladder();  // recommendation-driven variants
     // The forwarder relays the payload to the caller's function pointer FIRST,
     // then mirrors the caller's bool flag into the atomic the driver polls at
     // the start of the next OC iteration. Calling progress first means a cancel
@@ -484,7 +493,7 @@ OptimizeResult run_minimize_plastic_loadcase(
         topopt::Vec3{-build_dir.x, -build_dir.y, -build_dir.z};
     opts.gravity = 9810.0 * 1e-9;  // self-weight magnitude, used only if external is empty
     opts.volume_fraction_ladder = load_case.minimize_plastic
-                                      ? std::vector<double>{0.7, 0.5, 0.3}
+                                      ? reduction_ladder()
                                       : std::vector<double>{0.9};
     opts.progress = [&](std::size_t r, std::size_t rc, int iter) {
       if (progress != nullptr)

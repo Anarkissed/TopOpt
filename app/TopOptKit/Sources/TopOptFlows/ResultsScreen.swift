@@ -148,6 +148,11 @@ public struct ResultsScreen: View {
                     let active = tab.index == model.selectedIndex
                     Button { model.select(tab.index) } label: {
                         VStack(alignment: .leading, spacing: DS.Space.xxs) {
+                            if tab.isRecommended {
+                                Text("RECOMMENDED")
+                                    .font(.system(size: 9, weight: .bold)).tracking(0.6)
+                                    .foregroundStyle(DS.Color.okGreen.color)
+                            }
                             Text(tab.savingsLabel)
                                 .font(.system(size: active ? 20 : 16, weight: .heavy))
                                 .foregroundStyle(active ? DS.Color.accent.color : DS.Color.textPrimary.opacity(0.85).color)

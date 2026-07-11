@@ -60,9 +60,14 @@ final class ResultsModelTests: XCTestCase {
 
     // MARK: selection
 
-    func testDefaultSelectedIsMiddleWhenMultiple() {
+    func testDefaultSelectedIsRecommendedLightest() {
         let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.7), variant(vf: 0.5), variant(vf: 0.3)]))
-        XCTAssertEqual(m.selectedIndex, 1)
+        // Recommendation = lightest safe = the last (max-savings) tab; default-selected.
+        XCTAssertEqual(m.selectedIndex, 2)
+        XCTAssertTrue(m.tabs[2].isRecommended)
+        XCTAssertFalse(m.tabs[0].isRecommended)
+        XCTAssertFalse(m.tabs[1].isRecommended)
+        XCTAssertEqual(m.tabs.filter(\.isRecommended).count, 1, "exactly one recommendation")
     }
 
     func testDefaultSelectedIsZeroWhenSingle() {

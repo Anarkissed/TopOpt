@@ -110,6 +110,9 @@ public struct ResultVariantVM: Equatable, Sendable {
     /// M5.2b advisory min-feature data (report-only; never gates).
     public let minFeatureViolations: Int
     public let minFeatureWarning: String
+    /// The app's recommendation — the LIGHTEST variant that still clears the safety
+    /// margin for the loads (max plastic saved while safe). Default-selected.
+    public let isRecommended: Bool
 
     /// The tab's sub-line, e.g. "199 g · selected" / "199 g · plastic" (design).
     public func subLabel(active: Bool) -> String {
@@ -157,7 +160,8 @@ public final class ResultsModel: ObservableObject {
         self.spacing = Float(outcome.spacing)
         self.tabs = ResultsModel.buildTabs(accepted, voxelVolumeMM3: outcome.voxelVolumeMM3)
         self.stressScaleMaxMPa = accepted.map(\.maxStressMPa).max() ?? 0
-        self.selectedIndex = tabs.count > 1 ? 1 : 0
+        // Default to the recommended (lightest-safe) variant, the last accepted rung.
+        self.selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -254,7 +258,10 @@ public final class ResultsModel: ObservableObject {
     // MARK: - Builders (pure)
 
     static func buildTabs(_ variants: [OptimizeVariant], voxelVolumeMM3: Double) -> [ResultVariantVM] {
-        variants.enumerated().map { i, v in
+        // Variants arrive heaviest-first (ladder order); the LAST accepted rung is
+        // the lightest safe one — the recommendation.
+        let recommendedIndex = variants.count - 1
+        return variants.enumerated().map { i, v in
             let savings = 1 - v.achievedVolumeFraction
             let pct = Int((savings * 100).rounded())
             let cm3 = Double(v.supportVolumeVoxels) * voxelVolumeMM3 / 1000.0
@@ -276,7 +283,8 @@ public final class ResultsModel: ObservableObject {
                 maxStressMPa: v.maxStressMPa,
                 worstCaseMargin: v.worstCaseMargin,
                 minFeatureViolations: v.minFeatureViolations,
-                minFeatureWarning: v.minFeatureWarning)
+                minFeatureWarning: v.minFeatureWarning,
+                isRecommended: i == recommendedIndex)
         }
     }
 
