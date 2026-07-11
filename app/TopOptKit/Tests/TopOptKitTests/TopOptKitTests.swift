@@ -223,6 +223,11 @@ final class TopOptKitTests: XCTestCase {
             XCTAssertEqual(v.meshIndices.count % 3, 0)
             XCTAssertEqual(v.meshIndices.count, v.meshTriangleCount * 3)
             XCTAssertEqual(v.vonMisesField.count, voxelCount, "von Mises field is grid-indexed")
+            // Optimization-history keyframes flow (playback): several frames, the
+            // last (converged shape) non-empty.
+            XCTAssertGreaterThanOrEqual(v.keyframeMeshes.count, 2, "captured history keyframes")
+            XCTAssertFalse(v.keyframeMeshes.last?.vertices.isEmpty ?? true,
+                           "the final keyframe is the converged shape")
         }
         for v in outcome.variants {
             // Orientation is the M4.4 winning unit build direction — nonzero + finite.

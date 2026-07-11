@@ -216,6 +216,39 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.stressFraction(mpa: 40), 1, accuracy: 1e-9) // clamped
     }
 
+    // MARK: optimization-history playback (keyframes)
+
+    func testKeyframeIndexMapping() {
+        XCTAssertEqual(ResultsModel.keyframeIndex(playT: 0, count: 10), 0)     // start
+        XCTAssertEqual(ResultsModel.keyframeIndex(playT: 1, count: 10), 9)     // optimized end
+        XCTAssertEqual(ResultsModel.keyframeIndex(playT: 0.5, count: 11), 5)   // middle
+        XCTAssertEqual(ResultsModel.keyframeIndex(playT: -1, count: 10), 0)    // clamp low
+        XCTAssertEqual(ResultsModel.keyframeIndex(playT: 2, count: 10), 9)     // clamp high
+        XCTAssertEqual(ResultsModel.keyframeIndex(playT: 0.5, count: 1), 0)    // single frame
+        XCTAssertEqual(ResultsModel.keyframeIndex(playT: 0.5, count: 0), 0)    // no frames
+    }
+
+    func testHistoryPlaybackSelectsKeyframes() {
+        let v = OptimizeVariant(
+            requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 100,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2,
+            accepted: true, v3Passes: true, maxStressMPa: 10,
+            keyframeMeshes: [
+                KeyframeMesh(vertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], indices: [0, 1, 2]),
+                KeyframeMesh(vertices: [0, 0, 1, 1, 0, 1, 0, 1, 1], indices: [0, 1, 2]),
+            ])
+        let m = ResultsModel(projectName: "P", outcome: outcome([v]))
+        XCTAssertTrue(m.hasHistory)
+        XCTAssertEqual(m.keyframes().count, 2)
+        m.scrub(to: 0); XCTAssertNotNil(m.playbackMesh)          // ~solid start
+        m.scrub(to: 1); XCTAssertNotNil(m.playbackMesh)          // optimized end
+
+        // A variant with no keyframes has no history.
+        let plain = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5)]))
+        XCTAssertFalse(plain.hasHistory)
+        XCTAssertNil(plain.playbackMesh)
+    }
+
     // MARK: stress field sampling (grid index (k*ny+j)*nx+i, matches core)
 
     func testStressFieldSamplingMatchesGridIndex() {

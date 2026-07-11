@@ -115,6 +115,14 @@ struct MinimizePlasticOptions {
   // runs on the optimizing thread and must not throw.
   std::function<void(const MinimizePlasticVariant&)> on_variant;
 
+  // Optimization-history playback (app): the target number of keyframe meshes to
+  // capture per variant (0 = none, the default). The driver spreads this many
+  // frames across each rung's SIMP iterations and extracts a marching-cubes mesh
+  // per frame into MinimizePlasticVariant::keyframe_meshes. Adds a few cheap MC
+  // extractions per variant (relative to the FEA solves); no effect on the
+  // optimization itself.
+  int keyframe_count = 0;
+
   // User-defined design load (ARCHITECTURE §1 mode (a): "user-defined loads").
   // When NON-EMPTY, these nodal loads REPLACE self-weight as the design load —
   // the driver optimizes and analyses the part under this load case instead of
@@ -170,6 +178,14 @@ struct MinimizePlasticVariant {
   // without recomputing marching cubes or copying the mesh. Empty for a
   // cancelled rung (its `v3` is default-constructed).
   const TriangleMesh& mesh() const { return v3.mesh; }
+
+  // --- Optimization-history keyframes (app playback) -----------------------
+  // Raw marching-cubes isosurfaces of the analysis density at snapshots through
+  // this variant's SIMP iterations, in order from ~solid (first) to optimized
+  // (last, ~= mesh()), so the app can play back the shape being carved out.
+  // Populated only when MinimizePlasticOptions::keyframe_count > 0; empty
+  // otherwise and for a cancelled rung.
+  std::vector<TriangleMesh> keyframe_meshes;
 };
 
 // The result of a minimize_plastic run.

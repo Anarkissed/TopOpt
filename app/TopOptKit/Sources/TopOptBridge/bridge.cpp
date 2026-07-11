@@ -151,6 +151,22 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v) {
     ov.mesh_indices.push_back(t[2]);
   }
   ov.von_mises_field.assign(v.von_mises_field.begin(), v.von_mises_field.end());
+  // Playback keyframes, flattened (scalar vectors only).
+  for (const topopt::TriangleMesh& km : v.keyframe_meshes) {
+    ov.keyframe_vertex_counts.push_back(static_cast<int32_t>(km.vertices.size()));
+    for (const auto& p : km.vertices) {
+      ov.keyframe_vertices.push_back(static_cast<float>(p.x));
+      ov.keyframe_vertices.push_back(static_cast<float>(p.y));
+      ov.keyframe_vertices.push_back(static_cast<float>(p.z));
+    }
+    ov.keyframe_index_counts.push_back(
+        static_cast<int32_t>(km.triangles.size() * 3));
+    for (const auto& t : km.triangles) {
+      ov.keyframe_indices.push_back(t[0]);
+      ov.keyframe_indices.push_back(t[1]);
+      ov.keyframe_indices.push_back(t[2]);
+    }
+  }
   return ov;
 }
 
@@ -399,6 +415,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     opts.gravity_direction = topopt::Vec3{0.0, 0.0, -1.0};
     opts.volume_fraction_ladder = reduction_ladder();  // recommendation-driven variants
     enable_projection(opts);                           // M6.3 crisp density
+    opts.keyframe_count = 12;   // optimization-history playback
     // The forwarder relays the payload to the caller's function pointer FIRST,
     // then mirrors the caller's bool flag into the atomic the driver polls at
     // the start of the next OC iteration. Calling progress first means a cancel
@@ -537,6 +554,7 @@ OptimizeResult run_minimize_plastic_loadcase(
                                       ? reduction_ladder()
                                       : std::vector<double>{0.9};
     enable_projection(opts);   // M6.3 crisp density
+    opts.keyframe_count = 12;   // optimization-history playback
     opts.progress = [&](std::size_t r, std::size_t rc, int iter) {
       if (progress != nullptr)
         progress(ctx, static_cast<uint64_t>(r), static_cast<uint64_t>(rc), iter);

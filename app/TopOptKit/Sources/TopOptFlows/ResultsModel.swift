@@ -183,6 +183,7 @@ public final class ResultsModel: ObservableObject {
         spacing = Float(outcome.spacing)
         tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3)
         stressScaleMaxMPa = acc.map(\.maxStressMPa).max() ?? 0
+        keyframeCache = nil   // variant data changed → rebuild keyframes on demand
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -205,6 +206,40 @@ public final class ResultsModel: ObservableObject {
         guard let v = selectedVariant else { return nil }
         return StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+    }
+
+    // MARK: - optimization-history playback (keyframes)
+
+    /// Whether the selected variant carries an optimization history to play back.
+    public var hasHistory: Bool { !(selectedVariant?.keyframeMeshes.isEmpty ?? true) }
+
+    private var keyframeCache: (index: Int, meshes: [ViewerMesh])?
+
+    /// The selected variant's history keyframe meshes (~solid → optimized), built
+    /// once per selection. An empty frame (material not yet formed early in a
+    /// low-volume rung) becomes an empty ViewerMesh that renders nothing.
+    public func keyframes() -> [ViewerMesh] {
+        if let c = keyframeCache, c.index == selectedIndex { return c.meshes }
+        let ms = (selectedVariant?.keyframeMeshes ?? []).map {
+            ViewerMesh(vertices: $0.vertices, indices: $0.indices, faceIDs: [])
+        }
+        keyframeCache = (selectedIndex, ms)
+        return ms
+    }
+
+    /// The keyframe mesh at the current scrub position (0 = first/~solid, 1 =
+    /// optimized), or nil when there's no history (fall back to the final mesh).
+    public var playbackMesh: ViewerMesh? {
+        let ks = keyframes()
+        guard !ks.isEmpty else { return nil }
+        return ks[ResultsModel.keyframeIndex(playT: playT, count: ks.count)]
+    }
+
+    /// Which keyframe a scrub position maps to (nearest frame, clamped).
+    public static func keyframeIndex(playT: Double, count: Int) -> Int {
+        guard count > 1 else { return 0 }
+        let t = min(1, max(0, playT))
+        return min(count - 1, max(0, Int((t * Double(count - 1)).rounded())))
     }
 
     /// Per-flat-vertex stress colors (alpha 1) for `mesh`, sampled from `field`

@@ -815,6 +815,49 @@ int main() {
     std::printf("[K progressive] streamed %zu variants\n", streamed_vfs.size());
   }
 
+  // =========================================================================
+  // Scenario L — playback keyframes: capturing the optimization history so the
+  // app can play back the shape being carved out. Off by default; when
+  // keyframe_count > 0 each accepted variant carries ~that many isosurface
+  // snapshots, ending at the converged shape.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;   // accept-all: keyframes captured for every rung
+    o.keyframe_count = 6;
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+    CHECK(!r.evaluated.empty(), "L: keyframe run evaluates");
+    for (const MinimizePlasticVariant& ev : r.evaluated) {
+      if (!ev.accepted) continue;
+      CHECK(ev.keyframe_meshes.size() >= 2,
+            "L: each variant captured >= 2 history keyframes");
+      CHECK(ev.keyframe_meshes.size() <=
+                static_cast<std::size_t>(o.keyframe_count) + 2,
+            "L: ~keyframe_count frames (+ first + final)");
+      // The final keyframe is the converged shape — non-empty. (Early frames of a
+      // low-volume rung can be empty: uniform density below the iso, material not
+      // yet formed — that's the point of the playback.)
+      const topopt::TriangleMesh& last = ev.keyframe_meshes.back();
+      CHECK(!last.vertices.empty() && last.triangle_count() > 0,
+            "L: the final keyframe is the converged (non-empty) shape");
+    }
+
+    // Off by default: no keyframes, no cost.
+    MinimizePlasticOptions off = base_options();
+    off.gravity = cal_gravity;
+    const MinimizePlasticResult r0 =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, off);
+    for (const MinimizePlasticVariant& ev : r0.evaluated)
+      CHECK(ev.keyframe_meshes.empty(), "L: keyframes are off by default");
+
+    std::printf("[L keyframes] variant0 frames=%zu\n",
+                r.evaluated[0].keyframe_meshes.size());
+  }
+
   if (g_failures == 0) {
     std::printf("minimize_plastic (M5.3): all %d checks passed\n", g_checks);
     return 0;

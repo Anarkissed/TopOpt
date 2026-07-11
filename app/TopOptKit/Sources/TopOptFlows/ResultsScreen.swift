@@ -54,9 +54,9 @@ public struct ResultsScreen: View {
             // the selected variant's isosurface, optionally stress-colored, morphing
             // with the scrub. Pixels are device QA (the M7 /app/ standard).
             DS.Color.background.color.ignoresSafeArea()
-            MetalMeshView(mesh: model.selectedMesh,
+            MetalMeshView(mesh: viewerMesh,
                           stressTints: stressTints,
-                          reveal: Float(model.playT))
+                          reveal: viewerReveal)
                 .ignoresSafeArea()
 
             topLeft
@@ -106,6 +106,14 @@ public struct ResultsScreen: View {
               let field = model.selectedStressField, !field.isEmpty else { return nil }
         return model.stressTints(for: mesh, field: field)
     }
+
+    /// The mesh the viewer shows. When the variant has an optimization history and
+    /// stress is off, Play scrubs THROUGH the history keyframes (the real "watch it
+    /// carve out"); otherwise it's the final mesh (stress overlay, or the
+    /// reveal-scrub fallback for meshes without history).
+    private var showHistory: Bool { !model.stressOn && model.hasHistory }
+    private var viewerMesh: ViewerMesh? { showHistory ? model.playbackMesh : model.selectedMesh }
+    private var viewerReveal: Float { showHistory ? 1 : Float(model.playT) }
 
     // MARK: - Top-left: back + project / Optimized ✓
 

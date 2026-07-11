@@ -162,6 +162,16 @@ struct OptimizeVariant {
   std::vector<float> mesh_vertices;
   std::vector<int32_t> mesh_indices;
   std::vector<float> von_mises_field;
+  // Optimization-history keyframes for playback (M7): the isosurface at snapshots
+  // from ~solid to optimized. Flattened so only scalar vectors cross the importer:
+  // for keyframe f, its vertices are the `keyframe_vertex_counts[f]` xyz triples of
+  // `keyframe_vertices` after the earlier frames' vertices, and its triangle-corner
+  // indices (LOCAL to that frame) are the `keyframe_index_counts[f]` entries of
+  // `keyframe_indices` after the earlier frames'. Empty when playback is disabled.
+  std::vector<float> keyframe_vertices;
+  std::vector<int32_t> keyframe_vertex_counts;
+  std::vector<int32_t> keyframe_indices;
+  std::vector<int32_t> keyframe_index_counts;
 };
 
 struct OptimizeResult {

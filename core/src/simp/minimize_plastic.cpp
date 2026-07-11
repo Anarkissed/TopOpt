@@ -144,6 +144,25 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     MinimizePlasticVariant variant;
     variant.requested_volume_fraction = vf;
+
+    // Playback keyframes (M7): capture ~keyframe_count meshes of the analysis
+    // density across this rung's iterations (stride spreads them over the run —
+    // projection = summed stage iterations, else max_iterations). The callback
+    // extracts a raw marching-cubes isosurface per snapshot, so no density fields
+    // accumulate. `variant` outlives the (synchronous) simp_optimize call.
+    if (options.keyframe_count > 0) {
+      int total_iters = 0;
+      if (!opt.projection.empty())
+        for (const ProjectionStage& s : opt.projection) total_iters += s.iterations;
+      else
+        total_iters = opt.max_iterations;
+      opt.keyframe_stride =
+          std::max(1, total_iters / std::max(1, options.keyframe_count));
+      opt.keyframe = [&variant, &grid](const std::vector<double>& d) {
+        variant.keyframe_meshes.push_back(marching_cubes(grid, d, kIso));
+      };
+    }
+
     variant.optimization = simp_optimize(grid, params, bcs, loads, opt, mask);
 
     if (variant.optimization.cancelled) {

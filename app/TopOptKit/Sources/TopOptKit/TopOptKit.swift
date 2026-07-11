@@ -48,6 +48,17 @@ public struct VoxelSummary {
     public let solidVoxels: Int
 }
 
+/// One isosurface frame of a variant's optimization history (playback): flattened
+/// xyz vertices + triangle-corner indices (local to the frame).
+public struct KeyframeMesh: Equatable, Sendable {
+    public let vertices: [Float]
+    public let indices: [Int32]
+    public init(vertices: [Float], indices: [Int32]) {
+        self.vertices = vertices
+        self.indices = indices
+    }
+}
+
 /// One evaluated volume-fraction rung of a minimize_plastic run.
 public struct OptimizeVariant {
     public let requestedVolumeFraction: Double
@@ -82,6 +93,9 @@ public struct OptimizeVariant {
     /// M7.8 — per-voxel von Mises stress (MPa), grid-indexed against the outcome's
     /// grid metadata, for the stress overlay. Empty for a cancelled rung.
     public let vonMisesField: [Float]
+    /// Optimization-history keyframes (playback): the isosurface from ~solid (first)
+    /// to optimized (last). Empty when playback capture is off.
+    public let keyframeMeshes: [KeyframeMesh]
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 massGrams: Double, supportVolumeVoxels: Int, meshTriangleCount: Int,
@@ -90,7 +104,8 @@ public struct OptimizeVariant {
                 orientation: SIMD3<Double> = .zero, maxStressMPa: Double = 0,
                 maxInterlayerTensionMPa: Double = 0, inPlaneMargin: Double = 0,
                 interlayerMargin: Double = 0, meshVertices: [Float] = [],
-                meshIndices: [Int32] = [], vonMisesField: [Float] = []) {
+                meshIndices: [Int32] = [], vonMisesField: [Float] = [],
+                keyframeMeshes: [KeyframeMesh] = []) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         self.massGrams = massGrams
@@ -109,6 +124,7 @@ public struct OptimizeVariant {
         self.meshVertices = meshVertices
         self.meshIndices = meshIndices
         self.vonMisesField = vonMisesField
+        self.keyframeMeshes = keyframeMeshes
     }
 }
 
@@ -383,6 +399,28 @@ public enum TopOptKit {
         return convertOutcome(raw)
     }
 
+    /// Rebuild the per-variant playback keyframe meshes from the bridge's flattened
+    /// scalar vectors (one KeyframeMesh per captured frame, in order).
+    private static func reconstructKeyframes(_ v: topoptbridge.OptimizeVariant) -> [KeyframeMesh] {
+        let kv = Array(v.keyframe_vertices)
+        let kvc = Array(v.keyframe_vertex_counts)
+        let ki = Array(v.keyframe_indices)
+        let kic = Array(v.keyframe_index_counts)
+        var out: [KeyframeMesh] = []
+        out.reserveCapacity(kvc.count)
+        var vOff = 0, iOff = 0
+        for f in 0..<kvc.count {
+            let vc = Int(kvc[f])
+            let ic = f < kic.count ? Int(kic[f]) : 0
+            let vLo = vOff * 3, vHi = (vOff + vc) * 3
+            let verts = (vLo <= vHi && vHi <= kv.count) ? Array(kv[vLo..<vHi]) : []
+            let inds = (iOff <= iOff + ic && iOff + ic <= ki.count) ? Array(ki[iOff..<(iOff + ic)]) : []
+            out.append(KeyframeMesh(vertices: verts, indices: inds))
+            vOff += vc; iOff += ic
+        }
+        return out
+    }
+
     /// Map the bridge's OptimizeResult to the Swift outcome (shared by both run
     /// entry points — mirrors the C++ `to_optimize_result` helper).
     private static func convertOutcome(_ raw: topoptbridge.OptimizeResult) -> OptimizeOutcome {
@@ -406,7 +444,8 @@ public enum TopOptKit {
                 interlayerMargin: v.interlayer_margin,
                 meshVertices: Array(v.mesh_vertices),
                 meshIndices: Array(v.mesh_indices),
-                vonMisesField: Array(v.von_mises_field)))
+                vonMisesField: Array(v.von_mises_field),
+                keyframeMeshes: reconstructKeyframes(v)))
         }
         return OptimizeOutcome(variants: variants,
                                stoppedOnMargin: raw.stopped_on_margin,
