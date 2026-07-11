@@ -151,6 +151,10 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v) {
     ov.mesh_indices.push_back(t[2]);
   }
   ov.von_mises_field.assign(v.von_mises_field.begin(), v.von_mises_field.end());
+  // M7.disp: the per-node displacement field, same mechanism as von Mises
+  // (double -> float narrowing for the Metal vertex animation, M7.viz.3).
+  ov.displacement_field.assign(v.displacement_field.begin(),
+                               v.displacement_field.end());
   // Playback keyframes, flattened (scalar vectors only).
   for (const topopt::TriangleMesh& km : v.keyframe_meshes) {
     ov.keyframe_vertex_counts.push_back(static_cast<int32_t>(km.vertices.size()));

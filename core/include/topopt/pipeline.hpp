@@ -173,6 +173,19 @@ struct MinimizePlasticVariant {
   // spacing-aware: (# printed voxels) * grid.voxel_volume() (mm^3) / 1000.
   double mass_grams = 0.0;
 
+  // M7.disp — the per-node displacement field (the sibling of von_mises_field
+  // that M7.viz.3's flex animation needs to move mesh vertices; the scalar
+  // von Mises field cannot drive motion). DOF-ordered, size
+  // 3*fea_node_count(grid): entries [3n, 3n+1, 3n+2] are (ux, uy, uz) of node n
+  // in model units (mm). This is EXPOSURE, not new physics: it is the nodal
+  // displacement of the SAME final penalized solve that produces von_mises_field
+  // (SimpCompliance::solution), retained per node. Zero on nodes attached only
+  // to non-printed voxels (physical density <= the M3.5 iso 0.5), mirroring how
+  // von_mises_field is zero off the printed set, so the two fields agree on
+  // which nodes/voxels are "printed". Empty for a cancelled rung (its analysis
+  // is skipped, exactly like von_mises_field).
+  std::vector<double> displacement_field;
+
   // (b) The extracted + cleaned variant isosurface, exposed for display. It is
   // ALREADY computed by check_v3 (stored in `v3.mesh`); this accessor exposes it
   // without recomputing marching cubes or copying the mesh. Empty for a
@@ -203,11 +216,12 @@ struct MinimizePlasticResult {
   // True iff options.cancel was observed during a rung's optimization (M7.0a).
   // The cancelled rung is the last `evaluated` entry, rejected, with
   // optimization.cancelled true; its per-rung analysis (v3, report line, and
-  // the M7.0b visualization fields von_mises_field / support_volume_voxels /
-  // mass_grams / mesh()) is NOT computed — a cancel aborts the run, so the
-  // stress solve, V3 suite and settings for the half-optimized rung are skipped
-  // and those fields stay default-constructed. The accepted prefix and the
-  // assembled `report` are complete and valid as usual.
+  // the visualization fields von_mises_field / displacement_field /
+  // support_volume_voxels / mass_grams / mesh()) is NOT computed — a cancel
+  // aborts the run, so the stress solve, V3 suite and settings for the
+  // half-optimized rung are skipped and those fields stay default-constructed.
+  // The accepted prefix and the assembled `report` are complete and valid as
+  // usual.
   bool cancelled = false;
   // The assembled job report: the material name and one VariantReport per
   // ACCEPTED rung (report.variants[i] == evaluated[i].report for the accepted

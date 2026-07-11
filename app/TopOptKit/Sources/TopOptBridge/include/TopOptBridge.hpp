@@ -162,6 +162,14 @@ struct OptimizeVariant {
   std::vector<float> mesh_vertices;
   std::vector<int32_t> mesh_indices;
   std::vector<float> von_mises_field;
+  // M7.disp — the per-node displacement field (v.displacement_field), DOF-ordered
+  // and grid-node-indexed: entries [3n, 3n+1, 3n+2] are (ux, uy, uz) of node n in
+  // model units (mm). Node n is corner (a,b,c) of the run's grid at global index
+  // (c*(grid_ny+1) + b)*(grid_nx+1) + a; size 3*(grid_nx+1)*(grid_ny+1)*(grid_nz+1).
+  // Zero on nodes attached only to non-printed voxels (companion to
+  // von_mises_field). M7.viz.3's flex animation moves mesh vertices by this;
+  // empty for a cancelled rung.
+  std::vector<float> displacement_field;
   // Optimization-history keyframes for playback (M7): the isosurface at snapshots
   // from ~solid to optimized. Flattened so only scalar vectors cross the importer:
   // for keyframe f, its vertices are the `keyframe_vertex_counts[f]` xyz triples of

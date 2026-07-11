@@ -110,6 +110,17 @@ Material fdm_material() {
   return m;
 }
 
+// The SIMP params the driver derives from a material (minimize_plastic.cpp:
+// E from the material, penalty p = 3, density_min default). Used to re-run the
+// driver's final penalized solve in check_displacement_field.
+topopt::SimpParams driver_params(const Material& m) {
+  topopt::SimpParams p;
+  p.youngs_modulus = m.youngs_modulus_mpa;
+  p.poisson = m.poisson;
+  p.penalty = 3.0;
+  return p;
+}
+
 MinimizePlasticOptions base_options() {
   MinimizePlasticOptions o;
   o.volume_fraction_ladder = {0.7, 0.5, 0.3};
@@ -265,6 +276,70 @@ void check_viz_fields(const MinimizePlasticResult& r, const VoxelGrid& g,
   }
 }
 
+// M7.disp — the per-node displacement field exposed on every evaluated
+// NON-cancelled variant (the sibling of von_mises_field that M7.viz.3's flex
+// animation consumes). This is EXPOSURE, not recomputation: the field must equal
+// the SAME penalized solve the driver runs on the converged density, so the test
+// re-runs that identical solve (simp_compliance with the driver's params / bcs /
+// loads / CG settings — deterministic, so bit-identical) and asserts equality
+// element-for-element on printed nodes, zero on nodes attached only to
+// non-printed voxels, and the right DOF-ordered size. `params`, `bcs`, `loads`
+// and the CG settings MUST match what minimize_plastic used for the equality to
+// be exact. Fails against a stub that leaves the field default (empty).
+void check_displacement_field(const MinimizePlasticResult& r, const VoxelGrid& g,
+                              const topopt::SimpParams& params,
+                              const std::vector<DirichletBC>& bcs,
+                              const std::vector<topopt::NodalLoad>& loads,
+                              double cg_tol, int cg_maxit) {
+  const double iso = 0.5;
+  const int node_count = topopt::fea_node_count(g);
+  for (const MinimizePlasticVariant& ev : r.evaluated) {
+    if (ev.optimization.cancelled) continue;  // carve-out checked in scenario H
+    const std::vector<double>& rho = ev.optimization.physical_density;
+
+    // (1) DOF-ordered, per-node size.
+    CHECK(ev.displacement_field.size() ==
+              static_cast<std::size_t>(3 * node_count),
+          "disp: displacement_field is per-node DOF-ordered (size 3*node_count)");
+
+    // Nodes attached to at least one printed voxel (physical density > iso) —
+    // the "printed set" the field is exposed over.
+    std::vector<char> node_printed(static_cast<std::size_t>(node_count), 0);
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) {
+          if (!g.solid(i, j, k)) continue;
+          if (!(rho[g.index(i, j, k)] > iso)) continue;
+          for (int n : topopt::fea_element_nodes(g, i, j, k))
+            node_printed[static_cast<std::size_t>(n)] = 1;
+        }
+
+    // The SAME penalized solve the driver ran on this variant's density.
+    const topopt::SimpCompliance sc =
+        topopt::simp_compliance(g, params, rho, bcs, loads, cg_tol, cg_maxit);
+
+    bool exposure_exact = true, zero_off_printed = true, any_printed_nonzero = false;
+    for (int n = 0; n < node_count; ++n)
+      for (int c = 0; c < 3; ++c) {
+        const double got =
+            ev.displacement_field[static_cast<std::size_t>(3 * n + c)];
+        if (node_printed[static_cast<std::size_t>(n)]) {
+          // Exposure, not an independent value: bit-equal to the solve.
+          if (got != sc.solution.at(n, c)) exposure_exact = false;
+          if (got != 0.0) any_printed_nonzero = true;
+        } else if (got != 0.0) {
+          zero_off_printed = false;
+        }
+      }
+    CHECK(exposure_exact,
+          "disp: printed-node displacement equals the penalized solve exactly");
+    CHECK(zero_off_printed,
+          "disp: displacement is zero on nodes attached only to non-printed voxels");
+    CHECK(any_printed_nonzero,
+          "disp: loaded/printed nodes carry nonzero displacement");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -312,6 +387,13 @@ int main() {
     // M7.0b: the visualization data on every (accepted, non-cancelled) rung is
     // consistent with an independent recompute (build_dir = -gravity_direction).
     check_viz_fields(r, g, material, Vec3{0, 0, 1});
+    // M7.disp: the per-node displacement field equals the driver's final
+    // penalized solve exactly (self-weight loads at this scenario's gravity).
+    check_displacement_field(
+        r, g, driver_params(material),
+        bcs, topopt::self_weight_loads(g, material.density_g_cm3, o.gravity,
+                                       o.gravity_direction),
+        o.simp.cg_tolerance, o.simp.cg_max_iterations);
     // Lower volume fraction => a weaker arm => a lower margin (monotone), which
     // is what makes a descending-ladder mixed walk crossable.
     for (std::size_t v = 0; v < r.evaluated.size(); ++v)
@@ -615,13 +697,15 @@ int main() {
           "H1: the cancelled rung stopped at the flagged iteration");
     CHECK(rc.report.variants.size() == 1,
           "H1: the report carries exactly the accepted prefix");
-    // M7.0b carve-out: a cancelled rung ships NO visualization data (its
+    // M7.0b/M7.disp carve-out: a cancelled rung ships NO visualization data (its
     // per-rung analysis is skipped), while the accepted prefix rung carries it.
     CHECK(rc.evaluated[1].von_mises_field.empty() &&
+              rc.evaluated[1].displacement_field.empty() &&
               rc.evaluated[1].support_volume_voxels == 0 &&
               rc.evaluated[1].mass_grams == 0.0 && rc.evaluated[1].mesh().empty(),
           "H1: the cancelled rung's visualization fields stay default");
     CHECK(!rc.evaluated[0].von_mises_field.empty() &&
+              !rc.evaluated[0].displacement_field.empty() &&
               rc.evaluated[0].mass_grams > 0.0 && !rc.evaluated[0].mesh().empty(),
           "H1: the accepted prefix rung still carries visualization data");
     bool valid = true;
@@ -698,6 +782,13 @@ int main() {
 
     // (a,b) full recompute consistency (build_dir = +z here).
     check_viz_fields(r, g, material, Vec3{0, 0, 1});
+    // M7.disp: on a fully-printed cube every node is in the printed set, so the
+    // field is the solve's displacement everywhere (nonzero away from the clamp).
+    check_displacement_field(
+        r, g, driver_params(material),
+        bcs, topopt::self_weight_loads(g, material.density_g_cm3, o.gravity,
+                                       o.gravity_direction),
+        o.simp.cg_tolerance, o.simp.cg_max_iterations);
 
     std::printf("[I known-cube] printed=%zu mass=%.6g g support=%d "
                 "mesh_tris=%zu\n",
