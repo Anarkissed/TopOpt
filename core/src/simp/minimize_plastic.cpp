@@ -191,6 +191,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     std::vector<std::array<double, 6>> stress(grid.voxel_count(),
                                               std::array<double, 6>{});
     variant.von_mises_field.assign(grid.voxel_count(), 0.0);
+    // M7.disp: mark the nodes attached to at least one printed voxel; the
+    // displacement field is exposed only there (zero elsewhere), mirroring how
+    // von_mises_field is zero off the printed set.
+    const int node_count = fea_node_count(grid);
+    std::vector<char> node_printed(static_cast<std::size_t>(node_count), 0);
     std::size_t printed_voxels = 0;
     double max_von_mises = 0.0;
     for (int k = 0; k < grid.nz; ++k)
@@ -199,6 +204,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           if (!grid.solid(i, j, k)) continue;
           if (!(rho[grid.index(i, j, k)] > kIso)) continue;
           ++printed_voxels;
+          const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+          for (int n : en) node_printed[static_cast<std::size_t>(n)] = 1;
           const std::array<double, 24> ue = element_dofs(grid, sc.solution, i, j, k);
           const Hex8Stress st = hex8_stress(params.youngs_modulus,
                                             params.poisson, grid.spacing, ue);
@@ -207,6 +214,19 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           if (st.von_mises > max_von_mises) max_von_mises = st.von_mises;
         }
     const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+
+    // M7.disp field: the per-node displacement of the SAME penalized solve
+    // (sc.solution) — no new solve. DOF-ordered (size 3*node_count); exposed on
+    // printed nodes exactly as solved, zeroed on nodes attached only to
+    // non-printed voxels (mirrors von_mises_field). Model units (mm).
+    variant.displacement_field.assign(static_cast<std::size_t>(3 * node_count),
+                                      0.0);
+    for (int n = 0; n < node_count; ++n) {
+      if (!node_printed[static_cast<std::size_t>(n)]) continue;
+      for (int c = 0; c < 3; ++c)
+        variant.displacement_field[static_cast<std::size_t>(3 * n + c)] =
+            sc.solution.at(n, c);
+    }
 
     // M7.0b field (d): printed mass = material density (g/cm^3) * printed volume.
     // Volumes are mm^3 (mm-MPa unit system); 1 cm^3 = 1000 mm^3, so divide by

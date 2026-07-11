@@ -93,6 +93,13 @@ public struct OptimizeVariant {
     /// M7.8 — per-voxel von Mises stress (MPa), grid-indexed against the outcome's
     /// grid metadata, for the stress overlay. Empty for a cancelled rung.
     public let vonMisesField: [Float]
+    /// M7.disp — the per-node displacement field (mm), DOF-ordered: entries
+    /// [3n, 3n+1, 3n+2] are (ux, uy, uz) of grid node n (corner (a,b,c) at index
+    /// (c*(gridNy+1)+b)*(gridNx+1)+a; count 3*(gridNx+1)*(gridNy+1)*(gridNz+1)).
+    /// The companion of `vonMisesField` that M7.viz.3's flex animation displaces
+    /// mesh vertices by; zero on nodes attached only to non-printed voxels, empty
+    /// for a cancelled rung.
+    public let displacementField: [Float]
     /// Optimization-history keyframes (playback): the isosurface from ~solid (first)
     /// to optimized (last). Empty when playback capture is off.
     public let keyframeMeshes: [KeyframeMesh]
@@ -105,6 +112,7 @@ public struct OptimizeVariant {
                 maxInterlayerTensionMPa: Double = 0, inPlaneMargin: Double = 0,
                 interlayerMargin: Double = 0, meshVertices: [Float] = [],
                 meshIndices: [Int32] = [], vonMisesField: [Float] = [],
+                displacementField: [Float] = [],
                 keyframeMeshes: [KeyframeMesh] = []) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
@@ -124,6 +132,7 @@ public struct OptimizeVariant {
         self.meshVertices = meshVertices
         self.meshIndices = meshIndices
         self.vonMisesField = vonMisesField
+        self.displacementField = displacementField
         self.keyframeMeshes = keyframeMeshes
     }
 }
@@ -445,6 +454,7 @@ public enum TopOptKit {
                 meshVertices: Array(v.mesh_vertices),
                 meshIndices: Array(v.mesh_indices),
                 vonMisesField: Array(v.von_mises_field),
+                displacementField: Array(v.displacement_field),
                 keyframeMeshes: reconstructKeyframes(v)))
         }
         return OptimizeOutcome(variants: variants,
