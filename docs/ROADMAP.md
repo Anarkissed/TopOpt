@@ -361,13 +361,43 @@
       absolute von Mises value — the re-entrant corner is a mesh-dependent
       singularity (see the fixture's _why_no_pinned_stress note). Pure core;
       no /app/.
-- [ ] M7.mma.3 Multi-load-case optimization: weighted-sum and worst-case
-      (min-max via MMA constraints) compliance across N load cases; the
-      minimize_plastic job schema gains a load-case list, back-compatible
-      (single case = current behaviour, byte-identical results). Tests:
-      two-load fixture where the single-case optimum fails under the second
-      load and the multi-case optimum holds both; schema round-trip incl. the
-      single-case back-compat path. Pure core; no /app/.
+- [ ] M7.mma.3a Weighted-sum multi-load-case (OC path — do first). Objective
+      C = Σ w_i·c_i over N load cases sharing grid/material/BCs/volume
+      constraint; each c_i is one FEA solve against the same penalized K with a
+      different RHS; gradient is the weighted sum of the per-case compliance
+      sensitivities. STAYS ON THE OC PATH — the summed sensitivity feeds the
+      existing oc_update/oc_update_masked unchanged, so it works through
+      minimize_plastic with NO MMA and NO masked-MMA change (does not touch the
+      M7.mma.4 boundary). MinimizePlasticOptions gains a load-case list
+      (self-weight stays the empty-list fallback, as external_loads does now);
+      minimize_plastic reports the WORST-case margin over the cases; job.json
+      gains an additive `load_cases` array (a job without it parses exactly as
+      today). BACK-COMPAT IS A HARD REQUIREMENT: N=1, w=1 must be byte-identical
+      to today's single-load path — assert == physical_density and == compliance
+      element-for-element against the current single-load call (mirroring the
+      M7.disp exposure-equality test). Two-load test is an IN-CODE comparative
+      invariant (optimize under load-1, show it's worse under load-2, show the
+      multi-case optimum's worst-case is lower) — NO maintainer fixture, no
+      tests/fixtures/** change. Keep any viz-field/stress reporting additive
+      (interface freeze); if a bridge signature would change, STOP with a
+      Blocked handoff. Pure core; no /app/.
+- [ ] M7.mma.3b Worst-case / min-max multi-load-case (MMA — do second, after
+      3a). min_rho max_i c_i(rho) s.t. the volume constraint, via the MMA bound
+      formulation: auxiliary scalar z, min z s.t. c_i(rho)−z ≤ 0 for all i and
+      V(rho)−V* ≤ 0 (m = N+1 constraints + the z variable). Requires a GENERAL
+      m-constraint MMA dual solver — the existing m=1 single-bisection and m=2
+      nested-bisection do NOT generalize to arbitrary N; implement the dual over
+      the simplex×{μ≥0} (z-stationarity gives Σλ_i = 1) with proper projected
+      ascent/Newton, plus the auxiliary-z handling. ROUTING (maintainer-decided):
+      ship as a STANDALONE unmasked simp_optimize_minmax (the
+      simp_optimize_stress precedent), tested directly — do NOT lift the masked-
+      MMA rejection or wire into minimize_plastic's driver; the masked switchover
+      is M7.mma.4's job. Convergence risk is real (per M7.mma.2): the test is a
+      BEHAVIORAL invariant (multi-case optimum's worst-case compliance across the
+      loads < the single-case optimum's worst-case), NEVER a pinned value; may
+      need GCMMA-style conservative approximations to converge — if it can't be
+      made to converge reliably in one run, STOP with a Blocked handoff rather
+      than shipping a flaky solver. Pure core; no /app/.
 - [ ] M7.mma.4 Switchover: MMA becomes the default updater in
       minimize_plastic; OC stays available behind the option (retained, not
       deleted). BLOCKS ON: maintainer regenerates fixtures/benchmarks.json
