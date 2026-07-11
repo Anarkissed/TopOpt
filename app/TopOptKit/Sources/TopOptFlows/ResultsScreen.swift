@@ -23,6 +23,10 @@ public struct ResultsScreen: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var orientOpen = false
+    /// Drives the Play animation: a ~30 fps tick that advances the morph scrub while
+    /// `model.playing`, so Play actually plays (previously it required a manual drag).
+    @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
+    private static let morphDuration: Double = 6   // design `dur = 6`s
 
     public init(projectName: String, outcome: OptimizeOutcome,
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {}) {
@@ -51,6 +55,10 @@ public struct ResultsScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
+        .onReceive(ticker) { _ in
+            guard model.playing else { return }
+            model.advance((1.0 / 30.0) / Self.morphDuration)
+        }
     }
 
     /// Per-flat-vertex stress colors for the selected variant, or nil when the
@@ -181,7 +189,10 @@ public struct ResultsScreen: View {
         VStack {
             Spacer()
             HStack(spacing: DS.Space.sm) {
-                Button { model.togglePlay() } label: {
+                Button {
+                    if reduceMotion { model.scrub(to: 1) }   // snap to the formed shape
+                    else { model.togglePlay() }
+                } label: {
                     Image(systemName: model.playing ? "pause.fill" : "play.fill")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundStyle(DS.Color.background.color)
