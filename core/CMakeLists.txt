@@ -316,6 +316,25 @@ if(Eigen3_FOUND)
   add_executable(test_mma tests/validation/test_mma.cpp)
   target_link_libraries(test_mma PRIVATE topopt)
   add_test(NAME mma COMMAND test_mma)
+
+  # Stress-constrained optimization (M7.mma.2): the aggregated von Mises
+  # constraint on the MMA path — a finite-difference check of the adjoint
+  # sensitivity of simp_stress_aggregate, and the behavioral invariants (a)/(b)/
+  # (c) of a stress-constrained run. Drives simp_stress_aggregate /
+  # simp_optimize_stress (simp.cpp), so it is Eigen-gated like the other
+  # optimizer tests. When OCCT is present it ALSO consumes the committed
+  # L-bracket stress fixture (mma2_stress_fixture.json + l-bracket.step) to
+  # assert the fixture's invariant (a); the fixture directory is injected and the
+  # STEP path guarded by TOPOPT_HAVE_STEP. CI configures with
+  # -DTOPOPT_REQUIRE_DEPS=ON (Eigen + OCCT), so both paths always run in CI.
+  add_executable(test_stress tests/validation/test_stress.cpp)
+  target_link_libraries(test_stress PRIVATE topopt)
+  if(OpenCASCADE_FOUND)
+    target_compile_definitions(test_stress PRIVATE
+      TOPOPT_HAVE_STEP
+      DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
+  endif()
+  add_test(NAME stress COMMAND test_stress)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always
