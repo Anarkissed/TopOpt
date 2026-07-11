@@ -26,8 +26,10 @@ public final class ProjectModel: ObservableObject {
     /// Stable identity, shared with the project's `RecentProject.id` so
     /// `AppModel.open(_:)` can restore this exact instance from the recents grid.
     public let id: UUID
-    public let name: String
-    public let material: String
+    /// Display name — editable (tap the title to rename). Identity is `id`.
+    @Published public var name: String
+    /// Chosen material — editable within the project's process/category.
+    @Published public var material: String
     public let process: ProcessKind
     /// The imported file (nil for a legacy recent with no in-memory model yet).
     public let importedFile: ImportedFile?

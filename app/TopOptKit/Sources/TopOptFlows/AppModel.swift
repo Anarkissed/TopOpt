@@ -158,6 +158,40 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    /// Materials available for a given process (its category), for the in-workspace
+    /// material picker (only same-category materials are offered).
+    public func materials(for process: ProcessKind) -> [MaterialOption] {
+        process == .fdm ? fdmMaterials : resinMaterials
+    }
+
+    /// Rename the open project (tap the title). Updates the recents grid + persists.
+    public func renameCurrentProject(to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let project, !trimmed.isEmpty else { return }
+        project.name = trimmed
+        projectName = trimmed
+        updateRecent(id: project.id) {
+            RecentProject(id: $0.id, name: trimmed, materialName: $0.materialName, process: $0.process)
+        }
+        persistCurrentProject()
+    }
+
+    /// Change the open project's material (within its category). Updates recents + persists.
+    public func setCurrentProjectMaterial(_ material: String) {
+        guard let project else { return }
+        project.material = material
+        updateRecent(id: project.id) {
+            RecentProject(id: $0.id, name: $0.name, materialName: material, process: $0.process)
+        }
+        persistCurrentProject()
+    }
+
+    private func updateRecent(id: UUID, _ transform: (RecentProject) -> RecentProject) {
+        if let idx = recentProjects.firstIndex(where: { $0.id == id }) {
+            recentProjects[idx] = transform(recentProjects[idx])
+        }
+    }
+
     // MARK: - Import sheet lifecycle
 
     /// Open the import sheet for a new project. Clears any prior draft file but

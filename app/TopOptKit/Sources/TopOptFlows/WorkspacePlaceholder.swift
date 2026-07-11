@@ -48,6 +48,11 @@ public struct WorkspacePlaceholder: View {
     /// When a project has saved variants, results show by default; tapping "See
     /// Original" flips this to reveal the editable workspace (the variants stay).
     @State private var viewOriginal = false
+    /// Rename dialog (tap the project title).
+    @State private var renaming = false
+    @State private var nameDraft = ""
+    /// Collapse the (bottom-left) Selections panel by tapping its header.
+    @State private var selectionsCollapsed = false
 
     // Forwarders onto the project's persistent state. The `nonmutating set`
     // mutates the ProjectModel (a reference), so `selection.mutate()` /
@@ -250,11 +255,23 @@ public struct WorkspacePlaceholder: View {
             .buttonStyle(.plain)
 
             HStack(spacing: DS.Space.sm) {
-                Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                // Tap the title to rename.
+                Button { nameDraft = project.name; renaming = true } label: {
+                    Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                }
+                .buttonStyle(.plain)
                 Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
-                Text(project.material)
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
+                // Tap the material to switch it — only same-category materials.
+                Menu {
+                    ForEach(model.materials(for: project.process)) { opt in
+                        Button(opt.name) { model.setCurrentProjectMaterial(opt.name) }
+                    }
+                } label: {
+                    Text(project.material)
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
+                }
             }
             .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
             .background(Capsule().fill(DS.Surface.bar.color)
@@ -263,6 +280,11 @@ public struct WorkspacePlaceholder: View {
         }
         .padding(.top, DS.Space.xl3)
         .padding(.leading, DS.Space.xl4)
+        .alert("Rename project", isPresented: $renaming) {
+            TextField("Name", text: $nameDraft)
+            Button("Save") { model.renameCurrentProject(to: nameDraft) }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     // MARK: gravity setup prompt (D2) + persistent chip
@@ -349,30 +371,41 @@ public struct WorkspacePlaceholder: View {
     private var selectionsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
-                    Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                }
-                Spacer()
-                unitToggle
-            }
-            .padding(.horizontal, DS.Space.l).padding(.top, DS.Space.ml).padding(.bottom, DS.Space.m)
-
-            Divider().overlay(DS.Color.strokeSubtle.color)
-
-            if selection.isEmpty {
-                Text("Tap faces on the model to select them — a chip asks whether they’re an **anchor** or a **load**.")
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(DS.Space.xl)
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(selection.groups) { g in groupRow(g) }
+                // Tap the header to collapse/expand.
+                Button { selectionsCollapsed.toggle() } label: {
+                    HStack(spacing: DS.Space.s) {
+                        Image(systemName: selectionsCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
+                        Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        if selectionsCollapsed, !selection.isEmpty {
+                            Text("\(selection.groups.count)").dsStyle(DS.TypeScale.footnote)
+                                .foregroundStyle(DS.Color.textTertiary.color)
+                        }
                     }
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                if !selectionsCollapsed { unitToggle }
+            }
+            .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+
+            if !selectionsCollapsed {
+                Divider().overlay(DS.Color.strokeSubtle.color)
+                if selection.isEmpty {
+                    Text("Tap faces on the model to select them — a chip asks whether they’re an **anchor** or a **load**.")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(DS.Space.xl)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(selection.groups) { g in groupRow(g) }
+                        }
+                    }
+                    .frame(maxHeight: 360)
                 }
             }
         }
@@ -381,9 +414,10 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        .padding(.top, 82)
+        // Bottom-left, above the bottom bar.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(.leading, DS.Space.xl4)
-        .frame(maxHeight: 520, alignment: .top)
+        .padding(.bottom, 96)
     }
 
     private var unitToggle: some View {
@@ -408,10 +442,21 @@ public struct WorkspacePlaceholder: View {
         let active = g.id == selection.activeGroupID
         let tint = force.tint(for: g)
         return HStack(alignment: .top, spacing: DS.Space.s) {
-            RoundedRectangle(cornerRadius: 4).fill(tint.color)
-                .frame(width: 11, height: 11)
-                .shadow(color: tint.opacity(0.4).color, radius: 4)
-                .padding(.top, 3)
+            // Tap the swatch to recolor the group from the palette.
+            Menu {
+                ForEach(Array(DS.Color.groupPalette.enumerated()), id: \.offset) { idx, c in
+                    Button { selection.setColorIndex(g.id, idx) } label: {
+                        Label("Color \(idx + 1)", systemImage: "circle.fill")
+                            .foregroundStyle(c.color)
+                    }
+                }
+            } label: {
+                RoundedRectangle(cornerRadius: 4).fill(tint.color)
+                    .frame(width: 13, height: 13)
+                    .shadow(color: tint.opacity(0.4).color, radius: 4)
+                    .padding(.top, 3)
+            }
+            .buttonStyle(.plain)
             VStack(alignment: .leading, spacing: 3) {
                 TextField("Group", text: binding(for: g))
                     .textFieldStyle(.plain)

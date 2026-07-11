@@ -165,6 +165,22 @@ final class ProjectModelTests: XCTestCase {
         XCTAssertFalse(restored.minimizePlastic, "the toggle survives relaunch")
     }
 
+    func testRenameAndMaterialChangeUpdateProjectAndRecents() throws {
+        let (m, project, recent) = try openedProject()
+        m.renameCurrentProject(to: "  Wall Bracket v4  ")
+        XCTAssertEqual(project.name, "Wall Bracket v4")   // trimmed
+        XCTAssertEqual(m.recentProjects.first(where: { $0.id == recent.id })?.name, "Wall Bracket v4")
+        m.renameCurrentProject(to: "   ")                 // blank ignored
+        XCTAssertEqual(project.name, "Wall Bracket v4")
+
+        // Material change within the category (openedProject imports as PLA / FDM).
+        let other = m.materials(for: project.process).first { $0.name != project.material }?.name
+        let picked = try XCTUnwrap(other, "need a second FDM material to switch to")
+        m.setCurrentProjectMaterial(picked)
+        XCTAssertEqual(project.material, picked)
+        XCTAssertEqual(m.recentProjects.first(where: { $0.id == recent.id })?.materialName, picked)
+    }
+
     func testMakeRunRequestCarriesLoadCaseAndFlag() throws {
         let (m, project, _) = try openedProject()
         project.force.setGravity(faceNormal: SIMD3<Float>(0, 0, -1), face: 1)
