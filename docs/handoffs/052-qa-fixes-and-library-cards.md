@@ -90,5 +90,26 @@ New/changed tests:
 - **`DECISIONS.md`** still carries the maintainer's uncommitted 2026-07-11
   print-time entry (not part of my commits), as in handoffs 045–051.
 
+## Addendum — second QA pass (commit `06f0899`)
+Two more items from the same device-QA thread:
+- **Background-run chip cutting off the bottom hint bar**: the workspace's minimized
+  "Optimizing NN% · Tap to view" pill (RunScreen, distinct from the results
+  "Optimizing more variants…" chip) was bottom-anchored and overlapped the
+  "Scrub the weight…" hint bar. Moved to **top-center**, aligned with the nav row.
+  Done by removing RunScreen's outer `.ignoresSafeArea()` at the `WorkspacePlaceholder`
+  call site — the running card + failure sheet already `.ignoresSafeArea()` on their
+  OWN dim/scrim backdrops, so nothing full-bleed regressed; the chip now lives inside
+  the safe area under the status bar.
+- **Library cards never showed a run in progress**: added a third status,
+  **"Running"** (with a spinner), that wins over Optimized/Ready. `AppModel` now
+  subscribes to each live project's `RunModel.$phase` (Combine) in `observeRun`,
+  maintaining `@Published runningIDs` and flipping `optimized` when a background run
+  finishes with results. Cards read `running > optimized > ready`.
+  - `runningIDs` is reactive glue over `RunModel.$phase`; the phase transitions
+    themselves are covered by `RunModelTests`. There is no AppModel-level unit test
+    for it because injecting a drivable run into a project created by
+    `continueToWorkspace`/`open` would need a run-factory seam that doesn't exist —
+    deliberately not added. The chip placement + the "Running" chip are device QA.
+
 ## Blocked
 None.
