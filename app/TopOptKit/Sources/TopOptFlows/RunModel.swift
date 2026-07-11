@@ -28,15 +28,38 @@ public struct RunRequest: Equatable, Sendable {
     public let resolution: Int
     /// The project title, used in the completion-notification copy.
     public let projectName: String
+    /// The user's declared load case (empty for a self-weight / STL run): anchor
+    /// B-rep faces + load groups (faces + model-frame force). Consumed only on the
+    /// STEP path (`minimizePlasticLoadCase`).
+    public let anchorFaceIDs: [Int]
+    public let loadGroups: [TopOptKit.LoadGroupSpec]
+    /// "Minimize plastic": on → the material-reduction ladder; off → one
+    /// conservative variant that just handles the forces.
+    public let minimizePlastic: Bool
+    /// Print/build direction (model frame) for the interlayer-margin orientation.
+    public let buildDirection: SIMD3<Double>
+
+    /// STEP parts carry a B-rep face selection, so the run uses the load-case path;
+    /// STL parts have no faces and fall back to the self-weight path.
+    public var isStepModel: Bool {
+        let p = modelPath.lowercased()
+        return p.hasSuffix(".step") || p.hasSuffix(".stp")
+    }
 
     public init(modelPath: String, material: String, materialsPath: String,
-                rulesPath: String, resolution: Int, projectName: String) {
+                rulesPath: String, resolution: Int, projectName: String,
+                anchorFaceIDs: [Int] = [], loadGroups: [TopOptKit.LoadGroupSpec] = [],
+                minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)) {
         self.modelPath = modelPath
         self.material = material
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
         self.resolution = resolution
         self.projectName = projectName
+        self.anchorFaceIDs = anchorFaceIDs
+        self.loadGroups = loadGroups
+        self.minimizePlastic = minimizePlastic
+        self.buildDirection = buildDirection
     }
 }
 
@@ -302,7 +325,18 @@ public final class RunModel: ObservableObject {
     /// stops the run).
     public static func bridgeRunner(_ request: RunRequest,
                                     _ progress: @escaping (Int, Int, Int) -> Bool) throws -> OptimizeOutcome {
-        try TopOptKit.minimizePlastic(
+        // STEP: optimize under the user's declared load case (anchors/loads →
+        // clamps + tractions), or self-weight when no loads were set. STL: no
+        // faces, so the self-weight ladder (ARCHITECTURE §5) is the only option.
+        if request.isStepModel {
+            return try TopOptKit.minimizePlasticLoadCase(
+                stepPath: request.modelPath, material: request.material,
+                materialsPath: request.materialsPath, rulesPath: request.rulesPath,
+                resolution: request.resolution, anchorFaceIDs: request.anchorFaceIDs,
+                loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
+                buildDirection: request.buildDirection, progress: progress)
+        }
+        return try TopOptKit.minimizePlastic(
             stlPath: request.modelPath, material: request.material,
             materialsPath: request.materialsPath, rulesPath: request.rulesPath,
             resolution: request.resolution, progress: progress)

@@ -36,11 +36,15 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// The persisted workspace state.
     public var selection: SelectionModel
     public var force: ForceModel
+    /// The "minimize plastic" toggle. OPTIONAL so pre-existing schema-1 snapshots
+    /// (written before this field) still decode — nil is treated as `true`.
+    public var minimizePlastic: Bool?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
                 originalFileName: String, savedAt: Date,
-                selection: SelectionModel, force: ForceModel) {
+                selection: SelectionModel, force: ForceModel,
+                minimizePlastic: Bool? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -51,6 +55,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.savedAt = savedAt
         self.selection = selection
         self.force = force
+        self.minimizePlastic = minimizePlastic
     }
 }
 

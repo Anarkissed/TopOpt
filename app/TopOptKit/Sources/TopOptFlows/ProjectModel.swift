@@ -18,6 +18,7 @@
 // in-memory-across-navigation only. Nothing here is `Codable` yet.
 
 import Foundation
+import simd
 import TopOptKit
 
 @MainActor
@@ -38,6 +39,11 @@ public final class ProjectModel: ObservableObject {
     @Published public var selection = SelectionModel()
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
+
+    /// "Minimize plastic": pursue material reduction (the variant ladder). On with
+    /// no forces → self-weight removal; on with forces → removal under the forces;
+    /// off with forces → one conservative force-adequate variant. Default on.
+    @Published public var minimizePlastic = true
 
     /// The M7.7 run state machine. One per project so a run (and its background
     /// state) survives leaving and returning to the workspace.
@@ -70,6 +76,43 @@ public final class ProjectModel: ObservableObject {
                   importedMesh: importedMesh, run: run)
         self.selection = snapshot.selection
         self.force = snapshot.force
+        self.minimizePlastic = snapshot.minimizePlastic ?? true
+    }
+
+    /// Assemble the run's load case from the current selection + force state, in the
+    /// MODEL/grid frame the solver uses: anchor groups → their B-rep faces (clamped),
+    /// load groups → their faces + model-frame force (kgf → N). The build direction
+    /// (print up) is the negated gravity, or +Z if gravity is unset. Empty for an
+    /// STL project (no face selection) — the run then falls back to self-weight.
+    public func loadCase() -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
+                               buildDirection: SIMD3<Double>) {
+        var anchors: [Int] = []
+        var loads: [TopOptKit.LoadGroupSpec] = []
+        for g in selection.groups {
+            let kind = force.kind(for: g.id)
+            if kind.isAnchor {
+                anchors.append(contentsOf: g.faces.map { Int($0) })
+            } else if kind.isLoad {
+                let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
+                if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
+                    loads.append(.init(faceIDs: g.faces.map { Int($0) },
+                                       force: SIMD3<Double>(f)))
+                }
+            }
+        }
+        let up = force.gravity.map { -$0 } ?? SIMD3<Float>(0, 0, 1)
+        return (anchors, loads, SIMD3<Double>(up))
+    }
+
+    /// A group's model-space outward normal (mean of its faces' normals), or nil.
+    private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
+        guard let mesh = viewerMesh else { return nil }
+        var acc = SIMD3<Float>.zero
+        var found = false
+        for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; found = true } }
+        guard found else { return nil }
+        let len = simd_length(acc)
+        return len > 1e-6 ? acc / len : nil
     }
 
     /// A persistable snapshot of this project, or nil if there is no model to copy
@@ -81,7 +124,8 @@ public final class ProjectModel: ObservableObject {
         let modelFileName = ext.isEmpty ? "model" : "model.\(ext)"
         return ProjectSnapshot(id: id, name: name, material: material, process: process,
                                modelFileName: modelFileName, originalFileName: file.name,
-                               savedAt: savedAt, selection: selection, force: force)
+                               savedAt: savedAt, selection: selection, force: force,
+                               minimizePlastic: minimizePlastic)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

@@ -304,7 +304,7 @@ public enum TopOptKit {
     /// A user load group for `minimizePlasticLoadCase`: the B-rep faces it covers
     /// and the total force (newtons) applied over them (the M7.6 UI's direction ×
     /// weight). The force is spread as a distributed traction over the faces.
-    public struct LoadGroupSpec {
+    public struct LoadGroupSpec: Equatable, Sendable {
         public let faceIDs: [Int]
         public let force: SIMD3<Double>
         public init(faceIDs: [Int], force: SIMD3<Double>) {

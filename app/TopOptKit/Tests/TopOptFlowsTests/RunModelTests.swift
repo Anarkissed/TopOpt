@@ -32,6 +32,18 @@ final class RunModelTests: XCTestCase {
                    rulesPath: Self.rulesPath, resolution: resolution, projectName: "Cube")
     }
 
+    // MARK: - load-case routing
+
+    func testRunRequestIsStepModel() {
+        func req(_ path: String) -> RunRequest {
+            RunRequest(modelPath: path, material: "PLA", materialsPath: "", rulesPath: "",
+                       resolution: 20, projectName: "P")
+        }
+        XCTAssertTrue(req("/x/part.step").isStepModel)
+        XCTAssertTrue(req("/x/Part.STP").isStepModel)   // case-insensitive
+        XCTAssertFalse(req("/x/part.stl").isStepModel)  // STL → self-weight path
+    }
+
     // MARK: - RunProgress math
 
     func testFractionZeroBeforeFirstIteration() {

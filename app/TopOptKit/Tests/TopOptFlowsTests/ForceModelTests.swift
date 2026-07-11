@@ -319,4 +319,58 @@ final class ForceModelTests: XCTestCase {
         XCTAssertEqual(fm.panelKindLabel(for: ids[1]), "2.5 kg · push")
         XCTAssertEqual(fm.panelKindLabel(for: ids[2]), "Pending…")
     }
+
+    // MARK: - model-frame force (the frame the solver uses)
+
+    func testLoadForceVectorModelFrame() {
+        var fm = ForceModel()
+        fm.setGravity(faceNormal: SIMD3<Float>(0, 0, -1), face: 0)  // model down = −Z
+        let id = UUID()
+        fm.makeLoad(id)                 // default: gravity direction
+        fm.setWeight(id, kg: 2.0)
+        let mag = Float(2.0 * ForceModel.gravityAccel)
+        let n = SIMD3<Float>(1, 0, 0)   // a model face normal
+
+        // Gravity load: along the MODEL gravity (−Z), NOT world −Y.
+        let g = fm.loadForceVectorModel(id, groupNormal: n)!
+        XCTAssertEqual(g.x, 0, accuracy: 1e-4)
+        XCTAssertEqual(g.y, 0, accuracy: 1e-4)
+        XCTAssertEqual(g.z, -mag, accuracy: 1e-3)
+
+        // Push: into the face (−n). Pull: out (+n).
+        fm.setDirection(id, .push)
+        let p = fm.loadForceVectorModel(id, groupNormal: n)!
+        XCTAssertEqual(p.x, -mag, accuracy: 1e-3)
+        fm.setDirection(id, .pull)
+        let pull = fm.loadForceVectorModel(id, groupNormal: n)!
+        XCTAssertEqual(pull.x, mag, accuracy: 1e-3)
+
+        // An anchor (not a load) has no force vector.
+        let a = UUID(); fm.makeAnchor(a)
+        XCTAssertNil(fm.loadForceVectorModel(a, groupNormal: n))
+    }
+
+    // MARK: - Optimize enablement with the minimize-plastic toggle
+
+    func testCanOptimizeWithMinimizePlastic() {
+        var fm = ForceModel()
+        // Setup phase (gravity not set): never enabled.
+        XCTAssertFalse(fm.canOptimize(in: [], minimizePlastic: true))
+        fm.setGravity(faceNormal: SIMD3<Float>(0, 0, -1), face: 0)   // → edit phase
+
+        // No groups: minimize-plastic on → enabled (self-weight); off → not.
+        XCTAssertTrue(fm.canOptimize(in: [], minimizePlastic: true))
+        XCTAssertFalse(fm.canOptimize(in: [], minimizePlastic: false))
+
+        // A full force case (anchor + load): enabled even with minimize-plastic off.
+        var sel = SelectionModel()
+        let a = sel.addGroup(); sel.pickFace(1); fm.makeAnchor(a)
+        let l = sel.addGroup(); sel.pickFace(2); fm.makeLoad(l)
+        XCTAssertTrue(fm.canOptimize(in: sel.groups, minimizePlastic: false))
+        XCTAssertTrue(fm.canOptimize(in: sel.groups, minimizePlastic: true))
+
+        // A pending group blocks Optimize even with minimize-plastic on.
+        _ = sel.addGroup(); sel.pickFace(3)   // undeclared → pending
+        XCTAssertFalse(fm.canOptimize(in: sel.groups, minimizePlastic: true))
+    }
 }

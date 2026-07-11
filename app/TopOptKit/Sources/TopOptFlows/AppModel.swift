@@ -38,6 +38,9 @@ public final class AppModel: ObservableObject {
 
     /// The chosen print process; selects the material family offered.
     @Published public var process: ProcessKind = .fdm
+    /// Import-draft "minimize plastic" toggle, carried into the new project. On →
+    /// pursue material reduction; off → just handle the forces. Default on.
+    @Published public var minimizePlastic = true
     /// Selected material name per family (kept independently so switching the
     /// segment restores the family's own choice).
     @Published public private(set) var selectedFDMMaterial: String?
@@ -107,10 +110,14 @@ public final class AppModel: ObservableObject {
     public func makeRunRequest(resolution: Int) -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
+        let lc = project.loadCase()
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: resolution,
-                          projectName: project.name.isEmpty ? file.name : project.name)
+                          projectName: project.name.isEmpty ? file.name : project.name,
+                          anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
+                          minimizePlastic: project.minimizePlastic,
+                          buildDirection: lc.buildDirection)
     }
 
     // MARK: - Materials
@@ -158,6 +165,7 @@ public final class AppModel: ObservableObject {
     public func newTopOpt() {
         importedFile = nil
         importedMesh = nil
+        minimizePlastic = true   // reset the draft toggle to the default
         importSheetPresented = true
     }
 
@@ -219,6 +227,7 @@ public final class AppModel: ObservableObject {
         // returning to it from Home restores the full setup (M7.x-persist-a).
         let pm = ProjectModel(id: recent.id, name: name, material: material,
                               process: process, importedFile: file, importedMesh: importedMesh)
+        pm.minimizePlastic = minimizePlastic
         projectsById[recent.id] = pm
         project = pm
         recentProjects.insert(recent, at: 0)

@@ -96,7 +96,7 @@ public struct WorkspacePlaceholder: View {
             if force.phase == .setup {
                 gravityBanner
             } else {
-                if force.gravityIsSet { gravityChip }
+                if force.gravityIsSet { topRightControls }
                 if viewerMesh != nil { selectionsPanel }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
@@ -119,7 +119,7 @@ public struct WorkspacePlaceholder: View {
     /// `canOptimize` the button uses; nil request only if a file/material is
     /// somehow missing (Optimize is disabled in that case).
     private func startRun() {
-        guard force.canOptimize(in: selection.groups) else { return }
+        guard canOptimize else { return }
         guard let request = model.makeRunRequest(resolution: Self.runResolution) else {
             model.toast = "Can’t start — import a model and choose a material first."
             return
@@ -257,6 +257,18 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, DS.Space.xl4)
     }
 
+    /// Top-right stack: the gravity chip and, below it, the "Minimize plastic"
+    /// toggle (per the maintainer's placement — below the Gravity set · Change area).
+    private var topRightControls: some View {
+        VStack(alignment: .trailing, spacing: DS.Space.s) {
+            gravityChip
+            minimizePlasticChip
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.top, DS.Space.xl3)
+        .padding(.trailing, DS.Space.xl4)
+    }
+
     private var gravityChip: some View {
         HStack(spacing: DS.Space.s) {
             Image(systemName: "arrow.down.to.line")
@@ -278,9 +290,24 @@ public struct WorkspacePlaceholder: View {
         .background(Capsule().fill(DS.Surface.bar.color)
             .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
         .foregroundStyle(DS.Color.textPrimary.color)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.top, DS.Space.xl3)
-        .padding(.trailing, DS.Space.xl4)
+    }
+
+    /// The "Minimize plastic" toggle chip (D: pursue material reduction). Off with
+    /// forces set → optimize just handles the forces; on → the reduction ladder.
+    private var minimizePlasticChip: some View {
+        Button { project.minimizePlastic.toggle() } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle((project.minimizePlastic ? DS.Color.accent : DS.Color.textTertiary).color)
+                Text("Minimize plastic").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: left Selections panel (design) with the kg/lbs toggle
@@ -644,15 +671,35 @@ public struct WorkspacePlaceholder: View {
         return "Tap a face to select · tap a set arrow to edit its load · drag to orbit"
     }
 
+    /// Optimize is enabled once gravity is set and no group is pending, AND either
+    /// "Minimize plastic" is on (self-weight or force-driven removal) OR a full
+    /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
+    private var canOptimize: Bool {
+        force.canOptimize(in: selection.groups, minimizePlastic: project.minimizePlastic)
+    }
+
+    /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
+    private var optimizeSummary: String {
+        if force.phase == .setup { return "set gravity first" }
+        if force.hasPending(in: selection.groups) { return "finish the pending group" }
+        let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
+        if a > 0 && l > 0 {
+            let base = "\(a) anchor\(a > 1 ? "s" : "") · \(l) load\(l > 1 ? "s" : "")"
+            return project.minimizePlastic ? "minimize plastic · " + base : base
+        }
+        if project.minimizePlastic { return "minimize plastic · self-weight" }
+        return "needs an anchor and a load"
+    }
+
     private var optimizeButton: some View {
-        let ok = force.canOptimize(in: selection.groups)
+        let ok = canOptimize
         return Button {
             guard ok else { return }
             startRun()
         } label: {
             VStack(spacing: 1) {
                 Text("Optimize").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(force.optimizeSummary(in: selection.groups))
+                Text(optimizeSummary)
                     .font(.system(size: 10.5, weight: .semibold))
                     .opacity(0.75)
             }
