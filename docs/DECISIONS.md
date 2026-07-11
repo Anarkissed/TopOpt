@@ -85,3 +85,10 @@ Eigen-free public API. Approved by Nadim.
   source of truth. Order: M7.dom → M7.mma → M7.ml, gated on reviewed output
   showing speed is the actual limiter. M7.trust surfaces verification + a
   test-print recommendation on every result.
+- 2026-07-11: M7.8 print-time estimate — chose (b) OMIT in v1. A credible
+  print-time number depends on slicer, nozzle, layer height, speeds,
+  acceleration, and infill path planning — none of which TopOpt models — so a
+  volume÷flow-rate heuristic could be off by large factors and would undermine
+  trust in the numbers that ARE rigorous (margins, stress, volume saved). The
+  results screen omits print time entirely for v1. Revisit only if real slicer
+  integration is added later. M7.8 proceeds with no print-time field.

@@ -255,65 +255,195 @@
       decision required before this task starts: (a) rough heuristic
       (printed volume ÷ nominal flow rate, labelled "est."), or (b) omit in
       v1. Record in DECISIONS.md.
-- [ ] M7.9 Export + share. Export .3mf sheet per design (M6.1 exporter via
-      bridge), UIActivityViewController share, embed the M5.2 JSON report in
-      the 3MF metadata + optional "Save report" as .json.
+## Completed in PR #46 (record; do not re-task)
+
+> The load-case + results work is DONE, merged/pending in PR #46. Recorded here
+> so no agent re-opens finished work:
+> - Self-weight gravity-units bug: FIXED (bridge sets opts.gravity = 9810 * 1e-9,
+>   mirroring run_job.cpp). The core/CLI path was never buggy; gravity is
+>   pre-scaled by the caller (g/cm^3 -> t/mm^3, 1e-9). DO NOT add any density
+>   conversion inside /core/ (minimize_plastic / self_weight_loads) — it would
+>   double-convert and re-break the other way (weak parts silently accepted).
+> - Real load case: DONE. Core minimize_plastic now accepts options.external_loads;
+>   self-weight is the fallback. The bridge tags the user's anchor faces as
+>   clamped Fixture BCs and turns each Load group into distributed traction_loads
+>   (per-group kgf->N). The hardcoded min-x clamp is now only the no-anchors
+>   fallback. Tested (core scenario J + real-bridge l-bracket; 199 green).
+> - Recommendation-driven variants: DONE (recommend the lightest safe design;
+>   RECOMMENDED badge on the results screen) — replaces the fixed 30/50/70 ladder.
+> - M7.8 results screen: DONE (variant tabs, mass, stress overlay, morph scrub,
+>   recommended-orientation sheet), plus progressive streaming, history playback,
+>   video export, and cross-launch persistence.
+> MERGE NIT: PR #46's docs/ROADMAP.md contains a stray leftover conflict marker
+> line (">>>>>>> Stashed changes"). Strip it before merge.
+>
+> STILL OPEN below: the honesty/confidence surface (M7.8b), which did NOT land in
+> PR #46 — the results screen shows the recommended variant but not the explicit
+> verified/margin/"test-print before safety-critical" recommendation. And "MORE
+> plastic" (additive growth) is correctly still M7.dom, not in this PR.
+
+## M7-OPT — optimizer capability track (ACTIVE: this is the current work)
+
+> Ordering is deliberate. MMA lands and becomes the default engine BEFORE
+> M7.dom, so the domain-expansion fixture is authored once against the final
+> engine and fixtures/benchmarks.json is regenerated exactly once (at
+> M7.mma.4). ML comes last and is gated on a maintainer decision: ML saves
+> iterations; it does not add capability the physics tasks haven't already
+> delivered. Task order is positional, top to bottom; identifiers are labels,
+> not sequence.
+
+- [ ] M7.mma.1 MMA updater (Svanberg 1987), compliance objective + volume
+      constraint only, as a drop-in alternative to Optimality Criteria behind
+      `SimpOptions.updater = {OC, MMA}`. Default stays OC — NO fixture changes
+      in this task. Asymptote init/adaptation and move limits per the paper;
+      document constants in code comments. Tests: existing FD sensitivity
+      checks pass unchanged; MMA reproduces the existing MBB + cantilever
+      benchmark compliance within 2% of the OC references at the same volume
+      fraction; iteration counts reported in the test log (informational).
+      Pure core; no /app/.
+- [ ] M7.mma.2 Stress-constrained optimization on the MMA path: aggregated
+      von Mises constraint (p-norm or KS — record the choice and the
+      aggregation parameter in DECISIONS.md) with adjoint sensitivities and
+      stress relaxation for the singularity problem (qp or epsilon-relaxation;
+      record which). Tests: finite-difference check of the aggregated
+      constraint sensitivity on a tiny grid; L-bracket fixture where the
+      unconstrained design exceeds a stress cap at the re-entrant corner and
+      the constrained run satisfies the cap with worse compliance. BLOCKS ON:
+      maintainer generates the L-bracket stress reference via the independent
+      reference implementation BEFORE this task starts (fixture discipline,
+      per M6.3). Pure core; no /app/.
+- [ ] M7.mma.3 Multi-load-case optimization: weighted-sum and worst-case
+      (min-max via MMA constraints) compliance across N load cases; the
+      minimize_plastic job schema gains a load-case list, back-compatible
+      (single case = current behaviour, byte-identical results). Tests:
+      two-load fixture where the single-case optimum fails under the second
+      load and the multi-case optimum holds both; schema round-trip incl. the
+      single-case back-compat path. Pure core; no /app/.
+- [ ] M7.mma.4 Switchover: MMA becomes the default updater in
+      minimize_plastic; OC stays available behind the option (retained, not
+      deleted). BLOCKS ON: maintainer regenerates fixtures/benchmarks.json
+      under MMA via the independent reference implementation BEFORE this task
+      starts. All V-gates rerun green against the regenerated references;
+      per-benchmark iteration count and wall time vs the OC baseline recorded
+      in the handoff.
+- [ ] M7.dom-core Design-domain expansion (additive optimization) — PHYSICS,
+      NOT ML. Let the optimizer add material beyond the imported part so it
+      grows ribs/gussets/buttresses a user wouldn't draw. The mechanism
+      already exists (M3.7 masks: FrozenSolid=keep, FrozenVoid=exclude,
+      Active=optimizer's choice). Add: voxelize a user-defined design volume
+      (axis-aligned box in model space for v1) larger than the import, with
+      imported-part voxels tagged FrozenSolid, caller-supplied keep-out boxes
+      FrozenVoid, and the remaining volume Active. Acceptance test (Linux CI
+      fixture): a THIN L-bracket wrapped in a corner design box grows a
+      gusset along the inner-corner load path; keep-out stays empty; the
+      original part is never removed. This is the "discovers structure the
+      user couldn't" feature — fully FEA-verified, no ML. Pure core; no /app/.
+- [ ] M7.dom-app Design-domain UI: size/position the design box in the viewer
+      (per the design language — no new interaction paradigms); keep-out
+      marked via the existing face-selection → FrozenVoid path (STEP input;
+      STL keep-out arrives with M7.Zb — do NOT invent a painting UI here).
+      Calls M7.dom-core through the bridge. Headless tests for the data model
+      (box + keep-outs → expected mask counts on a fixture grid); UI is
+      maintainer device QA.
+
+## M7-SHIP — v1 ship block (small tasks; deliberately between M7.dom and the
+   ML track so the app is shippable end-to-end while ML work runs long)
+
+- [ ] M7.8b Honesty & confidence UI (was M7.trust — deferred to here to pair with
+      export, since that's when a result leaves the app and goes toward a real
+      print). Did NOT land in PR #46. Every result surfaces: (a) it was
+      FEA-verified against modeled material properties at the chosen orientation;
+      (b) a confidence/margin indicator (worst-case stress margin from the M5.2
+      report); (c) the load-bearing recommendation: "Verified against modeled
+      properties. Real prints vary (layer adhesion, moisture, printer) —
+      test-print and load-test before relying on this part for safety-critical
+      use." Applies to ALL results (OC, MMA, ML-warm-started). Surface it on the
+      existing M7.8 results screen AND in the export/share flow (M7.9), so the
+      caveat travels with the file, not just the on-screen view. This is honesty,
+      not a disclaimer to bury. Headless tests where data can be asserted (margin
+      value present and correct per variant, verified flag set); copy/layout is
+      maintainer device QA.
+- [ ] M7.9 Export + share. Export sheet per variant: .3mf via the M6.1
+      exporter through the bridge, UIActivityViewController share; embed the
+      M5.2 JSON report in the 3MF metadata; optional "Save report" as .json.
+      Headless test: bridge-driven export → re-import round-trip holds V3
+      properties (the M6.1 path exercised through the bridge).
 - [ ] M7.9b Sample model affordance + document types: import sheet offers
       "Load sample model" (imports the bundled sample_cube.stl) so a first-run
       user with no files isn't dead-ended; register .stl/.step document types
       (CFBundleDocumentTypes / UTImportedTypeDeclarations) so files open into
       TopOpt from Files/AirDrop.
+- [ ] M7.Za STL selection honesty (small): when a user taps a face in Faces
+      mode on an STL (a mesh with no B-rep face ids), show a clear message
+      instead of silently doing nothing — e.g. "Face selection needs a STEP
+      file. STL models have no faces; full STL region tools are coming."
+      Applies wherever face-tap returns nil for a faceless mesh. No selection
+      logic change; purely the missing signpost.
+
+## M7-ML — ML acceleration (ML PROPOSES, PHYSICS CERTIFIES)
+
+> NON-NEGOTIABLE, NON-REMOVABLE CONSTRAINT for every task in this track:
+> every design shown to a user is certified by a real FEA pass against real
+> material properties BEFORE display. The ML output is NEVER the source of
+> truth — it only saves iterations. A design that fails its certifying FEA is
+> rejected/re-refined, never shipped. The safety net is tested, not assumed.
+
+- [ ] M7.ml.0 MAINTAINER DECISION (human, no agent): after reviewing
+      M7.mma/M7.dom output, confirm speed/friction is the real limiter and ML
+      is warranted; set the dataset budget (sample count, resolution,
+      randomization ranges) and the target warm-start iteration savings.
+      Record in DECISIONS.md. Agents: if this is the topmost unchecked task,
+      write a handoff noting the decision is pending and stop.
+- [ ] M7.ml.1 Warm-start + certification plumbing (pure core, NO ML yet).
+      simp_optimize accepts an optional initial density field (validated:
+      grid-shaped, clamped to [0,1], mask-consistent); add a certify(result)
+      step — full FEA at final densities + the V3 property suite — and a
+      rejection path: a warm-started run whose certified result misses the
+      cold-start reference compliance tolerance is REJECTED (status code, not
+      exception) and automatically re-refined from cold start. Tests: warm
+      start from the known converged solution passes certification in fewer
+      iterations than cold; an INTENTIONALLY BAD warm start (e.g. inverted
+      density field) is caught by the certifying pass and the fallback
+      reproduces the reference result. This makes the track constraint
+      structural before any model exists. Pure core; no /app/.
+- [ ] M7.ml.2 Dataset harness: `topopt-cli dataset` batch-runs randomized
+      problems (domain proportions, BCs, load placement/direction, volume
+      fraction — all seeded and reproducible) and serializes (problem
+      encoding, converged density field) pairs in a documented compact format
+      under a manifest. Tests: schema validation, determinism per seed, a
+      3-sample smoke dataset generated within the CI time budget. Pure
+      core/tooling; no /app/.
+- [ ] M7.ml.3 MAINTAINER RUN (human, no agent): generate the real dataset per
+      the M7.ml.0 budget on the Mac; commit the manifest + storage location
+      (not the data). Agents: handoff and stop if topmost.
+- [ ] M7.ml.4 Surrogate training + export (tools/ml/, Python, out of core CI):
+      3D U-Net (or a justified alternative — record in DECISIONS.md)
+      predicting the density field from the problem encoding. Loss: L2 on
+      density + volume-fraction penalty; physics-informed equilibrium terms
+      are OPTIONAL for v1 — document what shipped. Deliverables: training
+      script, eval metrics on a held-out split, exported .mlpackage. The
+      agent writes and smoke-tests the pipeline on tiny synthetic data; the
+      maintainer runs the real training.
+- [ ] M7.ml.5 App integration: run the .mlpackage on-device (Core ML, Neural
+      Engine), feed the prediction through the bridge as the M7.ml.1 warm
+      start; graceful fallback to cold start when the model is absent or
+      inference fails. Verify on benchmark parts: the ML-warm-started result
+      matches pure-physics compliance within tolerance AND passes the same
+      V-gates; iteration savings vs cold start recorded. Results screen keeps
+      the M7.8b verified/margin surface — certification status is what the
+      user sees, never raw model output. xcodebuild tests for the fallback
+      and plumbing; maintainer device QA.
+
 - [ ] M7.10 Maintainer QA milestone (human, no agent): full-flow device pass,
       performance profile on target iPad (128³ end-to-end timing vs the M6.3
       projection cost decision), accessibility pass (Dynamic Type on sheets,
-      VoiceOver labels on tools), App Store asset checklist.
-      
-      ## Future milestones — optimizer capability & ML (parked; do not start until current output reviewed)
+      VoiceOver labels on tools), App Store asset checklist. Agents: if this
+      is the topmost unchecked task, write a handoff noting QA is pending and
+      stop — do not skip ahead into the parked section.
 
-- [ ] M7.dom  Design-domain expansion (additive optimization) — PHYSICS, NOT ML.
-      Let SIMP add material beyond the imported part so it can grow ribs/gussets/
-      buttresses a user wouldn't draw. Core already has the mechanism (M3.7 masks:
-      FrozenSolid=keep, FrozenVoid=exclude, Active=optimizer's choice). Add:
-      (a) voxelize a user-defined design volume larger than the import, part
-          embedded and tagged FrozenSolid; (b) UI to size that volume + paint
-          keep-out zones; (c) surrounding space defaults Active.
-      Acceptance test: a THIN L-bracket wrapped in a corner design box grows a
-      gusset along the inner-corner load path; keep-out stays empty; original
-      part never removed. This is the "discovers structure the user couldn't"
-      feature — fully FEA-verified, NO ML required. Build BEFORE any ML work.
+## Parked — cosmetics & STL region tools (do not start until everything above
+   is closed)
 
-- [ ] M7.mma  MMA optimizer updater + real constraints. Replace Optimality
-      Criteria with the Method of Moving Asymptotes (Svanberg 1987) to enable
-      stress constraints and multi-load-case optimization. Highest-value core
-      upgrade; slots into the existing benchmark-fixture harness (regenerate
-      references, same gates). Not ML — just a better, constraint-capable engine.
-      Foundation for everything below.
-
-- [ ] M7.ml  ML-accelerated optimization (ML PROPOSES, PHYSICS CERTIFIES).
-      A Core ML surrogate (runs on Apple silicon Neural Engine) predicts a near-
-      optimal density layout as a WARM START; SIMP/MMA then refines it with real
-      FEA to a verified result. Physics may also be folded into TRAINING
-      (physics-informed loss) so the model's proposals respect equilibrium.
-      NON-NEGOTIABLE, NON-REMOVABLE CONSTRAINT: every design shown to a user is
-      certified by a real FEA pass against real material properties BEFORE
-      display. The ML output is NEVER the source of truth — it only saves
-      iterations. A design that fails its certifying FEA is rejected/re-refined,
-      never shipped. Verify: on benchmark parts the ML-warm-started result
-      matches pure-SIMP compliance within tolerance AND passes the same V-gates;
-      an intentionally-bad surrogate output is caught and rejected by the
-      certifying pass (the safety net is tested, not assumed).
-      Build only AFTER M7.dom + M7.mma, and only if reviewed output shows SPEED/
-      FRICTION is the real limiter (ML removes friction; it does not add
-      capability M7.dom hasn't already delivered).
-
-- [ ] M7.trust  Honesty & confidence UI. Every result surfaces: (a) it was
-      FEA-verified against modeled material properties at the chosen orientation;
-      (b) a confidence/margin indicator (worst-case stress margin from the
-      report); (c) a clear recommendation for load-bearing parts: "Verified
-      against modeled properties. Real prints vary (layer adhesion, moisture,
-      printer) — test-print and load-test before relying on this part for
-      safety-critical use." Applies to ALL results (SIMP or ML). This is honesty,
-      not a disclaimer to bury — it's a first-class part of the result screen.
 - [ ] M7.11a Matcap rendering: replace the analytic clay shading with sampled
       matcap (material-capture) textures — load a matcap PNG into a Metal
       texture, sample it by the view-space normal (n.xy → UV), so shine,
@@ -327,32 +457,21 @@
       drop straight in). Lives in the appearance surface (with M7.8). Persists
       the choice per project. Tests: import validates the image; selection
       drives the renderer.
-- [ ] M7.Za STL selection honesty (small — recommend pulling forward to
-      M7.1b's error-text cleanup): when a user taps a face in Faces mode on an
-      STL (a mesh with no B-rep face ids), show a clear message instead of
-      silently doing nothing — e.g. "Face selection needs a STEP file. STL
-      models have no faces; full STL region tools are coming." Applies
-      wherever face-tap returns nil for a faceless mesh. No selection logic
-      change; purely the missing signpost.
-
-- [ ] M7.Zb STL region selection (deferred to end): give STL/faceless meshes a
-      real way to mark Fixture / Load / Frozen regions, feeding the SAME
-      SelectionModel + tagging path M7.5 built for STEP faces (so downstream
-      optimization is identical regardless of input format). Provide at least
-      one of, ideally building up to all three:
-        - coplanar-cluster grouping: auto-cluster adjacent triangles within an
-          angle tolerance into pseudo-faces, so an STL gets face-like regions
-          that tap-select like STEP faces (best default for mechanical parts);
-        - paint select: drag across the surface to tag triangles into the
-          active group;
-        - box/volume select: position a box; triangles inside join the group.
-      Maps groups to voxel tagging via the existing tag path (and mask path
-      once M7.5b bridges it). Tests: coplanar clustering recovers the expected
-      region count on a known STL; painted/boxed triangle sets tag the right
-      voxels. This makes STL a first-class input, not just an optimize-with-
-      defaults fallback.
-
-
-- [ ] M7.zz-ring (deferred, Consider whether this is absolutely necessary and how best to implenment before taking this on) Constrained single-DOF rotation ring for custom
-      load directions: 15° detents, haptic ticks, second ring after first
-      commits, never a freehand drag. After M7.6-app is solid. 
+- [ ] M7.Zb STL region selection: give STL/faceless meshes a real way to mark
+      Fixture / Load / Frozen regions, feeding the SAME SelectionModel +
+      tagging path M7.5 built for STEP faces (so downstream optimization is
+      identical regardless of input format), via the existing tag path and
+      the M7.6-core mask bridge. Acceptance floor for THIS box:
+      coplanar-cluster grouping — auto-cluster adjacent triangles within an
+      angle tolerance into pseudo-faces that tap-select like STEP faces (best
+      default for mechanical parts). Paint select (drag to tag triangles) and
+      box/volume select are follow-on tasks to be added to this list when
+      this box closes — do not attempt all three in one run. Tests: coplanar
+      clustering recovers the expected region count on a known STL; clustered
+      groups tag the right voxels. This makes STL a first-class input, not
+      just an optimize-with-defaults fallback.
+- [ ] M7.zz-ring Constrained single-DOF rotation ring for custom load
+      directions: 15° detents, haptic ticks, second ring after the first
+      commits, never a freehand drag. MAINTAINER DECISION REQUIRED before
+      start: is this needed at all, given the snap directions cover the
+      common cases? Record in DECISIONS.md.
