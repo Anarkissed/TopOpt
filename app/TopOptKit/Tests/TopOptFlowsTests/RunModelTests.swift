@@ -221,6 +221,7 @@ final class RunModelTests: XCTestCase {
         XCTAssertEqual(returnedAfterCancel, false)   // the callback reported stop
         XCTAssertEqual(model.phase, .cancelled)
         XCTAssertNil(model.failure)                  // cancel is not a failure
+        XCTAssertNil(model.outcome, "cancel discards results — no results view")
     }
 
     // MARK: - Run in Background + notifier

@@ -53,6 +53,11 @@ public struct WorkspacePlaceholder: View {
     @State private var nameDraft = ""
     /// Collapse the (bottom-left) Selections panel by tapping its header.
     @State private var selectionsCollapsed = false
+    /// The request that was last optimized — Optimize greys out until the inputs
+    /// (load case / material / quality) change from it (or a run is in flight).
+    @State private var lastRunRequest: RunRequest?
+    /// The group whose colour-swatch popover is open (nil = none).
+    @State private var recoloringGroup: UUID?
 
     // Forwarders onto the project's persistent state. The `nonmutating set`
     // mutates the ProjectModel (a reference), so `selection.mutate()` /
@@ -116,7 +121,7 @@ public struct WorkspacePlaceholder: View {
             // results), while the rest keep optimizing behind them. They PERSIST on
             // the project, so leaving to Home and reopening shows them again — until
             // the user views the original and re-optimizes.
-            if let outcome = run.outcome, !outcome.variants.isEmpty, !viewOriginal {
+            if let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }), !viewOriginal {
                 ResultsScreen(projectName: project.name, outcome: outcome,
                               streaming: run.isStreaming,
                               onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
@@ -125,7 +130,7 @@ public struct WorkspacePlaceholder: View {
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view.
-            if viewOriginal, let outcome = run.outcome, !outcome.variants.isEmpty {
+            if viewOriginal, let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }) {
                 seeResultsChip
             }
         }
@@ -161,6 +166,7 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Can’t start — import a model and choose a material first."
             return
         }
+        lastRunRequest = request   // Optimize greys out until the inputs change
         run.start(request)
     }
 
@@ -433,7 +439,9 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        // Bottom-left, above the bottom bar.
+        // Bottom-left, above the bottom bar. One animation keyed on the collapse
+        // state so the header + body move together (not at different speeds).
+        .animation(DS.Motion.emphasized, value: selectionsCollapsed)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(.leading, DS.Space.xl4)
         .padding(.bottom, 96)
@@ -461,21 +469,28 @@ public struct WorkspacePlaceholder: View {
         let active = g.id == selection.activeGroupID
         let tint = force.tint(for: g)
         return HStack(alignment: .top, spacing: DS.Space.s) {
-            // Tap the swatch to recolor the group from the palette.
-            Menu {
-                ForEach(Array(DS.Color.groupPalette.enumerated()), id: \.offset) { idx, c in
-                    Button { selection.setColorIndex(g.id, idx) } label: {
-                        Label("Color \(idx + 1)", systemImage: "circle.fill")
-                            .foregroundStyle(c.color)
-                    }
-                }
-            } label: {
+            // Tap the swatch to recolor the group — a row of colour swatches.
+            Button { recoloringGroup = g.id } label: {
                 RoundedRectangle(cornerRadius: 4).fill(tint.color)
-                    .frame(width: 13, height: 13)
+                    .frame(width: 14, height: 14)
                     .shadow(color: tint.opacity(0.4).color, radius: 4)
                     .padding(.top, 3)
             }
             .buttonStyle(.plain)
+            .popover(isPresented: Binding(get: { recoloringGroup == g.id },
+                                          set: { if !$0 { recoloringGroup = nil } })) {
+                HStack(spacing: DS.Space.sm) {
+                    ForEach(Array(DS.Color.groupPalette.enumerated()), id: \.offset) { idx, c in
+                        Button { selection.setColorIndex(g.id, idx); recoloringGroup = nil } label: {
+                            Circle().fill(c.color).frame(width: 28, height: 28)
+                                .overlay(Circle().strokeBorder(
+                                    g.colorIndex == idx ? DS.Color.textPrimary.color : .clear, lineWidth: 2))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(DS.Space.ml)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 TextField("Group", text: binding(for: g))
                     .textFieldStyle(.plain)
@@ -773,7 +788,12 @@ public struct WorkspacePlaceholder: View {
     /// "Minimize plastic" is on (self-weight or force-driven removal) OR a full
     /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
     private var canOptimize: Bool {
-        force.canOptimize(in: selection.groups, minimizePlastic: project.minimizePlastic)
+        guard run.phase != .running else { return false }   // not while a run is in flight
+        guard force.canOptimize(in: selection.groups, minimizePlastic: project.minimizePlastic)
+        else { return false }
+        // Grey out until the inputs change from the last optimized run.
+        if let last = lastRunRequest, model.makeRunRequest() == last { return false }
+        return true
     }
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.

@@ -68,7 +68,6 @@ public struct ResultsScreen: View {
             savingsTabs
             mediaPlayer
             orientationCorner
-            streamingChip
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
@@ -95,21 +94,18 @@ public struct ResultsScreen: View {
         }
     }
 
-    /// A top-center "optimizing more…" pill while later variants are still running.
+    /// An "optimizing more…" pill shown just above the savings tabs (bottom-left),
+    /// so a newly-arriving variant appears right next to it.
     @ViewBuilder private var streamingChip: some View {
         if streaming {
-            VStack {
-                HStack(spacing: DS.Space.s) {
-                    ProgressView().controlSize(.small).tint(DS.Color.accent.color)
-                    Text("Optimizing more variants…").dsStyle(DS.TypeScale.caption)
-                        .fontWeight(.semibold).foregroundStyle(DS.Color.textSecondary.color)
-                }
-                .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
-                .background(Capsule().fill(DS.Surface.bar.color)
-                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-                .padding(.top, DS.Space.xl3)
-                Spacer()
+            HStack(spacing: DS.Space.s) {
+                ProgressView().controlSize(.small).tint(DS.Color.accent.color)
+                Text("Optimizing more variants…").dsStyle(DS.TypeScale.footnote)
+                    .fontWeight(.semibold).foregroundStyle(DS.Color.textSecondary.color)
             }
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         }
     }
 
@@ -189,14 +185,14 @@ public struct ResultsScreen: View {
                                 RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
                                 RGBA(250, 220, 60).color, RGBA(255, 70, 50).color, RGBA(28, 60, 170).color,
                             ], center: .center))
-                            .frame(width: 12, height: 12)
-                        Text("Stress").dsStyle(DS.TypeScale.callout)
+                            .frame(width: 15, height: 15)
+                        Text("Stress").dsStyle(DS.TypeScale.bodyStrong)
                             .foregroundStyle(DS.Color.textPrimary.color)
                     }
-                    .padding(.vertical, DS.Space.sm)
-                    .padding(.horizontal, DS.Space.l)
-                    .background(Capsule().fill(model.stressOn ? DS.Color.accent.opacity(0.22).color : DS.Surface.bar.color)
-                        .overlay(Capsule().strokeBorder(model.stressOn ? DS.Color.accent.opacity(0.6).color : DS.Color.strokePanel.color, lineWidth: 1)))
+                    .padding(.vertical, DS.Space.m)
+                    .padding(.horizontal, DS.Space.xl4)   // match the Export button's size
+                    .background(Capsule().fill(model.stressOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
+                        .overlay(Capsule().strokeBorder(model.stressOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
                 }
                 .buttonStyle(.plain)
 
@@ -221,8 +217,9 @@ public struct ResultsScreen: View {
     // MARK: - Bottom-left: savings tabs
 
     private var savingsTabs: some View {
-        VStack {
+        VStack(alignment: .leading, spacing: DS.Space.sm) {
             Spacer()
+            streamingChip   // "optimizing more…" sits right above the variant tabs
             HStack(alignment: .bottom, spacing: DS.Space.s) {
                 ForEach(model.tabs, id: \.index) { tab in
                     let active = tab.index == model.selectedIndex

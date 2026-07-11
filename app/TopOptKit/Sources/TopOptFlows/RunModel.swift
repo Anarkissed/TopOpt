@@ -455,33 +455,34 @@ public final class RunModel: ObservableObject {
 
     private func finish(_ request: RunRequest, _ result: Result<OptimizeOutcome, Error>) {
         guard phase == .running else { return }    // a reset raced ahead — drop it
-        // Any variants already streamed to the results screen (progressive results).
-        let hadStreamed = !(outcome?.variants.isEmpty ?? true)
         switch result {
         case .success(let o):
-            outcome = o                                    // authoritative final
-            if o.acceptedCount == 0 && !o.cancelled {
+            if o.cancelled {
+                // The user cancelled — DISCARD any partial results and return to the
+                // workspace clean (a cancel must never open the results view).
+                outcome = nil
+                phase = .cancelled
+            } else if o.acceptedCount == 0 {
                 // Nothing strong enough: the terminal rung failed the margin gate.
+                outcome = o
                 let terminal = o.variants.last
                 failure = .allRejectedOnMargin(
                     worstMargin: terminal?.worstCaseMargin ?? 0,
                     minFeatureViolations: terminal?.minFeatureViolations ?? 0)
                 phase = .failed
-            } else if o.cancelled && o.acceptedCount == 0 {
-                phase = .cancelled                         // cancelled before any variant
             } else {
-                // Accepted variants exist (normal finish, or a cancel that kept the
-                // completed variants) → keep showing them.
+                outcome = o                                // authoritative final
                 progress = nil
                 phase = .succeeded
             }
         case .failure(let error):
-            if hadStreamed {
-                // The solver failed on a later variant, but earlier ones completed:
-                // keep those rather than throwing everything away.
+            // A solver error mid-run: keep variants that already streamed + were
+            // accepted; otherwise discard and show the failure sheet.
+            if outcome?.variants.contains(where: { $0.accepted }) == true {
                 progress = nil
                 phase = .succeeded
             } else {
+                outcome = nil
                 failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
                 phase = .failed
             }
