@@ -1,0 +1,42 @@
+{
+  "_comment": "Ground truth for M7.mma.2 (stress-constrained optimization). Maintainer-authored. REUSES the committed l-bracket.step geometry (no new geometry; geometry facts live in the existing expected_values.json). This fixture pins the LOAD CASE and the STRESS CAP, and the M7.mma.2 test asserts BEHAVIORAL INVARIANTS (constrained vs unconstrained), NOT an absolute stress value. Rationale below.",
+
+  "_why_no_pinned_stress": "The L-bracket's re-entrant inner corner is a geometric stress singularity: in exact elasticity the von Mises there is unbounded, and a voxel FEA's measured peak RISES with resolution and never converges (independent reference measured peak von Mises per unit force of 9.81e-2, 1.149e-1, 1.352e-1 MPa/N at resolutions 24, 32, 48 - monotonically increasing, no plateau). An absolute peak-stress value is therefore a mesh artifact and MUST NOT be pinned as a golden number; it would spuriously fail at any other resolution. This matches the existing fixture policy (see expected_values.json) of pinning geometry exactly but run results as behavioral invariants.",
+
+  "_provenance": "Load case, force scaling, and the cap-bites property computed by an independent standalone NumPy/SciPy voxel hex-FEA (shares no code with core/; mma2_reference.py, maintainer-run and verified). Peak stress location at res 48 = (23.1, -0.6, 8.1) mm = the re-entrant inner corner, as physically expected. Provenance rule per DECISIONS.md 2026-07-04.",
+
+  "l_bracket_stress_case": {
+    "model": "l-bracket.step",
+    "material": "PLA",
+    "resolution": 48,
+    "anchor": {
+      "description": "top face of the upright wall fully clamped (all 3 DOF)",
+      "plane": "z = 60",
+      "restrict_to_wall_x_range_mm": [22.0, 30.0]
+    },
+    "load": {
+      "description": "total downward force distributed over the far plate face (x = -30), plate thickness only (z in [0,8])",
+      "face": "x = -30",
+      "direction": [0.0, 0.0, -1.0],
+      "total_force_N": 1220.0,
+      "_force_note": "Chosen so the full-solid (unconstrained) peak von Mises at res 48 is ~3x PLA yield, i.e. the stress cap is comfortably exceeded and the constraint is genuinely active (KKT). Linear elasticity => stress scales linearly with force; the exact value is not critical, only that the cap bites."
+    },
+    "stress_cap_mpa": 55.0,
+    "_stress_cap_note": "PLA yield strength (materials.json). The unconstrained full-solid design's peak von Mises at res 48 is ~3x this cap (independent reference: 165 MPa vs 55 MPa cap, i.e. ~3.0x), so a stress-constrained run MUST change the design to satisfy it.",
+
+    "behavioral_invariants": {
+      "unconstrained_exceeds_cap": "an MMA compliance-minimizing run at this load case WITHOUT the stress constraint leaves peak von Mises strictly above stress_cap_mpa (the singular corner guarantees this at any resolution).",
+      "constrained_satisfies_cap": "the stress-constrained MMA run brings peak von Mises to <= stress_cap_mpa * (1 + tol), where tol is the aggregation slack of the p-norm/KS constraint (record the chosen aggregation + tol in DECISIONS.md per M7.mma.2). Do NOT assert equality to a pinned MPa value.",
+      "constraint_costs_compliance": "the constrained design's compliance is >= the unconstrained design's compliance at the same volume fraction (satisfying the cap costs stiffness). This is the core proof that the constraint is active and respected.",
+      "peak_moves_or_thickens_at_corner": "the constrained design retains/adds material at the re-entrant corner region (near x~22, z~8) relative to the unconstrained design (optional structural check; connectivity-based, not pixel-perfect)."
+    },
+
+    "_reviewer_sanity_reference": {
+      "note": "NOT asserted by the test - documentation so a reviewer can confirm the case is set up to bite. From the independent reference at res 48:",
+      "full_solid_peak_vm_per_unit_force_MPa_per_N": 0.135,
+      "full_solid_peak_vm_at_1220N_MPa": 165.0,
+      "peak_location_mm": [23.1, -0.6, 8.1],
+      "peak_over_cap_ratio": 3.0
+    }
+  }
+}

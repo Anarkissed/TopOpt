@@ -132,3 +132,4 @@ Eigen-free public API. Approved by Nadim.
      displacement vectors for M7.viz.3), the app agent STOPS with a Blocked
      handoff; the core track adds it — the app agent never edits /core/, and
      the core track never edits /app/. Approved by Nadim.
+- 2026-07-11: MMA added as an alternative updater behind SimpOptions.updater, OC remains default; §4 optimizer row will read OC+MMA at the M7.mma.4 switchover

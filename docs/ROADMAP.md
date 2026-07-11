@@ -306,7 +306,7 @@
 > delivered. Task order is positional, top to bottom; identifiers are labels,
 > not sequence.
 
-- [x] M7.mma.1 MMA updater (Svanberg 1987), compliance objective + volume
+- [ ] M7.mma.1 MMA updater (Svanberg 1987), compliance objective + volume
       constraint only, as a drop-in alternative to Optimality Criteria behind
       `SimpOptions.updater = {OC, MMA}`. Default stays OC — NO fixture changes
       in this task. Asymptote init/adaptation and move limits per the paper;
@@ -317,15 +317,21 @@
       Pure core; no /app/.
 - [ ] M7.mma.2 Stress-constrained optimization on the MMA path: aggregated
       von Mises constraint (p-norm or KS — record the choice and the
-      aggregation parameter in DECISIONS.md) with adjoint sensitivities and
-      stress relaxation for the singularity problem (qp or epsilon-relaxation;
-      record which). Tests: finite-difference check of the aggregated
-      constraint sensitivity on a tiny grid; L-bracket fixture where the
-      unconstrained design exceeds a stress cap at the re-entrant corner and
-      the constrained run satisfies the cap with worse compliance. BLOCKS ON:
-      maintainer generates the L-bracket stress reference via the independent
-      reference implementation BEFORE this task starts (fixture discipline,
-      per M6.3). Pure core; no /app/.
+      aggregation parameter/tolerance in DECISIONS.md) with adjoint
+      sensitivities and stress relaxation for the singularity problem (qp or
+      epsilon-relaxation; record which). Tests: finite-difference check of the
+      aggregated constraint sensitivity on a tiny grid; PLUS the L-bracket
+      stress case. The reference fixture is COMMITTED at
+      core/tests/fixtures/demo/mma2_stress_fixture.json (maintainer-authored,
+      independent NumPy FEA — this task is UNBLOCKED, consume it, do not
+      regenerate). Assert its BEHAVIORAL INVARIANTS: (a) an unconstrained run
+      leaves peak von Mises above stress_cap_mpa; (b) the constrained run
+      satisfies the cap within the aggregation tolerance you record; (c) the
+      constrained design's compliance >= the unconstrained design's at the same
+      volume fraction (the constraint costs stiffness). Do NOT pin or assert an
+      absolute von Mises value — the re-entrant corner is a mesh-dependent
+      singularity (see the fixture's _why_no_pinned_stress note). Pure core;
+      no /app/.
 - [ ] M7.mma.3 Multi-load-case optimization: weighted-sum and worst-case
       (min-max via MMA constraints) compliance across N load cases; the
       minimize_plastic job schema gains a load-case list, back-compatible
