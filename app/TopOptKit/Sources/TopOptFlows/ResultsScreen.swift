@@ -45,6 +45,7 @@ public struct ResultsScreen: View {
     /// `model.playing`, so Play actually plays (previously it required a manual drag).
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     private static let morphDuration: Double = 6   // design `dur = 6`s
+    private static let flexDuration: Double = 2.5  // one rest→full→rest wobble (s)
 
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
@@ -70,12 +71,15 @@ public struct ResultsScreen: View {
             MetalMeshView(mesh: viewerMesh,
                           onProjection: { projection = $0 },
                           stressTints: stressTints,
-                          reveal: viewerReveal)
+                          reveal: viewerReveal,
+                          flexDisplacements: flexDisplacements,
+                          flexScale: flexScale)
                 .ignoresSafeArea()
 
             topLeft
             topRight
             if model.stressOn { stressLegendPanel }   // M7.viz.1: yield-scaled legend
+            if flexActive { flexControlPanel }        // M7.viz.3: exaggeration slider
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
             savingsTabs
             mediaPlayer
@@ -85,8 +89,13 @@ public struct ResultsScreen: View {
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .onReceive(ticker) { _ in
-            guard model.playing else { return }
-            model.advance((1.0 / 30.0) / Self.morphDuration)
+            if model.playing { model.advance((1.0 / 30.0) / Self.morphDuration) }
+            // M7.viz.3: loop the flex while it's on — UNLESS reduced-motion, which
+            // holds the static full-deflection frame (no advance → phase stays put,
+            // and flexScale uses amplitude 1).
+            if model.flexOn && !reduceMotion {
+                model.advanceFlex((1.0 / 30.0) / Self.flexDuration)
+            }
         }
         .onChange(of: liveOutcome.variants.count) { _ in
             // A variant streamed in (or the final outcome landed) — merge it.
@@ -135,9 +144,26 @@ public struct ResultsScreen: View {
     /// stress is off, Play scrubs THROUGH the history keyframes (the real "watch it
     /// carve out"); otherwise it's the final mesh (stress overlay, or the
     /// reveal-scrub fallback for meshes without history).
-    private var showHistory: Bool { !model.stressOn && model.hasHistory }
+    /// M7.viz.3 flex is live only when toggled on AND the variant has a displacement
+    /// field. While flexing, the stage shows the final variant mesh (not the history
+    /// morph) fully formed, wobbling by the displacement.
+    private var flexActive: Bool { model.flexOn && model.hasFlex }
+    private var showHistory: Bool { !model.stressOn && !flexActive && model.hasHistory }
     private var viewerMesh: ViewerMesh? { showHistory ? model.playbackMesh : model.selectedMesh }
-    private var viewerReveal: Float { showHistory ? 1 : Float(model.playT) }
+    private var viewerReveal: Float { (showHistory || flexActive) ? 1 : Float(model.playT) }
+
+    /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
+    /// off / the variant has no field). Cached in the model, so this is cheap.
+    private var flexDisplacements: [Float]? {
+        guard flexActive, let mesh = model.selectedMesh,
+              let field = model.selectedDisplacementField, !field.isEmpty else { return nil }
+        return model.flexDisplacements(for: mesh, field: field)
+    }
+    /// The per-frame displacement scale (exaggeration·amplitude); reduced-motion pins
+    /// the amplitude at 1 (static full deflection).
+    private var flexScale: Float {
+        flexActive ? model.flexScale(reduceMotion: reduceMotion) : 0
+    }
 
     // MARK: - Stress legend (M7.viz.1 — scaled to material yield)
 
@@ -178,6 +204,50 @@ public struct ResultsScreen: View {
         RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
         RGBA(250, 220, 60).color, RGBA(255, 70, 50).color,
     ]
+
+    // MARK: - Flex control (M7.viz.3 — deflection animation)
+
+    /// The exaggeration slider for the flex animation (50–100×), top-leading so it
+    /// clears the top-center stress legend. Under reduced-motion the copy says a
+    /// static full-deflection frame is shown, not a loop. Pixels are device QA (the
+    /// M7 /app/ standard); the exaggeration math + reduced-motion path are tested on
+    /// the model.
+    @ViewBuilder private var flexControlPanel: some View {
+        VStack {
+            Spacer().frame(height: 84)   // clear the top nav row
+            HStack {
+                VStack(alignment: .leading, spacing: DS.Space.s) {
+                    HStack(spacing: DS.Space.m) {
+                        Text("Deflection").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        Spacer()
+                        Text("\(Int(model.flexExaggeration))×").dsStyle(DS.TypeScale.footnote)
+                            .fontWeight(.semibold).monospacedDigit()
+                            .foregroundStyle(DS.Color.accent.color)
+                    }
+                    Slider(value: Binding(get: { model.flexExaggeration },
+                                          set: { model.setFlexExaggeration($0) }),
+                           in: FlexAnimation.minExaggeration...FlexAnimation.maxExaggeration)
+                        .frame(width: 172)
+                        .tint(DS.Color.accent.color)
+                    Text(reduceMotion
+                         ? "Reduced motion — showing full deflection"
+                         : "Exaggerated \(Int(model.flexExaggeration))× — not to scale")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                        .frame(width: 172, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(DS.Space.l)
+                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                .dsShadow(.panel)
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(.horizontal, DS.Space.xl3)
+    }
 
     // MARK: - Hot-spot callout (M7.viz.2 — the single worst-stress point)
 
@@ -276,6 +346,23 @@ public struct ResultsScreen: View {
         VStack {
             HStack(spacing: DS.Space.sm) {
                 Spacer()
+                // M7.viz.3: Flex (deflection animation) toggle — only when the variant
+                // carries a displacement field to animate.
+                if model.hasFlex {
+                    Button { model.toggleFlex() } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "waveform.path")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Flex").dsStyle(DS.TypeScale.bodyStrong)
+                        }
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.vertical, DS.Space.m)
+                        .padding(.horizontal, DS.Space.xl4)
+                        .background(Capsule().fill(model.flexOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
+                            .overlay(Capsule().strokeBorder(model.flexOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
+                    }
+                    .buttonStyle(.plain)
+                }
                 Button { model.toggleStress() } label: {
                     HStack(spacing: DS.Space.s) {
                         Circle()

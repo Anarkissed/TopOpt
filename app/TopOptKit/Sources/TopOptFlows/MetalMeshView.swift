@@ -30,6 +30,10 @@ import QuartzCore
 private struct ViewerUniforms {
     var mvp: simd_float4x4
     var normalMatrix: simd_float4x4  // view rotation (upper-left 3×3), padded
+    /// M7.viz.3 flex: `.x` = displacement scale (exaggeration·amplitude) added to
+    /// each rest vertex before the MVP. Appended AFTER mvp/normalMatrix so the id
+    /// pass (which reads only that prefix) is unaffected.
+    var flex: SIMD4<Float> = .zero
 }
 
 // The neutral-clay shader (M7.4) + a selection tint (M7.5), compiled at runtime so
@@ -40,14 +44,20 @@ using namespace metal;
 
 struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; float4 tint [[attribute(2)]]; };
 struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight; };
-struct Uniforms { float4x4 mvp; float4x4 normalMatrix; };
+struct Uniforms { float4x4 mvp; float4x4 normalMatrix; float4 flex; };
 
-vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]]) {
+// buffer(3) carries the per-vertex FEA displacement (mm); `flex.x` scales it
+// (exaggeration·amplitude). At scale 0 the buffer contributes nothing, so the
+// static workspace draw is byte-identical — this is the M7.viz.3 flex animation,
+// a pure vertex displacement of the already-solved solution (no re-simulation).
+vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]],
+                          constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
     VOut o;
-    o.position = u.mvp * float4(in.position, 1.0);
+    float3 p = in.position + u.flex.x * float3(disp[vid]);
+    o.position = u.mvp * float4(p, 1.0);
     o.vnormal  = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
     o.tint = in.tint;
-    o.mheight = in.position.y;   // model-space height, for the M7.8 reveal scrub
+    o.mheight = in.position.y;   // model-space height (rest), for the M7.8 reveal scrub
     return o;
 }
 
@@ -150,6 +160,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var vertexBuffer: MTLBuffer?
     private var tintBuffer: MTLBuffer?
     private var idVertexBuffer: MTLBuffer?
+    /// M7.viz.3 flex: per-flat-vertex displacement (packed float3, mm). Always bound
+    /// at buffer(3) — zero-filled on `setMesh`, so the static draw adds nothing.
+    private var flexBuffer: MTLBuffer?
+    /// The current displacement scale (exaggeration·amplitude); 0 = rest.
+    private var flexScale: Float = 0
     private var vertexDrawCount = 0
     /// M7.8 reveal scrub params (fraction, minY, maxY, enabled); default shows all.
     private var revealParams = SIMD4<Float>(1, 0, 1, 0)
@@ -314,8 +329,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     func setMesh(_ mesh: ViewerMesh) {
         self.mesh = mesh
         guard !mesh.isEmpty else {
-            vertexBuffer = nil; tintBuffer = nil; idVertexBuffer = nil
-            vertexDrawCount = 0; flatFaceIDs = []
+            vertexBuffer = nil; tintBuffer = nil; idVertexBuffer = nil; flexBuffer = nil
+            vertexDrawCount = 0; flatFaceIDs = []; flexScale = 0
             return
         }
         let interleaved = mesh.flat.interleaved()
@@ -323,6 +338,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
         }
         vertexDrawCount = mesh.flat.vertexCount
+
+        // A fresh mesh starts un-flexed: a zero displacement buffer (always bound at
+        // buffer(3)) + scale 0, so the static draw is unchanged until flex is set.
+        flexScale = 0
+        let zeros = [Float](repeating: 0, count: vertexDrawCount * 3)
+        flexBuffer = zeros.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
 
         // Flat face ids: a triangle's id repeated for each of its three vertices.
         flatFaceIDs = mesh.faceIDs.flatMap { id -> [UInt32] in
@@ -482,6 +505,30 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// M7.viz.3 flex: upload the per-flat-vertex displacement vectors (flattened xyz,
+    /// mm) that the vertex shader scales by `flexScale`. `disp` must have one xyz per
+    /// flat vertex (`vertexDrawCount * 3`); a mismatch is ignored (keeps the zeros).
+    func setFlexDisplacements(_ disp: [Float]) {
+        guard vertexDrawCount > 0, disp.count == vertexDrawCount * 3 else { return }
+        flexBuffer = disp.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// M7.viz.3 flex: the current displacement scale (exaggeration·amplitude); 0 rests.
+    func setFlexScale(_ s: Float) { flexScale = s }
+
+    /// M7.viz.3 flex: drop back to rest — re-zero the displacement buffer (so a stale
+    /// variant's vectors can't leak) and clear the scale.
+    func resetFlex() {
+        flexScale = 0
+        guard vertexDrawCount > 0 else { flexBuffer = nil; return }
+        let zeros = [Float](repeating: 0, count: vertexDrawCount * 3)
+        flexBuffer = zeros.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
     /// M7.8 morph scrub: reveal fragments up to `fraction` of the mesh's model-Y
     /// extent (1 = fully formed). Enabled only while scrubbing (< 1).
     func setReveal(_ fraction: Float) {
@@ -547,6 +594,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// on-screen `draw(in:)` and the headless `renderOffscreen`.
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, into cmd: MTLCommandBuffer) {
         guard vertexDrawCount > 0, let vbuf = vertexBuffer, let tbuf = tintBuffer,
+              let fbuf = flexBuffer,
               let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
         var uniforms = makeUniforms(aspect: aspect)
         enc.setRenderPipelineState(pipeline)
@@ -554,6 +602,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setCullMode(.none)  // show both sides regardless of winding
         enc.setVertexBuffer(vbuf, offset: 0, index: 0)
         enc.setVertexBuffer(tbuf, offset: 0, index: 2)
+        enc.setVertexBuffer(fbuf, offset: 0, index: 3)   // M7.viz.3 flex displacement
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
         enc.setFragmentBytes(&revealParams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
@@ -589,7 +638,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             SIMD4<Float>(vm.columns.1.x, vm.columns.1.y, vm.columns.1.z, 0),
             SIMD4<Float>(vm.columns.2.x, vm.columns.2.y, vm.columns.2.z, 0),
             SIMD4<Float>(0, 0, 0, 1)))
-        return ViewerUniforms(mvp: mvp, normalMatrix: normal4)
+        return ViewerUniforms(mvp: mvp, normalMatrix: normal4,
+                              flex: SIMD4<Float>(flexScale, 0, 0, 0))
     }
 
     /// The ground's MVP: plain camera view·projection (world-space floor).
@@ -721,6 +771,11 @@ struct MeshViewInputs {
     var stressTints: [SIMD4<Float>]?
     /// M7.8 results morph scrub in [0, 1] (1 = fully formed; < 1 reveals partially).
     var reveal: Float = 1
+    /// M7.viz.3 flex: per-flat-vertex displacement (flattened xyz, mm), aligned with
+    /// `mesh.flat`. Uploaded on mesh change; nil = no flex geometry.
+    var flexDisplacements: [Float]? = nil
+    /// M7.viz.3 flex: the per-frame displacement scale (exaggeration·amplitude); 0 rests.
+    var flexScale: Float = 0
 }
 
 #if os(iOS)
@@ -733,11 +788,13 @@ public struct MetalMeshView: UIViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
-                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1) {
+                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1,
+                flexDisplacements: [Float]? = nil, flexScale: Float = 0) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection, stressTints: stressTints, reveal: reveal)
+            onProjection: onProjection, stressTints: stressTints, reveal: reveal,
+            flexDisplacements: flexDisplacements, flexScale: flexScale)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -771,11 +828,13 @@ public struct MetalMeshView: NSViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
-                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1) {
+                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1,
+                flexDisplacements: [Float]? = nil, flexScale: Float = 0) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection, stressTints: stressTints, reveal: reveal)
+            onProjection: onProjection, stressTints: stressTints, reveal: reveal,
+            flexDisplacements: flexDisplacements, flexScale: flexScale)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -833,6 +892,9 @@ extension MetalMeshView {
         /// M7.8: whether a stress overlay is currently uploaded, and the last reveal.
         private var appliedStress = false
         private var appliedReveal: Float = 1
+        /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
+        private var appliedFlex = false
+        private var appliedFlexScale: Float = 0
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
@@ -901,6 +963,27 @@ extension MetalMeshView {
             if inputs.reveal != appliedReveal || dirty {
                 appliedReveal = inputs.reveal
                 renderer.setReveal(inputs.reveal)
+                dirty = true
+            }
+
+            // M7.viz.3 flex: upload the per-vertex displacement vectors on mesh change
+            // / when they first arrive (they only depend on the mesh + field, not the
+            // phase); the scale is a cheap per-frame uniform that drives the loop.
+            if let flex = inputs.flexDisplacements {
+                if dirty || !appliedFlex {
+                    appliedFlex = true
+                    renderer.setFlexDisplacements(flex)
+                    dirty = true
+                }
+            } else if appliedFlex {
+                appliedFlex = false
+                renderer.resetFlex()      // re-zero so a stale variant can't displace
+                appliedFlexScale = 0
+                dirty = true
+            }
+            if inputs.flexScale != appliedFlexScale {
+                appliedFlexScale = inputs.flexScale
+                renderer.setFlexScale(inputs.flexScale)
                 dirty = true
             }
 

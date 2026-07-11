@@ -502,4 +502,174 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.selectedStressField?.values.count, 8)
         XCTAssertEqual(m.selectedStressField?.nx, 2)
     }
+
+    // MARK: - M7.viz.3 flex animation
+
+    private func assertClose(_ a: SIMD3<Float>, _ b: SIMD3<Float>,
+                             accuracy: Float = 1e-5, _ msg: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(a.x, b.x, accuracy: accuracy, msg, file: file, line: line)
+        XCTAssertEqual(a.y, b.y, accuracy: accuracy, msg, file: file, line: line)
+        XCTAssertEqual(a.z, b.z, accuracy: accuracy, msg, file: file, line: line)
+    }
+
+    // MARK: DisplacementField (per-node sampling)
+
+    func testDisplacementFieldSamplesNearestNode() {
+        // 1-voxel grid: 2×2×2 = 8 nodes. Displace only node (1,1,1) (index 7) by +Y 0.1.
+        var vals = [Float](repeating: 0, count: 24)
+        vals[7 * 3 + 1] = 0.1
+        let f = DisplacementField(nx: 1, ny: 1, nz: 1, origin: .zero, spacing: 1, values: vals)
+        XCTAssertFalse(f.isEmpty)
+        XCTAssertEqual(f.nodeCount, 8)
+        assertClose(f.displacement(at: SIMD3(0, 0, 0)), .zero)
+        assertClose(f.displacement(at: SIMD3(1, 1, 1)), SIMD3<Float>(0, 0.1, 0))
+        // A point nearer node (1,1,1) rounds to it (nearest-node — mesh verts sit on corners).
+        assertClose(f.displacement(at: SIMD3(0.9, 0.9, 0.9)), SIMD3<Float>(0, 0.1, 0))
+        // Non-zero origin + spacing: node (1,1,1) is at origin+(spacing,spacing,spacing).
+        let g = DisplacementField(nx: 1, ny: 1, nz: 1, origin: SIMD3(10, 20, 30), spacing: 2, values: vals)
+        assertClose(g.displacement(at: SIMD3(12, 22, 32)), SIMD3<Float>(0, 0.1, 0))
+        assertClose(g.displacement(at: SIMD3(10, 20, 30)), .zero)
+    }
+
+    func testDisplacementFieldEmptyRaggedAndOutOfRange() {
+        XCTAssertTrue(DisplacementField(nx: 1, ny: 1, nz: 1, origin: .zero, spacing: 1, values: []).isEmpty)
+        // A too-short field (< 3·nodeCount) is treated as empty (safety, no OOB read).
+        XCTAssertTrue(DisplacementField(nx: 1, ny: 1, nz: 1, origin: .zero, spacing: 1, values: [0, 0, 0]).isEmpty)
+        XCTAssertTrue(DisplacementField(nx: 0, ny: 0, nz: 0, origin: .zero, spacing: 1, values: [Float](repeating: 0, count: 3)).isEmpty)
+        // An out-of-range point clamps into range and reads a valid (zero) node, no trap.
+        let f = DisplacementField(nx: 1, ny: 1, nz: 1, origin: .zero, spacing: 1, values: [Float](repeating: 0, count: 24))
+        assertClose(f.displacement(at: SIMD3(100, 100, 100)), .zero)
+    }
+
+    // MARK: FlexAnimation (pure math)
+
+    func testFlexAmplitudeIsRestFullRest() {
+        XCTAssertEqual(FlexAnimation.amplitude(phase: 0), 0, accuracy: 1e-9)    // rest
+        XCTAssertEqual(FlexAnimation.amplitude(phase: 0.5), 1, accuracy: 1e-9)  // full deflection
+        XCTAssertEqual(FlexAnimation.amplitude(phase: 1), 0, accuracy: 1e-9)    // back to rest
+        // Non-decreasing from rest to full, and always in [0,1].
+        var prev = -1.0
+        for i in 0...50 {
+            let a = FlexAnimation.amplitude(phase: Double(i) / 100)   // phase 0 → 0.5
+            XCTAssertGreaterThanOrEqual(a, -1e-9)
+            XCTAssertLessThanOrEqual(a, 1 + 1e-9)
+            XCTAssertGreaterThanOrEqual(a, prev - 1e-9)
+            prev = a
+        }
+    }
+
+    func testFlexExaggerationClampAndDefaultInBand() {
+        XCTAssertEqual(FlexAnimation.clampExaggeration(10), 50)   // below → min
+        XCTAssertEqual(FlexAnimation.clampExaggeration(75), 75)   // inside → unchanged
+        XCTAssertEqual(FlexAnimation.clampExaggeration(999), 100) // above → max
+        XCTAssertGreaterThanOrEqual(FlexAnimation.defaultExaggeration, FlexAnimation.minExaggeration)
+        XCTAssertLessThanOrEqual(FlexAnimation.defaultExaggeration, FlexAnimation.maxExaggeration)
+    }
+
+    func testFlexDisplacedPositionScalesLinearly() {
+        let base = SIMD3<Float>(1, 2, 3), d = SIMD3<Float>(0, 0.1, 0)
+        // Amplitude 0 → rest (exactly the base position, no move).
+        assertClose(FlexAnimation.displacedPosition(base: base, displacement: d, exaggeration: 60, amplitude: 0), base)
+        // Amplitude 1 → full deflection = base + exaggeration·d.
+        assertClose(FlexAnimation.displacedPosition(base: base, displacement: d, exaggeration: 60, amplitude: 1),
+                    base + 60 * d)
+        // Linear in exaggeration: doubling the factor doubles the offset from base.
+        let a = FlexAnimation.displacedPosition(base: .zero, displacement: d, exaggeration: 50, amplitude: 1)
+        let b = FlexAnimation.displacedPosition(base: .zero, displacement: d, exaggeration: 100, amplitude: 1)
+        assertClose(b, 2 * a)
+        // Linear in amplitude: half amplitude = half the full-deflection offset.
+        let half = FlexAnimation.displacedPosition(base: .zero, displacement: d, exaggeration: 80, amplitude: 0.5)
+        assertClose(half, 40 * d)
+    }
+
+    // MARK: ResultsModel flex state
+
+    /// A single-triangle variant whose third vertex sits on node (1,1,1); a 1-voxel
+    /// grid whose node (1,1,1) is displaced +Y 0.1. So the flex buffer is non-trivial.
+    @MainActor private func flexModel() -> ResultsModel {
+        var vals = [Float](repeating: 0, count: 24)
+        vals[7 * 3 + 1] = 0.1   // node (1,1,1) = index 7, +Y 0.1 mm
+        let v = OptimizeVariant(
+            requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 10,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, orientation: SIMD3(0, 0, 1), maxStressMPa: 10,
+            meshVertices: [0, 0, 0, 1, 0, 0, 1, 1, 1], meshIndices: [0, 1, 2],
+            vonMisesField: [1], displacementField: vals)
+        let out = OptimizeOutcome(variants: [v], stoppedOnMargin: false, cancelled: false,
+                                  acceptedCount: 1, voxelVolumeMM3: 1,
+                                  gridNx: 1, gridNy: 1, gridNz: 1, gridOrigin: .zero, spacing: 1)
+        return ResultsModel(projectName: "P", outcome: out)
+    }
+
+    @MainActor func testHasFlexReflectsDisplacementField() {
+        XCTAssertTrue(flexModel().hasFlex)
+        // A variant with no displacement field (default []) cannot flex.
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5)]))
+        XCTAssertFalse(m.hasFlex)
+        XCTAssertTrue(m.selectedDisplacementField?.isEmpty ?? true)
+    }
+
+    @MainActor func testFlexToggleResetsPhaseAndClampsExaggeration() {
+        let m = flexModel()
+        XCTAssertFalse(m.flexOn)
+        m.toggleFlex(); XCTAssertTrue(m.flexOn)
+        m.setFlexExaggeration(5);   XCTAssertEqual(m.flexExaggeration, 50)   // clamped up
+        m.setFlexExaggeration(500); XCTAssertEqual(m.flexExaggeration, 100)  // clamped down
+        m.setFlexExaggeration(72);  XCTAssertEqual(m.flexExaggeration, 72)
+        m.advanceFlex(0.3)
+        XCTAssertEqual(m.flexPhase, 0.3, accuracy: 1e-9)
+        m.toggleFlex()                                   // off → loop resets to rest
+        XCTAssertFalse(m.flexOn)
+        XCTAssertEqual(m.flexPhase, 0, accuracy: 1e-9)
+    }
+
+    @MainActor func testFlexAmplitudeAndScaleWithReduceMotion() {
+        let m = flexModel()
+        m.setFlexExaggeration(60)
+        // Off → amplitude/scale are 0 regardless of reduced-motion.
+        XCTAssertEqual(m.flexAmplitude(reduceMotion: false), 0, accuracy: 1e-9)
+        XCTAssertEqual(m.flexAmplitude(reduceMotion: true), 0, accuracy: 1e-9)
+        XCTAssertEqual(m.flexScale(reduceMotion: false), 0, accuracy: 1e-6)
+
+        m.toggleFlex()   // on, phase 0 = rest
+        XCTAssertEqual(m.flexAmplitude(reduceMotion: false), 0, accuracy: 1e-9)  // animated: rest frame
+        XCTAssertEqual(m.flexScale(reduceMotion: false), 0, accuracy: 1e-6)
+        // Reduced-motion pins the STATIC full-deflection frame (amplitude 1) at any phase.
+        XCTAssertEqual(m.flexAmplitude(reduceMotion: true), 1, accuracy: 1e-9)
+        XCTAssertEqual(m.flexScale(reduceMotion: true), 60, accuracy: 1e-5)
+        // Advancing to phase 0.5 reaches full deflection when animated.
+        m.advanceFlex(0.5)
+        XCTAssertEqual(m.flexAmplitude(reduceMotion: false), 1, accuracy: 1e-9)
+        XCTAssertEqual(m.flexScale(reduceMotion: false), 60, accuracy: 1e-5)
+    }
+
+    @MainActor func testAdvanceFlexWrapsAndIsNoOpWhenOff() {
+        let m = flexModel()
+        m.advanceFlex(0.4)                                  // off → ignored
+        XCTAssertEqual(m.flexPhase, 0, accuracy: 1e-9)
+        m.toggleFlex()
+        m.advanceFlex(0.7); m.advanceFlex(0.7)              // 1.4 wraps to 0.4
+        XCTAssertEqual(m.flexPhase, 0.4, accuracy: 1e-9)
+    }
+
+    @MainActor func testFlexDisplacementsBufferRestAndFullFrames() {
+        let m = flexModel()
+        let mesh = try! XCTUnwrap(m.selectedMesh)
+        let field = try! XCTUnwrap(m.selectedDisplacementField)
+        let disp = m.flexDisplacements(for: mesh, field: field)
+        // One xyz per flat vertex (3 for a single triangle).
+        XCTAssertEqual(disp.count, mesh.flat.vertexCount * 3)
+        // The only displaced node is (1,1,1) with +Y 0.1; the vertex sitting there carries it.
+        let maxY = stride(from: 1, to: disp.count, by: 3).map { disp[$0] }.max() ?? 0
+        XCTAssertEqual(maxY, 0.1, accuracy: 1e-6)
+        // The rest frame (amplitude 0) moves nothing; the full-deflection frame
+        // (exaggeration 60 · amplitude 1) moves that corner 6 mm.
+        for i in stride(from: 0, to: disp.count, by: 3) {
+            let d = SIMD3<Float>(disp[i], disp[i + 1], disp[i + 2])
+            assertClose(FlexAnimation.displacedPosition(base: .zero, displacement: d, exaggeration: 60, amplitude: 0), .zero)
+        }
+        XCTAssertEqual(maxY * 60, 6, accuracy: 1e-4)
+        // Cached: the same array instance content is returned on re-query for the selection.
+        XCTAssertEqual(m.flexDisplacements(for: mesh, field: field), disp)
+    }
 }

@@ -295,6 +295,34 @@ final class ViewerTests: XCTestCase {
         }
         XCTAssertGreaterThan(lit, 500, "mesh did not rasterize (only \(lit) lit px of \(128 * 128))")
     }
+
+    // M7.viz.3: the flex vertex displacement actually moves geometry on the GPU, and
+    // scale 0 is byte-identical to rest (the buffer contributes nothing).
+    func testRendererFlexDisplacesGeometry() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("no Metal device on this host")
+        }
+        guard let renderer = MeshRenderer(device: device) else {
+            XCTFail("MeshRenderer init failed: \(MeshRenderer.lastInitError ?? "unknown")")
+            return
+        }
+        let mesh = ViewerMesh(vertices: Self.cubeVerts, indices: Self.cubeTris, faceIDs: [])
+        renderer.setMesh(mesh)
+        let rest = renderer.renderOffscreen(size: 96)
+        XCTAssertNotNil(rest)
+
+        // Shove every flat vertex +X; a non-zero scale must change the rasterization.
+        let flatV = mesh.flat.vertexCount
+        var disp = [Float](repeating: 0, count: flatV * 3)
+        for v in 0..<flatV { disp[v * 3] = 1 }
+        renderer.setFlexDisplacements(disp)
+        renderer.setFlexScale(3)
+        XCTAssertNotEqual(renderer.renderOffscreen(size: 96), rest, "flex scale did not move geometry")
+
+        // Scale 0 returns to rest exactly (deterministic same-state redraw).
+        renderer.setFlexScale(0)
+        XCTAssertEqual(renderer.renderOffscreen(size: 96), rest, "scale 0 should equal the rest frame")
+    }
     #endif
 
     // MARK: AppModel geometry seam (workspace viewer gets a mesh)
