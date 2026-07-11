@@ -354,6 +354,15 @@ public final class RunModel: ObservableObject {
     // MARK: - Lifecycle
 
     /// Start an optimize on a background queue. No-op if one is already running.
+    /// Restore persisted results (persist-c) into an idle run so the workspace shows
+    /// them immediately on reopen — no side effects (phase stays `.idle`, no
+    /// notifier). A later Optimize resets and re-runs as normal. No-op if a run is
+    /// active or results already loaded (e.g. reopened within the same launch).
+    public func restoreOutcome(_ restored: OptimizeOutcome) {
+        guard phase == .idle, outcome == nil else { return }
+        outcome = restored
+    }
+
     public func start(_ request: RunRequest) {
         guard phase != .running else { return }
         phase = .running

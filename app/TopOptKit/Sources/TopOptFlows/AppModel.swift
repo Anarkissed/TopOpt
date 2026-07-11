@@ -72,6 +72,9 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var runningIDs: Set<UUID> = []
     /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
     private var runCancellables: [UUID: AnyCancellable] = [:]
+    /// Serial queue for the (potentially large) results encode/decode + file IO, so
+    /// persisting/restoring variants never blocks the main thread (persist-c).
+    private static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
@@ -388,11 +391,22 @@ public final class AppModel: ObservableObject {
         } catch {
             toast = "Couldn’t save “\(project.name)”: \(error.localizedDescription)"
         }
-        // Once a project has results, reflect it in its Library card ("Optimized").
-        if project.hasResults,
-           let idx = recentProjects.firstIndex(where: { $0.id == project.id }),
-           !recentProjects[idx].optimized {
-            recentProjects[idx].optimized = true
+        // Once a project has results, reflect it in its Library card ("Optimized")
+        // and persist the full outcome (variants + playback keyframes) so it
+        // survives an app relaunch (persist-c). Encode + write off the main thread.
+        if project.hasResults, let outcome = project.run.outcome {
+            if let idx = recentProjects.firstIndex(where: { $0.id == project.id }),
+               !recentProjects[idx].optimized {
+                recentProjects[idx].optimized = true
+            }
+            let dto = OutcomeCodec.dto(from: outcome)
+            let url = store.resultsURL(id: project.id)
+            let dir = url.deletingLastPathComponent()
+            Self.resultsQueue.async {
+                guard let data = try? OutcomeCodec.encode(dto) else { return }
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try? data.write(to: url, options: .atomic)
+            }
         }
     }
 
@@ -406,7 +420,18 @@ public final class AppModel: ObservableObject {
         let file = ImportedFile(name: snap.originalFileName, path: path,
                                 triangleCount: mesh.triangleCount, faceCount: mesh.faceCount,
                                 watertight: mesh.watertight)
-        return ProjectModel(restoring: snap, importedFile: file, importedMesh: mesh)
+        let pm = ProjectModel(restoring: snap, importedFile: file, importedMesh: mesh)
+        // persist-c: if this project had results, load them (variants + playback)
+        // off-main and drop them into the idle run so results reopen instantly.
+        if snap.optimized == true {
+            let url = store.resultsURL(id: snap.id)
+            Self.resultsQueue.async {
+                guard let data = try? Data(contentsOf: url),
+                      let outcome = try? OutcomeCodec.decode(data) else { return }
+                DispatchQueue.main.async { pm.run.restoreOutcome(outcome) }
+            }
+        }
+        return pm
     }
 
     // MARK: - internals

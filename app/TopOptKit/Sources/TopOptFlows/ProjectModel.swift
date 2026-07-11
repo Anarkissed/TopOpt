@@ -18,6 +18,7 @@
 // in-memory-across-navigation only. Nothing here is `Codable` yet.
 
 import Foundation
+import Combine
 import simd
 import TopOptKit
 
@@ -60,6 +61,13 @@ public final class ProjectModel: ObservableObject {
         run.outcome?.variants.contains { $0.accepted } ?? false
     }
 
+    /// Forwards the run's MEANINGFUL changes (outcome + phase, NOT the per-iteration
+    /// progress ticks) up to this project's `objectWillChange`, so the workspace —
+    /// which observes the project, not the nested run — reliably re-renders when
+    /// results stream in, a run resolves, or persisted results are restored. Without
+    /// this the results overlay only refreshed incidentally (on a camera tick).
+    private var runForwarding: AnyCancellable?
+
     public init(id: UUID, name: String, material: String, process: ProcessKind,
                 importedFile: ImportedFile?, importedMesh: ImportedMesh?,
                 run: RunModel? = nil) {
@@ -73,6 +81,13 @@ public final class ProjectModel: ObservableObject {
             self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs)
         }
         self.run = run ?? ProjectModel.makeRun()
+        // The two initial value-replays fire here during init, before any view
+        // observes this object, so they're harmless no-ops.
+        self.runForwarding = Publishers.Merge(
+            self.run.$outcome.map { _ in () },
+            self.run.$phase.map { _ in () }
+        )
+        .sink { [weak self] in self?.objectWillChange.send() }
     }
 
     /// Rebuild a project from a persisted snapshot + its re-imported model

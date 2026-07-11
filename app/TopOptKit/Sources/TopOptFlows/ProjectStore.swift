@@ -98,6 +98,23 @@ public struct ProjectStore {
         projectDir(id).appendingPathComponent(fileName).path
     }
 
+    /// The persisted optimize results file (persist-c) within a project's folder.
+    public func resultsURL(id: UUID) -> URL {
+        projectDir(id).appendingPathComponent("results.plist")
+    }
+
+    /// Write serialized results (from `OutcomeCodec`) into the project folder.
+    /// The folder already exists once the snapshot has been saved.
+    public func saveResults(_ data: Data, id: UUID) throws {
+        try fm.createDirectory(at: projectDir(id), withIntermediateDirectories: true)
+        try data.write(to: resultsURL(id: id), options: .atomic)
+    }
+
+    /// Read the raw results blob, or nil if none was persisted / it's unreadable.
+    public func loadResultsData(id: UUID) -> Data? {
+        try? Data(contentsOf: resultsURL(id: id))
+    }
+
     /// Save a snapshot. If `modelSource` is given and the copy isn't already in the
     /// project folder, copy it in (once — the imported model is immutable). Throws
     /// on a filesystem error so the caller can surface it.
