@@ -45,6 +45,9 @@ public struct WorkspacePlaceholder: View {
     @State private var projection: CameraProjection?
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// When a project has saved variants, results show by default; tapping "See
+    /// Original" flips this to reveal the editable workspace (the variants stay).
+    @State private var viewOriginal = false
 
     // Forwarders onto the project's persistent state. The `nonmutating set`
     // mutates the ProjectModel (a reference), so `selection.mutate()` /
@@ -107,13 +110,20 @@ public struct WorkspacePlaceholder: View {
                       onRetry: startRun)
                 .ignoresSafeArea()
             // Results appear as soon as the FIRST variant streams in (progressive
-            // results), while the rest keep optimizing behind them.
-            if let outcome = run.outcome, !outcome.variants.isEmpty {
+            // results), while the rest keep optimizing behind them. They PERSIST on
+            // the project, so leaving to Home and reopening shows them again — until
+            // the user views the original and re-optimizes.
+            if let outcome = run.outcome, !outcome.variants.isEmpty, !viewOriginal {
                 ResultsScreen(projectName: project.name, outcome: outcome,
                               streaming: run.isStreaming,
-                              onClose: { run.cancel(); run.reset() },  // stop any still-running variants
-                              onExport: { model.toast = "Export (.3mf) arrives in M7.9" })
+                              onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
+                              onExport: { model.toast = "Export (.3mf) arrives in M7.9" },
+                              onSeeOriginal: { viewOriginal = true })
                     .ignoresSafeArea()
+            }
+            // Returning to the saved variants from the original view.
+            if viewOriginal, let outcome = run.outcome, !outcome.variants.isEmpty {
+                seeResultsChip
             }
         }
     }
@@ -121,8 +131,29 @@ public struct WorkspacePlaceholder: View {
     /// Start the M7.7 optimize run for the current load case. Gated on the same
     /// `canOptimize` the button uses; nil request only if a file/material is
     /// somehow missing (Optimize is disabled in that case).
+    /// A top-center chip to return to the saved variants from the original view.
+    private var seeResultsChip: some View {
+        VStack {
+            Button { viewOriginal = false } label: {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 13, weight: .semibold))
+                    Text("See Results").dsStyle(DS.TypeScale.bodyStrong)
+                }
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Color.accent.opacity(0.22).color)
+                    .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.6).color, lineWidth: 1)))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 80)   // clear the top chrome row
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private func startRun() {
         guard canOptimize else { return }
+        viewOriginal = false   // a fresh run replaces the saved variants → show results
         guard let request = model.makeRunRequest(resolution: Self.runResolution) else {
             model.toast = "Can’t start — import a model and choose a material first."
             return

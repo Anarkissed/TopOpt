@@ -21,11 +21,14 @@ public struct ResultsScreen: View {
     /// Whether the optimize is still running behind the results (more variants may
     /// arrive) — drives an "optimizing more…" indicator.
     let streaming: Bool
-    /// Back to the workspace (the run is reset so the workspace is interactive).
+    /// Back to Home (KEEPS the variants on the project so reopening shows them).
     var onClose: () -> Void
     /// Export (.3mf) — M7.9. Passed in so the button exists per the design now;
     /// the workspace wires the real export sheet in M7.9.
     var onExport: () -> Void
+    /// "See Original Model" — reveal the editable workspace (the variants stay
+    /// saved; re-optimizing there starts over).
+    var onSeeOriginal: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var orientOpen = false
@@ -35,12 +38,14 @@ public struct ResultsScreen: View {
     private static let morphDuration: Double = 6   // design `dur = 6`s
 
     public init(projectName: String, outcome: OptimizeOutcome, streaming: Bool = false,
-                onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {}) {
+                onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
+                onSeeOriginal: @escaping () -> Void = {}) {
         _model = StateObject(wrappedValue: ResultsModel(projectName: projectName, outcome: outcome))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.onClose = onClose
         self.onExport = onExport
+        self.onSeeOriginal = onSeeOriginal
     }
 
     public var body: some View {
@@ -128,6 +133,18 @@ public struct ResultsScreen: View {
                 .padding(.horizontal, DS.Space.l)
                 .background(Capsule().fill(DS.Surface.bar.color)
                     .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+
+                Button(action: onSeeOriginal) {
+                    HStack(spacing: DS.Space.s) {
+                        Image(systemName: "cube.transparent").font(.system(size: 12, weight: .semibold))
+                        Text("See Original").dsStyle(DS.TypeScale.callout)
+                    }
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                    .background(Capsule().fill(DS.Surface.bar.color)
+                        .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                }
+                .buttonStyle(.plain)
                 Spacer()
             }
             Spacer()
