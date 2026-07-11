@@ -125,6 +125,8 @@ public struct WorkspacePlaceholder: View {
             // the user views the original and re-optimizes.
             if let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }), !viewOriginal {
                 ResultsScreen(projectName: project.name, outcome: outcome,
+                              materialName: project.material,
+                              yieldStrengthMPa: model.yieldStrengthMPa(for: project.material),
                               streaming: run.isStreaming,
                               onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
                               onExport: { model.toast = "Export (.3mf) arrives in M7.9" },

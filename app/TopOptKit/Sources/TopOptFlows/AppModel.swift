@@ -60,6 +60,9 @@ public final class AppModel: ObservableObject {
 
     @Published public private(set) var fdmMaterials: [MaterialOption] = []
     @Published public private(set) var resinMaterials: [MaterialOption] = []
+    /// Full material records by name, kept so a result screen can look up the chosen
+    /// material's yield strength for the M7.viz.1 stress legend/scale.
+    private var materialsByName: [String: Material] = [:]
 
     // MARK: Recents + toast
 
@@ -144,6 +147,7 @@ public final class AppModel: ObservableObject {
         guard let materialsPath else { return }
         do {
             let mats = try materialsLoader(materialsPath)
+            materialsByName = Dictionary(mats.map { ($0.name, $0) }, uniquingKeysWith: { a, _ in a })
             fdmMaterials = mats.filter { $0.family == ProcessKind.fdm.family }
                 .map { MaterialOption($0.name) }
             resinMaterials = mats.filter { $0.family == ProcessKind.resin.family }
@@ -178,6 +182,13 @@ public final class AppModel: ObservableObject {
     /// material picker (only same-category materials are offered).
     public func materials(for process: ProcessKind) -> [MaterialOption] {
         process == .fdm ? fdmMaterials : resinMaterials
+    }
+
+    /// The yield strength (MPa) of a material by name, for the M7.viz.1 stress legend
+    /// / scale. 0 when the material isn't loaded (materials.json missing or a stale
+    /// name), which the results screen treats as "no limit" → relative-scale fallback.
+    public func yieldStrengthMPa(for materialName: String) -> Double {
+        materialsByName[materialName]?.yieldStrengthMPa ?? 0
     }
 
     /// Rename the open project (tap the title). Updates the recents grid + persists.

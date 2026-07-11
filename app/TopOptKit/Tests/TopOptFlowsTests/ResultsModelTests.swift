@@ -216,6 +216,84 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.stressFraction(mpa: 40), 1, accuracy: 1e-9) // clamped
     }
 
+    // MARK: stress scale keyed to material yield (M7.viz.1 — the honest heatmap)
+
+    /// A model whose stress scale is keyed to the material `yield` (MPa), as the app
+    /// constructs it from the run's material record (materials.json).
+    private func yieldModel(_ variants: [OptimizeVariant], yield: Double,
+                            material: String = "PLA") -> ResultsModel {
+        ResultsModel(projectName: "P", outcome: outcome(variants),
+                     materialName: material, yieldStrengthMPa: yield)
+    }
+
+    func testStressScaleKeyedToMaterialYieldNotDataRange() {
+        // Variants peak at 8 / 20 / 12 MPa, but the scale is the material YIELD (55),
+        // NOT the data max — so a color means the same physical safety everywhere.
+        let m = yieldModel([variant(vf: 0.7, maxStress: 8), variant(vf: 0.5, maxStress: 20),
+                            variant(vf: 0.3, maxStress: 12)], yield: 55)
+        XCTAssertEqual(m.stressScaleMaxMPa, 55, accuracy: 1e-9)
+        XCTAssertEqual(m.stressFraction(mpa: 0), 0, accuracy: 1e-9)
+        XCTAssertEqual(m.stressFraction(mpa: 27.5), 0.5, accuracy: 1e-9)   // half yield
+        XCTAssertEqual(m.stressFraction(mpa: 55), 1, accuracy: 1e-9)       // yield boundary
+        XCTAssertEqual(m.stressFraction(mpa: 110), 1, accuracy: 1e-9)      // above yield → clamped
+    }
+
+    func testStressYieldBoundaryMapsToRedAndZeroToBlue() {
+        // yield boundary correct: stress == yield → the ramp's red endpoint; above
+        // yield stays red (clamped); zero stress → the blue (safe) endpoint.
+        let m = yieldModel([variant(vf: 0.5, maxStress: 5)], yield: 55)
+        XCTAssertEqual(ResultsModel.stressColor(fraction: m.stressFraction(mpa: 55)), RGBA(255, 70, 50))
+        XCTAssertEqual(ResultsModel.stressColor(fraction: m.stressFraction(mpa: 80)), RGBA(255, 70, 50))
+        XCTAssertEqual(ResultsModel.stressColor(fraction: m.stressFraction(mpa: 0)), RGBA(28, 60, 170))
+    }
+
+    func testStressFractionMonotonicAndClampedAgainstYield() {
+        let m = yieldModel([variant(vf: 0.5, maxStress: 5)], yield: 50)
+        var prev = -1.0
+        for mpa in stride(from: 0.0, through: 100.0, by: 2.5) {
+            let f = m.stressFraction(mpa: mpa)
+            XCTAssertGreaterThanOrEqual(f, prev)      // monotone non-decreasing in stress
+            XCTAssertGreaterThanOrEqual(f, 0)
+            XCTAssertLessThanOrEqual(f, 1)            // clamped into [0, 1]
+            prev = f
+        }
+        XCTAssertEqual(m.stressFraction(mpa: 25), 0.5, accuracy: 1e-9)   // half of yield 50
+    }
+
+    func testStressScaleUnchangedBySelectionAndStreaming() {
+        // Keyed to the material limit, the scale is a constant — picking a tab or a
+        // heavier variant streaming in never rescales the colors.
+        let m = yieldModel([variant(vf: 0.7, maxStress: 8), variant(vf: 0.5, maxStress: 40)], yield: 55)
+        XCTAssertEqual(m.stressScaleMaxMPa, 55, accuracy: 1e-9)
+        m.select(0); XCTAssertEqual(m.stressScaleMaxMPa, 55, accuracy: 1e-9)
+        m.select(1); XCTAssertEqual(m.stressScaleMaxMPa, 55, accuracy: 1e-9)
+        m.update(from: outcome([variant(vf: 0.7, maxStress: 8), variant(vf: 0.5, maxStress: 40),
+                                variant(vf: 0.3, maxStress: 99)]))
+        XCTAssertEqual(m.stressScaleMaxMPa, 55, accuracy: 1e-9)   // 99 > 55 does not move the scale
+    }
+
+    func testStressLegendStatesMaterialAndYield() {
+        let m = yieldModel([variant(vf: 0.5, maxStress: 10)], yield: 55, material: "PLA")
+        let legend = m.stressLegend
+        XCTAssertTrue(legend.scaledToYield)
+        XCTAssertEqual(legend.yieldStrengthMPa, 55, accuracy: 1e-9)
+        XCTAssertTrue(legend.caption.contains("PLA"))    // names the material
+        XCTAssertTrue(legend.caption.contains("55"))     // states the yield value
+        XCTAssertTrue(legend.caption.contains("MPa"))
+        XCTAssertTrue(legend.maxLabel.contains("55"))
+        XCTAssertEqual(legend.minLabel, "0")
+    }
+
+    func testStressLegendFallsBackWhenNoMaterialYield() {
+        // No material limit → the scale degrades to the data range and the legend is
+        // honest that it is a relative scale (not keyed to yield).
+        let m = ResultsModel(projectName: "P", outcome: outcome([
+            variant(vf: 0.7, maxStress: 8), variant(vf: 0.5, maxStress: 20),
+        ]))
+        XCTAssertEqual(m.stressScaleMaxMPa, 20, accuracy: 1e-9)   // data-range fallback
+        XCTAssertFalse(m.stressLegend.scaledToYield)
+    }
+
     // MARK: optimization-history playback (keyframes)
 
     func testKeyframeIndexMapping() {
