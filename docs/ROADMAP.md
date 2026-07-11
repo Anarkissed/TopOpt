@@ -291,7 +291,7 @@
 > delivered. Task order is positional, top to bottom; identifiers are labels,
 > not sequence.
 
-- [ ] M7.mma.1 MMA updater (Svanberg 1987), compliance objective + volume
+- [x] M7.mma.1 MMA updater (Svanberg 1987), compliance objective + volume
       constraint only, as a drop-in alternative to Optimality Criteria behind
       `SimpOptions.updater = {OC, MMA}`. Default stays OC — NO fixture changes
       in this task. Asymptote init/adaptation and move limits per the paper;
