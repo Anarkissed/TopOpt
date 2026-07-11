@@ -366,6 +366,126 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(tints.allSatisfy { $0.w == 1 }, true) // opaque
     }
 
+    // MARK: hot-spot callout (M7.viz.2 — the single worst-stress point)
+
+    /// An outcome whose single accepted variant carries `field` on a `dims` grid at
+    /// unit spacing from the origin (so voxel (i,j,k)'s center is (i+0.5, j+0.5, k+0.5)).
+    private func fieldedOutcome(_ field: [Float], dims: (Int, Int, Int),
+                                maxStress: Double) -> OptimizeOutcome {
+        let v = OptimizeVariant(
+            requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 100,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, maxStressMPa: maxStress,
+            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2], vonMisesField: field)
+        return OptimizeOutcome(variants: [v], stoppedOnMargin: false, cancelled: false,
+                               acceptedCount: 1, voxelVolumeMM3: 1,
+                               gridNx: dims.0, gridNy: dims.1, gridNz: dims.2,
+                               gridOrigin: .zero, spacing: 1)
+    }
+
+    func testStressFieldPeakArgmaxAndPosition() {
+        // 2×3×4 grid, values == index → the max is the last voxel (idx 23 == (1,2,3)).
+        let vals = (0..<(2 * 3 * 4)).map { Float($0) }
+        let f = StressField(nx: 2, ny: 3, nz: 4, origin: .zero, spacing: 1, values: vals)
+        let peak = f.peak()
+        XCTAssertEqual(peak?.index, 23)                          // matches the field's max index
+        XCTAssertEqual(peak?.valueMPa, 23)
+        XCTAssertEqual(peak?.position, SIMD3<Float>(1.5, 2.5, 3.5))   // voxel (1,2,3) center
+    }
+
+    func testStressFieldPeakLocatesInteriorMaxWithOriginAndSpacing() {
+        // Max at a NON-terminal index on a non-cubic grid (proves argmax, not "last"),
+        // with a non-zero origin + spacing so the world-center math is exercised.
+        var vals = [Float](repeating: 1, count: 2 * 3 * 4)
+        vals[5] = 99                                             // idx 5 -> (i,j,k)=(1,2,0)
+        let f = StressField(nx: 2, ny: 3, nz: 4, origin: SIMD3(10, 20, 30), spacing: 2, values: vals)
+        let peak = f.peak()
+        XCTAssertEqual(peak?.index, 5)
+        XCTAssertEqual(peak?.valueMPa, 99)
+        // center = origin + (i+0.5, j+0.5, k+0.5) * spacing.
+        XCTAssertEqual(peak?.position, SIMD3<Float>(10 + 1.5 * 2, 20 + 2.5 * 2, 30 + 0.5 * 2))
+    }
+
+    func testStressFieldPeakNilWhenEmptyOrAllZero() {
+        XCTAssertNil(StressField(nx: 0, ny: 0, nz: 0, origin: .zero, spacing: 0, values: []).peak())
+        XCTAssertNil(StressField(nx: 2, ny: 2, nz: 2, origin: .zero, spacing: 1,
+                                 values: [Float](repeating: 0, count: 8)).peak())   // no stress → no hot spot
+    }
+
+    func testHotSpotValueAndMarginAgainstYield() {
+        // Field peaks at 24 MPa; yield 55 → margin = value ÷ yield = 24/55 (~44%).
+        var field = [Float](repeating: 2, count: 8)
+        field[6] = 24
+        let m = ResultsModel(projectName: "P",
+                             outcome: fieldedOutcome(field, dims: (2, 2, 2), maxStress: 24),
+                             materialName: "PLA", yieldStrengthMPa: 55)
+        let hs = m.hotSpot
+        XCTAssertNotNil(hs)
+        XCTAssertEqual(hs?.fieldIndex, 6)                        // located max == field argmax
+        XCTAssertEqual(hs?.valueMPa ?? 0, 24, accuracy: 1e-6)
+        XCTAssertEqual(hs?.margin ?? 0, 24.0 / 55.0, accuracy: 1e-9)   // value ÷ yield
+        XCTAssertTrue(hs?.valueLabel.contains("24") ?? false)
+        XCTAssertTrue(hs?.marginLabel.contains("44") ?? false)  // 24/55 rounds to 44% of yield
+    }
+
+    func testHotSpotMarginAtOrAboveYield() {
+        // A peak over yield → margin > 1 and the label reads at/above the limit.
+        var field = [Float](repeating: 1, count: 8)
+        field[0] = 60                                            // above yield 55
+        let m = ResultsModel(projectName: "P",
+                             outcome: fieldedOutcome(field, dims: (2, 2, 2), maxStress: 60),
+                             materialName: "PLA", yieldStrengthMPa: 55)
+        XCTAssertGreaterThan(m.hotSpot?.margin ?? 0, 1)
+        XCTAssertTrue(m.hotSpot?.marginLabel.lowercased().contains("yield") ?? false)
+    }
+
+    func testHotSpotWithoutMaterialYield() {
+        // No material limit: the point is still located, but there is no margin to
+        // state (honest fallback — not a % of yield).
+        var field = [Float](repeating: 1, count: 8)
+        field[3] = 12
+        let m = ResultsModel(projectName: "P",
+                             outcome: fieldedOutcome(field, dims: (2, 2, 2), maxStress: 12))
+        let hs = m.hotSpot
+        XCTAssertNotNil(hs)
+        XCTAssertEqual(hs?.valueMPa ?? 0, 12, accuracy: 1e-6)
+        XCTAssertEqual(hs?.margin ?? -1, 0, accuracy: 1e-9)      // no yield → no margin
+        XCTAssertFalse(hs?.marginLabel.contains("%") ?? true)
+    }
+
+    func testHotSpotNilWithoutStressField() {
+        // The plain variant() helper carries no vonMisesField / grid → nothing to call out.
+        let m = yieldModel([variant(vf: 0.5, maxStress: 10)], yield: 55)
+        XCTAssertNil(m.hotSpot)
+    }
+
+    func testHotSpotTracksSelectedVariant() {
+        // Two accepted variants with different peak locations; the hot spot follows
+        // whichever variant is displayed.
+        var fA = [Float](repeating: 0, count: 8); fA[1] = 30
+        var fB = [Float](repeating: 0, count: 8); fB[7] = 45
+        let a = OptimizeVariant(
+            requestedVolumeFraction: 0.7, achievedVolumeFraction: 0.7, massGrams: 100,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, maxStressMPa: 30,
+            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2], vonMisesField: fA)
+        let b = OptimizeVariant(
+            requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 80,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, maxStressMPa: 45,
+            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2], vonMisesField: fB)
+        let out = OptimizeOutcome(variants: [a, b], stoppedOnMargin: false, cancelled: false,
+                                  acceptedCount: 2, voxelVolumeMM3: 1, gridNx: 2, gridNy: 2, gridNz: 2,
+                                  gridOrigin: .zero, spacing: 1)
+        let m = ResultsModel(projectName: "P", outcome: out, materialName: "PLA", yieldStrengthMPa: 55)
+        // Default selection is the recommended lightest variant (index 1 → variant b).
+        XCTAssertEqual(m.hotSpot?.fieldIndex, 7)
+        XCTAssertEqual(m.hotSpot?.valueMPa ?? 0, 45, accuracy: 1e-6)
+        m.select(0)
+        XCTAssertEqual(m.hotSpot?.fieldIndex, 1)
+        XCTAssertEqual(m.hotSpot?.valueMPa ?? 0, 30, accuracy: 1e-6)
+    }
+
     func testSelectedMeshAndFieldFromVariant() {
         var v = variant(vf: 0.5, maxStress: 10)
         v = OptimizeVariant(

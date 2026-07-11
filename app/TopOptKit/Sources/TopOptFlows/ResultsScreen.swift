@@ -35,6 +35,11 @@ public struct ResultsScreen: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var orientOpen = false
+    /// The latest camera→screen projection the viewer publishes, so the hot-spot
+    /// marker (M7.viz.2) tracks the worst point as the camera orbits/zooms.
+    @State private var projection: CameraProjection?
+    /// Whether the hot-spot marker's value/margin callout is expanded (tap to toggle).
+    @State private var hotSpotExpanded = false
     @StateObject private var videoExport = VideoExportModel()
     /// Drives the Play animation: a ~30 fps tick that advances the morph scrub while
     /// `model.playing`, so Play actually plays (previously it required a manual drag).
@@ -63,6 +68,7 @@ public struct ResultsScreen: View {
             // with the scrub. Pixels are device QA (the M7 /app/ standard).
             DS.Color.background.color.ignoresSafeArea()
             MetalMeshView(mesh: viewerMesh,
+                          onProjection: { projection = $0 },
                           stressTints: stressTints,
                           reveal: viewerReveal)
                 .ignoresSafeArea()
@@ -70,6 +76,7 @@ public struct ResultsScreen: View {
             topLeft
             topRight
             if model.stressOn { stressLegendPanel }   // M7.viz.1: yield-scaled legend
+            hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
             savingsTabs
             mediaPlayer
             orientationCorner
@@ -171,6 +178,52 @@ public struct ResultsScreen: View {
         RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
         RGBA(250, 220, 60).color, RGBA(255, 70, 50).color,
     ]
+
+    // MARK: - Hot-spot callout (M7.viz.2 — the single worst-stress point)
+
+    /// A tappable marker framing the highest-stress point on the displayed variant,
+    /// with its value + margin (value ÷ yield) so the user is not left hunting the
+    /// red zone. Shown only while the stress overlay is on and the point projects in
+    /// front of the camera. The located point + value/margin are headlessly tested on
+    /// ResultsModel; the marker's placement/look is device QA (the M7 /app/ standard).
+    @ViewBuilder private var hotSpotMarker: some View {
+        if model.stressOn, let hs = model.hotSpot, let p = projection?.project(hs.position) {
+            let overYield = hs.yieldStrengthMPa > 0 && hs.margin >= 1
+            let tint = overYield ? RGBA(255, 70, 50).color : DS.Color.textPrimary.color
+            ZStack {
+                Button { hotSpotExpanded.toggle() } label: {
+                    Circle()
+                        .strokeBorder(tint, lineWidth: 2)
+                        .background(Circle().fill(tint.opacity(0.18)))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+
+                if hotSpotExpanded {
+                    hotSpotCallout(hs, tint: tint)
+                        .fixedSize()
+                        .offset(y: -48)   // float the readout above the marker
+                }
+            }
+            .position(p)
+        }
+    }
+
+    /// The hot spot's readout: "Hot spot" · peak value · margin (value ÷ yield).
+    private func hotSpotCallout(_ hs: HotSpot, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("HOT SPOT").font(.system(size: 9, weight: .bold)).tracking(0.6)
+                .foregroundStyle(DS.Color.textSecondary.color)
+            Text(hs.valueLabel).dsStyle(DS.TypeScale.bodyStrong)
+                .foregroundStyle(DS.Color.textPrimary.color)
+            Text(hs.marginLabel).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                .foregroundStyle(tint)
+        }
+        .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .dsShadow(.panel)
+    }
 
     // MARK: - Top-left: back + project / Optimized ✓
 

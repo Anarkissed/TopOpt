@@ -73,6 +73,29 @@ public struct StressField: Sendable {
     }
 
     private func clamp(_ v: Int, _ n: Int) -> Int { min(max(v, 0), n - 1) }
+
+    /// The single highest-stress voxel (M7.viz.2 hot-spot callout): its value (MPa),
+    /// the flat field index (argmax), and the world position of that voxel's center —
+    /// the anchor the marker frames. Nil when the field is empty or carries no stress
+    /// (all zero → nothing to call out). Ties resolve to the lowest index (stable).
+    public func peak() -> (valueMPa: Float, index: Int, position: SIMD3<Float>)? {
+        guard !isEmpty else { return nil }
+        var bestIdx = -1
+        var best: Float = 0
+        for idx in values.indices where values[idx] > best {
+            best = values[idx]; bestIdx = idx
+        }
+        guard bestIdx >= 0 else { return nil }   // every value <= 0 → no hot spot
+        // Invert index = (k*ny + j)*nx + i. plane = nx*ny, so k = idx/plane,
+        // rem = idx%plane, j = rem/nx, i = rem%nx.
+        let plane = nx * ny
+        let k = bestIdx / plane
+        let rem = bestIdx % plane
+        let j = rem / nx
+        let i = rem % nx
+        let center = origin + SIMD3<Float>(Float(i) + 0.5, Float(j) + 0.5, Float(k) + 0.5) * spacing
+        return (best, bestIdx, center)
+    }
 }
 
 /// One accepted variant's presentation (a savings tab + its orientation/shear
@@ -138,6 +161,30 @@ public struct StressLegend: Equatable, Sendable {
     public let minLabel: String
     /// High end of the bar (at/above yield → red): "55 MPa (yield)".
     public let maxLabel: String
+}
+
+/// The displayed variant's single worst-stress point (M7.viz.2 hot-spot callout) —
+/// where the red zone actually peaks, so the user is not left hunting for it. Its
+/// `margin` is the peak value ÷ the material yield (the fraction of the limit used
+/// at the worst point: 1.0 = exactly at yield, > 1 = over). `position` is the world
+/// center of the worst voxel, which the marker projects onto the stage.
+public struct HotSpot: Equatable, Sendable {
+    /// Peak von Mises stress on the displayed variant (MPa).
+    public let valueMPa: Double
+    /// The material yield (MPa) the margin is taken against (0 when unknown).
+    public let yieldStrengthMPa: Double
+    /// value ÷ yield — the fraction of the material limit reached at the worst point
+    /// (0 when no yield is available: there is no limit to compare against).
+    public let margin: Double
+    /// World position of the worst voxel's center — the marker anchor.
+    public let position: SIMD3<Float>
+    /// The worst voxel's flat field index (== the von Mises field's argmax).
+    public let fieldIndex: Int
+    /// The peak value phrased for the callout, e.g. "24 MPa".
+    public let valueLabel: String
+    /// The margin phrased for the callout, e.g. "44% of yield" / "at/above yield"; in
+    /// the no-material fallback it reads "peak stress" (no % — there is no limit).
+    public let marginLabel: String
 }
 
 /// The results screen's state + derived presentation. Constructed from a finished,
@@ -354,6 +401,34 @@ public final class ResultsModel: ObservableObject {
     /// Format a stress value in MPa for the legend, e.g. "55 MPa" (yields are whole
     /// MPa in materials.json).
     static func mpaLabel(_ v: Double) -> String { String(format: "%.0f MPa", v) }
+
+    /// The displayed variant's hot spot (M7.viz.2): the single highest-stress point,
+    /// its value, and its margin (value ÷ yield). Nil when the selected variant has
+    /// no stress field or carries no stress (nothing to call out). Uses the SAME
+    /// yield the M7.viz.1 scale is keyed to.
+    public var hotSpot: HotSpot? {
+        guard let field = selectedStressField, let peak = field.peak() else { return nil }
+        let value = Double(peak.valueMPa)
+        let y = yieldStrengthMPa
+        let frac = y > 0 ? value / y : 0
+        return HotSpot(
+            valueMPa: value,
+            yieldStrengthMPa: y,
+            margin: frac,
+            position: peak.position,
+            fieldIndex: peak.index,
+            valueLabel: ResultsModel.mpaLabel(value),
+            marginLabel: ResultsModel.hotSpotMarginLabel(fractionOfYield: frac, hasYield: y > 0))
+    }
+
+    /// Phrase the hot spot's margin (value ÷ yield). Below yield → "N% of yield"; at
+    /// or above the limit → the honest "at/above yield (N%)"; no material limit → a
+    /// plain "peak stress" (there is no yield to compare against).
+    static func hotSpotMarginLabel(fractionOfYield f: Double, hasYield: Bool) -> String {
+        guard hasYield else { return "peak stress" }
+        let pct = Int((f * 100).rounded())
+        return f >= 1 ? "at/above yield (\(pct)%)" : "\(pct)% of yield"
+    }
 
     /// The design's stress gradient (the conic legend on the Stress toggle):
     /// blue → cyan → green → yellow → red, evenly spaced. `fraction` is clamped.
