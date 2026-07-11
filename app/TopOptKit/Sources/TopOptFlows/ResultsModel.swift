@@ -120,6 +120,26 @@ public struct ResultVariantVM: Equatable, Sendable {
     }
 }
 
+/// The stress-overlay legend (M7.viz.1). States the material and the yield value
+/// the heatmap is scaled to, so a viewer knows a color is keyed to the material
+/// limit — not an arbitrary per-run data range. `scaledToYield` is false in the
+/// no-material fallback, where the scale is the data range and the copy says so.
+public struct StressLegend: Equatable, Sendable {
+    /// The material the scale is keyed to (empty in the fallback).
+    public let materialName: String
+    /// The yield strength (MPa) the top of the scale (red) corresponds to (0 in the
+    /// fallback).
+    public let yieldStrengthMPa: Double
+    /// Whether the scale is keyed to the material yield (vs. the data-range fallback).
+    public let scaledToYield: Bool
+    /// One-line caption naming the material + yield, e.g. "PLA · scaled to 55 MPa yield".
+    public let caption: String
+    /// Low end of the bar (safe): "0".
+    public let minLabel: String
+    /// High end of the bar (at/above yield → red): "55 MPa (yield)".
+    public let maxLabel: String
+}
+
 /// The results screen's state + derived presentation. Constructed from a finished,
 /// accepted `OptimizeOutcome` (the run screen only routes here when
 /// `acceptedCount >= 1`, so `tabs` is never empty).
@@ -127,12 +147,19 @@ public struct ResultVariantVM: Equatable, Sendable {
 public final class ResultsModel: ObservableObject {
     /// Project name for the top chrome.
     public let projectName: String
+    /// The run's material name (from materials.json), shown in the stress legend.
+    public let materialName: String
+    /// The material's yield strength (MPa) — the limit the stress heatmap is scaled
+    /// to (M7.viz.1 "honest heatmap"). 0 when unknown (no material / legacy
+    /// construction), in which case the scale falls back to the per-run data range.
+    public let yieldStrengthMPa: Double
     /// One tab per accepted variant, in ladder order (largest volume first, so
     /// savings ascend left→right as in the design). GROWS as variants stream in.
     @Published public private(set) var tabs: [ResultVariantVM] = []
-    /// Shared stress scale across variants: the max von Mises over all tabs, so the
-    /// overlay legend is comparable between variants (ARCHITECTURE V-gate spirit /
-    /// design "shared scale").
+    /// Shared stress scale (MPa) the overlay maps onto the color ramp. Keyed to the
+    /// material YIELD (M7.viz.1) so a color means the same physical safety across
+    /// variants and runs, not a per-run data range; falls back to the max von Mises
+    /// over all tabs only when no material yield is available.
     public private(set) var stressScaleMaxMPa: Double = 0
 
     /// Selected tab. Defaults to (and, until the user picks, follows) the recommended
@@ -155,8 +182,11 @@ public final class ResultsModel: ObservableObject {
     /// follows the recommendation as lighter variants stream in.
     private var userSelected = false
 
-    public init(projectName: String, outcome: OptimizeOutcome) {
+    public init(projectName: String, outcome: OptimizeOutcome,
+                materialName: String = "", yieldStrengthMPa: Double = 0) {
         self.projectName = projectName
+        self.materialName = materialName
+        self.yieldStrengthMPa = max(0, yieldStrengthMPa)
         apply(outcome)
         selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
     }
@@ -182,7 +212,13 @@ public final class ResultsModel: ObservableObject {
         gridOrigin = SIMD3<Float>(outcome.gridOrigin)
         spacing = Float(outcome.spacing)
         tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3)
-        stressScaleMaxMPa = acc.map(\.maxStressMPa).max() ?? 0
+        // M7.viz.1 "honest heatmap": key the shared stress scale to the MATERIAL
+        // LIMIT (yield) so a color means the same physical safety everywhere — not
+        // to the per-run data range. Fall back to the data-range max only when no
+        // material yield is available (legacy construction / no material).
+        stressScaleMaxMPa = yieldStrengthMPa > 0
+            ? yieldStrengthMPa
+            : (acc.map(\.maxStressMPa).max() ?? 0)
         keyframeCache = nil   // variant data changed → rebuild keyframes on demand
     }
 
@@ -298,6 +334,26 @@ public final class ResultsModel: ObservableObject {
     public func stressFraction(mpa: Double) -> Double {
         stressScaleMaxMPa > 0 ? min(1, max(0, mpa / stressScaleMaxMPa)) : 0
     }
+
+    /// The legend for the stress overlay (M7.viz.1): names the material and the yield
+    /// value the scale is keyed to (green ≈ comfortably below yield → red = at/above
+    /// yield). In the no-material fallback it is honest that the scale is relative.
+    public var stressLegend: StressLegend {
+        let scaled = yieldStrengthMPa > 0
+        let yieldText = ResultsModel.mpaLabel(yieldStrengthMPa)
+        let name = materialName.isEmpty ? "Material" : materialName
+        return StressLegend(
+            materialName: materialName,
+            yieldStrengthMPa: yieldStrengthMPa,
+            scaledToYield: scaled,
+            caption: scaled ? "\(name) · scaled to \(yieldText) yield" : "Relative scale (no material limit)",
+            minLabel: "0",
+            maxLabel: scaled ? "\(yieldText) (yield)" : "peak")
+    }
+
+    /// Format a stress value in MPa for the legend, e.g. "55 MPa" (yields are whole
+    /// MPa in materials.json).
+    static func mpaLabel(_ v: Double) -> String { String(format: "%.0f MPa", v) }
 
     /// The design's stress gradient (the conic legend on the Stress toggle):
     /// blue → cyan → green → yellow → red, evenly spaced. `fraction` is clamped.

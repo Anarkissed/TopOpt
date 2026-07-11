@@ -41,10 +41,14 @@ public struct ResultsScreen: View {
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     private static let morphDuration: Double = 6   // design `dur = 6`s
 
-    public init(projectName: String, outcome: OptimizeOutcome, streaming: Bool = false,
+    public init(projectName: String, outcome: OptimizeOutcome,
+                materialName: String = "", yieldStrengthMPa: Double = 0,
+                streaming: Bool = false,
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {}) {
-        _model = StateObject(wrappedValue: ResultsModel(projectName: projectName, outcome: outcome))
+        _model = StateObject(wrappedValue: ResultsModel(
+            projectName: projectName, outcome: outcome,
+            materialName: materialName, yieldStrengthMPa: yieldStrengthMPa))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.onClose = onClose
@@ -65,6 +69,7 @@ public struct ResultsScreen: View {
 
             topLeft
             topRight
+            if model.stressOn { stressLegendPanel }   // M7.viz.1: yield-scaled legend
             savingsTabs
             mediaPlayer
             orientationCorner
@@ -126,6 +131,46 @@ public struct ResultsScreen: View {
     private var showHistory: Bool { !model.stressOn && model.hasHistory }
     private var viewerMesh: ViewerMesh? { showHistory ? model.playbackMesh : model.selectedMesh }
     private var viewerReveal: Float { showHistory ? 1 : Float(model.playT) }
+
+    // MARK: - Stress legend (M7.viz.1 — scaled to material yield)
+
+    /// The stress heatmap's legend: names the material and the yield the scale is
+    /// keyed to, with the color ramp bar. Green (comfortably below yield) → red
+    /// (at/above yield). Shown only while the stress overlay is on. Pixels are
+    /// device QA (the M7 /app/ standard); the copy is headlessly tested on the model.
+    @ViewBuilder private var stressLegendPanel: some View {
+        let legend = model.stressLegend
+        VStack {
+            Spacer().frame(height: 84)   // clear the top nav / stress toggle row
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                Text(legend.caption)
+                    .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(LinearGradient(colors: Self.rampColors, startPoint: .leading, endPoint: .trailing))
+                    .frame(width: 180, height: 8)
+                HStack {
+                    Text(legend.minLabel).dsStyle(DS.TypeScale.caption)
+                    Spacer()
+                    Text(legend.maxLabel).dsStyle(DS.TypeScale.caption)
+                }
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .frame(width: 180)
+            }
+            .padding(DS.Space.l)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .dsShadow(.panel)
+            Spacer()
+        }
+    }
+
+    /// The stress ramp's five design stops as SwiftUI colors — the same
+    /// blue→cyan→green→yellow→red gradient ResultsModel.stressColor interpolates.
+    private static let rampColors: [Color] = [
+        RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
+        RGBA(250, 220, 60).color, RGBA(255, 70, 50).color,
+    ]
 
     // MARK: - Top-left: back + project / Optimized ✓
 
