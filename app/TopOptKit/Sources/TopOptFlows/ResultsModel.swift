@@ -128,15 +128,16 @@ public final class ResultsModel: ObservableObject {
     /// Project name for the top chrome.
     public let projectName: String
     /// One tab per accepted variant, in ladder order (largest volume first, so
-    /// savings ascend left→right as in the design).
-    public let tabs: [ResultVariantVM]
+    /// savings ascend left→right as in the design). GROWS as variants stream in.
+    @Published public private(set) var tabs: [ResultVariantVM] = []
     /// Shared stress scale across variants: the max von Mises over all tabs, so the
     /// overlay legend is comparable between variants (ARCHITECTURE V-gate spirit /
     /// design "shared scale").
-    public let stressScaleMaxMPa: Double
+    public private(set) var stressScaleMaxMPa: Double = 0
 
-    /// Selected tab. Defaults to the middle-ish variant (design `resultTab: 1`).
-    @Published public private(set) var selectedIndex: Int
+    /// Selected tab. Defaults to (and, until the user picks, follows) the recommended
+    /// lightest-safe variant.
+    @Published public private(set) var selectedIndex: Int = 0
     /// Stress overlay toggle (colors the variant mesh by von Mises — Metal follow-up).
     @Published public var stressOn: Bool = false
     /// Morph/threshold scrub position in [0, 1] (1 = fully formed variant).
@@ -146,22 +147,42 @@ public final class ResultsModel: ObservableObject {
 
     /// The accepted variants' raw geometry + fields (parallel to `tabs`), kept for
     /// the viewer to build the selected variant's mesh + sample its stress field.
-    private let accepted: [OptimizeVariant]
-    private let gridDim: (Int, Int, Int)
-    private let gridOrigin: SIMD3<Float>
-    private let spacing: Float
+    private var accepted: [OptimizeVariant] = []
+    private var gridDim: (Int, Int, Int) = (0, 0, 0)
+    private var gridOrigin: SIMD3<Float> = .zero
+    private var spacing: Float = 0
+    /// True once the user has manually picked a tab; until then the selection
+    /// follows the recommendation as lighter variants stream in.
+    private var userSelected = false
 
     public init(projectName: String, outcome: OptimizeOutcome) {
         self.projectName = projectName
-        let accepted = outcome.variants.filter { $0.accepted }
-        self.accepted = accepted
-        self.gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
-        self.gridOrigin = SIMD3<Float>(outcome.gridOrigin)
-        self.spacing = Float(outcome.spacing)
-        self.tabs = ResultsModel.buildTabs(accepted, voxelVolumeMM3: outcome.voxelVolumeMM3)
-        self.stressScaleMaxMPa = accepted.map(\.maxStressMPa).max() ?? 0
-        // Default to the recommended (lightest-safe) variant, the last accepted rung.
-        self.selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
+        apply(outcome)
+        selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
+    }
+
+    /// Merge a newer (possibly larger) outcome — a streamed variant landing or the
+    /// authoritative final outcome — preserving the user's tab pick / scrub / stress
+    /// toggle. Until the user manually selects, the selection follows the (updated)
+    /// recommendation so a freshly-arrived lighter variant becomes the default.
+    public func update(from outcome: OptimizeOutcome) {
+        apply(outcome)
+        if userSelected {
+            selectedIndex = min(selectedIndex, max(0, tabs.count - 1))
+        } else {
+            selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? selectedIndex
+        }
+    }
+
+    /// Recompute the derived presentation from an outcome (does NOT touch selection).
+    private func apply(_ outcome: OptimizeOutcome) {
+        let acc = outcome.variants.filter { $0.accepted }
+        accepted = acc
+        gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
+        gridOrigin = SIMD3<Float>(outcome.gridOrigin)
+        spacing = Float(outcome.spacing)
+        tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3)
+        stressScaleMaxMPa = acc.map(\.maxStressMPa).max() ?? 0
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -205,8 +226,10 @@ public final class ResultsModel: ObservableObject {
     // MARK: - Intents
 
     /// Select a tab. Resets the morph to fully-formed (design `pick` → playT 1).
+    /// Marks the selection as user-chosen, so streaming variants no longer move it.
     public func select(_ index: Int) {
         guard tabs.indices.contains(index) else { return }
+        userSelected = true
         selectedIndex = index
         playT = 1
         playing = false

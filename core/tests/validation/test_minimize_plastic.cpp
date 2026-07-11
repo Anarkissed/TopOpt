@@ -782,6 +782,39 @@ int main() {
                 rsw.evaluated[0].report.max_stress_mpa);
   }
 
+  // =========================================================================
+  // Scenario K — progressive results: on_variant streams each ACCEPTED rung as
+  // it completes (before the next lighter rung), so the app can show the first
+  // optimized variant while the rest are still running.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;   // accept-all: the whole ladder is streamed
+    std::vector<double> streamed_vfs;
+    o.on_variant = [&](const MinimizePlasticVariant& v) {
+      CHECK(v.accepted, "K: only accepted variants are streamed");
+      // The variant is fully analysed when streamed (report + viz fields ready).
+      CHECK(std::isfinite(v.report.margin.worst_case),
+            "K: a streamed variant carries a computed margin");
+      CHECK(!v.mesh().vertices.empty(),
+            "K: a streamed variant carries its extracted mesh");
+      streamed_vfs.push_back(v.optimization.volume_fraction);
+    };
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+
+    CHECK(streamed_vfs.size() == r.report.variants.size(),
+          "K: on_variant fires once per accepted variant");
+    CHECK(streamed_vfs.size() == o.volume_fraction_ladder.size(),
+          "K: accept-all streams the whole ladder");
+    for (std::size_t i = 1; i < streamed_vfs.size(); ++i)
+      CHECK(streamed_vfs[i] < streamed_vfs[i - 1],
+            "K: variants stream heaviest-first (ladder order)");
+    std::printf("[K progressive] streamed %zu variants\n", streamed_vfs.size());
+  }
+
   if (g_failures == 0) {
     std::printf("minimize_plastic (M5.3): all %d checks passed\n", g_checks);
     return 0;

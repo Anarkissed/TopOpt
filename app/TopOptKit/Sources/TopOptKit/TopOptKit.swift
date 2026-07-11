@@ -166,6 +166,14 @@ private final class ProgressBox {
     }
 }
 
+/// Boxes the Swift per-variant closure so the C `@convention(c)` variant
+/// trampoline can reach it via an opaque context pointer (progressive results).
+private final class VariantBox {
+    /// Receives a one-variant partial outcome (the variant + the run's grid metadata).
+    let callback: (OptimizeOutcome) -> Void
+    init(_ cb: @escaping (OptimizeOutcome) -> Void) { self.callback = cb }
+}
+
 /// The TopOptKit API. Static functions form the M7.1 bridge surface: load
 /// materials, import STEP/STL, voxelize, tag faces, run minimize_plastic (with
 /// M7.0a progress + cancellation), and export.
@@ -263,39 +271,59 @@ public enum TopOptKit {
         return Int(n)
     }
 
-    /// Run minimize_plastic (ROADMAP M5.3) with M7.0a progress + cancellation.
-    /// The `progress` closure is invoked once per OC iteration of every rung; it
-    /// returns `true` to continue or `false` to request cancellation.
+    // Non-capturing C trampolines reaching the boxed Swift closures via ctx.
+    private static let progressTrampoline: topoptbridge.ProgressFn = { ctxPtr, rung, count, iter in
+        guard let ctxPtr else { return }
+        let b = Unmanaged<ProgressBox>.fromOpaque(ctxPtr).takeUnretainedValue()
+        if !b.callback(Int(rung), Int(count), Int(iter)) { b.cancelFlag.pointee = true }
+    }
+    private static let variantTrampoline: topoptbridge.VariantFn = { ctxPtr, partialPtr in
+        guard let ctxPtr, let partialPtr else { return }
+        let b = Unmanaged<VariantBox>.fromOpaque(ctxPtr).takeUnretainedValue()
+        b.callback(TopOptKit.convertOutcome(partialPtr.pointee))
+    }
+
+    /// Run a bridge optimize with optional progress + per-variant streaming,
+    /// keeping the closure boxes alive across the (synchronous) call. `body`
+    /// receives the C fn-ptrs + ctx to forward to the bridge.
+    private static func withRunCallbacks<T>(
+        progress: ((Int, Int, Int) -> Bool)?, onVariant: ((OptimizeOutcome) -> Void)?,
+        cancelFlag: UnsafeMutablePointer<Bool>,
+        _ body: (topoptbridge.ProgressFn?, UnsafeMutableRawPointer?,
+                 topoptbridge.VariantFn?, UnsafeMutableRawPointer?) -> T
+    ) -> T {
+        let pBox = progress.map { ProgressBox($0, cancelFlag) }
+        let vBox = onVariant.map { VariantBox($0) }
+        let r = body(pBox == nil ? nil : progressTrampoline,
+                     pBox.map { Unmanaged.passUnretained($0).toOpaque() },
+                     vBox == nil ? nil : variantTrampoline,
+                     vBox.map { Unmanaged.passUnretained($0).toOpaque() })
+        withExtendedLifetime(pBox) {}
+        withExtendedLifetime(vBox) {}
+        return r
+    }
+
+    /// Run minimize_plastic (ROADMAP M5.3) with M7.0a progress + cancellation, and
+    /// optional progressive-results streaming: `onVariant` fires once per accepted
+    /// variant as it completes, with a one-variant partial outcome (variant + grid).
+    /// `progress` returns `true` to continue or `false` to request cancellation.
     public static func minimizePlastic(
         stlPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int,
-        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil
+        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
+        onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
         let cancelFlag = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
         cancelFlag.initialize(to: false)
         defer { cancelFlag.deinitialize(count: 1); cancelFlag.deallocate() }
 
         var err = topoptbridge.BridgeError()
-        var raw: topoptbridge.OptimizeResult
-        if let progress {
-            let box = ProgressBox(progress, cancelFlag)
-            let ctx = Unmanaged.passUnretained(box).toOpaque()
-            let trampoline: topoptbridge.ProgressFn = { ctxPtr, rung, count, iter in
-                guard let ctxPtr else { return }
-                let b = Unmanaged<ProgressBox>.fromOpaque(ctxPtr).takeUnretainedValue()
-                if !b.callback(Int(rung), Int(count), Int(iter)) {
-                    b.cancelFlag.pointee = true
-                }
-            }
-            raw = topoptbridge.run_minimize_plastic(
+        let raw = withRunCallbacks(progress: progress, onVariant: onVariant,
+                                   cancelFlag: cancelFlag) { pFn, pCtx, vFn, vCtx in
+            topoptbridge.run_minimize_plastic(
                 std.string(stlPath), std.string(material), std.string(materialsPath),
-                std.string(rulesPath), Int32(resolution), trampoline, ctx,
-                cancelFlag, &err)
-            withExtendedLifetime(box) {}
-        } else {
-            raw = topoptbridge.run_minimize_plastic(
-                std.string(stlPath), std.string(material), std.string(materialsPath),
-                std.string(rulesPath), Int32(resolution), nil, nil, cancelFlag, &err)
+                std.string(rulesPath), Int32(resolution), pFn, pCtx, cancelFlag,
+                vFn, vCtx, &err)
         }
         try throwIfFailed(err)
         return convertOutcome(raw)
@@ -322,7 +350,8 @@ public enum TopOptKit {
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
         minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
-        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil
+        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
+        onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
         var lc = topoptbridge.BridgeLoadCase()
         for f in anchorFaceIDs { lc.anchor_face_ids.push_back(Int32(f)) }
@@ -343,23 +372,12 @@ public enum TopOptKit {
         defer { cancelFlag.deinitialize(count: 1); cancelFlag.deallocate() }
 
         var err = topoptbridge.BridgeError()
-        var raw: topoptbridge.OptimizeResult
-        if let progress {
-            let box = ProgressBox(progress, cancelFlag)
-            let ctx = Unmanaged.passUnretained(box).toOpaque()
-            let trampoline: topoptbridge.ProgressFn = { ctxPtr, rung, count, iter in
-                guard let ctxPtr else { return }
-                let b = Unmanaged<ProgressBox>.fromOpaque(ctxPtr).takeUnretainedValue()
-                if !b.callback(Int(rung), Int(count), Int(iter)) { b.cancelFlag.pointee = true }
-            }
-            raw = topoptbridge.run_minimize_plastic_loadcase(
+        let raw = withRunCallbacks(progress: progress, onVariant: onVariant,
+                                   cancelFlag: cancelFlag) { pFn, pCtx, vFn, vCtx in
+            topoptbridge.run_minimize_plastic_loadcase(
                 std.string(stepPath), std.string(material), std.string(materialsPath),
-                std.string(rulesPath), Int32(resolution), lc, trampoline, ctx, cancelFlag, &err)
-            withExtendedLifetime(box) {}
-        } else {
-            raw = topoptbridge.run_minimize_plastic_loadcase(
-                std.string(stepPath), std.string(material), std.string(materialsPath),
-                std.string(rulesPath), Int32(resolution), lc, nil, nil, cancelFlag, &err)
+                std.string(rulesPath), Int32(resolution), lc, pFn, pCtx, cancelFlag,
+                vFn, vCtx, &err)
         }
         try throwIfFailed(err)
         return convertOutcome(raw)

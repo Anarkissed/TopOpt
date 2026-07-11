@@ -103,15 +103,48 @@ topopt::TriangleMesh import_any(const std::string& path) {
 // never returns an unsafe variant — it just walks further down for strong parts.
 std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
 
-// MinimizePlasticResult + grid -> the flat OptimizeResult the Swift side reads.
-// Shared by both run entry points (self-weight and the user load case) so the
-// M7.0b/M7.8 field mapping has one source of truth.
-OptimizeResult to_optimize_result(const topopt::MinimizePlasticResult& mp,
-                                  const topopt::VoxelGrid& grid) {
-  OptimizeResult result;
-  result.stopped_on_margin = mp.stopped_on_margin;
-  result.cancelled = mp.cancelled;
-  result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
+// One core variant -> the flat bridge OptimizeVariant (M7.0b/M7.8 fields). Shared
+// by the result builder AND the progressive-results stream, so there is one source
+// of truth for the mapping.
+OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v) {
+  OptimizeVariant ov;
+  ov.requested_volume_fraction = v.requested_volume_fraction;
+  ov.achieved_volume_fraction = v.optimization.volume_fraction;
+  ov.mass_grams = v.mass_grams;
+  ov.support_volume_voxels = v.support_volume_voxels;
+  ov.mesh_triangle_count = static_cast<int32_t>(v.mesh().triangle_count());
+  ov.worst_case_margin = v.report.margin.worst_case;
+  ov.accepted = v.accepted;
+  ov.v3_passes = v.v3.passes;
+  ov.min_feature_violations =
+      static_cast<int32_t>(v.report.min_feature_violations);
+  ov.min_feature_warning = v.report.min_feature_warning;
+  ov.orientation_x = v.report.orientation.x;
+  ov.orientation_y = v.report.orientation.y;
+  ov.orientation_z = v.report.orientation.z;
+  ov.max_stress_mpa = v.report.max_stress_mpa;
+  ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
+  ov.in_plane_margin = v.report.margin.in_plane;
+  ov.interlayer_margin = v.report.margin.interlayer;
+  const topopt::TriangleMesh& vm = v.mesh();
+  ov.mesh_vertices.reserve(vm.vertices.size() * 3);
+  for (const auto& p : vm.vertices) {
+    ov.mesh_vertices.push_back(static_cast<float>(p.x));
+    ov.mesh_vertices.push_back(static_cast<float>(p.y));
+    ov.mesh_vertices.push_back(static_cast<float>(p.z));
+  }
+  ov.mesh_indices.reserve(vm.triangles.size() * 3);
+  for (const auto& t : vm.triangles) {
+    ov.mesh_indices.push_back(t[0]);
+    ov.mesh_indices.push_back(t[1]);
+    ov.mesh_indices.push_back(t[2]);
+  }
+  ov.von_mises_field.assign(v.von_mises_field.begin(), v.von_mises_field.end());
+  return ov;
+}
+
+// Set the run's grid metadata (dims/origin/spacing/voxel-volume) on `result`.
+void set_grid_metadata(OptimizeResult& result, const topopt::VoxelGrid& grid) {
   result.voxel_volume_mm3 = grid.voxel_volume();
   result.grid_nx = grid.nx;
   result.grid_ny = grid.ny;
@@ -120,44 +153,36 @@ OptimizeResult to_optimize_result(const topopt::MinimizePlasticResult& mp,
   result.grid_origin_y = grid.origin.y;
   result.grid_origin_z = grid.origin.z;
   result.spacing = grid.spacing;
-  for (const auto& v : mp.evaluated) {
-    OptimizeVariant ov;
-    ov.requested_volume_fraction = v.requested_volume_fraction;
-    ov.achieved_volume_fraction = v.optimization.volume_fraction;
-    ov.mass_grams = v.mass_grams;
-    ov.support_volume_voxels = v.support_volume_voxels;
-    ov.mesh_triangle_count = static_cast<int32_t>(v.mesh().triangle_count());
-    ov.worst_case_margin = v.report.margin.worst_case;
-    ov.accepted = v.accepted;
-    ov.v3_passes = v.v3.passes;
-    ov.min_feature_violations =
-        static_cast<int32_t>(v.report.min_feature_violations);
-    ov.min_feature_warning = v.report.min_feature_warning;
-    ov.orientation_x = v.report.orientation.x;
-    ov.orientation_y = v.report.orientation.y;
-    ov.orientation_z = v.report.orientation.z;
-    ov.max_stress_mpa = v.report.max_stress_mpa;
-    ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
-    ov.in_plane_margin = v.report.margin.in_plane;
-    ov.interlayer_margin = v.report.margin.interlayer;
-    const topopt::TriangleMesh& vm = v.mesh();
-    ov.mesh_vertices.reserve(vm.vertices.size() * 3);
-    for (const auto& p : vm.vertices) {
-      ov.mesh_vertices.push_back(static_cast<float>(p.x));
-      ov.mesh_vertices.push_back(static_cast<float>(p.y));
-      ov.mesh_vertices.push_back(static_cast<float>(p.z));
-    }
-    ov.mesh_indices.reserve(vm.triangles.size() * 3);
-    for (const auto& t : vm.triangles) {
-      ov.mesh_indices.push_back(t[0]);
-      ov.mesh_indices.push_back(t[1]);
-      ov.mesh_indices.push_back(t[2]);
-    }
-    ov.von_mises_field.assign(v.von_mises_field.begin(),
-                              v.von_mises_field.end());
-    result.variants.push_back(ov);
-  }
+}
+
+// MinimizePlasticResult + grid -> the flat OptimizeResult the Swift side reads.
+OptimizeResult to_optimize_result(const topopt::MinimizePlasticResult& mp,
+                                  const topopt::VoxelGrid& grid) {
+  OptimizeResult result;
+  result.stopped_on_margin = mp.stopped_on_margin;
+  result.cancelled = mp.cancelled;
+  result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
+  set_grid_metadata(result, grid);
+  for (const auto& v : mp.evaluated)
+    result.variants.push_back(to_optimize_variant(v));
   return result;
+}
+
+// Wire the core on_variant callback to a C VariantFn: package each streamed
+// variant as a one-variant OptimizeResult (carrying the run's grid metadata, which
+// the Swift side needs to build a live results view) and hand it across.
+void set_variant_stream(topopt::MinimizePlasticOptions& opts,
+                        const topopt::VoxelGrid& grid, VariantFn variant_fn,
+                        void* variant_ctx) {
+  if (variant_fn == nullptr) return;
+  opts.on_variant = [variant_fn, variant_ctx,
+                     &grid](const topopt::MinimizePlasticVariant& v) {
+    OptimizeResult one;
+    one.accepted_count = 1;
+    set_grid_metadata(one, grid);
+    one.variants.push_back(to_optimize_variant(v));
+    variant_fn(variant_ctx, &one);
+  };
 }
 
 }  // namespace
@@ -310,6 +335,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     const std::string& rules_path,
                                     int resolution, ProgressFn progress,
                                     void* ctx, const bool* cancel_flag,
+                                    VariantFn variant_fn, void* variant_ctx,
                                     BridgeError& err) {
   OptimizeResult result;
   try {
@@ -373,6 +399,8 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
       if (cancel_flag != nullptr && *cancel_flag) cancelled.store(true);
     };
 
+    set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
+
     topopt::MinimizePlasticResult mp =
         topopt::minimize_plastic(grid, it->second, material_name, bcs, rules, opts);
     result = to_optimize_result(mp, grid);
@@ -388,7 +416,8 @@ OptimizeResult run_minimize_plastic_loadcase(
     const std::string& step_path, const std::string& material_name,
     const std::string& materials_path, const std::string& rules_path,
     int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
-    void* ctx, const bool* cancel_flag, BridgeError& err) {
+    void* ctx, const bool* cancel_flag, VariantFn variant_fn, void* variant_ctx,
+    BridgeError& err) {
 #ifdef TOPOPT_BRIDGE_HAS_OCCT
   OptimizeResult result;
   try {
@@ -501,6 +530,8 @@ OptimizeResult run_minimize_plastic_loadcase(
       if (cancel_flag != nullptr && *cancel_flag) cancelled.store(true);
     };
 
+    set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
+
     topopt::MinimizePlasticResult mp = topopt::minimize_plastic(
         grid, it->second, material_name, bcs, rules, opts);
     result = to_optimize_result(mp, grid);
@@ -511,6 +542,8 @@ OptimizeResult run_minimize_plastic_loadcase(
   }
   return result;
 #else
+  (void)variant_fn;
+  (void)variant_ctx;
   (void)step_path;
   (void)material_name;
   (void)materials_path;

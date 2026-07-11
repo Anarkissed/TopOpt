@@ -186,6 +186,14 @@ struct OptimizeResult {
   double spacing = 0.0;  // == cbrt(voxel_volume_mm3); carried explicitly for sampling
 };
 
+// Progressive results: invoked once per ACCEPTED variant as it completes (before
+// the next lighter rung is optimized), so the app can show the first optimized
+// variant while the rest still run. `partial` is a ONE-variant OptimizeResult
+// carrying that variant + the run's grid metadata; it (and its buffers) are valid
+// only for the duration of the call — copy what you need. Runs on the optimizing
+// thread. `ctx` is the opaque pointer passed in. May be null (no streaming).
+using VariantFn = void (*)(void* ctx, const OptimizeResult* partial);
+
 // Run minimize_plastic on the part at `stl_path`: import (STL), voxelize at
 // `resolution`, tag the minimum-x boundary slab as the Fixture/mounting face
 // and clamp its nodes, then walk the self-weight volume-fraction ladder using
@@ -199,6 +207,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     const std::string& rules_path,
                                     int resolution, ProgressFn progress,
                                     void* ctx, const bool* cancel_flag,
+                                    VariantFn variant_fn, void* variant_ctx,
                                     BridgeError& err);
 
 // ---------------------------------------------------------------------------
@@ -243,7 +252,8 @@ OptimizeResult run_minimize_plastic_loadcase(
     const std::string& step_path, const std::string& material_name,
     const std::string& materials_path, const std::string& rules_path,
     int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
-    void* ctx, const bool* cancel_flag, BridgeError& err);
+    void* ctx, const bool* cancel_flag, VariantFn variant_fn, void* variant_ctx,
+    BridgeError& err);
 
 // ---------------------------------------------------------------------------
 // Bridge smoke summary — the M7.1 deliverable "material count + imported-mesh

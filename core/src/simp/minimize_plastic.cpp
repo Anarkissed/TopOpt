@@ -233,6 +233,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     if (result.evaluated.back().accepted) {
       result.report.variants.push_back(result.evaluated.back().report);
+      // Progressive results: stream this accepted variant now, before optimizing
+      // the next lighter rung.
+      if (options.on_variant) options.on_variant(result.evaluated.back());
     } else {
       // First too-weak rung: stop the ladder here (do not run lighter rungs).
       result.stopped_on_margin = true;

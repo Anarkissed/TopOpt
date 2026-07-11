@@ -70,6 +70,28 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.tabs.filter(\.isRecommended).count, 1, "exactly one recommendation")
     }
 
+    func testUpdateAppendsStreamedVariantsAndFollowsRecommendation() {
+        // Progressive results: variants stream in one at a time; the model appends
+        // them and (until the user picks) keeps the recommendation/selection on the
+        // newest lightest-safe variant.
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.7)]))
+        XCTAssertEqual(m.tabs.count, 1)
+        XCTAssertTrue(m.tabs[0].isRecommended)
+        XCTAssertEqual(m.selectedIndex, 0)
+
+        m.update(from: outcome([variant(vf: 0.7), variant(vf: 0.5)]))
+        XCTAssertEqual(m.tabs.count, 2)
+        XCTAssertTrue(m.tabs[1].isRecommended)                  // recommendation moved to the lighter
+        XCTAssertEqual(m.selectedIndex, 1, "selection follows the recommendation")
+
+        // Once the user manually picks, streaming no longer moves the selection.
+        m.select(0)
+        m.update(from: outcome([variant(vf: 0.7), variant(vf: 0.5), variant(vf: 0.3)]))
+        XCTAssertEqual(m.tabs.count, 3)
+        XCTAssertTrue(m.tabs[2].isRecommended)
+        XCTAssertEqual(m.selectedIndex, 0, "the user's pick is preserved across streaming")
+    }
+
     func testDefaultSelectedIsZeroWhenSingle() {
         let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.6)]))
         XCTAssertEqual(m.selectedIndex, 0)

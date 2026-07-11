@@ -15,6 +15,12 @@ import TopOptKit
 
 public struct ResultsScreen: View {
     @StateObject private var model: ResultsModel
+    /// The current (growing) outcome — new variants stream in during the run; when
+    /// its variant count changes, the model merges it (progressive results).
+    let liveOutcome: OptimizeOutcome
+    /// Whether the optimize is still running behind the results (more variants may
+    /// arrive) — drives an "optimizing more…" indicator.
+    let streaming: Bool
     /// Back to the workspace (the run is reset so the workspace is interactive).
     var onClose: () -> Void
     /// Export (.3mf) — M7.9. Passed in so the button exists per the design now;
@@ -28,9 +34,11 @@ public struct ResultsScreen: View {
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     private static let morphDuration: Double = 6   // design `dur = 6`s
 
-    public init(projectName: String, outcome: OptimizeOutcome,
+    public init(projectName: String, outcome: OptimizeOutcome, streaming: Bool = false,
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {}) {
         _model = StateObject(wrappedValue: ResultsModel(projectName: projectName, outcome: outcome))
+        self.liveOutcome = outcome
+        self.streaming = streaming
         self.onClose = onClose
         self.onExport = onExport
     }
@@ -51,6 +59,7 @@ public struct ResultsScreen: View {
             savingsTabs
             mediaPlayer
             orientationCorner
+            streamingChip
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
@@ -58,6 +67,28 @@ public struct ResultsScreen: View {
         .onReceive(ticker) { _ in
             guard model.playing else { return }
             model.advance((1.0 / 30.0) / Self.morphDuration)
+        }
+        .onChange(of: liveOutcome.variants.count) { _ in
+            // A variant streamed in (or the final outcome landed) — merge it.
+            model.update(from: liveOutcome)
+        }
+    }
+
+    /// A top-center "optimizing more…" pill while later variants are still running.
+    @ViewBuilder private var streamingChip: some View {
+        if streaming {
+            VStack {
+                HStack(spacing: DS.Space.s) {
+                    ProgressView().controlSize(.small).tint(DS.Color.accent.color)
+                    Text("Optimizing more variants…").dsStyle(DS.TypeScale.caption)
+                        .fontWeight(.semibold).foregroundStyle(DS.Color.textSecondary.color)
+                }
+                .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Surface.bar.color)
+                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                .padding(.top, DS.Space.xl3)
+                Spacer()
+            }
         }
     }
 

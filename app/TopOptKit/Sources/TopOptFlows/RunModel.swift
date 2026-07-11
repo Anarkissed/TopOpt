@@ -299,12 +299,20 @@ public final class RunModel: ObservableObject {
     /// resolves so a failure sheet / success can surface.
     @Published public private(set) var isMinimized = false
 
-    /// The successful outcome, kept for the M7.8 results screen to consume.
-    public private(set) var outcome: OptimizeOutcome?
+    /// The outcome the results screen consumes. Updated INCREMENTALLY as variants
+    /// stream in (progressive results), then replaced by the authoritative final
+    /// outcome when the run resolves. `@Published` so the results screen grows live.
+    @Published public private(set) var outcome: OptimizeOutcome?
+    /// True while more variants may still arrive (the optimize is running behind an
+    /// already-visible results screen). Drives an "optimizing more…" indicator.
+    @Published public private(set) var isStreaming = false
 
-    /// The optimize call. Injected for tests; defaults to the real bridge.
+    /// The optimize call. Injected for tests; defaults to the real bridge. Streams
+    /// each accepted variant through `onVariant` (a one-variant partial outcome) as
+    /// it completes, then returns the full final outcome.
     public typealias Runner = (RunRequest,
-                               _ progress: @escaping (_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)
+                               _ progress: @escaping (_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool,
+                               _ onVariant: @escaping (OptimizeOutcome) -> Void)
                                throws -> OptimizeOutcome
     var runner: Runner
 
@@ -324,7 +332,8 @@ public final class RunModel: ObservableObject {
     /// callback (which doubles as the cancellation signal — returning `false`
     /// stops the run).
     public static func bridgeRunner(_ request: RunRequest,
-                                    _ progress: @escaping (Int, Int, Int) -> Bool) throws -> OptimizeOutcome {
+                                    _ progress: @escaping (Int, Int, Int) -> Bool,
+                                    _ onVariant: @escaping (OptimizeOutcome) -> Void) throws -> OptimizeOutcome {
         // STEP: optimize under the user's declared load case (anchors/loads →
         // clamps + tractions), or self-weight when no loads were set. STL: no
         // faces, so the self-weight ladder (ARCHITECTURE §5) is the only option.
@@ -334,12 +343,12 @@ public final class RunModel: ObservableObject {
                 materialsPath: request.materialsPath, rulesPath: request.rulesPath,
                 resolution: request.resolution, anchorFaceIDs: request.anchorFaceIDs,
                 loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
-                buildDirection: request.buildDirection, progress: progress)
+                buildDirection: request.buildDirection, progress: progress, onVariant: onVariant)
         }
         return try TopOptKit.minimizePlastic(
             stlPath: request.modelPath, material: request.material,
             materialsPath: request.materialsPath, rulesPath: request.rulesPath,
-            resolution: request.resolution, progress: progress)
+            resolution: request.resolution, progress: progress, onVariant: onVariant)
     }
 
     // MARK: - Lifecycle
@@ -351,6 +360,7 @@ public final class RunModel: ObservableObject {
         progress = nil
         failure = nil
         outcome = nil
+        isStreaming = true
         runningInBackground = false
         isMinimized = false
 
@@ -362,18 +372,37 @@ public final class RunModel: ObservableObject {
         scheduler.runInBackground { [weak self] in
             let result: Result<OptimizeOutcome, Error>
             do {
-                let o = try runner(request) { rung, count, iter in
+                let o = try runner(request, { rung, count, iter in
                     // Publish the snapshot on main (fire-and-forget); the keep-going
                     // decision reads the token directly — thread-safe, no hop.
                     scheduler.runOnMain { self?.publish(RunProgress(rung: rung, rungCount: count, iteration: iter)) }
                     return !token.isCancelled
-                }
+                }, { partial in
+                    // Progressive results: a variant finished — append it on main so
+                    // the results screen can show the first one while the rest run.
+                    scheduler.runOnMain { self?.appendStreamed(partial) }
+                })
                 result = .success(o)
             } catch {
                 result = .failure(error)
             }
             scheduler.runOnMain { self?.finish(request, result) }
         }
+    }
+
+    /// Append a streamed variant (a one-variant partial outcome carrying the run's
+    /// grid metadata) to the growing `outcome`, so the results screen shows the
+    /// first optimized variant as soon as it lands (progressive results).
+    private func appendStreamed(_ partial: OptimizeOutcome) {
+        guard phase == .running else { return }   // ignore ticks after resolve/reset
+        var variants = outcome?.variants ?? []
+        variants.append(contentsOf: partial.variants)
+        outcome = OptimizeOutcome(
+            variants: variants, stoppedOnMargin: false, cancelled: false,
+            acceptedCount: variants.count, voxelVolumeMM3: partial.voxelVolumeMM3,
+            gridNx: partial.gridNx, gridNy: partial.gridNy, gridNz: partial.gridNz,
+            gridOrigin: partial.gridOrigin, spacing: partial.spacing)
+        progress = nil   // the running card yields to the (now visible) results
     }
 
     /// Request cancellation of the in-flight run (the callback returns `false` on
@@ -413,6 +442,7 @@ public final class RunModel: ObservableObject {
         progress = nil
         failure = nil
         outcome = nil
+        isStreaming = false
         runningInBackground = false
     }
 
@@ -425,27 +455,38 @@ public final class RunModel: ObservableObject {
 
     private func finish(_ request: RunRequest, _ result: Result<OptimizeOutcome, Error>) {
         guard phase == .running else { return }    // a reset raced ahead — drop it
+        // Any variants already streamed to the results screen (progressive results).
+        let hadStreamed = !(outcome?.variants.isEmpty ?? true)
         switch result {
         case .success(let o):
-            outcome = o
-            if o.cancelled {
-                phase = .cancelled
-            } else if o.acceptedCount == 0 {
-                // The terminal (last evaluated) rung is the one that failed the
-                // margin gate and stopped the ladder — report its numbers.
+            outcome = o                                    // authoritative final
+            if o.acceptedCount == 0 && !o.cancelled {
+                // Nothing strong enough: the terminal rung failed the margin gate.
                 let terminal = o.variants.last
                 failure = .allRejectedOnMargin(
                     worstMargin: terminal?.worstCaseMargin ?? 0,
                     minFeatureViolations: terminal?.minFeatureViolations ?? 0)
                 phase = .failed
+            } else if o.cancelled && o.acceptedCount == 0 {
+                phase = .cancelled                         // cancelled before any variant
             } else {
+                // Accepted variants exist (normal finish, or a cancel that kept the
+                // completed variants) → keep showing them.
                 progress = nil
                 phase = .succeeded
             }
         case .failure(let error):
-            failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
-            phase = .failed
+            if hadStreamed {
+                // The solver failed on a later variant, but earlier ones completed:
+                // keep those rather than throwing everything away.
+                progress = nil
+                phase = .succeeded
+            } else {
+                failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
+                phase = .failed
+            }
         }
+        isStreaming = false
         isMinimized = false   // resolved: let a failure sheet / success surface
         if runningInBackground {
             notifier.runDidComplete(summary: completionSummary(request))

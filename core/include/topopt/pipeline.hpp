@@ -61,6 +61,10 @@ namespace topopt {
 // driver takes an already-voxelized, already-fixtured grid plus the mounting
 // Dirichlet BCs, exactly as the M3.x optimizer tests build their cases in code.
 
+// Forward declaration: the on_variant progressive-results callback (below)
+// references a fully-analysed variant, whose definition follows the options.
+struct MinimizePlasticVariant;
+
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
@@ -102,6 +106,14 @@ struct MinimizePlasticOptions {
                      int iteration)>
       progress;
   const std::atomic<bool>* cancel = nullptr;
+
+  // Progressive results: invoked once per ACCEPTED rung, right after its full
+  // analysis (V3 + report + M7.0b viz fields), BEFORE the next lighter rung is
+  // optimized. Lets a caller stream each variant to the UI as it completes
+  // (jump to the first optimized variant while the rest are still running)
+  // instead of waiting for the whole ladder. Optional; absent by default. It
+  // runs on the optimizing thread and must not throw.
+  std::function<void(const MinimizePlasticVariant&)> on_variant;
 
   // User-defined design load (ARCHITECTURE §1 mode (a): "user-defined loads").
   // When NON-EMPTY, these nodal loads REPLACE self-weight as the design load —

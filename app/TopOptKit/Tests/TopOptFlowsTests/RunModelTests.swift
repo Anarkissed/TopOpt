@@ -117,7 +117,7 @@ final class RunModelTests: XCTestCase {
 
     func testSuccessStoresOutcomeAndClearsProgress() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
-        model.runner = { _, progress in
+        model.runner = { _, progress, _ in
             _ = progress(0, 3, 5)
             _ = progress(1, 3, 8)
             return self.accepted(count: 2)
@@ -132,7 +132,7 @@ final class RunModelTests: XCTestCase {
     func testProgressPublishedFromCallback() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
         var lastSeen: RunProgress?
-        model.runner = { _, progress in
+        model.runner = { _, progress, _ in
             _ = progress(0, 3, 4)
             lastSeen = model.progress               // published synchronously by the inline scheduler
             return self.accepted()
@@ -141,11 +141,38 @@ final class RunModelTests: XCTestCase {
         XCTAssertEqual(lastSeen, RunProgress(rung: 0, rungCount: 3, iteration: 4))
     }
 
+    func testStreamedVariantsAppearBeforeFinish() {
+        // Progressive results: onVariant grows `outcome` DURING the run (so the
+        // results screen can show variant 1 while the rest optimize), and the run
+        // still returns the authoritative final outcome.
+        let g = { (n: Int) in OptimizeOutcome(
+            variants: [self.variant(margin: 3, accepted: true)],
+            stoppedOnMargin: false, cancelled: false, acceptedCount: 1,
+            gridNx: 4, gridNy: 4, gridNz: 4, spacing: 1) }
+        let model = RunModel(scheduler: SynchronousRunScheduler())
+        model.runner = { _, _, onVariant in
+            onVariant(g(1))                              // first variant lands
+            XCTAssertEqual(model.outcome?.variants.count, 1, "results available after variant 1")
+            XCTAssertTrue(model.isStreaming)
+            onVariant(g(2))                              // second variant lands
+            XCTAssertEqual(model.outcome?.variants.count, 2)
+            return OptimizeOutcome(
+                variants: [self.variant(margin: 3, accepted: true),
+                           self.variant(margin: 2, accepted: true)],
+                stoppedOnMargin: false, cancelled: false, acceptedCount: 2,
+                gridNx: 4, gridNy: 4, gridNz: 4, spacing: 1)
+        }
+        model.start(request())
+        XCTAssertEqual(model.phase, .succeeded)
+        XCTAssertEqual(model.outcome?.variants.count, 2)
+        XCTAssertFalse(model.isStreaming, "streaming clears when the run resolves")
+    }
+
     func testAllRejectedOnMarginIsAFailureSheetWithNumbers() {
         // Every rung rejected on strength: the terminal rung's margin (< 1.5) and
         // its advisory thin-feature count flow into the sheet.
         let model = RunModel(scheduler: SynchronousRunScheduler())
-        model.runner = { _, _ in
+        model.runner = { _, _, _ in
             OptimizeOutcome(variants: [self.variant(margin: 0.9, accepted: false, violations: 952)],
                             stoppedOnMargin: true, cancelled: false, acceptedCount: 0)
         }
@@ -160,7 +187,7 @@ final class RunModelTests: XCTestCase {
         // and the violation count is surfaced on the outcome, not turned into a
         // failure — this is the exact CLI-vs-app discrepancy the fix targets.
         let model = RunModel(scheduler: SynchronousRunScheduler())
-        model.runner = { _, _ in
+        model.runner = { _, _, _ in
             OptimizeOutcome(variants: [self.variant(margin: 2500, accepted: true, violations: 1334)],
                             stoppedOnMargin: false, cancelled: false, acceptedCount: 1)
         }
@@ -172,7 +199,7 @@ final class RunModelTests: XCTestCase {
 
     func testSolverThrowIsAFailureSheetWithDiagnostic() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
-        model.runner = { _, _ in throw TopOptError(message: "CG did not converge in 5000 iters") }
+        model.runner = { _, _, _ in throw TopOptError(message: "CG did not converge in 5000 iters") }
         model.start(request())
         XCTAssertEqual(model.phase, .failed)
         XCTAssertEqual(model.failure, .solver("CG did not converge in 5000 iters"))
@@ -181,7 +208,7 @@ final class RunModelTests: XCTestCase {
     func testCancelStopsTheCallbackAndYieldsCancelledPhase() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
         var returnedAfterCancel: Bool?
-        model.runner = { _, progress in
+        model.runner = { _, progress, _ in
             XCTAssertTrue(progress(0, 3, 1))         // still going
             model.cancel()                            // user hits Cancel
             let keepGoing = progress(0, 3, 2)         // token now flips this to false
@@ -209,7 +236,7 @@ final class RunModelTests: XCTestCase {
         let spy = NotifierSpy()
         let model = RunModel(scheduler: SynchronousRunScheduler(), notifier: spy)
         var minimizedDuringRun = false
-        model.runner = { _, progress in
+        model.runner = { _, progress, _ in
             _ = progress(0, 3, 1)
             model.runInBackground()                   // user leaves the run screen mid-run
             XCTAssertTrue(model.runningInBackground)
@@ -226,7 +253,7 @@ final class RunModelTests: XCTestCase {
     func testRestoreReopensAMinimizedRun() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
         var reopenedMidRun = false
-        model.runner = { _, progress in
+        model.runner = { _, progress, _ in
             model.runInBackground()
             XCTAssertTrue(model.isMinimized)
             model.restore()                           // tap the chip
@@ -240,7 +267,7 @@ final class RunModelTests: XCTestCase {
 
     func testMinimizedFailureIsRestoredSoTheSheetShows() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
-        model.runner = { _, _ in
+        model.runner = { _, _, _ in
             model.runInBackground()                   // minimized, then it fails
             return OptimizeOutcome(variants: [self.variant(margin: 0.5, accepted: false)],
                                    stoppedOnMargin: true, cancelled: false, acceptedCount: 0)
@@ -253,7 +280,7 @@ final class RunModelTests: XCTestCase {
     func testForegroundRunDoesNotNotify() {
         let spy = NotifierSpy()
         let model = RunModel(scheduler: SynchronousRunScheduler(), notifier: spy)
-        model.runner = { _, _ in self.accepted() }
+        model.runner = { _, _, _ in self.accepted() }
         model.start(request())
         XCTAssertEqual(spy.willCount, 0)
         XCTAssertTrue(spy.completions.isEmpty)        // never backgrounded => no notification
@@ -264,7 +291,7 @@ final class RunModelTests: XCTestCase {
     func testStartIsNoOpWhileRunning() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
         var starts = 0
-        model.runner = { _, progress in
+        model.runner = { _, progress, _ in
             starts += 1
             model.start(self.request())               // re-entrant start must be ignored
             _ = progress(0, 1, 1)
@@ -277,7 +304,7 @@ final class RunModelTests: XCTestCase {
 
     func testDismissFailureReturnsToIdle() {
         let model = RunModel(scheduler: SynchronousRunScheduler())
-        model.runner = { _, _ in self.accepted(count: 0) }
+        model.runner = { _, _, _ in self.accepted(count: 0) }
         model.start(request())
         XCTAssertEqual(model.phase, .failed)
         model.dismissFailure()

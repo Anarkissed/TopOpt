@@ -34,7 +34,15 @@ public struct RunScreen: View {
         ZStack {
             switch model.phase {
             case .running:
-                if model.isMinimized { minimizedChip } else { runningCard }
+                // Once the first variant streams in, the results screen takes over
+                // (progressive results); the progress card yields to it.
+                if !(model.outcome?.variants.isEmpty ?? true) {
+                    EmptyView()
+                } else if model.isMinimized {
+                    minimizedChip
+                } else {
+                    runningCard
+                }
             case .failed:
                 failureSheet
             default:

@@ -106,9 +106,12 @@ public struct WorkspacePlaceholder: View {
                       resolution: Self.runResolution,
                       onRetry: startRun)
                 .ignoresSafeArea()
-            if run.phase == .succeeded, let outcome = run.outcome {  // M7.8: results screen
+            // Results appear as soon as the FIRST variant streams in (progressive
+            // results), while the rest keep optimizing behind them.
+            if let outcome = run.outcome, !outcome.variants.isEmpty {
                 ResultsScreen(projectName: project.name, outcome: outcome,
-                              onClose: { run.reset() },
+                              streaming: run.isStreaming,
+                              onClose: { run.cancel(); run.reset() },  // stop any still-running variants
                               onExport: { model.toast = "Export (.3mf) arrives in M7.9" })
                     .ignoresSafeArea()
             }
