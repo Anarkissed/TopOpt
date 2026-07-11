@@ -106,6 +106,12 @@ public struct WorkspacePlaceholder: View {
                       resolution: Self.runResolution,
                       onRetry: startRun)
                 .ignoresSafeArea()
+            if run.phase == .succeeded, let outcome = run.outcome {  // M7.8: results screen
+                ResultsScreen(projectName: project.name, outcome: outcome,
+                              onClose: { run.reset() },
+                              onExport: { model.toast = "Export (.3mf) arrives in M7.9" })
+                    .ignoresSafeArea()
+            }
         }
     }
 

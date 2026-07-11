@@ -63,11 +63,26 @@ public struct OptimizeVariant {
     public let minFeatureViolations: Int
     /// The human-readable min-feature warning, or "" when there are none.
     public let minFeatureWarning: String
+    /// M7.8 — the chosen build orientation (M4.4 winning unit build direction),
+    /// for the results orientation sheet.
+    public let orientation: SIMD3<Double>
+    /// M7.8 — peak stresses for the chosen orientation (MPa). `maxStressMPa` (max
+    /// von Mises) drives the stress legend's shared scale; `maxInterlayerTensionMPa`
+    /// is the raw layer-plane tension behind the "Layer shear" readout.
+    public let maxStressMPa: Double
+    public let maxInterlayerTensionMPa: Double
+    /// M7.8 — the two margin components (safety factors; larger is safer). The
+    /// worst case is `worstCaseMargin`; `interlayerMargin` classifies layer shear.
+    public let inPlaneMargin: Double
+    public let interlayerMargin: Double
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 massGrams: Double, supportVolumeVoxels: Int, meshTriangleCount: Int,
                 worstCaseMargin: Double, accepted: Bool, v3Passes: Bool,
-                minFeatureViolations: Int = 0, minFeatureWarning: String = "") {
+                minFeatureViolations: Int = 0, minFeatureWarning: String = "",
+                orientation: SIMD3<Double> = .zero, maxStressMPa: Double = 0,
+                maxInterlayerTensionMPa: Double = 0, inPlaneMargin: Double = 0,
+                interlayerMargin: Double = 0) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         self.massGrams = massGrams
@@ -78,6 +93,11 @@ public struct OptimizeVariant {
         self.v3Passes = v3Passes
         self.minFeatureViolations = minFeatureViolations
         self.minFeatureWarning = minFeatureWarning
+        self.orientation = orientation
+        self.maxStressMPa = maxStressMPa
+        self.maxInterlayerTensionMPa = maxInterlayerTensionMPa
+        self.inPlaneMargin = inPlaneMargin
+        self.interlayerMargin = interlayerMargin
     }
 }
 
@@ -87,13 +107,17 @@ public struct OptimizeOutcome {
     public let stoppedOnMargin: Bool
     public let cancelled: Bool
     public let acceptedCount: Int
+    /// M7.8 — the run's voxel volume (mm³ == spacing³), for turning a variant's
+    /// `supportVolumeVoxels` count into a cm³ support estimate.
+    public let voxelVolumeMM3: Double
 
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
-                cancelled: Bool, acceptedCount: Int) {
+                cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
         self.acceptedCount = acceptedCount
+        self.voxelVolumeMM3 = voxelVolumeMM3
     }
 }
 
@@ -262,12 +286,18 @@ public enum TopOptKit {
                 accepted: v.accepted,
                 v3Passes: v.v3_passes,
                 minFeatureViolations: Int(v.min_feature_violations),
-                minFeatureWarning: String(v.min_feature_warning)))
+                minFeatureWarning: String(v.min_feature_warning),
+                orientation: SIMD3<Double>(v.orientation_x, v.orientation_y, v.orientation_z),
+                maxStressMPa: v.max_stress_mpa,
+                maxInterlayerTensionMPa: v.max_interlayer_tension_mpa,
+                inPlaneMargin: v.in_plane_margin,
+                interlayerMargin: v.interlayer_margin))
         }
         return OptimizeOutcome(variants: variants,
                                stoppedOnMargin: raw.stopped_on_margin,
                                cancelled: raw.cancelled,
-                               acceptedCount: Int(raw.accepted_count))
+                               acceptedCount: Int(raw.accepted_count),
+                               voxelVolumeMM3: raw.voxel_volume_mm3)
     }
 
     /// The M7.1 smoke summary shared by the app's smoke screen and the tests.

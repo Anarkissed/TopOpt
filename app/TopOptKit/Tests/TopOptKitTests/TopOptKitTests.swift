@@ -5,6 +5,7 @@
 // against the committed core fixtures, so they would fail if the bridge returned
 // stubbed data or the wiring to the core were broken.
 import XCTest
+import simd
 @testable import TopOptKit
 
 final class TopOptKitTests: XCTestCase {
@@ -199,6 +200,31 @@ final class TopOptKitTests: XCTestCase {
         }
         // accepted_count matches the accepted-prefix flags.
         XCTAssertEqual(outcome.acceptedCount, outcome.variants.filter(\.accepted).count)
+    }
+
+    // M7.8: the results-screen fields flow from the real bridge (VariantReport +
+    // grid), not stubbed. Would fail if the bridge left them default-constructed.
+    func testMinimizePlasticResultsFields() throws {
+        let outcome = try TopOptKit.minimizePlastic(
+            stlPath: Self.cubeSTL, material: "PLA",
+            materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+            resolution: 6)
+        XCTAssertGreaterThan(outcome.voxelVolumeMM3, 0, "grid.voxel_volume() must flow")
+        XCTAssertFalse(outcome.variants.isEmpty)
+        for v in outcome.variants {
+            // Orientation is the M4.4 winning unit build direction — nonzero + finite.
+            let len = simd_length(v.orientation)
+            XCTAssertGreaterThan(len, 0.5, "orientation must be a real (unit) direction")
+            XCTAssertTrue(v.orientation.x.isFinite && v.orientation.y.isFinite && v.orientation.z.isFinite)
+            // Peak stresses are nonnegative + finite (self-weighted cube → loaded).
+            XCTAssertGreaterThanOrEqual(v.maxStressMPa, 0)
+            XCTAssertTrue(v.maxStressMPa.isFinite && v.maxInterlayerTensionMPa.isFinite)
+            // Margins are positive + finite, and worst_case == min(in_plane, interlayer)
+            // (the locked definition) — proves all three carry the same real numbers.
+            XCTAssertGreaterThan(v.inPlaneMargin, 0)
+            XCTAssertGreaterThan(v.interlayerMargin, 0)
+            XCTAssertEqual(v.worstCaseMargin, min(v.inPlaneMargin, v.interlayerMargin), accuracy: 1e-6)
+        }
     }
 
     func testMinimizePlasticCancel() throws {

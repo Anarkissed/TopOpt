@@ -311,6 +311,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     result.stopped_on_margin = mp.stopped_on_margin;
     result.cancelled = mp.cancelled;
     result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
+    result.voxel_volume_mm3 = grid.voxel_volume();
     for (const auto& v : mp.evaluated) {
       OptimizeVariant ov;
       ov.requested_volume_fraction = v.requested_volume_fraction;
@@ -324,6 +325,14 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
       ov.min_feature_violations =
           static_cast<int32_t>(v.report.min_feature_violations);
       ov.min_feature_warning = v.report.min_feature_warning;
+      // M7.8 results-screen fields (from the assembled VariantReport).
+      ov.orientation_x = v.report.orientation.x;
+      ov.orientation_y = v.report.orientation.y;
+      ov.orientation_z = v.report.orientation.z;
+      ov.max_stress_mpa = v.report.max_stress_mpa;
+      ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
+      ov.in_plane_margin = v.report.margin.in_plane;
+      ov.interlayer_margin = v.report.margin.interlayer;
       result.variants.push_back(ov);
     }
   } catch (const std::exception& e) {

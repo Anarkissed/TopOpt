@@ -1,0 +1,191 @@
+// Headless tests for the M7.8 ResultsModel (savings tabs, orientation copy, layer
+// shear, stress color ramp + shared scale, scrub state). Pure logic — no bridge,
+// no rendering. The ResultsScreen chrome + the Metal stress/threshold rendering
+// are device QA (the M7 /app/ standard).
+import XCTest
+import simd
+@testable import TopOptFlows
+@testable import TopOptKit
+import TopOptDesign
+
+@MainActor
+final class ResultsModelTests: XCTestCase {
+
+    // A stub accepted variant with just the fields the results screen reads.
+    private func variant(vf: Double, mass: Double = 100, support: Int = 0,
+                         orientation: SIMD3<Double> = SIMD3(0, 0, 1),
+                         maxStress: Double = 10, interlayerMargin: Double = 3,
+                         accepted: Bool = true, minFeat: Int = 0) -> OptimizeVariant {
+        OptimizeVariant(
+            requestedVolumeFraction: vf, achievedVolumeFraction: vf, massGrams: mass,
+            supportVolumeVoxels: support, meshTriangleCount: 100, worstCaseMargin: min(2, interlayerMargin),
+            accepted: accepted, v3Passes: true, minFeatureViolations: minFeat, minFeatureWarning: minFeat > 0 ? "thin" : "",
+            orientation: orientation, maxStressMPa: maxStress, maxInterlayerTensionMPa: 5,
+            inPlaneMargin: 2, interlayerMargin: interlayerMargin)
+    }
+
+    private func outcome(_ variants: [OptimizeVariant], voxelVolumeMM3: Double = 1) -> OptimizeOutcome {
+        OptimizeOutcome(variants: variants, stoppedOnMargin: false, cancelled: false,
+                        acceptedCount: variants.filter(\.accepted).count, voxelVolumeMM3: voxelVolumeMM3)
+    }
+
+    // MARK: tabs / savings / mass
+
+    func testSavingsAndMassLabels() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([
+            variant(vf: 0.7, mass: 199), variant(vf: 0.5, mass: 142), variant(vf: 0.3, mass: 85),
+        ]))
+        XCTAssertEqual(m.tabs.count, 3)
+        XCTAssertEqual(m.tabs[0].savingsPercent, 30)
+        XCTAssertEqual(m.tabs[0].savingsLabel, "\u{2212}30%")   // U+2212 minus, per design
+        XCTAssertEqual(m.tabs[1].savingsLabel, "\u{2212}50%")
+        XCTAssertEqual(m.tabs[2].savingsLabel, "\u{2212}70%")
+        XCTAssertEqual(m.tabs[0].massLabel, "199 g")
+        XCTAssertEqual(m.tabs[0].subLabel(active: true), "199 g · selected")
+        XCTAssertEqual(m.tabs[0].subLabel(active: false), "199 g · plastic")
+    }
+
+    func testMassLabelFormatting() {
+        XCTAssertEqual(ResultsModel.massLabel(199), "199 g")
+        XCTAssertEqual(ResultsModel.massLabel(9.4), "9.4 g")
+        XCTAssertEqual(ResultsModel.massLabel(1240), "1.24 kg")
+    }
+
+    func testOnlyAcceptedVariantsBecomeTabs() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([
+            variant(vf: 0.7), variant(vf: 0.5), variant(vf: 0.3, accepted: false),  // rejected terminal
+        ]))
+        XCTAssertEqual(m.tabs.count, 2)
+    }
+
+    // MARK: selection
+
+    func testDefaultSelectedIsMiddleWhenMultiple() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.7), variant(vf: 0.5), variant(vf: 0.3)]))
+        XCTAssertEqual(m.selectedIndex, 1)
+    }
+
+    func testDefaultSelectedIsZeroWhenSingle() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.6)]))
+        XCTAssertEqual(m.selectedIndex, 0)
+        XCTAssertEqual(m.selected?.index, 0)
+    }
+
+    func testSelectResetsScrubAndClampsRange() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.7), variant(vf: 0.5)]))
+        m.scrub(to: 0.3)
+        m.select(0)
+        XCTAssertEqual(m.selectedIndex, 0)
+        XCTAssertEqual(m.playT, 1, accuracy: 1e-9)     // pick → fully formed
+        XCTAssertFalse(m.playing)
+        m.select(9)                                    // out of range → ignored
+        XCTAssertEqual(m.selectedIndex, 0)
+    }
+
+    // MARK: scrub / play state
+
+    func testScrubClamps() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5)]))
+        m.scrub(to: -1); XCTAssertEqual(m.playT, 0, accuracy: 1e-9)
+        m.scrub(to: 2);  XCTAssertEqual(m.playT, 1, accuracy: 1e-9)
+    }
+
+    func testTogglePlayRestartsFromEnd() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5)]))
+        XCTAssertEqual(m.playT, 1, accuracy: 1e-9)     // opens fully formed
+        m.togglePlay()                                 // at end → restart
+        XCTAssertTrue(m.playing)
+        XCTAssertEqual(m.playT, 0, accuracy: 1e-9)
+        m.advance(0.5); XCTAssertEqual(m.playT, 0.5, accuracy: 1e-9)
+        m.advance(1);   XCTAssertEqual(m.playT, 1, accuracy: 1e-9)
+        XCTAssertFalse(m.playing)                      // stops at 1
+    }
+
+    func testToggleStress() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5)]))
+        XCTAssertFalse(m.stressOn)
+        m.toggleStress(); XCTAssertTrue(m.stressOn)
+        m.toggleStress(); XCTAssertFalse(m.stressOn)
+    }
+
+    // MARK: support estimate
+
+    func testSupportEstimateCm3() {
+        // 2000 voxels × 1 mm³ each = 2000 mm³ = 2.0 cm³.
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5, support: 2000)], voxelVolumeMM3: 1))
+        XCTAssertEqual(m.tabs[0].supportCm3, 2.0, accuracy: 1e-9)
+        XCTAssertEqual(m.tabs[0].supportLabel, "2.0 cm³")
+    }
+
+    func testZeroSupportReadsMinimal() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5, support: 0)]))
+        XCTAssertEqual(m.tabs[0].supportLabel, "minimal")
+    }
+
+    // MARK: orientation tilt + copy
+
+    func testUprightOrientation() {
+        XCTAssertEqual(ResultsModel.tiltFromVertical(SIMD3(0, 0, 1)), 0)
+        XCTAssertEqual(ResultsModel.tiltFromVertical(SIMD3(0, 0, -1)), 0)   // same layer planes
+        let s = ResultsModel.orientationSummary(tiltDegrees: 0, supportCm3: 0, supportLabel: "minimal")
+        XCTAssertTrue(s.hasPrefix("Print upright"))
+        XCTAssertTrue(s.contains("Minimal supports"))
+    }
+
+    func testTiltedOrientation() {
+        // 45° between +Z and (1,0,1)/√2.
+        XCTAssertEqual(ResultsModel.tiltFromVertical(SIMD3(1, 0, 1)), 45)
+        let s = ResultsModel.orientationSummary(tiltDegrees: 45, supportCm3: 3.8, supportLabel: "3.8 cm³")
+        XCTAssertTrue(s.contains("Tilt 45° from vertical"))
+        XCTAssertTrue(s.contains("Est. 3.8 cm³ support"))
+    }
+
+    func testOrientationSummaryOmitsPrintTime() {
+        // DECISIONS 2026-07-11: (b) omit print time. Never surface a time/duration.
+        let s = ResultsModel.orientationSummary(tiltDegrees: 30, supportCm3: 1, supportLabel: "1.0 cm³")
+        XCTAssertFalse(s.lowercased().contains("print time"))
+        // No hour/minute duration tokens like "3h", "10 min", "2 hr".
+        let duration = #"\d+\s*(h|hr|hrs|hour|hours|min|mins|minute|minutes)\b"#
+        XCTAssertNil(s.range(of: duration, options: .regularExpression),
+                     "orientation copy must not surface a print-time duration")
+    }
+
+    // MARK: layer shear
+
+    func testLayerShearClassification() {
+        XCTAssertEqual(LayerShear.classify(interlayerMargin: 2.0), .low)
+        XCTAssertEqual(LayerShear.classify(interlayerMargin: 1.99), .moderate)
+        XCTAssertEqual(LayerShear.classify(interlayerMargin: 1.25), .moderate)
+        XCTAssertEqual(LayerShear.classify(interlayerMargin: 1.24), .high)
+        XCTAssertEqual(LayerShear.classify(interlayerMargin: .infinity), .low)  // no layer tension
+        XCTAssertTrue(LayerShear.low.isLow)
+        XCTAssertFalse(LayerShear.moderate.isLow)
+        XCTAssertEqual(LayerShear.high.label, "High")
+    }
+
+    // MARK: stress color ramp + shared scale
+
+    func testStressColorRampEndpointsAndMidpoint() {
+        let lo = ResultsModel.stressColor(fraction: 0)
+        XCTAssertEqual(lo, RGBA(28, 60, 170))       // #1c3caa
+        let hi = ResultsModel.stressColor(fraction: 1)
+        XCTAssertEqual(hi, RGBA(255, 70, 50))       // #ff4632
+        let mid = ResultsModel.stressColor(fraction: 0.5)
+        XCTAssertEqual(mid, RGBA(60, 190, 110))     // #3cbe6e (green, center stop)
+    }
+
+    func testStressColorClamps() {
+        XCTAssertEqual(ResultsModel.stressColor(fraction: -5), RGBA(28, 60, 170))
+        XCTAssertEqual(ResultsModel.stressColor(fraction: 5), RGBA(255, 70, 50))
+    }
+
+    func testStressSharedScaleAcrossVariants() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([
+            variant(vf: 0.7, maxStress: 8), variant(vf: 0.5, maxStress: 20), variant(vf: 0.3, maxStress: 12),
+        ]))
+        XCTAssertEqual(m.stressScaleMaxMPa, 20, accuracy: 1e-9)   // global max
+        XCTAssertEqual(m.stressFraction(mpa: 20), 1, accuracy: 1e-9)
+        XCTAssertEqual(m.stressFraction(mpa: 10), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(m.stressFraction(mpa: 40), 1, accuracy: 1e-9) // clamped
+    }
+}

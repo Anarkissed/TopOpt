@@ -141,6 +141,18 @@ struct OptimizeVariant {
   // acceptance (`accepted` is strength-margin only).
   int32_t min_feature_violations = 0;
   std::string min_feature_warning;  // empty when violations == 0
+  // M7.8 results screen. The chosen build orientation (VariantReport.orientation,
+  // the M4.4 winning unit build direction) for the orientation sheet; the peak
+  // stresses (max von Mises / max interlayer tension, MPa) for the stress legend's
+  // shared scale and the "Layer shear" readout; and the two margin components
+  // (StressMargin.in_plane / .interlayer — worst_case is `worst_case_margin`).
+  double orientation_x = 0.0;
+  double orientation_y = 0.0;
+  double orientation_z = 0.0;
+  double max_stress_mpa = 0.0;
+  double max_interlayer_tension_mpa = 0.0;
+  double in_plane_margin = 0.0;
+  double interlayer_margin = 0.0;
 };
 
 struct OptimizeResult {
@@ -148,6 +160,10 @@ struct OptimizeResult {
   bool stopped_on_margin = false;
   bool cancelled = false;
   int32_t accepted_count = 0;  // report.variants.size()
+  // M7.8: the run's voxel volume (grid.voxel_volume(), mm^3 == spacing^3), so the
+  // app can turn a variant's support_volume_voxels count into a cm^3 estimate
+  // (voxels * voxel_volume_mm3 / 1000). One grid per run, so it lives here.
+  double voxel_volume_mm3 = 0.0;
 };
 
 // Run minimize_plastic on the part at `stl_path`: import (STL), voxelize at
