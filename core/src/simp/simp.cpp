@@ -63,6 +63,17 @@ void validate_projection_options(const SimpOptions& o) {
   }
 }
 
+// The MMA updater (ROADMAP M7.mma.1) is scoped to the plain compliance +
+// volume-constraint loop for this task; combining it with a Heaviside
+// projection schedule (or, in the masked overload, a passive-region mask) is
+// rejected until the later MMA tasks extend those paths.
+void validate_updater_options(const SimpOptions& o) {
+  if (o.updater == SimpUpdater::MMA && !o.projection.empty())
+    throw std::invalid_argument(
+        "simp_optimize: MMA updater does not support a Heaviside projection "
+        "schedule yet (ROADMAP M7.mma.1); use OC or clear options.projection");
+}
+
 }  // namespace
 
 double simp_youngs(const SimpParams& params, double density) {
@@ -394,6 +405,168 @@ std::size_t total_stage_iterations(const std::vector<StagePlan>& plan) {
   return n;
 }
 
+// ---------------------------------------------------------------------------
+// MMA updater (ROADMAP M7.mma.1), Svanberg, "The method of moving asymptotes -
+// a new method for structural optimization", Int. J. Numer. Methods Eng. 24
+// (1987) 359-373. Compliance objective + a single volume constraint, as a
+// drop-in alternative to oc_update: it consumes the SAME inputs (the physical-
+// space compliance sensitivity, the volume-fraction target, the move limit) and
+// enforces the SAME volume constraint on the filtered density, but replaces the
+// multiplicative OC step with MMA's convex separable subproblem, solved through
+// its dual (1-D here since there is a single constraint, m = 1).
+
+// Persistent MMA state across the iterations of one simp_optimize run: the
+// previous two designs and the current moving asymptotes L_j, U_j. All vectors
+// are grid-indexed (size voxel_count()); only design (solid) voxels carry
+// meaningful values.
+struct MmaState {
+  std::vector<double> xold1;  // design at iteration k-1
+  std::vector<double> xold2;  // design at iteration k-2
+  std::vector<double> low;    // lower asymptotes L_j
+  std::vector<double> upp;    // upper asymptotes U_j
+};
+
+// One MMA design update. `st` carries the asymptotes + last two iterates across
+// calls; `mma_iter` is the 1-based MMA iteration number (asymptotes are
+// initialised for iter <= 2 and adapted afterwards). Constants follow the
+// widely-used mmasub reference and the 1987 paper: asyinit = 0.5 (initial
+// asymptote half-span, as a fraction of the x-range), asyincr = 1.2 /
+// asydecr = 0.7 (asymptote grow/shrink on non-oscillating / oscillating moves),
+// albefa = 0.1 (fraction keeping the move box strictly inside the asymptotes),
+// raa0 = 1e-5 (the small positive term guaranteeing p, q > 0). The move limit
+// reuses `move` as a fraction of xrange = xmax - xmin, matching oc_update so the
+// two updaters are directly comparable at the same move.
+std::vector<double> mma_update(MmaState& st, int mma_iter, const VoxelGrid& grid,
+                               const DensityFilter& filter,
+                               const std::vector<double>& density,
+                               const std::vector<double>& dcompliance,
+                               double volume_fraction, double move,
+                               double density_min) {
+  const std::size_t N = grid.voxel_count();
+
+  // Chain rule, exactly as oc_update: filter the physical-space compliance
+  // sensitivity and the unit volume sensitivity into design space (H is
+  // symmetric). dc <= 0 (more material lowers compliance); dv >= 0.
+  const std::vector<double> dc = filter.filter_sensitivity(dcompliance);
+  std::vector<double> ones(N, 0.0);
+  std::vector<std::size_t> dof;  // design (solid) voxel indices
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i)
+        if (grid.solid(i, j, k)) {
+          const std::size_t e = grid.index(i, j, k);
+          ones[e] = 1.0;
+          dof.push_back(e);
+        }
+  const std::vector<double> dv = filter.filter_sensitivity(ones);
+  const double target = volume_fraction * static_cast<double>(dof.size());
+
+  // Current constraint value g0 = V(x) - target. The filtered volume is linear
+  // in x (V(x) = sum_e xPhys_e), so summing filter_density(x) gives V(x).
+  const std::vector<double> xphys = filter.filter_density(density);
+  double vol = 0.0;
+  for (double v : xphys) vol += v;
+  const double g0 = vol - target;
+
+  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
+  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
+  const double albefa = 0.1, raa0 = 1e-5;
+
+  if (st.low.size() != N) {
+    st.low.assign(N, 0.0);
+    st.upp.assign(N, 0.0);
+  }
+
+  // 1. Moving asymptotes L_j, U_j.
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    if (mma_iter <= 2) {
+      st.low[e] = xe - asyinit * xrange;
+      st.upp[e] = xe + asyinit * xrange;
+    } else {
+      // Oscillation detector: sign of (x^k - x^{k-1})(x^{k-1} - x^{k-2}).
+      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
+      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
+      double L = xe - gamma * (st.xold1[e] - st.low[e]);
+      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
+      // Keep each asymptote within [0.01, 10] * xrange of the current point.
+      L = std::min(L, xe - 0.01 * xrange);
+      L = std::max(L, xe - 10.0 * xrange);
+      U = std::max(U, xe + 0.01 * xrange);
+      U = std::min(U, xe + 10.0 * xrange);
+      st.low[e] = L;
+      st.upp[e] = U;
+    }
+  }
+
+  // 2. Separable convex approximation coefficients and the move box [alpha, beta].
+  std::vector<double> p0(N, 0.0), q0(N, 0.0), p1(N, 0.0), q1(N, 0.0);
+  std::vector<double> alpha(N, 0.0), beta(N, 0.0);
+  double b = -g0;  // b = sum_j(p1/ux1 + q1/xl1) - g0
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    const double L = st.low[e], U = st.upp[e];
+    const double ux1 = U - xe, xl1 = xe - L;
+    const double dcp = std::max(dc[e], 0.0), dcm = std::max(-dc[e], 0.0);
+    const double dvp = std::max(dv[e], 0.0), dvm = std::max(-dv[e], 0.0);
+    p0[e] = ux1 * ux1 * (1.001 * dcp + 0.001 * dcm + raa0 / xrange);
+    q0[e] = xl1 * xl1 * (0.001 * dcp + 1.001 * dcm + raa0 / xrange);
+    p1[e] = ux1 * ux1 * (1.001 * dvp + 0.001 * dvm + raa0 / xrange);
+    q1[e] = xl1 * xl1 * (0.001 * dvp + 1.001 * dvm + raa0 / xrange);
+    b += p1[e] / ux1 + q1[e] / xl1;
+    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
+    beta[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
+  }
+
+  // 3. Dual solve for the single volume constraint. For a trial multiplier
+  // lambda >= 0 the primal minimiser of the separable subproblem is closed form:
+  //   x_j(lambda) = ( sqrt(p0+lambda*p1) L_j + sqrt(q0+lambda*q1) U_j )
+  //               / ( sqrt(p0+lambda*p1) + sqrt(q0+lambda*q1) )   (clamped to box).
+  auto candidate = [&](double lambda) {
+    std::vector<double> xnew(N, 0.0);
+    for (std::size_t e : dof) {
+      const double pl = std::sqrt(p0[e] + lambda * p1[e]);
+      const double ql = std::sqrt(q0[e] + lambda * q1[e]);
+      double xt = (pl * st.low[e] + ql * st.upp[e]) / (pl + ql);
+      if (xt < alpha[e]) xt = alpha[e];
+      if (xt > beta[e]) xt = beta[e];
+      xnew[e] = xt;
+    }
+    return xnew;
+  };
+  // The approximate constraint value g1(x) = sum_j(p1/(U-x) + q1/(x-L)) - b;
+  // it decreases monotonically in lambda, so bisect for g1 = 0 (KKT: lambda >= 0,
+  // g1 <= 0, complementarity). If the unconstrained optimum is already feasible,
+  // lambda stays 0.
+  auto gval = [&](const std::vector<double>& x) {
+    double s = 0.0;
+    for (std::size_t e : dof)
+      s += p1[e] / (st.upp[e] - x[e]) + q1[e] / (x[e] - st.low[e]);
+    return s - b;
+  };
+  double lambda = 0.0;
+  if (gval(candidate(0.0)) > 0.0) {
+    double l1 = 0.0, l2 = 1.0;
+    while (l2 < 1e30 && gval(candidate(l2)) > 0.0) l2 *= 2.0;
+    for (int it = 0; it < 100 && (l2 - l1) > 1e-9 * (1.0 + l1 + l2); ++it) {
+      const double lmid = 0.5 * (l1 + l2);
+      if (gval(candidate(lmid)) > 0.0)
+        l1 = lmid;
+      else
+        l2 = lmid;
+    }
+    lambda = 0.5 * (l1 + l2);
+  }
+  std::vector<double> xnew = candidate(lambda);
+
+  // 4. Roll the history forward (xold2 <- xold1 <- x). After iteration 1 xold2
+  // stays empty; the asymptote branch only reads xold1/xold2 for mma_iter >= 3,
+  // by which point both are full grid-sized vectors.
+  st.xold2 = st.xold1;
+  st.xold1 = density;
+  return xnew;
+}
+
 // Project the design (solid) voxels of a filtered field in place; Empty
 // voxels stay exactly 0.
 void project_solid(const VoxelGrid& grid, std::vector<double>& x, double beta,
@@ -507,12 +680,18 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   if (options.change_tol < 0.0)
     throw std::invalid_argument("simp_optimize: change_tol must be >= 0");
   validate_projection_options(options);
+  validate_updater_options(options);  // MMA + projection rejected (M7.mma.1)
 
   // make_density_filter validates filter_radius > 0.
   const DensityFilter filter = make_density_filter(grid, options.filter_radius);
   const double n_design = static_cast<double>(grid.solid_count());
   const std::vector<StagePlan> plan = build_stage_plan(options);
   const double eta = options.projection_eta;
+
+  // MMA updater state (ROADMAP M7.mma.1). Unused when updater == OC; the plain
+  // (unprojected) branch below owns the single continuous MMA iteration count.
+  MmaState mma_state;
+  int mma_iter = 0;
 
   // Physical volume fraction of a grid-indexed physical density field.
   auto phys_volfrac = [&](const std::vector<double>& xphys) {
@@ -553,6 +732,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         x_new = oc_update_projected(grid, filter, x, xtilde, c.dcompliance,
                                     st.beta, eta, options.volume_fraction,
                                     st.move, params.density_min);
+      } else if (options.updater == SimpUpdater::MMA) {
+        // MMA and projection are mutually exclusive here (validated above), so
+        // this is always the plain unprojected stage.
+        x_new = mma_update(mma_state, ++mma_iter, grid, filter, x, c.dcompliance,
+                           options.volume_fraction, st.move, params.density_min);
       } else {
         x_new = oc_update(grid, filter, x, c.dcompliance,
                           options.volume_fraction, st.move,
@@ -816,6 +1000,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   if (mask.size() != grid.voxel_count())
     throw std::invalid_argument("simp_optimize: mask size != voxel_count");
   validate_projection_options(options);
+  // Passive-region MMA is a later task (ROADMAP M7.mma.1 is the plain loop;
+  // the minimize_plastic/masked switchover is M7.mma.4). Reject it explicitly
+  // rather than silently falling back to OC.
+  if (options.updater == SimpUpdater::MMA)
+    throw std::invalid_argument(
+        "simp_optimize: MMA updater is not supported with a passive-region "
+        "mask yet (ROADMAP M7.mma.1); use OC");
 
   // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
   // analysis grid (FrozenVoid removed), and the Active-voxel budget.

@@ -305,6 +305,17 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_minimize_plastic PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME minimize_plastic COMMAND test_minimize_plastic)
+
+  # MMA updater (M7.mma.1): the Method of Moving Asymptotes design updater,
+  # exposed behind SimpOptions.updater = MMA, reproduces the OC minimum-
+  # compliance benchmarks (the Gate V2 cantilever + clamped-beam geometries)
+  # within 2% at the same volume fraction, and is correctly scoped (projection /
+  # passive-region masks rejected). Builds its grids in code (no fixture) and
+  # drives simp_optimize, so it is gated on Eigen like the other optimizer
+  # tests. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_mma tests/validation/test_mma.cpp)
+  target_link_libraries(test_mma PRIVATE topopt)
+  add_test(NAME mma COMMAND test_mma)
 endif()
 
 # STEP import test (M1.4). Requires OCCT; built only when it is available (always

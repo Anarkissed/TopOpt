@@ -220,10 +220,25 @@ std::vector<ProjectionStage> heaviside_continuation_schedule();
 // constraint is enforced on the physical (filtered) density by oc_update every
 // step, so the achieved physical volume fraction tracks the target throughout.
 
+// Design-variable updater (ROADMAP M7.mma.1). The design update rule the SIMP
+// loop uses each iteration:
+//   * OC  — the Optimality-Criteria updater (ARCHITECTURE §4; M3.3). Default.
+//   * MMA — the Method of Moving Asymptotes (Svanberg 1987), compliance
+//           objective + a single volume constraint, as a drop-in alternative to
+//           OC. Reproduces the OC minimum-compliance optimum (the M7.mma.1
+//           gate asserts within 2% at the same volume fraction) while giving the
+//           convex-subproblem machinery later stress/multi-load tasks build on.
+// The default is OC, so existing callers and the locked Gate-V2 fixture are
+// unaffected. MMA in M7.mma.1 is scoped to the plain (unprojected, unmasked)
+// compliance loop; combining it with a Heaviside projection schedule or a
+// passive-region mask throws std::invalid_argument (extended in later tasks).
+enum class SimpUpdater { OC, MMA };
+
 struct SimpOptions {
   double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
   double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
-  double move = 0.2;             // OC move limit
+  double move = 0.2;             // OC/MMA move limit
+  SimpUpdater updater = SimpUpdater::OC;  // design updater (M7.mma.1); default OC
   int max_iterations = 60;       // hard iteration cap (a convergence criterion)
   double change_tol = 0.01;      // stop when max_e |x_new - x| < change_tol
   double cg_tolerance = 1e-8;    // penalized-FEA CG tolerance (tight: §V2 gate)
