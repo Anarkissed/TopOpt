@@ -315,6 +315,35 @@
       benchmark compliance within 2% of the OC references at the same volume
       fraction; iteration counts reported in the test log (informational).
       Pure core; no /app/.
+- [ ] M7.disp Expose the per-node displacement field on MinimizePlasticVariant
+      (bridge visualization data — the M7.0b sibling of von_mises_field).
+      WHY: M7.viz.3 (flex animation) needs the solved displacement to move mesh
+      vertices; the app currently gets only the von Mises SCALAR (M7.0b), which
+      cannot drive motion. The physics ALREADY EXISTS — SimpCompliance.solution
+      (simp.hpp) carries the penalized FeaSolution (nodal displacements,
+      DOF-ordered, size 3*fea_node_count). This task EXPOSES it; it computes no
+      new physics and runs no new solve.
+      ADD to MinimizePlasticVariant (pipeline.hpp), populated in
+      minimize_plastic.cpp from the SAME final penalized solve that already
+      produces von_mises_field (reuse the sc = simp_compliance(...) result's
+      sc.solution, do not re-solve):
+        std::vector<double> displacement_field;  // per-NODE, DOF-ordered
+          (size 3*fea_node_count(grid)); [3n,3n+1,3n+2] = (ux,uy,uz) of node n
+          in model units (mm). Zero on nodes attached only to void/non-printed
+          voxels, mirroring how von_mises_field is zero off the printed set.
+      Populate it beside the existing von_mises_field assignment in the
+      per-variant stress loop; on the cancelled/aborted path leave it empty,
+      exactly as von_mises_field is (pipeline.hpp cancel contract).
+      BRIDGE: forward displacement_field through the TopOptKit bridge to Swift
+      as the app-facing companion to the von Mises field, same mechanism.
+      Additive field only — changes no existing signature, so the interface
+      freeze holds; M7.viz.3 consumes it, no other bridge change.
+      TESTS (Linux CI, pure core): displacement_field has size 3*node_count on
+      an accepted variant; nonzero on loaded/printed nodes, zero on void-only
+      nodes; matches sc.solution element-for-element (assert equality with the
+      solve, not an independent value — this is exposure, not recomputation);
+      empty on the cancelled path. Pure exposure of an existing field: no new
+      fixture, no benchmark change, do NOT touch tests/fixtures/**.
 - [ ] M7.mma.2 Stress-constrained optimization on the MMA path: aggregated
       von Mises constraint (p-norm or KS — record the choice and the
       aggregation parameter/tolerance in DECISIONS.md) with adjoint
