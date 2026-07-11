@@ -202,6 +202,50 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     BridgeError& err);
 
 // ---------------------------------------------------------------------------
+// Optimize under the user's DECLARED load case (ARCHITECTURE §1 mode (a)),
+// instead of self-weight. This is the path the app's M7.6 anchors/loads drive so
+// the reported margins/stresses reflect the forces the user actually set — not
+// the part's own weight.
+
+// The user's declared load case. Laid out with only scalar vectors so the Swift
+// C++ importer builds it member-wise (push_back) — no nested struct vectors.
+//   * `anchor_face_ids`: the anchor B-rep faces (tagged Fixture + clamped).
+//   * Load groups are flattened: group g's face ids are the `load_group_sizes[g]`
+//     entries of `load_face_ids` starting at the sum of earlier sizes, and its
+//     total force (newtons) is (load_forces[3g], load_forces[3g+1],
+//     load_forces[3g+2]). Each group's force is spread as a consistent,
+//     distributed traction over its exposed faces (topopt::traction_loads) —
+//     never a lumped point force.
+//   * `minimize_plastic`: on → the reduction ladder; off → one conservative variant.
+//   * `build_dir_*`: the print/build direction (the interlayer-margin orientation).
+struct BridgeLoadCase {
+  std::vector<int32_t> anchor_face_ids;
+  std::vector<int32_t> load_face_ids;
+  std::vector<int32_t> load_group_sizes;
+  std::vector<double> load_forces;  // 3 per group (fx, fy, fz)
+  bool minimize_plastic = true;
+  double build_dir_x = 0.0;
+  double build_dir_y = 0.0;
+  double build_dir_z = 1.0;
+};
+
+// Voxelize the STEP part once, tag the anchor faces Fixture (clamped) and each
+// load group's faces Load, assemble the load groups' tractions as the design load
+// (ARCHITECTURE §1 mode (a)), and walk the ladder. `minimize_plastic` on → the
+// reduction ladder {0.7,0.5,0.3} (save material while staying strong under the
+// forces); off → a single conservative variant (mostly-solid, just strong enough
+// — "handle the forces, minimal removal"). Degenerate fallbacks that keep a run
+// well-posed: with NO load groups the design load falls back to self-weight; with
+// NO anchor faces the minimum-x boundary is auto-clamped (mirroring
+// run_minimize_plastic). `build_dir_*` (0,0,0) defaults to +Z. Needs OCCT (STEP
+// face selection); on a platform without it, sets `err`.
+OptimizeResult run_minimize_plastic_loadcase(
+    const std::string& step_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
+    void* ctx, const bool* cancel_flag, BridgeError& err);
+
+// ---------------------------------------------------------------------------
 // Bridge smoke summary — the M7.1 deliverable "material count + imported-mesh
 // triangle count". Loads the materials file and imports the mesh, returning
 // both counts in one call so the app's smoke screen and the headless test share

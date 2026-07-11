@@ -240,6 +240,42 @@ final class TopOptKitTests: XCTestCase {
         }
     }
 
+    // The user's declared load case drives the solve (ARCHITECTURE §1 mode (a)),
+    // not self-weight: anchor one face, hang a force on another, and the run
+    // returns a valid outcome computed under that force. STEP-only (l-bracket).
+    func testMinimizePlasticLoadCaseUsesDeclaredForces() throws {
+        let res = 20
+        // Find two distinct faces that actually tag voxels (robust to the STEP's
+        // face numbering) — one anchor, one load.
+        let mesh = try TopOptKit.importMesh(path: Self.lbracketSTEP)
+        var taggable: [Int] = []
+        for f in 0..<mesh.faceCount {
+            let n = (try? TopOptKit.tagStepFace(stepPath: Self.lbracketSTEP, faceID: f,
+                                                asFixture: true, resolution: res)) ?? 0
+            if n > 0 { taggable.append(f) }
+            if taggable.count == 2 { break }
+        }
+        try XCTSkipIf(taggable.count < 2, "need two taggable faces on the fixture")
+
+        let outcome = try TopOptKit.minimizePlasticLoadCase(
+            stepPath: Self.lbracketSTEP, material: "PLA",
+            materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+            resolution: res, anchorFaceIDs: [taggable[0]],
+            loadGroups: [.init(faceIDs: [taggable[1]], force: SIMD3(0, 0, -5))],
+            minimizePlastic: false)   // one conservative variant => fast
+
+        XCTAssertGreaterThan(outcome.gridNx, 0)
+        XCTAssertGreaterThan(outcome.spacing, 0)
+        // `minimize_plastic` off => a single (conservative) variant, not the ladder.
+        XCTAssertEqual(outcome.variants.count, 1)
+        for v in outcome.variants {
+            XCTAssertTrue(v.maxStressMPa.isFinite && v.worstCaseMargin.isFinite)
+            XCTAssertGreaterThan(v.maxStressMPa, 0, "the declared force produces real stress")
+            XCTAssertFalse(v.meshVertices.isEmpty)
+            XCTAssertEqual(v.vonMisesField.count, outcome.gridNx * outcome.gridNy * outcome.gridNz)
+        }
+    }
+
     func testMinimizePlasticCancel() throws {
         var invocations = 0
         let outcome = try TopOptKit.minimizePlastic(

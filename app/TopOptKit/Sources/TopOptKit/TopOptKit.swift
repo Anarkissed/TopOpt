@@ -298,7 +298,76 @@ public enum TopOptKit {
                 std.string(rulesPath), Int32(resolution), nil, nil, cancelFlag, &err)
         }
         try throwIfFailed(err)
+        return convertOutcome(raw)
+    }
 
+    /// A user load group for `minimizePlasticLoadCase`: the B-rep faces it covers
+    /// and the total force (newtons) applied over them (the M7.6 UI's direction ×
+    /// weight). The force is spread as a distributed traction over the faces.
+    public struct LoadGroupSpec {
+        public let faceIDs: [Int]
+        public let force: SIMD3<Double>
+        public init(faceIDs: [Int], force: SIMD3<Double>) {
+            self.faceIDs = faceIDs
+            self.force = force
+        }
+    }
+
+    /// Run minimize_plastic under the user's DECLARED load case (ARCHITECTURE §1
+    /// mode (a)) — the app's tagged anchors/loads — instead of self-weight, so the
+    /// reported margins/stresses reflect the forces the user set. `minimizePlastic`
+    /// on → the material-reduction ladder; off → one conservative variant.
+    /// STEP-only (needs OCCT face selection). Same M7.0a progress/cancel contract.
+    public static func minimizePlasticLoadCase(
+        stepPath: String, material: String, materialsPath: String, rulesPath: String,
+        resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
+        minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil
+    ) throws -> OptimizeOutcome {
+        var lc = topoptbridge.BridgeLoadCase()
+        for f in anchorFaceIDs { lc.anchor_face_ids.push_back(Int32(f)) }
+        for g in loadGroups {
+            for f in g.faceIDs { lc.load_face_ids.push_back(Int32(f)) }
+            lc.load_group_sizes.push_back(Int32(g.faceIDs.count))
+            lc.load_forces.push_back(g.force.x)
+            lc.load_forces.push_back(g.force.y)
+            lc.load_forces.push_back(g.force.z)
+        }
+        lc.minimize_plastic = minimizePlastic
+        lc.build_dir_x = buildDirection.x
+        lc.build_dir_y = buildDirection.y
+        lc.build_dir_z = buildDirection.z
+
+        let cancelFlag = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        cancelFlag.initialize(to: false)
+        defer { cancelFlag.deinitialize(count: 1); cancelFlag.deallocate() }
+
+        var err = topoptbridge.BridgeError()
+        var raw: topoptbridge.OptimizeResult
+        if let progress {
+            let box = ProgressBox(progress, cancelFlag)
+            let ctx = Unmanaged.passUnretained(box).toOpaque()
+            let trampoline: topoptbridge.ProgressFn = { ctxPtr, rung, count, iter in
+                guard let ctxPtr else { return }
+                let b = Unmanaged<ProgressBox>.fromOpaque(ctxPtr).takeUnretainedValue()
+                if !b.callback(Int(rung), Int(count), Int(iter)) { b.cancelFlag.pointee = true }
+            }
+            raw = topoptbridge.run_minimize_plastic_loadcase(
+                std.string(stepPath), std.string(material), std.string(materialsPath),
+                std.string(rulesPath), Int32(resolution), lc, trampoline, ctx, cancelFlag, &err)
+            withExtendedLifetime(box) {}
+        } else {
+            raw = topoptbridge.run_minimize_plastic_loadcase(
+                std.string(stepPath), std.string(material), std.string(materialsPath),
+                std.string(rulesPath), Int32(resolution), lc, nil, nil, cancelFlag, &err)
+        }
+        try throwIfFailed(err)
+        return convertOutcome(raw)
+    }
+
+    /// Map the bridge's OptimizeResult to the Swift outcome (shared by both run
+    /// entry points — mirrors the C++ `to_optimize_result` helper).
+    private static func convertOutcome(_ raw: topoptbridge.OptimizeResult) -> OptimizeOutcome {
         var variants: [OptimizeVariant] = []
         for v in raw.variants {
             variants.append(OptimizeVariant(

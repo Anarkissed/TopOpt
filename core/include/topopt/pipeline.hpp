@@ -102,6 +102,18 @@ struct MinimizePlasticOptions {
                      int iteration)>
       progress;
   const std::atomic<bool>* cancel = nullptr;
+
+  // User-defined design load (ARCHITECTURE §1 mode (a): "user-defined loads").
+  // When NON-EMPTY, these nodal loads REPLACE self-weight as the design load —
+  // the driver optimizes and analyses the part under this load case instead of
+  // its own weight, so the reported margins/stresses are for the user's forces.
+  // Assemble it from the app's tagged Load faces via `traction_loads` (M7.6-core)
+  // and pass the mounting faces as `bcs`. When EMPTY (default), the driver uses
+  // self-weight exactly as before (mode (b), unchanged — all existing callers).
+  // `gravity_direction` is still required (it defines the reported build
+  // orientation and the interlayer-tension axis, M4.4); `gravity` is only
+  // consulted in the self-weight (empty) case.
+  std::vector<NodalLoad> external_loads;
 };
 
 // One ladder rung actually evaluated by the driver.
