@@ -12,6 +12,9 @@
 import SwiftUI
 import TopOptDesign
 import TopOptKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public struct ResultsScreen: View {
     @StateObject private var model: ResultsModel
@@ -32,6 +35,7 @@ public struct ResultsScreen: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var orientOpen = false
+    @StateObject private var videoExport = VideoExportModel()
     /// Drives the Play animation: a ~30 fps tick that advances the morph scrub while
     /// `model.playing`, so Play actually plays (previously it required a manual drag).
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
@@ -76,6 +80,18 @@ public struct ResultsScreen: View {
         .onChange(of: liveOutcome.variants.count) { _ in
             // A variant streamed in (or the final outcome landed) — merge it.
             model.update(from: liveOutcome)
+        }
+        .sheet(isPresented: Binding(
+            get: { if case .ready = videoExport.state { return true } else { return false } },
+            set: { if !$0 { videoExport.reset() } })) {
+            if case let .ready(url) = videoExport.state { ShareSheet(items: [url]) }
+        }
+        .alert("Couldn’t save video", isPresented: Binding(
+            get: { if case .failed = videoExport.state { return true } else { return false } },
+            set: { if !$0 { videoExport.reset() } })) {
+            Button("OK") { videoExport.reset() }
+        } message: {
+            if case let .failed(msg) = videoExport.state { Text(msg) }
         }
     }
 
@@ -266,6 +282,8 @@ public struct ResultsScreen: View {
                     .foregroundStyle(DS.Color.textSecondary.color)
                     .monospacedDigit()
                     .frame(width: 34)
+
+                downloadButton   // far-right: save the optimization as a video
             }
             .padding(.vertical, DS.Space.xs)
             .padding(.horizontal, DS.Space.m)
@@ -273,6 +291,27 @@ public struct ResultsScreen: View {
                 .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .dsShadow(.panel)
             .padding(.bottom, DS.Space.xl6)
+        }
+    }
+
+    /// Far-right timeline control: export the optimization playback as a video. A
+    /// spinner while encoding; enabled only when the variant has a history.
+    @ViewBuilder private var downloadButton: some View {
+        if videoExport.isExporting {
+            ProgressView().controlSize(.small).tint(DS.Color.accent.color)
+                .frame(width: 32, height: 32)
+        } else {
+            Button {
+                videoExport.export(keyframes: model.keyframes(), name: model.projectName)
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .disabled(!model.hasHistory)
+            .opacity(model.hasHistory ? 1 : 0.35)
         }
     }
 
@@ -340,3 +379,29 @@ public struct ResultsScreen: View {
         .transition(.opacity.combined(with: .move(edge: .trailing)))
     }
 }
+
+/// A share sheet for the exported video (UIActivityViewController on iOS; a simple
+/// confirmation on macOS, where there is no activity view controller).
+#if canImport(UIKit)
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+}
+#else
+struct ShareSheet: View {
+    let items: [Any]
+    var body: some View {
+        VStack(spacing: DS.Space.m) {
+            Text("Video saved").dsStyle(DS.TypeScale.title)
+            if let url = items.first as? URL {
+                Text(url.lastPathComponent).dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+            }
+        }
+        .padding(DS.Space.xl3)
+    }
+}
+#endif
