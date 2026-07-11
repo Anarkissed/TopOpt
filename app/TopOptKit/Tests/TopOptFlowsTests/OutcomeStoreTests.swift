@@ -18,6 +18,7 @@ final class OutcomeStoreTests: XCTestCase {
             maxInterlayerTensionMPa: 12.0, inPlaneMargin: 2.1, interlayerMargin: 1.8,
             meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2],
             vonMisesField: [1.5, 2.5, 3.5, 4.5],
+            displacementField: [0.1, -0.2, 0.3, 0.4, 0.5, -0.6],
             keyframeMeshes: [
                 KeyframeMesh(vertices: [0, 0, 0, 2, 0, 0, 0, 2, 0], indices: [0, 1, 2]),
                 KeyframeMesh(vertices: [0, 0, 0, 1, 1, 1], indices: [0, 1]),
@@ -59,6 +60,9 @@ final class OutcomeStoreTests: XCTestCase {
         XCTAssertEqual(a.meshVertices, [0, 0, 0, 1, 0, 0, 0, 1, 0])
         XCTAssertEqual(a.meshIndices, [0, 1, 2])
         XCTAssertEqual(a.vonMisesField, [1.5, 2.5, 3.5, 4.5])
+        // M7.viz.3: the per-node displacement field survives so a reopened project
+        // flexes without re-optimizing (the whole point of persisting it).
+        XCTAssertEqual(a.displacementField, [0.1, -0.2, 0.3, 0.4, 0.5, -0.6])
         XCTAssertEqual(a.keyframeMeshes.count, 2)
         XCTAssertEqual(a.keyframeMeshes[0].vertices, [0, 0, 0, 2, 0, 0, 0, 2, 0])
         XCTAssertEqual(a.keyframeMeshes[0].indices, [0, 1, 2])
@@ -68,6 +72,28 @@ final class OutcomeStoreTests: XCTestCase {
         XCTAssertFalse(b.accepted)
         XCTAssertTrue(b.meshVertices.isEmpty)
         XCTAssertTrue(b.keyframeMeshes.isEmpty)
+        XCTAssertTrue(b.displacementField.isEmpty)   // rejected rung carries no flex data
+    }
+
+    /// A persist-c blob written BEFORE M7.viz.3 has no `displacementField` key. It
+    /// must still decode (→ empty flex), not fail the whole outcome — that is why the
+    /// DTO field is optional. Simulate the legacy blob by stripping the key.
+    func testDecodesLegacyBlobWithoutDisplacementField() throws {
+        let data = try OutcomeCodec.encode(OutcomeCodec.dto(from: sampleOutcome()))
+        let obj = try PropertyListSerialization.propertyList(
+            from: data, options: PropertyListSerialization.ReadOptions(), format: nil)
+        var plist = try XCTUnwrap(obj as? [String: Any])
+        var variants = try XCTUnwrap(plist["variants"] as? [[String: Any]])
+        for i in variants.indices { variants[i].removeValue(forKey: "displacementField") }
+        plist["variants"] = variants
+        let stripped = try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)
+
+        let decoded = try OutcomeCodec.decode(stripped)
+        XCTAssertEqual(decoded.variants.count, 2)
+        // The rest of the outcome is intact; only flex degrades to empty.
+        XCTAssertEqual(decoded.variants[0].vonMisesField, [1.5, 2.5, 3.5, 4.5])
+        XCTAssertTrue(decoded.variants[0].displacementField.isEmpty)
+        XCTAssertTrue(decoded.variants[1].displacementField.isEmpty)
     }
 
     func testStoreSavesAndLoadsResultsBlob() throws {

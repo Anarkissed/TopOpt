@@ -98,6 +98,86 @@ public struct StressField: Sendable {
     }
 }
 
+/// A per-NODE displacement field (mm) from the FEA solve, exposed through the bridge
+/// by M7.disp — the companion of `StressField` that the M7.viz.3 flex animation
+/// displaces mesh vertices by. Unlike `StressField` (per-VOXEL), this is sampled at
+/// grid NODES: `nx/ny/nz` are the VOXEL dims, so there are `(nx+1)*(ny+1)*(nz+1)`
+/// nodes, node `(a,b,c)` at flat index `(c*(ny+1)+b)*(nx+1)+a` sits at world
+/// `origin + (a,b,c)*spacing`, and its three components `[3n, 3n+1, 3n+2]` are
+/// `(ux, uy, uz)`. This is NOT a physics simulation — the displacement is already
+/// solved; this only samples it so the mesh can be drawn deflected.
+public struct DisplacementField: Sendable {
+    public let nx: Int      // VOXEL grid dims (nodes are nx+1 / ny+1 / nz+1 per axis)
+    public let ny: Int
+    public let nz: Int
+    public let origin: SIMD3<Float>   // grid minimum corner (world mm)
+    public let spacing: Float         // voxel edge length (mm)
+    public let values: [Float]        // size 3*(nx+1)*(ny+1)*(nz+1), mm (may be empty)
+
+    public init(nx: Int, ny: Int, nz: Int, origin: SIMD3<Float>, spacing: Float, values: [Float]) {
+        self.nx = nx; self.ny = ny; self.nz = nz
+        self.origin = origin; self.spacing = spacing; self.values = values
+    }
+
+    /// Number of grid nodes ((nx+1)·(ny+1)·(nz+1)); the field holds 3 per node.
+    public var nodeCount: Int { (nx + 1) * (ny + 1) * (nz + 1) }
+
+    public var isEmpty: Bool {
+        values.isEmpty || spacing <= 0 || nx <= 0 || ny <= 0 || nz <= 0
+            || values.count < 3 * nodeCount
+    }
+
+    /// Nearest-node displacement at world position `p` (zero when empty / degenerate).
+    /// Mesh vertices sit on printed-voxel corners, i.e. grid nodes (M7.disp handoff),
+    /// so rounding to the nearest node lands on the exact node in practice.
+    public func displacement(at p: SIMD3<Float>) -> SIMD3<Float> {
+        guard !isEmpty else { return .zero }
+        let a = clamp(Int(((p.x - origin.x) / spacing).rounded()), nx + 1)
+        let b = clamp(Int(((p.y - origin.y) / spacing).rounded()), ny + 1)
+        let c = clamp(Int(((p.z - origin.z) / spacing).rounded()), nz + 1)
+        let n = (c * (ny + 1) + b) * (nx + 1) + a
+        let base = 3 * n
+        guard base >= 0, base + 2 < values.count else { return .zero }
+        return SIMD3<Float>(values[base], values[base + 1], values[base + 2])
+    }
+
+    private func clamp(_ v: Int, _ n: Int) -> Int { min(max(v, 0), n - 1) }
+}
+
+/// Pure math for the M7.viz.3 flex animation: the user-adjustable exaggeration and
+/// the rest→full→rest loop amplitude. Kept out of the renderer so it is verified
+/// headlessly (the M7 /app/ standard); the Metal vertex displacement that consumes
+/// it is device QA. The animation is a DRAWING of the already-solved FEA
+/// displacement, not a new simulation.
+public enum FlexAnimation {
+    /// Exaggeration band the design calls for (50–100×). The default sits at the low
+    /// end so the deflection reads on a phone screen without tearing the mesh apart.
+    public static let minExaggeration: Float = 50
+    public static let maxExaggeration: Float = 100
+    public static let defaultExaggeration: Float = 60
+
+    /// Clamp a user-chosen exaggeration into the [min, max] band.
+    public static func clampExaggeration(_ v: Float) -> Float {
+        min(maxExaggeration, max(minExaggeration, v))
+    }
+
+    /// Loop amplitude in [0, 1] for a phase in [0, 1): a raised cosine that is 0 at
+    /// rest (phase 0), 1 at full deflection (phase 0.5), and back to 0 (phase 1) —
+    /// rest → full → back, with zero slope at both turnarounds so the loop has no
+    /// visible seam.
+    public static func amplitude(phase: Double) -> Double {
+        0.5 - 0.5 * cos(2 * Double.pi * phase)
+    }
+
+    /// The displaced position of a rest vertex: `base + exaggeration·amplitude·d`.
+    /// This is exactly the math the Metal vertex shader applies (`flexScale =
+    /// exaggeration·amplitude`); amplitude 0 → rest, amplitude 1 → full deflection.
+    public static func displacedPosition(base: SIMD3<Float>, displacement d: SIMD3<Float>,
+                                         exaggeration: Float, amplitude: Double) -> SIMD3<Float> {
+        base + (exaggeration * Float(amplitude)) * d
+    }
+}
+
 /// One accepted variant's presentation (a savings tab + its orientation/shear
 /// readouts). Everything is precomputed from the outcome so it is `Equatable` and
 /// directly assertable in tests.
@@ -214,6 +294,17 @@ public final class ResultsModel: ObservableObject {
     @Published public private(set) var selectedIndex: Int = 0
     /// Stress overlay toggle (colors the variant mesh by von Mises — Metal follow-up).
     @Published public var stressOn: Bool = false
+    /// Flex animation toggle (M7.viz.3): displace the mesh by the FEA displacement
+    /// field, looping rest→full→rest (or a static full-deflection frame under
+    /// reduced-motion). Only meaningful when the selected variant `hasFlex`.
+    @Published public var flexOn: Bool = false
+    /// Flex loop position in [0, 1) — advanced by the view's timer while flexing;
+    /// wraps. Reduced-motion ignores it (the frame is pinned to full deflection).
+    @Published public private(set) var flexPhase: Double = 0
+    /// User-adjustable exaggeration (50–100×; default tuned for phone legibility),
+    /// clamped through `setFlexExaggeration`. Multiplies the solved displacement so
+    /// the (sub-millimetre) deflection is visible.
+    public private(set) var flexExaggeration: Float = FlexAnimation.defaultExaggeration
     /// Morph/threshold scrub position in [0, 1] (1 = fully formed variant).
     @Published public private(set) var playT: Double = 1
     /// Whether the morph is auto-playing (a UI timer advances `playT` in the view).
@@ -267,6 +358,7 @@ public final class ResultsModel: ObservableObject {
             ? yieldStrengthMPa
             : (acc.map(\.maxStressMPa).max() ?? 0)
         keyframeCache = nil   // variant data changed → rebuild keyframes on demand
+        flexCache = nil       // …and the per-vertex flex displacements
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -289,6 +381,80 @@ public final class ResultsModel: ObservableObject {
         guard let v = selectedVariant else { return nil }
         return StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+    }
+
+    // MARK: - flex animation (M7.viz.3)
+
+    /// The selected variant's per-node displacement field (M7.disp), tied to the
+    /// run's grid geometry — the field the flex animation displaces vertices by.
+    public var selectedDisplacementField: DisplacementField? {
+        guard let v = selectedVariant else { return nil }
+        return DisplacementField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
+                                 origin: gridOrigin, spacing: spacing, values: v.displacementField)
+    }
+
+    /// Whether the selected variant carries a displacement field to flex (a
+    /// cancelled/legacy variant has none, so the Flex control stays hidden).
+    public var hasFlex: Bool {
+        guard let f = selectedDisplacementField else { return false }
+        return !f.isEmpty
+    }
+
+    private var flexCache: (index: Int, disp: [Float])?
+
+    /// Toggle the flex animation. Turning it off resets the loop to rest so it
+    /// restarts cleanly next time.
+    public func toggleFlex() {
+        flexOn.toggle()
+        if !flexOn { flexPhase = 0 }
+    }
+
+    /// Set the exaggeration factor, clamped to the design's 50–100× band.
+    public func setFlexExaggeration(_ v: Float) {
+        flexExaggeration = FlexAnimation.clampExaggeration(v)
+    }
+
+    /// Advance the flex loop by `dt` (phase units); wraps into [0, 1). No-op unless
+    /// flexing (the view only calls this while `flexOn` and motion is allowed).
+    public func advanceFlex(_ dt: Double) {
+        guard flexOn else { return }
+        var p = (flexPhase + dt).truncatingRemainder(dividingBy: 1)
+        if p < 0 { p += 1 }
+        flexPhase = p
+    }
+
+    /// Current loop amplitude in [0, 1]. Reduced-motion pins it at full deflection
+    /// (a static frame, no loop, per the accessibility requirement); otherwise it
+    /// follows the rest→full→rest phase. 0 when flex is off (rest / no displacement).
+    public func flexAmplitude(reduceMotion: Bool) -> Double {
+        guard flexOn else { return 0 }
+        return reduceMotion ? 1 : FlexAnimation.amplitude(phase: flexPhase)
+    }
+
+    /// The GPU displacement scale for the current frame: `exaggeration · amplitude`.
+    /// The Metal vertex shader adds `flexScale · displacement` to each rest vertex.
+    public func flexScale(reduceMotion: Bool) -> Float {
+        flexExaggeration * Float(flexAmplitude(reduceMotion: reduceMotion))
+    }
+
+    /// Per-flat-vertex displacement vectors (mm) for `mesh`, sampled from `field` at
+    /// each flat vertex's rest position — the static buffer the viewer uploads once
+    /// per selection; the shader scales it by `flexScale` each frame. Flattened xyz,
+    /// aligned with `mesh.flat.positions`. Cached on `selectedIndex` (rebuilt when the
+    /// variant data changes) so the O(N) sample runs once per variant, not per frame.
+    public func flexDisplacements(for mesh: ViewerMesh, field: DisplacementField) -> [Float] {
+        if let c = flexCache, c.index == selectedIndex { return c.disp }
+        let positions = mesh.flat.positions
+        let count = mesh.flat.vertexCount
+        var out = [Float]()
+        out.reserveCapacity(count * 3)
+        for v in 0..<count {
+            let p = SIMD3<Float>(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2])
+            let d = field.displacement(at: p)
+            out.append(d.x); out.append(d.y); out.append(d.z)
+        }
+        flexCache = (selectedIndex, out)
+        return out
     }
 
     // MARK: - optimization-history playback (keyframes)
@@ -351,6 +517,7 @@ public final class ResultsModel: ObservableObject {
         selectedIndex = index
         playT = 1
         playing = false
+        flexPhase = 0   // the new variant's flex loop starts from rest
     }
 
     public func toggleStress() { stressOn.toggle() }
