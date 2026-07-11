@@ -42,12 +42,15 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// The optimize resolution/quality. OPTIONAL for the same back-compat reason
     /// (nil → Fast).
     public var quality: RunQuality?
+    /// Whether the project has optimize results. OPTIONAL for back-compat (nil → false).
+    public var optimized: Bool?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
                 originalFileName: String, savedAt: Date,
                 selection: SelectionModel, force: ForceModel,
-                minimizePlastic: Bool? = nil, quality: RunQuality? = nil) {
+                minimizePlastic: Bool? = nil, quality: RunQuality? = nil,
+                optimized: Bool? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -60,6 +63,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.force = force
         self.minimizePlastic = minimizePlastic
         self.quality = quality
+        self.optimized = optimized
     }
 }
 

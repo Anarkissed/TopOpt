@@ -112,12 +112,17 @@ public struct RecentProject: Identifiable, Equatable, Sendable {
     public let name: String
     public let materialName: String
     public let process: ProcessKind
+    /// Whether this project has produced optimize results — drives the Library card's
+    /// "Optimized" vs "Ready" status chip.
+    public var optimized: Bool
 
-    public init(id: UUID = UUID(), name: String, materialName: String, process: ProcessKind) {
+    public init(id: UUID = UUID(), name: String, materialName: String,
+                process: ProcessKind, optimized: Bool = false) {
         self.id = id
         self.name = name
         self.materialName = materialName
         self.process = process
+        self.optimized = optimized
     }
 
     /// The card's meta line, e.g. "PLA · Just now".

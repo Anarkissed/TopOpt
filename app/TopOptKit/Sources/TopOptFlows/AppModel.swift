@@ -12,6 +12,7 @@
 // forced deterministically.
 
 import Foundation
+import CoreGraphics
 import TopOptKit
 
 @MainActor
@@ -62,6 +63,9 @@ public final class AppModel: ObservableObject {
     // MARK: Recents + toast
 
     @Published public private(set) var recentProjects: [RecentProject] = []
+    /// Rendered Library thumbnails, keyed by project id. Generated from the imported
+    /// mesh this launch (in-memory; on-disk-only recents show the frosted fallback).
+    @Published public private(set) var thumbnails: [UUID: CGImage] = [:]
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
@@ -102,7 +106,8 @@ public final class AppModel: ObservableObject {
         // Seed the recents grid from disk (lazy: projects are re-imported only when
         // opened). persist-b.
         recentProjects = store.loadAllSnapshots().map {
-            RecentProject(id: $0.id, name: $0.name, materialName: $0.material, process: $0.process)
+            RecentProject(id: $0.id, name: $0.name, materialName: $0.material,
+                          process: $0.process, optimized: $0.optimized ?? false)
         }
     }
 
@@ -168,14 +173,27 @@ public final class AppModel: ObservableObject {
 
     /// Rename the open project (tap the title). Updates the recents grid + persists.
     public func renameCurrentProject(to newName: String) {
+        guard let project else { return }
+        renameRecent(id: project.id, to: newName)
+    }
+
+    /// Rename any recent (from the open workspace title or the Library card menu).
+    /// Updates the live project if loaded, the recents grid, and the on-disk snapshot.
+    public func renameRecent(id: UUID, to newName: String) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let project, !trimmed.isEmpty else { return }
-        project.name = trimmed
-        projectName = trimmed
-        updateRecent(id: project.id) {
-            RecentProject(id: $0.id, name: trimmed, materialName: $0.materialName, process: $0.process)
+        guard !trimmed.isEmpty else { return }
+        updateRecent(id: id) {
+            RecentProject(id: $0.id, name: trimmed, materialName: $0.materialName,
+                          process: $0.process, optimized: $0.optimized)
         }
-        persistCurrentProject()
+        if let pm = projectsById[id] {
+            pm.name = trimmed
+            if project?.id == id { projectName = trimmed }
+            persist(pm)
+        } else if var snap = store.snapshot(id: id) {
+            snap.name = trimmed
+            try? store.save(snap)   // model already copied — snapshot-only rewrite
+        }
     }
 
     /// Change the open project's material (within its category). Updates recents + persists.
@@ -183,9 +201,27 @@ public final class AppModel: ObservableObject {
         guard let project else { return }
         project.material = material
         updateRecent(id: project.id) {
-            RecentProject(id: $0.id, name: $0.name, materialName: material, process: $0.process)
+            RecentProject(id: $0.id, name: $0.name, materialName: material,
+                          process: $0.process, optimized: $0.optimized)
         }
         persistCurrentProject()
+    }
+
+    /// Flag a project as optimized (called when its run produces accepted variants):
+    /// flips the Library status chip and persists the flag.
+    public func markOptimized(_ id: UUID) {
+        guard let idx = recentProjects.firstIndex(where: { $0.id == id }),
+              !recentProjects[idx].optimized else { return }
+        recentProjects[idx].optimized = true
+        if let pm = projectsById[id] { persist(pm) }
+    }
+
+    /// Render + cache a Library thumbnail for a project from its imported mesh.
+    /// No-op when there's no mesh or Metal is unavailable (frosted fallback shows).
+    private func generateThumbnail(for id: UUID, mesh: ViewerMesh?) {
+        guard let mesh, thumbnails[id] == nil,
+              let image = MeshThumbnail.cgImage(for: mesh) else { return }
+        thumbnails[id] = image
     }
 
     private func updateRecent(id: UUID, _ transform: (RecentProject) -> RecentProject) {
@@ -269,6 +305,7 @@ public final class AppModel: ObservableObject {
         projectsById[recent.id] = pm
         project = pm
         recentProjects.insert(recent, at: 0)
+        generateThumbnail(for: recent.id, mesh: pm.viewerMesh)
         projectName = name
         importSheetPresented = false
         screen = .workspace
@@ -295,6 +332,7 @@ public final class AppModel: ObservableObject {
                                    importedFile: nil, importedMesh: nil)
             projectsById[recent.id] = project
         }
+        generateThumbnail(for: recent.id, mesh: project?.viewerMesh)
         screen = .workspace
     }
 
@@ -324,6 +362,12 @@ public final class AppModel: ObservableObject {
             try store.save(snapshot, modelSource: project.modelSourceURL)
         } catch {
             toast = "Couldn’t save “\(project.name)”: \(error.localizedDescription)"
+        }
+        // Once a project has results, reflect it in its Library card ("Optimized").
+        if project.hasResults,
+           let idx = recentProjects.firstIndex(where: { $0.id == project.id }),
+           !recentProjects[idx].optimized {
+            recentProjects[idx].optimized = true
         }
     }
 

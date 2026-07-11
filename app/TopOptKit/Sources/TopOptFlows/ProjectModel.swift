@@ -54,6 +54,12 @@ public final class ProjectModel: ObservableObject {
     /// state) survives leaving and returning to the workspace.
     public let run: RunModel
 
+    /// Whether the project has usable optimize results (≥1 accepted variant) —
+    /// drives the Library card's "Optimized" status and the persisted flag.
+    public var hasResults: Bool {
+        run.outcome?.variants.contains { $0.accepted } ?? false
+    }
+
     public init(id: UUID, name: String, material: String, process: ProcessKind,
                 importedFile: ImportedFile?, importedMesh: ImportedMesh?,
                 run: RunModel? = nil) {
@@ -131,7 +137,8 @@ public final class ProjectModel: ObservableObject {
         return ProjectSnapshot(id: id, name: name, material: material, process: process,
                                modelFileName: modelFileName, originalFileName: file.name,
                                savedAt: savedAt, selection: selection, force: force,
-                               minimizePlastic: minimizePlastic, quality: quality)
+                               minimizePlastic: minimizePlastic, quality: quality,
+                               optimized: hasResults)
     }
 
     /// The URL of the imported model file to copy into the store on first save.
