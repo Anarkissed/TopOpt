@@ -428,4 +428,100 @@ MultiVariantResult simp_optimize_variants(
     const SimpOptions& options, const std::vector<double>& volume_fractions,
     double iso = 0.5);
 
+// ---------------------------------------------------------------------------
+// Stress-constrained optimization on the MMA path (ROADMAP M7.mma.2).
+//
+// The minimum-compliance SIMP loop above drives stiffness only; a
+// compliance-optimal design can carry a peak von Mises stress well above the
+// material yield (the re-entrant-corner singularity of an L-bracket is the
+// canonical case). M7.mma.2 adds an AGGREGATED von Mises stress constraint to
+// the MMA path so the optimizer trades stiffness for a bounded peak stress.
+//
+// Three standard ingredients (recorded for DECISIONS.md per the ROADMAP task):
+//
+//   * Aggregation — P-NORM. The many local von Mises constraints are collapsed
+//     into one differentiable measure
+//         g(rho) = ( sum_e sigma~_e^P )^(1/P)     (over design/solid voxels),
+//     an upper bound on the true maximum that approaches it from above as P
+//     grows (P = 8 here). One aggregated constraint keeps the MMA subproblem
+//     small (m = 2: volume + stress) and the adjoint a single extra solve.
+//
+//   * Relaxation — qp (Bruggi 2008). To defuse the stress SINGULARITY problem
+//     (degenerate optima that a stress constraint on vanishing material cannot
+//     escape) the element stress is relaxed by a density power with exponent
+//     q < p (penalty):
+//         sigma~_e = clamp(rho_e)^q * sigma_vm(D0 * B * u_e),
+//     where sigma_vm is the true von Mises of the SOLID-material stress
+//     (constitutive D0 at E0, nu) evaluated on the penalized displacement u.
+//     q = 0.5 (p - q = 2.5 > 0) makes a void voxel's relaxed stress -> 0 so its
+//     constraint switches off, opening the degenerate corners of the feasible
+//     set. On a converged black/white design rho_e ~ 1, so sigma~_e ~ the true
+//     von Mises there.
+//
+//   * Sensitivity — ADJOINT. dg/drho_e has an explicit part (the rho^q factor)
+//     plus an implicit part through u, obtained with ONE adjoint solve
+//     K(rho) lambda = dg/du against the SAME penalized stiffness. The public
+//     simp_stress_aggregate below exposes g and the exact dg/drho so a caller
+//     (and the M7.mma.2 finite-difference gate) can verify the adjoint.
+
+// The aggregated von Mises stress measure and its adjoint sensitivity, for a
+// physical density field (grid-indexed, size voxel_count(); Empty-voxel entries
+// ignored, solid entries clamped to [density_min, 1]). `p_norm` (> 1) is the
+// P-norm exponent, `relaxation_q` (in (0, penalty)) the qp exponent, and
+// `printed_threshold` the density above which a voxel counts as "printed"
+// material for `max_von_mises`. Runs one penalized primal solve (K u = f) and
+// one adjoint solve through the void-gated Jacobi-CG path (fea_solve_cg), so
+// `tolerance` / `max_iterations` are forwarded to both.
+struct StressAggregate {
+  double value = 0.0;         // g = ( sum_e sigma~_e^P )^(1/P)  over design voxels
+  double max_von_mises = 0.0; // true max von Mises over PRINTED voxels (rho >= threshold)
+  double max_relaxed = 0.0;   // max_e sigma~_e (the aggregation's normalization target)
+  std::vector<double> dvalue; // dg/drho_e (physical-density space); 0 on Empty voxels
+  FeaSolution solution;       // primal displacement field u
+  CgInfo cg;                  // primal solve diagnostics
+  CgInfo adjoint_cg;          // adjoint solve diagnostics
+};
+
+// Throws std::invalid_argument if `density` has the wrong size, the params are
+// non-physical, p_norm <= 1, or relaxation_q not in (0, penalty); propagates
+// fea_solve_cg's throws (bad BC/load index, CG non-convergence).
+StressAggregate simp_stress_aggregate(
+    const VoxelGrid& grid, const SimpParams& params,
+    const std::vector<double>& density, const std::vector<DirichletBC>& bcs,
+    const std::vector<NodalLoad>& loads, double p_norm = 8.0,
+    double relaxation_q = 0.5, double printed_threshold = 0.5,
+    double tolerance = 1e-8, int max_iterations = 0);
+
+// Stress-constraint parameters for simp_optimize_stress.
+struct StressConstraint {
+  double stress_cap = 0.0;         // von Mises cap (same units as youngs_modulus)
+  double p_norm = 8.0;             // P-norm aggregation exponent (> 1)
+  double relaxation_q = 0.5;       // qp-relaxation exponent (0 < q < penalty)
+  double printed_threshold = 0.5;  // rho above which a voxel is "printed" material
+};
+
+// Minimum-compliance SIMP with a volume constraint AND an aggregated von Mises
+// stress constraint g(rho) <= stress_cap, solved on the MMA path (a two-
+// constraint convex subproblem per iteration; the stress adjoint of
+// simp_stress_aggregate supplies dg/drho). The aggregated measure is
+// adaptively normalized toward the true peak stress each iteration (the
+// classic Le/Paris/Kim/Tortorelli 2010 scaling, held constant across a single
+// subproblem so the recorded sensitivity stays exact), keeping the P-norm's
+// over-estimation from making the constraint spuriously conservative.
+//
+// Uses MMA regardless of `options.updater` (the stress path is MMA-only, per
+// M7.mma.2); a Heaviside projection schedule (options.projection non-empty) is
+// rejected (as on the plain MMA path, M7.mma.1). Returns a standard
+// SimpOptimizeResult (design, physical_density, compliance, ...); the achieved
+// stress can be read back with simp_stress_aggregate on physical_density.
+//
+// Throws std::invalid_argument for the simp_optimize argument errors plus
+// stress_cap <= 0, p_norm <= 1, relaxation_q not in (0, penalty), or a
+// projection schedule; propagates fea_solve_cg's std::runtime_error on CG
+// non-convergence.
+SimpOptimizeResult simp_optimize_stress(
+    const VoxelGrid& grid, const SimpParams& params,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads,
+    const SimpOptions& options, const StressConstraint& stress);
+
 }  // namespace topopt

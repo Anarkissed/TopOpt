@@ -1130,6 +1130,582 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 }
 
 // ---------------------------------------------------------------------------
+// Stress-constrained optimization (ROADMAP M7.mma.2): the aggregated von Mises
+// measure + its adjoint sensitivity, a two-constraint (volume + stress) MMA
+// update, and the loop tying them together. See topopt/simp.hpp for the
+// formulation record (P-norm aggregation, qp relaxation, adjoint sensitivity).
+
+namespace {
+
+// von Mises quadratic form (Voigt [xx,yy,zz,xy,yz,zx], TRUE shear stresses):
+// sigma^T Vm sigma = von_mises^2 = sxx^2+syy^2+szz^2 - sxx syy - syy szz
+//   - szz sxx + 3(txy^2 + tyz^2 + tzx^2).
+constexpr double kVm[6][6] = {
+    {1.0, -0.5, -0.5, 0.0, 0.0, 0.0}, {-0.5, 1.0, -0.5, 0.0, 0.0, 0.0},
+    {-0.5, -0.5, 1.0, 0.0, 0.0, 0.0}, {0.0, 0.0, 0.0, 3.0, 0.0, 0.0},
+    {0.0, 0.0, 0.0, 0.0, 3.0, 0.0},   {0.0, 0.0, 0.0, 0.0, 0.0, 3.0}};
+
+// Centroid stress-displacement matrix DB = D0 * B (6x24) for the SOLID isotropic
+// material (E0, nu) on a cubic voxel of edge h: sigma_centroid = DB * u_elem
+// (Voigt order, true shear). Identical B / D0 construction to hex8_stress at
+// natural coords (0,0,0); computed once (all cubic voxels share it) and reused
+// for every element's stress and stress adjoint.
+struct StressMatrix {
+  std::array<double, 6 * 24> DB{};
+  double operator()(int r, int c) const {
+    return DB[static_cast<std::size_t>(r) * 24 + c];
+  }
+};
+
+StressMatrix centroid_stress_matrix(double E, double nu, double h) {
+  // Isoparametric shape derivatives at the centroid: dN/dx = 0.25 * xi_a / h.
+  static constexpr double kXi[8] = {-1, 1, 1, -1, -1, 1, 1, -1};
+  static constexpr double kEta[8] = {-1, -1, 1, 1, -1, -1, 1, 1};
+  static constexpr double kZeta[8] = {-1, -1, -1, -1, 1, 1, 1, 1};
+  double dNdx[8], dNdy[8], dNdz[8];
+  for (int a = 0; a < 8; ++a) {
+    dNdx[a] = 0.25 * kXi[a] / h;
+    dNdy[a] = 0.25 * kEta[a] / h;
+    dNdz[a] = 0.25 * kZeta[a] / h;
+  }
+  double B[6][24] = {};
+  for (int a = 0; a < 8; ++a) {
+    const int cx = 3 * a, cy = 3 * a + 1, cz = 3 * a + 2;
+    B[0][cx] = dNdx[a];
+    B[1][cy] = dNdy[a];
+    B[2][cz] = dNdz[a];
+    B[3][cx] = dNdy[a];
+    B[3][cy] = dNdx[a];
+    B[4][cy] = dNdz[a];
+    B[4][cz] = dNdy[a];
+    B[5][cx] = dNdz[a];
+    B[5][cz] = dNdx[a];
+  }
+  // Isotropic constitutive D0 (same as hex8_stress).
+  const double c = E / ((1.0 + nu) * (1.0 - 2.0 * nu));
+  double D[6][6] = {};
+  D[0][0] = D[1][1] = D[2][2] = c * (1.0 - nu);
+  D[0][1] = D[0][2] = D[1][0] = D[1][2] = D[2][0] = D[2][1] = c * nu;
+  const double G = c * (1.0 - 2.0 * nu) / 2.0;
+  D[3][3] = D[4][4] = D[5][5] = G;
+
+  StressMatrix sm;
+  for (int r = 0; r < 6; ++r)
+    for (int col = 0; col < 24; ++col) {
+      double s = 0.0;
+      for (int m = 0; m < 6; ++m) s += D[r][m] * B[m][col];
+      sm.DB[static_cast<std::size_t>(r) * 24 + col] = s;
+    }
+  return sm;
+}
+
+// Gather a solid voxel's 24 nodal values from a DOF-ordered field.
+std::array<double, 24> gather_element(const VoxelGrid& grid,
+                                      const std::vector<double>& u, int i, int j,
+                                      int k) {
+  const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+  std::array<double, 24> ue;
+  for (int a = 0; a < 8; ++a)
+    for (int comp = 0; comp < 3; ++comp)
+      ue[static_cast<std::size_t>(3 * a + comp)] =
+          u[static_cast<std::size_t>(3 * en[a] + comp)];
+  return ue;
+}
+
+struct StressAdjoint {
+  double value = 0.0;
+  double max_relaxed = 0.0;
+  double max_von_mises = 0.0;
+  std::vector<double> dvalue;  // dg/drho (physical density space)
+  CgInfo adjoint_cg;
+};
+
+// The aggregated relaxed von Mises P-norm g and its adjoint sensitivity dg/drho,
+// given the penalized displacement field `u` for physical density `density`
+// (the SAME field simp_compliance already solved — the adjoint reuses that
+// K(rho) but not the objective's RHS). `elem_youngs` is E(rho) per voxel (the
+// adjoint stiffness). One extra (adjoint) CG solve. Empty voxels contribute
+// nothing; solid densities are clamped to [density_min, 1].
+StressAdjoint stress_aggregate_from_solution(
+    const VoxelGrid& grid, const SimpParams& params,
+    const std::vector<double>& density,
+    const std::vector<double>& elem_youngs, const FeaSolution& u,
+    const std::vector<DirichletBC>& bcs, double p_norm, double q,
+    double printed_threshold, double tolerance, int max_iterations) {
+  const std::size_t N = grid.voxel_count();
+  const StressMatrix sm =
+      centroid_stress_matrix(params.youngs_modulus, params.poisson, grid.spacing);
+
+  // Pass 1: per-voxel true von Mises vm_e and relaxed sigma~_e = rho^q vm_e,
+  // accumulate sum sigma~^P, and cache vm + the centroid stress for the adjoint.
+  std::vector<double> vm(N, 0.0);
+  std::vector<std::array<double, 6>> stress(N);
+  double sump = 0.0, max_relaxed = 0.0, max_vm = 0.0;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t e = grid.index(i, j, k);
+        const std::array<double, 24> ue = gather_element(grid, u.u, i, j, k);
+        std::array<double, 6> sig{};
+        for (int r = 0; r < 6; ++r) {
+          double s = 0.0;
+          for (int d = 0; d < 24; ++d) s += sm(r, d) * ue[static_cast<std::size_t>(d)];
+          sig[static_cast<std::size_t>(r)] = s;
+        }
+        double vmsq = 0.0;
+        for (int r = 0; r < 6; ++r)
+          for (int cc = 0; cc < 6; ++cc)
+            vmsq += sig[static_cast<std::size_t>(r)] * kVm[r][cc] *
+                    sig[static_cast<std::size_t>(cc)];
+        const double vme = vmsq > 0.0 ? std::sqrt(vmsq) : 0.0;
+        const double rho = clamp_density(params, density[e]);
+        const double relaxed = std::pow(rho, q) * vme;
+        vm[e] = vme;
+        stress[e] = sig;
+        sump += std::pow(relaxed, p_norm);
+        max_relaxed = std::max(max_relaxed, relaxed);
+        if (rho >= printed_threshold) max_vm = std::max(max_vm, vme);
+      }
+
+  StressAdjoint out;
+  out.dvalue.assign(N, 0.0);
+  out.max_relaxed = max_relaxed;
+  out.max_von_mises = max_vm;
+  out.value = sump > 0.0 ? std::pow(sump, 1.0 / p_norm) : 0.0;
+  if (!(out.value > 0.0)) {
+    out.adjoint_cg.converged = true;  // no stress -> trivially "solved"
+    return out;                       // dg/drho == 0 (a stress-free field)
+  }
+  const double gP1 = std::pow(out.value, 1.0 - p_norm);  // g^{1-P}
+
+  // Pass 2: adjoint RHS beta = dg/du = g^{1-P} sum_e sigma~_e^{P-1} rho^q
+  // (V sigma_e)^T DB / vm_e, scattered to global DOFs.
+  std::vector<double> beta(static_cast<std::size_t>(3 * fea_node_count(grid)),
+                           0.0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t e = grid.index(i, j, k);
+        const double vme = vm[e];
+        if (!(vme > 0.0)) continue;
+        const double rho = clamp_density(params, density[e]);
+        const double relaxed = std::pow(rho, q) * vme;
+        const double coef = gP1 * std::pow(relaxed, p_norm - 1.0) *
+                            std::pow(rho, q) / vme;
+        // Vs = Vm * sigma_e, then t = DB^T Vs (24-vector).
+        std::array<double, 6> Vs{};
+        for (int r = 0; r < 6; ++r) {
+          double s = 0.0;
+          for (int cc = 0; cc < 6; ++cc)
+            s += kVm[r][cc] * stress[e][static_cast<std::size_t>(cc)];
+          Vs[static_cast<std::size_t>(r)] = s;
+        }
+        const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+        for (int a = 0; a < 8; ++a)
+          for (int comp = 0; comp < 3; ++comp) {
+            const int d = 3 * a + comp;
+            double t = 0.0;
+            for (int r = 0; r < 6; ++r)
+              t += sm(r, d) * Vs[static_cast<std::size_t>(r)];
+            beta[static_cast<std::size_t>(3 * en[a] + comp)] += coef * t;
+          }
+      }
+
+  // Adjoint solve K(rho) lambda = beta on the same penalized stiffness and BCs
+  // (K symmetric, so the adjoint operator is K). Reuses the void-gated CG path;
+  // beta becomes the RHS "load" vector.
+  std::vector<NodalLoad> beta_loads;
+  for (int n = 0; n < fea_node_count(grid); ++n)
+    for (int comp = 0; comp < 3; ++comp) {
+      const double b = beta[static_cast<std::size_t>(3 * n + comp)];
+      if (b != 0.0) beta_loads.push_back({n, comp, b});
+    }
+  const FeaSolution lambda = fea_solve_cg(grid, elem_youngs, params.poisson, bcs,
+                                          beta_loads, tolerance, max_iterations,
+                                          &out.adjoint_cg);
+
+  // Pass 3: dg/drho_e = explicit (rho^q factor) + adjoint (through u).
+  const Hex8Stiffness K0 = hex8_stiffness(1.0, params.poisson, grid.spacing);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t e = grid.index(i, j, k);
+        const double vme = vm[e];
+        const double rho = clamp_density(params, density[e]);
+        double explicit_term = 0.0;
+        if (vme > 0.0) {
+          const double relaxed = std::pow(rho, q) * vme;
+          explicit_term = gP1 * std::pow(relaxed, p_norm - 1.0) * q *
+                          std::pow(rho, q - 1.0) * vme;
+        }
+        // adjoint: -p rho^{p-1} E0 (lambda_e^T K0 u_e).
+        const std::array<double, 24> ue = gather_element(grid, u.u, i, j, k);
+        const std::array<double, 24> le = gather_element(grid, lambda.u, i, j, k);
+        double quad = 0.0;
+        for (int r = 0; r < 24; ++r) {
+          double kr = 0.0;
+          for (int cc = 0; cc < 24; ++cc)
+            kr += K0(r, cc) * ue[static_cast<std::size_t>(cc)];
+          quad += le[static_cast<std::size_t>(r)] * kr;
+        }
+        const double adjoint_term = -params.penalty *
+                                    std::pow(rho, params.penalty - 1.0) *
+                                    params.youngs_modulus * quad;
+        out.dvalue[e] = explicit_term + adjoint_term;
+      }
+  return out;
+}
+
+// Per-voxel penalized modulus E(rho)=clamp(rho)^p*E0 (Empty voxels 0), the
+// graded-FEA input shared by the primal and adjoint solves.
+std::vector<double> penalized_youngs(const VoxelGrid& grid,
+                                     const SimpParams& params,
+                                     const std::vector<double>& density) {
+  std::vector<double> ey(grid.voxel_count(), 0.0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t e = grid.index(i, j, k);
+        ey[e] = std::pow(clamp_density(params, density[e]), params.penalty) *
+                params.youngs_modulus;
+      }
+  return ey;
+}
+
+}  // namespace
+
+StressAggregate simp_stress_aggregate(const VoxelGrid& grid,
+                                      const SimpParams& params,
+                                      const std::vector<double>& density,
+                                      const std::vector<DirichletBC>& bcs,
+                                      const std::vector<NodalLoad>& loads,
+                                      double p_norm, double relaxation_q,
+                                      double printed_threshold, double tolerance,
+                                      int max_iterations) {
+  validate_params(params);
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "simp_stress_aggregate: density vector size != voxel_count");
+  if (!(p_norm > 1.0))
+    throw std::invalid_argument("simp_stress_aggregate: p_norm must be > 1");
+  if (!(relaxation_q > 0.0 && relaxation_q < params.penalty))
+    throw std::invalid_argument(
+        "simp_stress_aggregate: relaxation_q must be in (0, penalty)");
+
+  const std::vector<double> elem_youngs = penalized_youngs(grid, params, density);
+  StressAggregate out;
+  out.solution = fea_solve_cg(grid, elem_youngs, params.poisson, bcs, loads,
+                              tolerance, max_iterations, &out.cg);
+  const StressAdjoint a = stress_aggregate_from_solution(
+      grid, params, density, elem_youngs, out.solution, bcs, p_norm,
+      relaxation_q, printed_threshold, tolerance, max_iterations);
+  out.value = a.value;
+  out.max_von_mises = a.max_von_mises;
+  out.max_relaxed = a.max_relaxed;
+  out.dvalue = a.dvalue;
+  out.adjoint_cg = a.adjoint_cg;
+  return out;
+}
+
+namespace {
+
+// One MMA design update for the minimum-compliance problem with a volume
+// constraint AND an aggregated stress constraint (ROADMAP M7.mma.2). Same
+// moving-asymptote machinery and convex separable approximation as mma_update
+// (Svanberg 1987), extended to m = 2 constraints. Because the objective and
+// both constraints are separable-convex, the dual is concave in lambda >= 0 and
+// its stationarity is solved by NESTED bisection: for a trial stress multiplier
+// lambda2, solve the volume multiplier lambda1 (g1 decreasing in lambda1) to
+// hold the volume constraint, then bisect lambda2 (g2 decreasing in lambda2
+// along that path) to hold the stress constraint. Complementarity is honoured:
+// a constraint already satisfied at lambda = 0 keeps its multiplier at 0.
+//
+// `dcompliance` / `dstress` are the PHYSICAL-space objective and stress
+// sensitivities (dstress already scaled so that g2(x) = sum(...)-b2 measures the
+// normalized constraint value/cap - 1); `g2_value` is that constraint's current
+// value at x. Constants match mma_update.
+std::vector<double> mma_update_stress(
+    MmaState& st, int mma_iter, const VoxelGrid& grid,
+    const DensityFilter& filter, const std::vector<double>& density,
+    const std::vector<double>& dcompliance, const std::vector<double>& dstress,
+    double g2_value, double volume_fraction, double move, double density_min) {
+  const std::size_t N = grid.voxel_count();
+
+  // Chain rule into design space (H symmetric): objective, unit-volume, stress.
+  const std::vector<double> dc = filter.filter_sensitivity(dcompliance);
+  std::vector<double> ones(N, 0.0);
+  std::vector<std::size_t> dof;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i)
+        if (grid.solid(i, j, k)) {
+          const std::size_t e = grid.index(i, j, k);
+          ones[e] = 1.0;
+          dof.push_back(e);
+        }
+  const std::vector<double> dv1 = filter.filter_sensitivity(ones);
+  const std::vector<double> dv2 = filter.filter_sensitivity(dstress);
+  const double target = volume_fraction * static_cast<double>(dof.size());
+
+  // Current constraint values. g1 = V(x) - target (filtered volume is linear).
+  const std::vector<double> xphys = filter.filter_density(density);
+  double vol = 0.0;
+  for (double v : xphys) vol += v;
+  const double g1 = vol - target;
+  const double g2 = g2_value;
+
+  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
+  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
+  const double albefa = 0.1, raa0 = 1e-5;
+
+  if (st.low.size() != N) {
+    st.low.assign(N, 0.0);
+    st.upp.assign(N, 0.0);
+  }
+
+  // 1. Moving asymptotes (identical rule to mma_update).
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    if (mma_iter <= 2) {
+      st.low[e] = xe - asyinit * xrange;
+      st.upp[e] = xe + asyinit * xrange;
+    } else {
+      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
+      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
+      double L = xe - gamma * (st.xold1[e] - st.low[e]);
+      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
+      L = std::min(L, xe - 0.01 * xrange);
+      L = std::max(L, xe - 10.0 * xrange);
+      U = std::max(U, xe + 0.01 * xrange);
+      U = std::min(U, xe + 10.0 * xrange);
+      st.low[e] = L;
+      st.upp[e] = U;
+    }
+  }
+
+  // 2. Separable convex coefficients for the objective (p0,q0) and the two
+  // constraints (p1,q1 volume; p2,q2 stress), plus the move box [alpha, beta]
+  // and each constraint's b_i.
+  std::vector<double> p0(N, 0.0), q0(N, 0.0);
+  std::vector<double> p1(N, 0.0), q1(N, 0.0), p2(N, 0.0), q2(N, 0.0);
+  std::vector<double> alpha(N, 0.0), beta(N, 0.0);
+  double b1 = -g1, b2 = -g2;
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    const double L = st.low[e], U = st.upp[e];
+    const double ux1 = U - xe, xl1 = xe - L;
+    const double u2 = ux1 * ux1, l2 = xl1 * xl1;
+    auto pj = [&](double d) { return u2 * (1.001 * std::max(d, 0.0) +
+                                           0.001 * std::max(-d, 0.0) +
+                                           raa0 / xrange); };
+    auto qj = [&](double d) { return l2 * (0.001 * std::max(d, 0.0) +
+                                           1.001 * std::max(-d, 0.0) +
+                                           raa0 / xrange); };
+    p0[e] = pj(dc[e]);
+    q0[e] = qj(dc[e]);
+    p1[e] = pj(dv1[e]);
+    q1[e] = qj(dv1[e]);
+    p2[e] = pj(dv2[e]);
+    q2[e] = qj(dv2[e]);
+    b1 += p1[e] / ux1 + q1[e] / xl1;
+    b2 += p2[e] / ux1 + q2[e] / xl1;
+    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
+    beta[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
+  }
+
+  // 3. Primal minimiser for trial multipliers (l1, l2), closed form + box clamp.
+  auto candidate = [&](double l1, double l2) {
+    std::vector<double> xnew(N, 0.0);
+    for (std::size_t e : dof) {
+      const double P = p0[e] + l1 * p1[e] + l2 * p2[e];
+      const double Q = q0[e] + l1 * q1[e] + l2 * q2[e];
+      const double sp = std::sqrt(P), sq = std::sqrt(Q);
+      double xt = (sp * st.low[e] + sq * st.upp[e]) / (sp + sq);
+      if (xt < alpha[e]) xt = alpha[e];
+      if (xt > beta[e]) xt = beta[e];
+      xnew[e] = xt;
+    }
+    return xnew;
+  };
+  auto g_of = [&](const std::vector<double>& x, const std::vector<double>& pi,
+                  const std::vector<double>& qi, double bi) {
+    double s = 0.0;
+    for (std::size_t e : dof)
+      s += pi[e] / (st.upp[e] - x[e]) + qi[e] / (x[e] - st.low[e]);
+    return s - bi;
+  };
+
+  // Inner: volume multiplier l1(l2) holding g1 == 0 (or 0 if already feasible).
+  auto solve_l1 = [&](double l2) {
+    auto g1at = [&](double l1) { return g_of(candidate(l1, l2), p1, q1, b1); };
+    if (g1at(0.0) <= 0.0) return 0.0;
+    double a = 0.0, b = 1.0;
+    while (b < 1e30 && g1at(b) > 0.0) b *= 2.0;
+    for (int it = 0; it < 80 && (b - a) > 1e-9 * (1.0 + a + b); ++it) {
+      const double m = 0.5 * (a + b);
+      if (g1at(m) > 0.0) a = m; else b = m;
+    }
+    return 0.5 * (a + b);
+  };
+
+  // Outer: stress multiplier l2 holding g2 == 0 along l1(l2) (or 0 if feasible).
+  auto g2at = [&](double l2) {
+    return g_of(candidate(solve_l1(l2), l2), p2, q2, b2);
+  };
+  double l2 = 0.0;
+  if (g2at(0.0) > 0.0) {
+    double a = 0.0, b = 1.0;
+    while (b < 1e30 && g2at(b) > 0.0) b *= 2.0;
+    for (int it = 0; it < 80 && (b - a) > 1e-9 * (1.0 + a + b); ++it) {
+      const double m = 0.5 * (a + b);
+      if (g2at(m) > 0.0) a = m; else b = m;
+    }
+    l2 = 0.5 * (a + b);
+  }
+  const double l1 = solve_l1(l2);
+  std::vector<double> xnew = candidate(l1, l2);
+
+  st.xold2 = st.xold1;
+  st.xold1 = density;
+  return xnew;
+}
+
+}  // namespace
+
+SimpOptimizeResult simp_optimize_stress(const VoxelGrid& grid,
+                                        const SimpParams& params,
+                                        const std::vector<DirichletBC>& bcs,
+                                        const std::vector<NodalLoad>& loads,
+                                        const SimpOptions& options,
+                                        const StressConstraint& stress) {
+  validate_params(params);
+  if (!(options.volume_fraction > 0.0 && options.volume_fraction <= 1.0))
+    throw std::invalid_argument(
+        "simp_optimize_stress: volume_fraction must be in (0, 1]");
+  if (!(options.move > 0.0))
+    throw std::invalid_argument("simp_optimize_stress: move must be > 0");
+  if (options.max_iterations < 1)
+    throw std::invalid_argument(
+        "simp_optimize_stress: max_iterations must be >= 1");
+  if (options.change_tol < 0.0)
+    throw std::invalid_argument("simp_optimize_stress: change_tol must be >= 0");
+  if (!options.projection.empty())
+    throw std::invalid_argument(
+        "simp_optimize_stress: Heaviside projection is not supported on the "
+        "stress-constrained MMA path (ROADMAP M7.mma.2)");
+  if (!(stress.stress_cap > 0.0))
+    throw std::invalid_argument("simp_optimize_stress: stress_cap must be > 0");
+  if (!(stress.p_norm > 1.0))
+    throw std::invalid_argument("simp_optimize_stress: p_norm must be > 1");
+  if (!(stress.relaxation_q > 0.0 && stress.relaxation_q < params.penalty))
+    throw std::invalid_argument(
+        "simp_optimize_stress: relaxation_q must be in (0, penalty)");
+
+  const DensityFilter filter = make_density_filter(grid, options.filter_radius);
+  const double n_design = static_cast<double>(grid.solid_count());
+  auto phys_volfrac = [&](const std::vector<double>& xphys) {
+    double vol = 0.0;
+    for (double v : xphys) vol += v;
+    return n_design > 0.0 ? vol / n_design : 0.0;
+  };
+
+  MmaState st;
+  int mma_iter = 0;
+  double c_norm = 0.0;  // adaptive P-norm -> peak normalization (Le et al. 2010)
+  bool c_norm_init = false;
+  const double cap = stress.stress_cap;
+  // Cap continuation: an aggressive target (peak >> cap) cannot be reached in one
+  // shot without oscillation, so tighten the effective cap geometrically from the
+  // starting aggregate down to `cap` (then hold), a standard stress-constrained
+  // stabilizer. `cap_eff` is seeded on the first iteration.
+  double cap_eff = 0.0;
+  const double kCapRamp = 0.92;  // tighten ~8%/iteration until cap_eff == cap
+
+  std::vector<double> x = simp_uniform_density(grid, options.volume_fraction);
+
+  SimpOptimizeResult result;
+  result.history.reserve(static_cast<std::size_t>(options.max_iterations));
+
+  for (int it = 0; it < options.max_iterations; ++it) {
+    if (options.cancel && options.cancel->load()) {
+      result.cancelled = true;
+      break;
+    }
+    const std::vector<double> xphys = filter.filter_density(x);
+    const SimpCompliance c = simp_compliance(grid, params, xphys, bcs, loads,
+                                             options.cg_tolerance,
+                                             options.cg_max_iterations);
+    if (!c.cg.converged)
+      throw std::runtime_error(
+          "simp_optimize_stress: penalized CG solve did not converge");
+
+    // Stress aggregate + adjoint from the SAME primal displacement field.
+    const std::vector<double> elem_youngs =
+        penalized_youngs(grid, params, xphys);
+    const StressAdjoint agg = stress_aggregate_from_solution(
+        grid, params, xphys, elem_youngs, c.solution, bcs, stress.p_norm,
+        stress.relaxation_q, stress.printed_threshold, options.cg_tolerance,
+        options.cg_max_iterations);
+    if (!agg.adjoint_cg.converged)
+      throw std::runtime_error(
+          "simp_optimize_stress: stress adjoint CG solve did not converge");
+
+    // Adaptive normalization: scale the P-norm toward the true peak of the
+    // relaxed field so the constraint is neither slack nor over-conservative.
+    // Held constant across this subproblem, so the sensitivity below is exact.
+    const double ratio = agg.value > 0.0 ? agg.max_relaxed / agg.value : 1.0;
+    c_norm = c_norm_init ? 0.5 * ratio + 0.5 * c_norm : ratio;
+    c_norm_init = true;
+    // Effective (continuation) cap: seed just under the starting normalized
+    // aggregate, then ratchet toward the true cap, never below it.
+    const double normalized = c_norm * agg.value;  // ~ peak relaxed stress
+    if (cap_eff <= 0.0) cap_eff = std::max(cap, normalized);
+    cap_eff = std::max(cap, cap_eff * kCapRamp);
+    const double g2 = normalized / cap_eff - 1.0;
+    std::vector<double> dstress = agg.dvalue;
+    for (double& d : dstress) d *= c_norm / cap_eff;
+
+    const std::vector<double> x_new =
+        mma_update_stress(st, ++mma_iter, grid, filter, x, c.dcompliance,
+                          dstress, g2, options.volume_fraction, options.move,
+                          params.density_min);
+
+    double change = 0.0;
+    for (std::size_t e = 0; e < x.size(); ++e)
+      change = std::max(change, std::fabs(x_new[e] - x[e]));
+    x = x_new;
+    if (result.iterations == 0) result.initial_compliance = c.compliance;
+    ++result.iterations;
+    const std::vector<double> xafter = filter.filter_density(x);
+    result.history.push_back({c.compliance, change, phys_volfrac(xafter)});
+    if (options.progress) options.progress(result.iterations, c.compliance, change);
+    if (options.keyframe && options.keyframe_stride > 0 &&
+        (result.iterations == 1 ||
+         result.iterations % options.keyframe_stride == 0))
+      options.keyframe(xafter);
+    if (change < options.change_tol) {
+      result.converged = true;
+      break;
+    }
+  }
+
+  result.design = x;
+  result.physical_density = filter.filter_density(x);
+  const SimpCompliance fc =
+      simp_compliance(grid, params, result.physical_density, bcs, loads,
+                      options.cg_tolerance, options.cg_max_iterations);
+  result.compliance = fc.compliance;
+  result.volume_fraction = phys_volfrac(result.physical_density);
+  if (options.keyframe && options.keyframe_stride > 0)
+    options.keyframe(result.physical_density);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Multi-variant runner (ROADMAP M3.6). Runs simp_optimize per requested volume
 // fraction and extracts a cleaned printable mesh from each result's physical
 // density (§5 "marching cubes -> mesh cleanup").
