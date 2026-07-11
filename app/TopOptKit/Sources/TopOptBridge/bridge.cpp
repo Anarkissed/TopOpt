@@ -6,8 +6,10 @@
 
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <exception>
 #include <functional>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -91,6 +93,123 @@ topopt::TriangleMesh import_any(const std::string& path) {
 #endif
   }
   return topopt::read_stl_file(path).mesh;
+}
+
+// The recommendation ladder (recommendation-driven variants): finer + lower than
+// the old fixed {0.7, 0.5, 0.3}, so minimize_plastic's margin-SAFE prefix ADAPTS
+// to the part + load case (a stronger part keeps lighter rungs, a weaker one shows
+// fewer/heavier ones) and the lightest safe rung is the recommendation the app
+// surfaces. minimize_plastic stops at the first rung below margin_stop, so this
+// never returns an unsafe variant — it just walks further down for strong parts.
+std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
+
+// Turn on the M6.3 single-field Heaviside projection + beta-continuation on a
+// run's SIMP options, for crisp (near-0/1) density with a minimum length scale.
+// Uses the locked continuation schedule and the M6.3 filter radius rmin = 2.5
+// (DECISIONS 2026-07-10). Non-empty `projection` makes the loop run the staged
+// schedule (its own iterations/move) instead of the plain M3.4 loop — noticeably
+// more compute per variant, in exchange for printable, threshold-stable geometry.
+void enable_projection(topopt::MinimizePlasticOptions& opts) {
+  opts.simp.projection = topopt::heaviside_continuation_schedule();
+  opts.simp.filter_radius = 2.5;
+}
+
+// One core variant -> the flat bridge OptimizeVariant (M7.0b/M7.8 fields). Shared
+// by the result builder AND the progressive-results stream, so there is one source
+// of truth for the mapping.
+OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v) {
+  OptimizeVariant ov;
+  ov.requested_volume_fraction = v.requested_volume_fraction;
+  ov.achieved_volume_fraction = v.optimization.volume_fraction;
+  ov.mass_grams = v.mass_grams;
+  ov.support_volume_voxels = v.support_volume_voxels;
+  ov.mesh_triangle_count = static_cast<int32_t>(v.mesh().triangle_count());
+  ov.worst_case_margin = v.report.margin.worst_case;
+  ov.accepted = v.accepted;
+  ov.v3_passes = v.v3.passes;
+  ov.min_feature_violations =
+      static_cast<int32_t>(v.report.min_feature_violations);
+  ov.min_feature_warning = v.report.min_feature_warning;
+  ov.orientation_x = v.report.orientation.x;
+  ov.orientation_y = v.report.orientation.y;
+  ov.orientation_z = v.report.orientation.z;
+  ov.max_stress_mpa = v.report.max_stress_mpa;
+  ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
+  ov.in_plane_margin = v.report.margin.in_plane;
+  ov.interlayer_margin = v.report.margin.interlayer;
+  const topopt::TriangleMesh& vm = v.mesh();
+  ov.mesh_vertices.reserve(vm.vertices.size() * 3);
+  for (const auto& p : vm.vertices) {
+    ov.mesh_vertices.push_back(static_cast<float>(p.x));
+    ov.mesh_vertices.push_back(static_cast<float>(p.y));
+    ov.mesh_vertices.push_back(static_cast<float>(p.z));
+  }
+  ov.mesh_indices.reserve(vm.triangles.size() * 3);
+  for (const auto& t : vm.triangles) {
+    ov.mesh_indices.push_back(t[0]);
+    ov.mesh_indices.push_back(t[1]);
+    ov.mesh_indices.push_back(t[2]);
+  }
+  ov.von_mises_field.assign(v.von_mises_field.begin(), v.von_mises_field.end());
+  // Playback keyframes, flattened (scalar vectors only).
+  for (const topopt::TriangleMesh& km : v.keyframe_meshes) {
+    ov.keyframe_vertex_counts.push_back(static_cast<int32_t>(km.vertices.size()));
+    for (const auto& p : km.vertices) {
+      ov.keyframe_vertices.push_back(static_cast<float>(p.x));
+      ov.keyframe_vertices.push_back(static_cast<float>(p.y));
+      ov.keyframe_vertices.push_back(static_cast<float>(p.z));
+    }
+    ov.keyframe_index_counts.push_back(
+        static_cast<int32_t>(km.triangles.size() * 3));
+    for (const auto& t : km.triangles) {
+      ov.keyframe_indices.push_back(t[0]);
+      ov.keyframe_indices.push_back(t[1]);
+      ov.keyframe_indices.push_back(t[2]);
+    }
+  }
+  return ov;
+}
+
+// Set the run's grid metadata (dims/origin/spacing/voxel-volume) on `result`.
+void set_grid_metadata(OptimizeResult& result, const topopt::VoxelGrid& grid) {
+  result.voxel_volume_mm3 = grid.voxel_volume();
+  result.grid_nx = grid.nx;
+  result.grid_ny = grid.ny;
+  result.grid_nz = grid.nz;
+  result.grid_origin_x = grid.origin.x;
+  result.grid_origin_y = grid.origin.y;
+  result.grid_origin_z = grid.origin.z;
+  result.spacing = grid.spacing;
+}
+
+// MinimizePlasticResult + grid -> the flat OptimizeResult the Swift side reads.
+OptimizeResult to_optimize_result(const topopt::MinimizePlasticResult& mp,
+                                  const topopt::VoxelGrid& grid) {
+  OptimizeResult result;
+  result.stopped_on_margin = mp.stopped_on_margin;
+  result.cancelled = mp.cancelled;
+  result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
+  set_grid_metadata(result, grid);
+  for (const auto& v : mp.evaluated)
+    result.variants.push_back(to_optimize_variant(v));
+  return result;
+}
+
+// Wire the core on_variant callback to a C VariantFn: package each streamed
+// variant as a one-variant OptimizeResult (carrying the run's grid metadata, which
+// the Swift side needs to build a live results view) and hand it across.
+void set_variant_stream(topopt::MinimizePlasticOptions& opts,
+                        const topopt::VoxelGrid& grid, VariantFn variant_fn,
+                        void* variant_ctx) {
+  if (variant_fn == nullptr) return;
+  opts.on_variant = [variant_fn, variant_ctx,
+                     &grid](const topopt::MinimizePlasticVariant& v) {
+    OptimizeResult one;
+    one.accepted_count = 1;
+    set_grid_metadata(one, grid);
+    one.variants.push_back(to_optimize_variant(v));
+    variant_fn(variant_ctx, &one);
+  };
 }
 
 }  // namespace
@@ -243,6 +362,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     const std::string& rules_path,
                                     int resolution, ProgressFn progress,
                                     void* ctx, const bool* cancel_flag,
+                                    VariantFn variant_fn, void* variant_ctx,
                                     BridgeError& err) {
   OptimizeResult result;
   try {
@@ -293,6 +413,9 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     constexpr double kGramPerCm3ToTonnePerMm3 = 1e-9;
     opts.gravity = 9810.0 * kGramPerCm3ToTonnePerMm3;
     opts.gravity_direction = topopt::Vec3{0.0, 0.0, -1.0};
+    opts.volume_fraction_ladder = reduction_ladder();  // recommendation-driven variants
+    enable_projection(opts);                           // M6.3 crisp density
+    opts.keyframe_count = 12;   // optimization-history playback
     // The forwarder relays the payload to the caller's function pointer FIRST,
     // then mirrors the caller's bool flag into the atomic the driver polls at
     // the start of the next OC iteration. Calling progress first means a cancel
@@ -305,33 +428,168 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
       if (cancel_flag != nullptr && *cancel_flag) cancelled.store(true);
     };
 
+    set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
+
     topopt::MinimizePlasticResult mp =
         topopt::minimize_plastic(grid, it->second, material_name, bcs, rules, opts);
-
-    result.stopped_on_margin = mp.stopped_on_margin;
-    result.cancelled = mp.cancelled;
-    result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
-    for (const auto& v : mp.evaluated) {
-      OptimizeVariant ov;
-      ov.requested_volume_fraction = v.requested_volume_fraction;
-      ov.achieved_volume_fraction = v.optimization.volume_fraction;
-      ov.mass_grams = v.mass_grams;
-      ov.support_volume_voxels = v.support_volume_voxels;
-      ov.mesh_triangle_count = static_cast<int32_t>(v.mesh().triangle_count());
-      ov.worst_case_margin = v.report.margin.worst_case;
-      ov.accepted = v.accepted;
-      ov.v3_passes = v.v3.passes;
-      ov.min_feature_violations =
-          static_cast<int32_t>(v.report.min_feature_violations);
-      ov.min_feature_warning = v.report.min_feature_warning;
-      result.variants.push_back(ov);
-    }
+    result = to_optimize_result(mp, grid);
   } catch (const std::exception& e) {
     err.ok = false;
     err.message = e.what();
     return OptimizeResult{};
   }
   return result;
+}
+
+OptimizeResult run_minimize_plastic_loadcase(
+    const std::string& step_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
+    void* ctx, const bool* cancel_flag, VariantFn variant_fn, void* variant_ctx,
+    BridgeError& err) {
+#ifdef TOPOPT_BRIDGE_HAS_OCCT
+  OptimizeResult result;
+  try {
+    topopt::StepModel model = topopt::import_step_file(step_path);
+    topopt::VoxelGrid grid = topopt::voxelize(model.mesh, resolution);
+
+    // Anchors -> Fixture (clamped + retained). Snapshot the anchors-only grid as
+    // the clean base for per-group traction, so each group's traction covers ONLY
+    // its own faces (traction_loads spreads a force over every Load voxel it sees).
+    for (int32_t fid : load_case.anchor_face_ids)
+      topopt::tag_step_face(grid, model, fid, topopt::VoxelTag::Fixture);
+    const topopt::VoxelGrid base_grid = grid;
+
+    std::vector<topopt::NodalLoad> external;
+    const std::size_t group_count = load_case.load_group_sizes.size();
+    std::size_t face_off = 0;
+    for (std::size_t g = 0; g < group_count; ++g) {
+      const std::size_t n = static_cast<std::size_t>(load_case.load_group_sizes[g]);
+      const topopt::Vec3 force{
+          3 * g + 0 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 0] : 0.0,
+          3 * g + 1 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 1] : 0.0,
+          3 * g + 2 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 2] : 0.0};
+      // The face ids of this group (a slice of the flattened load_face_ids).
+      std::vector<int32_t> faces;
+      for (std::size_t f = 0; f < n && face_off + f < load_case.load_face_ids.size(); ++f)
+        faces.push_back(load_case.load_face_ids[face_off + f]);
+      face_off += n;
+      if (!(std::fabs(force.x) + std::fabs(force.y) + std::fabs(force.z) > 0.0))
+        continue;  // a zero-force group contributes nothing
+      topopt::VoxelGrid gg = base_grid;  // anchors only, no other group's Load
+      bool any = false;
+      for (int32_t fid : faces)
+        if (topopt::tag_step_face(gg, model, fid, topopt::VoxelTag::Load) > 0)
+          any = true;
+      if (!any) continue;
+      const std::vector<topopt::NodalLoad> tl =
+          topopt::traction_loads(gg, topopt::VoxelTag::Load, force);
+      external.insert(external.end(), tl.begin(), tl.end());
+      // Retain the load faces on the MAIN grid (Load voxels are implicitly
+      // FrozenSolid, so the surface the traction sits on is never optimized away).
+      for (int32_t fid : faces)
+        topopt::tag_step_face(grid, model, fid, topopt::VoxelTag::Load);
+    }
+
+    // Dirichlet BCs from the Fixture voxels (clamp all 8 corner nodes, deduped).
+    std::vector<topopt::DirichletBC> bcs;
+    std::set<int> clamped;
+    auto clamp_node = [&](int n) {
+      if (clamped.insert(n).second) {
+        bcs.push_back({n, 0, 0.0});
+        bcs.push_back({n, 1, 0.0});
+        bcs.push_back({n, 2, 0.0});
+      }
+    };
+    bool any_fixture = false;
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i)
+          if (grid.tag(i, j, k) == topopt::VoxelTag::Fixture) {
+            any_fixture = true;
+            for (int dk = 0; dk <= 1; ++dk)
+              for (int dj = 0; dj <= 1; ++dj)
+                for (int di = 0; di <= 1; ++di)
+                  clamp_node(
+                      topopt::fea_node_index(grid, i + di, j + dj, k + dk));
+          }
+    if (!any_fixture) {
+      // No anchors declared: fall back to clamping the min-x boundary so the
+      // system is well-posed (mirrors run_minimize_plastic).
+      for (int k = 0; k < grid.nz; ++k)
+        for (int j = 0; j < grid.ny; ++j)
+          if (grid.solid(0, j, k))
+            grid.set_tag(0, j, k, topopt::VoxelTag::Fixture);
+      for (int c = 0; c <= grid.nz; ++c)
+        for (int b = 0; b <= grid.ny; ++b)
+          clamp_node(topopt::fea_node_index(grid, 0, b, c));
+    }
+
+    topopt::MaterialLibrary lib = topopt::load_materials_file(materials_path);
+    auto it = lib.find(material_name);
+    if (it == lib.end()) {
+      err.ok = false;
+      err.message = "material not found: " + material_name;
+      return OptimizeResult{};
+    }
+    topopt::SettingsRules rules = topopt::load_settings_rules_file(rules_path);
+
+    // Build direction (orientation for the interlayer margin); default +Z.
+    topopt::Vec3 build_dir{load_case.build_dir_x, load_case.build_dir_y,
+                           load_case.build_dir_z};
+    if (!(std::fabs(build_dir.x) + std::fabs(build_dir.y) +
+              std::fabs(build_dir.z) >
+          0.0))
+      build_dir = topopt::Vec3{0.0, 0.0, 1.0};
+
+    std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
+    topopt::MinimizePlasticOptions opts;
+    opts.cancel = &cancelled;
+    opts.external_loads = external;  // the user's load case (mode a); empty => self-weight
+    // gravity_direction defines the reported build orientation = its unit negation.
+    opts.gravity_direction =
+        topopt::Vec3{-build_dir.x, -build_dir.y, -build_dir.z};
+    opts.gravity = 9810.0 * 1e-9;  // self-weight magnitude, used only if external is empty
+    opts.volume_fraction_ladder = load_case.minimize_plastic
+                                      ? reduction_ladder()
+                                      : std::vector<double>{0.9};
+    enable_projection(opts);   // M6.3 crisp density
+    opts.keyframe_count = 12;   // optimization-history playback
+    opts.progress = [&](std::size_t r, std::size_t rc, int iter) {
+      if (progress != nullptr)
+        progress(ctx, static_cast<uint64_t>(r), static_cast<uint64_t>(rc), iter);
+      if (cancel_flag != nullptr && *cancel_flag) cancelled.store(true);
+    };
+
+    set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
+
+    topopt::MinimizePlasticResult mp = topopt::minimize_plastic(
+        grid, it->second, material_name, bcs, rules, opts);
+    result = to_optimize_result(mp, grid);
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    return OptimizeResult{};
+  }
+  return result;
+#else
+  (void)variant_fn;
+  (void)variant_ctx;
+  (void)step_path;
+  (void)material_name;
+  (void)materials_path;
+  (void)rules_path;
+  (void)resolution;
+  (void)load_case;
+  (void)progress;
+  (void)ctx;
+  (void)cancel_flag;
+  err.ok = false;
+  err.message =
+      "Load-case optimization requires OpenCASCADE (STEP face selection), which "
+      "is not available on this platform";
+  return OptimizeResult{};
+#endif
 }
 
 SmokeResult bridge_smoke(const std::string& materials_path,

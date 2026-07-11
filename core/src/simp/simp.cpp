@@ -571,6 +571,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       result.history.push_back({c.compliance, change, phys_volfrac(xafter)});
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
+      // Playback keyframe: the analysis density as the shape evolves (read-only).
+      if (options.keyframe && options.keyframe_stride > 0 &&
+          (result.iterations == 1 ||
+           result.iterations % options.keyframe_stride == 0))
+        options.keyframe(xafter);
 
       if (change < options.change_tol) {
         stage_converged = true;
@@ -597,6 +602,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                       options.cg_tolerance, options.cg_max_iterations);
   result.compliance = fc.compliance;
   result.volume_fraction = phys_volfrac(result.physical_density);
+  // Final playback keyframe: the converged shape.
+  if (options.keyframe && options.keyframe_stride > 0)
+    options.keyframe(result.physical_density);
   return result;
 }
 
@@ -888,6 +896,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
           {c.compliance, change, active_volfrac(xafter)});
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
+      // Playback keyframe: the printed-shape density (mask pins applied) as it
+      // evolves. Read-only — a pinned COPY, so `x` and the optimization are
+      // untouched.
+      if (options.keyframe && options.keyframe_stride > 0 &&
+          (result.iterations == 1 ||
+           result.iterations % options.keyframe_stride == 0)) {
+        std::vector<double> kf = xafter;
+        apply_mask_pins(eff, kf);
+        options.keyframe(kf);
+      }
 
       if (change < options.change_tol) {
         stage_converged = true;
@@ -914,6 +932,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                       options.cg_tolerance, options.cg_max_iterations);
   result.compliance = fc.compliance;
   result.volume_fraction = active_volfrac(xfinal_unpinned);
+  // Final playback keyframe: the converged printed shape.
+  if (options.keyframe && options.keyframe_stride > 0)
+    options.keyframe(result.physical_density);
   return result;
 }
 

@@ -269,6 +269,17 @@ struct SimpOptions {
   // The pointee must outlive the simp_optimize call.
   std::function<void(int iteration, double compliance, double change)> progress;
   const std::atomic<bool>* cancel = nullptr;
+
+  // Optimization-history keyframes for the app's playback. When `keyframe_stride
+  // > 0` AND `keyframe` is set, `keyframe` is invoked with the current ANALYSIS
+  // density (filtered + projected — the field a mesh would be extracted from)
+  // once per `keyframe_stride` OC iterations, plus the first iteration and the
+  // final converged state, so a caller can snapshot the shape as it evolves from
+  // solid to optimized WITHOUT accumulating the fields here (the callback
+  // extracts a mesh and discards the density). Read-only: it never changes `x`
+  // or the optimization. Runs on the optimizing thread; must not throw.
+  int keyframe_stride = 0;
+  std::function<void(const std::vector<double>& analysis_density)> keyframe;
 };
 
 // One recorded step of the SIMP trajectory.

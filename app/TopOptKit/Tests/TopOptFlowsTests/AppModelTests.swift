@@ -176,6 +176,70 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(m.recentProjects.first?.name, "Wall Bracket v4")
     }
 
+    func testContinueGeneratesLibraryThumbnail() {
+        let m = realModel()
+        m.loadMaterials()
+        m.newTopOpt()
+        m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        // A real mesh renders a thumbnail keyed by the recent's id.
+        let id = try! XCTUnwrap(m.recentProjects.first).id
+        let thumb = try! XCTUnwrap(m.thumbnails[id], "imported mesh should render a thumbnail")
+        XCTAssertGreaterThan(thumb.width, 0)
+        XCTAssertGreaterThan(thumb.height, 0)
+    }
+
+    func testRenameRecentUpdatesGridAndSnapshot() {
+        let m = realModel()
+        m.loadMaterials()
+        m.newTopOpt()
+        m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        let id = try! XCTUnwrap(m.recentProjects.first).id
+        m.renameRecent(id: id, to: "  Renamed Bracket  ")   // trimmed
+        XCTAssertEqual(m.recentProjects.first?.name, "Renamed Bracket")
+        XCTAssertEqual(m.projectName, "Renamed Bracket")     // open project follows
+        // The on-disk snapshot is rewritten too (survives relaunch).
+        let reloaded = AppModel(materialsPath: Self.materialsPath,
+                                store: ProjectStore(rootDir: tempDir))
+        reloaded.loadMaterials()
+        XCTAssertEqual(reloaded.recentProjects.first { $0.id == id }?.name, "Renamed Bracket")
+    }
+
+    func testRenameRecentIgnoresBlankName() {
+        let m = realModel()
+        m.loadMaterials()
+        m.newTopOpt()
+        m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        let id = try! XCTUnwrap(m.recentProjects.first).id
+        m.renameRecent(id: id, to: "   ")
+        XCTAssertEqual(m.recentProjects.first?.name, "Cube")   // unchanged
+    }
+
+    func testOptimizedFlagDefaultsFalseAndPersists() {
+        // A fresh recent is "Ready" (not optimized); the flag survives a snapshot
+        // round-trip when set true.
+        let m = realModel()
+        m.loadMaterials()
+        m.newTopOpt()
+        m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        XCTAssertEqual(m.recentProjects.first?.optimized, false)
+
+        let store = ProjectStore(rootDir: tempDir)
+        var snap = try! XCTUnwrap(store.loadAllSnapshots().first)
+        snap.optimized = true
+        try! store.save(snap)
+        let reloaded = AppModel(materialsPath: Self.materialsPath, store: store)
+        reloaded.loadMaterials()
+        XCTAssertEqual(reloaded.recentProjects.first?.optimized, true)
+    }
+
     func testContinueBlockedWithoutFile() {
         let m = realModel()
         m.loadMaterials()

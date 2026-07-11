@@ -141,6 +141,37 @@ struct OptimizeVariant {
   // acceptance (`accepted` is strength-margin only).
   int32_t min_feature_violations = 0;
   std::string min_feature_warning;  // empty when violations == 0
+  // M7.8 results screen. The chosen build orientation (VariantReport.orientation,
+  // the M4.4 winning unit build direction) for the orientation sheet; the peak
+  // stresses (max von Mises / max interlayer tension, MPa) for the stress legend's
+  // shared scale and the "Layer shear" readout; and the two margin components
+  // (StressMargin.in_plane / .interlayer — worst_case is `worst_case_margin`).
+  double orientation_x = 0.0;
+  double orientation_y = 0.0;
+  double orientation_z = 0.0;
+  double max_stress_mpa = 0.0;
+  double max_interlayer_tension_mpa = 0.0;
+  double in_plane_margin = 0.0;
+  double interlayer_margin = 0.0;
+  // M7.8 variant-mesh display + stress overlay. `mesh_vertices` is the extracted
+  // + cleaned variant isosurface (v.mesh(), flattened xyz, size 3*vertex_count);
+  // `mesh_indices` its triangle corners. `von_mises_field` is the M7.0b per-voxel
+  // von Mises stress over the printed material, grid-indexed (size
+  // grid.voxel_count(), see OptimizeResult grid_* / spacing), MPa — sampled at a
+  // mesh vertex to color it. All empty for a cancelled rung.
+  std::vector<float> mesh_vertices;
+  std::vector<int32_t> mesh_indices;
+  std::vector<float> von_mises_field;
+  // Optimization-history keyframes for playback (M7): the isosurface at snapshots
+  // from ~solid to optimized. Flattened so only scalar vectors cross the importer:
+  // for keyframe f, its vertices are the `keyframe_vertex_counts[f]` xyz triples of
+  // `keyframe_vertices` after the earlier frames' vertices, and its triangle-corner
+  // indices (LOCAL to that frame) are the `keyframe_index_counts[f]` entries of
+  // `keyframe_indices` after the earlier frames'. Empty when playback is disabled.
+  std::vector<float> keyframe_vertices;
+  std::vector<int32_t> keyframe_vertex_counts;
+  std::vector<int32_t> keyframe_indices;
+  std::vector<int32_t> keyframe_index_counts;
 };
 
 struct OptimizeResult {
@@ -148,7 +179,30 @@ struct OptimizeResult {
   bool stopped_on_margin = false;
   bool cancelled = false;
   int32_t accepted_count = 0;  // report.variants.size()
+  // M7.8: the run's voxel volume (grid.voxel_volume(), mm^3 == spacing^3), so the
+  // app can turn a variant's support_volume_voxels count into a cm^3 estimate
+  // (voxels * voxel_volume_mm3 / 1000). One grid per run, so it lives here.
+  double voxel_volume_mm3 = 0.0;
+  // M7.8: the run's voxel grid, so the app can sample a variant's grid-indexed
+  // von_mises_field at a mesh vertex position `p`: the voxel is
+  // i = floor((p - origin)/spacing) clamped to [0, n), field index
+  // (k*grid_ny + j)*grid_nx + i (VoxelGrid::index). One grid per run.
+  int32_t grid_nx = 0;
+  int32_t grid_ny = 0;
+  int32_t grid_nz = 0;
+  double grid_origin_x = 0.0;
+  double grid_origin_y = 0.0;
+  double grid_origin_z = 0.0;
+  double spacing = 0.0;  // == cbrt(voxel_volume_mm3); carried explicitly for sampling
 };
+
+// Progressive results: invoked once per ACCEPTED variant as it completes (before
+// the next lighter rung is optimized), so the app can show the first optimized
+// variant while the rest still run. `partial` is a ONE-variant OptimizeResult
+// carrying that variant + the run's grid metadata; it (and its buffers) are valid
+// only for the duration of the call — copy what you need. Runs on the optimizing
+// thread. `ctx` is the opaque pointer passed in. May be null (no streaming).
+using VariantFn = void (*)(void* ctx, const OptimizeResult* partial);
 
 // Run minimize_plastic on the part at `stl_path`: import (STL), voxelize at
 // `resolution`, tag the minimum-x boundary slab as the Fixture/mounting face
@@ -163,7 +217,53 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     const std::string& rules_path,
                                     int resolution, ProgressFn progress,
                                     void* ctx, const bool* cancel_flag,
+                                    VariantFn variant_fn, void* variant_ctx,
                                     BridgeError& err);
+
+// ---------------------------------------------------------------------------
+// Optimize under the user's DECLARED load case (ARCHITECTURE §1 mode (a)),
+// instead of self-weight. This is the path the app's M7.6 anchors/loads drive so
+// the reported margins/stresses reflect the forces the user actually set — not
+// the part's own weight.
+
+// The user's declared load case. Laid out with only scalar vectors so the Swift
+// C++ importer builds it member-wise (push_back) — no nested struct vectors.
+//   * `anchor_face_ids`: the anchor B-rep faces (tagged Fixture + clamped).
+//   * Load groups are flattened: group g's face ids are the `load_group_sizes[g]`
+//     entries of `load_face_ids` starting at the sum of earlier sizes, and its
+//     total force (newtons) is (load_forces[3g], load_forces[3g+1],
+//     load_forces[3g+2]). Each group's force is spread as a consistent,
+//     distributed traction over its exposed faces (topopt::traction_loads) —
+//     never a lumped point force.
+//   * `minimize_plastic`: on → the reduction ladder; off → one conservative variant.
+//   * `build_dir_*`: the print/build direction (the interlayer-margin orientation).
+struct BridgeLoadCase {
+  std::vector<int32_t> anchor_face_ids;
+  std::vector<int32_t> load_face_ids;
+  std::vector<int32_t> load_group_sizes;
+  std::vector<double> load_forces;  // 3 per group (fx, fy, fz)
+  bool minimize_plastic = true;
+  double build_dir_x = 0.0;
+  double build_dir_y = 0.0;
+  double build_dir_z = 1.0;
+};
+
+// Voxelize the STEP part once, tag the anchor faces Fixture (clamped) and each
+// load group's faces Load, assemble the load groups' tractions as the design load
+// (ARCHITECTURE §1 mode (a)), and walk the ladder. `minimize_plastic` on → the
+// reduction ladder {0.7,0.5,0.3} (save material while staying strong under the
+// forces); off → a single conservative variant (mostly-solid, just strong enough
+// — "handle the forces, minimal removal"). Degenerate fallbacks that keep a run
+// well-posed: with NO load groups the design load falls back to self-weight; with
+// NO anchor faces the minimum-x boundary is auto-clamped (mirroring
+// run_minimize_plastic). `build_dir_*` (0,0,0) defaults to +Z. Needs OCCT (STEP
+// face selection); on a platform without it, sets `err`.
+OptimizeResult run_minimize_plastic_loadcase(
+    const std::string& step_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
+    void* ctx, const bool* cancel_flag, VariantFn variant_fn, void* variant_ctx,
+    BridgeError& err);
 
 // ---------------------------------------------------------------------------
 // Bridge smoke summary — the M7.1 deliverable "material count + imported-mesh

@@ -34,7 +34,15 @@ public struct RunScreen: View {
         ZStack {
             switch model.phase {
             case .running:
-                if model.isMinimized { minimizedChip } else { runningCard }
+                // Once the first variant streams in, the results screen takes over
+                // (progressive results); the progress card yields to it.
+                if !(model.outcome?.variants.isEmpty ?? true) {
+                    EmptyView()
+                } else if model.isMinimized {
+                    minimizedChip
+                } else {
+                    runningCard
+                }
             case .failed:
                 failureSheet
             default:
@@ -47,11 +55,11 @@ public struct RunScreen: View {
 
     // MARK: - Minimized chip ("Run in Background")
 
-    /// A bottom pill shown while the run continues in the background; the workspace
-    /// behind it is fully interactive. Tap to re-open the full card.
+    /// A top-center pill shown while the run continues in the background; the
+    /// workspace behind it is fully interactive. Tap to re-open the full card. Sits
+    /// at the top (aligned with the nav row) so it never covers the bottom hint bar.
     private var minimizedChip: some View {
         VStack {
-            Spacer()
             Button { model.restore() } label: {
                 HStack(spacing: DS.Space.sm) {
                     ProgressView().controlSize(.small).tint(DS.Color.accent.color)
@@ -70,10 +78,11 @@ public struct RunScreen: View {
                 .dsShadow(.panel)
             }
             .buttonStyle(.plain)
-            .padding(.bottom, DS.Space.xl6)
+            .padding(.top, DS.Space.xl3)   // align with the top chrome (nav) row
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .transition(.move(edge: .bottom).combined(with: .opacity))
+        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     // MARK: - Running card (design RUNNING)

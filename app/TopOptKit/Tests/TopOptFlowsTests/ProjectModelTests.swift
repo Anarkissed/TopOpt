@@ -104,10 +104,12 @@ final class ProjectModelTests: XCTestCase {
     }
 
     func testMakeRunRequestReadsFromProject() throws {
-        let (m, _, _) = try openedProject()
-        let req = try XCTUnwrap(m.makeRunRequest(resolution: 32))
+        let (m, project, _) = try openedProject()
+        XCTAssertEqual(try XCTUnwrap(m.makeRunRequest()).resolution, 64)  // default Fast
+        project.quality = .fine
+        let req = try XCTUnwrap(m.makeRunRequest())
         XCTAssertEqual(req.material, "PLA")
-        XCTAssertEqual(req.resolution, 32)
+        XCTAssertEqual(req.resolution, 128)                              // Fine → 128³
         XCTAssertEqual(req.projectName, "Bracket")   // extension dropped
         XCTAssertTrue(req.modelPath.hasSuffix("cube_10mm.stl"))
     }
@@ -123,5 +125,81 @@ final class ProjectModelTests: XCTestCase {
         XCTAssertEqual(project.material, "PETG")
         XCTAssertNil(project.importedMesh)
         XCTAssertNil(project.viewerMesh)
+    }
+
+    // MARK: - load case (the real forces fed to the solver)
+
+    func testLoadCaseAssemblesAnchorsAndLoads() throws {
+        let (_, project, _) = try openedProject()
+        project.force.setGravity(faceNormal: SIMD3<Float>(0, 0, -1), face: 1)  // model down = −Z
+        let anchor = project.selection.addGroup()
+        project.selection.pickFace(10)
+        project.force.makeAnchor(anchor)
+        let load = project.selection.addGroup()
+        project.selection.pickFace(20)
+        project.force.makeLoad(load)             // default: gravity direction
+        project.force.setWeight(load, kg: 3.0)
+
+        let lc = project.loadCase()
+        XCTAssertEqual(lc.anchorFaceIDs, [10])
+        XCTAssertEqual(lc.loadGroups.count, 1)
+        XCTAssertEqual(lc.loadGroups[0].faceIDs, [20])
+        // A gravity load points along the MODEL gravity (−Z), magnitude kgf → N.
+        let mag = 3.0 * ForceModel.gravityAccel
+        XCTAssertEqual(lc.loadGroups[0].force.z, -mag, accuracy: 1e-2)
+        XCTAssertEqual(lc.loadGroups[0].force.x, 0, accuracy: 1e-3)
+        // Build direction = −gravity = +Z.
+        XCTAssertEqual(lc.buildDirection.z, 1, accuracy: 1e-5)
+    }
+
+    func testMinimizePlasticPersistsAcrossReload() throws {
+        let (m, project, recent) = try openedProject()
+        project.force.setGravity(faceNormal: SIMD3<Float>(0, -1, 0), face: 1)
+        project.minimizePlastic = false
+        project.quality = .fine
+        m.backHome()   // autosave to disk
+
+        // A brand-new AppModel over the same store reloads the snapshot.
+        let m2 = AppModel(materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+                          store: ProjectStore(rootDir: tempDir))
+        let recent2 = try XCTUnwrap(m2.recentProjects.first(where: { $0.id == recent.id }))
+        m2.open(recent2)
+        let restored = try XCTUnwrap(m2.project)
+        XCTAssertFalse(restored.minimizePlastic, "the toggle survives relaunch")
+        XCTAssertEqual(restored.quality, .fine, "the resolution/quality survives relaunch")
+    }
+
+    func testRenameAndMaterialChangeUpdateProjectAndRecents() throws {
+        let (m, project, recent) = try openedProject()
+        m.renameCurrentProject(to: "  Wall Bracket v4  ")
+        XCTAssertEqual(project.name, "Wall Bracket v4")   // trimmed
+        XCTAssertEqual(m.recentProjects.first(where: { $0.id == recent.id })?.name, "Wall Bracket v4")
+        m.renameCurrentProject(to: "   ")                 // blank ignored
+        XCTAssertEqual(project.name, "Wall Bracket v4")
+
+        // Material change within the category (openedProject imports as PLA / FDM).
+        let other = m.materials(for: project.process).first { $0.name != project.material }?.name
+        let picked = try XCTUnwrap(other, "need a second FDM material to switch to")
+        m.setCurrentProjectMaterial(picked)
+        XCTAssertEqual(project.material, picked)
+        XCTAssertEqual(m.recentProjects.first(where: { $0.id == recent.id })?.materialName, picked)
+    }
+
+    func testMakeRunRequestCarriesLoadCaseAndFlag() throws {
+        let (m, project, _) = try openedProject()
+        project.force.setGravity(faceNormal: SIMD3<Float>(0, 0, -1), face: 1)
+        let anchor = project.selection.addGroup()
+        project.selection.pickFace(10)
+        project.force.makeAnchor(anchor)
+        let load = project.selection.addGroup()
+        project.selection.pickFace(20)
+        project.force.makeLoad(load)
+        project.minimizePlastic = false
+
+        let req = try XCTUnwrap(m.makeRunRequest())
+        XCTAssertEqual(req.anchorFaceIDs, [10])
+        XCTAssertEqual(req.loadGroups.count, 1)
+        XCTAssertEqual(req.loadGroups.first?.faceIDs, [20])
+        XCTAssertFalse(req.minimizePlastic)
     }
 }

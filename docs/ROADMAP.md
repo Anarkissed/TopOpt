@@ -241,12 +241,11 @@
       summarizes. Calls M7.6-core's bridge signatures. Headless tests for the
       data model; UI is maintainer device QA.
 - [x] M7.7 Run screen. Optimize → minimize_plastic on a background queue with
->>>>>>> Stashed changes
       M7.0a progress driving the bar (per-rung + per-iteration); Cancel;
       "Run in Background" via BGProcessingTask with local notification on
       completion; failure states (CG non-convergence, all-rungs-rejected)
       rendered as design-consistent sheets, not alerts.
-- [ ] M7.8 Results screen. Variant tabs (−% labels + mass_grams from M7.0b),
+- [x] M7.8 Results screen. Variant tabs (−% labels + mass_grams from M7.0b),
       variant mesh display with the morph/threshold scrub, stress overlay
       toggle (von Mises field → vertex colors, shared scale across variants),
       orientation sheet: M4.4 score_orientations result phrased per design,

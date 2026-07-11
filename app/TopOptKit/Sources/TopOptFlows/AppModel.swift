@@ -12,6 +12,8 @@
 // forced deterministically.
 
 import Foundation
+import CoreGraphics
+import Combine
 import TopOptKit
 
 @MainActor
@@ -38,6 +40,11 @@ public final class AppModel: ObservableObject {
 
     /// The chosen print process; selects the material family offered.
     @Published public var process: ProcessKind = .fdm
+    /// Import-draft "minimize plastic" toggle, carried into the new project. On →
+    /// pursue material reduction; off → just handle the forces. Default on.
+    @Published public var minimizePlastic = true
+    /// Import-draft optimize resolution/quality, carried into the new project.
+    @Published public var quality: RunQuality = .fast
     /// Selected material name per family (kept independently so switching the
     /// segment restores the family's own choice).
     @Published public private(set) var selectedFDMMaterial: String?
@@ -57,6 +64,17 @@ public final class AppModel: ObservableObject {
     // MARK: Recents + toast
 
     @Published public private(set) var recentProjects: [RecentProject] = []
+    /// Rendered Library thumbnails, keyed by project id. Generated from the imported
+    /// mesh this launch (in-memory; on-disk-only recents show the frosted fallback).
+    @Published public private(set) var thumbnails: [UUID: CGImage] = [:]
+    /// Projects with a run in flight (incl. background runs) — drives the Library
+    /// card's "Running" status so you can see at a glance which are optimizing.
+    @Published public private(set) var runningIDs: Set<UUID> = []
+    /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
+    private var runCancellables: [UUID: AnyCancellable] = [:]
+    /// Serial queue for the (potentially large) results encode/decode + file IO, so
+    /// persisting/restoring variants never blocks the main thread (persist-c).
+    private static let resultsQueue = DispatchQueue(label: "app.topopt.results", qos: .utility)
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
@@ -97,20 +115,25 @@ public final class AppModel: ObservableObject {
         // Seed the recents grid from disk (lazy: projects are re-imported only when
         // opened). persist-b.
         recentProjects = store.loadAllSnapshots().map {
-            RecentProject(id: $0.id, name: $0.name, materialName: $0.material, process: $0.process)
+            RecentProject(id: $0.id, name: $0.name, materialName: $0.material,
+                          process: $0.process, optimized: $0.optimized ?? false)
         }
     }
 
     /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
     /// file / material / config path is missing (Optimize is gated on these, so nil
     /// only happens if wiring is incomplete).
-    public func makeRunRequest(resolution: Int) -> RunRequest? {
+    public func makeRunRequest() -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
+        let lc = project.loadCase()
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
-                          resolution: resolution,
-                          projectName: project.name.isEmpty ? file.name : project.name)
+                          resolution: project.quality.resolution,
+                          projectName: project.name.isEmpty ? file.name : project.name,
+                          anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
+                          minimizePlastic: project.minimizePlastic,
+                          buildDirection: lc.buildDirection)
     }
 
     // MARK: - Materials
@@ -151,6 +174,88 @@ public final class AppModel: ObservableObject {
         }
     }
 
+    /// Materials available for a given process (its category), for the in-workspace
+    /// material picker (only same-category materials are offered).
+    public func materials(for process: ProcessKind) -> [MaterialOption] {
+        process == .fdm ? fdmMaterials : resinMaterials
+    }
+
+    /// Rename the open project (tap the title). Updates the recents grid + persists.
+    public func renameCurrentProject(to newName: String) {
+        guard let project else { return }
+        renameRecent(id: project.id, to: newName)
+    }
+
+    /// Rename any recent (from the open workspace title or the Library card menu).
+    /// Updates the live project if loaded, the recents grid, and the on-disk snapshot.
+    public func renameRecent(id: UUID, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        updateRecent(id: id) {
+            RecentProject(id: $0.id, name: trimmed, materialName: $0.materialName,
+                          process: $0.process, optimized: $0.optimized)
+        }
+        if let pm = projectsById[id] {
+            pm.name = trimmed
+            if project?.id == id { projectName = trimmed }
+            persist(pm)
+        } else if var snap = store.snapshot(id: id) {
+            snap.name = trimmed
+            try? store.save(snap)   // model already copied — snapshot-only rewrite
+        }
+    }
+
+    /// Change the open project's material (within its category). Updates recents + persists.
+    public func setCurrentProjectMaterial(_ material: String) {
+        guard let project else { return }
+        project.material = material
+        updateRecent(id: project.id) {
+            RecentProject(id: $0.id, name: $0.name, materialName: material,
+                          process: $0.process, optimized: $0.optimized)
+        }
+        persistCurrentProject()
+    }
+
+    /// Flag a project as optimized (called when its run produces accepted variants):
+    /// flips the Library status chip and persists the flag.
+    public func markOptimized(_ id: UUID) {
+        guard let idx = recentProjects.firstIndex(where: { $0.id == id }),
+              !recentProjects[idx].optimized else { return }
+        recentProjects[idx].optimized = true
+        if let pm = projectsById[id] { persist(pm) }
+    }
+
+    /// Render + cache a Library thumbnail for a project from its imported mesh.
+    /// No-op when there's no mesh or Metal is unavailable (frosted fallback shows).
+    private func generateThumbnail(for id: UUID, mesh: ViewerMesh?) {
+        guard let mesh, thumbnails[id] == nil,
+              let image = MeshThumbnail.cgImage(for: mesh) else { return }
+        thumbnails[id] = image
+    }
+
+    /// Track a live project's run phase so the Library reflects background runs:
+    /// `runningIDs` gains/loses the id, and finishing with results marks it optimized.
+    private func observeRun(_ pm: ProjectModel) {
+        guard runCancellables[pm.id] == nil else { return }
+        runCancellables[pm.id] = pm.run.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak pm] phase in
+                guard let self, let pm else { return }
+                if phase == .running {
+                    self.runningIDs.insert(pm.id)
+                } else {
+                    self.runningIDs.remove(pm.id)
+                    if pm.hasResults { self.markOptimized(pm.id) }
+                }
+            }
+    }
+
+    private func updateRecent(id: UUID, _ transform: (RecentProject) -> RecentProject) {
+        if let idx = recentProjects.firstIndex(where: { $0.id == id }) {
+            recentProjects[idx] = transform(recentProjects[idx])
+        }
+    }
+
     // MARK: - Import sheet lifecycle
 
     /// Open the import sheet for a new project. Clears any prior draft file but
@@ -158,6 +263,8 @@ public final class AppModel: ObservableObject {
     public func newTopOpt() {
         importedFile = nil
         importedMesh = nil
+        minimizePlastic = true   // reset the draft toggle to the default
+        quality = .fast
         importSheetPresented = true
     }
 
@@ -219,9 +326,13 @@ public final class AppModel: ObservableObject {
         // returning to it from Home restores the full setup (M7.x-persist-a).
         let pm = ProjectModel(id: recent.id, name: name, material: material,
                               process: process, importedFile: file, importedMesh: importedMesh)
+        pm.minimizePlastic = minimizePlastic
+        pm.quality = quality
         projectsById[recent.id] = pm
         project = pm
         recentProjects.insert(recent, at: 0)
+        generateThumbnail(for: recent.id, mesh: pm.viewerMesh)
+        observeRun(pm)
         projectName = name
         importSheetPresented = false
         screen = .workspace
@@ -248,6 +359,8 @@ public final class AppModel: ObservableObject {
                                    importedFile: nil, importedMesh: nil)
             projectsById[recent.id] = project
         }
+        generateThumbnail(for: recent.id, mesh: project?.viewerMesh)
+        if let pm = projectsById[recent.id] { observeRun(pm) }
         screen = .workspace
     }
 
@@ -278,6 +391,23 @@ public final class AppModel: ObservableObject {
         } catch {
             toast = "Couldn’t save “\(project.name)”: \(error.localizedDescription)"
         }
+        // Once a project has results, reflect it in its Library card ("Optimized")
+        // and persist the full outcome (variants + playback keyframes) so it
+        // survives an app relaunch (persist-c). Encode + write off the main thread.
+        if project.hasResults, let outcome = project.run.outcome {
+            if let idx = recentProjects.firstIndex(where: { $0.id == project.id }),
+               !recentProjects[idx].optimized {
+                recentProjects[idx].optimized = true
+            }
+            let dto = OutcomeCodec.dto(from: outcome)
+            let url = store.resultsURL(id: project.id)
+            let dir = url.deletingLastPathComponent()
+            Self.resultsQueue.async {
+                guard let data = try? OutcomeCodec.encode(dto) else { return }
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                try? data.write(to: url, options: .atomic)
+            }
+        }
     }
 
     /// Rebuild a project from its on-disk snapshot, re-importing the copied model.
@@ -290,7 +420,18 @@ public final class AppModel: ObservableObject {
         let file = ImportedFile(name: snap.originalFileName, path: path,
                                 triangleCount: mesh.triangleCount, faceCount: mesh.faceCount,
                                 watertight: mesh.watertight)
-        return ProjectModel(restoring: snap, importedFile: file, importedMesh: mesh)
+        let pm = ProjectModel(restoring: snap, importedFile: file, importedMesh: mesh)
+        // persist-c: if this project had results, load them (variants + playback)
+        // off-main and drop them into the idle run so results reopen instantly.
+        if snap.optimized == true {
+            let url = store.resultsURL(id: snap.id)
+            Self.resultsQueue.async {
+                guard let data = try? Data(contentsOf: url),
+                      let outcome = try? OutcomeCodec.decode(data) else { return }
+                DispatchQueue.main.async { pm.run.restoreOutcome(outcome) }
+            }
+        }
+        return pm
     }
 
     // MARK: - internals

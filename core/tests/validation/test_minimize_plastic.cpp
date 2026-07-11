@@ -705,6 +705,159 @@ int main() {
                 ev.mesh().triangles.size());
   }
 
+  // =========================================================================
+  // Scenario J — external load case (ARCHITECTURE §1 mode (a)): a user tip load
+  // REPLACES self-weight as the design load, so the reported margins/stresses
+  // reflect that force, not the part's own weight. This is the path the app's
+  // declared anchors/loads drive (M7.6 load case -> traction_loads ->
+  // options.external_loads). Without this, the optimize ignored the user's forces.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    VoxelGrid g = cantilever_bracket(bcs);
+    // Tag the free tip face (i == nx-1) Load and hang a downward force on it.
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j) g.set_tag(g.nx - 1, j, k, VoxelTag::Load);
+    const Vec3 tip_force{0.0, 0.0, -2e-4};
+    const std::vector<topopt::NodalLoad> tip =
+        topopt::traction_loads(g, VoxelTag::Load, tip_force);
+
+    // The assembled nodal loads sum EXACTLY to the applied force (consistent +
+    // distributed, never lumped): the load the solver sees IS the user's force.
+    double sx = 0, sy = 0, sz = 0;
+    for (const topopt::NodalLoad& nl : tip) {
+      if (nl.component == 0) sx += nl.value;
+      else if (nl.component == 1) sy += nl.value;
+      else sz += nl.value;
+    }
+    CHECK(std::fabs(sx - tip_force.x) < 1e-12 && std::fabs(sy - tip_force.y) < 1e-12 &&
+              std::fabs(sz - tip_force.z) < 1e-9 * (1.0 + std::fabs(tip_force.z)),
+          "J: tip traction nodal loads sum to the applied force");
+
+    MinimizePlasticOptions o = base_options();
+    o.gravity = 0.0;       // unused under external loads: must NOT throw
+    o.margin_stop = 0.0;   // accept the whole ladder (isolate the load path)
+    o.external_loads = tip;
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+
+    CHECK(!r.evaluated.empty() &&
+              r.report.variants.size() == o.volume_fraction_ladder.size(),
+          "J: external-load run evaluates + accepts the ladder");
+    check_stop_invariant(r, o.margin_stop, "J");
+    check_v3_on_accepted(r);
+    for (const MinimizePlasticVariant& ev : r.evaluated) {
+      CHECK(std::isfinite(ev.report.max_stress_mpa) &&
+                ev.report.max_stress_mpa > 0.0,
+            "J: the tip load produces a real (finite, positive) stress field");
+      CHECK(std::isfinite(ev.report.margin.worst_case) &&
+                ev.report.margin.worst_case > 0.0,
+            "J: a finite positive margin under the external load");
+    }
+
+    // The load case actually MATTERS: the same part under self-weight gives a
+    // different peak stress than under the tip load (proves the load drives it).
+    MinimizePlasticOptions sw = base_options();
+    sw.gravity = 1.0;      // self-weight (external_loads empty)
+    const MinimizePlasticResult rsw =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, sw);
+    CHECK(std::fabs(r.evaluated[0].report.max_stress_mpa -
+                    rsw.evaluated[0].report.max_stress_mpa) > 1e-9,
+          "J: the external tip load yields a different stress field than self-weight");
+
+    // The gravity relaxation is external-load-only: self-weight with gravity 0
+    // still throws (a zero body force is degenerate).
+    bool threw = false;
+    try {
+      MinimizePlasticOptions bad = base_options();
+      bad.gravity = 0.0;   // external_loads empty => invalid
+      topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, bad);
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    CHECK(threw, "J: self-weight (no external loads) still requires gravity > 0");
+
+    std::printf("[J external-load] variants=%zu maxsigma=%.6g (self-weight %.6g)\n",
+                r.report.variants.size(), r.evaluated[0].report.max_stress_mpa,
+                rsw.evaluated[0].report.max_stress_mpa);
+  }
+
+  // =========================================================================
+  // Scenario K — progressive results: on_variant streams each ACCEPTED rung as
+  // it completes (before the next lighter rung), so the app can show the first
+  // optimized variant while the rest are still running.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;   // accept-all: the whole ladder is streamed
+    std::vector<double> streamed_vfs;
+    o.on_variant = [&](const MinimizePlasticVariant& v) {
+      CHECK(v.accepted, "K: only accepted variants are streamed");
+      // The variant is fully analysed when streamed (report + viz fields ready).
+      CHECK(std::isfinite(v.report.margin.worst_case),
+            "K: a streamed variant carries a computed margin");
+      CHECK(!v.mesh().vertices.empty(),
+            "K: a streamed variant carries its extracted mesh");
+      streamed_vfs.push_back(v.optimization.volume_fraction);
+    };
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+
+    CHECK(streamed_vfs.size() == r.report.variants.size(),
+          "K: on_variant fires once per accepted variant");
+    CHECK(streamed_vfs.size() == o.volume_fraction_ladder.size(),
+          "K: accept-all streams the whole ladder");
+    for (std::size_t i = 1; i < streamed_vfs.size(); ++i)
+      CHECK(streamed_vfs[i] < streamed_vfs[i - 1],
+            "K: variants stream heaviest-first (ladder order)");
+    std::printf("[K progressive] streamed %zu variants\n", streamed_vfs.size());
+  }
+
+  // =========================================================================
+  // Scenario L — playback keyframes: capturing the optimization history so the
+  // app can play back the shape being carved out. Off by default; when
+  // keyframe_count > 0 each accepted variant carries ~that many isosurface
+  // snapshots, ending at the converged shape.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;   // accept-all: keyframes captured for every rung
+    o.keyframe_count = 6;
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+    CHECK(!r.evaluated.empty(), "L: keyframe run evaluates");
+    for (const MinimizePlasticVariant& ev : r.evaluated) {
+      if (!ev.accepted) continue;
+      CHECK(ev.keyframe_meshes.size() >= 2,
+            "L: each variant captured >= 2 history keyframes");
+      CHECK(ev.keyframe_meshes.size() <=
+                static_cast<std::size_t>(o.keyframe_count) + 2,
+            "L: ~keyframe_count frames (+ first + final)");
+      // The final keyframe is the converged shape — non-empty. (Early frames of a
+      // low-volume rung can be empty: uniform density below the iso, material not
+      // yet formed — that's the point of the playback.)
+      const topopt::TriangleMesh& last = ev.keyframe_meshes.back();
+      CHECK(!last.vertices.empty() && last.triangle_count() > 0,
+            "L: the final keyframe is the converged (non-empty) shape");
+    }
+
+    // Off by default: no keyframes, no cost.
+    MinimizePlasticOptions off = base_options();
+    off.gravity = cal_gravity;
+    const MinimizePlasticResult r0 =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, off);
+    for (const MinimizePlasticVariant& ev : r0.evaluated)
+      CHECK(ev.keyframe_meshes.empty(), "L: keyframes are off by default");
+
+    std::printf("[L keyframes] variant0 frames=%zu\n",
+                r.evaluated[0].keyframe_meshes.size());
+  }
+
   if (g_failures == 0) {
     std::printf("minimize_plastic (M5.3): all %d checks passed\n", g_checks);
     return 0;
