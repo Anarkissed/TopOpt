@@ -92,3 +92,43 @@ Eigen-free public API. Approved by Nadim.
   trust in the numbers that ARE rigorous (margins, stress, volume saved). The
   results screen omits print time entirely for v1. Revisit only if real slicer
   integration is added later. M7.8 proceeds with no print-time field.
+- 2026-07-11: Concurrent two-track mode authorized — TRACK core (/core/,
+  M7-OPT block) + TRACK app (/app/, M7-VIZ block), each in its own Claude
+  Code worktree. The single-loop discipline assumed one active task and one
+  lineage; these overrides apply WHILE two tracks are live and revert to
+  single-loop rules when only one is active:
+
+  1. Two active fronts. Each worker is dispatched with a TRACK header and
+     takes only the topmost unchecked task WITHIN ITS OWN BLOCK (M7-OPT for
+     core, M7-VIZ for app), not the global topmost. Tasks outside those two
+     blocks (M7-SHIP, M7-ML, parked) are single-track work and are not started
+     while concurrent.
+  2. Territory lock. Core-track agents modify /core/ ONLY; app-track agents
+     modify /app/ ONLY. This is STRICTER than ARCHITECTURE §8.9's "/app/
+     off-limits unless M7" and overrides it for the duration: both tracks
+     carry M7 IDs, so the blanket M7 permission is too loose — track scope
+     wins. (ARCHITECTURE.md itself is unchanged; this is a tightening recorded
+     here, as §8.9 permits via a decision entry.)
+  3. ROADMAP.md is human-checked-only while concurrent. Agents report task
+     completion in the handoff; the maintainer checks the box at merge. This
+     supersedes the 2026-07-06 "agents check the box on local green" rule FOR
+     CONCURRENT MODE ONLY — with two lanes writing the same file, box-checking
+     is a guaranteed merge conflict. ROADMAP joins ARCHITECTURE/DECISIONS as
+     human-write-only until concurrency ends.
+  4. Handoffs stay in the single docs/handoffs/ folder with globally
+     sequential numbering (no per-track subfolders — that would collide on the
+     next number). Startup step 4 is amended to read the 3 most recent
+     handoffs MATCHING THE AGENT'S TRACK ID rather than the 3 most recent
+     overall, so each lane gets its own context.
+  5. Merge + refresh. Tracks merge one at a time via the normal
+     run→review→merge cadence, per track. After either merges, the other's
+     next run cuts a fresh branch from updated main. Disjoint territories mean
+     the code never conflicts; the refresh only keeps CI current.
+  6. Interface freeze. The tracks run blind to each other, which is safe ONLY
+     while they share no interface: MMA stays behind a flag and changes no
+     app-facing bridge signature until the switchover task (M7.mma.4); the viz
+     lane consumes existing bridge fields and never calls the optimizer. If a
+     viz task needs a /core/ field that does not yet exist (e.g. per-vertex
+     displacement vectors for M7.viz.3), the app agent STOPS with a Blocked
+     handoff; the core track adds it — the app agent never edits /core/, and
+     the core track never edits /app/. Approved by Nadim.

@@ -163,6 +163,11 @@ Mandatory validation gates:
    requesting human approval.
 8. **No speculative abstraction.** Build what the current task needs.
 9. `/app/` is off-limits unless the ROADMAP task explicitly lives in M7.
+10. When a DECISIONS.md entry explicitly scopes concurrent multi-track work,
+rules 4 and 9 above are read THROUGH that entry: "topmost unchecked" means
+topmost within the agent's assigned TRACK block, and /app/ vs /core/
+territory follows the track, not the blanket M7 permission. The concurrent
+entry narrows these rules; it never loosens rules 1–3, 5–8.
 
 ## 9. Milestones (summary — detail lives in ROADMAP.md)
 

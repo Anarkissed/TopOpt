@@ -1,11 +1,26 @@
 # ROADMAP.md — Task checklist
 
-> Agents: take the **topmost unchecked task** in the active milestone. One
-> task per run. Check the box only when all CI is green. Do not reorder,
-> reword, add, or remove tasks — if a task is wrong or too big, write a
-> `## Blocked` handoff and stop.
+> Agents: take the **topmost unchecked task in your track** (see the TRACK
+> header in your worker prompt). One task per run. Do NOT check the box —
+> report completion in your handoff; the maintainer checks it at merge (see
+> DECISIONS 2026-07-11, concurrent mode). Do not reorder, reword, add, or
+> remove tasks — if a task is wrong or too big, write a `## Blocked` handoff
+> and stop.
 >
 > Active milestone: **M7**
+>
+> CONCURRENT TWO-TRACK MODE (per DECISIONS 2026-07-11). Two lanes run in
+> parallel, each in its own worktree, each touching only its own tree:
+>   • TRACK core  → M7-OPT block. Modifies /core/ ONLY.
+>   • TRACK app   → M7-VIZ block. Modifies /app/ ONLY.
+> A track's "topmost unchecked task" is the first `[ ]` WITHIN THAT BLOCK, not
+> the global topmost. The two blocks share no files and no interfaces while
+> live (interface freeze, DECISIONS 2026-07-11 rule 6). Tasks OUTSIDE these two
+> blocks (M7-SHIP, M7-ML, parked) are single-track work — do not start them in
+> concurrent mode; they run after a track closes and the maintainer re-points
+> it. Some app tasks are DEPENDENCY-GATED (marked "GATED: waits on <task>") and
+> are NOT eligible as a track's topmost until their gate is merged; skip a
+> gated task and stop if it is the only thing left in the block.
 
 ## M1 — Import & voxelize
 
@@ -344,6 +359,68 @@
       Calls M7.dom-core through the bridge. Headless tests for the data model
       (box + keep-outs → expected mask counts on a fixture grid); UI is
       maintainer device QA.
+      GATED: waits on M7.dom-core. Not eligible as TRACK app's topmost until
+      M7.dom-core is merged; it is a core-dependent app task, run after the
+      viz lane or once dom-core lands.
+
+## M7-VIZ — result visualization track (TRACK app; ACTIVE, concurrent with M7-OPT)
+
+> This lane draws fields the SHIPPED core already produces (displacement from
+> the FEA solve, the von Mises field from M7.0b/M7.8) — it does NOT call the
+> optimizer and does NOT depend on any in-flight M7-OPT task, which is exactly
+> why it can run concurrently. /app/ only; Metal + SwiftUI. No Blender / no
+> external render engine (the physics is already solved in core; this renders
+> the existing solution — see the design conversation). Verification standard
+> is xcodebuild test + maintainer device QA per DECISIONS 2026-07-09. Task
+> order is positional. If a task needs a core field that does not yet exist,
+> STOP with a Blocked handoff (interface freeze — do not add it to /core/
+> yourself, and do not reach into the core track's work).
+
+- [ ] M7.viz.1 Stress map, scaled-to-limit (the honest heatmap). Replace any
+      data-range auto-scaling with a color scale keyed to the material limit:
+      green = comfortably below yield, through to red = at/above yield
+      (worst-case per-variant, using the M7.0b von Mises field + the material
+      yield already in the report). Shared scale across variants so colors mean
+      the same thing everywhere. Include a legend that states the material and
+      the yield value it is scaled to. This is the visual twin of the M7.8b
+      honesty surface. Consumes existing fields only. xcodebuild tests for the
+      value→color mapping (clamped, monotonic, yield boundary correct); visual
+      QA on device.
+- [ ] M7.viz.2 Hot-spot callout. Find and label the single highest-stress
+      point on the displayed variant with its actual value and its margin
+      (value ÷ yield). A tappable marker that frames the worst point, so the
+      user is not left hunting the red zone. Consumes the same von Mises field.
+      xcodebuild test: the located max matches the field's max index; margin
+      arithmetic correct. Visual QA on device.
+- [ ] M7.viz.3 Flex animation (the "wow"). Animate the FEA displacement
+      solution: scale the per-vertex displacement 50–100x (user-adjustable
+      exaggeration, default chosen for phone legibility) and animate the mesh
+      from rest to full deflection and back. This is NOT a physics simulation —
+      the displacement field is already solved; this only draws it. REQUIRES a
+      per-vertex (or per-node) displacement field exposed through the bridge:
+      if M7.0b / the current bridge exposes only the von Mises scalar and not
+      the displacement vectors, STOP and file a Blocked handoff requesting the
+      core field (interface freeze — the core track adds it, not you). Metal
+      vertex animation; reduced-motion setting disables the loop and shows the
+      full-deflection frame statically. xcodebuild tests where assertable
+      (exaggeration scale, reduced-motion path); device QA for feel.
+- [ ] M7.viz.4 Load-path visualization. Show how force travels from the loaded
+      region to the anchors, derived from the existing stress tensor field (the
+      same data as the heatmap) — this is what reveals WHY the optimizer grew a
+      rib where it did. v1 may be a principal-stress-direction / stress-flow
+      overlay; if it needs a tensor field the bridge does not currently expose,
+      STOP with a Blocked handoff rather than adding to /core/. /app/ only.
+      Device QA for legibility; xcodebuild tests for any pure-data derivation.
+- [ ] M7.viz.5 Progressive-disclosure tiers (Beginner / Intermediate /
+      Advanced). ONE surface, not three modes: the tier sets DEFAULTS and how
+      much is revealed, over identical underlying data (the Shapr3D pattern).
+      Beginner: safe/unsafe map (M7.viz.1) + flex animation (M7.viz.3), no
+      jargon. Advanced: raw von Mises values, displacement magnitude, the
+      hot-spot table (M7.viz.2), load-path (M7.viz.4), and a toggle for the
+      color-scale reference. Persist the tier per project. Build LAST in this
+      lane — it composes the other viz tasks, so it depends on them landing
+      first. Tests: tier selection drives which surfaces show; persistence
+      round-trips. Device QA.
 
 ## M7-SHIP — v1 ship block (small tasks; deliberately between M7.dom and the
    ML track so the app is shippable end-to-end while ML work runs long)

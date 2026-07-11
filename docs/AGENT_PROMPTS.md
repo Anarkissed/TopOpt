@@ -18,13 +18,16 @@ STARTUP SEQUENCE (do these in order, before writing any code):
 1. Read docs/ARCHITECTURE.md in full. It is immutable. If any instruction
    below conflicts with it, ARCHITECTURE.md wins and you must stop and
    report the conflict in your handoff.
-2. Read docs/ROADMAP.md. Identify the active milestone and the TOPMOST
-   unchecked task. That task — and nothing else — is your assignment.
-3. Read the three most recent files in docs/handoffs/ (highest numbers).
-   Note any warnings, open questions, or "next run should know" items.
-4. Run the full test suite once BEFORE changing anything. If it is not
+2. Read the most recent DECISIONS.md entries; they override anything below on conflict.
+3. Read docs/ROADMAP.md. Identify the active milestone and the TOPMOST
+   unchecked task in your track (see TRACK header; if none given, the global topmost). That task — and nothing else — is your assignment.
+4. Read the 3 most recent handoffs whose task-id matches your track (M7.mma / M7.dom for core; M7.viz for app); if fewer than 3, read what exists. Note any warnings, open questions, or "next run should know" items. Handoff FILE NUMBERS
+   remain globally sequential across both tracks — take the next unused
+   number regardless of track.
+5. Run the full test suite once BEFORE changing anything. If it is not
    green, your task changes: your entire run is now "restore green CI",
    regardless of what ROADMAP says. Record this in the handoff.
+
 
 RULES (violating any of these makes the run a failure):
 - Never modify: docs/ARCHITECTURE.md, tests/fixtures/**, numeric values in
