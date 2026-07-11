@@ -6,6 +6,7 @@
 // (blur, exact glow) is maintainer QA; the layout + tokens follow the design.
 
 import SwiftUI
+import CoreGraphics
 import TopOptDesign
 
 public struct HomeView: View {
@@ -15,6 +16,10 @@ public struct HomeView: View {
 
     private let columns = [GridItem(.adaptive(minimum: 290), spacing: DS.Space.xl3)]
 
+    /// The recent being renamed via the card's context menu (nil = alert closed).
+    @State private var renameTarget: RecentProject?
+    @State private var renameDraft = ""
+
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -22,7 +27,10 @@ public struct HomeView: View {
                 LazyVGrid(columns: columns, spacing: DS.Space.xl3) {
                     NewTopOptTile { model.newTopOpt() }
                     ForEach(model.recentProjects) { proj in
-                        RecentProjectCard(project: proj) { model.open(proj) }
+                        RecentProjectCard(project: proj, thumbnail: model.thumbnails[proj.id],
+                                          running: model.runningIDs.contains(proj.id),
+                                          onOpen: { model.open(proj) },
+                                          onRename: { renameDraft = proj.name; renameTarget = proj })
                     }
                 }
                 .padding(.horizontal, DS.Space.page)
@@ -32,6 +40,16 @@ public struct HomeView: View {
         }
         .background(DS.Color.background.color.ignoresSafeArea())
         .foregroundStyle(DS.Color.textPrimary.color)
+        .alert("Rename project", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } })) {
+            TextField("Name", text: $renameDraft)
+            Button("Rename") {
+                if let t = renameTarget { model.renameRecent(id: t.id, to: renameDraft) }
+                renameTarget = nil
+            }
+            Button("Cancel", role: .cancel) { renameTarget = nil }
+        }
     }
 
     private var header: some View {
@@ -106,21 +124,24 @@ private struct NewTopOptTile: View {
     }
 }
 
-/// A recent-projects card: a preview area (placeholder gradient until the M7.4
-/// viewer supplies thumbnails) over a footer with name, meta and a status chip.
+/// A recent-projects card: a preview area (the rendered model thumbnail, or a
+/// placeholder gradient until one exists) over a footer with name, meta and a
+/// status chip ("Optimized" once the project has results, else "Ready").
 private struct RecentProjectCard: View {
     let project: RecentProject
-    let action: () -> Void
+    let thumbnail: CGImage?
+    /// A run (incl. background) is in flight for this project.
+    let running: Bool
+    let onOpen: () -> Void
+    let onRename: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(action: onOpen) {
             VStack(spacing: 0) {
-                RoundedRectangle(cornerRadius: 0)
-                    .fill(RadialGradient(
-                        colors: [DS.Color.textPrimary.opacity(0.06).color, .clear],
-                        center: .center, startRadius: 4, endRadius: 150))
+                preview
                     .frame(minHeight: 160)
                     .frame(maxWidth: .infinity)
+                    .clipped()
                 HStack(spacing: DS.Space.sm) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
@@ -131,11 +152,7 @@ private struct RecentProjectCard: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: DS.Space.s)
-                    Text("Ready")
-                        .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                        .foregroundStyle(DS.Color.accent.color)
-                        .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
-                        .background(Capsule().fill(DS.Color.accent.opacity(0.14).color))
+                    statusChip
                 }
                 .padding(.horizontal, DS.Space.xl)
                 .padding(.vertical, DS.Space.ml)
@@ -158,6 +175,39 @@ private struct RecentProjectCard: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(DS.Color.textPrimary.color)
+        .contextMenu {
+            Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
+        }
+    }
+
+    /// Status chip: "Running" (a spinner, while optimizing incl. background) wins
+    /// over "Optimized" (green, has results) over "Ready" (accent).
+    @ViewBuilder private var statusChip: some View {
+        let tint = running ? DS.Color.accent : (project.optimized ? DS.Color.okGreen : DS.Color.accent)
+        HStack(spacing: DS.Space.xs) {
+            if running {
+                ProgressView().controlSize(.mini).tint(tint.color)
+            }
+            Text(running ? "Running" : (project.optimized ? "Optimized" : "Ready"))
+                .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                .foregroundStyle(tint.color)
+        }
+        .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
+        .background(Capsule().fill(tint.opacity(0.14).color))
+    }
+
+    /// The rendered model thumbnail, or the frosted placeholder when none exists yet.
+    @ViewBuilder private var preview: some View {
+        if let thumbnail {
+            Image(decorative: thumbnail, scale: 1)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+        } else {
+            Rectangle()
+                .fill(RadialGradient(
+                    colors: [DS.Color.textPrimary.opacity(0.06).color, .clear],
+                    center: .center, startRadius: 4, endRadius: 150))
+        }
     }
 }
 

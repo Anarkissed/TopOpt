@@ -45,6 +45,19 @@ public struct WorkspacePlaceholder: View {
     @State private var projection: CameraProjection?
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// When a project has saved variants, results show by default; tapping "See
+    /// Original" flips this to reveal the editable workspace (the variants stay).
+    @State private var viewOriginal = false
+    /// Rename dialog (tap the project title).
+    @State private var renaming = false
+    @State private var nameDraft = ""
+    /// Collapse the (bottom-left) Selections panel by tapping its header.
+    @State private var selectionsCollapsed = false
+    /// The request that was last optimized — Optimize greys out until the inputs
+    /// (load case / material / quality) change from it (or a run is in flight).
+    @State private var lastRunRequest: RunRequest?
+    /// The group whose colour-swatch popover is open (nil = none).
+    @State private var recoloringGroup: UUID?
 
     // Forwarders onto the project's persistent state. The `nonmutating set`
     // mutates the ProjectModel (a reference), so `selection.mutate()` /
@@ -66,10 +79,8 @@ public struct WorkspacePlaceholder: View {
 
     private static let identityQuat = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
 
-    /// Voxel resolution for the run. The design copy references 128³; the on-device
-    /// value is a maintainer performance decision (ROADMAP M7.10 / M6.3 projection
-    /// cost), so this stays a single tunable constant rather than being scattered.
-    private static let runResolution = 64
+    /// The run resolution, from the project's chosen quality (Fast/Balanced/Fine).
+    private var runResolution: Int { project.quality.resolution }
 
     public init(model: AppModel, project: ProjectModel) {
         self.model = model
@@ -96,28 +107,68 @@ public struct WorkspacePlaceholder: View {
             if force.phase == .setup {
                 gravityBanner
             } else {
-                if force.gravityIsSet { gravityChip }
+                if force.gravityIsSet { topRightControls }
                 if viewerMesh != nil { selectionsPanel }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
             bottomBar
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
-                      resolution: Self.runResolution,
+                      resolution: runResolution,
                       onRetry: startRun)
-                .ignoresSafeArea()
+                // The running card / failure sheet dim their OWN full-bleed
+                // backdrops; keeping RunScreen inside the safe area lets the
+                // minimized "Optimizing…" chip sit under the status bar / nav row.
+            // Results appear as soon as the FIRST variant streams in (progressive
+            // results), while the rest keep optimizing behind them. They PERSIST on
+            // the project, so leaving to Home and reopening shows them again — until
+            // the user views the original and re-optimizes.
+            if let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }), !viewOriginal {
+                ResultsScreen(projectName: project.name, outcome: outcome,
+                              streaming: run.isStreaming,
+                              onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
+                              onExport: { model.toast = "Export (.3mf) arrives in M7.9" },
+                              onSeeOriginal: { viewOriginal = true })
+                    .ignoresSafeArea()
+            }
+            // Returning to the saved variants from the original view.
+            if viewOriginal, let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }) {
+                seeResultsChip
+            }
         }
     }
 
     /// Start the M7.7 optimize run for the current load case. Gated on the same
     /// `canOptimize` the button uses; nil request only if a file/material is
     /// somehow missing (Optimize is disabled in that case).
+    /// A top-center chip to return to the saved variants from the original view.
+    private var seeResultsChip: some View {
+        VStack {
+            Button { viewOriginal = false } label: {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "square.stack.3d.up.fill").font(.system(size: 13, weight: .semibold))
+                    Text("See Results").dsStyle(DS.TypeScale.bodyStrong)
+                }
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Color.accent.opacity(0.22).color)
+                    .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.6).color, lineWidth: 1)))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 80)   // clear the top chrome row
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private func startRun() {
-        guard force.canOptimize(in: selection.groups) else { return }
-        guard let request = model.makeRunRequest(resolution: Self.runResolution) else {
+        guard canOptimize else { return }
+        viewOriginal = false   // a fresh run replaces the saved variants → show results
+        guard let request = model.makeRunRequest() else {
             model.toast = "Can’t start — import a model and choose a material first."
             return
         }
+        lastRunRequest = request   // Optimize greys out until the inputs change
         run.start(request)
     }
 
@@ -210,11 +261,23 @@ public struct WorkspacePlaceholder: View {
             .buttonStyle(.plain)
 
             HStack(spacing: DS.Space.sm) {
-                Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                // Tap the title to rename.
+                Button { nameDraft = project.name; renaming = true } label: {
+                    Text(project.name).dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                }
+                .buttonStyle(.plain)
                 Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
-                Text(project.material)
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
+                // Tap the material to switch it — only same-category materials.
+                Menu {
+                    ForEach(model.materials(for: project.process)) { opt in
+                        Button(opt.name) { model.setCurrentProjectMaterial(opt.name) }
+                    }
+                } label: {
+                    Text(project.material)
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.5).color)
+                }
             }
             .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
             .background(Capsule().fill(DS.Surface.bar.color)
@@ -223,6 +286,11 @@ public struct WorkspacePlaceholder: View {
         }
         .padding(.top, DS.Space.xl3)
         .padding(.leading, DS.Space.xl4)
+        .alert("Rename project", isPresented: $renaming) {
+            TextField("Name", text: $nameDraft)
+            Button("Save") { model.renameCurrentProject(to: nameDraft) }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     // MARK: gravity setup prompt (D2) + persistent chip
@@ -251,6 +319,39 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, DS.Space.xl4)
     }
 
+    /// Top-right stack: the gravity chip and, below it, the "Minimize plastic"
+    /// toggle (per the maintainer's placement — below the Gravity set · Change area).
+    private var topRightControls: some View {
+        VStack(alignment: .trailing, spacing: DS.Space.s) {
+            gravityChip
+            minimizePlasticChip
+            qualityChip
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.top, DS.Space.xl3)
+        .padding(.trailing, DS.Space.xl4)
+    }
+
+    /// Resolution / quality picker chip (Fast 64³ / Balanced 96³ / Fine 128³).
+    private var qualityChip: some View {
+        Menu {
+            ForEach(RunQuality.allCases, id: \.self) { q in
+                Button { project.quality = q } label: { Text("\(q.title) · \(q.detail)") }
+            }
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text("\(project.quality.title) · \(project.quality.resolution)³")
+                    .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
+    }
+
     private var gravityChip: some View {
         HStack(spacing: DS.Space.s) {
             Image(systemName: "arrow.down.to.line")
@@ -272,9 +373,24 @@ public struct WorkspacePlaceholder: View {
         .background(Capsule().fill(DS.Surface.bar.color)
             .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
         .foregroundStyle(DS.Color.textPrimary.color)
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.top, DS.Space.xl3)
-        .padding(.trailing, DS.Space.xl4)
+    }
+
+    /// The "Minimize plastic" toggle chip (D: pursue material reduction). Off with
+    /// forces set → optimize just handles the forces; on → the reduction ladder.
+    private var minimizePlasticChip: some View {
+        Button { project.minimizePlastic.toggle() } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle((project.minimizePlastic ? DS.Color.accent : DS.Color.textTertiary).color)
+                Text("Minimize plastic").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: left Selections panel (design) with the kg/lbs toggle
@@ -282,30 +398,41 @@ public struct WorkspacePlaceholder: View {
     private var selectionsPanel: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "square.stack.3d.up")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
-                    Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                }
-                Spacer()
-                unitToggle
-            }
-            .padding(.horizontal, DS.Space.l).padding(.top, DS.Space.ml).padding(.bottom, DS.Space.m)
-
-            Divider().overlay(DS.Color.strokeSubtle.color)
-
-            if selection.isEmpty {
-                Text("Tap faces on the model to select them — a chip asks whether they’re an **anchor** or a **load**.")
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(DS.Space.xl)
-            } else {
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(selection.groups) { g in groupRow(g) }
+                // Tap the header to collapse/expand.
+                Button { selectionsCollapsed.toggle() } label: {
+                    HStack(spacing: DS.Space.s) {
+                        Image(systemName: selectionsCollapsed ? "chevron.right" : "chevron.down")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(DS.Color.textPrimary.opacity(0.7).color)
+                        Text("Selections").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        if selectionsCollapsed, !selection.isEmpty {
+                            Text("\(selection.groups.count)").dsStyle(DS.TypeScale.footnote)
+                                .foregroundStyle(DS.Color.textTertiary.color)
+                        }
                     }
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                if !selectionsCollapsed { unitToggle }
+            }
+            .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+
+            if !selectionsCollapsed {
+                Divider().overlay(DS.Color.strokeSubtle.color)
+                if selection.isEmpty {
+                    Text("Tap faces on the model to select them — a chip asks whether they’re an **anchor** or a **load**.")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(DS.Space.xl)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            ForEach(selection.groups) { g in groupRow(g) }
+                        }
+                    }
+                    .frame(maxHeight: 360)
                 }
             }
         }
@@ -314,9 +441,12 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        .padding(.top, 82)
+        // Bottom-left, above the bottom bar. One animation keyed on the collapse
+        // state so the header + body move together (not at different speeds).
+        .animation(DS.Motion.emphasized, value: selectionsCollapsed)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(.leading, DS.Space.xl4)
-        .frame(maxHeight: 520, alignment: .top)
+        .padding(.bottom, 96)
     }
 
     private var unitToggle: some View {
@@ -341,10 +471,28 @@ public struct WorkspacePlaceholder: View {
         let active = g.id == selection.activeGroupID
         let tint = force.tint(for: g)
         return HStack(alignment: .top, spacing: DS.Space.s) {
-            RoundedRectangle(cornerRadius: 4).fill(tint.color)
-                .frame(width: 11, height: 11)
-                .shadow(color: tint.opacity(0.4).color, radius: 4)
-                .padding(.top, 3)
+            // Tap the swatch to recolor the group — a row of colour swatches.
+            Button { recoloringGroup = g.id } label: {
+                RoundedRectangle(cornerRadius: 4).fill(tint.color)
+                    .frame(width: 14, height: 14)
+                    .shadow(color: tint.opacity(0.4).color, radius: 4)
+                    .padding(.top, 3)
+            }
+            .buttonStyle(.plain)
+            .popover(isPresented: Binding(get: { recoloringGroup == g.id },
+                                          set: { if !$0 { recoloringGroup = nil } })) {
+                HStack(spacing: DS.Space.sm) {
+                    ForEach(Array(DS.Color.groupPalette.enumerated()), id: \.offset) { idx, c in
+                        Button { selection.setColorIndex(g.id, idx); recoloringGroup = nil } label: {
+                            Circle().fill(c.color).frame(width: 28, height: 28)
+                                .overlay(Circle().strokeBorder(
+                                    g.colorIndex == idx ? DS.Color.textPrimary.color : .clear, lineWidth: 2))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(DS.Space.ml)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 TextField("Group", text: binding(for: g))
                     .textFieldStyle(.plain)
@@ -638,15 +786,40 @@ public struct WorkspacePlaceholder: View {
         return "Tap a face to select · tap a set arrow to edit its load · drag to orbit"
     }
 
+    /// Optimize is enabled once gravity is set and no group is pending, AND either
+    /// "Minimize plastic" is on (self-weight or force-driven removal) OR a full
+    /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
+    private var canOptimize: Bool {
+        guard run.phase != .running else { return false }   // not while a run is in flight
+        guard force.canOptimize(in: selection.groups, minimizePlastic: project.minimizePlastic)
+        else { return false }
+        // Grey out until the inputs change from the last optimized run.
+        if let last = lastRunRequest, model.makeRunRequest() == last { return false }
+        return true
+    }
+
+    /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
+    private var optimizeSummary: String {
+        if force.phase == .setup { return "set gravity first" }
+        if force.hasPending(in: selection.groups) { return "finish the pending group" }
+        let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
+        if a > 0 && l > 0 {
+            let base = "\(a) anchor\(a > 1 ? "s" : "") · \(l) load\(l > 1 ? "s" : "")"
+            return project.minimizePlastic ? "minimize plastic · " + base : base
+        }
+        if project.minimizePlastic { return "minimize plastic · self-weight" }
+        return "needs an anchor and a load"
+    }
+
     private var optimizeButton: some View {
-        let ok = force.canOptimize(in: selection.groups)
+        let ok = canOptimize
         return Button {
             guard ok else { return }
             startRun()
         } label: {
             VStack(spacing: 1) {
                 Text("Optimize").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                Text(force.optimizeSummary(in: selection.groups))
+                Text(optimizeSummary)
                     .font(.system(size: 10.5, weight: .semibold))
                     .opacity(0.75)
             }

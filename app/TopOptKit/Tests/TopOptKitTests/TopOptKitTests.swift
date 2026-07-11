@@ -5,6 +5,7 @@
 // against the committed core fixtures, so they would fail if the bridge returned
 // stubbed data or the wiring to the core were broken.
 import XCTest
+import simd
 @testable import TopOptKit
 
 final class TopOptKitTests: XCTestCase {
@@ -183,7 +184,7 @@ final class TopOptKitTests: XCTestCase {
             resolution: 6
         ) { rung, rungCount, iteration in
             invocations += 1
-            XCTAssertEqual(rungCount, 3)                 // default ladder [0.7,0.5,0.3]
+            XCTAssertEqual(rungCount, 4)                 // recommendation ladder (4 rungs)
             if let prev = lastIterByRung[rung], iteration != prev + 1 { monotone = false }
             lastIterByRung[rung] = iteration
             return true                                   // never cancel
@@ -199,6 +200,85 @@ final class TopOptKitTests: XCTestCase {
         }
         // accepted_count matches the accepted-prefix flags.
         XCTAssertEqual(outcome.acceptedCount, outcome.variants.filter(\.accepted).count)
+    }
+
+    // M7.8: the results-screen fields flow from the real bridge (VariantReport +
+    // grid), not stubbed. Would fail if the bridge left them default-constructed.
+    func testMinimizePlasticResultsFields() throws {
+        let outcome = try TopOptKit.minimizePlastic(
+            stlPath: Self.cubeSTL, material: "PLA",
+            materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+            resolution: 6)
+        XCTAssertGreaterThan(outcome.voxelVolumeMM3, 0, "grid.voxel_volume() must flow")
+        // Grid metadata + variant geometry/field flow (for the M7.8 viewer overlay).
+        XCTAssertGreaterThan(outcome.gridNx, 0)
+        XCTAssertGreaterThan(outcome.gridNy, 0)
+        XCTAssertGreaterThan(outcome.gridNz, 0)
+        XCTAssertGreaterThan(outcome.spacing, 0)
+        let voxelCount = outcome.gridNx * outcome.gridNy * outcome.gridNz
+        XCTAssertFalse(outcome.variants.isEmpty)
+        for v in outcome.variants where v.accepted {
+            XCTAssertFalse(v.meshVertices.isEmpty, "variant isosurface must flow")
+            XCTAssertEqual(v.meshVertices.count % 3, 0)
+            XCTAssertEqual(v.meshIndices.count % 3, 0)
+            XCTAssertEqual(v.meshIndices.count, v.meshTriangleCount * 3)
+            XCTAssertEqual(v.vonMisesField.count, voxelCount, "von Mises field is grid-indexed")
+            // Optimization-history keyframes flow (playback): several frames, the
+            // last (converged shape) non-empty.
+            XCTAssertGreaterThanOrEqual(v.keyframeMeshes.count, 2, "captured history keyframes")
+            XCTAssertFalse(v.keyframeMeshes.last?.vertices.isEmpty ?? true,
+                           "the final keyframe is the converged shape")
+        }
+        for v in outcome.variants {
+            // Orientation is the M4.4 winning unit build direction — nonzero + finite.
+            let len = simd_length(v.orientation)
+            XCTAssertGreaterThan(len, 0.5, "orientation must be a real (unit) direction")
+            XCTAssertTrue(v.orientation.x.isFinite && v.orientation.y.isFinite && v.orientation.z.isFinite)
+            // Peak stresses are nonnegative + finite (self-weighted cube → loaded).
+            XCTAssertGreaterThanOrEqual(v.maxStressMPa, 0)
+            XCTAssertTrue(v.maxStressMPa.isFinite && v.maxInterlayerTensionMPa.isFinite)
+            // Margins are positive + finite, and worst_case == min(in_plane, interlayer)
+            // (the locked definition) — proves all three carry the same real numbers.
+            XCTAssertGreaterThan(v.inPlaneMargin, 0)
+            XCTAssertGreaterThan(v.interlayerMargin, 0)
+            XCTAssertEqual(v.worstCaseMargin, min(v.inPlaneMargin, v.interlayerMargin), accuracy: 1e-6)
+        }
+    }
+
+    // The user's declared load case drives the solve (ARCHITECTURE §1 mode (a)),
+    // not self-weight: anchor one face, hang a force on another, and the run
+    // returns a valid outcome computed under that force. STEP-only (l-bracket).
+    func testMinimizePlasticLoadCaseUsesDeclaredForces() throws {
+        let res = 20
+        // Find two distinct faces that actually tag voxels (robust to the STEP's
+        // face numbering) — one anchor, one load.
+        let mesh = try TopOptKit.importMesh(path: Self.lbracketSTEP)
+        var taggable: [Int] = []
+        for f in 0..<mesh.faceCount {
+            let n = (try? TopOptKit.tagStepFace(stepPath: Self.lbracketSTEP, faceID: f,
+                                                asFixture: true, resolution: res)) ?? 0
+            if n > 0 { taggable.append(f) }
+            if taggable.count == 2 { break }
+        }
+        try XCTSkipIf(taggable.count < 2, "need two taggable faces on the fixture")
+
+        let outcome = try TopOptKit.minimizePlasticLoadCase(
+            stepPath: Self.lbracketSTEP, material: "PLA",
+            materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+            resolution: res, anchorFaceIDs: [taggable[0]],
+            loadGroups: [.init(faceIDs: [taggable[1]], force: SIMD3(0, 0, -5))],
+            minimizePlastic: false)   // one conservative variant => fast
+
+        XCTAssertGreaterThan(outcome.gridNx, 0)
+        XCTAssertGreaterThan(outcome.spacing, 0)
+        // `minimize_plastic` off => a single (conservative) variant, not the ladder.
+        XCTAssertEqual(outcome.variants.count, 1)
+        for v in outcome.variants {
+            XCTAssertTrue(v.maxStressMPa.isFinite && v.worstCaseMargin.isFinite)
+            XCTAssertGreaterThan(v.maxStressMPa, 0, "the declared force produces real stress")
+            XCTAssertFalse(v.meshVertices.isEmpty)
+            XCTAssertEqual(v.vonMisesField.count, outcome.gridNx * outcome.gridNy * outcome.gridNz)
+        }
     }
 
     func testMinimizePlasticCancel() throws {

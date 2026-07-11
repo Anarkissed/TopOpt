@@ -238,6 +238,26 @@ public struct ForceModel: Equatable, Sendable, Codable {
         return dir * Float(forceNewtons(kg: kg))
     }
 
+    /// The load's force vector in the MODEL/grid frame (the frame the voxel grid
+    /// and the solver work in), or nil if the group is not a load. Unlike
+    /// `loadForceVectorNewtons` (whose gravity case is world −Y, for the settled
+    /// arrow render), a `.gravity` load here points along the stored model-space
+    /// gravity (the tapped floor normal), so the solver applies the force in the
+    /// same coordinates as the part. Push/Pull are the model-space ∓/± face normal.
+    /// `groupNormal` must be the group's MODEL-space outward normal.
+    public func loadForceVectorModel(_ id: UUID, groupNormal n: SIMD3<Float>) -> SIMD3<Float>? {
+        guard case let .load(direction, kg) = kinds[id] else { return nil }
+        let raw: SIMD3<Float>
+        switch direction {
+        case .gravity: raw = gravity ?? SIMD3<Float>(0, 0, -1)
+        case .push: raw = -n
+        case .pull: raw = n
+        }
+        let len = simd_length(raw)
+        guard len > 1e-6 else { return nil }
+        return (raw / len) * Float(forceNewtons(kg: kg))
+    }
+
     /// D6 arrow convention: true when the force points into the face
     /// (`dot(dir, n) < 0`), so the arrow tip is drawn at the application point;
     /// false (pulling/hanging) → tail at the application point (proto `into`).
@@ -272,6 +292,16 @@ public struct ForceModel: Equatable, Sendable, Codable {
             && anchorCount(in: groups) > 0
             && loadCount(in: groups) > 0
             && !hasPending(in: groups)
+    }
+
+    /// Whether Optimize is enabled given the "minimize plastic" toggle: gravity set
+    /// (edit phase), no group left pending, AND either minimize-plastic is on (a
+    /// self-weight or force-driven REMOVAL run is always possible) or a full force
+    /// load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
+    public func canOptimize(in groups: [SelectionGroup], minimizePlastic: Bool) -> Bool {
+        guard phase == .edit, !hasPending(in: groups) else { return false }
+        if minimizePlastic { return true }
+        return anchorCount(in: groups) > 0 && loadCount(in: groups) > 0
     }
 
     /// The Optimize button's sub-label (proto `opt.innerHTML` sub cascade).

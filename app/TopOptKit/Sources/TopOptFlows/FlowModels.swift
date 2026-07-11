@@ -42,6 +42,40 @@ public enum ProcessKind: String, CaseIterable, Hashable, Sendable, Codable {
     }
 }
 
+/// The optimize resolution / speed–quality tradeoff. The number is the voxel
+/// count along the part's longest axis; higher = crisper geometry, more compute.
+public enum RunQuality: String, CaseIterable, Hashable, Sendable, Codable {
+    case fast
+    case balanced
+    case fine
+
+    /// Voxels along the longest axis.
+    public var resolution: Int {
+        switch self {
+        case .fast: return 64
+        case .balanced: return 96
+        case .fine: return 128
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .fast: return "Fast"
+        case .balanced: return "Balanced"
+        case .fine: return "Fine"
+        }
+    }
+
+    /// A one-line hint for the picker, e.g. "64³ · quickest".
+    public var detail: String {
+        switch self {
+        case .fast: return "64³ · quickest"
+        case .balanced: return "96³"
+        case .fine: return "128³ · crispest, slowest"
+        }
+    }
+}
+
 /// A model file the user picked and the core successfully imported. Only a
 /// watertight import becomes an `ImportedFile`; a non-watertight or unreadable
 /// file is rejected with a toast and never produces one (see AppModel.importFile).
@@ -78,12 +112,17 @@ public struct RecentProject: Identifiable, Equatable, Sendable {
     public let name: String
     public let materialName: String
     public let process: ProcessKind
+    /// Whether this project has produced optimize results — drives the Library card's
+    /// "Optimized" vs "Ready" status chip.
+    public var optimized: Bool
 
-    public init(id: UUID = UUID(), name: String, materialName: String, process: ProcessKind) {
+    public init(id: UUID = UUID(), name: String, materialName: String,
+                process: ProcessKind, optimized: Bool = false) {
         self.id = id
         self.name = name
         self.materialName = materialName
         self.process = process
+        self.optimized = optimized
     }
 
     /// The card's meta line, e.g. "PLA · Just now".

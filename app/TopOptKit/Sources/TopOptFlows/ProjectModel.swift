@@ -18,6 +18,8 @@
 // in-memory-across-navigation only. Nothing here is `Codable` yet.
 
 import Foundation
+import Combine
+import simd
 import TopOptKit
 
 @MainActor
@@ -25,8 +27,10 @@ public final class ProjectModel: ObservableObject {
     /// Stable identity, shared with the project's `RecentProject.id` so
     /// `AppModel.open(_:)` can restore this exact instance from the recents grid.
     public let id: UUID
-    public let name: String
-    public let material: String
+    /// Display name — editable (tap the title to rename). Identity is `id`.
+    @Published public var name: String
+    /// Chosen material — editable within the project's process/category.
+    @Published public var material: String
     public let process: ProcessKind
     /// The imported file (nil for a legacy recent with no in-memory model yet).
     public let importedFile: ImportedFile?
@@ -39,9 +43,30 @@ public final class ProjectModel: ObservableObject {
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
 
+    /// "Minimize plastic": pursue material reduction (the variant ladder). On with
+    /// no forces → self-weight removal; on with forces → removal under the forces;
+    /// off with forces → one conservative force-adequate variant. Default on.
+    @Published public var minimizePlastic = true
+    /// Optimize resolution / speed–quality tradeoff (Fast 64³ / Balanced 96³ /
+    /// Fine 128³). Default Fast.
+    @Published public var quality: RunQuality = .fast
+
     /// The M7.7 run state machine. One per project so a run (and its background
     /// state) survives leaving and returning to the workspace.
     public let run: RunModel
+
+    /// Whether the project has usable optimize results (≥1 accepted variant) —
+    /// drives the Library card's "Optimized" status and the persisted flag.
+    public var hasResults: Bool {
+        run.outcome?.variants.contains { $0.accepted } ?? false
+    }
+
+    /// Forwards the run's MEANINGFUL changes (outcome + phase, NOT the per-iteration
+    /// progress ticks) up to this project's `objectWillChange`, so the workspace —
+    /// which observes the project, not the nested run — reliably re-renders when
+    /// results stream in, a run resolves, or persisted results are restored. Without
+    /// this the results overlay only refreshed incidentally (on a camera tick).
+    private var runForwarding: AnyCancellable?
 
     public init(id: UUID, name: String, material: String, process: ProcessKind,
                 importedFile: ImportedFile?, importedMesh: ImportedMesh?,
@@ -56,6 +81,13 @@ public final class ProjectModel: ObservableObject {
             self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs)
         }
         self.run = run ?? ProjectModel.makeRun()
+        // The two initial value-replays fire here during init, before any view
+        // observes this object, so they're harmless no-ops.
+        self.runForwarding = Publishers.Merge(
+            self.run.$outcome.map { _ in () },
+            self.run.$phase.map { _ in () }
+        )
+        .sink { [weak self] in self?.objectWillChange.send() }
     }
 
     /// Rebuild a project from a persisted snapshot + its re-imported model
@@ -70,6 +102,44 @@ public final class ProjectModel: ObservableObject {
                   importedMesh: importedMesh, run: run)
         self.selection = snapshot.selection
         self.force = snapshot.force
+        self.minimizePlastic = snapshot.minimizePlastic ?? true
+        self.quality = snapshot.quality ?? .fast
+    }
+
+    /// Assemble the run's load case from the current selection + force state, in the
+    /// MODEL/grid frame the solver uses: anchor groups → their B-rep faces (clamped),
+    /// load groups → their faces + model-frame force (kgf → N). The build direction
+    /// (print up) is the negated gravity, or +Z if gravity is unset. Empty for an
+    /// STL project (no face selection) — the run then falls back to self-weight.
+    public func loadCase() -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
+                               buildDirection: SIMD3<Double>) {
+        var anchors: [Int] = []
+        var loads: [TopOptKit.LoadGroupSpec] = []
+        for g in selection.groups {
+            let kind = force.kind(for: g.id)
+            if kind.isAnchor {
+                anchors.append(contentsOf: g.faces.map { Int($0) })
+            } else if kind.isLoad {
+                let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
+                if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
+                    loads.append(.init(faceIDs: g.faces.map { Int($0) },
+                                       force: SIMD3<Double>(f)))
+                }
+            }
+        }
+        let up = force.gravity.map { -$0 } ?? SIMD3<Float>(0, 0, 1)
+        return (anchors, loads, SIMD3<Double>(up))
+    }
+
+    /// A group's model-space outward normal (mean of its faces' normals), or nil.
+    private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
+        guard let mesh = viewerMesh else { return nil }
+        var acc = SIMD3<Float>.zero
+        var found = false
+        for f in g.faces { if let nrm = mesh.faceNormal(f) { acc += nrm; found = true } }
+        guard found else { return nil }
+        let len = simd_length(acc)
+        return len > 1e-6 ? acc / len : nil
     }
 
     /// A persistable snapshot of this project, or nil if there is no model to copy
@@ -81,7 +151,9 @@ public final class ProjectModel: ObservableObject {
         let modelFileName = ext.isEmpty ? "model" : "model.\(ext)"
         return ProjectSnapshot(id: id, name: name, material: material, process: process,
                                modelFileName: modelFileName, originalFileName: file.name,
-                               savedAt: savedAt, selection: selection, force: force)
+                               savedAt: savedAt, selection: selection, force: force,
+                               minimizePlastic: minimizePlastic, quality: quality,
+                               optimized: hasResults)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

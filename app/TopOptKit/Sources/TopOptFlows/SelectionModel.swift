@@ -42,7 +42,7 @@ public struct SelectionGroup: Identifiable, Equatable, Sendable, Codable {
     public var name: String
     /// Palette slot assigned round-robin at creation (design `nextColor % COLORS`).
     /// `color` resolves it against `DS.Color.groupPalette`.
-    public let colorIndex: Int
+    public var colorIndex: Int
     /// The face ids in this group, in selection order, deduplicated (design `faces`).
     public private(set) var faces: [FaceID]
 
@@ -169,6 +169,14 @@ public struct SelectionModel: Equatable, Sendable, Codable {
     public mutating func rename(_ id: UUID, to name: String) {
         guard let i = groups.firstIndex(where: { $0.id == id }) else { return }
         groups[i].name = name
+    }
+
+    /// Set a group's palette colour slot (tap the group's colour swatch). Wraps into
+    /// `DS.Color.groupPalette` range; no-op for an unknown id.
+    public mutating func setColorIndex(_ id: UUID, _ index: Int) {
+        guard let i = groups.firstIndex(where: { $0.id == id }) else { return }
+        let count = DS.Color.groupPalette.count
+        groups[i].colorIndex = ((index % count) + count) % count
     }
 
     /// Make a group active (design group-row `select`). No-op for an unknown id.

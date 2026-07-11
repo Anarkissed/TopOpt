@@ -28,15 +28,38 @@ public struct RunRequest: Equatable, Sendable {
     public let resolution: Int
     /// The project title, used in the completion-notification copy.
     public let projectName: String
+    /// The user's declared load case (empty for a self-weight / STL run): anchor
+    /// B-rep faces + load groups (faces + model-frame force). Consumed only on the
+    /// STEP path (`minimizePlasticLoadCase`).
+    public let anchorFaceIDs: [Int]
+    public let loadGroups: [TopOptKit.LoadGroupSpec]
+    /// "Minimize plastic": on → the material-reduction ladder; off → one
+    /// conservative variant that just handles the forces.
+    public let minimizePlastic: Bool
+    /// Print/build direction (model frame) for the interlayer-margin orientation.
+    public let buildDirection: SIMD3<Double>
+
+    /// STEP parts carry a B-rep face selection, so the run uses the load-case path;
+    /// STL parts have no faces and fall back to the self-weight path.
+    public var isStepModel: Bool {
+        let p = modelPath.lowercased()
+        return p.hasSuffix(".step") || p.hasSuffix(".stp")
+    }
 
     public init(modelPath: String, material: String, materialsPath: String,
-                rulesPath: String, resolution: Int, projectName: String) {
+                rulesPath: String, resolution: Int, projectName: String,
+                anchorFaceIDs: [Int] = [], loadGroups: [TopOptKit.LoadGroupSpec] = [],
+                minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)) {
         self.modelPath = modelPath
         self.material = material
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
         self.resolution = resolution
         self.projectName = projectName
+        self.anchorFaceIDs = anchorFaceIDs
+        self.loadGroups = loadGroups
+        self.minimizePlastic = minimizePlastic
+        self.buildDirection = buildDirection
     }
 }
 
@@ -276,12 +299,20 @@ public final class RunModel: ObservableObject {
     /// resolves so a failure sheet / success can surface.
     @Published public private(set) var isMinimized = false
 
-    /// The successful outcome, kept for the M7.8 results screen to consume.
-    public private(set) var outcome: OptimizeOutcome?
+    /// The outcome the results screen consumes. Updated INCREMENTALLY as variants
+    /// stream in (progressive results), then replaced by the authoritative final
+    /// outcome when the run resolves. `@Published` so the results screen grows live.
+    @Published public private(set) var outcome: OptimizeOutcome?
+    /// True while more variants may still arrive (the optimize is running behind an
+    /// already-visible results screen). Drives an "optimizing more…" indicator.
+    @Published public private(set) var isStreaming = false
 
-    /// The optimize call. Injected for tests; defaults to the real bridge.
+    /// The optimize call. Injected for tests; defaults to the real bridge. Streams
+    /// each accepted variant through `onVariant` (a one-variant partial outcome) as
+    /// it completes, then returns the full final outcome.
     public typealias Runner = (RunRequest,
-                               _ progress: @escaping (_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)
+                               _ progress: @escaping (_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool,
+                               _ onVariant: @escaping (OptimizeOutcome) -> Void)
                                throws -> OptimizeOutcome
     var runner: Runner
 
@@ -301,22 +332,44 @@ public final class RunModel: ObservableObject {
     /// callback (which doubles as the cancellation signal — returning `false`
     /// stops the run).
     public static func bridgeRunner(_ request: RunRequest,
-                                    _ progress: @escaping (Int, Int, Int) -> Bool) throws -> OptimizeOutcome {
-        try TopOptKit.minimizePlastic(
+                                    _ progress: @escaping (Int, Int, Int) -> Bool,
+                                    _ onVariant: @escaping (OptimizeOutcome) -> Void) throws -> OptimizeOutcome {
+        // STEP: optimize under the user's declared load case (anchors/loads →
+        // clamps + tractions), or self-weight when no loads were set. STL: no
+        // faces, so the self-weight ladder (ARCHITECTURE §5) is the only option.
+        if request.isStepModel {
+            return try TopOptKit.minimizePlasticLoadCase(
+                stepPath: request.modelPath, material: request.material,
+                materialsPath: request.materialsPath, rulesPath: request.rulesPath,
+                resolution: request.resolution, anchorFaceIDs: request.anchorFaceIDs,
+                loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
+                buildDirection: request.buildDirection, progress: progress, onVariant: onVariant)
+        }
+        return try TopOptKit.minimizePlastic(
             stlPath: request.modelPath, material: request.material,
             materialsPath: request.materialsPath, rulesPath: request.rulesPath,
-            resolution: request.resolution, progress: progress)
+            resolution: request.resolution, progress: progress, onVariant: onVariant)
     }
 
     // MARK: - Lifecycle
 
     /// Start an optimize on a background queue. No-op if one is already running.
+    /// Restore persisted results (persist-c) into an idle run so the workspace shows
+    /// them immediately on reopen — no side effects (phase stays `.idle`, no
+    /// notifier). A later Optimize resets and re-runs as normal. No-op if a run is
+    /// active or results already loaded (e.g. reopened within the same launch).
+    public func restoreOutcome(_ restored: OptimizeOutcome) {
+        guard phase == .idle, outcome == nil else { return }
+        outcome = restored
+    }
+
     public func start(_ request: RunRequest) {
         guard phase != .running else { return }
         phase = .running
         progress = nil
         failure = nil
         outcome = nil
+        isStreaming = true
         runningInBackground = false
         isMinimized = false
 
@@ -328,18 +381,37 @@ public final class RunModel: ObservableObject {
         scheduler.runInBackground { [weak self] in
             let result: Result<OptimizeOutcome, Error>
             do {
-                let o = try runner(request) { rung, count, iter in
+                let o = try runner(request, { rung, count, iter in
                     // Publish the snapshot on main (fire-and-forget); the keep-going
                     // decision reads the token directly — thread-safe, no hop.
                     scheduler.runOnMain { self?.publish(RunProgress(rung: rung, rungCount: count, iteration: iter)) }
                     return !token.isCancelled
-                }
+                }, { partial in
+                    // Progressive results: a variant finished — append it on main so
+                    // the results screen can show the first one while the rest run.
+                    scheduler.runOnMain { self?.appendStreamed(partial) }
+                })
                 result = .success(o)
             } catch {
                 result = .failure(error)
             }
             scheduler.runOnMain { self?.finish(request, result) }
         }
+    }
+
+    /// Append a streamed variant (a one-variant partial outcome carrying the run's
+    /// grid metadata) to the growing `outcome`, so the results screen shows the
+    /// first optimized variant as soon as it lands (progressive results).
+    private func appendStreamed(_ partial: OptimizeOutcome) {
+        guard phase == .running else { return }   // ignore ticks after resolve/reset
+        var variants = outcome?.variants ?? []
+        variants.append(contentsOf: partial.variants)
+        outcome = OptimizeOutcome(
+            variants: variants, stoppedOnMargin: false, cancelled: false,
+            acceptedCount: variants.count, voxelVolumeMM3: partial.voxelVolumeMM3,
+            gridNx: partial.gridNx, gridNy: partial.gridNy, gridNz: partial.gridNz,
+            gridOrigin: partial.gridOrigin, spacing: partial.spacing)
+        progress = nil   // the running card yields to the (now visible) results
     }
 
     /// Request cancellation of the in-flight run (the callback returns `false` on
@@ -379,6 +451,7 @@ public final class RunModel: ObservableObject {
         progress = nil
         failure = nil
         outcome = nil
+        isStreaming = false
         runningInBackground = false
     }
 
@@ -393,25 +466,37 @@ public final class RunModel: ObservableObject {
         guard phase == .running else { return }    // a reset raced ahead — drop it
         switch result {
         case .success(let o):
-            outcome = o
             if o.cancelled {
+                // The user cancelled — DISCARD any partial results and return to the
+                // workspace clean (a cancel must never open the results view).
+                outcome = nil
                 phase = .cancelled
             } else if o.acceptedCount == 0 {
-                // The terminal (last evaluated) rung is the one that failed the
-                // margin gate and stopped the ladder — report its numbers.
+                // Nothing strong enough: the terminal rung failed the margin gate.
+                outcome = o
                 let terminal = o.variants.last
                 failure = .allRejectedOnMargin(
                     worstMargin: terminal?.worstCaseMargin ?? 0,
                     minFeatureViolations: terminal?.minFeatureViolations ?? 0)
                 phase = .failed
             } else {
+                outcome = o                                // authoritative final
                 progress = nil
                 phase = .succeeded
             }
         case .failure(let error):
-            failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
-            phase = .failed
+            // A solver error mid-run: keep variants that already streamed + were
+            // accepted; otherwise discard and show the failure sheet.
+            if outcome?.variants.contains(where: { $0.accepted }) == true {
+                progress = nil
+                phase = .succeeded
+            } else {
+                outcome = nil
+                failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
+                phase = .failed
+            }
         }
+        isStreaming = false
         isMinimized = false   // resolved: let a failure sheet / success surface
         if runningInBackground {
             notifier.runDidComplete(summary: completionSummary(request))

@@ -48,6 +48,17 @@ public struct VoxelSummary {
     public let solidVoxels: Int
 }
 
+/// One isosurface frame of a variant's optimization history (playback): flattened
+/// xyz vertices + triangle-corner indices (local to the frame).
+public struct KeyframeMesh: Equatable, Sendable {
+    public let vertices: [Float]
+    public let indices: [Int32]
+    public init(vertices: [Float], indices: [Int32]) {
+        self.vertices = vertices
+        self.indices = indices
+    }
+}
+
 /// One evaluated volume-fraction rung of a minimize_plastic run.
 public struct OptimizeVariant {
     public let requestedVolumeFraction: Double
@@ -63,11 +74,38 @@ public struct OptimizeVariant {
     public let minFeatureViolations: Int
     /// The human-readable min-feature warning, or "" when there are none.
     public let minFeatureWarning: String
+    /// M7.8 — the chosen build orientation (M4.4 winning unit build direction),
+    /// for the results orientation sheet.
+    public let orientation: SIMD3<Double>
+    /// M7.8 — peak stresses for the chosen orientation (MPa). `maxStressMPa` (max
+    /// von Mises) drives the stress legend's shared scale; `maxInterlayerTensionMPa`
+    /// is the raw layer-plane tension behind the "Layer shear" readout.
+    public let maxStressMPa: Double
+    public let maxInterlayerTensionMPa: Double
+    /// M7.8 — the two margin components (safety factors; larger is safer). The
+    /// worst case is `worstCaseMargin`; `interlayerMargin` classifies layer shear.
+    public let inPlaneMargin: Double
+    public let interlayerMargin: Double
+    /// M7.8 — the extracted+cleaned variant isosurface for display: flattened xyz
+    /// vertices and flattened triangle-corner indices (empty for a cancelled rung).
+    public let meshVertices: [Float]
+    public let meshIndices: [Int32]
+    /// M7.8 — per-voxel von Mises stress (MPa), grid-indexed against the outcome's
+    /// grid metadata, for the stress overlay. Empty for a cancelled rung.
+    public let vonMisesField: [Float]
+    /// Optimization-history keyframes (playback): the isosurface from ~solid (first)
+    /// to optimized (last). Empty when playback capture is off.
+    public let keyframeMeshes: [KeyframeMesh]
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 massGrams: Double, supportVolumeVoxels: Int, meshTriangleCount: Int,
                 worstCaseMargin: Double, accepted: Bool, v3Passes: Bool,
-                minFeatureViolations: Int = 0, minFeatureWarning: String = "") {
+                minFeatureViolations: Int = 0, minFeatureWarning: String = "",
+                orientation: SIMD3<Double> = .zero, maxStressMPa: Double = 0,
+                maxInterlayerTensionMPa: Double = 0, inPlaneMargin: Double = 0,
+                interlayerMargin: Double = 0, meshVertices: [Float] = [],
+                meshIndices: [Int32] = [], vonMisesField: [Float] = [],
+                keyframeMeshes: [KeyframeMesh] = []) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         self.massGrams = massGrams
@@ -78,6 +116,15 @@ public struct OptimizeVariant {
         self.v3Passes = v3Passes
         self.minFeatureViolations = minFeatureViolations
         self.minFeatureWarning = minFeatureWarning
+        self.orientation = orientation
+        self.maxStressMPa = maxStressMPa
+        self.maxInterlayerTensionMPa = maxInterlayerTensionMPa
+        self.inPlaneMargin = inPlaneMargin
+        self.interlayerMargin = interlayerMargin
+        self.meshVertices = meshVertices
+        self.meshIndices = meshIndices
+        self.vonMisesField = vonMisesField
+        self.keyframeMeshes = keyframeMeshes
     }
 }
 
@@ -87,13 +134,31 @@ public struct OptimizeOutcome {
     public let stoppedOnMargin: Bool
     public let cancelled: Bool
     public let acceptedCount: Int
+    /// M7.8 — the run's voxel volume (mm³ == spacing³), for turning a variant's
+    /// `supportVolumeVoxels` count into a cm³ support estimate.
+    public let voxelVolumeMM3: Double
+    /// M7.8 — the run's voxel grid (dims, min-corner origin, spacing), for sampling
+    /// a variant's `vonMisesField` at a mesh vertex (index (k*ny+j)*nx+i).
+    public let gridNx: Int
+    public let gridNy: Int
+    public let gridNz: Int
+    public let gridOrigin: SIMD3<Double>
+    public let spacing: Double
 
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
-                cancelled: Bool, acceptedCount: Int) {
+                cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
+                gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
+                gridOrigin: SIMD3<Double> = .zero, spacing: Double = 0) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
         self.acceptedCount = acceptedCount
+        self.voxelVolumeMM3 = voxelVolumeMM3
+        self.gridNx = gridNx
+        self.gridNy = gridNy
+        self.gridNz = gridNz
+        self.gridOrigin = gridOrigin
+        self.spacing = spacing
     }
 }
 
@@ -115,6 +180,14 @@ private final class ProgressBox {
         self.callback = cb
         self.cancelFlag = cancelFlag
     }
+}
+
+/// Boxes the Swift per-variant closure so the C `@convention(c)` variant
+/// trampoline can reach it via an opaque context pointer (progressive results).
+private final class VariantBox {
+    /// Receives a one-variant partial outcome (the variant + the run's grid metadata).
+    let callback: (OptimizeOutcome) -> Void
+    init(_ cb: @escaping (OptimizeOutcome) -> Void) { self.callback = cb }
 }
 
 /// The TopOptKit API. Static functions form the M7.1 bridge surface: load
@@ -214,42 +287,143 @@ public enum TopOptKit {
         return Int(n)
     }
 
-    /// Run minimize_plastic (ROADMAP M5.3) with M7.0a progress + cancellation.
-    /// The `progress` closure is invoked once per OC iteration of every rung; it
-    /// returns `true` to continue or `false` to request cancellation.
+    // Non-capturing C trampolines reaching the boxed Swift closures via ctx.
+    private static let progressTrampoline: topoptbridge.ProgressFn = { ctxPtr, rung, count, iter in
+        guard let ctxPtr else { return }
+        let b = Unmanaged<ProgressBox>.fromOpaque(ctxPtr).takeUnretainedValue()
+        if !b.callback(Int(rung), Int(count), Int(iter)) { b.cancelFlag.pointee = true }
+    }
+    private static let variantTrampoline: topoptbridge.VariantFn = { ctxPtr, partialPtr in
+        guard let ctxPtr, let partialPtr else { return }
+        let b = Unmanaged<VariantBox>.fromOpaque(ctxPtr).takeUnretainedValue()
+        b.callback(TopOptKit.convertOutcome(partialPtr.pointee))
+    }
+
+    /// Run a bridge optimize with optional progress + per-variant streaming,
+    /// keeping the closure boxes alive across the (synchronous) call. `body`
+    /// receives the C fn-ptrs + ctx to forward to the bridge.
+    private static func withRunCallbacks<T>(
+        progress: ((Int, Int, Int) -> Bool)?, onVariant: ((OptimizeOutcome) -> Void)?,
+        cancelFlag: UnsafeMutablePointer<Bool>,
+        _ body: (topoptbridge.ProgressFn?, UnsafeMutableRawPointer?,
+                 topoptbridge.VariantFn?, UnsafeMutableRawPointer?) -> T
+    ) -> T {
+        let pBox = progress.map { ProgressBox($0, cancelFlag) }
+        let vBox = onVariant.map { VariantBox($0) }
+        let r = body(pBox == nil ? nil : progressTrampoline,
+                     pBox.map { Unmanaged.passUnretained($0).toOpaque() },
+                     vBox == nil ? nil : variantTrampoline,
+                     vBox.map { Unmanaged.passUnretained($0).toOpaque() })
+        withExtendedLifetime(pBox) {}
+        withExtendedLifetime(vBox) {}
+        return r
+    }
+
+    /// Run minimize_plastic (ROADMAP M5.3) with M7.0a progress + cancellation, and
+    /// optional progressive-results streaming: `onVariant` fires once per accepted
+    /// variant as it completes, with a one-variant partial outcome (variant + grid).
+    /// `progress` returns `true` to continue or `false` to request cancellation.
     public static func minimizePlastic(
         stlPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int,
-        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil
+        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
+        onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
         let cancelFlag = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
         cancelFlag.initialize(to: false)
         defer { cancelFlag.deinitialize(count: 1); cancelFlag.deallocate() }
 
         var err = topoptbridge.BridgeError()
-        var raw: topoptbridge.OptimizeResult
-        if let progress {
-            let box = ProgressBox(progress, cancelFlag)
-            let ctx = Unmanaged.passUnretained(box).toOpaque()
-            let trampoline: topoptbridge.ProgressFn = { ctxPtr, rung, count, iter in
-                guard let ctxPtr else { return }
-                let b = Unmanaged<ProgressBox>.fromOpaque(ctxPtr).takeUnretainedValue()
-                if !b.callback(Int(rung), Int(count), Int(iter)) {
-                    b.cancelFlag.pointee = true
-                }
-            }
-            raw = topoptbridge.run_minimize_plastic(
+        let raw = withRunCallbacks(progress: progress, onVariant: onVariant,
+                                   cancelFlag: cancelFlag) { pFn, pCtx, vFn, vCtx in
+            topoptbridge.run_minimize_plastic(
                 std.string(stlPath), std.string(material), std.string(materialsPath),
-                std.string(rulesPath), Int32(resolution), trampoline, ctx,
-                cancelFlag, &err)
-            withExtendedLifetime(box) {}
-        } else {
-            raw = topoptbridge.run_minimize_plastic(
-                std.string(stlPath), std.string(material), std.string(materialsPath),
-                std.string(rulesPath), Int32(resolution), nil, nil, cancelFlag, &err)
+                std.string(rulesPath), Int32(resolution), pFn, pCtx, cancelFlag,
+                vFn, vCtx, &err)
         }
         try throwIfFailed(err)
+        return convertOutcome(raw)
+    }
 
+    /// A user load group for `minimizePlasticLoadCase`: the B-rep faces it covers
+    /// and the total force (newtons) applied over them (the M7.6 UI's direction ×
+    /// weight). The force is spread as a distributed traction over the faces.
+    public struct LoadGroupSpec: Equatable, Sendable {
+        public let faceIDs: [Int]
+        public let force: SIMD3<Double>
+        public init(faceIDs: [Int], force: SIMD3<Double>) {
+            self.faceIDs = faceIDs
+            self.force = force
+        }
+    }
+
+    /// Run minimize_plastic under the user's DECLARED load case (ARCHITECTURE §1
+    /// mode (a)) — the app's tagged anchors/loads — instead of self-weight, so the
+    /// reported margins/stresses reflect the forces the user set. `minimizePlastic`
+    /// on → the material-reduction ladder; off → one conservative variant.
+    /// STEP-only (needs OCCT face selection). Same M7.0a progress/cancel contract.
+    public static func minimizePlasticLoadCase(
+        stepPath: String, material: String, materialsPath: String, rulesPath: String,
+        resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
+        minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+        progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
+        onVariant: ((OptimizeOutcome) -> Void)? = nil
+    ) throws -> OptimizeOutcome {
+        var lc = topoptbridge.BridgeLoadCase()
+        for f in anchorFaceIDs { lc.anchor_face_ids.push_back(Int32(f)) }
+        for g in loadGroups {
+            for f in g.faceIDs { lc.load_face_ids.push_back(Int32(f)) }
+            lc.load_group_sizes.push_back(Int32(g.faceIDs.count))
+            lc.load_forces.push_back(g.force.x)
+            lc.load_forces.push_back(g.force.y)
+            lc.load_forces.push_back(g.force.z)
+        }
+        lc.minimize_plastic = minimizePlastic
+        lc.build_dir_x = buildDirection.x
+        lc.build_dir_y = buildDirection.y
+        lc.build_dir_z = buildDirection.z
+
+        let cancelFlag = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
+        cancelFlag.initialize(to: false)
+        defer { cancelFlag.deinitialize(count: 1); cancelFlag.deallocate() }
+
+        var err = topoptbridge.BridgeError()
+        let raw = withRunCallbacks(progress: progress, onVariant: onVariant,
+                                   cancelFlag: cancelFlag) { pFn, pCtx, vFn, vCtx in
+            topoptbridge.run_minimize_plastic_loadcase(
+                std.string(stepPath), std.string(material), std.string(materialsPath),
+                std.string(rulesPath), Int32(resolution), lc, pFn, pCtx, cancelFlag,
+                vFn, vCtx, &err)
+        }
+        try throwIfFailed(err)
+        return convertOutcome(raw)
+    }
+
+    /// Rebuild the per-variant playback keyframe meshes from the bridge's flattened
+    /// scalar vectors (one KeyframeMesh per captured frame, in order).
+    private static func reconstructKeyframes(_ v: topoptbridge.OptimizeVariant) -> [KeyframeMesh] {
+        let kv = Array(v.keyframe_vertices)
+        let kvc = Array(v.keyframe_vertex_counts)
+        let ki = Array(v.keyframe_indices)
+        let kic = Array(v.keyframe_index_counts)
+        var out: [KeyframeMesh] = []
+        out.reserveCapacity(kvc.count)
+        var vOff = 0, iOff = 0
+        for f in 0..<kvc.count {
+            let vc = Int(kvc[f])
+            let ic = f < kic.count ? Int(kic[f]) : 0
+            let vLo = vOff * 3, vHi = (vOff + vc) * 3
+            let verts = (vLo <= vHi && vHi <= kv.count) ? Array(kv[vLo..<vHi]) : []
+            let inds = (iOff <= iOff + ic && iOff + ic <= ki.count) ? Array(ki[iOff..<(iOff + ic)]) : []
+            out.append(KeyframeMesh(vertices: verts, indices: inds))
+            vOff += vc; iOff += ic
+        }
+        return out
+    }
+
+    /// Map the bridge's OptimizeResult to the Swift outcome (shared by both run
+    /// entry points — mirrors the C++ `to_optimize_result` helper).
+    private static func convertOutcome(_ raw: topoptbridge.OptimizeResult) -> OptimizeOutcome {
         var variants: [OptimizeVariant] = []
         for v in raw.variants {
             variants.append(OptimizeVariant(
@@ -262,12 +436,26 @@ public enum TopOptKit {
                 accepted: v.accepted,
                 v3Passes: v.v3_passes,
                 minFeatureViolations: Int(v.min_feature_violations),
-                minFeatureWarning: String(v.min_feature_warning)))
+                minFeatureWarning: String(v.min_feature_warning),
+                orientation: SIMD3<Double>(v.orientation_x, v.orientation_y, v.orientation_z),
+                maxStressMPa: v.max_stress_mpa,
+                maxInterlayerTensionMPa: v.max_interlayer_tension_mpa,
+                inPlaneMargin: v.in_plane_margin,
+                interlayerMargin: v.interlayer_margin,
+                meshVertices: Array(v.mesh_vertices),
+                meshIndices: Array(v.mesh_indices),
+                vonMisesField: Array(v.von_mises_field),
+                keyframeMeshes: reconstructKeyframes(v)))
         }
         return OptimizeOutcome(variants: variants,
                                stoppedOnMargin: raw.stopped_on_margin,
                                cancelled: raw.cancelled,
-                               acceptedCount: Int(raw.accepted_count))
+                               acceptedCount: Int(raw.accepted_count),
+                               voxelVolumeMM3: raw.voxel_volume_mm3,
+                               gridNx: Int(raw.grid_nx), gridNy: Int(raw.grid_ny),
+                               gridNz: Int(raw.grid_nz),
+                               gridOrigin: SIMD3<Double>(raw.grid_origin_x, raw.grid_origin_y, raw.grid_origin_z),
+                               spacing: raw.spacing)
     }
 
     /// The M7.1 smoke summary shared by the app's smoke screen and the tests.

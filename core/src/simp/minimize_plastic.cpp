@@ -71,10 +71,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (!std::isfinite(options.margin_stop) || options.margin_stop < 0.0)
     throw std::invalid_argument(
         "minimize_plastic: margin_stop must be finite and >= 0");
-  if (!std::isfinite(options.gravity) || !(options.gravity > 0.0))
+  // `gravity` is only the SELF-WEIGHT magnitude; it is unused when the caller
+  // supplies an external load case, so only require it there.
+  if (options.external_loads.empty() &&
+      (!std::isfinite(options.gravity) || !(options.gravity > 0.0)))
     throw std::invalid_argument(
         "minimize_plastic: gravity must be finite and > 0");
   {
+    // Always required: it defines the reported build orientation + interlayer axis.
     const Vec3& d = options.gravity_direction;
     if (!(std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) > 1e-300))
       throw std::invalid_argument(
@@ -82,11 +86,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   }
 
   // --- Fixed pipeline setup (shared across every rung) ---------------------
-  // Self-weight as the design load, computed once on the original solid grid
-  // (pipeline.hpp modeling note). self_weight_loads validates density/gravity/
-  // direction and normalizes the direction internally.
-  const std::vector<NodalLoad> loads = self_weight_loads(
-      grid, material.density_g_cm3, options.gravity, options.gravity_direction);
+  // The design load, computed once and held across rungs (pipeline.hpp modeling
+  // note). Mode (a): a caller-supplied external load case (the user's tagged Load
+  // faces via traction_loads) takes precedence. Mode (b): self-weight on the
+  // original solid grid (self_weight_loads validates density/gravity/direction
+  // and normalizes the direction internally).
+  const std::vector<NodalLoad> loads =
+      options.external_loads.empty()
+          ? self_weight_loads(grid, material.density_g_cm3, options.gravity,
+                              options.gravity_direction)
+          : options.external_loads;
 
   // The reported / analysed build direction is the build-plate normal: gravity
   // pulls toward the plate, so the build direction is the unit negation.
@@ -135,6 +144,25 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     MinimizePlasticVariant variant;
     variant.requested_volume_fraction = vf;
+
+    // Playback keyframes (M7): capture ~keyframe_count meshes of the analysis
+    // density across this rung's iterations (stride spreads them over the run —
+    // projection = summed stage iterations, else max_iterations). The callback
+    // extracts a raw marching-cubes isosurface per snapshot, so no density fields
+    // accumulate. `variant` outlives the (synchronous) simp_optimize call.
+    if (options.keyframe_count > 0) {
+      int total_iters = 0;
+      if (!opt.projection.empty())
+        for (const ProjectionStage& s : opt.projection) total_iters += s.iterations;
+      else
+        total_iters = opt.max_iterations;
+      opt.keyframe_stride =
+          std::max(1, total_iters / std::max(1, options.keyframe_count));
+      opt.keyframe = [&variant, &grid](const std::vector<double>& d) {
+        variant.keyframe_meshes.push_back(marching_cubes(grid, d, kIso));
+      };
+    }
+
     variant.optimization = simp_optimize(grid, params, bcs, loads, opt, mask);
 
     if (variant.optimization.cancelled) {
@@ -224,6 +252,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     if (result.evaluated.back().accepted) {
       result.report.variants.push_back(result.evaluated.back().report);
+      // Progressive results: stream this accepted variant now, before optimizing
+      // the next lighter rung.
+      if (options.on_variant) options.on_variant(result.evaluated.back());
     } else {
       // First too-weak rung: stop the ladder here (do not run lighter rungs).
       result.stopped_on_margin = true;

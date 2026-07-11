@@ -50,6 +50,10 @@ public struct ImportSheet: View {
 
             materialDropdown.padding(.top, DS.Space.l)
 
+            minimizePlasticRow.padding(.top, DS.Space.l)
+
+            qualityPicker.padding(.top, DS.Space.l)
+
             HStack(spacing: DS.Space.m) {
                 Spacer()
                 PillButton("Cancel", style: .secondary) { model.cancelImport() }
@@ -112,6 +116,40 @@ public struct ImportSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(DS.Color.textPrimary.opacity(0.09).color, lineWidth: 1))
         }
+    }
+
+    // MARK: resolution / quality picker
+
+    private var qualityPicker: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Text("Detail").dsStyle(DS.TypeScale.footnote)
+                .foregroundStyle(DS.Color.textSecondary.color)
+            SegmentedGlass(RunQuality.allCases.map { .init($0, $0.title) }, selection: $model.quality)
+            Text(model.quality.detail).dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textTertiary.color)
+        }
+    }
+
+    // MARK: minimize-plastic toggle
+
+    private var minimizePlasticRow: some View {
+        Button { model.minimizePlastic.toggle() } label: {
+            HStack(alignment: .top, spacing: DS.Space.m) {
+                Image(systemName: model.minimizePlastic ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle((model.minimizePlastic ? DS.Color.accent : DS.Color.textTertiary).color)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Minimize plastic").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+                    Text("Remove material where it isn’t needed. Turn off to just handle your forces.")
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(DS.Color.textPrimary.color)
     }
 
     // MARK: material dropdown

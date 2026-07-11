@@ -61,6 +61,10 @@ namespace topopt {
 // driver takes an already-voxelized, already-fixtured grid plus the mounting
 // Dirichlet BCs, exactly as the M3.x optimizer tests build their cases in code.
 
+// Forward declaration: the on_variant progressive-results callback (below)
+// references a fully-analysed variant, whose definition follows the options.
+struct MinimizePlasticVariant;
+
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
@@ -102,6 +106,34 @@ struct MinimizePlasticOptions {
                      int iteration)>
       progress;
   const std::atomic<bool>* cancel = nullptr;
+
+  // Progressive results: invoked once per ACCEPTED rung, right after its full
+  // analysis (V3 + report + M7.0b viz fields), BEFORE the next lighter rung is
+  // optimized. Lets a caller stream each variant to the UI as it completes
+  // (jump to the first optimized variant while the rest are still running)
+  // instead of waiting for the whole ladder. Optional; absent by default. It
+  // runs on the optimizing thread and must not throw.
+  std::function<void(const MinimizePlasticVariant&)> on_variant;
+
+  // Optimization-history playback (app): the target number of keyframe meshes to
+  // capture per variant (0 = none, the default). The driver spreads this many
+  // frames across each rung's SIMP iterations and extracts a marching-cubes mesh
+  // per frame into MinimizePlasticVariant::keyframe_meshes. Adds a few cheap MC
+  // extractions per variant (relative to the FEA solves); no effect on the
+  // optimization itself.
+  int keyframe_count = 0;
+
+  // User-defined design load (ARCHITECTURE §1 mode (a): "user-defined loads").
+  // When NON-EMPTY, these nodal loads REPLACE self-weight as the design load —
+  // the driver optimizes and analyses the part under this load case instead of
+  // its own weight, so the reported margins/stresses are for the user's forces.
+  // Assemble it from the app's tagged Load faces via `traction_loads` (M7.6-core)
+  // and pass the mounting faces as `bcs`. When EMPTY (default), the driver uses
+  // self-weight exactly as before (mode (b), unchanged — all existing callers).
+  // `gravity_direction` is still required (it defines the reported build
+  // orientation and the interlayer-tension axis, M4.4); `gravity` is only
+  // consulted in the self-weight (empty) case.
+  std::vector<NodalLoad> external_loads;
 };
 
 // One ladder rung actually evaluated by the driver.
@@ -146,6 +178,14 @@ struct MinimizePlasticVariant {
   // without recomputing marching cubes or copying the mesh. Empty for a
   // cancelled rung (its `v3` is default-constructed).
   const TriangleMesh& mesh() const { return v3.mesh; }
+
+  // --- Optimization-history keyframes (app playback) -----------------------
+  // Raw marching-cubes isosurfaces of the analysis density at snapshots through
+  // this variant's SIMP iterations, in order from ~solid (first) to optimized
+  // (last, ~= mesh()), so the app can play back the shape being carved out.
+  // Populated only when MinimizePlasticOptions::keyframe_count > 0; empty
+  // otherwise and for a cancelled rung.
+  std::vector<TriangleMesh> keyframe_meshes;
 };
 
 // The result of a minimize_plastic run.
