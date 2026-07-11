@@ -28,6 +28,7 @@ public struct HomeView: View {
                     NewTopOptTile { model.newTopOpt() }
                     ForEach(model.recentProjects) { proj in
                         RecentProjectCard(project: proj, thumbnail: model.thumbnails[proj.id],
+                                          running: model.runningIDs.contains(proj.id),
                                           onOpen: { model.open(proj) },
                                           onRename: { renameDraft = proj.name; renameTarget = proj })
                     }
@@ -129,6 +130,8 @@ private struct NewTopOptTile: View {
 private struct RecentProjectCard: View {
     let project: RecentProject
     let thumbnail: CGImage?
+    /// A run (incl. background) is in flight for this project.
+    let running: Bool
     let onOpen: () -> Void
     let onRename: () -> Void
 
@@ -149,12 +152,7 @@ private struct RecentProjectCard: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: DS.Space.s)
-                    let optimized = project.optimized
-                    Text(optimized ? "Optimized" : "Ready")
-                        .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                        .foregroundStyle((optimized ? DS.Color.okGreen : DS.Color.accent).color)
-                        .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
-                        .background(Capsule().fill((optimized ? DS.Color.okGreen : DS.Color.accent).opacity(0.14).color))
+                    statusChip
                 }
                 .padding(.horizontal, DS.Space.xl)
                 .padding(.vertical, DS.Space.ml)
@@ -180,6 +178,22 @@ private struct RecentProjectCard: View {
         .contextMenu {
             Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
         }
+    }
+
+    /// Status chip: "Running" (a spinner, while optimizing incl. background) wins
+    /// over "Optimized" (green, has results) over "Ready" (accent).
+    @ViewBuilder private var statusChip: some View {
+        let tint = running ? DS.Color.accent : (project.optimized ? DS.Color.okGreen : DS.Color.accent)
+        HStack(spacing: DS.Space.xs) {
+            if running {
+                ProgressView().controlSize(.mini).tint(tint.color)
+            }
+            Text(running ? "Running" : (project.optimized ? "Optimized" : "Ready"))
+                .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                .foregroundStyle(tint.color)
+        }
+        .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
+        .background(Capsule().fill(tint.opacity(0.14).color))
     }
 
     /// The rendered model thumbnail, or the frosted placeholder when none exists yet.

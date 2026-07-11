@@ -13,6 +13,7 @@
 
 import Foundation
 import CoreGraphics
+import Combine
 import TopOptKit
 
 @MainActor
@@ -66,6 +67,11 @@ public final class AppModel: ObservableObject {
     /// Rendered Library thumbnails, keyed by project id. Generated from the imported
     /// mesh this launch (in-memory; on-disk-only recents show the frosted fallback).
     @Published public private(set) var thumbnails: [UUID: CGImage] = [:]
+    /// Projects with a run in flight (incl. background runs) — drives the Library
+    /// card's "Running" status so you can see at a glance which are optimizing.
+    @Published public private(set) var runningIDs: Set<UUID> = []
+    /// Phase subscriptions per live project, keeping `runningIDs`/`optimized` current.
+    private var runCancellables: [UUID: AnyCancellable] = [:]
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
@@ -224,6 +230,23 @@ public final class AppModel: ObservableObject {
         thumbnails[id] = image
     }
 
+    /// Track a live project's run phase so the Library reflects background runs:
+    /// `runningIDs` gains/loses the id, and finishing with results marks it optimized.
+    private func observeRun(_ pm: ProjectModel) {
+        guard runCancellables[pm.id] == nil else { return }
+        runCancellables[pm.id] = pm.run.$phase
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak pm] phase in
+                guard let self, let pm else { return }
+                if phase == .running {
+                    self.runningIDs.insert(pm.id)
+                } else {
+                    self.runningIDs.remove(pm.id)
+                    if pm.hasResults { self.markOptimized(pm.id) }
+                }
+            }
+    }
+
     private func updateRecent(id: UUID, _ transform: (RecentProject) -> RecentProject) {
         if let idx = recentProjects.firstIndex(where: { $0.id == id }) {
             recentProjects[idx] = transform(recentProjects[idx])
@@ -306,6 +329,7 @@ public final class AppModel: ObservableObject {
         project = pm
         recentProjects.insert(recent, at: 0)
         generateThumbnail(for: recent.id, mesh: pm.viewerMesh)
+        observeRun(pm)
         projectName = name
         importSheetPresented = false
         screen = .workspace
@@ -333,6 +357,7 @@ public final class AppModel: ObservableObject {
             projectsById[recent.id] = project
         }
         generateThumbnail(for: recent.id, mesh: project?.viewerMesh)
+        if let pm = projectsById[recent.id] { observeRun(pm) }
         screen = .workspace
     }
 

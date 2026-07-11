@@ -116,7 +116,9 @@ public struct WorkspacePlaceholder: View {
                       materialName: project.material,
                       resolution: runResolution,
                       onRetry: startRun)
-                .ignoresSafeArea()
+                // The running card / failure sheet dim their OWN full-bleed
+                // backdrops; keeping RunScreen inside the safe area lets the
+                // minimized "Optimizing…" chip sit under the status bar / nav row.
             // Results appear as soon as the FIRST variant streams in (progressive
             // results), while the rest keep optimizing behind them. They PERSIST on
             // the project, so leaving to Home and reopening shows them again — until
