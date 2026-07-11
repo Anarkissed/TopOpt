@@ -210,7 +210,20 @@ final class TopOptKitTests: XCTestCase {
             materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
             resolution: 6)
         XCTAssertGreaterThan(outcome.voxelVolumeMM3, 0, "grid.voxel_volume() must flow")
+        // Grid metadata + variant geometry/field flow (for the M7.8 viewer overlay).
+        XCTAssertGreaterThan(outcome.gridNx, 0)
+        XCTAssertGreaterThan(outcome.gridNy, 0)
+        XCTAssertGreaterThan(outcome.gridNz, 0)
+        XCTAssertGreaterThan(outcome.spacing, 0)
+        let voxelCount = outcome.gridNx * outcome.gridNy * outcome.gridNz
         XCTAssertFalse(outcome.variants.isEmpty)
+        for v in outcome.variants where v.accepted {
+            XCTAssertFalse(v.meshVertices.isEmpty, "variant isosurface must flow")
+            XCTAssertEqual(v.meshVertices.count % 3, 0)
+            XCTAssertEqual(v.meshIndices.count % 3, 0)
+            XCTAssertEqual(v.meshIndices.count, v.meshTriangleCount * 3)
+            XCTAssertEqual(v.vonMisesField.count, voxelCount, "von Mises field is grid-indexed")
+        }
         for v in outcome.variants {
             // Orientation is the M4.4 winning unit build direction — nonzero + finite.
             let len = simd_length(v.orientation)

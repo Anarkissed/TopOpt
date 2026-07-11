@@ -43,6 +43,38 @@ public enum LayerShear: Equatable, Sendable {
     }
 }
 
+/// A grid-indexed scalar field (the variant's per-voxel von Mises stress, MPa)
+/// with the grid geometry needed to sample it at a mesh vertex. The index layout
+/// matches the core `VoxelGrid::index` = (k*ny + j)*nx + i.
+public struct StressField: Sendable {
+    public let nx: Int
+    public let ny: Int
+    public let nz: Int
+    public let origin: SIMD3<Float>   // grid minimum corner (world mm)
+    public let spacing: Float         // voxel edge length (mm)
+    public let values: [Float]        // size nx*ny*nz, MPa (may be empty)
+
+    public init(nx: Int, ny: Int, nz: Int, origin: SIMD3<Float>, spacing: Float, values: [Float]) {
+        self.nx = nx; self.ny = ny; self.nz = nz
+        self.origin = origin; self.spacing = spacing; self.values = values
+    }
+
+    public var isEmpty: Bool { values.isEmpty || spacing <= 0 || nx <= 0 || ny <= 0 || nz <= 0 }
+
+    /// Nearest-voxel value at world position `p` (0 when empty; indices clamp into
+    /// range so a vertex exactly on the max face still reads the boundary voxel).
+    public func value(at p: SIMD3<Float>) -> Float {
+        guard !isEmpty else { return 0 }
+        let i = clamp(Int(((p.x - origin.x) / spacing).rounded(.down)), nx)
+        let j = clamp(Int(((p.y - origin.y) / spacing).rounded(.down)), ny)
+        let k = clamp(Int(((p.z - origin.z) / spacing).rounded(.down)), nz)
+        let idx = (k * ny + j) * nx + i
+        return idx >= 0 && idx < values.count ? values[idx] : 0
+    }
+
+    private func clamp(_ v: Int, _ n: Int) -> Int { min(max(v, 0), n - 1) }
+}
+
 /// One accepted variant's presentation (a savings tab + its orientation/shear
 /// readouts). Everything is precomputed from the outcome so it is `Equatable` and
 /// directly assertable in tests.
@@ -109,9 +141,20 @@ public final class ResultsModel: ObservableObject {
     /// Whether the morph is auto-playing (a UI timer advances `playT` in the view).
     @Published public private(set) var playing: Bool = false
 
+    /// The accepted variants' raw geometry + fields (parallel to `tabs`), kept for
+    /// the viewer to build the selected variant's mesh + sample its stress field.
+    private let accepted: [OptimizeVariant]
+    private let gridDim: (Int, Int, Int)
+    private let gridOrigin: SIMD3<Float>
+    private let spacing: Float
+
     public init(projectName: String, outcome: OptimizeOutcome) {
         self.projectName = projectName
         let accepted = outcome.variants.filter { $0.accepted }
+        self.accepted = accepted
+        self.gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
+        self.gridOrigin = SIMD3<Float>(outcome.gridOrigin)
+        self.spacing = Float(outcome.spacing)
         self.tabs = ResultsModel.buildTabs(accepted, voxelVolumeMM3: outcome.voxelVolumeMM3)
         self.stressScaleMaxMPa = accepted.map(\.maxStressMPa).max() ?? 0
         self.selectedIndex = tabs.count > 1 ? 1 : 0
@@ -120,6 +163,39 @@ public final class ResultsModel: ObservableObject {
     /// The currently selected variant (nil only for an empty outcome).
     public var selected: ResultVariantVM? {
         tabs.indices.contains(selectedIndex) ? tabs[selectedIndex] : nil
+    }
+
+    private var selectedVariant: OptimizeVariant? {
+        accepted.indices.contains(selectedIndex) ? accepted[selectedIndex] : nil
+    }
+
+    /// The selected variant's isosurface for display (nil if it has no geometry).
+    public var selectedMesh: ViewerMesh? {
+        guard let v = selectedVariant, !v.meshVertices.isEmpty else { return nil }
+        return ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [])
+    }
+
+    /// The selected variant's stress field, tied to the run's grid geometry.
+    public var selectedStressField: StressField? {
+        guard let v = selectedVariant else { return nil }
+        return StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
+                           origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+    }
+
+    /// Per-flat-vertex stress colors (alpha 1) for `mesh`, sampled from `field`
+    /// against the shared scale — the buffer the viewer uploads when stress is on.
+    public func stressTints(for mesh: ViewerMesh, field: StressField) -> [SIMD4<Float>] {
+        let positions = mesh.flat.positions
+        let count = mesh.flat.vertexCount
+        var out = [SIMD4<Float>]()
+        out.reserveCapacity(count)
+        for v in 0..<count {
+            let p = SIMD3<Float>(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2])
+            let frac = stressFraction(mpa: Double(field.value(at: p)))
+            let c = ResultsModel.stressColor(fraction: frac)
+            out.append(SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1))
+        }
+        return out
     }
 
     // MARK: - Intents

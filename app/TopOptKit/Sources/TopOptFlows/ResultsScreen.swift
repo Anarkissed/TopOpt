@@ -33,6 +33,15 @@ public struct ResultsScreen: View {
 
     public var body: some View {
         ZStack {
+            // The variant stage: its own viewer (opaque over the workspace) showing
+            // the selected variant's isosurface, optionally stress-colored, morphing
+            // with the scrub. Pixels are device QA (the M7 /app/ standard).
+            DS.Color.background.color.ignoresSafeArea()
+            MetalMeshView(mesh: model.selectedMesh,
+                          stressTints: stressTints,
+                          reveal: Float(model.playT))
+                .ignoresSafeArea()
+
             topLeft
             topRight
             savingsTabs
@@ -42,6 +51,16 @@ public struct ResultsScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
+    }
+
+    /// Per-flat-vertex stress colors for the selected variant, or nil when the
+    /// overlay is off / the variant has no field. NOTE (device-QA perf follow-up):
+    /// recomputed on each body eval while the overlay is on; memoize on
+    /// `selectedIndex` if a scrub-with-stress hitch shows up on device.
+    private var stressTints: [SIMD4<Float>]? {
+        guard model.stressOn, let mesh = model.selectedMesh,
+              let field = model.selectedStressField, !field.isEmpty else { return nil }
+        return model.stressTints(for: mesh, field: field)
     }
 
     // MARK: - Top-left: back + project / Optimized ✓

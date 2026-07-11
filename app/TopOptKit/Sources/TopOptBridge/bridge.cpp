@@ -312,6 +312,13 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     result.cancelled = mp.cancelled;
     result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
     result.voxel_volume_mm3 = grid.voxel_volume();
+    result.grid_nx = grid.nx;
+    result.grid_ny = grid.ny;
+    result.grid_nz = grid.nz;
+    result.grid_origin_x = grid.origin.x;
+    result.grid_origin_y = grid.origin.y;
+    result.grid_origin_z = grid.origin.z;
+    result.spacing = grid.spacing;
     for (const auto& v : mp.evaluated) {
       OptimizeVariant ov;
       ov.requested_volume_fraction = v.requested_volume_fraction;
@@ -333,6 +340,21 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
       ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
       ov.in_plane_margin = v.report.margin.in_plane;
       ov.interlayer_margin = v.report.margin.interlayer;
+      // Variant isosurface (already extracted in check_v3) + per-voxel von Mises.
+      const topopt::TriangleMesh& vm = v.mesh();
+      ov.mesh_vertices.reserve(vm.vertices.size() * 3);
+      for (const auto& p : vm.vertices) {
+        ov.mesh_vertices.push_back(static_cast<float>(p.x));
+        ov.mesh_vertices.push_back(static_cast<float>(p.y));
+        ov.mesh_vertices.push_back(static_cast<float>(p.z));
+      }
+      ov.mesh_indices.reserve(vm.triangles.size() * 3);
+      for (const auto& t : vm.triangles) {
+        ov.mesh_indices.push_back(t[0]);
+        ov.mesh_indices.push_back(t[1]);
+        ov.mesh_indices.push_back(t[2]);
+      }
+      ov.von_mises_field.assign(v.von_mises_field.begin(), v.von_mises_field.end());
       result.variants.push_back(ov);
     }
   } catch (const std::exception& e) {

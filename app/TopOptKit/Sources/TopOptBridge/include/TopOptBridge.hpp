@@ -153,6 +153,15 @@ struct OptimizeVariant {
   double max_interlayer_tension_mpa = 0.0;
   double in_plane_margin = 0.0;
   double interlayer_margin = 0.0;
+  // M7.8 variant-mesh display + stress overlay. `mesh_vertices` is the extracted
+  // + cleaned variant isosurface (v.mesh(), flattened xyz, size 3*vertex_count);
+  // `mesh_indices` its triangle corners. `von_mises_field` is the M7.0b per-voxel
+  // von Mises stress over the printed material, grid-indexed (size
+  // grid.voxel_count(), see OptimizeResult grid_* / spacing), MPa — sampled at a
+  // mesh vertex to color it. All empty for a cancelled rung.
+  std::vector<float> mesh_vertices;
+  std::vector<int32_t> mesh_indices;
+  std::vector<float> von_mises_field;
 };
 
 struct OptimizeResult {
@@ -164,6 +173,17 @@ struct OptimizeResult {
   // app can turn a variant's support_volume_voxels count into a cm^3 estimate
   // (voxels * voxel_volume_mm3 / 1000). One grid per run, so it lives here.
   double voxel_volume_mm3 = 0.0;
+  // M7.8: the run's voxel grid, so the app can sample a variant's grid-indexed
+  // von_mises_field at a mesh vertex position `p`: the voxel is
+  // i = floor((p - origin)/spacing) clamped to [0, n), field index
+  // (k*grid_ny + j)*grid_nx + i (VoxelGrid::index). One grid per run.
+  int32_t grid_nx = 0;
+  int32_t grid_ny = 0;
+  int32_t grid_nz = 0;
+  double grid_origin_x = 0.0;
+  double grid_origin_y = 0.0;
+  double grid_origin_z = 0.0;
+  double spacing = 0.0;  // == cbrt(voxel_volume_mm3); carried explicitly for sampling
 };
 
 // Run minimize_plastic on the part at `stl_path`: import (STL), voxelize at

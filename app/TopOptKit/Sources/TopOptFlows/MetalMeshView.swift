@@ -39,7 +39,7 @@ private let viewerShaderSource = """
 using namespace metal;
 
 struct VIn  { float3 position [[attribute(0)]]; float3 normal [[attribute(1)]]; float4 tint [[attribute(2)]]; };
-struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; };
+struct VOut { float4 position [[position]]; float3 vnormal; float4 tint; float mheight; };
 struct Uniforms { float4x4 mvp; float4x4 normalMatrix; };
 
 vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]]) {
@@ -47,10 +47,18 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
     o.position = u.mvp * float4(in.position, 1.0);
     o.vnormal  = (u.normalMatrix * float4(in.normal, 0.0)).xyz;
     o.tint = in.tint;
+    o.mheight = in.position.y;   // model-space height, for the M7.8 reveal scrub
     return o;
 }
 
-fragment float4 viewer_fragment(VOut in [[stage_in]]) {
+// `reveal` = (fraction 0..1, minY, maxY, enabled). When enabled, fragments above
+// the reveal height (normalized model Y) are discarded — the results morph scrub
+// (M7.8). Default (…, 0) shows everything, so edit-mode is unaffected.
+fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]]) {
+    if (reveal.w > 0.5) {
+        float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
+        if (t > reveal.x) discard_fragment();
+    }
     float3 N = normalize(in.vnormal);
     // Neutral-clay: soft half-Lambert key + gentle hemisphere fill over a light
     // base, faint cool fresnel. Front faces have N.z > 0 (eye looks down −Z).
@@ -143,6 +151,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var tintBuffer: MTLBuffer?
     private var idVertexBuffer: MTLBuffer?
     private var vertexDrawCount = 0
+    /// M7.8 reveal scrub params (fraction, minY, maxY, enabled); default shows all.
+    private var revealParams = SIMD4<Float>(1, 0, 1, 0)
     /// Per-flat-vertex face ids (a triangle's id repeated 3×), for the tint buffer.
     private var flatFaceIDs: [UInt32] = []
     private var aspect: Float = 1
@@ -456,6 +466,31 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         buildTintBuffer(faceTint: faceTint, activeFaces: activeFaces)
     }
 
+    /// M7.8 stress overlay: upload per-flat-vertex colors (alpha 1) directly as the
+    /// tint buffer, so the fragment shader mixes them over the clay. `colors` must
+    /// have one entry per flat vertex (`vertexDrawCount`); a mismatch is ignored.
+    func setStressTints(_ colors: [SIMD4<Float>]) {
+        guard vertexDrawCount > 0, colors.count == vertexDrawCount else { return }
+        var tints = [Float](repeating: 0, count: vertexDrawCount * 4)
+        for v in 0..<vertexDrawCount {
+            let c = colors[v]
+            tints[v * 4] = c.x; tints[v * 4 + 1] = c.y
+            tints[v * 4 + 2] = c.z; tints[v * 4 + 3] = c.w
+        }
+        tintBuffer = tints.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// M7.8 morph scrub: reveal fragments up to `fraction` of the mesh's model-Y
+    /// extent (1 = fully formed). Enabled only while scrubbing (< 1).
+    func setReveal(_ fraction: Float) {
+        let f = min(1, max(0, fraction))
+        let minY = mesh?.bounds.min.y ?? 0
+        let maxY = mesh?.bounds.max.y ?? 1
+        revealParams = SIMD4<Float>(f, minY, maxY, f < 0.999 ? 1 : 0)
+    }
+
     private func buildIDBuffer() {
         guard vertexDrawCount > 0, let mesh, mesh.flat.positions.count == vertexDrawCount * 3 else {
             idVertexBuffer = nil; return
@@ -520,6 +555,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setVertexBuffer(vbuf, offset: 0, index: 0)
         enc.setVertexBuffer(tbuf, offset: 0, index: 2)
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
+        enc.setFragmentBytes(&revealParams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
@@ -680,6 +716,11 @@ struct MeshViewInputs {
     var onMiss: (() -> Void)?
     /// Published each time the camera changes, so overlays can project 3D points.
     var onProjection: ((CameraProjection) -> Void)?
+    /// M7.8 results stress overlay: per-flat-vertex colors (one per `mesh.flat`
+    /// vertex). When set, they replace the face-highlight tints. nil = no overlay.
+    var stressTints: [SIMD4<Float>]?
+    /// M7.8 results morph scrub in [0, 1] (1 = fully formed; < 1 reveals partially).
+    var reveal: Float = 1
 }
 
 #if os(iOS)
@@ -691,11 +732,12 @@ public struct MetalMeshView: UIViewRepresentable {
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
-                onProjection: ((CameraProjection) -> Void)? = nil) {
+                onProjection: ((CameraProjection) -> Void)? = nil,
+                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection)
+            onProjection: onProjection, stressTints: stressTints, reveal: reveal)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -728,11 +770,12 @@ public struct MetalMeshView: NSViewRepresentable {
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
-                onProjection: ((CameraProjection) -> Void)? = nil) {
+                onProjection: ((CameraProjection) -> Void)? = nil,
+                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection)
+            onProjection: onProjection, stressTints: stressTints, reveal: reveal)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -787,6 +830,9 @@ extension MetalMeshView {
         private var appliedSignature: [Float]?
         private var appliedTint: TintKey?
         private var lastSettleVector: SIMD4<Float>?
+        /// M7.8: whether a stress overlay is currently uploaded, and the last reveal.
+        private var appliedStress = false
+        private var appliedReveal: Float = 1
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
@@ -830,13 +876,31 @@ extension MetalMeshView {
                 dirty = true
             }
 
-            // Highlight tint (role-aware if provided, else the group palette).
-            let tint = inputs.faceTints ?? derivedTint(inputs.selection)
-            let active = Set(inputs.selection?.activeGroup?.faces ?? [])
-            let key = TintKey(tint: tint, active: active)
-            if key != appliedTint {
-                appliedTint = key
-                renderer.setHighlights(faceTint: tint, activeFaces: active)
+            if let stress = inputs.stressTints {
+                // M7.8 results stress overlay: per-vertex colors replace face tints.
+                // Re-upload on mesh change (dirty) or when the overlay turns on.
+                if dirty || !appliedStress {
+                    appliedStress = true
+                    renderer.setStressTints(stress)
+                    dirty = true
+                }
+            } else {
+                if appliedStress { appliedStress = false; appliedTint = nil }  // rebuild plain tints
+                // Highlight tint (role-aware if provided, else the group palette).
+                let tint = inputs.faceTints ?? derivedTint(inputs.selection)
+                let active = Set(inputs.selection?.activeGroup?.faces ?? [])
+                let key = TintKey(tint: tint, active: active)
+                if key != appliedTint {
+                    appliedTint = key
+                    renderer.setHighlights(faceTint: tint, activeFaces: active)
+                    dirty = true
+                }
+            }
+
+            // M7.8 morph scrub reveal.
+            if inputs.reveal != appliedReveal || dirty {
+                appliedReveal = inputs.reveal
+                renderer.setReveal(inputs.reveal)
                 dirty = true
             }
 

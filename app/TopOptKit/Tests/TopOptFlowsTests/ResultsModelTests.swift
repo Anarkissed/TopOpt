@@ -188,4 +188,60 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.stressFraction(mpa: 10), 0.5, accuracy: 1e-9)
         XCTAssertEqual(m.stressFraction(mpa: 40), 1, accuracy: 1e-9) // clamped
     }
+
+    // MARK: stress field sampling (grid index (k*ny+j)*nx+i, matches core)
+
+    func testStressFieldSamplingMatchesGridIndex() {
+        // NON-cubic 2×3×4 grid (distinct dims so index order matters — a cubic grid
+        // can't tell (k*ny+j)*nx+i from a transposed formula), unit voxels at origin;
+        // value == the field index.
+        let vals = (0..<(2 * 3 * 4)).map { Float($0) }
+        let f = StressField(nx: 2, ny: 3, nz: 4, origin: .zero, spacing: 1, values: vals)
+        // idx = (k*ny + j)*nx + i.
+        XCTAssertEqual(f.value(at: SIMD3(0.5, 0.5, 0.5)), 0)    // (0,0,0) -> 0
+        XCTAssertEqual(f.value(at: SIMD3(1.5, 0.5, 0.5)), 1)    // (1,0,0) -> 1
+        XCTAssertEqual(f.value(at: SIMD3(0.5, 1.5, 0.5)), 2)    // (0,1,0) -> 2
+        XCTAssertEqual(f.value(at: SIMD3(0.5, 0.5, 1.5)), 6)    // (0,0,1) -> (1*3+0)*2+0 = 6
+        XCTAssertEqual(f.value(at: SIMD3(1.5, 2.5, 0.5)), 5)    // (1,2,0) -> (0*3+2)*2+1 = 5
+        XCTAssertEqual(f.value(at: SIMD3(1.5, 2.5, 3.5)), 23)   // (1,2,3) -> (3*3+2)*2+1 = 23
+        XCTAssertEqual(f.value(at: SIMD3(99, 99, 99)), 23)      // clamps to (1,2,3) -> 23
+    }
+
+    func testStressFieldEmptyIsZero() {
+        XCTAssertTrue(StressField(nx: 0, ny: 0, nz: 0, origin: .zero, spacing: 0, values: []).isEmpty)
+        XCTAssertEqual(StressField(nx: 2, ny: 2, nz: 2, origin: .zero, spacing: 1, values: []).value(at: .zero), 0)
+    }
+
+    func testStressTintsPerFlatVertexColored() {
+        // Shared scale 10 (from the variant), a triangle with a vertex in each of
+        // three voxels holding 0 / 10 / 5 → blue / red / green.
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5, maxStress: 10)]))
+        let mesh = ViewerMesh(vertices: [0.5, 0.5, 0.5,  1.5, 0.5, 0.5,  0.5, 1.5, 0.5],
+                              indices: [0, 1, 2], faceIDs: [])
+        let field = StressField(nx: 2, ny: 2, nz: 2, origin: .zero, spacing: 1,
+                                values: [0, 10, 5, 0, 0, 0, 0, 0])
+        let tints = m.stressTints(for: mesh, field: field)
+        XCTAssertEqual(tints.count, mesh.flat.vertexCount)   // one per flat vertex
+        XCTAssertEqual(tints[0], SIMD4<Float>(Float(RGBA(28, 60, 170).r), Float(RGBA(28, 60, 170).g), Float(RGBA(28, 60, 170).b), 1))   // frac 0
+        XCTAssertGreaterThan(tints[1].x, 0.9)               // frac 1 → red (high R)
+        XCTAssertLessThan(tints[1].z, 0.3)                  //         low B
+        XCTAssertEqual(tints.allSatisfy { $0.w == 1 }, true) // opaque
+    }
+
+    func testSelectedMeshAndFieldFromVariant() {
+        var v = variant(vf: 0.5, maxStress: 10)
+        v = OptimizeVariant(
+            requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 100,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, orientation: SIMD3(0, 0, 1), maxStressMPa: 10,
+            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2],
+            vonMisesField: [1, 2, 3, 4, 5, 6, 7, 8])
+        let out = OptimizeOutcome(variants: [v], stoppedOnMargin: false, cancelled: false,
+                                  acceptedCount: 1, voxelVolumeMM3: 1,
+                                  gridNx: 2, gridNy: 2, gridNz: 2, gridOrigin: .zero, spacing: 1)
+        let m = ResultsModel(projectName: "P", outcome: out)
+        XCTAssertEqual(m.selectedMesh?.triangleCount, 1)
+        XCTAssertEqual(m.selectedStressField?.values.count, 8)
+        XCTAssertEqual(m.selectedStressField?.nx, 2)
+    }
 }

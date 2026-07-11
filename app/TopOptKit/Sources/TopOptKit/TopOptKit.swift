@@ -75,6 +75,13 @@ public struct OptimizeVariant {
     /// worst case is `worstCaseMargin`; `interlayerMargin` classifies layer shear.
     public let inPlaneMargin: Double
     public let interlayerMargin: Double
+    /// M7.8 — the extracted+cleaned variant isosurface for display: flattened xyz
+    /// vertices and flattened triangle-corner indices (empty for a cancelled rung).
+    public let meshVertices: [Float]
+    public let meshIndices: [Int32]
+    /// M7.8 — per-voxel von Mises stress (MPa), grid-indexed against the outcome's
+    /// grid metadata, for the stress overlay. Empty for a cancelled rung.
+    public let vonMisesField: [Float]
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 massGrams: Double, supportVolumeVoxels: Int, meshTriangleCount: Int,
@@ -82,7 +89,8 @@ public struct OptimizeVariant {
                 minFeatureViolations: Int = 0, minFeatureWarning: String = "",
                 orientation: SIMD3<Double> = .zero, maxStressMPa: Double = 0,
                 maxInterlayerTensionMPa: Double = 0, inPlaneMargin: Double = 0,
-                interlayerMargin: Double = 0) {
+                interlayerMargin: Double = 0, meshVertices: [Float] = [],
+                meshIndices: [Int32] = [], vonMisesField: [Float] = []) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         self.massGrams = massGrams
@@ -98,6 +106,9 @@ public struct OptimizeVariant {
         self.maxInterlayerTensionMPa = maxInterlayerTensionMPa
         self.inPlaneMargin = inPlaneMargin
         self.interlayerMargin = interlayerMargin
+        self.meshVertices = meshVertices
+        self.meshIndices = meshIndices
+        self.vonMisesField = vonMisesField
     }
 }
 
@@ -110,14 +121,28 @@ public struct OptimizeOutcome {
     /// M7.8 — the run's voxel volume (mm³ == spacing³), for turning a variant's
     /// `supportVolumeVoxels` count into a cm³ support estimate.
     public let voxelVolumeMM3: Double
+    /// M7.8 — the run's voxel grid (dims, min-corner origin, spacing), for sampling
+    /// a variant's `vonMisesField` at a mesh vertex (index (k*ny+j)*nx+i).
+    public let gridNx: Int
+    public let gridNy: Int
+    public let gridNz: Int
+    public let gridOrigin: SIMD3<Double>
+    public let spacing: Double
 
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
-                cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0) {
+                cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
+                gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
+                gridOrigin: SIMD3<Double> = .zero, spacing: Double = 0) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
         self.acceptedCount = acceptedCount
         self.voxelVolumeMM3 = voxelVolumeMM3
+        self.gridNx = gridNx
+        self.gridNy = gridNy
+        self.gridNz = gridNz
+        self.gridOrigin = gridOrigin
+        self.spacing = spacing
     }
 }
 
@@ -291,13 +316,20 @@ public enum TopOptKit {
                 maxStressMPa: v.max_stress_mpa,
                 maxInterlayerTensionMPa: v.max_interlayer_tension_mpa,
                 inPlaneMargin: v.in_plane_margin,
-                interlayerMargin: v.interlayer_margin))
+                interlayerMargin: v.interlayer_margin,
+                meshVertices: Array(v.mesh_vertices),
+                meshIndices: Array(v.mesh_indices),
+                vonMisesField: Array(v.von_mises_field)))
         }
         return OptimizeOutcome(variants: variants,
                                stoppedOnMargin: raw.stopped_on_margin,
                                cancelled: raw.cancelled,
                                acceptedCount: Int(raw.accepted_count),
-                               voxelVolumeMM3: raw.voxel_volume_mm3)
+                               voxelVolumeMM3: raw.voxel_volume_mm3,
+                               gridNx: Int(raw.grid_nx), gridNy: Int(raw.grid_ny),
+                               gridNz: Int(raw.grid_nz),
+                               gridOrigin: SIMD3<Double>(raw.grid_origin_x, raw.grid_origin_y, raw.grid_origin_z),
+                               spacing: raw.spacing)
     }
 
     /// The M7.1 smoke summary shared by the app's smoke screen and the tests.
