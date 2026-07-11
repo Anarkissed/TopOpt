@@ -41,6 +41,8 @@ public final class AppModel: ObservableObject {
     /// Import-draft "minimize plastic" toggle, carried into the new project. On →
     /// pursue material reduction; off → just handle the forces. Default on.
     @Published public var minimizePlastic = true
+    /// Import-draft optimize resolution/quality, carried into the new project.
+    @Published public var quality: RunQuality = .fast
     /// Selected material name per family (kept independently so switching the
     /// segment restores the family's own choice).
     @Published public private(set) var selectedFDMMaterial: String?
@@ -107,13 +109,13 @@ public final class AppModel: ObservableObject {
     /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
     /// file / material / config path is missing (Optimize is gated on these, so nil
     /// only happens if wiring is incomplete).
-    public func makeRunRequest(resolution: Int) -> RunRequest? {
+    public func makeRunRequest() -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
         let lc = project.loadCase()
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
-                          resolution: resolution,
+                          resolution: project.quality.resolution,
                           projectName: project.name.isEmpty ? file.name : project.name,
                           anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
                           minimizePlastic: project.minimizePlastic,
@@ -200,6 +202,7 @@ public final class AppModel: ObservableObject {
         importedFile = nil
         importedMesh = nil
         minimizePlastic = true   // reset the draft toggle to the default
+        quality = .fast
         importSheetPresented = true
     }
 
@@ -262,6 +265,7 @@ public final class AppModel: ObservableObject {
         let pm = ProjectModel(id: recent.id, name: name, material: material,
                               process: process, importedFile: file, importedMesh: importedMesh)
         pm.minimizePlastic = minimizePlastic
+        pm.quality = quality
         projectsById[recent.id] = pm
         project = pm
         recentProjects.insert(recent, at: 0)

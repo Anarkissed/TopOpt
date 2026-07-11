@@ -318,7 +318,8 @@ final class RunModelTests: XCTestCase {
         // Drives the production GCD scheduler + the real minimize_plastic on the
         // committed cube fixture. Proves the runner is actually wired to the core
         // (a stub couldn't pass) and that progress callbacks marshal back onto
-        // main. Small resolution keeps it fast.
+        // main. Tiny resolution keeps it fast — the bridge now runs the M6.3
+        // projection schedule (300 OC iterations/variant), so res is kept small.
         let model = RunModel(scheduler: GCDRunScheduler())
         var progressTicks = 0
         var cancellables = Set<AnyCancellable>()
@@ -335,7 +336,7 @@ final class RunModelTests: XCTestCase {
             }
             .store(in: &cancellables)
 
-        model.start(request(resolution: 20))
+        model.start(request(resolution: 8))
         wait(for: [done], timeout: 180)
 
         XCTAssertFalse(model.phase.isRunning)

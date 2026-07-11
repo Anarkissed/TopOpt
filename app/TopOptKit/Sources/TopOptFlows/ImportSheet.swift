@@ -52,6 +52,8 @@ public struct ImportSheet: View {
 
             minimizePlasticRow.padding(.top, DS.Space.l)
 
+            qualityPicker.padding(.top, DS.Space.l)
+
             HStack(spacing: DS.Space.m) {
                 Spacer()
                 PillButton("Cancel", style: .secondary) { model.cancelImport() }
@@ -113,6 +115,18 @@ public struct ImportSheet: View {
                 .fill(DS.Color.textPrimary.opacity(0.05).color)
                 .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(DS.Color.textPrimary.opacity(0.09).color, lineWidth: 1))
+        }
+    }
+
+    // MARK: resolution / quality picker
+
+    private var qualityPicker: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Text("Detail").dsStyle(DS.TypeScale.footnote)
+                .foregroundStyle(DS.Color.textSecondary.color)
+            SegmentedGlass(RunQuality.allCases.map { .init($0, $0.title) }, selection: $model.quality)
+            Text(model.quality.detail).dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textTertiary.color)
         }
     }
 

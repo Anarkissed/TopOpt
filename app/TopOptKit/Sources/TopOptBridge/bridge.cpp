@@ -103,6 +103,17 @@ topopt::TriangleMesh import_any(const std::string& path) {
 // never returns an unsafe variant — it just walks further down for strong parts.
 std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
 
+// Turn on the M6.3 single-field Heaviside projection + beta-continuation on a
+// run's SIMP options, for crisp (near-0/1) density with a minimum length scale.
+// Uses the locked continuation schedule and the M6.3 filter radius rmin = 2.5
+// (DECISIONS 2026-07-10). Non-empty `projection` makes the loop run the staged
+// schedule (its own iterations/move) instead of the plain M3.4 loop — noticeably
+// more compute per variant, in exchange for printable, threshold-stable geometry.
+void enable_projection(topopt::MinimizePlasticOptions& opts) {
+  opts.simp.projection = topopt::heaviside_continuation_schedule();
+  opts.simp.filter_radius = 2.5;
+}
+
 // One core variant -> the flat bridge OptimizeVariant (M7.0b/M7.8 fields). Shared
 // by the result builder AND the progressive-results stream, so there is one source
 // of truth for the mapping.
@@ -387,6 +398,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     opts.gravity = 9810.0 * kGramPerCm3ToTonnePerMm3;
     opts.gravity_direction = topopt::Vec3{0.0, 0.0, -1.0};
     opts.volume_fraction_ladder = reduction_ladder();  // recommendation-driven variants
+    enable_projection(opts);                           // M6.3 crisp density
     // The forwarder relays the payload to the caller's function pointer FIRST,
     // then mirrors the caller's bool flag into the atomic the driver polls at
     // the start of the next OC iteration. Calling progress first means a cancel
@@ -524,6 +536,7 @@ OptimizeResult run_minimize_plastic_loadcase(
     opts.volume_fraction_ladder = load_case.minimize_plastic
                                       ? reduction_ladder()
                                       : std::vector<double>{0.9};
+    enable_projection(opts);   // M6.3 crisp density
     opts.progress = [&](std::size_t r, std::size_t rc, int iter) {
       if (progress != nullptr)
         progress(ctx, static_cast<uint64_t>(r), static_cast<uint64_t>(rc), iter);

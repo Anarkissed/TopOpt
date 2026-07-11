@@ -46,6 +46,9 @@ public final class ProjectModel: ObservableObject {
     /// no forces → self-weight removal; on with forces → removal under the forces;
     /// off with forces → one conservative force-adequate variant. Default on.
     @Published public var minimizePlastic = true
+    /// Optimize resolution / speed–quality tradeoff (Fast 64³ / Balanced 96³ /
+    /// Fine 128³). Default Fast.
+    @Published public var quality: RunQuality = .fast
 
     /// The M7.7 run state machine. One per project so a run (and its background
     /// state) survives leaving and returning to the workspace.
@@ -79,6 +82,7 @@ public final class ProjectModel: ObservableObject {
         self.selection = snapshot.selection
         self.force = snapshot.force
         self.minimizePlastic = snapshot.minimizePlastic ?? true
+        self.quality = snapshot.quality ?? .fast
     }
 
     /// Assemble the run's load case from the current selection + force state, in the
@@ -127,7 +131,7 @@ public final class ProjectModel: ObservableObject {
         return ProjectSnapshot(id: id, name: name, material: material, process: process,
                                modelFileName: modelFileName, originalFileName: file.name,
                                savedAt: savedAt, selection: selection, force: force,
-                               minimizePlastic: minimizePlastic)
+                               minimizePlastic: minimizePlastic, quality: quality)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

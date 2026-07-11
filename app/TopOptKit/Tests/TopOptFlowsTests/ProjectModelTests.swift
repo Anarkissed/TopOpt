@@ -104,10 +104,12 @@ final class ProjectModelTests: XCTestCase {
     }
 
     func testMakeRunRequestReadsFromProject() throws {
-        let (m, _, _) = try openedProject()
-        let req = try XCTUnwrap(m.makeRunRequest(resolution: 32))
+        let (m, project, _) = try openedProject()
+        XCTAssertEqual(try XCTUnwrap(m.makeRunRequest()).resolution, 64)  // default Fast
+        project.quality = .fine
+        let req = try XCTUnwrap(m.makeRunRequest())
         XCTAssertEqual(req.material, "PLA")
-        XCTAssertEqual(req.resolution, 32)
+        XCTAssertEqual(req.resolution, 128)                              // Fine → 128³
         XCTAssertEqual(req.projectName, "Bracket")   // extension dropped
         XCTAssertTrue(req.modelPath.hasSuffix("cube_10mm.stl"))
     }
@@ -154,6 +156,7 @@ final class ProjectModelTests: XCTestCase {
         let (m, project, recent) = try openedProject()
         project.force.setGravity(faceNormal: SIMD3<Float>(0, -1, 0), face: 1)
         project.minimizePlastic = false
+        project.quality = .fine
         m.backHome()   // autosave to disk
 
         // A brand-new AppModel over the same store reloads the snapshot.
@@ -163,6 +166,7 @@ final class ProjectModelTests: XCTestCase {
         m2.open(recent2)
         let restored = try XCTUnwrap(m2.project)
         XCTAssertFalse(restored.minimizePlastic, "the toggle survives relaunch")
+        XCTAssertEqual(restored.quality, .fine, "the resolution/quality survives relaunch")
     }
 
     func testRenameAndMaterialChangeUpdateProjectAndRecents() throws {
@@ -192,7 +196,7 @@ final class ProjectModelTests: XCTestCase {
         project.force.makeLoad(load)
         project.minimizePlastic = false
 
-        let req = try XCTUnwrap(m.makeRunRequest(resolution: 24))
+        let req = try XCTUnwrap(m.makeRunRequest())
         XCTAssertEqual(req.anchorFaceIDs, [10])
         XCTAssertEqual(req.loadGroups.count, 1)
         XCTAssertEqual(req.loadGroups.first?.faceIDs, [20])

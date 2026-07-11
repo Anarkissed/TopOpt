@@ -39,12 +39,15 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// The "minimize plastic" toggle. OPTIONAL so pre-existing schema-1 snapshots
     /// (written before this field) still decode — nil is treated as `true`.
     public var minimizePlastic: Bool?
+    /// The optimize resolution/quality. OPTIONAL for the same back-compat reason
+    /// (nil → Fast).
+    public var quality: RunQuality?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
                 originalFileName: String, savedAt: Date,
                 selection: SelectionModel, force: ForceModel,
-                minimizePlastic: Bool? = nil) {
+                minimizePlastic: Bool? = nil, quality: RunQuality? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -56,6 +59,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.selection = selection
         self.force = force
         self.minimizePlastic = minimizePlastic
+        self.quality = quality
     }
 }
 

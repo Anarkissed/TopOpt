@@ -74,10 +74,8 @@ public struct WorkspacePlaceholder: View {
 
     private static let identityQuat = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
 
-    /// Voxel resolution for the run. The design copy references 128³; the on-device
-    /// value is a maintainer performance decision (ROADMAP M7.10 / M6.3 projection
-    /// cost), so this stays a single tunable constant rather than being scattered.
-    private static let runResolution = 64
+    /// The run resolution, from the project's chosen quality (Fast/Balanced/Fine).
+    private var runResolution: Int { project.quality.resolution }
 
     public init(model: AppModel, project: ProjectModel) {
         self.model = model
@@ -111,7 +109,7 @@ public struct WorkspacePlaceholder: View {
             bottomBar
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
-                      resolution: Self.runResolution,
+                      resolution: runResolution,
                       onRetry: startRun)
                 .ignoresSafeArea()
             // Results appear as soon as the FIRST variant streams in (progressive
@@ -159,7 +157,7 @@ public struct WorkspacePlaceholder: View {
     private func startRun() {
         guard canOptimize else { return }
         viewOriginal = false   // a fresh run replaces the saved variants → show results
-        guard let request = model.makeRunRequest(resolution: Self.runResolution) else {
+        guard let request = model.makeRunRequest() else {
             model.toast = "Can’t start — import a model and choose a material first."
             return
         }
@@ -319,10 +317,31 @@ public struct WorkspacePlaceholder: View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
             gravityChip
             minimizePlasticChip
+            qualityChip
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.top, DS.Space.xl3)
         .padding(.trailing, DS.Space.xl4)
+    }
+
+    /// Resolution / quality picker chip (Fast 64³ / Balanced 96³ / Fine 128³).
+    private var qualityChip: some View {
+        Menu {
+            ForEach(RunQuality.allCases, id: \.self) { q in
+                Button { project.quality = q } label: { Text("\(q.title) · \(q.detail)") }
+            }
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text("\(project.quality.title) · \(project.quality.resolution)³")
+                    .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
     }
 
     private var gravityChip: some View {
