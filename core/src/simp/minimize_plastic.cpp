@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
@@ -169,6 +170,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
   MinimizePlasticResult result;
   result.report.material = material_name;
+
+  // Reserve result.evaluated to the ladder length (its known maximum: at most one
+  // entry per rung, and the walk stops early on the first rejected/cancelled rung)
+  // so it NEVER reallocates while the ladder runs. The progressive-results stream
+  // (options.on_variant, below) hands its callback a reference to a variant that
+  // lives inside result.evaluated; a mid-run reallocation would free the block
+  // that reference points into (ASan heap-buffer-overflow, read-after-realloc —
+  // the empty keyframeMeshes / displacementField symptoms). Reserving up front
+  // removes the reallocation entirely; the per-push assert guards the invariant.
+  result.evaluated.reserve(ladder.size());
 
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
@@ -333,11 +344,22 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     variant.accepted =
         margin.worst_case * infill_knockdown >= options.margin_stop;
     result.evaluated.push_back(std::move(variant));
+    // Storage never reallocates (reserved to ladder.size() above), so the
+    // references taken below stay valid for the whole run — see the reserve() note.
+    assert(result.evaluated.size() <= ladder.size() &&
+           "minimize_plastic: result.evaluated grew past its reserved capacity");
 
     if (result.evaluated.back().accepted) {
       result.report.variants.push_back(result.evaluated.back().report);
       // Progressive results: stream this accepted variant now, before optimizing
-      // the next lighter rung.
+      // the next lighter rung. This hands the callback (bridge to_optimize_variant)
+      // a REFERENCE to the variant living inside result.evaluated, which reads its
+      // keyframe-mesh vector and displacement field. That is safe ONLY because
+      // result.evaluated is reserved to its final size up front and so never
+      // reallocates: without the reserve, a later rung's push_back that grew the
+      // vector past capacity would reallocate and free the block a streamed
+      // reference pointed into (ASan heap-buffer-overflow, read-after-realloc),
+      // surfacing downstream as empty keyframeMeshes / displacementField.
       if (options.on_variant) options.on_variant(result.evaluated.back());
     } else {
       // First too-weak rung: stop the ladder here (do not run lighter rungs).
