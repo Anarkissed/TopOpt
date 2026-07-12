@@ -949,6 +949,107 @@ int main() {
                 r.evaluated[0].keyframe_meshes.size());
   }
 
+  // =========================================================================
+  // Scenario M — streaming stability under a LONG ladder (regression for the
+  // read-after-realloc defect). The progressive-results callback hands its
+  // consumer (the bridge's to_optimize_variant) a reference to a variant that
+  // lives INSIDE result.evaluated. Every streamed variant's keyframe meshes and
+  // displacement field must stay VALID and COMPLETE for the whole run, even as
+  // result.evaluated grows across many rungs.
+  //
+  // Root cause of the fixed bug: result.evaluated was NOT reserved, so a later
+  // rung's push_back that grew it past capacity reallocated and freed the block
+  // an already-streamed reference pointed into (ASan heap-buffer-overflow,
+  // read-after-realloc) — surfacing downstream as empty keyframeMeshes
+  // (playback) / empty displacementField (flex). No other scenario caught it
+  // because their ladders are only 1–3 rungs, never enough to force a
+  // reallocation of result.evaluated.
+  //
+  // This scenario accept-alls a 16-rung ladder so result.evaluated would (unfixed)
+  // reallocate several times mid-stream, and — crucially — on each callback it
+  // ALSO re-reads the PREVIOUS streamed variant's keyframe meshes + displacement
+  // field. Under the unfixed driver that earlier reference dangles after a
+  // reallocation (ASan fires here); under the reserve()'d driver the whole
+  // result.evaluated block is stable for the run and the reads stay valid. Small
+  // grid + few iters keep it CI-fast: the trigger is VARIANT COUNT, not
+  // resolution. Run under ASan to catch a regression as a hard failure rather
+  // than a silent empty array.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+    const int node_count = topopt::fea_node_count(g);
+    const std::size_t disp_len = static_cast<std::size_t>(3 * node_count);
+
+    MinimizePlasticOptions o = base_options();
+    o.gravity = cal_gravity;   // accept-all: every rung is accepted and streamed
+    o.keyframe_count = 4;
+    o.simp.max_iterations = 20;  // keep the long ladder CI-fast
+    // A long, strictly-descending, accept-all ladder — enough rungs that, without
+    // the reserve() fix, result.evaluated would reallocate several times.
+    o.volume_fraction_ladder.clear();
+    for (int i = 0; i < 16; ++i)
+      o.volume_fraction_ladder.push_back(0.90 - 0.04 * i);  // 0.90 .. 0.30
+
+    // Validate one streamed variant's viz data: keyframes present + internally
+    // consistent (triangle indices in range, final frame = converged non-empty
+    // shape) and displacement field DOF-ordered, finite, carrying real flex.
+    auto check_streamed = [&](const MinimizePlasticVariant& v) {
+      CHECK(v.keyframe_meshes.size() >= 2,
+            "M: a streamed variant carries its history keyframes");
+      bool indices_ok = true;
+      for (const topopt::TriangleMesh& km : v.keyframe_meshes)
+        for (const auto& t : km.triangles)
+          if (static_cast<std::size_t>(t[0]) >= km.vertices.size() ||
+              static_cast<std::size_t>(t[1]) >= km.vertices.size() ||
+              static_cast<std::size_t>(t[2]) >= km.vertices.size())
+            indices_ok = false;
+      CHECK(indices_ok, "M: streamed keyframe triangle indices are in range");
+      const topopt::TriangleMesh& last = v.keyframe_meshes.back();
+      CHECK(!last.vertices.empty() && last.triangle_count() > 0,
+            "M: the final streamed keyframe is the non-empty converged shape");
+      CHECK(v.displacement_field.size() == disp_len,
+            "M: streamed displacement_field is per-node DOF-ordered");
+      bool any_nonzero = false, all_finite = true;
+      for (double d : v.displacement_field) {
+        if (!std::isfinite(d)) all_finite = false;
+        if (d != 0.0) any_nonzero = true;
+      }
+      CHECK(all_finite, "M: streamed displacement_field is finite");
+      CHECK(any_nonzero, "M: streamed displacement_field carries nonzero flex");
+    };
+
+    std::size_t streamed = 0;
+    // The previous callback's streamed variant. It points INTO result.evaluated;
+    // re-reading it here (after the driver may have pushed another rung) is the
+    // read-after-realloc probe — valid only because the fixed driver reserves.
+    const MinimizePlasticVariant* prev = nullptr;
+    o.on_variant = [&](const MinimizePlasticVariant& v) {
+      ++streamed;
+      check_streamed(v);
+      if (prev != nullptr) check_streamed(*prev);
+      prev = &v;  // stable across callbacks iff result.evaluated never reallocates
+    };
+
+    const MinimizePlasticResult r =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+
+    CHECK(streamed == r.evaluated.size(),
+          "M: on_variant fires once per accepted (evaluated) variant");
+    CHECK(r.evaluated.size() == o.volume_fraction_ladder.size(),
+          "M: accept-all evaluates the whole long ladder");
+    // Well past std::vector's initial capacity: without the reserve() fix this
+    // many pushes forces one or more reallocations while streaming.
+    CHECK(r.evaluated.size() >= 8,
+          "M: the ladder is long enough to have forced a reallocation unreserved");
+    // The whole streamed history is still readable after the run (the reserved
+    // block never moved) — final belt-and-suspenders on reference stability.
+    for (const MinimizePlasticVariant& ev : r.evaluated)
+      if (ev.accepted) check_streamed(ev);
+    std::printf("[M realloc-stream] streamed %zu variants across a %zu-rung ladder\n",
+                streamed, o.volume_fraction_ladder.size());
+  }
+
   if (g_failures == 0) {
     std::printf("minimize_plastic (M5.3): all %d checks passed\n", g_checks);
     return 0;
