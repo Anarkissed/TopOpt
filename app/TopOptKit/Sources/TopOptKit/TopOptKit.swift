@@ -371,10 +371,14 @@ public enum TopOptKit {
     /// reported margins/stresses reflect the forces the user set. `minimizePlastic`
     /// on → the material-reduction ladder; off → one conservative variant.
     /// STEP-only (needs OCCT face selection). Same M7.0a progress/cancel contract.
+    /// - Parameter infillPercent: the M7.params user infill-density override (0–100),
+    ///   or < 0 for "no override". Threaded to the core through
+    ///   `BridgeLoadCase.infill_percent` for the M7.infill-margin ladder knockdown.
     public static func minimizePlasticLoadCase(
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
         minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+        infillPercent: Int = -1,
         progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
         onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
@@ -391,6 +395,7 @@ public enum TopOptKit {
         lc.build_dir_x = buildDirection.x
         lc.build_dir_y = buildDirection.y
         lc.build_dir_z = buildDirection.z
+        lc.infill_percent = Int32(infillPercent)
 
         let cancelFlag = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
         cancelFlag.initialize(to: false)
