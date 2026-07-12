@@ -89,6 +89,18 @@ struct MinimizePlasticOptions {
   // the driver — use the two fields below instead.
   SimpOptions simp;
 
+  // PHYSICAL minimum-feature length scale in millimetres (model units). When
+  // > 0, the driver sets each rung's `simp.filter_radius` from the grid spacing
+  // via physical_filter_radius(min_feature_mm, grid.spacing) — so the filtered
+  // minimum member thickness is RESOLUTION INDEPENDENT (a fixed voxel radius is
+  // not: it shrinks in mm as the grid is refined, letting thin members
+  // proliferate at high resolution — diagnosis 060). The voxel radius is
+  // floored at 1.5 (checkerboarding suppression, ARCHITECTURE §4). 0 (the
+  // default) DISABLES the physical scaling and uses `simp.filter_radius` (voxel
+  // units) verbatim, keeping every existing direct caller and fixture byte-
+  // identical. Must be finite and >= 0.
+  double min_feature_mm = 0.0;
+
   // Per-rung progress + cancellation (M7.0a). Both optional, absent by
   // default; when absent the run is unchanged.
   //

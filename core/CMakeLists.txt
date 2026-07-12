@@ -238,6 +238,15 @@ if(Eigen3_FOUND)
   target_link_libraries(test_simp PRIVATE topopt)
   add_test(NAME simp COMMAND test_simp)
 
+  # Physical filter radius (M7.rmin): the mm->voxel density-filter radius scaling
+  # (physical_filter_radius) that makes the minimum member thickness resolution
+  # independent. Pure arithmetic, but the symbol lives in simp.cpp (topopt), so
+  # gate it on Eigen like test_simp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON,
+  # so it always runs.
+  add_executable(test_rmin tests/unit/test_rmin.cpp)
+  target_link_libraries(test_rmin PRIVATE topopt)
+  add_test(NAME rmin COMMAND test_rmin)
+
   # MBB validation gate (M3.3): a 2D-equivalent MBB slice driven through the
   # density filter + Optimality-Criteria update reproduces the classic 99-line
   # MBB result pattern. Builds its grid in code (no fixture) and drives
