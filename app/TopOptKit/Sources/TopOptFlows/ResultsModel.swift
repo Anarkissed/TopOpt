@@ -127,6 +127,18 @@ public struct DisplacementField: Sendable {
             || values.count < 3 * nodeCount
     }
 
+    /// Displacement at grid node `(a, b, c)` (voxel corner), `.zero` if the node is
+    /// out of range or the field is empty/ragged. Unlike `displacement(at:)` (which
+    /// rounds a world point to the nearest node), this indexes an exact node — the
+    /// load-path strain gradient (M7.viz.4) needs a voxel's eight named corners.
+    public func node(_ a: Int, _ b: Int, _ c: Int) -> SIMD3<Float> {
+        guard !isEmpty, a >= 0, a <= nx, b >= 0, b <= ny, c >= 0, c <= nz else { return .zero }
+        let n = (c * (ny + 1) + b) * (nx + 1) + a
+        let base = 3 * n
+        guard base >= 0, base + 2 < values.count else { return .zero }
+        return SIMD3<Float>(values[base], values[base + 1], values[base + 2])
+    }
+
     /// Nearest-node displacement at world position `p` (zero when empty / degenerate).
     /// Mesh vertices sit on printed-voxel corners, i.e. grid nodes (M7.disp handoff),
     /// so rounding to the nearest node lands on the exact node in practice.
@@ -305,6 +317,12 @@ public final class ResultsModel: ObservableObject {
     /// clamped through `setFlexExaggeration`. Multiplies the solved displacement so
     /// the (sub-millimetre) deflection is visible.
     public private(set) var flexExaggeration: Float = FlexAnimation.defaultExaggeration
+    /// Load-path overlay toggle (M7.viz.4): draw the dominant principal-stress
+    /// direction as short segments over the variant, tracing how force travels from
+    /// the loaded region to the anchors. An advanced-tier overlay (viz.5 gates
+    /// tiers). Only meaningful when the selected variant `hasLoadPath`. The overlay
+    /// is static, so it needs no reduced-motion special-case.
+    @Published public var loadPathOn: Bool = false
     /// Morph/threshold scrub position in [0, 1] (1 = fully formed variant).
     @Published public private(set) var playT: Double = 1
     /// Whether the morph is auto-playing (a UI timer advances `playT` in the view).
@@ -359,6 +377,8 @@ public final class ResultsModel: ObservableObject {
             : (acc.map(\.maxStressMPa).max() ?? 0)
         keyframeCache = nil   // variant data changed → rebuild keyframes on demand
         flexCache = nil       // …and the per-vertex flex displacements
+        loadPathCache = nil   // …and the derived load-path glyphs
+        loadPathSegmentCache = nil
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -403,9 +423,12 @@ public final class ResultsModel: ObservableObject {
     private var flexCache: (index: Int, disp: [Float])?
 
     /// Toggle the flex animation. Turning it off resets the loop to rest so it
-    /// restarts cleanly next time.
+    /// restarts cleanly next time. Flex and the load-path overlay are mutually
+    /// exclusive — flex moves the vertices while the load path is drawn at rest
+    /// positions, so turning one on turns the other off.
     public func toggleFlex() {
         flexOn.toggle()
+        if flexOn { loadPathOn = false }
         if !flexOn { flexPhase = 0 }
     }
 
@@ -454,6 +477,60 @@ public final class ResultsModel: ObservableObject {
             out.append(d.x); out.append(d.y); out.append(d.z)
         }
         flexCache = (selectedIndex, out)
+        return out
+    }
+
+    // MARK: - load-path overlay (M7.viz.4)
+
+    private var loadPathCache: (index: Int, path: LoadPath)?
+    private var loadPathSegmentCache: (index: Int, verts: [Float])?
+
+    /// Whether the selected variant can show a load path. It is derived from the FEA
+    /// displacement field (strain → principal-stress direction), so it needs the same
+    /// displacement field the flex animation does; a cancelled/legacy variant has
+    /// none, so the Load-path control stays hidden.
+    public var hasLoadPath: Bool { hasFlex }
+
+    /// Toggle the load-path overlay. Mutually exclusive with flex (see `toggleFlex`).
+    public func toggleLoadPath() {
+        loadPathOn.toggle()
+        if loadPathOn { flexOn = false; flexPhase = 0 }
+    }
+
+    /// The selected variant's derived load path (dominant principal-stress direction
+    /// glyphs over the printed region), built once per selection and cached. Nil when
+    /// the variant carries no displacement field.
+    public var selectedLoadPath: LoadPath? {
+        if let c = loadPathCache, c.index == selectedIndex { return c.path }
+        guard let disp = selectedDisplacementField, !disp.isEmpty else { return nil }
+        let path = LoadPathField.build(displacement: disp, stress: selectedStressField)
+        loadPathCache = (selectedIndex, path)
+        return path
+    }
+
+    /// The load-path overlay's line-segment vertex buffer: two vertices per glyph,
+    /// each `[x, y, z, r, g, b, a]` (stride 7) — the world-space endpoints of the
+    /// segment centred on the glyph, coloured by the glyph's von Mises stress on the
+    /// SHARED scale (same ramp as the M7.viz.1 heatmap, so a hot path reads red).
+    /// This is exactly the pos+rgba line layout the Metal ground/line pipeline draws.
+    /// Cached on `selectedIndex`.
+    public func loadPathSegments(for path: LoadPath) -> [Float] {
+        if let c = loadPathSegmentCache, c.index == selectedIndex { return c.verts }
+        var out = [Float]()
+        out.reserveCapacity(path.glyphs.count * 2 * 7)
+        let half = path.segmentLength * 0.5
+        for g in path.glyphs {
+            let frac = stressFraction(mpa: Double(g.stressMPa))
+            let c = ResultsModel.stressColor(fraction: frac)
+            let r = Float(c.r), gr = Float(c.g), b = Float(c.b)
+            let p0 = g.position - half * g.direction
+            let p1 = g.position + half * g.direction
+            out.append(p0.x); out.append(p0.y); out.append(p0.z)
+            out.append(r); out.append(gr); out.append(b); out.append(1)
+            out.append(p1.x); out.append(p1.y); out.append(p1.z)
+            out.append(r); out.append(gr); out.append(b); out.append(1)
+        }
+        loadPathSegmentCache = (selectedIndex, out)
         return out
     }
 
