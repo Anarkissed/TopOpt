@@ -816,6 +816,59 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.pushFactor, 1, accuracy: 1e-9)
     }
 
+    @MainActor func testPushScrubSweepMonotonicDeflectionAndYieldTrigger() {
+        // M7.viz.6b acceptance, tested headlessly: as the user scrubs the push from 1×
+        // up to the failure multiplier, (a) the rendered deflection scale STRICTLY
+        // INCREASES at every step (the part visibly flexes more), and (b) the failure
+        // region lights up (`atFailure`) EXACTLY at/above the multiplier — not before.
+        let m = failureModel(peak: 20, yield: 60)                    // multiplier = 3
+        m.toggleFailure()
+        guard let mult = m.failurePrediction?.multiplier else {
+            return XCTFail("prediction must exist for the sweep")
+        }
+        XCTAssertEqual(mult, 3, accuracy: 1e-9)
+        // Sweep the scrub across [1, multiplier] and just past it.
+        let steps = stride(from: 1.0, through: mult + 0.5, by: 0.25)
+        var lastScale: Float = -1
+        for f in steps {
+            m.setPush(factor: f)
+            let scale = m.pushFlexScale()
+            if m.pushFactor < mult - 1e-6 {
+                // Below yield: strictly more deflection than the previous (lower) step…
+                XCTAssertGreaterThan(scale, lastScale, "deflection must grow as the scrub rises (f=\(f))")
+                XCTAssertFalse(m.atFailure, "must NOT report yield below the multiplier (f=\(f))")
+                lastScale = scale
+            } else {
+                // At/above yield: pinned at the legible max, and the failure region lights up.
+                XCTAssertEqual(scale, FlexAnimation.maxExaggeration, accuracy: 1e-4)
+                XCTAssertGreaterThanOrEqual(scale, lastScale)
+                XCTAssertTrue(m.atFailure, "must report yield at/above the multiplier (f=\(f))")
+            }
+        }
+        // The rendered deflection at failure is exactly the proportional multiple of the
+        // 1× deflection (linear FEA): scale(mult) / scale(1) == mult.
+        m.setPush(factor: 1)
+        let base = m.pushFlexScale()
+        m.setPush(factor: mult)
+        XCTAssertEqual(m.pushFlexScale() / base, Float(mult), accuracy: 1e-3,
+                       "on-screen deflection scales linearly with the push (∝ load)")
+    }
+
+    @MainActor func testPushReadoutReadsNaturallyAndFlipsAtYield() {
+        // M7.viz.6b: the drag readout shows the live load + multiple, flipping to YIELDS
+        // at the multiplier. appliedLoad 2 kg, multiplier 3 → failure load 6 kg.
+        let m = failureModel(appliedLoadKg: 2, unit: .kg, peak: 20, yield: 60)
+        guard let fp = m.failurePrediction else { return XCTFail("prediction required") }
+        m.toggleFailure()
+        m.setPush(factor: 1)
+        XCTAssertEqual(m.pushReadout(prediction: fp), "2.0 kg · 1.0× load")
+        m.setPush(factor: 2)
+        XCTAssertEqual(m.pushReadout(prediction: fp), "4.0 kg · 2.0× load")   // live load tracks the scrub
+        m.setPush(factor: 3)                                                  // == multiplier → yields
+        XCTAssertTrue(m.atFailure)
+        XCTAssertEqual(m.pushReadout(prediction: fp), "6.0 kg · 3.0× · YIELDS")
+    }
+
     @MainActor func testPushDegradesGracefullyWithoutDisplacementField() {
         // No displacement field → still a prediction (number + marker), but no scrub.
         let m = failureModel(withFlex: false)

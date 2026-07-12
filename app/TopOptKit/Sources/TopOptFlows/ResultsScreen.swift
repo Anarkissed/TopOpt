@@ -420,9 +420,9 @@ public struct ResultsScreen: View {
                    in: 1...max(1.0001, fp.multiplier))
                 .frame(width: 172)
                 .tint(model.atFailure ? Self.failureRed : DS.Color.accent.color)
-            Text(model.atFailure
-                 ? "Yields here — \(fp.solidValueLabel)"
-                 : "\(ResultsModel.loadLabel(kg: model.pushFactor * fp.appliedLoadKg, unit: fp.unit)) of \(fp.solidValueLabel)")
+            // Reads naturally as the user drags: the live load in their units + the
+            // current multiple, ramping "1180 lb · 1.4× load" → "1915 lb · 3.0× · YIELDS".
+            Text(model.pushReadout(prediction: fp))
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.textSecondary.color)
                 .frame(width: 172, alignment: .leading)
