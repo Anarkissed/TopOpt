@@ -771,6 +771,7 @@ public struct WorkspacePlaceholder: View {
                 .background(Capsule().fill(DS.Surface.bar.color))
                 .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             Spacer()
+            printParamsButton
             optimizeButton
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -811,6 +812,22 @@ public struct WorkspacePlaceholder: View {
         }
         if project.minimizePlastic { return "minimize plastic · self-weight" }
         return "needs an anchor and a load"
+    }
+
+    /// The M7.params "Print Parameters" entry (design: the sliders pill paired with
+    /// Optimize). Opens the print-parameters sheet; always available in the workspace.
+    private var printParamsButton: some View {
+        Button { model.openPrintParams() } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
+                Text("Print Parameters").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, 11).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
     }
 
     private var optimizeButton: some View {

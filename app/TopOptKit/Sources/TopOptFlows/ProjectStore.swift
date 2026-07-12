@@ -44,13 +44,17 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     public var quality: RunQuality?
     /// Whether the project has optimize results. OPTIONAL for back-compat (nil → false).
     public var optimized: Bool?
+    /// The M7.params print parameters (user override of the M5.1 recommended slicer
+    /// settings). OPTIONAL so snapshots written before this field still decode —
+    /// nil is treated as `PrintParams.fdmDefault`.
+    public var printParams: PrintParams?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
                 originalFileName: String, savedAt: Date,
                 selection: SelectionModel, force: ForceModel,
                 minimizePlastic: Bool? = nil, quality: RunQuality? = nil,
-                optimized: Bool? = nil) {
+                optimized: Bool? = nil, printParams: PrintParams? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -64,6 +68,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.minimizePlastic = minimizePlastic
         self.quality = quality
         self.optimized = optimized
+        self.printParams = printParams
     }
 }
 

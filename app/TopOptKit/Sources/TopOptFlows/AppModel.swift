@@ -25,6 +25,8 @@ public final class AppModel: ObservableObject {
     @Published public private(set) var screen: Screen = .home
     /// Whether the import sheet is presented over Home.
     @Published public private(set) var importSheetPresented = false
+    /// Whether the M7.params print-parameters sheet is presented over the workspace.
+    @Published public private(set) var printParamsSheetPresented = false
     /// The name shown in the workspace chrome once a project is opened.
     @Published public private(set) var projectName = ""
 
@@ -136,7 +138,8 @@ public final class AppModel: ObservableObject {
                           projectName: project.name.isEmpty ? file.name : project.name,
                           anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
                           minimizePlastic: project.minimizePlastic,
-                          buildDirection: lc.buildDirection)
+                          buildDirection: lc.buildDirection,
+                          infillPercent: project.printParams.infillPercent)
     }
 
     // MARK: - Materials
@@ -224,6 +227,25 @@ public final class AppModel: ObservableObject {
             RecentProject(id: $0.id, name: $0.name, materialName: material,
                           process: $0.process, optimized: $0.optimized)
         }
+        persistCurrentProject()
+    }
+
+    // MARK: - Print parameters sheet (M7.params)
+
+    /// Present the print-parameters sheet over the workspace. No-op without an open
+    /// project (there's nothing to edit).
+    public func openPrintParams() {
+        guard project != nil else { return }
+        printParamsSheetPresented = true
+    }
+
+    /// Dismiss the print-parameters sheet, committing (persisting) the project's
+    /// current parameters. Clamps to sane FDM bounds first (the numeric fields let a
+    /// user type anything). Called on Done and on scrim-dismiss — the sheet edits the
+    /// project live, so both paths keep the edits.
+    public func closePrintParams() {
+        if let project { project.printParams = project.printParams.clamped() }
+        printParamsSheetPresented = false
         persistCurrentProject()
     }
 

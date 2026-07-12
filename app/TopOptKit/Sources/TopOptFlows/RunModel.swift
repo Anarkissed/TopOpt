@@ -38,6 +38,12 @@ public struct RunRequest: Equatable, Sendable {
     public let minimizePlastic: Bool
     /// Print/build direction (model frame) for the interlayer-margin orientation.
     public let buildDirection: SIMD3<Double>
+    /// The M7.params user infill-density override (0–100 %), or < 0 for "no override".
+    /// Threaded to the core through the bridge (`BridgeLoadCase.infill_percent`) for
+    /// the M7.infill-margin ladder knockdown. Part of the request identity, so
+    /// changing infill re-enables Optimize (it feeds the optimizer, unlike the other
+    /// print parameters, which are slicer-settings overrides only).
+    public let infillPercent: Int
 
     /// STEP parts carry a B-rep face selection, so the run uses the load-case path;
     /// STL parts have no faces and fall back to the self-weight path.
@@ -49,7 +55,8 @@ public struct RunRequest: Equatable, Sendable {
     public init(modelPath: String, material: String, materialsPath: String,
                 rulesPath: String, resolution: Int, projectName: String,
                 anchorFaceIDs: [Int] = [], loadGroups: [TopOptKit.LoadGroupSpec] = [],
-                minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1)) {
+                minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+                infillPercent: Int = -1) {
         self.modelPath = modelPath
         self.material = material
         self.materialsPath = materialsPath
@@ -60,6 +67,7 @@ public struct RunRequest: Equatable, Sendable {
         self.loadGroups = loadGroups
         self.minimizePlastic = minimizePlastic
         self.buildDirection = buildDirection
+        self.infillPercent = infillPercent
     }
 }
 
@@ -343,7 +351,8 @@ public final class RunModel: ObservableObject {
                 materialsPath: request.materialsPath, rulesPath: request.rulesPath,
                 resolution: request.resolution, anchorFaceIDs: request.anchorFaceIDs,
                 loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
-                buildDirection: request.buildDirection, progress: progress, onVariant: onVariant)
+                buildDirection: request.buildDirection, infillPercent: request.infillPercent,
+                progress: progress, onVariant: onVariant)
         }
         return try TopOptKit.minimizePlastic(
             stlPath: request.modelPath, material: request.material,

@@ -254,6 +254,16 @@ struct BridgeLoadCase {
   double build_dir_x = 0.0;
   double build_dir_y = 0.0;
   double build_dir_z = 1.0;
+  // M7.params — the user's infill-density override (0–100 %), or < 0 when the user
+  // set no override (use the M5.1 recommendation). ADDITIVE + DEFAULTED so this is
+  // source-compatible: `run_minimize_plastic_loadcase`'s signature is unchanged
+  // (BridgeLoadCase is passed by const ref) and existing callers keep the default.
+  // The app captures it from the print-parameters sheet; M7.infill-margin (the
+  // ladder knockdown) is what CONSUMES it in the core. That consumption needs a
+  // field on the core's MinimizePlasticOptions, which is OUT OF SCOPE for M7.params
+  // (a /core/ change M7.infill-margin owns) — so today this value reaches the bridge
+  // and stops there. See the M7.params handoff.
+  int infill_percent = -1;
 };
 
 // Voxelize the STEP part once, tag the anchor faces Fixture (clamped) and each

@@ -33,6 +33,11 @@ public struct RootView: View {
                 importOverlay
                     .transition(.opacity)
             }
+
+            if model.printParamsSheetPresented, let project = model.project {
+                printParamsOverlay(project)
+                    .transition(.opacity)
+            }
         }
         .toast($model.toast)
         .task { model.loadMaterials() }
@@ -56,6 +61,19 @@ public struct RootView: View {
                 .transition(.scale(scale: 0.97).combined(with: .opacity))
         }
         .animation(DS.Motion.sheetIn, value: model.importSheetPresented)
+    }
+
+    private func printParamsOverlay(_ project: ProjectModel) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(DS.Color.scrim.color)
+                .ignoresSafeArea()
+                .onTapGesture { model.closePrintParams() }
+            GlassSheet { PrintParamsSheet(model: model, project: project) }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+        }
+        .animation(DS.Motion.sheetIn, value: model.printParamsSheetPresented)
     }
 }
 

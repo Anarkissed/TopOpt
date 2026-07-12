@@ -51,6 +51,13 @@ public final class ProjectModel: ObservableObject {
     /// Fine 128³). Default Fast.
     @Published public var quality: RunQuality = .fast
 
+    /// The M7.params print parameters (wall loops, top/bottom shell layers, infill %,
+    /// pattern, layer height) — the user's override of the M5.1 recommended slicer
+    /// settings. Seeded with FDM-sensible defaults; persisted on the project. The
+    /// infill % is threaded through the bridge for the M7.infill-margin ladder
+    /// knockdown (see `AppModel.makeRunRequest` → `RunRequest.infillPercent`).
+    @Published public var printParams: PrintParams = .fdmDefault
+
     /// The M7.7 run state machine. One per project so a run (and its background
     /// state) survives leaving and returning to the workspace.
     public let run: RunModel
@@ -104,6 +111,7 @@ public final class ProjectModel: ObservableObject {
         self.force = snapshot.force
         self.minimizePlastic = snapshot.minimizePlastic ?? true
         self.quality = snapshot.quality ?? .fast
+        self.printParams = snapshot.printParams ?? .fdmDefault
     }
 
     /// Assemble the run's load case from the current selection + force state, in the
@@ -153,7 +161,7 @@ public final class ProjectModel: ObservableObject {
                                modelFileName: modelFileName, originalFileName: file.name,
                                savedAt: savedAt, selection: selection, force: force,
                                minimizePlastic: minimizePlastic, quality: quality,
-                               optimized: hasResults)
+                               optimized: hasResults, printParams: printParams)
     }
 
     /// The URL of the imported model file to copy into the store on first save.
