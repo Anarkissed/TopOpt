@@ -949,6 +949,93 @@ int main() {
                 r.evaluated[0].keyframe_meshes.size());
   }
 
+  // =========================================================================
+  // Scenario M — M7.infill-margin: an infill-derived KNOCKDOWN on the ladder
+  // ACCEPTANCE-gate margin. The FEA / stress field / stored margin are unchanged
+  // (infill NEVER enters the solver, ARCHITECTURE §2); only what the acceptance
+  // test compares against shrinks, so a lower infill stops the ladder EARLIER
+  // (retains more material / accepts a heavier terminal rung) than the solid
+  // part. Back-compat: unset / 100% infill reproduces the current ladder exactly.
+  //
+  // Gravity is placed (from scenario A's calibrated per-rung margins, which scale
+  // as 1/gravity) so the SOLID part comfortably accepts the WHOLE ladder — the
+  // "raw margin is large" over-stripping case the knockdown is meant to curb.
+  // The weakest (last) rung's solid margin is set to 4x the 1.5 threshold.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+    const double g_infill = cal_gravity * cal_margins.back() / (1.5 * 4.0);
+
+    auto run_infill = [&](double infill_percent) {
+      MinimizePlasticOptions o = base_options();
+      o.gravity = g_infill;
+      o.infill_percent = infill_percent;
+      return topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
+    };
+
+    // The default (infill unset) run and an explicit 100% run must be
+    // byte-identical, and both accept the whole ladder with no margin stop: the
+    // knockdown is exactly 1.0 (a no-op), so the gate matches the pre-M7 driver.
+    MinimizePlasticOptions o_unset = base_options();
+    o_unset.gravity = g_infill;  // infill_percent left at its 100.0 default
+    const MinimizePlasticResult solid =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o_unset);
+    const MinimizePlasticResult solid100 = run_infill(100.0);
+    CHECK(topopt::job_report_json(solid.report) ==
+              topopt::job_report_json(solid100.report),
+          "M: unset infill == explicit 100% infill (byte-identical report)");
+    CHECK(!solid.stopped_on_margin &&
+              solid.report.variants.size() ==
+                  o_unset.volume_fraction_ladder.size(),
+          "M: the solid part accepts the whole ladder (large raw margin)");
+
+    // A LOW infill knocks the accepted margin down, stopping the ladder EARLIER:
+    // strictly fewer accepted rungs (more material retained, heavier terminal).
+    const MinimizePlasticResult low = run_infill(30.0);
+    CHECK(low.report.variants.size() < solid.report.variants.size(),
+          "M: low infill accepts strictly fewer rungs than solid (less stripping)");
+    CHECK(low.stopped_on_margin,
+          "M: the knockdown makes the ladder stop on margin (over-stripping curbed)");
+
+    // Monotone: a lower infill never accepts MORE rungs than a higher one (the
+    // knockdown factor is monotone in infill and the per-rung solid margins are
+    // fixed). And every rung the knockdown DID accept still clears the RAW solid
+    // margin (accept => margin*knockdown >= stop, knockdown <= 1 => margin >=
+    // stop): the gate only ever rejects more, never accepts something the solid
+    // gate would have rejected.
+    const double sweep[] = {100.0, 70.0, 50.0, 30.0, 10.0};
+    std::size_t prev_accepted = solid.report.variants.size();
+    for (double pct : sweep) {
+      const MinimizePlasticResult r = run_infill(pct);
+      CHECK(r.report.variants.size() <= prev_accepted,
+            "M: accepted-rung count is non-increasing as infill drops");
+      prev_accepted = r.report.variants.size();
+      for (const MinimizePlasticVariant& ev : r.evaluated)
+        if (ev.accepted)
+          CHECK(ev.report.margin.worst_case >= o_unset.margin_stop,
+                "M: an accepted rung still clears the raw solid margin");
+    }
+
+    // The knockdown touches ONLY the accept/reject decision — NOT the stored
+    // margin, stress, or optimized geometry. For every rung the low-infill run
+    // retained, its report line is identical to the solid run's (same FEA, same
+    // deterministic optimization; infill never entered the solver).
+    for (std::size_t v = 0; v < low.report.variants.size(); ++v) {
+      const topopt::VariantReport& a = solid.report.variants[v];
+      const topopt::VariantReport& b = low.report.variants[v];
+      CHECK(a.margin.worst_case == b.margin.worst_case &&
+                a.volume_fraction == b.volume_fraction &&
+                a.max_stress_mpa == b.max_stress_mpa,
+            "M: a retained rung's stored margin/stress/vf are unchanged by infill");
+    }
+
+    std::printf("[M infill-margin] solid_accepted=%zu low(30%%)_accepted=%zu "
+                "stopped=%d\n",
+                solid.report.variants.size(), low.report.variants.size(),
+                static_cast<int>(low.stopped_on_margin));
+  }
+
   if (g_failures == 0) {
     std::printf("minimize_plastic (M5.3): all %d checks passed\n", g_checks);
     return 0;
