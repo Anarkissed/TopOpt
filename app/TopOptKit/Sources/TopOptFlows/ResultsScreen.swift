@@ -49,12 +49,15 @@ public struct ResultsScreen: View {
 
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
+                appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
+                infillPercent: Int = 100,
                 streaming: Bool = false,
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {}) {
         _model = StateObject(wrappedValue: ResultsModel(
             projectName: projectName, outcome: outcome,
-            materialName: materialName, yieldStrengthMPa: yieldStrengthMPa))
+            materialName: materialName, yieldStrengthMPa: yieldStrengthMPa,
+            appliedLoadKg: appliedLoadKg, loadUnit: loadUnit, infillPercent: infillPercent))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.onClose = onClose
@@ -73,14 +76,18 @@ public struct ResultsScreen: View {
                           stressTints: stressTints,
                           reveal: viewerReveal,
                           flexDisplacements: flexDisplacements,
-                          flexScale: flexScale)
+                          flexScale: flexScale,
+                          loadPathSegments: loadPathSegments)
                 .ignoresSafeArea()
 
             topLeft
             topRight
             if model.stressOn { stressLegendPanel }   // M7.viz.1: yield-scaled legend
             if flexActive { flexControlPanel }        // M7.viz.3: exaggeration slider
+            if loadPathActive { loadPathLegendPanel } // M7.viz.4: load-path key
+            if model.failureOn { failureControlPanel } // M7.viz.6: failure load + push
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
+            failureMarker.ignoresSafeArea()           // M7.viz.6: failure-point marker
             savingsTabs
             mediaPlayer
             orientationCorner
@@ -148,21 +155,41 @@ public struct ResultsScreen: View {
     /// field. While flexing, the stage shows the final variant mesh (not the history
     /// morph) fully formed, wobbling by the displacement.
     private var flexActive: Bool { model.flexOn && model.hasFlex }
-    private var showHistory: Bool { !model.stressOn && !flexActive && model.hasHistory }
+    /// M7.viz.4 load-path is live only when toggled on AND the variant has a
+    /// displacement field to derive principal directions from. Like flex, it shows
+    /// the final mesh fully formed (not the history morph).
+    private var loadPathActive: Bool { model.loadPathOn && model.hasLoadPath }
+    /// M7.viz.6 "push" scrub: drives the flex deflection at a load-proportional scale.
+    /// Only live when the failure surface is on AND the variant has a displacement
+    /// field (else the feature degrades to just the number + marker — no scrub).
+    private var pushActive: Bool { model.pushActive }
+    /// Either flex mechanism displaces the mesh via the same render path (per-vertex
+    /// displacement × scale): the viz.3 wobble or the viz.6 push scrub.
+    private var deflectionActive: Bool { flexActive || pushActive }
+    private var showHistory: Bool { !model.stressOn && !deflectionActive && !loadPathActive && model.hasHistory }
     private var viewerMesh: ViewerMesh? { showHistory ? model.playbackMesh : model.selectedMesh }
-    private var viewerReveal: Float { (showHistory || flexActive) ? 1 : Float(model.playT) }
+    private var viewerReveal: Float { (showHistory || deflectionActive || loadPathActive) ? 1 : Float(model.playT) }
+
+    /// The load-path overlay's line segments for the selected variant (nil when the
+    /// overlay is off / the variant has no displacement field). Cached in the model.
+    private var loadPathSegments: [Float]? {
+        guard loadPathActive, let path = model.selectedLoadPath, !path.isEmpty else { return nil }
+        return model.loadPathSegments(for: path)
+    }
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
     private var flexDisplacements: [Float]? {
-        guard flexActive, let mesh = model.selectedMesh,
+        guard deflectionActive, let mesh = model.selectedMesh,
               let field = model.selectedDisplacementField, !field.isEmpty else { return nil }
         return model.flexDisplacements(for: mesh, field: field)
     }
-    /// The per-frame displacement scale (exaggeration·amplitude); reduced-motion pins
-    /// the amplitude at 1 (static full deflection).
+    /// The per-frame displacement scale. For the viz.3 wobble it is exaggeration·
+    /// amplitude (reduced-motion pins amplitude at 1); for the viz.6 push scrub it is
+    /// the load-proportional push exaggeration (a static scrub — no loop).
     private var flexScale: Float {
-        flexActive ? model.flexScale(reduceMotion: reduceMotion) : 0
+        if pushActive { return model.pushFlexScale() }
+        return flexActive ? model.flexScale(reduceMotion: reduceMotion) : 0
     }
 
     // MARK: - Stress legend (M7.viz.1 — scaled to material yield)
@@ -249,6 +276,43 @@ public struct ResultsScreen: View {
         .padding(.horizontal, DS.Space.xl3)
     }
 
+    // MARK: - Load-path legend (M7.viz.4 — principal-stress-direction key)
+
+    /// A small key for the load-path overlay: what the lines mean and how they are
+    /// derived + coloured. Sits in the top-LEADING slot (shared with the flex panel,
+    /// which is never on at the same time — they're mutually exclusive), so it never
+    /// collides with the top-center stress legend when the stress overlay is also on.
+    /// Static (no motion), so it is reduced-motion-safe by construction. The copy is
+    /// headlessly assertable via `LoadPathCopy`; placement is device QA.
+    @ViewBuilder private var loadPathLegendPanel: some View {
+        VStack {
+            Spacer().frame(height: 84)   // clear the top nav / toggle row
+            HStack {
+                VStack(alignment: .leading, spacing: DS.Space.s) {
+                    Text("Load path").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    Text(LoadPathCopy.what)
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                        .frame(width: 200, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(LoadPathCopy.how)
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                        .frame(width: 200, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(DS.Space.l)
+                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                .dsShadow(.panel)
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(.horizontal, DS.Space.xl3)
+    }
+
     // MARK: - Hot-spot callout (M7.viz.2 — the single worst-stress point)
 
     /// A tappable marker framing the highest-stress point on the displayed variant,
@@ -257,7 +321,9 @@ public struct ResultsScreen: View {
     /// front of the camera. The located point + value/margin are headlessly tested on
     /// ResultsModel; the marker's placement/look is device QA (the M7 /app/ standard).
     @ViewBuilder private var hotSpotMarker: some View {
-        if model.stressOn, let hs = model.hotSpot, let p = projection?.project(hs.position) {
+        // When the failure surface is on, its marker sits at this same point (the
+        // failure location IS the hot spot), so defer to it to avoid a double marker.
+        if model.stressOn, !model.failureOn, let hs = model.hotSpot, let p = projection?.project(hs.position) {
             let overYield = hs.yieldStrengthMPa > 0 && hs.margin >= 1
             let tint = overYield ? RGBA(255, 70, 50).color : DS.Color.textPrimary.color
             ZStack {
@@ -287,6 +353,114 @@ public struct ResultsScreen: View {
             Text(hs.valueLabel).dsStyle(DS.TypeScale.bodyStrong)
                 .foregroundStyle(DS.Color.textPrimary.color)
             Text(hs.marginLabel).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                .foregroundStyle(tint)
+        }
+        .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .dsShadow(.panel)
+    }
+
+    // MARK: - Failure-load prediction (M7.viz.6 — "push it till it breaks")
+
+    private static let failureRed = RGBA(255, 70, 50).color
+
+    /// The failure-load card: the predicted (solid-print) failure load in the user's
+    /// units, the honesty caption, the infill-adjusted estimate when an infill is set,
+    /// and — when the variant has a displacement field — the "push" scrub (1× → the
+    /// failure multiple) that drives the deflection toward failure. Top-leading (shared
+    /// with the flex/load-path panels, which the failure toggle turns off, so it never
+    /// collides). All values are headlessly tested on ResultsModel; layout is device QA.
+    @ViewBuilder private var failureControlPanel: some View {
+        if let fp = model.failurePrediction {
+            VStack {
+                Spacer().frame(height: 84)   // clear the top nav / toggle row
+                HStack {
+                    VStack(alignment: .leading, spacing: DS.Space.s) {
+                        Text("FAILURE LOAD").font(.system(size: 9, weight: .bold)).tracking(0.6)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                        Text(fp.headline).dsStyle(DS.TypeScale.bodyStrong)
+                            .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.textPrimary.color)
+                        Text(fp.subtitle)
+                            .dsStyle(DS.TypeScale.caption)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .frame(width: 200, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let note = fp.infillNote {
+                            Text(note).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                                .foregroundStyle(DS.Color.textPrimary.color)
+                        }
+                        if model.hasFlex { pushControl(fp) }
+                    }
+                    .padding(DS.Space.l)
+                    .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                    .dsShadow(.panel)
+                    Spacer()
+                }
+                Spacer()
+            }
+            .padding(.horizontal, DS.Space.xl3)
+        }
+    }
+
+    /// The push scrub: drag 1× (current load) → the failure multiple to drive the part
+    /// visibly toward failure. At/above the multiple the copy flips to "Yields here".
+    private func pushControl(_ fp: FailurePrediction) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.m) {
+                Text("Push").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Spacer()
+                Text(String(format: "%.1f×", model.pushFactor)).dsStyle(DS.TypeScale.footnote)
+                    .fontWeight(.semibold).monospacedDigit()
+                    .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.accent.color)
+            }
+            Slider(value: Binding(get: { model.pushFactor }, set: { model.setPush(factor: $0) }),
+                   in: 1...max(1.0001, fp.multiplier))
+                .frame(width: 172)
+                .tint(model.atFailure ? Self.failureRed : DS.Color.accent.color)
+            Text(model.atFailure
+                 ? "Yields here — \(fp.solidValueLabel)"
+                 : "\(ResultsModel.loadLabel(kg: model.pushFactor * fp.appliedLoadKg, unit: fp.unit)) of \(fp.solidValueLabel)")
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.textSecondary.color)
+                .frame(width: 172, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, DS.Space.s)
+    }
+
+    /// The failure-point marker: reuses the M7.viz.2 hot-spot marker styling at the
+    /// same worst point (the failure location IS the peak-stress point). Turns red with
+    /// a "Yields here" callout once the push scrub reaches the failure multiple.
+    @ViewBuilder private var failureMarker: some View {
+        if model.failureOn, let fp = model.failurePrediction, let p = projection?.project(fp.position) {
+            let tint = model.atFailure ? Self.failureRed : DS.Color.accent.color
+            ZStack {
+                Circle()
+                    .strokeBorder(tint, lineWidth: 2)
+                    .background(Circle().fill(tint.opacity(model.atFailure ? 0.30 : 0.18)))
+                    .frame(width: 26, height: 26)
+                failureCallout(fp, tint: tint)
+                    .fixedSize()
+                    .offset(y: -48)   // float the readout above the marker
+            }
+            .position(p)
+        }
+    }
+
+    /// The failure marker's readout: "YIELDS HERE" + the load at which it yields, or —
+    /// before failure — the current push load against the failure load.
+    private func failureCallout(_ fp: FailurePrediction, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(model.atFailure ? "YIELDS HERE" : "FAILS AT")
+                .font(.system(size: 9, weight: .bold)).tracking(0.6)
+                .foregroundStyle(DS.Color.textSecondary.color)
+            Text(fp.solidValueLabel).dsStyle(DS.TypeScale.bodyStrong)
+                .foregroundStyle(model.atFailure ? tint : DS.Color.textPrimary.color)
+            Text(String(format: "%.1f× the load", fp.multiplier))
+                .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
                 .foregroundStyle(tint)
         }
         .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
@@ -360,6 +534,40 @@ public struct ResultsScreen: View {
                         .padding(.horizontal, DS.Space.xl4)
                         .background(Capsule().fill(model.flexOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
                             .overlay(Capsule().strokeBorder(model.flexOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                // M7.viz.4: Load-path toggle (advanced overlay) — only when the variant
+                // carries a displacement field to derive principal directions from.
+                if model.hasLoadPath {
+                    Button { model.toggleLoadPath() } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Load path").dsStyle(DS.TypeScale.bodyStrong)
+                        }
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.vertical, DS.Space.m)
+                        .padding(.horizontal, DS.Space.xl4)
+                        .background(Capsule().fill(model.loadPathOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
+                            .overlay(Capsule().strokeBorder(model.loadPathOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                // M7.viz.6: Failure-load ("push it till it breaks") toggle — only when
+                // the variant has an applied load + peak + yield to derive it from.
+                if model.hasFailurePrediction {
+                    Button { model.toggleFailure() } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "burst")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Failure").dsStyle(DS.TypeScale.bodyStrong)
+                        }
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.vertical, DS.Space.m)
+                        .padding(.horizontal, DS.Space.xl4)
+                        .background(Capsule().fill(model.failureOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
+                            .overlay(Capsule().strokeBorder(model.failureOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
                     }
                     .buttonStyle(.plain)
                 }

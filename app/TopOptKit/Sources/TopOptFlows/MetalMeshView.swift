@@ -165,6 +165,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var flexBuffer: MTLBuffer?
     /// The current displacement scale (exaggeration·amplitude); 0 = rest.
     private var flexScale: Float = 0
+    /// M7.viz.4 load-path: line segments (pos+rgba, stride 7) tracing the dominant
+    /// principal-stress direction, drawn with the line/ground pipeline. Empty = off.
+    private var loadPathBuffer: MTLBuffer?
+    private var loadPathVertexCount = 0
     private var vertexDrawCount = 0
     /// M7.8 reveal scrub params (fraction, minY, maxY, enabled); default shows all.
     private var revealParams = SIMD4<Float>(1, 0, 1, 0)
@@ -328,6 +332,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// zeroed tint buffer — and frame it.
     func setMesh(_ mesh: ViewerMesh) {
         self.mesh = mesh
+        loadPathBuffer = nil; loadPathVertexCount = 0   // new variant → drop stale glyphs
         guard !mesh.isEmpty else {
             vertexBuffer = nil; tintBuffer = nil; idVertexBuffer = nil; flexBuffer = nil
             vertexDrawCount = 0; flatFaceIDs = []; flexScale = 0
@@ -518,6 +523,22 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// M7.viz.3 flex: the current displacement scale (exaggeration·amplitude); 0 rests.
     func setFlexScale(_ s: Float) { flexScale = s }
 
+    /// M7.viz.4 load-path: upload the line segments (flattened `[x,y,z,r,g,b,a]` per
+    /// vertex, two vertices per glyph) to draw over the variant. A malformed buffer
+    /// (not a multiple of the stride-7 layout) is ignored. Empty clears the overlay.
+    func setLoadPath(_ verts: [Float]) {
+        guard !verts.isEmpty, verts.count % 7 == 0 else {
+            loadPathBuffer = nil; loadPathVertexCount = 0; return
+        }
+        loadPathVertexCount = verts.count / 7
+        loadPathBuffer = verts.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// M7.viz.4 load-path: drop the overlay (toggled off / variant without a field).
+    func clearLoadPath() { loadPathBuffer = nil; loadPathVertexCount = 0 }
+
     /// M7.viz.3 flex: drop back to rest — re-zero the displacement buffer (so a stale
     /// variant's vectors can't leak) and clear the scale.
     func resetFlex() {
@@ -622,6 +643,19 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 enc.setVertexBuffer(lbuf, offset: 0, index: 0)
                 enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: groundLineCount)
             }
+        }
+
+        // Load-path overlay (M7.viz.4): principal-stress-direction segments drawn
+        // with the same pos+rgba line pipeline, but under the MESH's model·view·proj
+        // (uniforms.mvp) so they lock to the part (the ground pass uses a world MVP).
+        // Depth-tested against the part (occluded behind it) but not depth-writing.
+        if loadPathVertexCount > 0, let lpipe = groundPipeline, let lbuf = loadPathBuffer {
+            var mvp = uniforms.mvp
+            enc.setRenderPipelineState(lpipe)
+            enc.setDepthStencilState(groundDepthState)
+            enc.setVertexBuffer(lbuf, offset: 0, index: 0)
+            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: loadPathVertexCount)
         }
         enc.endEncoding()
     }
@@ -776,6 +810,9 @@ struct MeshViewInputs {
     var flexDisplacements: [Float]? = nil
     /// M7.viz.3 flex: the per-frame displacement scale (exaggeration·amplitude); 0 rests.
     var flexScale: Float = 0
+    /// M7.viz.4 load-path: line segments (pos+rgba, stride 7) tracing the dominant
+    /// principal-stress direction over the variant. nil = overlay off.
+    var loadPathSegments: [Float]? = nil
 }
 
 #if os(iOS)
@@ -789,12 +826,14 @@ public struct MetalMeshView: UIViewRepresentable {
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1,
-                flexDisplacements: [Float]? = nil, flexScale: Float = 0) {
+                flexDisplacements: [Float]? = nil, flexScale: Float = 0,
+                loadPathSegments: [Float]? = nil) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, reveal: reveal,
-            flexDisplacements: flexDisplacements, flexScale: flexScale)
+            flexDisplacements: flexDisplacements, flexScale: flexScale,
+            loadPathSegments: loadPathSegments)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -829,12 +868,14 @@ public struct MetalMeshView: NSViewRepresentable {
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1,
-                flexDisplacements: [Float]? = nil, flexScale: Float = 0) {
+                flexDisplacements: [Float]? = nil, flexScale: Float = 0,
+                loadPathSegments: [Float]? = nil) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, reveal: reveal,
-            flexDisplacements: flexDisplacements, flexScale: flexScale)
+            flexDisplacements: flexDisplacements, flexScale: flexScale,
+            loadPathSegments: loadPathSegments)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -895,6 +936,8 @@ extension MetalMeshView {
         /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
         private var appliedFlex = false
         private var appliedFlexScale: Float = 0
+        /// M7.viz.4: whether load-path segments are uploaded.
+        private var appliedLoadPath = false
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
@@ -984,6 +1027,21 @@ extension MetalMeshView {
             if inputs.flexScale != appliedFlexScale {
                 appliedFlexScale = inputs.flexScale
                 renderer.setFlexScale(inputs.flexScale)
+                dirty = true
+            }
+
+            // M7.viz.4 load-path: upload the segment buffer on mesh change / first
+            // arrival (a variant selection changes the mesh → dirty → rebuild); clear
+            // when the overlay turns off so a stale variant's glyphs can't linger.
+            if let segments = inputs.loadPathSegments {
+                if dirty || !appliedLoadPath {
+                    appliedLoadPath = true
+                    renderer.setLoadPath(segments)
+                    dirty = true
+                }
+            } else if appliedLoadPath {
+                appliedLoadPath = false
+                renderer.clearLoadPath()
                 dirty = true
             }
 

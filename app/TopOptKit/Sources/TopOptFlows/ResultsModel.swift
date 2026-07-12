@@ -127,6 +127,18 @@ public struct DisplacementField: Sendable {
             || values.count < 3 * nodeCount
     }
 
+    /// Displacement at grid node `(a, b, c)` (voxel corner), `.zero` if the node is
+    /// out of range or the field is empty/ragged. Unlike `displacement(at:)` (which
+    /// rounds a world point to the nearest node), this indexes an exact node — the
+    /// load-path strain gradient (M7.viz.4) needs a voxel's eight named corners.
+    public func node(_ a: Int, _ b: Int, _ c: Int) -> SIMD3<Float> {
+        guard !isEmpty, a >= 0, a <= nx, b >= 0, b <= ny, c >= 0, c <= nz else { return .zero }
+        let n = (c * (ny + 1) + b) * (nx + 1) + a
+        let base = 3 * n
+        guard base >= 0, base + 2 < values.count else { return .zero }
+        return SIMD3<Float>(values[base], values[base + 1], values[base + 2])
+    }
+
     /// Nearest-node displacement at world position `p` (zero when empty / degenerate).
     /// Mesh vertices sit on printed-voxel corners, i.e. grid nodes (M7.disp handoff),
     /// so rounding to the nearest node lands on the exact node in practice.
@@ -175,6 +187,58 @@ public enum FlexAnimation {
     public static func displacedPosition(base: SIMD3<Float>, displacement d: SIMD3<Float>,
                                          exaggeration: Float, amplitude: Double) -> SIMD3<Float> {
         base + (exaggeration * Float(amplitude)) * d
+    }
+}
+
+/// Pure math for the M7.viz.6 failure-load prediction ("push it till it breaks").
+/// Kept out of the model + renderer so it is verified headlessly (the M7 /app/
+/// standard). NO new physics: linear FEA means the von Mises field scales linearly
+/// with the applied load, so the load that first reaches yield is a direct
+/// derivation from ALREADY-COMPUTED data (peak von Mises + material yield + the
+/// load the user applied). Nothing here solves, meshes, or calls the optimizer.
+public enum FailureLoad {
+    /// Gibson-Ashby knockdown exponent — MUST match the core's
+    /// `minimize_plastic.cpp infill_margin_knockdown()` (`kKnockdownExponent`), so
+    /// the infill-adjusted failure load here AGREES with the ladder's infill-aware
+    /// acceptance gate (M7.infill-margin). Do NOT invent a different curve.
+    public static let knockdownExponent: Double = 1.5
+    /// The core's `kKnockdownFloor`: a degenerate (≤ 0%) infill never yields a
+    /// non-positive factor, so the knockdown stays in (0, 1].
+    public static let knockdownFloor: Double = 1e-3
+
+    /// The multiplicative infill knockdown on strength (and therefore on the failure
+    /// LOAD, which scales with strength): `f^1.5` with `f = infill% / 100`, pinned to
+    /// EXACTLY 1.0 at ≥ 100% (solid) so a solid/unset project shows no adjustment.
+    /// Byte-for-byte the core `infill_margin_knockdown` (which knocks down the
+    /// acceptance MARGIN); strength ∝ margin·load⁻¹, so the same factor applies to
+    /// the failure load. See `minimize_plastic.cpp` (M7.infill-margin).
+    public static func infillKnockdown(percent: Double) -> Double {
+        let f = percent / 100.0
+        if f >= 1.0 { return 1.0 }
+        if f <= 0.0 { return knockdownFloor }
+        return Swift.max(pow(f, knockdownExponent), knockdownFloor)
+    }
+
+    /// The failure multiplier = material yield ÷ current peak von Mises: how many
+    /// times the current load the part can carry before the worst point reaches
+    /// yield. Nil (undefined) when the peak stress or the yield is not positive —
+    /// there is no finite ratio to report (a load-free / no-material variant).
+    public static func multiplier(peakMPa: Double, yieldMPa: Double) -> Double? {
+        guard peakMPa > 0, yieldMPa > 0 else { return nil }
+        return yieldMPa / peakMPa
+    }
+
+    /// The on-screen deflection exaggeration for a "push" scrub position, PROPORTIONAL
+    /// to load (linear FEA): a push to `pushFactor`× the current load deflects
+    /// `pushFactor`× as much, so mapping `pushFactor ∈ [1, multiplier]` linearly onto
+    /// `[maxExaggeration/multiplier, maxExaggeration]` shows the real proportion while
+    /// staying bounded — at failure (`pushFactor == multiplier`) the deflection reaches
+    /// the legible `maxExaggeration`, and a lightly-loaded part (large multiplier)
+    /// honestly barely moves at 1× (that's the "feels dead" case this feature answers).
+    public static func pushExaggeration(pushFactor: Double, multiplier: Double) -> Float {
+        guard multiplier > 0 else { return 0 }
+        let frac = Swift.min(1, Swift.max(0, pushFactor / multiplier))
+        return FlexAnimation.maxExaggeration * Float(frac)
     }
 }
 
@@ -267,6 +331,56 @@ public struct HotSpot: Equatable, Sendable {
     public let marginLabel: String
 }
 
+/// The M7.viz.6 failure-load prediction for the displayed variant: how much load it
+/// carries before the worst point yields, and WHERE it fails first. A pure derivation
+/// from already-computed data (peak von Mises + material yield + the applied load) —
+/// linear FEA, no new solve. The `position`/`fieldIndex` are the SAME worst point the
+/// M7.viz.2 hot spot finds (the marker reuses its styling).
+///
+/// HONESTY (M7.viz.6, inherits the infill finding): `failureLoadKg` is a SOLID-PART
+/// estimate — the FEA models solid material (ARCHITECTURE §2), infill never enters
+/// the solver — so it is labelled a "solid-print estimate". When an infill % is set
+/// (M7.params), `infillFailureLoadKg` is the infill-adjusted estimate using the SAME
+/// Gibson-Ashby knockdown the M7.infill-margin ladder uses, so the two agree.
+public struct FailurePrediction: Equatable, Sendable {
+    /// yield ÷ peak von Mises — how many times the current load the part carries
+    /// before the worst point reaches yield (> 1 means it has headroom).
+    public let multiplier: Double
+    /// The load the user applied (kgf; the sum of the load groups' weights) — the
+    /// scalar the failure load scales from.
+    public let appliedLoadKg: Double
+    /// The solid-print failure load (kgf): `multiplier × appliedLoadKg`.
+    public let failureLoadKg: Double
+    /// The display unit the labels are formatted in (the workspace kg/lbs toggle).
+    public let unit: WeightUnit
+    /// World position of the worst voxel's center — the failure marker anchor (== the
+    /// M7.viz.2 hot spot).
+    public let position: SIMD3<Float>
+    /// The worst voxel's flat field index (== the von Mises field's argmax).
+    public let fieldIndex: Int
+    /// Peak von Mises the estimate is derived from (MPa).
+    public let peakMPa: Double
+    /// The material yield the estimate is derived against (MPa).
+    public let yieldMPa: Double
+    /// The headline, e.g. "Holds ~340 lb" (solid-print estimate; unit per the toggle).
+    public let headline: String
+    /// The solid failure load phrased alone, e.g. "340 lb".
+    public let solidValueLabel: String
+    /// The always-shown honesty caption: "Solid-print estimate · yields at the marker".
+    public let subtitle: String
+    /// The project infill % when one is set below solid (0 < % < 100), else nil (a
+    /// solid/unset project has no separate adjusted estimate).
+    public let infillPercent: Int?
+    /// The Gibson-Ashby knockdown applied for `infillPercent` (1.0 when solid/unset).
+    public let infillKnockdown: Double
+    /// The infill-adjusted failure load (kgf), or nil when solid/unset.
+    public let infillFailureLoadKg: Double?
+    /// The infill-adjusted load phrased alone, e.g. "150 lb", or nil when solid/unset.
+    public let infillValueLabel: String?
+    /// The infill line for the card, e.g. "≈ 150 lb at 20% infill", or nil.
+    public let infillNote: String?
+}
+
 /// The results screen's state + derived presentation. Constructed from a finished,
 /// accepted `OptimizeOutcome` (the run screen only routes here when
 /// `acceptedCount >= 1`, so `tabs` is never empty).
@@ -280,6 +394,18 @@ public final class ResultsModel: ObservableObject {
     /// to (M7.viz.1 "honest heatmap"). 0 when unknown (no material / legacy
     /// construction), in which case the scale falls back to the per-run data range.
     public let yieldStrengthMPa: Double
+    /// The total load the user applied (kgf; the sum of the load-group weights) — the
+    /// scalar the M7.viz.6 failure load scales from. 0 when no load case is declared
+    /// (an STL / self-weight run), which suppresses the failure prediction (there is
+    /// no user load to scale). It is app-declared data (ForceModel), threaded in from
+    /// the workspace — not a core field.
+    public let appliedLoadKg: Double
+    /// The workspace's kg/lbs display unit, so the failure load reads in the user's
+    /// current units (M7.viz.6 surfaces the prediction in the same toggle).
+    public let loadUnit: WeightUnit
+    /// The project's infill % (M7.params), for the M7.viz.6 infill-adjusted failure
+    /// estimate. 100 (the default) means solid / no adjustment.
+    public let infillPercent: Int
     /// One tab per accepted variant, in ladder order (largest volume first, so
     /// savings ascend left→right as in the design). GROWS as variants stream in.
     @Published public private(set) var tabs: [ResultVariantVM] = []
@@ -305,6 +431,21 @@ public final class ResultsModel: ObservableObject {
     /// clamped through `setFlexExaggeration`. Multiplies the solved displacement so
     /// the (sub-millimetre) deflection is visible.
     public private(set) var flexExaggeration: Float = FlexAnimation.defaultExaggeration
+    /// Load-path overlay toggle (M7.viz.4): draw the dominant principal-stress
+    /// direction as short segments over the variant, tracing how force travels from
+    /// the loaded region to the anchors. An advanced-tier overlay (viz.5 gates
+    /// tiers). Only meaningful when the selected variant `hasLoadPath`. The overlay
+    /// is static, so it needs no reduced-motion special-case.
+    @Published public var loadPathOn: Bool = false
+    /// Failure-load surface toggle (M7.viz.6): reveals the predicted failure load, the
+    /// failure marker (reusing the viz.2 hot-spot styling), and — when the variant has
+    /// a displacement field — the "push" scrub. Only meaningful when the selected
+    /// variant `hasFailurePrediction`.
+    @Published public var failureOn: Bool = false
+    /// The "push" scrub position (M7.viz.6): the load multiple the user is driving the
+    /// part to, in [1, failure multiplier]. 1 = the current load; the multiplier =
+    /// yield. Drives the flex animation at proportional exaggeration (`pushFlexScale`).
+    @Published public private(set) var pushFactor: Double = 1
     /// Morph/threshold scrub position in [0, 1] (1 = fully formed variant).
     @Published public private(set) var playT: Double = 1
     /// Whether the morph is auto-playing (a UI timer advances `playT` in the view).
@@ -321,10 +462,15 @@ public final class ResultsModel: ObservableObject {
     private var userSelected = false
 
     public init(projectName: String, outcome: OptimizeOutcome,
-                materialName: String = "", yieldStrengthMPa: Double = 0) {
+                materialName: String = "", yieldStrengthMPa: Double = 0,
+                appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
+                infillPercent: Int = 100) {
         self.projectName = projectName
         self.materialName = materialName
         self.yieldStrengthMPa = max(0, yieldStrengthMPa)
+        self.appliedLoadKg = max(0, appliedLoadKg)
+        self.loadUnit = loadUnit
+        self.infillPercent = infillPercent
         apply(outcome)
         selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
     }
@@ -359,6 +505,9 @@ public final class ResultsModel: ObservableObject {
             : (acc.map(\.maxStressMPa).max() ?? 0)
         keyframeCache = nil   // variant data changed → rebuild keyframes on demand
         flexCache = nil       // …and the per-vertex flex displacements
+        loadPathCache = nil   // …and the derived load-path glyphs
+        loadPathSegmentCache = nil
+        failureCache = nil    // …and the failure-load prediction
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -403,9 +552,12 @@ public final class ResultsModel: ObservableObject {
     private var flexCache: (index: Int, disp: [Float])?
 
     /// Toggle the flex animation. Turning it off resets the loop to rest so it
-    /// restarts cleanly next time.
+    /// restarts cleanly next time. Flex and the load-path overlay are mutually
+    /// exclusive — flex moves the vertices while the load path is drawn at rest
+    /// positions, so turning one on turns the other off.
     public func toggleFlex() {
         flexOn.toggle()
+        if flexOn { loadPathOn = false; failureOn = false; pushFactor = 1 }
         if !flexOn { flexPhase = 0 }
     }
 
@@ -455,6 +607,160 @@ public final class ResultsModel: ObservableObject {
         }
         flexCache = (selectedIndex, out)
         return out
+    }
+
+    // MARK: - load-path overlay (M7.viz.4)
+
+    private var loadPathCache: (index: Int, path: LoadPath)?
+    private var loadPathSegmentCache: (index: Int, verts: [Float])?
+
+    /// Whether the selected variant can show a load path. It is derived from the FEA
+    /// displacement field (strain → principal-stress direction), so it needs the same
+    /// displacement field the flex animation does; a cancelled/legacy variant has
+    /// none, so the Load-path control stays hidden.
+    public var hasLoadPath: Bool { hasFlex }
+
+    /// Toggle the load-path overlay. Mutually exclusive with flex (see `toggleFlex`).
+    public func toggleLoadPath() {
+        loadPathOn.toggle()
+        if loadPathOn { flexOn = false; flexPhase = 0; failureOn = false; pushFactor = 1 }
+    }
+
+    /// The selected variant's derived load path (dominant principal-stress direction
+    /// glyphs over the printed region), built once per selection and cached. Nil when
+    /// the variant carries no displacement field.
+    public var selectedLoadPath: LoadPath? {
+        if let c = loadPathCache, c.index == selectedIndex { return c.path }
+        guard let disp = selectedDisplacementField, !disp.isEmpty else { return nil }
+        let path = LoadPathField.build(displacement: disp, stress: selectedStressField)
+        loadPathCache = (selectedIndex, path)
+        return path
+    }
+
+    /// The load-path overlay's line-segment vertex buffer: two vertices per glyph,
+    /// each `[x, y, z, r, g, b, a]` (stride 7) — the world-space endpoints of the
+    /// segment centred on the glyph, coloured by the glyph's von Mises stress on the
+    /// SHARED scale (same ramp as the M7.viz.1 heatmap, so a hot path reads red).
+    /// This is exactly the pos+rgba line layout the Metal ground/line pipeline draws.
+    /// Cached on `selectedIndex`.
+    public func loadPathSegments(for path: LoadPath) -> [Float] {
+        if let c = loadPathSegmentCache, c.index == selectedIndex { return c.verts }
+        var out = [Float]()
+        out.reserveCapacity(path.glyphs.count * 2 * 7)
+        let half = path.segmentLength * 0.5
+        for g in path.glyphs {
+            let frac = stressFraction(mpa: Double(g.stressMPa))
+            let c = ResultsModel.stressColor(fraction: frac)
+            let r = Float(c.r), gr = Float(c.g), b = Float(c.b)
+            let p0 = g.position - half * g.direction
+            let p1 = g.position + half * g.direction
+            out.append(p0.x); out.append(p0.y); out.append(p0.z)
+            out.append(r); out.append(gr); out.append(b); out.append(1)
+            out.append(p1.x); out.append(p1.y); out.append(p1.z)
+            out.append(r); out.append(gr); out.append(b); out.append(1)
+        }
+        loadPathSegmentCache = (selectedIndex, out)
+        return out
+    }
+
+    // MARK: - failure-load prediction (M7.viz.6)
+
+    private var failureCache: (index: Int, pred: FailurePrediction?)?
+
+    /// The displayed variant's failure-load prediction (M7.viz.6). A pure derivation:
+    /// `multiplier = yield / peak`, `failureLoad = multiplier × appliedLoad`, at the
+    /// hot spot (reusing the viz.2 peak point). Nil when there is no user load to scale
+    /// (`appliedLoadKg == 0` — an STL/self-weight run), no stress to peak, or no
+    /// material yield to compare against. Cached per selection (the O(N) peak scan runs
+    /// once per variant, not per push-scrub frame); the load/unit/infill are constant.
+    public var failurePrediction: FailurePrediction? {
+        if let c = failureCache, c.index == selectedIndex { return c.pred }
+        let pred = computeFailurePrediction()
+        failureCache = (selectedIndex, pred)
+        return pred
+    }
+
+    private func computeFailurePrediction() -> FailurePrediction? {
+        guard appliedLoadKg > 0,
+              let field = selectedStressField, let peak = field.peak(),
+              let mult = FailureLoad.multiplier(peakMPa: Double(peak.valueMPa),
+                                                yieldMPa: yieldStrengthMPa)
+        else { return nil }
+        let failKg = mult * appliedLoadKg
+        // Infill-adjusted estimate — ONLY when the project sets a sparse infill below
+        // solid. Same Gibson-Ashby family as the M7.infill-margin ladder so they agree.
+        let showInfill = infillPercent > 0 && infillPercent < 100
+        let knock = showInfill ? FailureLoad.infillKnockdown(percent: Double(infillPercent)) : 1.0
+        let infillKg: Double? = showInfill ? failKg * knock : nil
+        let infillLbl = infillKg.map { ResultsModel.loadLabel(kg: $0, unit: loadUnit) }
+        let solidLbl = ResultsModel.loadLabel(kg: failKg, unit: loadUnit)
+        return FailurePrediction(
+            multiplier: mult,
+            appliedLoadKg: appliedLoadKg,
+            failureLoadKg: failKg,
+            unit: loadUnit,
+            position: peak.position,
+            fieldIndex: peak.index,
+            peakMPa: Double(peak.valueMPa),
+            yieldMPa: yieldStrengthMPa,
+            headline: "Holds ~\(solidLbl)",
+            solidValueLabel: solidLbl,
+            subtitle: "Solid-print estimate · yields at the marker",
+            infillPercent: showInfill ? infillPercent : nil,
+            infillKnockdown: knock,
+            infillFailureLoadKg: infillKg,
+            infillValueLabel: infillLbl,
+            infillNote: infillLbl.map { "≈ \($0) at \(infillPercent)% infill" })
+    }
+
+    /// Whether the selected variant can show a failure prediction (drives the toggle).
+    public var hasFailurePrediction: Bool { failurePrediction != nil }
+
+    /// Whether the "push" scrub is available: the failure surface is on AND the variant
+    /// carries a displacement field to drive the flex deflection. When there is no
+    /// displacement field, the feature degrades gracefully to the number + marker only
+    /// (no scrub), rather than failing.
+    public var pushActive: Bool { failureOn && hasFlex && hasFailurePrediction }
+
+    /// Toggle the failure-load surface. Mutually exclusive with flex/load-path (they
+    /// drive the same viewer deflection/overlay channels); turning it off resets the
+    /// push scrub to the current load (1×).
+    public func toggleFailure() {
+        failureOn.toggle()
+        if failureOn { flexOn = false; loadPathOn = false; flexPhase = 0 }
+        if !failureOn { pushFactor = 1 }
+    }
+
+    /// Set the push scrub, clamped to [1, failure multiplier] (no-op with no
+    /// prediction). 1 = the current load; the multiplier = the load that yields.
+    public func setPush(factor: Double) {
+        guard let fp = failurePrediction else { return }
+        pushFactor = min(fp.multiplier, max(1, factor))
+    }
+
+    /// The flex exaggeration for the current push position — proportional to load
+    /// (linear FEA), reaching the legible max at failure. 0 with no prediction. This is
+    /// a STATIC scrub (the position maps straight to a deflection), so it is
+    /// reduced-motion-safe by construction — no loop.
+    public func pushFlexScale() -> Float {
+        guard hasFlex, let fp = failurePrediction else { return 0 }
+        return FailureLoad.pushExaggeration(pushFactor: pushFactor, multiplier: fp.multiplier)
+    }
+
+    /// Whether the push scrub has reached (or passed) the failure multiplier — the
+    /// part yields here, so the marker turns red / a "yields here" label shows.
+    public var atFailure: Bool {
+        guard let fp = failurePrediction else { return false }
+        return pushFactor >= fp.multiplier - 1e-6
+    }
+
+    /// Format a kgf load in the given display unit (kg / lbs), matching the workspace
+    /// weight readout (`ForceModel.formattedWeight`): < 10 → one decimal, ≥ 10 →
+    /// rounded integer. Keeps the failure load in the user's current units.
+    static func loadLabel(kg: Double, unit: WeightUnit) -> String {
+        let v = unit == .kg ? kg : kg * ForceModel.kgToLb
+        let num = v < 10 ? String(format: "%.1f", v) : String(Int(v.rounded()))
+        return "\(num) \(unit.rawValue)"
     }
 
     // MARK: - optimization-history playback (keyframes)
@@ -518,6 +824,7 @@ public final class ResultsModel: ObservableObject {
         playT = 1
         playing = false
         flexPhase = 0   // the new variant's flex loop starts from rest
+        pushFactor = 1  // …and the push scrub resets to the current load
     }
 
     public func toggleStress() { stressOn.toggle() }

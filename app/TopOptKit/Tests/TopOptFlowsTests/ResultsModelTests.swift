@@ -672,4 +672,197 @@ final class ResultsModelTests: XCTestCase {
         // Cached: the same array instance content is returned on re-query for the selection.
         XCTAssertEqual(m.flexDisplacements(for: mesh, field: field), disp)
     }
+
+    // MARK: failure-load prediction (M7.viz.6 — "push it till it breaks")
+
+    /// A variant carrying a von Mises field peaking at `peak` (one voxel) plus, when
+    /// `withFlex`, a displacement field, on a 1×1×1 grid — so `hotSpot`/`peak` and the
+    /// applied load drive the failure prediction. Yield/applied-load/unit/infill are
+    /// the M7.viz.6 inputs threaded into the model.
+    @MainActor private func failureModel(appliedLoadKg: Double = 2.5, unit: WeightUnit = .kg,
+                                         infillPercent: Int = 100, peak: Float = 20,
+                                         yield: Double = 60, withFlex: Bool = true) -> ResultsModel {
+        var disp = [Float](repeating: 0, count: 24)
+        disp[7 * 3 + 1] = 0.1                                   // node (1,1,1) +Y 0.1 mm
+        let v = OptimizeVariant(
+            requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5, massGrams: 10,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, orientation: SIMD3(0, 0, 1), maxStressMPa: Double(peak),
+            meshVertices: [0, 0, 0, 1, 0, 0, 1, 1, 1], meshIndices: [0, 1, 2],
+            vonMisesField: [peak], displacementField: withFlex ? disp : [])
+        let out = OptimizeOutcome(variants: [v], stoppedOnMargin: false, cancelled: false,
+                                  acceptedCount: 1, voxelVolumeMM3: 1,
+                                  gridNx: 1, gridNy: 1, gridNz: 1, gridOrigin: .zero, spacing: 1)
+        return ResultsModel(projectName: "P", outcome: out, materialName: "PLA",
+                            yieldStrengthMPa: yield, appliedLoadKg: appliedLoadKg,
+                            loadUnit: unit, infillPercent: infillPercent)
+    }
+
+    @MainActor func testFailureMultiplierAndLoadFromPeakYieldAndAppliedLoad() {
+        // peak 20, yield 60 → multiplier 3; applied 2.5 kg → failure load 7.5 kg. The
+        // failure LOCATION is the hot spot (the peak voxel's center on a 1³ grid).
+        let m = failureModel(appliedLoadKg: 2.5, peak: 20, yield: 60)
+        let fp = try! XCTUnwrap(m.failurePrediction)
+        XCTAssertEqual(fp.multiplier, 3, accuracy: 1e-9)
+        XCTAssertEqual(fp.appliedLoadKg, 2.5, accuracy: 1e-9)
+        XCTAssertEqual(fp.failureLoadKg, 7.5, accuracy: 1e-9)
+        XCTAssertEqual(fp.position, SIMD3<Float>(0.5, 0.5, 0.5))    // == the viz.2 hot spot
+        XCTAssertEqual(fp.fieldIndex, m.hotSpot?.fieldIndex)
+        XCTAssertEqual(fp.solidValueLabel, "7.5 kg")
+        XCTAssertEqual(fp.headline, "Holds ~7.5 kg")
+        XCTAssertTrue(fp.subtitle.lowercased().contains("solid-print"))
+    }
+
+    @MainActor func testFailureLoadInEachUnit() {
+        // 7.5 kg in kg → "7.5 kg"; in lbs → 16.5 lb → "17 lbs" (≥10 rounds to integer).
+        XCTAssertEqual(failureModel(unit: .kg).failurePrediction?.solidValueLabel, "7.5 kg")
+        XCTAssertEqual(failureModel(unit: .lbs).failurePrediction?.solidValueLabel, "17 lbs")
+        // A design-scale case: 10 kg applied, peak 4 / yield 60 → ×15 → 150 kg → 331 lb.
+        let big = failureModel(appliedLoadKg: 10, unit: .lbs, peak: 4, yield: 60)
+        XCTAssertEqual(big.failurePrediction?.failureLoadKg ?? 0, 150, accuracy: 1e-6)
+        XCTAssertEqual(big.failurePrediction?.solidValueLabel, "331 lbs")
+    }
+
+    @MainActor func testFailureLoadLabelFormatting() {
+        XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .kg), "7.5 kg")
+        XCTAssertEqual(ResultsModel.loadLabel(kg: 154.2, unit: .kg), "154 kg")
+        XCTAssertEqual(ResultsModel.loadLabel(kg: 7.5, unit: .lbs), "17 lbs")   // 16.5 → 17
+        XCTAssertEqual(ResultsModel.loadLabel(kg: 0.67, unit: .kg), "0.7 kg")
+    }
+
+    @MainActor func testFailureInfillAdjustedUsesGibsonAshbyKnockdown() {
+        // infill 20% → knockdown 0.2^1.5 ≈ 0.0894; 7.5 kg × 0.0894 ≈ 0.67 kg.
+        let m = failureModel(infillPercent: 20)
+        let fp = try! XCTUnwrap(m.failurePrediction)
+        XCTAssertEqual(fp.infillPercent, 20)
+        XCTAssertEqual(fp.infillKnockdown, pow(0.2, 1.5), accuracy: 1e-12)
+        XCTAssertEqual(try XCTUnwrap(fp.infillFailureLoadKg), 7.5 * pow(0.2, 1.5), accuracy: 1e-9)
+        XCTAssertEqual(fp.infillValueLabel, "0.7 kg")
+        XCTAssertEqual(fp.infillNote, "≈ 0.7 kg at 20% infill")
+        XCTAssertLessThan(try XCTUnwrap(fp.infillFailureLoadKg), fp.failureLoadKg)   // weaker than solid
+    }
+
+    @MainActor func testFailureNoInfillEstimateWhenSolid() {
+        // 100% (solid, the default) and any out-of-range value → no separate estimate.
+        for pct in [100, 0, 150] {
+            let fp = try! XCTUnwrap(failureModel(infillPercent: pct).failurePrediction)
+            XCTAssertNil(fp.infillPercent)
+            XCTAssertNil(fp.infillFailureLoadKg)
+            XCTAssertNil(fp.infillNote)
+            XCTAssertEqual(fp.infillKnockdown, 1, accuracy: 1e-12)
+        }
+    }
+
+    @MainActor func testFailurePredictionNilOnMissingInputs() {
+        // Degrade gracefully: no applied load, no yield, or no stress → no prediction.
+        XCTAssertNil(failureModel(appliedLoadKg: 0).failurePrediction)          // no user load
+        XCTAssertNil(failureModel(yield: 0).failurePrediction)                  // no material limit
+        XCTAssertNil(failureModel(peak: 0).failurePrediction)                   // no stress to peak
+        // No stress field at all (plain variant) → nil, toggle stays hidden.
+        let plain = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5)]),
+                                 materialName: "PLA", yieldStrengthMPa: 60, appliedLoadKg: 2.5)
+        XCTAssertNil(plain.failurePrediction)
+        XCTAssertFalse(plain.hasFailurePrediction)
+    }
+
+    func testInfillKnockdownMatchesCoreCurve() {
+        // MUST match core minimize_plastic.cpp infill_margin_knockdown (Gibson-Ashby
+        // f^1.5, exact 1.0 at ≥100, floored at 1e-3) so the two features agree.
+        XCTAssertEqual(FailureLoad.infillKnockdown(percent: 100), 1)
+        XCTAssertEqual(FailureLoad.infillKnockdown(percent: 130), 1)
+        XCTAssertEqual(FailureLoad.infillKnockdown(percent: 0), 1e-3)
+        XCTAssertEqual(FailureLoad.infillKnockdown(percent: -5), 1e-3)
+        XCTAssertEqual(FailureLoad.infillKnockdown(percent: 20), pow(0.2, 1.5), accuracy: 1e-12)
+        XCTAssertEqual(FailureLoad.infillKnockdown(percent: 50), pow(0.5, 1.5), accuracy: 1e-12)
+        XCTAssertLessThan(FailureLoad.infillKnockdown(percent: 40),
+                          FailureLoad.infillKnockdown(percent: 60))   // monotonic in infill
+    }
+
+    func testFailureMultiplierGuards() {
+        XCTAssertEqual(FailureLoad.multiplier(peakMPa: 20, yieldMPa: 60), 3)
+        XCTAssertNil(FailureLoad.multiplier(peakMPa: 0, yieldMPa: 60))
+        XCTAssertNil(FailureLoad.multiplier(peakMPa: 20, yieldMPa: 0))
+        XCTAssertNil(FailureLoad.multiplier(peakMPa: -1, yieldMPa: 60))
+    }
+
+    func testPushExaggerationProportionalAndBounded() {
+        // Proportional to load, reaching the legible max at failure, bounded above it.
+        XCTAssertEqual(FailureLoad.pushExaggeration(pushFactor: 3, multiplier: 3),
+                       FlexAnimation.maxExaggeration)                 // at failure → max
+        XCTAssertEqual(FailureLoad.pushExaggeration(pushFactor: 1, multiplier: 3),
+                       FlexAnimation.maxExaggeration / 3, accuracy: 1e-3)   // 1× is proportional
+        XCTAssertEqual(FailureLoad.pushExaggeration(pushFactor: 9, multiplier: 3),
+                       FlexAnimation.maxExaggeration)                 // clamped above failure
+        XCTAssertGreaterThan(FailureLoad.pushExaggeration(pushFactor: 2, multiplier: 3),
+                             FailureLoad.pushExaggeration(pushFactor: 1, multiplier: 3))
+        XCTAssertEqual(FailureLoad.pushExaggeration(pushFactor: 1, multiplier: 0), 0)   // degenerate
+    }
+
+    @MainActor func testPushScrubClampAtFailureAndScale() {
+        let m = failureModel(peak: 20, yield: 60)                     // multiplier 3
+        m.toggleFailure()
+        XCTAssertTrue(m.failureOn)
+        XCTAssertTrue(m.pushActive)                                   // has a displacement field
+        XCTAssertEqual(m.pushFactor, 1, accuracy: 1e-9)              // starts at the current load
+        XCTAssertFalse(m.atFailure)
+        m.setPush(factor: 2)
+        XCTAssertEqual(m.pushFactor, 2, accuracy: 1e-9)
+        XCTAssertEqual(m.pushFlexScale(), FlexAnimation.maxExaggeration * 2 / 3, accuracy: 1e-3)
+        m.setPush(factor: 99)                                         // clamps to the multiplier
+        XCTAssertEqual(m.pushFactor, 3, accuracy: 1e-9)
+        XCTAssertTrue(m.atFailure)
+        XCTAssertEqual(m.pushFlexScale(), FlexAnimation.maxExaggeration, accuracy: 1e-4)
+        m.setPush(factor: 0)                                          // clamps to ≥ 1
+        XCTAssertEqual(m.pushFactor, 1, accuracy: 1e-9)
+    }
+
+    @MainActor func testPushDegradesGracefullyWithoutDisplacementField() {
+        // No displacement field → still a prediction (number + marker), but no scrub.
+        let m = failureModel(withFlex: false)
+        XCTAssertNotNil(m.failurePrediction)
+        XCTAssertTrue(m.hasFailurePrediction)
+        XCTAssertFalse(m.hasFlex)
+        m.toggleFailure()
+        XCTAssertFalse(m.pushActive)                                 // scrub unavailable
+        XCTAssertEqual(m.pushFlexScale(), 0)
+    }
+
+    @MainActor func testFailureMutuallyExclusiveWithFlexAndLoadPath() {
+        let m = failureModel()
+        m.toggleFlex()
+        XCTAssertTrue(m.flexOn)
+        m.toggleFailure()                                            // turning failure on…
+        XCTAssertTrue(m.failureOn)
+        XCTAssertFalse(m.flexOn)                                     // …turns flex off
+        m.setPush(factor: 2)
+        m.toggleFlex()                                               // and flex back on…
+        XCTAssertTrue(m.flexOn)
+        XCTAssertFalse(m.failureOn)                                  // …turns failure off
+        XCTAssertEqual(m.pushFactor, 1, accuracy: 1e-9)             // and resets the push scrub
+    }
+
+    @MainActor func testFailurePredictionCachedPerSelection() {
+        // Two variants with different peaks → the prediction follows the selection.
+        let strong = OptimizeVariant(
+            requestedVolumeFraction: 0.7, achievedVolumeFraction: 0.7, massGrams: 20,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, maxStressMPa: 10, meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+            meshIndices: [0, 1, 2], vonMisesField: [10])
+        let weak = OptimizeVariant(
+            requestedVolumeFraction: 0.4, achievedVolumeFraction: 0.4, massGrams: 12,
+            supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 2, accepted: true,
+            v3Passes: true, maxStressMPa: 30, meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+            meshIndices: [0, 1, 2], vonMisesField: [30])
+        let out = OptimizeOutcome(variants: [strong, weak], stoppedOnMargin: false,
+                                  cancelled: false, acceptedCount: 2, voxelVolumeMM3: 1,
+                                  gridNx: 1, gridNy: 1, gridNz: 1, gridOrigin: .zero, spacing: 1)
+        let m = ResultsModel(projectName: "P", outcome: out, materialName: "PLA",
+                             yieldStrengthMPa: 60, appliedLoadKg: 2.0)
+        m.select(1)                                                  // weak: peak 30 → ×2 → 4 kg
+        XCTAssertEqual(m.failurePrediction?.multiplier ?? 0, 2, accuracy: 1e-9)
+        XCTAssertEqual(m.failurePrediction?.failureLoadKg ?? 0, 4, accuracy: 1e-9)
+        m.select(0)                                                  // strong: peak 10 → ×6 → 12 kg
+        XCTAssertEqual(m.failurePrediction?.multiplier ?? 0, 6, accuracy: 1e-9)
+        XCTAssertEqual(m.failurePrediction?.failureLoadKg ?? 0, 12, accuracy: 1e-9)
+    }
 }

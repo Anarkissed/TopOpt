@@ -101,6 +101,25 @@ struct MinimizePlasticOptions {
   // identical. Must be finite and >= 0.
   double min_feature_mm = 0.0;
 
+  // M7.infill-margin — the sparse-infill fraction the real print will use, as a
+  // PERCENT in [0, 100]. The FEA and the stress field are always computed on
+  // SOLID material — infill NEVER enters the solver (ARCHITECTURE §2). This value
+  // only KNOCKS DOWN the worst-case stress margin at the ladder ACCEPTANCE gate,
+  // so the driver stops stripping material against a solid-part margin the sparse
+  // print will not actually deliver. It does NOT change the FEA, the stress
+  // field, the optimizer math, or the stored/displayed margin (vr.margin stays
+  // the SOLID margin) — only what the acceptance test compares against (see
+  // minimize_plastic.cpp infill_margin_knockdown()).
+  //
+  // 100 (the DEFAULT) means "solid / no knockdown": the knockdown factor is
+  // exactly 1.0, so the acceptance gate — hence the whole ladder, and every
+  // existing caller/fixture — is byte-for-byte identical to the pre-M7.infill
+  // behavior (the same back-compat discipline as min_feature_mm == 0). Values in
+  // [0, 100) scale the accepted margin down by a sub-linear factor in (0, 1], so
+  // a lower infill accepts a HEAVIER (more material) terminal rung. Must be
+  // finite.
+  double infill_percent = 100.0;
+
   // Per-rung progress + cancellation (M7.0a). Both optional, absent by
   // default; when absent the run is unchanged.
   //
