@@ -217,18 +217,35 @@ final class TopOptKitTests: XCTestCase {
         XCTAssertGreaterThan(outcome.spacing, 0)
         let voxelCount = outcome.gridNx * outcome.gridNy * outcome.gridNz
         XCTAssertFalse(outcome.variants.isEmpty)
+        // M7.viz.3 / M7.viz.6b: the per-NODE displacement field is the motion engine the
+        // flex animation and the push-to-failure scrub render. Guard the per-variant
+        // checks below can't pass vacuously (they only run for `accepted` variants).
+        let nodeCount = (outcome.gridNx + 1) * (outcome.gridNy + 1) * (outcome.gridNz + 1)
+        var checkedAccepted = 0
         for v in outcome.variants where v.accepted {
+            checkedAccepted += 1
             XCTAssertFalse(v.meshVertices.isEmpty, "variant isosurface must flow")
             XCTAssertEqual(v.meshVertices.count % 3, 0)
             XCTAssertEqual(v.meshIndices.count % 3, 0)
             XCTAssertEqual(v.meshIndices.count, v.meshTriangleCount * 3)
             XCTAssertEqual(v.vonMisesField.count, voxelCount, "von Mises field is grid-indexed")
+            // The displacement field must FLOW for an accepted variant: size is
+            // 3·(nx+1)(ny+1)(nz+1) (DOF-ordered, per NODE — NOT per voxel), and a loaded
+            // part actually deflects, so at least one component is non-zero + finite.
+            // If this ever regresses to empty/all-zero, the push-to-failure experience
+            // silently loses its motion (the exact failure mode M7.viz.6b guards against)
+            // — fail loud here rather than shipping a dead animation.
+            XCTAssertEqual(v.displacementField.count, 3 * nodeCount,
+                           "displacement is per-node, DOF-ordered (drives the flex/push motion)")
+            XCTAssertTrue(v.displacementField.contains { $0 != 0 && $0.isFinite },
+                          "a loaded, accepted variant must deflect — non-zero displacement drives the scrub")
             // Optimization-history keyframes flow (playback): several frames, the
             // last (converged shape) non-empty.
             XCTAssertGreaterThanOrEqual(v.keyframeMeshes.count, 2, "captured history keyframes")
             XCTAssertFalse(v.keyframeMeshes.last?.vertices.isEmpty ?? true,
                            "the final keyframe is the converged shape")
         }
+        XCTAssertGreaterThan(checkedAccepted, 0, "the per-variant field checks must not be vacuous")
         for v in outcome.variants {
             // Orientation is the M4.4 winning unit build direction — nonzero + finite.
             let len = simd_length(v.orientation)

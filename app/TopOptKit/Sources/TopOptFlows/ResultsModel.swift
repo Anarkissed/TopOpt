@@ -754,6 +754,16 @@ public final class ResultsModel: ObservableObject {
         return pushFactor >= fp.multiplier - 1e-6
     }
 
+    /// The live "push" scrub readout (M7.viz.6b): the current load in the user's units
+    /// plus the current multiple, phrased so it reads naturally as the user drags —
+    /// e.g. "1180 lb · 1.4× load", ramping to "1915 lb · 3.0× · YIELDS" at/above the
+    /// failure multiplier. Pure (position → string), so it is headlessly assertable.
+    public func pushReadout(prediction fp: FailurePrediction) -> String {
+        let load = ResultsModel.loadLabel(kg: pushFactor * fp.appliedLoadKg, unit: fp.unit)
+        let mult = String(format: "%.1f×", pushFactor)
+        return atFailure ? "\(load) · \(mult) · YIELDS" : "\(load) · \(mult) load"
+    }
+
     /// Format a kgf load in the given display unit (kg / lbs), matching the workspace
     /// weight readout (`ForceModel.formattedWeight`): < 10 → one decimal, ≥ 10 →
     /// rounded integer. Keeps the failure load in the user's current units.
