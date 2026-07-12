@@ -73,13 +73,15 @@ public struct ResultsScreen: View {
                           stressTints: stressTints,
                           reveal: viewerReveal,
                           flexDisplacements: flexDisplacements,
-                          flexScale: flexScale)
+                          flexScale: flexScale,
+                          loadPathSegments: loadPathSegments)
                 .ignoresSafeArea()
 
             topLeft
             topRight
             if model.stressOn { stressLegendPanel }   // M7.viz.1: yield-scaled legend
             if flexActive { flexControlPanel }        // M7.viz.3: exaggeration slider
+            if loadPathActive { loadPathLegendPanel } // M7.viz.4: load-path key
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
             savingsTabs
             mediaPlayer
@@ -148,9 +150,20 @@ public struct ResultsScreen: View {
     /// field. While flexing, the stage shows the final variant mesh (not the history
     /// morph) fully formed, wobbling by the displacement.
     private var flexActive: Bool { model.flexOn && model.hasFlex }
-    private var showHistory: Bool { !model.stressOn && !flexActive && model.hasHistory }
+    /// M7.viz.4 load-path is live only when toggled on AND the variant has a
+    /// displacement field to derive principal directions from. Like flex, it shows
+    /// the final mesh fully formed (not the history morph).
+    private var loadPathActive: Bool { model.loadPathOn && model.hasLoadPath }
+    private var showHistory: Bool { !model.stressOn && !flexActive && !loadPathActive && model.hasHistory }
     private var viewerMesh: ViewerMesh? { showHistory ? model.playbackMesh : model.selectedMesh }
-    private var viewerReveal: Float { (showHistory || flexActive) ? 1 : Float(model.playT) }
+    private var viewerReveal: Float { (showHistory || flexActive || loadPathActive) ? 1 : Float(model.playT) }
+
+    /// The load-path overlay's line segments for the selected variant (nil when the
+    /// overlay is off / the variant has no displacement field). Cached in the model.
+    private var loadPathSegments: [Float]? {
+        guard loadPathActive, let path = model.selectedLoadPath, !path.isEmpty else { return nil }
+        return model.loadPathSegments(for: path)
+    }
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
@@ -236,6 +249,43 @@ public struct ResultsScreen: View {
                         .dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textSecondary.color)
                         .frame(width: 172, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(DS.Space.l)
+                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                .dsShadow(.panel)
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(.horizontal, DS.Space.xl3)
+    }
+
+    // MARK: - Load-path legend (M7.viz.4 — principal-stress-direction key)
+
+    /// A small key for the load-path overlay: what the lines mean and how they are
+    /// derived + coloured. Sits in the top-LEADING slot (shared with the flex panel,
+    /// which is never on at the same time — they're mutually exclusive), so it never
+    /// collides with the top-center stress legend when the stress overlay is also on.
+    /// Static (no motion), so it is reduced-motion-safe by construction. The copy is
+    /// headlessly assertable via `LoadPathCopy`; placement is device QA.
+    @ViewBuilder private var loadPathLegendPanel: some View {
+        VStack {
+            Spacer().frame(height: 84)   // clear the top nav / toggle row
+            HStack {
+                VStack(alignment: .leading, spacing: DS.Space.s) {
+                    Text("Load path").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    Text(LoadPathCopy.what)
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textSecondary.color)
+                        .frame(width: 200, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(LoadPathCopy.how)
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                        .frame(width: 200, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(DS.Space.l)
@@ -360,6 +410,23 @@ public struct ResultsScreen: View {
                         .padding(.horizontal, DS.Space.xl4)
                         .background(Capsule().fill(model.flexOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
                             .overlay(Capsule().strokeBorder(model.flexOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                // M7.viz.4: Load-path toggle (advanced overlay) — only when the variant
+                // carries a displacement field to derive principal directions from.
+                if model.hasLoadPath {
+                    Button { model.toggleLoadPath() } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Load path").dsStyle(DS.TypeScale.bodyStrong)
+                        }
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .padding(.vertical, DS.Space.m)
+                        .padding(.horizontal, DS.Space.xl4)
+                        .background(Capsule().fill(model.loadPathOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
+                            .overlay(Capsule().strokeBorder(model.loadPathOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
                     }
                     .buttonStyle(.plain)
                 }
