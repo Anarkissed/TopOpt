@@ -33,6 +33,43 @@ Vec3 normalized(const Vec3& v) {
   return Vec3{v.x / n, v.y / n, v.z / n};
 }
 
+// M7.infill-margin — map a sparse-infill fraction to the multiplicative KNOCKDOWN
+// applied to the worst-case stress margin at the ladder ACCEPTANCE gate (only).
+//
+// WHY: the margin (yield / stress) is computed on SOLID material — infill never
+// enters the FEA (ARCHITECTURE §2). A real FDM print at infill fraction f < 1 is
+// weaker than that solid part, so accepting a rung on its solid margin lets the
+// ladder strip material the sparse print cannot carry. This scalar scales the
+// solid margin down to the infill-aware effective margin the acceptance test
+// compares against; nothing else (FEA, stress field, optimizer, or the
+// stored/displayed margin) sees it.
+//
+// CURVE (SEED — the maintainer tunes this; do NOT treat it as final): a
+// Gibson-Ashby cellular-solid scaling, effective/solid strength ~= f^p with
+// p = 1.5 and f = infill_percent / 100. The exponent p > 1 puts the curve BELOW
+// the linear f for f in (0, 1) (sub-linear) and pins it to 1.0 at f = 1 (solid).
+// It deliberately ignores the load the solid perimeters/walls of a real slice
+// carry, so it UNDER-estimates strength — i.e. it is CONSERVATIVE (stops the
+// ladder sooner, retaining more material). Reasonable later tuning: raise p
+// toward 2 (the foam strength exponent), add a wall-count-derived floor, or fit
+// a measured relation.
+//
+// RANGE / DEFAULT: returns a factor in (0, 1]. f >= 1 (the default 100, and any
+// "solid/unset" caller) returns EXACTLY 1.0 with no arithmetic, so
+// margin * knockdown == margin bit-for-bit and an unset run reproduces the
+// current ladder exactly. f in (0, 1) maps to f^p; f <= 0 (a degenerate hollow
+// request) is floored to a small positive knockdown so the factor never leaves
+// (0, 1].
+constexpr double kKnockdownExponent = 1.5;
+constexpr double kKnockdownFloor = 1e-3;
+
+double infill_margin_knockdown(double infill_percent) {
+  const double f = infill_percent / 100.0;
+  if (f >= 1.0) return 1.0;  // solid / unset: exact 1.0, byte-identical gate
+  if (f <= 0.0) return kKnockdownFloor;
+  return std::max(std::pow(f, kKnockdownExponent), kKnockdownFloor);
+}
+
 // Gather one element's 24 nodal displacements from the global solution, in the
 // hex8_stiffness DOF order (node-major interleaved), matching the recovery in
 // the V4/V5 gates.
@@ -74,6 +111,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (!std::isfinite(options.min_feature_mm) || options.min_feature_mm < 0.0)
     throw std::invalid_argument(
         "minimize_plastic: min_feature_mm must be finite and >= 0");
+  if (!std::isfinite(options.infill_percent))
+    throw std::invalid_argument(
+        "minimize_plastic: infill_percent must be finite");
   // `gravity` is only the SELF-WEIGHT magnitude; it is unused when the caller
   // supplies an external load case, so only require it there.
   if (options.external_loads.empty() &&
@@ -121,6 +161,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       std::max({static_cast<double>(grid.nx), static_cast<double>(grid.ny),
                 static_cast<double>(grid.nz)}) *
       grid.spacing;
+
+  // M7.infill-margin: a single rung-independent scalar in (0, 1] applied to the
+  // worst-case margin at the acceptance gate below. 1.0 for solid/unset infill
+  // (the default 100), making the whole ladder byte-identical to pre-M7.infill.
+  const double infill_knockdown = infill_margin_knockdown(options.infill_percent);
 
   MinimizePlasticResult result;
   result.report.material = material_name;
@@ -279,7 +324,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.min_feature_warning =
         min_feature_warning_text(rules, variant.v3.min_feature_violations);
 
-    variant.accepted = margin.worst_case >= options.margin_stop;
+    // M7.infill-margin: gate on the INFILL-ADJUSTED worst-case margin. The stored
+    // report margin (vr.margin above) stays the SOLID margin — this knockdown is
+    // applied ONLY to what the acceptance test compares, never to the FEA, the
+    // stress field, or the displayed value. infill_knockdown == 1.0 for
+    // solid/unset infill, so `margin.worst_case * 1.0 >= margin_stop` is
+    // bit-for-bit the pre-M7.infill gate `margin.worst_case >= margin_stop`.
+    variant.accepted =
+        margin.worst_case * infill_knockdown >= options.margin_stop;
     result.evaluated.push_back(std::move(variant));
 
     if (result.evaluated.back().accepted) {

@@ -569,14 +569,16 @@ OptimizeResult run_minimize_plastic_loadcase(
                                       : std::vector<double>{0.9};
     enable_projection(opts);   // M6.3 crisp density
     opts.keyframe_count = 12;   // optimization-history playback
-    // M7.params — the user's infill-density override arrives here as
-    // load_case.infill_percent (0–100, or < 0 for "no override"). It is CAPTURED
-    // at the bridge boundary but NOT yet fed to the optimizer: consuming it is the
-    // M7.infill-margin ladder knockdown, which needs a field on the core's
-    // MinimizePlasticOptions (a /core/ change owned by that task, out of M7.params
-    // scope). When that field lands, set it here from load_case.infill_percent. See
-    // the M7.params handoff. (void)-cast so the plumbed value is not flagged unused.
-    (void)load_case.infill_percent;
+    // M7.infill-margin — feed the user's infill-density override into the ladder
+    // acceptance-gate knockdown. load_case.infill_percent is a PERCENT in [0, 100],
+    // or < 0 for "no override" (use the M5.1 recommendation, i.e. no knockdown).
+    // The core defaults opts.infill_percent to 100 (solid => knockdown 1.0 =>
+    // current behavior EXACTLY), so only forward an actual override; a negative
+    // value leaves the default untouched. This scales ONLY the acceptance margin —
+    // infill never enters the FEA (ARCHITECTURE §2 unchanged); see
+    // minimize_plastic infill_margin_knockdown().
+    if (load_case.infill_percent >= 0)
+      opts.infill_percent = static_cast<double>(load_case.infill_percent);
     opts.progress = [&](std::size_t r, std::size_t rc, int iter) {
       if (progress != nullptr)
         progress(ctx, static_cast<uint64_t>(r), static_cast<uint64_t>(rc), iter);
