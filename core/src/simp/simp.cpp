@@ -254,6 +254,21 @@ DensityFilter make_density_filter(const VoxelGrid& grid, double radius) {
   return make_density_filter(grid, radius, make_active_mask(grid));
 }
 
+double physical_filter_radius(double min_feature_mm, double spacing,
+                              double floor_voxels) {
+  if (!std::isfinite(min_feature_mm) || !(min_feature_mm > 0.0))
+    throw std::invalid_argument(
+        "physical_filter_radius: min_feature_mm must be finite and > 0");
+  if (!std::isfinite(spacing) || !(spacing > 0.0))
+    throw std::invalid_argument(
+        "physical_filter_radius: spacing must be finite and > 0");
+  if (!std::isfinite(floor_voxels) || !(floor_voxels > 0.0))
+    throw std::invalid_argument(
+        "physical_filter_radius: floor_voxels must be finite and > 0");
+  const double rmin_voxels = min_feature_mm / spacing;
+  return rmin_voxels < floor_voxels ? floor_voxels : rmin_voxels;
+}
+
 std::vector<double> DensityFilter::filter_density(
     const std::vector<double>& x) const {
   if (x.size() != voxel_count)

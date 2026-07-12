@@ -105,13 +105,23 @@ std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
 
 // Turn on the M6.3 single-field Heaviside projection + beta-continuation on a
 // run's SIMP options, for crisp (near-0/1) density with a minimum length scale.
-// Uses the locked continuation schedule and the M6.3 filter radius rmin = 2.5
-// (DECISIONS 2026-07-10). Non-empty `projection` makes the loop run the staged
-// schedule (its own iterations/move) instead of the plain M3.4 loop — noticeably
-// more compute per variant, in exchange for printable, threshold-stable geometry.
+// Uses the locked continuation schedule. Non-empty `projection` makes the loop
+// run the staged schedule (its own iterations/move) instead of the plain M3.4
+// loop — noticeably more compute per variant, in exchange for printable,
+// threshold-stable geometry.
+//
+// The minimum length scale is set PHYSICALLY (M7.rmin): min_feature_mm is a
+// nozzle-scale FDM feature size in mm, and minimize_plastic converts it to the
+// voxel-unit filter radius per rung from the grid spacing, so the minimum
+// member thickness is the same in mm at every voxel resolution (a fixed voxel
+// radius is not — it shrinks in mm as the grid refines, so thin members
+// proliferate at high resolution: diagnosis 060). 2.5 mm reproduces the M6.3
+// rmin = 2.5 voxels exactly on the 1.0 mm-spaced Gate-V2 benchmark geometry
+// (DECISIONS 2026-07-10), keeping that decision numerically continuous, while
+// scaling correctly for real parts voxelized at 64^3..128^3.
 void enable_projection(topopt::MinimizePlasticOptions& opts) {
   opts.simp.projection = topopt::heaviside_continuation_schedule();
-  opts.simp.filter_radius = 2.5;
+  opts.min_feature_mm = 2.5;  // mm; per-rung -> filter_radius = 2.5 / spacing
 }
 
 // One core variant -> the flat bridge OptimizeVariant (M7.0b/M7.8 fields). Shared

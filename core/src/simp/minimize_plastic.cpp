@@ -71,6 +71,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (!std::isfinite(options.margin_stop) || options.margin_stop < 0.0)
     throw std::invalid_argument(
         "minimize_plastic: margin_stop must be finite and >= 0");
+  if (!std::isfinite(options.min_feature_mm) || options.min_feature_mm < 0.0)
+    throw std::invalid_argument(
+        "minimize_plastic: min_feature_mm must be finite and >= 0");
   // `gravity` is only the SELF-WEIGHT magnitude; it is unused when the caller
   // supplies an external load case, so only require it there.
   if (options.external_loads.empty() &&
@@ -127,6 +130,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     const double vf = ladder[rung];
     SimpOptions opt = options.simp;
     opt.volume_fraction = vf;
+
+    // M7.rmin: derive the density-filter radius from a PHYSICAL length scale so
+    // the filtered minimum member thickness is resolution independent. When
+    // min_feature_mm is 0 the caller's voxel-unit simp.filter_radius is used
+    // unchanged (back-compat: the Gate-V2 fixture and every direct simp caller
+    // are untouched — they never set min_feature_mm and never route here).
+    if (options.min_feature_mm > 0.0)
+      opt.filter_radius =
+          physical_filter_radius(options.min_feature_mm, grid.spacing);
 
     // M7.0a: the driver owns the optimizer's progress/cancel hooks (any set on
     // options.simp are overridden — pipeline.hpp). Per-rung progress forwards
