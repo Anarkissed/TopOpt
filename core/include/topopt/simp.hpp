@@ -124,6 +124,29 @@ struct DensityFilter {
 // (ARCHITECTURE §4: >= 1.5). Throws std::invalid_argument if radius <= 0.
 DensityFilter make_density_filter(const VoxelGrid& grid, double radius);
 
+// Convert a PHYSICAL minimum-feature length scale (mm) into a density-filter
+// radius in VOXEL units for a grid of the given `spacing` (mm/voxel). The point
+// is RESOLUTION INDEPENDENCE: make_density_filter takes a voxel radius, so a
+// fixed voxel radius fixes the minimum member thickness in *voxels*, which
+// SHRINKS in millimetres as the grid is refined — the same physical part
+// voxelized finer grows thinner members (diagnosis 060). Scaling the radius by
+// 1/spacing instead keeps the filtered length scale constant in mm across
+// resolutions:  rmin_voxels = min_feature_mm / spacing, so
+// rmin_voxels * spacing == min_feature_mm regardless of how finely the part is
+// voxelized.
+//
+// The result is clamped UP to `floor_voxels` (default 1.5 — ARCHITECTURE §4's
+// ">= 1.5 voxels" checkerboarding-suppression threshold): on a grid coarse
+// enough that min_feature_mm / spacing < floor_voxels the filter would stop
+// suppressing checkerboards, so the floor wins and the effective mm length
+// scale is intentionally LARGER than requested there (documented trade-off — a
+// coarse grid cannot resolve a feature finer than its own mesh-independence
+// floor). Returns a value that is always >= floor_voxels.
+//
+// Throws std::invalid_argument if any argument is non-finite or <= 0.
+double physical_filter_radius(double min_feature_mm, double spacing,
+                              double floor_voxels = 1.5);
+
 // Mask-aware density filter (ROADMAP M3.7). Identical weights to the overload
 // above, but only Active solid voxels (mask[e] == MaskValue::Active) are
 // design/filter voxels: FrozenSolid, FrozenVoid and Empty voxels are excluded
