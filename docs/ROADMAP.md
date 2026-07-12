@@ -306,7 +306,7 @@
 > delivered. Task order is positional, top to bottom; identifiers are labels,
 > not sequence.
 
-- [ ] M7.mma.1 MMA updater (Svanberg 1987), compliance objective + volume
+- [x] M7.mma.1 MMA updater (Svanberg 1987), compliance objective + volume
       constraint only, as a drop-in alternative to Optimality Criteria behind
       `SimpOptions.updater = {OC, MMA}`. Default stays OC — NO fixture changes
       in this task. Asymptote init/adaptation and move limits per the paper;
@@ -315,7 +315,7 @@
       benchmark compliance within 2% of the OC references at the same volume
       fraction; iteration counts reported in the test log (informational).
       Pure core; no /app/.
-- [ ] M7.disp Expose the per-node displacement field on MinimizePlasticVariant
+- [x] M7.disp Expose the per-node displacement field on MinimizePlasticVariant
       (bridge visualization data — the M7.0b sibling of von_mises_field).
       WHY: M7.viz.3 (flex animation) needs the solved displacement to move mesh
       vertices; the app currently gets only the von Mises SCALAR (M7.0b), which
@@ -344,7 +344,7 @@
       solve, not an independent value — this is exposure, not recomputation);
       empty on the cancelled path. Pure exposure of an existing field: no new
       fixture, no benchmark change, do NOT touch tests/fixtures/**.
-- [ ] M7.mma.2 Stress-constrained optimization on the MMA path: aggregated
+- [x] M7.mma.2 Stress-constrained optimization on the MMA path: aggregated
       von Mises constraint (p-norm or KS — record the choice and the
       aggregation parameter/tolerance in DECISIONS.md) with adjoint
       sensitivities and stress relaxation for the singularity problem (qp or
@@ -398,6 +398,44 @@
       need GCMMA-style conservative approximations to converge — if it can't be
       made to converge reliably in one run, STOP with a Blocked handoff rather
       than shipping a flaky solver. Pure core; no /app/.
+- [ ] M7.rmin Physical (mm-based) density-filter radius. BUG (diagnosis 060):
+      the SIMP density-filter radius is hardcoded at 2.5 VOXELS
+      (bridge.cpp:114, opts.simp.filter_radius; default 1.5 at simp.hpp:239)
+      and never scales to physical size — so the minimum member thickness is a
+      fixed voxel count regardless of resolution (~12% of the part at 20^3,
+      ~2% at 128^3). Large/fine parts therefore proliferate thin members
+      (the internal fin/ridge artifact). FIX: derive the voxel radius from a
+      target minimum feature size in MILLIMETERS divided by grid spacing —
+      rmin_voxels = min_feature_mm / grid.spacing — clamped to a sane floor
+      (never below ~1.5 voxels, which is what suppresses checkerboarding).
+      Pick a sensible default min_feature_mm (document the choice + reasoning
+      in the handoff; a nozzle-scale value in the ~1.5-3mm range is reasonable
+      for FDM). The physical length scale must be resolution-INDEPENDENT: the
+      same part at different resolutions should yield the same minimum member
+      thickness in mm. TEST: assert that for a fixed part at two different
+      resolutions, the effective filter radius in mm is equal (within
+      tolerance) — i.e. rmin_voxels scales with resolution such that
+      rmin_voxels * spacing is constant. Also assert the checkerboarding floor
+      holds (radius never drops below the suppression threshold). Do NOT change
+      the optimizer, the objective, or the marshaling path (separate tasks).
+      Pure core; the only bridge touch is replacing the hardcoded 2.5 with the
+      physical derivation.
+- [ ] M7.infill-margin (core) Apply an infill knockdown to the ladder
+      acceptance margin. Per DECISIONS 2026-07-11: the reduction-ladder
+      acceptance test (minimize_plastic, the margin_stop gate ~line 270) must
+      compare margin_stop against an INFILL-ADJUSTED worst-case margin =
+      margin.worst_case * knockdown(infill_percent), not the raw solid margin.
+      Add the infill % (and wall count if used) to MinimizePlasticOptions,
+      threaded from the job/bridge; default to a value that reproduces CURRENT
+      behavior when infill is unset/100% (knockdown = 1.0) so existing tests and
+      benchmarks are byte-unaffected. The knockdown function is seeded
+      conservative (document the curve + reasoning in the handoff; maintainer
+      tunes later). Do NOT touch the FEA, the element stiffness, or the stress
+      field — infill does NOT enter the solver (ARCHITECTURE §2). Tests:
+      knockdown=1.0 (unset) reproduces current ladder behavior exactly; a low
+      infill % produces a smaller adjusted margin and stops the ladder earlier
+      (retains more material) than solid on a fixture where the raw margin is
+      large. Pure core; the bridge threads the infill value.
 - [ ] M7.mma.4 Switchover: MMA becomes the default updater in
       minimize_plastic; OC stays available behind the option (retained, not
       deleted). BLOCKS ON: maintainer regenerates fixtures/benchmarks.json
@@ -441,7 +479,7 @@
 > STOP with a Blocked handoff (interface freeze — do not add it to /core/
 > yourself, and do not reach into the core track's work).
 
-- [ ] M7.viz.1 Stress map, scaled-to-limit (the honest heatmap). Replace any
+- [x] M7.viz.1 Stress map, scaled-to-limit (the honest heatmap). Replace any
       data-range auto-scaling with a color scale keyed to the material limit:
       green = comfortably below yield, through to red = at/above yield
       (worst-case per-variant, using the M7.0b von Mises field + the material
@@ -451,13 +489,13 @@
       honesty surface. Consumes existing fields only. xcodebuild tests for the
       value→color mapping (clamped, monotonic, yield boundary correct); visual
       QA on device.
-- [ ] M7.viz.2 Hot-spot callout. Find and label the single highest-stress
+- [x] M7.viz.2 Hot-spot callout. Find and label the single highest-stress
       point on the displayed variant with its actual value and its margin
       (value ÷ yield). A tappable marker that frames the worst point, so the
       user is not left hunting the red zone. Consumes the same von Mises field.
       xcodebuild test: the located max matches the field's max index; margin
       arithmetic correct. Visual QA on device.
-- [ ] M7.viz.3 Flex animation (the "wow"). Animate the FEA displacement
+- [x] M7.viz.3 Flex animation (the "wow"). Animate the FEA displacement
       solution: scale the per-vertex displacement 50–100x (user-adjustable
       exaggeration, default chosen for phone legibility) and animate the mesh
       from rest to full deflection and back. This is NOT a physics simulation —
@@ -490,6 +528,16 @@
 ## M7-SHIP — v1 ship block (small tasks; deliberately between M7.dom and the
    ML track so the app is shippable end-to-end while ML work runs long)
 
+- [ ] M7.params (app) Print-parameters input screen on import. Build from the
+      Claude Design source (design HTML is the visual source of truth, DECISIONS
+      2026-07-09) [DESIGN PATH TBD]. After import, before the workspace, present
+      a sheet capturing walls / top layers / bottom layers / infill %, with FDM
+      defaults. Persist on the project (survives relaunch, per the persist-c
+      pattern). Feed the values to the M5.1 settings engine as user overrides AND
+      pass infill % through the bridge to the core (consumed by M7.infill-margin).
+      /app/ UI + persistence + bridge threading of the infill value; no FEA
+      change. xcodebuild tests for capture + persistence round-trip; layout is
+      device QA.
 - [ ] M7.8b Honesty & confidence UI (was M7.trust — deferred to here to pair with
       export, since that's when a result leaves the app and goes toward a real
       print). Did NOT land in PR #46. Every result surfaces: (a) it was

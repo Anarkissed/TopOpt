@@ -133,3 +133,25 @@ Eigen-free public API. Approved by Nadim.
      handoff; the core track adds it — the app agent never edits /core/, and
      the core track never edits /app/. Approved by Nadim.
 - 2026-07-11: MMA added as an alternative updater behind SimpOptions.updater, OC remains default; §4 optimizer row will read OC+MMA at the M7.mma.4 switchover
+- 2026-07-11: Infill/print-parameter handling decided (maintainer). Print
+  parameters (walls, top/bottom layers, infill %) are captured from the user at
+  import and used TWO ways: (1) fed to the M5.1 settings rule engine as user
+  overrides of the recommended values; (2) an infill-derived KNOCKDOWN FACTOR is
+  applied to the worst-case stress margin used by the reduction-ladder
+  acceptance test (minimize_plastic margin_stop gate), so the optimizer does not
+  strip material against a solid-part margin the real print won't deliver.
+  EXPLICITLY: infill does NOT enter the FEA. The solver continues to model kept
+  material at full solid modulus (ARCHITECTURE §2 stands, unchanged — infill is
+  still not simulated). The knockdown is a scalar applied to the margin at the
+  acceptance gate, NOT a modification of the element stiffness or the stress
+  field. The knockdown factor's form (a function of infill % and, optionally,
+  wall count/pattern) is seeded conservative and human-tuned; agents implement
+  the mechanism and may propose factor changes only via Blocked. Margins shown
+  to users must be labeled as solid-print margins with the infill-adjusted value
+  surfaced alongside (folds into M7.8b honesty UI).
+- 2026-07-11: M7.rmin default min_feature_mm = 2.5mm (maintainer-confirmed).
+  Chosen because (a) nozzle-scale FDM minimum feature is ~1.5-3mm, and (b) at
+  the Gate-V2 benchmark spacing of 1.0mm it yields exactly 2.5 voxels,
+  continuous with the M6.3-locked rmin=2.5 so V2 stays valid without fixture
+  regeneration. The filter radius is now a physical length scale; simp.filter_radius
+  (voxel units) remains the low-level knob for direct callers.
