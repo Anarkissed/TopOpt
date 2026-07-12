@@ -127,6 +127,12 @@ public struct WorkspacePlaceholder: View {
                 ResultsScreen(projectName: project.name, outcome: outcome,
                               materialName: project.material,
                               yieldStrengthMPa: model.yieldStrengthMPa(for: project.material),
+                              // M7.viz.6: the failure-load prediction scales from the
+                              // user's applied load (kgf) in their kg/lbs unit, with the
+                              // infill % for the infill-adjusted estimate. All app data.
+                              appliedLoadKg: force.totalLoadKg(in: selection.groups),
+                              loadUnit: force.unit,
+                              infillPercent: project.printParams.infillPercent,
                               streaming: run.isStreaming,
                               onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
                               onExport: { model.toast = "Export (.3mf) arrives in M7.9" },
