@@ -420,7 +420,7 @@
       the optimizer, the objective, or the marshaling path (separate tasks).
       Pure core; the only bridge touch is replacing the hardcoded 2.5 with the
       physical derivation.
-- [ ] M7.infill-margin (core) Apply an infill knockdown to the ladder
+- [x] M7.infill-margin (core) Apply an infill knockdown to the ladder
       acceptance margin. Per DECISIONS 2026-07-11: the reduction-ladder
       acceptance test (minimize_plastic, the margin_stop gate ~line 270) must
       compare margin_stop against an INFILL-ADJUSTED worst-case margin =
@@ -507,7 +507,7 @@
       vertex animation; reduced-motion setting disables the loop and shows the
       full-deflection frame statically. xcodebuild tests where assertable
       (exaggeration scale, reduced-motion path); device QA for feel.
-- [ ] M7.viz.4 Load-path visualization. Show how force travels from the loaded
+- [x] M7.viz.4 Load-path visualization. Show how force travels from the loaded
       region to the anchors, derived from the existing stress tensor field (the
       same data as the heatmap) — this is what reveals WHY the optimizer grew a
       rib where it did. v1 may be a principal-stress-direction / stress-flow
@@ -524,6 +524,29 @@
       lane — it composes the other viz tasks, so it depends on them landing
       first. Tests: tier selection drives which surfaces show; persistence
       round-trips. Device QA.
+- [ ] M7.viz.6 Failure-load prediction ("push it till it breaks"). Show the
+      user how much load the part can take before it yields, and WHERE it fails
+      first. This is a pure derivation from ALREADY-COMPUTED data — linear FEA
+      means stress scales linearly with load, so no new solve: the failure
+      multiplier = yield / current_peak_von_mises, the failure LOAD = that
+      multiplier x the load the user applied, and the failure LOCATION = the
+      hot-spot the M7.viz.2 callout already finds. Surface: (a) the predicted
+      failure load in the user's units (lb/kg/N), (b) a marker at the failure
+      location (reuse the viz.2 hot-spot marker), and (c) an OPTIONAL "push"
+      interaction — a slider/scrub from 1x up to the failure multiplier that
+      drives the EXISTING flex animation (M7.viz.3) at proportional
+      exaggeration, so as the user pushes toward failure the part visibly
+      deflects more and the failure point lights up. At/above the multiplier,
+      indicate failure (the hot-spot region turns red / a "yields here" label).
+      HONESTY (required, ties to the infill finding): the predicted failure load
+      is a SOLID-PART prediction — the FEA models solid material (ARCHITECTURE
+      §2). Label it as such ("solid-print estimate") and, if an infill % is set
+      (M7.params), show the infill-adjusted estimate alongside using the same
+      knockdown family as M7.infill-margin. Never present it as a guaranteed
+      real-print strength. Consumes existing fields only (von Mises scalar +
+      the applied load magnitude + material yield); if the applied-load
+      magnitude is not already available to the results screen, STOP with a
+      Blocked handoff requesting it rather than guessing. /app/ only.
 
 ## M7-SHIP — v1 ship block (small tasks; deliberately between M7.dom and the
    ML track so the app is shippable end-to-end while ML work runs long)
