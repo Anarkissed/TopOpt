@@ -46,12 +46,12 @@ public struct ResultsScreen: View {
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     private static let morphDuration: Double = 6   // design `dur = 6`s
     private static let flexDuration: Double = 2.5  // one rest→full→rest wobble (s)
-    private static let loadPathDuration: Double = 1.6  // one load→anchor dash sweep (s)
 
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
+                loadLocations: [SIMD3<Float>] = [],
                 streaming: Bool = false,
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {}) {
@@ -59,7 +59,8 @@ public struct ResultsScreen: View {
             projectName: projectName, outcome: outcome,
             materialName: materialName, yieldStrengthMPa: yieldStrengthMPa,
             appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
-            infillPercent: infillPercent, infillPattern: infillPattern))
+            infillPercent: infillPercent, infillPattern: infillPattern,
+            loadLocations: loadLocations))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.onClose = onClose
@@ -80,8 +81,10 @@ public struct ResultsScreen: View {
                           reveal: viewerReveal,
                           flexDisplacements: flexDisplacements,
                           flexScale: flexScale,
-                          loadPathSegments: loadPathSegments,
-                          loadPathFlow: Float(model.loadPathPhase))
+                          loadFlowVertices: loadFlowVertices,
+                          loadFlowKey: loadFlowKey,
+                          loadFlowGuides: loadFlowGuides,
+                          bodyAlpha: bodyAlpha)
                 .ignoresSafeArea()
 
             topBar
@@ -107,10 +110,11 @@ public struct ResultsScreen: View {
             if model.flexOn && !reduceMotion {
                 model.advanceFlex((1.0 / 30.0) / Self.flexDuration)
             }
-            // M7.viz.4: flow the load-path dashes while the overlay is on — UNLESS
-            // reduced-motion, which holds the static overlay (no advance → phase stays 0).
-            if model.loadPathOn && !reduceMotion {
-                model.advanceLoadPath((1.0 / 30.0) / Self.loadPathDuration)
+            // Handoff 070 flow: advance the comet clock while the overlay is on — UNLESS
+            // reduced-motion (system OR the drawer toggle), which freezes the arrows
+            // mid-path with clean heads (no advance → the static presentation).
+            if model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion) {
+                model.advanceFlowClock(1.0 / 30.0)
             }
         }
         .onChange(of: liveOutcome.variants.count) { _ in
@@ -151,6 +155,15 @@ public struct ResultsScreen: View {
     /// recomputed on each body eval while the overlay is on; memoize on
     /// `selectedIndex` if a scrub-with-stress hitch shows up on device.
     private var stressTints: [SIMD4<Float>]? {
+        // In load-path FLOW mode the flow's Body segment owns the body appearance: the
+        // "Stress" body paints the static field with the MOVING epicenters blended in
+        // (a bloom following each arrow); x-ray / solid paint plain clay (nil tints).
+        if loadPathActive {
+            guard model.flowBodyMode == .stress, let mesh = viewerMesh,
+                  let field = model.selectedStressField, !field.isEmpty else { return nil }
+            let heads = model.flowHeadPositions(reduceMotion: reduceMotion)
+            return model.flowStressTints(for: mesh, field: field, heads: heads)
+        }
         guard showStressColors, let mesh = viewerMesh,
               let field = model.selectedStressField, !field.isEmpty else { return nil }
         return model.stressTints(for: mesh, field: field, multiplier: stressMultiplier)
@@ -199,12 +212,56 @@ public struct ResultsScreen: View {
     private var viewerMesh: ViewerMesh? { showHistory ? model.playbackMesh : model.selectedMesh }
     private var viewerReveal: Float { (showHistory || deflectionActive || loadPathActive) ? 1 : Float(model.playT) }
 
-    /// The load-path overlay's line segments for the selected variant (nil when the
-    /// overlay is off / the variant has no displacement field). Cached in the model.
-    private var loadPathSegments: [Float]? {
-        guard loadPathActive, let path = model.selectedLoadPath, !path.isEmpty else { return nil }
-        return model.loadPathSegments(for: path)
+    // MARK: - Load-path FLOW geometry (handoff 070 → Metal)
+
+    /// The comet-arrow tube geometry for THIS frame — the model's comet frames (one per
+    /// visible path, animated at the flow clock) extruded to GPU vertices. nil when the
+    /// overlay is off / the variant has no curves. Recomputed each tick (that is the
+    /// animation); the coordinator re-uploads it every frame.
+    private var loadFlowVertices: [Float]? {
+        guard loadPathActive else { return nil }
+        let frames = model.flowCometFrames(reduceMotion: reduceMotion)
+        guard !frames.isEmpty else { return nil }
+        var out: [Float] = []
+        for f in frames { out.append(contentsOf: CometMesh.build(f)) }
+        return out.isEmpty ? nil : out
     }
+
+    /// A per-frame key so the coordinator knows the comet geometry changed (the flow
+    /// clock, plus a discriminator for paused param changes).
+    private var loadFlowKey: Double { model.flowClock }
+
+    /// The faint full-path guide routes (pos+rgba line list, stride 7), so a path reads
+    /// even when its arrow is elsewhere on it. The isolated path is brighter; when all
+    /// paths show, every guide is equally faint. nil when the overlay is off.
+    private var loadFlowGuides: [Float]? {
+        guard loadPathActive else { return nil }
+        let polys = model.flowGuidePolylines()
+        guard !polys.isEmpty else { return nil }
+        let isolate = model.flowIsolate
+        let c = ResultsModel.flowColor
+        var out: [Float] = []
+        for (i, poly) in polys.enumerated() where poly.count >= 2 {
+            let a: Float = isolate == nil ? 0.16 : (isolate == i ? 0.55 : 0.05)
+            for k in 0..<(poly.count - 1) {
+                appendGuideVertex(&out, poly[k], c, a)
+                appendGuideVertex(&out, poly[k + 1], c, a)
+            }
+        }
+        return out.isEmpty ? nil : out
+    }
+
+    /// Append one guide-line vertex: position + PREMULTIPLIED rgba (the comet pipeline
+    /// blends additive, so the emissive contribution is `rgb·a`).
+    private func appendGuideVertex(_ out: inout [Float], _ p: SIMD3<Float>,
+                                   _ c: SIMD3<Float>, _ a: Float) {
+        out.append(p.x); out.append(p.y); out.append(p.z)
+        out.append(c.x * a); out.append(c.y * a); out.append(c.z * a); out.append(a)
+    }
+
+    /// The body opacity for the current flow body mode (x-ray/stress translucent,
+    /// solid opaque); 1 when the overlay is off (the normal opaque draw).
+    private var bodyAlpha: Float { loadPathActive ? model.flowBodyMode.bodyAlpha : 1 }
 
     /// Per-flat-vertex flex displacement for the selected variant (nil when flex is
     /// off / the variant has no field). Cached in the model, so this is cheap.
@@ -290,27 +347,95 @@ public struct ResultsScreen: View {
 
     // MARK: - Load-path legend (M7.viz.4 — principal-stress-direction key)
 
-    /// The Load-path chip's drawer: a small key for the overlay — what the lines mean
-    /// and how they are derived + coloured. Slides open beside the Load-path chip on
-    /// the right rail. Static (no motion), so it is reduced-motion-safe by
-    /// construction. The copy is headlessly assertable via `LoadPathCopy`; placement
-    /// is device QA.
+    /// The compact-drawer content width for the load-path FLOW controls — a touch wider
+    /// than the other drawers so the segmented controls read, still slim.
+    private static let flowDrawerWidth: CGFloat = 188
+
+    /// The Load-path chip's drawer (handoff 070 redesign): the "alive" flow's compact
+    /// controls — motion style, isolate-a-path, body mode, flow speed, wiggle, and a
+    /// reduced-motion (static) toggle. Matches the prototype's Tune panel control set,
+    /// squeezed into the existing right-rail chip drawer (not a big floating panel).
+    /// Placement/pixels are device QA; the underlying state + curve math are headless.
     @ViewBuilder private var loadPathDrawer: some View {
-        VStack(alignment: .leading, spacing: DS.Space.xs) {
-            Text("Load path").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            Text("Load-path flow").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
                 .foregroundStyle(DS.Color.textPrimary.color)
-            Text(LoadPathCopy.what)
+            Text("Red arrows flow LOAD → the hot-spot, following the stress field.")
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(DS.Color.textSecondary.color)
-                .frame(width: Self.drawerWidth, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(LoadPathCopy.how)
-                .dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.textTertiary.color)
-                .frame(width: Self.drawerWidth, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
+
+            drawerLabel("Motion")
+            SegmentedGlass(FlowMotionStyle.allCases.map { .init($0, $0.title) },
+                           selection: $model.flowStyle)
+
+            if model.flowCurveCount > 1 {
+                drawerLabel("Isolate a path")
+                isolatePicker
+            }
+
+            drawerLabel("Body")
+            SegmentedGlass(FlowBodyMode.allCases.map { .init($0, $0.title) },
+                           selection: $model.flowBodyMode)
+
+            drawerLabel("Flow speed")
+            HStack(spacing: DS.Space.s) {
+                Slider(value: Binding(get: { model.flowSpeed }, set: { model.setFlowSpeed($0) }),
+                       in: 0.2...2.5).tint(RGBA(255, 90, 72).color)
+                Text(String(format: "%.1f×", model.flowSpeed)).dsStyle(DS.TypeScale.caption)
+                    .monospacedDigit().foregroundStyle(DS.Color.textSecondary.color)
+                    .frame(width: 30, alignment: .trailing)
+            }
+
+            drawerLabel("Wiggle")
+            HStack(spacing: DS.Space.s) {
+                Slider(value: Binding(get: { model.flowWiggle }, set: { model.setFlowWiggle($0) }),
+                       in: 0...2).tint(RGBA(255, 90, 72).color)
+                Text(String(format: "%.1f×", model.flowWiggle)).dsStyle(DS.TypeScale.caption)
+                    .monospacedDigit().foregroundStyle(DS.Color.textSecondary.color)
+                    .frame(width: 30, alignment: .trailing)
+            }
+
+            Toggle(isOn: $model.flowReducedStatic) {
+                Text("Reduced motion (static)").dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+            }
+            .toggleStyle(SwitchToggleStyle(tint: RGBA(255, 90, 72).color))
+            .padding(.top, DS.Space.xxs)
         }
-        .resultsDrawerChrome(width: Self.drawerWidth)
+        .resultsDrawerChrome(width: Self.flowDrawerWidth)
+    }
+
+    /// A small uppercase section label inside the flow drawer (prototype `label.h`).
+    private func drawerLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.system(size: 9, weight: .bold)).tracking(0.6)
+            .foregroundStyle(DS.Color.textTertiary.color)
+            .padding(.top, DS.Space.xxs)
+    }
+
+    /// The isolate-a-path menu: "All paths" or a single path (index into the curves).
+    private var isolatePicker: some View {
+        Menu {
+            Button("All paths") { model.flowIsolate = nil }
+            ForEach(0..<model.flowCurveCount, id: \.self) { i in
+                Button("Path \(i + 1)") { model.flowIsolate = i }
+            }
+        } label: {
+            HStack {
+                Text(model.flowIsolate.map { "Path \($0 + 1)" } ?? "All paths")
+                    .dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textPrimary.color)
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                .fill(.black.opacity(0.30))
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+        }
+        .menuStyle(.borderlessButton)
     }
 
     // MARK: - Hot-spot callout (M7.viz.2 — the single worst-stress point)
