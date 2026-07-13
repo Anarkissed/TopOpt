@@ -265,6 +265,30 @@ final class LoadPathTests: XCTestCase {
         XCTAssertFalse(m.loadPathOn)
     }
 
+    @MainActor func testLoadPathFlowAdvancesWrapsAndResets() {
+        // The M7.viz.4 traveling-dash animation: the flow phase advances only while the
+        // overlay is on, wraps into [0, 1), and resets to 0 on toggle (so it restarts
+        // cleanly) — reduced-motion simply never calls advance, holding a static frame.
+        let m = loadPathModel()
+        m.advanceLoadPath(0.4)                               // off → ignored
+        XCTAssertEqual(m.loadPathPhase, 0, accuracy: 1e-9)
+        m.toggleLoadPath()                                   // on, phase 0
+        XCTAssertEqual(m.loadPathPhase, 0, accuracy: 1e-9)
+        m.advanceLoadPath(0.7); m.advanceLoadPath(0.7)       // 1.4 wraps to 0.4
+        XCTAssertEqual(m.loadPathPhase, 0.4, accuracy: 1e-9)
+        m.toggleLoadPath()                                   // off → resets
+        XCTAssertEqual(m.loadPathPhase, 0, accuracy: 1e-9)
+    }
+
+    @MainActor func testSelectingVariantResetsLoadPathFlow() {
+        let m = loadPathModel()
+        m.toggleLoadPath()
+        m.advanceLoadPath(0.6)
+        XCTAssertEqual(m.loadPathPhase, 0.6, accuracy: 1e-9)
+        m.select(0)                                          // re-selecting restarts the flow
+        XCTAssertEqual(m.loadPathPhase, 0, accuracy: 1e-9)
+    }
+
     // MARK: GPU smoke (device QA covers legibility; this only proves it draws)
 
     #if canImport(MetalKit)

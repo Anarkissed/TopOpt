@@ -46,6 +46,7 @@ public struct ResultsScreen: View {
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
     private static let morphDuration: Double = 6   // design `dur = 6`s
     private static let flexDuration: Double = 2.5  // one rest→full→rest wobble (s)
+    private static let loadPathDuration: Double = 1.6  // one load→anchor dash sweep (s)
 
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
@@ -78,14 +79,15 @@ public struct ResultsScreen: View {
                           reveal: viewerReveal,
                           flexDisplacements: flexDisplacements,
                           flexScale: flexScale,
-                          loadPathSegments: loadPathSegments)
+                          loadPathSegments: loadPathSegments,
+                          loadPathFlow: Float(model.loadPathPhase))
                 .ignoresSafeArea()
 
             topBar
             // The viz toggles (Stress / Flex / Load path / Failure) and their
-            // now-compact controls live on the right rail; each chip slides its own
-            // drawer open rather than dropping a big panel over the model. The rail
-            // sits below the top bar so it never collides with the bar's controls.
+            // now-compact controls cluster at the BOTTOM-RIGHT; each chip slides its own
+            // drawer open to the LEFT rather than dropping a big panel over the model.
+            // The cluster sits just above the orientation cube (see `cubeClearance`).
             vizRail
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
             failureMarker.ignoresSafeArea()           // M7.viz.6: failure-point marker
@@ -103,6 +105,11 @@ public struct ResultsScreen: View {
             // and flexScale uses amplitude 1).
             if model.flexOn && !reduceMotion {
                 model.advanceFlex((1.0 / 30.0) / Self.flexDuration)
+            }
+            // M7.viz.4: flow the load-path dashes while the overlay is on — UNLESS
+            // reduced-motion, which holds the static overlay (no advance → phase stays 0).
+            if model.loadPathOn && !reduceMotion {
+                model.advanceLoadPath((1.0 / 30.0) / Self.loadPathDuration)
             }
         }
         .onChange(of: liveOutcome.variants.count) { _ in
@@ -237,7 +244,7 @@ public struct ResultsScreen: View {
             .foregroundStyle(DS.Color.textSecondary.color)
             .frame(width: Self.drawerWidth)
         }
-        .resultsDrawerChrome()
+        .resultsDrawerChrome(width: Self.drawerWidth)
     }
 
     /// The stress ramp's five design stops as SwiftUI colors — the same
@@ -277,7 +284,7 @@ public struct ResultsScreen: View {
                 .frame(width: Self.drawerWidth, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .resultsDrawerChrome()
+        .resultsDrawerChrome(width: Self.drawerWidth)
     }
 
     // MARK: - Load-path legend (M7.viz.4 — principal-stress-direction key)
@@ -302,7 +309,7 @@ public struct ResultsScreen: View {
                 .frame(width: Self.drawerWidth, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .resultsDrawerChrome()
+        .resultsDrawerChrome(width: Self.drawerWidth)
     }
 
     // MARK: - Hot-spot callout (M7.viz.2 — the single worst-stress point)
@@ -381,7 +388,7 @@ public struct ResultsScreen: View {
                 }
                 if model.hasFlex { pushControl(fp) }
             }
-            .resultsDrawerChrome()
+            .resultsDrawerChrome(width: Self.drawerWidth)
         }
     }
 
@@ -510,20 +517,26 @@ public struct ResultsScreen: View {
         .padding(DS.Space.xl3)
     }
 
-    // MARK: - Right rail: slide-open visualization chips
+    // MARK: - Bottom-right rail: slide-open visualization chips
 
     /// The compact drawer content width (sliders, ramp, key copy) — the drawers are
     /// deliberately slim so the model viewport stays maximally unobstructed.
     private static let drawerWidth: CGFloat = 150
+    /// Bottom inset that lifts the chip cluster clear of the orientation cube, which
+    /// occupies the very bottom-right corner (`orientationCorner`): its `xl4` gutter +
+    /// the 50pt cube + a gap. Keeps the two right-corner clusters from overlapping.
+    private static let cubeClearance: CGFloat = DS.Space.xl4 + 50 + DS.Space.m
 
-    /// A vertical rail down the right edge, below the top bar, holding the secondary
+    /// A vertical cluster pinned to the BOTTOM-RIGHT, holding the secondary
     /// visualization toggles. Each chip toggles its mode and slides its own compact
     /// drawer open to the LEFT; flex/load-path/failure are mutually exclusive in the
     /// model, so opening one collapses the others (stress can accompany them, as
-    /// before — a stress-coloured flex is a real combination). The top inset clears
-    /// the top bar so the rail never collides with it. Pixels are device QA.
+    /// before — a stress-coloured flex is a real combination). A leading `Spacer` sinks
+    /// the chips to the bottom; the bottom inset clears the orientation cube so the two
+    /// right-corner clusters never collide. Pixels are device QA.
     private var vizRail: some View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
+            Spacer()
             // Stress — the ramp legend drawer.
             vizRow(open: model.stressOn, drawer: { stressDrawer }, chip: { stressChip })
             // M7.viz.3 Flex — only when the variant carries a displacement field.
@@ -538,12 +551,10 @@ public struct ResultsScreen: View {
             if model.hasFailurePrediction {
                 vizRow(open: model.failureOn, drawer: { failureDrawer }, chip: { failureChip })
             }
-            Spacer()
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.horizontal, DS.Space.xl3)
-        .padding(.bottom, DS.Space.xl3)
-        .padding(.top, 76)   // clear the top bar (back button + its inset)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        .padding(.horizontal, DS.Space.xl4)   // align the chips' right edge with the cube
+        .padding(.bottom, Self.cubeClearance)
         .animation(DS.Motion.sheetIn, value: model.stressOn)
         .animation(DS.Motion.sheetIn, value: model.flexOn)
         .animation(DS.Motion.sheetIn, value: model.loadPathOn)
@@ -802,13 +813,21 @@ public struct ResultsScreen: View {
 /// padding than the old floating cards) with the standard panel surface, stroke, and
 /// shadow. Keeping it in one place makes every drawer read as the same treatment.
 private extension View {
-    func resultsDrawerChrome() -> some View {
+    /// `width` is the drawer's CONTENT width (the sliders/ramp/key all share it). The
+    /// content is pinned to exactly that width BEFORE the chrome padding, so a drawer is
+    /// only ever as wide as its contents + padding — no full-width stretch. This is the
+    /// fix for the "drawers stretch nearly the full screen" bug: the Deflection/Failure
+    /// drawers contain `HStack { label; Spacer(); value }` rows whose greedy `Spacer`
+    /// would otherwise expand the drawer to fill whatever width the rail offered.
+    func resultsDrawerChrome(width: CGFloat) -> some View {
         self
+            .frame(width: width, alignment: .leading)
             .padding(.vertical, DS.Space.m)
             .padding(.horizontal, DS.Space.l)
             .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .dsShadow(.panel)
+            .fixedSize()   // never let an ancestor stretch the finished card
     }
 }
 
