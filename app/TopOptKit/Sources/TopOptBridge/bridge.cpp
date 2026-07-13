@@ -7,7 +7,6 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
-#include <cstdio>  // TEMP-INSTRUMENT: std::fprintf for diag 064 load-path logs
 #include <exception>
 #include <functional>
 #include <set>
@@ -517,38 +516,13 @@ OptimizeResult run_minimize_plastic_loadcase(
       for (std::size_t f = 0; f < n && face_off + f < load_case.load_face_ids.size(); ++f)
         faces.push_back(load_case.load_face_ids[face_off + f]);
       face_off += n;
-      // TEMP-INSTRUMENT: per load-group force + face count, and the zero-force
-      // skip test (diag 064 log #3). |F|sum==0 => this group is dropped.
-      std::fprintf(stderr,
-                   "TEMP-INSTRUMENT [bridge] loadGroup[%zu] n_faces=%zu "
-                   "force=(%g, %g, %g) |F|sum=%g zeroForceSkip=%d\n",
-                   g, n, force.x, force.y, force.z,
-                   std::fabs(force.x) + std::fabs(force.y) + std::fabs(force.z),
-                   !(std::fabs(force.x) + std::fabs(force.y) +
-                         std::fabs(force.z) >
-                     0.0)
-                       ? 1
-                       : 0);
       if (!(std::fabs(force.x) + std::fabs(force.y) + std::fabs(force.z) > 0.0))
         continue;  // a zero-force group contributes nothing
       topopt::VoxelGrid gg = base_grid;  // anchors only, no other group's Load
       bool any = false;
-      int tagged_load_voxels = 0;  // TEMP-INSTRUMENT: how many Load voxels tagged
       for (int32_t fid : faces)
         if (topopt::tag_step_face(gg, model, fid, topopt::VoxelTag::Load) > 0)
           any = true;
-      // TEMP-INSTRUMENT: recount Load voxels this group produced, and log the
-      // any==false empty-group condition that drops the group at the next line
-      // (diag 064 log #3).
-      for (int kk = 0; kk < gg.nz; ++kk)
-        for (int jj = 0; jj < gg.ny; ++jj)
-          for (int ii = 0; ii < gg.nx; ++ii)
-            if (gg.tag(ii, jj, kk) == topopt::VoxelTag::Load)
-              ++tagged_load_voxels;
-      std::fprintf(stderr,
-                   "TEMP-INSTRUMENT [bridge] loadGroup[%zu] any=%d "
-                   "loadVoxels=%d emptyGroupSkip=%d\n",
-                   g, any ? 1 : 0, tagged_load_voxels, any ? 0 : 1);
       if (!any) continue;
       const std::vector<topopt::NodalLoad> tl =
           topopt::traction_loads(gg, topopt::VoxelTag::Load, force);
@@ -559,20 +533,6 @@ OptimizeResult run_minimize_plastic_loadcase(
         topopt::tag_step_face(grid, model, fid, topopt::VoxelTag::Load);
         retained_load_faces.push_back(fid);
       }
-    }
-
-    // TEMP-INSTRUMENT: THE KEY LOG (diag 064 log #2). Total applied force that
-    // actually reaches the solver as external nodal loads. external.empty() here
-    // => the core will silently substitute self-weight (minimize_plastic.cpp:138),
-    // so the "displayed" stress would be self-weight, NOT the user's 100/150 lb.
-    {
-      double ext_abs_sum = 0.0;
-      for (const topopt::NodalLoad& nl : external)
-        ext_abs_sum += std::fabs(nl.value);
-      std::fprintf(stderr,
-                   "TEMP-INSTRUMENT [bridge] external.size()=%zu "
-                   "sum|external.value|=%g (total applied force to solver)\n",
-                   external.size(), ext_abs_sum);
     }
 
     // Dirichlet BCs from the Fixture voxels (clamp all 8 corner nodes, deduped).
@@ -597,13 +557,6 @@ OptimizeResult run_minimize_plastic_loadcase(
                   clamp_node(
                       topopt::fea_node_index(grid, i + di, j + dj, k + dk));
           }
-    // TEMP-INSTRUMENT: did the declared anchors actually freeze voxels, or is the
-    // min-x fallback about to fire? (diag 064 log #4). clampedNodes counts the
-    // Dirichlet-constrained nodes accumulated from Fixture voxels above.
-    std::fprintf(stderr,
-                 "TEMP-INSTRUMENT [bridge] any_fixture=%d clampedNodes=%zu "
-                 "minXFallbackWillFire=%d\n",
-                 any_fixture ? 1 : 0, clamped.size(), any_fixture ? 0 : 1);
     if (!any_fixture) {
       // No anchors declared: fall back to clamping the min-x boundary so the
       // system is well-posed (mirrors run_minimize_plastic).
