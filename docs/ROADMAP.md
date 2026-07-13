@@ -398,7 +398,7 @@
       need GCMMA-style conservative approximations to converge — if it can't be
       made to converge reliably in one run, STOP with a Blocked handoff rather
       than shipping a flaky solver. Pure core; no /app/.
-- [ ] M7.rmin Physical (mm-based) density-filter radius. BUG (diagnosis 060):
+- [x] M7.rmin Physical (mm-based) density-filter radius. BUG (diagnosis 060):
       the SIMP density-filter radius is hardcoded at 2.5 VOXELS
       (bridge.cpp:114, opts.simp.filter_radius; default 1.5 at simp.hpp:239)
       and never scales to physical size — so the minimum member thickness is a
@@ -436,7 +436,7 @@
       infill % produces a smaller adjusted margin and stops the ladder earlier
       (retains more material) than solid on a fixture where the raw margin is
       large. Pure core; the bridge threads the infill value.
-- [ ] M7.mma.4 Switchover: MMA becomes the default updater in
+- [x] M7.mma.4 Switchover: MMA becomes the default updater in
       minimize_plastic; OC stays available behind the option (retained, not
       deleted). BLOCKS ON: maintainer regenerates fixtures/benchmarks.json
       under MMA via the independent reference implementation BEFORE this task
@@ -465,6 +465,13 @@
       GATED: waits on M7.dom-core. Not eligible as TRACK app's topmost until
       M7.dom-core is merged; it is a core-dependent app task, run after the
       viz lane or once dom-core lands.
+- [ ] M7.mma-projection Implement Heaviside projection support ON the MMA path
+      (restores crisp-density boundaries for MMA runs; removes the Option-B
+      temporary skip). Requires threading the projection derivative through the
+      MMA sensitivities (projection chain rule) — MMA is gradient-based and
+      sensitive to this, so validate convergence carefully (per the M7.mma.4
+      scale-sensitivity precedent). Until this lands, MMA runs skip projection
+      (softer boundaries). Pure core.
 
 ## M7-VIZ — result visualization track (TRACK app; ACTIVE, concurrent with M7-OPT)
 
@@ -524,7 +531,7 @@
       lane — it composes the other viz tasks, so it depends on them landing
       first. Tests: tier selection drives which surfaces show; persistence
       round-trips. Device QA.
-- [ ] M7.viz.6 Failure-load prediction ("push it till it breaks"). Show the
+- [x] M7.viz.6 Failure-load prediction ("push it till it breaks"). Show the
       user how much load the part can take before it yields, and WHERE it fails
       first. This is a pure derivation from ALREADY-COMPUTED data — linear FEA
       means stress scales linearly with load, so no new solve: the failure
@@ -551,7 +558,7 @@
 ## M7-SHIP — v1 ship block (small tasks; deliberately between M7.dom and the
    ML track so the app is shippable end-to-end while ML work runs long)
 
-- [ ] M7.params (app) Print-parameters input screen on import. Build from the
+- [x] M7.params (app) Print-parameters input screen on import. Build from the
       Claude Design source (design HTML is the visual source of truth, DECISIONS
       2026-07-09) [DESIGN PATH TBD]. After import, before the workspace, present
       a sheet capturing walls / top layers / bottom layers / infill %, with FDM
