@@ -71,7 +71,12 @@ vertex VOut viewer_vertex(VIn in [[stage_in]], constant Uniforms& u [[buffer(1)]
 // `reveal` = (fraction 0..1, minY, maxY, enabled). When enabled, fragments above
 // the reveal height (normalized model Y) are discarded — the results morph scrub
 // (M7.8). Default (…, 0) shows everything, so edit-mode is unaffected.
-fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]]) {
+// `bodyAlpha` (buffer 1) is the body opacity for the load-flow x-ray/stress body
+// modes (handoff 070): the output is PREMULTIPLIED (rgb·a, a), so the opaque draw
+// (a == 1, blending off) is byte-identical to before while a translucent pipeline
+// (a < 1, premultiplied "over" blending) shows the flow through the walls.
+fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[buffer(0)]],
+                                constant float& bodyAlpha [[buffer(1)]]) {
     if (reveal.w > 0.5) {
         float t = (in.mheight - reveal.y) / max(reveal.z - reveal.y, 1e-4);
         if (t > reveal.x) discard_fragment();
@@ -94,7 +99,8 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
     if (in.tint.a > 0.001) {
         color = mix(color, in.tint.rgb * (0.55 + 0.45 * lighting), in.tint.a);
     }
-    return float4(clamp(color, 0.0, 1.0), 1.0);
+    float3 rgb = clamp(color, 0.0, 1.0);
+    return float4(rgb * bodyAlpha, bodyAlpha);   // premultiplied (a==1 → unchanged)
 }
 """
 
@@ -247,6 +253,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// M7.viz.4 load-path: the flow-animation phase in [0, 1) — scrolls the bright dash
     /// along each ribbon. 0 = static (reduced-motion holds it here).
     private var loadPathFlow: Float = 0
+    /// Load-path FLOW (handoff 070): the comet-arrow tube geometry (pos+rgba, stride 7),
+    /// rebuilt each animation frame from the model's `CometFrame`s and drawn ADDITIVE so
+    /// the arrows glow through the x-ray body. Empty = off.
+    private var loadFlowBuffer: MTLBuffer?
+    private var loadFlowVertexCount = 0
+    /// Load-path FLOW: the faint full-path guide lines (pos+rgba, stride 7, `.line`).
+    private var flowGuideBuffer: MTLBuffer?
+    private var flowGuideVertexCount = 0
+    /// Body opacity for the load-flow body modes: 1 opaque (solid, default), < 1 draws
+    /// the mesh translucent so the flow shows through the walls (x-ray / stress).
+    private var bodyAlpha: Float = 1
     private var vertexDrawCount = 0
     /// M7.8 reveal scrub params (fraction, minY, maxY, enabled); default shows all.
     private var revealParams = SIMD4<Float>(1, 0, 1, 0)
@@ -275,6 +292,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The thick-ribbon load-path pipeline (M7.viz.4). Optional: if it fails to build,
     /// the load path degrades to the 1px `groundPipeline` line draw.
     private let loadPathPipeline: MTLRenderPipelineState?
+    /// Load-path FLOW (handoff 070): an ADDITIVE-blended pipeline (reuses the ground
+    /// pos+rgba shaders) for the glowing comet tubes + guide lines. Optional.
+    private let cometPipeline: MTLRenderPipelineState?
+    /// Load-path FLOW: a translucent copy of the main viewer pipeline (premultiplied
+    /// "over" blending) for the semi-transparent x-ray/stress body. Optional — a nil
+    /// falls back to the opaque draw (no see-through, but everything still renders).
+    private let translucentBodyPipeline: MTLRenderPipelineState?
+    /// Depth state for the translucent body: test `.less` but DO NOT write depth, so
+    /// back walls show through the front (the x-ray read).
+    private let translucentBodyDepthState: MTLDepthStencilState
     private var modelCenter = SIMD3<Float>.zero
     /// The currently-displayed model rotation (animates toward `settleTo`).
     private var modelRotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
@@ -448,6 +475,64 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             lpPipe = try? device.makeRenderPipelineState(descriptor: lpd)
         }
 
+        // Load-path FLOW comet pipeline (handoff 070): reuses the ground pos+rgba
+        // shaders but blends ADDITIVE (src one / dst one), so the premultiplied comet
+        // tubes accumulate into a glow that reads through the translucent x-ray body.
+        var cometPipe: MTLRenderPipelineState? = nil
+        if let cLib = try? device.makeLibrary(source: groundShaderSource, options: nil),
+           let cvf = cLib.makeFunction(name: "ground_vertex"),
+           let cff = cLib.makeFunction(name: "ground_fragment") {
+            let cvd = MTLVertexDescriptor()
+            cvd.attributes[0].format = .float3     // position
+            cvd.attributes[0].offset = 0
+            cvd.attributes[0].bufferIndex = 0
+            cvd.attributes[1].format = .float4     // rgba (premultiplied)
+            cvd.attributes[1].offset = MemoryLayout<Float>.stride * 3
+            cvd.attributes[1].bufferIndex = 0
+            cvd.layouts[0].stride = MemoryLayout<Float>.stride * 7
+            let cpd = MTLRenderPipelineDescriptor()
+            cpd.vertexFunction = cvf
+            cpd.fragmentFunction = cff
+            cpd.vertexDescriptor = cvd
+            cpd.colorAttachments[0].pixelFormat = Self.colorFormat
+            cpd.colorAttachments[0].isBlendingEnabled = true          // ADDITIVE glow
+            cpd.colorAttachments[0].rgbBlendOperation = .add
+            cpd.colorAttachments[0].alphaBlendOperation = .add
+            cpd.colorAttachments[0].sourceRGBBlendFactor = .one
+            cpd.colorAttachments[0].sourceAlphaBlendFactor = .one
+            cpd.colorAttachments[0].destinationRGBBlendFactor = .one
+            cpd.colorAttachments[0].destinationAlphaBlendFactor = .one
+            cpd.depthAttachmentPixelFormat = Self.depthFormat
+            cometPipe = try? device.makeRenderPipelineState(descriptor: cpd)
+        }
+
+        // Load-path FLOW translucent body pipeline (handoff 070): the SAME viewer
+        // shaders + vertex layout, but premultiplied "over" blending so the x-ray/stress
+        // body draws see-through (the fragment already premultiplies by `bodyAlpha`).
+        var translucentPipe: MTLRenderPipelineState? = nil
+        do {
+            let tpd = MTLRenderPipelineDescriptor()
+            tpd.vertexFunction = vfn
+            tpd.fragmentFunction = ffn
+            tpd.vertexDescriptor = vd
+            tpd.colorAttachments[0].pixelFormat = Self.colorFormat
+            tpd.colorAttachments[0].isBlendingEnabled = true
+            tpd.colorAttachments[0].rgbBlendOperation = .add
+            tpd.colorAttachments[0].alphaBlendOperation = .add
+            tpd.colorAttachments[0].sourceRGBBlendFactor = .one       // premultiplied
+            tpd.colorAttachments[0].sourceAlphaBlendFactor = .one
+            tpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            tpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            tpd.depthAttachmentPixelFormat = Self.depthFormat
+            translucentPipe = try? device.makeRenderPipelineState(descriptor: tpd)
+        }
+
+        // Translucent body depth: test against the part but write nothing, so back
+        // walls show through the front — the x-ray read.
+        let tdsd = MTLDepthStencilDescriptor()
+        tdsd.depthCompareFunction = .less
+        tdsd.isDepthWriteEnabled = false
+
         // Ground depth: test against the part (so it is occluded) but do not write
         // depth (the translucent ground must not block anything behind it).
         let gdsd = MTLDepthStencilDescriptor()
@@ -469,6 +554,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
         self.lineOverlayDepthState = device.makeDepthStencilState(descriptor: odsd) ?? depth
         self.loadPathPipeline = lpPipe
+        self.cometPipeline = cometPipe
+        self.translucentBodyPipeline = translucentPipe
+        self.translucentBodyDepthState = device.makeDepthStencilState(descriptor: tdsd) ?? depth
         super.init()
     }
 
@@ -479,6 +567,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.mesh = mesh
         loadPathBuffer = nil; loadPathVertexCount = 0   // new variant → drop stale glyphs
         loadPathRibbonBuffer = nil; loadPathRibbonVertexCount = 0
+        loadFlowBuffer = nil; loadFlowVertexCount = 0   // …and stale comet-flow geometry
+        flowGuideBuffer = nil; flowGuideVertexCount = 0
         guard !mesh.isEmpty else {
             vertexBuffer = nil; tintBuffer = nil; idVertexBuffer = nil; flexBuffer = nil
             vertexDrawCount = 0; flatFaceIDs = []; flexScale = 0
@@ -779,6 +869,42 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// M7.viz.4 load-path: the current flow-animation phase (scrolls the traveling dash).
     func setLoadPathFlow(_ phase: Float) { loadPathFlow = phase }
 
+    /// Load-path FLOW (handoff 070): upload the comet-arrow tube geometry (pos+rgba,
+    /// stride 7) for THIS frame. Rebuilt each animation tick from the model's comet
+    /// frames, so this is called ~30×/s while the overlay animates. Empty clears it.
+    func setLoadFlow(_ verts: [Float]) {
+        guard !verts.isEmpty, verts.count % 7 == 0 else {
+            loadFlowBuffer = nil; loadFlowVertexCount = 0; return
+        }
+        loadFlowVertexCount = verts.count / 7
+        loadFlowBuffer = verts.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// Load-path FLOW: upload the faint full-path guide lines (pos+rgba, stride 7,
+    /// drawn `.line`). Uploaded once per selection (the routes don't move). Empty clears.
+    func setFlowGuides(_ verts: [Float]) {
+        guard !verts.isEmpty, verts.count % 7 == 0, verts.count % 14 == 0 else {
+            flowGuideBuffer = nil; flowGuideVertexCount = 0; return
+        }
+        flowGuideVertexCount = verts.count / 7
+        flowGuideBuffer = verts.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// Load-path FLOW: the body opacity (1 opaque; < 1 draws the mesh translucent so
+    /// the flow shows through — the x-ray / stress body modes).
+    func setBodyAlpha(_ a: Float) { bodyAlpha = min(1, max(0, a)) }
+
+    /// Load-path FLOW: drop the comet geometry + guides (overlay off / stale variant).
+    func clearLoadFlow() {
+        loadFlowBuffer = nil; loadFlowVertexCount = 0
+        flowGuideBuffer = nil; flowGuideVertexCount = 0
+        bodyAlpha = 1
+    }
+
     /// M7.viz.4 load-path: drop the overlay (toggled off / variant without a field).
     func clearLoadPath() {
         loadPathBuffer = nil; loadPathVertexCount = 0
@@ -864,14 +990,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
               let fbuf = flexBuffer,
               let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
         var uniforms = makeUniforms(aspect: aspect)
-        enc.setRenderPipelineState(pipeline)
-        enc.setDepthStencilState(depthState)
+        // Load-flow body modes (handoff 070): a body alpha < 1 draws the mesh through
+        // the translucent pipeline (premultiplied "over", no depth write) so the comet
+        // arrows show through the walls; alpha 1 is the unchanged opaque draw.
+        let translucent = bodyAlpha < 0.999
+        var bodyAlphaVal = bodyAlpha
+        enc.setRenderPipelineState(translucent ? (translucentBodyPipeline ?? pipeline) : pipeline)
+        enc.setDepthStencilState(translucent ? translucentBodyDepthState : depthState)
         enc.setCullMode(.none)  // show both sides regardless of winding
         enc.setVertexBuffer(vbuf, offset: 0, index: 0)
         enc.setVertexBuffer(tbuf, offset: 0, index: 2)
         enc.setVertexBuffer(fbuf, offset: 0, index: 3)   // M7.viz.3 flex displacement
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
         enc.setFragmentBytes(&revealParams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
+        enc.setFragmentBytes(&bodyAlphaVal, length: MemoryLayout<Float>.stride, index: 1)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
@@ -940,6 +1072,25 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setVertexBuffer(lbuf, offset: 0, index: 0)
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: loadPathVertexCount)
+        }
+
+        // Load-path FLOW (handoff 070): the faint guide routes then the glowing comet
+        // arrows, both under the MESH's mvp (locked to the part) and depth-ALWAYS (so
+        // they read through/inside the translucent body — the same overlay treatment as
+        // the ribbon draw). Additive `cometPipeline` makes the tubes glow.
+        if let cpipe = cometPipeline {
+            var mvp = uniforms.mvp
+            enc.setRenderPipelineState(cpipe)
+            enc.setDepthStencilState(lineOverlayDepthState)
+            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            if let gbuf = flowGuideBuffer, flowGuideVertexCount > 0 {
+                enc.setVertexBuffer(gbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: flowGuideVertexCount)
+            }
+            if let fbuf = loadFlowBuffer, loadFlowVertexCount > 0 {
+                enc.setVertexBuffer(fbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: loadFlowVertexCount)
+            }
         }
         enc.endEncoding()
     }
@@ -1110,6 +1261,18 @@ struct MeshViewInputs {
     /// in model space. Rendered as translucent volumes with bright edges.
     var designBox: DesignBoxBounds? = nil
     var keepOutBoxes: [DesignBoxBounds] = []
+    /// Load-path FLOW (handoff 070): the comet-arrow tube geometry (pos+rgba, stride 7)
+    /// for THIS frame, rebuilt each tick from the model's comet frames. nil = flow off.
+    var loadFlowVertices: [Float]? = nil
+    /// Load-path FLOW: a per-frame key (the flow clock) so the coordinator re-uploads the
+    /// comet buffer every animation tick (the geometry changes each frame, unlike a
+    /// cheap uniform).
+    var loadFlowKey: Double = 0
+    /// Load-path FLOW: the faint full-path guide lines (pos+rgba, stride 7). Uploaded
+    /// when they change (per selection), not per frame.
+    var loadFlowGuides: [Float]? = nil
+    /// Load-path FLOW: body opacity (1 opaque; < 1 = translucent x-ray/stress body).
+    var bodyAlpha: Float = 1
 }
 
 #if os(iOS)
@@ -1125,14 +1288,18 @@ public struct MetalMeshView: UIViewRepresentable {
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
-                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = []) {
+                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
+                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
-            designBox: designBox, keepOutBoxes: keepOutBoxes)
+            designBox: designBox, keepOutBoxes: keepOutBoxes,
+            loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
+            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1169,14 +1336,18 @@ public struct MetalMeshView: NSViewRepresentable {
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
-                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = []) {
+                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
+                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
-            designBox: designBox, keepOutBoxes: keepOutBoxes)
+            designBox: designBox, keepOutBoxes: keepOutBoxes,
+            loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
+            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1243,6 +1414,12 @@ extension MetalMeshView {
         /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
         private var appliedLoadPath = false
         private var appliedLoadPathFlow: Float = 0
+        /// Load-path FLOW (handoff 070): whether the comet flow is on, the last comet
+        /// key (re-upload each animation tick), guide signature, and body alpha.
+        private var appliedFlow = false
+        private var appliedFlowKey: Double = -1
+        private var appliedGuideSig = -1
+        private var appliedBodyAlpha: Float = 1
         /// M7.dom-app: the design box + keep-outs last uploaded, so the gizmo geometry
         /// rebuilds only when the boxes actually change (not every camera tick).
         private var appliedDesignBox: DesignBoxBounds?
@@ -1363,6 +1540,37 @@ extension MetalMeshView {
                 appliedLoadPath = false
                 appliedLoadPathFlow = 0
                 renderer.clearLoadPath()
+                dirty = true
+            }
+
+            // Load-path FLOW (handoff 070): the comet geometry is rebuilt every
+            // animation tick, so re-upload it whenever the per-frame `loadFlowKey`
+            // moves (that is what animates the arrows). Guides + body alpha change only
+            // on selection / body-mode change, so re-upload them on their own signals.
+            if let flow = inputs.loadFlowVertices {
+                // apply() runs once per ticker tick (a `flowClock` change re-evaluates the
+                // SwiftUI body), so re-upload the per-frame comet geometry unconditionally
+                // here — that is what animates the arrows, and it also covers a paused
+                // param change (style/wiggle/isolate/reduced) that alters the same frame.
+                renderer.setLoadFlow(flow)
+                appliedFlowKey = inputs.loadFlowKey
+                let gsig = inputs.loadFlowGuides?.count ?? 0
+                if !appliedFlow || gsig != appliedGuideSig {
+                    appliedGuideSig = gsig
+                    renderer.setFlowGuides(inputs.loadFlowGuides ?? [])
+                }
+                if !appliedFlow || inputs.bodyAlpha != appliedBodyAlpha {
+                    appliedBodyAlpha = inputs.bodyAlpha
+                    renderer.setBodyAlpha(inputs.bodyAlpha)
+                }
+                appliedFlow = true
+                dirty = true
+            } else if appliedFlow {
+                appliedFlow = false
+                appliedFlowKey = -1
+                appliedGuideSig = -1
+                appliedBodyAlpha = 1
+                renderer.clearLoadFlow()
                 dirty = true
             }
 

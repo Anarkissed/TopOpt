@@ -145,6 +145,11 @@ public struct WorkspacePlaceholder: View {
                               loadUnit: force.unit,
                               infillPercent: project.printParams.infillPercent,
                               infillPattern: project.printParams.infillPattern,
+                              // Handoff 070 load-path FLOW: the load-group centroids are
+                              // where each comet arrow starts (app-side data, like the
+                              // applied load). Empty → the results screen falls back to
+                              // the most-deflected node.
+                              loadLocations: loadFlowSeeds,
                               streaming: run.isStreaming,
                               onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
                               onExport: { model.toast = "Export (.3mf) arrives in M7.9" },
@@ -240,6 +245,15 @@ public struct WorkspacePlaceholder: View {
     private func settledWorld(_ modelPoint: SIMD3<Float>) -> SIMD3<Float> {
         let c = meshCenter
         return c + settleQuat.act(modelPoint - c)
+    }
+
+    /// The model-space centroids of the tagged LOAD groups — the start points for the
+    /// redesigned load-path flow (handoff 070). Same model frame (mm) as the results
+    /// grid/variant, so a centroid here lines up with the derived stress field there.
+    private var loadFlowSeeds: [SIMD3<Float>] {
+        selection.groups.compactMap { g in
+            force.kind(for: g.id).isLoad ? groupCentroidModel(g) : nil
+        }
     }
 
     /// A group's model-space centroid (mean of its faces' centroids).

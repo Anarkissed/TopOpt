@@ -412,6 +412,12 @@ public final class ResultsModel: ObservableObject {
     /// (e.g. "Holds ~157 lb at 20% gyroid"). Purely descriptive — the knockdown math
     /// depends only on the infill %.
     public let infillPattern: String
+    /// World-mm start points for the redesigned load-path FLOW (handoff 070): the
+    /// tagged load-group centroids, threaded in from the workspace (app-side data, like
+    /// `appliedLoadKg`). Empty for an STL / self-weight run — the flow then falls back
+    /// to the most-deflected node (`flowLoadSeeds`), an honest proxy for where load
+    /// enters. These are the origins of the `.stressPoint` curves the comet arrows ride.
+    public let loadLocations: [SIMD3<Float>]
     /// The Gibson-Ashby strength knockdown for this project's fixed infill (f^1.5;
     /// 1.0 when solid). The SAME factor the core applies at its acceptance gate
     /// (`minimize_plastic.cpp`), so the displayed physics agrees with the ladder. The
@@ -465,6 +471,27 @@ public final class ResultsModel: ObservableObject {
     /// flowing from the loads toward the anchors). Wraps. Reduced-motion holds it at 0
     /// (a static overlay), so the animation is opt-out-safe.
     @Published public private(set) var loadPathPhase: Double = 0
+    // Redesigned load-path FLOW controls (handoff 070 → Metal). These drive the
+    // "alive" comet arrows and their moving stress epicenters; they are meaningful
+    // only while `loadPathOn`. All are compact-drawer controls matching the prototype.
+    /// The "alive" motion preset (Sine / Serpentine / Pulse).
+    @Published public var flowStyle: FlowMotionStyle = .sine
+    /// How the body is drawn behind the flow (X-ray / Stress / Solid).
+    @Published public var flowBodyMode: FlowBodyMode = .xray
+    /// Travel-speed multiplier (prototype 0.2–2.5×).
+    @Published public private(set) var flowSpeed: Float = 1
+    /// Undulation-amount multiplier (prototype 0–2×).
+    @Published public private(set) var flowWiggle: Float = 1
+    /// User "reduced motion (static)" toggle — freezes the arrows mid-path with clean
+    /// heads. OR-ed with the system reduce-motion setting by the view.
+    @Published public var flowReducedStatic: Bool = false
+    /// Which single path to isolate (index into `selectedFlowCurves`), or nil for all.
+    @Published public var flowIsolate: Int? = nil
+    /// Monotonic animation clock (seconds) advanced by the view's ticker while the
+    /// overlay is on. Drives the comet travel + undulation (unlike a wrapped phase, the
+    /// comet math needs a continuous time for its per-path desync oscillators).
+    @Published public private(set) var flowClock: Double = 0
+
     /// Failure-load surface toggle (M7.viz.6): reveals the predicted failure load, the
     /// failure marker (reusing the viz.2 hot-spot styling), and — when the variant has
     /// a displacement field — the "push" scrub. Only meaningful when the selected
@@ -492,7 +519,8 @@ public final class ResultsModel: ObservableObject {
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
-                infillPercent: Int = 100, infillPattern: String = "gyroid") {
+                infillPercent: Int = 100, infillPattern: String = "gyroid",
+                loadLocations: [SIMD3<Float>] = []) {
         self.projectName = projectName
         self.materialName = materialName
         self.yieldStrengthMPa = max(0, yieldStrengthMPa)
@@ -500,6 +528,7 @@ public final class ResultsModel: ObservableObject {
         self.loadUnit = loadUnit
         self.infillPercent = infillPercent
         self.infillPattern = infillPattern
+        self.loadLocations = loadLocations
         self.infillKnockdown = FailureLoad.infillKnockdown(percent: Double(infillPercent))
         apply(outcome)
         selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
@@ -541,6 +570,8 @@ public final class ResultsModel: ObservableObject {
         flexCache = nil       // …and the per-vertex flex displacements
         loadPathCache = nil   // …and the derived load-path glyphs
         loadPathSegmentCache = nil
+        flowCurveCache = nil   // …and the redesigned flow curves
+        flowSeedCache = nil
         failureCache = nil    // …and the failure-load prediction
         peakToRedCache = nil  // …and the flex peak-to-red color multiple
     }
@@ -660,6 +691,8 @@ public final class ResultsModel: ObservableObject {
     public func toggleLoadPath() {
         loadPathOn.toggle()
         loadPathPhase = 0
+        flowClock = 0            // restart the comet flow cleanly
+        flowIsolate = nil        // …showing all paths by default (the acceptance default)
         if loadPathOn { flexOn = false; flexPhase = 0; failureOn = false; pushFactor = 1 }
     }
 
@@ -708,6 +741,170 @@ public final class ResultsModel: ObservableObject {
         }
         loadPathSegmentCache = (selectedIndex, out)
         return out
+    }
+
+    // MARK: - load-path FLOW (handoff 070 → Metal): curves, comet frames, epicenters
+
+    /// Seconds for one tail→head traverse of a comet at 1× speed. The per-path
+    /// speed multipliers + the user speed slider scale from this.
+    public static let flowLoopPeriod: Double = 3.6
+
+    /// The path colour: a fixed bright red matching the approved "flowing red arrows"
+    /// design. The arrows depict the load FLOW (a path); the stress colour lives in the
+    /// body + the moving bloom, so the arrows stay a consistent, legible red.
+    public static let flowColor = SIMD3<Float>(1.0, 0.28, 0.22)
+
+    private var flowCurveCache: (index: Int, curves: [FlowCurve])?
+    private var flowSeedCache: (index: Int, seeds: [SIMD3<Float>])?
+
+    /// The absolute comet tube thickness (world mm), scaled to the part size so it
+    /// reads the same on a small bracket and a large beam.
+    private var flowBaseRadius: Float {
+        let r = selectedMesh?.bounds.radius ?? max(spacing * 8, 1)
+        return Swift.max(r * 0.010, spacing * 0.3)
+    }
+    /// The moving stress bloom's world-mm reach around each arrow head.
+    private var flowBloomRadius: Float {
+        let r = selectedMesh?.bounds.radius ?? max(spacing * 8, 1)
+        return Swift.max(r * 0.28, spacing * 3)
+    }
+
+    /// The world-mm start points for the flow curves: the tagged load-group centroids
+    /// (`loadLocations`), or — when none were declared (STL / self-weight run) — a
+    /// single honest fallback at the most-deflected node of the displacement field
+    /// (where the load visibly enters the part). Cached per selection.
+    public var flowLoadSeeds: [SIMD3<Float>] {
+        if let c = flowSeedCache, c.index == selectedIndex { return c.seeds }
+        let seeds: [SIMD3<Float>]
+        if !loadLocations.isEmpty {
+            seeds = loadLocations
+        } else if let d = selectedDisplacementField, !d.isEmpty, let m = maxDisplacementPosition(d) {
+            seeds = [m]
+        } else {
+            seeds = []
+        }
+        flowSeedCache = (selectedIndex, seeds)
+        return seeds
+    }
+
+    /// The world position of the grid node with the largest displacement magnitude —
+    /// the honest "where does load enter" proxy when no load group was tagged.
+    private func maxDisplacementPosition(_ d: DisplacementField) -> SIMD3<Float>? {
+        var best: Float = -1
+        var bestPos: SIMD3<Float>? = nil
+        for c in 0...d.nz {
+            for b in 0...d.ny {
+                for a in 0...d.nx {
+                    let mag = simd_length(d.node(a, b, c))
+                    if mag > best {
+                        best = mag
+                        bestPos = d.origin + SIMD3<Float>(Float(a), Float(b), Float(c)) * d.spacing
+                    }
+                }
+            }
+        }
+        return best > 0 ? bestPos : nil
+    }
+
+    /// The `.stressPoint` flow curves for the selected variant: one comet path per load
+    /// seed, streaming from the load through the principal-stress field to the peak
+    /// hot-spot. Cached per selection (the streamline integration runs once per variant,
+    /// not per frame). Empty when the mode has no field / seeds / hot-spot.
+    public var selectedFlowCurves: [FlowCurve] {
+        if let c = flowCurveCache, c.index == selectedIndex { return c.curves }
+        let curves: [FlowCurve]
+        if let path = selectedLoadPath, !path.isEmpty, let hs = hotSpot, !flowLoadSeeds.isEmpty {
+            curves = LoadFlowField.curves(mode: .stressPoint, loadSeeds: flowLoadSeeds,
+                                          glyphs: path, hotSpot: hs.position,
+                                          stepLength: max(spacing, 1e-3))
+        } else {
+            curves = []
+        }
+        flowCurveCache = (selectedIndex, curves)
+        return curves
+    }
+
+    /// How many flow paths the selected variant has (for the isolate picker).
+    public var flowCurveCount: Int { selectedFlowCurves.count }
+
+    /// The indices of the curves currently drawn: the isolated one, or all of them.
+    public var visibleFlowCurveIndices: [Int] {
+        let curves = selectedFlowCurves
+        if let i = flowIsolate, curves.indices.contains(i) { return [i] }
+        return Array(curves.indices)
+    }
+
+    /// The effective reduced-motion state: the user's static toggle OR the system
+    /// setting (the view passes the latter). Freezes the arrows mid-path (clean heads).
+    public func flowReduced(reduceMotion: Bool) -> Bool { flowReducedStatic || reduceMotion }
+
+    /// The comet-arrow frames to draw this instant — one per visible curve, animated at
+    /// `flowClock`. The view extrudes each into tube geometry (device QA); the frame
+    /// math itself is headlessly tested in `LoadFlowTests`.
+    public func flowCometFrames(reduceMotion: Bool) -> [CometFrame] {
+        let curves = selectedFlowCurves
+        guard !curves.isEmpty else { return [] }
+        let reduced = flowReduced(reduceMotion: reduceMotion)
+        let r = flowBaseRadius
+        return visibleFlowCurveIndices.map { i in
+            CometArrow.frame(curve: curves[i], style: flowStyle, clock: Float(flowClock),
+                             loopPeriod: Float(Self.flowLoopPeriod), speed: flowSpeed,
+                             wiggle: flowWiggle, reduced: reduced, baseRadius: r,
+                             color: Self.flowColor)
+        }
+    }
+
+    /// The current arrow-head world positions — the moving stress epicenters the body
+    /// bloom follows. One per visible curve.
+    public func flowHeadPositions(reduceMotion: Bool) -> [SIMD3<Float>] {
+        flowCometFrames(reduceMotion: reduceMotion).map(\.headPosition)
+    }
+
+    /// Per-flat-vertex body colours for the flow's "stress" body mode with the MOVING
+    /// epicenters blended in: each vertex's true static stress fraction, heated toward
+    /// hot near the nearest arrow head (a bloom travelling with the load). Reuses the
+    /// exact "drive stress colour from an animation parameter" pattern the flex→stress
+    /// coupling uses — the parameter is now arrow position, not a load multiple. This is
+    /// a viz layer; the literal Stress chip stays the truthful static readout.
+    public func flowStressTints(for mesh: ViewerMesh, field: StressField,
+                                heads: [SIMD3<Float>]) -> [SIMD4<Float>] {
+        let positions = mesh.flat.positions
+        let count = mesh.flat.vertexCount
+        let radius = flowBloomRadius
+        var out = [SIMD4<Float>](); out.reserveCapacity(count)
+        for v in 0..<count {
+            let p = SIMD3<Float>(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2])
+            let base = stressFraction(mpa: Double(field.value(at: p)))
+            let frac = LoadFlowEpicenter.heatedFraction(base: base, position: p, heads: heads,
+                                                        radius: radius, strength: Self.epicenterStrength)
+            let c = ResultsModel.stressColor(fraction: frac)
+            out.append(SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1))
+        }
+        return out
+    }
+
+    /// How hot the bloom centre pushes a vertex (fraction units) as a head passes — a
+    /// cool-blue vertex lifts into the warm band, illustrating the travelling load.
+    static let epicenterStrength: Double = 0.55
+
+    /// The faint full-path guide polylines (world mm) so a route reads even when the
+    /// arrow is elsewhere on it — one flattened `[x,y,z]` list per curve. The view draws
+    /// these as dim lines (the selected/isolated one brighter).
+    public func flowGuidePolylines() -> [[SIMD3<Float>]] {
+        selectedFlowCurves.map { $0.points }
+    }
+
+    /// Set the flow travel speed, clamped to the prototype's band.
+    public func setFlowSpeed(_ v: Float) { flowSpeed = Swift.min(2.5, Swift.max(0.2, v)) }
+    /// Set the flow wiggle amount, clamped to the prototype's band.
+    public func setFlowWiggle(_ v: Float) { flowWiggle = Swift.min(2, Swift.max(0, v)) }
+
+    /// Advance the flow clock by `dt` seconds (called by the view's ticker while the
+    /// overlay is on and motion is allowed). Monotonic — the comet math wraps travel
+    /// internally, so the clock itself never needs to reset mid-run.
+    public func advanceFlowClock(_ dt: Double) {
+        guard loadPathOn else { return }
+        flowClock += dt
     }
 
     // MARK: - failure-load prediction (M7.viz.6)
@@ -952,6 +1149,8 @@ public final class ResultsModel: ObservableObject {
         playing = false
         flexPhase = 0   // the new variant's flex loop starts from rest
         loadPathPhase = 0   // …and the load-path flow restarts
+        flowClock = 0   // …and the redesigned comet flow restarts
+        flowIsolate = nil   // …back to all paths for the new variant
         pushFactor = 1  // …and the push scrub resets to the current load
     }
 
