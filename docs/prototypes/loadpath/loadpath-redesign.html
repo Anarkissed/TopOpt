@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Load-Path Redesign — 3D Prototype (L-bracket)</title>
+<style>
+  :root{
+    --ink:#f2f5fa; --dim:#8b96a8; --line:#2a3242;
+    --pill:#161b24; --pill-b:#2b3444; --accent:#0a84ff; --red:#ff3b30;
+  }
+  *{box-sizing:border-box;-webkit-user-select:none;user-select:none;}
+  html,body{margin:0;height:100%;background:#000;color:var(--ink);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;position:absolute;inset:0;touch-action:none;}
+
+  /* ---- top bar ---- */
+  .top{position:absolute;top:0;left:0;right:0;height:56px;display:flex;align-items:center;
+    gap:12px;padding:0 16px;z-index:5;pointer-events:none;}
+  .top .chip,.top .btn{pointer-events:auto;}
+  .chev{width:34px;height:34px;border-radius:50%;background:#12161d;border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:16px;}
+  .title{font-weight:650;font-size:15px;}
+  .title .opt{color:#34d17a;font-weight:600;margin-left:8px;font-size:13px;}
+  .seeorig{display:flex;align-items:center;gap:7px;background:#12161d;border:1px solid var(--line);
+    border-radius:9px;padding:7px 12px;color:var(--ink);font-size:13px;}
+  .spacer{flex:1;}
+  .export{background:var(--accent);color:#fff;border-radius:11px;padding:9px 15px;font-weight:650;
+    font-size:14px;display:flex;align-items:center;gap:7px;}
+
+  /* ---- right mode rail ---- */
+  .rail{position:absolute;right:16px;bottom:120px;display:flex;flex-direction:column;gap:12px;z-index:5;align-items:flex-end;}
+  .mode{pointer-events:auto;display:flex;align-items:center;gap:9px;background:var(--pill);
+    border:1px solid var(--pill-b);border-radius:12px;padding:11px 16px;font-weight:600;font-size:14px;
+    color:var(--ink);min-width:118px;cursor:pointer;transition:border-color .15s,background .15s;}
+  .mode .dot{width:15px;height:15px;border-radius:50%;flex:none;
+    background:conic-gradient(#2c6bff,#17d3e0,#38e08a,#ffd24a,#ff3b30,#2c6bff);}
+  .mode.icon .dot{background:none;color:var(--dim);font-size:15px;width:auto;}
+  .mode.on{border-color:var(--accent);background:#0d2136;}
+  .mode.on.lp{border-color:var(--red);background:#2a1113;}
+
+  /* stress legend chip */
+  .legend{position:absolute;right:150px;bottom:214px;z-index:5;background:rgba(20,25,33,.9);
+    border:1px solid var(--pill-b);border-radius:12px;padding:10px 13px;width:200px;font-size:12px;display:none;}
+  .legend .l1{color:var(--ink);font-weight:600;line-height:1.25;}
+  .legend .bar{height:8px;border-radius:5px;margin:8px 0 4px;
+    background:linear-gradient(90deg,#0a2a8f,#1565ff,#17d3e0,#38e08a,#ffd24a,#ff3b30);}
+  .legend .ends{display:flex;justify-content:space-between;color:var(--dim);}
+
+  /* ---- bottom mass chips ---- */
+  .chips{position:absolute;left:16px;bottom:96px;display:flex;gap:10px;z-index:5;}
+  .mchip{background:var(--pill);border:1px solid var(--pill-b);border-radius:12px;padding:9px 14px;min-width:78px;}
+  .mchip .p{font-weight:700;font-size:16px;color:#cdd6e4;}
+  .mchip .g{color:var(--dim);font-size:11px;margin-top:2px;}
+  .mchip.sel{border-color:#1f6f4a;background:#0e2018;}
+  .mchip.sel .rec{color:#34d17a;font-size:9px;font-weight:700;letter-spacing:.08em;}
+  .mchip.sel .p{color:#34d17a;}
+
+  /* ---- scrubber ---- */
+  .scrub{position:absolute;left:50%;transform:translateX(-50%);bottom:34px;z-index:5;
+    display:flex;align-items:center;gap:12px;background:rgba(18,22,29,.82);border:1px solid var(--pill-b);
+    border-radius:30px;padding:8px 16px 8px 8px;backdrop-filter:blur(8px);}
+  .play{width:40px;height:40px;border-radius:50%;background:#fff;color:#111;display:flex;align-items:center;
+    justify-content:center;font-size:15px;cursor:pointer;}
+  .scrub input[type=range]{width:230px;accent-color:var(--accent);}
+  .scrub .t{color:var(--dim);font-variant-numeric:tabular-nums;font-size:13px;min-width:34px;}
+
+  /* ---- cube / tune buttons ---- */
+  .fab{position:absolute;right:16px;bottom:34px;z-index:5;display:flex;gap:10px;}
+  .fab .b{width:46px;height:46px;border-radius:12px;background:var(--pill);border:1px solid var(--pill-b);
+    display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:18px;cursor:pointer;}
+  .fab .b.tune{width:auto;padding:0 15px;gap:8px;color:var(--ink);font-weight:600;font-size:13px;}
+
+  /* ---- tuning panel ---- */
+  .tune{position:absolute;right:182px;bottom:96px;width:270px;z-index:6;background:rgba(16,20,27,.96);
+    border:1px solid var(--pill-b);border-radius:16px;padding:16px;backdrop-filter:blur(12px);
+    box-shadow:0 18px 48px rgba(0,0,0,.55);
+    transform-origin:100% 82%;transform:translateX(46px) scale(.94);opacity:0;pointer-events:none;
+    transition:transform .28s cubic-bezier(.2,.85,.2,1),opacity .18s ease;}
+  .tune.open{transform:translateX(0) scale(1);opacity:1;pointer-events:auto;}
+  .tune .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .tune h3{margin:0 0 4px;font-size:14px;}
+  .tune .x{flex:none;width:28px;height:28px;margin-top:-4px;border-radius:50%;background:#0b0f16;
+    border:1px solid var(--pill-b);color:var(--dim);font-size:15px;line-height:1;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;transition:color .12s,border-color .12s;}
+  .tune .x:hover{color:var(--ink);border-color:#3a4657;}
+  .tune .cap{color:var(--dim);font-size:11.5px;margin-bottom:14px;}
+  .tune label.h{display:block;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin:14px 0 7px;}
+  .seg{display:flex;background:#0b0f16;border:1px solid var(--pill-b);border-radius:9px;padding:3px;gap:3px;}
+  .seg button{flex:1;border:0;background:transparent;color:var(--dim);padding:7px 4px;border-radius:6px;
+    font-size:12px;cursor:pointer;font-weight:600;}
+  .seg button.on{background:var(--red);color:#fff;}
+  .tune select{width:100%;background:#0b0f16;color:var(--ink);border:1px solid var(--pill-b);border-radius:9px;
+    padding:9px 10px;font-size:13px;}
+  .tune .row{display:flex;align-items:center;gap:10px;}
+  .tune input[type=range]{width:100%;accent-color:var(--red);}
+  .tune .val{color:var(--dim);font-size:12px;min-width:38px;text-align:right;font-variant-numeric:tabular-nums;}
+  .tune .tg{display:flex;align-items:center;justify-content:space-between;padding:9px 0;border-top:1px solid var(--line);}
+  .switch{position:relative;width:40px;height:23px;flex:none;}
+  .switch input{opacity:0;width:0;height:0;}
+  .switch .sl{position:absolute;inset:0;background:#2a3444;border-radius:99px;transition:.15s;cursor:pointer;}
+  .switch .sl::before{content:"";position:absolute;width:17px;height:17px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;}
+  .switch input:checked + .sl{background:var(--red);}
+  .switch input:checked + .sl::before{transform:translateX(17px);}
+  .hint{position:absolute;left:16px;top:64px;z-index:5;color:var(--dim);font-size:11.5px;max-width:230px;
+    background:rgba(15,18,24,.6);border:1px solid var(--line);border-radius:9px;padding:8px 11px;}
+  .hint b{color:var(--ink);}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="hint" id="hint"><b>Load Path</b> — drag to orbit · scroll to zoom. Red arrows flow LOAD → ANCHORS through the semi-transparent body.</div>
+
+  <div class="top">
+    <div class="chev">‹</div>
+    <div class="title">l bracket large<span class="opt">Optimized ✓</span></div>
+    <div class="seeorig">◧ See Original</div>
+    <div class="spacer"></div>
+    <div class="export">⬆ Export .3mf</div>
+  </div>
+
+  <div class="legend" id="legend">
+    <div class="l1">ASA · scaled to 4 MPa<br>yield at 20% gyroid</div>
+    <div class="bar"></div>
+    <div class="ends"><span>0</span><span>4 MPa (yield)</span></div>
+  </div>
+
+  <div class="rail">
+    <div class="mode icon" data-mode="stress"><span class="dot"></span>Stress</div>
+    <div class="mode icon" data-mode="flex"><span class="dot">∿</span>Flex</div>
+    <div class="mode icon on lp" data-mode="loadpath"><span class="dot">⌇</span>Load path</div>
+    <div class="mode icon" data-mode="failure"><span class="dot">✷</span>Failure</div>
+  </div>
+
+  <div class="chips">
+    <div class="mchip"><div class="p">−32%</div><div class="g">702 g · plastic</div></div>
+    <div class="mchip"><div class="p">−48%</div><div class="g">620 g · plastic</div></div>
+    <div class="mchip"><div class="p">−62%</div><div class="g">547 g · plastic</div></div>
+    <div class="mchip sel"><div class="rec">RECOMMENDED</div><div class="p">−74%</div><div class="g">485 g · selected</div></div>
+  </div>
+
+  <div class="scrub">
+    <div class="play" id="play">❚❚</div>
+    <input id="scrubber" type="range" min="0" max="1" step="0.001" value="0">
+    <div class="t" id="time">0:00</div>
+  </div>
+
+  <div class="fab">
+    <div class="b">◈</div>
+  </div>
+
+  <div class="tune" id="tunePanel">
+    <div class="hd"><h3>Load-path motion</h3><div class="x" id="tuneClose" title="Close">✕</div></div>
+    <div class="cap">Tuning for the redesigned arrows. Mock geometry &amp; paths — judge the look &amp; feel.</div>
+
+    <label class="h">Alive motion style</label>
+    <div class="seg" id="styleSeg">
+      <button data-style="A" class="on">Sine</button>
+      <button data-style="B">Serpentine</button>
+      <button data-style="C">Pulse</button>
+    </div>
+
+    <label class="h">Isolate a path</label>
+    <select id="pathSel"><option value="all">All paths (default)</option></select>
+
+    <label class="h">Body</label>
+    <div class="seg" id="bodySeg">
+      <button data-body="xray" class="on">X-ray</button>
+      <button data-body="stress">Stress</button>
+      <button data-body="solid">Solid</button>
+    </div>
+
+    <label class="h">Flow speed</label>
+    <div class="row"><input id="speed" type="range" min="0.2" max="2.5" step="0.05" value="1"><span class="val" id="speedV">1.0×</span></div>
+
+    <label class="h">Wiggle amount</label>
+    <div class="row"><input id="wig" type="range" min="0" max="2" step="0.05" value="1"><span class="val" id="wigV">1.0×</span></div>
+
+    <div class="tg"><span>Reduced motion (static)</span>
+      <label class="switch"><input id="reduce" type="checkbox"><span class="sl"></span></label></div>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script>
+// three.js is loaded as a classic UMD script (global THREE) so this prototype
+// opens by double-click from file:// in any browser — no server, no modules.
+
+// ============================================================= scene setup
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:false});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x000000);
+
+const camera = new THREE.PerspectiveCamera(34, innerWidth/innerHeight, 0.5, 2000);
+const target = new THREE.Vector3(0, 24, 0);
+
+// lights
+scene.add(new THREE.HemisphereLight(0xbcd2ff, 0x0a0d12, 1.15));
+const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(60,90,80); scene.add(key);
+const fill = new THREE.DirectionalLight(0x88aaff, 0.5); fill.position.set(-70,20,-40); scene.add(fill);
+
+// part coords (x,y,z with z up) -> three world (x, z, y)
+const W = (x,y,z)=> new THREE.Vector3(x, z, y);
+
+// ============================================================= L-bracket geometry
+// L profile in (px, pz):  base plate x[-30,30] z[0,8] + vertical flange x[22,30] z[8,60]
+const prof = [[-30,0],[30,0],[30,60],[22,60],[22,8],[-30,8]];
+const shape = new THREE.Shape();
+shape.moveTo(prof[0][0], prof[0][1]);
+for(let i=1;i<prof.length;i++) shape.lineTo(prof[i][0], prof[i][1]);
+shape.closePath();
+const DEPTH = 40;
+let geo = new THREE.ExtrudeGeometry(shape, {depth:DEPTH, bevelEnabled:false, curveSegments:2});
+geo.translate(0,0,-DEPTH/2);          // center depth -> world Z in [-20,20]
+// extrude builds in XY(=px,pz) extruded along Z(=py). That already matches world (x,z,y).
+geo.computeVertexNormals();
+
+// mock von-Mises vertex colors (blue field, cyan at inner corner) --------------
+function stressColor(t){ // t 0..1 -> app-like colormap
+  const stops=[[0,0x0a2a8f],[0.28,0x1565ff],[0.55,0x17d3e0],[0.74,0x38e08a],[0.88,0xffd24a],[1,0xff3b30]];
+  for(let i=0;i<stops.length-1;i++){
+    const [a,ca]=stops[i], [b,cb]=stops[i+1];
+    if(t<=b){ const u=(t-a)/(b-a);
+      const A=new THREE.Color(ca), B=new THREE.Color(cb); return A.lerp(B,u);
+    }
+  }
+  return new THREE.Color(0xff3b30);
+}
+const pos = geo.attributes.position;
+const colors = new Float32Array(pos.count*3);
+const cornerXZ = new THREE.Vector2(22,8);        // inner corner line (per x-z)
+for(let i=0;i<pos.count;i++){
+  const px=pos.getX(i), pz=pos.getY(i);          // world X,Y == part x,z
+  const d = new THREE.Vector2(px,pz).distanceTo(cornerXZ);
+  let s = Math.max(0, 1 - d/34);                 // hot near inner corner
+  s = Math.min(0.62, s*0.62 + 0.06);             // keep mostly blue like the app
+  const c = stressColor(s);
+  colors[i*3]=c.r; colors[i*3+1]=c.g; colors[i*3+2]=c.b;
+}
+geo.setAttribute('color', new THREE.BufferAttribute(colors,3));
+
+const matXray  = new THREE.MeshStandardMaterial({color:0xaebdd4, transparent:true, opacity:0.16,
+  roughness:.55, metalness:.0, side:THREE.DoubleSide, depthWrite:false});
+const matSolid = new THREE.MeshStandardMaterial({color:0xb8bfcb, roughness:.62, metalness:.03, side:THREE.DoubleSide});
+const matStress= new THREE.MeshStandardMaterial({vertexColors:true, transparent:true, opacity:0.5,
+  roughness:.5, metalness:0, side:THREE.DoubleSide, depthWrite:false, emissive:0x0a1a3a, emissiveIntensity:.3});
+const body = new THREE.Mesh(geo, matXray);
+scene.add(body);
+
+// crisp edges for the x-ray read
+const edges = new THREE.LineSegments(
+  new THREE.EdgesGeometry(geo, 25),
+  new THREE.LineBasicMaterial({color:0x9fb4d6, transparent:true, opacity:0.5}));
+scene.add(edges);
+
+// ---- anchors (bolt holes in base plate) + load marker -----------------------
+const anchorsPart = [[9,0],[-17,0]];             // (px,py)
+anchorsPart.forEach(([ax,ay])=>{
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(3.6,0.7,10,28),
+    new THREE.MeshBasicMaterial({color:0x5f7fb0}));
+  ring.position.copy(W(ax,ay,0.4)); ring.rotation.x=Math.PI/2; scene.add(ring);
+  const ring2 = new THREE.Mesh(new THREE.TorusGeometry(2.2,0.4,8,24),
+    new THREE.MeshBasicMaterial({color:0x3a4a63}));
+  ring2.position.copy(W(ax,ay,0.5)); ring2.rotation.x=Math.PI/2; scene.add(ring2);
+});
+// load arrow (yellow) pushing down on top of the flange
+(()=>{
+  const g=new THREE.Group();
+  const shaft=new THREE.Mesh(new THREE.CylinderGeometry(0.9,0.9,16,12),
+    new THREE.MeshBasicMaterial({color:0xffd24a}));
+  shaft.position.y=8; g.add(shaft);
+  const tip=new THREE.Mesh(new THREE.ConeGeometry(2.6,6,16),
+    new THREE.MeshBasicMaterial({color:0xffd24a})); tip.position.y=-1; tip.rotation.x=Math.PI; g.add(tip);
+  g.position.copy(W(26,0,62)); scene.add(g);
+})();
+
+// ============================================================= load paths
+const toWorldPts = arr => arr.map(([x,y,z])=>W(x,y,z));
+const PATHS_DEF = [
+  { id:'p1', name:'Load +y → anchor A', pts:[[26,12,58],[26,11,44],[25,9,26],[24,7,13],[21,4,7],[15,1.5,5],[9,0,4]] },
+  { id:'p2', name:'Load −y → anchor B', pts:[[26,-12,58],[26,-11,44],[25,-9,26],[24,-6,13],[20,-3,7],[-2,-1,5],[-17,0,4]] },
+  { id:'p3', name:'Load mid → anchor A', pts:[[27,0,58],[26,0,44],[25,0,27],[24,0.5,13],[21,1.5,7],[15,0.6,5],[9,0,4]] },
+  { id:'p4', name:'Load mid → anchor B', pts:[[25,4,58],[25,3,44],[24,2,27],[23,1,13],[20,0,7],[-2,0,5],[-17,0,4]] },
+];
+PATHS_DEF.forEach((p,i)=>{ p.offset=[0,0.28,0.55,0.8][i]; p.phase=i*1.9; p.speedMul=[1,0.9,1.12,0.96][i]; });
+
+// resample each curve by arc length
+const RES = 260;
+const arrows = [];
+PATHS_DEF.forEach(p=>{
+  const curve = new THREE.CatmullRomCurve3(toWorldPts(p.pts), false, 'catmullrom', 0.5);
+  const samples = curve.getSpacedPoints(RES);
+  const cum=[0]; for(let i=1;i<=RES;i++) cum[i]=cum[i-1]+samples[i].distanceTo(samples[i-1]);
+  const total=cum[RES];
+  const sampleAt=(arc)=>{                    // -> {pos, tan}
+    arc=Math.max(0,Math.min(total,arc));
+    let lo=0,hi=RES; while(lo<hi){const m=(lo+hi)>>1; if(cum[m]<arc)lo=m+1;else hi=m;}
+    const i=Math.max(1,lo); const u=(arc-cum[i-1])/((cum[i]-cum[i-1])||1);
+    const pos=samples[i-1].clone().lerp(samples[i],u);
+    const tan=samples[Math.min(RES,i)].clone().sub(samples[Math.max(0,i-1)]).normalize();
+    return {pos,tan};
+  };
+  p.total=total; p.sampleAt=sampleAt;
+
+  // guide line (faint full path) so the route reads even when the arrow is elsewhere
+  const guide=new THREE.Line(new THREE.BufferGeometry().setFromPoints(samples),
+    new THREE.LineBasicMaterial({color:0xff5a48, transparent:true, opacity:0.14}));
+  scene.add(guide);
+
+  // arrow meshes: core tube + halo tube + arrowhead cone -----------------------
+  const M=26, K=8;
+  const mkTube=(op,rad)=>{
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(M*K*3),3));
+    g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(M*K*3),3));
+    const idx=[]; for(let i=0;i<M-1;i++)for(let k=0;k<K;k++){
+      const a=i*K+k, b=i*K+(k+1)%K, c=(i+1)*K+k, d=(i+1)*K+(k+1)%K;
+      idx.push(a,c,b, b,c,d);
+    }
+    g.setIndex(idx);
+    const m=new THREE.Mesh(g, new THREE.MeshBasicMaterial({color:0xff3b30, transparent:op<1, opacity:op,
+      blending:op<1?THREE.AdditiveBlending:THREE.NormalBlending, depthWrite:op>=1}));
+    scene.add(m); return m;
+  };
+  const halo = mkTube(0.28, 1);
+  const core = mkTube(1, 1);
+  const head = new THREE.Mesh(new THREE.ConeGeometry(1,1,14),
+    new THREE.MeshBasicMaterial({color:0xff5b45}));
+  scene.add(head);
+  const headHalo = new THREE.Mesh(new THREE.ConeGeometry(1,1,14),
+    new THREE.MeshBasicMaterial({color:0xff3b30, transparent:true, opacity:0.3, blending:THREE.AdditiveBlending}));
+  scene.add(headHalo);
+
+  arrows.push({p, core, halo, head, headHalo, guide, M, K});
+});
+
+// fill a tube geometry given centers[], tangents[], radii[]
+const _n=new THREE.Vector3(), _b=new THREE.Vector3(), _up=new THREE.Vector3(0,1,0), _up2=new THREE.Vector3(1,0,0), _v=new THREE.Vector3();
+function fillTube(mesh, centers, tans, radii, K){
+  const posA=mesh.geometry.attributes.position.array;
+  const norA=mesh.geometry.attributes.normal.array;
+  const M=centers.length;
+  for(let i=0;i<M;i++){
+    const T=tans[i];
+    _n.copy(Math.abs(T.y)>0.9?_up2:_up).cross(T).normalize();
+    _b.copy(T).cross(_n).normalize();
+    const c=centers[i], r=radii[i];
+    for(let k=0;k<K;k++){
+      const th=k/K*Math.PI*2, cs=Math.cos(th), sn=Math.sin(th);
+      _v.set(_n.x*cs+_b.x*sn, _n.y*cs+_b.y*sn, _n.z*cs+_b.z*sn);
+      const o=(i*K+k)*3;
+      posA[o]=c.x+_v.x*r; posA[o+1]=c.y+_v.y*r; posA[o+2]=c.z+_v.z*r;
+      norA[o]=_v.x; norA[o+1]=_v.y; norA[o+2]=_v.z;
+    }
+  }
+  mesh.geometry.attributes.position.needsUpdate=true;
+  mesh.geometry.attributes.normal.needsUpdate=true;
+  mesh.geometry.computeBoundingSphere();
+}
+
+// ============================================================= motion styles
+const STYLES={
+  A:{amp:3.2, waves:1.1, wSpeed:2.2, bodyLen:34, coreR:1.15, headR:2.6, headLen:7, speedPulse:0, breath:.08},
+  B:{amp:5.0, waves:2.3, wSpeed:3.4, bodyLen:44, coreR:1.05, headR:2.5, headLen:7, speedPulse:.02, breath:.05},
+  C:{amp:2.4, waves:1.4, wSpeed:2.0, bodyLen:30, coreR:1.35, headR:3.0, headLen:8, speedPulse:.06, breath:.24},
+};
+const S={style:'A', playing:true, speed:1, wiggle:1, selected:'all', reduced:false, T:6};
+let clock=0, last=performance.now();
+
+const _qFrom=new THREE.Vector3(0,1,0), _q=new THREE.Quaternion();
+const _wig=new THREE.Vector3();
+
+function updateArrow(a, st){
+  const p=a.p, M=a.M, K=a.K;
+  let base = clock*0.16*st.bodyLen/34*p.speedMul*S.speed + p.offset;   // normalized progress
+  base = clock/S.T*p.speedMul + p.offset;
+  if(!S.reduced && st.speedPulse) base += st.speedPulse*Math.sin(clock*1.7+p.phase);
+  let u = S.reduced ? (0.55 + p.offset*0.1) : ((base%1)+1)%1;
+  const headArc = u*p.total;
+  const breath = S.reduced?1:(1+st.breath*Math.sin(clock*2.3+p.phase));
+
+  const centers=[], tans=[], rCore=[], rHalo=[];
+  for(let i=0;i<M;i++){
+    const s=i/(M-1);                       // 0 tail .. 1 head
+    const arc=headArc-(1-s)*st.bodyLen;
+    const {pos,tan}=p.sampleAt(arc);
+    // undulation, biased into world-Z (part depth, the wide 40mm axis) so it stays in the body
+    const env=Math.pow(1-s,0.7)*S.wiggle;
+    let w=Math.sin(s*st.waves*Math.PI*2 - (S.reduced?0:clock)*st.wSpeed + p.phase);
+    if(st===STYLES.B) w=0.6*w+0.4*Math.sin(s*st.waves*1.9*Math.PI*2-(S.reduced?0:clock)*st.wSpeed*1.6+p.phase*1.3);
+    const off=st.amp*env*w;
+    // depth axis is world Z; add a touch of world-X so it's not purely planar
+    _wig.set(0.28*off, 0, off);
+    pos.add(_wig);
+    centers.push(pos); tans.push(tan);
+    const cr=st.coreR*Math.pow(s,0.7)*breath;      // comet taper
+    rCore.push(Math.max(0.12,cr));
+    rHalo.push(Math.max(0.3, cr*2.1));
+  }
+  fillTube(a.core, centers, tans, rCore, K);
+  fillTube(a.halo, centers, tans, rHalo, K);
+
+  // arrowhead
+  const tip=centers[M-1], dir=tans[M-1];
+  _q.setFromUnitVectors(_qFrom, dir);
+  const hl=st.headLen*breath, hr=st.headR*breath;
+  a.head.position.copy(tip).addScaledVector(dir, hl*0.5);
+  a.head.quaternion.copy(_q); a.head.scale.set(hr, hl, hr);
+  a.headHalo.position.copy(a.head.position); a.headHalo.quaternion.copy(_q);
+  a.headHalo.scale.set(hr*1.8, hl*1.25, hr*1.8);
+}
+
+// ============================================================= orbit controls
+const sph={r:150, theta:0.72, phi:1.15};
+function applyCam(){
+  const s=Math.sin(sph.phi);
+  camera.position.set(target.x+sph.r*s*Math.sin(sph.theta),
+                      target.y+sph.r*Math.cos(sph.phi),
+                      target.z+sph.r*s*Math.cos(sph.theta));
+  camera.lookAt(target);
+}
+applyCam();
+let drag=false, lx=0, ly=0;
+renderer.domElement.addEventListener('pointerdown',e=>{drag=true;lx=e.clientX;ly=e.clientY;e.target.setPointerCapture(e.pointerId);});
+renderer.domElement.addEventListener('pointermove',e=>{ if(!drag)return;
+  sph.theta-=(e.clientX-lx)*0.006; sph.phi=Math.max(0.15,Math.min(Math.PI-0.15,sph.phi-(e.clientY-ly)*0.006));
+  lx=e.clientX; ly=e.clientY; applyCam();});
+addEventListener('pointerup',()=>drag=false);
+renderer.domElement.addEventListener('wheel',e=>{e.preventDefault();
+  sph.r=Math.max(60,Math.min(360,sph.r*(1+e.deltaY*0.0012))); applyCam();},{passive:false});
+
+// ============================================================= loop
+const scrubber=document.getElementById('scrubber'), timeEl=document.getElementById('time');
+function fmt(t){const s=Math.floor(t%60); return '0:'+String(s).padStart(2,'0');}
+function frame(now){
+  const dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(S.playing && !S.reduced) clock+=dt*S.speed;
+  const st=STYLES[S.style];
+  arrows.forEach(a=>{
+    const show=(S.selected==='all'||S.selected===a.p.id);
+    a.core.visible=a.halo.visible=a.head.visible=a.headHalo.visible=show;
+    if(show) updateArrow(a, st);
+  });
+  if(!drag){ const ph=(clock%S.T)/S.T; scrubber.value=ph; timeEl.textContent=fmt(clock); }
+  renderer.render(scene,camera);
+  schedule();
+}
+function schedule(){ document.hidden ? setTimeout(()=>frame(performance.now()),40) : requestAnimationFrame(frame); }
+schedule();
+
+addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); });
+
+// ============================================================= UI wiring
+const legend=document.getElementById('legend');
+function setBody(mode){
+  body.material = mode==='solid'?matSolid : mode==='stress'?matStress : matXray;
+  edges.visible = mode!=='solid';
+  legend.style.display = mode==='stress'?'block':'none';
+  [...document.querySelectorAll('#bodySeg button')].forEach(b=>b.classList.toggle('on',b.dataset.body===mode));
+}
+document.getElementById('bodySeg').onclick=e=>{const b=e.target.closest('button'); if(b) setBody(b.dataset.body);};
+
+document.getElementById('styleSeg').onclick=e=>{const b=e.target.closest('button'); if(!b)return;
+  S.style=b.dataset.style; [...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));};
+
+const pathSel=document.getElementById('pathSel');
+PATHS_DEF.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;pathSel.appendChild(o);});
+pathSel.onchange=e=>{ S.selected=e.target.value;
+  arrows.forEach(a=>a.guide.material.opacity=(S.selected==='all')?0.14:(S.selected===a.p.id?0.5:0.04)); };
+
+const speed=document.getElementById('speed'), speedV=document.getElementById('speedV');
+speed.oninput=()=>{S.speed=+speed.value; speedV.textContent=(+speed.value).toFixed(1)+'×';};
+const wig=document.getElementById('wig'), wigV=document.getElementById('wigV');
+wig.oninput=()=>{S.wiggle=+wig.value; wigV.textContent=(+wig.value).toFixed(1)+'×';};
+document.getElementById('reduce').onchange=e=>{S.reduced=e.target.checked;};
+
+const play=document.getElementById('play');
+play.onclick=()=>{S.playing=!S.playing; play.textContent=S.playing?'❚❚':'▶';};
+scrubber.addEventListener('input',()=>{ clock=(+scrubber.value)*S.T; });
+
+const tunePanel=document.getElementById('tunePanel');
+const openDrawer=o=>tunePanel.classList.toggle('open',o);
+document.getElementById('tuneClose').onclick=()=>openDrawer(false);
+
+// app mode rail -> map Stress/Load path to the body backdrop.
+// Selecting "Load path" slides its tuning drawer out to the left; re-tapping toggles it.
+document.querySelectorAll('.rail .mode').forEach(m=>{
+  m.onclick=()=>{
+    const mode=m.dataset.mode, wasLp=m.classList.contains('lp');
+    document.querySelectorAll('.rail .mode').forEach(x=>x.classList.remove('on','lp'));
+    m.classList.add('on');
+    if(mode==='loadpath'){ m.classList.add('lp'); setBody('xray'); openDrawer(!wasLp || !tunePanel.classList.contains('open')); }
+    else if(mode==='stress'){ setBody('stress'); openDrawer(false); }
+    else { setBody(mode==='failure'?'solid':'xray'); openDrawer(false); }
+  };
+});
+</script>
+</body>
+</html>
