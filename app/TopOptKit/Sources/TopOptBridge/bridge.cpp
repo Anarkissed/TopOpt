@@ -118,13 +118,16 @@ constexpr int kAnchorPadDepthVoxels = 3;
 // M7.anchor-integrity (FIX 2) — the ladder-floor multiple handed to
 // minimize_plastic on the loadcase path (MinimizePlasticOptions::margin_floor_
 // multiple). The ladder stops stripping once an accepted rung's worst-case margin
-// is >= this multiple of margin_stop (1.5), i.e. >= 4.5 here — roughly 2x headroom
-// above the 1.5 strength floor. This keeps a lightly-loaded part from being walked
-// to the lightest rung (0.26 VF) just because it can survive there. Conservative
-// seed; the maintainer can tune it after seeing results. Setting it to
-// +infinity (or removing this line) reverts to the legacy walk-to-the-lightest-
-// safe-rung behavior exactly (minimize_plastic asserts that equivalence).
-constexpr double kAnchorMarginFloorMultiple = 3.0;
+// is >= this multiple of margin_stop (1.5), i.e. >= 3.0 here — so a rung that
+// clears 2x the margin_stop comfort floor is the terminal accepted variant. This
+// keeps a lightly-loaded part from being walked to the lightest rung (0.26 VF)
+// just because it can survive there. Conservative seed; the maintainer can tune it
+// after seeing results (one-line change). Setting it to +infinity (or removing the
+// opts.margin_floor_multiple assignment) reverts to the legacy walk-to-the-
+// lightest-safe-rung behavior exactly (minimize_plastic asserts that equivalence).
+constexpr double kAnchorMarginFloorMultiple = 2.0;   // stop the ladder once a rung
+                                                     // clears 2x the margin_stop
+                                                     // comfort floor
 
 // Turn on the M6.3 single-field Heaviside projection + beta-continuation on a
 // run's SIMP options, for crisp (near-0/1) density with a minimum length scale.
