@@ -345,6 +345,18 @@ public final class RunModel: ObservableObject {
         // STEP: optimize under the user's declared load case (anchors/loads →
         // clamps + tractions), or self-weight when no loads were set. STL: no
         // faces, so the self-weight ladder (ARCHITECTURE §5) is the only option.
+        // TEMP-INSTRUMENT: confirm the .step load-case path is taken and dump the
+        // declared load case (group count + per-group force) that will be handed
+        // to the bridge. (diag 064 log #1)
+        NSLog("%@", "TEMP-INSTRUMENT [RunModel] isStepModel=\(request.isStepModel) "
+              + "anchorFaces=\(request.anchorFaceIDs.count) "
+              + "loadGroups=\(request.loadGroups.count)")
+        for (gi, g) in request.loadGroups.enumerated() {
+            let fsum = abs(g.force.x) + abs(g.force.y) + abs(g.force.z)
+            NSLog("%@", "TEMP-INSTRUMENT [RunModel] loadGroup[\(gi)] "
+                  + "faces=\(g.faceIDs.count) "
+                  + "force=(\(g.force.x), \(g.force.y), \(g.force.z)) |F|sum=\(fsum)")
+        }
         if request.isStepModel {
             return try TopOptKit.minimizePlasticLoadCase(
                 stepPath: request.modelPath, material: request.material,

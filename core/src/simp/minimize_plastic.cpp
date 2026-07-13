@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>  // TEMP-INSTRUMENT: std::fprintf for diag 064 load/stress logs
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -140,6 +141,19 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           ? self_weight_loads(grid, material.density_g_cm3, options.gravity,
                               options.gravity_direction)
           : options.external_loads;
+  // TEMP-INSTRUMENT: which load path was taken (diag 064 log #6). If external
+  // was empty, self-weight was SUBSTITUTED — the whole ladder is then solving
+  // self-weight, and any displayed stress reflects gravity, not the user's load.
+  {
+    double load_abs_sum = 0.0;
+    for (const NodalLoad& nl : loads) load_abs_sum += std::fabs(nl.value);
+    std::fprintf(stderr,
+                 "TEMP-INSTRUMENT [core] external_loads.empty()=%d "
+                 "selfWeightSubstituted=%d loads.size()=%zu sum|loads.value|=%g\n",
+                 options.external_loads.empty() ? 1 : 0,
+                 options.external_loads.empty() ? 1 : 0, loads.size(),
+                 load_abs_sum);
+  }
 
   // The reported / analysed build direction is the build-plate normal: gravity
   // pulls toward the plate, so the build direction is the unit negation.
@@ -283,6 +297,24 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         }
     const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
 
+    // TEMP-INSTRUMENT: THE TWO-SOLVES QUESTION (diag 064 log #5, part A). Both the
+    // FAILURE/acceptance check (max_von_mises -> compute_stress_margin) and the
+    // DISPLAY field (variant.von_mises_field, copied verbatim to the app) are peaks
+    // over the SAME per-voxel st.von_mises from this single penalized solve. Log
+    // both peaks: if they DIFFER here, failure-check and display read different
+    // fields. (They are computed from the same loop, so equality here proves the
+    // divergence is upstream in the LOAD, not in the stress recovery.)
+    {
+      double display_peak_vm = 0.0;
+      for (double v : variant.von_mises_field)
+        if (v > display_peak_vm) display_peak_vm = v;
+      std::fprintf(stderr,
+                   "TEMP-INSTRUMENT [core] rung=%zu vf=%g failCheckPeakVM=%g "
+                   "displayFieldPeakVM=%g max_interlayer=%g printedVoxels=%zu\n",
+                   rung, vf, max_von_mises, display_peak_vm, max_interlayer,
+                   printed_voxels);
+    }
+
     // M7.disp field: the per-node displacement of the SAME penalized solve
     // (sc.solution) — no new solve. DOF-ordered (size 3*node_count); exposed on
     // printed nodes exactly as solved, zeroed on nodes attached only to
@@ -343,6 +375,17 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // bit-for-bit the pre-M7.infill gate `margin.worst_case >= margin_stop`.
     variant.accepted =
         margin.worst_case * infill_knockdown >= options.margin_stop;
+    // TEMP-INSTRUMENT: the acceptance decision that drives "couldn't handle the
+    // load" (diag 064 log #5, part B). worst_case margin = yield / peakStress-ish;
+    // this is the number the failure sheet reports. Pairs with the peak-VM log
+    // above: same rung, same solve.
+    std::fprintf(stderr,
+                 "TEMP-INSTRUMENT [core] rung=%zu vf=%g marginWorstCase=%g "
+                 "infillKnockdown=%g marginStop=%g accepted=%d "
+                 "maxStressMPa=%g yieldMPa=%g\n",
+                 rung, vf, margin.worst_case, infill_knockdown,
+                 options.margin_stop, variant.accepted ? 1 : 0,
+                 vr.max_stress_mpa, material.yield_strength_mpa);
     result.evaluated.push_back(std::move(variant));
     // Storage never reallocates (reserved to ladder.size() above), so the
     // references taken below stay valid for the whole run — see the reserve() note.
