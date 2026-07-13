@@ -339,6 +339,17 @@ if(Eigen3_FOUND)
   target_link_libraries(test_mma PRIVATE topopt)
   add_test(NAME mma COMMAND test_mma)
 
+  # MMA projection-gate (Option B): after the M7.mma.4 switchover the run path
+  # must NOT enable a Heaviside projection schedule under MMA (simp_optimize
+  # rejects it). Pins the pure gate predicate (projection_supported) and both
+  # loop configs it selects — MMA runs cleanly with projection skipped; OC keeps
+  # projection byte-identically. Drives simp_optimize, so Eigen-gated like the
+  # other optimizer tests.
+  add_executable(test_mma_projection_gate
+    tests/validation/test_mma_projection_gate.cpp)
+  target_link_libraries(test_mma_projection_gate PRIVATE topopt)
+  add_test(NAME mma_projection_gate COMMAND test_mma_projection_gate)
+
   # Stress-constrained optimization (M7.mma.2): the aggregated von Mises
   # constraint on the MMA path — a finite-difference check of the adjoint
   # sensitivity of simp_stress_aggregate, and the behavioral invariants (a)/(b)/
