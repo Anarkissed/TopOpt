@@ -328,6 +328,21 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME anchor_integrity COMMAND test_anchor_integrity)
 
+  # Design-domain expansion (M7.dom-core) — the "add material" feature: a
+  # user-defined design-volume box expands the run onto a larger grid whose mask
+  # freezes the imported part (FrozenSolid), voids the keep-out boxes (FrozenVoid)
+  # and opens the rest of the design volume to the optimizer (Active), so it can
+  # GROW a gusset into empty space along the load path. The acceptance test builds
+  # a thin L-bracket in code and drives minimize_plastic / simp_compliance, so it
+  # is Eigen-gated like the other optimizer tests; the real settings rule table is
+  # injected as in test_minimize_plastic. CI configures with
+  # -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_design_domain tests/validation/test_design_domain.cpp)
+  target_link_libraries(test_design_domain PRIVATE topopt)
+  target_compile_definitions(test_design_domain PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME design_domain COMMAND test_design_domain)
+
   # MMA updater (M7.mma.1): the Method of Moving Asymptotes design updater,
   # exposed behind SimpOptions.updater = MMA, reproduces the OC minimum-
   # compliance benchmarks (the Gate V2 cantilever + clamped-beam geometries)
