@@ -58,6 +58,11 @@ public struct WorkspacePlaceholder: View {
     @State private var lastRunRequest: RunRequest?
     /// The group whose colour-swatch popover is open (nil = none).
     @State private var recoloringGroup: UUID?
+    /// M7.dom-app: the design box captured at the start of a handle drag, so each
+    /// drag applies an absolute delta from where the box was when the drag began
+    /// (nil = no drag in progress). Same for a keep-out (with its index).
+    @State private var dragBaseBox: DesignBoxBounds?
+    @State private var dragBaseKeepOut: (index: Int, bounds: DesignBoxBounds)?
 
     // Forwarders onto the project's persistent state. The `nonmutating set`
     // mutates the ProjectModel (a reference), so `selection.mutate()` /
@@ -98,10 +103,15 @@ public struct WorkspacePlaceholder: View {
                           showGround: showGround,
                           faceToolActive: true,                 // D1: tap always selects (routed by phase)
                           onPickFace: handlePick,
-                          onProjection: { projection = $0 })
+                          onProjection: { projection = $0 },
+                          // M7.dom-app: the translucent design box + keep-outs (model
+                          // space); nil when the tool is off → nothing drawn.
+                          designBox: showDesignGizmo ? project.designBox.box : nil,
+                          keepOutBoxes: showDesignGizmo ? project.designBox.keepOuts : [])
                 .ignoresSafeArea()
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
+            if showDesignGizmo { designGizmoOverlay.ignoresSafeArea() }  // dom-app resize/move handles
 
             chrome
             if force.phase == .setup {
@@ -109,6 +119,7 @@ public struct WorkspacePlaceholder: View {
             } else {
                 if force.gravityIsSet { topRightControls }
                 if viewerMesh != nil { selectionsPanel }
+                if showDesignGizmo { designBoxPanel }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
             bottomBar
@@ -334,6 +345,7 @@ public struct WorkspacePlaceholder: View {
             gravityChip
             minimizePlasticChip
             qualityChip
+            designBoxChip
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.top, DS.Space.xl3)
@@ -399,6 +411,265 @@ public struct WorkspacePlaceholder: View {
             .foregroundStyle(DS.Color.textPrimary.color)
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: design box tool (M7.dom-app) — define grow room + keep-outs
+
+    /// Whether the design-box gizmo (translucent box + drag handles) is shown: the
+    /// tool is active and we're in the normal edit phase (not gravity setup).
+    private var showDesignGizmo: Bool {
+        force.phase == .edit && force.gravityIsSet && project.designBox.isActive
+    }
+
+    /// The design-box tool toggle chip. Off → tap to open (seeds a grow-room box
+    /// around the part). On → tap to close (reverts to the default no-box run).
+    private var designBoxChip: some View {
+        Button {
+            if project.designBox.isActive {
+                project.designBox.disable()
+            } else if let mesh = viewerMesh {
+                project.designBox.enable(around: mesh.bounds)
+                model.toast = "Design box on — drag the handles to size the space the optimizer can grow into"
+            }
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: project.designBox.isActive ? "cube.fill" : "cube")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle((project.designBox.isActive ? DS.Color.accentGreen : DS.Color.textTertiary).color)
+                Text("Design Box").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+            .foregroundStyle(DS.Color.textPrimary.color)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The design-box control panel (top-right, below the chips): a short explainer,
+    /// Reset (back to the default grow-room box), Add keep-out, and per-keep-out
+    /// remove. The sizing itself is the on-scene drag handles.
+    private var designBoxPanel: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "cube.fill").font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(DS.Color.accentGreen.color)
+                Text("Design Box").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            Text("Drag the green handles to size the space the optimizer may grow material into — it can extend past the part.")
+                .dsStyle(DS.TypeScale.footnote)
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: DS.Space.s) {
+                Button {
+                    if let mesh = viewerMesh { project.designBox.reset(around: mesh.bounds) }
+                } label: { designBoxPanelButton("arrow.counterclockwise", "Reset") }
+                    .buttonStyle(.plain)
+                Button {
+                    if let mesh = viewerMesh {
+                        project.designBox.addKeepOut(around: mesh.bounds)
+                        model.toast = "Keep-out added — the optimizer must leave this region empty"
+                    }
+                } label: { designBoxPanelButton("nosign", "Add keep-out") }
+                    .buttonStyle(.plain)
+            }
+            if !project.designBox.keepOuts.isEmpty {
+                Divider().overlay(DS.Color.strokeSubtle.color)
+                ForEach(Array(project.designBox.keepOuts.enumerated()), id: \.offset) { idx, _ in
+                    HStack(spacing: DS.Space.s) {
+                        Circle().fill(Color(red: 0.95, green: 0.42, blue: 0.38)).frame(width: 8, height: 8)
+                        Text("Keep-out \(idx + 1)").dsStyle(DS.TypeScale.footnote)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                        Spacer(minLength: DS.Space.l)
+                        Button { project.designBox.removeKeepOut(at: idx) } label: {
+                            Image(systemName: "trash").font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(DS.Color.textPrimary.opacity(0.4).color)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(width: 260, alignment: .leading)
+        .padding(DS.Space.l)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.top, 210)          // clear the gravity / minimize / quality / design chips
+        .padding(.trailing, DS.Space.xl4)
+    }
+
+    private func designBoxPanelButton(_ icon: String, _ text: String) -> some View {
+        HStack(spacing: DS.Space.xs) {
+            Image(systemName: icon).font(.system(size: 11, weight: .semibold))
+            Text(text).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+        }
+        .foregroundStyle(DS.Color.textPrimary.color)
+        .padding(.vertical, 7).padding(.horizontal, DS.Space.m)
+        .background(Capsule().fill(DS.Color.fillSubtle.color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+    }
+
+    // MARK: design box on-scene handles (resize + move)
+
+    private static let designGreen = Color(red: 0.30, green: 0.78, blue: 0.55)
+    private static let keepOutRed = Color(red: 0.95, green: 0.42, blue: 0.38)
+
+    /// A model-space axis' settled world direction (unit), for the drag-projection math.
+    private func settledAxis(_ axis: Int) -> SIMD3<Float> {
+        var a = SIMD3<Float>(0, 0, 0); a[axis] = 1
+        return simd_normalize(settleQuat.act(a))
+    }
+
+    /// The screen position of a box face-centre handle, or nil if it can't project.
+    private func faceHandleScreen(_ box: DesignBoxBounds, axis: Int, isMax: Bool,
+                                  proj: CameraProjection) -> CGPoint? {
+        proj.project(settledWorld(box.faceCenter(axis: axis, isMax: isMax)))
+    }
+
+    /// The probe step (mm) the drag math uses to measure an axis' on-screen scale.
+    private var handleProbe: Float { Swift.max(viewerMesh?.bounds.radius ?? 1, 1e-3) * 0.1 }
+
+    /// The full on-scene gizmo: six resize handles + a centre move handle for the
+    /// design box, and the same for each keep-out.
+    private var designGizmoOverlay: some View {
+        GeometryReader { _ in
+            ZStack(alignment: .topLeading) {
+                if let proj = projection, let box = project.designBox.box {
+                    // Design-box centre move handle.
+                    if let c = proj.project(settledWorld(box.center)) {
+                        moveHandle(color: Self.designGreen)
+                            .position(c)
+                            .gesture(designMoveDrag())
+                    }
+                    // Design-box face resize handles.
+                    ForEach(0..<6, id: \.self) { i in
+                        let axis = i / 2, isMax = (i % 2 == 1)
+                        if let pt = faceHandleScreen(box, axis: axis, isMax: isMax, proj: proj) {
+                            resizeHandle(color: Self.designGreen, axis: axis)
+                                .position(pt)
+                                .gesture(designFaceDrag(axis: axis, isMax: isMax))
+                        }
+                    }
+                    // Keep-out handles.
+                    ForEach(Array(project.designBox.keepOuts.enumerated()), id: \.offset) { idx, ko in
+                        if let c = proj.project(settledWorld(ko.center)) {
+                            moveHandle(color: Self.keepOutRed)
+                                .position(c)
+                                .gesture(keepOutMoveDrag(idx))
+                        }
+                        ForEach(0..<6, id: \.self) { i in
+                            let axis = i / 2, isMax = (i % 2 == 1)
+                            if let pt = faceHandleScreen(ko, axis: axis, isMax: isMax, proj: proj) {
+                                resizeHandle(color: Self.keepOutRed, axis: axis)
+                                    .position(pt)
+                                    .gesture(keepOutFaceDrag(idx, axis: axis, isMax: isMax))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A face-resize handle: a small coloured square (draggable along its axis).
+    private func resizeHandle(color: Color, axis: Int) -> some View {
+        RoundedRectangle(cornerRadius: 4)
+            .fill(color)
+            .frame(width: 20, height: 20)
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.white.opacity(0.85), lineWidth: 1.5))
+            .shadow(color: color.opacity(0.5), radius: 4)
+            .contentShape(Rectangle().inset(by: -12))
+    }
+
+    /// A centre move handle: a ringed dot (draggable to slide the whole box).
+    private func moveHandle(color: Color) -> some View {
+        Circle()
+            .fill(color.opacity(0.28))
+            .frame(width: 30, height: 30)
+            .overlay(Circle().strokeBorder(color, lineWidth: 2))
+            .overlay(Image(systemName: "move.3d").font(.system(size: 12, weight: .bold))
+                .foregroundStyle(.white))
+            .contentShape(Circle())
+    }
+
+    // The model-space delta (mm) a drag represents along one axis (settled).
+    private func axisDelta(fromWorld world: SIMD3<Float>, axis: Int, drag: CGSize,
+                           proj: CameraProjection) -> Float {
+        DesignBoxDrag.axisDelta(handleWorld: world, worldAxis: settledAxis(axis),
+                                drag: CGVector(dx: drag.width, dy: drag.height),
+                                projection: proj, probe: handleProbe)
+    }
+
+    private func designFaceDrag(axis: Int, isMax: Bool) -> some Gesture {
+        DragGesture()
+            .onChanged { v in
+                guard let proj = projection, let mesh = viewerMesh else { return }
+                if dragBaseBox == nil { dragBaseBox = project.designBox.box }
+                guard let base = dragBaseBox else { return }
+                let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
+                let delta = axisDelta(fromWorld: world, axis: axis, drag: v.translation, proj: proj)
+                let target = (isMax ? base.max[axis] : base.min[axis]) + delta
+                var next = base
+                next = next.movingFace(axis: axis, isMax: isMax, to: target,
+                                       minSize: DesignBoxModel.minSize(for: mesh.bounds))
+                project.designBox.box = next
+            }
+            .onEnded { _ in dragBaseBox = nil }
+    }
+
+    private func designMoveDrag() -> some Gesture {
+        DragGesture()
+            .onChanged { v in
+                guard let proj = projection else { return }
+                if dragBaseBox == nil { dragBaseBox = project.designBox.box }
+                guard let base = dragBaseBox else { return }
+                let world = settledWorld(base.center)
+                // Slide in the ground plane (model X + Z); vertical is via face handles.
+                let dx = axisDelta(fromWorld: world, axis: 0, drag: v.translation, proj: proj)
+                let dz = axisDelta(fromWorld: world, axis: 2, drag: v.translation, proj: proj)
+                project.designBox.box = base.translated(by: SIMD3<Float>(dx, 0, dz))
+            }
+            .onEnded { _ in dragBaseBox = nil }
+    }
+
+    private func keepOutFaceDrag(_ index: Int, axis: Int, isMax: Bool) -> some Gesture {
+        DragGesture()
+            .onChanged { v in
+                guard let proj = projection, let mesh = viewerMesh,
+                      project.designBox.keepOuts.indices.contains(index) else { return }
+                if dragBaseKeepOut?.index != index {
+                    dragBaseKeepOut = (index, project.designBox.keepOuts[index])
+                }
+                guard let base = dragBaseKeepOut?.bounds else { return }
+                let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
+                let delta = axisDelta(fromWorld: world, axis: axis, drag: v.translation, proj: proj)
+                let target = (isMax ? base.max[axis] : base.min[axis]) + delta
+                project.designBox.keepOuts[index] = base.movingFace(
+                    axis: axis, isMax: isMax, to: target,
+                    minSize: DesignBoxModel.minSize(for: mesh.bounds))
+            }
+            .onEnded { _ in dragBaseKeepOut = nil }
+    }
+
+    private func keepOutMoveDrag(_ index: Int) -> some Gesture {
+        DragGesture()
+            .onChanged { v in
+                guard let proj = projection,
+                      project.designBox.keepOuts.indices.contains(index) else { return }
+                if dragBaseKeepOut?.index != index {
+                    dragBaseKeepOut = (index, project.designBox.keepOuts[index])
+                }
+                guard let base = dragBaseKeepOut?.bounds else { return }
+                let world = settledWorld(base.center)
+                let dx = axisDelta(fromWorld: world, axis: 0, drag: v.translation, proj: proj)
+                let dz = axisDelta(fromWorld: world, axis: 2, drag: v.translation, proj: proj)
+                project.designBox.keepOuts[index] = base.translated(by: SIMD3<Float>(dx, 0, dz))
+            }
+            .onEnded { _ in dragBaseKeepOut = nil }
     }
 
     // MARK: left Selections panel (design) with the kg/lbs toggle

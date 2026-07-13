@@ -291,6 +291,15 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var groundShadowBuffer: MTLBuffer?
     private var groundShadowCount = 0
 
+    // M7.dom-app design-box gizmo: translucent box faces + bright edges for the
+    // design box (grow room) and any keep-out boxes, in MODEL space so they settle
+    // with the part. Reuses the alpha-blended `groundPipeline` (position + rgba,
+    // stride 7) under the MESH's mvp. Empty until `setDesignBoxes` uploads geometry.
+    private var designBoxFaceBuffer: MTLBuffer?
+    private var designBoxFaceCount = 0
+    private var designBoxLineBuffer: MTLBuffer?
+    private var designBoxLineCount = 0
+
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
     static let idFormat: MTLPixelFormat = .r32Uint
@@ -625,6 +634,63 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// M7.dom-app: upload the design-box gizmo geometry. `design` is the grow-room
+    /// box (nil hides the gizmo); `keepOuts` are the excluded regions. Each is drawn
+    /// as translucent faces + bright edges in its colour, in MODEL space (so it
+    /// settles with the part). Called on the main thread; the draw reads the buffers.
+    func setDesignBoxes(design: DesignBoxBounds?, designColor: SIMD4<Float>,
+                        keepOuts: [DesignBoxBounds], keepOutColor: SIMD4<Float>) {
+        designBoxFaceBuffer = nil; designBoxFaceCount = 0
+        designBoxLineBuffer = nil; designBoxLineCount = 0
+        guard design != nil || !keepOuts.isEmpty else { return }
+
+        var faces: [Float] = []
+        var lines: [Float] = []
+        func push(_ dst: inout [Float], _ p: SIMD3<Float>, _ c: SIMD4<Float>) {
+            dst.append(p.x); dst.append(p.y); dst.append(p.z)
+            dst.append(c.x); dst.append(c.y); dst.append(c.z); dst.append(c.w)
+        }
+        // Append one box: 6 quad faces (2 triangles each) at `faceAlpha`, and 12
+        // edges at full colour. Premultiplied alpha (the ground pipeline blends
+        // source .one / dest oneMinusSourceAlpha), so scale rgb by alpha.
+        func appendBox(_ b: DesignBoxBounds, _ color: SIMD4<Float>, faceAlpha: Float) {
+            let lo = b.min, hi = b.max
+            let c = [SIMD3<Float>(lo.x, lo.y, lo.z), SIMD3<Float>(hi.x, lo.y, lo.z),
+                     SIMD3<Float>(hi.x, hi.y, lo.z), SIMD3<Float>(lo.x, hi.y, lo.z),
+                     SIMD3<Float>(lo.x, lo.y, hi.z), SIMD3<Float>(hi.x, lo.y, hi.z),
+                     SIMD3<Float>(hi.x, hi.y, hi.z), SIMD3<Float>(lo.x, hi.y, hi.z)]
+            let fcol = SIMD4<Float>(color.x * faceAlpha, color.y * faceAlpha,
+                                    color.z * faceAlpha, faceAlpha)  // premultiplied
+            let quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+                         [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3]]
+            for q in quads {
+                push(&faces, c[q[0]], fcol); push(&faces, c[q[1]], fcol); push(&faces, c[q[2]], fcol)
+                push(&faces, c[q[0]], fcol); push(&faces, c[q[2]], fcol); push(&faces, c[q[3]], fcol)
+            }
+            let ea = min(1, color.w)
+            let ecol = SIMD4<Float>(color.x * ea, color.y * ea, color.z * ea, ea)
+            let edges = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6],
+                         [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+            for e in edges { push(&lines, c[e[0]], ecol); push(&lines, c[e[1]], ecol) }
+        }
+
+        if let d = design { appendBox(d, designColor, faceAlpha: 0.10) }
+        for k in keepOuts { appendBox(k, keepOutColor, faceAlpha: 0.16) }
+
+        designBoxFaceCount = faces.count / 7
+        if designBoxFaceCount > 0 {
+            designBoxFaceBuffer = faces.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+        }
+        designBoxLineCount = lines.count / 7
+        if designBoxLineCount > 0 {
+            designBoxLineBuffer = lines.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+        }
+    }
+
     /// Rebuild the per-vertex tint buffer from the selection: each grouped face's
     /// vertices carry that group's colour; the active group is tinted more strongly.
     func setHighlights(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>) {
@@ -825,6 +891,26 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             }
         }
 
+        // M7.dom-app design-box gizmo: translucent box faces + bright edges, drawn
+        // under the MESH's mvp (uniforms.mvp) so they lock to the part and settle
+        // with it. Blended + depth-tested (groundDepthState: test against the part so
+        // the part occludes the box's far faces, but no depth write so the box never
+        // hides the part). Faces first, then edges on top.
+        if (designBoxFaceCount > 0 || designBoxLineCount > 0), let gpipe = groundPipeline {
+            var mvp = uniforms.mvp
+            enc.setRenderPipelineState(gpipe)
+            enc.setDepthStencilState(groundDepthState)
+            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            if let fbuf = designBoxFaceBuffer, designBoxFaceCount > 0 {
+                enc.setVertexBuffer(fbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: designBoxFaceCount)
+            }
+            if let lbuf = designBoxLineBuffer, designBoxLineCount > 0 {
+                enc.setVertexBuffer(lbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: designBoxLineCount)
+            }
+        }
+
         // Load-path overlay (M7.viz.4): principal-stress-direction glyphs drawn under
         // the MESH's model·view·proj (uniforms.mvp) so they lock to the part (the ground
         // pass uses a world MVP). Drawn depth-ALWAYS (lineOverlayDepthState): the glyphs
@@ -1016,6 +1102,10 @@ struct MeshViewInputs {
     /// ticker; scrolls the traveling dash along the ribbons. Changing it re-draws (a
     /// cheap per-frame uniform), which is what animates the flow. 0 = static.
     var loadPathFlow: Float = 0
+    /// M7.dom-app design-box gizmo: the grow-room box (nil hides it) + keep-out boxes,
+    /// in model space. Rendered as translucent volumes with bright edges.
+    var designBox: DesignBoxBounds? = nil
+    var keepOutBoxes: [DesignBoxBounds] = []
 }
 
 #if os(iOS)
@@ -1030,13 +1120,15 @@ public struct MetalMeshView: UIViewRepresentable {
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
-                loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0) {
+                loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
+                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = []) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
-            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow)
+            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
+            designBox: designBox, keepOutBoxes: keepOutBoxes)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1072,13 +1164,15 @@ public struct MetalMeshView: NSViewRepresentable {
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
-                loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0) {
+                loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
+                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = []) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
-            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow)
+            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
+            designBox: designBox, keepOutBoxes: keepOutBoxes)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1145,6 +1239,11 @@ extension MetalMeshView {
         /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
         private var appliedLoadPath = false
         private var appliedLoadPathFlow: Float = 0
+        /// M7.dom-app: the design box + keep-outs last uploaded, so the gizmo geometry
+        /// rebuilds only when the boxes actually change (not every camera tick).
+        private var appliedDesignBox: DesignBoxBounds?
+        private var appliedKeepOuts: [DesignBoxBounds] = []
+        private var appliedDesignBoxSet = false
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
@@ -1263,6 +1362,20 @@ extension MetalMeshView {
                 dirty = true
             }
 
+            // M7.dom-app design-box gizmo: rebuild the box geometry only when the box
+            // or keep-outs change (or on a mesh change, which resets the buffers).
+            if dirty || !appliedDesignBoxSet || inputs.designBox != appliedDesignBox
+                || inputs.keepOutBoxes != appliedKeepOuts {
+                appliedDesignBoxSet = true
+                appliedDesignBox = inputs.designBox
+                appliedKeepOuts = inputs.keepOutBoxes
+                renderer.setDesignBoxes(design: inputs.designBox,
+                                        designColor: SIMD4<Float>(0.30, 0.78, 0.55, 0.85),
+                                        keepOuts: inputs.keepOutBoxes,
+                                        keepOutColor: SIMD4<Float>(0.95, 0.42, 0.38, 0.9))
+                dirty = true
+            }
+
             if dirty { redraw(view) }
             // Publish the camera projection (deduped). The async pass catches the
             // post-layout viewport when the first update ran before layout.
@@ -1371,7 +1484,8 @@ public struct MetalMeshView: View {
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
                 settleAnimated: Bool = false, showGround: Bool = false,
                 faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil,
-                onMiss: (() -> Void)? = nil, onProjection: ((CameraProjection) -> Void)? = nil) {}
+                onMiss: (() -> Void)? = nil, onProjection: ((CameraProjection) -> Void)? = nil,
+                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = []) {}
     public var body: some View { DS.Color.background.color }
 }
 #endif

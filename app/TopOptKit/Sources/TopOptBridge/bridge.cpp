@@ -4,6 +4,7 @@
 // to BridgeError so nothing throws across the language boundary.
 #include "TopOptBridge.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -623,19 +624,56 @@ OptimizeResult run_minimize_plastic_loadcase(
     // FrozenSolid by the core), so the mask only ADDS keep-in pad voxels. Only the
     // loadcase (recommendation-ladder) path pads; the fixed single-fraction
     // preview (minimize_plastic == false) is left untouched.
+    //
+    // M7.dom-app: the anchor pad is a caller `design_mask`, which minimize_plastic
+    // REJECTS alongside a `design_box` (the box builds the effective mask itself,
+    // pipeline.hpp). It is also unnecessary under a design box: expand_design_domain
+    // freezes EVERY imported-part solid voxel as FrozenSolid (the whole import is
+    // kept, not just an N-voxel pad behind the BC faces), so the anchor/load bosses
+    // are already tied into the frozen body. So build the pad only when there is no
+    // design box; the ladder floor is orthogonal and applies either way.
     if (load_case.minimize_plastic) {
-      topopt::DesignMask pad = topopt::make_active_mask(grid);
-      for (int32_t fid : load_case.anchor_face_ids)
-        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                               kAnchorPadDepthVoxels, pad);
-      for (int32_t fid : retained_load_faces)
-        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                               kAnchorPadDepthVoxels, pad);
-      opts.design_mask = std::move(pad);
+      if (!load_case.has_design_box) {
+        topopt::DesignMask pad = topopt::make_active_mask(grid);
+        for (int32_t fid : load_case.anchor_face_ids)
+          topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                                 kAnchorPadDepthVoxels, pad);
+        for (int32_t fid : retained_load_faces)
+          topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                                 kAnchorPadDepthVoxels, pad);
+        opts.design_mask = std::move(pad);
+      }
       // M7.anchor-integrity (FIX 2): floor the reduction ladder so a lightly-
       // loaded part is not stripped to the lightest rung once it is comfortably
       // strong. Only meaningful when the ladder actually walks (minimize_plastic).
       opts.margin_floor_multiple = kAnchorMarginFloorMultiple;
+    }
+
+    // M7.dom-app: the design-domain expansion. When the app defined a design box,
+    // hand it (and any keep-outs) to the core so the optimizer voxelizes onto the
+    // larger grid and grows material into the box beyond the frozen import
+    // (dom-core expand_design_domain). Model space matches the voxel/mesh frame, so
+    // the box coordinates pass straight through. Left unset → BYTE-IDENTICAL to the
+    // pre-M7.dom-app run (the default no-box path).
+    if (load_case.has_design_box) {
+      topopt::DesignBox db;
+      db.min = topopt::Vec3{load_case.design_box_min_x, load_case.design_box_min_y,
+                            load_case.design_box_min_z};
+      db.max = topopt::Vec3{load_case.design_box_max_x, load_case.design_box_max_y,
+                            load_case.design_box_max_z};
+      opts.design_box = db;
+      const std::size_t kn =
+          std::min(load_case.keep_out_min.size(), load_case.keep_out_max.size()) / 3;
+      for (std::size_t b = 0; b < kn; ++b) {
+        topopt::DesignBox ko;
+        ko.min = topopt::Vec3{load_case.keep_out_min[3 * b + 0],
+                              load_case.keep_out_min[3 * b + 1],
+                              load_case.keep_out_min[3 * b + 2]};
+        ko.max = topopt::Vec3{load_case.keep_out_max[3 * b + 0],
+                              load_case.keep_out_max[3 * b + 1],
+                              load_case.keep_out_max[3 * b + 2]};
+        opts.keep_out_boxes.push_back(ko);
+      }
     }
 
     enable_projection(opts);   // M6.3 crisp density
@@ -656,11 +694,24 @@ OptimizeResult run_minimize_plastic_loadcase(
       if (cancel_flag != nullptr && *cancel_flag) cancelled.store(true);
     };
 
-    set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
+    // M7.dom-app: which grid the RESULT arrays live on. minimize_plastic takes the
+    // PART grid and (when design_box is set) expands INTERNALLY, so every variant's
+    // mesh, von-Mises/displacement field and playback are indexed to the EXPANDED
+    // grid. The reported grid metadata (dims/origin/spacing — used by the app to
+    // sample the grid-indexed fields at a mesh vertex) must therefore describe that
+    // expanded grid, not the part grid. Rebuild it here with the SAME pure-geometry
+    // call minimize_plastic uses (deterministic → identical grid). With no design
+    // box the result grid IS the part grid (byte-identical default).
+    const topopt::VoxelGrid result_grid =
+        load_case.has_design_box
+            ? topopt::expand_design_domain(grid, *opts.design_box, opts.keep_out_boxes).grid
+            : grid;
+
+    set_variant_stream(opts, result_grid, variant_fn, variant_ctx);  // progressive results
 
     topopt::MinimizePlasticResult mp = topopt::minimize_plastic(
         grid, it->second, material_name, bcs, rules, opts);
-    result = to_optimize_result(mp, grid);
+    result = to_optimize_result(mp, result_grid);
   } catch (const std::exception& e) {
     err.ok = false;
     err.message = e.what();

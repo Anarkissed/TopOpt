@@ -44,6 +44,14 @@ public struct RunRequest: Equatable, Sendable {
     /// changing infill re-enables Optimize (it feeds the optimizer, unlike the other
     /// print parameters, which are slicer-settings overrides only).
     public let infillPercent: Int
+    /// The M7.dom-app design box (model space, mm) the optimizer may GROW material
+    /// into beyond the import, or nil for the default no-box run (byte-identical to
+    /// before). Consumed only on the STEP load-case path. Part of the request
+    /// identity, so editing the box re-enables Optimize.
+    public let designBox: TopOptKit.DesignBoxSpec?
+    /// The M7.dom-app keep-out boxes (regions the optimizer must leave empty). Only
+    /// meaningful alongside a `designBox`.
+    public let keepOutBoxes: [TopOptKit.DesignBoxSpec]
 
     /// STEP parts carry a B-rep face selection, so the run uses the load-case path;
     /// STL parts have no faces and fall back to the self-weight path.
@@ -56,7 +64,9 @@ public struct RunRequest: Equatable, Sendable {
                 rulesPath: String, resolution: Int, projectName: String,
                 anchorFaceIDs: [Int] = [], loadGroups: [TopOptKit.LoadGroupSpec] = [],
                 minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
-                infillPercent: Int = -1) {
+                infillPercent: Int = -1,
+                designBox: TopOptKit.DesignBoxSpec? = nil,
+                keepOutBoxes: [TopOptKit.DesignBoxSpec] = []) {
         self.modelPath = modelPath
         self.material = material
         self.materialsPath = materialsPath
@@ -68,6 +78,8 @@ public struct RunRequest: Equatable, Sendable {
         self.minimizePlastic = minimizePlastic
         self.buildDirection = buildDirection
         self.infillPercent = infillPercent
+        self.designBox = designBox
+        self.keepOutBoxes = keepOutBoxes
     }
 }
 
@@ -352,6 +364,7 @@ public final class RunModel: ObservableObject {
                 resolution: request.resolution, anchorFaceIDs: request.anchorFaceIDs,
                 loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
                 buildDirection: request.buildDirection, infillPercent: request.infillPercent,
+                designBox: request.designBox, keepOutBoxes: request.keepOutBoxes,
                 progress: progress, onVariant: onVariant)
         }
         return try TopOptKit.minimizePlastic(

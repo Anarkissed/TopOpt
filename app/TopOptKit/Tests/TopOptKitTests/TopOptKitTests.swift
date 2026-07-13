@@ -298,6 +298,63 @@ final class TopOptKitTests: XCTestCase {
         }
     }
 
+    // M7.dom-app: a design box LARGER than the part must reach the core through the
+    // bridge and expand the optimize grid (dom-core expand_design_domain), while the
+    // no-box run stays on the imported grid (byte-identical default). This is the
+    // end-to-end proof that the box → BridgeLoadCase → MinimizePlasticOptions path
+    // is wired; the DesignBoxTests cover the model-space conversion in isolation.
+    func testMinimizePlasticLoadCaseDesignBoxExpandsTheGrid() throws {
+        let res = 10
+        let mesh = try TopOptKit.importMesh(path: Self.lbracketSTEP)
+        var taggable: [Int] = []
+        for f in 0..<mesh.faceCount {
+            let n = (try? TopOptKit.tagStepFace(stepPath: Self.lbracketSTEP, faceID: f,
+                                                asFixture: true, resolution: res)) ?? 0
+            if n > 0 { taggable.append(f) }
+            if taggable.count == 2 { break }
+        }
+        try XCTSkipIf(taggable.count < 2, "need two taggable faces on the fixture")
+
+        func run(_ box: TopOptKit.DesignBoxSpec?) throws -> OptimizeOutcome {
+            try TopOptKit.minimizePlasticLoadCase(
+                stepPath: Self.lbracketSTEP, material: "PLA",
+                materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+                resolution: res, anchorFaceIDs: [taggable[0]],
+                loadGroups: [.init(faceIDs: [taggable[1]], force: SIMD3(0, 0, -5))],
+                minimizePlastic: false, designBox: box)
+        }
+
+        // No box: the run stays on the imported part grid.
+        let base = try run(nil)
+        XCTAssertGreaterThan(base.gridNx, 0)
+        let baseVoxels = base.gridNx * base.gridNy * base.gridNz
+
+        // A design box padded well beyond the part bounds (model space, mm) must
+        // enlarge the grid — the empty grow room becomes Active voxels. Bounds are
+        // computed from the imported mesh's flattened xyz vertices.
+        var mn = SIMD3<Double>(repeating: .greatestFiniteMagnitude)
+        var mx = SIMD3<Double>(repeating: -.greatestFiniteMagnitude)
+        var i = 0
+        while i + 2 < mesh.vertices.count {
+            let p = SIMD3<Double>(Double(mesh.vertices[i]), Double(mesh.vertices[i + 1]),
+                                  Double(mesh.vertices[i + 2]))
+            mn = simd_min(mn, p); mx = simd_max(mx, p)
+            i += 3
+        }
+        let pad = simd_length(mx - mn) * 0.25   // a generous outward pad (grow room)
+        let grown = try run(TopOptKit.DesignBoxSpec(
+            min: mn - SIMD3<Double>(repeating: pad),
+            max: mx + SIMD3<Double>(repeating: pad)))
+        let grownVoxels = grown.gridNx * grown.gridNy * grown.gridNz
+
+        XCTAssertGreaterThan(grownVoxels, baseVoxels,
+                             "the design box expands the optimize grid beyond the import")
+        // The grown run still produces a usable variant with a matching field size.
+        let v = try XCTUnwrap(grown.variants.first)
+        XCTAssertEqual(v.vonMisesField.count, grownVoxels)
+        XCTAssertFalse(v.meshVertices.isEmpty)
+    }
+
     func testMinimizePlasticCancel() throws {
         var invocations = 0
         let outcome = try TopOptKit.minimizePlastic(

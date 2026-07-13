@@ -43,6 +43,12 @@ public final class ProjectModel: ObservableObject {
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
 
+    /// The M7.dom-app design-domain state: an optional design box (empty grow-room the
+    /// optimizer may ADD material into, beyond the import) plus keep-out boxes. Default
+    /// OFF (`box == nil`) → the run passes no box and behaves exactly as before.
+    /// Persisted on the project; threaded to the core via `AppModel.makeRunRequest`.
+    @Published public var designBox = DesignBoxModel()
+
     /// "Minimize plastic": pursue material reduction (the variant ladder). On with
     /// no forces → self-weight removal; on with forces → removal under the forces;
     /// off with forces → one conservative force-adequate variant. Default on.
@@ -112,6 +118,7 @@ public final class ProjectModel: ObservableObject {
         self.minimizePlastic = snapshot.minimizePlastic ?? true
         self.quality = snapshot.quality ?? .fast
         self.printParams = snapshot.printParams ?? .fdmDefault
+        self.designBox = snapshot.designBox ?? DesignBoxModel()
     }
 
     /// Assemble the run's load case from the current selection + force state, in the
@@ -161,7 +168,8 @@ public final class ProjectModel: ObservableObject {
                                modelFileName: modelFileName, originalFileName: file.name,
                                savedAt: savedAt, selection: selection, force: force,
                                minimizePlastic: minimizePlastic, quality: quality,
-                               optimized: hasResults, printParams: printParams)
+                               optimized: hasResults, printParams: printParams,
+                               designBox: designBox)
     }
 
     /// The URL of the imported model file to copy into the store on first save.
