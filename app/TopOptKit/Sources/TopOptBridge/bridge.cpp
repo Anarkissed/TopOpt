@@ -104,6 +104,29 @@ topopt::TriangleMesh import_any(const std::string& path) {
 // never returns an unsafe variant — it just walks further down for strong parts.
 std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
 
+// M7.anchor-integrity (FIX 1) — depth, in voxels, of the FrozenSolid structural
+// pad frozen behind each anchor/load face on the loadcase run path. tag_step_face
+// freezes only a ~1-voxel BC skin (thr2 = 0.25*h*h; step.cpp), so the material
+// behind it is a free design variable the optimizer carves away, leaving the
+// anchor boss a paper-thin film that then gets isolated and discarded (diagnosis
+// 064). Freezing a pad this many voxels deep (via mask_step_face, FrozenSolid)
+// ties the boundary condition into the body so the optimizer must route load
+// through a real structural region. 3 is a conservative default: deep enough to
+// be a structural pad (> the 2-voxel min-feature size, §7 V3) without pinning a
+// large fraction of a small part. Tunable — raise for chunkier anchors.
+constexpr int kAnchorPadDepthVoxels = 3;
+
+// M7.anchor-integrity (FIX 2) — the ladder-floor multiple handed to
+// minimize_plastic on the loadcase path (MinimizePlasticOptions::margin_floor_
+// multiple). The ladder stops stripping once an accepted rung's worst-case margin
+// is >= this multiple of margin_stop (1.5), i.e. >= 4.5 here — roughly 2x headroom
+// above the 1.5 strength floor. This keeps a lightly-loaded part from being walked
+// to the lightest rung (0.26 VF) just because it can survive there. Conservative
+// seed; the maintainer can tune it after seeing results. Setting it to
+// +infinity (or removing this line) reverts to the legacy walk-to-the-lightest-
+// safe-rung behavior exactly (minimize_plastic asserts that equivalence).
+constexpr double kAnchorMarginFloorMultiple = 3.0;
+
 // Turn on the M6.3 single-field Heaviside projection + beta-continuation on a
 // run's SIMP options, for crisp (near-0/1) density with a minimum length scale.
 // Uses the locked continuation schedule. Non-empty `projection` makes the loop
@@ -476,6 +499,11 @@ OptimizeResult run_minimize_plastic_loadcase(
     const topopt::VoxelGrid base_grid = grid;
 
     std::vector<topopt::NodalLoad> external;
+    // M7.anchor-integrity (FIX 1): the load faces actually retained on the main
+    // grid (the non-zero groups), collected so their structural pad is frozen
+    // alongside the anchors' below. Mirrors exactly the faces tagged Load at the
+    // "retain the load faces" step, so no zero-force / empty group is padded.
+    std::vector<int32_t> retained_load_faces;
     const std::size_t group_count = load_case.load_group_sizes.size();
     std::size_t face_off = 0;
     for (std::size_t g = 0; g < group_count; ++g) {
@@ -527,8 +555,10 @@ OptimizeResult run_minimize_plastic_loadcase(
       external.insert(external.end(), tl.begin(), tl.end());
       // Retain the load faces on the MAIN grid (Load voxels are implicitly
       // FrozenSolid, so the surface the traction sits on is never optimized away).
-      for (int32_t fid : faces)
+      for (int32_t fid : faces) {
         topopt::tag_step_face(grid, model, fid, topopt::VoxelTag::Load);
+        retained_load_faces.push_back(fid);
+      }
     }
 
     // TEMP-INSTRUMENT: THE KEY LOG (diag 064 log #2). Total applied force that
@@ -614,6 +644,32 @@ OptimizeResult run_minimize_plastic_loadcase(
     opts.volume_fraction_ladder = load_case.minimize_plastic
                                       ? reduction_ladder()
                                       : std::vector<double>{0.9};
+
+    // M7.anchor-integrity (FIX 1): freeze an N-voxel structural PAD behind every
+    // anchor and (retained) load face, not just the 1-voxel BC skin tag_step_face
+    // produces. mask_step_face marks the first kAnchorPadDepthVoxels solid layers
+    // FrozenSolid; minimize_plastic pins them to density 1 and keeps them out of
+    // the design, so the anchor boss + hole bosses are tied into the body and the
+    // optimizer must route load through them instead of carving them away
+    // (diagnosis 064). Composes with the M1.6 Load/Fixture tags (still forced
+    // FrozenSolid by the core), so the mask only ADDS keep-in pad voxels. Only the
+    // loadcase (recommendation-ladder) path pads; the fixed single-fraction
+    // preview (minimize_plastic == false) is left untouched.
+    if (load_case.minimize_plastic) {
+      topopt::DesignMask pad = topopt::make_active_mask(grid);
+      for (int32_t fid : load_case.anchor_face_ids)
+        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                               kAnchorPadDepthVoxels, pad);
+      for (int32_t fid : retained_load_faces)
+        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                               kAnchorPadDepthVoxels, pad);
+      opts.design_mask = std::move(pad);
+      // M7.anchor-integrity (FIX 2): floor the reduction ladder so a lightly-
+      // loaded part is not stripped to the lightest rung once it is comfortably
+      // strong. Only meaningful when the ladder actually walks (minimize_plastic).
+      opts.margin_floor_multiple = kAnchorMarginFloorMultiple;
+    }
+
     enable_projection(opts);   // M6.3 crisp density
     opts.keyframe_count = 12;   // optimization-history playback
     // M7.infill-margin — feed the user's infill-density override into the ladder

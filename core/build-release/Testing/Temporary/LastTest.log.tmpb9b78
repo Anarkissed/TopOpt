@@ -1,0 +1,210 @@
+Start testing: Jul 12 23:15 EDT
+----------------------------------------------------------
+1/30 Testing: materials_loader
+1/30 Test: materials_loader
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_materials"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"materials_loader" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+materials loader: all 37 checks passed
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"materials_loader" end time: Jul 12 23:15 EDT
+"materials_loader" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/30 Testing: stl_import
+2/30 Test: stl_import
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_stl"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"stl_import" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+stl import: all 33 checks passed
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"stl_import" end time: Jul 12 23:15 EDT
+"stl_import" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/30 Testing: voxelize
+3/30 Test: voxelize
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_voxel"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"voxelize" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+voxelize: all 22 checks passed
+<end of output>
+Test time =   0.09 sec
+----------------------------------------------------------
+Test Passed.
+"voxelize" end time: Jul 12 23:15 EDT
+"voxelize" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/30 Testing: hex_element
+4/30 Test: hex_element
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_fea"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"hex_element" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+hex element: all 74 checks passed
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"hex_element" end time: Jul 12 23:15 EDT
+"hex_element" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/30 Testing: orientation
+5/30 Test: orientation
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_orient"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"orientation" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+orientation candidates + support proxy + scoring (M4.3/M4.4): all 80 checks passed
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"orientation" end time: Jul 12 23:15 EDT
+"orientation" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/30 Testing: settings
+6/30 Test: settings
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_settings"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"settings" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+settings rule engine (M5.1): all 97 checks passed
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"settings" end time: Jul 12 23:15 EDT
+"settings" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/30 Testing: report
+7/30 Test: report
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_report"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"report" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+job report (M5.2): all 80 checks passed
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"report" end time: Jul 12 23:15 EDT
+"report" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/30 Testing: export_stl
+8/30 Test: export_stl
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_export"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"export_stl" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+STL export round-trip (M6.1): all 36 checks passed
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"export_stl" end time: Jul 12 23:15 EDT
+"export_stl" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/30 Testing: job_schema
+9/30 Test: job_schema
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_job"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"job_schema" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+job schema (M6.2): all 81 checks passed
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"job_schema" end time: Jul 12 23:15 EDT
+"job_schema" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/30 Testing: fea_assembly
+10/30 Test: fea_assembly
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_assembly"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"fea_assembly" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+fea assembly: all 19 checks passed
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"fea_assembly" end time: Jul 12 23:15 EDT
+"fea_assembly" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/30 Testing: traction_loads
+11/30 Test: traction_loads
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_traction"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"traction_loads" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+traction_loads: all 9 checks passed
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"traction_loads" end time: Jul 12 23:15 EDT
+"traction_loads" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/30 Testing: fea_cg
+12/30 Test: fea_cg
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_cg"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"fea_cg" start time: Jul 12 23:15 EDT
+Output:
+----------------------------------------------------------
+64^3 cantilever: 578 CG iterations, residual 9.840e-09
+fea cg: all 26 checks passed
+<end of output>
+Test time =  25.19 sec
+----------------------------------------------------------
+Test Passed.
+"fea_cg" end time: Jul 12 23:16 EDT
+"fea_cg" time elapsed: 00:00:25
+----------------------------------------------------------
+
+13/30 Testing: beam_validation
+13/30 Test: beam_validation
+Command: "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release/test_beam"
+Directory: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/anchor-integrity-ladder-floor-074fc3/core/build-release
+"beam_validation" start time: Jul 12 23:16 EDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =  12.38 sec
+----------------------------------------------------------
+Test Failed.
+"beam_validation" end time: Jul 12 23:16 EDT
+"beam_validation" time elapsed: 00:00:12
+----------------------------------------------------------
+

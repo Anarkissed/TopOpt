@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "topopt/mesh.hpp"
@@ -265,7 +266,83 @@ V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
   // Gate 1 + 2: marching cubes -> cleanup -> watertight + single component.
   const TriangleMesh raw = marching_cubes(grid, density, iso);
   r.mesh_components_raw = count_components(raw);
-  r.mesh = keep_largest_component(raw);
+
+  // M7.anchor-integrity (FIX 3): flag every raw-mesh vertex that sits on the
+  // surface of a frozen (Load/Fixture) voxel, so the cleanup keeps a pinned
+  // anchor/hole region even when it becomes a minority island — but NOTHING more.
+  //
+  // A marching-cubes vertex lies on an EDGE between two adjacent voxel CENTRES
+  // (origin + (i+0.5)*spacing), differing by 1 in exactly one axis; the vertex
+  // "belongs to" ONLY those two bounding voxels. We identify them precisely: in
+  // voxel-centre coordinates u = (p - origin)/spacing - 0.5, the two constant
+  // axes sit exactly on an integer centre and the varying axis lies strictly
+  // between floor(u) and floor(u)+1. Flagging exactly this <=2-voxel edge set
+  // (not a fat neighbourhood) means only a component that genuinely BOUNDS a
+  // frozen voxel is marked: a separate optimisation-noise fragment near — but
+  // separated by void from — the frozen region is NOT flagged, so it is still
+  // cleaned away and the single-component invariant holds for normal parts.
+  // When the part carries no Load/Fixture voxels this flags nothing and
+  // keep_largest_and_marked_components degenerates to keep_largest_component
+  // (byte-identical to the pre-M7.anchor-integrity path).
+  bool any_frozen = false;
+  for (const VoxelTag t : grid.tags)
+    if (t == VoxelTag::Load || t == VoxelTag::Fixture) {
+      any_frozen = true;
+      break;
+    }
+  std::vector<char> vertex_frozen(raw.vertices.size(), 0);
+  if (any_frozen) {
+    const double h = grid.spacing;
+    auto is_frozen = [&](int i, int j, int k) {
+      if (i < 0 || i >= grid.nx || j < 0 || j >= grid.ny || k < 0 ||
+          k >= grid.nz)
+        return false;
+      const VoxelTag t = grid.tag(i, j, k);
+      return t == VoxelTag::Load || t == VoxelTag::Fixture;
+    };
+    for (std::size_t vi = 0; vi < raw.vertices.size(); ++vi) {
+      const Vec3& p = raw.vertices[vi];
+      const double u[3] = {(p.x - grid.origin.x) / h - 0.5,
+                           (p.y - grid.origin.y) / h - 0.5,
+                           (p.z - grid.origin.z) / h - 0.5};
+      // Nearest integer centre + signed distance to it, per axis.
+      int ctr[3];
+      double d[3];
+      for (int a = 0; a < 3; ++a) {
+        ctr[a] = static_cast<int>(std::lround(u[a]));
+        d[a] = u[a] - static_cast<double>(ctr[a]);
+      }
+      // The varying axis is the one whose coordinate is NOT on a centre.
+      int va = 0;
+      for (int a = 1; a < 3; ++a)
+        if (std::fabs(d[a]) > std::fabs(d[va])) va = a;
+      int lo[3] = {ctr[0], ctr[1], ctr[2]};
+      int hi[3] = {ctr[0], ctr[1], ctr[2]};
+      if (std::fabs(d[va]) > 1e-6) {
+        lo[va] = static_cast<int>(std::floor(u[va]));
+        hi[va] = lo[va] + 1;  // the two edge-endpoint voxels on the varying axis
+      }
+      if (is_frozen(lo[0], lo[1], lo[2]) || is_frozen(hi[0], hi[1], hi[2]))
+        vertex_frozen[vi] = 1;
+    }
+  }
+  // SURFACE, don't silently delete. keep_largest_and_marked_components reports
+  // how many non-largest components genuinely bound frozen material via
+  // `out_extra_kept`; that count is the SIGNAL (r.load_fixture_islands). The
+  // displayed mesh itself stays the single largest body (keep_largest_component)
+  // — so the §7 V3 single-component gate and every existing caller are byte-
+  // identical — but a disconnected frozen region is no longer hidden: a caller
+  // that sees load_fixture_islands > 0 knows the cleanup dropped pinned
+  // Load/Fixture material and can warn instead of shipping a silently-broken
+  // result (diagnosis 064: "keep the structure connected [the FIX 1 pad]; if
+  // islands remain, surface a warning rather than silently deleting them"). In
+  // the common healthy case out_extra_kept == 0 and the marked mesh IS the
+  // largest component, so we reuse it and do no extra work.
+  int extra = 0;
+  TriangleMesh marked =
+      keep_largest_and_marked_components(raw, vertex_frozen, extra);
+  r.load_fixture_islands = extra;
+  r.mesh = extra == 0 ? std::move(marked) : keep_largest_component(raw);
   r.watertight = check_watertight(r.mesh);
   r.mesh_components = count_components(r.mesh);
 

@@ -136,6 +136,16 @@ struct V3Report {
   bool load_fixture_retained = false;  // gate 3: all Load/Fixture voxels rho>=0.9
   double min_load_fixture_density = 1.0;  // min rho over Load/Fixture voxels
   int load_fixture_voxels = 0;            // number of Load/Fixture voxels checked
+  // M7.anchor-integrity (FIX 3): the number of NON-largest mesh components that
+  // genuinely bound frozen Load/Fixture material — a pinned anchor/hole region
+  // the surrounding bulk was stripped away from, which keep_largest_component
+  // would otherwise DROP from `mesh` silently. 0 in the healthy case (the frozen
+  // region is part of the single main body — the FIX 1 pad keeps it there). When
+  // > 0, the cleanup dropped a disconnected frozen region: `mesh` is still the
+  // single largest body (so the §7 V3 single-component gate is unchanged), but
+  // this count SURFACES the drop so a caller can warn instead of shipping a
+  // silently-broken result (diagnosis 064). Not a §7 V3 gate; a diagnostic signal.
+  int load_fixture_islands = 0;
   int min_feature_violations = 0;  // gate 4: solid voxels not in any 2x2x2 block
   bool passes = false;
 
