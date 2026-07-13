@@ -294,5 +294,33 @@ final class LoadPathTests: XCTestCase {
         renderer.clearLoadPath()
         XCTAssertEqual(renderer.renderOffscreen(size: 96), baseline, "clearing did not restore the frame")
     }
+
+    /// The "Load path shows nothing" regression: glyphs sit at voxel CENTRES inside
+    /// the solid part, so a normal depth test hides them behind the front surface.
+    /// A segment fully INSIDE the cube must still change the frame (drawn depth-always).
+    func testRendererDrawsLoadPathLinesInsideTheSolid() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("no Metal device on this host")
+        }
+        guard let renderer = MeshRenderer(device: device) else {
+            XCTFail("MeshRenderer init failed: \(MeshRenderer.lastInitError ?? "unknown")")
+            return
+        }
+        let corners: [Float] = [0,0,0, 1,0,0, 1,1,0, 0,1,0, 0,0,1, 1,0,1, 1,1,1, 0,1,1]
+        let tris: [Int32] = [1,2,6, 1,6,5, 0,4,7, 0,7,3, 3,7,6, 3,6,2,
+                             0,1,5, 0,5,4, 4,5,6, 4,6,7, 0,3,2, 0,2,1]
+        renderer.setMesh(ViewerMesh(vertices: corners, indices: tris, faceIDs: []))
+        let baseline = renderer.renderOffscreen(size: 96)
+        XCTAssertNotNil(baseline)
+
+        // A bright segment wholly WITHIN the cube (both endpoints interior, so it is
+        // entirely behind the front face). Before the depth-always fix this drew
+        // nothing (occluded); now it must overlay.
+        let interior: [Float] = [0.3, 0.5, 0.5, 1, 0, 1, 1,
+                                 0.7, 0.5, 0.5, 1, 0, 1, 1]
+        renderer.setLoadPath(interior)
+        XCTAssertNotEqual(renderer.renderOffscreen(size: 96), baseline,
+                          "interior load-path lines were occluded (nothing drew)")
+    }
     #endif
 }

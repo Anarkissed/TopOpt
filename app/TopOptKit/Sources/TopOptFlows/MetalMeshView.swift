@@ -187,6 +187,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     // target (the centre) fixed, so framing is unaffected.
     private let groundPipeline: MTLRenderPipelineState?
     private let groundDepthState: MTLDepthStencilState
+    /// Depth state for the load-path overlay: test ALWAYS (never occluded), write
+    /// nothing. The glyphs sit at voxel centres INSIDE the solid part, so a normal
+    /// depth test (`.less` against the opaque mesh) hides every one of them behind the
+    /// front surface — the "Load path shows nothing" bug. Drawing them depth-always
+    /// overlays the load-path trajectories on top of the part (an x-ray hedgehog),
+    /// which is exactly the intent: see how force travels through the structure.
+    private let lineOverlayDepthState: MTLDepthStencilState
     private var modelCenter = SIMD3<Float>.zero
     /// The currently-displayed model rotation (animates toward `settleTo`).
     private var modelRotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
@@ -317,6 +324,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         gdsd.depthCompareFunction = .less
         gdsd.isDepthWriteEnabled = false
 
+        // Load-path overlay: always passes the depth test (draws over the part), never
+        // writes depth (so it never occludes anything else).
+        let odsd = MTLDepthStencilDescriptor()
+        odsd.depthCompareFunction = .always
+        odsd.isDepthWriteEnabled = false
+
         self.device = device
         self.queue = queue
         self.pipeline = pipe
@@ -324,6 +337,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.idPipeline = idPipe
         self.groundPipeline = groundPipe
         self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
+        self.lineOverlayDepthState = device.makeDepthStencilState(descriptor: odsd) ?? depth
         super.init()
     }
 
@@ -648,11 +662,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         // Load-path overlay (M7.viz.4): principal-stress-direction segments drawn
         // with the same pos+rgba line pipeline, but under the MESH's model·view·proj
         // (uniforms.mvp) so they lock to the part (the ground pass uses a world MVP).
-        // Depth-tested against the part (occluded behind it) but not depth-writing.
+        // Drawn depth-ALWAYS (lineOverlayDepthState): the glyphs sit at voxel centres
+        // inside the solid part, so a normal depth test hides them behind the surface
+        // (nothing shows). Overlaying them on top is the intent — trace the load path
+        // through the structure.
         if loadPathVertexCount > 0, let lpipe = groundPipeline, let lbuf = loadPathBuffer {
             var mvp = uniforms.mvp
             enc.setRenderPipelineState(lpipe)
-            enc.setDepthStencilState(groundDepthState)
+            enc.setDepthStencilState(lineOverlayDepthState)   // depth-always: never hidden inside the part
             enc.setVertexBuffer(lbuf, offset: 0, index: 0)
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: loadPathVertexCount)
@@ -803,6 +820,11 @@ struct MeshViewInputs {
     /// M7.8 results stress overlay: per-flat-vertex colors (one per `mesh.flat`
     /// vertex). When set, they replace the face-highlight tints. nil = no overlay.
     var stressTints: [SIMD4<Float>]?
+    /// M7.viz coupling: the load multiple the `stressTints` were computed at (the flex
+    /// amplitude / failure push). It changes each animation frame, so the coordinator
+    /// re-uploads the (already-multiplied) tints whenever it moves — that is what makes
+    /// the heatmap recolor WITH the motion instead of freezing at the first frame.
+    var stressMultiplier: Float = 1
     /// M7.8 results morph scrub in [0, 1] (1 = fully formed; < 1 reveals partially).
     var reveal: Float = 1
     /// M7.viz.3 flex: per-flat-vertex displacement (flattened xyz, mm), aligned with
@@ -825,14 +847,14 @@ public struct MetalMeshView: UIViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
-                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1,
+                stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection, stressTints: stressTints, reveal: reveal,
-            flexDisplacements: flexDisplacements, flexScale: flexScale,
+            onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
+            reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments)
     }
 
@@ -867,14 +889,14 @@ public struct MetalMeshView: NSViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
-                stressTints: [SIMD4<Float>]? = nil, reveal: Float = 1,
+                stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection, stressTints: stressTints, reveal: reveal,
-            flexDisplacements: flexDisplacements, flexScale: flexScale,
+            onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
+            reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments)
     }
 
@@ -932,6 +954,9 @@ extension MetalMeshView {
         private var lastSettleVector: SIMD4<Float>?
         /// M7.8: whether a stress overlay is currently uploaded, and the last reveal.
         private var appliedStress = false
+        /// M7.viz coupling: the multiplier the uploaded tints were computed at, so a
+        /// change (the animating flex/push) forces a re-upload → the heatmap recolors.
+        private var appliedStressMultiplier: Float = 1
         private var appliedReveal: Float = 1
         /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
         private var appliedFlex = false
@@ -983,14 +1008,17 @@ extension MetalMeshView {
 
             if let stress = inputs.stressTints {
                 // M7.8 results stress overlay: per-vertex colors replace face tints.
-                // Re-upload on mesh change (dirty) or when the overlay turns on.
-                if dirty || !appliedStress {
+                // Re-upload on mesh change (dirty), when the overlay turns on, OR when
+                // the coupling multiplier moves (the flex loop / failure push) — the
+                // last is what makes the heatmap recolor together with the motion.
+                if dirty || !appliedStress || inputs.stressMultiplier != appliedStressMultiplier {
                     appliedStress = true
+                    appliedStressMultiplier = inputs.stressMultiplier
                     renderer.setStressTints(stress)
                     dirty = true
                 }
             } else {
-                if appliedStress { appliedStress = false; appliedTint = nil }  // rebuild plain tints
+                if appliedStress { appliedStress = false; appliedStressMultiplier = 1; appliedTint = nil }  // rebuild plain tints
                 // Highlight tint (role-aware if provided, else the group palette).
                 let tint = inputs.faceTints ?? derivedTint(inputs.selection)
                 let active = Set(inputs.selection?.activeGroup?.faces ?? [])

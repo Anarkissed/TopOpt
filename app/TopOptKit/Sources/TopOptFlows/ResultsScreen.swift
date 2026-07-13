@@ -74,6 +74,7 @@ public struct ResultsScreen: View {
             MetalMeshView(mesh: viewerMesh,
                           onProjection: { projection = $0 },
                           stressTints: stressTints,
+                          stressMultiplier: Float(stressMultiplier),
                           reveal: viewerReveal,
                           flexDisplacements: flexDisplacements,
                           flexScale: flexScale,
@@ -142,10 +143,21 @@ public struct ResultsScreen: View {
     /// recomputed on each body eval while the overlay is on; memoize on
     /// `selectedIndex` if a scrub-with-stress hitch shows up on device.
     private var stressTints: [SIMD4<Float>]? {
-        guard model.stressOn, let mesh = model.selectedMesh,
+        guard showStressColors, let mesh = viewerMesh,
               let field = model.selectedStressField, !field.isEmpty else { return nil }
-        return model.stressTints(for: mesh, field: field)
+        return model.stressTints(for: mesh, field: field, multiplier: stressMultiplier)
     }
+
+    /// Whether the body is stress-colored right now: when the Stress chip is on, OR
+    /// when a deflection is animating (flex loop / failure push) so the part visibly
+    /// flushes blue→red as it moves (M7.viz coupling). Sampled against `viewerMesh`,
+    /// so during the history morph it colors whichever keyframe is on screen.
+    private var showStressColors: Bool { model.stressOn || deflectionActive }
+
+    /// The load multiple the stress field is colored at this frame (1× at rest, the
+    /// flex amplitude while wobbling, the push scrub while driving to failure). Passed
+    /// to the viewer so it re-uploads the recolored tints as the multiplier moves.
+    private var stressMultiplier: Double { model.stressColorMultiplier(reduceMotion: reduceMotion) }
 
     /// The mesh the viewer shows. When the variant has an optimization history and
     /// stress is off, Play scrubs THROUGH the history keyframes (the real "watch it
@@ -166,7 +178,16 @@ public struct ResultsScreen: View {
     /// Either flex mechanism displaces the mesh via the same render path (per-vertex
     /// displacement × scale): the viz.3 wobble or the viz.6 push scrub.
     private var deflectionActive: Bool { flexActive || pushActive }
-    private var showHistory: Bool { !model.stressOn && !deflectionActive && !loadPathActive && model.hasHistory }
+    /// Whether Play morphs THROUGH the optimization history (the "watch it carve out")
+    /// rather than the reveal-slice fallback. `stressOn` is deliberately NOT a factor
+    /// (see `ResultsModel.showsHistoryMorph`): the Stress chip used to fall through to
+    /// the slice viewer here, so Play with Stress on sliced instead of morphing. The
+    /// morph and the stress overlay now coexist — the tints sample the live keyframe.
+    private var showHistory: Bool {
+        ResultsModel.showsHistoryMorph(hasHistory: model.hasHistory,
+                                       deflectionActive: deflectionActive,
+                                       loadPathActive: loadPathActive)
+    }
     private var viewerMesh: ViewerMesh? { showHistory ? model.playbackMesh : model.selectedMesh }
     private var viewerReveal: Float { (showHistory || deflectionActive || loadPathActive) ? 1 : Float(model.playT) }
 
