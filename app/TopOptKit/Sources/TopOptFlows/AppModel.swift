@@ -158,7 +158,9 @@ public final class AppModel: ObservableObject {
                           anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
                           minimizePlastic: project.minimizePlastic,
                           buildDirection: lc.buildDirection,
-                          infillPercent: project.printParams.infillPercent)
+                          infillPercent: project.printParams.infillPercent,
+                          designBox: project.designBox.bridgeBox,
+                          keepOutBoxes: project.designBox.bridgeKeepOuts)
     }
 
     // MARK: - Materials

@@ -48,13 +48,18 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// settings). OPTIONAL so snapshots written before this field still decode —
     /// nil is treated as `PrintParams.fdmDefault`.
     public var printParams: PrintParams?
+    /// The M7.dom-app design-domain (design box + keep-outs). OPTIONAL so snapshots
+    /// written before this field still decode — nil is treated as the default-off
+    /// `DesignBoxModel()` (no box → no design-domain expansion on the run).
+    public var designBox: DesignBoxModel?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
                 originalFileName: String, savedAt: Date,
                 selection: SelectionModel, force: ForceModel,
                 minimizePlastic: Bool? = nil, quality: RunQuality? = nil,
-                optimized: Bool? = nil, printParams: PrintParams? = nil) {
+                optimized: Bool? = nil, printParams: PrintParams? = nil,
+                designBox: DesignBoxModel? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -69,6 +74,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.quality = quality
         self.optimized = optimized
         self.printParams = printParams
+        self.designBox = designBox
     }
 }
 

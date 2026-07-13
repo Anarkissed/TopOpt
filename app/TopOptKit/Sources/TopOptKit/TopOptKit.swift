@@ -374,11 +374,24 @@ public enum TopOptKit {
     /// - Parameter infillPercent: the M7.params user infill-density override (0–100),
     ///   or < 0 for "no override". Threaded to the core through
     ///   `BridgeLoadCase.infill_percent` for the M7.infill-margin ladder knockdown.
+    /// A design box / keep-out box for `minimizePlasticLoadCase`: an axis-aligned
+    /// volume in MODEL space (mm) — the same frame as the mesh and the load faces.
+    /// `min` must be <= `max` componentwise (the caller enforces this).
+    public struct DesignBoxSpec: Equatable, Sendable {
+        public let min: SIMD3<Double>
+        public let max: SIMD3<Double>
+        public init(min: SIMD3<Double>, max: SIMD3<Double>) {
+            self.min = min
+            self.max = max
+        }
+    }
+
     public static func minimizePlasticLoadCase(
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
         minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
         infillPercent: Int = -1,
+        designBox: DesignBoxSpec? = nil, keepOutBoxes: [DesignBoxSpec] = [],
         progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
         onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
@@ -396,6 +409,26 @@ public enum TopOptKit {
         lc.build_dir_y = buildDirection.y
         lc.build_dir_z = buildDirection.z
         lc.infill_percent = Int32(infillPercent)
+
+        // M7.dom-app: the optional design-domain expansion. Unset → has_design_box
+        // stays false and the run is byte-identical to a no-box run (default off).
+        if let box = designBox {
+            lc.has_design_box = true
+            lc.design_box_min_x = box.min.x
+            lc.design_box_min_y = box.min.y
+            lc.design_box_min_z = box.min.z
+            lc.design_box_max_x = box.max.x
+            lc.design_box_max_y = box.max.y
+            lc.design_box_max_z = box.max.z
+            for ko in keepOutBoxes {
+                lc.keep_out_min.push_back(ko.min.x)
+                lc.keep_out_min.push_back(ko.min.y)
+                lc.keep_out_min.push_back(ko.min.z)
+                lc.keep_out_max.push_back(ko.max.x)
+                lc.keep_out_max.push_back(ko.max.y)
+                lc.keep_out_max.push_back(ko.max.z)
+            }
+        }
 
         let cancelFlag = UnsafeMutablePointer<Bool>.allocate(capacity: 1)
         cancelFlag.initialize(to: false)

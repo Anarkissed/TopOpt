@@ -264,6 +264,31 @@ struct BridgeLoadCase {
   // (a /core/ change M7.infill-margin owns) — so today this value reaches the bridge
   // and stops there. See the M7.params handoff.
   int infill_percent = -1;
+
+  // M7.dom-app — the design-domain expansion (the "ADD MATERIAL" feature). When
+  // `has_design_box` is true the run voxelizes the part onto a LARGER grid spanning
+  // the union of the part and this design box (model-space mm, axis-aligned), and
+  // the optimizer may GROW material into the box beyond the import (dom-core's
+  // expand_design_domain: imported part → FrozenSolid, kept forever; design box →
+  // Active growable region; keep-out boxes → FrozenVoid, left empty). The box may
+  // extend BEYOND the part's bounds — that empty space is the grow room.
+  //
+  // ADDITIVE + DEFAULTED: `has_design_box` defaults false, so an unset box means the
+  // fields are ignored and the run is BYTE-IDENTICAL to today (the default no-box
+  // path — see MinimizePlasticOptions::design_box). The whole feature is opt-in.
+  //
+  // Model space matches the voxelizer/mesh frame (mm), the same coordinates the
+  // anchors/loads use, so no transform is needed. `min` must be <= `max`
+  // componentwise (the app enforces this before the call).
+  bool has_design_box = false;
+  double design_box_min_x = 0.0, design_box_min_y = 0.0, design_box_min_z = 0.0;
+  double design_box_max_x = 0.0, design_box_max_y = 0.0, design_box_max_z = 0.0;
+  // Keep-out boxes (model space, mm), flattened as one (x,y,z) triple per box:
+  // keep-out box b spans (keep_out_min[3b], keep_out_min[3b+1], keep_out_min[3b+2])
+  // to (keep_out_max[3b], …). Only consulted when `has_design_box` is true. A
+  // keep-out never carves into the imported part (part voxels stay FrozenSolid).
+  std::vector<double> keep_out_min;
+  std::vector<double> keep_out_max;
 };
 
 // Voxelize the STEP part once, tag the anchor faces Fixture (clamped) and each
