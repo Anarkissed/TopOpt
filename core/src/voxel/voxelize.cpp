@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -34,6 +35,141 @@ std::size_t VoxelGrid::solid_count() const {
 
 DesignMask make_active_mask(const VoxelGrid& grid) {
   return DesignMask(grid.voxel_count(), MaskValue::Active);
+}
+
+// ---------------------------------------------------------------------------
+// Design-domain expansion (ROADMAP M7.dom-core).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void validate_box(const DesignBox& b, const char* what) {
+  const double c[6] = {b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z};
+  for (double v : c)
+    if (!std::isfinite(v))
+      throw std::invalid_argument(std::string("expand_design_domain: ") + what +
+                                  " has a non-finite coordinate");
+  if (b.min.x > b.max.x || b.min.y > b.max.y || b.min.z > b.max.z)
+    throw std::invalid_argument(std::string("expand_design_domain: ") + what +
+                                " has min > max on some axis");
+}
+
+// Whether a point lies inside an axis-aligned box (inclusive of the faces).
+bool point_in_box(const Vec3& p, const DesignBox& b) {
+  return p.x >= b.min.x && p.x <= b.max.x && p.y >= b.min.y && p.y <= b.max.y &&
+         p.z >= b.min.z && p.z <= b.max.z;
+}
+
+}  // namespace
+
+DesignDomain expand_design_domain(const VoxelGrid& part,
+                                  const DesignBox& design_box,
+                                  const std::vector<DesignBox>& keep_out) {
+  if (!(part.spacing > 0.0))
+    throw std::invalid_argument(
+        "expand_design_domain: part.spacing must be > 0");
+  validate_box(design_box, "design_box");
+  for (const DesignBox& k : keep_out) validate_box(k, "keep_out box");
+
+  const double s = part.spacing;
+
+  // Per axis, pad the part grid DOWN to cover design_box.min and UP to cover
+  // design_box.max, in whole voxels, keeping the part's lattice (so part voxels
+  // map to integer offsets). lo_pad voxels are prepended below the part origin;
+  // the total count also covers the part and any voxels needed above it.
+  auto axis = [&](double origin, int n, double bmin, double bmax, int& lo_pad,
+                  int& total) {
+    // Voxels to prepend so the new origin (origin - lo_pad*s) is <= bmin.
+    lo_pad = static_cast<int>(std::ceil((origin - bmin) / s - 1e-9));
+    if (lo_pad < 0) lo_pad = 0;
+    // Voxels to append beyond the part's far face so the grid reaches bmax.
+    const double part_far = origin + static_cast<double>(n) * s;
+    int hi_pad = static_cast<int>(std::ceil((bmax - part_far) / s - 1e-9));
+    if (hi_pad < 0) hi_pad = 0;
+    total = lo_pad + n + hi_pad;
+  };
+
+  int oi, oj, ok, new_nx, new_ny, new_nz;
+  axis(part.origin.x, part.nx, design_box.min.x, design_box.max.x, oi, new_nx);
+  axis(part.origin.y, part.ny, design_box.min.y, design_box.max.y, oj, new_ny);
+  axis(part.origin.z, part.nz, design_box.min.z, design_box.max.z, ok, new_nz);
+
+  DesignDomain domain;
+  domain.offset_i = oi;
+  domain.offset_j = oj;
+  domain.offset_k = ok;
+
+  VoxelGrid& g = domain.grid;
+  g.nx = new_nx;
+  g.ny = new_ny;
+  g.nz = new_nz;
+  g.spacing = s;
+  g.origin = Vec3{part.origin.x - static_cast<double>(oi) * s,
+                  part.origin.y - static_cast<double>(oj) * s,
+                  part.origin.z - static_cast<double>(ok) * s};
+  g.tags.assign(static_cast<std::size_t>(new_nx) *
+                    static_cast<std::size_t>(new_ny) *
+                    static_cast<std::size_t>(new_nz),
+                VoxelTag::Empty);
+  domain.mask.assign(g.voxel_count(), MaskValue::Active);
+
+  for (int k = 0; k < new_nz; ++k)
+    for (int j = 0; j < new_ny; ++j)
+      for (int i = 0; i < new_nx; ++i) {
+        const std::size_t idx = g.index(i, j, k);
+        // Does this expanded voxel map to a SOLID imported-part voxel?
+        const int pi = i - oi, pj = j - oj, pk = k - ok;
+        if (pi >= 0 && pi < part.nx && pj >= 0 && pj < part.ny && pk >= 0 &&
+            pk < part.nz && part.solid(pi, pj, pk)) {
+          // The imported part: frozen solid, keeping its original tag (incl. any
+          // Load/Fixture face tag). Never removed, never overridden by a box.
+          g.tags[idx] = part.tag(pi, pj, pk);
+          domain.mask[idx] = MaskValue::FrozenSolid;
+          continue;
+        }
+        // Not part material: only the design volume is a design region.
+        const Vec3 c = g.voxel_center(i, j, k);
+        if (!point_in_box(c, design_box)) continue;  // Empty / Active-ignored
+        bool blocked = false;
+        for (const DesignBox& ko : keep_out)
+          if (point_in_box(c, ko)) {
+            blocked = true;
+            break;
+          }
+        if (blocked) {
+          // Keep-out: FrozenVoid. Tag Empty so it carries no FEA element and no
+          // self-weight (the mask value is ignored for Empty voxels but recorded
+          // to document intent).
+          domain.mask[idx] = MaskValue::FrozenVoid;
+        } else {
+          // New design material the optimizer may grow into.
+          g.tags[idx] = VoxelTag::Interior;
+          domain.mask[idx] = MaskValue::Active;
+        }
+      }
+
+  return domain;
+}
+
+int remap_node_to_domain(const VoxelGrid& part, const DesignDomain& domain,
+                         int node) {
+  const int node_count = (part.nx + 1) * (part.ny + 1) * (part.nz + 1);
+  if (node < 0 || node >= node_count)
+    throw std::invalid_argument(
+        "remap_node_to_domain: node out of range for part grid");
+  const int stride_x = part.nx + 1;
+  const int stride_xy = stride_x * (part.ny + 1);
+  const int a = node % stride_x;
+  const int b = (node / stride_x) % (part.ny + 1);
+  const int c = node / stride_xy;
+  // Corner-node id on the expanded grid, shifted by the domain offset. The
+  // formula (fea.hpp) is inlined so this always-built TU keeps no link
+  // dependency on the Eigen-gated fea_node_index in assembly.cpp.
+  const int A = a + domain.offset_i;
+  const int B = b + domain.offset_j;
+  const int C = c + domain.offset_k;
+  const VoxelGrid& g = domain.grid;
+  return (C * (g.ny + 1) + B) * (g.nx + 1) + A;
 }
 
 namespace {

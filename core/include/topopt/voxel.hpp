@@ -112,6 +112,80 @@ VoxelGrid voxelize(const TriangleMesh& mesh, int resolution);
 DesignMask make_active_mask(const VoxelGrid& grid);
 
 // ---------------------------------------------------------------------------
+// Design-domain expansion — "add material" beyond the imported part (M7.dom-core).
+//
+// The M3.7 mask lets the optimizer keep (FrozenSolid) / exclude (FrozenVoid) /
+// choose (Active) each voxel, but the Active region has always been a SUBSET of
+// the imported part: the optimizer could only REMOVE material from the import.
+// This expansion lets it ADD material BEYOND the import — grow ribs, gussets and
+// buttresses into empty space along the load path — by voxelizing a larger
+// user-defined DESIGN VOLUME and making the space around the part Active.
+//
+// A DESIGN VOLUME is an axis-aligned box in model space (mm), typically larger
+// than the imported part's bounding region. Expanding a part grid over it yields
+// a LARGER grid (same voxel lattice/spacing as the part) whose effective mask is:
+//   * imported-part voxels          -> FrozenSolid (the guaranteed-kept core: the
+//                                      original part is NEVER removed),
+//   * caller keep-out box voxels    -> FrozenVoid (the optimizer may not fill
+//                                      these; they contribute no FEA element),
+//   * the remaining design-volume   -> Active (the NEW material the optimizer can
+//     voxels                          grow into),
+//   * everything else               -> Empty (outside the design volume and not
+//                                      part of the import).
+// Running the existing mask-aware SIMP/MMA optimizer over that grid+mask adds
+// material in the Active region wherever the load path needs it, on top of the
+// frozen imported part.
+
+// An axis-aligned box in model space (mm). `min` must be <= `max` componentwise.
+struct DesignBox {
+  Vec3 min;
+  Vec3 max;
+};
+
+// The expanded design domain built from a part grid and a design box: the larger
+// grid, its effective mask, and the integer voxel offset at which the original
+// part sits inside the expanded grid (part voxel (i,j,k) is expanded voxel
+// (i+offset_i, j+offset_j, k+offset_k); part corner-node (a,b,c) is expanded
+// corner-node (a+offset_i, b+offset_j, c+offset_k)).
+struct DesignDomain {
+  VoxelGrid grid;   // expanded grid (same spacing + lattice as the part)
+  DesignMask mask;  // FrozenSolid part / FrozenVoid keep-out / Active new region
+  int offset_i = 0;
+  int offset_j = 0;
+  int offset_k = 0;
+};
+
+// Expand `part`'s grid so it also covers `design_box`, and build the effective
+// mask (rules above). The expanded grid shares the part's `spacing` and lies on
+// the part's voxel lattice (the part's corners map to integer offsets), so its
+// origin is `part.origin` shifted DOWN by whole voxels and it spans the union of
+// the part's bounding box and `design_box`. A design_box smaller than or inside
+// the part still works: the offsets are then 0 and the grid equals the part on
+// the axes where no padding is needed. Membership in `design_box` / `keep_out`
+// is decided by the VOXEL CENTRE (matching the voxelizer's centre-sampling).
+//
+// Part solid voxels become FrozenSolid regardless of the boxes (the import is
+// never removed, and a keep-out box never carves into it). Keep-out voxels that
+// are not part are tagged Empty (mask FrozenVoid) so they carry no FEA element
+// and no self-weight. New Active voxels are tagged Interior (solid design
+// variables at the caller's volume fraction). With a design_box that exactly
+// matches the part's bounding box and no keep-out, every part voxel is
+// FrozenSolid and every in-box empty voxel is Active — the offsets are all 0.
+//
+// Throws std::invalid_argument if `design_box` (or any `keep_out` box) has
+// min > max on any axis or a non-finite coordinate, or if `part.spacing` <= 0.
+DesignDomain expand_design_domain(const VoxelGrid& part,
+                                  const DesignBox& design_box,
+                                  const std::vector<DesignBox>& keep_out = {});
+
+// Map a corner-node id of `part`'s node grid to the corresponding corner-node id
+// of `domain.grid` (shifted by the domain's voxel offset). Use it to remap
+// DirichletBC / NodalLoad node indices from the imported part onto the expanded
+// grid. Throws std::invalid_argument if `node` is out of range for `part`.
+int remap_node_to_domain(const VoxelGrid& part, const DesignDomain& domain,
+                         int node);
+
+// ---------------------------------------------------------------------------
 // Marching cubes on a density field + Gate V3 property suite (ROADMAP M3.5).
 //
 // After the SIMP loop (M3.4) produces a physical density field, M3.5 extracts a

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <functional>
 #include <limits>  // margin_floor_multiple's "disabled" sentinel (+infinity)
+#include <optional>  // the optional design-volume box (M7.dom-core)
 #include <stdexcept>  // the driver throws std::invalid_argument (see below)
 #include <string>
 #include <vector>
@@ -110,6 +111,42 @@ struct MinimizePlasticOptions {
   // EMPTY (default) the driver uses make_active_mask(grid) — byte-identical to
   // every existing caller. Must be empty or size grid.voxel_count().
   DesignMask design_mask;
+
+  // M7.dom-core — the "add material" feature: an optional user-defined DESIGN
+  // VOLUME (an axis-aligned box in model space, mm), typically LARGER than the
+  // imported part's bounding region. When set, the driver EXPANDS the run onto a
+  // larger grid (expand_design_domain, voxel.hpp) so the optimizer can ADD
+  // material BEYOND the import — grow ribs/gussets/buttresses into empty space
+  // along the load path — instead of only removing material from the import. The
+  // effective mask over the expanded grid is: imported-part voxels FrozenSolid
+  // (the guaranteed-kept core — the original part is NEVER removed),
+  // `keep_out_boxes` voxels FrozenVoid (the optimizer may not fill them), and the
+  // remaining design-volume voxels Active (the new material the optimizer grows).
+  //
+  // The mounting `bcs` and any `external_loads` are node-indexed to the ORIGINAL
+  // part grid; the driver remaps them onto the expanded grid automatically
+  // (remap_node_to_domain). Self-weight (empty `external_loads`) is computed over
+  // the expanded grid's solid voxels (the frozen part plus the Active design
+  // envelope), held fixed across rungs like the original-solid self-weight model.
+  //
+  // Because it changes the domain, `design_box` is INCOMPATIBLE with a caller
+  // `design_mask` (the driver builds the mask itself): supplying both throws. The
+  // volume fraction of each ladder rung then applies to the ACTIVE design voxels
+  // (the growable region), not the frozen part.
+  //
+  // UNSET (std::nullopt, the DEFAULT) disables the whole feature: the run uses
+  // the imported `grid`/`bcs` verbatim with Active = the import, byte-for-byte
+  // identical to the pre-M7.dom-core driver (the same opt-in discipline as
+  // min_feature_mm == 0 / infill_percent == 100). Every existing caller, fixture
+  // and benchmark is unaffected.
+  std::optional<DesignBox> design_box;
+  // Keep-out boxes (axis-aligned, model space) for the design volume: voxels
+  // whose centre lies in any of these become FrozenVoid (the optimizer may not
+  // grow material there). Only consulted when `design_box` is set; ignored
+  // otherwise. A keep-out box never carves into the imported part (part voxels
+  // are always FrozenSolid).
+  std::vector<DesignBox> keep_out_boxes;
+
   // Self-weight body load. `gravity` is the acceleration magnitude (finite,
   // > 0); `gravity_direction` is the direction gravity pulls (need not be unit,
   // normalized internally; must be non-zero). Units are caller-chosen but must

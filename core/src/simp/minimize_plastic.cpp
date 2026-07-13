@@ -136,17 +136,55 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           "minimize_plastic: gravity_direction is (near) zero length");
   }
 
+  // --- M7.dom-core: optional design-volume expansion -----------------------
+  // With a design box supplied, expand the run onto a LARGER grid whose mask
+  // freezes the imported part (FrozenSolid), voids the keep-out boxes
+  // (FrozenVoid) and opens the rest of the design volume to the optimizer
+  // (Active) — the "add material" feature. The mounting BCs and any external
+  // loads are node-indexed to the imported part, so they are remapped onto the
+  // expanded grid. When no design box is supplied, `G` / `B` alias the caller's
+  // `grid` / `bcs` and every quantity derived below is byte-for-byte identical to
+  // the pre-M7.dom-core driver (the design-box branch is simply skipped).
+  DesignDomain domain;                    // populated only when a design box is set
+  std::vector<DirichletBC> remapped_bcs;  // expanded-grid BCs (design-box path)
+  std::vector<NodalLoad> remapped_loads;  // expanded-grid external loads
+  const bool expanded = options.design_box.has_value();
+  if (expanded) {
+    if (!options.design_mask.empty())
+      throw std::invalid_argument(
+          "minimize_plastic: design_box is incompatible with a caller "
+          "design_mask (the design box builds the effective mask itself)");
+    domain = expand_design_domain(grid, *options.design_box,
+                                  options.keep_out_boxes);
+    remapped_bcs.reserve(bcs.size());
+    for (const DirichletBC& bc : bcs)
+      remapped_bcs.push_back({remap_node_to_domain(grid, domain, bc.node),
+                              bc.component, bc.value});
+    if (!options.external_loads.empty()) {
+      remapped_loads.reserve(options.external_loads.size());
+      for (const NodalLoad& nl : options.external_loads)
+        remapped_loads.push_back({remap_node_to_domain(grid, domain, nl.node),
+                                  nl.component, nl.value});
+    }
+  }
+  // The effective grid + BCs the whole pipeline runs on (the expanded pair with a
+  // design box, else the caller's inputs verbatim).
+  const VoxelGrid& G = expanded ? domain.grid : grid;
+  const std::vector<DirichletBC>& B = expanded ? remapped_bcs : bcs;
+
   // --- Fixed pipeline setup (shared across every rung) ---------------------
   // The design load, computed once and held across rungs (pipeline.hpp modeling
   // note). Mode (a): a caller-supplied external load case (the user's tagged Load
-  // faces via traction_loads) takes precedence. Mode (b): self-weight on the
-  // original solid grid (self_weight_loads validates density/gravity/direction
-  // and normalizes the direction internally).
+  // faces via traction_loads, remapped onto the expanded grid when a design box
+  // is set) takes precedence. Mode (b): self-weight on the effective solid grid
+  // (self_weight_loads validates density/gravity/direction and normalizes the
+  // direction internally; with a design box the weight covers the frozen part
+  // plus the Active design envelope, held fixed across rungs).
   const std::vector<NodalLoad> loads =
-      options.external_loads.empty()
-          ? self_weight_loads(grid, material.density_g_cm3, options.gravity,
-                              options.gravity_direction)
-          : options.external_loads;
+      !options.external_loads.empty()
+          ? (expanded ? remapped_loads : options.external_loads)
+          : self_weight_loads(G, material.density_g_cm3, options.gravity,
+                              options.gravity_direction);
 
   // The reported / analysed build direction is the build-plate normal: gravity
   // pulls toward the plate, so the build direction is the unit negation.
@@ -160,27 +198,30 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   params.poisson = material.poisson;
   params.penalty = 3.0;
 
-  // Mask-aware optimize. Default: an all-Active mask — Fixture voxels are
-  // implicitly FrozenSolid (M3.7), so the §7 V3 retention gate holds structurally.
-  // M7.anchor-integrity (FIX 1): when the caller supplies a design mask it
-  // REPLACES the all-Active default, letting the anchor/load faces freeze an
-  // N-voxel structural pad (FrozenSolid) rather than only the 1-voxel BC skin
-  // (diagnosis 064). Load/Fixture tags are still forced FrozenSolid on top of it
-  // by the mask-aware simp path (effective_mask), so the mask only ADDS keep-in
-  // pad voxels; it never un-freezes a tagged BC voxel.
-  if (!options.design_mask.empty() &&
+  // Mask-aware optimize. With a design box the effective mask is built by
+  // expand_design_domain (imported part FrozenSolid, keep-out FrozenVoid, the
+  // rest of the design volume Active). Otherwise: an all-Active mask — Fixture
+  // voxels are implicitly FrozenSolid (M3.7), so the §7 V3 retention gate holds
+  // structurally. M7.anchor-integrity (FIX 1): when the caller supplies a design
+  // mask (no design box) it REPLACES the all-Active default, letting the
+  // anchor/load faces freeze an N-voxel structural pad (FrozenSolid) rather than
+  // only the 1-voxel BC skin (diagnosis 064). Load/Fixture tags are still forced
+  // FrozenSolid on top of it by the mask-aware simp path (effective_mask), so the
+  // mask only ADDS keep-in pad voxels; it never un-freezes a tagged BC voxel.
+  if (!expanded && !options.design_mask.empty() &&
       options.design_mask.size() != grid.voxel_count())
     throw std::invalid_argument(
         "minimize_plastic: design_mask size != grid.voxel_count()");
-  const DesignMask mask = options.design_mask.empty()
-                              ? make_active_mask(grid)
-                              : options.design_mask;
+  const DesignMask mask =
+      expanded ? domain.mask
+               : (options.design_mask.empty() ? make_active_mask(G)
+                                              : options.design_mask);
 
   // Part size for the settings size class: the largest grid bounding-box edge.
   const double part_dim_mm =
-      std::max({static_cast<double>(grid.nx), static_cast<double>(grid.ny),
-                static_cast<double>(grid.nz)}) *
-      grid.spacing;
+      std::max({static_cast<double>(G.nx), static_cast<double>(G.ny),
+                static_cast<double>(G.nz)}) *
+      G.spacing;
 
   // M7.infill-margin: a single rung-independent scalar in (0, 1] applied to the
   // worst-case margin at the acceptance gate below. 1.0 for solid/unset infill
@@ -217,7 +258,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // are untouched — they never set min_feature_mm and never route here).
     if (options.min_feature_mm > 0.0)
       opt.filter_radius =
-          physical_filter_radius(options.min_feature_mm, grid.spacing);
+          physical_filter_radius(options.min_feature_mm, G.spacing);
 
     // M7.0a: the driver owns the optimizer's progress/cancel hooks (any set on
     // options.simp are overridden — pipeline.hpp). Per-rung progress forwards
@@ -249,12 +290,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         total_iters = opt.max_iterations;
       opt.keyframe_stride =
           std::max(1, total_iters / std::max(1, options.keyframe_count));
-      opt.keyframe = [&variant, &grid](const std::vector<double>& d) {
-        variant.keyframe_meshes.push_back(marching_cubes(grid, d, kIso));
+      opt.keyframe = [&variant, &G](const std::vector<double>& d) {
+        variant.keyframe_meshes.push_back(marching_cubes(G, d, kIso));
       };
     }
 
-    variant.optimization = simp_optimize(grid, params, bcs, loads, opt, mask);
+    variant.optimization = simp_optimize(G, params, B, loads, opt, mask);
 
     if (variant.optimization.cancelled) {
       // Cancelled mid-rung: report this rung as the rejected terminal rung and
@@ -271,7 +312,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     // Final penalized solve on the converged density to recover the
     // displacement field (simp_optimize returns compliance/density, not u).
-    const SimpCompliance sc = simp_compliance(grid, params, rho, bcs, loads,
+    const SimpCompliance sc = simp_compliance(G, params, rho, B, loads,
                                               opt.cg_tolerance,
                                               opt.cg_max_iterations);
 
@@ -279,32 +320,32 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // the material's solid modulus. Empty/void voxels stay at zero stress. The
     // per-voxel von Mises is also retained grid-indexed (M7.0b field (a)), and
     // the printed voxels are counted for the M7.0b mass (field (d)).
-    std::vector<std::array<double, 6>> stress(grid.voxel_count(),
+    std::vector<std::array<double, 6>> stress(G.voxel_count(),
                                               std::array<double, 6>{});
-    variant.von_mises_field.assign(grid.voxel_count(), 0.0);
+    variant.von_mises_field.assign(G.voxel_count(), 0.0);
     // M7.disp: mark the nodes attached to at least one printed voxel; the
     // displacement field is exposed only there (zero elsewhere), mirroring how
     // von_mises_field is zero off the printed set.
-    const int node_count = fea_node_count(grid);
+    const int node_count = fea_node_count(G);
     std::vector<char> node_printed(static_cast<std::size_t>(node_count), 0);
     std::size_t printed_voxels = 0;
     double max_von_mises = 0.0;
-    for (int k = 0; k < grid.nz; ++k)
-      for (int j = 0; j < grid.ny; ++j)
-        for (int i = 0; i < grid.nx; ++i) {
-          if (!grid.solid(i, j, k)) continue;
-          if (!(rho[grid.index(i, j, k)] > kIso)) continue;
+    for (int k = 0; k < G.nz; ++k)
+      for (int j = 0; j < G.ny; ++j)
+        for (int i = 0; i < G.nx; ++i) {
+          if (!G.solid(i, j, k)) continue;
+          if (!(rho[G.index(i, j, k)] > kIso)) continue;
           ++printed_voxels;
-          const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+          const std::array<int, 8> en = fea_element_nodes(G, i, j, k);
           for (int n : en) node_printed[static_cast<std::size_t>(n)] = 1;
-          const std::array<double, 24> ue = element_dofs(grid, sc.solution, i, j, k);
+          const std::array<double, 24> ue = element_dofs(G, sc.solution, i, j, k);
           const Hex8Stress st = hex8_stress(params.youngs_modulus,
-                                            params.poisson, grid.spacing, ue);
-          stress[grid.index(i, j, k)] = st.sigma;
-          variant.von_mises_field[grid.index(i, j, k)] = st.von_mises;
+                                            params.poisson, G.spacing, ue);
+          stress[G.index(i, j, k)] = st.sigma;
+          variant.von_mises_field[G.index(i, j, k)] = st.von_mises;
           if (st.von_mises > max_von_mises) max_von_mises = st.von_mises;
         }
-    const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+    const double max_interlayer = max_interlayer_tension(G, stress, build_dir);
 
     // M7.disp field: the per-node displacement of the SAME penalized solve
     // (sc.solution) — no new solve. DOF-ordered (size 3*node_count); exposed on
@@ -324,14 +365,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // 1000 to land in grams. Spacing-aware via grid.voxel_volume().
     variant.mass_grams = material.density_g_cm3 *
                          (static_cast<double>(printed_voxels) *
-                          grid.voxel_volume()) /
+                          G.voxel_volume()) /
                          1000.0;
 
     // M7.0b field (c): support-volume proxy for the analysed build direction
     // over THIS variant's printed geometry. The M4.3 proxy is defined on grid
     // tags, so mark non-printed voxels Empty in a copy and count overhangs on
     // the printed shape (per-variant, unlike the fixed original solid grid).
-    VoxelGrid printed_grid = grid;
+    VoxelGrid printed_grid = G;
     for (std::size_t idx = 0; idx < printed_grid.tags.size(); ++idx)
       if (!(rho[idx] > kIso)) printed_grid.tags[idx] = VoxelTag::Empty;
     variant.support_volume_voxels =
@@ -343,7 +384,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         max_interlayer);
 
     // §7 V3 property suite on this optimizer output (M3.5).
-    variant.v3 = check_v3(grid, rho, kIso);
+    variant.v3 = check_v3(G, rho, kIso);
 
     // Assemble this rung's report line (M5.2 / M5.2b).
     VariantReport& vr = variant.report;
