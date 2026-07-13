@@ -219,6 +219,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     const double vf = ladder[rung];
     SimpOptions opt = options.simp;
     opt.volume_fraction = vf;
+    // M7.mma.4 — the switchover: the driver, not the shared SimpOptions default,
+    // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
+    // set options.updater = OC to fall back. Overrides any simp.updater.
+    opt.updater = options.updater;
 
     // M7.rmin: derive the density-filter radius from a PHYSICAL length scale so
     // the filtered minimum member thickness is resolution independent. When

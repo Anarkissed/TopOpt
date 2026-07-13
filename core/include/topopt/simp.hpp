@@ -251,10 +251,15 @@ std::vector<ProjectionStage> heaviside_continuation_schedule();
 //           OC. Reproduces the OC minimum-compliance optimum (the M7.mma.1
 //           gate asserts within 2% at the same volume fraction) while giving the
 //           convex-subproblem machinery later stress/multi-load tasks build on.
-// The default is OC, so existing callers and the locked Gate-V2 fixture are
-// unaffected. MMA in M7.mma.1 is scoped to the plain (unprojected, unmasked)
-// compliance loop; combining it with a Heaviside projection schedule or a
-// passive-region mask throws std::invalid_argument (extended in later tasks).
+// The SimpOptions default is OC, so direct simp_optimize callers and the locked
+// Gate-V2 fixture are unaffected. MMA works on the plain (unprojected) loop
+// (M7.mma.1) AND the passive-region MASKED loop (M7.mma.4 — the switchover), so
+// minimize_plastic runs MMA in production (MinimizePlasticOptions::updater
+// defaults to MMA). What MMA still rejects is a Heaviside projection schedule:
+// the projected chain is the OC-locked Gate-V2 formulation, so MMA + a non-empty
+// options.projection throws std::invalid_argument (an MMA+projection path is a
+// separate future task). The stress path (simp_optimize_stress, M7.mma.2) is
+// MMA regardless of this field.
 enum class SimpUpdater { OC, MMA };
 
 struct SimpOptions {

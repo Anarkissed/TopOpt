@@ -1137,6 +1137,60 @@ int main() {
                 streamed, o.volume_fraction_ladder.size());
   }
 
+  // =========================================================================
+  // Scenario O — the MMA switchover (M7.mma.4): MMA is the production driver's
+  // DEFAULT updater, and it produces valid designs that match or BEAT the OC
+  // ladder at the same volume fractions. A tiny gravity (accept-all, scenario A)
+  // runs the whole ladder so every rung is compared.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bracket(bcs);
+
+    // The default really is MMA — the switchover, asserted on the option struct.
+    CHECK(base_options().updater == topopt::SimpUpdater::MMA,
+          "O: minimize_plastic defaults to the MMA updater (the switchover)");
+
+    MinimizePlasticOptions omma = base_options();
+    omma.gravity = cal_gravity;  // accept-all: run every rung
+    MinimizePlasticOptions ooc = omma;
+    ooc.updater = topopt::SimpUpdater::OC;  // retained fall-back
+
+    const MinimizePlasticResult rmma =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, omma);
+    const MinimizePlasticResult roc =
+        topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, ooc);
+
+    CHECK(rmma.evaluated.size() == omma.volume_fraction_ladder.size(),
+          "O: MMA accept-all evaluates the whole ladder");
+    CHECK(roc.evaluated.size() == rmma.evaluated.size(),
+          "O: OC and MMA walk the same number of rungs");
+    // Both updaters are valid designs (V3 gates, volume constraint) and the MMA
+    // switchover does not regress the ladder: MMA compliance <= OC * (1 + tol)
+    // at each rung's matched volume fraction (MMA should match or beat OC).
+    check_v3_on_accepted(rmma);
+    const double kTol = 0.02;  // MMA within 2% of the OC compliance (matches or beats)
+    for (std::size_t v = 0;
+         v < rmma.evaluated.size() && v < roc.evaluated.size(); ++v) {
+      const MinimizePlasticVariant& em = rmma.evaluated[v];
+      const MinimizePlasticVariant& eo = roc.evaluated[v];
+      CHECK(std::fabs(em.optimization.volume_fraction -
+                      eo.optimization.volume_fraction) <= 1e-2,
+            "O: OC and MMA hit the same achieved volume fraction per rung");
+      const double rel =
+          std::fabs(em.optimization.compliance - eo.optimization.compliance) /
+          std::fabs(eo.optimization.compliance);
+      CHECK(em.optimization.compliance <= eo.optimization.compliance * (1.0 + kTol),
+            "O: MMA compliance matches or beats OC at the same volume fraction");
+      std::printf(
+          "[O switchover] rung %zu vf=%.3f  OC c=%.6e it=%d | MMA c=%.6e it=%d "
+          "| rel=%+.3f%%\n",
+          v, em.requested_volume_fraction, eo.optimization.compliance,
+          eo.optimization.iterations, em.optimization.compliance,
+          em.optimization.iterations, 100.0 * rel);
+    }
+  }
+
   if (g_failures == 0) {
     std::printf("minimize_plastic (M5.3): all %d checks passed\n", g_checks);
     return 0;
