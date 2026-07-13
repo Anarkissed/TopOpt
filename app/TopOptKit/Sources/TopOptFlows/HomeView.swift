@@ -19,6 +19,9 @@ public struct HomeView: View {
     /// The recent being renamed via the card's context menu (nil = alert closed).
     @State private var renameTarget: RecentProject?
     @State private var renameDraft = ""
+    /// The recent pending deletion — drives the confirm-before-delete dialog (nil =
+    /// closed). Deletion is destructive + erases persisted data, so it's confirmed.
+    @State private var deleteTarget: RecentProject?
 
     public var body: some View {
         ScrollView {
@@ -30,7 +33,8 @@ public struct HomeView: View {
                         RecentProjectCard(project: proj, thumbnail: model.thumbnails[proj.id],
                                           running: model.runningIDs.contains(proj.id),
                                           onOpen: { model.open(proj) },
-                                          onRename: { renameDraft = proj.name; renameTarget = proj })
+                                          onRename: { renameDraft = proj.name; renameTarget = proj },
+                                          onDelete: { deleteTarget = proj })
                     }
                 }
                 .padding(.horizontal, DS.Space.page)
@@ -49,6 +53,19 @@ public struct HomeView: View {
                 renameTarget = nil
             }
             Button("Cancel", role: .cancel) { renameTarget = nil }
+        }
+        .confirmationDialog(
+            deleteTarget.map { "Delete “\($0.name)”?" } ?? "Delete project?",
+            isPresented: Binding(get: { deleteTarget != nil },
+                                 set: { if !$0 { deleteTarget = nil } }),
+            titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let t = deleteTarget { model.deleteProject(id: t.id) }
+                deleteTarget = nil
+            }
+            Button("Cancel", role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text("This permanently removes the project and any optimized results. This can’t be undone.")
         }
     }
 
@@ -134,6 +151,7 @@ private struct RecentProjectCard: View {
     let running: Bool
     let onOpen: () -> Void
     let onRename: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
@@ -177,6 +195,7 @@ private struct RecentProjectCard: View {
         .foregroundStyle(DS.Color.textPrimary.color)
         .contextMenu {
             Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
+            Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
         }
     }
 

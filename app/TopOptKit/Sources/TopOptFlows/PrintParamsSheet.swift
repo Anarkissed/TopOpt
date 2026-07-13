@@ -76,23 +76,71 @@ public struct PrintParamsSheet: View {
         }
     }
 
-    // MARK: infill density (number + slider)
+    // MARK: infill density (tap-to-edit number + steppers + slider)
 
+    /// Infill density: a whole-% slider paired with a precise entry — tap the value
+    /// to type an exact %, or use the − / + steppers. The slider was hard to drag
+    /// precisely at step 5 (M7.params c); it now steps by 1, and the number is the
+    /// authoritative precise input so you never have to fight the thumb.
     private var infillRow: some View {
-        VStack(alignment: .leading, spacing: DS.Space.xs) {
-            HStack {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            HStack(spacing: DS.Space.s) {
                 Text("Infill density").dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textTertiary.color)
                 Spacer()
-                Text("\(project.printParams.infillPercent)%")
-                    .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.accent.color)
+                infillStepper
             }
-            Slider(value: Binding(get: { Double(project.printParams.infillPercent) },
-                                  set: { project.printParams.infillPercent = Int($0.rounded()) }),
-                   in: 0...100, step: 5)
+            Slider(value: infillSliderBinding, in: 0...100, step: 1)
                 .tint(DS.Color.accent.color)
         }
+    }
+
+    /// The − / value / + control. The value is a live `TextField` (tap to type an
+    /// exact %); the steppers nudge by 1, clamped to 0–100 so they never run past
+    /// the range. Free-typed out-of-range values are clamped on sheet close.
+    private var infillStepper: some View {
+        HStack(spacing: DS.Space.xs) {
+            stepButton("minus") { stepInfill(-1) }
+            HStack(spacing: 1) {
+                TextField("", value: binding(\.infillPercent), format: .number)
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 34)
+                    .font(DS.TypeScale.caption.font).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.accent.color)
+                Text("%").dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.accent.color)
+            }
+            .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+            .background(fieldBackground)
+            stepButton("plus") { stepInfill(1) }
+        }
+    }
+
+    private func stepButton(_ systemName: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .frame(width: 32, height: 32)
+                .background(Circle().fill(DS.Color.fillSubtle.color)
+                    .overlay(Circle().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Step infill by ±1, clamped to 0–100 (headless logic in `PrintParams`).
+    private func stepInfill(_ delta: Int) {
+        project.printParams.infillPercent = project.printParams.steppingInfill(by: delta)
+    }
+
+    /// The slider reads the value pinned into its 0–100 track (the tap-to-edit field
+    /// can briefly hold an out-of-range value); writing snaps to the whole-% step.
+    private var infillSliderBinding: Binding<Double> {
+        Binding(get: { project.printParams.infillSliderValue },
+                set: { project.printParams.infillPercent = Int($0.rounded()) })
     }
 
     // MARK: infill pattern

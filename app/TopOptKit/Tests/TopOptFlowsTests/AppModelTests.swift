@@ -292,4 +292,81 @@ final class AppModelTests: XCTestCase {
                                    importedFile: nil, importedMesh: nil)
         _ = WorkspacePlaceholder(model: m, project: project)
     }
+
+    // MARK: - Project deletion (Home / Library card)
+
+    /// Import two projects, then delete one from Home: it leaves the recents grid and
+    /// its whole on-disk folder (snapshot + copied model + any results) is erased; the
+    /// other project is untouched.
+    func testDeleteRemovesProjectFromRecentsAndDisk() throws {
+        let store = ProjectStore(rootDir: tempDir)
+        let m = AppModel(materialsPath: Self.materialsPath, store: store)
+        m.loadMaterials()
+
+        m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "A.stl"))
+        m.continueToWorkspace()
+        let idA = try XCTUnwrap(m.project?.id)
+        m.backHome()
+
+        m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "B.stl"))
+        m.continueToWorkspace()
+        let idB = try XCTUnwrap(m.project?.id)
+        m.backHome()
+
+        XCTAssertEqual(m.recentProjects.count, 2)
+        XCTAssertNotNil(store.snapshot(id: idA))
+
+        m.deleteProject(id: idA)
+
+        XCTAssertEqual(m.recentProjects.count, 1)
+        XCTAssertFalse(m.recentProjects.contains { $0.id == idA })
+        XCTAssertTrue(m.recentProjects.contains { $0.id == idB })
+        XCTAssertNil(store.snapshot(id: idA), "the on-disk snapshot is erased")
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: tempDir.appendingPathComponent(idA.uuidString).path),
+            "the whole project folder (snapshot + model + results) is removed")
+        XCTAssertNotNil(store.snapshot(id: idB), "the other project is untouched")
+    }
+
+    /// Deleting the project that's currently open returns to Home and clears it.
+    func testDeleteOpenProjectReturnsHome() throws {
+        let m = realModel()
+        m.loadMaterials()
+        m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Open.stl"))
+        m.continueToWorkspace()
+        let id = try XCTUnwrap(m.project?.id)
+        XCTAssertEqual(m.screen, .workspace)
+
+        m.deleteProject(id: id)
+
+        XCTAssertEqual(m.screen, .home)
+        XCTAssertNil(m.project, "the open project is cleared")
+        XCTAssertFalse(m.printParamsSheetPresented, "any open sheet is dismissed")
+        XCTAssertTrue(m.recentProjects.isEmpty)
+    }
+
+    /// A restored project's persisted results are gone after deletion: a fresh
+    /// AppModel over the same store no longer lists it.
+    func testDeletePersistsAcrossRelaunch() throws {
+        let m1 = AppModel(materialsPath: Self.materialsPath, store: ProjectStore(rootDir: tempDir))
+        m1.loadMaterials()
+        m1.newTopOpt(); m1.selectMaterial("PLA")
+        XCTAssertTrue(m1.importFile(atPath: Self.cubeSTL, displayName: "Gone.stl"))
+        m1.continueToWorkspace()
+        let id = try XCTUnwrap(m1.project?.id)
+        m1.backHome()
+
+        // Relaunch, then delete an id that was NOT loaded live this launch (disk-only).
+        let m2 = AppModel(materialsPath: Self.materialsPath, store: ProjectStore(rootDir: tempDir))
+        XCTAssertTrue(m2.recentProjects.contains { $0.id == id })
+        m2.deleteProject(id: id)
+        XCTAssertFalse(m2.recentProjects.contains { $0.id == id })
+
+        // A third launch confirms it's gone from disk (nothing to seed the grid).
+        let m3 = AppModel(materialsPath: Self.materialsPath, store: ProjectStore(rootDir: tempDir))
+        XCTAssertFalse(m3.recentProjects.contains { $0.id == id })
+    }
 }
