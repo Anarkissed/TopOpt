@@ -72,11 +72,26 @@ struct SimpCompliance {
 // Throws std::invalid_argument if `density` has the wrong size or the params are
 // non-physical; propagates fea_solve_cg's throws (bad BC/load index, or a CG
 // non-convergence std::runtime_error).
+// `initial_guess` (optional) warm-starts the penalized CG solve from a prior
+// DOF-ordered displacement field (e.g. the previous SIMP iteration's solution);
+// it changes only the CG starting iterate, not the convergence tolerance, so the
+// returned field is the same solution within that tolerance. nullptr is the exact
+// cold-start path (bit-for-bit), so existing callers are unaffected. See
+// fea_solve_cg (topopt/fea.hpp) for the full contract.
+//
+// `solver` (optional) is a PenalizedSolver over the SAME (grid, poisson, bcs,
+// loads); when supplied and usable() it performs the linear solve by rescaling a
+// cached, pre-reduced operator and warm-starting internally, avoiding the full
+// per-call reassembly. It must match this call's grid/BCs/loads (the caller owns
+// that invariant); `initial_guess` is then ignored (the solver warm-starts
+// itself). nullptr keeps the stateless fea_solve_cg path.
 SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<double>& density,
                                const std::vector<DirichletBC>& bcs,
                                const std::vector<NodalLoad>& loads,
-                               double tolerance = 1e-8, int max_iterations = 0);
+                               double tolerance = 1e-8, int max_iterations = 0,
+                               const FeaSolution* initial_guess = nullptr,
+                               PenalizedSolver* solver = nullptr);
 
 // ---------------------------------------------------------------------------
 // Density filter + Optimality-Criteria update (ROADMAP M3.3).

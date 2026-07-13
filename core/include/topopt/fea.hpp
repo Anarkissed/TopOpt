@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -249,12 +250,24 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid, double youngs_modulus,
 // if the vector size mismatches, a solid voxel's modulus is not > 0, or a BC/load
 // index is out of range; throws std::runtime_error on CG non-convergence or a
 // void-gate structural rejection (as the uniform overload).
+//
+// WARM START (performance, ROADMAP solver-perf): if `initial_guess` is non-null
+// it seeds the CG iteration with that DOF-ordered field (size 3*fea_node_count,
+// e.g. the previous SIMP iteration's solution) instead of the zero vector. The
+// grid/BC topology fixes the free-DOF layout across a SIMP run, so the previous
+// displacement field is a close guess and CG reaches the SAME relative-residual
+// tolerance in far fewer iterations. It changes only the starting iterate, never
+// the convergence criterion (||K u - f|| <= tolerance * ||f||), so the returned
+// field is the same solution within the solver tolerance. `initial_guess ==
+// nullptr` is the exact prior cold-start path (bit-for-bit), so every existing
+// caller is unaffected.
 FeaSolution fea_solve_cg(const VoxelGrid& grid,
                          const std::vector<double>& youngs_per_voxel,
                          double poisson, const std::vector<DirichletBC>& bcs,
                          const std::vector<NodalLoad>& loads,
                          double tolerance = 1e-8, int max_iterations = 0,
-                         CgInfo* info = nullptr);
+                         CgInfo* info = nullptr,
+                         const FeaSolution* initial_guess = nullptr);
 
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
@@ -264,5 +277,61 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid,
 std::vector<double> fea_von_mises_field(const VoxelGrid& grid,
                                         double youngs_modulus, double poisson,
                                         const FeaSolution& sol);
+
+// ---------------------------------------------------------------------------
+// Persistent graded penalized solver (ROADMAP solver-perf profile).
+//
+// A SIMP optimization loop calls the graded fea_solve_cg once per iteration on a
+// FIXED analysis grid / Poisson ratio / boundary conditions / load vector — only
+// the per-voxel modulus E(rho) changes. The stateless fea_solve_cg therefore
+// rebuilds the whole global stiffness (millions of triplets, a sparse sort) and
+// re-forms the BC-reduced operator (sparse P K P^T products) on EVERY iteration,
+// which profiling shows is ~40-50% of a 64^3 iteration.
+//
+// This object removes that redundancy: it assembles the BC-reduced, void-gated
+// stiffness PATTERN once at construction, then on every solve() only rescales
+// the cached matrix values in place (O(nnz), no triplet rebuild, no projection)
+// and warm-starts the Jacobi-CG from the previous solve's field. The operator it
+// solves is the same K_ff(E) that the graded fea_solve_cg builds, and CG stops on
+// the same relative-residual tolerance, so the returned field matches fea_solve_cg
+// within that tolerance.
+//
+// REQUIREMENT: homogeneous Dirichlet BCs (every bc.value == 0), which the SIMP
+// pipeline always uses (clamps). With any prescribed non-zero displacement the
+// reduced RHS depends on E and cannot be cached, so the constructor leaves the
+// object unusable() and the caller must fall back to fea_solve_cg. Construction
+// validates BC/load indices and material inputs exactly as fea_solve_cg and
+// throws the same exceptions; a genuinely under-constrained system (no stiffness,
+// or a load on a stiffness-free DOF) throws std::runtime_error from the first
+// solve, matching the stateless void-gate.
+class PenalizedSolver {
+ public:
+  PenalizedSolver(const VoxelGrid& grid, double poisson,
+                  const std::vector<DirichletBC>& bcs,
+                  const std::vector<NodalLoad>& loads);
+  ~PenalizedSolver();
+  PenalizedSolver(PenalizedSolver&&) noexcept;
+  PenalizedSolver& operator=(PenalizedSolver&&) noexcept;
+  PenalizedSolver(const PenalizedSolver&) = delete;
+  PenalizedSolver& operator=(const PenalizedSolver&) = delete;
+
+  // False when the BCs are not homogeneous (a prescribed non-zero displacement):
+  // the caller must then use fea_solve_cg instead.
+  bool usable() const;
+
+  // Solve K_ff(E) u = f for the per-voxel modulus `youngs_per_voxel` (same
+  // contract as the graded fea_solve_cg: size grid.voxel_count(), Empty entries
+  // ignored, each solid entry must be > 0). Warm-starts from the previous solve
+  // automatically. Throws std::invalid_argument on a size mismatch or a
+  // non-positive solid modulus, std::runtime_error on CG non-convergence or an
+  // under-constrained system.
+  FeaSolution solve(const std::vector<double>& youngs_per_voxel,
+                    double tolerance = 1e-8, int max_iterations = 0,
+                    CgInfo* info = nullptr);
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
 
 }  // namespace topopt
