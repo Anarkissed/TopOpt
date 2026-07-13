@@ -146,11 +146,11 @@ public struct PrintParamsSheet: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.m),
                                 GridItem(.flexible(), spacing: DS.Space.m)],
                       alignment: .leading, spacing: DS.Space.ml) {
-                decimalField("Layer height", suffix: "mm",
-                             value: binding(\.layerHeightMM), step: 0.02)
-                intField("Wall loops", value: binding(\.wallLoops))
-                intField("Top shell layers", value: binding(\.topLayers))
-                intField("Bottom shell layers", value: binding(\.bottomLayers))
+                decimalField("Layer height", suffix: "mm", value: binding(\.layerHeightMM),
+                             onStep: stepLayerHeight)
+                intField("Wall loops", value: binding(\.wallLoops), onStep: stepWallLoops)
+                intField("Top shell layers", value: binding(\.topLayers), onStep: stepTopLayers)
+                intField("Bottom shell layers", value: binding(\.bottomLayers), onStep: stepBottomLayers)
             }
             .padding(.top, DS.Space.xl3)
 
@@ -265,6 +265,22 @@ public struct PrintParamsSheet: View {
         project.printParams.infillPercent = project.printParams.steppingInfill(by: delta)
     }
 
+    // The grid fields' − / + steppers, each nudging one field by its sensible
+    // increment (layer height 0.02 mm, the counts by 1) and clamping to the shared
+    // bounds — the same headless logic in `PrintParams` the tests cover.
+    private func stepLayerHeight(_ steps: Int) {
+        project.printParams.layerHeightMM = project.printParams.steppingLayerHeight(by: steps)
+    }
+    private func stepWallLoops(_ delta: Int) {
+        project.printParams.wallLoops = project.printParams.steppingWallLoops(by: delta)
+    }
+    private func stepTopLayers(_ delta: Int) {
+        project.printParams.topLayers = project.printParams.steppingTopLayers(by: delta)
+    }
+    private func stepBottomLayers(_ delta: Int) {
+        project.printParams.bottomLayers = project.printParams.steppingBottomLayers(by: delta)
+    }
+
     /// The slider reads the value pinned into its 0–100 track (the tap-to-edit field
     /// can briefly hold an out-of-range value); writing snaps to the whole-% step.
     private var infillSliderBinding: Binding<Double> {
@@ -300,40 +316,57 @@ public struct PrintParamsSheet: View {
 
     // MARK: field builders
 
-    /// A labelled integer field (design: numeric input in the grid).
-    private func intField(_ label: String, value: Binding<Int>) -> some View {
+    /// A labelled integer field: a tap-to-type number bracketed by − / + steppers
+    /// (design: numeric input in the grid, now with the same stepper treatment as
+    /// infill). Typing is authoritative; `onStep(±1)` nudges + clamps via `PrintParams`.
+    private func intField(_ label: String, value: Binding<Int>,
+                          onStep: @escaping (Int) -> Void) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             Text(label).dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
-            TextField("", value: value, format: .number)
-                #if os(iOS)
-                .keyboardType(.numberPad)
-                #endif
-                .font(DS.TypeScale.bodyStrong.font)
-                .foregroundStyle(DS.Color.textPrimary.color)
-                .padding(.vertical, 11).padding(.horizontal, DS.Space.m)
-                .background(fieldBackground)
+            HStack(spacing: DS.Space.xs) {
+                stepButton("minus") { onStep(-1) }
+                TextField("", value: value, format: .number)
+                    #if os(iOS)
+                    .keyboardType(.numberPad)
+                    #endif
+                    .multilineTextAlignment(.center)
+                    .font(DS.TypeScale.bodyStrong.font)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11).padding(.horizontal, DS.Space.s)
+                    .background(fieldBackground)
+                stepButton("plus") { onStep(1) }
+            }
         }
     }
 
-    /// A labelled decimal field with a trailing unit (design: layer height in mm).
-    private func decimalField(_ label: String, suffix: String,
-                              value: Binding<Double>, step: Double) -> some View {
+    /// A labelled decimal field with a trailing unit and − / + steppers (design:
+    /// layer height in mm). Typing is authoritative; `onStep(±1)` nudges by the
+    /// field's increment (0.02 mm) and clamps, via `PrintParams`.
+    private func decimalField(_ label: String, suffix: String, value: Binding<Double>,
+                              onStep: @escaping (Int) -> Void) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             Text(label).dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
-            HStack(spacing: DS.Space.s) {
-                TextField("", value: value, format: .number.precision(.fractionLength(0...2)))
-                    #if os(iOS)
-                    .keyboardType(.decimalPad)
-                    #endif
-                    .font(DS.TypeScale.bodyStrong.font)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                Text(suffix).dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
+            HStack(spacing: DS.Space.xs) {
+                stepButton("minus") { onStep(-1) }
+                HStack(spacing: DS.Space.xs) {
+                    TextField("", value: value, format: .number.precision(.fractionLength(0...2)))
+                        #if os(iOS)
+                        .keyboardType(.decimalPad)
+                        #endif
+                        .multilineTextAlignment(.center)
+                        .font(DS.TypeScale.bodyStrong.font)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                    Text(suffix).dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11).padding(.horizontal, DS.Space.s)
+                .background(fieldBackground)
+                stepButton("plus") { onStep(1) }
             }
-            .padding(.vertical, 11).padding(.horizontal, DS.Space.m)
-            .background(fieldBackground)
         }
     }
 

@@ -64,26 +64,68 @@ public struct PrintParams: Equatable, Sendable, Codable {
         "gyroid", "grid", "cubic", "triangles", "honeycomb", "lines",
     ]
 
+    // MARK: - Field bounds + step increments
+
+    /// The sane FDM bounds for each numeric field, shared by the on-close `clamped()`
+    /// and every − / + stepper so the two can never drift apart. Layer height
+    /// 0.04–1.0 mm; walls 0–10; top/bottom shells 0–15; infill 0–100 %.
+    public static let layerHeightRange: ClosedRange<Double> = 0.04...1.0
+    public static let wallLoopsRange: ClosedRange<Int> = 0...10
+    public static let shellLayersRange: ClosedRange<Int> = 0...15
+    public static let infillRange: ClosedRange<Int> = 0...100
+
+    /// The nudge each field's − / + stepper applies: layer height by 0.02 mm, the
+    /// wall / shell counts and infill % by 1.
+    public static let layerHeightStep: Double = 0.02
+
     // MARK: - Validation
 
     /// Sane FDM bounds, applied when the user edits a field (numeric inputs let a
-    /// user type anything). Layer height 0.04–1.0 mm; walls 0–10; top/bottom 0–15;
-    /// infill 0–100 %. A pattern outside `patternOptions` falls back to the default.
+    /// user type anything). A pattern outside `patternOptions` falls back to the
+    /// default. Bounds come from the shared ranges so the steppers agree with this.
     public func clamped() -> PrintParams {
         PrintParams(
-            layerHeightMM: layerHeightMM.isFinite ? min(max(layerHeightMM, 0.04), 1.0) : PrintParams.fdmDefault.layerHeightMM,
-            wallLoops: min(max(wallLoops, 0), 10),
-            topLayers: min(max(topLayers, 0), 15),
-            bottomLayers: min(max(bottomLayers, 0), 15),
-            infillPercent: min(max(infillPercent, 0), 100),
+            layerHeightMM: layerHeightMM.isFinite ? Self.clamp(layerHeightMM, Self.layerHeightRange) : PrintParams.fdmDefault.layerHeightMM,
+            wallLoops: Self.clamp(wallLoops, Self.wallLoopsRange),
+            topLayers: Self.clamp(topLayers, Self.shellLayersRange),
+            bottomLayers: Self.clamp(bottomLayers, Self.shellLayersRange),
+            infillPercent: Self.clamp(infillPercent, Self.infillRange),
             infillPattern: PrintParams.patternOptions.contains(infillPattern) ? infillPattern : PrintParams.fdmDefault.infillPattern)
+    }
+
+    private static func clamp<V: Comparable>(_ v: V, _ range: ClosedRange<V>) -> V {
+        Swift.min(Swift.max(v, range.lowerBound), range.upperBound)
     }
 
     /// Infill after stepping by `delta` %, already clamped to the valid 0–100 range.
     /// The sheet's − / + steppers use this so a step never leaves the range (the
     /// free-type field is still clamped globally on sheet close, per `clamped()`).
     public func steppingInfill(by delta: Int) -> Int {
-        min(max(infillPercent + delta, 0), 100)
+        Self.clamp(infillPercent + delta, Self.infillRange)
+    }
+
+    /// Layer height after nudging by `steps` × 0.02 mm, clamped to 0.04–1.0 mm and
+    /// rounded to a clean 2-dp mm value (so repeated steps don't accumulate float
+    /// drift). Used by the sheet's layer-height − / + steppers.
+    public func steppingLayerHeight(by steps: Int) -> Double {
+        let nudged = layerHeightMM + Double(steps) * Self.layerHeightStep
+        let clamped = Self.clamp(nudged, Self.layerHeightRange)
+        return (clamped * 100).rounded() / 100
+    }
+
+    /// Wall loops after stepping by `delta`, clamped to 0–10 (the − / + steppers).
+    public func steppingWallLoops(by delta: Int) -> Int {
+        Self.clamp(wallLoops + delta, Self.wallLoopsRange)
+    }
+
+    /// Top shell layers after stepping by `delta`, clamped to 0–15.
+    public func steppingTopLayers(by delta: Int) -> Int {
+        Self.clamp(topLayers + delta, Self.shellLayersRange)
+    }
+
+    /// Bottom shell layers after stepping by `delta`, clamped to 0–15.
+    public func steppingBottomLayers(by delta: Int) -> Int {
+        Self.clamp(bottomLayers + delta, Self.shellLayersRange)
     }
 
     /// Infill pinned to the 0–100 slider track. The tap-to-edit field can briefly

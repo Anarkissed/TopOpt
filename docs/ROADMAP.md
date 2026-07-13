@@ -443,7 +443,7 @@
       starts. All V-gates rerun green against the regenerated references;
       per-benchmark iteration count and wall time vs the OC baseline recorded
       in the handoff.
-- [ ] M7.dom-core Design-domain expansion (additive optimization) — PHYSICS,
+- [x] M7.dom-core Design-domain expansion (additive optimization) — PHYSICS,
       NOT ML. Let the optimizer add material beyond the imported part so it
       grows ribs/gussets/buttresses a user wouldn't draw. The mechanism
       already exists (M3.7 masks: FrozenSolid=keep, FrozenVoid=exclude,
@@ -455,7 +455,7 @@
       gusset along the inner-corner load path; keep-out stays empty; the
       original part is never removed. This is the "discovers structure the
       user couldn't" feature — fully FEA-verified, no ML. Pure core; no /app/.
-- [ ] M7.dom-app Design-domain UI: size/position the design box in the viewer
+- [x] M7.dom-app Design-domain UI: size/position the design box in the viewer
       (per the design language — no new interaction paradigms); keep-out
       marked via the existing face-selection → FrozenVoid path (STEP input;
       STL keep-out arrives with M7.Zb — do NOT invent a painting UI here).

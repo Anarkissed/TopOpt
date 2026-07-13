@@ -540,34 +540,40 @@ public struct WorkspacePlaceholder: View {
         GeometryReader { _ in
             ZStack(alignment: .topLeading) {
                 if let proj = projection, let box = project.designBox.box {
-                    // Design-box centre move handle.
+                    // Design-box centre move handle. The drag gesture is attached to
+                    // the SIZED handle BEFORE `.position`: `.position` makes a view
+                    // greedily fill all offered space, so a gesture applied AFTER it
+                    // would capture drags across the WHOLE stage — swallowing the
+                    // camera's orbit/pinch-zoom while the gizmo is up (the bug). Bound
+                    // before positioning, each drag only fires on its own handle, so
+                    // camera navigation still reaches the Metal view underneath.
                     if let c = proj.project(settledWorld(box.center)) {
                         moveHandle(color: Self.designGreen)
-                            .position(c)
                             .gesture(designMoveDrag())
+                            .position(c)
                     }
                     // Design-box face resize handles.
                     ForEach(0..<6, id: \.self) { i in
                         let axis = i / 2, isMax = (i % 2 == 1)
                         if let pt = faceHandleScreen(box, axis: axis, isMax: isMax, proj: proj) {
                             resizeHandle(color: Self.designGreen, axis: axis)
-                                .position(pt)
                                 .gesture(designFaceDrag(axis: axis, isMax: isMax))
+                                .position(pt)
                         }
                     }
                     // Keep-out handles.
                     ForEach(Array(project.designBox.keepOuts.enumerated()), id: \.offset) { idx, ko in
                         if let c = proj.project(settledWorld(ko.center)) {
                             moveHandle(color: Self.keepOutRed)
-                                .position(c)
                                 .gesture(keepOutMoveDrag(idx))
+                                .position(c)
                         }
                         ForEach(0..<6, id: \.self) { i in
                             let axis = i / 2, isMax = (i % 2 == 1)
                             if let pt = faceHandleScreen(ko, axis: axis, isMax: isMax, proj: proj) {
                                 resizeHandle(color: Self.keepOutRed, axis: axis)
-                                    .position(pt)
                                     .gesture(keepOutFaceDrag(idx, axis: axis, isMax: isMax))
+                                    .position(pt)
                             }
                         }
                     }

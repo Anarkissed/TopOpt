@@ -78,6 +78,53 @@ final class PrintParamsTests: XCTestCase {
         XCTAssertEqual(p.steppingInfill(by: 1), 100, "capped at 100 — the + stepper can't overshoot")
     }
 
+    func testSteppingLayerHeightNudgesAndClamps() {
+        var p = PrintParams.fdmDefault
+        p.layerHeightMM = 0.20
+        XCTAssertEqual(p.steppingLayerHeight(by: 1), 0.22, accuracy: 1e-9, "+1 step = +0.02 mm")
+        XCTAssertEqual(p.steppingLayerHeight(by: -1), 0.18, accuracy: 1e-9, "−1 step = −0.02 mm")
+        // Repeated steps must not accumulate float drift (values stay clean 2-dp mm).
+        p.layerHeightMM = 0.18
+        XCTAssertEqual(p.steppingLayerHeight(by: -1), 0.16, accuracy: 1e-9)
+        // Clamped to the 0.04–1.0 mm bounds — the steppers can't leave the range.
+        p.layerHeightMM = 0.04
+        XCTAssertEqual(p.steppingLayerHeight(by: -1), 0.04, "floored at 0.04 mm")
+        p.layerHeightMM = 1.0
+        XCTAssertEqual(p.steppingLayerHeight(by: 1), 1.0, "capped at 1.0 mm")
+    }
+
+    func testSteppingCountsClampToBounds() {
+        var p = PrintParams.fdmDefault
+        p.wallLoops = 3
+        XCTAssertEqual(p.steppingWallLoops(by: 1), 4)
+        XCTAssertEqual(p.steppingWallLoops(by: -1), 2)
+        p.wallLoops = 0
+        XCTAssertEqual(p.steppingWallLoops(by: -1), 0, "walls floored at 0")
+        p.wallLoops = 10
+        XCTAssertEqual(p.steppingWallLoops(by: 1), 10, "walls capped at 10")
+
+        p.topLayers = 15
+        XCTAssertEqual(p.steppingTopLayers(by: 1), 15, "top shells capped at 15")
+        p.topLayers = 0
+        XCTAssertEqual(p.steppingTopLayers(by: -1), 0, "top shells floored at 0")
+
+        p.bottomLayers = 15
+        XCTAssertEqual(p.steppingBottomLayers(by: 1), 15, "bottom shells capped at 15")
+        p.bottomLayers = 0
+        XCTAssertEqual(p.steppingBottomLayers(by: -1), 0, "bottom shells floored at 0")
+    }
+
+    func testStepperBoundsAgreeWithClamp() {
+        // The steppers and the on-close clamp share the same bounds, so a value a
+        // stepper produces is already a fixed point of `clamped()` (they never fight).
+        let atBounds = PrintParams(layerHeightMM: 1.0, wallLoops: 10, topLayers: 15,
+                                   bottomLayers: 15, infillPercent: 100, infillPattern: "gyroid")
+        XCTAssertEqual(atBounds.clamped(), atBounds)
+        let atFloor = PrintParams(layerHeightMM: 0.04, wallLoops: 0, topLayers: 0,
+                                  bottomLayers: 0, infillPercent: 0, infillPattern: "gyroid")
+        XCTAssertEqual(atFloor.clamped(), atFloor)
+    }
+
     func testInfillSliderValuePinsIntoTrack() {
         var p = PrintParams.fdmDefault
         p.infillPercent = 37
