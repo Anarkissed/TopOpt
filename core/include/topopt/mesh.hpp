@@ -94,4 +94,23 @@ int count_components(const TriangleMesh& mesh);
 // stray 0.5-threshold islands. An empty input returns an empty mesh.
 TriangleMesh keep_largest_component(const TriangleMesh& mesh);
 
+// M7.anchor-integrity (FIX 3): like keep_largest_component, but ALSO retains any
+// non-largest component that contains at least one "marked" vertex, and reports
+// how many such components there were. `keep_vertex` is a per-vertex flag
+// (size == mesh.vertices.size()); a component is kept when it is the largest OR
+// any of its triangles touches a flagged vertex. `out_extra_kept` receives the
+// number of non-largest components retained solely because they were marked; 0
+// means the result is byte-for-byte keep_largest_component(mesh).
+//
+// check_v3 uses this to detect a pinned Load/Fixture anchor region that broke off
+// as a minority island: it passes vertices adjacent to frozen voxels as the marks
+// and reads `out_extra_kept` as the load_fixture_islands SIGNAL (it ships the
+// single largest body as the mesh, so the §7 V3 single-component gate is
+// unchanged — see voxelize.cpp check_v3). Callers that want the frozen region
+// physically retained can use the returned mesh directly. Throws
+// std::invalid_argument if keep_vertex.size() != mesh.vertices.size().
+TriangleMesh keep_largest_and_marked_components(const TriangleMesh& mesh,
+                                                const std::vector<char>& keep_vertex,
+                                                int& out_extra_kept);
+
 }  // namespace topopt

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -542,6 +543,79 @@ TriangleMesh keep_largest_component(const TriangleMesh& mesh) {
   std::vector<int> remap(clean.vertices.size(), -1);
   for (int t = 0; t < static_cast<int>(clean.triangles.size()); ++t) {
     if (root[t] != best_root) continue;
+    std::array<int, 3> nt{};
+    for (int w = 0; w < 3; ++w) {
+      int v = clean.triangles[t][w];
+      if (remap[v] == -1) {
+        remap[v] = static_cast<int>(out.vertices.size());
+        out.vertices.push_back(clean.vertices[v]);
+      }
+      nt[w] = remap[v];
+    }
+    out.triangles.push_back(nt);
+  }
+  return out;
+}
+
+TriangleMesh keep_largest_and_marked_components(
+    const TriangleMesh& mesh, const std::vector<char>& keep_vertex,
+    int& out_extra_kept) {
+  // M7.anchor-integrity (FIX 3): keep the largest component AND every other
+  // component that touches a flagged ("marked") vertex, so a pinned region — a
+  // frozen Load/Fixture anchor/hole skin that the bulk was stripped away from —
+  // is never silently discarded as a minority island. When no vertex is flagged
+  // (keep_vertex all-false), no extra component is ever kept and the result is
+  // byte-for-byte identical to keep_largest_component: the marked-root set is
+  // empty, so `keep` reduces to `root == best_root` and the winning-component
+  // rebuild (order, tie-break, vertex remap) is unchanged.
+  out_extra_kept = 0;
+  if (keep_vertex.size() != mesh.vertices.size())
+    throw std::invalid_argument(
+        "keep_largest_and_marked_components: keep_vertex size != vertex count");
+
+  // Drop degenerate (repeated-index) triangles first (as keep_largest_component).
+  TriangleMesh clean;
+  clean.vertices = mesh.vertices;
+  for (const auto& t : mesh.triangles)
+    if (t[0] != t[1] && t[1] != t[2] && t[0] != t[2])
+      clean.triangles.push_back(t);
+  if (clean.triangles.empty()) return TriangleMesh{};
+
+  int comps = 0;
+  const std::vector<int> root = triangle_components(clean, comps);
+
+  // Largest component by triangle count (identical tie-break to
+  // keep_largest_component: first-seen wins on the root-ordered map).
+  std::map<int, int> count;
+  for (int r : root) ++count[r];
+  int best_root = -1, best_size = -1;
+  for (const auto& kv : count)
+    if (kv.second > best_size) {
+      best_size = kv.second;
+      best_root = kv.first;
+    }
+
+  // A component is "marked" (kept even if not the largest) when any of its
+  // triangles has a flagged vertex.
+  std::set<int> marked_roots;
+  for (int t = 0; t < static_cast<int>(clean.triangles.size()); ++t) {
+    const auto& tri = clean.triangles[t];
+    if (keep_vertex[static_cast<std::size_t>(tri[0])] ||
+        keep_vertex[static_cast<std::size_t>(tri[1])] ||
+        keep_vertex[static_cast<std::size_t>(tri[2])])
+      marked_roots.insert(root[t]);
+  }
+  for (int r : marked_roots)
+    if (r != best_root) ++out_extra_kept;
+
+  // Rebuild from the winning component plus every marked component, re-indexing
+  // only the retained vertices (same walk as keep_largest_component).
+  TriangleMesh out;
+  std::vector<int> remap(clean.vertices.size(), -1);
+  for (int t = 0; t < static_cast<int>(clean.triangles.size()); ++t) {
+    const bool keep =
+        root[t] == best_root || marked_roots.count(root[t]) != 0;
+    if (!keep) continue;
     std::array<int, 3> nt{};
     for (int w = 0; w < 3; ++w) {
       int v = clean.triangles[t][w];

@@ -1,0 +1,32 @@
+variants 1 5.99241
+minimize_plastic 1 23.1982
+anchor_integrity 3 1.36497
+materials_loader 2 0.0250261
+stl_import 2 0.0293845
+voxelize 2 0.0365768
+hex_element 2 0.0271502
+orientation 2 0.0252527
+settings 2 0.0263982
+report 2 0.0268893
+export_stl 2 0.0283241
+job_schema 2 0.0263152
+fea_assembly 2 0.0254124
+traction_loads 2 0.0270015
+fea_cg 2 10.7335
+beam_validation 2 31.1758
+gate_v4 2 0.0243931
+gate_v5 2 0.0500582
+simp 2 0.12354
+rmin 2 0.0241279
+mbb_validation 2 1.93718
+gate_v2 2 32.1721
+property_v3 2 1.51241
+passive_regions 2 4.13255
+mma 2 23.9245
+stress 2 10.4536
+step_import 2 0.0380384
+face_tag 2 0.0306618
+mask_face 2 0.0301037
+cli_demo 0 0
+---
+cli_demo

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <limits>  // margin_floor_multiple's "disabled" sentinel (+infinity)
 #include <stdexcept>  // the driver throws std::invalid_argument (see below)
 #include <string>
 #include <vector>
@@ -74,6 +75,41 @@ struct MinimizePlasticOptions {
   // Stop at the first rung whose worst-case stress margin is < margin_stop.
   // Must be finite and >= 0 (0 disables the margin stop: the whole ladder runs).
   double margin_stop = 1.5;
+
+  // M7.anchor-integrity (FIX 2) — the ladder FLOOR, symmetric to margin_stop.
+  // margin_stop is the CEILING on strippedness: keep stripping until the margin
+  // would drop below it. This is the FLOOR: STOP stripping once an accepted rung
+  // already carries a comfortable margin, so a lightly-loaded part is not walked
+  // to the lightest rung (0.26 VF, ~74% removed) purely because it can survive
+  // there. After a rung is accepted, if
+  //   margin.worst_case * infill_knockdown >= margin_floor_multiple * margin_stop
+  // (the SAME infill-adjusted scale as the acceptance gate), the driver stops:
+  // that comfortable rung is the terminal accepted variant and no lighter rung
+  // runs. A multiple of 3.0 means "stop once the worst-case margin is >= 3x the
+  // strength floor" (~2x headroom above margin_stop).
+  //
+  // The DEFAULT is +infinity ("disabled"): +inf * margin_stop is +inf (or NaN
+  // when margin_stop == 0), and `x >= +inf`/`x >= NaN` is false for every finite
+  // margin, so the floor NEVER fires and the ladder walks exactly as before —
+  // every existing caller/fixture/benchmark is byte-for-byte identical (the same
+  // opt-in discipline as min_feature_mm == 0 and infill_percent == 100). Must be
+  // >= 1.0 or +infinity; a multiple below 1 would floor below the acceptance
+  // threshold, which is meaningless (the accept gate already ran at margin_stop).
+  double margin_floor_multiple = std::numeric_limits<double>::infinity();
+
+  // M7.anchor-integrity (FIX 1) — an optional caller design mask (Active /
+  // FrozenSolid / FrozenVoid per voxel, grid-indexed, size grid.voxel_count()).
+  // When NON-EMPTY it REPLACES the driver's default all-Active mask, so the
+  // caller can freeze a structural PAD: e.g. an N-voxel-deep FrozenSolid shell
+  // behind each anchor/load face (via mask_step_face) that pins that material to
+  // density 1 and ties the boundary condition into the body, instead of leaving
+  // only the 1-voxel BC skin frozen and letting the optimizer carve out
+  // everything behind it (diagnosis 064). The mask composes with the M1.6 tags
+  // exactly as the mask-aware simp path already does: Load/Fixture voxels are
+  // still forced FrozenSolid on top of this mask (pipeline effective_mask). When
+  // EMPTY (default) the driver uses make_active_mask(grid) — byte-identical to
+  // every existing caller. Must be empty or size grid.voxel_count().
+  DesignMask design_mask;
   // Self-weight body load. `gravity` is the acceleration magnitude (finite,
   // > 0); `gravity_direction` is the direction gravity pulls (need not be unit,
   // normalized internally; must be non-zero). Units are caller-chosen but must
@@ -244,6 +280,13 @@ struct MinimizePlasticResult {
   // ladder was accepted (every rung margin >= margin_stop) or the run was
   // cancelled (a cancel is not a margin stop).
   bool stopped_on_margin = false;
+  // M7.anchor-integrity (FIX 2): true iff the ladder stopped EARLY because an
+  // accepted rung already met the comfort floor (margin >= margin_floor_multiple
+  // * margin_stop) — so the last `evaluated` entry is an ACCEPTED terminal rung
+  // and lighter rungs were deliberately not run. Distinct from stopped_on_margin
+  // (which marks a REJECTED terminal rung). Always false when margin_floor_multiple
+  // is disabled (+infinity, the default).
+  bool stopped_on_floor = false;
   // True iff options.cancel was observed during a rung's optimization (M7.0a).
   // The cancelled rung is the last `evaluated` entry, rejected, with
   // optimization.cancelled true; its per-rung analysis (v3, report line, and

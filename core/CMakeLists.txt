@@ -315,6 +315,19 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME minimize_plastic COMMAND test_minimize_plastic)
 
+  # M7.anchor-integrity — the diagnosis-064 policy/display fixes on the core
+  # mechanisms: the design-mask structural PAD (FIX 1), the reduction-ladder
+  # FLOOR (FIX 2, incl. the disabled==legacy byte-identity), and check_v3 /
+  # keep_largest_and_marked_components never deleting a frozen anchor island
+  # (FIX 3). Drives minimize_plastic (simp_optimize), so it is Eigen-gated like
+  # the other optimizer tests; the real settings rule table is injected as in
+  # test_minimize_plastic. Builds its parts in code (no fixtures).
+  add_executable(test_anchor_integrity tests/validation/test_anchor_integrity.cpp)
+  target_link_libraries(test_anchor_integrity PRIVATE topopt)
+  target_compile_definitions(test_anchor_integrity PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME anchor_integrity COMMAND test_anchor_integrity)
+
   # MMA updater (M7.mma.1): the Method of Moving Asymptotes design updater,
   # exposed behind SimpOptions.updater = MMA, reproduces the OC minimum-
   # compliance benchmarks (the Gate V2 cantilever + clamped-beam geometries)

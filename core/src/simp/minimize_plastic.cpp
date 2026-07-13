@@ -110,6 +110,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (!std::isfinite(options.margin_stop) || options.margin_stop < 0.0)
     throw std::invalid_argument(
         "minimize_plastic: margin_stop must be finite and >= 0");
+  // M7.anchor-integrity (FIX 2): the floor multiple is >= 1.0 or +infinity
+  // (disabled). NaN and values < 1 are rejected; +infinity is allowed as the
+  // "disabled" sentinel (the default). `>= 1.0` is false for NaN, so this also
+  // rejects NaN.
+  if (!(options.margin_floor_multiple >= 1.0))
+    throw std::invalid_argument(
+        "minimize_plastic: margin_floor_multiple must be >= 1 or +infinity");
   if (!std::isfinite(options.min_feature_mm) || options.min_feature_mm < 0.0)
     throw std::invalid_argument(
         "minimize_plastic: min_feature_mm must be finite and >= 0");
@@ -167,9 +174,21 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   params.poisson = material.poisson;
   params.penalty = 3.0;
 
-  // Mask-aware optimize with an all-Active mask: Fixture voxels are implicitly
-  // FrozenSolid (M3.7), so the §7 V3 retention gate holds structurally.
-  const DesignMask mask = make_active_mask(grid);
+  // Mask-aware optimize. Default: an all-Active mask — Fixture voxels are
+  // implicitly FrozenSolid (M3.7), so the §7 V3 retention gate holds structurally.
+  // M7.anchor-integrity (FIX 1): when the caller supplies a design mask it
+  // REPLACES the all-Active default, letting the anchor/load faces freeze an
+  // N-voxel structural pad (FrozenSolid) rather than only the 1-voxel BC skin
+  // (diagnosis 064). Load/Fixture tags are still forced FrozenSolid on top of it
+  // by the mask-aware simp path (effective_mask), so the mask only ADDS keep-in
+  // pad voxels; it never un-freezes a tagged BC voxel.
+  if (!options.design_mask.empty() &&
+      options.design_mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "minimize_plastic: design_mask size != grid.voxel_count()");
+  const DesignMask mask = options.design_mask.empty()
+                              ? make_active_mask(grid)
+                              : options.design_mask;
 
   // Part size for the settings size class: the largest grid bounding-box edge.
   const double part_dim_mm =
@@ -404,6 +423,20 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       // reference pointed into (ASan heap-buffer-overflow, read-after-realloc),
       // surfacing downstream as empty keyframeMeshes / displacementField.
       if (options.on_variant) options.on_variant(result.evaluated.back());
+
+      // M7.anchor-integrity (FIX 2): the ladder FLOOR. Once an accepted rung
+      // already clears the comfort floor, stop — do NOT keep stripping toward the
+      // lightest rung just because the part could survive there. The comparison
+      // uses the SAME infill-adjusted margin the acceptance gate above uses, so
+      // the floor and the ceiling are measured on one scale. Disabled by default
+      // (margin_floor_multiple == +infinity): the RHS is +infinity (or NaN when
+      // margin_stop == 0), so the test is false for every finite margin and the
+      // walk is byte-identical to the pre-M7.anchor-integrity ladder.
+      if (margin.worst_case * infill_knockdown >=
+          options.margin_floor_multiple * options.margin_stop) {
+        result.stopped_on_floor = true;
+        break;
+      }
     } else {
       // First too-weak rung: stop the ladder here (do not run lighter rungs).
       result.stopped_on_margin = true;
