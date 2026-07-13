@@ -146,7 +146,19 @@ constexpr double kAnchorMarginFloorMultiple = 2.0;   // stop the ladder once a r
 // (DECISIONS 2026-07-10), keeping that decision numerically continuous, while
 // scaling correctly for real parts voxelized at 64^3..128^3.
 void enable_projection(topopt::MinimizePlasticOptions& opts) {
-  opts.simp.projection = topopt::heaviside_continuation_schedule();
+  // TEMPORARY (Option B): the Heaviside projection schedule is OC-only. The
+  // M7.mma.4 switchover made MMA the production default (MinimizePlasticOptions::
+  // updater), and simp_optimize rejects MMA + a non-empty projection schedule
+  // (the projected chain is the OC-locked Gate-V2 formulation) — so enabling
+  // projection unconditionally makes every real MMA run throw. Gate it on the
+  // updater: apply the projection schedule only when the run uses OC. When MMA
+  // drives the ladder we skip projection, so the run completes cleanly at the
+  // cost of slightly softer density boundaries. Crisp-density projection on MMA
+  // is a deferred future task (Option A). The physical min-feature length scale
+  // is set for BOTH updaters — it is a filter radius, not projection, and keeps
+  // the OC + projection Gate-V2 chain byte-identical.
+  if (topopt::projection_supported(opts.updater))
+    opts.simp.projection = topopt::heaviside_continuation_schedule();
   opts.min_feature_mm = 2.5;  // mm; per-rung -> filter_radius = 2.5 / spacing
 }
 

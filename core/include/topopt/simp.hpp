@@ -262,6 +262,19 @@ std::vector<ProjectionStage> heaviside_continuation_schedule();
 // MMA regardless of this field.
 enum class SimpUpdater { OC, MMA };
 
+// Whether a Heaviside projection schedule may be applied for `updater`. TEMPORARY
+// (Option B): projection is compatible ONLY with OC — the projected chain is the
+// OC-locked Gate-V2 formulation, and simp_optimize rejects MMA + a non-empty
+// projection schedule (validate_updater_options). Run-path callers that enable
+// projection (e.g. the bridge's enable_projection) gate on this so MMA — now the
+// production default — skips projection and runs cleanly instead of throwing.
+// Crisp-density projection on MMA is a deferred future task (Option A); until it
+// lands MMA designs have slightly softer density boundaries. Pure predicate so
+// the gate decision is directly unit-testable.
+constexpr bool projection_supported(SimpUpdater updater) {
+  return updater == SimpUpdater::OC;
+}
+
 struct SimpOptions {
   double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
   double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
