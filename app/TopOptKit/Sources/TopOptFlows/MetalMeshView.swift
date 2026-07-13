@@ -842,6 +842,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setDepthStencilState(lineOverlayDepthState)   // depth-always: never hidden inside the part
             enc.setVertexBuffer(rbuf, offset: 0, index: 0)
             enc.setVertexBytes(&lpu, length: MemoryLayout<LoadPathUniforms>.stride, index: 1)
+            // `loadpath_fragment` ALSO declares `LPUniforms u [[buffer(1)]]` (it reads the
+            // flow phase for the traveling dash), so the fragment index-1 buffer must be
+            // bound too — without this Metal aborts: "missing Buffer binding at index 1".
+            enc.setFragmentBytes(&lpu, length: MemoryLayout<LoadPathUniforms>.stride, index: 1)
             enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: loadPathRibbonVertexCount)
         } else if loadPathVertexCount > 0, let lpipe = groundPipeline, let lbuf = loadPathBuffer {
             var mvp = uniforms.mvp
