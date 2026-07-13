@@ -20,6 +20,8 @@
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 
+#include "fea_reduced.hpp"
+
 namespace topopt {
 
 namespace {
@@ -204,30 +206,20 @@ std::vector<NodalLoad> traction_loads(const VoxelGrid& grid, VoxelTag tag,
   return loads;
 }
 
-namespace {
+namespace fea_detail {
 
-using SpMat = Eigen::SparseMatrix<double>;
-using Vec = Eigen::VectorXd;
-
-// The constrained linear system reduced to its free DOFs: solve
-// K_ff u_f = rf, then scatter u_f back into the full field `up` (which already
-// carries the prescribed displacements) at the `freedofs` positions. Both
-// fea_solve (direct) and fea_solve_cg (iterative) share this assembly + BC
-// reduction; only the linear solve differs.
-struct ReducedSystem {
-  SpMat Kff;             // nf x nf, symmetric positive (semi-)definite
-  Vec rf;                // nf, reduced right-hand side
-  std::vector<int> freedofs;
-  Vec up;                // ndof, full field seeded with prescribed values
-  int ndof = 0;
-};
+// SpMat, Vec and ReducedSystem are declared in fea_reduced.hpp so multigrid.cpp
+// shares them. assemble_reduced and void_dof_survivors are defined here (in
+// fea_detail, not the anonymous namespace) so the multigrid solver links to the
+// same assembly + void-gate the Jacobi-CG path uses — both solve the identical
+// reduced system.
 
 ReducedSystem assemble_reduced(const VoxelGrid& grid, double youngs_modulus,
                                double poisson,
                                const std::vector<DirichletBC>& bcs,
                                const std::vector<NodalLoad>& loads,
                                const char* who,
-                               const std::vector<double>* elem_youngs = nullptr) {
+                               const std::vector<double>* elem_youngs) {
   const int num_nodes = fea_node_count(grid);
   const int ndof = 3 * num_nodes;
 
@@ -367,6 +359,14 @@ std::vector<int> void_dof_survivors(const SpMat& Kff, const Vec& rf,
   return kept;
 }
 
+}  // namespace fea_detail
+
+namespace {
+
+using fea_detail::ReducedSystem;
+using fea_detail::SpMat;
+using fea_detail::Vec;
+
 // Solve an already-assembled, BC-reduced system K_ff u_f = rf with the Jacobi
 // (diagonal) preconditioned CG solver, applying the M3.1 void-DOF safety gate
 // first, and scatter the result back into the full field. Shared by both
@@ -388,7 +388,7 @@ FeaSolution solve_reduced_cg(const ReducedSystem& s, double tolerance,
     // rejection detected before any CG iteration, so report zero iterations.
     std::vector<int> kept;
     try {
-      kept = void_dof_survivors(s.Kff, s.rf, "fea_solve_cg");
+      kept = fea_detail::void_dof_survivors(s.Kff, s.rf, "fea_solve_cg");
     } catch (...) {
       diag.converged = false;
       diag.iterations = 0;
@@ -455,6 +455,13 @@ FeaSolution solve_reduced_cg(const ReducedSystem& s, double tolerance,
 }
 
 }  // namespace
+
+// The public solve entry points build the reduced system through the shared
+// fea_detail helpers (also used by the multigrid solver in multigrid.cpp).
+using fea_detail::assemble_reduced;
+using fea_detail::ReducedSystem;
+using fea_detail::SpMat;
+using fea_detail::Vec;
 
 FeaSolution fea_solve(const VoxelGrid& grid, double youngs_modulus,
                       double poisson, const std::vector<DirichletBC>& bcs,
