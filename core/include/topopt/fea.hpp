@@ -212,6 +212,13 @@ struct CgInfo {
   bool converged = false;
   int iterations = 0;
   double residual = 0.0;
+  // Set by fea_solve_mgcg: true if the geometric-multigrid-preconditioned CG
+  // path ran, false if it fell back to (or the caller used) plain Jacobi-CG.
+  // `mg_levels` is the number of grid levels in the multigrid hierarchy (0 when
+  // multigrid did not run). The Jacobi-CG entry points leave both at their
+  // defaults.
+  bool used_multigrid = false;
+  int mg_levels = 0;
 };
 
 // Solve the same global linear-elastic system as fea_solve, but with a Jacobi
@@ -268,6 +275,44 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid,
                          double tolerance = 1e-8, int max_iterations = 0,
                          CgInfo* info = nullptr,
                          const FeaSolution* initial_guess = nullptr);
+
+// Geometric-multigrid-preconditioned CG variants of fea_solve_cg (handoff 072).
+// These solve the IDENTICAL BC-reduced, void-gated system Ku=f as fea_solve_cg,
+// to the same relative-residual `tolerance`, but precondition CG with a standard
+// V-cycle geometric multigrid (vertex coarsening 2x/level, trilinear transfer,
+// Galerkin coarse operators, damped-Jacobi smoother) instead of the weak Jacobi
+// (diagonal) preconditioner. On the voxel grids the profile targets this cuts
+// the CG iteration count by ~10-30x (handoff 072 reports the measured numbers).
+//
+// The multigrid preconditioner is a drop-in ACCELERATOR, not a different model:
+// the converged displacement field — and hence compliance, sensitivities and the
+// optimized design — are unchanged within tolerance. The solver is fully OPT-IN
+// (nothing calls it unless a caller chooses it); the existing fea_solve_cg path
+// is byte-for-byte untouched, so Gate-V2 and the reference path are unaffected.
+//
+// ROBUST FALLBACK: if a multigrid hierarchy is not applicable (the grid is not
+// 2x-divisible enough to build >= 2 levels, or the coarsest level is too large
+// for a direct solve) or MG-CG fails to converge / produces a non-finite field,
+// the solver transparently FALLS BACK to the exact Jacobi-CG path — it never
+// returns a wrong or unconverged result. `info->used_multigrid` reports which
+// path actually ran. Throwing behaviour (bad BC/load index, void-gate rejection,
+// CG non-convergence of the fallback) matches fea_solve_cg.
+FeaSolution fea_solve_mgcg(const VoxelGrid& grid, double youngs_modulus,
+                           double poisson, const std::vector<DirichletBC>& bcs,
+                           const std::vector<NodalLoad>& loads,
+                           double tolerance = 1e-8, int max_iterations = 0,
+                           CgInfo* info = nullptr);
+
+// Heterogeneous-material variant of fea_solve_mgcg: each solid voxel (i,j,k) uses
+// its own Young's modulus youngs_per_voxel[grid.index(i,j,k)] (the SIMP graded
+// path, E(rho)=rho^p*E0). Same contract, hierarchy and fallback as the uniform
+// overload above; solves the identical system as the graded fea_solve_cg.
+FeaSolution fea_solve_mgcg(const VoxelGrid& grid,
+                           const std::vector<double>& youngs_per_voxel,
+                           double poisson, const std::vector<DirichletBC>& bcs,
+                           const std::vector<NodalLoad>& loads,
+                           double tolerance = 1e-8, int max_iterations = 0,
+                           CgInfo* info = nullptr);
 
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises

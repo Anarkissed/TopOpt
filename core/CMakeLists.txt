@@ -64,6 +64,11 @@ endif()
 # Eigen links PRIVATE. Compiled only when Eigen is found (always in CI).
 if(Eigen3_FOUND)
   target_sources(topopt PRIVATE src/fea/assembly.cpp)
+  # Geometric-multigrid-preconditioned CG solver (handoff 072): an opt-in
+  # accelerator for the fea_solve_cg system, sharing assembly.cpp's reduced
+  # system via the internal src/fea/fea_reduced.hpp. Gated on Eigen like
+  # assembly.cpp. CI has Eigen (DEPS=ON), so it always builds in CI.
+  target_sources(topopt PRIVATE src/fea/multigrid.cpp)
   # SIMP density interpolation + penalized compliance/sensitivities (M3.2). It
   # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
@@ -196,6 +201,17 @@ if(Eigen3_FOUND)
   add_executable(test_cg tests/unit/test_cg.cpp)
   target_link_libraries(test_cg PRIVATE topopt)
   add_test(NAME fea_cg COMMAND test_cg)
+
+  # Geometric-multigrid-preconditioned CG solver test (handoff 072). Proves
+  # MG-CG solves the IDENTICAL system as the Jacobi-CG fea_solve_cg (same field
+  # on the exact patch, the direct solve, and a SIMP soft-void graded grid), that
+  # the void-gate / validation / fallback behaviour matches, and the speedup gate
+  # (MG-CG converges in <= 60 iterations at 32^3 and 64^3, vs Jacobi's hundreds).
+  # Needs fea_solve_mgcg (multigrid.cpp), so it is gated on Eigen like assembly.cpp.
+  # CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_mgcg tests/unit/test_mgcg.cpp)
+  target_link_libraries(test_mgcg PRIVATE topopt)
+  add_test(NAME fea_mgcg COMMAND test_mgcg)
 
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises
