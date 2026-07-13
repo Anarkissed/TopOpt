@@ -19,3 +19,5 @@ vcpkg_installed/
 app/TopOpt.xcodeproj/project.xcworkspace/xcuserdata/nadim.xcuserdatad/UserInterfaceState.xcuserstate
 app/TopOpt.xcodeproj/xcuserdata/nadim.xcuserdatad/xcschemes/xcschememanagement.plist
 app/TopOptKit/.swiftpm/xcode/xcuserdata/nadim.xcuserdatad/xcschemes/xcschememanagement.plist
+build-asan/
+build-release/
