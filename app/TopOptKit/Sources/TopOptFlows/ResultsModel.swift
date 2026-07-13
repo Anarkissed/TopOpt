@@ -807,20 +807,61 @@ public final class ResultsModel: ObservableObject {
         return min(count - 1, max(0, Int((t * Double(count - 1)).rounded())))
     }
 
+    /// Whether Play scrubs THROUGH the optimization-history keyframes (the "watch it
+    /// carve out" morph) rather than the static / reveal-slice view. Pure so the
+    /// branch is verified headlessly (the M7 /app/ standard); `ResultsScreen.showHistory`
+    /// is exactly this call.
+    ///
+    /// THE FIX ("Stress chip breaks playback"): `stressOn` is deliberately NOT a factor.
+    /// It used to suppress the morph (Stress on → the branch fell back to the
+    /// slice-reveal viewer), so pressing Play with Stress on sliced instead of morphing.
+    /// The morph and the stress overlay now coexist (the tints are sampled per keyframe).
+    /// A deflection (flex loop / failure push) or the load-path overlay still shows the
+    /// final formed mesh — they animate/annotate it — so they take precedence.
+    public static func showsHistoryMorph(hasHistory: Bool, deflectionActive: Bool,
+                                         loadPathActive: Bool) -> Bool {
+        hasHistory && !deflectionActive && !loadPathActive
+    }
+
     /// Per-flat-vertex stress colors (alpha 1) for `mesh`, sampled from `field`
     /// against the shared scale — the buffer the viewer uploads when stress is on.
-    public func stressTints(for mesh: ViewerMesh, field: StressField) -> [SIMD4<Float>] {
+    ///
+    /// `multiplier` scales the sampled von Mises value before the color lookup so the
+    /// heatmap tracks the motion (M7.viz coupling): linear FEA means the stress at a
+    /// point scales with the applied load, so the flex loop (0 at rest → 1 at full
+    /// deflection) and the failure "push" scrub (1× → the failure multiple) drive the
+    /// SAME field warmer/cooler as the geometry moves. `multiplier` 1 is the solved
+    /// field as-is (a static stress overlay). See `stressColorMultiplier`.
+    public func stressTints(for mesh: ViewerMesh, field: StressField,
+                            multiplier: Double = 1) -> [SIMD4<Float>] {
         let positions = mesh.flat.positions
         let count = mesh.flat.vertexCount
         var out = [SIMD4<Float>]()
         out.reserveCapacity(count)
         for v in 0..<count {
             let p = SIMD3<Float>(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2])
-            let frac = stressFraction(mpa: Double(field.value(at: p)))
+            let frac = stressFraction(mpa: Double(field.value(at: p)) * multiplier)
             let c = ResultsModel.stressColor(fraction: frac)
             out.append(SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1))
         }
         return out
+    }
+
+    /// The load multiple currently applied to the base von Mises field for coloring,
+    /// so the stress heatmap moves WITH the geometry (M7.viz.2/3/6 coupling). Linear
+    /// FEA: the displayed field = base field × this multiplier, recolored against the
+    /// SAME yield scale.
+    ///   • Failure "push" active → the push scrub `pushFactor` (1× → the failure
+    ///     multiple): as the user drives toward failure the body flushes to red, and
+    ///     at the multiple the peak voxel reaches exactly yield (fraction 1 → red).
+    ///   • Flex loop active → the deflection `flexAmplitude` (0 at rest → 1 at full
+    ///     deflection): the body cycles blue → hot → blue as it wobbles. Reduced-motion
+    ///     pins amplitude 1 (the static full-deflection frame shows the real field).
+    ///   • Neither → 1 (the solved field as-is, a static stress overlay).
+    public func stressColorMultiplier(reduceMotion: Bool) -> Double {
+        if pushActive { return pushFactor }
+        if flexOn && hasFlex { return flexAmplitude(reduceMotion: reduceMotion) }
+        return 1
     }
 
     // MARK: - Intents

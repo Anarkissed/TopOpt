@@ -918,4 +918,80 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.failurePrediction?.multiplier ?? 0, 6, accuracy: 1e-9)
         XCTAssertEqual(m.failurePrediction?.failureLoadKg ?? 0, 12, accuracy: 1e-9)
     }
+
+    // MARK: stress ↔ motion coupling (the displayed field scales with the load)
+
+    func testStressTintsScaleWithMultiplier() {
+        // Shared scale 10 (variant maxStress). A voxel holding 5 MPa reads green-ish at
+        // rest (frac 0.5); at multiplier 2 it reads 10 MPa → frac 1 → red; at 0 it
+        // reads 0 → blue. So the SAME field recolors as the load multiple moves.
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5, maxStress: 10)]))
+        let mesh = ViewerMesh(vertices: [0.5, 0.5, 0.5, 1.5, 0.5, 0.5, 0.5, 1.5, 0.5],
+                              indices: [0, 1, 2], faceIDs: [])
+        let field = StressField(nx: 2, ny: 2, nz: 2, origin: .zero, spacing: 1,
+                                values: [5, 0, 0, 0, 0, 0, 0, 0])
+        let rest = m.stressTints(for: mesh, field: field, multiplier: 0)
+        let base = m.stressTints(for: mesh, field: field, multiplier: 1)
+        let pushed = m.stressTints(for: mesh, field: field, multiplier: 2)
+        // Vertex 0 sits in the 5-MPa voxel. Blue at 0×, mid at 1×, red at 2×.
+        XCTAssertEqual(rest[0], SIMD4<Float>(Float(RGBA(28, 60, 170).r), Float(RGBA(28, 60, 170).g),
+                                             Float(RGBA(28, 60, 170).b), 1))     // frac 0 → blue
+        XCTAssertGreaterThan(pushed[0].x, 0.9)                                   // frac 1 → red (high R)
+        XCTAssertLessThan(pushed[0].z, 0.3)                                      //         low B
+        XCTAssertGreaterThan(pushed[0].x, base[0].x)                            // warmer as the load climbs
+        // Default multiplier is 1 (unchanged behavior for the static overlay).
+        XCTAssertEqual(m.stressTints(for: mesh, field: field), base)
+    }
+
+    @MainActor func testStressColorMultiplierDefaultsToOne() {
+        // Nothing animating → the field shows as-is (multiplier 1).
+        let m = flexModel()
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 1, accuracy: 1e-9)
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: true), 1, accuracy: 1e-9)
+    }
+
+    @MainActor func testStressColorMultiplierFollowsFlexAmplitude() {
+        // Flex loop drives the color: rest (phase 0) → 0, full deflection (0.5) → 1,
+        // matching the geometry so motion and color move together.
+        let m = flexModel()
+        m.toggleFlex()
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 0, accuracy: 1e-9)   // rest
+        m.advanceFlex(0.5)
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 1, accuracy: 1e-9)   // full
+        // Reduced-motion pins the static full-deflection frame → full color at any phase.
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: true), 1, accuracy: 1e-9)
+    }
+
+    @MainActor func testStressColorMultiplierFollowsFailurePush() {
+        // The failure push drives the color: multiplier == pushFactor, and at failure
+        // (pushFactor == the failure multiple) the peak voxel reaches EXACTLY yield → red.
+        let m = failureModel(peak: 20, yield: 60)   // multiplier 3, scale keyed to yield 60
+        m.toggleFailure()
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 1, accuracy: 1e-9)   // 1× load
+        m.setPush(factor: 2)
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 2, accuracy: 1e-9)
+        m.setPush(factor: 99)                                                             // → clamps to 3
+        XCTAssertTrue(m.atFailure)
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 3, accuracy: 1e-9)
+        // At the failure multiple the peak (20 MPa × 3 = 60 = yield) colors red.
+        let mesh = try! XCTUnwrap(m.selectedMesh)
+        let field = try! XCTUnwrap(m.selectedStressField)
+        let tints = m.stressTints(for: mesh, field: field,
+                                  multiplier: m.stressColorMultiplier(reduceMotion: false))
+        XCTAssertTrue(tints.allSatisfy { $0.x > 0.9 && $0.z < 0.3 })   // whole peak voxel is red
+    }
+
+    // MARK: playback branch (the "Stress chip breaks playback" fix)
+
+    func testShowsHistoryMorphIgnoresStressToggle() {
+        // The crux: with a history and nothing deflecting/overlaying, Play morphs —
+        // and the Stress toggle is NOT an input here, so turning Stress on can no
+        // longer force the slice-reveal fallback.
+        XCTAssertTrue(ResultsModel.showsHistoryMorph(hasHistory: true, deflectionActive: false, loadPathActive: false))
+        // No history → no morph (the reveal-slice fallback for fieldless meshes).
+        XCTAssertFalse(ResultsModel.showsHistoryMorph(hasHistory: false, deflectionActive: false, loadPathActive: false))
+        // Deflection (flex/push) or load-path show the final formed mesh, not the morph.
+        XCTAssertFalse(ResultsModel.showsHistoryMorph(hasHistory: true, deflectionActive: true, loadPathActive: false))
+        XCTAssertFalse(ResultsModel.showsHistoryMorph(hasHistory: true, deflectionActive: false, loadPathActive: true))
+    }
 }
