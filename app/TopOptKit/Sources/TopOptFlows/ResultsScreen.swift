@@ -80,12 +80,12 @@ public struct ResultsScreen: View {
                           loadPathSegments: loadPathSegments)
                 .ignoresSafeArea()
 
-            topLeft
-            topRight
-            if model.stressOn { stressLegendPanel }   // M7.viz.1: yield-scaled legend
-            if flexActive { flexControlPanel }        // M7.viz.3: exaggeration slider
-            if loadPathActive { loadPathLegendPanel } // M7.viz.4: load-path key
-            if model.failureOn { failureControlPanel } // M7.viz.6: failure load + push
+            topBar
+            // The viz toggles (Stress / Flex / Load path / Failure) and their
+            // now-compact controls live on the right rail; each chip slides its own
+            // drawer open rather than dropping a big panel over the model. The rail
+            // sits below the top bar so it never collides with the bar's controls.
+            vizRail
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
             failureMarker.ignoresSafeArea()           // M7.viz.6: failure-point marker
             savingsTabs
@@ -194,35 +194,29 @@ public struct ResultsScreen: View {
 
     // MARK: - Stress legend (M7.viz.1 — scaled to material yield)
 
-    /// The stress heatmap's legend: names the material and the yield the scale is
-    /// keyed to, with the color ramp bar. Green (comfortably below yield) → red
-    /// (at/above yield). Shown only while the stress overlay is on. Pixels are
-    /// device QA (the M7 /app/ standard); the copy is headlessly tested on the model.
-    @ViewBuilder private var stressLegendPanel: some View {
+    /// The Stress chip's drawer: the heatmap legend — names the material and the
+    /// yield the scale is keyed to, with the color ramp bar. Green (comfortably below
+    /// yield) → red (at/above yield). Slides open beside the Stress chip on the right
+    /// rail. Pixels are device QA (the M7 /app/ standard); the copy is headlessly
+    /// tested on the model.
+    @ViewBuilder private var stressDrawer: some View {
         let legend = model.stressLegend
-        VStack {
-            Spacer().frame(height: 84)   // clear the top nav / stress toggle row
-            VStack(alignment: .leading, spacing: DS.Space.s) {
-                Text(legend.caption)
-                    .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(LinearGradient(colors: Self.rampColors, startPoint: .leading, endPoint: .trailing))
-                    .frame(width: 180, height: 8)
-                HStack {
-                    Text(legend.minLabel).dsStyle(DS.TypeScale.caption)
-                    Spacer()
-                    Text(legend.maxLabel).dsStyle(DS.TypeScale.caption)
-                }
-                .foregroundStyle(DS.Color.textSecondary.color)
-                .frame(width: 180)
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Text(legend.caption)
+                .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                .foregroundStyle(DS.Color.textPrimary.color)
+            RoundedRectangle(cornerRadius: 3)
+                .fill(LinearGradient(colors: Self.rampColors, startPoint: .leading, endPoint: .trailing))
+                .frame(width: Self.drawerWidth, height: 7)
+            HStack {
+                Text(legend.minLabel).dsStyle(DS.TypeScale.caption)
+                Spacer()
+                Text(legend.maxLabel).dsStyle(DS.TypeScale.caption)
             }
-            .padding(DS.Space.l)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
-                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-            .dsShadow(.panel)
-            Spacer()
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .frame(width: Self.drawerWidth)
         }
+        .resultsDrawerChrome()
     }
 
     /// The stress ramp's five design stops as SwiftUI colors — the same
@@ -234,83 +228,60 @@ public struct ResultsScreen: View {
 
     // MARK: - Flex control (M7.viz.3 — deflection animation)
 
-    /// The exaggeration slider for the flex animation (50–100×), top-leading so it
-    /// clears the top-center stress legend. Under reduced-motion the copy says a
-    /// static full-deflection frame is shown, not a loop. Pixels are device QA (the
-    /// M7 /app/ standard); the exaggeration math + reduced-motion path are tested on
-    /// the model.
-    @ViewBuilder private var flexControlPanel: some View {
-        VStack {
-            Spacer().frame(height: 84)   // clear the top nav row
-            HStack {
-                VStack(alignment: .leading, spacing: DS.Space.s) {
-                    HStack(spacing: DS.Space.m) {
-                        Text("Deflection").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                        Spacer()
-                        Text("\(Int(model.flexExaggeration))×").dsStyle(DS.TypeScale.footnote)
-                            .fontWeight(.semibold).monospacedDigit()
-                            .foregroundStyle(DS.Color.accent.color)
-                    }
-                    Slider(value: Binding(get: { model.flexExaggeration },
-                                          set: { model.setFlexExaggeration($0) }),
-                           in: FlexAnimation.minExaggeration...FlexAnimation.maxExaggeration)
-                        .frame(width: 172)
-                        .tint(DS.Color.accent.color)
-                    Text(reduceMotion
-                         ? "Reduced motion — showing full deflection"
-                         : "Exaggerated \(Int(model.flexExaggeration))× — not to scale")
-                        .dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.textSecondary.color)
-                        .frame(width: 172, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(DS.Space.l)
-                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
-                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-                .dsShadow(.panel)
+    /// The Flex chip's drawer: the exaggeration slider for the flex animation
+    /// (50–100×). Under reduced-motion the copy says a static full-deflection frame is
+    /// shown, not a loop. Slides open beside the Flex chip on the right rail. Pixels
+    /// are device QA (the M7 /app/ standard); the exaggeration math + reduced-motion
+    /// path are tested on the model.
+    @ViewBuilder private var flexDrawer: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: DS.Space.m) {
+                Text("Deflection").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
                 Spacer()
+                Text("\(Int(model.flexExaggeration))×").dsStyle(DS.TypeScale.footnote)
+                    .fontWeight(.semibold).monospacedDigit()
+                    .foregroundStyle(DS.Color.accent.color)
             }
-            Spacer()
+            Slider(value: Binding(get: { model.flexExaggeration },
+                                  set: { model.setFlexExaggeration($0) }),
+                   in: FlexAnimation.minExaggeration...FlexAnimation.maxExaggeration)
+                .frame(width: Self.drawerWidth)
+                .tint(DS.Color.accent.color)
+            Text(reduceMotion
+                 ? "Reduced motion — full deflection"
+                 : "Exaggerated \(Int(model.flexExaggeration))× — not to scale")
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .frame(width: Self.drawerWidth, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, DS.Space.xl3)
+        .resultsDrawerChrome()
     }
 
     // MARK: - Load-path legend (M7.viz.4 — principal-stress-direction key)
 
-    /// A small key for the load-path overlay: what the lines mean and how they are
-    /// derived + coloured. Sits in the top-LEADING slot (shared with the flex panel,
-    /// which is never on at the same time — they're mutually exclusive), so it never
-    /// collides with the top-center stress legend when the stress overlay is also on.
-    /// Static (no motion), so it is reduced-motion-safe by construction. The copy is
-    /// headlessly assertable via `LoadPathCopy`; placement is device QA.
-    @ViewBuilder private var loadPathLegendPanel: some View {
-        VStack {
-            Spacer().frame(height: 84)   // clear the top nav / toggle row
-            HStack {
-                VStack(alignment: .leading, spacing: DS.Space.s) {
-                    Text("Load path").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    Text(LoadPathCopy.what)
-                        .dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.textSecondary.color)
-                        .frame(width: 200, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(LoadPathCopy.how)
-                        .dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                        .frame(width: 200, alignment: .leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(DS.Space.l)
-                .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
-                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-                .dsShadow(.panel)
-                Spacer()
-            }
-            Spacer()
+    /// The Load-path chip's drawer: a small key for the overlay — what the lines mean
+    /// and how they are derived + coloured. Slides open beside the Load-path chip on
+    /// the right rail. Static (no motion), so it is reduced-motion-safe by
+    /// construction. The copy is headlessly assertable via `LoadPathCopy`; placement
+    /// is device QA.
+    @ViewBuilder private var loadPathDrawer: some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Text("Load path").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                .foregroundStyle(DS.Color.textPrimary.color)
+            Text(LoadPathCopy.what)
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .frame(width: Self.drawerWidth, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(LoadPathCopy.how)
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .frame(width: Self.drawerWidth, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, DS.Space.xl3)
+        .resultsDrawerChrome()
     }
 
     // MARK: - Hot-spot callout (M7.viz.2 — the single worst-stress point)
@@ -365,42 +336,31 @@ public struct ResultsScreen: View {
 
     private static let failureRed = RGBA(255, 70, 50).color
 
-    /// The failure-load card: the predicted (solid-print) failure load in the user's
-    /// units, the honesty caption, the infill-adjusted estimate when an infill is set,
-    /// and — when the variant has a displacement field — the "push" scrub (1× → the
-    /// failure multiple) that drives the deflection toward failure. Top-leading (shared
-    /// with the flex/load-path panels, which the failure toggle turns off, so it never
-    /// collides). All values are headlessly tested on ResultsModel; layout is device QA.
-    @ViewBuilder private var failureControlPanel: some View {
+    /// The Failure chip's drawer: the predicted (solid-print) failure load in the
+    /// user's units, the honesty caption, the infill-adjusted estimate when an infill
+    /// is set, and — when the variant has a displacement field — the "push" scrub
+    /// (1× → the failure multiple) that drives the deflection toward failure. Slides
+    /// open beside the Failure chip on the right rail. All values are headlessly tested
+    /// on ResultsModel; layout is device QA.
+    @ViewBuilder private var failureDrawer: some View {
         if let fp = model.failurePrediction {
-            VStack {
-                Spacer().frame(height: 84)   // clear the top nav / toggle row
-                HStack {
-                    VStack(alignment: .leading, spacing: DS.Space.s) {
-                        Text("FAILURE LOAD").font(.system(size: 9, weight: .bold)).tracking(0.6)
-                            .foregroundStyle(DS.Color.textSecondary.color)
-                        Text(fp.headline).dsStyle(DS.TypeScale.bodyStrong)
-                            .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.textPrimary.color)
-                        Text(fp.subtitle)
-                            .dsStyle(DS.TypeScale.caption)
-                            .foregroundStyle(DS.Color.textSecondary.color)
-                            .frame(width: 200, alignment: .leading)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let note = fp.infillNote {
-                            Text(note).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                                .foregroundStyle(DS.Color.textPrimary.color)
-                        }
-                        if model.hasFlex { pushControl(fp) }
-                    }
-                    .padding(DS.Space.l)
-                    .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
-                        .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-                    .dsShadow(.panel)
-                    Spacer()
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                Text("FAILURE LOAD").font(.system(size: 9, weight: .bold)).tracking(0.6)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                Text(fp.headline).dsStyle(DS.TypeScale.bodyStrong)
+                    .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.textPrimary.color)
+                Text(fp.subtitle)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .frame(width: Self.drawerWidth, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let note = fp.infillNote {
+                    Text(note).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
+                        .foregroundStyle(DS.Color.textPrimary.color)
                 }
-                Spacer()
+                if model.hasFlex { pushControl(fp) }
             }
-            .padding(.horizontal, DS.Space.xl3)
+            .resultsDrawerChrome()
         }
     }
 
@@ -418,14 +378,14 @@ public struct ResultsScreen: View {
             }
             Slider(value: Binding(get: { model.pushFactor }, set: { model.setPush(factor: $0) }),
                    in: 1...max(1.0001, fp.multiplier))
-                .frame(width: 172)
+                .frame(width: Self.drawerWidth)
                 .tint(model.atFailure ? Self.failureRed : DS.Color.accent.color)
             // Reads naturally as the user drags: the live load in their units + the
             // current multiple, ramping "1180 lb · 1.4× load" → "1915 lb · 3.0× · YIELDS".
             Text(model.pushReadout(prediction: fp))
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.textSecondary.color)
-                .frame(width: 172, alignment: .leading)
+                .frame(width: Self.drawerWidth, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.top, DS.Space.s)
@@ -469,9 +429,15 @@ public struct ResultsScreen: View {
         .dsShadow(.panel)
     }
 
-    // MARK: - Top-left: back + project / Optimized ✓
+    // MARK: - Top bar: back · project / Optimized ✓ · See Original · Export
 
-    private var topLeft: some View {
+    /// One flex row across the top: navigation + project on the left, Export on the
+    /// right. Keeping every top control in a single HStack (rather than two
+    /// independent left/right overlays) means a narrow device compresses the row
+    /// instead of letting "See Original" and Export overlap. The secondary viz chips
+    /// were pulled OUT of here onto the right rail (`vizRail`), which is what freed the
+    /// space. Pixels are device QA (the M7 /app/ standard).
+    private var topBar: some View {
         VStack {
             HStack(spacing: DS.Space.m) {
                 Button(action: onClose) {
@@ -487,14 +453,19 @@ public struct ResultsScreen: View {
                 HStack(spacing: DS.Space.sm) {
                     Text(model.projectName).dsStyle(DS.TypeScale.bodyStrong)
                         .foregroundStyle(DS.Color.textPrimary.color)
+                        .lineLimit(1)
                     Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
                     Text("Optimized ✓").dsStyle(DS.TypeScale.callout)
                         .foregroundStyle(DS.Color.okGreen.color)
+                        .fixedSize()
                 }
                 .padding(.vertical, DS.Space.sm)
                 .padding(.horizontal, DS.Space.l)
                 .background(Capsule().fill(DS.Surface.bar.color)
                     .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                // The project capsule is the one flexible element — under width
+                // pressure its name truncates (lineLimit 1) while the fixed-size
+                // buttons keep their full width, so nothing overlaps.
 
                 Button(action: onSeeOriginal) {
                     HStack(spacing: DS.Space.s) {
@@ -502,109 +473,140 @@ public struct ResultsScreen: View {
                         Text("See Original").dsStyle(DS.TypeScale.callout)
                     }
                     .foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize()
                     .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
                     .background(Capsule().fill(DS.Surface.bar.color)
                         .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
                 }
                 .buttonStyle(.plain)
-                Spacer()
+
+                Spacer(minLength: DS.Space.m)
+
+                exportButton
             }
             Spacer()
         }
         .padding(DS.Space.xl3)
     }
 
-    // MARK: - Top-right: Stress toggle + Export
+    // MARK: - Right rail: slide-open visualization chips
 
-    private var topRight: some View {
-        VStack {
-            HStack(spacing: DS.Space.sm) {
-                Spacer()
-                // M7.viz.3: Flex (deflection animation) toggle — only when the variant
-                // carries a displacement field to animate.
-                if model.hasFlex {
-                    Button { model.toggleFlex() } label: {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "waveform.path")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Flex").dsStyle(DS.TypeScale.bodyStrong)
-                        }
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .padding(.vertical, DS.Space.m)
-                        .padding(.horizontal, DS.Space.xl4)
-                        .background(Capsule().fill(model.flexOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
-                            .overlay(Capsule().strokeBorder(model.flexOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
-                    }
-                    .buttonStyle(.plain)
-                }
-                // M7.viz.4: Load-path toggle (advanced overlay) — only when the variant
-                // carries a displacement field to derive principal directions from.
-                if model.hasLoadPath {
-                    Button { model.toggleLoadPath() } label: {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Load path").dsStyle(DS.TypeScale.bodyStrong)
-                        }
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .padding(.vertical, DS.Space.m)
-                        .padding(.horizontal, DS.Space.xl4)
-                        .background(Capsule().fill(model.loadPathOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
-                            .overlay(Capsule().strokeBorder(model.loadPathOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
-                    }
-                    .buttonStyle(.plain)
-                }
-                // M7.viz.6: Failure-load ("push it till it breaks") toggle — only when
-                // the variant has an applied load + peak + yield to derive it from.
-                if model.hasFailurePrediction {
-                    Button { model.toggleFailure() } label: {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "burst")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text("Failure").dsStyle(DS.TypeScale.bodyStrong)
-                        }
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .padding(.vertical, DS.Space.m)
-                        .padding(.horizontal, DS.Space.xl4)
-                        .background(Capsule().fill(model.failureOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
-                            .overlay(Capsule().strokeBorder(model.failureOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
-                    }
-                    .buttonStyle(.plain)
-                }
-                Button { model.toggleStress() } label: {
-                    HStack(spacing: DS.Space.s) {
-                        Circle()
-                            .fill(AngularGradient(colors: [
-                                RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
-                                RGBA(250, 220, 60).color, RGBA(255, 70, 50).color, RGBA(28, 60, 170).color,
-                            ], center: .center))
-                            .frame(width: 15, height: 15)
-                        Text("Stress").dsStyle(DS.TypeScale.bodyStrong)
-                            .foregroundStyle(DS.Color.textPrimary.color)
-                    }
-                    .padding(.vertical, DS.Space.m)
-                    .padding(.horizontal, DS.Space.xl4)   // match the Export button's size
-                    .background(Capsule().fill(model.stressOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
-                        .overlay(Capsule().strokeBorder(model.stressOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
-                }
-                .buttonStyle(.plain)
+    /// The compact drawer content width (sliders, ramp, key copy) — the drawers are
+    /// deliberately slim so the model viewport stays maximally unobstructed.
+    private static let drawerWidth: CGFloat = 150
 
-                Button(action: onExport) {
-                    HStack(spacing: DS.Space.s) {
-                        Image(systemName: "square.and.arrow.up").font(.system(size: 13, weight: .semibold))
-                        Text("Export .3mf").dsStyle(DS.TypeScale.bodyStrong)
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.vertical, DS.Space.m)
-                    .padding(.horizontal, DS.Space.xl4)
-                    .background(Capsule().fill(DS.Color.accent.color))
-                    .dsShadow(.accentGlow)
-                }
-                .buttonStyle(.plain)
+    /// A vertical rail down the right edge, below the top bar, holding the secondary
+    /// visualization toggles. Each chip toggles its mode and slides its own compact
+    /// drawer open to the LEFT; flex/load-path/failure are mutually exclusive in the
+    /// model, so opening one collapses the others (stress can accompany them, as
+    /// before — a stress-coloured flex is a real combination). The top inset clears
+    /// the top bar so the rail never collides with it. Pixels are device QA.
+    private var vizRail: some View {
+        VStack(alignment: .trailing, spacing: DS.Space.s) {
+            // Stress — the ramp legend drawer.
+            vizRow(open: model.stressOn, drawer: { stressDrawer }, chip: { stressChip })
+            // M7.viz.3 Flex — only when the variant carries a displacement field.
+            if model.hasFlex {
+                vizRow(open: flexActive, drawer: { flexDrawer }, chip: { flexChip })
+            }
+            // M7.viz.4 Load path — same displacement-field gate as Flex.
+            if model.hasLoadPath {
+                vizRow(open: loadPathActive, drawer: { loadPathDrawer }, chip: { loadPathChip })
+            }
+            // M7.viz.6 Failure — only when the variant has an applied load + peak + yield.
+            if model.hasFailurePrediction {
+                vizRow(open: model.failureOn, drawer: { failureDrawer }, chip: { failureChip })
             }
             Spacer()
         }
-        .padding(DS.Space.xl3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+        .padding(.horizontal, DS.Space.xl3)
+        .padding(.bottom, DS.Space.xl3)
+        .padding(.top, 76)   // clear the top bar (back button + its inset)
+        .animation(DS.Motion.sheetIn, value: model.stressOn)
+        .animation(DS.Motion.sheetIn, value: model.flexOn)
+        .animation(DS.Motion.sheetIn, value: model.loadPathOn)
+        .animation(DS.Motion.sheetIn, value: model.failureOn)
+    }
+
+    /// One rail row: the chip pinned to the right edge, its drawer sliding out to the
+    /// left when `open`. The leading spacer keeps the chip flush-right and lets the
+    /// drawer float over the model rather than pushing the chip around.
+    private func vizRow<Drawer: View, Chip: View>(
+        open: Bool, @ViewBuilder drawer: () -> Drawer, @ViewBuilder chip: () -> Chip) -> some View {
+        HStack(alignment: .top, spacing: DS.Space.s) {
+            Spacer(minLength: 0)
+            if open {
+                drawer()
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+            chip()
+        }
+    }
+
+    /// A rail toggle chip — icon + label capsule, accent-tinted when its mode is on.
+    /// Matches the app's existing chip language exactly (padding, capsule, accent).
+    private func vizChip<Icon: View>(
+        label: String, isOn: Bool, action: @escaping () -> Void,
+        @ViewBuilder icon: () -> Icon) -> some View {
+        Button(action: action) {
+            HStack(spacing: DS.Space.s) {
+                icon()
+                Text(label).dsStyle(DS.TypeScale.bodyStrong)
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, DS.Space.m)
+            .padding(.horizontal, DS.Space.xl4)
+            .background(Capsule().fill(isOn ? DS.Color.accent.opacity(0.28).color : DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(isOn ? DS.Color.accent.opacity(0.7).color : DS.Color.strokeStrong.color, lineWidth: 1.5)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var stressChip: some View {
+        vizChip(label: "Stress", isOn: model.stressOn, action: { model.toggleStress() }) {
+            Circle()
+                .fill(AngularGradient(colors: [
+                    RGBA(28, 60, 170).color, RGBA(0, 170, 220).color, RGBA(60, 190, 110).color,
+                    RGBA(250, 220, 60).color, RGBA(255, 70, 50).color, RGBA(28, 60, 170).color,
+                ], center: .center))
+                .frame(width: 15, height: 15)
+        }
+    }
+
+    private var flexChip: some View {
+        vizChip(label: "Flex", isOn: model.flexOn, action: { model.toggleFlex() }) {
+            Image(systemName: "waveform.path").font(.system(size: 13, weight: .semibold))
+        }
+    }
+
+    private var loadPathChip: some View {
+        vizChip(label: "Load path", isOn: model.loadPathOn, action: { model.toggleLoadPath() }) {
+            Image(systemName: "point.topleft.down.to.point.bottomright.curvepath")
+                .font(.system(size: 13, weight: .semibold))
+        }
+    }
+
+    private var failureChip: some View {
+        vizChip(label: "Failure", isOn: model.failureOn, action: { model.toggleFailure() }) {
+            Image(systemName: "burst").font(.system(size: 13, weight: .semibold))
+        }
+    }
+
+    private var exportButton: some View {
+        Button(action: onExport) {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "square.and.arrow.up").font(.system(size: 13, weight: .semibold))
+                Text("Export .3mf").dsStyle(DS.TypeScale.bodyStrong)
+            }
+            .fixedSize()
+            .foregroundStyle(.white)
+            .padding(.vertical, DS.Space.m)
+            .padding(.horizontal, DS.Space.xl4)
+            .background(Capsule().fill(DS.Color.accent.color))
+            .dsShadow(.accentGlow)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Bottom-left: savings tabs
@@ -642,7 +644,12 @@ public struct ResultsScreen: View {
                 Spacer()
             }
         }
-        .padding(DS.Space.xl4)
+        // Lifted clear of the bottom-center playbar so the variant cards and the play
+        // controls never overlap (they used to share the bottom band). The playbar
+        // occupies ~76pt up from the bottom; this keeps the cards above it.
+        .padding(.horizontal, DS.Space.xl4)
+        .padding(.top, DS.Space.xl4)
+        .padding(.bottom, 92)
     }
 
     // MARK: - Bottom-center: morph media player
@@ -767,6 +774,20 @@ public struct ResultsScreen: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(.panel)
         .transition(.opacity.combined(with: .move(edge: .trailing)))
+    }
+}
+
+/// The shared chrome for the right-rail drawers: a compact glass panel (tighter
+/// padding than the old floating cards) with the standard panel surface, stroke, and
+/// shadow. Keeping it in one place makes every drawer read as the same treatment.
+private extension View {
+    func resultsDrawerChrome() -> some View {
+        self
+            .padding(.vertical, DS.Space.m)
+            .padding(.horizontal, DS.Space.l)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .dsShadow(.panel)
     }
 }
 
