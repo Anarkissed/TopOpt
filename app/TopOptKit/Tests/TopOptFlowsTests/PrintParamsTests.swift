@@ -63,6 +63,31 @@ final class PrintParamsTests: XCTestCase {
         XCTAssertEqual(ok.clamped(), ok)
     }
 
+    // MARK: - infill numeric-input logic (M7.params c: precise entry)
+
+    func testSteppingInfillClampsToRange() {
+        var p = PrintParams.fdmDefault
+        p.infillPercent = 20
+        XCTAssertEqual(p.steppingInfill(by: 1), 21)
+        XCTAssertEqual(p.steppingInfill(by: -1), 19)
+        p.infillPercent = 0
+        XCTAssertEqual(p.steppingInfill(by: -1), 0, "floored at 0 — the − stepper can't go negative")
+        p.infillPercent = 100
+        XCTAssertEqual(p.steppingInfill(by: 1), 100, "capped at 100 — the + stepper can't overshoot")
+    }
+
+    func testInfillSliderValuePinsIntoTrack() {
+        var p = PrintParams.fdmDefault
+        p.infillPercent = 37
+        XCTAssertEqual(p.infillSliderValue, 37)
+        // The tap-to-edit field can briefly hold an out-of-range value before the
+        // on-close clamp; the slider still reads a value inside its 0...100 track.
+        p.infillPercent = 500
+        XCTAssertEqual(p.infillSliderValue, 100)
+        p.infillPercent = -20
+        XCTAssertEqual(p.infillSliderValue, 0)
+    }
+
     func testSlicerOverrideDropsLayerHeight() {
         // The override projects onto the M5.1 engine's FDM field set — layer height
         // is captured but NOT part of that set (it has no engine field).
@@ -167,6 +192,66 @@ final class PrintParamsTests: XCTestCase {
         let m = appModel(store: ProjectStore(rootDir: tempDir))
         m.openPrintParams()
         XCTAssertFalse(m.printParamsSheetPresented, "nothing to edit with no open project")
+    }
+
+    // MARK: - auto-present after import (M7.params b)
+
+    func testSheetAutoPresentsAfterImport() throws {
+        // A freshly imported model prompts for print params: the sheet is presented
+        // as the workspace opens, without the user tapping the Print Parameters pill.
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertFalse(m.printParamsSheetPresented, "not shown during import")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        XCTAssertEqual(m.screen, .workspace)
+        XCTAssertTrue(m.printParamsSheetPresented,
+                      "the sheet auto-presents over the new workspace after import")
+    }
+
+    func testOpeningRecentDoesNotAutoPresentSheet() throws {
+        // Auto-present is for a NEW import only. Reopening an existing project from
+        // Home lands in the workspace without re-prompting for print params.
+        let m1 = appModel(store: ProjectStore(rootDir: tempDir))
+        m1.loadMaterials(); m1.newTopOpt(); m1.selectMaterial("PLA")
+        XCTAssertTrue(m1.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m1.continueToWorkspace()
+        m1.closePrintParams()   // dismiss the auto-presented sheet
+        m1.backHome()
+
+        let m2 = appModel(store: ProjectStore(rootDir: tempDir))
+        let recent = try XCTUnwrap(m2.recentProjects.first)
+        m2.open(recent)
+        XCTAssertEqual(m2.screen, .workspace)
+        XCTAssertFalse(m2.printParamsSheetPresented, "reopening a recent doesn't re-prompt")
+    }
+
+    func testSheetRoundTripThroughAutoPresentPersists() throws {
+        // The full UX path the fix delivers: import → sheet auto-presents → the user
+        // edits every field live (as the sheet's bindings do) → Done → the values are
+        // persisted and survive an app relaunch.
+        let m1 = appModel(store: ProjectStore(rootDir: tempDir))
+        m1.loadMaterials(); m1.newTopOpt(); m1.selectMaterial("PLA")
+        XCTAssertTrue(m1.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m1.continueToWorkspace()
+        let project = try XCTUnwrap(m1.project)
+        XCTAssertTrue(m1.printParamsSheetPresented)
+
+        project.printParams.layerHeightMM = 0.16
+        project.printParams.wallLoops = 5
+        project.printParams.topLayers = 6
+        project.printParams.bottomLayers = 5
+        project.printParams.infillPercent = 42
+        project.printParams.infillPattern = "grid"
+        m1.closePrintParams()   // the sheet's Done
+        XCTAssertFalse(m1.printParamsSheetPresented)
+
+        let m2 = appModel(store: ProjectStore(rootDir: tempDir))
+        m2.open(try XCTUnwrap(m2.recentProjects.first))
+        let restored = try XCTUnwrap(m2.project)
+        XCTAssertEqual(restored.printParams,
+                       PrintParams(layerHeightMM: 0.16, wallLoops: 5, topLayers: 6,
+                                   bottomLayers: 5, infillPercent: 42, infillPattern: "grid"))
     }
 
     // MARK: - infill threading into the run request

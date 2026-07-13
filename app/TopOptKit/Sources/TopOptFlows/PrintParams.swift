@@ -79,6 +79,20 @@ public struct PrintParams: Equatable, Sendable, Codable {
             infillPattern: PrintParams.patternOptions.contains(infillPattern) ? infillPattern : PrintParams.fdmDefault.infillPattern)
     }
 
+    /// Infill after stepping by `delta` %, already clamped to the valid 0–100 range.
+    /// The sheet's − / + steppers use this so a step never leaves the range (the
+    /// free-type field is still clamped globally on sheet close, per `clamped()`).
+    public func steppingInfill(by delta: Int) -> Int {
+        min(max(infillPercent + delta, 0), 100)
+    }
+
+    /// Infill pinned to the 0–100 slider track. The tap-to-edit field can briefly
+    /// hold an out-of-range value before the on-close clamp, and a SwiftUI `Slider`
+    /// value outside its bounds is undefined — so the infill slider reads this.
+    public var infillSliderValue: Double {
+        Double(min(max(infillPercent, 0), 100))
+    }
+
     // MARK: - Settings override
 
     /// The user overrides projected onto the M5.1 engine's FDM field set — i.e. the

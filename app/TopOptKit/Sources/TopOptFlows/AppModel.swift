@@ -370,6 +370,36 @@ public final class AppModel: ObservableObject {
         importSheetPresented = false
         screen = .workspace
         persist(pm)   // copy the model into the store + write the initial snapshot (persist-b)
+        // M7.params (b): a freshly imported model prompts for its print parameters as
+        // it enters the workspace. The sheet auto-presents over the new workspace
+        // (project is set, so `openPrintParams` presents); Done/scrim persist it.
+        openPrintParams()
+    }
+
+    // MARK: - Deletion
+
+    /// Delete a project from Home (Library card menu). Cancels any in-flight run,
+    /// drops all in-memory state (the live model, its thumbnail, run observation and
+    /// running flag), removes it from the recents grid, and erases its on-disk folder
+    /// — the JSON snapshot, the copied model file, AND the persisted optimize results
+    /// (`ProjectStore.delete` removes the whole project directory). If the project
+    /// being deleted is the one currently open, returns to Home first. Safe for an id
+    /// that was never loaded this launch (only the on-disk folder + recents entry).
+    public func deleteProject(id: UUID) {
+        if let pm = projectsById[id] { pm.run.cancel() }
+        runCancellables[id]?.cancel()
+        runCancellables[id] = nil
+        runningIDs.remove(id)
+        if project?.id == id {
+            project = nil
+            projectName = ""
+            printParamsSheetPresented = false
+            screen = .home
+        }
+        projectsById[id] = nil
+        thumbnails[id] = nil
+        recentProjects.removeAll { $0.id == id }
+        store.delete(id: id)
     }
 
     // MARK: - Recents / navigation
@@ -398,7 +428,11 @@ public final class AppModel: ObservableObject {
     }
 
     /// Return to Home from the workspace, saving the project's current state first.
+    /// Also dismisses the print-parameters sheet if it was up (the workspace back
+    /// affordance is behind the sheet's scrim in normal use, but keep the invariant
+    /// that the sheet never outlives the workspace).
     public func backHome() {
+        if printParamsSheetPresented { closePrintParams() }
         persistCurrentProject()
         screen = .home
     }
