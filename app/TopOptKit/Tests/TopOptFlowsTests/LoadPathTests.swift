@@ -346,5 +346,48 @@ final class LoadPathTests: XCTestCase {
         XCTAssertNotEqual(renderer.renderOffscreen(size: 96), baseline,
                           "interior load-path lines were occluded (nothing drew)")
     }
+
+    /// The SIGABRT regression: tapping the Load Path chip drove the ANIMATED THICK-RIBBON
+    /// draw (`loadPathRibbonVertexCount > 0` branch), whose `loadpath_fragment` shader
+    /// declares `LPUniforms u [[buffer(1)]]` for the flow phase. The draw bound that buffer
+    /// only for the vertex stage, so Metal aborted: "missing Buffer binding at index 1 for
+    /// u[0]". This exercises that exact ribbon draw path — with a non-zero, then advanced,
+    /// flow phase — so the fragment-buffer binding is present and the frame both draws and
+    /// animates. On a host with Metal API validation enabled it aborts here without the fix.
+    func testRendererDrawsAnimatedLoadPathRibbon() throws {
+        guard let device = MTLCreateSystemDefaultDevice() else {
+            throw XCTSkip("no Metal device on this host")
+        }
+        guard let renderer = MeshRenderer(device: device) else {
+            XCTFail("MeshRenderer init failed: \(MeshRenderer.lastInitError ?? "unknown")")
+            return
+        }
+        let corners: [Float] = [0,0,0, 1,0,0, 1,1,0, 0,1,0, 0,0,1, 1,0,1, 1,1,1, 0,1,1]
+        let tris: [Int32] = [1,2,6, 1,6,5, 0,4,7, 0,7,3, 3,7,6, 3,6,2,
+                             0,1,5, 0,5,4, 4,5,6, 4,6,7, 0,3,2, 0,2,1]
+        renderer.setMesh(ViewerMesh(vertices: corners, indices: tris, faceIDs: []))
+        let baseline = try XCTUnwrap(renderer.renderOffscreen(size: 96))
+
+        // A bright segment → one glyph → a 6-vertex thick ribbon (the draw that crashed).
+        let seg: [Float] = [-1, 0.5, 0.5, 1, 0, 1, 1,
+                             2, 0.5, 0.5, 1, 0, 1, 1]
+        renderer.setLoadPath(seg)
+
+        // Mid-pulse flow phase: the ribbon draw reads it in BOTH the vertex and the
+        // fragment stage — so the fragment index-1 binding must exist or Metal aborts.
+        renderer.setLoadPathFlow(0.3)
+        let frameA = try XCTUnwrap(renderer.renderOffscreen(size: 96),
+                                   "animated ribbon draw produced no frame")
+        XCTAssertNotEqual(frameA, baseline, "load-path ribbon did not draw")
+
+        // Advancing the flow phase scrolls the bright dash → the frame must change,
+        // proving the fragment uniforms (`params.z`) are actually being read.
+        renderer.setLoadPathFlow(0.75)
+        let frameB = try XCTUnwrap(renderer.renderOffscreen(size: 96))
+        XCTAssertNotEqual(frameB, frameA, "advancing the flow phase did not animate the ribbon")
+
+        renderer.clearLoadPath()
+        XCTAssertEqual(renderer.renderOffscreen(size: 96), baseline, "clearing did not restore the frame")
+    }
     #endif
 }
