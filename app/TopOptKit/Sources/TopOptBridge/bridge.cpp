@@ -200,6 +200,11 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v) {
     ov.mesh_indices.push_back(t[2]);
   }
   ov.von_mises_field.assign(v.von_mises_field.begin(), v.von_mises_field.end());
+  // Per-voxel Cauchy stress tensor, same mechanism as von Mises (double -> float
+  // narrowing). Flattened Voigt [xx,yy,zz,xy,yz,zx], TRUE shear; size
+  // 6*voxel_count, empty for a cancelled rung.
+  ov.stress_tensor_field.assign(v.stress_tensor_field.begin(),
+                                v.stress_tensor_field.end());
   // M7.disp: the per-node displacement field, same mechanism as von Mises
   // (double -> float narrowing for the Metal vertex animation, M7.viz.3).
   ov.displacement_field.assign(v.displacement_field.begin(),

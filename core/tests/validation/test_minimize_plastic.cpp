@@ -276,6 +276,70 @@ void check_viz_fields(const MinimizePlasticResult& r, const VoxelGrid& g,
   }
 }
 
+// Per-voxel Cauchy stress tensor field exposed on every evaluated NON-cancelled
+// variant (the tensor sibling of von_mises_field that the app's load->anchor
+// flux streamlines need). This is EXPOSURE, not recomputation: the tensor is the
+// SAME one the trusted von_mises_field scalar is derived from, so the test
+// re-derives von Mises FROM the tensor with the field's stated convention
+// (Voigt [xx,yy,zz,xy,yz,zx], TRUE shear) and asserts it matches von_mises_field
+// voxel by voxel within a tight tolerance. A stub of zeros or a mislabeled Voigt
+// order fails this. Also pins the grid-indexed size (6*voxel_count) and the
+// zero-off-printed gating.
+void check_stress_tensor_field(const MinimizePlasticResult& r,
+                               const VoxelGrid& g) {
+  const double iso = 0.5;
+  for (const MinimizePlasticVariant& ev : r.evaluated) {
+    if (ev.optimization.cancelled) continue;  // carve-out checked in scenario H
+    const std::vector<double>& rho = ev.optimization.physical_density;
+
+    // Flattened grid-indexed: six Voigt components per voxel.
+    CHECK(ev.stress_tensor_field.size() == 6 * g.voxel_count(),
+          "stress-tensor: field is flattened grid-indexed (size 6*voxel_count)");
+    // The scalar sibling it must agree with is itself grid-indexed.
+    CHECK(ev.von_mises_field.size() == g.voxel_count(),
+          "stress-tensor: von_mises_field is grid-indexed (size voxel_count)");
+    if (ev.stress_tensor_field.size() != 6 * g.voxel_count() ||
+        ev.von_mises_field.size() != g.voxel_count())
+      continue;  // sizes wrong: the per-voxel checks below would index OOB
+
+    bool vm_matches = true, zero_off_printed = true, any_printed_nonzero = false;
+    for (std::size_t idx = 0; idx < rho.size(); ++idx) {
+      const std::size_t base = 6 * idx;
+      const double sxx = ev.stress_tensor_field[base + 0];
+      const double syy = ev.stress_tensor_field[base + 1];
+      const double szz = ev.stress_tensor_field[base + 2];
+      const double sxy = ev.stress_tensor_field[base + 3];  // TRUE shear (tau)
+      const double syz = ev.stress_tensor_field[base + 4];
+      const double szx = ev.stress_tensor_field[base + 5];
+
+      if (rho[idx] > iso) {
+        // Derive von Mises from the tensor with the field's own convention and
+        // compare to the trusted scalar computed in the same solve.
+        const double vm_from_tensor = std::sqrt(
+            0.5 * ((sxx - syy) * (sxx - syy) + (syy - szz) * (syy - szz) +
+                   (szz - sxx) * (szz - sxx)) +
+            3.0 * (sxy * sxy + syz * syz + szx * szx));
+        const double vm_ref = ev.von_mises_field[idx];
+        if (std::fabs(vm_from_tensor - vm_ref) > 1e-9 * (1.0 + std::fabs(vm_ref)))
+          vm_matches = false;
+        if (vm_from_tensor > 0.0) any_printed_nonzero = true;
+      } else {
+        // Off the printed set every component is zero, exactly like the scalar.
+        if (sxx != 0.0 || syy != 0.0 || szz != 0.0 || sxy != 0.0 ||
+            syz != 0.0 || szx != 0.0)
+          zero_off_printed = false;
+      }
+    }
+    CHECK(vm_matches,
+          "stress-tensor: von Mises re-derived from the tensor matches "
+          "von_mises_field voxel by voxel (same tensor, right Voigt order)");
+    CHECK(zero_off_printed,
+          "stress-tensor: every component is zero off the printed material");
+    CHECK(any_printed_nonzero,
+          "stress-tensor: at least one printed voxel carries nonzero stress");
+  }
+}
+
 // M7.disp — the per-node displacement field exposed on every evaluated
 // NON-cancelled variant (the sibling of von_mises_field that M7.viz.3's flex
 // animation consumes). This is EXPOSURE, not recomputation: the field must equal
@@ -387,6 +451,10 @@ int main() {
     // M7.0b: the visualization data on every (accepted, non-cancelled) rung is
     // consistent with an independent recompute (build_dir = -gravity_direction).
     check_viz_fields(r, g, material, Vec3{0, 0, 1});
+    // Stress-tensor field: the exposed per-voxel Cauchy tensor is the REAL tensor
+    // von_mises_field came from — von Mises re-derived from it matches voxel by
+    // voxel, and it is sized/gated like the scalar.
+    check_stress_tensor_field(r, g);
     // M7.disp: the per-node displacement field equals the driver's final
     // penalized solve exactly (self-weight loads at this scenario's gravity).
     check_displacement_field(
@@ -700,11 +768,14 @@ int main() {
     // M7.0b/M7.disp carve-out: a cancelled rung ships NO visualization data (its
     // per-rung analysis is skipped), while the accepted prefix rung carries it.
     CHECK(rc.evaluated[1].von_mises_field.empty() &&
+              rc.evaluated[1].stress_tensor_field.empty() &&
               rc.evaluated[1].displacement_field.empty() &&
               rc.evaluated[1].support_volume_voxels == 0 &&
               rc.evaluated[1].mass_grams == 0.0 && rc.evaluated[1].mesh().empty(),
           "H1: the cancelled rung's visualization fields stay default");
     CHECK(!rc.evaluated[0].von_mises_field.empty() &&
+              rc.evaluated[0].stress_tensor_field.size() ==
+                  6 * rc.evaluated[0].von_mises_field.size() &&
               !rc.evaluated[0].displacement_field.empty() &&
               rc.evaluated[0].mass_grams > 0.0 && !rc.evaluated[0].mesh().empty(),
           "H1: the accepted prefix rung still carries visualization data");
@@ -782,6 +853,9 @@ int main() {
 
     // (a,b) full recompute consistency (build_dir = +z here).
     check_viz_fields(r, g, material, Vec3{0, 0, 1});
+    // Stress-tensor field on the fully-printed cube: von Mises re-derived from the
+    // exposed tensor matches the scalar field everywhere.
+    check_stress_tensor_field(r, g);
     // M7.disp: on a fully-printed cube every node is in the printed set, so the
     // field is the solve's displacement everywhere (nonzero away from the clamp).
     check_displacement_field(

@@ -162,6 +162,14 @@ struct OptimizeVariant {
   std::vector<float> mesh_vertices;
   std::vector<int32_t> mesh_indices;
   std::vector<float> von_mises_field;
+  // Per-voxel Cauchy stress tensor (v.stress_tensor_field), grid-indexed and
+  // flattened: voxel idx occupies entries [6*idx .. 6*idx+5] in Voigt order
+  // [xx, yy, zz, xy, yz, zx] with TRUE shear stresses (tau, not doubled), MPa;
+  // size 6*grid.voxel_count() (see OptimizeResult grid_*). The tensor the trusted
+  // von_mises_field is derived from, exposed per voxel for load->anchor flux
+  // streamlines. Zero on non-printed voxels (companion to von_mises_field);
+  // empty for a cancelled rung.
+  std::vector<float> stress_tensor_field;
   // M7.disp — the per-node displacement field (v.displacement_field), DOF-ordered
   // and grid-node-indexed: entries [3n, 3n+1, 3n+2] are (ux, uy, uz) of node n in
   // model units (mm). Node n is corner (a,b,c) of the run's grid at global index

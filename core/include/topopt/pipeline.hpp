@@ -285,6 +285,17 @@ struct MinimizePlasticVariant {
   // extracted at); zero on void and Empty voxels. This is the field the stress
   // solve already computes for the peak-stress reduction, retained per voxel.
   std::vector<double> von_mises_field;
+  // Per-voxel Cauchy stress tensor over the PRINTED material, grid-indexed and
+  // flattened (size 6*grid.voxel_count()): voxel idx occupies entries
+  // [6*idx .. 6*idx+5] in Voigt order [xx, yy, zz, xy, yz, zx] with TRUE shear
+  // stresses (tau, not doubled) — the SAME std::array<double,6> convention as
+  // Hex8Stress::sigma. In MPa. This is the tensor the stress solve already
+  // computes for the peak-stress reduction (the same tensor von_mises_field is
+  // derived from), retained per voxel instead of discarded — EXPOSURE, not new
+  // physics. Nonzero only on printed voxels (physical density > 0.5, the M3.5
+  // iso); the six components are zero on void/Empty voxels, gated exactly like
+  // von_mises_field. Empty for a cancelled rung (its analysis is skipped).
+  std::vector<double> stress_tensor_field;
   // (c) Support-volume proxy (M4.3 support_overhang_voxels) for the analysed
   // build direction (report.orientation), evaluated over THIS variant's printed
   // geometry (voxels with density > 0.5): the count of printed voxels that would
