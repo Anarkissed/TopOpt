@@ -36,6 +36,13 @@ private struct ViewerUniforms {
     var flex: SIMD4<Float> = .zero
 }
 
+// The load-path ribbon uniforms — must match `LPUniforms` in `loadPathShaderSource`.
+// `params` = (aspect = w/h, halfWidth in NDC-y, flow phase 0..1, unused).
+private struct LoadPathUniforms {
+    var mvp: simd_float4x4
+    var params: SIMD4<Float>
+}
+
 // The neutral-clay shader (M7.4) + a selection tint (M7.5), compiled at runtime so
 // the SwiftPM target needs no .metal resource bundling (identical on iOS/macOS).
 private let viewerShaderSource = """
@@ -136,6 +143,68 @@ fragment float4 ground_fragment(GOut in [[stage_in]]) {
 }
 """
 
+// The load-path overlay pass (M7.viz.4): the principal-stress-direction glyphs drawn
+// as THICK, ANIMATED ribbons rather than 1px lines. Two things the plain GL-line draw
+// could not do:
+//   • Thickness — Metal `.line` primitives are always one pixel, so the hedgehog read
+//     as a faint scribble. Each segment is expanded in the VERTEX shader into a
+//     screen-space-width ribbon (billboarded quad), so the lines stay a legible,
+//     constant pixel width from any camera angle.
+//   • Flow — a `flow` phase (advanced by the results ticker) scrolls a bright dash
+//     along each segment's length (u = 0 at one end → 1 at the other), so force reads
+//     as visibly TRAVELLING through the structure rather than sitting static.
+// Each ribbon vertex carries both segment endpoints (to derive the screen-space
+// perpendicular), a side (±1) and an end flag (0/1 → the dash coordinate `u`), plus
+// the glyph's shared-scale colour. Blended premultiplied like the ground pass.
+private let loadPathShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct LPIn {
+    float3 segStart [[attribute(0)]];
+    float3 segEnd   [[attribute(1)]];
+    float2 sideEnd  [[attribute(2)]];   // x = side (±1), y = end flag (0 = start, 1 = end)
+    float4 color    [[attribute(3)]];
+};
+struct LPOut { float4 position [[position]]; float4 color; float u; };
+// params: (aspect = w/h, halfWidth in NDC-y, flow phase 0..1, unused).
+struct LPUniforms { float4x4 mvp; float4 params; };
+
+vertex LPOut loadpath_vertex(LPIn in [[stage_in]], constant LPUniforms& u [[buffer(1)]]) {
+    float4 c0 = u.mvp * float4(in.segStart, 1.0);
+    float4 c1 = u.mvp * float4(in.segEnd, 1.0);
+    float endFlag = in.sideEnd.y;
+    float4 clip = (endFlag < 0.5) ? c0 : c1;
+    // Screen-space (NDC) segment direction, aspect-corrected so width is uniform px.
+    float asp = max(u.params.x, 1e-4);
+    float2 s0 = c0.xy / max(c0.w, 1e-4);
+    float2 s1 = c1.xy / max(c1.w, 1e-4);
+    float2 dir = (s1 - s0); dir.x *= asp;
+    float len = max(length(dir), 1e-5);
+    dir /= len;
+    float2 perp = float2(-dir.y, dir.x);
+    perp.x /= asp;                         // undo the aspect stretch on the x offset
+    float hw = u.params.y;
+    clip.xy += perp * in.sideEnd.x * hw * clip.w;   // offset in clip space (× w)
+    LPOut o;
+    o.position = clip;
+    o.color = in.color;
+    o.u = endFlag;                         // interpolates 0→1 along the ribbon length
+    return o;
+}
+
+fragment float4 loadpath_fragment(LPOut in [[stage_in]], constant LPUniforms& u [[buffer(1)]]) {
+    // A single bright dash travels from u = 0 → 1 as the flow phase advances, over a
+    // dim steady base so the whole path stays visible between pulses.
+    float d = fract(in.u - u.params.z);
+    float pulse = smoothstep(0.0, 0.22, d) * (1.0 - smoothstep(0.22, 0.62, d));
+    float bright = 0.6 + 1.2 * pulse;
+    float alpha = clamp(in.color.a * (0.5 + 0.6 * pulse), 0.0, 1.0);
+    float3 col = clamp(in.color.rgb * bright, 0.0, 1.0);
+    return float4(col * alpha, alpha);     // premultiplied
+}
+"""
+
 /// The sentinel face id written to the id target's background (no face under the
 /// pixel). Face ids are non-negative, so `UInt32.max` never collides.
 private let idBackground: UInt32 = .max
@@ -166,9 +235,18 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The current displacement scale (exaggeration·amplitude); 0 = rest.
     private var flexScale: Float = 0
     /// M7.viz.4 load-path: line segments (pos+rgba, stride 7) tracing the dominant
-    /// principal-stress direction, drawn with the line/ground pipeline. Empty = off.
+    /// principal-stress direction. Kept as the FALLBACK draw (1px lines) for when the
+    /// thick-ribbon pipeline is unavailable. Empty = off.
     private var loadPathBuffer: MTLBuffer?
     private var loadPathVertexCount = 0
+    /// M7.viz.4 load-path: the expanded THICK-RIBBON geometry (stride-12: segStart xyz,
+    /// segEnd xyz, side, endFlag, rgba — 6 verts per glyph). Drawn by `loadPathPipeline`
+    /// when it built; billboarded to a constant screen width in the vertex shader.
+    private var loadPathRibbonBuffer: MTLBuffer?
+    private var loadPathRibbonVertexCount = 0
+    /// M7.viz.4 load-path: the flow-animation phase in [0, 1) — scrolls the bright dash
+    /// along each ribbon. 0 = static (reduced-motion holds it here).
+    private var loadPathFlow: Float = 0
     private var vertexDrawCount = 0
     /// M7.8 reveal scrub params (fraction, minY, maxY, enabled); default shows all.
     private var revealParams = SIMD4<Float>(1, 0, 1, 0)
@@ -194,6 +272,9 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// overlays the load-path trajectories on top of the part (an x-ray hedgehog),
     /// which is exactly the intent: see how force travels through the structure.
     private let lineOverlayDepthState: MTLDepthStencilState
+    /// The thick-ribbon load-path pipeline (M7.viz.4). Optional: if it fails to build,
+    /// the load path degrades to the 1px `groundPipeline` line draw.
+    private let loadPathPipeline: MTLRenderPipelineState?
     private var modelCenter = SIMD3<Float>.zero
     /// The currently-displayed model rotation (animates toward `settleTo`).
     private var modelRotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
@@ -213,6 +294,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
     static let idFormat: MTLPixelFormat = .r32Uint
+    /// Half-width of a load-path ribbon in NDC-y units (the vertex shader billboards to
+    /// this constant screen thickness). ~0.006 ≈ a few pixels — legible without hiding
+    /// the part underneath.
+    static let loadPathHalfWidth: Float = 0.006
 
     static var lastInitError: String?
 
@@ -318,6 +403,42 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             gpd.depthAttachmentPixelFormat = Self.depthFormat
             groundPipe = try? device.makeRenderPipelineState(descriptor: gpd)
         }
+        // Load-path ribbon pipeline (optional: falls back to the ground line pipeline).
+        // Vertex layout (stride 48): segStart(12) + segEnd(12) + side/endFlag(8) + rgba(16).
+        var lpPipe: MTLRenderPipelineState? = nil
+        if let lpLib = try? device.makeLibrary(source: loadPathShaderSource, options: nil),
+           let lpvf = lpLib.makeFunction(name: "loadpath_vertex"),
+           let lpff = lpLib.makeFunction(name: "loadpath_fragment") {
+            let lvd = MTLVertexDescriptor()
+            lvd.attributes[0].format = .float3            // segStart
+            lvd.attributes[0].offset = 0
+            lvd.attributes[0].bufferIndex = 0
+            lvd.attributes[1].format = .float3            // segEnd
+            lvd.attributes[1].offset = MemoryLayout<Float>.stride * 3
+            lvd.attributes[1].bufferIndex = 0
+            lvd.attributes[2].format = .float2            // side, end flag
+            lvd.attributes[2].offset = MemoryLayout<Float>.stride * 6
+            lvd.attributes[2].bufferIndex = 0
+            lvd.attributes[3].format = .float4            // rgba
+            lvd.attributes[3].offset = MemoryLayout<Float>.stride * 8
+            lvd.attributes[3].bufferIndex = 0
+            lvd.layouts[0].stride = MemoryLayout<Float>.stride * 12
+            let lpd = MTLRenderPipelineDescriptor()
+            lpd.vertexFunction = lpvf
+            lpd.fragmentFunction = lpff
+            lpd.vertexDescriptor = lvd
+            lpd.colorAttachments[0].pixelFormat = Self.colorFormat
+            lpd.colorAttachments[0].isBlendingEnabled = true          // premultiplied alpha
+            lpd.colorAttachments[0].rgbBlendOperation = .add
+            lpd.colorAttachments[0].alphaBlendOperation = .add
+            lpd.colorAttachments[0].sourceRGBBlendFactor = .one
+            lpd.colorAttachments[0].sourceAlphaBlendFactor = .one
+            lpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            lpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            lpd.depthAttachmentPixelFormat = Self.depthFormat
+            lpPipe = try? device.makeRenderPipelineState(descriptor: lpd)
+        }
+
         // Ground depth: test against the part (so it is occluded) but do not write
         // depth (the translucent ground must not block anything behind it).
         let gdsd = MTLDepthStencilDescriptor()
@@ -338,6 +459,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.groundPipeline = groundPipe
         self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
         self.lineOverlayDepthState = device.makeDepthStencilState(descriptor: odsd) ?? depth
+        self.loadPathPipeline = lpPipe
         super.init()
     }
 
@@ -347,6 +469,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     func setMesh(_ mesh: ViewerMesh) {
         self.mesh = mesh
         loadPathBuffer = nil; loadPathVertexCount = 0   // new variant → drop stale glyphs
+        loadPathRibbonBuffer = nil; loadPathRibbonVertexCount = 0
         guard !mesh.isEmpty else {
             vertexBuffer = nil; tintBuffer = nil; idVertexBuffer = nil; flexBuffer = nil
             vertexDrawCount = 0; flatFaceIDs = []; flexScale = 0
@@ -540,18 +663,61 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// M7.viz.4 load-path: upload the line segments (flattened `[x,y,z,r,g,b,a]` per
     /// vertex, two vertices per glyph) to draw over the variant. A malformed buffer
     /// (not a multiple of the stride-7 layout) is ignored. Empty clears the overlay.
+    /// Builds BOTH the thick-ribbon geometry (the primary draw) and keeps the raw line
+    /// buffer as the fallback for when the ribbon pipeline is unavailable.
     func setLoadPath(_ verts: [Float]) {
-        guard !verts.isEmpty, verts.count % 7 == 0 else {
-            loadPathBuffer = nil; loadPathVertexCount = 0; return
+        guard !verts.isEmpty, verts.count % 7 == 0, verts.count % 14 == 0 else {
+            clearLoadPath(); return
         }
         loadPathVertexCount = verts.count / 7
         loadPathBuffer = verts.withUnsafeBytes {
             device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
         }
+        buildLoadPathRibbon(from: verts)
     }
 
+    /// Expand each stride-7 segment pair (p0, p1) into a 6-vertex ribbon (two triangles)
+    /// in the stride-12 layout the ribbon pipeline consumes: both endpoints on every
+    /// vertex (so the shader can billboard to a screen-space width), a side (±1) and an
+    /// end flag (0/1), plus the glyph's colour. Uses the first vertex's colour for the
+    /// whole ribbon (the two endpoints of a glyph share it).
+    private func buildLoadPathRibbon(from verts: [Float]) {
+        let glyphCount = verts.count / 14
+        var out = [Float](); out.reserveCapacity(glyphCount * 6 * 12)
+        func push(_ sx: Float, _ sy: Float, _ sz: Float, _ ex: Float, _ ey: Float, _ ez: Float,
+                  _ side: Float, _ end: Float, _ r: Float, _ g: Float, _ b: Float, _ a: Float) {
+            out.append(sx); out.append(sy); out.append(sz)
+            out.append(ex); out.append(ey); out.append(ez)
+            out.append(side); out.append(end)
+            out.append(r); out.append(g); out.append(b); out.append(a)
+        }
+        for gi in 0..<glyphCount {
+            let b = gi * 14
+            let sx = verts[b], sy = verts[b + 1], sz = verts[b + 2]
+            let r = verts[b + 3], g = verts[b + 4], bl = verts[b + 5], a = verts[b + 6]
+            let ex = verts[b + 7], ey = verts[b + 8], ez = verts[b + 9]
+            // Two triangles: (start-, start+, end-) and (end-, start+, end+).
+            push(sx, sy, sz, ex, ey, ez, -1, 0, r, g, bl, a)
+            push(sx, sy, sz, ex, ey, ez,  1, 0, r, g, bl, a)
+            push(sx, sy, sz, ex, ey, ez, -1, 1, r, g, bl, a)
+            push(sx, sy, sz, ex, ey, ez, -1, 1, r, g, bl, a)
+            push(sx, sy, sz, ex, ey, ez,  1, 0, r, g, bl, a)
+            push(sx, sy, sz, ex, ey, ez,  1, 1, r, g, bl, a)
+        }
+        loadPathRibbonVertexCount = out.count / 12
+        loadPathRibbonBuffer = out.isEmpty ? nil : out.withUnsafeBytes {
+            device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+        }
+    }
+
+    /// M7.viz.4 load-path: the current flow-animation phase (scrolls the traveling dash).
+    func setLoadPathFlow(_ phase: Float) { loadPathFlow = phase }
+
     /// M7.viz.4 load-path: drop the overlay (toggled off / variant without a field).
-    func clearLoadPath() { loadPathBuffer = nil; loadPathVertexCount = 0 }
+    func clearLoadPath() {
+        loadPathBuffer = nil; loadPathVertexCount = 0
+        loadPathRibbonBuffer = nil; loadPathRibbonVertexCount = 0
+    }
 
     /// M7.viz.3 flex: drop back to rest — re-zero the displacement buffer (so a stale
     /// variant's vectors can't leak) and clear the scale.
@@ -659,17 +825,28 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             }
         }
 
-        // Load-path overlay (M7.viz.4): principal-stress-direction segments drawn
-        // with the same pos+rgba line pipeline, but under the MESH's model·view·proj
-        // (uniforms.mvp) so they lock to the part (the ground pass uses a world MVP).
-        // Drawn depth-ALWAYS (lineOverlayDepthState): the glyphs sit at voxel centres
-        // inside the solid part, so a normal depth test hides them behind the surface
-        // (nothing shows). Overlaying them on top is the intent — trace the load path
-        // through the structure.
-        if loadPathVertexCount > 0, let lpipe = groundPipeline, let lbuf = loadPathBuffer {
-            var mvp = uniforms.mvp
+        // Load-path overlay (M7.viz.4): principal-stress-direction glyphs drawn under
+        // the MESH's model·view·proj (uniforms.mvp) so they lock to the part (the ground
+        // pass uses a world MVP). Drawn depth-ALWAYS (lineOverlayDepthState): the glyphs
+        // sit at voxel centres inside the solid part, so a normal depth test hides them
+        // behind the surface (nothing shows). Overlaying them on top is the intent —
+        // trace the load path through the structure.
+        //
+        // PRIMARY: thick, animated ribbons (billboarded to a constant screen width, with
+        // a bright dash flowing along each segment). FALLBACK: the 1px line pipeline when
+        // the ribbon pipeline failed to build.
+        if loadPathRibbonVertexCount > 0, let lpipe = loadPathPipeline, let rbuf = loadPathRibbonBuffer {
+            var lpu = LoadPathUniforms(mvp: uniforms.mvp,
+                                       params: SIMD4<Float>(aspect, Self.loadPathHalfWidth, loadPathFlow, 0))
             enc.setRenderPipelineState(lpipe)
             enc.setDepthStencilState(lineOverlayDepthState)   // depth-always: never hidden inside the part
+            enc.setVertexBuffer(rbuf, offset: 0, index: 0)
+            enc.setVertexBytes(&lpu, length: MemoryLayout<LoadPathUniforms>.stride, index: 1)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: loadPathRibbonVertexCount)
+        } else if loadPathVertexCount > 0, let lpipe = groundPipeline, let lbuf = loadPathBuffer {
+            var mvp = uniforms.mvp
+            enc.setRenderPipelineState(lpipe)
+            enc.setDepthStencilState(lineOverlayDepthState)
             enc.setVertexBuffer(lbuf, offset: 0, index: 0)
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: loadPathVertexCount)
@@ -835,6 +1012,10 @@ struct MeshViewInputs {
     /// M7.viz.4 load-path: line segments (pos+rgba, stride 7) tracing the dominant
     /// principal-stress direction over the variant. nil = overlay off.
     var loadPathSegments: [Float]? = nil
+    /// M7.viz.4 load-path: the flow-animation phase in [0, 1). Advanced by the results
+    /// ticker; scrolls the traveling dash along the ribbons. Changing it re-draws (a
+    /// cheap per-frame uniform), which is what animates the flow. 0 = static.
+    var loadPathFlow: Float = 0
 }
 
 #if os(iOS)
@@ -849,13 +1030,13 @@ public struct MetalMeshView: UIViewRepresentable {
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
-                loadPathSegments: [Float]? = nil) {
+                loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
-            loadPathSegments: loadPathSegments)
+            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -891,13 +1072,13 @@ public struct MetalMeshView: NSViewRepresentable {
                 onProjection: ((CameraProjection) -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
-                loadPathSegments: [Float]? = nil) {
+                loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0) {
         inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
-            loadPathSegments: loadPathSegments)
+            loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -961,8 +1142,9 @@ extension MetalMeshView {
         /// M7.viz.3: whether flex displacements are uploaded, and the last scale.
         private var appliedFlex = false
         private var appliedFlexScale: Float = 0
-        /// M7.viz.4: whether load-path segments are uploaded.
+        /// M7.viz.4: whether load-path segments are uploaded, and the last flow phase.
         private var appliedLoadPath = false
+        private var appliedLoadPathFlow: Float = 0
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
@@ -1067,8 +1249,16 @@ extension MetalMeshView {
                     renderer.setLoadPath(segments)
                     dirty = true
                 }
+                // The flow phase is a cheap per-frame uniform (like flexScale): a change
+                // re-draws → the traveling dash advances. This is what animates the flow.
+                if inputs.loadPathFlow != appliedLoadPathFlow {
+                    appliedLoadPathFlow = inputs.loadPathFlow
+                    renderer.setLoadPathFlow(inputs.loadPathFlow)
+                    dirty = true
+                }
             } else if appliedLoadPath {
                 appliedLoadPath = false
+                appliedLoadPathFlow = 0
                 renderer.clearLoadPath()
                 dirty = true
             }

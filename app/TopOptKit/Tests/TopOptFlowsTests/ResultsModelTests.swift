@@ -951,15 +951,48 @@ final class ResultsModelTests: XCTestCase {
     }
 
     @MainActor func testStressColorMultiplierFollowsFlexAmplitude() {
-        // Flex loop drives the color: rest (phase 0) → 0, full deflection (0.5) → 1,
-        // matching the geometry so motion and color move together.
+        // Flex loop drives the color the SAME way the failure push does: rest (phase 0)
+        // → 0 (all blue), full deflection (phase 0.5) → `peakToRedMultiplier` (the peak
+        // voxel reaches the top of the scale → red). The old behavior topped out at 1×
+        // (the solved field), which for a below-yield part stays flat blue — the bug.
+        // flexModel: peak voxel 1 MPa, scale 10 (maxStress, no yield) → peakToRed = 10.
         let m = flexModel()
+        XCTAssertEqual(m.peakToRedMultiplier, 10, accuracy: 1e-9)
         m.toggleFlex()
-        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 0, accuracy: 1e-9)   // rest
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 0, accuracy: 1e-9)   // rest → blue
         m.advanceFlex(0.5)
-        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 1, accuracy: 1e-9)   // full
-        // Reduced-motion pins the static full-deflection frame → full color at any phase.
-        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: true), 1, accuracy: 1e-9)
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: false), 10, accuracy: 1e-9)  // full → red
+        // Reduced-motion pins the static full-deflection frame → peak-to-red at any phase.
+        XCTAssertEqual(m.stressColorMultiplier(reduceMotion: true), 10, accuracy: 1e-9)
+    }
+
+    @MainActor func testFlexLoopFlushesPeakVoxelToRedAtFullDeflection() {
+        // The end-to-end guarantee the "flex doesn't recolor" fix buys: at full flex
+        // deflection the coupling colors the peak voxel red (top of the shared scale),
+        // exactly as the failure push does — so the body visibly flushes blue → red as
+        // it wobbles instead of holding a flat blue.
+        let m = flexModel()
+        let mesh = try! XCTUnwrap(m.selectedMesh)
+        let field = try! XCTUnwrap(m.selectedStressField)
+        m.toggleFlex()
+        // Rest (amplitude 0 → multiplier 0): the field reads 0 everywhere → blue.
+        let rest = m.stressTints(for: mesh, field: field,
+                                 multiplier: m.stressColorMultiplier(reduceMotion: false))
+        XCTAssertTrue(rest.allSatisfy { $0.z > 0.6 && $0.x < 0.2 })   // blue (high B, low R)
+        // Full deflection (amplitude 1 → multiplier peakToRed): peak voxel → red.
+        m.advanceFlex(0.5)
+        let full = m.stressTints(for: mesh, field: field,
+                                 multiplier: m.stressColorMultiplier(reduceMotion: false))
+        XCTAssertTrue(full.contains { $0.x > 0.9 && $0.z < 0.3 })     // at least the peak is red
+    }
+
+    @MainActor func testPeakToRedMultiplierKeyedToYieldEqualsFailureMultiple() {
+        // When the scale is keyed to the material yield, peakToRed == yield / peak ==
+        // the failure multiple, so the flex loop's full-deflection red and the failure
+        // push's at-yield red land at the SAME point (one shared coupling).
+        let m = failureModel(peak: 20, yield: 60)   // scale 60, peak 20 → 3
+        XCTAssertEqual(m.peakToRedMultiplier, 3, accuracy: 1e-9)
+        XCTAssertEqual(m.peakToRedMultiplier, m.failurePrediction?.multiplier ?? 0, accuracy: 1e-9)
     }
 
     @MainActor func testStressColorMultiplierFollowsFailurePush() {

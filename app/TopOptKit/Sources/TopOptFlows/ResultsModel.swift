@@ -437,6 +437,11 @@ public final class ResultsModel: ObservableObject {
     /// tiers). Only meaningful when the selected variant `hasLoadPath`. The overlay
     /// is static, so it needs no reduced-motion special-case.
     @Published public var loadPathOn: Bool = false
+    /// Load-path flow position in [0, 1) — advanced by the view's timer while the
+    /// overlay is on, driving the traveling-dash animation (M7.viz.4: force visibly
+    /// flowing from the loads toward the anchors). Wraps. Reduced-motion holds it at 0
+    /// (a static overlay), so the animation is opt-out-safe.
+    @Published public private(set) var loadPathPhase: Double = 0
     /// Failure-load surface toggle (M7.viz.6): reveals the predicted failure load, the
     /// failure marker (reusing the viz.2 hot-spot styling), and — when the variant has
     /// a displacement field — the "push" scrub. Only meaningful when the selected
@@ -508,6 +513,7 @@ public final class ResultsModel: ObservableObject {
         loadPathCache = nil   // …and the derived load-path glyphs
         loadPathSegmentCache = nil
         failureCache = nil    // …and the failure-load prediction
+        peakToRedCache = nil  // …and the flex peak-to-red color multiple
     }
 
     /// The currently selected variant (nil only for an empty outcome).
@@ -621,9 +627,21 @@ public final class ResultsModel: ObservableObject {
     public var hasLoadPath: Bool { hasFlex }
 
     /// Toggle the load-path overlay. Mutually exclusive with flex (see `toggleFlex`).
+    /// Resets the flow animation to the start so it restarts cleanly each time.
     public func toggleLoadPath() {
         loadPathOn.toggle()
+        loadPathPhase = 0
         if loadPathOn { flexOn = false; flexPhase = 0; failureOn = false; pushFactor = 1 }
+    }
+
+    /// Advance the load-path flow animation by `dt` (phase units); wraps into [0, 1).
+    /// No-op unless the overlay is on (the view only calls this while `loadPathOn` and
+    /// motion is allowed), so reduced-motion simply never advances it → a static frame.
+    public func advanceLoadPath(_ dt: Double) {
+        guard loadPathOn else { return }
+        var p = (loadPathPhase + dt).truncatingRemainder(dividingBy: 1)
+        if p < 0 { p += 1 }
+        loadPathPhase = p
     }
 
     /// The selected variant's derived load path (dominant principal-stress direction
@@ -847,6 +865,27 @@ public final class ResultsModel: ObservableObject {
         return out
     }
 
+    private var peakToRedCache: (index: Int, value: Double)?
+
+    /// The load multiple that drives the displayed variant's PEAK stress to the TOP of
+    /// the shared color scale (fraction 1 → red). When the scale is keyed to the
+    /// material yield (M7.viz.1) this is exactly `yield / peak` — i.e. the SAME multiple
+    /// the failure "push" reaches at the failure load — so the flex loop can flush to
+    /// the identical red at full deflection that the push does. 1 when there is no
+    /// field / no peak (nothing to warm). Cached per selection (the O(N) peak scan runs
+    /// once per variant, not per flex-loop frame — `stressColorMultiplier` reads it each
+    /// frame while flexing).
+    public var peakToRedMultiplier: Double {
+        if let c = peakToRedCache, c.index == selectedIndex { return c.value }
+        let value: Double = {
+            guard let field = selectedStressField, let peak = field.peak(),
+                  peak.valueMPa > 0, stressScaleMaxMPa > 0 else { return 1 }
+            return stressScaleMaxMPa / Double(peak.valueMPa)
+        }()
+        peakToRedCache = (selectedIndex, value)
+        return value
+    }
+
     /// The load multiple currently applied to the base von Mises field for coloring,
     /// so the stress heatmap moves WITH the geometry (M7.viz.2/3/6 coupling). Linear
     /// FEA: the displayed field = base field × this multiplier, recolored against the
@@ -855,12 +894,17 @@ public final class ResultsModel: ObservableObject {
     ///     multiple): as the user drives toward failure the body flushes to red, and
     ///     at the multiple the peak voxel reaches exactly yield (fraction 1 → red).
     ///   • Flex loop active → the deflection `flexAmplitude` (0 at rest → 1 at full
-    ///     deflection): the body cycles blue → hot → blue as it wobbles. Reduced-motion
-    ///     pins amplitude 1 (the static full-deflection frame shows the real field).
+    ///     deflection) SCALED by `peakToRedMultiplier`, so the body flushes blue → red →
+    ///     blue as it wobbles — the SAME coupling the failure push uses (at full
+    ///     deflection the peak voxel reaches the top of the scale, exactly like a push to
+    ///     failure). Without this scale the flex loop only ever reached the solved 1×
+    ///     field, which for a part comfortably below yield reads as a flat, unchanging
+    ///     blue — the "flex doesn't recolor" bug. Reduced-motion pins amplitude 1 (the
+    ///     static full-deflection frame shows the peak at red).
     ///   • Neither → 1 (the solved field as-is, a static stress overlay).
     public func stressColorMultiplier(reduceMotion: Bool) -> Double {
         if pushActive { return pushFactor }
-        if flexOn && hasFlex { return flexAmplitude(reduceMotion: reduceMotion) }
+        if flexOn && hasFlex { return flexAmplitude(reduceMotion: reduceMotion) * peakToRedMultiplier }
         return 1
     }
 
@@ -875,6 +919,7 @@ public final class ResultsModel: ObservableObject {
         playT = 1
         playing = false
         flexPhase = 0   // the new variant's flex loop starts from rest
+        loadPathPhase = 0   // …and the load-path flow restarts
         pushFactor = 1  // …and the push scrub resets to the current load
     }
 
