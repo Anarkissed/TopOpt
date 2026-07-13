@@ -58,6 +58,16 @@ public final class ProjectModel: ObservableObject {
     /// knockdown (see `AppModel.makeRunRequest` → `RunRequest.infillPercent`).
     @Published public var printParams: PrintParams = .fdmDefault
 
+    /// Whether the print parameters are LOCKED (M7.params lock-at-creation). Print
+    /// parameters are chosen ONCE — on the sheet that auto-presents at import — and
+    /// then fixed for the life of the project; to use different ones the user creates
+    /// a new project. A freshly imported project starts UNLOCKED (the creation sheet
+    /// is editable) and locks when that sheet is dismissed (`AppModel.closePrintParams`);
+    /// a project restored from disk or reopened is already created, so it is locked.
+    /// In-memory only — a restored project is always locked regardless of what was
+    /// saved, so there is nothing to persist.
+    @Published public var paramsLocked: Bool
+
     /// The M7.7 run state machine. One per project so a run (and its background
     /// state) survives leaving and returning to the workspace.
     public let run: RunModel
@@ -75,15 +85,19 @@ public final class ProjectModel: ObservableObject {
     /// this the results overlay only refreshed incidentally (on a camera tick).
     private var runForwarding: AnyCancellable?
 
+    /// - Parameter paramsLocked: whether print parameters start locked. Defaults to
+    ///   `true` (a restored/reopened project is already created); the import flow
+    ///   passes `false` so the auto-presented creation sheet is editable once.
     public init(id: UUID, name: String, material: String, process: ProcessKind,
                 importedFile: ImportedFile?, importedMesh: ImportedMesh?,
-                run: RunModel? = nil) {
+                run: RunModel? = nil, paramsLocked: Bool = true) {
         self.id = id
         self.name = name
         self.material = material
         self.process = process
         self.importedFile = importedFile
         self.importedMesh = importedMesh
+        self.paramsLocked = paramsLocked
         if let m = importedMesh {
             self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs)
         }

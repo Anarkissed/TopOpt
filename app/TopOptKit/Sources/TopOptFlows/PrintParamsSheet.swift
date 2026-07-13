@@ -1,15 +1,22 @@
 // PrintParamsSheet.swift — the M7.params PRINT PARAMETERS sheet.
 //
 // Matches docs/design/PrintParams_TopOpt.dc.html's PRINT PARAMETERS modal sheet:
-// title + subtitle, a "Default" reset, a 2-column grid of Layer height / Wall loops
-// / Top shell layers / Bottom shell layers, a full-width Infill density row (number
-// + slider) and an Infill pattern picker, then a primary Done. Styled with the DS
-// glass tokens; RootView presents it centered over the design's blurred scrim.
+// title + subtitle, a preset PICKER + Save (was a single "Default" reset), a
+// 2-column grid of Layer height / Wall loops / Top shell layers / Bottom shell
+// layers, a full-width Infill density row (number + slider) and an Infill pattern
+// picker, then a primary Done. Styled with the DS glass tokens; RootView presents it
+// centered over the design's blurred scrim.
 //
-// It edits the open project's `printParams` LIVE (bindings write straight through),
-// so leaving the sheet — Done or scrim-tap — keeps the edits; AppModel.closePrintParams
-// clamps + persists. Only the modal sheet from that mockup is in scope (M7.params);
-// the rest of that file is a stale prototype and is ignored.
+// TWO MODES (M7.params lock-at-creation):
+//   * EDITABLE — the sheet that auto-presents at import. Bindings write straight
+//     through to the project's live `printParams`; leaving the sheet (Done or
+//     scrim-tap) clamps + persists + LOCKS via AppModel.closePrintParams. The preset
+//     picker loads a saved preset's values; Save captures the current values as a
+//     new app-wide named preset.
+//   * READ-ONLY — reopening the sheet after creation. Print parameters are fixed for
+//     the life of the project, so the values are shown as static rows with a note;
+//     there is nothing to edit and no preset/Save affordance (to use different
+//     parameters the user creates a new project).
 
 import SwiftUI
 import TopOptDesign
@@ -17,6 +24,10 @@ import TopOptDesign
 public struct PrintParamsSheet: View {
     @ObservedObject var model: AppModel
     @ObservedObject var project: ProjectModel
+
+    /// Whether the save-preset name dialog is up, and the name being typed.
+    @State private var savingPreset = false
+    @State private var presetName = ""
 
     public init(model: AppModel, project: ProjectModel) {
         self.model = model
@@ -27,6 +38,111 @@ public struct PrintParamsSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
+            if project.paramsLocked {
+                lockedBody
+            } else {
+                editableBody
+            }
+
+            HStack {
+                Spacer()
+                PillButton("Done", style: .primary) { model.closePrintParams() }
+            }
+            .padding(.top, DS.Space.xl5)
+        }
+        .padding(DS.Space.xl6)
+        .frame(width: 560, alignment: .leading)
+        .foregroundStyle(DS.Color.textPrimary.color)
+        // Save the current values as a named, app-wide preset (editable mode only).
+        .alert("Save preset", isPresented: $savingPreset) {
+            TextField("Preset name", text: $presetName)
+            Button("Cancel", role: .cancel) { presetName = "" }
+            Button("Save") {
+                model.savePreset(named: presetName, params: project.printParams)
+                presetName = ""
+            }
+        } message: {
+            Text("Save these print parameters as a reusable preset, available to every project.")
+        }
+    }
+
+    // MARK: header
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: DS.Space.ml) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Print Parameters").dsStyle(DS.TypeScale.title)
+                Text(project.paramsLocked
+                     ? "Fixed for this project. Create a new project to print at different settings."
+                     : "Set once for this project — the optimizer accounts for how the part will actually print.")
+                    .dsStyle(DS.TypeScale.subhead)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: DS.Space.s)
+            if project.paramsLocked {
+                lockedChip
+            } else {
+                presetControls
+            }
+        }
+    }
+
+    /// The editable-mode header controls: a preset PICKER (Default + every saved
+    /// preset) that loads values into the sheet, and a Save button that captures the
+    /// current values as a new app-wide preset. Replaces the old single "Default"
+    /// reset — "Default" is now just the first preset in the picker.
+    private var presetControls: some View {
+        HStack(spacing: DS.Space.s) {
+            Menu {
+                ForEach(model.allPresets) { preset in
+                    Button(preset.name) { model.applyPreset(preset) }
+                }
+            } label: {
+                HStack(spacing: DS.Space.xs) {
+                    Text("Presets")
+                        .dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Color.fillSubtle.color)
+                    .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+            }
+
+            Button { savingPreset = true } label: {
+                HStack(spacing: DS.Space.xs) {
+                    Image(systemName: "square.and.arrow.down")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Save").dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
+                }
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Color.fillSubtle.color)
+                    .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// The locked-mode header badge: a small lock chip, signalling the values below
+    /// are fixed for the project.
+    private var lockedChip: some View {
+        HStack(spacing: DS.Space.xs) {
+            Image(systemName: "lock.fill").font(.system(size: 10, weight: .semibold))
+            Text("Fixed").dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
+        }
+        .foregroundStyle(DS.Color.textTertiary.color)
+        .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+        .background(Capsule().fill(DS.Color.fillSubtle.color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
+    }
+
+    // MARK: editable body (creation-time)
+
+    private var editableBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.m),
                                 GridItem(.flexible(), spacing: DS.Space.m)],
                       alignment: .leading, spacing: DS.Space.ml) {
@@ -40,39 +156,52 @@ public struct PrintParamsSheet: View {
 
             infillRow.padding(.top, DS.Space.ml)
             patternRow.padding(.top, DS.Space.ml)
-
-            HStack {
-                Spacer()
-                PillButton("Done", style: .primary) { model.closePrintParams() }
-            }
-            .padding(.top, DS.Space.xl5)
         }
-        .padding(DS.Space.xl6)
-        .frame(width: 560, alignment: .leading)
-        .foregroundStyle(DS.Color.textPrimary.color)
     }
 
-    // MARK: header
+    // MARK: locked body (read-only, post-creation)
 
-    private var header: some View {
-        HStack(alignment: .top, spacing: DS.Space.ml) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Print Parameters").dsStyle(DS.TypeScale.title)
-                Text("The optimizer accounts for how the part will actually print.")
-                    .dsStyle(DS.TypeScale.subhead)
-                    .foregroundStyle(DS.Color.textTertiary.color)
+    /// The committed parameters, shown as static rows. No inputs — the parameters are
+    /// fixed for the life of the project (M7.params lock-at-creation).
+    private var lockedBody: some View {
+        let p = project.printParams
+        return VStack(alignment: .leading, spacing: 0) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.m),
+                                GridItem(.flexible(), spacing: DS.Space.m)],
+                      alignment: .leading, spacing: DS.Space.ml) {
+                readOnlyField("Layer height",
+                              value: p.layerHeightMM.formatted(.number.precision(.fractionLength(0...2))) + " mm")
+                readOnlyField("Wall loops", value: "\(p.wallLoops)")
+                readOnlyField("Top shell layers", value: "\(p.topLayers)")
+                readOnlyField("Bottom shell layers", value: "\(p.bottomLayers)")
+                readOnlyField("Infill density", value: "\(p.infillPercent)%")
+                readOnlyField("Infill pattern", value: p.infillPattern.capitalized)
+            }
+            .padding(.top, DS.Space.xl3)
+
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
+                Text("These parameters were locked when the project was created and can't be changed. Create a new project to print at different settings.")
+                    .dsStyle(DS.TypeScale.caption)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: DS.Space.s)
-            Button { project.printParams = .fdmDefault } label: {
-                Text("Default")
-                    .dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
-                    .background(Capsule().fill(DS.Color.fillSubtle.color)
-                        .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
-            }
-            .buttonStyle(.plain)
+            .foregroundStyle(DS.Color.textTertiary.color)
+            .padding(.top, DS.Space.xl)
+        }
+    }
+
+    /// A labelled read-only value row (locked mode), matching the editable fields'
+    /// look but non-interactive.
+    private func readOnlyField(_ label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Text(label).dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            Text(value)
+                .font(DS.TypeScale.bodyStrong.font)
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 11).padding(.horizontal, DS.Space.m)
+                .background(fieldBackground)
         }
     }
 

@@ -83,6 +83,19 @@ public final class AppModel: ObservableObject {
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
+    // MARK: Print-parameter presets (M7.params — app-wide named presets)
+
+    /// The user's saved print-parameter presets (app-level, shared by every project).
+    /// The built-in "Default" is NOT in here — `allPresets` synthesizes it as the
+    /// first entry so it always exists. Loaded from `presetStore` on launch.
+    @Published public private(set) var savedPresets: [PrintParamsPreset] = []
+
+    /// Every preset offered in the sheet's picker: the built-in "Default" first, then
+    /// the user's saved presets in save order.
+    public var allPresets: [PrintParamsPreset] {
+        [.builtInDefault] + savedPresets
+    }
+
     // MARK: Dependencies (injected for tests; default to the real bridge)
 
     private let materialsPath: String?
@@ -92,6 +105,8 @@ public final class AppModel: ObservableObject {
     /// Cross-launch persistence layer (M7.x-persist-b) and the clock used for
     /// `savedAt` (injected for deterministic tests).
     private let store: ProjectStore
+    /// App-wide print-preset persistence (separate from per-project `store`).
+    private let presetStore: PrintParamsPresetStore
     private let now: () -> Date
 
     /// - Parameters:
@@ -109,6 +124,7 @@ public final class AppModel: ObservableObject {
         materialsLoader: @escaping (String) throws -> [Material] = { try TopOptKit.loadMaterials(path: $0) },
         importer: @escaping (String) throws -> ImportedMesh = { try TopOptKit.importMesh(path: $0) },
         store: ProjectStore = ProjectStore(),
+        presetStore: PrintParamsPresetStore = PrintParamsPresetStore(),
         now: @escaping () -> Date = { Date() }
     ) {
         self.materialsPath = materialsPath
@@ -116,7 +132,10 @@ public final class AppModel: ObservableObject {
         self.materialsLoader = materialsLoader
         self.importer = importer
         self.store = store
+        self.presetStore = presetStore
         self.now = now
+        // App-wide print presets survive relaunch (loaded once; Default is synthesized).
+        savedPresets = presetStore.load()
         // Seed the recents grid from disk (lazy: projects are re-imported only when
         // opened). persist-b.
         recentProjects = store.loadAllSnapshots().map {
@@ -233,20 +252,56 @@ public final class AppModel: ObservableObject {
     // MARK: - Print parameters sheet (M7.params)
 
     /// Present the print-parameters sheet over the workspace. No-op without an open
-    /// project (there's nothing to edit).
+    /// project (there's nothing to edit). After project creation the sheet is
+    /// READ-ONLY (`project.paramsLocked`): print parameters are set once, at import,
+    /// and fixed for the life of the project — reopening it just shows the committed
+    /// values so the user can review what this project was built at.
     public func openPrintParams() {
         guard project != nil else { return }
         printParamsSheetPresented = true
     }
 
-    /// Dismiss the print-parameters sheet, committing (persisting) the project's
-    /// current parameters. Clamps to sane FDM bounds first (the numeric fields let a
-    /// user type anything). Called on Done and on scrim-dismiss — the sheet edits the
-    /// project live, so both paths keep the edits.
+    /// Dismiss the print-parameters sheet. During creation (the auto-presented sheet,
+    /// `paramsLocked == false`) this COMMITS the chosen parameters: clamp to sane FDM
+    /// bounds (the numeric fields let a user type anything), persist, and LOCK them for
+    /// the life of the project — to use different parameters the user creates a new
+    /// project. Reopening a locked project's sheet is read-only, so a Done there is a
+    /// harmless no-op re-persist. Called on Done and on scrim-dismiss alike.
     public func closePrintParams() {
-        if let project { project.printParams = project.printParams.clamped() }
+        if let project {
+            project.printParams = project.printParams.clamped()
+            project.paramsLocked = true
+        }
         printParamsSheetPresented = false
         persistCurrentProject()
+    }
+
+    // MARK: - Print-parameter presets (M7.params — app-wide named presets)
+
+    /// Save the given parameters as a new named preset, persisted app-wide so it is
+    /// offered to every project. A blank name is ignored. The values are clamped to
+    /// sane FDM bounds first (a preset is only ever as valid as a committed project).
+    /// - Returns: the saved preset, or nil if the name was blank.
+    @discardableResult
+    public func savePreset(named name: String, params: PrintParams) -> PrintParamsPreset? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let preset = PrintParamsPreset(name: trimmed, params: params.clamped())
+        savedPresets.append(preset)
+        do {
+            try presetStore.save(savedPresets)
+        } catch {
+            toast = "Couldn’t save preset “\(trimmed)”: \(error.localizedDescription)"
+        }
+        return preset
+    }
+
+    /// Load a preset's values into the open project's (still-editable) print
+    /// parameters. No-op once the project's parameters are locked (post-creation) —
+    /// presets are a setup-time convenience, not a way around the lock.
+    public func applyPreset(_ preset: PrintParamsPreset) {
+        guard let project, !project.paramsLocked else { return }
+        project.printParams = preset.params
     }
 
     /// Flag a project as optimized (called when its run produces accepted variants):
@@ -357,8 +412,11 @@ public final class AppModel: ObservableObject {
         let recent = RecentProject(name: name, materialName: material, process: process)
         // Build the project's live working state and key it by the recent's id so
         // returning to it from Home restores the full setup (M7.x-persist-a).
+        // Unlocked so the auto-presented creation sheet is editable once; it locks on
+        // dismiss (closePrintParams), fixing the parameters for the project's life.
         let pm = ProjectModel(id: recent.id, name: name, material: material,
-                              process: process, importedFile: file, importedMesh: importedMesh)
+                              process: process, importedFile: file, importedMesh: importedMesh,
+                              paramsLocked: false)
         pm.minimizePlastic = minimizePlastic
         pm.quality = quality
         projectsById[recent.id] = pm

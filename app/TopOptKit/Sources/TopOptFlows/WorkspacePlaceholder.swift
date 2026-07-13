@@ -133,6 +133,7 @@ public struct WorkspacePlaceholder: View {
                               appliedLoadKg: force.totalLoadKg(in: selection.groups),
                               loadUnit: force.unit,
                               infillPercent: project.printParams.infillPercent,
+                              infillPattern: project.printParams.infillPattern,
                               streaming: run.isStreaming,
                               onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
                               onExport: { model.toast = "Export (.3mf) arrives in M7.9" },

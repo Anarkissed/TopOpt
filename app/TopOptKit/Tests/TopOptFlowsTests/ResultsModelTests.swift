@@ -459,6 +459,64 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertNil(m.hotSpot)
     }
 
+    // MARK: M7.params — infill-aware physics applied UNIFORMLY (every readout agrees)
+
+    func testInfillKnocksDownEveryDisplayedStrengthFigureConsistently() {
+        // A project fixed at 20% gyroid: the SAME Gibson-Ashby knockdown (0.2^1.5)
+        // must reach EVERY displayed physics figure, so they all agree on the printed
+        // part's effective strength — the stress scale, the hot-spot "% of yield", and
+        // the failure multiplier, all measured against effectiveYield = yield × knock.
+        var field = [Float](repeating: 2, count: 8)
+        field[6] = 24
+        let knock = pow(0.2, 1.5)
+        let effectiveYield = 55.0 * knock
+        let m = ResultsModel(projectName: "P",
+                             outcome: fieldedOutcome(field, dims: (2, 2, 2), maxStress: 24),
+                             materialName: "PLA", yieldStrengthMPa: 55,
+                             appliedLoadKg: 3, infillPercent: 20, infillPattern: "gyroid")
+        // The effective yield the whole screen keys to.
+        XCTAssertEqual(m.effectiveYieldStrengthMPa, effectiveYield, accuracy: 1e-9)
+        // Stress scale + legend → effective yield (not the solid 55).
+        XCTAssertEqual(m.stressScaleMaxMPa, effectiveYield, accuracy: 1e-9)
+        XCTAssertEqual(m.stressLegend.yieldStrengthMPa, effectiveYield, accuracy: 1e-9)
+        XCTAssertTrue(m.stressLegend.caption.contains("20% gyroid"),
+                      "the legend annotates the printed infill")
+        // Hot spot "% of yield" → measured against effective yield (harsher than solid).
+        XCTAssertEqual(m.hotSpot?.margin ?? 0, 24.0 / effectiveYield, accuracy: 1e-9)
+        // Failure multiplier → effective yield ÷ peak (the same effective yield).
+        XCTAssertEqual(m.failurePrediction?.multiplier ?? 0, effectiveYield / 24.0, accuracy: 1e-9)
+        // …and the flex peak-to-red multiple stays coupled to that same failure multiple.
+        XCTAssertEqual(m.peakToRedMultiplier, m.failurePrediction?.multiplier ?? -1, accuracy: 1e-9)
+    }
+
+    func testSolidProjectLeavesPhysicsFiguresUnknockedDown() {
+        // A solid (100%) project — the default — keys everything to the plain yield,
+        // exactly as before infill-aware physics (knockdown 1, no regression).
+        var field = [Float](repeating: 2, count: 8)
+        field[6] = 24
+        let m = ResultsModel(projectName: "P",
+                             outcome: fieldedOutcome(field, dims: (2, 2, 2), maxStress: 24),
+                             materialName: "PLA", yieldStrengthMPa: 55,
+                             appliedLoadKg: 3)   // infillPercent defaults to 100
+        XCTAssertEqual(m.effectiveYieldStrengthMPa, 55, accuracy: 1e-9)
+        XCTAssertEqual(m.stressScaleMaxMPa, 55, accuracy: 1e-9)
+        XCTAssertEqual(m.hotSpot?.margin ?? 0, 24.0 / 55.0, accuracy: 1e-9)
+        XCTAssertFalse(m.stressLegend.caption.contains("%"))   // no infill annotation
+    }
+
+    func testInfillKnocksDownLayerShearClassification() {
+        // Layer shear is a strength/margin readout, so it too reflects the printed
+        // part: an interlayer margin of 3.0 reads "Low" solid, but at 20% infill the
+        // effective margin 3.0 × 0.2^1.5 ≈ 0.27 → "High".
+        let v = variant(vf: 0.5, maxStress: 10, interlayerMargin: 3.0)
+        let solid = ResultsModel.buildTabs([v], voxelVolumeMM3: 1, knockdown: 1)
+        XCTAssertEqual(solid.first?.layerShear, .low)
+        let sparse = ResultsModel.buildTabs([v], voxelVolumeMM3: 1, knockdown: pow(0.2, 1.5))
+        XCTAssertEqual(sparse.first?.layerShear, .high)
+        XCTAssertEqual(sparse.first?.worstCaseMargin ?? 0,
+                       (solid.first?.worstCaseMargin ?? 0) * pow(0.2, 1.5), accuracy: 1e-9)
+    }
+
     func testHotSpotTracksSelectedVariant() {
         // Two accepted variants with different peak locations; the hot spot follows
         // whichever variant is displayed.
@@ -708,19 +766,20 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(fp.failureLoadKg, 7.5, accuracy: 1e-9)
         XCTAssertEqual(fp.position, SIMD3<Float>(0.5, 0.5, 0.5))    // == the viz.2 hot spot
         XCTAssertEqual(fp.fieldIndex, m.hotSpot?.fieldIndex)
-        XCTAssertEqual(fp.solidValueLabel, "7.5 kg")
-        XCTAssertEqual(fp.headline, "Holds ~7.5 kg")
+        XCTAssertEqual(fp.valueLabel, "7.5 kg")
+        XCTAssertEqual(fp.headline, "Holds ~7.5 kg")   // solid → no infill suffix
         XCTAssertTrue(fp.subtitle.lowercased().contains("solid-print"))
+        XCTAssertEqual(fp.effectiveYieldMPa, 60, accuracy: 1e-9)   // solid: unchanged
     }
 
     @MainActor func testFailureLoadInEachUnit() {
         // 7.5 kg in kg → "7.5 kg"; in lbs → 16.5 lb → "17 lbs" (≥10 rounds to integer).
-        XCTAssertEqual(failureModel(unit: .kg).failurePrediction?.solidValueLabel, "7.5 kg")
-        XCTAssertEqual(failureModel(unit: .lbs).failurePrediction?.solidValueLabel, "17 lbs")
+        XCTAssertEqual(failureModel(unit: .kg).failurePrediction?.valueLabel, "7.5 kg")
+        XCTAssertEqual(failureModel(unit: .lbs).failurePrediction?.valueLabel, "17 lbs")
         // A design-scale case: 10 kg applied, peak 4 / yield 60 → ×15 → 150 kg → 331 lb.
         let big = failureModel(appliedLoadKg: 10, unit: .lbs, peak: 4, yield: 60)
         XCTAssertEqual(big.failurePrediction?.failureLoadKg ?? 0, 150, accuracy: 1e-6)
-        XCTAssertEqual(big.failurePrediction?.solidValueLabel, "331 lbs")
+        XCTAssertEqual(big.failurePrediction?.valueLabel, "331 lbs")
     }
 
     @MainActor func testFailureLoadLabelFormatting() {
@@ -730,27 +789,42 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(ResultsModel.loadLabel(kg: 0.67, unit: .kg), "0.7 kg")
     }
 
-    @MainActor func testFailureInfillAdjustedUsesGibsonAshbyKnockdown() {
-        // infill 20% → knockdown 0.2^1.5 ≈ 0.0894; 7.5 kg × 0.0894 ≈ 0.67 kg.
-        let m = failureModel(infillPercent: 20)
+    @MainActor func testFailureIsOneInfillAdjustedValue() {
+        // Infill is FIXED per project, so the failure load is a SINGLE honest value —
+        // the printed part's, not a solid-vs-infill pair. infill 20% → knockdown
+        // 0.2^1.5 ≈ 0.0894; effective yield 60 × 0.0894 ≈ 5.37 MPa; failure load
+        // 7.5 kg × 0.0894 ≈ 0.67 kg. The label carries the infill descriptor.
+        let m = failureModel(infillPercent: 20, yield: 60)
         let fp = try! XCTUnwrap(m.failurePrediction)
         XCTAssertEqual(fp.infillPercent, 20)
         XCTAssertEqual(fp.infillKnockdown, pow(0.2, 1.5), accuracy: 1e-12)
-        XCTAssertEqual(try XCTUnwrap(fp.infillFailureLoadKg), 7.5 * pow(0.2, 1.5), accuracy: 1e-9)
-        XCTAssertEqual(fp.infillValueLabel, "0.7 kg")
-        XCTAssertEqual(fp.infillNote, "≈ 0.7 kg at 20% infill")
-        XCTAssertLessThan(try XCTUnwrap(fp.infillFailureLoadKg), fp.failureLoadKg)   // weaker than solid
+        XCTAssertEqual(fp.effectiveYieldMPa, 60 * pow(0.2, 1.5), accuracy: 1e-9)
+        XCTAssertEqual(fp.multiplier, (60 * pow(0.2, 1.5)) / 20, accuracy: 1e-9)
+        XCTAssertEqual(fp.failureLoadKg, 7.5 * pow(0.2, 1.5), accuracy: 1e-9)
+        XCTAssertEqual(fp.valueLabel, "0.7 kg")
+        XCTAssertEqual(fp.headline, "Holds ~0.7 kg at 20% gyroid")
+        XCTAssertEqual(fp.subtitle, "At 20% gyroid infill · yields at the marker")
     }
 
-    @MainActor func testFailureNoInfillEstimateWhenSolid() {
-        // 100% (solid, the default) and any out-of-range value → no separate estimate.
-        for pct in [100, 0, 150] {
-            let fp = try! XCTUnwrap(failureModel(infillPercent: pct).failurePrediction)
-            XCTAssertNil(fp.infillPercent)
-            XCTAssertNil(fp.infillFailureLoadKg)
-            XCTAssertNil(fp.infillNote)
+    @MainActor func testFailureSolidHasNoInfillSuffixAndFullStrength() {
+        // 100% (solid, the default) and any ≥100 value → knockdown 1, no infill suffix.
+        for pct in [100, 150] {
+            let fp = try! XCTUnwrap(failureModel(infillPercent: pct, yield: 60).failurePrediction)
+            XCTAssertEqual(fp.infillPercent, pct)
             XCTAssertEqual(fp.infillKnockdown, 1, accuracy: 1e-12)
+            XCTAssertEqual(fp.effectiveYieldMPa, 60, accuracy: 1e-9)
+            XCTAssertEqual(fp.failureLoadKg, 7.5, accuracy: 1e-9)
+            XCTAssertFalse(fp.headline.contains("%"))    // no "at N% …" suffix when solid
+            XCTAssertTrue(fp.subtitle.lowercased().contains("solid-print"))
         }
+    }
+
+    @MainActor func testInfillWeakensFailureLoadVsSolid() {
+        // The printed part at sparse infill fails SOONER than the solid estimate would.
+        let solid = try! XCTUnwrap(failureModel(infillPercent: 100).failurePrediction)
+        let sparse = try! XCTUnwrap(failureModel(infillPercent: 20).failurePrediction)
+        XCTAssertLessThan(sparse.failureLoadKg, solid.failureLoadKg)
+        XCTAssertLessThan(sparse.multiplier, solid.multiplier)
     }
 
     @MainActor func testFailurePredictionNilOnMissingInputs() {

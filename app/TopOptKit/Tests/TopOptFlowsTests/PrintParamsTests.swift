@@ -28,8 +28,10 @@ final class PrintParamsTests: XCTestCase {
     override func tearDownWithError() throws {
         if let tempDir { try? FileManager.default.removeItem(at: tempDir) }
     }
-    private func appModel(store: ProjectStore) -> AppModel {
-        AppModel(materialsPath: Self.materialsPath, rulesPath: Self.rulesPath, store: store)
+    private func appModel(store: ProjectStore,
+                          presetStore: PrintParamsPresetStore? = nil) -> AppModel {
+        AppModel(materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+                 store: store, presetStore: presetStore ?? PrintParamsPresetStore(rootDir: tempDir))
     }
 
     // MARK: - the value type
@@ -279,5 +281,109 @@ final class PrintParamsTests: XCTestCase {
                                  rulesPath: "/rules", resolution: 64, projectName: "P",
                                  infillPercent: 40)
         XCTAssertNotEqual(base, changed)
+    }
+
+    // MARK: - app-wide named presets (M7.params "save")
+
+    func testPresetStoreRoundTrip() throws {
+        let store = PrintParamsPresetStore(rootDir: tempDir)
+        XCTAssertTrue(store.load().isEmpty, "nothing saved yet")
+        let presets = [
+            PrintParamsPreset(name: "Strong", params: PrintParams(
+                layerHeightMM: 0.2, wallLoops: 6, topLayers: 6, bottomLayers: 6,
+                infillPercent: 60, infillPattern: "gyroid")),
+            PrintParamsPreset(name: "Draft", params: .fdmDefault),
+        ]
+        try store.save(presets)
+        XCTAssertEqual(PrintParamsPresetStore(rootDir: tempDir).load(), presets,
+                       "a fresh store over the same dir reads the saved presets back")
+    }
+
+    func testAllPresetsAlwaysLeadsWithBuiltInDefault() {
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        XCTAssertEqual(m.allPresets.first, .builtInDefault)
+        XCTAssertEqual(m.allPresets.first?.params, .fdmDefault)
+        XCTAssertEqual(m.allPresets.count, 1, "just Default on a fresh install")
+    }
+
+    func testSavePresetPersistsAppWideAcrossLaunches() throws {
+        let presetStore = PrintParamsPresetStore(rootDir: tempDir)
+        // Launch 1: save a named preset from the current values.
+        let m1 = appModel(store: ProjectStore(rootDir: tempDir), presetStore: presetStore)
+        let params = PrintParams(layerHeightMM: 0.16, wallLoops: 5, topLayers: 6,
+                                 bottomLayers: 5, infillPercent: 45, infillPattern: "cubic")
+        let saved = try XCTUnwrap(m1.savePreset(named: "  My Bracket Preset  ", params: params))
+        XCTAssertEqual(saved.name, "My Bracket Preset", "trimmed")
+        XCTAssertEqual(m1.savedPresets, [saved])
+        XCTAssertEqual(m1.allPresets.map(\.name), ["Default", "My Bracket Preset"])
+
+        // Launch 2: a brand-new AppModel over the same preset store sees it (app-wide).
+        let m2 = appModel(store: ProjectStore(rootDir: tempDir),
+                          presetStore: PrintParamsPresetStore(rootDir: tempDir))
+        XCTAssertEqual(m2.savedPresets, [saved])
+        XCTAssertEqual(m2.allPresets.last?.params, params.clamped())
+    }
+
+    func testSavePresetIgnoresBlankName() {
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        XCTAssertNil(m.savePreset(named: "   ", params: .fdmDefault))
+        XCTAssertTrue(m.savedPresets.isEmpty)
+    }
+
+    func testApplyPresetLoadsValuesIntoOpenProject() throws {
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()   // unlocked creation sheet
+        let project = try XCTUnwrap(m.project)
+        let preset = PrintParamsPreset(name: "Fine", params: PrintParams(
+            layerHeightMM: 0.12, wallLoops: 4, topLayers: 5, bottomLayers: 5,
+            infillPercent: 35, infillPattern: "grid"))
+        m.applyPreset(preset)
+        XCTAssertEqual(project.printParams, preset.params, "the preset loads into the sheet")
+    }
+
+    // MARK: - lock at creation (M7.params lock-at-creation)
+
+    func testNewProjectStartsUnlockedThenLocksOnCreationSheetDone() throws {
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        let project = try XCTUnwrap(m.project)
+        XCTAssertFalse(project.paramsLocked, "editable during the auto-presented creation sheet")
+        project.printParams.infillPercent = 30
+        m.closePrintParams()   // the creation sheet's Done commits + LOCKS
+        XCTAssertTrue(project.paramsLocked, "fixed for the life of the project after creation")
+        XCTAssertEqual(project.printParams.infillPercent, 30)
+    }
+
+    func testApplyPresetIsNoOpOnceLocked() throws {
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        let project = try XCTUnwrap(m.project)
+        project.printParams.infillPercent = 25
+        m.closePrintParams()   // lock it
+        let before = project.printParams
+        m.applyPreset(PrintParamsPreset(name: "Other", params: .fdmDefault))
+        XCTAssertEqual(project.printParams, before, "presets can't override a locked project")
+    }
+
+    func testRestoredProjectIsLocked() throws {
+        // Launch 1: create + commit params, leave to Home.
+        let m1 = appModel(store: ProjectStore(rootDir: tempDir))
+        m1.loadMaterials(); m1.newTopOpt(); m1.selectMaterial("PLA")
+        XCTAssertTrue(m1.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m1.continueToWorkspace()
+        m1.closePrintParams()
+        m1.backHome()
+
+        // Launch 2: reopening the restored project is already created → locked.
+        let m2 = appModel(store: ProjectStore(rootDir: tempDir))
+        m2.open(try XCTUnwrap(m2.recentProjects.first))
+        XCTAssertTrue(try XCTUnwrap(m2.project).paramsLocked,
+                      "a restored project's parameters are fixed")
     }
 }

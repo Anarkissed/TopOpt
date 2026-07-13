@@ -51,14 +51,15 @@ public struct ResultsScreen: View {
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
-                infillPercent: Int = 100,
+                infillPercent: Int = 100, infillPattern: String = "gyroid",
                 streaming: Bool = false,
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {}) {
         _model = StateObject(wrappedValue: ResultsModel(
             projectName: projectName, outcome: outcome,
             materialName: materialName, yieldStrengthMPa: yieldStrengthMPa,
-            appliedLoadKg: appliedLoadKg, loadUnit: loadUnit, infillPercent: infillPercent))
+            appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
+            infillPercent: infillPercent, infillPattern: infillPattern))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.onClose = onClose
@@ -364,12 +365,12 @@ public struct ResultsScreen: View {
 
     private static let failureRed = RGBA(255, 70, 50).color
 
-    /// The Failure chip's drawer: the predicted (solid-print) failure load in the
-    /// user's units, the honesty caption, the infill-adjusted estimate when an infill
-    /// is set, and — when the variant has a displacement field — the "push" scrub
-    /// (1× → the failure multiple) that drives the deflection toward failure. Slides
-    /// open beside the Failure chip on the right rail. All values are headlessly tested
-    /// on ResultsModel; layout is device QA.
+    /// The Failure chip's drawer: the ONE honest failure load for this project's fixed
+    /// infill (M7.params infill-aware) in the user's units, the honesty caption, and —
+    /// when the variant has a displacement field — the "push" scrub (1× → the failure
+    /// multiple) that drives the deflection toward failure. Slides open beside the
+    /// Failure chip on the right rail. All values are headlessly tested on ResultsModel;
+    /// layout is device QA.
     @ViewBuilder private var failureDrawer: some View {
         if let fp = model.failurePrediction {
             VStack(alignment: .leading, spacing: DS.Space.xs) {
@@ -377,15 +378,13 @@ public struct ResultsScreen: View {
                     .foregroundStyle(DS.Color.textSecondary.color)
                 Text(fp.headline).dsStyle(DS.TypeScale.bodyStrong)
                     .foregroundStyle(model.atFailure ? Self.failureRed : DS.Color.textPrimary.color)
+                    .frame(width: Self.drawerWidth, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(fp.subtitle)
                     .dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textSecondary.color)
                     .frame(width: Self.drawerWidth, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)
-                if let note = fp.infillNote {
-                    Text(note).dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                }
                 if model.hasFlex { pushControl(fp) }
             }
             .resultsDrawerChrome(width: Self.drawerWidth)
@@ -445,7 +444,7 @@ public struct ResultsScreen: View {
             Text(model.atFailure ? "YIELDS HERE" : "FAILS AT")
                 .font(.system(size: 9, weight: .bold)).tracking(0.6)
                 .foregroundStyle(DS.Color.textSecondary.color)
-            Text(fp.solidValueLabel).dsStyle(DS.TypeScale.bodyStrong)
+            Text(fp.valueLabel).dsStyle(DS.TypeScale.bodyStrong)
                 .foregroundStyle(model.atFailure ? tint : DS.Color.textPrimary.color)
             Text(String(format: "%.1f× the load", fp.multiplier))
                 .dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)

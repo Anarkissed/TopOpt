@@ -337,19 +337,23 @@ public struct HotSpot: Equatable, Sendable {
 /// linear FEA, no new solve. The `position`/`fieldIndex` are the SAME worst point the
 /// M7.viz.2 hot spot finds (the marker reuses its styling).
 ///
-/// HONESTY (M7.viz.6, inherits the infill finding): `failureLoadKg` is a SOLID-PART
-/// estimate — the FEA models solid material (ARCHITECTURE §2), infill never enters
-/// the solver — so it is labelled a "solid-print estimate". When an infill % is set
-/// (M7.params), `infillFailureLoadKg` is the infill-adjusted estimate using the SAME
-/// Gibson-Ashby knockdown the M7.infill-margin ladder uses, so the two agree.
+/// HONESTY (M7.viz.6 + M7.params infill-aware): infill is FIXED per project
+/// (lock-at-creation), so there is ONE honest failure load — the value for THIS
+/// project's infill — not a swinging "solid vs infill" pair. The FEA still models
+/// solid material (ARCHITECTURE §2); the Gibson-Ashby knockdown (`effectiveYield =
+/// yield × f^1.5`, the SAME curve the M7.infill-margin ladder uses) is applied at the
+/// display layer, so `multiplier = effectiveYield ÷ peak` and `failureLoadKg` reflect
+/// the printed part. A solid (100 %) project has knockdown 1, so the number is
+/// unchanged and the label drops the infill suffix.
 public struct FailurePrediction: Equatable, Sendable {
-    /// yield ÷ peak von Mises — how many times the current load the part carries
-    /// before the worst point reaches yield (> 1 means it has headroom).
+    /// effectiveYield ÷ peak von Mises — how many times the current load the printed
+    /// part carries before the worst point reaches its (infill-adjusted) yield.
     public let multiplier: Double
     /// The load the user applied (kgf; the sum of the load groups' weights) — the
     /// scalar the failure load scales from.
     public let appliedLoadKg: Double
-    /// The solid-print failure load (kgf): `multiplier × appliedLoadKg`.
+    /// The failure load (kgf) for THIS project's infill: `multiplier × appliedLoadKg`.
+    /// The single honest value shown everywhere.
     public let failureLoadKg: Double
     /// The display unit the labels are formatted in (the workspace kg/lbs toggle).
     public let unit: WeightUnit
@@ -360,25 +364,22 @@ public struct FailurePrediction: Equatable, Sendable {
     public let fieldIndex: Int
     /// Peak von Mises the estimate is derived from (MPa).
     public let peakMPa: Double
-    /// The material yield the estimate is derived against (MPa).
+    /// The material's solid yield (MPa), before the infill knockdown — kept for
+    /// reference; `effectiveYieldMPa` is what the multiplier is actually measured on.
     public let yieldMPa: Double
-    /// The headline, e.g. "Holds ~340 lb" (solid-print estimate; unit per the toggle).
-    public let headline: String
-    /// The solid failure load phrased alone, e.g. "340 lb".
-    public let solidValueLabel: String
-    /// The always-shown honesty caption: "Solid-print estimate · yields at the marker".
-    public let subtitle: String
-    /// The project infill % when one is set below solid (0 < % < 100), else nil (a
-    /// solid/unset project has no separate adjusted estimate).
-    public let infillPercent: Int?
-    /// The Gibson-Ashby knockdown applied for `infillPercent` (1.0 when solid/unset).
+    /// The printed part's effective yield (MPa): `yieldMPa × infillKnockdown`.
+    public let effectiveYieldMPa: Double
+    /// The project's fixed infill % (100 = solid).
+    public let infillPercent: Int
+    /// The Gibson-Ashby knockdown applied (1.0 when solid).
     public let infillKnockdown: Double
-    /// The infill-adjusted failure load (kgf), or nil when solid/unset.
-    public let infillFailureLoadKg: Double?
-    /// The infill-adjusted load phrased alone, e.g. "150 lb", or nil when solid/unset.
-    public let infillValueLabel: String?
-    /// The infill line for the card, e.g. "≈ 150 lb at 20% infill", or nil.
-    public let infillNote: String?
+    /// The failure load phrased alone, e.g. "157 lb".
+    public let valueLabel: String
+    /// The headline, e.g. "Holds ~157 lb at 20% gyroid" (or "Holds ~340 lb" solid).
+    public let headline: String
+    /// The honesty caption, e.g. "At 20% gyroid infill · yields at the marker" (or
+    /// "Solid-print estimate · yields at the marker" when solid).
+    public let subtitle: String
 }
 
 /// The results screen's state + derived presentation. Constructed from a finished,
@@ -403,9 +404,31 @@ public final class ResultsModel: ObservableObject {
     /// The workspace's kg/lbs display unit, so the failure load reads in the user's
     /// current units (M7.viz.6 surfaces the prediction in the same toggle).
     public let loadUnit: WeightUnit
-    /// The project's infill % (M7.params), for the M7.viz.6 infill-adjusted failure
-    /// estimate. 100 (the default) means solid / no adjustment.
+    /// The project's infill % (M7.params). Fixed per project (lock-at-creation), so
+    /// EVERY displayed physics figure is knocked down to this infill consistently
+    /// (`infillKnockdown` / `effectiveYieldStrengthMPa`). 100 means solid (knockdown 1).
     public let infillPercent: Int
+    /// The project's infill pattern (M7.params), for the infill-aware labels
+    /// (e.g. "Holds ~157 lb at 20% gyroid"). Purely descriptive — the knockdown math
+    /// depends only on the infill %.
+    public let infillPattern: String
+    /// The Gibson-Ashby strength knockdown for this project's fixed infill (f^1.5;
+    /// 1.0 when solid). The SAME factor the core applies at its acceptance gate
+    /// (`minimize_plastic.cpp`), so the displayed physics agrees with the ladder. The
+    /// FEA/stress field itself stays solid (ARCHITECTURE §2); this scales the DISPLAYED
+    /// strength — the effective yield the part reaches at this infill — everywhere.
+    public let infillKnockdown: Double
+
+    /// The effective yield strength (MPa) of the PRINTED part at this project's infill:
+    /// the material yield knocked down by `infillKnockdown`. This is the limit every
+    /// displayed strength/margin figure is measured against — the stress scale, the
+    /// hot-spot "% of yield", and the failure multiplier — so they all agree and are
+    /// honest for the part that actually prints (M7.params infill-aware physics).
+    public var effectiveYieldStrengthMPa: Double { yieldStrengthMPa * infillKnockdown }
+
+    /// Whether this project prints at a sparse infill below solid (drives the
+    /// infill-aware labels; a solid part shows no infill suffix).
+    public var isSparseInfill: Bool { infillPercent < 100 }
     /// One tab per accepted variant, in ladder order (largest volume first, so
     /// savings ascend left→right as in the design). GROWS as variants stream in.
     @Published public private(set) var tabs: [ResultVariantVM] = []
@@ -469,13 +492,15 @@ public final class ResultsModel: ObservableObject {
     public init(projectName: String, outcome: OptimizeOutcome,
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
-                infillPercent: Int = 100) {
+                infillPercent: Int = 100, infillPattern: String = "gyroid") {
         self.projectName = projectName
         self.materialName = materialName
         self.yieldStrengthMPa = max(0, yieldStrengthMPa)
         self.appliedLoadKg = max(0, appliedLoadKg)
         self.loadUnit = loadUnit
         self.infillPercent = infillPercent
+        self.infillPattern = infillPattern
+        self.infillKnockdown = FailureLoad.infillKnockdown(percent: Double(infillPercent))
         apply(outcome)
         selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
     }
@@ -500,13 +525,17 @@ public final class ResultsModel: ObservableObject {
         gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
         gridOrigin = SIMD3<Float>(outcome.gridOrigin)
         spacing = Float(outcome.spacing)
-        tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3)
+        tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3,
+                                      knockdown: infillKnockdown)
         // M7.viz.1 "honest heatmap": key the shared stress scale to the MATERIAL
         // LIMIT (yield) so a color means the same physical safety everywhere — not
-        // to the per-run data range. Fall back to the data-range max only when no
-        // material yield is available (legacy construction / no material).
-        stressScaleMaxMPa = yieldStrengthMPa > 0
-            ? yieldStrengthMPa
+        // to the per-run data range. M7.params infill-aware: the limit is the
+        // EFFECTIVE yield of the printed part at this project's fixed infill (yield ×
+        // knockdown), so the same color, the hot-spot "% of yield", and the failure
+        // multiplier all measure against the part that actually prints. Fall back to
+        // the data-range max only when no material yield is available.
+        stressScaleMaxMPa = effectiveYieldStrengthMPa > 0
+            ? effectiveYieldStrengthMPa
             : (acc.map(\.maxStressMPa).max() ?? 0)
         keyframeCache = nil   // variant data changed → rebuild keyframes on demand
         flexCache = nil       // …and the per-vertex flex displacements
@@ -699,19 +728,17 @@ public final class ResultsModel: ObservableObject {
     }
 
     private func computeFailurePrediction() -> FailurePrediction? {
+        // Measure against the EFFECTIVE yield of the printed part at this project's
+        // fixed infill (M7.params infill-aware): one honest failure load, not a
+        // solid-vs-infill pair. Solid (knockdown 1) reduces to the plain yield/peak.
         guard appliedLoadKg > 0,
               let field = selectedStressField, let peak = field.peak(),
               let mult = FailureLoad.multiplier(peakMPa: Double(peak.valueMPa),
-                                                yieldMPa: yieldStrengthMPa)
+                                                yieldMPa: effectiveYieldStrengthMPa)
         else { return nil }
         let failKg = mult * appliedLoadKg
-        // Infill-adjusted estimate — ONLY when the project sets a sparse infill below
-        // solid. Same Gibson-Ashby family as the M7.infill-margin ladder so they agree.
-        let showInfill = infillPercent > 0 && infillPercent < 100
-        let knock = showInfill ? FailureLoad.infillKnockdown(percent: Double(infillPercent)) : 1.0
-        let infillKg: Double? = showInfill ? failKg * knock : nil
-        let infillLbl = infillKg.map { ResultsModel.loadLabel(kg: $0, unit: loadUnit) }
-        let solidLbl = ResultsModel.loadLabel(kg: failKg, unit: loadUnit)
+        let valueLbl = ResultsModel.loadLabel(kg: failKg, unit: loadUnit)
+        let descriptor = ResultsModel.infillDescriptor(percent: infillPercent, pattern: infillPattern)
         return FailurePrediction(
             multiplier: mult,
             appliedLoadKg: appliedLoadKg,
@@ -721,14 +748,19 @@ public final class ResultsModel: ObservableObject {
             fieldIndex: peak.index,
             peakMPa: Double(peak.valueMPa),
             yieldMPa: yieldStrengthMPa,
-            headline: "Holds ~\(solidLbl)",
-            solidValueLabel: solidLbl,
-            subtitle: "Solid-print estimate · yields at the marker",
-            infillPercent: showInfill ? infillPercent : nil,
-            infillKnockdown: knock,
-            infillFailureLoadKg: infillKg,
-            infillValueLabel: infillLbl,
-            infillNote: infillLbl.map { "≈ \($0) at \(infillPercent)% infill" })
+            effectiveYieldMPa: effectiveYieldStrengthMPa,
+            infillPercent: infillPercent,
+            infillKnockdown: infillKnockdown,
+            valueLabel: valueLbl,
+            headline: descriptor.map { "Holds ~\(valueLbl) at \($0)" } ?? "Holds ~\(valueLbl)",
+            subtitle: descriptor.map { "At \($0) infill · yields at the marker" }
+                ?? "Solid-print estimate · yields at the marker")
+    }
+
+    /// The infill descriptor for a physics label, e.g. "20% gyroid", or nil when the
+    /// project prints solid (100 %) — a solid part carries no infill suffix.
+    static func infillDescriptor(percent: Int, pattern: String) -> String? {
+        percent < 100 ? "\(percent)% \(pattern)" : nil
     }
 
     /// Whether the selected variant can show a failure prediction (drives the toggle).
@@ -956,14 +988,27 @@ public final class ResultsModel: ObservableObject {
     /// value the scale is keyed to (green ≈ comfortably below yield → red = at/above
     /// yield). In the no-material fallback it is honest that the scale is relative.
     public var stressLegend: StressLegend {
-        let scaled = yieldStrengthMPa > 0
-        let yieldText = ResultsModel.mpaLabel(yieldStrengthMPa)
+        // M7.params infill-aware: the scale is keyed to the printed part's EFFECTIVE
+        // yield (yield × knockdown), so red means "at the limit of the part that
+        // actually prints." A sparse infill annotates the caption (e.g. "at 20%
+        // gyroid"); solid is unchanged.
+        let effective = effectiveYieldStrengthMPa
+        let scaled = effective > 0
+        let yieldText = ResultsModel.mpaLabel(effective)
         let name = materialName.isEmpty ? "Material" : materialName
+        let infill = ResultsModel.infillDescriptor(percent: infillPercent, pattern: infillPattern)
+        let caption: String
+        if scaled {
+            let base = "\(name) · scaled to \(yieldText) yield"
+            caption = infill.map { "\(base) at \($0)" } ?? base
+        } else {
+            caption = "Relative scale (no material limit)"
+        }
         return StressLegend(
             materialName: materialName,
-            yieldStrengthMPa: yieldStrengthMPa,
+            yieldStrengthMPa: effective,
             scaledToYield: scaled,
-            caption: scaled ? "\(name) · scaled to \(yieldText) yield" : "Relative scale (no material limit)",
+            caption: caption,
             minLabel: "0",
             maxLabel: scaled ? "\(yieldText) (yield)" : "peak")
     }
@@ -979,7 +1024,10 @@ public final class ResultsModel: ObservableObject {
     public var hotSpot: HotSpot? {
         guard let field = selectedStressField, let peak = field.peak() else { return nil }
         let value = Double(peak.valueMPa)
-        let y = yieldStrengthMPa
+        // M7.params infill-aware: the "% of yield" is measured against the printed
+        // part's EFFECTIVE yield (yield × knockdown), so it agrees with the failure
+        // multiplier and the stress scale. Solid (knockdown 1) is the plain fraction.
+        let y = effectiveYieldStrengthMPa
         let frac = y > 0 ? value / y : 0
         return HotSpot(
             valueMPa: value,
@@ -1016,7 +1064,13 @@ public final class ResultsModel: ObservableObject {
 
     // MARK: - Builders (pure)
 
-    static func buildTabs(_ variants: [OptimizeVariant], voxelVolumeMM3: Double) -> [ResultVariantVM] {
+    /// - Parameter knockdown: the Gibson-Ashby infill knockdown (1.0 solid). The
+    ///   core reports SOLID margins (it applies the knockdown only at its acceptance
+    ///   gate — minimize_plastic.cpp), so the DISPLAYED strength/margin readouts
+    ///   (worst-case margin, layer-shear classification) are knocked down here to the
+    ///   printed part's infill, consistently with the failure load + hot spot.
+    static func buildTabs(_ variants: [OptimizeVariant], voxelVolumeMM3: Double,
+                          knockdown: Double = 1) -> [ResultVariantVM] {
         // Variants arrive heaviest-first (ladder order); the LAST accepted rung is
         // the lightest safe one — the recommendation.
         let recommendedIndex = variants.count - 1
@@ -1038,9 +1092,9 @@ public final class ResultsModel: ObservableObject {
                 orientation: v.orientation,
                 tiltDegrees: tilt,
                 orientationSummary: orientationSummary(tiltDegrees: tilt, supportCm3: cm3, supportLabel: supportLabel),
-                layerShear: LayerShear.classify(interlayerMargin: v.interlayerMargin),
+                layerShear: LayerShear.classify(interlayerMargin: v.interlayerMargin * knockdown),
                 maxStressMPa: v.maxStressMPa,
-                worstCaseMargin: v.worstCaseMargin,
+                worstCaseMargin: v.worstCaseMargin * knockdown,
                 minFeatureViolations: v.minFeatureViolations,
                 minFeatureWarning: v.minFeatureWarning,
                 isRecommended: i == recommendedIndex)
