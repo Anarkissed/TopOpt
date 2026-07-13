@@ -122,8 +122,25 @@ struct MinimizePlasticOptions {
   // Shared SIMP loop options (filter radius, move limit, iteration cap, CG
   // tolerances). `volume_fraction` is overridden by each ladder rung and is
   // ignored here. `simp.progress` and `simp.cancel` are also overridden by
-  // the driver — use the two fields below instead.
+  // the driver — use the two fields below instead. `simp.updater` is overridden
+  // by `updater` below (the production driver picks the updater, not the shared
+  // SimpOptions default) — set `updater`, not `simp.updater`.
   SimpOptions simp;
+
+  // M7.mma.4 — the design updater for the production ladder. Defaults to MMA
+  // (the Method of Moving Asymptotes, Svanberg 1987): the switchover makes MMA,
+  // not Optimality Criteria, the updater real minimize_plastic runs use. MMA
+  // matches or beats OC's minimum-compliance optimum at the same volume fraction
+  // (it is the convex-subproblem machinery the stress / multi-load constraints
+  // build on) and runs the SAME mask-aware volume-constrained loop the driver
+  // already used. Set to SimpUpdater::OC to fall back to the Optimality-Criteria
+  // updater (retained, unchanged — the projected Gate-V2 path stays OC-only).
+  // This value REPLACES `simp.updater` for every rung. It does NOT change the
+  // FEA, the filter, the stress recovery, or the ladder logic — only the design
+  // update rule inside simp_optimize, so the reported designs/compliances shift
+  // to MMA's optimum while every driver contract (volume constraint, margins,
+  // V3 suite, viz fields) is unchanged.
+  SimpUpdater updater = SimpUpdater::MMA;
 
   // PHYSICAL minimum-feature length scale in millimetres (model units). When
   // > 0, the driver sets each rung's `simp.filter_radius` from the grid spacing

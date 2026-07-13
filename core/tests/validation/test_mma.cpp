@@ -12,8 +12,11 @@
 //   * both updaters meet the volume-fraction target and reduce compliance from
 //     the uniform start;
 //   * the MMA design stays in the admissible box and honours the move limit;
-//   * MMA is correctly scoped for this task: combining it with a Heaviside
-//     projection schedule, or with a passive-region mask, throws.
+//   * masked MMA (M7.mma.4 — the switchover): the passive-region loop that
+//     minimize_plastic drives runs under MMA, reproduces the OC masked optimum,
+//     and honours the frozen pins;
+//   * MMA still rejects a Heaviside projection schedule (the projected chain is
+//     the OC-locked Gate-V2 formulation), on both the plain and masked overloads.
 //
 // Per-benchmark iteration counts are printed (informational, per the task).
 //
@@ -255,9 +258,9 @@ int main() {
   }
 
   // ==========================================================================
-  // 3. Scope guards (ROADMAP M7.mma.1): MMA is the plain compliance loop only.
-  //    Combining it with a projection schedule, or with a passive-region mask,
-  //    throws std::invalid_argument rather than silently misbehaving.
+  // 3. Scope guard: MMA supports the plain loop (M7.mma.1) AND the masked loop
+  //    (M7.mma.4 — the switchover); only a Heaviside projection schedule is
+  //    still rejected (the projected chain is the OC-locked Gate-V2 formulation).
   // ==========================================================================
   {
     Problem pr = make_cantilever(6, 3, 3);
@@ -271,29 +274,104 @@ int main() {
     } catch (const std::invalid_argument&) {
       threw_proj = true;
     }
-    CHECK(threw_proj, "scope: MMA + projection schedule throws");
+    CHECK(threw_proj, "scope: MMA + projection schedule throws (plain overload)");
 
-    SimpOptions masked = bench_options();
-    masked.updater = SimpUpdater::MMA;
-    DesignMask mask = topopt::make_active_mask(pr.grid);
-    bool threw_mask = false;
+    // MMA + projection is rejected on the MASKED overload too (not a silent
+    // fall-back to the OC projected updater).
+    SimpOptions mproj = bench_options();
+    mproj.updater = SimpUpdater::MMA;
+    mproj.projection = {{1.0, 0.2, 4}};
+    DesignMask amask6 = topopt::make_active_mask(pr.grid);
+    bool threw_mproj = false;
     try {
-      topopt::simp_optimize(pr.grid, p, pr.bcs, pr.loads, masked, mask);
+      topopt::simp_optimize(pr.grid, p, pr.bcs, pr.loads, mproj, amask6);
     } catch (const std::invalid_argument&) {
-      threw_mask = true;
+      threw_mproj = true;
     }
-    CHECK(threw_mask, "scope: MMA + passive-region mask throws");
+    CHECK(threw_mproj, "scope: MMA + projection throws (masked overload)");
+  }
 
-    // The OC masked path is unaffected (still runs).
-    SimpOptions ocm = bench_options();
-    ocm.max_iterations = 8;
-    bool oc_masked_ok = true;
-    try {
-      topopt::simp_optimize(pr.grid, p, pr.bcs, pr.loads, ocm, mask);
-    } catch (...) {
-      oc_masked_ok = false;
-    }
-    CHECK(oc_masked_ok, "scope: OC masked path still runs");
+  // ==========================================================================
+  // 4. Masked MMA (ROADMAP M7.mma.4 — the switchover). The passive-region loop
+  //    minimize_plastic drives now runs under MMA: it reproduces the OC masked
+  //    optimum (an all-Active mask on an all-Interior grid is the plain loop),
+  //    meets the volume target, stays in the box, and honours the frozen pins.
+  // ==========================================================================
+  {
+    Problem mpr = make_cantilever(16, 8, 8);
+    DesignMask amask = topopt::make_active_mask(mpr.grid);
+
+    SimpOptions moc = bench_options();
+    moc.updater = SimpUpdater::OC;
+    moc.max_iterations = 120;
+    SimpOptions mmm = bench_options();
+    mmm.updater = SimpUpdater::MMA;
+    mmm.max_iterations = 120;
+
+    const SimpOptimizeResult rmoc =
+        topopt::simp_optimize(mpr.grid, p, mpr.bcs, mpr.loads, moc, amask);
+    const SimpOptimizeResult rmmm =
+        topopt::simp_optimize(mpr.grid, p, mpr.bcs, mpr.loads, mmm, amask);
+
+    const double relm = std::fabs(rmmm.compliance - rmoc.compliance) /
+                        std::fabs(rmoc.compliance);
+    std::printf(
+        "masked MMA cantilever_16x8x8: OC c=%.6f vf=%.4f it=%d | "
+        "MMA c=%.6f vf=%.4f it=%d | rel=%.3f%%\n",
+        rmoc.compliance, rmoc.volume_fraction, rmoc.iterations,
+        rmmm.compliance, rmmm.volume_fraction, rmmm.iterations, 100.0 * relm);
+
+    CHECK(rmmm.compliance > 0.0, "masked MMA: positive compliance");
+    CHECK(rmmm.compliance < rmmm.initial_compliance,
+          "masked MMA: reduces compliance from the uniform start");
+    CHECK(near(rmmm.volume_fraction, mmm.volume_fraction, 1e-2),
+          "masked MMA: meets the volume-fraction target");
+    // MMA matches or BEATS the OC masked optimum (within the 2% parity band).
+    CHECK(relm <= kVolTol,
+          "masked MMA: compliance within 2% of the OC masked reference");
+    bool mbox_ok = true;
+    for (double v : rmmm.design)
+      if (v < p.density_min - 1e-12 || v > 1.0 + 1e-12) mbox_ok = false;
+    CHECK(mbox_ok, "masked MMA: design stays in [density_min, 1]");
+    bool mmoves_ok = true;
+    for (const topopt::SimpIteration& h : rmmm.history)
+      if (h.change > mmm.move + 1e-9) mmoves_ok = false;
+    CHECK(mmoves_ok, "masked MMA: per-iteration change respects the move limit");
+  }
+
+  // Masked MMA honours the mask pins: FrozenSolid -> 1, FrozenVoid -> 0.
+  {
+    Problem mpr = make_cantilever(16, 8, 8);
+    DesignMask mask = topopt::make_active_mask(mpr.grid);
+    std::vector<std::size_t> keep, drop;
+    for (int k = 6; k < 8; ++k)
+      for (int j = 3; j < 5; ++j)
+        for (int i = 10; i < 14; ++i) {
+          const std::size_t e = mpr.grid.index(i, j, k);
+          mask[e] = MaskValue::FrozenSolid;
+          keep.push_back(e);
+        }
+    for (int k = 0; k < 2; ++k)
+      for (int j = 3; j < 5; ++j)
+        for (int i = 6; i < 10; ++i) {
+          const std::size_t e = mpr.grid.index(i, j, k);
+          mask[e] = MaskValue::FrozenVoid;
+          drop.push_back(e);
+        }
+    SimpOptions mmm = bench_options();
+    mmm.updater = SimpUpdater::MMA;
+    mmm.max_iterations = 80;
+    const SimpOptimizeResult r =
+        topopt::simp_optimize(mpr.grid, p, mpr.bcs, mpr.loads, mmm, mask);
+    bool solid_ok = true, void_ok = true;
+    for (std::size_t e : keep)
+      if (std::fabs(r.physical_density[e] - 1.0) > 1e-9) solid_ok = false;
+    for (std::size_t e : drop)
+      if (r.physical_density[e] > 1e-12) void_ok = false;
+    CHECK(solid_ok, "masked MMA: FrozenSolid voxels pinned at density 1");
+    CHECK(void_ok, "masked MMA: FrozenVoid voxels pinned at density 0");
+    CHECK(near(r.volume_fraction, mmm.volume_fraction, 2e-2),
+          "masked MMA (pinned): meets the Active volume target");
   }
 
   if (g_failures == 0) {

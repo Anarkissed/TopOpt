@@ -63,15 +63,17 @@ void validate_projection_options(const SimpOptions& o) {
   }
 }
 
-// The MMA updater (ROADMAP M7.mma.1) is scoped to the plain compliance +
-// volume-constraint loop for this task; combining it with a Heaviside
-// projection schedule (or, in the masked overload, a passive-region mask) is
-// rejected until the later MMA tasks extend those paths.
+// The MMA updater supports the plain compliance loop (M7.mma.1) and, since the
+// switchover (M7.mma.4), the passive-region MASKED loop that minimize_plastic
+// drives — but NOT a Heaviside projection schedule. The projected formulation
+// is the OC-locked Gate-V2 chain (benchmarks.json "formulation_locked"); an
+// MMA+projection path is a separate future task, so combining the two is
+// rejected here (in both overloads) rather than silently falling back to OC.
 void validate_updater_options(const SimpOptions& o) {
   if (o.updater == SimpUpdater::MMA && !o.projection.empty())
     throw std::invalid_argument(
         "simp_optimize: MMA updater does not support a Heaviside projection "
-        "schedule yet (ROADMAP M7.mma.1); use OC or clear options.projection");
+        "schedule; use OC or clear options.projection");
 }
 
 }  // namespace
@@ -462,7 +464,7 @@ std::vector<double> mma_update(MmaState& st, int mma_iter, const VoxelGrid& grid
   // Chain rule, exactly as oc_update: filter the physical-space compliance
   // sensitivity and the unit volume sensitivity into design space (H is
   // symmetric). dc <= 0 (more material lowers compliance); dv >= 0.
-  const std::vector<double> dc = filter.filter_sensitivity(dcompliance);
+  std::vector<double> dc = filter.filter_sensitivity(dcompliance);
   std::vector<double> ones(N, 0.0);
   std::vector<std::size_t> dof;  // design (solid) voxel indices
   for (int k = 0; k < grid.nz; ++k)
@@ -475,6 +477,21 @@ std::vector<double> mma_update(MmaState& st, int mma_iter, const VoxelGrid& grid
         }
   const std::vector<double> dv = filter.filter_sensitivity(ones);
   const double target = volume_fraction * static_cast<double>(dof.size());
+
+  // Scale-invariance (ROADMAP M7.mma.4): normalize the compliance sensitivity to
+  // O(1) so the FIXED raa0 regularizer below stays negligible regardless of the
+  // LOAD magnitude. The minimum-compliance topology is invariant to the load
+  // scale, but dc scales as load^2; without this, a tiny self-weight load (real
+  // minimize_plastic runs have compliance ~1e-8) lets raa0 (1e-5) swamp dc, so
+  // p0/q0 are driven by the regularizer, not the objective, and MMA converges to
+  // a load-scale-DEPENDENT, much worse design (measured: rel > 100% vs OC at
+  // production gravity, ~0.5% here). Scaling dc by a positive constant leaves the
+  // MMA subproblem optimum unchanged — the dual multiplier absorbs it — so this
+  // only fixes the raa0 balance; the rmin-2.5 OC parity is preserved.
+  double dc_scale = 0.0;
+  for (std::size_t e : dof) dc_scale = std::max(dc_scale, std::fabs(dc[e]));
+  if (dc_scale > 0.0)
+    for (std::size_t e : dof) dc[e] /= dc_scale;
 
   // Current constraint value g0 = V(x) - target. The filtered volume is linear
   // in x (V(x) = sum_e xPhys_e), so summing filter_density(x) gives V(x).
@@ -922,6 +939,152 @@ std::vector<double> oc_update_masked(const VoxelGrid& grid,
   return candidate(0.5 * (l1 + l2));
 }
 
+// One MMA design update restricted to Active voxels (ROADMAP M7.mma.4 — the
+// switchover). The mask-aware analogue of mma_update: FrozenSolid (x=1) and
+// FrozenVoid (x=0) entries of `density` are carried through unchanged; only
+// Active voxels move, under the single volume constraint on the ACTIVE physical
+// density (sum_active xPhys(x_new) == volume_fraction * n_active). `filter` is
+// the mask-aware (Active-only) filter, so both the compliance and volume
+// sensitivities are already confined to Active voxels. The moving-asymptote
+// machinery, convex separable subproblem and 1-D dual bisection are IDENTICAL
+// to mma_update (same constants); this only swaps the design set (grid.solid ->
+// Active) and preserves the frozen pins, exactly as oc_update_masked does for
+// OC. `st`/`mma_iter` persist the asymptotes + last two iterates across calls.
+// With an all-Active mask on an all-Interior grid it reproduces mma_update
+// bit-for-bit (same design set, no pins), so the switchover leaves an
+// all-Active driver run equivalent to the plain MMA loop.
+std::vector<double> mma_update_masked(MmaState& st, int mma_iter,
+                                      const VoxelGrid& grid,
+                                      const DensityFilter& filter,
+                                      const DesignMask& eff,
+                                      const std::vector<double>& density,
+                                      const std::vector<double>& dcompliance,
+                                      double volume_fraction, double move,
+                                      double density_min) {
+  const std::size_t N = grid.voxel_count();
+
+  // Chain rule (mask-aware transpose): filter the physical-space compliance
+  // sensitivity and the unit volume sensitivity into Active design space. The
+  // Active-only filter makes dc/dv nonzero only on Active voxels. dc <= 0; dv >= 0.
+  std::vector<double> dc = filter.filter_sensitivity(dcompliance);
+  std::vector<double> ones(N, 0.0);
+  std::vector<std::size_t> dof;  // Active (design) voxel indices
+  for (std::size_t e = 0; e < N; ++e)
+    if (eff[e] == MaskValue::Active) {
+      ones[e] = 1.0;
+      dof.push_back(e);
+    }
+  const std::vector<double> dv = filter.filter_sensitivity(ones);
+  const double target = volume_fraction * static_cast<double>(dof.size());
+
+  // Scale-invariance (M7.mma.4): normalize the compliance sensitivity to O(1) so
+  // the fixed raa0 regularizer stays negligible regardless of the load magnitude
+  // (see mma_update for the full rationale — self-weight loads make dc ~1e-8, and
+  // an un-normalized raa0 would swamp it and destroy scale-invariance). The
+  // subproblem optimum is unchanged by this positive scaling.
+  double dc_scale = 0.0;
+  for (std::size_t e : dof) dc_scale = std::max(dc_scale, std::fabs(dc[e]));
+  if (dc_scale > 0.0)
+    for (std::size_t e : dof) dc[e] /= dc_scale;
+
+  // Current constraint value g0 = V_active(x) - target. filter_density is 0 on
+  // frozen/empty voxels, so summing the whole field sums the Active voxels only.
+  const std::vector<double> xphys = filter.filter_density(density);
+  double vol = 0.0;
+  for (double v : xphys) vol += v;
+  const double g0 = vol - target;
+
+  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
+  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
+  const double albefa = 0.1, raa0 = 1e-5;
+
+  if (st.low.size() != N) {
+    st.low.assign(N, 0.0);
+    st.upp.assign(N, 0.0);
+  }
+
+  // 1. Moving asymptotes L_j, U_j (Active voxels only).
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    if (mma_iter <= 2) {
+      st.low[e] = xe - asyinit * xrange;
+      st.upp[e] = xe + asyinit * xrange;
+    } else {
+      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
+      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
+      double L = xe - gamma * (st.xold1[e] - st.low[e]);
+      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
+      L = std::min(L, xe - 0.01 * xrange);
+      L = std::max(L, xe - 10.0 * xrange);
+      U = std::max(U, xe + 0.01 * xrange);
+      U = std::min(U, xe + 10.0 * xrange);
+      st.low[e] = L;
+      st.upp[e] = U;
+    }
+  }
+
+  // 2. Separable convex approximation coefficients + move box [alpha, beta].
+  std::vector<double> p0(N, 0.0), q0(N, 0.0), p1(N, 0.0), q1(N, 0.0);
+  std::vector<double> alpha(N, 0.0), beta(N, 0.0);
+  double b = -g0;
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    const double L = st.low[e], U = st.upp[e];
+    const double ux1 = U - xe, xl1 = xe - L;
+    const double dcp = std::max(dc[e], 0.0), dcm = std::max(-dc[e], 0.0);
+    const double dvp = std::max(dv[e], 0.0), dvm = std::max(-dv[e], 0.0);
+    p0[e] = ux1 * ux1 * (1.001 * dcp + 0.001 * dcm + raa0 / xrange);
+    q0[e] = xl1 * xl1 * (0.001 * dcp + 1.001 * dcm + raa0 / xrange);
+    p1[e] = ux1 * ux1 * (1.001 * dvp + 0.001 * dvm + raa0 / xrange);
+    q1[e] = xl1 * xl1 * (0.001 * dvp + 1.001 * dvm + raa0 / xrange);
+    b += p1[e] / ux1 + q1[e] / xl1;
+    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
+    beta[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
+  }
+
+  // 3. Dual solve for the single volume constraint. Frozen voxels keep their
+  // pinned x (1 or 0); only Active voxels take the closed-form primal minimiser.
+  auto candidate = [&](double lambda) {
+    std::vector<double> xnew = density;  // preserves FrozenSolid=1, FrozenVoid=0
+    for (std::size_t e : dof) {
+      const double pl = std::sqrt(p0[e] + lambda * p1[e]);
+      const double ql = std::sqrt(q0[e] + lambda * q1[e]);
+      double xt = (pl * st.low[e] + ql * st.upp[e]) / (pl + ql);
+      if (xt < alpha[e]) xt = alpha[e];
+      if (xt > beta[e]) xt = beta[e];
+      xnew[e] = xt;
+    }
+    return xnew;
+  };
+  auto gval = [&](const std::vector<double>& x) {
+    double s = 0.0;
+    for (std::size_t e : dof)
+      s += p1[e] / (st.upp[e] - x[e]) + q1[e] / (x[e] - st.low[e]);
+    return s - b;
+  };
+  double lambda = 0.0;
+  if (gval(candidate(0.0)) > 0.0) {
+    double l1 = 0.0, l2 = 1.0;
+    while (l2 < 1e30 && gval(candidate(l2)) > 0.0) l2 *= 2.0;
+    for (int it = 0; it < 100 && (l2 - l1) > 1e-9 * (1.0 + l1 + l2); ++it) {
+      const double lmid = 0.5 * (l1 + l2);
+      if (gval(candidate(lmid)) > 0.0)
+        l1 = lmid;
+      else
+        l2 = lmid;
+    }
+    lambda = 0.5 * (l1 + l2);
+  }
+  std::vector<double> xnew = candidate(lambda);
+
+  // 4. Roll history forward (xold2 <- xold1 <- x). Frozen voxels store their
+  // constant pin here too; the asymptote branch only reads xold1/xold2 for
+  // Active voxels (mma_iter >= 3), so the frozen entries are inert.
+  st.xold2 = st.xold1;
+  st.xold1 = density;
+  return xnew;
+}
+
 // Project the Active voxels of a filtered field in place (M6.3). Frozen and
 // Empty voxels are left untouched (their physical density is pinned / 0
 // separately), mirroring the mask-aware filter's Active-only domain.
@@ -1015,13 +1178,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   if (mask.size() != grid.voxel_count())
     throw std::invalid_argument("simp_optimize: mask size != voxel_count");
   validate_projection_options(options);
-  // Passive-region MMA is a later task (ROADMAP M7.mma.1 is the plain loop;
-  // the minimize_plastic/masked switchover is M7.mma.4). Reject it explicitly
-  // rather than silently falling back to OC.
-  if (options.updater == SimpUpdater::MMA)
-    throw std::invalid_argument(
-        "simp_optimize: MMA updater is not supported with a passive-region "
-        "mask yet (ROADMAP M7.mma.1); use OC");
+  // The masked loop supports both updaters since the switchover (M7.mma.4);
+  // only MMA + a Heaviside projection schedule is rejected (the projected path
+  // is the OC-locked Gate-V2 formulation — see validate_updater_options).
+  validate_updater_options(options);
 
   // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
   // analysis grid (FrozenVoid removed), and the Active-voxel budget.
@@ -1051,6 +1211,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     else if (eff[e] == MaskValue::FrozenSolid) x[e] = 1.0;
     // FrozenVoid / Empty stay 0
   }
+
+  // MMA updater state (ROADMAP M7.mma.4). Unused when updater == OC; the masked
+  // loop owns a single continuous MMA iteration count across all stages, exactly
+  // like the unconstrained overload. MMA + projection is rejected above, so the
+  // MMA branch below is always the plain (unprojected) masked stage.
+  MmaState mma_state;
+  int mma_iter = 0;
 
   SimpOptimizeResult result;
   result.history.reserve(total_stage_iterations(plan));
@@ -1083,6 +1250,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                            c.dcompliance, st.beta, eta,
                                            options.volume_fraction, st.move,
                                            params.density_min);
+      } else if (options.updater == SimpUpdater::MMA) {
+        // Passive-region MMA (M7.mma.4): the same single-volume-constraint MMA
+        // subproblem as the plain overload, restricted to Active voxels.
+        x_new = mma_update_masked(mma_state, ++mma_iter, grid, filter, eff, x,
+                                  c.dcompliance, options.volume_fraction,
+                                  st.move, params.density_min);
       } else {
         x_new = oc_update_masked(grid, filter, eff, x, c.dcompliance,
                                  options.volume_fraction, st.move,
