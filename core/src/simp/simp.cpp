@@ -126,7 +126,9 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<double>& density,
                                const std::vector<DirichletBC>& bcs,
                                const std::vector<NodalLoad>& loads,
-                               double tolerance, int max_iterations) {
+                               double tolerance, int max_iterations,
+                               const FeaSolution* initial_guess,
+                               PenalizedSolver* solver) {
   validate_params(params);
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
@@ -147,8 +149,15 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       }
 
   SimpCompliance out;
-  out.solution = fea_solve_cg(grid, elem_youngs, params.poisson, bcs, loads,
-                              tolerance, max_iterations, &out.cg);
+  if (solver != nullptr && solver->usable()) {
+    // Cached fast path: rescale the pre-reduced operator + internal warm start.
+    out.solution =
+        solver->solve(elem_youngs, tolerance, max_iterations, &out.cg);
+  } else {
+    out.solution = fea_solve_cg(grid, elem_youngs, params.poisson, bcs, loads,
+                                tolerance, max_iterations, &out.cg,
+                                initial_guess);
+  }
 
   // Compliance c = sum_e E(rho_e) * (u_e^T K_unit u_e) and the self-adjoint
   // sensitivity dc/drho_e = -p * rho_e^(p-1) * E0 * (u_e^T K_unit u_e). K_unit is
@@ -735,6 +744,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // Initial design: uniform at the target volume fraction on every solid voxel.
   std::vector<double> x = simp_uniform_density(grid, options.volume_fraction);
 
+  // Persistent solver: the grid, Poisson ratio, BCs and loads are fixed across
+  // the run, so this assembles the BC-reduced operator once and per iteration
+  // only rescales its values and warm-starts CG (profiling: ~40-50% of a 64^3
+  // iteration was redundant reassembly). Falls back to the stateless path (with
+  // an explicit warm-start guess) when the BCs are non-homogeneous.
+  PenalizedSolver solver(grid, params.poisson, bcs, loads);
+  const bool use_solver = solver.usable();
+  FeaSolution warm;  // fallback warm-start guess (unused when use_solver)
+
   SimpOptimizeResult result;
   result.history.reserve(total_stage_iterations(plan));
 
@@ -749,9 +767,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       }
       std::vector<double> xphys = filter.filter_density(x);
       if (st.project) project_solid(grid, xphys, st.beta, eta);
-      const SimpCompliance c = simp_compliance(grid, params, xphys, bcs, loads,
-                                               options.cg_tolerance,
-                                               options.cg_max_iterations);
+      const SimpCompliance c = simp_compliance(
+          grid, params, xphys, bcs, loads, options.cg_tolerance,
+          options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
+          use_solver ? &solver : nullptr);
+      if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
             "simp_optimize: penalized CG solve did not converge");
@@ -813,9 +833,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   result.physical_density = filter.filter_density(x);
   if (plan.back().project)
     project_solid(grid, result.physical_density, plan.back().beta, eta);
-  const SimpCompliance fc =
-      simp_compliance(grid, params, result.physical_density, bcs, loads,
-                      options.cg_tolerance, options.cg_max_iterations);
+  const SimpCompliance fc = simp_compliance(
+      grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
+      options.cg_max_iterations, nullptr, use_solver ? &solver : nullptr);
   result.compliance = fc.compliance;
   result.volume_fraction = phys_volfrac(result.physical_density);
   // Final playback keyframe: the converged shape.
@@ -1219,6 +1239,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   MmaState mma_state;
   int mma_iter = 0;
 
+  // Persistent solver over the FIXED analysis grid / BCs / loads (see the
+  // unconstrained overload): assembles the reduced operator once, then per
+  // iteration only rescales values and warm-starts CG. Falls back to the
+  // stateless path when BCs are non-homogeneous.
+  PenalizedSolver solver(analysis, params.poisson, bcs, loads);
+  const bool use_solver = solver.usable();
+  FeaSolution warm;  // fallback warm-start guess (unused when use_solver)
+
   SimpOptimizeResult result;
   result.history.reserve(total_stage_iterations(plan));
 
@@ -1236,7 +1264,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
       const SimpCompliance c =
           simp_compliance(analysis, params, xphys, bcs, loads,
-                          options.cg_tolerance, options.cg_max_iterations);
+                          options.cg_tolerance, options.cg_max_iterations,
+                          warm.u.empty() ? nullptr : &warm,
+                          use_solver ? &solver : nullptr);
+      if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
             "simp_optimize: penalized CG solve did not converge");
@@ -1306,9 +1337,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     project_active(eff, result.physical_density, plan.back().beta, eta);
   std::vector<double> xfinal_unpinned = result.physical_density;
   apply_mask_pins(eff, result.physical_density);
-  const SimpCompliance fc =
-      simp_compliance(analysis, params, result.physical_density, bcs, loads,
-                      options.cg_tolerance, options.cg_max_iterations);
+  const SimpCompliance fc = simp_compliance(
+      analysis, params, result.physical_density, bcs, loads,
+      options.cg_tolerance, options.cg_max_iterations, nullptr,
+      use_solver ? &solver : nullptr);
   result.compliance = fc.compliance;
   result.volume_fraction = active_volfrac(xfinal_unpinned);
   // Final playback keyframe: the converged printed shape.
