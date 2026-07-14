@@ -16,6 +16,9 @@
 
 import Foundation
 import TopOptKit
+#if canImport(os)
+import os
+#endif
 
 /// A fully-specified minimize_plastic run — the inputs `TopOptKit.minimizePlastic`
 /// needs, gathered from the workspace (imported file, chosen material, resolution).
@@ -147,6 +150,30 @@ public enum RunFailure: Equatable, Sendable {
     /// `MinimizePlasticOptions.margin_stop` default / ROADMAP M5.3).
     public static let marginStop = 1.5
 
+    /// Shown when a run stalls in core setup/solve without ever emitting progress
+    /// (the M7.diag setup-stall watchdog). Root-cause-agnostic and actionable so it
+    /// is honest whatever the underlying stall is, and it frees Optimize to retry.
+    public static let stalledDuringSetup =
+        "The optimizer stalled before it could take its first step, so the run was "
+      + "stopped. This can happen on a dense load case or a fine resolution — try "
+      + "the Fast resolution or a simpler load case, then run again."
+
+    /// The design-box variant of `stalledDuringSetup`. The design box (growth
+    /// space) is the confirmed trigger of the on-device stall — it makes the solver
+    /// work on a much larger expanded grid — so when the stalled run used one, point
+    /// the user straight at it (turning it off is the reliable workaround today).
+    public static let stalledWithDesignBox =
+        "The optimizer stalled before it could take its first step, so the run was "
+      + "stopped. The growth space (design box) makes this much more likely — try "
+      + "turning it off or making it smaller, or use the Fast resolution, then run "
+      + "again."
+
+    /// Substituted for an EMPTY core diagnostic so a genuine failure never renders
+    /// a blank sheet (some core throws carry no `what()` text on device).
+    public static let unknownSolverError =
+        "The optimizer stopped with an unspecified error. Please try again, or try "
+      + "a coarser resolution."
+
     /// Sheet headline.
     public var title: String {
         switch self {
@@ -220,6 +247,46 @@ public struct SynchronousRunScheduler: RunScheduler {
     public init() {}
     public func runInBackground(_ work: @escaping () -> Void) { work() }
     public func runOnMain(_ work: @escaping () -> Void) { work() }
+}
+
+/// The setup-stall watchdog (M7.diag — on-device optimize silent failure). A run
+/// that never emits its first progress tick is stuck in the core setup/solve
+/// (diagnosed: the production MultigridCG path, on a high-contrast 64³ system,
+/// stagnates then runs an effectively-unbounded Jacobi-CG fallback — a core bug,
+/// tracked for a core follow-up). That stall throws no exception, so without this
+/// the run hangs at 0% forever and leaves Optimize greyed (`phase == .running`).
+/// The watchdog is armed at `start`, DISARMED by the first sign of progress (so a
+/// genuinely-progressing-but-slow run is never touched), and if it fires it turns
+/// the stalled run into an honest failure sheet and re-enables Optimize.
+///
+/// Injected so tests drive it deterministically; production uses a real timer.
+public protocol RunWatchdog {
+    /// Arm a one-shot stall timer; invoke `onStall` on the main thread unless the
+    /// returned handle is called first to cancel it. Called on the main actor.
+    func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel
+}
+
+/// Cancels an armed watchdog (idempotent).
+public typealias RunWatchdogCancel = () -> Void
+
+/// Production watchdog: fire `onStall` after `graceSeconds` of no first progress.
+/// The grace is deliberately generous — it must clear the slowest LEGITIMATE
+/// first FEA solve (one solve runs before the first OC-iteration tick) so it only
+/// ever trips a genuine stall, never a slow-but-healthy run.
+public struct TimerRunWatchdog: RunWatchdog {
+    public let graceSeconds: Double
+    public init(graceSeconds: Double = 150) { self.graceSeconds = graceSeconds }
+    public func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel {
+        let work = DispatchWorkItem(block: onStall)
+        DispatchQueue.main.asyncAfter(deadline: .now() + graceSeconds, execute: work)
+        return { work.cancel() }
+    }
+}
+
+/// A watchdog that never fires (for tests / previews that don't exercise it).
+public struct DisabledRunWatchdog: RunWatchdog {
+    public init() {}
+    public func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel { {} }
 }
 
 /// Side effects for the "Run in Background" affordance (ROADMAP M7.7). Injected so
@@ -338,14 +405,36 @@ public final class RunModel: ObservableObject {
 
     private let scheduler: RunScheduler
     private let notifier: RunNotifier
+    private let watchdog: RunWatchdog
     private var token = CancelToken()
+    /// Cancels the armed setup-stall watchdog; nil when none is armed.
+    private var watchdogCancel: RunWatchdogCancel?
+    /// The in-flight request, so a watchdog stall can tailor its message (e.g. name
+    /// the design box, the confirmed on-device stall trigger). Cleared when the run
+    /// resolves.
+    private var runningRequest: RunRequest?
+
+    #if canImport(os)
+    private static let log = Logger(subsystem: "app.topopt", category: "run")
+    #endif
 
     public init(scheduler: RunScheduler = GCDRunScheduler(),
                 notifier: RunNotifier = SilentRunNotifier(),
+                watchdog: RunWatchdog = TimerRunWatchdog(),
                 runner: @escaping Runner = RunModel.bridgeRunner) {
         self.scheduler = scheduler
         self.notifier = notifier
+        self.watchdog = watchdog
         self.runner = runner
+    }
+
+    /// Diagnostic log hop (M7.diag). os_log on Apple → Console.app + Xcode; a
+    /// no-op elsewhere. Used to record WHY a run failed, so a device failure is
+    /// never silent even before the UI sheet renders.
+    private func diag(_ message: String) {
+        #if canImport(os)
+        Self.log.error("\(message, privacy: .public)")
+        #endif
     }
 
     /// The default runner: drive `minimize_plastic` with the M7.0a progress
@@ -397,8 +486,16 @@ public final class RunModel: ObservableObject {
 
         let token = CancelToken()
         self.token = token
+        runningRequest = request
         let runner = self.runner
         let scheduler = self.scheduler
+
+        // Arm the setup-stall watchdog. Disarmed by the first sign of progress
+        // (`publish`/`appendStreamed`) or by the run resolving (`finish`); if it
+        // fires first, the run was stuck in core setup with no exception to
+        // surface, and `watchdogFired` turns it into an honest failure sheet.
+        watchdogCancel?()
+        watchdogCancel = watchdog.arm { [weak self] in self?.watchdogFired(token) }
 
         scheduler.runInBackground { [weak self] in
             let result: Result<OptimizeOutcome, Error>
@@ -417,8 +514,33 @@ public final class RunModel: ObservableObject {
             } catch {
                 result = .failure(error)
             }
-            scheduler.runOnMain { self?.finish(request, result) }
+            scheduler.runOnMain { self?.finish(request, token, result) }
         }
+    }
+
+    /// The setup-stall watchdog fired: the run produced no progress and no streamed
+    /// variant within the grace period, so it is stuck in core setup/solve (no
+    /// exception thrown). Convert it to an honest failure sheet — but only if this
+    /// is STILL the run that armed it (`token`) and it truly never came alive.
+    private func watchdogFired(_ token: CancelToken) {
+        guard token === self.token, phase == .running, progress == nil,
+              (outcome?.variants.isEmpty ?? true) else { return }
+        token.cancel()                 // best-effort: the orphaned core run may never poll
+        let hadDesignBox = runningRequest?.designBox != nil
+        diag("run stalled during setup — no progress within the watchdog grace (designBox=\(hadDesignBox)); surfacing a failure sheet")
+        outcome = nil
+        failure = .solver(hadDesignBox ? RunFailure.stalledWithDesignBox
+                                       : RunFailure.stalledDuringSetup)
+        phase = .failed
+        isStreaming = false
+        isMinimized = false
+        watchdogCancel = nil
+    }
+
+    /// Cancel any armed watchdog (idempotent).
+    private func disarmWatchdog() {
+        watchdogCancel?()
+        watchdogCancel = nil
     }
 
     /// Append a streamed variant (a one-variant partial outcome carrying the run's
@@ -426,6 +548,7 @@ public final class RunModel: ObservableObject {
     /// first optimized variant as soon as it lands (progressive results).
     private func appendStreamed(_ partial: OptimizeOutcome) {
         guard phase == .running else { return }   // ignore ticks after resolve/reset
+        disarmWatchdog()                          // a streamed variant is progress
         var variants = outcome?.variants ?? []
         variants.append(contentsOf: partial.variants)
         outcome = OptimizeOutcome(
@@ -440,6 +563,7 @@ public final class RunModel: ObservableObject {
     /// its next tick; the core returns a cancelled outcome cleanly, M7.0a).
     public func cancel() {
         guard phase == .running else { return }
+        disarmWatchdog()
         token.cancel()
     }
 
@@ -469,6 +593,8 @@ public final class RunModel: ObservableObject {
 
     /// Reset after consuming a success (e.g. once M7.8 has taken the outcome).
     public func reset() {
+        disarmWatchdog()
+        runningRequest = nil
         phase = .idle
         progress = nil
         failure = nil
@@ -481,11 +607,18 @@ public final class RunModel: ObservableObject {
 
     private func publish(_ snapshot: RunProgress) {
         guard phase == .running else { return }   // ignore ticks after cancel/reset
+        disarmWatchdog()                          // the run is alive — stand the watchdog down
         progress = snapshot
     }
 
-    private func finish(_ request: RunRequest, _ result: Result<OptimizeOutcome, Error>) {
-        guard phase == .running else { return }    // a reset raced ahead — drop it
+    private func finish(_ request: RunRequest, _ token: CancelToken,
+                        _ result: Result<OptimizeOutcome, Error>) {
+        // Drop a result from a run that is no longer the current one: a reset raced
+        // ahead, OR the setup-stall watchdog already failed this run and a fresh run
+        // started (its late core return must never clobber the new run).
+        guard token === self.token, phase == .running else { return }
+        disarmWatchdog()
+        runningRequest = nil
         switch result {
         case .success(let o):
             if o.cancelled {
@@ -513,8 +646,15 @@ public final class RunModel: ObservableObject {
                 progress = nil
                 phase = .succeeded
             } else {
+                // Surface the core diagnostic — os_log it first so the reason is in
+                // the device log even before the sheet renders, and never leave the
+                // sheet blank when the core throw carries no message.
+                let raw = (error as? TopOptError)?.message ?? String(describing: error)
+                let message = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? RunFailure.unknownSolverError : raw
+                diag("run failed: \(message)")
                 outcome = nil
-                failure = .solver((error as? TopOptError)?.message ?? String(describing: error))
+                failure = .solver(message)
                 phase = .failed
             }
         }

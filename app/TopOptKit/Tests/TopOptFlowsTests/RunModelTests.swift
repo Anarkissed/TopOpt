@@ -313,6 +313,101 @@ final class RunModelTests: XCTestCase {
         XCTAssertNil(model.failure)
     }
 
+    // MARK: - setup-stall watchdog (M7.diag on-device silent failure)
+
+    /// A scheduler that HOLDS the background work instead of running it, so a run
+    /// stays in flight (phase `.running`, no progress) — the on-device stall shape.
+    private final class HeldRunScheduler: RunScheduler {
+        var held: (() -> Void)?
+        func runInBackground(_ work: @escaping () -> Void) { held = work }
+        func runOnMain(_ work: @escaping () -> Void) { work() }
+    }
+
+    /// A watchdog the test fires by hand (standing in for the grace period elapsing).
+    private final class ManualRunWatchdog: RunWatchdog {
+        var fire: (() -> Void)?
+        private(set) var cancelled = false
+        func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel {
+            fire = onStall
+            return { [weak self] in self?.cancelled = true }
+        }
+    }
+
+    /// The core stalls in setup (no progress, no throw): the watchdog converts the
+    /// hung run into an honest failure sheet (not a silent 0% hang) and frees the
+    /// run out of `.running` so Optimize re-enables.
+    func testSetupStallBecomesAFailureSheet() {
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: HeldRunScheduler(), watchdog: dog)
+        model.runner = { _, _, _ in self.accepted() }   // never actually runs (work is held)
+        model.start(request())
+        XCTAssertEqual(model.phase, .running)            // in flight, at 0%
+        XCTAssertNil(model.progress)
+
+        dog.fire?()                                      // grace elapses with no progress
+
+        XCTAssertEqual(model.phase, .failed, "a stall must not stay stuck in .running")
+        XCTAssertEqual(model.failure, .solver(RunFailure.stalledDuringSetup))
+        XCTAssertNil(model.outcome)
+    }
+
+    /// A stall on a run that used the design box (the confirmed on-device trigger)
+    /// names the box in the failure sheet, so the user is pointed at the workaround.
+    func testSetupStallWithDesignBoxNamesTheBox() {
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: HeldRunScheduler(), watchdog: dog)
+        let boxed = RunRequest(
+            modelPath: "/tmp/part.step", material: "PLA",
+            materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
+            resolution: 64, projectName: "Boxed",
+            designBox: .init(min: SIMD3(0, 0, 0), max: SIMD3(50, 50, 50)))
+        model.runner = { _, _, _ in self.accepted() }
+        model.start(boxed)
+        dog.fire?()
+        XCTAssertEqual(model.phase, .failed)
+        XCTAssertEqual(model.failure, .solver(RunFailure.stalledWithDesignBox))
+    }
+
+    /// Once a run shows any progress, the watchdog stands down — a slow-but-healthy
+    /// run is never aborted, and a late watchdog fire is a no-op.
+    func testWatchdogDisarmsOnFirstProgress() {
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: SynchronousRunScheduler(), watchdog: dog)
+        model.runner = { _, progress, _ in
+            _ = progress(0, 2, 1)                        // first tick → disarm
+            return self.accepted()
+        }
+        model.start(request())
+        XCTAssertEqual(model.phase, .succeeded)
+        XCTAssertTrue(dog.cancelled, "watchdog is stood down once the run shows progress")
+        dog.fire?()                                      // a stale fire must do nothing
+        XCTAssertEqual(model.phase, .succeeded)
+    }
+
+    /// The orphaned core computation from a watchdog-failed run may still return
+    /// later; that stale result must not clobber a fresh run (token-identity guard).
+    func testLateReturnFromAStalledRunIsDroppedForTheNewRun() {
+        let sched = HeldRunScheduler()
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: sched, watchdog: dog)
+
+        model.runner = { _, _, _ in self.accepted(count: 3) }   // run 1's (late) result
+        model.start(request())
+        let run1Work = sched.held                               // capture run 1's held work
+        dog.fire?()                                             // run 1 stalls → failed
+        XCTAssertEqual(model.phase, .failed)
+        model.dismissFailure()
+
+        model.runner = { _, _, _ in self.accepted(count: 1) }   // run 2
+        model.start(request())                                  // run 2 in flight (held)
+        XCTAssertEqual(model.phase, .running)
+
+        run1Work?()                                             // run 1 finally returns — stale
+
+        XCTAssertEqual(model.phase, .running, "stale run-1 result must not resolve run 2")
+        XCTAssertNil(model.outcome)
+    }
+
     // MARK: - integration: the REAL bridge on the committed cube fixture
 
     func testRealMinimizePlasticRunReachesTerminalPhase() {
@@ -342,6 +437,34 @@ final class RunModelTests: XCTestCase {
 
         XCTAssertFalse(model.phase.isRunning)
         XCTAssertNotEqual(model.phase, .idle)
+        XCTAssertGreaterThan(progressTicks, 0, "expected at least one SIMP iteration callback")
+    }
+
+    // M7.diag: the production runs flip the solver to MultigridCG (bridge.cpp),
+    // but the desktop Gate-V2 / minimize_plastic tests never set that solver — they
+    // exercise the library-default JacobiCG. So the exact production solver path is
+    // otherwise unexercised (the diagnosed on-device stall lives there). res 8 is
+    // too small to build a multigrid hierarchy (it falls straight back to Jacobi),
+    // so this drives a resolution that engages the MG coarsening at least once,
+    // headlessly, and asserts it terminates and streams progress. A regression that
+    // stalls the MG path at this scale trips the timeout instead of shipping to a
+    // device. Kept modest so it stays a quick guard, not a long solve.
+    func testProductionMultigridPathTerminatesAndReportsProgress() {
+        let model = RunModel(scheduler: GCDRunScheduler())
+        var progressTicks = 0
+        var cancellables = Set<AnyCancellable>()
+        let done = expectation(description: "MultigridCG run reaches a terminal phase")
+        done.assertForOverFulfill = false
+
+        model.$progress.compactMap { $0 }.sink { _ in progressTicks += 1 }.store(in: &cancellables)
+        model.$phase.sink { phase in
+            if phase == .succeeded || phase == .failed || phase == .cancelled { done.fulfill() }
+        }.store(in: &cancellables)
+
+        model.start(request(resolution: 16))
+        wait(for: [done], timeout: 300)
+
+        XCTAssertFalse(model.phase.isRunning, "production MultigridCG path must terminate, not hang")
         XCTAssertGreaterThan(progressTicks, 0, "expected at least one SIMP iteration callback")
     }
 }
