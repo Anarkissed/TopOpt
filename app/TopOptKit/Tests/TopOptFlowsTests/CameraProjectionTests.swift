@@ -64,4 +64,49 @@ final class CameraProjectionTests: XCTestCase {
         XCTAssertFalse(proj.isUsable)
         XCTAssertNil(proj.project(cam.target))
     }
+
+    // MARK: - Full-orbit rotation (shared viewer camera — Stress / Flex / Load-path)
+
+    /// A vertical drag (dy) must change ELEVATION, and elevation must move the view
+    /// matrix — i.e. the orbit is not yaw-only. This pins the shared-camera behaviour all
+    /// three result viewers rely on (they render through the same `OrbitCamera`).
+    func testElevationOrbitChangesViewMatrix() {
+        var cam = framedCamera()
+        let before = cam.viewMatrix()
+        let eyeBefore = cam.eye
+        cam.orbit(dx: 0, dy: 60)                 // pure vertical drag → pitch only
+        XCTAssertNotEqual(cam.viewMatrix(), before, "elevation drag did not move the view")
+        // The eye actually climbed the sphere (pitch applied, not just yaw): its height
+        // above the target changed while the distance is preserved.
+        XCTAssertNotEqual(cam.eye.y, eyeBefore.y, accuracy: 0)
+        XCTAssertEqual(simd_distance(cam.eye, cam.target),
+                       simd_distance(eyeBefore, cam.target), accuracy: 1e-3)
+    }
+
+    /// Azimuth and elevation are independent axes — a horizontal drag yaws without
+    /// touching pitch, a vertical drag pitches without touching yaw.
+    func testAzimuthAndElevationAreIndependent() {
+        var cam = framedCamera()
+        let az0 = cam.azimuth, el0 = cam.elevation
+        cam.orbit(dx: 40, dy: 0)                 // horizontal only
+        XCTAssertNotEqual(cam.azimuth, az0)
+        XCTAssertEqual(cam.elevation, el0, accuracy: 1e-6)
+        let az1 = cam.azimuth
+        cam.orbit(dx: 0, dy: 40)                 // vertical only
+        XCTAssertEqual(cam.azimuth, az1, accuracy: 1e-6)
+        XCTAssertNotEqual(cam.elevation, el0)
+    }
+
+    /// Elevation is clamped just shy of the poles (no gimbal flip): driving the pitch
+    /// hard past vertical in either direction lands exactly on ±maxElevation and the up
+    /// vector never degenerates.
+    func testElevationClampsAtPoles() {
+        var cam = framedCamera()
+        cam.orbit(dx: 0, dy: 100_000)            // slam toward the top pole
+        XCTAssertEqual(cam.elevation, OrbitCamera.maxElevation, accuracy: 1e-5)
+        XCTAssertLessThan(cam.elevation, .pi / 2)    // strictly under 90° → no flip
+        cam.orbit(dx: 0, dy: -200_000)           // slam toward the bottom pole
+        XCTAssertEqual(cam.elevation, -OrbitCamera.maxElevation, accuracy: 1e-5)
+        XCTAssertGreaterThan(cam.elevation, -(.pi / 2))
+    }
 }

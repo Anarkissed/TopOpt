@@ -347,9 +347,11 @@ public struct ResultsScreen: View {
 
     // MARK: - Load-path legend (M7.viz.4 — principal-stress-direction key)
 
-    /// The compact-drawer content width for the load-path FLOW controls — a touch wider
-    /// than the other drawers so the segmented controls read, still slim.
-    private static let flowDrawerWidth: CGFloat = 188
+    /// The content width for the load-path FLOW controls' folder. Wider than the slim
+    /// rail drawers so NO control text wraps — in particular the Motion segmented control
+    /// must fit "Serpentine" on one line — while still reading as a compact right-rail
+    /// folder, not a full panel.
+    private static let flowDrawerWidth: CGFloat = 236
 
     /// The Load-path chip's drawer (handoff 070 redesign): the "alive" flow's compact
     /// controls — motion style, isolate-a-path, body mode, flow speed, wiggle, and a
@@ -364,6 +366,15 @@ public struct ResultsScreen: View {
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(DS.Color.textSecondary.color)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // MODE slot — reserved for the follow-up Stress-point / Anchor selector. Today
+            // there is one mode (load → stress point), shown here as a single locked
+            // segment so the label + spot are already laid out: the next task swaps this
+            // one line for a two-segment `SegmentedGlass` bound to a mode enum, with NO
+            // other change to the folder. (Load-path viewer-fixes handoff: slot left on
+            // purpose; the anchor mode itself is out of scope here.)
+            drawerLabel("Mode")
+            modeSlot
 
             drawerLabel("Motion")
             SegmentedGlass(FlowMotionStyle.allCases.map { .init($0, $0.title) },
@@ -403,7 +414,35 @@ public struct ResultsScreen: View {
             .toggleStyle(SwitchToggleStyle(tint: RGBA(255, 90, 72).color))
             .padding(.top, DS.Space.xxs)
         }
-        .resultsDrawerChrome(width: Self.flowDrawerWidth)
+        .loadPathFolderChrome(width: Self.flowDrawerWidth)
+    }
+
+    /// The Mode slot's current control: a single locked segment reading the active mode.
+    /// Styled to match `SegmentedGlass` (same inset track + lit selected segment) so when
+    /// the follow-up drops a real two-segment selector in, the folder does not reflow. It
+    /// is inert today (one mode), so it takes no binding.
+    private var modeSlot: some View {
+        HStack(spacing: 0) {
+            Text("Load → Stress point")
+                .dsStyle(DS.TypeScale.body)
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DS.Space.sm)
+                .background {
+                    RoundedRectangle(cornerRadius: DS.Radius.segment, style: .continuous)
+                        .fill(DS.Color.fillSelected.color)
+                }
+        }
+        .padding(3)
+        .background {
+            RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                .fill(.black.opacity(0.30))
+                .overlay {
+                    RoundedRectangle(cornerRadius: DS.Radius.field, style: .continuous)
+                        .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)
+                }
+        }
     }
 
     /// A small uppercase section label inside the flow drawer (prototype `label.h`).
@@ -952,6 +991,40 @@ private extension View {
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .dsShadow(.panel)
             .fixedSize()   // never let an ancestor stretch the finished card
+    }
+
+    /// Folder-style chrome for the Load-path drawer. The panel reads as a folder BODY
+    /// with a small tab poking up at its top-TRAILING edge — sitting just to the LEFT of
+    /// the "Load path" chip the folder hangs from (the maintainer's "folder below the
+    /// chip, tab left of it" ask). Same panel surface/stroke/shadow as
+    /// `resultsDrawerChrome`, only wider and tab-topped; exact tab placement is device QA.
+    func loadPathFolderChrome(width: CGFloat) -> some View {
+        let bodyShape = RoundedRectangle(cornerRadius: DS.Radius.panelSmall, style: .continuous)
+        // The tab: a short rounded stub the body's top edge overlaps, so it reads as one
+        // folder. Trailing-aligned (toward the chip) and inset so it clears the corner.
+        // A plain RoundedRectangle (not UnevenRoundedRectangle, which forces a direct
+        // SwiftUICore link that the headless SwiftPM test product can't resolve) — its
+        // bottom corners sit BEHIND the body, so only the rounded top shows as the tab.
+        let tab = RoundedRectangle(cornerRadius: DS.Radius.segment, style: .continuous)
+        return self
+            .frame(width: width, alignment: .leading)
+            .padding(.vertical, DS.Space.m)
+            .padding(.horizontal, DS.Space.l)
+            .background(alignment: .topTrailing) {
+                ZStack(alignment: .topTrailing) {
+                    // Tab first (behind), lifted above the body so its top shows as a folder tab.
+                    // Height 22 with only ~10pt showing above the body keeps the ~9pt
+                    // bottom corner-radius tucked behind the body (no floating pill).
+                    tab.fill(DS.Surface.panel.color)
+                        .overlay(tab.strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                        .frame(width: 66, height: 22)
+                        .offset(x: -DS.Space.xl2, y: -10)
+                    bodyShape.fill(DS.Surface.panel.color)
+                        .overlay(bodyShape.strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                }
+            }
+            .dsShadow(.panel)
+            .fixedSize()   // never let an ancestor stretch the finished folder
     }
 }
 

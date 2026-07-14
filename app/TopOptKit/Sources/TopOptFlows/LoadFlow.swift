@@ -483,18 +483,21 @@ public enum CometMesh {
         let c = frame.color
         // Halo first (dim, wide), then core (bright, tapered), then the head cone.
         // All additive, so draw order does not matter — but core-over-halo keeps the
-        // centre saturated where they overlap.
+        // centre saturated where they overlap. The per-layer alphas are kept modest so
+        // the stacked additive contribution does not blow the tip out to white/pink:
+        // with a deep-red colour and these weights the overlap saturates the RED channel
+        // (reads as a glowing red core) without lifting green/blue enough to desaturate.
         appendTube(&out, centers: frame.centers, tangents: frame.tangents,
-                   radii: frame.haloRadii, color: c, alpha: 0.22 * intensity)
+                   radii: frame.haloRadii, color: c, alpha: 0.16 * intensity)
         appendTube(&out, centers: frame.centers, tangents: frame.tangents,
-                   radii: frame.coreRadii, color: c, alpha: 0.9 * intensity)
+                   radii: frame.coreRadii, color: c, alpha: 0.7 * intensity)
         appendCone(&out, tip: frame.headPosition, dir: frame.headDirection,
                    length: frame.headLength, radius: frame.headRadius,
-                   color: c, alpha: 1.0 * intensity)
+                   color: c, alpha: 0.85 * intensity)
         // A wider, dimmer head halo for the glowing tip.
         appendCone(&out, tip: frame.headPosition, dir: frame.headDirection,
                    length: frame.headLength * 1.25, radius: frame.headRadius * 1.8,
-                   color: c, alpha: 0.30 * intensity)
+                   color: c, alpha: 0.22 * intensity)
         return out
     }
 

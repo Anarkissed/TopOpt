@@ -749,10 +749,16 @@ public final class ResultsModel: ObservableObject {
     /// speed multipliers + the user speed slider scale from this.
     public static let flowLoopPeriod: Double = 3.6
 
-    /// The path colour: a fixed bright red matching the approved "flowing red arrows"
-    /// design. The arrows depict the load FLOW (a path); the stress colour lives in the
-    /// body + the moving bloom, so the arrows stay a consistent, legible red.
-    public static let flowColor = SIMD3<Float>(1.0, 0.28, 0.22)
+    /// The path colour: a fixed deep, saturated red matching the approved "flowing red
+    /// arrows" design. The arrows depict the load FLOW (a path); the stress colour lives
+    /// in the body + the moving bloom, so the arrows stay a consistent, legible red.
+    ///
+    /// The green/blue channels are kept LOW on purpose. The comet is drawn with ADDITIVE
+    /// premultiplied blending (halo + core + head cone stacked), so the red channel
+    /// saturates to 1 fast while any green/blue accumulates on top — a warm red (the old
+    /// `0.28, 0.22`) washed the overlapping core/head out to pink/white. Deep red keeps
+    /// the tip reading red no matter how many additive layers overlap.
+    public static let flowColor = SIMD3<Float>(1.0, 0.12, 0.07)
 
     private var flowCurveCache: (index: Int, curves: [FlowCurve])?
     private var flowSeedCache: (index: Int, seeds: [SIMD3<Float>])?
@@ -884,8 +890,9 @@ public final class ResultsModel: ObservableObject {
     }
 
     /// How hot the bloom centre pushes a vertex (fraction units) as a head passes — a
-    /// cool-blue vertex lifts into the warm band, illustrating the travelling load.
-    static let epicenterStrength: Double = 0.55
+    /// cool-blue vertex lifts clear into the warm/hot band, so the travelling bloom is
+    /// unmistakable against the static field (device QA: the bloom must visibly move).
+    static let epicenterStrength: Double = 0.7
 
     /// The faint full-path guide polylines (world mm) so a route reads even when the
     /// arrow is elsewhere on it — one flattened `[x,y,z]` list per curve. The view draws

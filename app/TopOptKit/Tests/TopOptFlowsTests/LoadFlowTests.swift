@@ -254,14 +254,59 @@ final class LoadFlowTests: XCTestCase {
 
     @MainActor func testFlowIsolationRestrictsVisibleCurves() {
         let m = flowModel()
+        XCTAssertNil(m.flowIsolate)                              // default: none isolated…
+        XCTAssertGreaterThan(m.flowCurveCount, 1)               // …of a genuinely multi-load part
         XCTAssertEqual(m.visibleFlowCurveIndices.count, m.flowCurveCount)   // all by default
+        XCTAssertEqual(m.visibleFlowCurveIndices, Array(0..<m.flowCurveCount))
         XCTAssertEqual(m.flowCometFrames(reduceMotion: false).count, m.flowCurveCount)
         m.flowIsolate = 1
         XCTAssertEqual(m.visibleFlowCurveIndices, [1])           // just the isolated one
         XCTAssertEqual(m.flowCometFrames(reduceMotion: false).count, 1)
+        // Back to all.
+        m.flowIsolate = nil
+        XCTAssertEqual(m.visibleFlowCurveIndices.count, m.flowCurveCount)
         // An out-of-range isolate falls back to all (defensive).
         m.flowIsolate = 99
         XCTAssertEqual(m.visibleFlowCurveIndices.count, m.flowCurveCount)
+    }
+
+    @MainActor func testAdvancingFlowClockMovesHeadsUnlessReduced() {
+        let m = flowModel()
+        m.toggleLoadPath()
+        // Reduced-motion OFF: advancing the flow clock moves the arrow heads.
+        let before = m.flowHeadPositions(reduceMotion: false)
+        m.advanceFlowClock(0.5)
+        let after = m.flowHeadPositions(reduceMotion: false)
+        XCTAssertEqual(before.count, after.count)
+        XCTAssertFalse(before.isEmpty)
+        let moved = zip(before, after).contains { simd_distance($0, $1) > 1e-4 }
+        XCTAssertTrue(moved, "advancing the clock did not move any head (frozen with motion ON)")
+        // Reduced-motion ON: the same clock advance leaves the heads pinned (static).
+        let rBefore = m.flowHeadPositions(reduceMotion: true)
+        m.advanceFlowClock(1.0)
+        let rAfter = m.flowHeadPositions(reduceMotion: true)
+        for (a, b) in zip(rBefore, rAfter) { assertClose(a, b, accuracy: 1e-5) }
+    }
+
+    @MainActor func testStaticStressReadoutUnchangedByFlowClock() {
+        // HONESTY: the moving bloom is a flow overlay; the literal static Stress readout
+        // (`stressTints`) must NOT depend on the arrow heads or the flow clock.
+        let m = flowModel()
+        m.toggleLoadPath()
+        let mesh = try! XCTUnwrap(m.selectedMesh)
+        let field = try! XCTUnwrap(m.selectedStressField)
+        let staticBefore = m.stressTints(for: mesh, field: field, multiplier: 1)
+        m.advanceFlowClock(0.9)                                  // heads move…
+        let staticAfter = m.stressTints(for: mesh, field: field, multiplier: 1)
+        XCTAssertEqual(staticBefore, staticAfter, "the static Stress readout drifted with the flow")
+        // …while the flow's moving-epicenter tints DO change with the clock (the bloom
+        // travels), proving the two paths are independent.
+        let heads0 = m.flowHeadPositions(reduceMotion: false)
+        m.advanceFlowClock(0.9)
+        let heads1 = m.flowHeadPositions(reduceMotion: false)
+        let bloom0 = m.flowStressTints(for: mesh, field: field, heads: heads0)
+        let bloom1 = m.flowStressTints(for: mesh, field: field, heads: heads1)
+        XCTAssertNotEqual(bloom0, bloom1, "the moving bloom did not travel with the clock")
     }
 
     @MainActor func testToggleLoadPathResetsFlowAndIsExclusiveWithFlex() {

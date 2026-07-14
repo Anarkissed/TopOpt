@@ -35,6 +35,8 @@ public struct SegmentedGlass<Value: Hashable>: View {
                 Button { selection = seg.value } label: {
                     Text(seg.label)
                         .dsStyle(DS.TypeScale.body)
+                        .lineLimit(1)                       // never wrap a segment label
+                        .minimumScaleFactor(0.8)            // shrink to fit before truncating
                         .foregroundStyle(isOn ? DS.Color.textPrimary.color
                                               : DS.Color.textPrimary.opacity(0.5).color)
                         .frame(maxWidth: .infinity)

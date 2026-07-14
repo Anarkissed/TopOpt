@@ -1470,10 +1470,16 @@ extension MetalMeshView {
 
             if let stress = inputs.stressTints {
                 // M7.8 results stress overlay: per-vertex colors replace face tints.
-                // Re-upload on mesh change (dirty), when the overlay turns on, OR when
-                // the coupling multiplier moves (the flex loop / failure push) — the
-                // last is what makes the heatmap recolor together with the motion.
-                if dirty || !appliedStress || inputs.stressMultiplier != appliedStressMultiplier {
+                // Re-upload on mesh change (dirty), when the overlay turns on, when the
+                // coupling multiplier moves (the flex loop / failure push), OR — for the
+                // load-path FLOW "Stress" body — when the flow clock advances. In flow
+                // mode the tints change because the moving epicenters (arrow HEADS) shift
+                // the bloom every tick, NOT because a scalar multiplier moves; without the
+                // flow-key trigger the bloom would freeze at the first frame while the
+                // arrows travelled on (the moving bloom was computed but never re-uploaded).
+                let flowTintsMoved = inputs.loadFlowVertices != nil && inputs.loadFlowKey != appliedFlowKey
+                if dirty || !appliedStress || inputs.stressMultiplier != appliedStressMultiplier
+                    || flowTintsMoved {
                     appliedStress = true
                     appliedStressMultiplier = inputs.stressMultiplier
                     renderer.setStressTints(stress)
