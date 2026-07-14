@@ -323,6 +323,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     std::vector<std::array<double, 6>> stress(G.voxel_count(),
                                               std::array<double, 6>{});
     variant.von_mises_field.assign(G.voxel_count(), 0.0);
+    // Per-voxel Cauchy stress tensor, flattened grid-indexed (size
+    // 6*voxel_count): the same `stress` array below, retained instead of
+    // discarded. Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa; zero off the
+    // printed set, exactly like von_mises_field.
+    variant.stress_tensor_field.assign(6 * G.voxel_count(), 0.0);
     // M7.disp: mark the nodes attached to at least one printed voxel; the
     // displacement field is exposed only there (zero elsewhere), mirroring how
     // von_mises_field is zero off the printed set.
@@ -343,6 +348,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                                             params.poisson, G.spacing, ue);
           stress[G.index(i, j, k)] = st.sigma;
           variant.von_mises_field[G.index(i, j, k)] = st.von_mises;
+          const std::size_t base = 6 * G.index(i, j, k);
+          for (int c = 0; c < 6; ++c)
+            variant.stress_tensor_field[base + static_cast<std::size_t>(c)] =
+                st.sigma[static_cast<std::size_t>(c)];
           if (st.von_mises > max_von_mises) max_von_mises = st.von_mises;
         }
     const double max_interlayer = max_interlayer_tension(G, stress, build_dir);
