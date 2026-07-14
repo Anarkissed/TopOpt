@@ -8,12 +8,17 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <exception>
 #include <functional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#if defined(__APPLE__)
+#include <os/log.h>
+#endif
 
 #include "topopt/fea.hpp"
 #include "topopt/materials.hpp"
@@ -28,6 +33,37 @@
 
 namespace topoptbridge {
 namespace {
+
+// M7.diag (on-device optimize silent-failure): a run that stalls in the core
+// setup/solve emits NO C++ exception, so the app has nothing to surface and the
+// run appears to "hang at 0%". These checkpoints trace each setup step to the
+// unified log (os_log on Apple → Console.app + Xcode; stderr elsewhere) so the
+// LAST line printed before a stall pinpoints where the run is stuck, and the
+// per-step counts (loads/anchors/grid dims/bbox) capture the exact load case the
+// solver was handed on device. Cheap: a handful of lines per run, not per
+// iteration. Prefix is greppable in a noisy device log.
+void bridge_log(const std::string& msg) {
+#if defined(__APPLE__)
+  os_log(OS_LOG_DEFAULT, "[TopOptBridge] %{public}s", msg.c_str());
+#else
+  std::fprintf(stderr, "[TopOptBridge] %s\n", msg.c_str());
+  std::fflush(stderr);
+#endif
+}
+
+// One-line summary of a voxel grid: dims, spacing, min/max corners (bbox) and
+// solid-voxel count — the STEP-2 "grid dims + bbox" the diagnosis asks be logged.
+std::string grid_summary(const topopt::VoxelGrid& g) {
+  const double mx = g.origin.x + g.nx * g.spacing;
+  const double my = g.origin.y + g.ny * g.spacing;
+  const double mz = g.origin.z + g.nz * g.spacing;
+  return "grid " + std::to_string(g.nx) + "x" + std::to_string(g.ny) + "x" +
+         std::to_string(g.nz) + " spacing=" + std::to_string(g.spacing) +
+         " bbox=[" + std::to_string(g.origin.x) + "," + std::to_string(g.origin.y) +
+         "," + std::to_string(g.origin.z) + "]..[" + std::to_string(mx) + "," +
+         std::to_string(my) + "," + std::to_string(mz) + "] solid=" +
+         std::to_string(g.solid_count());
+}
 
 // TriangleMesh -> ImportedMesh (flattened buffers + watertight flag).
 ImportedMesh to_imported(const topopt::TriangleMesh& m,
@@ -424,9 +460,12 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     BridgeError& err) {
   OptimizeResult result;
   try {
+    bridge_log("selfweight: ENTER res=" + std::to_string(resolution) +
+               " path='" + stl_path + "'");
     // Part -> voxel grid.
     topopt::TriangleMesh mesh = import_any(stl_path);
     topopt::VoxelGrid grid = topopt::voxelize(mesh, resolution);
+    bridge_log("selfweight: voxelized " + grid_summary(grid));
 
     // Mounting face: the minimum-x boundary. Tag its solid voxels Fixture and
     // clamp every node on the i == 0 plane in all three DOFs (the same clamped-
@@ -494,12 +533,18 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
 
     set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
 
+    bridge_log("selfweight: entering minimize_plastic (solver=MultigridCG) " +
+               grid_summary(grid) + " dirichlet_bcs=" + std::to_string(bcs.size()));
     topopt::MinimizePlasticResult mp =
         topopt::minimize_plastic(grid, it->second, material_name, bcs, rules, opts);
     result = to_optimize_result(mp, grid);
+    bridge_log("selfweight: minimize_plastic returned variants=" +
+               std::to_string(result.variants.size()) +
+               " accepted=" + std::to_string(result.accepted_count));
   } catch (const std::exception& e) {
     err.ok = false;
     err.message = e.what();
+    bridge_log(std::string("selfweight: THREW: ") + e.what());
     return OptimizeResult{};
   }
   return result;
@@ -514,8 +559,17 @@ OptimizeResult run_minimize_plastic_loadcase(
 #ifdef TOPOPT_BRIDGE_HAS_OCCT
   OptimizeResult result;
   try {
+    bridge_log("loadcase: ENTER res=" + std::to_string(resolution) +
+               " anchors=" + std::to_string(load_case.anchor_face_ids.size()) +
+               " load_groups=" + std::to_string(load_case.load_group_sizes.size()) +
+               " load_faces=" + std::to_string(load_case.load_face_ids.size()) +
+               " minimize_plastic=" + std::to_string(load_case.minimize_plastic ? 1 : 0) +
+               " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0));
+    bridge_log("loadcase: importing STEP '" + step_path + "'");
     topopt::StepModel model = topopt::import_step_file(step_path);
+    bridge_log("loadcase: STEP imported; voxelizing");
     topopt::VoxelGrid grid = topopt::voxelize(model.mesh, resolution);
+    bridge_log("loadcase: voxelized " + grid_summary(grid));
 
     // Anchors -> Fixture (clamped + retained). Snapshot the anchors-only grid as
     // the clean base for per-group traction, so each group's traction covers ONLY
@@ -726,12 +780,33 @@ OptimizeResult run_minimize_plastic_loadcase(
 
     set_variant_stream(opts, result_grid, variant_fn, variant_ctx);  // progressive results
 
+    // The last checkpoint before the solve: if the device log stops here, the
+    // stall is INSIDE minimize_plastic (the first FEA solve runs before the first
+    // progress tick), not in the app-side setup. Report the exact system size and
+    // BC/load counts handed to the solver — an empty external set means the run
+    // fell back to self-weight + a min-x clamp (see any_fixture above).
+    //
+    // When a design box is set, minimize_plastic solves on the EXPANDED grid
+    // (`result_grid`), not the part grid — and that expanded grid is the diagnosed
+    // trigger (odd dims force the Jacobi-CG fallback over a large soft-void domain).
+    // Log both so the device console shows the grid that actually hangs.
+    bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG)")
+               + " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0)
+               + " part " + grid_summary(grid)
+               + (load_case.has_design_box ? " | SOLVED-ON expanded " + grid_summary(result_grid)
+                                           : std::string(" | SOLVED-ON part grid"))
+               + " nodal_loads=" + std::to_string(external.size())
+               + " dirichlet_bcs=" + std::to_string(bcs.size()));
     topopt::MinimizePlasticResult mp = topopt::minimize_plastic(
         grid, it->second, material_name, bcs, rules, opts);
     result = to_optimize_result(mp, result_grid);
+    bridge_log("loadcase: minimize_plastic returned variants=" +
+               std::to_string(result.variants.size()) +
+               " accepted=" + std::to_string(result.accepted_count));
   } catch (const std::exception& e) {
     err.ok = false;
     err.message = e.what();
+    bridge_log(std::string("loadcase: THREW: ") + e.what());
     return OptimizeResult{};
   }
   return result;
