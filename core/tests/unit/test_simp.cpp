@@ -37,6 +37,7 @@ using topopt::SimpCompliance;
 using topopt::SimpOptimizeResult;
 using topopt::SimpOptions;
 using topopt::SimpParams;
+using topopt::SolverKind;
 using topopt::VoxelGrid;
 using topopt::VoxelTag;
 
@@ -1032,6 +1033,103 @@ int main() {
         topopt::simp_optimize(g, p, bcs, loads, optpjc);
     CHECK(rjc.cancelled && rjc.iterations == 4,
           "cancel(projected): mid-stage cancel stops the continuation");
+  }
+
+  // ==========================================================================
+  // 13. Multigrid solver opt-in (handoff 073). The geometric-multigrid-
+  //     preconditioned CG (fea_solve_mgcg) is wired into the optimizer as an
+  //     OPT-IN accelerator via SolverKind / SimpOptions::solver, defaulting OFF.
+  //     Proves: (a) the DEFAULT path is genuinely Jacobi-CG (used_multigrid ==
+  //     false), (b) MultigridCG actually engages on a 2x-divisible grid
+  //     (used_multigrid == true — not just a silent fallback), and (c) the SAME
+  //     optimization problem run through the full loop with JacobiCG vs
+  //     MultigridCG produces the SAME design (max|drho| ~ 1e-6), the SAME final
+  //     compliance (~1e-6 relative), and the identical accepted/rejected outcome
+  //     — the "same result, faster engine" proof at the OPTIMIZER level (handoff
+  //     072 proved it at the single-solve level; this survives iteration after
+  //     iteration through the OC updates).
+  // ==========================================================================
+  {
+    VoxelGrid g = make_solid_grid(8, 4, 4, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -1.0);
+
+    SimpParams p;
+    p.youngs_modulus = 1.0;
+    p.poisson = 0.3;
+    p.penalty = 3.0;
+    p.density_min = 1e-3;
+
+    std::vector<double> d = simp_uniform_density(g, 0.5);
+
+    // 13a. DEFAULT simp_compliance (no solver_kind arg) runs Jacobi-CG: the
+    //      multigrid path is not reached unless a caller opts in.
+    SimpCompliance def = topopt::simp_compliance(g, p, d, bcs, loads, 1e-10, 0);
+    CHECK(!def.cg.used_multigrid,
+          "mgcg: default simp_compliance uses Jacobi-CG (used_multigrid false)");
+    CHECK(def.cg.mg_levels == 0,
+          "mgcg: default simp_compliance reports no multigrid levels");
+
+    // 13b. Explicitly-selected JacobiCG is identical to the default (still
+    //      Jacobi-CG), and MultigridCG genuinely engages the V-cycle hierarchy
+    //      on this 2x-divisible grid (used_multigrid true, >= 2 levels).
+    SimpCompliance jac = topopt::simp_compliance(g, p, d, bcs, loads, 1e-10, 0,
+                                                 nullptr, nullptr,
+                                                 SolverKind::JacobiCG);
+    CHECK(!jac.cg.used_multigrid,
+          "mgcg: explicit JacobiCG uses Jacobi-CG (used_multigrid false)");
+    SimpCompliance mg = topopt::simp_compliance(g, p, d, bcs, loads, 1e-10, 0,
+                                                nullptr, nullptr,
+                                                SolverKind::MultigridCG);
+    CHECK(mg.cg.used_multigrid,
+          "mgcg: MultigridCG engages the multigrid path (used_multigrid true)");
+    CHECK(mg.cg.mg_levels >= 2,
+          "mgcg: multigrid hierarchy has >= 2 levels on an 8x4x4 grid");
+    // Same system, same tolerance => same displacement field and compliance.
+    double max_du = 0.0;
+    for (std::size_t i = 0; i < jac.solution.u.size(); ++i)
+      max_du = std::max(max_du, std::fabs(jac.solution.u[i] - mg.solution.u[i]));
+    double max_abs_u = 0.0;
+    for (double v : jac.solution.u) max_abs_u = std::max(max_abs_u, std::fabs(v));
+    CHECK(max_du <= 1e-6 * max_abs_u,
+          "mgcg: single-solve field agrees Jacobi-CG vs MG-CG (rel 1e-6)");
+    CHECK(near(jac.compliance, mg.compliance, 1e-6 * std::fabs(jac.compliance)),
+          "mgcg: single-solve compliance agrees Jacobi-CG vs MG-CG");
+
+    // 13c. Same result through the FULL optimize loop. change_tol = 0 forces
+    //      both runs to the full iteration cap (identical iteration counts and
+    //      accepted/rejected outcome by construction), so the comparison
+    //      isolates the solver: iteration after iteration the MG-accelerated
+    //      design must track the Jacobi design.
+    SimpOptions base;
+    base.volume_fraction = 0.4;
+    base.filter_radius = 1.5;
+    base.move = 0.2;
+    base.max_iterations = 15;
+    base.change_tol = 0.0;   // run the full cap on both -> deterministic outcome
+    base.cg_tolerance = 1e-10;
+
+    SimpOptions oj = base;  oj.solver = SolverKind::JacobiCG;
+    SimpOptions om = base;  om.solver = SolverKind::MultigridCG;
+    SimpOptimizeResult rj = topopt::simp_optimize(g, p, bcs, loads, oj);
+    SimpOptimizeResult rm = topopt::simp_optimize(g, p, bcs, loads, om);
+
+    // Identical accepted/rejected outcome and iteration count.
+    CHECK(rj.iterations == rm.iterations,
+          "mgcg: optimize iteration count identical (JacobiCG vs MultigridCG)");
+    CHECK(rj.converged == rm.converged,
+          "mgcg: optimize converged/outcome identical (JacobiCG vs MultigridCG)");
+
+    // Final designs agree within a tight tolerance, iteration after iteration.
+    double max_drho = 0.0;
+    bool sized = rj.design.size() == rm.design.size();
+    for (std::size_t e = 0; sized && e < rj.design.size(); ++e)
+      max_drho = std::max(max_drho, std::fabs(rj.design[e] - rm.design[e]));
+    CHECK(sized, "mgcg: optimize designs are the same size");
+    CHECK(max_drho <= 1e-6,
+          "mgcg: final design agrees JacobiCG vs MultigridCG (max|drho| 1e-6)");
+    CHECK(near(rj.compliance, rm.compliance, 1e-6 * std::fabs(rj.compliance)),
+          "mgcg: final compliance agrees JacobiCG vs MultigridCG (rel 1e-6)");
   }
 
   if (g_failures == 0) {
