@@ -1132,6 +1132,111 @@ int main() {
           "mgcg: final compliance agrees JacobiCG vs MultigridCG (rel 1e-6)");
   }
 
+  // ==========================================================================
+  // 14. REALISTIC multi-level same-answer proof (handoff 074). This is the
+  //     evidence that justifies turning MultigridCG ON at the app's production
+  //     optimize entry point. It runs the SAME optimization through the FULL
+  //     simp_optimize loop TWICE — once JacobiCG, once MultigridCG — on a
+  //     realistic ~32^3 grid (a >= 3-level multigrid hierarchy, vs the 8x4x4 /
+  //     2-level grid of §13). change_tol = 0 forces both runs to the full
+  //     iteration cap, so iteration counts + accepted/rejected outcome are
+  //     identical by construction and the comparison isolates the solver.
+  //     Proves the fast engine == the slow engine at production scale:
+  //     identical iterations/outcome, final max|drho| <= 1e-6, compliance to
+  //     1e-6 relative. Then a speedup-REALITY check: it probes every analysis
+  //     density the MultigridCG loop visited and reports how many engaged the
+  //     V-cycle vs fell back to exact Jacobi-CG. Correctness holds either way
+  //     (a fallback IS an exact Jacobi-CG solve); this tells us whether real
+  //     filtered/coherent SIMP fields genuinely get the multigrid win rather
+  //     than silently falling back.
+  // ==========================================================================
+  {
+    VoxelGrid g = make_solid_grid(32, 32, 32, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -1.0);
+
+    SimpParams p;
+    p.youngs_modulus = 1.0;
+    p.poisson = 0.3;
+    p.penalty = 3.0;
+    p.density_min = 1e-3;
+
+    // 14a. On this 32^3 grid the hierarchy is genuinely multi-level (>= 3 grid
+    //      levels) and MultigridCG engages the V-cycle on a real filtered start
+    //      field — not a silent fallback to Jacobi.
+    std::vector<double> d0 = simp_uniform_density(g, 0.5);
+    SimpCompliance mg0 = topopt::simp_compliance(g, p, d0, bcs, loads, 1e-10, 0,
+                                                 nullptr, nullptr,
+                                                 SolverKind::MultigridCG);
+    CHECK(mg0.cg.used_multigrid,
+          "realistic: MultigridCG engages the V-cycle at 32^3 (not a fallback)");
+    CHECK(mg0.cg.mg_levels >= 3,
+          "realistic: 32^3 multigrid hierarchy has >= 3 levels");
+
+    // 14b. Same optimization, full loop, both engines. change_tol = 0 => both
+    //      hit the cap => identical iteration count and accepted/rejected outcome
+    //      by construction, isolating the solver. The MultigridCG run also
+    //      captures the analysis density it visits each OC iteration (read-only
+    //      playback keyframe — the field the penalized solve uses), so we can
+    //      afterward probe how many of those solves the V-cycle accelerated.
+    SimpOptions base;
+    base.volume_fraction = 0.4;
+    base.filter_radius = 1.5;
+    base.move = 0.2;
+    base.max_iterations = 10;  // realistic multi-iteration loop; keeps the whole
+                               // test well under ~2 min with margin for slower CI
+    base.change_tol = 0.0;     // run the full cap on both -> deterministic
+    base.cg_tolerance = 1e-10;
+
+    std::vector<std::vector<double>> mg_fields;
+    SimpOptions oj = base;  oj.solver = SolverKind::JacobiCG;
+    SimpOptions om = base;  om.solver = SolverKind::MultigridCG;
+    om.keyframe_stride = 1;
+    om.keyframe = [&](const std::vector<double>& analysis_density) {
+      mg_fields.push_back(analysis_density);
+    };
+
+    SimpOptimizeResult rj = topopt::simp_optimize(g, p, bcs, loads, oj);
+    SimpOptimizeResult rm = topopt::simp_optimize(g, p, bcs, loads, om);
+
+    CHECK(rj.iterations == rm.iterations,
+          "realistic: optimize iteration count identical (JacobiCG vs MultigridCG)");
+    CHECK(rj.converged == rm.converged,
+          "realistic: optimize converged/outcome identical (JacobiCG vs MultigridCG)");
+
+    double max_drho = 0.0;
+    bool sized = rj.design.size() == rm.design.size();
+    for (std::size_t e = 0; sized && e < rj.design.size(); ++e)
+      max_drho = std::max(max_drho, std::fabs(rj.design[e] - rm.design[e]));
+    CHECK(sized, "realistic: optimize designs are the same size");
+    CHECK(max_drho <= 1e-6,
+          "realistic: final design agrees JacobiCG vs MultigridCG (max|drho| 1e-6)");
+    CHECK(near(rm.compliance, rj.compliance, 1e-6 * std::fabs(rj.compliance)),
+          "realistic: final compliance agrees JacobiCG vs MultigridCG (rel 1e-6)");
+
+    // 14c. Speedup-REALITY check: re-solve each analysis density the MultigridCG
+    //      loop visited (same tolerance) and count V-cycle vs Jacobi-CG fallback.
+    //      Deterministic + stateless, so each probe reproduces the loop solve's
+    //      own MG-vs-fallback decision on that exact field.
+    int mg_used = 0, mg_fell_back = 0, levels = 0;
+    for (const std::vector<double>& fld : mg_fields) {
+      SimpCompliance c = topopt::simp_compliance(g, p, fld, bcs, loads,
+                                                 base.cg_tolerance, 0, nullptr,
+                                                 nullptr, SolverKind::MultigridCG);
+      if (c.cg.used_multigrid) { ++mg_used; levels = c.cg.mg_levels; }
+      else ++mg_fell_back;
+    }
+    std::printf(
+        "realistic(32^3, cap %d): MultigridCG V-cycle engaged on %d/%zu analysis "
+        "densities the loop visited (%d fell back to exact Jacobi-CG); hierarchy "
+        "= %d levels; final compliance jac=%.10g mg=%.10g; max|drho|=%.3e over %d "
+        "iters\n",
+        base.max_iterations, mg_used, mg_fields.size(), mg_fell_back, levels,
+        rj.compliance, rm.compliance, max_drho, rm.iterations);
+    CHECK(!mg_fields.empty(),
+          "realistic: the MultigridCG loop visited at least one analysis density");
+  }
+
   if (g_failures == 0) {
     std::printf("simp: all %d checks passed\n", g_checks);
     return 0;

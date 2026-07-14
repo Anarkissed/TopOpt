@@ -460,6 +460,12 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
+    // Production runs use the geometric-multigrid accelerator (handoff 072/073): it
+    // solves the identical system to the same tolerance and falls back to exact
+    // Jacobi-CG if a hierarchy is not applicable, so the result is always correct.
+    // The library default stays JacobiCG so Gate-V2 and the locked reference are
+    // untouched. This is the flip.
+    opts.simp.solver = topopt::SolverKind::MultigridCG;
     // Self-weight body load in mm-MPa-consistent units. The material density from
     // materials.json is g/cm^3 and lengths are mm, so density*gravity must be in
     // N/mm^3: fold the g/cm^3 -> t/mm^3 factor (1e-9) into standard gravity in
@@ -610,6 +616,12 @@ OptimizeResult run_minimize_plastic_loadcase(
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
+    // Production runs use the geometric-multigrid accelerator (handoff 072/073): it
+    // solves the identical system to the same tolerance and falls back to exact
+    // Jacobi-CG if a hierarchy is not applicable, so the result is always correct.
+    // The library default stays JacobiCG so Gate-V2 and the locked reference are
+    // untouched. This is the flip.
+    opts.simp.solver = topopt::SolverKind::MultigridCG;
     opts.external_loads = external;  // the user's load case (mode a); empty => self-weight
     // gravity_direction defines the reported build orientation = its unit negation.
     opts.gravity_direction =
