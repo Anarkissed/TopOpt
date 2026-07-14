@@ -41,6 +41,10 @@ public struct ResultsScreen: View {
     /// Whether the hot-spot marker's value/margin callout is expanded (tap to toggle).
     @State private var hotSpotExpanded = false
     @StateObject private var videoExport = VideoExportModel()
+    /// The ONE shared orbit camera for this results stage (STEP 1). The Metal viewer AND
+    /// the orientation gizmo both drive it, so dragging the model turns the cube and
+    /// tapping the cube orbits the model.
+    @StateObject private var cameraModel = OrbitCameraModel()
     /// Drives the Play animation: a ~30 fps tick that advances the morph scrub while
     /// `model.playing`, so Play actually plays (previously it required a manual drag).
     @State private var ticker = Timer.publish(every: 1.0 / 30.0, on: .main, in: .common).autoconnect()
@@ -77,6 +81,7 @@ public struct ResultsScreen: View {
             // with the scrub. Pixels are device QA (the M7 /app/ standard).
             DS.Color.background.color.ignoresSafeArea()
             MetalMeshView(mesh: viewerMesh,
+                          camera: cameraModel,
                           onProjection: { projection = $0 },
                           stressTints: stressTints,
                           stressMultiplier: Float(stressMultiplier),
@@ -100,6 +105,7 @@ public struct ResultsScreen: View {
             savingsTabs
             mediaPlayer
             orientationCorner
+            orientationGizmo
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transition(.opacity)
@@ -921,6 +927,25 @@ public struct ResultsScreen: View {
             .disabled(!model.hasHistory)
             .opacity(model.hasHistory ? 1 : 0.35)
         }
+    }
+
+    // MARK: - Top-left: orientation gizmo (ViewCube)
+
+    /// The ViewCube-style orientation widget, pinned TOP-LEFT. That corner is the only
+    /// one clear on every results viewer (Stress/Flex/Load-path): the right rail holds
+    /// the viz chips + their drawers and the recommended-orientation cube, the bottom-left
+    /// holds the savings tabs, and the bottom-centre holds the media player. It sits just
+    /// under the top nav bar so it never collides with the Back / project chrome.
+    private var orientationGizmo: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                OrientationGizmoView(camera: cameraModel)
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(.top, 84)
+        .padding(.leading, DS.Space.xl3)
     }
 
     // MARK: - Bottom-right: orientation cube + sheet

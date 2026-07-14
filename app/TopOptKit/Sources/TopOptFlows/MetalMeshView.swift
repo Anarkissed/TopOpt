@@ -20,6 +20,7 @@
 import SwiftUI
 import TopOptDesign
 import simd
+import Combine
 
 #if canImport(MetalKit)
 import MetalKit
@@ -1220,6 +1221,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
 /// two platform representables (and the Coordinator) share one signature.
 struct MeshViewInputs {
     var mesh: ViewerMesh?
+    /// The shared orbit-camera source of truth (STEP 1). When present the viewer reads
+    /// its orientation/zoom from this model and routes gestures back into it, so a
+    /// sibling orientation gizmo drives — and mirrors — the exact same state. nil keeps
+    /// the legacy self-owned camera (offscreen thumbnails, previews).
+    var camera: OrbitCameraModel?
     var selection: SelectionModel?
     /// Per-face tint (rgba) — role-aware (anchor green); overrides the palette.
     var faceTints: [FaceID: SIMD4<Float>]?
@@ -1279,7 +1285,7 @@ struct MeshViewInputs {
 public struct MetalMeshView: UIViewRepresentable {
     let inputs: MeshViewInputs
 
-    public init(mesh: ViewerMesh?, selection: SelectionModel? = nil,
+    public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
                 showGround: Bool = false, faceToolActive: Bool = false,
@@ -1291,7 +1297,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
-        inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
+        inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
@@ -1327,7 +1333,7 @@ public struct MetalMeshView: UIViewRepresentable {
 public struct MetalMeshView: NSViewRepresentable {
     let inputs: MeshViewInputs
 
-    public init(mesh: ViewerMesh?, selection: SelectionModel? = nil,
+    public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), settleAnimated: Bool = false,
                 showGround: Bool = false, faceToolActive: Bool = false,
@@ -1339,7 +1345,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
-        inputs = MeshViewInputs(mesh: mesh, selection: selection, faceTints: faceTints,
+        inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
             onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
@@ -1397,8 +1403,14 @@ extension MetalMeshView {
         let active: Set<FaceID>
     }
 
+    @MainActor
     public final class Coordinator: NSObject {
         var renderer: MeshRenderer?
+        /// The shared camera source of truth (STEP 1), when the host provides one. The
+        /// renderer's own `camera` becomes a mirror kept in sync from this via `sink`.
+        private var cameraModel: OrbitCameraModel?
+        private var cameraCancellable: AnyCancellable?
+        private weak var boundView: MTKView?
         private var appliedSignature: [Float]?
         private var appliedTint: TintKey?
         private var lastSettleVector: SIMD4<Float>?
@@ -1435,6 +1447,8 @@ extension MetalMeshView {
         /// camera projection — each only when it actually changes.
         func apply(_ inputs: MeshViewInputs, to view: MTKView) {
             guard let renderer else { return }
+            boundView = view
+            attachCameraModel(inputs.camera, to: view, renderer: renderer)
             faceToolActive = inputs.faceToolActive
             onPickFace = inputs.onPickFace
             onMiss = inputs.onMiss
@@ -1444,7 +1458,19 @@ extension MetalMeshView {
             let sig = inputs.mesh.map(meshSignature)
             if sig != appliedSignature {
                 appliedSignature = sig
-                if let mesh = inputs.mesh { renderer.setMesh(mesh) }
+                if let mesh = inputs.mesh {
+                    // With a shared model, mirror its orientation onto the renderer BEFORE
+                    // framing (so the fit keeps the user's azimuth/elevation), then hand the
+                    // freshly-framed distance/target back to the model — it stays the single
+                    // source of truth.
+                    if let model = cameraModel {
+                        renderer.camera = model.camera
+                        renderer.setMesh(mesh)
+                        model.adopt(renderer.camera)
+                    } else {
+                        renderer.setMesh(mesh)
+                    }
+                }
                 appliedTint = nil            // rebuild highlight for the new mesh
                 lastSettleVector = nil       // re-apply settle for the new mesh
                 dirty = true
@@ -1612,6 +1638,28 @@ extension MetalMeshView {
             return tint
         }
 
+        /// Subscribe to the shared camera model (STEP 1): mirror every published camera
+        /// onto the renderer and redraw. This is how a drag/snap the GIZMO triggers, or
+        /// the eased snap animation, reaches the Metal view without a full SwiftUI pass.
+        /// Idempotent — re-attaching the same model is a no-op.
+        private func attachCameraModel(_ model: OrbitCameraModel?, to view: MTKView, renderer: MeshRenderer) {
+            guard cameraModel !== model else { return }
+            cameraModel = model
+            cameraCancellable = nil
+            guard let model else { return }
+            renderer.camera = model.camera
+            cameraCancellable = model.$camera.sink { [weak self, weak view, weak renderer] cam in
+                // `$camera` is only ever mutated on the main actor (the model is
+                // @MainActor), so this delivery is already on main.
+                MainActor.assumeIsolated {
+                    guard let self, let view, let renderer else { return }
+                    renderer.camera = cam
+                    self.redraw(view)
+                    self.publishProjection(from: view)
+                }
+            }
+        }
+
         /// Compute + publish the camera→screen projection when it has changed.
         private func publishProjection(from view: MTKView) {
             guard let renderer, let onProjection else { return }
@@ -1652,16 +1700,24 @@ extension MetalMeshView {
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
             let t = g.translation(in: view)
-            renderer?.camera.orbit(dx: Float(t.x), dy: Float(t.y))
+            if let model = cameraModel {
+                model.orbit(dx: Float(t.x), dy: Float(t.y))   // sink redraws + publishes
+            } else {
+                renderer?.camera.orbit(dx: Float(t.x), dy: Float(t.y))
+                redraw(view); publishProjection(from: view)
+            }
             g.setTranslation(.zero, in: view)
-            redraw(view); publishProjection(from: view)
         }
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
             guard let view = g.view as? MTKView, g.scale > 0 else { return }
-            renderer?.camera.zoom(Float(1 / g.scale))  // spread (scale>1) → closer
+            if let model = cameraModel {
+                model.zoom(Float(1 / g.scale))
+            } else {
+                renderer?.camera.zoom(Float(1 / g.scale))  // spread (scale>1) → closer
+                redraw(view); publishProjection(from: view)
+            }
             g.scale = 1
-            redraw(view); publishProjection(from: view)
         }
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
@@ -1672,16 +1728,24 @@ extension MetalMeshView {
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
             let t = g.translation(in: view)
-            renderer?.camera.orbit(dx: Float(t.x), dy: Float(-t.y))  // AppKit y is up
+            if let model = cameraModel {
+                model.orbit(dx: Float(t.x), dy: Float(-t.y))   // AppKit y is up
+            } else {
+                renderer?.camera.orbit(dx: Float(t.x), dy: Float(-t.y))
+                redraw(view); publishProjection(from: view)
+            }
             g.setTranslation(.zero, in: view)
-            redraw(view); publishProjection(from: view)
         }
 
         @objc func handleMagnify(_ g: NSMagnificationGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
-            renderer?.camera.zoom(Float(1 / (1 + g.magnification)))
+            if let model = cameraModel {
+                model.zoom(Float(1 / (1 + g.magnification)))
+            } else {
+                renderer?.camera.zoom(Float(1 / (1 + g.magnification)))
+                redraw(view); publishProjection(from: view)
+            }
             g.magnification = 0
-            redraw(view); publishProjection(from: view)
         }
 
         @objc func handleClick(_ g: NSClickGestureRecognizer) {
@@ -1697,13 +1761,18 @@ extension MetalMeshView {
 
 #else  // !canImport(MetalKit) — keep the workspace compiling everywhere.
 public struct MetalMeshView: View {
-    public init(mesh: ViewerMesh?, selection: SelectionModel? = nil,
+    public init(mesh: ViewerMesh?, camera: OrbitCameraModel? = nil, selection: SelectionModel? = nil,
                 faceTints: [FaceID: SIMD4<Float>]? = nil,
                 settleRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
                 settleAnimated: Bool = false, showGround: Bool = false,
                 faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil, onProjection: ((CameraProjection) -> Void)? = nil,
-                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = []) {}
+                stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
+                flexDisplacements: [Float]? = nil, flexScale: Float = 0,
+                loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
+                designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
+                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {}
     public var body: some View { DS.Color.background.color }
 }
 #endif
