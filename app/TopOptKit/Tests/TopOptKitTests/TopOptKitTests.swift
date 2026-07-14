@@ -229,6 +229,28 @@ final class TopOptKitTests: XCTestCase {
             XCTAssertEqual(v.meshIndices.count % 3, 0)
             XCTAssertEqual(v.meshIndices.count, v.meshTriangleCount * 3)
             XCTAssertEqual(v.vonMisesField.count, voxelCount, "von Mises field is grid-indexed")
+            // M7.viz.5 load→anchor flow: the per-voxel Cauchy stress TENSOR must FLOW
+            // from the (freshly built) xcframework — 6 components per voxel, Voigt
+            // [xx,yy,zz,xy,yz,zx] with true shear. Proving it is populated (not empty)
+            // AND that von Mises reconstructed from it (via the core's own formula)
+            // matches the trusted vonMisesField voxel-for-voxel is the end-to-end guard
+            // that the app reads the SAME convention the core wrote — a mislabeled order /
+            // doubled shear / stale (fieldless) xcframework fails here. (Computed inline
+            // from the raw bridge array so this bridge-layer test needs no TopOptFlows.)
+            XCTAssertEqual(v.stressTensorField.count, 6 * voxelCount,
+                           "stress tensor is 6-per-voxel, grid-indexed (drives the anchor flow)")
+            XCTAssertTrue(v.stressTensorField.contains { $0 != 0 && $0.isFinite },
+                          "a loaded, accepted variant must carry non-zero stress")
+            for idx in stride(from: 0, to: voxelCount, by: max(1, voxelCount / 40)) {
+                let b = 6 * idx
+                let xx = v.stressTensorField[b], yy = v.stressTensorField[b + 1], zz = v.stressTensorField[b + 2]
+                let xy = v.stressTensorField[b + 3], yz = v.stressTensorField[b + 4], zx = v.stressTensorField[b + 5]
+                let dev = 0.5 * (pow(xx - yy, 2) + pow(yy - zz, 2) + pow(zz - xx, 2))
+                let recon = (dev + 3 * (xy * xy + yz * yz + zx * zx)).squareRoot()
+                XCTAssertEqual(recon, v.vonMisesField[idx],
+                               accuracy: 1e-3 * (1 + abs(v.vonMisesField[idx])),
+                               "von Mises from the tensor must match the scalar at voxel \(idx)")
+            }
             // The displacement field must FLOW for an accepted variant: size is
             // 3·(nx+1)(ny+1)(nz+1) (DOF-ordered, per NODE — NOT per voxel), and a loaded
             // part actually deflects, so at least one component is non-zero + finite.

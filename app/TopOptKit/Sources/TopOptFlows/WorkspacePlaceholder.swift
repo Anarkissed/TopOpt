@@ -150,6 +150,11 @@ public struct WorkspacePlaceholder: View {
                               // applied load). Empty → the results screen falls back to
                               // the most-deflected node.
                               loadLocations: loadFlowSeeds,
+                              // M7.viz.5 load→anchor flow: the per-load force directions
+                              // d̂ (index-aligned with the seeds) and the anchor face
+                              // centroids — the flux streamline's direction + target set.
+                              loadDirections: loadFlowDirections,
+                              anchorPoints: anchorFlowPoints,
                               streaming: run.isStreaming,
                               onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
                               onExport: { model.toast = "Export (.3mf) arrives in M7.9" },
@@ -247,13 +252,45 @@ public struct WorkspacePlaceholder: View {
         return c + settleQuat.act(modelPoint - c)
     }
 
+    /// The tagged LOAD groups as (centroid, unit force direction) pairs in the model
+    /// frame — the start points AND the per-load d̂ the load-path flow needs. The
+    /// centroid is where a comet arrow starts; the direction is the load's model-space
+    /// force (`ForceModel.loadForceVectorModel`, gravity = the tapped floor normal,
+    /// push/pull = ∓/± face normal), normalised, which the `.anchor` mode integrates as
+    /// `F = σ·d̂`. Built together so the two arrays stay index-aligned. Same model frame
+    /// (mm) as the results grid/variant, so a centroid here lines up with the stress
+    /// field there. A load with a centroid but no computable direction gets a zero d̂
+    /// (the anchor mode skips it; the stress-point mode ignores direction).
+    private var loadFlowPairs: [(seed: SIMD3<Float>, dir: SIMD3<Float>)] {
+        selection.groups.compactMap { g in
+            guard force.kind(for: g.id).isLoad, let c = groupCentroidModel(g) else { return nil }
+            let n = groupNormalModel(g) ?? SIMD3<Float>(0, 1, 0)
+            let f = force.loadForceVectorModel(g.id, groupNormal: n) ?? .zero
+            let len = simd_length(f)
+            return (c, len > 1e-6 ? f / len : SIMD3<Float>.zero)
+        }
+    }
+
     /// The model-space centroids of the tagged LOAD groups — the start points for the
     /// redesigned load-path flow (handoff 070). Same model frame (mm) as the results
     /// grid/variant, so a centroid here lines up with the derived stress field there.
-    private var loadFlowSeeds: [SIMD3<Float>] {
-        selection.groups.compactMap { g in
-            force.kind(for: g.id).isLoad ? groupCentroidModel(g) : nil
+    private var loadFlowSeeds: [SIMD3<Float>] { loadFlowPairs.map(\.seed) }
+
+    /// The per-load unit force directions d̂ (model frame), INDEX-ALIGNED with
+    /// `loadFlowSeeds` — the `.anchor` flux-streamline direction for each load (M7.viz.5).
+    private var loadFlowDirections: [SIMD3<Float>] { loadFlowPairs.map(\.dir) }
+
+    /// The model-space centroids of every tagged ANCHOR face — the load→anchor flow's
+    /// target set (M7.viz.5). Per-FACE (not per-group) so the support surface rasterises
+    /// to enough voxels; voxelised once per run into an `AnchorVoxelSet` by the results
+    /// model. Same model frame as the loads/grid. Empty when no anchors are tagged.
+    private var anchorFlowPoints: [SIMD3<Float>] {
+        guard let mesh = viewerMesh else { return [] }
+        var pts: [SIMD3<Float>] = []
+        for g in selection.groups where force.kind(for: g.id).isAnchor {
+            for f in g.faces { if let c = mesh.faceCentroid(f) { pts.append(c) } }
         }
+        return pts
     }
 
     /// A group's model-space centroid (mean of its faces' centroids).
