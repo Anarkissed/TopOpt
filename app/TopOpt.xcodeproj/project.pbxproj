@@ -9,9 +9,9 @@
 /* Begin PBXBuildFile section */
 		A00000000000000000000012 /* TopOptKit in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000011 /* TopOptKit */; };
 		A00000000000000000000014 /* materials.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000013 /* materials.json */; };
-		A00000000000000000000021 /* rules.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* rules.json */; };
 		A00000000000000000000015 /* TopOptFlows in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000016 /* TopOptFlows */; };
 		A00000000000000000000018 /* TopOptOCCT in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000017 /* TopOptOCCT */; };
+		A00000000000000000000021 /* rules.json in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000020 /* rules.json */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -192,11 +192,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XJLVB9A477;
 				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -208,7 +208,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.topopt.TopOpt;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nadim.topopt;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
@@ -225,11 +225,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "Apple Development";
-				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = XJLVB9A477;
 				ENABLE_PREVIEWS = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -241,7 +241,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.topopt.TopOpt;
+				PRODUCT_BUNDLE_IDENTIFIER = com.nadim.topopt;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SDKROOT = iphoneos;
