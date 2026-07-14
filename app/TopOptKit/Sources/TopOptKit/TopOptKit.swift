@@ -100,13 +100,6 @@ public struct OptimizeVariant {
     /// mesh vertices by; zero on nodes attached only to non-printed voxels, empty
     /// for a cancelled rung.
     public let displacementField: [Float]
-    /// M7.viz.5 (load→anchor flow) — the per-voxel Cauchy stress tensor, grid-indexed
-    /// and flattened: voxel `idx` occupies entries `[6*idx .. 6*idx+5]` in Voigt order
-    /// `[xx, yy, zz, xy, yz, zx]` with TRUE shear (τ, not doubled), MPa; size
-    /// `6·voxelCount`. The tensor `vonMisesField` is derived from, exposed per voxel so
-    /// the app can integrate load→anchor flux streamlines (`F = σ·d̂`). Zero on
-    /// non-printed voxels (companion to `vonMisesField`); empty for a cancelled rung.
-    public let stressTensorField: [Float]
     /// Optimization-history keyframes (playback): the isosurface from ~solid (first)
     /// to optimized (last). Empty when playback capture is off.
     public let keyframeMeshes: [KeyframeMesh]
@@ -119,7 +112,7 @@ public struct OptimizeVariant {
                 maxInterlayerTensionMPa: Double = 0, inPlaneMargin: Double = 0,
                 interlayerMargin: Double = 0, meshVertices: [Float] = [],
                 meshIndices: [Int32] = [], vonMisesField: [Float] = [],
-                displacementField: [Float] = [], stressTensorField: [Float] = [],
+                displacementField: [Float] = [],
                 keyframeMeshes: [KeyframeMesh] = []) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
@@ -140,7 +133,6 @@ public struct OptimizeVariant {
         self.meshIndices = meshIndices
         self.vonMisesField = vonMisesField
         self.displacementField = displacementField
-        self.stressTensorField = stressTensorField
         self.keyframeMeshes = keyframeMeshes
     }
 }
@@ -501,7 +493,6 @@ public enum TopOptKit {
                 meshIndices: Array(v.mesh_indices),
                 vonMisesField: Array(v.von_mises_field),
                 displacementField: Array(v.displacement_field),
-                stressTensorField: Array(v.stress_tensor_field),
                 keyframeMeshes: reconstructKeyframes(v)))
         }
         return OptimizeOutcome(variants: variants,
