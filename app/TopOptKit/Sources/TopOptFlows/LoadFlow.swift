@@ -32,13 +32,36 @@ import simd
 
 /// Which family of curves the flow renders. The animation is identical across
 /// modes — only the curve GENERATION differs — so adding a mode is adding a `case`
-/// here plus a branch in `LoadFlowField.curves`. THIS TASK ships `.stressPoint`
-/// only; `.anchor` (load → clamped anchor) is a deliberate follow-up.
-public enum FlowPathMode: Equatable, Sendable {
+/// here plus a branch in `LoadFlowField.curves`. The comet animation, moving
+/// epicenters, isolation, and the whole renderer are reused UNCHANGED between modes.
+public enum FlowPathMode: Equatable, Sendable, CaseIterable {
     /// Load location → follows the principal-stress direction field → terminates at
     /// the peak-stress hot-spot (viz.2). The curves the animation engine renders here.
     case stressPoint
-    // case anchor  — FUTURE: load location → down the load path → a clamped anchor.
+    /// Load location → integrates the stress-flux field `F(x) = σ(x)·d̂` (the traction
+    /// carried across the load-direction plane) → terminates at an ANCHOR voxel: the
+    /// route the force takes to reach the supports (M7.viz.5, Diagnosis 071 §C). In
+    /// equilibrium `∇·σ = 0`, so `F` is solenoidal and its streamlines can only start at
+    /// the load (source) and end at the reactions (sinks) — the anchors — which is the
+    /// termination guarantee a bare principal-stress trajectory lacks.
+    case anchor
+
+    /// The user-facing selector title for this mode (the drawer's Mode segmented control).
+    public var title: String {
+        switch self {
+        case .stressPoint: return "Load → Stress point"
+        case .anchor: return "Load → Anchor"
+        }
+    }
+
+    /// The drawer's descriptive caption for this mode — honest that it depicts a PATH,
+    /// not a claim force moves in time (the literal Stress chip stays the static readout).
+    public var caption: String {
+        switch self {
+        case .stressPoint: return "Red arrows flow LOAD → hot-spot, following the stress field."
+        case .anchor:      return "Red arrows flow LOAD → anchor: the route the force takes to reach the supports."
+        }
+    }
 }
 
 /// One flow path: an arc-length-parameterised polyline (`points`) with its unit
@@ -135,10 +158,81 @@ public struct FlowCurve: Equatable, Sendable {
     }
 }
 
+/// The set of grid voxels that count as "an anchor" for the `.anchor` flow — the
+/// terminus a flux streamline must enter to be a completed load→anchor route. Built
+/// ONCE per variant from the declared anchor face centroids (Diagnosis 071 §3: "flag
+/// every voxel within ~1 spacing of an anchor faceCentroid"), then cached and queried
+/// per RK4 step. Grid geometry + index layout match `StressField`
+/// (`(k*ny + j)*nx + i`), so an anchor voxel here is the same voxel the tensor field
+/// samples.
+public struct AnchorVoxelSet: Sendable, Equatable {
+    public let nx: Int
+    public let ny: Int
+    public let nz: Int
+    public let origin: SIMD3<Float>
+    public let spacing: Float
+    /// Flat voxel indices `(k*ny + j)*nx + i` flagged as anchors.
+    public let voxels: Set<Int>
+
+    public init(nx: Int, ny: Int, nz: Int, origin: SIMD3<Float>, spacing: Float, voxels: Set<Int>) {
+        self.nx = nx; self.ny = ny; self.nz = nz
+        self.origin = origin; self.spacing = spacing; self.voxels = voxels
+    }
+
+    public var isEmpty: Bool { voxels.isEmpty || spacing <= 0 || nx <= 0 || ny <= 0 || nz <= 0 }
+
+    /// Build the anchor voxel set: every voxel whose CENTRE lies within `radiusVoxels`
+    /// spacings of an anchor point is flagged. Each anchor point contributes a small
+    /// neighbourhood (⌈radius⌉ voxels each way), so a face centroid rasterises to the
+    /// handful of voxels straddling the support surface. Cheap — a few anchor points ×
+    /// a tiny neighbourhood, run once per variant.
+    public static func build(points: [SIMD3<Float>], nx: Int, ny: Int, nz: Int,
+                             origin: SIMD3<Float>, spacing: Float,
+                             radiusVoxels: Float = 1) -> AnchorVoxelSet {
+        guard nx > 0, ny > 0, nz > 0, spacing > 0, !points.isEmpty else {
+            return AnchorVoxelSet(nx: nx, ny: ny, nz: nz, origin: origin, spacing: spacing, voxels: [])
+        }
+        let reach = Int(radiusVoxels.rounded(.up))
+        let r2 = (radiusVoxels * spacing) * (radiusVoxels * spacing)
+        var flagged = Set<Int>()
+        func clamp(_ v: Int, _ n: Int) -> Int { Swift.min(Swift.max(v, 0), n - 1) }
+        for p in points {
+            let ci = Int(((p.x - origin.x) / spacing).rounded(.down))
+            let cj = Int(((p.y - origin.y) / spacing).rounded(.down))
+            let ck = Int(((p.z - origin.z) / spacing).rounded(.down))
+            for dk in -reach...reach {
+                for dj in -reach...reach {
+                    for di in -reach...reach {
+                        let i = clamp(ci + di, nx), j = clamp(cj + dj, ny), k = clamp(ck + dk, nz)
+                        let centre = origin + SIMD3<Float>(Float(i) + 0.5, Float(j) + 0.5, Float(k) + 0.5) * spacing
+                        if simd_distance_squared(centre, p) <= r2 {
+                            flagged.insert((k * ny + j) * nx + i)
+                        }
+                    }
+                }
+            }
+        }
+        return AnchorVoxelSet(nx: nx, ny: ny, nz: nz, origin: origin, spacing: spacing, voxels: flagged)
+    }
+
+    /// Whether world position `p` lies in a flagged anchor voxel (the nearest-voxel test
+    /// a streamline uses to detect arrival). Indices clamp into range, matching
+    /// `StressField.value(at:)`.
+    public func contains(_ p: SIMD3<Float>) -> Bool {
+        guard !isEmpty else { return false }
+        func clamp(_ v: Int, _ n: Int) -> Int { Swift.min(Swift.max(v, 0), n - 1) }
+        let i = clamp(Int(((p.x - origin.x) / spacing).rounded(.down)), nx)
+        let j = clamp(Int(((p.y - origin.y) / spacing).rounded(.down)), ny)
+        let k = clamp(Int(((p.z - origin.z) / spacing).rounded(.down)), nz)
+        return voxels.contains((k * ny + j) * nx + i)
+    }
+}
+
 /// Builds the flow curves for a mode from the fields the app already derives. For
 /// `.stressPoint`: integrates a streamline from each load seed THROUGH the
 /// principal-stress direction field (the viz.4 glyphs) toward the peak-stress
-/// hot-spot (the viz.2 point), then resamples it. Pure math (no GPU, no bridge).
+/// hot-spot (the viz.2 point). For `.anchor`: integrates the stress-flux field
+/// `F = σ·d̂` from each load to an anchor voxel. Pure math (no GPU, no bridge).
 public enum LoadFlowField {
     /// How many samples each resampled comet curve carries. Enough for a smooth,
     /// undulating tube on a phone without heavy per-frame cost (a few curves only).
@@ -149,11 +243,15 @@ public enum LoadFlowField {
     static let phaseTable: [Float] = [0.0, 0.28, 0.55, 0.8, 0.15, 0.66]
     static let speedTable: [Float] = [1.0, 0.9, 1.12, 0.96, 1.05, 0.92]
 
-    /// Generate the flow curves. `loadSeeds` are the world-mm start points (tagged
-    /// load-group centroids, or a derived fallback). `glyphs` is the principal-stress
-    /// direction field; `hotSpot` the terminus. `stepLength` (world mm, e.g. the voxel
-    /// spacing) sets the integration granularity. Returns one curve per seed that
-    /// reaches the hot-spot; seeds with no usable route are dropped.
+    /// Generate the `.stressPoint` flow curves. `loadSeeds` are the world-mm start
+    /// points (tagged load-group centroids, or a derived fallback). `glyphs` is the
+    /// principal-stress direction field; `hotSpot` the terminus. `stepLength` (world mm,
+    /// e.g. the voxel spacing) sets the integration granularity. Returns one curve per
+    /// seed that reaches the hot-spot; seeds with no usable route are dropped.
+    ///
+    /// `.anchor` mode needs richer inputs (the stress tensor, per-load d̂, the anchor
+    /// set) this scalar-glyph overload does not carry — it has its own `curves(...)`
+    /// overload below — so this entry returns nothing for `.anchor`.
     public static func curves(mode: FlowPathMode, loadSeeds: [SIMD3<Float>],
                               glyphs: LoadPath, hotSpot: SIMD3<Float>?,
                               stepLength: Float, maxSteps: Int = 400) -> [FlowCurve] {
@@ -172,8 +270,115 @@ public enum LoadFlowField {
                                               phaseOffset: phase, speedMul: speed, wobblePhase: wobble))
             }
             return out
+        case .anchor:
+            return []   // built by the tensor/anchor overload below
         }
     }
+
+    /// Generate the `.anchor` flow curves: for each load seed, integrate the stress-flux
+    /// streamline `F(x) = σ(x)·d̂` (Diagnosis 071 §C) until it reaches an anchor voxel,
+    /// then resample it. One curve per (load → anchor) path; a load whose streamline
+    /// leaves the printed material or runs past `maxSteps` without reaching an anchor is
+    /// DROPPED (not every line reaches ground). `loadDirections` are the per-load unit
+    /// force directions d̂ (index-aligned with `loadSeeds`); `tensor` is the per-voxel
+    /// Cauchy stress; `printedGate` (von Mises) is the viz.4 printed-material gate;
+    /// `anchors` is the prebuilt anchor voxel set; `stepLength` ≈ ½ voxel.
+    ///
+    /// The returned `[FlowCurve]` is the SAME type the `.stressPoint` overload emits, so
+    /// `CometArrow`/`CometMesh`/epicenters/renderer/drawer consume it UNCHANGED — the
+    /// mode difference lives entirely in this curve source (the 071 separation).
+    public static func curves(mode: FlowPathMode, loadSeeds: [SIMD3<Float>],
+                              loadDirections: [SIMD3<Float>], tensor: StressTensorField,
+                              printedGate: StressField?, anchors: AnchorVoxelSet,
+                              stepLength: Float, maxSteps: Int = 400) -> [FlowCurve] {
+        switch mode {
+        case .stressPoint:
+            return []   // built by the glyph/hot-spot overload above
+        case .anchor:
+            guard !anchors.isEmpty, !tensor.isEmpty else { return [] }
+            var out: [FlowCurve] = []
+            for (i, seed) in loadSeeds.enumerated() {
+                let d = i < loadDirections.count ? loadDirections[i] : SIMD3<Float>(repeating: 0)
+                let dLen = simd_length(d)
+                guard dLen > 1e-6 else { continue }
+                let dHat = d / dLen
+                let traced = fluxStreamline(from: seed, direction: dHat, tensor: tensor,
+                                            printedGate: printedGate, anchors: anchors,
+                                            stepLength: stepLength, maxSteps: maxSteps)
+                // Only completed load→anchor paths become arrows (stop conditions (b)
+                // "left material" and (c) "max length" drop the line).
+                guard traced.stop == .reachedAnchor, traced.points.count >= 2 else { continue }
+                let phase = phaseTable[i % phaseTable.count]
+                let speed = speedTable[i % speedTable.count]
+                let wobble = Float(i) * 1.9
+                out.append(FlowCurve.resample(traced.points, resolution: curveResolution,
+                                              phaseOffset: phase, speedMul: speed, wobblePhase: wobble))
+            }
+            return out
+        }
+    }
+
+    /// Why a flux streamline stopped — the THREE required stop conditions (Diagnosis
+    /// 071 §3). Only `.reachedAnchor` yields a drawn curve.
+    public enum FluxStop: Equatable, Sendable {
+        case reachedAnchor    // (a) stepped into an anchor voxel — a completed route
+        case leftMaterial     // (b) left the printed material (von Mises ≤ 0)
+        case exceededLength   // (c) ran past maxSteps without reaching an anchor
+    }
+
+    /// Integrate the stress-flux streamline of `F(x) = σ(x)·d̂` from `seed`, following
+    /// the field's own direction with RK4 (step ≈ ½ voxel). Returns the polyline and
+    /// which stop condition fired. The heading is `normalize(σ(x)·d̂)` — a genuine
+    /// vector (unlike a sign-ambiguous principal axis), so a CORRECT tensor contraction
+    /// routes load→anchor while a wrong Voigt order / doubled shear points elsewhere and
+    /// leaves the material (the negative-control failure the STEP 2 test relies on).
+    /// No anchor-seeking bias is applied: the anchor is reached by the physics of `F`,
+    /// not steered, so the test stays meaningful.
+    static func fluxStreamline(from seed: SIMD3<Float>, direction dHat: SIMD3<Float>,
+                               tensor: StressTensorField, printedGate: StressField?,
+                               anchors: AnchorVoxelSet, stepLength: Float,
+                               maxSteps: Int) -> (points: [SIMD3<Float>], stop: FluxStop) {
+        let step = Swift.max(stepLength, 1e-4)
+        let hasGate = !(printedGate?.isEmpty ?? true)
+        var pos = seed
+        var pts: [SIMD3<Float>] = [seed]
+        // The seed sits ON the loaded surface; if it is already inside an anchor voxel
+        // there is nothing to route (degenerate) — still report it reached.
+        if anchors.contains(pos) { return (pts, .reachedAnchor) }
+        for _ in 0..<maxSteps {
+            // RK4 on the normalized flux field g(x) = normalize(σ(x)·d̂).
+            guard let k1 = fluxDir(at: pos, dHat: dHat, tensor: tensor) else {
+                return (pts, .leftMaterial)   // ‖F‖≈0 → off the stressed material
+            }
+            let k2 = fluxDir(at: pos + k1 * (step / 2), dHat: dHat, tensor: tensor) ?? k1
+            let k3 = fluxDir(at: pos + k2 * (step / 2), dHat: dHat, tensor: tensor) ?? k1
+            let k4 = fluxDir(at: pos + k3 * step, dHat: dHat, tensor: tensor) ?? k1
+            let dir = k1 + 2 * k2 + 2 * k3 + k4
+            let len = simd_length(dir)
+            let heading = len > 1e-6 ? dir / len : k1
+            pos += heading * step
+            // (a) reached an anchor voxel — completed route.
+            if anchors.contains(pos) { pts.append(pos); return (pts, .reachedAnchor) }
+            // (b) left the printed material (the viz.4 printed gate).
+            if hasGate && printedGate!.value(at: pos) <= 0 { return (pts, .leftMaterial) }
+            pts.append(pos)
+        }
+        return (pts, .exceededLength)   // (c) ran out of steps
+    }
+
+    /// The unit flux direction `normalize(σ(x)·d̂)` at `x`, or nil when the traction is
+    /// negligible (‖σ·d̂‖ below `fluxFloor` — off the stressed/printed material, where
+    /// the tensor is zero). The vector the streamline follows.
+    static func fluxDir(at x: SIMD3<Float>, dHat: SIMD3<Float>,
+                        tensor: StressTensorField) -> SIMD3<Float>? {
+        let f = tensor.tensor(at: x) * dHat
+        let len = simd_length(f)
+        return len > fluxFloor ? f / len : nil
+    }
+
+    /// Below this traction magnitude (MPa) the flux field carries no meaningful
+    /// direction (void / unstressed voxels read zero tensor), so the streamline stops.
+    static let fluxFloor: Float = 1e-6
 
     /// Integrate a streamline from `seed` to `target` through the principal-stress
     /// field. At each step the heading is the nearest glyph's principal direction —
