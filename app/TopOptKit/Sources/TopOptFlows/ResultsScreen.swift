@@ -52,6 +52,7 @@ public struct ResultsScreen: View {
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
                 loadLocations: [SIMD3<Float>] = [],
+                loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
                 streaming: Bool = false,
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {}) {
@@ -60,7 +61,8 @@ public struct ResultsScreen: View {
             materialName: materialName, yieldStrengthMPa: yieldStrengthMPa,
             appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
             infillPercent: infillPercent, infillPattern: infillPattern,
-            loadLocations: loadLocations))
+            loadLocations: loadLocations,
+            loadDirections: loadDirections, anchorPoints: anchorPoints))
         self.liveOutcome = outcome
         self.streaming = streaming
         self.onClose = onClose
@@ -362,7 +364,21 @@ public struct ResultsScreen: View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             Text("Load-path flow").dsStyle(DS.TypeScale.footnote).fontWeight(.semibold)
                 .foregroundStyle(DS.Color.textPrimary.color)
-            Text("Red arrows flow LOAD → the hot-spot, following the stress field.")
+
+            // Mode selector (M7.viz.5): swap which family of curves the SAME comet
+            // animation rides — LOAD → hot-spot (the stress field) vs LOAD → anchor (the
+            // route to ground). Shown only when the anchor route is available (a tensor
+            // field + tagged loads + tagged anchors); otherwise the flow stays the
+            // stress-point mode with no toggle.
+            if model.hasAnchorFlow {
+                drawerLabel("Mode")
+                SegmentedGlass(FlowPathMode.allCases.map { .init($0, $0.title) },
+                               selection: Binding(get: { model.flowMode },
+                                                  set: { model.setFlowMode($0) }))
+            }
+            // The caption is honest per mode: it depicts a PATH, not a claim force moves
+            // in time — the literal Stress chip stays the truthful static readout.
+            Text(model.flowMode.caption)
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(DS.Color.textSecondary.color)
                 .fixedSize(horizontal: false, vertical: true)

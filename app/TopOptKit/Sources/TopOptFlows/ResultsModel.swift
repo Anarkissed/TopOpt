@@ -98,6 +98,75 @@ public struct StressField: Sendable {
     }
 }
 
+/// A grid-indexed per-voxel Cauchy stress TENSOR field (MPa), the companion of
+/// `StressField` (the von Mises SCALAR) that M7.viz.5's load→anchor flow integrates
+/// as a flux field `F(x) = σ(x)·d̂`. Values are flattened six-per-voxel in the core's
+/// Voigt order `[σxx, σyy, σzz, τxy, τyz, τzx]` with TRUE shear (τ, not doubled) — the
+/// exact convention `OptimizeVariant.stressTensorField` carries — so voxel `idx`
+/// occupies `values[6*idx .. 6*idx+5]`. The index layout matches the core
+/// `VoxelGrid::index` = (k*ny + j)*nx + i, identical to `StressField`.
+public struct StressTensorField: Sendable {
+    public let nx: Int
+    public let ny: Int
+    public let nz: Int
+    public let origin: SIMD3<Float>   // grid minimum corner (world mm)
+    public let spacing: Float         // voxel edge length (mm)
+    public let values: [Float]        // size 6*nx*ny*nz, MPa Voigt [xx,yy,zz,xy,yz,zx]
+
+    public init(nx: Int, ny: Int, nz: Int, origin: SIMD3<Float>, spacing: Float, values: [Float]) {
+        self.nx = nx; self.ny = ny; self.nz = nz
+        self.origin = origin; self.spacing = spacing; self.values = values
+    }
+
+    public var isEmpty: Bool {
+        values.isEmpty || spacing <= 0 || nx <= 0 || ny <= 0 || nz <= 0
+            || values.count < 6 * nx * ny * nz
+    }
+
+    /// The six Voigt components `(xx, yy, zz, xy, yz, zx)` at the nearest voxel to world
+    /// position `p` (all zero when empty; indices clamp into range, matching
+    /// `StressField.value(at:)`). This is the raw storage read, before assembling the
+    /// symmetric 3×3 — exposed so von Mises can be reconstructed component-wise.
+    public func components(at p: SIMD3<Float>) -> (xx: Float, yy: Float, zz: Float,
+                                                   xy: Float, yz: Float, zx: Float) {
+        guard !isEmpty else { return (0, 0, 0, 0, 0, 0) }
+        let i = clamp(Int(((p.x - origin.x) / spacing).rounded(.down)), nx)
+        let j = clamp(Int(((p.y - origin.y) / spacing).rounded(.down)), ny)
+        let k = clamp(Int(((p.z - origin.z) / spacing).rounded(.down)), nz)
+        let base = 6 * ((k * ny + j) * nx + i)
+        guard base >= 0, base + 5 < values.count else { return (0, 0, 0, 0, 0, 0) }
+        return (values[base], values[base + 1], values[base + 2],
+                values[base + 3], values[base + 4], values[base + 5])
+    }
+
+    /// The full symmetric Cauchy stress tensor at the nearest voxel to `p`, as a
+    /// `simd_float3x3` (`.zero` when empty). Off-diagonals are the TRUE shear stresses
+    /// (not doubled): row/col (0,1)=τxy, (1,2)=τyz, (2,0)=τzx. The flux field the flow
+    /// integrates is `tensor(at: p) * d̂`.
+    public func tensor(at p: SIMD3<Float>) -> simd_float3x3 {
+        let s = components(at: p)
+        // Column-major, but symmetric so column == row. Diagonal = normal stresses,
+        // off-diagonal = true shear.
+        return simd_float3x3(columns: (
+            SIMD3<Float>(s.xx, s.xy, s.zx),
+            SIMD3<Float>(s.xy, s.yy, s.yz),
+            SIMD3<Float>(s.zx, s.yz, s.zz)))
+    }
+
+    /// Von Mises stress reconstructed from the tensor at `p` — the SAME formula the core
+    /// applies to `Hex8Stress::sigma` (`sqrt(0.5·Σ(σii-σjj)² + 3·Σ τ²)`), so a
+    /// correctly-mapped tensor reproduces the trusted `StressField` value voxel-for-voxel.
+    /// A mislabeled Voigt order or doubled shear would not match — the STEP 1 test's guard.
+    public func vonMises(at p: SIMD3<Float>) -> Float {
+        let s = components(at: p)
+        let dev = 0.5 * (pow(s.xx - s.yy, 2) + pow(s.yy - s.zz, 2) + pow(s.zz - s.xx, 2))
+        let shear = 3 * (s.xy * s.xy + s.yz * s.yz + s.zx * s.zx)
+        return (dev + shear).squareRoot()
+    }
+
+    private func clamp(_ v: Int, _ n: Int) -> Int { min(max(v, 0), n - 1) }
+}
+
 /// A per-NODE displacement field (mm) from the FEA solve, exposed through the bridge
 /// by M7.disp — the companion of `StressField` that the M7.viz.3 flex animation
 /// displaces mesh vertices by. Unlike `StressField` (per-VOXEL), this is sampled at
@@ -418,6 +487,18 @@ public final class ResultsModel: ObservableObject {
     /// to the most-deflected node (`flowLoadSeeds`), an honest proxy for where load
     /// enters. These are the origins of the `.stressPoint` curves the comet arrows ride.
     public let loadLocations: [SIMD3<Float>]
+    /// M7.viz.5 (load→anchor flow): per-load UNIT force directions d̂ in the model/grid
+    /// frame, INDEX-ALIGNED with `loadLocations` (seed `i` has direction
+    /// `loadDirections[i]`). The `.anchor` mode integrates `F = σ·d̂` from each seed, so
+    /// it needs the direction the load pushes into the part. Empty for an STL /
+    /// self-weight run (no tagged loads) — the `.anchor` mode then builds nothing.
+    /// Threaded in from the workspace (`ForceModel.loadForceVectorModel`), app-side data.
+    public let loadDirections: [SIMD3<Float>]
+    /// M7.viz.5: the model-frame centroids of the declared `.anchor` faces — the target
+    /// the load→anchor flux streamlines must reach. Voxelised once per run into an
+    /// `AnchorVoxelSet`. Empty when no anchors are tagged (the `.anchor` mode then builds
+    /// no curves). Threaded in from the workspace alongside `loadLocations`.
+    public let anchorPoints: [SIMD3<Float>]
     /// The Gibson-Ashby strength knockdown for this project's fixed infill (f^1.5;
     /// 1.0 when solid). The SAME factor the core applies at its acceptance gate
     /// (`minimize_plastic.cpp`), so the displayed physics agrees with the ladder. The
@@ -474,6 +555,13 @@ public final class ResultsModel: ObservableObject {
     // Redesigned load-path FLOW controls (handoff 070 → Metal). These drive the
     // "alive" comet arrows and their moving stress epicenters; they are meaningful
     // only while `loadPathOn`. All are compact-drawer controls matching the prototype.
+    /// Which family of curves the flow renders (M7.viz.5). `.stressPoint` = LOAD →
+    /// hot-spot (the stress field); `.anchor` = LOAD → anchor (the route to ground).
+    /// Only the curve SOURCE differs — the comet animation, epicenters, isolation, body
+    /// modes, and speed/wiggle are identical across modes. Set via `setFlowMode` so the
+    /// curve cache + isolation reset cleanly. Read-only externally (mutate through the
+    /// method) so the cache invariant holds.
+    @Published public private(set) var flowMode: FlowPathMode = .stressPoint
     /// The "alive" motion preset (Sine / Serpentine / Pulse).
     @Published public var flowStyle: FlowMotionStyle = .sine
     /// How the body is drawn behind the flow (X-ray / Stress / Solid).
@@ -520,7 +608,8 @@ public final class ResultsModel: ObservableObject {
                 materialName: String = "", yieldStrengthMPa: Double = 0,
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
-                loadLocations: [SIMD3<Float>] = []) {
+                loadLocations: [SIMD3<Float>] = [],
+                loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = []) {
         self.projectName = projectName
         self.materialName = materialName
         self.yieldStrengthMPa = max(0, yieldStrengthMPa)
@@ -529,6 +618,8 @@ public final class ResultsModel: ObservableObject {
         self.infillPercent = infillPercent
         self.infillPattern = infillPattern
         self.loadLocations = loadLocations
+        self.loadDirections = loadDirections
+        self.anchorPoints = anchorPoints
         self.infillKnockdown = FailureLoad.infillKnockdown(percent: Double(infillPercent))
         apply(outcome)
         selectedIndex = tabs.firstIndex(where: { $0.isRecommended }) ?? 0
@@ -572,6 +663,7 @@ public final class ResultsModel: ObservableObject {
         loadPathSegmentCache = nil
         flowCurveCache = nil   // …and the redesigned flow curves
         flowSeedCache = nil
+        anchorVoxelCache = nil // …and the voxelised anchor target set (grid changed)
         failureCache = nil    // …and the failure-load prediction
         peakToRedCache = nil  // …and the flex peak-to-red color multiple
     }
@@ -596,6 +688,15 @@ public final class ResultsModel: ObservableObject {
         guard let v = selectedVariant else { return nil }
         return StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+    }
+
+    /// The selected variant's per-voxel Cauchy stress TENSOR field (M7.viz.5), tied to
+    /// the run's grid geometry — the flux source `σ` the load→anchor flow integrates.
+    /// Empty (`isEmpty`) for a cancelled/legacy variant that carries no tensor.
+    public var selectedTensorField: StressTensorField? {
+        guard let v = selectedVariant else { return nil }
+        return StressTensorField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
+                                 origin: gridOrigin, spacing: spacing, values: v.stressTensorField)
     }
 
     // MARK: - flex animation (M7.viz.3)
@@ -760,8 +861,9 @@ public final class ResultsModel: ObservableObject {
     /// the tip reading red no matter how many additive layers overlap.
     public static let flowColor = SIMD3<Float>(1.0, 0.12, 0.07)
 
-    private var flowCurveCache: (index: Int, curves: [FlowCurve])?
+    private var flowCurveCache: (index: Int, mode: FlowPathMode, curves: [FlowCurve])?
     private var flowSeedCache: (index: Int, seeds: [SIMD3<Float>])?
+    private var anchorVoxelCache: AnchorVoxelSet?
 
     /// The absolute comet tube thickness (world mm), scaled to the part size so it
     /// reads the same on a small bracket and a large beam.
@@ -812,22 +914,76 @@ public final class ResultsModel: ObservableObject {
         return best > 0 ? bestPos : nil
     }
 
-    /// The `.stressPoint` flow curves for the selected variant: one comet path per load
-    /// seed, streaming from the load through the principal-stress field to the peak
-    /// hot-spot. Cached per selection (the streamline integration runs once per variant,
-    /// not per frame). Empty when the mode has no field / seeds / hot-spot.
+    /// The prebuilt anchor voxel set for the current run (the `.anchor` mode's terminus).
+    /// The declared anchor face centroids (`anchorPoints`) voxelised against the run's
+    /// grid — the same grid for every variant, so it is built once and cached. Empty when
+    /// no anchors were tagged.
+    public var selectedAnchorSet: AnchorVoxelSet {
+        if let c = anchorVoxelCache { return c }
+        let set = AnchorVoxelSet.build(points: anchorPoints, nx: gridDim.0, ny: gridDim.1,
+                                       nz: gridDim.2, origin: gridOrigin, spacing: spacing)
+        anchorVoxelCache = set
+        return set
+    }
+
+    /// The flow curves for the selected variant in the CURRENT mode — one comet path per
+    /// load. `.stressPoint`: from each load through the principal-stress field to the
+    /// peak hot-spot. `.anchor`: the stress-flux streamline `F = σ·d̂` from each load to
+    /// an anchor voxel (the route to ground). Cached per (selection, mode) — the
+    /// integration runs once per variant/mode, not per frame. The RESULT type is identical
+    /// across modes, so every downstream consumer (comet frames, epicenters, isolation,
+    /// renderer, drawer) is mode-blind. Empty when the mode has no usable seeds/target.
     public var selectedFlowCurves: [FlowCurve] {
-        if let c = flowCurveCache, c.index == selectedIndex { return c.curves }
+        if let c = flowCurveCache, c.index == selectedIndex, c.mode == flowMode { return c.curves }
         let curves: [FlowCurve]
-        if let path = selectedLoadPath, !path.isEmpty, let hs = hotSpot, !flowLoadSeeds.isEmpty {
-            curves = LoadFlowField.curves(mode: .stressPoint, loadSeeds: flowLoadSeeds,
-                                          glyphs: path, hotSpot: hs.position,
-                                          stepLength: max(spacing, 1e-3))
-        } else {
-            curves = []
+        switch flowMode {
+        case .stressPoint:
+            if let path = selectedLoadPath, !path.isEmpty, let hs = hotSpot, !flowLoadSeeds.isEmpty {
+                curves = LoadFlowField.curves(mode: .stressPoint, loadSeeds: flowLoadSeeds,
+                                              glyphs: path, hotSpot: hs.position,
+                                              stepLength: max(spacing, 1e-3))
+            } else {
+                curves = []
+            }
+        case .anchor:
+            // The `.anchor` mode needs the load DIRECTIONS (for `σ·d̂`), so it uses the
+            // tagged `loadLocations`/`loadDirections` pair directly — NOT the
+            // max-deflection fallback (which carries no direction). No loads or no
+            // anchors → no route to draw.
+            let anchors = selectedAnchorSet
+            if let tensor = selectedTensorField, !tensor.isEmpty, !anchors.isEmpty,
+               !loadLocations.isEmpty {
+                // Step ≈ ½ voxel (Diagnosis 071 §C), the RK4 integration granularity.
+                curves = LoadFlowField.curves(mode: .anchor, loadSeeds: loadLocations,
+                                              loadDirections: loadDirections, tensor: tensor,
+                                              printedGate: selectedStressField, anchors: anchors,
+                                              stepLength: max(spacing * 0.5, 1e-3))
+            } else {
+                curves = []
+            }
         }
-        flowCurveCache = (selectedIndex, curves)
+        flowCurveCache = (selectedIndex, flowMode, curves)
         return curves
+    }
+
+    /// Whether the CURRENT mode can produce curves for the selected variant — drives the
+    /// mode selector's availability. `.stressPoint` needs a load path + hot-spot;
+    /// `.anchor` needs a tensor field, tagged loads, and tagged anchors.
+    public var hasAnchorFlow: Bool {
+        guard let t = selectedTensorField, !t.isEmpty else { return false }
+        return !selectedAnchorSet.isEmpty && !loadLocations.isEmpty
+    }
+
+    /// Switch the flow curve family (M7.viz.5). Resets the animation clock + isolation so
+    /// the swap reads cleanly from the same camera (the new mode's curves differ in count
+    /// and shape). The comet animation, epicenters, body modes, and speed/wiggle are all
+    /// preserved — only the curve SOURCE changes.
+    public func setFlowMode(_ mode: FlowPathMode) {
+        guard mode != flowMode else { return }
+        flowMode = mode
+        flowIsolate = nil        // curve count/identity changed → show all paths
+        flowClock = 0            // restart the comet flow cleanly for the new curves
+        // flowCurveCache is keyed on mode, so it rebuilds lazily on next read.
     }
 
     /// How many flow paths the selected variant has (for the isolate picker).
