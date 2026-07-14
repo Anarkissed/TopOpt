@@ -84,6 +84,21 @@ final class TopOptKitTests: XCTestCase {
         XCTAssertTrue(mesh.faceIDs.allSatisfy { $0 >= 0 && Int($0) < mesh.faceCount })
     }
 
+    // OCCT-on-simulator proof (handoff 075). This is the exact `import_step`
+    // call that THREW "STEP import requires OpenCASCADE, which is not available on
+    // this platform" when the iOS-simulator core slice was built OCCT-free. It now
+    // returns a real tessellated B-rep on an iphonesimulator destination. The
+    // triangle count is logged so the raw test output carries the proof number.
+    func testStepImportProducesMeshOnThisPlatform() throws {
+        let mesh = try TopOptKit.importMesh(path: Self.lbracketSTEP)
+        print("STEP-IMPORT-PROOF l-bracket.step triangleCount=\(mesh.triangleCount) "
+            + "vertexCount=\(mesh.vertexCount) faceCount=\(mesh.faceCount) "
+            + "watertight=\(mesh.watertight)")
+        XCTAssertGreaterThan(mesh.triangleCount, 0)
+        XCTAssertEqual(mesh.indices.count, mesh.triangleCount * 3)
+        XCTAssertEqual(mesh.vertices.count, mesh.vertexCount * 3)
+    }
+
     // MARK: voxelize
 
     func testVoxelizeCube() throws {
