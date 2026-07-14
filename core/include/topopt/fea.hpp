@@ -314,6 +314,96 @@ FeaSolution fea_solve_mgcg(const VoxelGrid& grid,
                            double tolerance = 1e-8, int max_iterations = 0,
                            CgInfo* info = nullptr);
 
+// ---------------------------------------------------------------------------
+// Matrix-free global stiffness operator + matrix-free CG (handoff: matrix-free
+// operator). The assembled sparse global K is what OOMs on large (design-box)
+// grids; these entry points compute the IDENTICAL linear system WITHOUT ever
+// storing K, exploiting the regular grid — every solid voxel is the same unit
+// cube, so there is ONE reference 24x24 element stiffness Ke and each element's
+// contribution is a scaled apply of it. No new physics: same isotropic Hex8,
+// same DOF numbering, same M3.1 void-DOF gate, same convergence criterion as
+// fea_solve_cg. The assembled path (fea_solve / fea_solve_cg / fea_solve_mgcg)
+// is untouched; these are NEW, opt-in, default-OFF entry points.
+
+// Matrix-free global stiffness apply: y = K u over the FULL global stiffness of
+// all solid voxels (no BCs, no reduction), computed element-by-element WITHOUT
+// assembling K. For each solid voxel the 24 local DOFs of `u` are gathered, the
+// element contribution factor * Ke * u_local is formed from the single reference
+// element stiffness (uniform: Ke = hex8_stiffness(youngs_modulus, ...), factor
+// = 1; graded: Ke = hex8_stiffness(1, ...), factor = the voxel's modulus, since
+// the isotropic Hex8 is exactly linear in E), and scattered back into `y`. This
+// is the atomic operator the matrix-free CG below is built on; it equals the
+// assembled global K*u DOF-for-DOF (to floating-point roundoff).
+//
+// `u` must have size 3*fea_node_count(grid); the result has the same size.
+// Empty voxels contribute nothing. The graded overload requires
+// youngs_per_voxel.size() == grid.voxel_count() and each solid entry > 0.
+// Material errors (E<=0, nu not in (-1,0.5), spacing<=0) propagate from
+// hex8_stiffness. Throws std::invalid_argument on a size mismatch or a
+// non-positive solid modulus.
+std::vector<double> fea_matfree_apply(const VoxelGrid& grid,
+                                      double youngs_modulus, double poisson,
+                                      const std::vector<double>& u);
+std::vector<double> fea_matfree_apply(const VoxelGrid& grid,
+                                      const std::vector<double>& youngs_per_voxel,
+                                      double poisson,
+                                      const std::vector<double>& u);
+
+// Assembled reference for the operator above: y = K u over the same full global
+// stiffness, but computed by materialising the sparse K and multiplying. This is
+// the byte-for-byte assembled operator (it goes through the same assembly the
+// solvers use), exposed so callers/tests can verify the matrix-free apply equals
+// the assembled apply DOF-for-DOF. Same argument contract as fea_matfree_apply.
+// (Because it builds the sparse K, it is NOT the memory-lean path — use
+// fea_matfree_apply / fea_solve_cg_matfree for large grids.)
+std::vector<double> fea_assembled_apply(const VoxelGrid& grid,
+                                        double youngs_modulus, double poisson,
+                                        const std::vector<double>& u);
+std::vector<double> fea_assembled_apply(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    double poisson, const std::vector<double>& u);
+
+// Matrix-free Jacobi-preconditioned CG. Solves the IDENTICAL BC-reduced,
+// void-gated system Ku=f as fea_solve_cg — same free-DOF numbering, same M3.1
+// void-DOF gate (survivors = free DOFs touched by a solid element), same
+// relative-residual stopping criterion (||K u - f|| <= tolerance * ||f||) — but
+// the CG matvec is the matrix-free apply above, so NO assembled global K (no
+// Eigen SpMat) is ever constructed on this path. This is the memory foundation
+// for large design-box grids where the assembled K would OOM.
+//
+// Contract mirrors fea_solve_cg's two overloads exactly, including `info`
+// (iterations / residual / converged) and the throwing behaviour: bad BC/load
+// index or non-positive solid modulus -> std::invalid_argument; genuinely
+// under-constrained system (all free DOFs void, or a load on a void DOF) ->
+// std::runtime_error before any iteration; CG non-convergence within the
+// iteration cap -> std::runtime_error. Prescribed non-zero Dirichlet
+// displacements are supported (moved to the RHS with the same matrix-free apply).
+// `max_iterations <= 0` uses the default cap 2*(surviving free DOF count), the
+// same default fea_solve_cg (Eigen) uses. The graded overload accepts an
+// optional warm-start `initial_guess` with the same semantics as fea_solve_cg.
+FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid, double youngs_modulus,
+                                 double poisson,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 double tolerance = 1e-8, int max_iterations = 0,
+                                 CgInfo* info = nullptr);
+FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
+                                 const std::vector<double>& youngs_per_voxel,
+                                 double poisson,
+                                 const std::vector<DirichletBC>& bcs,
+                                 const std::vector<NodalLoad>& loads,
+                                 double tolerance = 1e-8, int max_iterations = 0,
+                                 CgInfo* info = nullptr,
+                                 const FeaSolution* initial_guess = nullptr);
+
+// Number of scalar (double) values the matrix-free operator stores to represent
+// the global stiffness K: exactly the single 24x24 reference element stiffness
+// (Hex8Stiffness::kDof^2 = 576), INDEPENDENT of grid size. Memory evidence that
+// fea_matfree_apply / fea_solve_cg_matfree never materialise an assembled global
+// K (whose nonzero count grows as ~O(grid voxels)); the operator footprint is a
+// grid-independent constant.
+std::size_t fea_matfree_operator_storage_doubles();
+
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
 // stress at its Hex8 element centroid, recovered from the displacement solution

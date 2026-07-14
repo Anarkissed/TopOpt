@@ -804,6 +804,42 @@ FeaSolution PenalizedSolver::solve(const std::vector<double>& youngs_per_voxel,
   return sol;
 }
 
+namespace {
+
+// Assembled reference operator y = K u over the FULL global stiffness (no BCs,
+// no reduction). Reuses assemble_reduced with empty BCs/loads, which leaves
+// every DOF free, so its Kff IS the full global K the solvers assemble — the
+// byte-for-byte assembled operator the matrix-free apply is verified against.
+std::vector<double> assembled_apply_impl(const VoxelGrid& grid,
+                                         double youngs_modulus, double poisson,
+                                         const std::vector<double>* elem_youngs,
+                                         const std::vector<double>& u) {
+  const int ndof = 3 * fea_node_count(grid);
+  if (static_cast<int>(u.size()) != ndof)
+    throw std::invalid_argument(
+        "fea_assembled_apply: u size != 3*fea_node_count");
+  ReducedSystem s = assemble_reduced(grid, youngs_modulus, poisson, {}, {},
+                                     "fea_assembled_apply", elem_youngs);
+  // No BCs -> freedofs = all ndof and s.Kff is the full global K.
+  Eigen::Map<const Vec> uv(u.data(), ndof);
+  const Vec y = s.Kff * uv;
+  return std::vector<double>(y.data(), y.data() + ndof);
+}
+
+}  // namespace
+
+std::vector<double> fea_assembled_apply(const VoxelGrid& grid,
+                                        double youngs_modulus, double poisson,
+                                        const std::vector<double>& u) {
+  return assembled_apply_impl(grid, youngs_modulus, poisson, nullptr, u);
+}
+
+std::vector<double> fea_assembled_apply(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    double poisson, const std::vector<double>& u) {
+  return assembled_apply_impl(grid, 1.0, poisson, &youngs_per_voxel, u);
+}
+
 std::vector<double> fea_von_mises_field(const VoxelGrid& grid,
                                         double youngs_modulus, double poisson,
                                         const FeaSolution& sol) {

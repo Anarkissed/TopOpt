@@ -69,6 +69,14 @@ if(Eigen3_FOUND)
   # system via the internal src/fea/fea_reduced.hpp. Gated on Eigen like
   # assembly.cpp. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/fea/multigrid.cpp)
+  # Matrix-free global stiffness operator + matrix-free Jacobi-CG (handoff:
+  # matrix-free operator): computes the SAME BC-reduced, void-gated system as
+  # fea_solve_cg element-by-element, never assembling the global K (the memory
+  # foundation for large design-box grids). matfree.cpp is itself Eigen-FREE, but
+  # it is grouped here with the FEA solvers and its test compares against the
+  # assembled operator (fea_assembled_apply in assembly.cpp), so it is gated on
+  # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
+  target_sources(topopt PRIVATE src/fea/matfree.cpp)
   # SIMP density interpolation + penalized compliance/sensitivities (M3.2). It
   # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
@@ -212,6 +220,19 @@ if(Eigen3_FOUND)
   add_executable(test_mgcg tests/unit/test_mgcg.cpp)
   target_link_libraries(test_mgcg PRIVATE topopt)
   add_test(NAME fea_mgcg COMMAND test_mgcg)
+
+  # Matrix-free operator + matrix-free CG test (handoff: matrix-free operator).
+  # Proves the matrix-free apply equals the ASSEMBLED K*u DOF-for-DOF (operator
+  # equality), that matrix-free CG converges to the SAME field as fea_solve_cg
+  # (incl. the ill-conditioned SIMP soft-void grid), that the void-gate /
+  # validation behaviour matches, and that the operator's storage is a
+  # grid-independent constant (memory evidence — no assembled K). Needs
+  # fea_matfree_* / fea_assembled_apply / fea_solve_cg, so it is gated on Eigen
+  # like assembly.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always
+  # runs.
+  add_executable(test_matfree tests/unit/test_matfree.cpp)
+  target_link_libraries(test_matfree PRIVATE topopt)
+  add_test(NAME fea_matfree COMMAND test_matfree)
 
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises
