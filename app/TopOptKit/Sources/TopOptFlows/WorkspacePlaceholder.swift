@@ -43,6 +43,9 @@ public struct WorkspacePlaceholder: View {
     /// The latest camera→screen projection the viewer publishes, so the floating
     /// overlays + arrows track the 3D selection as the camera moves (M7.6 D3–D6).
     @State private var projection: CameraProjection?
+    /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
+    /// Metal viewer's drag and the orientation gizmo.
+    @StateObject private var cameraModel = OrbitCameraModel()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When a project has saved variants, results show by default; tapping "See
@@ -96,6 +99,7 @@ public struct WorkspacePlaceholder: View {
         ZStack(alignment: .topLeading) {
             DS.Color.background.color.ignoresSafeArea()
             MetalMeshView(mesh: viewerMesh,
+                          camera: cameraModel,
                           selection: selection,
                           faceTints: roleTints,                 // D3/D5: anchor faces tint green
                           settleRotation: settleQuat,           // D2: settle onto the floor
@@ -122,6 +126,7 @@ public struct WorkspacePlaceholder: View {
                 if showDesignGizmo { designBoxPanel }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
+            if viewerMesh != nil { orientationGizmo }           // shared ViewCube (top-left)
             bottomBar
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
@@ -184,6 +189,21 @@ public struct WorkspacePlaceholder: View {
             Spacer()
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// The shared ViewCube orientation gizmo, pinned TOP-LEFT under the chrome. The
+    /// right side holds the design-box / gravity controls and the bottom-left the
+    /// Selections panel, so top-left is the corner that stays clear here too.
+    private var orientationGizmo: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                OrientationGizmoView(camera: cameraModel)
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(.top, 76)
+        .padding(.leading, DS.Space.xl3)
     }
 
     private func startRun() {
