@@ -123,7 +123,16 @@ var packageTargets: [Target] = [
     ),
     .testTarget(
         name: "TopOptKitTests",
-        dependencies: ["TopOptKit"],
+        // On macOS the core slice links OCCT via TopOptKit's Homebrew -L/-l flags.
+        // On iOS the OCCT symbols the core slice pulls in (STEP import) are only
+        // satisfied by the cross-built OCCT frameworks, which the *app* gets via
+        // the TopOptOCCT product. A package unit-test bundle does not link that
+        // product, so to exercise STEP import on an iphonesimulator destination
+        // the test bundle must itself link + embed the iOS OCCT frameworks.
+        // iOS-gated and empty on macOS / OCCT-free checkouts (iosBinaryNames == [])
+        // so macOS build/tests and CI are unaffected.
+        dependencies: ["TopOptKit"]
+            + iosBinaryNames.map { .target(name: $0, condition: .when(platforms: [.iOS])) },
         swiftSettings: [.interoperabilityMode(.Cxx)]
     ),
     // M7.2 design system: SwiftUI-only, no C++ interop (so it needs none of
@@ -144,7 +153,11 @@ var packageTargets: [Target] = [
     ),
     .testTarget(
         name: "TopOptFlowsTests",
-        dependencies: ["TopOptFlows"],
+        // Transitively links the core (TopOptFlows -> TopOptKit -> TopOptCore),
+        // so on iOS it must link + embed the OCCT frameworks too (see the note on
+        // TopOptKitTests). iOS-gated; empty on macOS / OCCT-free checkouts.
+        dependencies: ["TopOptFlows"]
+            + iosBinaryNames.map { .target(name: $0, condition: .when(platforms: [.iOS])) },
         swiftSettings: [.interoperabilityMode(.Cxx)]
     ),
     // Carrier for the iOS OCCT/lib3mf frameworks. The app's xcodeproj links the
