@@ -312,9 +312,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     // Final penalized solve on the converged density to recover the
     // displacement field (simp_optimize returns compliance/density, not u).
+    // Solver selection (handoff 073) flows from options.simp.solver via `opt`;
+    // default JacobiCG keeps this byte-identical. The final recovery solve uses
+    // the same solver the ladder ran with.
     const SimpCompliance sc = simp_compliance(G, params, rho, B, loads,
                                               opt.cg_tolerance,
-                                              opt.cg_max_iterations);
+                                              opt.cg_max_iterations,
+                                              /*initial_guess=*/nullptr,
+                                              /*solver=*/nullptr, opt.solver);
 
     // Peak stresses over the PRINTED material (physical density > iso), using
     // the material's solid modulus. Empty/void voxels stay at zero stress. The

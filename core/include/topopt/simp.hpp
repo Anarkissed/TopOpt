@@ -42,6 +42,25 @@ struct SimpParams {
 // (youngs_modulus <= 0, penalty <= 0, or density_min not in (0, 1]).
 double simp_youngs(const SimpParams& params, double density);
 
+// FEA linear-solver selection for the optimizer's penalized solve (handoff
+// 073 — "put the engine in the car"). This is an OPT-IN accelerator switch; the
+// default is JacobiCG everywhere, so nothing changes unless a caller flips it.
+//   * JacobiCG (default) — the shipping path: the Jacobi-preconditioned CG
+//     (fea_solve_cg) / cached PenalizedSolver that every existing caller and the
+//     locked Gate-V2 fixture use. Byte-for-byte unchanged.
+//   * MultigridCG — routes the penalized solve through the geometric-multigrid-
+//     preconditioned CG (fea_solve_mgcg, handoff 072) instead. It solves the
+//     IDENTICAL BC-reduced, void-gated system to the same relative-residual
+//     tolerance — so the converged displacement field, compliance, sensitivities
+//     and optimized design are unchanged within CG tolerance — but converges in
+//     far fewer (mesh-independent ~15) iterations on large grids. fea_solve_mgcg
+//     transparently falls back to the exact Jacobi-CG when a multigrid hierarchy
+//     is not applicable, so the answer is always correct. When MultigridCG is
+//     selected the cached PenalizedSolver fast path and CG warm-start are
+//     bypassed (fea_solve_mgcg is stateless); CgInfo::used_multigrid on the
+//     returned SimpCompliance::cg reports which path actually ran per solve.
+enum class SolverKind { JacobiCG, MultigridCG };
+
 // A uniform initial design field: every solid voxel gets density `value`, every
 // Empty voxel gets 0. Size = grid.voxel_count(), indexed like the grid. This is
 // the "density field" a SIMP run starts from (typically value = the target
@@ -85,13 +104,23 @@ struct SimpCompliance {
 // per-call reassembly. It must match this call's grid/BCs/loads (the caller owns
 // that invariant); `initial_guess` is then ignored (the solver warm-starts
 // itself). nullptr keeps the stateless fea_solve_cg path.
+//
+// `solver_kind` (optional, default JacobiCG) selects the FEA linear solver. The
+// default is the current byte-identical path. MultigridCG routes the penalized
+// solve through fea_solve_mgcg (handoff 072/073): it solves the identical system
+// to the same tolerance — so the returned displacement field, compliance and
+// sensitivities are unchanged within CG tolerance — and bypasses the cached
+// `solver` / `initial_guess` warm start (fea_solve_mgcg is stateless). The
+// returned SimpCompliance::cg carries used_multigrid so the caller can see which
+// path ran. See SolverKind (above) for the full contract.
 SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<double>& density,
                                const std::vector<DirichletBC>& bcs,
                                const std::vector<NodalLoad>& loads,
                                double tolerance = 1e-8, int max_iterations = 0,
                                const FeaSolution* initial_guess = nullptr,
-                               PenalizedSolver* solver = nullptr);
+                               PenalizedSolver* solver = nullptr,
+                               SolverKind solver_kind = SolverKind::JacobiCG);
 
 // ---------------------------------------------------------------------------
 // Density filter + Optimality-Criteria update (ROADMAP M3.3).
@@ -295,6 +324,12 @@ struct SimpOptions {
   double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
   double move = 0.2;             // OC/MMA move limit
   SimpUpdater updater = SimpUpdater::OC;  // design updater (M7.mma.1); default OC
+  // FEA linear-solver selection (handoff 073). Default JacobiCG = the current
+  // byte-identical shipping path; MultigridCG opts every penalized solve in this
+  // run into the geometric-multigrid accelerator (fea_solve_mgcg), which solves
+  // the identical system to the same tolerance. OPT-IN: leaving this at the
+  // default keeps Gate-V2 and every existing caller unchanged. See SolverKind.
+  SolverKind solver = SolverKind::JacobiCG;
   int max_iterations = 60;       // hard iteration cap (a convergence criterion)
   double change_tol = 0.01;      // stop when max_e |x_new - x| < change_tol
   double cg_tolerance = 1e-8;    // penalized-FEA CG tolerance (tight: §V2 gate)

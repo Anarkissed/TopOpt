@@ -128,7 +128,8 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<NodalLoad>& loads,
                                double tolerance, int max_iterations,
                                const FeaSolution* initial_guess,
-                               PenalizedSolver* solver) {
+                               PenalizedSolver* solver,
+                               SolverKind solver_kind) {
   validate_params(params);
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
@@ -149,7 +150,14 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       }
 
   SimpCompliance out;
-  if (solver != nullptr && solver->usable()) {
+  if (solver_kind == SolverKind::MultigridCG) {
+    // Opt-in accelerator (handoff 073): the geometric-multigrid-preconditioned
+    // CG solves the identical system to the same tolerance. It is stateless, so
+    // the cached PenalizedSolver fast path and warm start are bypassed;
+    // out.cg.used_multigrid reports whether MG ran or it fell back to Jacobi-CG.
+    out.solution = fea_solve_mgcg(grid, elem_youngs, params.poisson, bcs, loads,
+                                  tolerance, max_iterations, &out.cg);
+  } else if (solver != nullptr && solver->usable()) {
     // Cached fast path: rescale the pre-reduced operator + internal warm start.
     out.solution =
         solver->solve(elem_youngs, tolerance, max_iterations, &out.cg);
@@ -770,7 +778,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       const SimpCompliance c = simp_compliance(
           grid, params, xphys, bcs, loads, options.cg_tolerance,
           options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
-          use_solver ? &solver : nullptr);
+          use_solver ? &solver : nullptr, options.solver);
       if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
@@ -835,7 +843,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     project_solid(grid, result.physical_density, plan.back().beta, eta);
   const SimpCompliance fc = simp_compliance(
       grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
-      options.cg_max_iterations, nullptr, use_solver ? &solver : nullptr);
+      options.cg_max_iterations, nullptr, use_solver ? &solver : nullptr,
+      options.solver);
   result.compliance = fc.compliance;
   result.volume_fraction = phys_volfrac(result.physical_density);
   // Final playback keyframe: the converged shape.
@@ -1266,7 +1275,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
           simp_compliance(analysis, params, xphys, bcs, loads,
                           options.cg_tolerance, options.cg_max_iterations,
                           warm.u.empty() ? nullptr : &warm,
-                          use_solver ? &solver : nullptr);
+                          use_solver ? &solver : nullptr, options.solver);
       if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
@@ -1340,7 +1349,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   const SimpCompliance fc = simp_compliance(
       analysis, params, result.physical_density, bcs, loads,
       options.cg_tolerance, options.cg_max_iterations, nullptr,
-      use_solver ? &solver : nullptr);
+      use_solver ? &solver : nullptr, options.solver);
   result.compliance = fc.compliance;
   result.volume_fraction = active_volfrac(xfinal_unpinned);
   // Final playback keyframe: the converged printed shape.
