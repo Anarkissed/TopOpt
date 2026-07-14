@@ -98,9 +98,38 @@ public struct OrbitCamera: Equatable {
         self.elevation = Self.clampElevation(elevation)
     }
 
-    private static func clampElevation(_ e: Float) -> Float {
+    static func clampElevation(_ e: Float) -> Float {
         Swift.min(Swift.max(e, -maxElevation), maxElevation)
     }
+
+    /// Set azimuth + elevation together (elevation clamped near the poles). Used by
+    /// the shared camera model when snapping to a canonical view or animating.
+    public mutating func setOrientation(azimuth: Float, elevation: Float) {
+        self.azimuth = azimuth
+        self.elevation = Self.clampElevation(elevation)
+    }
+
+    /// Invert `direction` back to an (azimuth, elevation) pair — the canonical camera
+    /// that looks at the target FROM `d` (a unit eye-direction). This is the exact
+    /// inverse of `direction`'s formula `(cosE·sinA, sinE, cosE·cosA)`, so snapping to
+    /// a named-view direction and reading `direction` back is a round-trip. Elevation
+    /// is clamped to the pole limit (so a straight-down "Top" lands at the reachable
+    /// `maxElevation`, never the degenerate pole). At a pole the azimuth is undefined,
+    /// so the caller's `currentAzimuth` is preserved (keeps the spin you had).
+    public static func azimuthElevation(forDirection d: SIMD3<Float>,
+                                        currentAzimuth: Float = 0) -> (azimuth: Float, elevation: Float) {
+        let n = simd_length(d) > 1e-6 ? simd_normalize(d) : SIMD3<Float>(0, 0, 1)
+        let elevation = clampElevation(asin(Swift.min(Swift.max(n.y, -1), 1)))
+        // Near a pole the horizontal component vanishes and azimuth is undefined.
+        let horiz = n.x * n.x + n.z * n.z
+        let azimuth = horiz > 1e-6 ? atan2(n.x, n.z) : currentAzimuth
+        return (azimuth, elevation)
+    }
+
+    /// The upper-left 3×3 of the view matrix (world→view rotation) — the orientation
+    /// the model appears in from this camera. The orientation gizmo renders the cube
+    /// through exactly this, so the widget can never diverge from the live view.
+    public func viewRotation() -> simd_float3x3 { normalMatrix() }
 
     /// Frame `bounds`: look at its centre from a distance that fits the whole
     /// bounding sphere in the vertical field of view (with a small margin), and set
