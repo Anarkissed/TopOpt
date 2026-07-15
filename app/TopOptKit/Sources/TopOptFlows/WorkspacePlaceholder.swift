@@ -196,19 +196,27 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// The shared ViewCube orientation gizmo, pinned TOP-LEFT under the chrome. The
-    /// right side holds the design-box / gravity controls and the bottom-left the
-    /// Selections panel, so top-left is the corner that stays clear here too.
+    /// The liquid-glass orientation widget, moved to the RIGHT side (gizmo-liquid-glass-
+    /// reskin task, item 2). Unlike ResultsScreen — whose right rail is clear below the
+    /// Export button — the SETUP screen's right rail is congested: the gravity / minimize /
+    /// quality / design-box chips (`topRightControls`) fill the top-right (≈y 22–230) and
+    /// the design-box PANEL (`designBoxPanel`, 260pt wide, top inset 210 ⇒ ≈y 210–460) takes
+    /// the upper-right whenever that tool is active. There is no ~300pt top-right slot free
+    /// of both, so the gizmo is anchored BOTTOM-right instead — clear of the top controls
+    /// and, in portrait, clear of the design-box panel; it clears the bottom bar's
+    /// Optimize / print-params buttons via the bottom inset. Residual caveat (handoff): in
+    /// SHORT LANDSCAPE with the design-box tool open the case's top edge can graze the
+    /// panel's lower edge (~70pt) — reported, not silently worked around.
     private var orientationGizmo: some View {
-        VStack(alignment: .leading) {
-            HStack {
-                OrientationGizmoView(camera: cameraModel)
-                Spacer()
-            }
+        VStack {
             Spacer()
+            HStack {
+                Spacer()
+                OrientationGizmoView(camera: cameraModel)
+            }
         }
-        .padding(.top, 76)
-        .padding(.leading, DS.Space.xl3)
+        .padding(.trailing, DS.Space.xl3)
+        .padding(.bottom, DS.Space.xl4 + 50 + DS.Space.m)   // clear the bottom bar buttons
     }
 
     private func startRun() {

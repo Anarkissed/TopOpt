@@ -190,6 +190,21 @@ final class OrientationGizmoTests: XCTestCase {
         XCTAssertEqual(OrientationGizmo.regions.filter { $0.kind == .corner }.count, 8)
     }
 
+    /// The reskin (gizmo-liquid-glass-reskin) draws a clickable BUBBLE at every anchor's
+    /// projected position, but keeps the band-based `hitTest` so the snap targets are
+    /// unchanged. This proves no region was lost when the targets became bubbles: for each
+    /// of the 26 regions, when the camera looks from its canonical direction its bubble
+    /// projects to the gizmo centre, and a tap there must resolve back to that SAME region.
+    func testEveryAnchorHasAReachableClickableTarget() {
+        let s = CGSize(width: 74, height: 74)
+        for region in OrientationGizmo.regions {
+            let r = rotation(forID: region.id)
+            let hit = OrientationGizmo.hitTest(point: CGPoint(x: 37, y: 37), in: s, rotation: r)
+            XCTAssertEqual(hit?.id, region.id,
+                           "region \(region.id) must stay reachable at its bubble (view centre)")
+        }
+    }
+
     // MARK: helpers
 
     private func assertDirection(_ a: SIMD3<Float>, _ b: SIMD3<Float>,
