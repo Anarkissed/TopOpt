@@ -152,19 +152,23 @@ std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
 // large fraction of a small part. Tunable — raise for chunkier anchors.
 constexpr int kAnchorPadDepthVoxels = 3;
 
-// M7.anchor-integrity (FIX 2) — the ladder-floor multiple handed to
-// minimize_plastic on the loadcase path (MinimizePlasticOptions::margin_floor_
-// multiple). The ladder stops stripping once an accepted rung's worst-case margin
-// is >= this multiple of margin_stop (1.5), i.e. >= 3.0 here — so a rung that
-// clears 2x the margin_stop comfort floor is the terminal accepted variant. This
-// keeps a lightly-loaded part from being walked to the lightest rung (0.26 VF)
-// just because it can survive there. Conservative seed; the maintainer can tune it
-// after seeing results (one-line change). Setting it to +infinity (or removing the
-// opts.margin_floor_multiple assignment) reverts to the legacy walk-to-the-
-// lightest-safe-rung behavior exactly (minimize_plastic asserts that equivalence).
-constexpr double kAnchorMarginFloorMultiple = 2.0;   // stop the ladder once a rung
-                                                     // clears 2x the margin_stop
-                                                     // comfort floor
+// M7.anchor-integrity (FIX 2) — WITHDRAWN (diagnosis 084-ladder-collapse-diagnosis). The
+// "ladder floor" halted the walk at the first accepted rung whose worst-case margin
+// cleared `margin_floor_multiple * margin_stop` (2 * 1.5 = 3.0). Because the ladder
+// walks HEAVIEST -> lightest and margin is highest at rung 0 (the heaviest, most
+// material), that test fires at rung 0 for any comfortably-strong part — collapsing
+// the savings ladder to a SINGLE rung and hiding exactly the lighter, higher-savings
+// variants the product recommends (the lightest safe rung). It stripped material
+// removal precisely when the part was safest to continue: backwards for a savings
+// ladder. It was domain-independent (set on BOTH the no-box and box loadcase paths),
+// so it regressed the no-box ladder too (PR #64), not just the design-box path; the
+// no-box collapse was masked only because the historical 4-rung runs predate it.
+// Anchor integrity is served by FIX 1 (the frozen structural pad), not by truncating
+// the ladder. margin_floor_multiple stays in the core API defaulting to +infinity
+// (disabled); the bridge no longer turns it on, restoring walk-to-lightest-safe-rung.
+// If a "don't over-recommend an aggressive strip" behavior is ever wanted, it belongs
+// at the recommendation-SELECTION layer (which rung to highlight), never as a walk
+// terminator that deletes the other rungs. See docs/handoffs/084-ladder-collapse-diagnosis-*.
 
 // Turn on the M6.3 single-field Heaviside projection + beta-continuation on a
 // run's SIMP options, for crisp (near-0/1) density with a minimum length scale.
@@ -726,10 +730,10 @@ OptimizeResult run_minimize_plastic_loadcase(
         topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
                                kAnchorPadDepthVoxels, pad);
       opts.design_mask = std::move(pad);
-      // M7.anchor-integrity (FIX 2): floor the reduction ladder so a lightly-
-      // loaded part is not stripped to the lightest rung once it is comfortably
-      // strong. Only meaningful when the ladder actually walks (minimize_plastic).
-      opts.margin_floor_multiple = kAnchorMarginFloorMultiple;
+      // M7.anchor-integrity (FIX 2) WITHDRAWN — the ladder floor is no longer set
+      // here; opts.margin_floor_multiple keeps its +infinity default (disabled), so
+      // the ladder walks to the lightest safe rung on BOTH the no-box and box paths.
+      // See the constant's comment above and docs/handoffs/084-ladder-collapse-diagnosis-*.
     }
 
     // M7.dom-app: the design-domain expansion. When the app defined a design box,

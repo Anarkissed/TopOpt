@@ -406,6 +406,18 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME designbox_reduction COMMAND test_designbox_reduction)
 
+  # Savings-ladder rung-collapse regression (diagnosis 084-ladder-collapse-diagnosis): a
+  # comfortably-strong part must produce MULTIPLE savings rungs on BOTH the no-box
+  # and box paths (the ladder walks to the lightest safe rung, which the app
+  # recommends). Guards against re-introducing a ladder-truncating "floor" that
+  # halts the walk at the strongest rung. Drives minimize_plastic, so Eigen-gated
+  # like the other optimizer gates; the real settings rule table is injected.
+  add_executable(test_ladder_rung_count tests/validation/test_ladder_rung_count.cpp)
+  target_link_libraries(test_ladder_rung_count PRIVATE topopt)
+  target_compile_definitions(test_ladder_rung_count PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME ladder_rung_count COMMAND test_ladder_rung_count)
+
   # Anchor integrity on the design-box path (handoff 082): with the imported part
   # Active/removable (whole-domain optimize), a caller anchor pad (FrozenSolid
   # design_mask on the PART grid) is MERGED into the expanded domain and keeps the
