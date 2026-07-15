@@ -155,7 +155,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           "minimize_plastic: design_box is incompatible with a caller "
           "design_mask (the design box builds the effective mask itself)");
     domain = expand_design_domain(grid, *options.design_box,
-                                  options.keep_out_boxes);
+                                  options.keep_out_boxes,
+                                  options.freeze_imported_part);
     remapped_bcs.reserve(bcs.size());
     for (const DirichletBC& bc : bcs)
       remapped_bcs.push_back({remap_node_to_domain(grid, domain, bc.node),
@@ -217,6 +218,44 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                : (options.design_mask.empty() ? make_active_mask(G)
                                               : options.design_mask);
 
+  // Handoff 080 (Option 2 — "whole-domain optimize"): on a design-box run that does
+  // NOT freeze the imported part, the part is an Active design region the optimizer
+  // may remove. Two quantities must then be normalised to the PART rather than to
+  // the Active envelope, so the run reduces plastic against the part and the app's
+  // savings/baseline are the honest part reference:
+  //   (1) each ladder rung's volume-fraction TARGET — simp's volume constraint is
+  //       `vf * n_active` over the Active envelope (part interior + add-region),
+  //       which for a loose box permits far MORE material than the part; rescale it
+  //       to `vf * part_solid` so rung `vf` means "keep vf of the part's worth of
+  //       material" (see the near-solid diagnosis, handoff 080);
+  //   (2) the reported ACHIEVED fraction — set below to printed_voxels / part_solid
+  //       so `savings = 1 - achieved` and the implied baseline (mass / achieved)
+  //       resolve to the part's mass, not the filled expanded domain.
+  // `active_effective` mirrors what effective_mask (simp) actually optimises: Active
+  // voxels minus the Empty/Load/Fixture voxels it reclassifies out of the budget.
+  // Gated on the box path only, so the no-box run is byte-identical.
+  const bool part_relative = expanded && !options.freeze_imported_part;
+  const double part_solid = static_cast<double>(grid.solid_count());
+  double active_effective = 0.0;   // voxels simp's volume constraint moves
+  double frozen_effective = 0.0;   // voxels effective_mask pins solid (always printed)
+  if (part_relative) {
+    for (int k = 0; k < G.nz; ++k)
+      for (int j = 0; j < G.ny; ++j)
+        for (int i = 0; i < G.nx; ++i) {
+          const std::size_t idx = G.index(i, j, k);
+          const VoxelTag t = G.tag(i, j, k);
+          // effective_mask (simp) forces Load/Fixture -> FrozenSolid: these are
+          // always printed but never move, so they spend part of the part budget.
+          if (t == VoxelTag::Load || t == VoxelTag::Fixture) {
+            frozen_effective += 1.0;
+            continue;
+          }
+          if (mask[idx] != MaskValue::Active) continue;
+          if (t == VoxelTag::Empty) continue;  // effective_mask -> FrozenVoid
+          active_effective += 1.0;
+        }
+  }
+
   // Part size for the settings size class: the largest grid bounding-box edge.
   const double part_dim_mm =
       std::max({static_cast<double>(G.nx), static_cast<double>(G.ny),
@@ -245,7 +284,21 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
     SimpOptions opt = options.simp;
+    // Whole-domain optimize (handoff 080): rescale the rung's fraction from
+    // "fraction of the Active envelope" to "fraction of the part" so a loose box
+    // does not let the optimizer keep MORE material than the part. Target total
+    // printed material is `vf * part_solid` voxels; `frozen_effective` of those are
+    // spent on the always-printed Load/Fixture skin, so the Active budget targets
+    // the remainder, and dividing by the Active count gives the simp fraction that
+    // lands the TOTAL at `vf * part_solid`. Clamped to (0, 1]. Off the box path this
+    // is exactly `vf` (byte-identical).
     opt.volume_fraction = vf;
+    if (part_relative && active_effective > 0.0) {
+      const double active_target = vf * part_solid - frozen_effective;
+      opt.volume_fraction =
+          std::min(1.0, std::max(params.density_min,
+                                 active_target / active_effective));
+    }
     // M7.mma.4 — the switchover: the driver, not the shared SimpOptions default,
     // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
     // set options.updater = OC to fall back. Overrides any simp.updater.
@@ -391,6 +444,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       if (!(rho[idx] > kIso)) printed_grid.tags[idx] = VoxelTag::Empty;
     variant.support_volume_voxels =
         support_overhang_voxels(printed_grid, build_dir);
+
+    // Whole-domain optimize (handoff 080): report the achieved fraction relative to
+    // the PART, not the Active envelope. printed_voxels already counts every printed
+    // voxel (kept part + grown material). Overwriting the optimizer's active-envelope
+    // fraction here makes `savings = 1 - achieved` and the app's implied baseline
+    // (mass / achieved) resolve to the part's mass: mass / (printed/part_solid) =
+    // density * part_solid * voxel_volume / 1000 == the imported part's mass. The
+    // value can exceed 1 (net material added → negative savings), which is honest.
+    // vr.volume_fraction below reads this same field, so the report line agrees.
+    if (part_relative && part_solid > 0.0)
+      variant.optimization.volume_fraction =
+          static_cast<double>(printed_voxels) / part_solid;
 
     // Worst-case stress margin (M5.2 locked definition).
     const StressMargin margin = compute_stress_margin(

@@ -147,6 +147,24 @@ struct MinimizePlasticOptions {
   // are always FrozenSolid).
   std::vector<DesignBox> keep_out_boxes;
 
+  // M7.dom-core / handoff 080 — what the imported part becomes on the design-box
+  // path. Only consulted when `design_box` is set.
+  //   * false (DEFAULT — "whole-domain optimize"): the imported part is an Active
+  //     design region the optimizer may REMOVE as well as grow beyond, so a
+  //     minimize-plastic run with a box genuinely reduces plastic MEASURED AGAINST
+  //     THE PART. On this path the ladder's volume fraction and the reported
+  //     achieved fraction are normalised to the PART (part.solid_count()), not the
+  //     Active add-region, so `savings = 1 - achieved` and the implied baseline
+  //     (mass / achieved) are the honest part reference. The Load/Fixture BC skin
+  //     is still pinned FrozenSolid (expand_design_domain preserves those tags).
+  //   * true ("add material" feature): the imported part is FrozenSolid (never
+  //     removed); the optimizer only grows new material into the Active box volume,
+  //     and the fraction applies to that add-region. This is the M7.dom-core
+  //     contract exercised by test_design_domain.
+  // Ignored when `design_box` is unset (the no-box path is byte-identical either
+  // way). See handoff 080-designbox-nearsolid-diagnosis.md.
+  bool freeze_imported_part = false;
+
   // Self-weight body load. `gravity` is the acceleration magnitude (finite,
   // > 0); `gravity_direction` is the direction gravity pulls (need not be unit,
   // normalized internally; must be non-zero). Units are caller-chosen but must

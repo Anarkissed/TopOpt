@@ -394,6 +394,18 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME design_domain COMMAND test_design_domain)
 
+  # Handoff 080 regression gate: the design-box "whole-domain optimize" path
+  # (freeze_imported_part == false, the default) must REDUCE plastic against the
+  # imported part — removes material, baseline == part mass, and the ladder walks
+  # the same rung count as the no-box path (no collapse to one near-solid rung).
+  # Drives minimize_plastic, so Eigen-gated like the other optimizer gates; the real
+  # settings rule table is injected. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_designbox_reduction tests/validation/test_designbox_reduction.cpp)
+  target_link_libraries(test_designbox_reduction PRIVATE topopt)
+  target_compile_definitions(test_designbox_reduction PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME designbox_reduction COMMAND test_designbox_reduction)
+
   # MMA updater (M7.mma.1): the Method of Moving Asymptotes design updater,
   # exposed behind SimpOptions.updater = MMA, reproduces the OC minimum-
   # compliance benchmarks (the Gate V2 cantilever + clamped-beam geometries)

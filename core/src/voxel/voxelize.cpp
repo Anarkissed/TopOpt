@@ -64,7 +64,8 @@ bool point_in_box(const Vec3& p, const DesignBox& b) {
 
 DesignDomain expand_design_domain(const VoxelGrid& part,
                                   const DesignBox& design_box,
-                                  const std::vector<DesignBox>& keep_out) {
+                                  const std::vector<DesignBox>& keep_out,
+                                  bool freeze_part) {
   if (!(part.spacing > 0.0))
     throw std::invalid_argument(
         "expand_design_domain: part.spacing must be > 0");
@@ -121,10 +122,15 @@ DesignDomain expand_design_domain(const VoxelGrid& part,
         const int pi = i - oi, pj = j - oj, pk = k - ok;
         if (pi >= 0 && pi < part.nx && pj >= 0 && pj < part.ny && pk >= 0 &&
             pk < part.nz && part.solid(pi, pj, pk)) {
-          // The imported part: frozen solid, keeping its original tag (incl. any
-          // Load/Fixture face tag). Never removed, never overridden by a box.
+          // The imported part keeps its original tag (incl. any Load/Fixture face
+          // tag), never overridden by a box. `freeze_part` decides whether it is a
+          // FrozenSolid keep-in (add-material feature) or an Active design variable
+          // the optimizer may also remove (whole-domain optimize, handoff 080). The
+          // Load/Fixture tags survive both, so the mask-aware simp path still pins
+          // the BC skin FrozenSolid even when the part interior is Active.
           g.tags[idx] = part.tag(pi, pj, pk);
-          domain.mask[idx] = MaskValue::FrozenSolid;
+          domain.mask[idx] =
+              freeze_part ? MaskValue::FrozenSolid : MaskValue::Active;
           continue;
         }
         // Not part material: only the design volume is a design region.

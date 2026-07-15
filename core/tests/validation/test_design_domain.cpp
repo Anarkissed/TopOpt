@@ -254,6 +254,11 @@ int main() {
 
   // --- Run the optimizer over the expanded design domain -------------------
   MinimizePlasticOptions o;
+  // This gate exercises the M7.dom-core "add material" feature: the imported part
+  // is FrozenSolid (never removed) and the optimizer only GROWS into the Active box
+  // volume. Handoff 080 made minimize_plastic default to the "whole-domain optimize"
+  // semantics (part removable), so opt INTO the frozen-part feature explicitly here.
+  o.freeze_imported_part = true;
   o.volume_fraction_ladder = {0.5};  // a single rung; grow 50% of the Active volume
   o.margin_stop = 0.0;               // accept the rung (isolate the growth/compliance)
   o.gravity = 0.0;                   // unused: an external load case drives the design
