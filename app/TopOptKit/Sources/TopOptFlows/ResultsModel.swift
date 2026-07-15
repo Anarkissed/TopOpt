@@ -677,10 +677,32 @@ public final class ResultsModel: ObservableObject {
         accepted.indices.contains(selectedIndex) ? accepted[selectedIndex] : nil
     }
 
+    /// Honest surface-resolution note (083). Non-nil only when this part is
+    /// voxelized coarsely enough that the app's 2.5 mm physical min-feature filter
+    /// hits its 1.5-voxel checkerboard floor — spacing > 2.5/1.5 ≈ 1.667 mm, i.e.
+    /// max part dimension > ~107 mm at Fast (64³). That is the regime where the
+    /// marching-cubes surface visibly terraces. The note states the ACTUAL voxel
+    /// size (mm) and is explicit that the smooth-shaded preview is cosmetic: the
+    /// stepping is REAL geometry that stays in the exported STL/3MF and the print.
+    /// It points at raising Detail as a choice — it never silently changes it.
+    public var surfaceResolutionNote: String? {
+        guard spacing > Float(2.5 / 1.5) else { return nil }
+        return String(
+            format: "Solved at %.1f mm voxels. The surface stepping is real "
+                  + "geometry at this scale and stays in the exported STL — "
+                  + "smoothing softens the preview only. Raise Detail for a finer "
+                  + "surface (slower, more memory).",
+            Double(spacing))
+    }
+
     /// The selected variant's isosurface for display (nil if it has no geometry).
     public var selectedMesh: ViewerMesh? {
         guard let v = selectedVariant, !v.meshVertices.isEmpty else { return nil }
-        return ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [])
+        // Smooth-shade the organic optimized surface (083): flat per-face normals
+        // turn every voxel-lattice facet into a visible terrace on coarse (large-
+        // part) grids. Display-only — geometry/mass/exported STL are unchanged.
+        return ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
+                          smoothShaded: true)
     }
 
     /// The selected variant's stress field, tied to the run's grid geometry.
@@ -1196,7 +1218,9 @@ public final class ResultsModel: ObservableObject {
     public func keyframes() -> [ViewerMesh] {
         if let c = keyframeCache, c.index == selectedIndex { return c.meshes }
         let ms = (selectedVariant?.keyframeMeshes ?? []).map {
-            ViewerMesh(vertices: $0.vertices, indices: $0.indices, faceIDs: [])
+            // Smooth-shade organic playback meshes to match selectedMesh (083).
+            ViewerMesh(vertices: $0.vertices, indices: $0.indices, faceIDs: [],
+                       smoothShaded: true)
         }
         keyframeCache = (selectedIndex, ms)
         return ms

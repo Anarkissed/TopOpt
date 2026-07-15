@@ -157,6 +157,44 @@ public enum MeshGeometry {
         }
         return FlatMesh(positions: pos, normals: nor)
     }
+
+    /// Smooth-shade expansion (M-stairstep 083): same unshared-vertex layout as
+    /// `flatShaded` — every triangle emits its three positions in triangle order,
+    /// so the `3 * triangleCount` vertex ordering is BYTE-IDENTICAL and every
+    /// per-flat-vertex attribute buffer (stress tint, flex displacement, id) stays
+    /// aligned — but each emitted vertex carries the shared-vertex SMOOTH normal
+    /// (area-weighted, `vertexNormals`) looked up by its original index instead of
+    /// the triangle's constant face normal. Only the normals differ; positions,
+    /// count, order, and the exported geometry are untouched. This is the correct
+    /// shading for an ORGANIC marching-cubes surface (the optimized result), where
+    /// flat per-face normals turn every 64³ lattice facet into a visible terrace.
+    /// It changes the VIEW only: the surface geometry, mass, and exported STL/3MF
+    /// are unchanged (the exporter uses the core mesh, not these normals), and the
+    /// silhouette still shows the true voxel stepping.
+    public static func flatShadedSmooth(vertices: [Float], indices: [Int32]) -> FlatMesh {
+        let vertexCount = vertices.count / 3
+        let smooth = vertexNormals(vertices: vertices, indices: indices)  // 3 per shared vertex
+        var pos = [Float]()
+        var nor = [Float]()
+        pos.reserveCapacity(indices.count * 3)
+        nor.reserveCapacity(indices.count * 3)
+        var t = 0
+        while t + 2 < indices.count {
+            for k in 0..<3 {
+                let idx = indices[t + k]
+                let p = position(idx, in: vertices, vertexCount: vertexCount)
+                pos.append(p.x); pos.append(p.y); pos.append(p.z)
+                if idx >= 0, Int(idx) < vertexCount {
+                    let b = Int(idx) * 3
+                    nor.append(smooth[b]); nor.append(smooth[b + 1]); nor.append(smooth[b + 2])
+                } else {
+                    nor.append(0); nor.append(0); nor.append(1)
+                }
+            }
+            t += 3
+        }
+        return FlatMesh(positions: pos, normals: nor)
+    }
 }
 
 /// A flat-shaded render buffer: unshared vertices (`3 * triangleCount`), each
@@ -211,16 +249,28 @@ public struct ViewerMesh {
     public var triangleCount: Int { indices.count / 3 }
     public var isEmpty: Bool { indices.isEmpty }
 
-    /// Build from the bridge's flattened buffers: derives the flat render buffer
-    /// (default) and the smooth normals (available), the bounds, and converts the
-    /// signed indices to the unsigned form a Metal index buffer wants.
-    public init(vertices: [Float], indices: [Int32], faceIDs: [Int32]) {
+    /// Build from the bridge's flattened buffers: derives the flat render buffer,
+    /// the smooth normals (available), the bounds, and converts the signed indices
+    /// to the unsigned form a Metal index buffer wants.
+    ///
+    /// `smoothShaded` picks how the `flat` render buffer is normal-shaded (the
+    /// unshared-vertex layout is identical either way, so all per-flat-vertex
+    /// attribute buffers stay aligned): `false` (default) = per-face normals, the
+    /// crisp CAD look for prismatic imported parts; `true` = smooth per-vertex
+    /// normals, the correct look for an ORGANIC optimized marching-cubes result
+    /// (M-stairstep 083) where flat shading turns every voxel-lattice facet into a
+    /// visible terrace. Smooth shading is display-only — geometry, mass, and the
+    /// exported STL/3MF are unchanged.
+    public init(vertices: [Float], indices: [Int32], faceIDs: [Int32],
+                smoothShaded: Bool = false) {
         self.positions = vertices
         self.normals = MeshGeometry.vertexNormals(vertices: vertices, indices: indices)
         self.indices = indices.map { UInt32(bitPattern: $0) }
         self.faceIDs = faceIDs
         self.bounds = MeshGeometry.bounds(vertices: vertices)
-        self.flat = MeshGeometry.flatShaded(vertices: vertices, indices: indices)
+        self.flat = smoothShaded
+            ? MeshGeometry.flatShadedSmooth(vertices: vertices, indices: indices)
+            : MeshGeometry.flatShaded(vertices: vertices, indices: indices)
     }
 
     /// Positions and normals interleaved as `[px,py,pz,nx,ny,nz]` per vertex — the

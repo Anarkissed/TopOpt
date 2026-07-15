@@ -128,6 +128,47 @@ final class ViewerTests: XCTestCase {
         }
     }
 
+    // MARK: smooth-shaded flat buffer (083) — display-only anti-terracing
+
+    func testSmoothFlatBufferMatchesFlatPositionsButUsesSmoothNormals() {
+        let verts = Self.cubeVerts, tris = Self.cubeTris
+        let flat = MeshGeometry.flatShaded(vertices: verts, indices: tris)
+        let smooth = MeshGeometry.flatShadedSmooth(vertices: verts, indices: tris)
+        // Same unshared-vertex layout: identical count and byte-identical positions
+        // in the same order (so per-flat-vertex tint/flex/id buffers stay aligned).
+        XCTAssertEqual(smooth.vertexCount, flat.vertexCount)
+        XCTAssertEqual(smooth.positions, flat.positions)
+        // Normals are the shared-vertex SMOOTH normals expanded by original index,
+        // NOT the constant face normal — so they differ from the flat buffer.
+        let vtxNormals = MeshGeometry.vertexNormals(vertices: verts, indices: tris)
+        var t = 0, corner = 0
+        for v in 0..<smooth.vertexCount {
+            let idx = Int(tris[t + corner])
+            for k in 0..<3 {
+                XCTAssertEqual(smooth.normals[v * 3 + k], vtxNormals[idx * 3 + k], accuracy: 1e-6)
+            }
+            let n = SIMD3<Float>(smooth.normals[v * 3], smooth.normals[v * 3 + 1], smooth.normals[v * 3 + 2])
+            XCTAssertEqual(simd_length(n), 1, accuracy: 1e-5)  // unit smooth normal
+            corner += 1
+            if corner == 3 { corner = 0; t += 3 }
+        }
+        // On the cube the smooth normals genuinely differ from the flat ones
+        // (a corner vertex averages three faces), proving it is not a no-op.
+        XCTAssertNotEqual(smooth.normals, flat.normals)
+    }
+
+    func testSmoothShadedViewerMeshLeavesGeometryUnchanged() {
+        let verts = Self.cubeVerts, tris = Self.cubeTris
+        let flatMesh = ViewerMesh(vertices: verts, indices: tris, faceIDs: [])
+        let smoothMesh = ViewerMesh(vertices: verts, indices: tris, faceIDs: [], smoothShaded: true)
+        // Display-only: positions, indices and bounds (the exported/printed geometry
+        // proxy) are identical; only the render buffer's normals change.
+        XCTAssertEqual(smoothMesh.positions, flatMesh.positions)
+        XCTAssertEqual(smoothMesh.indices, flatMesh.indices)
+        XCTAssertEqual(smoothMesh.flat.positions, flatMesh.flat.positions)
+        XCTAssertNotEqual(smoothMesh.flat.normals, flatMesh.flat.normals)
+    }
+
     func testCubeYieldsSixDistinctFaceNormals() {
         let faces = MeshGeometry.faceNormals(vertices: Self.cubeVerts, indices: Self.cubeTris)
         XCTAssertEqual(faces.count, 12)
