@@ -200,8 +200,11 @@ int main() {
   // kDesignBoxCoarsenAlign); pass the same alignment here so this domain matches
   // the run's grid index-for-index.
   constexpr int kCoarsenAlign = 8;  // must equal minimize_plastic's constant
-  const DesignDomain domain =
-      topopt::expand_design_domain(part, box, {keep_out}, kCoarsenAlign);
+  // freeze_part=true matches o.freeze_imported_part below (this gate exercises the
+  // add-material feature), and kCoarsenAlign matches minimize_plastic's internal
+  // expand so this domain aligns with the run's grid index-for-index.
+  const DesignDomain domain = topopt::expand_design_domain(
+      part, box, {keep_out}, /*freeze_part=*/true, kCoarsenAlign);
 
   // The expansion actually ENLARGED the grid (new Active volume beyond the import)
   // and shifted the part by a nonzero offset (exercising node remapping).
@@ -261,6 +264,11 @@ int main() {
 
   // --- Run the optimizer over the expanded design domain -------------------
   MinimizePlasticOptions o;
+  // This gate exercises the M7.dom-core "add material" feature: the imported part
+  // is FrozenSolid (never removed) and the optimizer only GROWS into the Active box
+  // volume. Handoff 080 made minimize_plastic default to the "whole-domain optimize"
+  // semantics (part removable), so opt INTO the frozen-part feature explicitly here.
+  o.freeze_imported_part = true;
   o.volume_fraction_ladder = {0.5};  // a single rung; grow 50% of the Active volume
   o.margin_stop = 0.0;               // accept the rung (isolate the growth/compliance)
   o.gravity = 0.0;                   // unused: an external load case drives the design

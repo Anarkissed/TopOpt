@@ -121,8 +121,10 @@ int main() {
   box.min = Vec3{-3.5, -0.5, -0.5};   // lo_pad in x -> nonzero offset_i
   box.max = Vec3{12.5, 8.5, 8.5};     // grow beyond the far faces
 
-  const DesignDomain d1 = topopt::expand_design_domain(part, box, {}, 1);
-  const DesignDomain d8 = topopt::expand_design_domain(part, box, {}, 8);
+  const DesignDomain d1 =
+      topopt::expand_design_domain(part, box, {}, /*freeze_part=*/true, 1);
+  const DesignDomain d8 =
+      topopt::expand_design_domain(part, box, {}, /*freeze_part=*/true, 8);
 
   std::printf("[pad] unpadded grid = %dx%dx%d  padded grid = %dx%dx%d  "
               "offset=(%d,%d,%d)\n",

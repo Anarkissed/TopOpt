@@ -164,13 +164,22 @@ struct DesignDomain {
 // the axes where no padding is needed. Membership in `design_box` / `keep_out`
 // is decided by the VOXEL CENTRE (matching the voxelizer's centre-sampling).
 //
-// Part solid voxels become FrozenSolid regardless of the boxes (the import is
-// never removed, and a keep-out box never carves into it). Keep-out voxels that
-// are not part are tagged Empty (mask FrozenVoid) so they carry no FEA element
-// and no self-weight. New Active voxels are tagged Interior (solid design
-// variables at the caller's volume fraction). With a design_box that exactly
-// matches the part's bounding box and no keep-out, every part voxel is
-// FrozenSolid and every in-box empty voxel is Active — the offsets are all 0.
+// `freeze_part` selects what the imported part becomes in the effective mask:
+//   * true  (default, the M7.dom-core "add material" feature): part solid voxels
+//     become FrozenSolid — the import is never removed and the optimizer may only
+//     GROW new material into the Active design volume.
+//   * false (handoff 080, Option 2 "whole-domain optimize"): part solid voxels
+//     become Active — the optimizer may REMOVE part material as well as grow into
+//     the box, so "minimize plastic + a design box" can genuinely reduce plastic
+//     against the part. Their original tags (incl. any Load/Fixture face tag) are
+//     preserved either way, so the mask-aware simp path still pins the Load/Fixture
+//     BC skin FrozenSolid — only the part's INTERIOR becomes a design variable.
+// Keep-out voxels that are not part are tagged Empty (mask FrozenVoid) so they
+// carry no FEA element and no self-weight; a keep-out box never carves into the
+// part regardless of `freeze_part`. New Active voxels are tagged Interior (solid
+// design variables at the caller's volume fraction). With a design_box that
+// exactly matches the part's bounding box, no keep-out and freeze_part=true, every
+// part voxel is FrozenSolid and every in-box empty voxel is Active — offsets 0.
 //
 // COARSENING ALIGNMENT (design-box on-device fix): `coarsen_align` rounds each
 // expanded element dimension (new_nx/ny/nz) UP to the next multiple of that value
@@ -193,7 +202,7 @@ struct DesignDomain {
 DesignDomain expand_design_domain(const VoxelGrid& part,
                                   const DesignBox& design_box,
                                   const std::vector<DesignBox>& keep_out = {},
-                                  int coarsen_align = 1);
+                                  bool freeze_part = true, int coarsen_align = 1);
 
 // Map a corner-node id of `part`'s node grid to the corresponding corner-node id
 // of `domain.grid` (shifted by the domain's voxel offset). Use it to remap
