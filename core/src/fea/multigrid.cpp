@@ -38,12 +38,14 @@
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 
+#include "fea_matfree.hpp"
 #include "fea_reduced.hpp"
 
 namespace topopt {
@@ -442,6 +444,435 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
   return sol;
 }
 
+// ===========================================================================
+// Matrix-free geometric multigrid (handoff: matrix-free multigrid).
+//
+// The FINEST level is MATRIX-FREE: its matvecs, residuals and damped-Jacobi
+// smoother use fea_detail's element-by-element apply (mf_apply_full via
+// MatfreeReduced::apply_kgg) and matrix-free Jacobi diagonal — the assembled
+// fine operator A0 (the sparse K that OOMs on the ~623k-voxel design box) is
+// NEVER built. Only the (>=8x smaller) COARSE operators are assembled.
+//
+// STEP 0 coarse-operator strategy (see docs/handoffs/078): matrix-free GALERKIN
+// via an element-local triple product. The level-1 operator A1 = P0^T A0 P0 is
+// formed by projecting each solid element's reference block factor*Ke through
+// the trilinear prolongation restricted to that element's <=24 local coarse
+// DOFs, then scattering the small projected block. This reproduces the assembled
+// Galerkin A1 DOF-for-DOF (to summation roundoff) WITHOUT ever assembling A0, so
+// it keeps Galerkin's robustness under the SIMP soft-void modulus contrast
+// (rho_min^p high contrast) — the documented reason Galerkin was chosen over
+// rediscretisation — while removing the fine matrix. Levels 2.. are the ordinary
+// assembled Galerkin products on the (small) A1 via the shared build_hierarchy.
+// The V-cycle structure (equal pre/post damped-Jacobi, R = P0^T, exact coarse
+// solve) is preserved, so the preconditioner stays SPD and CG-valid.
+// ===========================================================================
+
+using fea_detail::MatfreeReduced;
+using fea_detail::MfElem;
+
+// A matrix-free multigrid hierarchy: level 0 is the matrix-free fine operator
+// `m`; levels 1.. are the assembled `coarse` Levels (coarse[0] == level 1).
+struct MfHierarchy {
+  const MatfreeReduced* m = nullptr;  // fine (level 0), matrix-free
+  Vec fine_dinv;                      // 1/diag(A0) at the fine level
+  SpMat P0;                           // prolongation level1 -> fine (ng x nc1)
+  std::vector<Level> coarse;          // assembled levels 1..L (coarse[0]==lvl 1)
+  int levels() const { return 1 + static_cast<int>(coarse.size()); }
+};
+
+// Fine-level matrix-free matvec y = A0 x (restricted to the kept DOFs).
+inline Vec mf_fine_matvec(const MfHierarchy& H, const Vec& x) {
+  const int n = H.m->ng;
+  std::vector<double> xs(static_cast<std::size_t>(n));
+  for (int i = 0; i < n; ++i) xs[static_cast<std::size_t>(i)] = x[i];
+  std::vector<double> ys;
+  H.m->apply_kgg(xs, ys);
+  Vec y(n);
+  for (int i = 0; i < n; ++i) y[i] = ys[static_cast<std::size_t>(i)];
+  return y;
+}
+
+// One fine-level damped-Jacobi sweep, matrix-free: x <- x + omega*Dinv.*(b-A0 x).
+inline void mf_jacobi_sweep(const MfHierarchy& H, const Vec& b, Vec& x) {
+  const Vec Ax = mf_fine_matvec(H, x);
+  x += kJacobiOmega * (H.fine_dinv.array() * (b - Ax).array()).matrix();
+}
+
+// Symmetric V-cycle with a matrix-free finest level. The coarse-grid correction
+// reuses the assembled v_cycle on the coarse hierarchy, so this is a valid SPD
+// preconditioner (equal pre/post smoothing, R = P0^T, exact coarse solve).
+Vec mf_v_cycle(const MfHierarchy& H, const Vec& b) {
+  Vec x = Vec::Zero(H.m->ng);
+  for (int s = 0; s < kPreSmooth; ++s) mf_jacobi_sweep(H, b, x);
+
+  const Vec r = b - mf_fine_matvec(H, x);
+  const Vec bc = H.P0.transpose() * r;          // restrict residual (R = P0^T)
+  const Vec ec = v_cycle(H.coarse, 0, bc);      // coarse-grid correction
+  x += H.P0 * ec;                                // prolongate + correct
+
+  for (int s = 0; s < kPostSmooth; ++s) mf_jacobi_sweep(H, b, x);
+  return x;
+}
+
+// MG-preconditioned CG with the matrix-free finest level. Identical algorithm
+// and stopping criterion to mgpcg (||b - A x|| / ||b|| <= tol), only the fine
+// matvec and preconditioner are matrix-free. Returns false (with diagnostics) on
+// non-convergence within max_it or a non-finite iterate -> caller falls back.
+bool mf_mgpcg(const MfHierarchy& H, const Vec& b, double tol, int max_it, Vec& x,
+              int& iters, double& resid) {
+  const int n = H.m->ng;
+  const double bnorm = b.norm();
+  iters = 0;
+  resid = 0.0;
+  if (!(bnorm > 0.0)) {          // zero RHS -> zero solution, trivially converged
+    x = Vec::Zero(n);
+    return true;
+  }
+  const double threshold = tol * bnorm;
+
+  x = Vec::Zero(n);
+  Vec r = b;                              // r = b - A*0
+  Vec z = mf_v_cycle(H, r);               // z = M^{-1} r
+  Vec p = z;
+  double rz = r.dot(z);
+  if (!std::isfinite(rz)) return false;
+
+  for (int k = 1; k <= max_it; ++k) {
+    const Vec Ap = mf_fine_matvec(H, p);
+    const double pAp = p.dot(Ap);
+    if (!(pAp > 0.0) || !std::isfinite(pAp)) return false;  // breakdown
+    const double alpha = rz / pAp;
+    x += alpha * p;
+    r -= alpha * Ap;
+    iters = k;
+    const double rn = r.norm();
+    resid = rn / bnorm;
+    if (rn <= threshold) return x.allFinite();
+    Vec znew = mf_v_cycle(H, r);
+    const double rznew = r.dot(znew);
+    if (!std::isfinite(rznew)) return false;
+    const double beta = rznew / rz;
+    p = znew + beta * p;
+    rz = rznew;
+    z.swap(znew);
+  }
+  return false;  // hit the iteration cap without converging
+}
+
+// Build the matrix-free multigrid hierarchy from the matrix-free fine operator
+// `m` whose kept DOFs sit on the node grid (nnx,nny,nnz). Returns false (leaving
+// `out` unusable) if a usable hierarchy cannot be built (fine not 2x-divisible,
+// or the coarse operator not factorable) — the caller then falls back to the
+// matrix-free Jacobi-CG. The FINE operator A0 is never assembled: A1 is formed
+// by an element-local Galerkin triple product, all coarser levels by build_hierarchy.
+bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
+                        MfHierarchy& out) {
+  const int fex = nnx - 1, fey = nny - 1, fez = nnz - 1;  // fine element dims
+  if ((fex & 1) || (fey & 1) || (fez & 1)) return false;
+  const int cex = fex / 2, cey = fey / 2, cez = fez / 2;
+  if (cex < kMinCoarseElems || cey < kMinCoarseElems || cez < kMinCoarseElems)
+    return false;
+  const int cnx = cex + 1, cny = cey + 1, cnz = cez + 1;
+
+  // Fine active map: global DOF (node*3+comp) -> kept id (0..ng-1), or -1.
+  std::vector<int> active(static_cast<std::size_t>(m.ndof), -1);
+  for (int kg = 0; kg < m.ng; ++kg)
+    active[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(kg)])] =
+        kg;
+
+  auto fnode_index = [&](int a, int b, int c) { return (c * nny + b) * nnx + a; };
+
+  // Coarse (level-1) active DOFs: active iff the coincident fine node-DOF is.
+  std::vector<int> cactive(static_cast<std::size_t>(cnx) * cny * cnz * 3, -1);
+  int nc = 0;
+  for (int c = 0; c < cnz; ++c)
+    for (int b = 0; b < cny; ++b)
+      for (int a = 0; a < cnx; ++a) {
+        const int fnode = fnode_index(2 * a, 2 * b, 2 * c);
+        const int cnode = (c * cny + b) * cnx + a;
+        for (int comp = 0; comp < 3; ++comp)
+          if (active[static_cast<std::size_t>(fnode) * 3 + comp] >= 0)
+            cactive[static_cast<std::size_t>(cnode) * 3 + comp] = nc++;
+      }
+  if (nc == 0) return false;
+
+  // Prolongation P0 (fine kept rows x coarse cols) + per-kept-DOF coarse weight
+  // list `prolong` (the rows of P0, used by the element-local Galerkin below).
+  // Identical trilinear stencil to build_hierarchy's fine-level P.
+  std::vector<Trip> ptrips;
+  ptrips.reserve(static_cast<std::size_t>(m.ng) * 8);
+  std::vector<std::vector<std::pair<int, double>>> prolong(
+      static_cast<std::size_t>(m.ng));
+  for (int fc = 0; fc < nnz; ++fc)
+    for (int fb = 0; fb < nny; ++fb)
+      for (int fa = 0; fa < nnx; ++fa) {
+        const int fnode = fnode_index(fa, fb, fc);
+        int hasActive = 0;
+        for (int comp = 0; comp < 3; ++comp)
+          if (active[static_cast<std::size_t>(fnode) * 3 + comp] >= 0)
+            hasActive = 1;
+        if (!hasActive) continue;
+        int ia[2], ib[2], ic[2];
+        double wa[2], wb[2], wc[2];
+        const int na = axis_weights(fa, ia, wa);
+        const int nb = axis_weights(fb, ib, wb);
+        const int ncz = axis_weights(fc, ic, wc);
+        for (int comp = 0; comp < 3; ++comp) {
+          const int row = active[static_cast<std::size_t>(fnode) * 3 + comp];
+          if (row < 0) continue;
+          for (int x = 0; x < na; ++x)
+            for (int y = 0; y < nb; ++y)
+              for (int z = 0; z < ncz; ++z) {
+                const int cnode = (ic[z] * cny + ib[y]) * cnx + ia[x];
+                const int col = cactive[static_cast<std::size_t>(cnode) * 3 + comp];
+                if (col < 0) continue;  // inactive coarse node -> weight 0
+                const double w = wa[x] * wb[y] * wc[z];
+                ptrips.emplace_back(row, col, w);
+                prolong[static_cast<std::size_t>(row)].emplace_back(col, w);
+              }
+        }
+      }
+  SpMat P0(m.ng, nc);
+  P0.setFromTriplets(ptrips.begin(), ptrips.end());
+  P0.makeCompressed();
+
+  // Element-local Galerkin A1 = P0^T A0 P0, formed WITHOUT assembling A0. Per
+  // element: gather its <=24 distinct local coarse DOFs, build the 24 x mloc
+  // local prolongation W (rows of P0 for the element's kept fine DOFs), and
+  // scatter W^T (factor*Ke) W. Summing these over all elements yields exactly
+  // P0^T A0 P0 (A0 = sum_e factor_e S_e^T Ke S_e).
+  constexpr int kDof = Hex8Stiffness::kDof;  // 24
+  std::vector<Trip> a1trips;
+  a1trips.reserve(m.elems.size() * static_cast<std::size_t>(kDof) * 2);
+  std::vector<int> cds;
+  cds.reserve(kDof);
+  double W[kDof][kDof];   // fine-local (24) x coarse-local (<=24)
+  double KW[kDof][kDof];  // Ke * W
+  for (const MfElem& el : m.elems) {
+    int kg[kDof];
+    for (int r = 0; r < kDof; ++r)
+      kg[r] = active[static_cast<std::size_t>(el.edof[r])];  // -1 if fixed/void
+
+    // Distinct local coarse DOFs touched by this element (mloc <= 24).
+    cds.clear();
+    for (int r = 0; r < kDof; ++r) {
+      if (kg[r] < 0) continue;
+      for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
+        bool found = false;
+        for (int t = 0; t < static_cast<int>(cds.size()); ++t)
+          if (cds[static_cast<std::size_t>(t)] == pr.first) { found = true; break; }
+        if (!found) cds.push_back(pr.first);
+      }
+    }
+    const int mloc = static_cast<int>(cds.size());
+    if (mloc == 0) continue;
+
+    // W[r][cl] = prolongation weight of fine-local DOF r onto local coarse cl.
+    for (int r = 0; r < kDof; ++r)
+      for (int cl = 0; cl < mloc; ++cl) W[r][cl] = 0.0;
+    for (int r = 0; r < kDof; ++r) {
+      if (kg[r] < 0) continue;
+      for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
+        int idx = 0;
+        while (cds[static_cast<std::size_t>(idx)] != pr.first) ++idx;
+        W[r][idx] += pr.second;
+      }
+    }
+
+    // KW = Ke * W  (24 x mloc), then block = factor * W^T KW (mloc x mloc).
+    for (int r = 0; r < kDof; ++r)
+      for (int cl = 0; cl < mloc; ++cl) {
+        double s = 0.0;
+        for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
+        KW[r][cl] = s;
+      }
+    for (int cl = 0; cl < mloc; ++cl)
+      for (int dl = 0; dl < mloc; ++dl) {
+        double s = 0.0;
+        for (int r = 0; r < kDof; ++r) s += W[r][cl] * KW[r][dl];
+        const double v = el.factor * s;
+        if (v != 0.0)
+          a1trips.emplace_back(cds[static_cast<std::size_t>(cl)],
+                               cds[static_cast<std::size_t>(dl)], v);
+      }
+  }
+  SpMat A1(nc, nc);
+  A1.setFromTriplets(a1trips.begin(), a1trips.end());
+  A1.makeCompressed();
+
+  // Coarser levels 2.. via the shared assembled Galerkin builder, seeded at A1.
+  std::vector<Level> coarse = build_hierarchy(A1, cnx, cny, cnz, cactive);
+  if (coarse.empty()) {
+    // A1 alone could not seed a >=2-level sub-hierarchy. Use A1 as the sole
+    // (directly factored) coarse level if small enough, giving a 2-level
+    // matrix-free cycle (fine matrix-free + A1 direct); else no usable hierarchy.
+    if (static_cast<int>(A1.cols()) > kCoarseDofCap) return false;
+    Level only;
+    only.nx = cnx;
+    only.ny = cny;
+    only.nz = cnz;
+    only.n = static_cast<int>(A1.cols());
+    only.A = A1;
+    only.Dinv = inverse_diagonal(A1);
+    only.active = cactive;
+    only.coarsest = true;
+    only.chol = std::make_shared<Eigen::SimplicialLDLT<SpMat>>();
+    only.chol->compute(only.A);
+    if (only.chol->info() != Eigen::Success) return false;
+    coarse.push_back(std::move(only));
+  }
+
+  out.m = &m;
+  out.fine_dinv = Eigen::Map<const Vec>(m.invdiag.data(),
+                                        static_cast<Eigen::Index>(m.invdiag.size()));
+  out.P0 = std::move(P0);
+  out.coarse = std::move(coarse);
+  return true;
+}
+
+// Matrix-free MG-CG solve, falling back to the exact matrix-free Jacobi-CG when
+// a hierarchy is not applicable or MG does not converge. Mirrors
+// solve_reduced_mgcg's fallback discipline and scatter, but the FINE level is
+// never assembled. `elem_youngs` selects the graded path when non-null.
+FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
+                               double poisson,
+                               const std::vector<DirichletBC>& bcs,
+                               const std::vector<NodalLoad>& loads,
+                               double tolerance, int max_iterations, CgInfo* info,
+                               const std::vector<double>* elem_youngs) {
+  // Build the reduced, void-gated matrix-free system (throws + sets *info on a
+  // void-gate rejection, exactly like solve_reduced_mgcg's gate).
+  MatfreeReduced m = fea_detail::mf_build_reduced(
+      grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
+      "fea_solve_mgcg_matfree", info);
+
+  CgInfo diag;
+  diag.converged = true;  // no free DOFs -> trivially converged
+
+  std::vector<double> u = m.up;
+  if (m.ng > 0) {
+    const int nnx = grid.nx + 1, nny = grid.ny + 1, nnz = grid.nz + 1;
+    const int cap =
+        max_iterations > 0 ? max_iterations : std::max(1000, 2 * m.ng);
+
+    MfHierarchy H;
+    const bool have_h = build_mf_hierarchy(m, nnx, nny, nnz, H);
+
+    std::vector<double> xkept(static_cast<std::size_t>(m.ng), 0.0);
+    bool solved = false;
+    if (have_h) {
+      Vec rgv = Eigen::Map<const Vec>(m.rg.data(),
+                                      static_cast<Eigen::Index>(m.ng));
+      const int mg_cap = std::min(cap, kMgIterBudget);
+      Vec xg;
+      int it = 0;
+      double res = 0.0;
+      const bool ok = mf_mgpcg(H, rgv, tolerance, mg_cap, xg, it, res);
+      if (ok) {
+        for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
+        diag.iterations = it;
+        diag.residual = res;
+        diag.converged = true;
+        diag.used_multigrid = true;
+        diag.mg_levels = H.levels();
+        solved = true;
+      }
+      // MG did not converge / broke down -> fall through to the exact fallback.
+    }
+
+    if (!solved) {
+      // Exact matrix-free fallback (Jacobi-CG). Reports the Jacobi attempt in
+      // *info (used_multigrid=false); throws on non-convergence, parity with
+      // fea_solve_cg and the assembled fea_solve_mgcg fallback.
+      fea_detail::mf_cg_solve(m, tolerance, cap, xkept, diag.iterations,
+                              diag.residual, diag.converged);
+      diag.used_multigrid = false;
+      diag.mg_levels = 0;
+      if (info) *info = diag;
+      if (!diag.converged)
+        throw std::runtime_error(
+            "fea_solve_mgcg_matfree: CG did not reach the requested tolerance "
+            "within max_iterations");
+    }
+
+    for (int k = 0; k < m.ng; ++k)
+      u[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])] =
+          xkept[static_cast<std::size_t>(k)];
+  }
+
+  if (info) *info = diag;
+
+  FeaSolution sol;
+  sol.u = std::move(u);
+  return sol;
+}
+
+// --- Memory evidence (diagnostic) ------------------------------------------
+// Total nonzeros stored across the ASSEMBLED operators of the multigrid
+// hierarchy each solver builds, for a solid or graded grid. For the assembled
+// fea_solve_mgcg this INCLUDES the fine operator A0 (the big one); for the
+// matrix-free path only the coarse operators are assembled (the fine level
+// stores just the 576-double reference Ke). The gap — and how it widens with
+// grid size — demonstrates the fine matrix is absent on the matrix-free path.
+std::size_t assembled_hierarchy_nonzeros(const VoxelGrid& grid,
+                                         double youngs_modulus, double poisson,
+                                         const std::vector<DirichletBC>& bcs,
+                                         const std::vector<NodalLoad>& loads,
+                                         const std::vector<double>* elem_youngs) {
+  ReducedSystem s = fea_detail::assemble_reduced(
+      grid, elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson, bcs, loads,
+      "assembled_hierarchy_nonzeros", elem_youngs);
+  const int nf = static_cast<int>(s.freedofs.size());
+  if (nf == 0) return 0;
+  std::vector<int> kept =
+      fea_detail::void_dof_survivors(s.Kff, s.rf, "assembled_hierarchy_nonzeros");
+  const int ng = static_cast<int>(kept.size());
+
+  SpMat Kgg;
+  if (ng != nf) {
+    SpMat Q(ng, nf);
+    std::vector<Trip> qtrips;
+    qtrips.reserve(static_cast<std::size_t>(ng));
+    for (int r = 0; r < ng; ++r) qtrips.emplace_back(r, kept[r], 1.0);
+    Q.setFromTriplets(qtrips.begin(), qtrips.end());
+    Kgg = Q * s.Kff * Q.transpose();
+    Kgg.makeCompressed();
+  } else {
+    Kgg = s.Kff;
+  }
+
+  const int nnx = grid.nx + 1, nny = grid.ny + 1, nnz = grid.nz + 1;
+  std::vector<int> active(static_cast<std::size_t>(nnx) * nny * nnz * 3, -1);
+  for (int r = 0; r < ng; ++r) {
+    const int gdof = s.freedofs[static_cast<std::size_t>(kept[r])];
+    active[static_cast<std::size_t>(gdof)] = r;
+  }
+  std::vector<Level> levels = build_hierarchy(Kgg, nnx, nny, nnz, active);
+  if (levels.empty())
+    return static_cast<std::size_t>(Kgg.nonZeros());  // fallback: only Kgg
+  std::size_t total = 0;
+  for (const Level& L : levels) total += static_cast<std::size_t>(L.A.nonZeros());
+  return total;
+}
+
+std::size_t matfree_hierarchy_nonzeros(const VoxelGrid& grid,
+                                       double youngs_modulus, double poisson,
+                                       const std::vector<DirichletBC>& bcs,
+                                       const std::vector<NodalLoad>& loads,
+                                       const std::vector<double>* elem_youngs) {
+  MatfreeReduced m = fea_detail::mf_build_reduced(
+      grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
+      "matfree_hierarchy_nonzeros", nullptr);
+  if (m.ng == 0) return 0;
+  MfHierarchy H;
+  const int nnx = grid.nx + 1, nny = grid.ny + 1, nnz = grid.nz + 1;
+  if (!build_mf_hierarchy(m, nnx, nny, nnz, H)) return 0;  // no assembled ops
+  std::size_t total = 0;  // fine level (level 0) is matrix-free: 0 assembled nnz
+  for (const Level& L : H.coarse)
+    total += static_cast<std::size_t>(L.A.nonZeros());
+  return total;
+}
+
 }  // namespace
 
 FeaSolution fea_solve_mgcg(const VoxelGrid& grid, double youngs_modulus,
@@ -461,6 +892,43 @@ FeaSolution fea_solve_mgcg(const VoxelGrid& grid,
   ReducedSystem s = fea_detail::assemble_reduced(
       grid, 1.0, poisson, bcs, loads, "fea_solve_mgcg", &youngs_per_voxel);
   return solve_reduced_mgcg(s, grid, tolerance, max_iterations, info);
+}
+
+// --- Matrix-free multigrid entry points (opt-in, default OFF) --------------
+
+FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
+                                   double poisson,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance, int max_iterations,
+                                   CgInfo* info) {
+  return solve_mgcg_matfree(grid, youngs_modulus, poisson, bcs, loads, tolerance,
+                            max_iterations, info, nullptr);
+}
+
+FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
+                                   const std::vector<double>& youngs_per_voxel,
+                                   double poisson,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance, int max_iterations,
+                                   CgInfo* info) {
+  return solve_mgcg_matfree(grid, 1.0, poisson, bcs, loads, tolerance,
+                            max_iterations, info, &youngs_per_voxel);
+}
+
+std::size_t fea_mgcg_assembled_operator_nonzeros(
+    const VoxelGrid& grid, double youngs_modulus, double poisson,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads) {
+  return assembled_hierarchy_nonzeros(grid, youngs_modulus, poisson, bcs, loads,
+                                      nullptr);
+}
+
+std::size_t fea_matfree_mgcg_assembled_operator_nonzeros(
+    const VoxelGrid& grid, double youngs_modulus, double poisson,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads) {
+  return matfree_hierarchy_nonzeros(grid, youngs_modulus, poisson, bcs, loads,
+                                    nullptr);
 }
 
 }  // namespace topopt
