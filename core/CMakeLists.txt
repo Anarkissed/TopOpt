@@ -394,6 +394,19 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME design_domain COMMAND test_design_domain)
 
+  # Design-box coarsening alignment (design-box on-device fix): expand_design_domain
+  # rounds the expanded element dims UP to a multiple of 8 with Empty high-side
+  # padding so the geometric-multigrid hierarchy can coarsen (an odd axis otherwise
+  # bails to an effectively-hung Jacobi-CG on the ~1e-9-contrast design-box system).
+  # Proves the padding is physically inert (unpadded==padded compliance), that the
+  # padded grid engages the matrix-free multigrid (used_multigrid, mg_levels>=3),
+  # and that the BC/load remap stays correct at a nonzero offset. Drives
+  # simp_compliance / fea_solve_mgcg_matfree, so it is Eigen-gated. CI configures
+  # with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_designbox_padding tests/validation/test_designbox_padding.cpp)
+  target_link_libraries(test_designbox_padding PRIVATE topopt)
+  add_test(NAME designbox_padding COMMAND test_designbox_padding)
+
   # MMA updater (M7.mma.1): the Method of Moving Asymptotes design updater,
   # exposed behind SimpOptions.updater = MMA, reproduces the OC minimum-
   # compliance benchmarks (the Gate V2 cantilever + clamped-beam geometries)

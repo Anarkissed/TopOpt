@@ -59,7 +59,18 @@ double simp_youngs(const SimpParams& params, double density);
 //     selected the cached PenalizedSolver fast path and CG warm-start are
 //     bypassed (fea_solve_mgcg is stateless); CgInfo::used_multigrid on the
 //     returned SimpCompliance::cg reports which path actually ran per solve.
-enum class SolverKind { JacobiCG, MultigridCG };
+//   * MultigridCG_Matfree — same geometric-multigrid solve as MultigridCG but
+//     MATRIX-FREE at the fine level (fea_solve_mgcg_matfree, handoff 078): the
+//     assembled fine stiffness K (which OOMs on the ~2M-DOF design box — a
+//     measured ~7 GB peak, the device std::bad_alloc) is NEVER built; only the
+//     >= 8x smaller coarse operators are assembled. It solves the IDENTICAL
+//     system to the same tolerance (same converged field / compliance /
+//     sensitivities / design within tolerance; the coarse operator reproduces the
+//     assembled Galerkin DOF-for-DOF, so the iteration count matches MultigridCG)
+//     and falls back to the exact matrix-free Jacobi-CG when a hierarchy is not
+//     applicable. This is the memory-lean path for the design-box on-device run;
+//     like MultigridCG it bypasses the cached PenalizedSolver / warm start.
+enum class SolverKind { JacobiCG, MultigridCG, MultigridCG_Matfree };
 
 // A uniform initial design field: every solid voxel gets density `value`, every
 // Empty voxel gets 0. Size = grid.voxel_count(), indexed like the grid. This is

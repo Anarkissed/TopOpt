@@ -121,13 +121,41 @@ Vec inverse_diagonal(const SpMat& A) {
   return dinv;
 }
 
+// Memory-frugal Galerkin coarse operator A_c = P^T A P, computed one COLUMN BLOCK
+// of P at a time so the A*P intermediate is only a block wide instead of the full
+// (peak-doubling) product. Each coarse column A_c[:,j] = P^T A P[:,j] is computed
+// independently, so the result equals P.transpose()*(A*P) to summation roundoff.
+// Used by the matrix-free path, where the level-1 operator A1 (~O(voxels) nnz) is
+// large enough that the full A1*P intermediate is a couple hundred MB on the
+// design box; blocking cuts that transient to tens of MB. (The assembled path
+// keeps the plain product, byte-for-byte.)
+SpMat galerkin_pt_a_p_frugal(const SpMat& A, const SpMat& P) {
+  const int nc = static_cast<int>(P.cols());
+  constexpr int kBlockCols = 4096;
+  const SpMat Pt = P.transpose();
+  std::vector<Trip> trips;
+  for (int c0 = 0; c0 < nc; c0 += kBlockCols) {
+    const int w = std::min(kBlockCols, nc - c0);
+    const SpMat APblk = A * P.middleCols(c0, w);   // A.rows x w
+    const SpMat Acblk = Pt * APblk;                 // nc x w (block of A_c columns)
+    for (int j = 0; j < w; ++j)
+      for (SpMat::InnerIterator it(Acblk, j); it; ++it)
+        trips.emplace_back(static_cast<int>(it.row()), c0 + j, it.value());
+  }
+  SpMat Ac(nc, nc);
+  Ac.setFromTriplets(trips.begin(), trips.end());
+  return Ac;
+}
+
 // Build the multigrid hierarchy from the finest active operator A0 whose active
 // DOFs sit on the node grid (nx0,ny0,nz0) with the given active map. Returns the
 // levels finest-first, or an empty vector if a usable hierarchy (>= kMinLevels
 // with a small enough coarsest level) cannot be built — the caller then falls
-// back to Jacobi-CG.
+// back to Jacobi-CG. `frugal` selects the column-blocked coarse Galerkin product
+// (matrix-free path, lower peak); default false keeps the plain product the
+// assembled path has always used, byte-for-byte.
 std::vector<Level> build_hierarchy(const SpMat& A0, int nx0, int ny0, int nz0,
-                                   std::vector<int> active0) {
+                                   std::vector<int> active0, bool frugal = false) {
   std::vector<Level> levels;
   Level fine;
   fine.nx = nx0;
@@ -204,10 +232,16 @@ std::vector<Level> build_hierarchy(const SpMat& A0, int nx0, int ny0, int nz0,
     P.setFromTriplets(ptrips.begin(), ptrips.end());
     P.makeCompressed();
 
-    // Galerkin coarse operator A_c = P^T A P (materialised stepwise to keep Eigen
-    // on the plain sparse*sparse path).
-    const SpMat AP = f.A * P;          // n x nc
-    SpMat Ac = P.transpose() * AP;     // nc x nc, symmetric
+    // Galerkin coarse operator A_c = P^T A P. The assembled path materialises the
+    // product stepwise (plain Eigen sparse*sparse, byte-for-byte unchanged); the
+    // matrix-free path uses the column-blocked frugal form to bound the A*P peak.
+    SpMat Ac;
+    if (frugal) {
+      Ac = galerkin_pt_a_p_frugal(f.A, P);
+    } else {
+      const SpMat AP = f.A * P;        // n x nc
+      Ac = P.transpose() * AP;         // nc x nc, symmetric
+    }
     Ac.makeCompressed();
 
     levels.back().P = std::move(P);
@@ -635,15 +669,31 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   SpMat P0(m.ng, nc);
   P0.setFromTriplets(ptrips.begin(), ptrips.end());
   P0.makeCompressed();
+  std::vector<Trip>().swap(ptrips);  // P0 is built; free the triplet scratch
 
   // Element-local Galerkin A1 = P0^T A0 P0, formed WITHOUT assembling A0. Per
   // element: gather its <=24 distinct local coarse DOFs, build the 24 x mloc
   // local prolongation W (rows of P0 for the element's kept fine DOFs), and
   // scatter W^T (factor*Ke) W. Summing these over all elements yields exactly
   // P0^T A0 P0 (A0 = sum_e factor_e S_e^T Ke S_e).
+  //
+  // MEMORY (design-box on-device fix): each element streams up to kDof^2 = 576
+  // triplets, so a single materialised triplet array is ~576 * elements — at the
+  // ~623k-element design box that is ~359M triplets ~= 5.5 GB, the peak that blows
+  // the iPad memory budget (measured). Instead A1 is accumulated DIRECTLY in place:
+  // A1 is pre-reserved with the coarse Galerkin stencil width (a coarse DOF couples
+  // only to the <= 3x3x3 coarse-node * 3-comp = 81-wide stencil) and each element
+  // block is added via coeffRef, so NO triplet array and NO sparse-matrix add churn
+  // is ever allocated — peak A1 memory is just the final operator (~230 MB) plus a
+  // fixed 81/col reservation. The accumulated sum is the same P0^T A0 P0
+  // (A0 = sum_e factor_e S_e^T Ke S_e); only the grouping of the floating-point
+  // additions differs from a single setFromTriplets (roundoff at the ULP level),
+  // which does not change the multigrid iteration count (the 078
+  // assembled==matrix-free iteration-count parity still holds; verified).
   constexpr int kDof = Hex8Stiffness::kDof;  // 24
-  std::vector<Trip> a1trips;
-  a1trips.reserve(m.elems.size() * static_cast<std::size_t>(kDof) * 2);
+  constexpr int kCoarseStencil = 81;  // 3x3x3 coarse nodes * 3 components
+  SpMat A1(nc, nc);
+  A1.reserve(Eigen::VectorXi::Constant(nc, kCoarseStencil));
   std::vector<int> cds;
   cds.reserve(kDof);
   double W[kDof][kDof];   // fine-local (24) x coarse-local (<=24)
@@ -679,7 +729,8 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
       }
     }
 
-    // KW = Ke * W  (24 x mloc), then block = factor * W^T KW (mloc x mloc).
+    // KW = Ke * W  (24 x mloc), then block = factor * W^T KW (mloc x mloc),
+    // accumulated straight into A1 (no triplets).
     for (int r = 0; r < kDof; ++r)
       for (int cl = 0; cl < mloc; ++cl) {
         double s = 0.0;
@@ -692,16 +743,16 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
         for (int r = 0; r < kDof; ++r) s += W[r][cl] * KW[r][dl];
         const double v = el.factor * s;
         if (v != 0.0)
-          a1trips.emplace_back(cds[static_cast<std::size_t>(cl)],
-                               cds[static_cast<std::size_t>(dl)], v);
+          A1.coeffRef(cds[static_cast<std::size_t>(cl)],
+                      cds[static_cast<std::size_t>(dl)]) += v;
       }
   }
-  SpMat A1(nc, nc);
-  A1.setFromTriplets(a1trips.begin(), a1trips.end());
   A1.makeCompressed();
 
   // Coarser levels 2.. via the shared assembled Galerkin builder, seeded at A1.
-  std::vector<Level> coarse = build_hierarchy(A1, cnx, cny, cnz, cactive);
+  // Frugal (column-blocked) coarse products keep the design-box peak in budget.
+  std::vector<Level> coarse =
+      build_hierarchy(A1, cnx, cny, cnz, cactive, /*frugal=*/true);
   if (coarse.empty()) {
     // A1 alone could not seed a >=2-level sub-hierarchy. Use A1 as the sole
     // (directly factored) coarse level if small enough, giving a 2-level

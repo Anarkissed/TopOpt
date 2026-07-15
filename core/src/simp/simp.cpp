@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -150,7 +151,16 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       }
 
   SimpCompliance out;
-  if (solver_kind == SolverKind::MultigridCG) {
+  if (solver_kind == SolverKind::MultigridCG_Matfree) {
+    // Matrix-free multigrid (handoff 078 + design-box on-device fix): the
+    // memory-lean path — the assembled fine K (which OOMs on the design box) is
+    // never built. Solves the identical system to the same tolerance; stateless,
+    // so the cached PenalizedSolver / warm start are bypassed. out.cg.used_multigrid
+    // reports whether MG ran or it fell back to the matrix-free Jacobi-CG.
+    out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson, bcs,
+                                          loads, tolerance, max_iterations,
+                                          &out.cg);
+  } else if (solver_kind == SolverKind::MultigridCG) {
     // Opt-in accelerator (handoff 073): the geometric-multigrid-preconditioned
     // CG solves the identical system to the same tolerance. It is stateless, so
     // the cached PenalizedSolver fast path and warm start are bypassed;
@@ -757,8 +767,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // only rescales its values and warm-starts CG (profiling: ~40-50% of a 64^3
   // iteration was redundant reassembly). Falls back to the stateless path (with
   // an explicit warm-start guess) when the BCs are non-homogeneous.
-  PenalizedSolver solver(grid, params.poisson, bcs, loads);
-  const bool use_solver = solver.usable();
+  //
+  // Only built for the JacobiCG path: the multigrid solvers bypass the cached
+  // solver, and its constructor ASSEMBLES the BC-reduced fine stiffness K — the
+  // very ~2 GB / ~7 GB-transient matrix that OOMs on the design box. Constructing
+  // it under MultigridCG_Matfree would reintroduce the crash the matrix-free path
+  // exists to avoid, so skip it entirely for both multigrid kinds.
+  std::unique_ptr<PenalizedSolver> solver;
+  if (options.solver == SolverKind::JacobiCG)
+    solver = std::make_unique<PenalizedSolver>(grid, params.poisson, bcs, loads);
+  const bool use_solver = solver && solver->usable();
   FeaSolution warm;  // fallback warm-start guess (unused when use_solver)
 
   SimpOptimizeResult result;
@@ -778,7 +796,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       const SimpCompliance c = simp_compliance(
           grid, params, xphys, bcs, loads, options.cg_tolerance,
           options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
-          use_solver ? &solver : nullptr, options.solver);
+          use_solver ? solver.get() : nullptr, options.solver);
       if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
@@ -843,7 +861,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     project_solid(grid, result.physical_density, plan.back().beta, eta);
   const SimpCompliance fc = simp_compliance(
       grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
-      options.cg_max_iterations, nullptr, use_solver ? &solver : nullptr,
+      options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
       options.solver);
   result.compliance = fc.compliance;
   result.volume_fraction = phys_volfrac(result.physical_density);
@@ -1251,9 +1269,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // Persistent solver over the FIXED analysis grid / BCs / loads (see the
   // unconstrained overload): assembles the reduced operator once, then per
   // iteration only rescales values and warm-starts CG. Falls back to the
-  // stateless path when BCs are non-homogeneous.
-  PenalizedSolver solver(analysis, params.poisson, bcs, loads);
-  const bool use_solver = solver.usable();
+  // stateless path when BCs are non-homogeneous. Only built for the JacobiCG
+  // path — its constructor assembles the fine K that OOMs on the design box, so
+  // the multigrid kinds (which bypass it) must not construct it. This is the
+  // mask-aware MMA optimizer the design-box run uses, so the gate is what keeps
+  // the on-device design-box path matrix-free (no assembled fine K).
+  std::unique_ptr<PenalizedSolver> solver;
+  if (options.solver == SolverKind::JacobiCG)
+    solver =
+        std::make_unique<PenalizedSolver>(analysis, params.poisson, bcs, loads);
+  const bool use_solver = solver && solver->usable();
   FeaSolution warm;  // fallback warm-start guess (unused when use_solver)
 
   SimpOptimizeResult result;
@@ -1275,7 +1300,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
           simp_compliance(analysis, params, xphys, bcs, loads,
                           options.cg_tolerance, options.cg_max_iterations,
                           warm.u.empty() ? nullptr : &warm,
-                          use_solver ? &solver : nullptr, options.solver);
+                          use_solver ? solver.get() : nullptr, options.solver);
       if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
@@ -1349,7 +1374,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   const SimpCompliance fc = simp_compliance(
       analysis, params, result.physical_density, bcs, loads,
       options.cg_tolerance, options.cg_max_iterations, nullptr,
-      use_solver ? &solver : nullptr, options.solver);
+      use_solver ? solver.get() : nullptr, options.solver);
   result.compliance = fc.compliance;
   result.volume_fraction = active_volfrac(xfinal_unpinned);
   // Final playback keyframe: the converged printed shape.
