@@ -704,24 +704,28 @@ OptimizeResult run_minimize_plastic_loadcase(
     // loadcase (recommendation-ladder) path pads; the fixed single-fraction
     // preview (minimize_plastic == false) is left untouched.
     //
-    // M7.dom-app: the anchor pad is a caller `design_mask`, which minimize_plastic
-    // REJECTS alongside a `design_box` (the box builds the effective mask itself,
-    // pipeline.hpp). It is also unnecessary under a design box: expand_design_domain
-    // freezes EVERY imported-part solid voxel as FrozenSolid (the whole import is
-    // kept, not just an N-voxel pad behind the BC faces), so the anchor/load bosses
-    // are already tied into the frozen body. So build the pad only when there is no
-    // design box; the ladder floor is orthogonal and applies either way.
+    // M7.anchor-integrity on the box path (handoff 082): build the pad on BOTH the
+    // no-box AND the design-box path. The old code skipped it under a design box on
+    // the assumption that "expand_design_domain freezes EVERY imported-part solid
+    // voxel as FrozenSolid, so the bosses are already tied into the frozen body."
+    // Handoff 080 (whole-domain optimize, freeze_imported_part == false — now the
+    // box default) made the imported part Active/REMOVABLE: only the 1-voxel
+    // Load/Fixture BC skin is pinned, and the optimizer can carve the boss behind an
+    // anchor thin. So that assumption is FALSE and the pad IS needed here. The pad is
+    // built on the PART grid (mask_step_face walks the part's solid layers); the core
+    // remaps it onto the expanded grid by the same offset it applies to the BCs/loads
+    // and merges it into the effective mask (minimize_plastic, design_box +
+    // design_mask are now compatible on the whole-domain path). The ladder floor
+    // (FIX 2) is orthogonal and applies either way.
     if (load_case.minimize_plastic) {
-      if (!load_case.has_design_box) {
-        topopt::DesignMask pad = topopt::make_active_mask(grid);
-        for (int32_t fid : load_case.anchor_face_ids)
-          topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                                 kAnchorPadDepthVoxels, pad);
-        for (int32_t fid : retained_load_faces)
-          topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                                 kAnchorPadDepthVoxels, pad);
-        opts.design_mask = std::move(pad);
-      }
+      topopt::DesignMask pad = topopt::make_active_mask(grid);
+      for (int32_t fid : load_case.anchor_face_ids)
+        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                               kAnchorPadDepthVoxels, pad);
+      for (int32_t fid : retained_load_faces)
+        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                               kAnchorPadDepthVoxels, pad);
+      opts.design_mask = std::move(pad);
       // M7.anchor-integrity (FIX 2): floor the reduction ladder so a lightly-
       // loaded part is not stripped to the lightest rung once it is comfortably
       // strong. Only meaningful when the ladder actually walks (minimize_plastic).
