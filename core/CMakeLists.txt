@@ -234,6 +234,20 @@ if(Eigen3_FOUND)
   target_link_libraries(test_matfree PRIVATE topopt)
   add_test(NAME fea_matfree COMMAND test_matfree)
 
+  # Matrix-free geometric-multigrid CG test (handoff 078). Proves the matrix-free
+  # MG-CG solves the IDENTICAL system as the assembled fea_solve_mgcg /
+  # fea_solve_cg (same field DOF-for-DOF on a solid 32^3 grid AND an
+  # ill-conditioned SIMP soft-void graded 32^3 grid), that its V-cycle is SPD (CG
+  # converges), that the void-gate / validation / fallback behaviour matches the
+  # assembled path, and the MEMORY evidence — no assembled FINE operator (the fine
+  # footprint is a grid-independent 576 doubles; the matrix-free hierarchy's
+  # assembled coarse-only nnz is a small, shrinking fraction of the assembled
+  # hierarchy's). Needs fea_solve_mgcg_matfree (multigrid.cpp), so it is gated on
+  # Eigen like assembly.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_mgcg_matfree tests/unit/test_mgcg_matfree.cpp)
+  target_link_libraries(test_mgcg_matfree PRIVATE topopt)
+  add_test(NAME fea_mgcg_matfree COMMAND test_mgcg_matfree)
+
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises
   # stress field output. Builds its beam grids in code (no fixture) and drives

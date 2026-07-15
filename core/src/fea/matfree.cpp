@@ -1,5 +1,5 @@
 // Matrix-free global stiffness operator + matrix-free Jacobi-CG for the voxel
-// FEA (handoff: matrix-free operator). The assembled sparse global K is what
+// FEA (handoff 077: matrix-free operator). The assembled sparse global K is what
 // OOMs on large (design-box) grids; this computes the IDENTICAL linear system
 // element-by-element WITHOUT ever assembling K.
 //
@@ -19,6 +19,13 @@
 // and iteration algorithm Eigen's ConjugateGradient<DiagonalPreconditioner> uses
 // — so it converges to the same displacement field. The assembled fea_solve_cg
 // path is untouched; these are new, opt-in entry points.
+//
+// The element table (mf_build_elems), the element-by-element apply
+// (mf_apply_full), the reduced void-gated system (mf_build_reduced) and the
+// matrix-free Jacobi-CG (mf_cg_solve) live in fea_detail (declared in the
+// internal fea_matfree.hpp) so the matrix-free MULTIGRID solver (multigrid.cpp)
+// can reuse the identical apply, diagonal and void gate as its FINE level — it
+// must not reimplement them.
 
 #include "topopt/fea.hpp"
 
@@ -32,35 +39,32 @@
 #include <utility>
 #include <vector>
 
+#include "fea_matfree.hpp"
+
 namespace topopt {
 
+namespace fea_detail {
+
 namespace {
-
 constexpr int kDof = Hex8Stiffness::kDof;  // 24
-
-// One solid element in the fixed grid-scan order: its per-voxel modulus scale
-// and its 24 global DOF indices (node-major interleaved, matching hex8_stiffness).
-struct Elem {
-  double factor = 1.0;
-  int edof[kDof];
-};
+}  // namespace
 
 // Build the solid-element table (edof + factor). `elem_youngs` selects the graded
 // path (factor = per-voxel modulus, validated > 0) when non-null; otherwise the
 // uniform path (factor = 1, the modulus already baked into Ke).
-std::vector<Elem> build_elems(const VoxelGrid& grid,
-                              const std::vector<double>* elem_youngs,
-                              const char* who) {
+std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
+                                   const std::vector<double>* elem_youngs,
+                                   const char* who) {
   if (elem_youngs != nullptr && elem_youngs->size() != grid.voxel_count())
     throw std::invalid_argument(
         std::string(who) + ": per-voxel modulus vector size != voxel_count");
-  std::vector<Elem> elems;
+  std::vector<MfElem> elems;
   elems.reserve(grid.solid_count());
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         if (!grid.solid(i, j, k)) continue;
-        Elem el;
+        MfElem el;
         if (elem_youngs != nullptr) {
           el.factor = (*elem_youngs)[grid.index(i, j, k)];
           if (!(el.factor > 0.0))
@@ -79,10 +83,10 @@ std::vector<Elem> build_elems(const VoxelGrid& grid,
 // y = K x over the full global stiffness, element-by-element. `x` and `y` are
 // full ndof vectors; `y` is overwritten (zeroed) then accumulated. No assembled
 // K: only the reference Ke and the local 24-DOF gather/scatter.
-void apply_full(const std::vector<Elem>& elems, const Hex8Stiffness& Ke,
-                const std::vector<double>& x, std::vector<double>& y) {
+void mf_apply_full(const std::vector<MfElem>& elems, const Hex8Stiffness& Ke,
+                   const std::vector<double>& x, std::vector<double>& y) {
   std::fill(y.begin(), y.end(), 0.0);
-  for (const Elem& el : elems) {
+  for (const MfElem& el : elems) {
     double ul[kDof];
     for (int r = 0; r < kDof; ++r)
       ul[r] = x[static_cast<std::size_t>(el.edof[r])];
@@ -95,68 +99,29 @@ void apply_full(const std::vector<Elem>& elems, const Hex8Stiffness& Ke,
   }
 }
 
-std::vector<double> matfree_apply_impl(const VoxelGrid& grid,
-                                       double youngs_modulus, double poisson,
-                                       const std::vector<double>* elem_youngs,
-                                       const std::vector<double>& u) {
-  const int ndof = 3 * fea_node_count(grid);
-  if (static_cast<int>(u.size()) != ndof)
-    throw std::invalid_argument(
-        "fea_matfree_apply: u size != 3*fea_node_count");
-  // Uniform: Ke carries the modulus, factor == 1. Graded: Ke is the unit-modulus
-  // element, factor == per-voxel E (hex8 stiffness is exactly linear in E). This
-  // matches the assembled path's two element builds byte-for-byte.
-  const Hex8Stiffness Ke = hex8_stiffness(
-      elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson, grid.spacing);
-  const std::vector<Elem> elems = build_elems(grid, elem_youngs, "fea_matfree_apply");
-  std::vector<double> y(static_cast<std::size_t>(ndof), 0.0);
-  apply_full(elems, Ke, u, y);
-  return y;
+void MatfreeReduced::apply_kgg(const std::vector<double>& xg,
+                               std::vector<double>& yg) const {
+  std::fill(xfull.begin(), xfull.end(), 0.0);
+  for (int k = 0; k < ng; ++k)
+    xfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
+        xg[static_cast<std::size_t>(k)];
+  mf_apply_full(elems, Ke, xfull, yfull);
+  yg.assign(static_cast<std::size_t>(ng), 0.0);
+  for (int k = 0; k < ng; ++k)
+    yg[static_cast<std::size_t>(k)] =
+        yfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])];
 }
-
-// ---- Matrix-free Jacobi-preconditioned CG ---------------------------------
-
-// The reduced, void-gated system in matrix-free form. `kept_global[kg]` is the
-// global DOF of surviving free DOF kg; `apply_kgg` realises y_g = K_gg x_g by
-// scatter -> full apply -> gather, with the full working buffers reused across
-// iterations. This is exactly K restricted to the kept DOFs (fixed and void DOFs
-// carry a zero in the scattered vector and are never read back), so it equals the
-// assembled reduced operator DOF-for-DOF.
-struct MatfreeReduced {
-  std::vector<Elem> elems;
-  Hex8Stiffness Ke;
-  int ndof = 0;
-  int ng = 0;                       // surviving free-DOF count
-  std::vector<int> kept_global;     // kg -> global DOF
-  std::vector<double> up;           // full field seeded with prescribed values
-  std::vector<double> rg;           // ng reduced RHS
-  std::vector<double> invdiag;      // ng Jacobi inverse diagonal
-  // Reused full-length scratch for the matvec.
-  mutable std::vector<double> xfull, yfull;
-
-  void apply_kgg(const std::vector<double>& xg, std::vector<double>& yg) const {
-    std::fill(xfull.begin(), xfull.end(), 0.0);
-    for (int k = 0; k < ng; ++k)
-      xfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
-          xg[static_cast<std::size_t>(k)];
-    apply_full(elems, Ke, xfull, yfull);
-    yg.assign(static_cast<std::size_t>(ng), 0.0);
-    for (int k = 0; k < ng; ++k)
-      yg[static_cast<std::size_t>(k)] =
-          yfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])];
-  }
-};
 
 // Build the matrix-free reduced system. Mirrors assemble_reduced + the M3.1 gate
 // (void_dof_survivors) but without ever assembling a sparse matrix. On a void-gate
 // rejection it sets `*info` (converged=false, 0 iterations) and throws, matching
 // solve_reduced_cg's behaviour.
-MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
-                             double poisson,
-                             const std::vector<DirichletBC>& bcs,
-                             const std::vector<NodalLoad>& loads,
-                             const std::vector<double>* elem_youngs,
-                             CgInfo* info) {
+MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
+                                double poisson,
+                                const std::vector<DirichletBC>& bcs,
+                                const std::vector<NodalLoad>& loads,
+                                const std::vector<double>* elem_youngs,
+                                const char* who, CgInfo* info) {
   const int num_nodes = fea_node_count(grid);
   const int ndof = 3 * num_nodes;
 
@@ -164,7 +129,7 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
   m.ndof = ndof;
   m.Ke = hex8_stiffness(elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson,
                         grid.spacing);
-  m.elems = build_elems(grid, elem_youngs, "fea_solve_cg_matfree");
+  m.elems = mf_build_elems(grid, elem_youngs, who);
   m.xfull.assign(static_cast<std::size_t>(ndof), 0.0);
   m.yfull.assign(static_cast<std::size_t>(ndof), 0.0);
 
@@ -175,7 +140,7 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
   for (const DirichletBC& bc : bcs) {
     if (bc.node < 0 || bc.node >= num_nodes || bc.component < 0 ||
         bc.component > 2)
-      throw std::invalid_argument("fea_solve_cg_matfree: BC index out of range");
+      throw std::invalid_argument(std::string(who) + ": BC index out of range");
     const int dof = 3 * bc.node + bc.component;
     fixed[static_cast<std::size_t>(dof)] = 1;
     m.up[static_cast<std::size_t>(dof)] = bc.value;
@@ -186,8 +151,7 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
   std::vector<double> f(static_cast<std::size_t>(ndof), 0.0);
   for (const NodalLoad& l : loads) {
     if (l.node < 0 || l.node >= num_nodes || l.component < 0 || l.component > 2)
-      throw std::invalid_argument(
-          "fea_solve_cg_matfree: load index out of range");
+      throw std::invalid_argument(std::string(who) + ": load index out of range");
     f[static_cast<std::size_t>(3 * l.node + l.component)] += l.value;
   }
 
@@ -196,7 +160,7 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
   std::vector<double> rhs_full = f;
   if (nonzero_bc) {
     std::vector<double> kup(static_cast<std::size_t>(ndof), 0.0);
-    apply_full(m.elems, m.Ke, m.up, kup);
+    mf_apply_full(m.elems, m.Ke, m.up, kup);
     for (int d = 0; d < ndof; ++d)
       rhs_full[static_cast<std::size_t>(d)] -= kup[static_cast<std::size_t>(d)];
   }
@@ -213,7 +177,7 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
   // sweep (diag[d] += factor_e * Ke(local,local)).
   std::vector<char> touched(static_cast<std::size_t>(nf), 0);
   std::vector<double> diagfull(static_cast<std::size_t>(ndof), 0.0);
-  for (const Elem& el : m.elems)
+  for (const MfElem& el : m.elems)
     for (int r = 0; r < kDof; ++r) {
       const int fr = free_of_dof[static_cast<std::size_t>(el.edof[r])];
       if (fr >= 0) touched[static_cast<std::size_t>(fr)] = 1;
@@ -229,8 +193,8 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
     if (!any) {
       if (info) { info->converged = false; info->iterations = 0; info->residual = 0.0; }
       throw std::runtime_error(
-          "fea_solve_cg_matfree: singular system (no stiffness — every free DOF "
-          "is void)");
+          std::string(who) +
+          ": singular system (no stiffness — every free DOF is void)");
     }
   }
 
@@ -249,8 +213,9 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
     if (std::fabs(rhs_full[static_cast<std::size_t>(d)]) > load_tol) {
       if (info) { info->converged = false; info->iterations = 0; info->residual = 0.0; }
       throw std::runtime_error(
-          "fea_solve_cg_matfree: under-constrained system (load applied to a "
-          "void DOF with no stiffness — no equilibrium possible)");
+          std::string(who) +
+          ": under-constrained system (load applied to a void DOF with no "
+          "stiffness — no equilibrium possible)");
     }
   }
 
@@ -279,9 +244,9 @@ MatfreeReduced build_reduced(const VoxelGrid& grid, double youngs_modulus,
 // criterion (relative residual sqrt(||r||^2/||rhs||^2) <= tolerance) so the
 // matrix-free solve converges to the same field. `x` is seeded (warm start or
 // zero) and holds the solution on the kept DOFs.
-void cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
-              std::vector<double>& x, int& iters_out, double& error_out,
-              bool& converged_out) {
+void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
+                 std::vector<double>& x, int& iters_out, double& error_out,
+                 bool& converged_out) {
   const int n = m.ng;
   const double tol = tolerance;
   const int maxIters = (max_iterations > 0) ? max_iterations : 2 * n;
@@ -356,6 +321,33 @@ void cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   converged_out = (error_out <= tol) && finite;
 }
 
+}  // namespace fea_detail
+
+namespace {
+
+using fea_detail::MatfreeReduced;
+using fea_detail::MfElem;
+
+std::vector<double> matfree_apply_impl(const VoxelGrid& grid,
+                                       double youngs_modulus, double poisson,
+                                       const std::vector<double>* elem_youngs,
+                                       const std::vector<double>& u) {
+  const int ndof = 3 * fea_node_count(grid);
+  if (static_cast<int>(u.size()) != ndof)
+    throw std::invalid_argument(
+        "fea_matfree_apply: u size != 3*fea_node_count");
+  // Uniform: Ke carries the modulus, factor == 1. Graded: Ke is the unit-modulus
+  // element, factor == per-voxel E (hex8 stiffness is exactly linear in E). This
+  // matches the assembled path's two element builds byte-for-byte.
+  const Hex8Stiffness Ke = hex8_stiffness(
+      elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson, grid.spacing);
+  const std::vector<MfElem> elems =
+      fea_detail::mf_build_elems(grid, elem_youngs, "fea_matfree_apply");
+  std::vector<double> y(static_cast<std::size_t>(ndof), 0.0);
+  fea_detail::mf_apply_full(elems, Ke, u, y);
+  return y;
+}
+
 FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
                                   double poisson,
                                   const std::vector<DirichletBC>& bcs,
@@ -364,8 +356,9 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
                                   CgInfo* info,
                                   const std::vector<double>* elem_youngs,
                                   const FeaSolution* initial_guess) {
-  MatfreeReduced m = build_reduced(grid, youngs_modulus, poisson, bcs, loads,
-                                   elem_youngs, info);
+  MatfreeReduced m = fea_detail::mf_build_reduced(
+      grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
+      "fea_solve_cg_matfree", info);
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
@@ -379,8 +372,8 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
         x[static_cast<std::size_t>(k)] = initial_guess->u[static_cast<std::size_t>(
             m.kept_global[static_cast<std::size_t>(k)])];
 
-    cg_solve(m, tolerance, max_iterations, x, diag.iterations, diag.residual,
-             diag.converged);
+    fea_detail::mf_cg_solve(m, tolerance, max_iterations, x, diag.iterations,
+                            diag.residual, diag.converged);
     if (info) *info = diag;
     if (!diag.converged)
       throw std::runtime_error(

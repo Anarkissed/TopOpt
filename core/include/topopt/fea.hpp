@@ -314,6 +314,56 @@ FeaSolution fea_solve_mgcg(const VoxelGrid& grid,
                            double tolerance = 1e-8, int max_iterations = 0,
                            CgInfo* info = nullptr);
 
+// Matrix-free variants of fea_solve_mgcg (handoff 078). Same geometric-multigrid
+// preconditioned CG, solving the IDENTICAL BC-reduced, void-gated system Ku=f to
+// the same relative-residual `tolerance` and converging to the same field — but
+// the FINEST level is MATRIX-FREE. Its matvecs, residuals and damped-Jacobi
+// smoother are computed element-by-element (reusing fea_matfree_apply's operator
+// and matrix-free Jacobi diagonal), so the assembled fine stiffness K (the sparse
+// matrix that OOMs on large design-box grids) is NEVER built. The coarse-grid
+// operators are formed by an element-local GALERKIN triple product (A_c = P^T A P
+// without materialising the fine A), preserving Galerkin's robustness under the
+// SIMP soft-void modulus contrast; only these (>=8x smaller) coarse operators are
+// assembled. Peak memory during the solve is therefore dominated by the coarse
+// operators, not the now-absent fine matrix.
+//
+// Fully OPT-IN and default-OFF: nothing calls these unless a caller chooses them;
+// the assembled fea_solve_mgcg / fea_solve_cg paths are byte-for-byte untouched,
+// so Gate-V2 and the reference path are unaffected. Same ROBUST FALLBACK as the
+// assembled path — if a multigrid hierarchy is not applicable or MG-CG does not
+// converge, the solver falls back to the EXACT matrix-free Jacobi-CG (still no
+// assembled fine K) and reports it via `info->used_multigrid`. Throwing behaviour
+// (bad BC/load index, void-gate rejection, non-convergence) matches fea_solve_cg.
+FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
+                                   double poisson,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance = 1e-8,
+                                   int max_iterations = 0, CgInfo* info = nullptr);
+FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
+                                   const std::vector<double>& youngs_per_voxel,
+                                   double poisson,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance = 1e-8,
+                                   int max_iterations = 0, CgInfo* info = nullptr);
+
+// Memory evidence (diagnostic): total nonzeros stored across the ASSEMBLED
+// operators of the multigrid hierarchy each solver builds for (grid, E, nu, bcs,
+// loads). The assembled fea_solve_mgcg count INCLUDES the fine operator A0 (the
+// large sparse K); the matrix-free fea_solve_mgcg_matfree count is COARSE-ONLY
+// (the fine level is matrix-free, storing just the 576-double reference Ke, per
+// fea_matfree_operator_storage_doubles). The gap — which widens with grid size as
+// the fine level comes to dominate — demonstrates the fine matrix is absent on
+// the matrix-free path. Return 0 when no assembled hierarchy is built (no free
+// DOFs, or the grid falls back to a plain CG with no multigrid operators).
+std::size_t fea_mgcg_assembled_operator_nonzeros(
+    const VoxelGrid& grid, double youngs_modulus, double poisson,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads);
+std::size_t fea_matfree_mgcg_assembled_operator_nonzeros(
+    const VoxelGrid& grid, double youngs_modulus, double poisson,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads);
+
 // ---------------------------------------------------------------------------
 // Matrix-free global stiffness operator + matrix-free CG (handoff: matrix-free
 // operator). The assembled sparse global K is what OOMs on large (design-box)
