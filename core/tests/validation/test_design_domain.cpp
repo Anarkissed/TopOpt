@@ -40,6 +40,7 @@
 #include "topopt/simp.hpp"
 #include "topopt/voxel.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -194,9 +195,13 @@ int main() {
 
   // The expanded design domain the driver will build (deterministic — the same
   // call the driver makes internally, so its grid/mask align index-for-index with
-  // the run's physical_density).
+  // the run's physical_density). The driver aligns the expanded element dims to a
+  // power of two (8) for the multigrid hierarchy (minimize_plastic.cpp
+  // kDesignBoxCoarsenAlign); pass the same alignment here so this domain matches
+  // the run's grid index-for-index.
+  constexpr int kCoarsenAlign = 8;  // must equal minimize_plastic's constant
   const DesignDomain domain =
-      topopt::expand_design_domain(part, box, {keep_out});
+      topopt::expand_design_domain(part, box, {keep_out}, kCoarsenAlign);
 
   // The expansion actually ENLARGED the grid (new Active volume beyond the import)
   // and shifted the part by a nonzero offset (exercising node remapping).
@@ -204,8 +209,10 @@ int main() {
         "expand: the design box enlarges the grid beyond the import");
   CHECK(domain.offset_i == 1 && domain.offset_k == 1 && domain.offset_j == 0,
         "expand: the part sits at the expected nonzero voxel offset");
-  CHECK(domain.grid.nx == 11 && domain.grid.ny == 3 && domain.grid.nz == 11,
-        "expand: the expanded grid has the expected dimensions");
+  // Unaligned the box gives 11x3x11; aligned UP to multiples of 8 (HIGH side
+  // only, so the offset above is unchanged) gives 16x8x16.
+  CHECK(domain.grid.nx == 16 && domain.grid.ny == 8 && domain.grid.nz == 16,
+        "expand: the expanded grid has the expected coarsening-aligned dimensions");
   CHECK(domain.mask.size() == domain.grid.voxel_count(),
         "expand: the mask is sized to the expanded grid");
 
@@ -317,6 +324,43 @@ int main() {
   const double grown_compliance = grown.evaluated[0].optimization.compliance;
   CHECK(grown_compliance < import_only.compliance,
         "(d): the grown result has lower compliance than the import alone");
+
+  // --- STEP-4 flip: the production matrix-free multigrid produces the SAME
+  // design end-to-end as the assembled multigrid (which the bridge flip replaces).
+  // Both run the full mask-aware ladder on the expanded design box; the
+  // matrix-free path never assembles the fine K (the design-box OOM) yet solves
+  // the identical system, so the converged design must match the assembled path
+  // to solver tolerance. The default `grown` above is the JacobiCG reference.
+  MinimizePlasticOptions o_asm = o;
+  o_asm.simp.solver = topopt::SolverKind::MultigridCG;
+  const MinimizePlasticResult grown_asm =
+      topopt::minimize_plastic(part, material, "PLA_test", bcs, rules, o_asm);
+  MinimizePlasticOptions o_mf = o;
+  o_mf.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
+  const MinimizePlasticResult grown_mf =
+      topopt::minimize_plastic(part, material, "PLA_test", bcs, rules, o_mf);
+  CHECK(grown_asm.evaluated.size() == 1 && grown_asm.evaluated[0].accepted &&
+            grown_mf.evaluated.size() == 1 && grown_mf.evaluated[0].accepted,
+        "flip: both the assembled and matrix-free multigrid runs complete");
+  const std::vector<double>& rho_asm =
+      grown_asm.evaluated[0].optimization.physical_density;
+  const std::vector<double>& rho_mf =
+      grown_mf.evaluated[0].optimization.physical_density;
+  CHECK(rho_mf.size() == rho.size() && rho_asm.size() == rho.size(),
+        "flip: both runs are on the same expanded grid as the reference");
+  double max_mf_vs_asm = 0.0;
+  for (std::size_t idx = 0; idx < rho.size(); ++idx)
+    max_mf_vs_asm =
+        std::max(max_mf_vs_asm, std::abs(rho_mf[idx] - rho_asm[idx]));
+  const double casm = grown_asm.evaluated[0].optimization.compliance;
+  const double cmf = grown_mf.evaluated[0].optimization.compliance;
+  const double crel = std::abs(cmf - casm) / std::abs(casm);
+  std::printf("[flip] max|rho_mf - rho_asm|=%.3e compliance rel.diff=%.3e\n",
+              max_mf_vs_asm, crel);
+  CHECK(max_mf_vs_asm < 1e-6,
+        "flip: matrix-free design matches the assembled multigrid design");
+  CHECK(crel < 1e-6,
+        "flip: matrix-free compliance matches the assembled multigrid compliance");
 
   // --- Default (no design box) is byte-identical to the legacy driver -------
   // With design_box unset the run uses the imported grid verbatim (Active == the

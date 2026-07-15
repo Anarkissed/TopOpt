@@ -154,8 +154,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       throw std::invalid_argument(
           "minimize_plastic: design_box is incompatible with a caller "
           "design_mask (the design box builds the effective mask itself)");
+    // Align the expanded grid's element dims to a power of two (8 => >= 3
+    // multigrid levels) by appending Empty high-side voxels. The design-box
+    // system is ~1e-9-contrast and ~2M-DOF; without an even-dimensioned grid the
+    // geometric-multigrid hierarchy cannot coarsen (an odd axis makes it bail to
+    // an effectively-hung Jacobi-CG). The padding adds no physics (Empty voxels,
+    // void-gated) and leaves the BC/load remap offset unchanged. See voxel.hpp.
+    constexpr int kDesignBoxCoarsenAlign = 8;
     domain = expand_design_domain(grid, *options.design_box,
-                                  options.keep_out_boxes);
+                                  options.keep_out_boxes, kDesignBoxCoarsenAlign);
     remapped_bcs.reserve(bcs.size());
     for (const DirichletBC& bc : bcs)
       remapped_bcs.push_back({remap_node_to_domain(grid, domain, bc.node),

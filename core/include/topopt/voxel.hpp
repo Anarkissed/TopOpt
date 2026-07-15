@@ -172,11 +172,28 @@ struct DesignDomain {
 // matches the part's bounding box and no keep-out, every part voxel is
 // FrozenSolid and every in-box empty voxel is Active — the offsets are all 0.
 //
-// Throws std::invalid_argument if `design_box` (or any `keep_out` box) has
-// min > max on any axis or a non-finite coordinate, or if `part.spacing` <= 0.
+// COARSENING ALIGNMENT (design-box on-device fix): `coarsen_align` rounds each
+// expanded element dimension (new_nx/ny/nz) UP to the next multiple of that value
+// by APPENDING voxels on the HIGH side of each axis (never the low side). The
+// appended voxels lie beyond `design_box` (the pre-alignment grid already reached
+// design_box.max), so they are classified Empty exactly like any other
+// out-of-box voxel: no FEA element, no self-weight, no design variable — the
+// void-DOF gate removes their DOFs, so they add NO physics and do NOT change the
+// solved result. Because only the high side grows, `offset_i/j/k` and `origin`
+// are UNCHANGED, so remap_node_to_domain stays correct with no adjustment.
+//
+// The purpose is the geometric-multigrid solver: its hierarchy can only coarsen
+// (halve) axes whose element count is even, and bails entirely if any axis is
+// odd, falling back to an effectively-hung Jacobi-CG on the ~1e-9-contrast
+// design-box system. Aligning to a power of two (the driver passes 8) guarantees
+// the expanded grid coarsens deep enough for a real hierarchy (>= 3 levels).
+// `coarsen_align <= 1` is the exact pre-existing behaviour (no rounding,
+// byte-for-byte identical grid); the default is 1 so every existing caller and
+// test is unaffected. Throws std::invalid_argument if `coarsen_align < 1`.
 DesignDomain expand_design_domain(const VoxelGrid& part,
                                   const DesignBox& design_box,
-                                  const std::vector<DesignBox>& keep_out = {});
+                                  const std::vector<DesignBox>& keep_out = {},
+                                  int coarsen_align = 1);
 
 // Map a corner-node id of `part`'s node grid to the corresponding corner-node id
 // of `domain.grid` (shifted by the domain's voxel offset). Use it to remap

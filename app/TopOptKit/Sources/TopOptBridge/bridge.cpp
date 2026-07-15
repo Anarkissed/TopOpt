@@ -499,12 +499,16 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
-    // Production runs use the geometric-multigrid accelerator (handoff 072/073): it
-    // solves the identical system to the same tolerance and falls back to exact
-    // Jacobi-CG if a hierarchy is not applicable, so the result is always correct.
+    // Production runs use the MATRIX-FREE geometric-multigrid accelerator (handoff
+    // 072/073/078 + design-box on-device fix): it solves the identical system to
+    // the same tolerance and falls back to exact Jacobi-CG if a hierarchy is not
+    // applicable, so the result is always correct. Matrix-free never assembles the
+    // fine stiffness K, whose ~7 GB peak was the design-box std::bad_alloc; the
+    // design-box grid is padded to coarsening-friendly dims so multigrid actually
+    // engages (an odd axis otherwise falls back to an effectively-hung Jacobi-CG).
     // The library default stays JacobiCG so Gate-V2 and the locked reference are
     // untouched. This is the flip.
-    opts.simp.solver = topopt::SolverKind::MultigridCG;
+    opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
     // Self-weight body load in mm-MPa-consistent units. The material density from
     // materials.json is g/cm^3 and lengths are mm, so density*gravity must be in
     // N/mm^3: fold the g/cm^3 -> t/mm^3 factor (1e-9) into standard gravity in
@@ -533,7 +537,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
 
     set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
 
-    bridge_log("selfweight: entering minimize_plastic (solver=MultigridCG) " +
+    bridge_log("selfweight: entering minimize_plastic (solver=MultigridCG_Matfree) " +
                grid_summary(grid) + " dirichlet_bcs=" + std::to_string(bcs.size()));
     topopt::MinimizePlasticResult mp =
         topopt::minimize_plastic(grid, it->second, material_name, bcs, rules, opts);
@@ -670,12 +674,16 @@ OptimizeResult run_minimize_plastic_loadcase(
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
-    // Production runs use the geometric-multigrid accelerator (handoff 072/073): it
-    // solves the identical system to the same tolerance and falls back to exact
-    // Jacobi-CG if a hierarchy is not applicable, so the result is always correct.
+    // Production runs use the MATRIX-FREE geometric-multigrid accelerator (handoff
+    // 072/073/078 + design-box on-device fix): it solves the identical system to
+    // the same tolerance and falls back to exact Jacobi-CG if a hierarchy is not
+    // applicable, so the result is always correct. Matrix-free never assembles the
+    // fine stiffness K, whose ~7 GB peak was the design-box std::bad_alloc; the
+    // design-box grid is padded to coarsening-friendly dims so multigrid actually
+    // engages (an odd axis otherwise falls back to an effectively-hung Jacobi-CG).
     // The library default stays JacobiCG so Gate-V2 and the locked reference are
     // untouched. This is the flip.
-    opts.simp.solver = topopt::SolverKind::MultigridCG;
+    opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
     opts.external_loads = external;  // the user's load case (mode a); empty => self-weight
     // gravity_direction defines the reported build orientation = its unit negation.
     opts.gravity_direction =
@@ -790,7 +798,7 @@ OptimizeResult run_minimize_plastic_loadcase(
     // (`result_grid`), not the part grid — and that expanded grid is the diagnosed
     // trigger (odd dims force the Jacobi-CG fallback over a large soft-void domain).
     // Log both so the device console shows the grid that actually hangs.
-    bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG)")
+    bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG_Matfree)")
                + " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0)
                + " part " + grid_summary(grid)
                + (load_case.has_design_box ? " | SOLVED-ON expanded " + grid_summary(result_grid)
