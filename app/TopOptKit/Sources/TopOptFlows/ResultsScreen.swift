@@ -929,23 +929,26 @@ public struct ResultsScreen: View {
         }
     }
 
-    // MARK: - Top-left: orientation gizmo (ViewCube)
+    // MARK: - Top-right: orientation gizmo (ViewCube), below Export
 
-    /// The ViewCube-style orientation widget, pinned TOP-LEFT. That corner is the only
-    /// one clear on every results viewer (Stress/Flex/Load-path): the right rail holds
-    /// the viz chips + their drawers and the recommended-orientation cube, the bottom-left
-    /// holds the savings tabs, and the bottom-centre holds the media player. It sits just
-    /// under the top nav bar so it never collides with the Back / project chrome.
+    /// The liquid-glass orientation widget, pinned TOP-RIGHT directly below the Export
+    /// button (gizmo-liquid-glass-reskin task, item 2). The right rail is clear in that
+    /// band: the viz chips + their left-opening drawers and the recommended-orientation
+    /// cube all sit at the BOTTOM-right (`vizRail` / `orientationCorner`, lifted by
+    /// `cubeClearance`), the savings tabs are bottom-left, and the media player is
+    /// bottom-centre — so a ~300pt gizmo below Export (≈y 96–396) never reaches them even
+    /// on the shortest supported iPad (landscape ~768pt tall; the bottom cluster starts
+    /// ≈y 480). Right-aligned to the Export button's `xl3` gutter.
     private var orientationGizmo: some View {
-        VStack(alignment: .leading) {
+        VStack(alignment: .trailing) {
             HStack {
-                OrientationGizmoView(camera: cameraModel)
                 Spacer()
+                OrientationGizmoView(camera: cameraModel)
             }
             Spacer()
         }
-        .padding(.top, 84)
-        .padding(.leading, DS.Space.xl3)
+        .padding(.top, 96)
+        .padding(.trailing, DS.Space.xl3)
     }
 
     // MARK: - Bottom-right: orientation cube + sheet
