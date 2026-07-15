@@ -394,6 +394,58 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME design_domain COMMAND test_design_domain)
 
+  # Handoff 080 regression gate: the design-box "whole-domain optimize" path
+  # (freeze_imported_part == false, the default) must REDUCE plastic against the
+  # imported part — removes material, baseline == part mass, and the ladder walks
+  # the same rung count as the no-box path (no collapse to one near-solid rung).
+  # Drives minimize_plastic, so Eigen-gated like the other optimizer gates; the real
+  # settings rule table is injected. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_designbox_reduction tests/validation/test_designbox_reduction.cpp)
+  target_link_libraries(test_designbox_reduction PRIVATE topopt)
+  target_compile_definitions(test_designbox_reduction PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME designbox_reduction COMMAND test_designbox_reduction)
+
+  # Anchor integrity on the design-box path (handoff 082): with the imported part
+  # Active/removable (whole-domain optimize), a caller anchor pad (FrozenSolid
+  # design_mask on the PART grid) is MERGED into the expanded domain and keeps the
+  # N-voxel anchor neighbourhood solid after optimization. Proves the pad protects at
+  # a nonzero offset, that the box path still removes material with the pad merged,
+  # and that the add-material contract (design_box + design_mask throws when the part
+  # is frozen) survives. Drives minimize_plastic, so Eigen-gated; the real settings
+  # rule table is injected. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_designbox_anchor_pad tests/validation/test_designbox_anchor_pad.cpp)
+  target_link_libraries(test_designbox_anchor_pad PRIVATE topopt)
+  target_compile_definitions(test_designbox_anchor_pad PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME designbox_anchor_pad COMMAND test_designbox_anchor_pad)
+
+  # Design-box coarsening alignment (design-box on-device fix): expand_design_domain
+  # rounds the expanded element dims UP to a multiple of 8 with Empty high-side
+  # padding so the geometric-multigrid hierarchy can coarsen (an odd axis otherwise
+  # bails to an effectively-hung Jacobi-CG on the ~1e-9-contrast design-box system).
+  # Proves the padding is physically inert (unpadded==padded compliance), that the
+  # padded grid engages the matrix-free multigrid (used_multigrid, mg_levels>=3),
+  # and that the BC/load remap stays correct at a nonzero offset. Drives
+  # simp_compliance / fea_solve_mgcg_matfree, so it is Eigen-gated. CI configures
+  # with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_designbox_padding tests/validation/test_designbox_padding.cpp)
+  target_link_libraries(test_designbox_padding PRIVATE topopt)
+  add_test(NAME designbox_padding COMMAND test_designbox_padding)
+
+  # Design-box grid-report guard: the grid minimize_plastic REPORTS (solved_grid /
+  # minimize_plastic_solved_grid) must equal the grid it SOLVED on, voxel-for-voxel,
+  # so the app samples the von-Mises / displacement / playback fields at the right
+  # voxels. Proves the old 3-arg expand_design_domain default derivation (unpadded)
+  # MISREPORTS that grid, and that the per-variant field lengths match the reported
+  # grid. Drives minimize_plastic / the design-box multigrid, so it is Eigen-gated;
+  # the settings rule table is injected. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_designbox_grid_report tests/validation/test_designbox_grid_report.cpp)
+  target_link_libraries(test_designbox_grid_report PRIVATE topopt)
+  target_compile_definitions(test_designbox_grid_report PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME designbox_grid_report COMMAND test_designbox_grid_report)
+
   # MMA updater (M7.mma.1): the Method of Moving Asymptotes design updater,
   # exposed behind SimpOptions.updater = MMA, reproduces the OC minimum-
   # compliance benchmarks (the Gate V2 cantilever + clamped-beam geometries)

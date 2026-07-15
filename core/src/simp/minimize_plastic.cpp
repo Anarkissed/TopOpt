@@ -86,6 +86,20 @@ std::array<double, 24> element_dofs(const VoxelGrid& grid, const FeaSolution& so
 
 }  // namespace
 
+VoxelGrid minimize_plastic_solved_grid(const VoxelGrid& grid,
+                                       const MinimizePlasticOptions& options) {
+  // Mirror EXACTLY the design-domain expansion minimize_plastic performs above:
+  // same expand_design_domain overload, same keep-outs, same freeze flag, same
+  // kDesignBoxCoarsenAlign. Expansion is pure geometry (no voxelization, no
+  // solve), so this returns the identical grid the driver solves on without
+  // running the ladder. With no design box the solved grid IS the caller's grid.
+  if (!options.design_box.has_value()) return grid;
+  return expand_design_domain(grid, *options.design_box, options.keep_out_boxes,
+                              options.freeze_imported_part,
+                              kDesignBoxCoarsenAlign)
+      .grid;
+}
+
 MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                                        const Material& material,
                                        const std::string& material_name,
@@ -150,12 +164,65 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   std::vector<NodalLoad> remapped_loads;  // expanded-grid external loads
   const bool expanded = options.design_box.has_value();
   if (expanded) {
-    if (!options.design_mask.empty())
-      throw std::invalid_argument(
-          "minimize_plastic: design_box is incompatible with a caller "
-          "design_mask (the design box builds the effective mask itself)");
+    // M7.anchor-integrity on the box path (handoff 082): a caller `design_mask` is
+    // the anchor PAD (mask_step_face FrozenSolid, PART-grid indexed; diagnosis 064).
+    // Its validity depends on freeze_imported_part:
+    //   * freeze_imported_part == true (the "add material" feature): the WHOLE import
+    //     is already FrozenSolid and the box builds the mask itself, so a caller pad
+    //     is redundant AND ambiguous — REJECT it, exactly as the pre-082 driver did
+    //     (test_design_domain's add-material contract still throws here).
+    //   * freeze_imported_part == false (whole-domain optimize, the DEFAULT): handoff
+    //     080 made the imported part an Active/REMOVABLE region, so only the 1-voxel
+    //     Load/Fixture BC skin is pinned and the optimizer can carve an anchor boss
+    //     thin. A caller pad is now MEANINGFUL — it re-freezes that N-voxel boss — so
+    //     MERGE it into the expanded mask (below) instead of rejecting it.
+    if (!options.design_mask.empty()) {
+      if (options.freeze_imported_part)
+        throw std::invalid_argument(
+            "minimize_plastic: a caller design_mask is rejected together with a "
+            "design_box when freeze_imported_part is set (the frozen box builds "
+            "the effective mask itself)");
+      if (options.design_mask.size() != grid.voxel_count())
+        throw std::invalid_argument(
+            "minimize_plastic: design_mask size != part grid.voxel_count()");
+    }
+    // Align the expanded grid's element dims to a power of two (8 => >= 3
+    // multigrid levels) by appending Empty high-side voxels. The design-box
+    // system is ~1e-9-contrast and ~2M-DOF; without an even-dimensioned grid the
+    // geometric-multigrid hierarchy cannot coarsen (an odd axis makes it bail to
+    // an effectively-hung Jacobi-CG). The padding adds no physics (Empty voxels,
+    // void-gated) and leaves the BC/load remap offset unchanged. See voxel.hpp.
+    // kDesignBoxCoarsenAlign is the public constant (pipeline.hpp) so any caller
+    // re-deriving this grid — via minimize_plastic_solved_grid — uses the same
+    // alignment and cannot drift from what is solved here.
     domain = expand_design_domain(grid, *options.design_box,
-                                  options.keep_out_boxes);
+                                  options.keep_out_boxes,
+                                  options.freeze_imported_part,
+                                  kDesignBoxCoarsenAlign);
+    // MERGE the caller anchor pad into the expanded mask. The pad is indexed on the
+    // PART grid; the expanded grid is LARGER and sits at a whole-voxel offset
+    // (domain.offset_*, the SAME offset remap_node_to_domain applies to the BCs and
+    // loads just below). MERGE RULE: a part voxel the caller marked FrozenSolid
+    // becomes FrozenSolid at its offset location in the expanded mask;
+    // expand_design_domain's Active / FrozenVoid / Empty classification stands
+    // everywhere else. The pad only ADDS keep-in (FrozenSolid) voxels — the sole
+    // value mask_step_face writes — so nothing else is propagated and the box's own
+    // domain is never un-frozen. A pad FrozenSolid voxel always sits on a part-solid
+    // voxel (mask_step_face walks solid layers), which the whole-domain expand left
+    // Active; the overlay pins it back to a keep-in boss.
+    if (!options.design_mask.empty()) {
+      for (int pk = 0; pk < grid.nz; ++pk)
+        for (int pj = 0; pj < grid.ny; ++pj)
+          for (int pi = 0; pi < grid.nx; ++pi) {
+            if (options.design_mask[grid.index(pi, pj, pk)] !=
+                MaskValue::FrozenSolid)
+              continue;
+            domain.mask[domain.grid.index(pi + domain.offset_i,
+                                          pj + domain.offset_j,
+                                          pk + domain.offset_k)] =
+                MaskValue::FrozenSolid;
+          }
+    }
     remapped_bcs.reserve(bcs.size());
     for (const DirichletBC& bc : bcs)
       remapped_bcs.push_back({remap_node_to_domain(grid, domain, bc.node),
@@ -217,6 +284,52 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                : (options.design_mask.empty() ? make_active_mask(G)
                                               : options.design_mask);
 
+  // Handoff 080 (Option 2 — "whole-domain optimize"): on a design-box run that does
+  // NOT freeze the imported part, the part is an Active design region the optimizer
+  // may remove. Two quantities must then be normalised to the PART rather than to
+  // the Active envelope, so the run reduces plastic against the part and the app's
+  // savings/baseline are the honest part reference:
+  //   (1) each ladder rung's volume-fraction TARGET — simp's volume constraint is
+  //       `vf * n_active` over the Active envelope (part interior + add-region),
+  //       which for a loose box permits far MORE material than the part; rescale it
+  //       to `vf * part_solid` so rung `vf` means "keep vf of the part's worth of
+  //       material" (see the near-solid diagnosis, handoff 080);
+  //   (2) the reported ACHIEVED fraction — set below to printed_voxels / part_solid
+  //       so `savings = 1 - achieved` and the implied baseline (mass / achieved)
+  //       resolve to the part's mass, not the filled expanded domain.
+  // `active_effective` mirrors what effective_mask (simp) actually optimises: Active
+  // voxels minus the Empty/Load/Fixture voxels it reclassifies out of the budget.
+  // Gated on the box path only, so the no-box run is byte-identical.
+  const bool part_relative = expanded && !options.freeze_imported_part;
+  const double part_solid = static_cast<double>(grid.solid_count());
+  double active_effective = 0.0;   // voxels simp's volume constraint moves
+  double frozen_effective = 0.0;   // voxels effective_mask pins solid (always printed)
+  if (part_relative) {
+    for (int k = 0; k < G.nz; ++k)
+      for (int j = 0; j < G.ny; ++j)
+        for (int i = 0; i < G.nx; ++i) {
+          const std::size_t idx = G.index(i, j, k);
+          const VoxelTag t = G.tag(i, j, k);
+          // effective_mask (simp) pins these FrozenSolid: always printed, never
+          // move, so they spend part of the part budget. TWO sources: the M1.6
+          // Load/Fixture BC tags, AND (handoff 082) any voxel the merged anchor pad
+          // marked FrozenSolid — the re-frozen boss behind the BC skin. Counting the
+          // pad here keeps each rung's TOTAL printed material at `vf * part_solid`
+          // (the target below is `vf*part_solid - frozen_effective`, so the active
+          // budget shrinks by exactly the pad); omitting it would silently overshoot
+          // the part budget by the pad size. No pad => no FrozenSolid on this path,
+          // so this is byte-identical to the pre-082 whole-domain run.
+          if (t == VoxelTag::Load || t == VoxelTag::Fixture ||
+              mask[idx] == MaskValue::FrozenSolid) {
+            frozen_effective += 1.0;
+            continue;
+          }
+          if (mask[idx] != MaskValue::Active) continue;  // FrozenVoid
+          if (t == VoxelTag::Empty) continue;  // effective_mask -> FrozenVoid
+          active_effective += 1.0;
+        }
+  }
+
   // Part size for the settings size class: the largest grid bounding-box edge.
   const double part_dim_mm =
       std::max({static_cast<double>(G.nx), static_cast<double>(G.ny),
@@ -230,6 +343,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
   MinimizePlasticResult result;
   result.report.material = material_name;
+  // Record the grid every evaluated variant's fields are indexed to — the
+  // expanded domain grid under a design box, else the caller's grid. This IS the
+  // grid solved on (G), not a re-derivation, so a caller reporting grid metadata
+  // from it samples the von-Mises/displacement fields at the correct voxels. It
+  // equals minimize_plastic_solved_grid(grid, options) voxel-for-voxel.
+  result.solved_grid = G;
 
   // Reserve result.evaluated to the ladder length (its known maximum: at most one
   // entry per rung, and the walk stops early on the first rejected/cancelled rung)
@@ -245,7 +364,21 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
     SimpOptions opt = options.simp;
+    // Whole-domain optimize (handoff 080): rescale the rung's fraction from
+    // "fraction of the Active envelope" to "fraction of the part" so a loose box
+    // does not let the optimizer keep MORE material than the part. Target total
+    // printed material is `vf * part_solid` voxels; `frozen_effective` of those are
+    // spent on the always-printed Load/Fixture skin, so the Active budget targets
+    // the remainder, and dividing by the Active count gives the simp fraction that
+    // lands the TOTAL at `vf * part_solid`. Clamped to (0, 1]. Off the box path this
+    // is exactly `vf` (byte-identical).
     opt.volume_fraction = vf;
+    if (part_relative && active_effective > 0.0) {
+      const double active_target = vf * part_solid - frozen_effective;
+      opt.volume_fraction =
+          std::min(1.0, std::max(params.density_min,
+                                 active_target / active_effective));
+    }
     // M7.mma.4 — the switchover: the driver, not the shared SimpOptions default,
     // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
     // set options.updater = OC to fall back. Overrides any simp.updater.
@@ -391,6 +524,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       if (!(rho[idx] > kIso)) printed_grid.tags[idx] = VoxelTag::Empty;
     variant.support_volume_voxels =
         support_overhang_voxels(printed_grid, build_dir);
+
+    // Whole-domain optimize (handoff 080): report the achieved fraction relative to
+    // the PART, not the Active envelope. printed_voxels already counts every printed
+    // voxel (kept part + grown material). Overwriting the optimizer's active-envelope
+    // fraction here makes `savings = 1 - achieved` and the app's implied baseline
+    // (mass / achieved) resolve to the part's mass: mass / (printed/part_solid) =
+    // density * part_solid * voxel_volume / 1000 == the imported part's mass. The
+    // value can exceed 1 (net material added → negative savings), which is honest.
+    // vr.volume_fraction below reads this same field, so the report line agrees.
+    if (part_relative && part_solid > 0.0)
+      variant.optimization.volume_fraction =
+          static_cast<double>(printed_voxels) / part_solid;
 
     // Worst-case stress margin (M5.2 locked definition).
     const StressMargin margin = compute_stress_margin(

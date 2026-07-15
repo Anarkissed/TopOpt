@@ -64,10 +64,14 @@ bool point_in_box(const Vec3& p, const DesignBox& b) {
 
 DesignDomain expand_design_domain(const VoxelGrid& part,
                                   const DesignBox& design_box,
-                                  const std::vector<DesignBox>& keep_out) {
+                                  const std::vector<DesignBox>& keep_out,
+                                  bool freeze_part, int coarsen_align) {
   if (!(part.spacing > 0.0))
     throw std::invalid_argument(
         "expand_design_domain: part.spacing must be > 0");
+  if (coarsen_align < 1)
+    throw std::invalid_argument(
+        "expand_design_domain: coarsen_align must be >= 1");
   validate_box(design_box, "design_box");
   for (const DesignBox& k : keep_out) validate_box(k, "keep_out box");
 
@@ -76,7 +80,11 @@ DesignDomain expand_design_domain(const VoxelGrid& part,
   // Per axis, pad the part grid DOWN to cover design_box.min and UP to cover
   // design_box.max, in whole voxels, keeping the part's lattice (so part voxels
   // map to integer offsets). lo_pad voxels are prepended below the part origin;
-  // the total count also covers the part and any voxels needed above it.
+  // the total count also covers the part and any voxels needed above it. Finally
+  // round `total` UP to a multiple of coarsen_align by appending HIGH-side voxels
+  // only (lo_pad — and therefore the offset and origin — is never touched), so
+  // the multigrid hierarchy can coarsen every axis (see voxel.hpp). The appended
+  // voxels sit beyond design_box.max and are classified Empty below.
   auto axis = [&](double origin, int n, double bmin, double bmax, int& lo_pad,
                   int& total) {
     // Voxels to prepend so the new origin (origin - lo_pad*s) is <= bmin.
@@ -87,6 +95,10 @@ DesignDomain expand_design_domain(const VoxelGrid& part,
     int hi_pad = static_cast<int>(std::ceil((bmax - part_far) / s - 1e-9));
     if (hi_pad < 0) hi_pad = 0;
     total = lo_pad + n + hi_pad;
+    if (coarsen_align > 1) {
+      const int rem = total % coarsen_align;
+      if (rem != 0) total += coarsen_align - rem;  // grow the HIGH side only
+    }
   };
 
   int oi, oj, ok, new_nx, new_ny, new_nz;
@@ -121,10 +133,15 @@ DesignDomain expand_design_domain(const VoxelGrid& part,
         const int pi = i - oi, pj = j - oj, pk = k - ok;
         if (pi >= 0 && pi < part.nx && pj >= 0 && pj < part.ny && pk >= 0 &&
             pk < part.nz && part.solid(pi, pj, pk)) {
-          // The imported part: frozen solid, keeping its original tag (incl. any
-          // Load/Fixture face tag). Never removed, never overridden by a box.
+          // The imported part keeps its original tag (incl. any Load/Fixture face
+          // tag), never overridden by a box. `freeze_part` decides whether it is a
+          // FrozenSolid keep-in (add-material feature) or an Active design variable
+          // the optimizer may also remove (whole-domain optimize, handoff 080). The
+          // Load/Fixture tags survive both, so the mask-aware simp path still pins
+          // the BC skin FrozenSolid even when the part interior is Active.
           g.tags[idx] = part.tag(pi, pj, pk);
-          domain.mask[idx] = MaskValue::FrozenSolid;
+          domain.mask[idx] =
+              freeze_part ? MaskValue::FrozenSolid : MaskValue::Active;
           continue;
         }
         // Not part material: only the design volume is a design region.

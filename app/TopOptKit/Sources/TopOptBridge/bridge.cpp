@@ -499,12 +499,16 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
-    // Production runs use the geometric-multigrid accelerator (handoff 072/073): it
-    // solves the identical system to the same tolerance and falls back to exact
-    // Jacobi-CG if a hierarchy is not applicable, so the result is always correct.
+    // Production runs use the MATRIX-FREE geometric-multigrid accelerator (handoff
+    // 072/073/078 + design-box on-device fix): it solves the identical system to
+    // the same tolerance and falls back to exact Jacobi-CG if a hierarchy is not
+    // applicable, so the result is always correct. Matrix-free never assembles the
+    // fine stiffness K, whose ~7 GB peak was the design-box std::bad_alloc; the
+    // design-box grid is padded to coarsening-friendly dims so multigrid actually
+    // engages (an odd axis otherwise falls back to an effectively-hung Jacobi-CG).
     // The library default stays JacobiCG so Gate-V2 and the locked reference are
     // untouched. This is the flip.
-    opts.simp.solver = topopt::SolverKind::MultigridCG;
+    opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
     // Self-weight body load in mm-MPa-consistent units. The material density from
     // materials.json is g/cm^3 and lengths are mm, so density*gravity must be in
     // N/mm^3: fold the g/cm^3 -> t/mm^3 factor (1e-9) into standard gravity in
@@ -533,7 +537,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
 
     set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
 
-    bridge_log("selfweight: entering minimize_plastic (solver=MultigridCG) " +
+    bridge_log("selfweight: entering minimize_plastic (solver=MultigridCG_Matfree) " +
                grid_summary(grid) + " dirichlet_bcs=" + std::to_string(bcs.size()));
     topopt::MinimizePlasticResult mp =
         topopt::minimize_plastic(grid, it->second, material_name, bcs, rules, opts);
@@ -670,12 +674,16 @@ OptimizeResult run_minimize_plastic_loadcase(
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
-    // Production runs use the geometric-multigrid accelerator (handoff 072/073): it
-    // solves the identical system to the same tolerance and falls back to exact
-    // Jacobi-CG if a hierarchy is not applicable, so the result is always correct.
+    // Production runs use the MATRIX-FREE geometric-multigrid accelerator (handoff
+    // 072/073/078 + design-box on-device fix): it solves the identical system to
+    // the same tolerance and falls back to exact Jacobi-CG if a hierarchy is not
+    // applicable, so the result is always correct. Matrix-free never assembles the
+    // fine stiffness K, whose ~7 GB peak was the design-box std::bad_alloc; the
+    // design-box grid is padded to coarsening-friendly dims so multigrid actually
+    // engages (an odd axis otherwise falls back to an effectively-hung Jacobi-CG).
     // The library default stays JacobiCG so Gate-V2 and the locked reference are
     // untouched. This is the flip.
-    opts.simp.solver = topopt::SolverKind::MultigridCG;
+    opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
     opts.external_loads = external;  // the user's load case (mode a); empty => self-weight
     // gravity_direction defines the reported build orientation = its unit negation.
     opts.gravity_direction =
@@ -696,24 +704,28 @@ OptimizeResult run_minimize_plastic_loadcase(
     // loadcase (recommendation-ladder) path pads; the fixed single-fraction
     // preview (minimize_plastic == false) is left untouched.
     //
-    // M7.dom-app: the anchor pad is a caller `design_mask`, which minimize_plastic
-    // REJECTS alongside a `design_box` (the box builds the effective mask itself,
-    // pipeline.hpp). It is also unnecessary under a design box: expand_design_domain
-    // freezes EVERY imported-part solid voxel as FrozenSolid (the whole import is
-    // kept, not just an N-voxel pad behind the BC faces), so the anchor/load bosses
-    // are already tied into the frozen body. So build the pad only when there is no
-    // design box; the ladder floor is orthogonal and applies either way.
+    // M7.anchor-integrity on the box path (handoff 082): build the pad on BOTH the
+    // no-box AND the design-box path. The old code skipped it under a design box on
+    // the assumption that "expand_design_domain freezes EVERY imported-part solid
+    // voxel as FrozenSolid, so the bosses are already tied into the frozen body."
+    // Handoff 080 (whole-domain optimize, freeze_imported_part == false — now the
+    // box default) made the imported part Active/REMOVABLE: only the 1-voxel
+    // Load/Fixture BC skin is pinned, and the optimizer can carve the boss behind an
+    // anchor thin. So that assumption is FALSE and the pad IS needed here. The pad is
+    // built on the PART grid (mask_step_face walks the part's solid layers); the core
+    // remaps it onto the expanded grid by the same offset it applies to the BCs/loads
+    // and merges it into the effective mask (minimize_plastic, design_box +
+    // design_mask are now compatible on the whole-domain path). The ladder floor
+    // (FIX 2) is orthogonal and applies either way.
     if (load_case.minimize_plastic) {
-      if (!load_case.has_design_box) {
-        topopt::DesignMask pad = topopt::make_active_mask(grid);
-        for (int32_t fid : load_case.anchor_face_ids)
-          topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                                 kAnchorPadDepthVoxels, pad);
-        for (int32_t fid : retained_load_faces)
-          topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                                 kAnchorPadDepthVoxels, pad);
-        opts.design_mask = std::move(pad);
-      }
+      topopt::DesignMask pad = topopt::make_active_mask(grid);
+      for (int32_t fid : load_case.anchor_face_ids)
+        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                               kAnchorPadDepthVoxels, pad);
+      for (int32_t fid : retained_load_faces)
+        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
+                               kAnchorPadDepthVoxels, pad);
+      opts.design_mask = std::move(pad);
       // M7.anchor-integrity (FIX 2): floor the reduction ladder so a lightly-
       // loaded part is not stripped to the lightest rung once it is comfortably
       // strong. Only meaningful when the ladder actually walks (minimize_plastic).
@@ -770,13 +782,18 @@ OptimizeResult run_minimize_plastic_loadcase(
     // mesh, von-Mises/displacement field and playback are indexed to the EXPANDED
     // grid. The reported grid metadata (dims/origin/spacing — used by the app to
     // sample the grid-indexed fields at a mesh vertex) must therefore describe that
-    // expanded grid, not the part grid. Rebuild it here with the SAME pure-geometry
-    // call minimize_plastic uses (deterministic → identical grid). With no design
-    // box the result grid IS the part grid (byte-identical default).
+    // grid, not the part grid. Ask the solver which grid it will solve on rather
+    // than re-deriving the expansion here: minimize_plastic_solved_grid runs the
+    // SAME expand_design_domain call the driver runs (options.freeze_imported_part,
+    // kDesignBoxCoarsenAlign — no defaults to drift out of sync), and the value it
+    // returns equals the mp.solved_grid the driver reports below, voxel-for-voxel.
+    // We need it up front because the progressive-variant stream is registered on
+    // `opts` (below) BEFORE minimize_plastic returns, so it must carry the correct
+    // grid at registration time. With no design box the solved grid IS the part
+    // grid (byte-identical default). Held in a named local: set_variant_stream
+    // captures it by reference for the duration of the solve.
     const topopt::VoxelGrid result_grid =
-        load_case.has_design_box
-            ? topopt::expand_design_domain(grid, *opts.design_box, opts.keep_out_boxes).grid
-            : grid;
+        topopt::minimize_plastic_solved_grid(grid, opts);
 
     set_variant_stream(opts, result_grid, variant_fn, variant_ctx);  // progressive results
 
@@ -790,7 +807,7 @@ OptimizeResult run_minimize_plastic_loadcase(
     // (`result_grid`), not the part grid — and that expanded grid is the diagnosed
     // trigger (odd dims force the Jacobi-CG fallback over a large soft-void domain).
     // Log both so the device console shows the grid that actually hangs.
-    bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG)")
+    bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG_Matfree)")
                + " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0)
                + " part " + grid_summary(grid)
                + (load_case.has_design_box ? " | SOLVED-ON expanded " + grid_summary(result_grid)
@@ -799,7 +816,11 @@ OptimizeResult run_minimize_plastic_loadcase(
                + " dirichlet_bcs=" + std::to_string(bcs.size()));
     topopt::MinimizePlasticResult mp = topopt::minimize_plastic(
         grid, it->second, material_name, bcs, rules, opts);
-    result = to_optimize_result(mp, result_grid);
+    // Report the grid the driver ACTUALLY solved on (mp.solved_grid), not the
+    // up-front derivation: they are equal by construction, but sourcing the final
+    // metadata straight from the result closes any remaining gap between the grid
+    // the fields are indexed to and the grid metadata the app samples them with.
+    result = to_optimize_result(mp, mp.solved_grid);
     bridge_log("loadcase: minimize_plastic returned variants=" +
                std::to_string(result.variants.size()) +
                " accepted=" + std::to_string(result.accepted_count));

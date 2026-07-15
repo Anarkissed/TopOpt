@@ -67,6 +67,16 @@ namespace topopt {
 // references a fully-analysed variant, whose definition follows the options.
 struct MinimizePlasticVariant;
 
+// The design-box coarsening alignment minimize_plastic passes to
+// expand_design_domain: it rounds each expanded element dim UP to a multiple of
+// this value with inert Empty high-side padding so the geometric-multigrid
+// hierarchy can coarsen (>= 3 levels) instead of bailing to an effectively-hung
+// Jacobi-CG on the ~1e-9-contrast design-box system (voxel.hpp). Exposed as a
+// SINGLE public constant so no caller re-deriving the solved grid has to repeat
+// the literal 8 — the grid the driver solves on and any externally-derived grid
+// stay in lockstep by construction. See minimize_plastic_solved_grid.
+inline constexpr int kDesignBoxCoarsenAlign = 8;
+
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
@@ -146,6 +156,24 @@ struct MinimizePlasticOptions {
   // otherwise. A keep-out box never carves into the imported part (part voxels
   // are always FrozenSolid).
   std::vector<DesignBox> keep_out_boxes;
+
+  // M7.dom-core / handoff 080 — what the imported part becomes on the design-box
+  // path. Only consulted when `design_box` is set.
+  //   * false (DEFAULT — "whole-domain optimize"): the imported part is an Active
+  //     design region the optimizer may REMOVE as well as grow beyond, so a
+  //     minimize-plastic run with a box genuinely reduces plastic MEASURED AGAINST
+  //     THE PART. On this path the ladder's volume fraction and the reported
+  //     achieved fraction are normalised to the PART (part.solid_count()), not the
+  //     Active add-region, so `savings = 1 - achieved` and the implied baseline
+  //     (mass / achieved) are the honest part reference. The Load/Fixture BC skin
+  //     is still pinned FrozenSolid (expand_design_domain preserves those tags).
+  //   * true ("add material" feature): the imported part is FrozenSolid (never
+  //     removed); the optimizer only grows new material into the Active box volume,
+  //     and the fraction applies to that add-region. This is the M7.dom-core
+  //     contract exercised by test_design_domain.
+  // Ignored when `design_box` is unset (the no-box path is byte-identical either
+  // way). See handoff 080-designbox-nearsolid-diagnosis.md.
+  bool freeze_imported_part = false;
 
   // Self-weight body load. `gravity` is the acceleration magnitude (finite,
   // > 0); `gravity_direction` is the direction gravity pulls (need not be unit,
@@ -366,6 +394,16 @@ struct MinimizePlasticResult {
   // ACCEPTED rung (report.variants[i] == evaluated[i].report for the accepted
   // prefix). validate_job_report_json(job_report_json(report)) always passes.
   JobReport report;
+  // The grid the run ACTUALLY solved on, and to which every evaluated variant's
+  // mesh, von-Mises field, displacement field and playback are indexed. With a
+  // design box this is the EXPANDED domain grid (expand_design_domain, aligned to
+  // kDesignBoxCoarsenAlign, freeze_imported_part honoured); with no box it is the
+  // caller's `grid` verbatim. Returned so a caller sampling those grid-indexed
+  // fields uses the same dims/origin/spacing the solver used — it cannot drift
+  // from whatever expand_design_domain arguments the driver grows later. Callers
+  // that need this grid BEFORE the solve returns (e.g. to seed a progressive
+  // stream) get the identical grid from minimize_plastic_solved_grid().
+  VoxelGrid solved_grid;
 };
 
 // Run the minimize_plastic pipeline over `grid` (an already-voxelized part with
@@ -384,6 +422,20 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                                        const std::string& material_name,
                                        const std::vector<DirichletBC>& bcs,
                                        const SettingsRules& rules,
+                                       const MinimizePlasticOptions& options);
+
+// The grid minimize_plastic(grid, ..., options) will solve on, computed WITHOUT
+// running the solve. Returns the expanded design domain grid when
+// options.design_box is set (the exact expand_design_domain call the driver
+// makes: options.keep_out_boxes, options.freeze_imported_part,
+// kDesignBoxCoarsenAlign), else `grid` verbatim. This is the SINGLE source of
+// truth for that derivation: minimize_plastic itself uses it, and it equals the
+// returned MinimizePlasticResult::solved_grid voxel-for-voxel. Use it when the
+// solved grid is needed up front — e.g. to index a progressive-variant stream
+// registered on options before minimize_plastic returns — so the stream and the
+// final result can never describe different grids. Deterministic; performs the
+// same voxelization-free geometry as minimize_plastic's internal expansion.
+VoxelGrid minimize_plastic_solved_grid(const VoxelGrid& grid,
                                        const MinimizePlasticOptions& options);
 
 }  // namespace topopt

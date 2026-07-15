@@ -164,19 +164,45 @@ struct DesignDomain {
 // the axes where no padding is needed. Membership in `design_box` / `keep_out`
 // is decided by the VOXEL CENTRE (matching the voxelizer's centre-sampling).
 //
-// Part solid voxels become FrozenSolid regardless of the boxes (the import is
-// never removed, and a keep-out box never carves into it). Keep-out voxels that
-// are not part are tagged Empty (mask FrozenVoid) so they carry no FEA element
-// and no self-weight. New Active voxels are tagged Interior (solid design
-// variables at the caller's volume fraction). With a design_box that exactly
-// matches the part's bounding box and no keep-out, every part voxel is
-// FrozenSolid and every in-box empty voxel is Active — the offsets are all 0.
+// `freeze_part` selects what the imported part becomes in the effective mask:
+//   * true  (default, the M7.dom-core "add material" feature): part solid voxels
+//     become FrozenSolid — the import is never removed and the optimizer may only
+//     GROW new material into the Active design volume.
+//   * false (handoff 080, Option 2 "whole-domain optimize"): part solid voxels
+//     become Active — the optimizer may REMOVE part material as well as grow into
+//     the box, so "minimize plastic + a design box" can genuinely reduce plastic
+//     against the part. Their original tags (incl. any Load/Fixture face tag) are
+//     preserved either way, so the mask-aware simp path still pins the Load/Fixture
+//     BC skin FrozenSolid — only the part's INTERIOR becomes a design variable.
+// Keep-out voxels that are not part are tagged Empty (mask FrozenVoid) so they
+// carry no FEA element and no self-weight; a keep-out box never carves into the
+// part regardless of `freeze_part`. New Active voxels are tagged Interior (solid
+// design variables at the caller's volume fraction). With a design_box that
+// exactly matches the part's bounding box, no keep-out and freeze_part=true, every
+// part voxel is FrozenSolid and every in-box empty voxel is Active — offsets 0.
 //
-// Throws std::invalid_argument if `design_box` (or any `keep_out` box) has
-// min > max on any axis or a non-finite coordinate, or if `part.spacing` <= 0.
+// COARSENING ALIGNMENT (design-box on-device fix): `coarsen_align` rounds each
+// expanded element dimension (new_nx/ny/nz) UP to the next multiple of that value
+// by APPENDING voxels on the HIGH side of each axis (never the low side). The
+// appended voxels lie beyond `design_box` (the pre-alignment grid already reached
+// design_box.max), so they are classified Empty exactly like any other
+// out-of-box voxel: no FEA element, no self-weight, no design variable — the
+// void-DOF gate removes their DOFs, so they add NO physics and do NOT change the
+// solved result. Because only the high side grows, `offset_i/j/k` and `origin`
+// are UNCHANGED, so remap_node_to_domain stays correct with no adjustment.
+//
+// The purpose is the geometric-multigrid solver: its hierarchy can only coarsen
+// (halve) axes whose element count is even, and bails entirely if any axis is
+// odd, falling back to an effectively-hung Jacobi-CG on the ~1e-9-contrast
+// design-box system. Aligning to a power of two (the driver passes 8) guarantees
+// the expanded grid coarsens deep enough for a real hierarchy (>= 3 levels).
+// `coarsen_align <= 1` is the exact pre-existing behaviour (no rounding,
+// byte-for-byte identical grid); the default is 1 so every existing caller and
+// test is unaffected. Throws std::invalid_argument if `coarsen_align < 1`.
 DesignDomain expand_design_domain(const VoxelGrid& part,
                                   const DesignBox& design_box,
-                                  const std::vector<DesignBox>& keep_out = {});
+                                  const std::vector<DesignBox>& keep_out = {},
+                                  bool freeze_part = true, int coarsen_align = 1);
 
 // Map a corner-node id of `part`'s node grid to the corresponding corner-node id
 // of `domain.grid` (shifted by the domain's voxel offset). Use it to remap
