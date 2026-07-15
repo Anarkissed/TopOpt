@@ -778,13 +778,18 @@ OptimizeResult run_minimize_plastic_loadcase(
     // mesh, von-Mises/displacement field and playback are indexed to the EXPANDED
     // grid. The reported grid metadata (dims/origin/spacing — used by the app to
     // sample the grid-indexed fields at a mesh vertex) must therefore describe that
-    // expanded grid, not the part grid. Rebuild it here with the SAME pure-geometry
-    // call minimize_plastic uses (deterministic → identical grid). With no design
-    // box the result grid IS the part grid (byte-identical default).
+    // grid, not the part grid. Ask the solver which grid it will solve on rather
+    // than re-deriving the expansion here: minimize_plastic_solved_grid runs the
+    // SAME expand_design_domain call the driver runs (options.freeze_imported_part,
+    // kDesignBoxCoarsenAlign — no defaults to drift out of sync), and the value it
+    // returns equals the mp.solved_grid the driver reports below, voxel-for-voxel.
+    // We need it up front because the progressive-variant stream is registered on
+    // `opts` (below) BEFORE minimize_plastic returns, so it must carry the correct
+    // grid at registration time. With no design box the solved grid IS the part
+    // grid (byte-identical default). Held in a named local: set_variant_stream
+    // captures it by reference for the duration of the solve.
     const topopt::VoxelGrid result_grid =
-        load_case.has_design_box
-            ? topopt::expand_design_domain(grid, *opts.design_box, opts.keep_out_boxes).grid
-            : grid;
+        topopt::minimize_plastic_solved_grid(grid, opts);
 
     set_variant_stream(opts, result_grid, variant_fn, variant_ctx);  // progressive results
 
@@ -807,7 +812,11 @@ OptimizeResult run_minimize_plastic_loadcase(
                + " dirichlet_bcs=" + std::to_string(bcs.size()));
     topopt::MinimizePlasticResult mp = topopt::minimize_plastic(
         grid, it->second, material_name, bcs, rules, opts);
-    result = to_optimize_result(mp, result_grid);
+    // Report the grid the driver ACTUALLY solved on (mp.solved_grid), not the
+    // up-front derivation: they are equal by construction, but sourcing the final
+    // metadata straight from the result closes any remaining gap between the grid
+    // the fields are indexed to and the grid metadata the app samples them with.
+    result = to_optimize_result(mp, mp.solved_grid);
     bridge_log("loadcase: minimize_plastic returned variants=" +
                std::to_string(result.variants.size()) +
                " accepted=" + std::to_string(result.accepted_count));
