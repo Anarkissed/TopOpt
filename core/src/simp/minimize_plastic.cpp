@@ -86,6 +86,20 @@ std::array<double, 24> element_dofs(const VoxelGrid& grid, const FeaSolution& so
 
 }  // namespace
 
+VoxelGrid minimize_plastic_solved_grid(const VoxelGrid& grid,
+                                       const MinimizePlasticOptions& options) {
+  // Mirror EXACTLY the design-domain expansion minimize_plastic performs above:
+  // same expand_design_domain overload, same keep-outs, same freeze flag, same
+  // kDesignBoxCoarsenAlign. Expansion is pure geometry (no voxelization, no
+  // solve), so this returns the identical grid the driver solves on without
+  // running the ladder. With no design box the solved grid IS the caller's grid.
+  if (!options.design_box.has_value()) return grid;
+  return expand_design_domain(grid, *options.design_box, options.keep_out_boxes,
+                              options.freeze_imported_part,
+                              kDesignBoxCoarsenAlign)
+      .grid;
+}
+
 MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                                        const Material& material,
                                        const std::string& material_name,
@@ -178,7 +192,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // geometric-multigrid hierarchy cannot coarsen (an odd axis makes it bail to
     // an effectively-hung Jacobi-CG). The padding adds no physics (Empty voxels,
     // void-gated) and leaves the BC/load remap offset unchanged. See voxel.hpp.
-    constexpr int kDesignBoxCoarsenAlign = 8;
+    // kDesignBoxCoarsenAlign is the public constant (pipeline.hpp) so any caller
+    // re-deriving this grid — via minimize_plastic_solved_grid — uses the same
+    // alignment and cannot drift from what is solved here.
     domain = expand_design_domain(grid, *options.design_box,
                                   options.keep_out_boxes,
                                   options.freeze_imported_part,
@@ -327,6 +343,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
   MinimizePlasticResult result;
   result.report.material = material_name;
+  // Record the grid every evaluated variant's fields are indexed to — the
+  // expanded domain grid under a design box, else the caller's grid. This IS the
+  // grid solved on (G), not a re-derivation, so a caller reporting grid metadata
+  // from it samples the von-Mises/displacement fields at the correct voxels. It
+  // equals minimize_plastic_solved_grid(grid, options) voxel-for-voxel.
+  result.solved_grid = G;
 
   // Reserve result.evaluated to the ladder length (its known maximum: at most one
   // entry per rung, and the walk stops early on the first rejected/cancelled rung)
