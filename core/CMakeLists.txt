@@ -419,6 +419,19 @@ if(Eigen3_FOUND)
   target_link_libraries(test_designbox_padding PRIVATE topopt)
   add_test(NAME designbox_padding COMMAND test_designbox_padding)
 
+  # Design-box grid-report guard: the grid minimize_plastic REPORTS (solved_grid /
+  # minimize_plastic_solved_grid) must equal the grid it SOLVED on, voxel-for-voxel,
+  # so the app samples the von-Mises / displacement / playback fields at the right
+  # voxels. Proves the old 3-arg expand_design_domain default derivation (unpadded)
+  # MISREPORTS that grid, and that the per-variant field lengths match the reported
+  # grid. Drives minimize_plastic / the design-box multigrid, so it is Eigen-gated;
+  # the settings rule table is injected. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_designbox_grid_report tests/validation/test_designbox_grid_report.cpp)
+  target_link_libraries(test_designbox_grid_report PRIVATE topopt)
+  target_compile_definitions(test_designbox_grid_report PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME designbox_grid_report COMMAND test_designbox_grid_report)
+
   # MMA updater (M7.mma.1): the Method of Moving Asymptotes design updater,
   # exposed behind SimpOptions.updater = MMA, reproduces the OC minimum-
   # compliance benchmarks (the Gate V2 cantilever + clamped-beam geometries)

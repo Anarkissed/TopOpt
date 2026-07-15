@@ -196,15 +196,14 @@ int main() {
   // The expanded design domain the driver will build (deterministic — the same
   // call the driver makes internally, so its grid/mask align index-for-index with
   // the run's physical_density). The driver aligns the expanded element dims to a
-  // power of two (8) for the multigrid hierarchy (minimize_plastic.cpp
-  // kDesignBoxCoarsenAlign); pass the same alignment here so this domain matches
-  // the run's grid index-for-index.
-  constexpr int kCoarsenAlign = 8;  // must equal minimize_plastic's constant
+  // power of two for the multigrid hierarchy; use the SAME public constant
+  // (topopt::kDesignBoxCoarsenAlign) the driver passes rather than a duplicated
+  // literal, so this domain matches the run's grid index-for-index and cannot
+  // drift if the alignment ever changes.
   // freeze_part=true matches o.freeze_imported_part below (this gate exercises the
-  // add-material feature), and kCoarsenAlign matches minimize_plastic's internal
-  // expand so this domain aligns with the run's grid index-for-index.
+  // add-material feature).
   const DesignDomain domain = topopt::expand_design_domain(
-      part, box, {keep_out}, /*freeze_part=*/true, kCoarsenAlign);
+      part, box, {keep_out}, /*freeze_part=*/true, topopt::kDesignBoxCoarsenAlign);
 
   // The expansion actually ENLARGED the grid (new Active volume beyond the import)
   // and shifted the part by a nonzero offset (exercising node remapping).
