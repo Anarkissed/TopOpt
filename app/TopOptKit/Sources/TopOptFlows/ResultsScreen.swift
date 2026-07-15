@@ -95,6 +95,7 @@ public struct ResultsScreen: View {
                 .ignoresSafeArea()
 
             topBar
+            resolutionNote                            // 083: honest voxel-size note
             // The viz toggles (Stress / Flex / Load path / Failure) and their
             // now-compact controls cluster at the BOTTOM-RIGHT; each chip slides its own
             // drawer open to the LEFT rather than dropping a big panel over the model.
@@ -140,6 +141,31 @@ public struct ResultsScreen: View {
             Button("OK") { videoExport.reset() }
         } message: {
             if case let .failed(msg) = videoExport.state { Text(msg) }
+        }
+    }
+
+    /// Honest under-resolution note (083): a small caption shown ONLY when the
+    /// part is voxelized coarsely enough that the 2.5 mm min-feature filter hits
+    /// its 1.5-voxel floor (spacing > ~1.67 mm) — the regime where the surface
+    /// visibly terraces. It states the real voxel size and is explicit that the
+    /// smooth-shaded preview is cosmetic: the stepping is real geometry that stays
+    /// in the exported STL. Non-interactive so it never blocks the viewer gestures.
+    @ViewBuilder private var resolutionNote: some View {
+        if let note = model.surfaceResolutionNote {
+            HStack(alignment: .top, spacing: DS.Space.s) {
+                Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
+                Text(note).dsStyle(DS.TypeScale.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .frame(maxWidth: 360, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, 76)
+            .allowsHitTesting(false)
         }
     }
 
