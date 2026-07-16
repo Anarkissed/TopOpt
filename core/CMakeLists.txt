@@ -44,6 +44,15 @@ add_library(topopt
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
+# The matrix-free FEA apply (src/fea/matfree.cpp) threads its element loop over a
+# persistent std::thread worker pool, so the library depends on the platform
+# threading runtime. PUBLIC so executables linking the static topopt inherit the
+# link requirement (-pthread on Linux; a no-op on Apple platforms where pthread is
+# in libSystem). Prefer -pthread over -lpthread on GNU/Clang toolchains.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+target_link_libraries(topopt PUBLIC Threads::Threads)
+
 # STEP import (M1.4) requires OCCT. Compile it into the library and link the
 # needed OCCT toolkits only when OCCT is present. OCCT is LGPL 2.1 and its
 # imported targets are SHARED (dynamic linking only, ARCHITECTURE.md §4/§10).
@@ -247,6 +256,19 @@ if(Eigen3_FOUND)
   add_executable(test_mgcg_matfree tests/unit/test_mgcg_matfree.cpp)
   target_link_libraries(test_mgcg_matfree PRIVATE topopt)
   add_test(NAME fea_mgcg_matfree COMMAND test_mgcg_matfree)
+
+  # Matrix-free THREADING determinism guard (matrix-free speed task). The element
+  # apply is threaded over a deterministic 8-colour (2x2x2) partition; this proves
+  # the result is BIT-IDENTICAL across thread counts (1/2/4/8) and run-to-run, that
+  # the threaded matrix-free MG-CG still matches the assembled multigrid DOF-for-DOF
+  # within 1e-6 and at the SAME iteration count (078 parity holds with threading
+  # on), and that a naive scheduling-dependent scatter would be caught. Drives
+  # fea_solve_mgcg_matfree / fea_solve_cg_matfree / fea_matfree_apply with
+  # fea_set_matfree_threads, so it is gated on Eigen like the other matrix-free
+  # tests. CI configures with -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_matfree_threads tests/unit/test_matfree_threads.cpp)
+  target_link_libraries(test_matfree_threads PRIVATE topopt)
+  add_test(NAME fea_matfree_threads COMMAND test_matfree_threads)
 
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises

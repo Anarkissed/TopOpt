@@ -454,6 +454,16 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
 // grid-independent constant.
 std::size_t fea_matfree_operator_storage_doubles();
 
+// Set the number of worker threads the matrix-free element apply (fea_*_matfree
+// and the matrix-free multigrid) uses. n <= 0 selects an automatic count (hardware
+// concurrency). Returns the previous setting. The apply threads a deterministic
+// 8-colour (2x2x2) partition of the voxel grid, so no two threads ever touch the
+// same node and the accumulation order is fixed regardless of the count — the
+// result is BIT-IDENTICAL for any thread count (1 vs N) and across runs. This is
+// therefore a pure performance control, safe to change between solves; it never
+// affects the computed field. Thread-global (not per-call).
+int fea_set_matfree_threads(int n);
+
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
 // stress at its Hex8 element centroid, recovered from the displacement solution
