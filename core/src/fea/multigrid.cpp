@@ -703,77 +703,195 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   // scatter W^T (factor*Ke) W. Summing these over all elements yields exactly
   // P0^T A0 P0 (A0 = sum_e factor_e S_e^T Ke S_e).
   //
-  // MEMORY (design-box on-device fix): each element streams up to kDof^2 = 576
-  // triplets, so a single materialised triplet array is ~576 * elements — at the
-  // ~623k-element design box that is ~359M triplets ~= 5.5 GB, the peak that blows
-  // the iPad memory budget (measured). Instead A1 is accumulated DIRECTLY in place:
-  // A1 is pre-reserved with the coarse Galerkin stencil width (a coarse DOF couples
-  // only to the <= 3x3x3 coarse-node * 3-comp = 81-wide stencil) and each element
-  // block is added via coeffRef, so NO triplet array and NO sparse-matrix add churn
-  // is ever allocated — peak A1 memory is just the final operator (~230 MB) plus a
-  // fixed 81/col reservation. The accumulated sum is the same P0^T A0 P0
-  // (A0 = sum_e factor_e S_e^T Ke S_e); only the grouping of the floating-point
-  // additions differs from a single setFromTriplets (roundoff at the ULP level),
-  // which does not change the multigrid iteration count (the 078
-  // assembled==matrix-free iteration-count parity still holds; verified).
+  // ASSEMBLY — TWO-PASS CSR (handoff 085 follow-up). Naively streaming each
+  // element's <=kDof^2 = 576 (i,j,v) triplets into a single array is ~576*elements
+  // ~= 359M triplets ~= 5.5 GB at the design box (the measured OOM 079 avoided). 079
+  // instead accumulated in place via A1.coeffRef, which is memory-bounded but pays an
+  // insert cost: the FIRST touch of each (i,j) inserts into a sorted sparse column
+  // and shifts its tail, and the column is pre-reserved at the full 81-wide stencil.
+  // The two-pass CSR keeps 079's bounded memory, drops that over-reservation, and
+  // removes the insert-shifting:
+  //   Pass 0  cache each element's distinct coarse DOFs (cds) once (CSR ecds).
+  //   Pass 1  SYMBOLIC: build the exact CSC structure (colptr + row-sorted rowidx)
+  //           via an inverse map (coarse DOF -> elements) and a column mark, so each
+  //           (i,j) is discovered once with O(1) dedup — no triplet array, no insert.
+  //           A1 is then created at EXACTLY this structure (values 0), and the scratch
+  //           colptr/rowidx freed, so no second nnz-sized array is copied into Eigen.
+  //   Pass 2  NUMERIC: recompute each element's block (same W/KW/W^T KW as before) and
+  //           add v straight into A1's OWN value array by BINARY SEARCH over A1's
+  //           sorted inner indices — a pure search, never an insertion.
+  // Pass 2 loops elements in the same order and adds the same nonzero v's to each
+  // (i,j) in the same order coeffRef did, so A1 is BIT-FOR-BIT identical to 079's —
+  // same values, and the same pattern (every structural (i,j) receives a nonzero
+  // contribution; verified by the unchanged nnz). The 078 iteration-count parity
+  // (18 == 18) is thus preserved by construction, not merely to roundoff. NOTE: the
+  // build is dominated by the element block arithmetic below (~73% of build time,
+  // measured), which this assembly change does not touch; coeffRef was ~2 s of it.
   constexpr int kDof = Hex8Stiffness::kDof;  // 24
-  constexpr int kCoarseStencil = 81;  // 3x3x3 coarse nodes * 3 components
+  const int nelems = static_cast<int>(m.elems.size());
+
+  // Pass 0: per-element distinct coarse DOFs (CSR ecds_off/ecds), same discovery
+  // order the old per-element loop used, so the projected blocks are identical.
+  std::vector<int> ecds_off;
+  ecds_off.reserve(static_cast<std::size_t>(nelems) + 1);
+  ecds_off.push_back(0);
+  std::vector<int> ecds;
+  ecds.reserve(static_cast<std::size_t>(nelems) * 8);
+  {
+    std::vector<int> cds;
+    cds.reserve(kDof);
+    for (const MfElem& el : m.elems) {
+      cds.clear();
+      for (int r = 0; r < kDof; ++r) {
+        const int kgr = active[static_cast<std::size_t>(el.edof[r])];
+        if (kgr < 0) continue;
+        for (const auto& pr : prolong[static_cast<std::size_t>(kgr)]) {
+          bool found = false;
+          for (int t : cds)
+            if (t == pr.first) { found = true; break; }
+          if (!found) cds.push_back(pr.first);
+        }
+      }
+      for (int c : cds) ecds.push_back(c);
+      ecds_off.push_back(static_cast<int>(ecds.size()));
+    }
+  }
+
+  // Pass 1a: inverse map coarse DOF -> elements touching it (CSR inv_off/inv), the
+  // column view the symbolic dedup needs.
+  std::vector<int> inv_off(static_cast<std::size_t>(nc) + 1, 0);
+  for (int e = 0; e < nelems; ++e)
+    for (int k = ecds_off[static_cast<std::size_t>(e)];
+         k < ecds_off[static_cast<std::size_t>(e) + 1]; ++k)
+      ++inv_off[static_cast<std::size_t>(ecds[static_cast<std::size_t>(k)]) + 1];
+  for (int j = 0; j < nc; ++j) inv_off[static_cast<std::size_t>(j) + 1] += inv_off[static_cast<std::size_t>(j)];
+  std::vector<int> inv(ecds.size());
+  {
+    std::vector<int> cur(inv_off.begin(), inv_off.end());
+    for (int e = 0; e < nelems; ++e)
+      for (int k = ecds_off[static_cast<std::size_t>(e)];
+           k < ecds_off[static_cast<std::size_t>(e) + 1]; ++k)
+        inv[static_cast<std::size_t>(cur[static_cast<std::size_t>(ecds[static_cast<std::size_t>(k)])]++)] = e;
+  }
+
+  // Pass 1b: symbolic structure. A column mark (monotone j needs no per-column
+  // reset within a sweep) discovers each distinct row once. First sweep counts
+  // nnz/col -> colptr; second fills rowidx, then sorts each column's rows.
+  std::vector<int> colptr(static_cast<std::size_t>(nc) + 1, 0);
+  std::vector<int> mark(static_cast<std::size_t>(nc), -1);
+  for (int j = 0; j < nc; ++j) {
+    int cnt = 0;
+    for (int p = inv_off[static_cast<std::size_t>(j)]; p < inv_off[static_cast<std::size_t>(j) + 1]; ++p) {
+      const int e = inv[static_cast<std::size_t>(p)];
+      for (int k = ecds_off[static_cast<std::size_t>(e)];
+           k < ecds_off[static_cast<std::size_t>(e) + 1]; ++k) {
+        const int i = ecds[static_cast<std::size_t>(k)];
+        if (mark[static_cast<std::size_t>(i)] != j) { mark[static_cast<std::size_t>(i)] = j; ++cnt; }
+      }
+    }
+    colptr[static_cast<std::size_t>(j) + 1] = cnt;
+  }
+  for (int j = 0; j < nc; ++j) colptr[static_cast<std::size_t>(j) + 1] += colptr[static_cast<std::size_t>(j)];
+  const int a1nnz = colptr[static_cast<std::size_t>(nc)];
+  std::vector<int> rowidx(static_cast<std::size_t>(a1nnz));
+  std::fill(mark.begin(), mark.end(), -1);
+  for (int j = 0; j < nc; ++j) {
+    int w = colptr[static_cast<std::size_t>(j)];
+    for (int p = inv_off[static_cast<std::size_t>(j)]; p < inv_off[static_cast<std::size_t>(j) + 1]; ++p) {
+      const int e = inv[static_cast<std::size_t>(p)];
+      for (int k = ecds_off[static_cast<std::size_t>(e)];
+           k < ecds_off[static_cast<std::size_t>(e) + 1]; ++k) {
+        const int i = ecds[static_cast<std::size_t>(k)];
+        if (mark[static_cast<std::size_t>(i)] != j) {
+          mark[static_cast<std::size_t>(i)] = j;
+          rowidx[static_cast<std::size_t>(w++)] = i;
+        }
+      }
+    }
+    std::sort(rowidx.begin() + colptr[static_cast<std::size_t>(j)],
+              rowidx.begin() + w);
+  }
+  std::vector<int>().swap(inv);       // symbolic done; free the column view
+  std::vector<int>().swap(inv_off);
+  std::vector<int>().swap(mark);
+
+  // Build A1's STRUCTURE from the symbolic CSC (row-sorted, all values 0), then
+  // free the scratch colptr/rowidx and accumulate straight into A1's OWN value
+  // storage in Pass 2 — no second nnz-sized values array, so peak stays near the
+  // final operator (unlike a separate CSC that is then copied into Eigen). Insertion
+  // is in increasing (col, row) order into an exact per-column reservation, so it is
+  // O(1) amortised (no shifting — the very cost the coeffRef path paid).
   SpMat A1(nc, nc);
-  A1.reserve(Eigen::VectorXi::Constant(nc, kCoarseStencil));
-  std::vector<int> cds;
-  cds.reserve(kDof);
-  double W[kDof][kDof];   // fine-local (24) x coarse-local (<=24)
-  double KW[kDof][kDof];  // Ke * W
-  for (const MfElem& el : m.elems) {
-    int kg[kDof];
-    for (int r = 0; r < kDof; ++r)
-      kg[r] = active[static_cast<std::size_t>(el.edof[r])];  // -1 if fixed/void
-
-    // Distinct local coarse DOFs touched by this element (mloc <= 24).
-    cds.clear();
-    for (int r = 0; r < kDof; ++r) {
-      if (kg[r] < 0) continue;
-      for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
-        bool found = false;
-        for (int t = 0; t < static_cast<int>(cds.size()); ++t)
-          if (cds[static_cast<std::size_t>(t)] == pr.first) { found = true; break; }
-        if (!found) cds.push_back(pr.first);
-      }
-    }
-    const int mloc = static_cast<int>(cds.size());
-    if (mloc == 0) continue;
-
-    // W[r][cl] = prolongation weight of fine-local DOF r onto local coarse cl.
-    for (int r = 0; r < kDof; ++r)
-      for (int cl = 0; cl < mloc; ++cl) W[r][cl] = 0.0;
-    for (int r = 0; r < kDof; ++r) {
-      if (kg[r] < 0) continue;
-      for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
-        int idx = 0;
-        while (cds[static_cast<std::size_t>(idx)] != pr.first) ++idx;
-        W[r][idx] += pr.second;
-      }
-    }
-
-    // KW = Ke * W  (24 x mloc), then block = factor * W^T KW (mloc x mloc),
-    // accumulated straight into A1 (no triplets).
-    for (int r = 0; r < kDof; ++r)
-      for (int cl = 0; cl < mloc; ++cl) {
-        double s = 0.0;
-        for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
-        KW[r][cl] = s;
-      }
-    for (int cl = 0; cl < mloc; ++cl)
-      for (int dl = 0; dl < mloc; ++dl) {
-        double s = 0.0;
-        for (int r = 0; r < kDof; ++r) s += W[r][cl] * KW[r][dl];
-        const double v = el.factor * s;
-        if (v != 0.0)
-          A1.coeffRef(cds[static_cast<std::size_t>(cl)],
-                      cds[static_cast<std::size_t>(dl)]) += v;
-      }
+  {
+    Eigen::VectorXi cnt(nc);
+    for (int j = 0; j < nc; ++j)
+      cnt[j] = colptr[static_cast<std::size_t>(j) + 1] - colptr[static_cast<std::size_t>(j)];
+    A1.reserve(cnt);
+    for (int j = 0; j < nc; ++j)
+      for (int k = colptr[static_cast<std::size_t>(j)];
+           k < colptr[static_cast<std::size_t>(j) + 1]; ++k)
+        A1.insert(rowidx[static_cast<std::size_t>(k)], j) = 0.0;
   }
   A1.makeCompressed();
+  std::vector<int>().swap(rowidx);   // structure now lives in A1; free the scratch
+  std::vector<int>().swap(colptr);
+
+  // Pass 2: numeric. Recompute each element block (W/KW/W^T KW, unchanged) and add v
+  // into A1's value array by binary search over A1's (sorted) inner indices — a pure
+  // search, never an insertion. The element loop order and the per-(i,j) add order
+  // match the old coeffRef path exactly, so A1 is BIT-IDENTICAL to 079's. Every
+  // structural (i,j) receives a nonzero contribution (verified: the resulting nnz
+  // equals the coeffRef path's), so no explicit zeros are introduced.
+  {
+    const int* Aouter = A1.outerIndexPtr();
+    const int* Ainner = A1.innerIndexPtr();
+    double* Aval = A1.valuePtr();
+    double W[kDof][kDof];   // fine-local (24) x coarse-local (<=24)
+    double KW[kDof][kDof];  // Ke * W
+    int kg[kDof];
+    for (int e = 0; e < nelems; ++e) {
+      const int cb = ecds_off[static_cast<std::size_t>(e)];
+      const int mloc = ecds_off[static_cast<std::size_t>(e) + 1] - cb;
+      if (mloc == 0) continue;
+      const MfElem& el = m.elems[static_cast<std::size_t>(e)];
+      for (int r = 0; r < kDof; ++r)
+        kg[r] = active[static_cast<std::size_t>(el.edof[r])];
+
+      for (int r = 0; r < kDof; ++r)
+        for (int cl = 0; cl < mloc; ++cl) W[r][cl] = 0.0;
+      for (int r = 0; r < kDof; ++r) {
+        if (kg[r] < 0) continue;
+        for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
+          int idx = 0;
+          while (ecds[static_cast<std::size_t>(cb + idx)] != pr.first) ++idx;
+          W[r][idx] += pr.second;
+        }
+      }
+      for (int r = 0; r < kDof; ++r)
+        for (int cl = 0; cl < mloc; ++cl) {
+          double s = 0.0;
+          for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
+          KW[r][cl] = s;
+        }
+      for (int cl = 0; cl < mloc; ++cl) {
+        const int i = ecds[static_cast<std::size_t>(cb + cl)];
+        for (int dl = 0; dl < mloc; ++dl) {
+          double s = 0.0;
+          for (int r = 0; r < kDof; ++r) s += W[r][cl] * KW[r][dl];
+          const double v = el.factor * s;
+          if (v == 0.0) continue;
+          const int j = ecds[static_cast<std::size_t>(cb + dl)];
+          int lo = Aouter[j], hi = Aouter[j + 1];
+          while (lo < hi) {  // binary search: Ainner[.] sorted, i present
+            const int mid = (lo + hi) >> 1;
+            if (Ainner[mid] < i) lo = mid + 1; else hi = mid;
+          }
+          Aval[lo] += v;
+        }
+      }
+    }
+  }
+  std::vector<std::vector<std::pair<int, double>>>().swap(prolong);  // done with W
 
   // Coarser levels 2.. via the shared assembled Galerkin builder, seeded at A1.
   // Frugal (column-blocked) coarse products keep the design-box peak in budget.

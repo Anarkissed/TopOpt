@@ -201,9 +201,9 @@ coarse+vector; 26 s build) by 079's ~87 iters × ~30 MMA × 4 rungs ≈ 120 solv
 On the device: (a) 8 performance cores scale the apply further than my 4, pushing
 the ratio up; (b) the absolute wall differs from both my model and the observed
 2.5 h (different ISA, core count, and the real 85 %-solid geometry) — the RATIO is
-what transfers. After this change the build is ~40 % of each solve, so the
-`build_mf_hierarchy` follow-up (below) is the next ~2× and the clear path to well
-under the device time.
+what transfers. After this change the build is a large share of each solve; STEP 5
+(below) profiled it and found the cost is element block arithmetic (18 s), not the
+coeffRef the two-pass removed — so SIMD-ing that arithmetic is the next lever.
 
 ## Correctness guards — all green
 
@@ -222,22 +222,56 @@ under the device time.
 - `core/src/fea/fea_matfree.hpp` — `apply_kgg_raw`, `color_offsets`, colour/thread
   declarations (internal).
 - `core/src/fea/multigrid.cpp` — `MfScratch` + scratch-reuse in the matrix-free
-  V-cycle/CG (matrix-free functions only; assembled path byte-identical).
+  V-cycle/CG; **two-pass CSR assembly of A1** (STEP 5, replacing the coeffRef
+  accumulation, memory-lean + bit-identical). Matrix-free functions only; assembled
+  path byte-identical.
 - `core/include/topopt/fea.hpp` — `fea_set_matfree_threads` (additive public API).
 - `core/CMakeLists.txt` — link `Threads::Threads`; build/register
   `test_matfree_threads`.
 - `core/tests/unit/test_matfree_threads.cpp` — **new**, determinism guard.
 
+## STEP 5 — TWO-PASS CSR ASSEMBLY of A1 (follow-up; the coeffRef premise was WRONG)
+
+Implemented the two-pass CSR assembly this handoff proposed for `build_mf_hierarchy`.
+**Profiling first corrected the premise:** the A1 `coeffRef` accumulation was only
+**~2 s** of the ~24 s build — NOT the bottleneck. The build breakdown (96×80×96,
+instrumented) is:
+
+| stage | time | note |
+|-------|-----:|------|
+| P0 build | 0.6 s | |
+| symbolic (new CSR structure) | 1.7 s | inverse map + column-mark dedup |
+| structure (insert zeros) | 0.3 s | |
+| **numeric — element block arithmetic (W, Ke·W, Wᵀ·KW)** | **18.3 s (73 %)** | the REAL cost |
+| coarser levels + LDLT | 2.4 s | |
+
+So the dominant build cost is the per-element **dense block arithmetic**, which the
+assembly method does not touch. The two-pass therefore is NOT the ~5-10× win this
+handoff originally (wrongly) claimed.
+
+**What the two-pass DID deliver — a memory win, bit-identical:**
+- Structure built once (symbolic: coarse-DOF→element inverse map + a column mark
+  that discovers each (i,j) once), then values accumulated straight into Eigen's own
+  value array by binary search — no insert-shifting, and no second nnz-sized array.
+- Because the exact per-column reservation replaces the old `coeffRef` 81/col
+  over-reservation and there is no separate CSC copy, **build peak drops 1.64 → 1.53
+  GB (−110 MB)** on the 96×80×96 case — a real gain against the design-box budget.
+- **Bit-identical:** same element order, same per-(i,j) add order ⇒ A1 identical.
+  Verified: nnz unchanged (16974 / 470898), iters 15/18/843, residuals
+  4.544e-9 / 5.340e-10 all exactly as before; **18==18 holds**; all 78+44+20 checks
+  pass. Time is neutral (~±1.5 s run-to-run; the ~2 s coeffRef saving is within
+  noise at this scale).
+- **The real build lever is now SIMD-ing the numeric block arithmetic** (18 s, 73 %)
+  — the direct analog of STEP 3's apply kernel. Threading it needs a COARSER colour
+  (the fine 2×2×2 colour does not make the coarse-DOF scatter race-free), so it is a
+  separate, larger change. Left as the next follow-up.
+
 ## Not done / follow-ups (honest)
 
-- **`build_mf_hierarchy` (~26 s/solve) is now the co-dominant / dominant cost and
-  is NOT optimized here.** It is out of the task's named apply scope and is the
-  memory-sensitive `coeffRef` path 079 engineered to avoid a 5.48 GB triplet
-  transient. The clean speedup is a two-pass CSR assembly (count per-column nnz,
-  then scatter values into the fixed 81-wide coarse stencil) — memory-bounded and
-  ~5-10× faster than `coeffRef` — but it is a substantial change to numerically-
-  sensitive code and warrants its own task with the 18==18 + memory guards.
-  **This is the biggest remaining end-to-end lever.**
+- **Build is still ~18 s of element block arithmetic (the numeric pass).** The
+  two-pass CSR made the assembly memory-lean and removed coeffRef, but the block
+  products dominate; SIMD (and a coarse-colour threading) of that arithmetic is the
+  remaining build lever. **This is the biggest remaining end-to-end lever.**
 - **On-device measurement not performed** (no Apple hardware). NEON path is
   correct-by-construction (bit-identical arithmetic to the verified SSE2/scalar
   path); wall time and 6/8-thread scaling need the iPad / an arm64 host.
