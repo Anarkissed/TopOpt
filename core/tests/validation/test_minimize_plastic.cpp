@@ -1227,6 +1227,15 @@ int main() {
 
     MinimizePlasticOptions omma = base_options();
     omma.gravity = cal_gravity;  // accept-all: run every rung
+    // This scenario compares the UPDATE RULE (MMA vs OC optimum) at a matched
+    // iteration budget, so disable MMA objective-plateau termination (handoff
+    // 086-mma-plateau) here: with it on, MMA stops at its plateau (~fewer iters)
+    // while OC runs the full cap, which measures the termination rule, not the
+    // updater. window=0 reverts MMA to the shared change_tol=0 full-cap run, so
+    // both updaters get the same 40 iterations and the "matches or beats OC"
+    // parity claim is isolated. Plateau termination is validated separately
+    // (test_simp objective-plateau cases + STEP 3 of the handoff).
+    omma.simp.mma_plateau_window = 0;
     MinimizePlasticOptions ooc = omma;
     ooc.updater = topopt::SimpUpdater::OC;  // retained fall-back
 

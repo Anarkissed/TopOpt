@@ -317,6 +317,43 @@ std::vector<ProjectionStage> heaviside_continuation_schedule();
 // MMA regardless of this field.
 enum class SimpUpdater { OC, MMA };
 
+// Objective-plateau detector for MMA termination (handoff 086-mma-plateau).
+// Given the compliance history (compliance at the START of each iteration, as
+// recorded in SimpOptimizeResult::history), returns true when the objective has
+// settled: the RUNNING-MINIMUM compliance has improved by less than `rel_tol`
+// (relative) over the trailing `window` iterations.
+//
+// WHY the running minimum, not a raw per-iteration relative change: MMA
+// compliance is NON-MONOTONE — it spikes up whenever a member toggles, then
+// recovers to a new low. A naive |c[i]-c[i-1]|/c[i] test fires during the flat
+// spot that precedes such a toggle, terminating BEFORE the productive drop and
+// yielding a worse design. Tracking the best-so-far makes spikes inert (they
+// never lower the running minimum) and only reports a plateau once `window`
+// consecutive iterations have ALL failed to find a materially lower compliance —
+// i.e. the descent has genuinely stalled, not merely paused before a toggle.
+// `window` is the patience: it must exceed the longest flat-spot-to-recovery gap
+// (calibrated in STEP 3 of the handoff).
+//
+// A PROGRESS GATE guards the start: the plateau cannot fire until the running
+// minimum has dropped at least `min_drop` (relative) below the FIRST sample
+// (the uniform-start compliance). This is essential because the early "forming"
+// iterations are spike-heavy — measured on a vf=0.20 self-weight cube, iters
+// 2-11 spike to ~10^5-10^6 while the running minimum stays pinned at the start
+// value, so without the gate the window test reads "0% improvement" and fires at
+// iter 11, keeping a near-uniform design (compliance ~30× the optimum). The gate
+// requires real descent from the start before a plateau is even considered; on
+// every well-behaved case the objective drops far more than `min_drop` long
+// before it settles, so the gate never delays a legitimate plateau. `min_drop`
+// deliberately small (default 0.05) so high-volume-fraction rungs, whose total
+// optimization gain is smaller, still clear it.
+//
+// Returns false until at least `window + 1` samples exist, whenever
+// `window <= 0` (plateau disabled), and until the progress gate opens.
+// Compliance entries are expected > 0; a non-positive running-minimum baseline
+// returns false (cannot form a ratio).
+bool mma_objective_plateau(const std::vector<double>& compliance_history,
+                           int window, double rel_tol, double min_drop);
+
 // Whether a Heaviside projection schedule may be applied for `updater`. TEMPORARY
 // (Option B): projection is compatible ONLY with OC — the projected chain is the
 // OC-locked Gate-V2 formulation, and simp_optimize rejects MMA + a non-empty
@@ -341,10 +378,59 @@ struct SimpOptions {
   // the identical system to the same tolerance. OPT-IN: leaving this at the
   // default keeps Gate-V2 and every existing caller unchanged. See SolverKind.
   SolverKind solver = SolverKind::JacobiCG;
-  int max_iterations = 60;       // hard iteration cap (a convergence criterion)
-  double change_tol = 0.01;      // stop when max_e |x_new - x| < change_tol
+  // Iteration cap. For the OC / projected paths this is the convergence
+  // criterion paired with `change_tol` (unchanged). For MMA it is the raised
+  // SAFETY CAP behind objective-plateau termination (handoff 086-mma-plateau):
+  // the plateau (below) is the real terminator, and this cap only backstops the
+  // pathological case where the objective never settles. Default 200 gives the
+  // ~90-150-iter MMA plateau ample headroom while staying far below both the
+  // ~395-iter change_tol convergence and the ~6.5 h/ladder a 400-cap would cost.
+  // Every OC caller / fixture sets this explicitly, so the raised default only
+  // reaches the production MMA ladder (which relies on it).
+  int max_iterations = 200;
+  double change_tol = 0.01;      // OC/projected stop: max_e |x_new - x| < change_tol
   double cg_tolerance = 1e-8;    // penalized-FEA CG tolerance (tight: §V2 gate)
   int cg_max_iterations = 0;     // 0 -> Eigen CG default (2 * n_dof)
+
+  // Objective-plateau termination for the MMA path (handoff 086-mma-plateau).
+  //
+  // WHY MMA needs a different stop test than OC: at fixed volume MMA drives the
+  // COMPLIANCE down while a few boundary voxels keep oscillating at the move
+  // limit long after the objective has settled — so `change_tol` on the design-
+  // space max|drho| (the OC test) needs ~395 iterations to fire while compliance
+  // is within ~1% by ~150. Diagnosis 085-mma-convergence proved the production
+  // ladder therefore ALWAYS terminated on the iteration cap (never change_tol),
+  // discarding the branch-refinement phase. The fix stops MMA on the OBJECTIVE,
+  // not the design variables.
+  //
+  // The test: terminate when the RUNNING-MINIMUM compliance has improved by less
+  // than `mma_plateau_tol` (relative) over the trailing `mma_plateau_window`
+  // iterations (see mma_objective_plateau). Compliance is NON-MONOTONE — it
+  // spikes when a member toggles then recovers to a new low — so a naive
+  // per-iteration relative-change test fires in the flat spot BEFORE a productive
+  // toggle and yields a worse design. Tracking the running minimum makes spikes
+  // inert and only reports a plateau once `window` consecutive iterations have
+  // all failed to find a materially lower compliance. STEP 3 of the handoff
+  // calibrated window=10 / tol=1e-3 across four geometries: it fires after the
+  // steep branch-refinement phase (iters ~100-145), materially beating the old
+  // cap-60 design on every case (closing 60-89% of the cap-60 -> converged gap).
+  // The diagnosis's suggested window=5 was MEASURED to fail (it fires at iter 6
+  // on a curve whose first 12 iterations are member-toggle spikes, keeping a
+  // garbage design); window=10 survives that, and the early SPIKE-ABOVE-START
+  // phase is handled by the progress gate (`mma_plateau_min_drop` below).
+  //
+  // Only consulted when `updater == MMA` (the OC / projected path is untouched
+  // and byte-identical). `mma_plateau_window <= 0` disables plateau termination
+  // and reverts MMA to the `change_tol` test (opt-out / back-compat).
+  int mma_plateau_window = 10;    // trailing window, iterations (0 disables)
+  double mma_plateau_tol = 1e-3;  // relative running-min improvement threshold
+  // Progress gate (see mma_objective_plateau): the plateau cannot fire until the
+  // running-minimum compliance has dropped this fraction below the uniform-start
+  // compliance. Blocks the spike-heavy early "forming" phase — without it a
+  // low-vf rung whose first ~11 iterations spike above the start value fires
+  // immediately and keeps a near-uniform design (measured). Small so high-vf
+  // rungs still clear it.
+  double mma_plateau_min_drop = 0.05;
 
   // Heaviside projection + beta continuation (M6.3). EMPTY (the default)
   // disables projection entirely: the loop is the unchanged M3.4 formulation

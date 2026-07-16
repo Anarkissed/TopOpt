@@ -374,6 +374,75 @@ int main() {
           "masked MMA (pinned): meets the Active volume target");
   }
 
+  // 5. Objective-plateau termination (handoff 086-mma-plateau). The diagnosed
+  //    regime: a self-weight cantilever at fixed volume, where a few boundary
+  //    voxels oscillate at the move limit long after the compliance has settled.
+  //    With a raised safety cap, MMA must now terminate on the OBJECTIVE PLATEAU
+  //    (converged == true, iterations < cap) — NOT run out the cap as it did when
+  //    the design-space change_tol was the stop test. The contrast run with
+  //    plateau disabled hits the cap, proving the plateau is the real terminator.
+  {
+    // A thin self-weight cantilever (the diagnosis's geometry family): clamped
+    // root face, sagging under gravity -z. Self-weight is the production load.
+    Problem pr = make_cantilever(32, 4, 16);   // grid + clamp; loads replaced below
+    pr.loads = topopt::self_weight_loads(pr.grid, /*density=*/1.0e-3,
+                                         /*gravity=*/1.0, topopt::Vec3{0, 0, -1});
+
+    // Production defaults really carry plateau termination on and a raised cap.
+    const SimpOptions defaults;
+    CHECK(defaults.mma_plateau_window == 10 && defaults.mma_plateau_tol == 1e-3 &&
+              defaults.mma_plateau_min_drop == 0.05,
+          "plateau: SimpOptions defaults enable objective-plateau termination");
+    CHECK(defaults.max_iterations == 200,
+          "plateau: the default MMA safety cap is raised to 200");
+
+    const int kCap = 250;  // safety cap, well above the expected plateau point
+    SimpOptions opt;
+    opt.volume_fraction = 0.3;
+    opt.filter_radius = 1.5;
+    opt.move = 0.2;
+    opt.updater = SimpUpdater::MMA;
+    opt.max_iterations = kCap;
+    opt.change_tol = 0.0;         // the OLD stop test: never fires (diagnosis)
+    opt.cg_tolerance = 1e-9;
+    // opt.mma_plateau_window / _tol keep the production defaults (8 / 1e-3).
+
+    const SimpOptimizeResult rp =
+        topopt::simp_optimize(pr.grid, p, pr.bcs, pr.loads, opt);
+    CHECK(rp.converged,
+          "plateau: MMA terminates converged (on the objective plateau)");
+    CHECK(rp.iterations < kCap,
+          "plateau: MMA stops BEFORE the safety cap (not cap-terminated)");
+    CHECK(rp.iterations > opt.mma_plateau_window,
+          "plateau: it fires after the window, not trivially early");
+    CHECK(rp.compliance < rp.initial_compliance,
+          "plateau: the terminal design is a real optimization (c < c_initial)");
+
+    // Contrast: the SAME run with plateau disabled reverts to change_tol=0 and
+    // runs out the full cap — exactly the pre-fix cap-terminated behavior. This
+    // is the direct proof that the plateau (not the cap) does the terminating.
+    SimpOptions capopt = opt;
+    capopt.mma_plateau_window = 0;
+    const SimpOptimizeResult rc =
+        topopt::simp_optimize(pr.grid, p, pr.bcs, pr.loads, capopt);
+    CHECK(!rc.converged && rc.iterations == kCap,
+          "plateau: with plateau OFF the same MMA run hits the cap (contrast)");
+    // THE FIX'S VALUE: the plateau design is materially BETTER than the old
+    // cap-60 design. rc ran the full curve with plateau off, so its history at
+    // iteration 60 is exactly the design a cap-60 run keeps — the pre-fix
+    // behavior the diagnosis flagged. The plateau (deeper, past the branch-
+    // refinement phase) has strictly lower compliance.
+    const std::size_t i60 = std::min<std::size_t>(60, rc.history.size()) - 1;
+    const double cap60_c = rc.history[i60].compliance;
+    CHECK(rp.compliance < cap60_c,
+          "plateau: the plateau design beats the old cap-60 design");
+    std::printf(
+        "[plateau term] self-weight 32x4x16: plateau it=%d c=%.6e | "
+        "cap60 c=%.6e | cap%d c=%.6e  (plateau beats cap60 by %.2f%%)\n",
+        rp.iterations, rp.compliance, cap60_c, kCap, rc.compliance,
+        100.0 * (cap60_c - rp.compliance) / cap60_c);
+  }
+
   if (g_failures == 0) {
     std::printf("mma: all %d checks passed\n", g_checks);
     return 0;
