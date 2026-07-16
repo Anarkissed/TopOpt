@@ -150,21 +150,39 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   result.report_path = join_path(out_dir, job.output.report);
   write_text_file(result.report_path, result.report_json);
 
+  // Smooth-export (handoff 086): with smooth_factor > 1 the exported mesh is
+  // re-extracted from the SAME converged physical density resampled finer, so the
+  // STL/3MF surface is tessellated more finely. This touches ONLY the exported
+  // geometry — variant.v3.mesh (the V3-gated + displayed mesh) and the JobReport
+  // are unchanged, and factor 1 (the default) writes variant.v3.mesh verbatim.
+  const int sf = job.output.smooth_factor;
+  const VoxelGrid& sg = result.pipeline.solved_grid;
   for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
     if (!variant.accepted) continue;
     const std::string path = join_path(
         out_dir, mesh_file_name(job.output.mesh_prefix,
                                 variant.requested_volume_fraction,
                                 job.output.mesh_format));
+
+    TriangleMesh smooth;  // only populated when sf > 1
+    if (sf > 1) {
+      const TriangleMesh raw = marching_cubes_resampled(
+          sg.nx, sg.ny, sg.nz, sg.spacing, sg.origin,
+          variant.optimization.physical_density, /*iso=*/0.5, sf,
+          ResampleInterp::Tricubic);
+      smooth = keep_largest_component(raw);
+    }
+    const TriangleMesh& export_mesh = (sf > 1) ? smooth : variant.v3.mesh;
+
     if (job.output.mesh_format == "3mf") {
 #ifdef TOPOPT_HAVE_3MF
-      write_3mf_file(path, variant.v3.mesh);
+      write_3mf_file(path, export_mesh);
 #else
       // Unreachable: rejected before the pipeline ran.
       throw JobError("3MF support unavailable in this build");
 #endif
     } else {
-      write_stl_file(path, variant.v3.mesh);
+      write_stl_file(path, export_mesh);
     }
     result.mesh_paths.push_back(path);
   }

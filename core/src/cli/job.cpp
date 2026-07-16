@@ -414,8 +414,9 @@ JobDescription parse_job(const std::string& json_text) {
   {
     const JsonValue& out =
         require_object(require_key(root, "output", "the job"), "output");
-    reject_unknown_keys(out, {"report", "mesh_format", "mesh_prefix"},
-                        "output");
+    reject_unknown_keys(
+        out, {"report", "mesh_format", "mesh_prefix", "smooth_factor"},
+        "output");
     job.output.report = require_nonempty_string(
         require_key(out, "report", "output"), "output.report");
     job.output.mesh_format = require_nonempty_string(
@@ -425,6 +426,14 @@ JobDescription parse_job(const std::string& json_text) {
                   job.output.mesh_format + "\")");
     job.output.mesh_prefix = require_nonempty_string(
         require_key(out, "mesh_prefix", "output"), "output.mesh_prefix");
+    // Optional smooth-export factor (handoff 086); absent => 1 (native export).
+    if (const JsonValue* sf = find_key(out, "smooth_factor")) {
+      job.output.smooth_factor =
+          require_positive_int(*sf, "output.smooth_factor");
+      if (job.output.smooth_factor < 1 || job.output.smooth_factor > 4)
+        schema_fail("output \"smooth_factor\" must be in [1, 4] (got " +
+                    std::to_string(job.output.smooth_factor) + ")");
+    }
   }
 
   return job;

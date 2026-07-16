@@ -64,6 +64,19 @@ struct JobOutput {
   std::string report;       // the M5.2 JobReport JSON file name
   std::string mesh_format;  // "3mf" (primary) | "stl" (secondary), §4
   std::string mesh_prefix;  // per-variant mesh files: <prefix>_<vf*100>.<format>
+
+  // Optional smooth-export tessellation (handoff 086-surface-resample). 1 (the
+  // DEFAULT) exports the native marching-cubes mesh byte-for-byte as before.
+  // N in [2,4] re-extracts the exported mesh from the SAME converged physical
+  // density resampled N x finer via a tricubic (Catmull-Rom) interpolant, so the
+  // curved iso-surface the grayscale field already describes is tessellated with
+  // ~N x smaller facets. It changes ONLY the surface tessellation of the exported
+  // STL/3MF — NOT the design, the physics, the optimizer, the density field, the
+  // JobReport, or the V3-gated variant mesh (variant.v3.mesh is untouched). The
+  // reported mass_grams stays voxel-count based; see the handoff for the (small)
+  // mesh-vs-readout volume gap this widens. Optional key "smooth_factor"; absent
+  // or 1 keeps every existing job byte-for-byte identical.
+  int smooth_factor = 1;
 };
 
 // A parsed, schema-valid job.json.

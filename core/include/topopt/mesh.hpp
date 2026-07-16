@@ -94,6 +94,52 @@ int count_components(const TriangleMesh& mesh);
 // stray 0.5-threshold islands. An empty input returns an empty mesh.
 TriangleMesh keep_largest_component(const TriangleMesh& mesh);
 
+// ---------------------------------------------------------------------------
+// Surface resampling for smooth tessellation (handoff 086-surface-resample).
+//
+// The optimizer's physical density is a GRAYSCALE field: the M3.3 density filter
+// blurs the 0/1 design into a ramp roughly one min-feature radius wide. Marching
+// cubes at the native grid tessellates that ramp with facets ~= one voxel across,
+// so a smoothly-curved iso-surface is UNDER-tessellated and reads as terracing.
+// The remedy is pure geometry: resample the SAME field to a finer lattice and run
+// the SAME marching cubes there, yielding a better polygonal approximation of the
+// SAME 0.5 iso-surface. It adds NO design information — the surface is already in
+// the field — and makes no claim the optimizer did not make. It changes ONLY the
+// tessellation, not the design, physics, or optimizer.
+
+// Interpolant used to evaluate the coarse field at the fine sample locations.
+//   Trilinear : C0 across cell boundaries — cheap but leaves visible creases at
+//               the original cell walls; a poor smoother (kept for comparison).
+//   Tricubic  : Catmull-Rom cubic convolution (Keys a = -1/2). C1-continuous AND
+//               interpolating — it passes exactly through the original samples,
+//               so the extracted surface is still the 0.5 level set of the input
+//               samples, not an approximation of it. This is the smoothing choice.
+enum class ResampleInterp { Trilinear, Tricubic };
+
+// Resample a scalar field (VoxelGrid layout: size nx*ny*nz, x-fastest) onto a
+// lattice `factor`x finer on every axis, returning the fine field of size
+// (nx*factor)*(ny*factor)*(nz*factor) in the same layout. Fine sample m along an
+// axis maps to the continuous coarse-centre coordinate u = (m+0.5)/factor - 0.5,
+// so the fine and coarse lattices cover the SAME physical domain and centre
+// convention as marching_cubes. Samples outside [0,n) read as background 0 — the
+// same one-layer zero padding marching_cubes uses — so a solid touching the grid
+// boundary is closed off identically. `factor` must be >= 1 (1 is the identity);
+// throws std::invalid_argument on factor < 1 or field.size() != nx*ny*nz.
+std::vector<double> resample_field(int nx, int ny, int nz,
+                                   const std::vector<double>& field, int factor,
+                                   ResampleInterp interp);
+
+// Extract the iso-surface of `field` at `factor`x finer tessellation: resample
+// the field (above) then run the standard marching_cubes on the fine lattice at
+// spacing/factor. factor == 1 is byte-identical to marching_cubes(...) (the
+// resample is the identity and reuses the same MC), so this is a strict superset.
+// Same argument validation as marching_cubes plus factor >= 1.
+TriangleMesh marching_cubes_resampled(int nx, int ny, int nz, double spacing,
+                                      const Vec3& origin,
+                                      const std::vector<double>& field,
+                                      double iso, int factor,
+                                      ResampleInterp interp);
+
 // M7.anchor-integrity (FIX 3): like keep_largest_component, but ALSO retains any
 // non-largest component that contains at least one "marked" vertex, and reports
 // how many such components there were. `keep_vertex` is a per-vertex flag
