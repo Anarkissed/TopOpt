@@ -144,12 +144,13 @@ public struct ResultsScreen: View {
         }
     }
 
-    /// Honest under-resolution note (083): a small caption shown ONLY when the
-    /// part is voxelized coarsely enough that the 2.5 mm min-feature filter hits
-    /// its 1.5-voxel floor (spacing > ~1.67 mm) — the regime where the surface
-    /// visibly terraces. It states the real voxel size and is explicit that the
-    /// smooth-shaded preview is cosmetic: the stepping is real geometry that stays
-    /// in the exported STL. Non-interactive so it never blocks the viewer gestures.
+    /// Honest under-resolution note (083, reworded post smooth-export): a small
+    /// caption shown ONLY when the part is voxelized coarsely enough that the 2.5 mm
+    /// min-feature filter hits its 1.5-voxel floor (spacing > ~1.67 mm). It states
+    /// the real voxel size and separates the surface faceting (a tessellation effect,
+    /// now smoothed on export) from the design's finest feature (the filter floor,
+    /// which smoothing does not change — that needs finer voxels). Non-interactive so
+    /// it never blocks the viewer gestures.
     @ViewBuilder private var resolutionNote: some View {
         if let note = model.surfaceResolutionNote {
             HStack(alignment: .top, spacing: DS.Space.s) {
