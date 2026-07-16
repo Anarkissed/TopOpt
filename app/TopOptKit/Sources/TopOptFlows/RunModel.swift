@@ -131,6 +131,40 @@ public struct RunProgress: Equatable, Sendable {
             ? "Variant \(rung + 1) of \(rungCount) · SIMP iteration \(iteration)"
             : "SIMP iteration \(iteration)"
     }
+
+    /// Fraction of the ladder DONE, measured by completed rungs only (0…1). Unlike
+    /// `fractionComplete` this makes no within-rung claim: it steps at each variant
+    /// boundary and sits flat while a rung runs (honest — handoff 086 made rung
+    /// termination ADAPTIVE, so there is no in-advance sub-rung progress to show).
+    /// The progress-readout surfaces (086-mma-plateau-termination) drive the honest
+    /// determinate bar from THIS, and lean on the live elapsed/iteration ticks for
+    /// the "it's alive" signal, rather than the fabricated `fractionComplete` ramp.
+    public var rungFractionComplete: Double {
+        Double(rung) / Double(rungCount)
+    }
+
+    /// An HONEST remaining-time estimate in seconds, or nil when there isn't yet
+    /// enough measured history to project one. `elapsed` is total wall time since the
+    /// run began; `currentRungElapsed` is how long THIS rung has been running. It
+    /// averages the time per COMPLETED rung (rungs are the only durations we can
+    /// actually measure — the bridge callback carries no per-iteration timing) and
+    /// counts DOWN within a rung: `currentLeft` shrinks as the current rung runs, so
+    /// the estimate never inflates while you wait. nil until ≥1 rung has finished —
+    /// before the first variant lands there is no rung rate to extrapolate from, so
+    /// the UI says "estimating" rather than inventing a number. Callers must present
+    /// the result as an estimate (the maintainer's honesty constraint): it assumes
+    /// later rungs cost about what earlier ones did, which is only roughly true.
+    public func remainingEstimate(elapsed: TimeInterval,
+                                  currentRungElapsed: TimeInterval) -> TimeInterval? {
+        let completed = rung                       // 0-based index == finished rungs
+        guard completed >= 1, elapsed > 0 else { return nil }
+        let completedTime = Swift.max(0, elapsed - currentRungElapsed)
+        let perRung = completedTime / Double(completed)
+        guard perRung > 0 else { return nil }
+        let notStarted = Swift.max(0, rungCount - completed - 1)
+        let currentLeft = Swift.max(0, perRung - currentRungElapsed)
+        return perRung * Double(notStarted) + currentLeft
+    }
 }
 
 /// A run failure the design renders as a sheet (ROADMAP M7.7: "not alerts").
@@ -394,6 +428,15 @@ public final class RunModel: ObservableObject {
     /// already-visible results screen). Drives an "optimizing more…" indicator.
     @Published public private(set) var isStreaming = false
 
+    /// Wall-clock instant the in-flight run started (set in `start`, cleared in
+    /// `reset`). PRESENTATION-ONLY — it drives the progress readout's elapsed clock
+    /// and the rung-rate ETA (run-progress-visibility task). It is deliberately NOT
+    /// part of how runs persist or stream (that is the concurrent data-loss task's
+    /// territory): nothing here reads or writes it except the readout. Because the
+    /// RunModel is owned by the ProjectModel it survives a Home round-trip, so an
+    /// 80-minute run backgrounded and reopened still shows a truthful elapsed time.
+    @Published public private(set) var startedAt: Date?
+
     /// The optimize call. Injected for tests; defaults to the real bridge. Streams
     /// each accepted variant through `onVariant` (a one-variant partial outcome) as
     /// it completes, then returns the full final outcome.
@@ -481,6 +524,7 @@ public final class RunModel: ObservableObject {
         failure = nil
         outcome = nil
         isStreaming = true
+        startedAt = Date()      // anchor the elapsed clock / ETA (presentation-only)
         runningInBackground = false
         isMinimized = false
 
@@ -600,6 +644,7 @@ public final class RunModel: ObservableObject {
         failure = nil
         outcome = nil
         isStreaming = false
+        startedAt = nil
         runningInBackground = false
     }
 

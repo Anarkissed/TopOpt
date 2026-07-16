@@ -161,6 +161,13 @@ public struct WorkspacePlaceholder: View {
                               loadDirections: loadFlowDirections,
                               anchorPoints: anchorFlowPoints,
                               streaming: run.isStreaming,
+
+                              // Pass the live run so the streaming pill can surface the
+                              // honest progress readout (variant N of M · elapsed · ETA)
+                              // and offer Cancel — reads only (run-progress-visibility).
+                              run: run, runResolution: runResolution,
+                              runMaterialName: project.material,
+                             
                               // Home, KEEP the variants — and DON'T cancel: an in-flight
                               // ladder must keep optimizing so leaving and returning shows
                               // MORE variants (an 80-minute run survives being looked at,

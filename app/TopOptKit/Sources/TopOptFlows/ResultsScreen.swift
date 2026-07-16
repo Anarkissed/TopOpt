@@ -24,6 +24,15 @@ public struct ResultsScreen: View {
     /// Whether the optimize is still running behind the results (more variants may
     /// arrive) — drives an "optimizing more…" indicator.
     let streaming: Bool
+    /// The live run, so the streaming pill can surface the honest progress readout
+    /// (variant N of M, elapsed, ETA) and offer Cancel. Optional — nil in previews /
+    /// tests that render a static results screen; when nil the pill stays a plain
+    /// "Optimizing more variants…" label. Only READ here (progress/startedAt) plus
+    /// the existing `cancel()`; this task surfaces run state, it doesn't change it.
+    var run: RunModel?
+    /// Voxel resolution + material name for the readout's "SIMP · NN³" footer.
+    let runResolution: Int
+    let runMaterialName: String
     /// Back to Home (KEEPS the variants on the project so reopening shows them).
     var onClose: () -> Void
     /// Export (.3mf) — M7.9. Passed in so the button exists per the design now;
@@ -40,6 +49,9 @@ public struct ResultsScreen: View {
     @State private var projection: CameraProjection?
     /// Whether the hot-spot marker's value/margin callout is expanded (tap to toggle).
     @State private var hotSpotExpanded = false
+    /// Whether the streaming pill's progress drawer is open (tap the pill to toggle):
+    /// the compact, honest readout of the in-flight run + a Cancel affordance.
+    @State private var progressDrawerOpen = false
     @StateObject private var videoExport = VideoExportModel()
     /// The ONE shared orbit camera for this results stage (STEP 1). The Metal viewer AND
     /// the orientation gizmo both drive it, so dragging the model turns the cube and
@@ -57,7 +69,8 @@ public struct ResultsScreen: View {
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
                 loadLocations: [SIMD3<Float>] = [],
                 loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
-                streaming: Bool = false,
+                streaming: Bool = false, run: RunModel? = nil,
+                runResolution: Int = 64, runMaterialName: String = "",
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {}) {
         _model = StateObject(wrappedValue: ResultsModel(
@@ -69,6 +82,9 @@ public struct ResultsScreen: View {
             loadDirections: loadDirections, anchorPoints: anchorPoints))
         self.liveOutcome = outcome
         self.streaming = streaming
+        self.run = run
+        self.runResolution = runResolution
+        self.runMaterialName = runMaterialName.isEmpty ? materialName : runMaterialName
         self.onClose = onClose
         self.onExport = onExport
         self.onSeeOriginal = onSeeOriginal
@@ -170,19 +186,70 @@ public struct ResultsScreen: View {
         }
     }
 
-    /// An "optimizing more…" pill shown just above the savings tabs (bottom-left),
-    /// so a newly-arriving variant appears right next to it.
+    /// The in-flight-progress pill above the savings tabs (bottom-left). Previously
+    /// an inert "Optimizing more variants…" label with no progress, count, or time —
+    /// on an ~80-minute run it was indistinguishable from a dead run. Now it is LIVE
+    /// (variant N of M · elapsed) and TAPPABLE: tapping opens a compact drawer with
+    /// the honest readout + a Cancel affordance. Falls back to the old static label
+    /// only when no live `run` was supplied (previews / tests).
     @ViewBuilder private var streamingChip: some View {
         if streaming {
-            HStack(spacing: DS.Space.s) {
-                ProgressView().controlSize(.small).tint(DS.Color.accent.color)
-                Text("Optimizing more variants…").dsStyle(DS.TypeScale.footnote)
-                    .fontWeight(.semibold).foregroundStyle(DS.Color.textSecondary.color)
+            VStack(alignment: .leading, spacing: DS.Space.s) {
+                if progressDrawerOpen, let run { progressDrawer(run) }
+                if let run {
+                    Button { withAnimation(DS.Motion.sheetIn) { progressDrawerOpen.toggle() } } label: {
+                        HStack(spacing: DS.Space.s) {
+                            RunProgressReadout(model: run, resolution: runResolution,
+                                               materialName: runMaterialName, compact: true)
+                            Image(systemName: progressDrawerOpen ? "chevron.down" : "chevron.up")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(DS.Color.textTertiary.color)
+                        }
+                        .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+                        .background(Capsule().fill(DS.Surface.bar.color)
+                            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    HStack(spacing: DS.Space.s) {
+                        ProgressView().controlSize(.small).tint(DS.Color.accent.color)
+                        Text("Optimizing more variants…").dsStyle(DS.TypeScale.footnote)
+                            .fontWeight(.semibold).foregroundStyle(DS.Color.textSecondary.color)
+                    }
+                    .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+                    .background(Capsule().fill(DS.Surface.bar.color)
+                        .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                }
             }
-            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
-            .background(Capsule().fill(DS.Surface.bar.color)
-                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         }
+    }
+
+    /// The tappable pill's drawer: the full honest readout (variant N of M, SIMP
+    /// iteration, elapsed, est.-remaining) plus Cancel — reusing the compact glass
+    /// panel treatment the right-rail drawers use. Cancel calls the run's existing
+    /// CancelToken path (`RunModel.cancel()`); an 80-minute run must be stoppable.
+    @ViewBuilder private func progressDrawer(_ run: RunModel) -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.m) {
+            RunProgressReadout(model: run, resolution: runResolution, materialName: runMaterialName)
+            Button { run.cancel() } label: {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "stop.circle").font(.system(size: 13, weight: .semibold))
+                    Text("Cancel run").dsStyle(DS.TypeScale.bodyStrong)
+                }
+                .foregroundStyle(DS.Color.danger.color)
+                .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Color.danger.opacity(0.12).color)
+                    .overlay(Capsule().strokeBorder(DS.Color.danger.opacity(0.4).color, lineWidth: 1)))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(DS.Space.l)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .dsShadow(.panel)
+        .fixedSize()
+        .transition(.opacity.combined(with: .move(edge: .bottom)))
     }
 
     /// Per-flat-vertex stress colors for the selected variant, or nil when the
