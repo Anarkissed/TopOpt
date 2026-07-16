@@ -1466,7 +1466,18 @@ extension MetalMeshView {
                     if let model = cameraModel {
                         renderer.camera = model.camera
                         renderer.setMesh(mesh)
-                        model.adopt(renderer.camera)
+                        // Handing the freshly-framed camera back to the shared model
+                        // REPUBLISHES it (`@Published camera` on the @StateObject the
+                        // live body observes). `apply` runs inside `updateUIView` — a
+                        // SwiftUI view-update pass — so doing that synchronously is
+                        // "Publishing changes from within view updates" UB, and it
+                        // floods every time the displayed mesh changes (each streamed
+                        // variant during a run, and the See-Original view swap). Hop the
+                        // write-back to the next runloop so the model updates cleanly
+                        // AFTER this render pass; the renderer already holds the framed
+                        // camera for the current draw.
+                        let framed = renderer.camera
+                        DispatchQueue.main.async { [weak model] in model?.adopt(framed) }
                     } else {
                         renderer.setMesh(mesh)
                     }
@@ -1621,9 +1632,11 @@ extension MetalMeshView {
             }
 
             if dirty { redraw(view) }
-            // Publish the camera projection (deduped). The async pass catches the
+            // Publish the camera projection (deduped) on the NEXT runloop, never inline:
+            // `onProjection` writes the host view's `@State projection`, and `apply` runs
+            // inside `updateUIView` (a SwiftUI view-update pass), so an inline publish is
+            // "Modifying state during view update" UB. The async pass also catches the
             // post-layout viewport when the first update ran before layout.
-            publishProjection(from: view)
             DispatchQueue.main.async { [weak self] in self?.publishProjection(from: view) }
         }
 
