@@ -1,6 +1,7 @@
 #include "topopt/mesh.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -379,6 +380,118 @@ struct SampleField {
 };
 
 }  // namespace
+
+namespace {
+
+// Catmull-Rom cubic convolution (Keys, a = -1/2): the C1-continuous,
+// INTERPOLATING cubic through the four samples pm1,p0,p1,p2 straddling the query,
+// evaluated at fractional position t in [0,1] between p0 and p1. Interpolating
+// means value(t=0)=p0 and value(t=1)=p1 exactly, so resampling reproduces the
+// original samples at their own locations (the iso-surface stays the 0.5 level
+// set of the input, not an approximation of it).
+inline double cubic_catmull_rom(double pm1, double p0, double p1, double p2,
+                                double t) {
+  const double t2 = t * t;
+  const double t3 = t2 * t;
+  return (-0.5 * t3 + t2 - 0.5 * t) * pm1 +
+         (1.5 * t3 - 2.5 * t2 + 1.0) * p0 +
+         (-1.5 * t3 + 2.0 * t2 + 0.5 * t) * p1 +
+         (0.5 * t3 - 0.5 * t2) * p2;
+}
+
+// Resample the flat field `in` (dims dx*dy*dz, x-fastest) `factor`x finer along
+// ONE axis, returning the enlarged flat field. Separability of both interpolants
+// makes the 3D resample three of these passes; zero-padding beyond the axis range
+// matches marching_cubes' background convention. Sample m maps to coarse-axis
+// coordinate u = (m+0.5)/factor - 0.5.
+std::vector<double> resample_axis(const std::vector<double>& in, int dx, int dy,
+                                  int dz, int axis, int factor,
+                                  ResampleInterp interp) {
+  int odx = dx, ody = dy, odz = dz;
+  int n = (axis == 0) ? dx : (axis == 1) ? dy : dz;
+  if (axis == 0) odx = dx * factor;
+  else if (axis == 1) ody = dy * factor;
+  else odz = dz * factor;
+  const int on = n * factor;
+
+  std::vector<double> out(static_cast<std::size_t>(odx) * ody * odz);
+  auto in_idx = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * dy + j) * dx + i;
+  };
+  auto out_idx = [&](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * ody + j) * odx + i;
+  };
+
+  // The two axes orthogonal to `axis` are copied through unchanged.
+  const int a1 = (axis == 0) ? dy : dx;                 // first ortho extent
+  const int a2 = (axis == 2) ? dy : dz;                 // second ortho extent
+  for (int p2 = 0; p2 < a2; ++p2)
+    for (int p1 = 0; p1 < a1; ++p1) {
+      // Fetch the input line along `axis` with zero-padding.
+      auto line = [&](int t) -> double {
+        if (t < 0 || t >= n) return 0.0;
+        if (axis == 0) return in[in_idx(t, p1, p2)];
+        if (axis == 1) return in[in_idx(p1, t, p2)];
+        return in[in_idx(p1, p2, t)];
+      };
+      for (int m = 0; m < on; ++m) {
+        const double u = (m + 0.5) / factor - 0.5;
+        const int i1 = static_cast<int>(std::floor(u));
+        const double t = u - i1;
+        double v;
+        if (interp == ResampleInterp::Trilinear) {
+          v = (1.0 - t) * line(i1) + t * line(i1 + 1);
+        } else {
+          v = cubic_catmull_rom(line(i1 - 1), line(i1), line(i1 + 1),
+                                line(i1 + 2), t);
+        }
+        if (axis == 0) out[out_idx(m, p1, p2)] = v;
+        else if (axis == 1) out[out_idx(p1, m, p2)] = v;
+        else out[out_idx(p1, p2, m)] = v;
+      }
+    }
+  return out;
+}
+
+}  // namespace
+
+std::vector<double> resample_field(int nx, int ny, int nz,
+                                   const std::vector<double>& field, int factor,
+                                   ResampleInterp interp) {
+  if (nx < 1 || ny < 1 || nz < 1)
+    throw std::invalid_argument("resample_field: grid dims must be >= 1");
+  if (factor < 1)
+    throw std::invalid_argument("resample_field: factor must be >= 1");
+  if (field.size() != static_cast<std::size_t>(nx) * ny * nz)
+    throw std::invalid_argument("resample_field: field size != nx*ny*nz");
+  if (factor == 1) return field;  // identity
+
+  // Separable: resample x, then y, then z. Intermediate buffers grow one axis at
+  // a time so peak memory is the final field plus the last intermediate, not
+  // factor^3 copies.
+  std::vector<double> rx =
+      resample_axis(field, nx, ny, nz, 0, factor, interp);
+  std::vector<double> rxy =
+      resample_axis(rx, nx * factor, ny, nz, 1, factor, interp);
+  rx.clear();
+  rx.shrink_to_fit();
+  return resample_axis(rxy, nx * factor, ny * factor, nz, 2, factor, interp);
+}
+
+TriangleMesh marching_cubes_resampled(int nx, int ny, int nz, double spacing,
+                                      const Vec3& origin,
+                                      const std::vector<double>& field,
+                                      double iso, int factor,
+                                      ResampleInterp interp) {
+  if (factor < 1)
+    throw std::invalid_argument("marching_cubes_resampled: factor must be >= 1");
+  if (factor == 1)
+    return marching_cubes(nx, ny, nz, spacing, origin, field, iso);
+  const std::vector<double> fine =
+      resample_field(nx, ny, nz, field, factor, interp);
+  return marching_cubes(nx * factor, ny * factor, nz * factor, spacing / factor,
+                        origin, fine, iso);
+}
 
 TriangleMesh marching_cubes(int nx, int ny, int nz, double spacing,
                             const Vec3& origin, const std::vector<double>& field,

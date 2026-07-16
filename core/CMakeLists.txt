@@ -196,6 +196,14 @@ target_compile_definitions(test_job PRIVATE
   DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
 add_test(NAME job_schema COMMAND test_job)
 
+# Surface-resample smoothing (handoff 086). Pure C++/std (no OCCT, no Eigen, no
+# lib3mf): resample_field / marching_cubes_resampled live in the always-built
+# src/mesh/mesh.cpp, and the test builds a synthetic grayscale blob in code, so
+# it runs in every configuration like the other geometry tests.
+add_executable(test_resample tests/unit/test_resample.cpp)
+target_link_libraries(test_resample PRIVATE topopt)
+add_test(NAME resample COMMAND test_resample)
+
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
 # assembly.cpp. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
