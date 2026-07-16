@@ -62,11 +62,8 @@ public struct RunScreen: View {
         VStack {
             Button { model.restore() } label: {
                 HStack(spacing: DS.Space.sm) {
-                    ProgressView().controlSize(.small).tint(DS.Color.accent.color)
-                    Text("Optimizing \(model.progress?.percent ?? 0)%")
-                        .dsStyle(DS.TypeScale.bodyStrong)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .monospacedDigit()
+                    RunProgressReadout(model: model, resolution: resolution,
+                                       materialName: materialName, compact: true)
                     Text("Tap to view")
                         .dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textTertiary.color)
@@ -93,31 +90,18 @@ public struct RunScreen: View {
             Rectangle().fill(.ultraThinMaterial).opacity(0.15).ignoresSafeArea()
 
             GlassSheet {
-             VStack(spacing: 0) {
+             VStack(alignment: .leading, spacing: DS.Space.l) {
                 Text("Optimizing")
                     .dsStyle(DS.TypeScale.overline)
                     .textCase(.uppercase)
                     .foregroundStyle(DS.Color.accent.color)
                     .opacity(pulse ? 1 : 0.65)
 
-                Text("\(model.progress?.percent ?? 0)%")
-                    .dsStyle(DS.TypeScale.display)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .monospacedDigit()
-                    .padding(.top, DS.Space.s)
-
-                Text(model.progress?.stageLabel ?? "Preparing…")
-                    .dsStyle(DS.TypeScale.body)
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .padding(.top, DS.Space.xs)
-
-                ProgressBar(value: model.progress?.fractionComplete ?? 0)
-                    .padding(.top, DS.Space.l)
-
-                Text("SIMP · \(resolution)³ voxel grid · \(materialName)")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textTertiary.color)
-                    .padding(.top, DS.Space.s)
+                // The honest, live readout: variant N of M, current SIMP iteration,
+                // elapsed clock, and a LABELLED est.-remaining (once one variant has
+                // completed). No fabricated percentage — handoff 086 made rung
+                // termination adaptive, so an in-advance progress bar would lie.
+                RunProgressReadout(model: model, resolution: resolution, materialName: materialName)
 
                 HStack(spacing: DS.Space.m) {
                     PillButton("Cancel", style: .secondary) { model.cancel() }
@@ -125,7 +109,8 @@ public struct RunScreen: View {
                                style: .secondary,
                                isEnabled: !model.runningInBackground) { model.runInBackground() }
                 }
-                .padding(.top, DS.Space.xl2)
+                .padding(.top, DS.Space.s)
+                .frame(maxWidth: .infinity)
              }
              .padding(.horizontal, DS.Space.xl3)
              .padding(.vertical, DS.Space.xl2)

@@ -84,6 +84,71 @@ final class RunModelTests: XCTestCase {
                        "Variant 2 of 3 · SIMP iteration 12")
     }
 
+    // MARK: - honest progress readout math (run-progress-visibility)
+
+    func testRungFractionIsDiscreteAndFlatWithinARung() {
+        // Rung fraction steps at variant boundaries and makes NO within-rung claim:
+        // more iterations in the same rung do not move it (unlike fractionComplete).
+        let early = RunProgress(rung: 1, rungCount: 4, iteration: 5)
+        let late  = RunProgress(rung: 1, rungCount: 4, iteration: 140)
+        XCTAssertEqual(early.rungFractionComplete, 0.25, accuracy: 1e-12)
+        XCTAssertEqual(late.rungFractionComplete, 0.25, accuracy: 1e-12)   // flat in-rung
+        XCTAssertEqual(RunProgress(rung: 0, rungCount: 4, iteration: 99).rungFractionComplete,
+                       0.0, accuracy: 1e-12)
+        XCTAssertEqual(RunProgress(rung: 3, rungCount: 4, iteration: 1).rungFractionComplete,
+                       0.75, accuracy: 1e-12)
+    }
+
+    func testRemainingEstimateNilUntilFirstRungCompletes() {
+        // No completed rung => no measured rung rate => no honest estimate.
+        let p = RunProgress(rung: 0, rungCount: 4, iteration: 60)
+        XCTAssertNil(p.remainingEstimate(elapsed: 600, currentRungElapsed: 600))
+        // Also nil with zero elapsed (nothing measured yet).
+        XCTAssertNil(RunProgress(rung: 1, rungCount: 4, iteration: 1)
+                        .remainingEstimate(elapsed: 0, currentRungElapsed: 0))
+    }
+
+    func testRemainingEstimateProjectsFromCompletedRungs() {
+        // One rung done in 1200s; 4 rungs total; the current rung just started.
+        // perRung = (1200 - 0)/1 = 1200; 2 not-started rungs + a full current rung
+        // => ~1200*2 + 1200 = 3600s remaining.
+        let p = RunProgress(rung: 1, rungCount: 4, iteration: 3)
+        let eta = p.remainingEstimate(elapsed: 1200, currentRungElapsed: 0)
+        XCTAssertNotNil(eta)
+        XCTAssertEqual(eta!, 3600, accuracy: 1.0)
+    }
+
+    func testRemainingEstimateCountsDownWithinARung() {
+        // Same rung position, current rung running longer => estimate must DECREASE
+        // (never inflate while you wait — the maintainer's honesty constraint).
+        let p = RunProgress(rung: 2, rungCount: 4, iteration: 50)
+        let early = p.remainingEstimate(elapsed: 2400, currentRungElapsed: 100)!
+        let later = p.remainingEstimate(elapsed: 2600, currentRungElapsed: 300)!
+        XCTAssertLessThan(later, early)
+    }
+
+    func testRemainingEstimateNonNegativeWhenCurrentRungRunsLong() {
+        // A current rung that overruns the average must not push the estimate below 0.
+        let p = RunProgress(rung: 3, rungCount: 4, iteration: 190)  // last rung
+        let eta = p.remainingEstimate(elapsed: 5000, currentRungElapsed: 4000)!
+        XCTAssertGreaterThanOrEqual(eta, 0)
+    }
+
+    func testStartSetsStartedAtAndResetClearsIt() {
+        let model = RunModel(scheduler: SynchronousRunScheduler())
+        // The stub runs synchronously; capture startedAt from inside the run.
+        var startedDuringRun: Date?
+        model.runner = { _, _, _ in
+            startedDuringRun = model.startedAt
+            return self.accepted(count: 1)
+        }
+        XCTAssertNil(model.startedAt)
+        model.start(request())
+        XCTAssertNotNil(startedDuringRun, "startedAt is set for the duration of the run")
+        model.reset()
+        XCTAssertNil(model.startedAt, "reset clears the elapsed-clock anchor")
+    }
+
     // MARK: - RunFailure copy
 
     func testFailureMessages() {
