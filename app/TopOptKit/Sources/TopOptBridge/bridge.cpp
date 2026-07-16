@@ -203,16 +203,65 @@ void enable_projection(topopt::MinimizePlasticOptions& opts) {
   opts.min_feature_mm = 2.5;  // mm; per-rung -> filter_radius = 2.5 / spacing
 }
 
+// Smooth-export tessellation factor (handoff 087-wire-smooth-export, building on
+// core handoff 086-surface-resample). The optimizer's physical density is a
+// GRAYSCALE ramp ~1 min-feature radius wide (~4.7 mm at 64^3 / 3.125 mm); native
+// marching cubes tessellates that smooth ramp with ~3.1 mm facets, so the curved
+// iso-surface reads as terracing. Re-extracting the SAME 0.5 iso-surface from the
+// SAME field resampled `factor`x finer (tricubic Catmull-Rom, ~6x more faithful
+// than trilinear per 086) is PURE GEOMETRY — no new design detail, no ML — and
+// removes the faceting. 2x is 086's recommendation: it clears the terracing at
+// ~100 ms / variant and a triangle count the iPad viewer handles comfortably.
+//
+// SEAM (STEP 1): the app has ONE mesh per variant — the bridge sends v.mesh()
+// (v3.mesh) as mesh_vertices/mesh_indices, and it is the ONLY geometry the app
+// has: the viewer renders it and the (M7.9) export will write it. File export is
+// still a placeholder today, so the DISPLAYED mesh is the only thing visible on
+// device — smoothing it is the only way the fix reaches the maintainer's screen.
+// So we smooth the single shared mesh (display + future export) rather than add a
+// separate export-only buffer that nothing would render. factor 1 sends v.mesh()
+// verbatim (byte-identical to today); factor > 1 re-extracts from solved_grid.
+constexpr int kSmoothExportFactor = 2;
+
+// The mesh the bridge hands the app for a variant: v.mesh() (v3.mesh) at factor 1,
+// or the SAME iso-surface re-extracted `factor`x finer at factor > 1. Mirrors the
+// CLI seam (run_job.cpp): resample variant.optimization.physical_density on the
+// SOLVED grid (NOT a re-derived one — handoff 082 grid-mismatch guard) and keep
+// the largest component, exactly the call the CLI export uses. Falls back to
+// v.mesh() when the variant has no displayed mesh (a cancelled rung, whose per-
+// rung analysis — hence physical_density-as-a-surface — was skipped) or when the
+// field does not match the grid, so cancelled/edge cases stay byte-identical.
+const topopt::TriangleMesh& export_display_mesh(
+    const topopt::MinimizePlasticVariant& v, const topopt::VoxelGrid& solved_grid,
+    int factor, topopt::TriangleMesh& scratch) {
+  const topopt::TriangleMesh& raw_display = v.mesh();
+  if (factor <= 1 || raw_display.vertices.empty() ||
+      v.optimization.physical_density.size() != solved_grid.voxel_count())
+    return raw_display;
+  scratch = topopt::keep_largest_component(topopt::marching_cubes_resampled(
+      solved_grid.nx, solved_grid.ny, solved_grid.nz, solved_grid.spacing,
+      solved_grid.origin, v.optimization.physical_density, /*iso=*/0.5, factor,
+      topopt::ResampleInterp::Tricubic));
+  return scratch;
+}
+
 // One core variant -> the flat bridge OptimizeVariant (M7.0b/M7.8 fields). Shared
 // by the result builder AND the progressive-results stream, so there is one source
-// of truth for the mapping.
-OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v) {
+// of truth for the mapping. `solved_grid` is the grid the variant's fields are
+// indexed to (mp.solved_grid) and `smooth_factor` the export/display tessellation.
+OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v,
+                                    const topopt::VoxelGrid& solved_grid,
+                                    int smooth_factor) {
   OptimizeVariant ov;
   ov.requested_volume_fraction = v.requested_volume_fraction;
   ov.achieved_volume_fraction = v.optimization.volume_fraction;
   ov.mass_grams = v.mass_grams;
   ov.support_volume_voxels = v.support_volume_voxels;
-  ov.mesh_triangle_count = static_cast<int32_t>(v.mesh().triangle_count());
+  // The exported/displayed surface: smoothed at smooth_factor > 1, else v.mesh().
+  topopt::TriangleMesh smoothed_scratch;
+  const topopt::TriangleMesh& vm =
+      export_display_mesh(v, solved_grid, smooth_factor, smoothed_scratch);
+  ov.mesh_triangle_count = static_cast<int32_t>(vm.triangle_count());
   ov.worst_case_margin = v.report.margin.worst_case;
   ov.accepted = v.accepted;
   ov.v3_passes = v.v3.passes;
@@ -226,7 +275,6 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v) {
   ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
   ov.in_plane_margin = v.report.margin.in_plane;
   ov.interlayer_margin = v.report.margin.interlayer;
-  const topopt::TriangleMesh& vm = v.mesh();
   ov.mesh_vertices.reserve(vm.vertices.size() * 3);
   for (const auto& p : vm.vertices) {
     ov.mesh_vertices.push_back(static_cast<float>(p.x));
@@ -288,8 +336,12 @@ OptimizeResult to_optimize_result(const topopt::MinimizePlasticResult& mp,
   result.cancelled = mp.cancelled;
   result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
   set_grid_metadata(result, grid);
+  // `grid` here is mp.solved_grid (the caller passes it, loadcase path) or the
+  // no-box selfweight grid, which equals solved_grid — the grid every variant's
+  // physical_density is indexed to. Smooth the export/display mesh against it.
   for (const auto& v : mp.evaluated)
-    result.variants.push_back(to_optimize_variant(v));
+    result.variants.push_back(
+        to_optimize_variant(v, grid, kSmoothExportFactor));
   return result;
 }
 
@@ -305,7 +357,9 @@ void set_variant_stream(topopt::MinimizePlasticOptions& opts,
     OptimizeResult one;
     one.accepted_count = 1;
     set_grid_metadata(one, grid);
-    one.variants.push_back(to_optimize_variant(v));
+    // `grid` is the solved grid (minimize_plastic_solved_grid, captured by ref):
+    // the same grid the streamed variant's physical_density is indexed to.
+    one.variants.push_back(to_optimize_variant(v, grid, kSmoothExportFactor));
     variant_fn(variant_ctx, &one);
   };
 }

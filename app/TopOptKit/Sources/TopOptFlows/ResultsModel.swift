@@ -677,30 +677,46 @@ public final class ResultsModel: ObservableObject {
         accepted.indices.contains(selectedIndex) ? accepted[selectedIndex] : nil
     }
 
-    /// Honest surface-resolution note (083). Non-nil only when this part is
-    /// voxelized coarsely enough that the app's 2.5 mm physical min-feature filter
-    /// hits its 1.5-voxel checkerboard floor — spacing > 2.5/1.5 ≈ 1.667 mm, i.e.
-    /// max part dimension > ~107 mm at Fast (64³). That is the regime where the
-    /// marching-cubes surface visibly terraces. The note states the ACTUAL voxel
-    /// size (mm) and is explicit that the smooth-shaded preview is cosmetic: the
-    /// stepping is REAL geometry that stays in the exported STL/3MF and the print.
+    /// Honest surface-resolution note (083, reworded once smooth export was wired —
+    /// handoff 087-wire-smooth-export). Non-nil only when this part is voxelized
+    /// coarsely enough that the app's 2.5 mm physical min-feature filter hits its
+    /// 1.5-voxel checkerboard floor — spacing > 2.5/1.5 ≈ 1.667 mm, i.e. max part
+    /// dimension > ~107 mm at Fast (64³). The note keeps two DIFFERENT things
+    /// distinct:
+    ///   • SURFACE SMOOTHNESS — the marching-cubes faceting. A tessellation effect,
+    ///     now SMOOTHED on export (the exported/displayed mesh is re-extracted from
+    ///     the same field resampled finer, tricubic — handoff 086), so it no longer
+    ///     reaches the STL/3MF. FIXED.
+    ///   • DESIGN DETAIL — the finest feature the optimizer can actually form. Capped
+    ///     at the min-feature filter floor, max(1.5·spacing, 2.5 mm) in millimetres.
+    ///     Smoothing does NOT change this: finer features need finer VOXELS (raise
+    ///     Detail), not finer tessellation. NOT fixed here.
     /// It points at raising Detail as a choice — it never silently changes it.
     public var surfaceResolutionNote: String? {
         guard spacing > Float(2.5 / 1.5) else { return nil }
+        // Effective min feature (mm) = filter radius (voxels) × spacing, with the
+        // radius floored at 1.5 voxels (checkerboard suppression) — so in this
+        // coarse regime the floor, not the 2.5 mm request, sets the finest feature.
+        let minFeatureMM = max(1.5 * Double(spacing), 2.5)
         return String(
-            format: "Solved at %.1f mm voxels. The surface stepping is real "
-                  + "geometry at this scale and stays in the exported STL — "
-                  + "smoothing softens the preview only. Raise Detail for a finer "
-                  + "surface (slower, more memory).",
-            Double(spacing))
+            format: "Solved at %.1f mm voxels. At this resolution the design's "
+                  + "finest features are limited to about %.1f mm (the min-feature "
+                  + "filter floor) — detail finer than that cannot form regardless "
+                  + "of tessellation. The surface faceting is a separate "
+                  + "tessellation effect, now smoothed on export; it is not the "
+                  + "design limit. Raise Detail for finer features.",
+            Double(spacing), minFeatureMM)
     }
 
     /// The selected variant's isosurface for display (nil if it has no geometry).
     public var selectedMesh: ViewerMesh? {
         guard let v = selectedVariant, !v.meshVertices.isEmpty else { return nil }
         // Smooth-shade the organic optimized surface (083): flat per-face normals
-        // turn every voxel-lattice facet into a visible terrace on coarse (large-
-        // part) grids. Display-only — geometry/mass/exported STL are unchanged.
+        // turn every facet into a visible terrace on coarse (large-part) grids.
+        // The `smoothShaded` flag only recomputes NORMALS — it changes neither the
+        // geometry nor the mass. The geometry itself (v.meshVertices/meshIndices) is
+        // now the smooth-export surface: the bridge resamples the field finer before
+        // marching cubes (handoff 087), so display and export share one smooth mesh.
         return ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
                           smoothShaded: true)
     }
