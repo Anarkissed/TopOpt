@@ -514,46 +514,72 @@ struct MfHierarchy {
   int levels() const { return 1 + static_cast<int>(coarse.size()); }
 };
 
-// Fine-level matrix-free matvec y = A0 x (restricted to the kept DOFs).
-inline Vec mf_fine_matvec(const MfHierarchy& H, const Vec& x) {
+// Preallocated scratch for the matrix-free V-cycle + MG-CG, sized once per solve
+// and reused across every iteration so the numerically-hot path performs NO
+// per-iteration heap allocation (handoff 079's named lever). Every buffer is
+// written in full before it is read, so reuse is bit-for-bit identical to the
+// previous allocate-fresh-each-call code — the arithmetic and its ordering are
+// unchanged; only the storage is recycled.
+struct MfScratch {
+  // Fine-level (ng) work vectors.
+  Vec Ax;    // A0 * x from the fine matvec / jacobi sweep
+  Vec vr;    // V-cycle fine residual b - A0 x
+  Vec prol;  // P0 * ec (prolongated coarse correction)
+  Vec Ap;    // MG-CG: A0 * p
+  Vec zc;    // MG-CG: preconditioned residual (z / znew are ping-ponged here)
+  // Coarse (nc) work vectors.
+  Vec bc;    // restricted residual P0^T r
+  Vec ec;    // coarse-grid correction
+
+  void resize(int ng, int nc) {
+    Ax.resize(ng); vr.resize(ng); prol.resize(ng); Ap.resize(ng); zc.resize(ng);
+    bc.resize(nc); ec.resize(nc);
+  }
+};
+
+// Fine-level matrix-free matvec y = A0 x (restricted to the kept DOFs), writing
+// into the caller-owned `y` (reused across calls). Eigen vectors store their
+// entries contiguously, so apply_kgg_raw drives the element apply straight off
+// x.data()/y.data() with NO marshalling copies (the previous version allocated
+// two std::vectors and an output Vec every call).
+inline void mf_fine_matvec(const MfHierarchy& H, const Vec& x, Vec& y) {
   const int n = H.m->ng;
-  std::vector<double> xs(static_cast<std::size_t>(n));
-  for (int i = 0; i < n; ++i) xs[static_cast<std::size_t>(i)] = x[i];
-  std::vector<double> ys;
-  H.m->apply_kgg(xs, ys);
-  Vec y(n);
-  for (int i = 0; i < n; ++i) y[i] = ys[static_cast<std::size_t>(i)];
-  return y;
+  y.resize(n);
+  H.m->apply_kgg_raw(x.data(), y.data());
 }
 
 // One fine-level damped-Jacobi sweep, matrix-free: x <- x + omega*Dinv.*(b-A0 x).
-inline void mf_jacobi_sweep(const MfHierarchy& H, const Vec& b, Vec& x) {
-  const Vec Ax = mf_fine_matvec(H, x);
-  x += kJacobiOmega * (H.fine_dinv.array() * (b - Ax).array()).matrix();
+inline void mf_jacobi_sweep(const MfHierarchy& H, MfScratch& S, const Vec& b,
+                            Vec& x) {
+  mf_fine_matvec(H, x, S.Ax);
+  x += kJacobiOmega * (H.fine_dinv.array() * (b - S.Ax).array()).matrix();
 }
 
-// Symmetric V-cycle with a matrix-free finest level. The coarse-grid correction
-// reuses the assembled v_cycle on the coarse hierarchy, so this is a valid SPD
-// preconditioner (equal pre/post smoothing, R = P0^T, exact coarse solve).
-Vec mf_v_cycle(const MfHierarchy& H, const Vec& b) {
-  Vec x = Vec::Zero(H.m->ng);
-  for (int s = 0; s < kPreSmooth; ++s) mf_jacobi_sweep(H, b, x);
+// Symmetric V-cycle with a matrix-free finest level, writing the result into the
+// caller-owned `x` (reused). The coarse-grid correction reuses the assembled
+// v_cycle on the coarse hierarchy, so this is a valid SPD preconditioner (equal
+// pre/post smoothing, R = P0^T, exact coarse solve).
+void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x) {
+  x.setZero(H.m->ng);
+  for (int s = 0; s < kPreSmooth; ++s) mf_jacobi_sweep(H, S, b, x);
 
-  const Vec r = b - mf_fine_matvec(H, x);
-  const Vec bc = H.P0.transpose() * r;          // restrict residual (R = P0^T)
-  const Vec ec = v_cycle(H.coarse, 0, bc);      // coarse-grid correction
-  x += H.P0 * ec;                                // prolongate + correct
+  mf_fine_matvec(H, x, S.Ax);
+  S.vr = b - S.Ax;                            // fine residual
+  S.bc.noalias() = H.P0.transpose() * S.vr;   // restrict (R = P0^T)
+  S.ec = v_cycle(H.coarse, 0, S.bc);          // coarse-grid correction
+  S.prol.noalias() = H.P0 * S.ec;             // prolongate + correct
+  x += S.prol;
 
-  for (int s = 0; s < kPostSmooth; ++s) mf_jacobi_sweep(H, b, x);
-  return x;
+  for (int s = 0; s < kPostSmooth; ++s) mf_jacobi_sweep(H, S, b, x);
 }
 
 // MG-preconditioned CG with the matrix-free finest level. Identical algorithm
 // and stopping criterion to mgpcg (||b - A x|| / ||b|| <= tol), only the fine
 // matvec and preconditioner are matrix-free. Returns false (with diagnostics) on
 // non-convergence within max_it or a non-finite iterate -> caller falls back.
-bool mf_mgpcg(const MfHierarchy& H, const Vec& b, double tol, int max_it, Vec& x,
-              int& iters, double& resid) {
+// All work vectors come from `S` (sized once), so the loop heap-allocates nothing.
+bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
+              int max_it, Vec& x, int& iters, double& resid) {
   const int n = H.m->ng;
   const double bnorm = b.norm();
   iters = 0;
@@ -566,29 +592,29 @@ bool mf_mgpcg(const MfHierarchy& H, const Vec& b, double tol, int max_it, Vec& x
 
   x = Vec::Zero(n);
   Vec r = b;                              // r = b - A*0
-  Vec z = mf_v_cycle(H, r);               // z = M^{-1} r
+  Vec z(n);
+  mf_v_cycle(H, S, r, z);                 // z = M^{-1} r
   Vec p = z;
   double rz = r.dot(z);
   if (!std::isfinite(rz)) return false;
 
   for (int k = 1; k <= max_it; ++k) {
-    const Vec Ap = mf_fine_matvec(H, p);
-    const double pAp = p.dot(Ap);
+    mf_fine_matvec(H, p, S.Ap);
+    const double pAp = p.dot(S.Ap);
     if (!(pAp > 0.0) || !std::isfinite(pAp)) return false;  // breakdown
     const double alpha = rz / pAp;
     x += alpha * p;
-    r -= alpha * Ap;
+    r -= alpha * S.Ap;
     iters = k;
     const double rn = r.norm();
     resid = rn / bnorm;
     if (rn <= threshold) return x.allFinite();
-    Vec znew = mf_v_cycle(H, r);
-    const double rznew = r.dot(znew);
+    mf_v_cycle(H, S, r, S.zc);            // znew = M^{-1} r (reused buffer)
+    const double rznew = r.dot(S.zc);
     if (!std::isfinite(rznew)) return false;
     const double beta = rznew / rz;
-    p = znew + beta * p;
+    p = S.zc + beta * p;
     rz = rznew;
-    z.swap(znew);
   }
   return false;  // hit the iteration cap without converging
 }
@@ -818,7 +844,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       Vec xg;
       int it = 0;
       double res = 0.0;
-      const bool ok = mf_mgpcg(H, rgv, tolerance, mg_cap, xg, it, res);
+      MfScratch scratch;
+      scratch.resize(m.ng, static_cast<int>(H.P0.cols()));
+      const bool ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res);
       if (ok) {
         for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
         diag.iterations = it;

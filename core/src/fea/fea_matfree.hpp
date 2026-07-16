@@ -24,25 +24,49 @@
 namespace topopt {
 namespace fea_detail {
 
-// One solid element in the fixed grid-scan order: its per-voxel modulus scale
-// and its 24 global DOF indices (node-major interleaved, matching hex8_stiffness).
+// Number of element colours: a 2x2x2 (parity of i,j,k) partition of the regular
+// voxel grid. Two elements of the same colour differ by an even offset on at least
+// one axis by construction, so on this axis they are >= 2 cells apart and their
+// node spans are disjoint — no two same-colour elements share a node. Threading
+// the apply one colour at a time is therefore race-free, and because each node is
+// written by at most one element per colour, the scatter into that node happens in
+// a FIXED colour order (0..7) independent of thread count or scheduling — the
+// result is deterministic and identical for 1 vs N threads (see mf_apply_full).
+constexpr int kNumColors = 8;
+
+// One solid element: its per-voxel modulus scale and its 24 global DOF indices
+// (node-major interleaved, matching hex8_stiffness). The element table is stored
+// SORTED BY COLOUR (colour 0 first, then 1, .., 7); within a colour the elements
+// keep grid-scan order. `color_offsets` (size kNumColors+1) delimits each colour's
+// contiguous range: colour k spans [color_offsets[k], color_offsets[k+1]).
 struct MfElem {
   double factor = 1.0;
   int edof[Hex8Stiffness::kDof];
 };
 
-// Build the solid-element table (edof + factor). `elem_youngs` selects the graded
-// path (factor = per-voxel modulus, validated > 0) when non-null; otherwise the
-// uniform path (factor = 1, the modulus already baked into Ke). `who` names the
-// caller in thrown messages.
+// Build the solid-element table (edof + factor), SORTED BY COLOUR. `elem_youngs`
+// selects the graded path (factor = per-voxel modulus, validated > 0) when
+// non-null; otherwise the uniform path (factor = 1, the modulus already baked into
+// Ke). If `color_offsets` is non-null it is filled with the kNumColors+1 range
+// delimiters. `who` names the caller in thrown messages.
 std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
                                    const std::vector<double>* elem_youngs,
-                                   const char* who);
+                                   const char* who,
+                                   std::vector<int>* color_offsets = nullptr);
 
-// y = K x over the FULL global stiffness, element-by-element. `x` and `y` are
-// full ndof vectors; `y` is overwritten (zeroed) then accumulated. No assembled
-// K: only the reference Ke and the local 24-DOF gather/scatter.
-void mf_apply_full(const std::vector<MfElem>& elems, const Hex8Stiffness& Ke,
+// Set the worker-thread count for the matrix-free element apply. n<=0 selects an
+// automatic count (hardware concurrency). Threading is deterministic (see
+// kNumColors): the result never depends on the count. Returns the previous value.
+int mf_set_thread_count(int n);
+int mf_thread_count();  // effective count actually used (>= 1)
+
+// y = K x over the FULL global stiffness, element-by-element, COLOUR by COLOUR in
+// fixed order; each colour's elements are apply'd (optionally across threads, no
+// races). `x` and `y` are full ndof vectors; `y` is overwritten (zeroed) then
+// accumulated. No assembled K: only the reference Ke and the local 24-DOF
+// gather/scatter. `color_offsets` (size kNumColors+1) must match `elems`.
+void mf_apply_full(const std::vector<MfElem>& elems,
+                   const std::vector<int>& color_offsets, const Hex8Stiffness& Ke,
                    const std::vector<double>& x, std::vector<double>& y);
 
 // The reduced, void-gated system in matrix-free form. `kept_global[kg]` is the
@@ -53,6 +77,7 @@ void mf_apply_full(const std::vector<MfElem>& elems, const Hex8Stiffness& Ke,
 // reduced operator DOF-for-DOF.
 struct MatfreeReduced {
   std::vector<MfElem> elems;
+  std::vector<int> color_offsets;   // kNumColors+1 delimiters into elems
   Hex8Stiffness Ke;
   int ndof = 0;
   int ng = 0;                       // surviving free-DOF count
@@ -64,6 +89,13 @@ struct MatfreeReduced {
   mutable std::vector<double> xfull, yfull;
 
   void apply_kgg(const std::vector<double>& xg, std::vector<double>& yg) const;
+  // Raw-pointer core of apply_kgg: yg[0..ng) = K_gg xg[0..ng). `xg` and `yg` must
+  // each point at ng contiguous doubles (yg is fully overwritten). Lets a caller
+  // holding contiguous storage (e.g. an Eigen vector's .data()) drive the matvec
+  // with NO marshalling copies — the multigrid fine matvec relies on this to reuse
+  // the caller's buffers across CG/V-cycle iterations. Same arithmetic (and thus
+  // same result, bit-for-bit) as the std::vector overload.
+  void apply_kgg_raw(const double* xg, double* yg) const;
 };
 
 // Build the matrix-free reduced system. Mirrors assemble_reduced + the M3.1 gate

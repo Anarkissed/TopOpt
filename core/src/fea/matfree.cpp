@@ -31,15 +31,26 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <condition_variable>
 #include <cstddef>
+#include <functional>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "fea_matfree.hpp"
+
+#if defined(__ARM_NEON)
+#include <arm_neon.h>
+#elif defined(__SSE2__)
+#include <emmintrin.h>
+#endif
 
 namespace topopt {
 
@@ -47,19 +58,214 @@ namespace fea_detail {
 
 namespace {
 constexpr int kDof = Hex8Stiffness::kDof;  // 24
+
+// AXPY over the 24 output DOFs: acc[r] += w * col[r] for r in [0,24), with acc and
+// col contiguous. This is the SIMD-friendly restructuring of the element apply:
+// the reference-block matvec y_r = sum_c Ke[r][c] ul[c] is accumulated COLUMN by
+// column (fixed c, all r) instead of row-dot (fixed r, all c), so each step is a
+// contiguous vertical AXPY with NO horizontal reduction. Because for each output r
+// the terms are still summed in ascending-c order (one column per c), the result
+// is BIT-FOR-BIT identical to the original row-dot loop — same terms, same order.
+// A plain multiply+add (never a fused FMA) is used in every lane so the vector and
+// scalar paths agree to the last bit and the 078 iteration-count parity is
+// preserved without relying on the compiler's fp-contraction setting.
+inline void axpy24(double* acc, double w, const double* col) {
+#if defined(__ARM_NEON)
+  // NEON: 2-wide doubles (the width the task calls out for Apple Silicon).
+  const float64x2_t wv = vdupq_n_f64(w);
+  for (int r = 0; r < kDof; r += 2) {
+    float64x2_t a = vld1q_f64(acc + r);
+    a = vaddq_f64(a, vmulq_f64(wv, vld1q_f64(col + r)));  // mul+add, no FMA
+    vst1q_f64(acc + r, a);
+  }
+#elif defined(__SSE2__)
+  // x86 proxy: SSE2 packed doubles, also 2-wide (matches NEON width) so the
+  // on-device NEON behaviour is faithfully represented by the local measurement.
+  const __m128d wv = _mm_set1_pd(w);
+  for (int r = 0; r < kDof; r += 2) {
+    __m128d a = _mm_loadu_pd(acc + r);
+    a = _mm_add_pd(a, _mm_mul_pd(wv, _mm_loadu_pd(col + r)));  // mul+add, no FMA
+    _mm_storeu_pd(acc + r, a);
+  }
+#else
+  for (int r = 0; r < kDof; ++r) acc[r] += w * col[r];
+#endif
+}
+
+// Column-major copy of the reference block: KeCM[c*24 + r] = Ke[r][c]. Built once
+// per apply so the per-element loop reads whole columns of Ke contiguously (the
+// AXPY operand above). 576 doubles, negligible next to the element loop.
+inline void build_ke_colmajor(const Hex8Stiffness& Ke, double* KeCM) {
+  for (int r = 0; r < kDof; ++r)
+    for (int c = 0; c < kDof; ++c)
+      KeCM[static_cast<std::size_t>(c) * kDof + r] = Ke.k[static_cast<std::size_t>(r) * kDof + c];
+}
+
+// Apply the reference block to ONE element: y[edof] += factor * (Ke * ul). Reads
+// its 24 inputs from x by edof (gather), does the column-major AXPY into res, then
+// scatters factor*res back into y. Bit-identical to the original per-element loop.
+inline void apply_one_element(const MfElem& el, const double* KeCM,
+                              const std::vector<double>& x,
+                              std::vector<double>& y) {
+  alignas(16) double ul[kDof];
+  alignas(16) double res[kDof];
+  for (int r = 0; r < kDof; ++r) {
+    ul[r] = x[static_cast<std::size_t>(el.edof[r])];
+    res[r] = 0.0;
+  }
+  for (int c = 0; c < kDof; ++c)
+    axpy24(res, ul[c], &KeCM[static_cast<std::size_t>(c) * kDof]);
+  for (int r = 0; r < kDof; ++r)
+    y[static_cast<std::size_t>(el.edof[r])] += el.factor * res[r];
+}
+
+// Requested worker-thread count (0 = auto). Global, set once per run; the apply
+// reads it. Determinism does NOT depend on it (colour partition), so it is a pure
+// performance knob.
+std::atomic<int> g_mf_threads{0};
+
+// Minimum elements per worker chunk: below this a colour runs serially, since a
+// chunk must carry enough work to amortise the (microsecond) pool dispatch. 1024
+// elements is ~1 ms of apply work — comfortably above the wakeup cost — and keeps
+// small grids from over-threading while letting moderate grids engage the pool.
+constexpr int kMinElemsPerThread = 1024;
+
+// Persistent fork-join worker pool for the element apply. Workers are spawned ONCE
+// (lazily, and grown on demand) and reused across every apply of the whole solve —
+// the thousands of matvecs a design-box optimise runs. (An earlier version spawned
+// std::threads per apply; the repeated pthread stack mmap/join made 4 threads
+// ~2x SLOWER than serial in-solve. A persistent pool woken by a condition variable
+// costs microseconds per dispatch.) Determinism is unaffected: which worker runs
+// which contiguous chunk of a colour never changes the result (a colour's elements
+// share no node). Assumes applies are not issued concurrently from multiple
+// threads — true for the single optimise loop that drives the solver.
+class ApplyPool {
+ public:
+  static ApplyPool& instance() {
+    static ApplyPool p;
+    return p;
+  }
+
+  // Run body(lo,hi) over [begin,end) split into `n` contiguous chunks (chunk 0 on
+  // the calling thread, the rest on workers); block until all chunks finish.
+  void run(int n, int begin, int end,
+           const std::function<void(int, int)>& body) {
+    const int total = end - begin;
+    if (total <= 0) return;
+    if (n <= 1) { body(begin, end); return; }
+    ensure(n - 1);
+    const int chunk = (total + n - 1) / n;
+    {
+      std::unique_lock<std::mutex> lk(mu_);
+      body_ = &body;
+      begin_ = begin; end_ = end; chunk_ = chunk;
+      active_workers_ = n - 1;
+      remaining_ = n - 1;
+      ++gen_;
+    }
+    cv_work_.notify_all();
+    body(begin, std::min(end, begin + chunk));  // calling thread does chunk 0
+    std::unique_lock<std::mutex> lk(mu_);
+    cv_done_.wait(lk, [this] { return remaining_ == 0; });
+  }
+
+  ~ApplyPool() {
+    {
+      std::unique_lock<std::mutex> lk(mu_);
+      stop_ = true;
+      ++gen_;
+    }
+    cv_work_.notify_all();
+    for (std::thread& t : workers_)
+      if (t.joinable()) t.join();
+  }
+
+ private:
+  void ensure(int want_workers) {
+    // Only the calling (main) thread grows the pool, and never during a dispatch,
+    // so no lock is needed against the workers here.
+    while (static_cast<int>(workers_.size()) < want_workers) {
+      const int id = static_cast<int>(workers_.size());
+      workers_.emplace_back([this, id] { worker_loop(id); });
+    }
+  }
+
+  void worker_loop(int id) {
+    long seen = 0;
+    for (;;) {
+      const std::function<void(int, int)>* body;
+      int begin, end, chunk;
+      {
+        std::unique_lock<std::mutex> lk(mu_);
+        cv_work_.wait(lk, [this, seen] { return stop_ || gen_ != seen; });
+        if (stop_) return;
+        seen = gen_;
+        if (id >= active_workers_) continue;  // idle this round
+        body = body_; begin = begin_; end = end_; chunk = chunk_;
+      }
+      const int lo = begin + (id + 1) * chunk;  // worker id handles chunk id+1
+      const int hi = std::min(end, lo + chunk);
+      if (lo < hi) (*body)(lo, hi);
+      {
+        std::unique_lock<std::mutex> lk(mu_);
+        if (--remaining_ == 0) cv_done_.notify_one();
+      }
+    }
+  }
+
+  std::mutex mu_;
+  std::condition_variable cv_work_, cv_done_;
+  std::vector<std::thread> workers_;
+  const std::function<void(int, int)>* body_ = nullptr;
+  int begin_ = 0, end_ = 0, chunk_ = 0;
+  int active_workers_ = 0;
+  int remaining_ = 0;
+  long gen_ = 0;
+  bool stop_ = false;
+};
+
+// Run body over [begin,end) split for `nthreads`, honouring the min-work threshold.
+inline void parallel_ranges(int begin, int end, int nthreads,
+                            const std::function<void(int, int)>& body) {
+  const int n = end - begin;
+  if (n <= 0) return;
+  int t = nthreads;
+  if (t < 1) t = 1;
+  if (t > 1) t = std::min(t, (n + kMinElemsPerThread - 1) / kMinElemsPerThread);
+  if (t <= 1) { body(begin, end); return; }
+  ApplyPool::instance().run(t, begin, end, body);
+}
 }  // namespace
 
-// Build the solid-element table (edof + factor). `elem_youngs` selects the graded
-// path (factor = per-voxel modulus, validated > 0) when non-null; otherwise the
-// uniform path (factor = 1, the modulus already baked into Ke).
+int mf_set_thread_count(int n) { return g_mf_threads.exchange(n); }
+
+int mf_thread_count() {
+  int n = g_mf_threads.load();
+  if (n <= 0) {
+    n = static_cast<int>(std::thread::hardware_concurrency());
+    if (n <= 0) n = 1;
+  }
+  return n;
+}
+
+// Build the solid-element table (edof + factor), SORTED BY COLOUR. `elem_youngs`
+// selects the graded path (factor = per-voxel modulus, validated > 0) when
+// non-null; otherwise the uniform path (factor = 1, the modulus baked into Ke).
+// The elements are emitted colour 0..7 (colour = parity of i,j,k), each colour in
+// grid-scan order, so the apply can process one colour at a time. `color_offsets`,
+// if given, receives the kNumColors+1 range delimiters.
 std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
                                    const std::vector<double>* elem_youngs,
-                                   const char* who) {
+                                   const char* who,
+                                   std::vector<int>* color_offsets) {
   if (elem_youngs != nullptr && elem_youngs->size() != grid.voxel_count())
     throw std::invalid_argument(
         std::string(who) + ": per-voxel modulus vector size != voxel_count");
-  std::vector<MfElem> elems;
-  elems.reserve(grid.solid_count());
+
+  // Bucket by colour in grid-scan order (validating graded moduli as we go), then
+  // concatenate colour 0..7. Two passes would re-scan; one pass into 8 buckets
+  // keeps a single grid traversal and preserves scan order within each colour.
+  std::vector<MfElem> buckets[kNumColors];
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
@@ -75,41 +281,64 @@ std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
         const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
         for (int a = 0; a < 8; ++a)
           for (int c = 0; c < 3; ++c) el.edof[3 * a + c] = 3 * en[a] + c;
-        elems.push_back(el);
+        const int color = (i & 1) | ((j & 1) << 1) | ((k & 1) << 2);
+        buckets[color].push_back(el);
       }
+
+  std::vector<MfElem> elems;
+  elems.reserve(grid.solid_count());
+  if (color_offsets) color_offsets->assign(kNumColors + 1, 0);
+  for (int color = 0; color < kNumColors; ++color) {
+    if (color_offsets) (*color_offsets)[color] = static_cast<int>(elems.size());
+    elems.insert(elems.end(), buckets[color].begin(), buckets[color].end());
+  }
+  if (color_offsets) (*color_offsets)[kNumColors] = static_cast<int>(elems.size());
   return elems;
 }
 
-// y = K x over the full global stiffness, element-by-element. `x` and `y` are
-// full ndof vectors; `y` is overwritten (zeroed) then accumulated. No assembled
-// K: only the reference Ke and the local 24-DOF gather/scatter.
-void mf_apply_full(const std::vector<MfElem>& elems, const Hex8Stiffness& Ke,
+// y = K x over the full global stiffness, COLOUR by COLOUR in fixed order 0..7.
+// Within a colour no two elements share a node, so the colour's elements are
+// apply'd in parallel (parallel_ranges) with NO races and NO order dependence —
+// each node is written by exactly one element per colour, and the (up to 8)
+// contributions to a node accumulate strictly in colour order. The result is thus
+// bit-identical for any thread count. `x`/`y` are full ndof vectors; `y` is zeroed
+// then accumulated.
+void mf_apply_full(const std::vector<MfElem>& elems,
+                   const std::vector<int>& color_offsets, const Hex8Stiffness& Ke,
                    const std::vector<double>& x, std::vector<double>& y) {
   std::fill(y.begin(), y.end(), 0.0);
-  for (const MfElem& el : elems) {
-    double ul[kDof];
-    for (int r = 0; r < kDof; ++r)
-      ul[r] = x[static_cast<std::size_t>(el.edof[r])];
-    for (int r = 0; r < kDof; ++r) {
-      double s = 0.0;
-      const double* krow = &Ke.k[static_cast<std::size_t>(r) * kDof];
-      for (int c = 0; c < kDof; ++c) s += krow[c] * ul[c];
-      y[static_cast<std::size_t>(el.edof[r])] += el.factor * s;
-    }
+  alignas(16) double KeCM[static_cast<std::size_t>(kDof) * kDof];
+  build_ke_colmajor(Ke, KeCM);
+  const int nthreads = mf_thread_count();
+  // One std::function for the whole apply (all colours use the same body; only the
+  // [lo,hi) range differs), so the per-colour dispatch never re-allocates it.
+  const std::function<void(int, int)> body = [&](int lo, int hi) {
+    for (int i = lo; i < hi; ++i)
+      apply_one_element(elems[static_cast<std::size_t>(i)], KeCM, x, y);
+  };
+  for (int color = 0; color < kNumColors; ++color) {
+    const int b = color_offsets[static_cast<std::size_t>(color)];
+    const int e = color_offsets[static_cast<std::size_t>(color) + 1];
+    parallel_ranges(b, e, nthreads, body);
   }
 }
 
-void MatfreeReduced::apply_kgg(const std::vector<double>& xg,
-                               std::vector<double>& yg) const {
+void MatfreeReduced::apply_kgg_raw(const double* xg, double* yg) const {
   std::fill(xfull.begin(), xfull.end(), 0.0);
   for (int k = 0; k < ng; ++k)
     xfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
         xg[static_cast<std::size_t>(k)];
-  mf_apply_full(elems, Ke, xfull, yfull);
-  yg.assign(static_cast<std::size_t>(ng), 0.0);
+  mf_apply_full(elems, color_offsets, Ke, xfull, yfull);
+  // yg is fully overwritten (every kept DOF is written), so no pre-zero needed.
   for (int k = 0; k < ng; ++k)
     yg[static_cast<std::size_t>(k)] =
         yfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])];
+}
+
+void MatfreeReduced::apply_kgg(const std::vector<double>& xg,
+                               std::vector<double>& yg) const {
+  yg.resize(static_cast<std::size_t>(ng));
+  apply_kgg_raw(xg.data(), yg.data());
 }
 
 // Build the matrix-free reduced system. Mirrors assemble_reduced + the M3.1 gate
@@ -129,7 +358,7 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
   m.ndof = ndof;
   m.Ke = hex8_stiffness(elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson,
                         grid.spacing);
-  m.elems = mf_build_elems(grid, elem_youngs, who);
+  m.elems = mf_build_elems(grid, elem_youngs, who, &m.color_offsets);
   m.xfull.assign(static_cast<std::size_t>(ndof), 0.0);
   m.yfull.assign(static_cast<std::size_t>(ndof), 0.0);
 
@@ -160,7 +389,7 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
   std::vector<double> rhs_full = f;
   if (nonzero_bc) {
     std::vector<double> kup(static_cast<std::size_t>(ndof), 0.0);
-    mf_apply_full(m.elems, m.Ke, m.up, kup);
+    mf_apply_full(m.elems, m.color_offsets, m.Ke, m.up, kup);
     for (int d = 0; d < ndof; ++d)
       rhs_full[static_cast<std::size_t>(d)] -= kup[static_cast<std::size_t>(d)];
   }
@@ -341,10 +570,11 @@ std::vector<double> matfree_apply_impl(const VoxelGrid& grid,
   // matches the assembled path's two element builds byte-for-byte.
   const Hex8Stiffness Ke = hex8_stiffness(
       elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson, grid.spacing);
-  const std::vector<MfElem> elems =
-      fea_detail::mf_build_elems(grid, elem_youngs, "fea_matfree_apply");
+  std::vector<int> color_offsets;
+  const std::vector<MfElem> elems = fea_detail::mf_build_elems(
+      grid, elem_youngs, "fea_matfree_apply", &color_offsets);
   std::vector<double> y(static_cast<std::size_t>(ndof), 0.0);
-  fea_detail::mf_apply_full(elems, Ke, u, y);
+  fea_detail::mf_apply_full(elems, color_offsets, Ke, u, y);
   return y;
 }
 
@@ -409,6 +639,8 @@ std::vector<double> fea_matfree_apply(const VoxelGrid& grid,
 std::size_t fea_matfree_operator_storage_doubles() {
   return static_cast<std::size_t>(Hex8Stiffness::kDof) * Hex8Stiffness::kDof;
 }
+
+int fea_set_matfree_threads(int n) { return fea_detail::mf_set_thread_count(n); }
 
 FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                  double poisson,
