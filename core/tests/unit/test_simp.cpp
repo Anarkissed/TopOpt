@@ -1237,6 +1237,139 @@ int main() {
           "realistic: the MultigridCG loop visited at least one analysis density");
   }
 
+  // =========================================================================
+  // Objective-plateau detector (handoff 086-mma-plateau). The MMA termination
+  // test operates on the compliance curve, NOT the design-space max|drho|. Its
+  // core requirement is robustness to MMA's NON-MONOTONE compliance: it must not
+  // fire in the flat spot that precedes a productive member toggle. These are
+  // pure-function checks on hand-built curves (no solve) so the guard is
+  // deterministic and fast.
+  // =========================================================================
+  {
+    using topopt::mma_objective_plateau;
+
+    // Tested at the PRODUCTION default window (10). window <= 0 disables the
+    // test; fewer than window+1 samples never fire. The first three groups
+    // isolate the WINDOW logic (progress gate off, min_drop = 0); the gate is
+    // guarded separately at the end.
+    const int W = 10;    // production default (SimpOptions::mma_plateau_window)
+    const double G = 0.05;  // production default (SimpOptions::mma_plateau_min_drop)
+    CHECK(!mma_objective_plateau({1.0, 0.9, 0.8}, 0, 1e-3, 0.0),
+          "plateau: window<=0 disables the test");
+    CHECK(!mma_objective_plateau({1.0, 0.9, 0.8}, W, 1e-3, 0.0),
+          "plateau: fewer than window+1 samples never fires");
+
+    // A steadily descending curve (running min improving every step) must NOT
+    // register a plateau, however long.
+    {
+      std::vector<double> desc;
+      double v = 100.0;
+      for (int i = 0; i < 40; ++i) { desc.push_back(v); v *= 0.95; }
+      CHECK(!mma_objective_plateau(desc, W, 1e-3, 0.0),
+            "plateau: a steadily descending curve never plateaus");
+    }
+
+    // THE ANTI-EARLY-TERMINATION GUARD. A curve that descends, sits on a flat
+    // spot SHORTER than the window, then a member toggles — compliance spikes and
+    // recovers to a NEW, materially lower low — then settles. A naive
+    // single-iteration relative-change test fires ON the flat spot (premature:
+    // the running min there is ~14.4, far above the true optimum ~9). The
+    // running-minimum window test must NOT fire there — the flat spot is shorter
+    // than the window, so the window still reaches back to real descent.
+    std::vector<double> c = {
+        200, 120, 80, 55, 40, 32, 26, 22, 19, 17, 15.5, 14.8, 14.5,  // descent 0-12
+        14.450, 14.448, 14.447, 14.4465, 14.446, 14.4457, 14.4455, 14.4454, // flat 13-20
+        60.0,                                                        // toggle spike 21
+        11.0, 10.0, 9.5, 9.1,                                        // recovery 22-25
+        9.000, 8.999, 8.998, 8.9975, 8.997, 8.9968, 8.9967, 8.99665, // settle 26-...
+        8.99663, 8.99662, 8.996615, 8.996612, 8.996610, 8.996609,
+        8.996609, 8.996609, 8.996609};
+
+    // The naive single-iteration test (|c[i]-c[i-1]|/c[i] < tol) fires early,
+    // inside the flat spot (its running minimum is still ~14.4), with well more
+    // than window+1 samples present — so the window test's refusal below is a
+    // genuine check, not a too-few-samples triviality.
+    auto naive_fire = [](const std::vector<double>& v, double tol) {
+      for (std::size_t i = 1; i < v.size(); ++i)
+        if (std::fabs(v[i] - v[i - 1]) / std::fabs(v[i]) < tol)
+          return static_cast<int>(i + 1);  // 1-based
+      return -1;
+    };
+    const int nf = naive_fire(c, 1e-3);
+    CHECK(nf > W && nf <= 21,
+          "plateau: the naive test fires in the flat spot, past window+1 samples");
+    double naive_best = c[0];
+    for (int i = 0; i < nf; ++i) naive_best = std::min(naive_best, c[i]);
+    CHECK(naive_best > 14.0,
+          "plateau: the naive test's design is still ~14.4 (far above optimum ~9)");
+    // The guard: the window test does NOT fire at the naive point (the prefix up
+    // to nf). This is the assertion that FAILS for a naive window=1 detector.
+    std::vector<double> prefix(c.begin(), c.begin() + nf);
+    CHECK(!mma_objective_plateau(prefix, W, 1e-3, 0.0),
+          "plateau GUARD: window=10 does NOT fire in the pre-toggle flat spot");
+    // A degenerate window=1 detector WOULD fire there — proving the guard has
+    // teeth (the naive test it must beat).
+    CHECK(mma_objective_plateau(prefix, 1, 1e-3, 0.0),
+          "plateau GUARD: a naive window=1 detector DOES fire there (must beat)");
+
+    // The full curve does eventually plateau, and only AFTER the productive
+    // toggle — the kept design's running min is at the true optimum ~9, not ~14.
+    CHECK(mma_objective_plateau(c, W, 1e-3, 0.0),
+          "plateau: the settled curve past the toggle registers a plateau");
+    // Find the first fire point on the full curve and confirm it is post-toggle.
+    int fire = -1;
+    for (std::size_t n = 1; n <= c.size(); ++n) {
+      std::vector<double> pre(c.begin(), c.begin() + n);
+      if (mma_objective_plateau(pre, W, 1e-3, 0.0)) { fire = static_cast<int>(n); break; }
+    }
+    CHECK(fire > 21, "plateau: the window test fires only AFTER the toggle (iter 22+)");
+    double fire_best = c[0];
+    for (int i = 0; i < fire; ++i) fire_best = std::min(fire_best, c[i]);
+    CHECK(fire_best < 9.2,
+          "plateau: at the fire point the running min is the true optimum ~9");
+    std::printf("[plateau] naive fires@%d (best~%.2f) | window=10 fires@%d (best~%.3f)\n",
+                nf, naive_best, fire, fire_best);
+
+    // THE PROGRESS-GATE GUARD (the vf=0.20 failure). A low-volume rung's early
+    // "forming" iterations SPIKE far ABOVE the start value while the design
+    // percolates, so the running minimum stays PINNED at c[0] for ~10 iterations
+    // before the compliance plummets. Without the gate the window test reads
+    // "0% improvement over the window" at iter 11 and fires, keeping a
+    // near-uniform design (~30x the optimum). This is the exact shape MEASURED on
+    // a vf=0.20 self-weight cube (c[0]~18.4, iters 2-11 spike to ~1e5-1e6, then a
+    // descent to ~2.3). The gate blocks the fire until the running min has
+    // dropped `min_drop` below c[0].
+    std::vector<double> spike = {
+        18.4, 6.4e5, 1.6e4, 46.9, 1.0e5, 1.3e6, 4.7e4, 3.4e6, 9.2e5,  // 0-8
+        1.4e4, 1177.0, 69.5, 23.7, 12.6,                              // 9-13 (min pinned at 18.4)
+        9.5, 7.5, 6.0, 4.9, 4.1, 3.5, 3.1, 2.8, 2.6, 2.5,            // 14-23 descent
+        2.45, 2.42, 2.40, 2.395};                                    // 24-27 descent
+    for (int i = 0; i < 16; ++i) spike.push_back(2.39);              // 28-43 flat settle
+    // The running minimum is pinned at c[0]=18.4 through iter 13 (all spikes are
+    // above it), so at iter 11 the window improvement is exactly zero.
+    std::vector<double> spike11(spike.begin(), spike.begin() + 11);
+    CHECK(!mma_objective_plateau(spike11, W, 1e-3, G),
+          "plateau GATE: does NOT fire in the spike-heavy forming phase (iter 11)");
+    // With NO gate (min_drop = 0) the very same prefix DOES fire — proving the
+    // gate is what prevents the near-uniform design (the bug it fixes).
+    CHECK(mma_objective_plateau(spike11, W, 1e-3, 0.0),
+          "plateau GATE: without the gate the forming-phase prefix fires (the bug)");
+    // The gated detector fires only once the objective has genuinely settled,
+    // deep in the descent (running min ~2.39, near the ~2.387 optimum).
+    int gfire = -1;
+    for (std::size_t n = 1; n <= spike.size(); ++n) {
+      std::vector<double> pre(spike.begin(), spike.begin() + n);
+      if (mma_objective_plateau(pre, W, 1e-3, G)) { gfire = static_cast<int>(n); break; }
+    }
+    CHECK(gfire > 30, "plateau GATE: fires only after the descent settles (iter 30+)");
+    double gbest = spike[0];
+    for (int i = 0; i < gfire; ++i) gbest = std::min(gbest, spike[i]);
+    CHECK(gbest < 2.45,
+          "plateau GATE: at the gated fire point the design is near-optimal (~2.39)");
+    std::printf("[plateau gate] ungated fires@11 (best~18.4) | gated fires@%d (best~%.2f)\n",
+                gfire, gbest);
+  }
+
   if (g_failures == 0) {
     std::printf("simp: all %d checks passed\n", g_checks);
     return 0;

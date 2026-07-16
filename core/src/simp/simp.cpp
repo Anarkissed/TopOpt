@@ -449,6 +449,58 @@ std::size_t total_stage_iterations(const std::vector<StagePlan>& plan) {
   return n;
 }
 
+}  // namespace
+
+// Objective-plateau detector (handoff 086-mma-plateau). Public + non-namespaced
+// so the anti-early-termination guard can unit-test it directly against a
+// hand-built non-monotone compliance curve. See simp.hpp for the rationale.
+bool mma_objective_plateau(const std::vector<double>& c, int window,
+                           double rel_tol, double min_drop) {
+  if (window <= 0) return false;
+  const int n = static_cast<int>(c.size());
+  if (n < window + 1) return false;
+  // Running minimum over the whole history so far, and over the history
+  // EXCLUDING the trailing `window` samples. Non-monotone spikes never lower a
+  // running minimum, so the difference is exactly the compliance improvement the
+  // last `window` iterations actually delivered.
+  double best_now = c[0];
+  for (int i = 1; i < n; ++i)
+    if (c[i] < best_now) best_now = c[i];
+  // Progress gate: require real descent from the uniform-start compliance c[0]
+  // before a plateau can fire. Without this, an early spike-heavy phase (whose
+  // spikes sit ABOVE c[0], so the running minimum stays pinned at c[0]) reads as
+  // a plateau and fires immediately — keeping a near-uniform design. See the
+  // header for the measured vf=0.20 failure this prevents.
+  if (min_drop > 0.0 && !(best_now <= c[0] * (1.0 - min_drop))) return false;
+  double best_prev = c[0];
+  for (int i = 1; i < n - window; ++i)
+    if (c[i] < best_prev) best_prev = c[i];
+  if (!(best_prev > 0.0)) return false;  // cannot form a relative ratio
+  const double rel_improve = (best_prev - best_now) / best_prev;
+  return rel_improve < rel_tol;
+}
+
+namespace {
+
+// The per-iteration termination test, shared by both simp_optimize overloads.
+// MMA (fixed volume) stops on an objective plateau (handoff 086-mma-plateau);
+// OC / projected keeps the design-space `change_tol` test byte-identically. MMA
+// rejects a projection schedule, so an MMA run is always a single non-projected
+// stage and `history` is exactly that stage's contiguous compliance curve.
+bool stage_should_stop(const SimpOptions& options,
+                       const std::vector<SimpIteration>& history,
+                       double change) {
+  if (options.updater == SimpUpdater::MMA && options.mma_plateau_window > 0) {
+    std::vector<double> curve;
+    curve.reserve(history.size());
+    for (const SimpIteration& h : history) curve.push_back(h.compliance);
+    return mma_objective_plateau(curve, options.mma_plateau_window,
+                                 options.mma_plateau_tol,
+                                 options.mma_plateau_min_drop);
+  }
+  return change < options.change_tol;
+}
+
 // ---------------------------------------------------------------------------
 // MMA updater (ROADMAP M7.mma.1), Svanberg, "The method of moving asymptotes -
 // a new method for structural optimization", Int. J. Numer. Methods Eng. 24
@@ -839,14 +891,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
            result.iterations % options.keyframe_stride == 0))
         options.keyframe(xafter);
 
-      if (change < options.change_tol) {
+      if (stage_should_stop(options, result.history, change)) {
         stage_converged = true;
         break;
       }
     }
-    // The stage either re-converged (change_tol) or ran its cap; continuation
-    // proceeds either way. The loop is `converged` iff its LAST stage was
-    // (a cancelled stage never is).
+    // The stage either re-converged (change_tol / plateau) or ran its cap;
+    // continuation proceeds either way. The loop is `converged` iff its LAST
+    // stage was (a cancelled stage never is).
     result.converged = stage_converged;
     if (result.cancelled) break;
   }
@@ -1351,7 +1403,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         options.keyframe(kf);
       }
 
-      if (change < options.change_tol) {
+      if (stage_should_stop(options, result.history, change)) {
         stage_converged = true;
         break;
       }

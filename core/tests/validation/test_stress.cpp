@@ -207,6 +207,15 @@ int main() {
     opt.max_iterations = 100;
     opt.change_tol = 0.0;  // run the full cap (deterministic)
     opt.cg_tolerance = 1e-9;
+    // The invariants below compare the constrained vs unconstrained COMPLIANCE
+    // at a matched iteration budget (both must run the full cap). Disable MMA
+    // objective-plateau termination (handoff 086-mma-plateau) so the
+    // unconstrained compliance run is not cut short at its plateau, which would
+    // leave it with higher compliance and spuriously flip invariant (c)
+    // "constrained >= unconstrained". The stress path (simp_optimize_stress)
+    // never consults the plateau field. Plateau termination is validated
+    // separately (test_simp objective-plateau cases + STEP 3 of the handoff).
+    opt.mma_plateau_window = 0;
 
     // Unconstrained compliance-minimizing MMA run and its stress aggregate.
     SimpOptimizeResult un = topopt::simp_optimize(g, p, bcs, loads, opt);
@@ -385,6 +394,8 @@ int main() {
     lopt.max_iterations = 60;
     lopt.change_tol = 0.0;
     lopt.cg_tolerance = 1e-8;
+    lopt.mma_plateau_window = 0;  // matched-budget compliance comparison (see
+                                  // invariant (c) above); handoff 086-mma-plateau
 
     SimpOptimizeResult lun = topopt::simp_optimize(grid, p, bcs, loads, lopt);
     StressAggregate lua = topopt::simp_stress_aggregate(
