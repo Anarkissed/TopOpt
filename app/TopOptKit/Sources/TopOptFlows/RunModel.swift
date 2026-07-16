@@ -667,10 +667,19 @@ public final class RunModel: ObservableObject {
         switch result {
         case .success(let o):
             if o.cancelled {
-                // The user cancelled — DISCARD any partial results and return to the
-                // workspace clean (a cancel must never open the results view).
-                outcome = nil
-                phase = .cancelled
+                // The user cancelled. If accepted variants already STREAMED and were
+                // shown (progressive results), those are usable output the user was
+                // looking at — KEEP them (identical to the mid-run solver-throw case
+                // below), so leaving an in-flight run never destroys the variants on
+                // screen. Only when nothing was shown does a cancel discard to a clean
+                // workspace (a cancel must never open an EMPTY results view).
+                if outcome?.variants.contains(where: { $0.accepted }) == true {
+                    progress = nil
+                    phase = .succeeded
+                } else {
+                    outcome = nil
+                    phase = .cancelled
+                }
             } else if o.acceptedCount == 0 {
                 // Nothing strong enough: the terminal rung failed the margin gate.
                 outcome = o

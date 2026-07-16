@@ -289,6 +289,56 @@ final class RunModelTests: XCTestCase {
         XCTAssertNil(model.outcome, "cancel discards results — no results view")
     }
 
+    /// Data-loss regression (state-corruption / data-loss handoff). A user who leaves
+    /// an IN-FLIGHT run from the RESULTS screen must not lose the variants already
+    /// streamed and shown. The results Back chevron used to `run.cancel()` before going
+    /// Home; the core then returned a cancelled outcome and `finish` wiped the accepted
+    /// variant the user had just been looking at (rung 0, "-32%, 587 g") — so on reopen
+    /// the whole optimization was gone. A run that FINISHED before leaving survived only
+    /// because `cancel()` no-ops off `.running`. Cancelling a run that has ALREADY
+    /// produced accepted, shown results must KEEP them (they are usable output), exactly
+    /// like a mid-run solver throw already does.
+    func testStreamedAcceptedVariantSurvivesLeavingAnInFlightRun() {
+        let streamed = OptimizeOutcome(
+            variants: [variant(margin: 3, accepted: true)],
+            stoppedOnMargin: false, cancelled: false, acceptedCount: 1,
+            gridNx: 4, gridNy: 4, gridNz: 4, spacing: 1)
+        let model = RunModel(scheduler: SynchronousRunScheduler())
+        model.runner = { _, progress, onVariant in
+            onVariant(streamed)                       // variant 1 lands → results visible
+            XCTAssertEqual(model.outcome?.variants.count, 1)
+            model.cancel()                            // user taps the results Back chevron
+            let keepGoing = progress(0, 3, 2)         // the token flips this to false
+            // the core returns a cancelled outcome cleanly when told to stop (M7.0a)
+            return OptimizeOutcome(variants: [], stoppedOnMargin: false,
+                                   cancelled: !keepGoing, acceptedCount: 0)
+        }
+        model.start(request())
+        XCTAssertEqual(model.outcome?.variants.count, 1,
+                       "a streamed, already-shown accepted variant must survive leaving the run")
+        XCTAssertTrue(model.outcome?.variants.contains { $0.accepted } ?? false)
+        XCTAssertEqual(model.phase, .succeeded, "usable accepted results resolve as a success")
+        XCTAssertNil(model.failure, "keeping the variants is not a failure")
+    }
+
+    /// The clean-cancel case is unchanged: a run cancelled BEFORE any accepted variant
+    /// streamed (the only time the progress card's Cancel button is even reachable —
+    /// once a variant streams the card yields to the results screen) still discards to a
+    /// clean workspace, never opening an empty results view.
+    func testCancelBeforeAnyVariantStillDiscardsCleanly() {
+        let model = RunModel(scheduler: SynchronousRunScheduler())
+        model.runner = { _, progress, _ in
+            _ = progress(0, 3, 1)
+            model.cancel()
+            let keepGoing = progress(0, 3, 2)
+            return OptimizeOutcome(variants: [], stoppedOnMargin: false,
+                                   cancelled: !keepGoing, acceptedCount: 0)
+        }
+        model.start(request())
+        XCTAssertEqual(model.phase, .cancelled)
+        XCTAssertNil(model.outcome, "nothing was shown — cancel returns a clean workspace")
+    }
+
     // MARK: - Run in Background + notifier
 
     private final class NotifierSpy: RunNotifier {

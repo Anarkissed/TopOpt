@@ -161,12 +161,19 @@ public struct WorkspacePlaceholder: View {
                               loadDirections: loadFlowDirections,
                               anchorPoints: anchorFlowPoints,
                               streaming: run.isStreaming,
+
                               // Pass the live run so the streaming pill can surface the
                               // honest progress readout (variant N of M · elapsed · ETA)
                               // and offer Cancel — reads only (run-progress-visibility).
                               run: run, runResolution: runResolution,
                               runMaterialName: project.material,
-                              onClose: { run.cancel(); model.backHome() },   // Home, KEEP the variants
+                             
+                              // Home, KEEP the variants — and DON'T cancel: an in-flight
+                              // ladder must keep optimizing so leaving and returning shows
+                              // MORE variants (an 80-minute run survives being looked at,
+                              // left, and returned to). Cancelling here used to wipe the
+                              // streamed results (RunModel.finish cancelled branch → nil).
+                              onClose: { model.backHome() },
                               onExport: { model.toast = "Export (.3mf) arrives in M7.9" },
                               onSeeOriginal: { viewOriginal = true })
                     .ignoresSafeArea()
