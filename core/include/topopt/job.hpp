@@ -79,6 +79,42 @@ struct JobOutput {
   int smooth_factor = 1;
 };
 
+// One load group of a declared load case (handoff 093): its faces are chosen
+// GEOMETRICALLY (the same selector rule as fixture_faces), and its total force
+// (newtons) is spread as a distributed traction over them. Mirrors one
+// BridgeLoadCase load group so the CLI and app express the same load case.
+struct JobLoadGroup {
+  // Faces may be chosen GEOMETRICALLY (`faces`, hand-authored jobs) OR given as
+  // RAW B-rep face ids (`face_ids`, the id form the iPad app's interactive
+  // selection produces and the LAN worker forwards). Exactly one form per group.
+  std::vector<JobFaceSelector> faces;  // every match tagged LOAD
+  std::vector<int> face_ids;           // raw B-rep face ids, tagged LOAD
+  Vec3 force{0.0, 0.0, 0.0};           // fx, fy, fz in N
+};
+
+// A declared load case (ARCHITECTURE §1 mode (a)) — the CLI counterpart of the
+// app's BridgeLoadCase. Optional in job.json (the "loads" block). When present,
+// the run optimizes under these anchors + forces instead of self-weight; when
+// absent, the run is the self-weight + fixture_faces path (unchanged). Both feed
+// the SAME core builder (build_production_loadcase) as the app.
+struct JobLoadCase {
+  bool present = false;                     // "loads" block was given
+  std::vector<JobFaceSelector> anchors;     // geometric selectors -> FIXTURE
+  std::vector<int> anchor_face_ids;         // OR raw B-rep face ids -> FIXTURE
+  std::vector<JobLoadGroup> groups;         // distributed tractions
+  Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
+  double infill_percent = -1.0;             // < 0 = no override
+  bool minimize_plastic = true;             // true = reduction ladder + pad
+};
+
+// An axis-aligned box in model space (mm), min <= max componentwise — a design
+// box or a keep-out. Deliberately a job-local POD so the schema owns its own
+// validation; run_job copies it into a core DesignBox.
+struct JobBox {
+  Vec3 min{0.0, 0.0, 0.0};
+  Vec3 max{0.0, 0.0, 0.0};
+};
+
 // A parsed, schema-valid job.json.
 struct JobDescription {
   std::string model;     // model file path; relative paths resolve against the
@@ -86,13 +122,25 @@ struct JobDescription {
   std::string material;  // key into materials.json (validated by run_job)
   std::string mode;      // "minimize_plastic" (the only supported mode)
   int resolution = 0;    // voxelizer resolution along the longest axis, >= 1
-  std::vector<JobFaceSelector> fixture_faces;  // non-empty; all matches are
-                                               // tagged FIXTURE
+  std::vector<JobFaceSelector> fixture_faces;  // self-weight path: all matches
+                                               // tagged FIXTURE (may be empty
+                                               // when a "loads" block is given)
   JobGravity gravity;
   std::vector<double> ladder;  // volume fractions, (0,1], strictly descending
   double margin_stop = 0.0;    // finite >= 0 (0 disables the stop)
   int simp_max_iterations = 0;  // optional "simp" block; 0 = SimpOptions default
   JobOutput output;
+
+  // Optional declared load case (the "loads" block). When present the run uses
+  // build_production_loadcase (anchors + forces) instead of self-weight.
+  JobLoadCase loads;
+
+  // Optional design-domain expansion (the "add material" feature, handoff 093):
+  // the optimizer may grow material into this box beyond the imported part, with
+  // keep_out_boxes left void. Absent => the run stays on the imported grid.
+  bool has_design_box = false;
+  JobBox design_box;
+  std::vector<JobBox> keep_out_boxes;
 };
 
 // Parse and schema-validate a job document. Throws JobError on malformed JSON,
@@ -128,9 +176,20 @@ struct RunJobResult {
 // selector matching no face, a mesh_format the build cannot write (3MF without
 // lib3mf), or an unwritable output. Propagates StepError / std::invalid_argument
 // / solver errors from the underlying stages.
+// When `emit_progress` is true (the topopt-cli binary sets it; in-process callers
+// and tests leave it false, keeping the run byte-identical), run_job streams the
+// run to STDOUT as structured, machine-parseable checkpoint lines and writes each
+// accepted variant's mesh AS IT COMPLETES rather than all at the end, so a wrapper
+// (the LAN worker, handoff 093) can forward live progress and progressive
+// artifacts instead of blocking until the whole ladder finishes:
+//   PROGRESS rung=<i> rungs=<n> iter=<k>          (once per optimizer iteration)
+//   VARIANT vf=<req> achieved=<vf> margin=<m> accepted=<0|1> mesh=<path>
+//                                                 (once per accepted rung)
+// These lines are OBSERVERS: they do not change the design, the report, or the
+// exported meshes (identical bytes to the batch path), so determinism holds.
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
                      const MaterialLibrary& materials,
-                     const SettingsRules& rules);
+                     const SettingsRules& rules, bool emit_progress = false);
 
 }  // namespace topopt

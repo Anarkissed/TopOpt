@@ -95,6 +95,13 @@ if(Eigen3_FOUND)
   # it is gated on Eigen like simp.cpp. CI has Eigen (DEPS=ON), so it always
   # builds in CI.
   target_sources(topopt PRIVATE src/simp/minimize_plastic.cpp)
+  # Shared production-run configuration (handoff 093 / LAN-offload STEP 0): the
+  # single source of truth for the solver + projection + min-feature + Galerkin
+  # cache settings both the app (TopOptBridge) and topopt-cli apply. It only uses
+  # the solver stack's declarations but links its symbols (heaviside schedule,
+  # the Galerkin-cache setter), so it is gated on Eigen like the rest of the
+  # driver. CI has Eigen (DEPS=ON), so it always builds in CI.
+  target_sources(topopt PRIVATE src/simp/production.cpp)
   target_link_libraries(topopt PRIVATE Eigen3::Eigen)
 endif()
 
@@ -612,10 +619,28 @@ endif()
 # its integration test always build and run in the pipeline.
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_sources(topopt PRIVATE src/cli/run_job.cpp)
+  # Shared production load-case builder (handoff 093 / LAN-offload STEP 0): the
+  # single grid/BC/options construction the iPad app (TopOptBridge) and the CLI
+  # both use for a declared load case. Needs OCCT (STEP face selection) AND Eigen
+  # (traction_loads / minimize_plastic_solved_grid), so it is gated with run_job.
+  target_sources(topopt PRIVATE src/cli/loadcase.cpp)
 
   add_executable(topopt_cli src/cli/main.cpp)
   set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)
   target_link_libraries(topopt_cli PRIVATE topopt)
+  # Build fingerprint for `topopt-cli --version` (handoff 093, worker /health +
+  # the app's version-skew refusal): the core git commit SHA when available, else
+  # "dev". Two cores that differ silently produce different parts, so the app
+  # refuses a worker whose fingerprint != its own.
+  execute_process(
+    COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse --short=12 HEAD
+    OUTPUT_VARIABLE TOPOPT_GIT_SHA OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET RESULT_VARIABLE TOPOPT_GIT_RC)
+  if(NOT TOPOPT_GIT_RC EQUAL 0 OR TOPOPT_GIT_SHA STREQUAL "")
+    set(TOPOPT_GIT_SHA "dev")
+  endif()
+  target_compile_definitions(topopt_cli PRIVATE
+    TOPOPT_BUILD_FINGERPRINT="${TOPOPT_GIT_SHA}")
   # Dev/CI defaults for --materials / --rules: the committed files. The flags
   # override them; the integration test passes both explicitly.
   target_compile_definitions(topopt_cli PRIVATE
@@ -641,4 +666,17 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     target_compile_definitions(test_cli PRIVATE TOPOPT_HAVE_3MF)
   endif()
   add_test(NAME cli_demo COMMAND test_cli)
+
+  # STEP-0 parity gate (handoff 093): proves configure_production_options +
+  # build_production_loadcase — the ONE seam the CLI and the iPad app both route
+  # through — apply the production solver config and produce a deterministic,
+  # bit-identical design, so a desktop worker running the CLI returns the same
+  # part the app would. Drives OCCT (STEP) + Eigen (minimize_plastic).
+  add_executable(test_production_parity tests/validation/test_production_parity.cpp)
+  target_link_libraries(test_production_parity PRIVATE topopt)
+  target_compile_definitions(test_production_parity PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME production_parity COMMAND test_production_parity)
 endif()

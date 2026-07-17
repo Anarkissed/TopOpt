@@ -306,6 +306,76 @@ const JsonValue& require_object(const JsonValue& v, const std::string& name) {
   return v;
 }
 
+// One geometric face selector ({"kind":"cylindrical","radius_mm":r}) — the same
+// locked GEOMETRIC selection fixture_faces uses (never a raw OCCT face index).
+// Shared by fixture_faces, loadcase anchors, and load-group faces so all three
+// enforce identical selector semantics.
+JobFaceSelector parse_face_selector(const JsonValue& sel, const std::string& where) {
+  if (sel.type != JsonValue::Type::Object)
+    schema_fail("every " + where + " entry must be a selector object");
+  reject_unknown_keys(sel, {"kind", "radius_mm"}, "a " + where + " selector");
+  JobFaceSelector s;
+  s.kind = require_nonempty_string(
+      require_key(sel, "kind", "a " + where + " selector"), "kind");
+  if (s.kind != "cylindrical")
+    schema_fail("selector \"kind\" must be \"cylindrical\" (got \"" + s.kind +
+                "\")");
+  s.radius_mm = require_number(
+      require_key(sel, "radius_mm", "a " + where + " selector"), "radius_mm");
+  if (!(s.radius_mm > 0.0)) schema_fail("selector \"radius_mm\" must be > 0");
+  return s;
+}
+
+// A non-empty array of face selectors.
+std::vector<JobFaceSelector> parse_selector_array(const JsonValue& v,
+                                                  const std::string& where) {
+  if (v.type != JsonValue::Type::Array)
+    schema_fail("\"" + where + "\" must be an array");
+  if (v.arr.empty())
+    schema_fail("\"" + where + "\" must contain at least one selector");
+  std::vector<JobFaceSelector> out;
+  for (const JsonValue& sel : v.arr) out.push_back(parse_face_selector(sel, where));
+  return out;
+}
+
+// A non-empty array of non-negative integers (raw B-rep face ids).
+std::vector<int> parse_int_array(const JsonValue& v, const std::string& name) {
+  if (v.type != JsonValue::Type::Array)
+    schema_fail("\"" + name + "\" must be an array");
+  if (v.arr.empty())
+    schema_fail("\"" + name + "\" must contain at least one id");
+  std::vector<int> out;
+  for (const JsonValue& e : v.arr) {
+    const double d = require_number(e, name + " entry");
+    if (d < 0.0 || d != std::floor(d))
+      schema_fail("every \"" + name + "\" entry must be a non-negative integer");
+    out.push_back(static_cast<int>(d));
+  }
+  return out;
+}
+
+// A 3-number array -> Vec3.
+Vec3 parse_vec3(const JsonValue& v, const std::string& name) {
+  if (v.type != JsonValue::Type::Array || v.arr.size() != 3)
+    schema_fail("\"" + name + "\" must be an array of 3 numbers");
+  double d[3];
+  for (int i = 0; i < 3; ++i)
+    d[i] = require_number(v.arr[static_cast<std::size_t>(i)], name + " component");
+  return Vec3{d[0], d[1], d[2]};
+}
+
+// An axis-aligned box {"min":[x,y,z],"max":[x,y,z]}, min <= max componentwise.
+JobBox parse_box(const JsonValue& v, const std::string& name) {
+  require_object(v, name);
+  reject_unknown_keys(v, {"min", "max"}, name);
+  JobBox b;
+  b.min = parse_vec3(require_key(v, "min", name), name + ".min");
+  b.max = parse_vec3(require_key(v, "max", name), name + ".max");
+  if (b.max.x < b.min.x || b.max.y < b.min.y || b.max.z < b.min.z)
+    schema_fail("\"" + name + "\" max must be >= min componentwise");
+  return b;
+}
+
 }  // namespace
 
 JobDescription parse_job(const std::string& json_text) {
@@ -317,7 +387,7 @@ JobDescription parse_job(const std::string& json_text) {
   reject_unknown_keys(root,
                       {"model", "material", "mode", "resolution",
                        "fixture_faces", "gravity", "ladder", "margin_stop",
-                       "simp", "output"},
+                       "simp", "output", "loads", "design_box", "keep_outs"},
                       "the job");
 
   JobDescription job;
@@ -333,73 +403,128 @@ JobDescription parse_job(const std::string& json_text) {
   job.resolution = require_positive_int(
       require_key(root, "resolution", "the job"), "resolution");
 
-  // fixture_faces: non-empty array of geometric selectors.
-  {
-    const JsonValue& faces = require_key(root, "fixture_faces", "the job");
-    if (faces.type != JsonValue::Type::Array)
-      schema_fail("\"fixture_faces\" must be an array");
-    if (faces.arr.empty())
-      schema_fail("\"fixture_faces\" must contain at least one selector");
-    for (const JsonValue& sel : faces.arr) {
-      if (sel.type != JsonValue::Type::Object)
-        schema_fail("every fixture_faces entry must be a selector object");
-      reject_unknown_keys(sel, {"kind", "radius_mm"}, "a fixture_faces selector");
-      JobFaceSelector s;
-      s.kind = require_nonempty_string(
-          require_key(sel, "kind", "a fixture_faces selector"), "kind");
-      if (s.kind != "cylindrical")
-        schema_fail("selector \"kind\" must be \"cylindrical\" (got \"" +
-                    s.kind + "\")");
-      s.radius_mm = require_number(
-          require_key(sel, "radius_mm", "a fixture_faces selector"),
-          "radius_mm");
-      if (!(s.radius_mm > 0.0))
-        schema_fail("selector \"radius_mm\" must be > 0");
-      job.fixture_faces.push_back(s);
+  // The run is in LOADCASE mode iff a "loads" block is present. In that mode the
+  // anchors are the fixtures, the groups are the design load, and the production
+  // ladder / fixed self-weight magnitude / default margin apply (exactly the app
+  // path) — so the self-weight keys are MEANINGLESS and rejected rather than
+  // silently ignored. In SELF-WEIGHT mode (no "loads") they are required as before.
+  const JsonValue* loads_v = find_key(root, "loads");
+  const bool loadcase = loads_v != nullptr;
+
+  if (loadcase) {
+    for (const char* k : {"fixture_faces", "gravity", "ladder", "margin_stop"})
+      if (find_key(root, k))
+        schema_fail(std::string("\"") + k +
+                    "\" is not allowed with \"loads\": in loadcase mode the "
+                    "anchors are the fixtures, the groups are the design load, "
+                    "and the production ladder + margin apply");
+
+    const JsonValue& lv = require_object(*loads_v, "loads");
+    reject_unknown_keys(
+        lv, {"anchors", "anchor_face_ids", "groups", "build_dir",
+             "infill_percent", "minimize_plastic"},
+        "loads");
+    job.loads.present = true;
+    // anchors: optional, given as geometric selectors ("anchors") OR raw B-rep
+    // face ids ("anchor_face_ids", the id form the app produces). Empty => min-x
+    // clamp fallback, like the app. The two forms compose.
+    if (const JsonValue* a = find_key(lv, "anchors"))
+      job.loads.anchors = parse_selector_array(*a, "anchors");
+    if (const JsonValue* aid = find_key(lv, "anchor_face_ids"))
+      job.loads.anchor_face_ids = parse_int_array(*aid, "anchor_face_ids");
+    // groups: optional (empty => self-weight fallback). Each group's faces are
+    // {"faces":[selectors]} OR {"face_ids":[ids]}, plus a "force":[fx,fy,fz].
+    if (const JsonValue* gs = find_key(lv, "groups")) {
+      if (gs->type != JsonValue::Type::Array)
+        schema_fail("\"loads.groups\" must be an array");
+      for (const JsonValue& gv : gs->arr) {
+        require_object(gv, "a loads group");
+        reject_unknown_keys(gv, {"faces", "face_ids", "force"}, "a loads group");
+        JobLoadGroup grp;
+        if (const JsonValue* fs = find_key(gv, "faces"))
+          grp.faces = parse_selector_array(*fs, "faces");
+        if (const JsonValue* fid = find_key(gv, "face_ids"))
+          grp.face_ids = parse_int_array(*fid, "face_ids");
+        if (grp.faces.empty() && grp.face_ids.empty())
+          schema_fail("a loads group must give \"faces\" or \"face_ids\"");
+        grp.force = parse_vec3(require_key(gv, "force", "a loads group"),
+                               "a loads group force");
+        job.loads.groups.push_back(std::move(grp));
+      }
     }
-  }
-
-  // gravity: direction (3 finite numbers, non-zero) + magnitude.
-  {
-    const JsonValue& g =
-        require_object(require_key(root, "gravity", "the job"), "gravity");
-    reject_unknown_keys(g, {"direction", "magnitude_mm_s2"}, "gravity");
-    const JsonValue& dir = require_key(g, "direction", "gravity");
-    if (dir.type != JsonValue::Type::Array || dir.arr.size() != 3)
-      schema_fail("gravity \"direction\" must be an array of 3 numbers");
-    double d[3];
-    for (int i = 0; i < 3; ++i)
-      d[i] = require_number(dir.arr[static_cast<std::size_t>(i)],
-                            "gravity direction component");
-    job.gravity.direction = Vec3{d[0], d[1], d[2]};
-    if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= 0.0)
-      schema_fail("gravity \"direction\" must be non-zero");
-    job.gravity.magnitude_mm_s2 = require_number(
-        require_key(g, "magnitude_mm_s2", "gravity"), "magnitude_mm_s2");
-    if (!(job.gravity.magnitude_mm_s2 > 0.0))
-      schema_fail("gravity \"magnitude_mm_s2\" must be > 0");
-  }
-
-  // ladder: non-empty, entries in (0,1], strictly descending (the same rules
-  // minimize_plastic enforces — validated here so the diagnostic points at the
-  // job file, before any import/solve work).
-  {
-    const JsonValue& ladder = require_key(root, "ladder", "the job");
-    if (ladder.type != JsonValue::Type::Array || ladder.arr.empty())
-      schema_fail("\"ladder\" must be a non-empty array of numbers");
-    for (const JsonValue& r : ladder.arr) {
-      const double f = require_number(r, "ladder entry");
-      if (!(f > 0.0) || f > 1.0)
-        schema_fail("every \"ladder\" entry must be in (0, 1]");
-      if (!job.ladder.empty() && f >= job.ladder.back())
-        schema_fail("\"ladder\" must be strictly descending");
-      job.ladder.push_back(f);
+    if (const JsonValue* bd = find_key(lv, "build_dir")) {
+      job.loads.build_dir = parse_vec3(*bd, "loads.build_dir");
+      if (job.loads.build_dir.x == 0.0 && job.loads.build_dir.y == 0.0 &&
+          job.loads.build_dir.z == 0.0)
+        schema_fail("\"loads.build_dir\" must be non-zero");
     }
+    if (const JsonValue* ip = find_key(lv, "infill_percent")) {
+      job.loads.infill_percent = require_number(*ip, "loads.infill_percent");
+      if (job.loads.infill_percent < 0.0 || job.loads.infill_percent > 100.0)
+        schema_fail("\"loads.infill_percent\" must be in [0, 100]");
+    }
+    if (const JsonValue* mp = find_key(lv, "minimize_plastic")) {
+      if (mp->type != JsonValue::Type::Bool)
+        schema_fail("\"loads.minimize_plastic\" must be a boolean");
+      job.loads.minimize_plastic = (mp->num != 0.0);
+    }
+  } else {
+    // Self-weight mode: fixture_faces (required, non-empty geometric selectors).
+    job.fixture_faces =
+        parse_selector_array(require_key(root, "fixture_faces", "the job"),
+                             "fixture_faces");
+
+    // gravity: direction (3 finite numbers, non-zero) + magnitude.
+    {
+      const JsonValue& g =
+          require_object(require_key(root, "gravity", "the job"), "gravity");
+      reject_unknown_keys(g, {"direction", "magnitude_mm_s2"}, "gravity");
+      job.gravity.direction =
+          parse_vec3(require_key(g, "direction", "gravity"), "gravity.direction");
+      const Vec3& d = job.gravity.direction;
+      if (d.x * d.x + d.y * d.y + d.z * d.z <= 0.0)
+        schema_fail("gravity \"direction\" must be non-zero");
+      job.gravity.magnitude_mm_s2 = require_number(
+          require_key(g, "magnitude_mm_s2", "gravity"), "magnitude_mm_s2");
+      if (!(job.gravity.magnitude_mm_s2 > 0.0))
+        schema_fail("gravity \"magnitude_mm_s2\" must be > 0");
+    }
+
+    // ladder: non-empty, entries in (0,1], strictly descending (the same rules
+    // minimize_plastic enforces — validated here so the diagnostic points at the
+    // job file, before any import/solve work).
+    {
+      const JsonValue& ladder = require_key(root, "ladder", "the job");
+      if (ladder.type != JsonValue::Type::Array || ladder.arr.empty())
+        schema_fail("\"ladder\" must be a non-empty array of numbers");
+      for (const JsonValue& r : ladder.arr) {
+        const double f = require_number(r, "ladder entry");
+        if (!(f > 0.0) || f > 1.0)
+          schema_fail("every \"ladder\" entry must be in (0, 1]");
+        if (!job.ladder.empty() && f >= job.ladder.back())
+          schema_fail("\"ladder\" must be strictly descending");
+        job.ladder.push_back(f);
+      }
+    }
+
+    job.margin_stop = require_number(
+        require_key(root, "margin_stop", "the job"), "margin_stop");
+    if (job.margin_stop < 0.0) schema_fail("\"margin_stop\" must be >= 0");
   }
 
-  job.margin_stop = require_number(
-      require_key(root, "margin_stop", "the job"), "margin_stop");
-  if (job.margin_stop < 0.0) schema_fail("\"margin_stop\" must be >= 0");
+  // design_box + keep_outs: optional in BOTH modes (the "add material" feature).
+  if (const JsonValue* db = find_key(root, "design_box")) {
+    job.has_design_box = true;
+    job.design_box = parse_box(*db, "design_box");
+  }
+  if (const JsonValue* kos = find_key(root, "keep_outs")) {
+    if (kos->type != JsonValue::Type::Array)
+      schema_fail("\"keep_outs\" must be an array");
+    if (!job.has_design_box && !kos->arr.empty())
+      schema_fail("\"keep_outs\" requires a \"design_box\"");
+    for (const JsonValue& kv : kos->arr)
+      job.keep_out_boxes.push_back(parse_box(kv, "a keep_outs box"));
+  }
 
   // simp: optional; the only key the schema defines is max_iterations.
   if (const JsonValue* simp = find_key(root, "simp")) {
