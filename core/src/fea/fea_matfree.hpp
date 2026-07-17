@@ -60,6 +60,14 @@ std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
 int mf_set_thread_count(int n);
 int mf_thread_count();  // effective count actually used (>= 1)
 
+// Galerkin block cache toggle (handoff 090; public face:
+// fea_set_matfree_galerkin_block_cache). Opt-in, default OFF. Read by the
+// matrix-free multigrid's coarse-operator build in multigrid.cpp; it changes only
+// HOW the purely geometric block W^T Ke W is obtained (compute-once-per-colour vs
+// recompute-per-element), never its value, so A1 stays bit-identical.
+bool mf_set_galerkin_block_cache(bool enable);
+bool mf_galerkin_block_cache_enabled();
+
 // y = K x over the FULL global stiffness, element-by-element, COLOUR by COLOUR in
 // fixed order; each colour's elements are apply'd (optionally across threads, no
 // races). `x` and `y` are full ndof vectors; `y` is overwritten (zeroed) then

@@ -424,6 +424,23 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME design_domain COMMAND test_design_domain)
 
+  # Galerkin block cache guards (handoff 090). The cache reuses the purely
+  # GEOMETRIC coarse-operator block W^T Ke W across same-colour elements instead of
+  # recomputing it per element, which is where ~92% of the design-box build went
+  # (the near-void elements the optimizer may grow into). It is opt-in and default
+  # OFF. These guards prove it is a compute saving and NOT an approximation:
+  # bit-identical field/iterations vs the uncached build on solid AND soft-void
+  # graded grids, 078's assembled-vs-matrix-free iteration parity still holds with
+  # it on, and — the decisive guard — the M7.dom gusset case still GROWS the same
+  # material into initially-near-void space (a scheme that skipped or froze the
+  # void would fail that one). Drives minimize_plastic, so it is Eigen-gated and
+  # takes the injected settings rule table like the other optimizer tests.
+  add_executable(test_galerkin_cache tests/unit/test_galerkin_cache.cpp)
+  target_link_libraries(test_galerkin_cache PRIVATE topopt)
+  target_compile_definitions(test_galerkin_cache PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME galerkin_cache COMMAND test_galerkin_cache)
+
   # Handoff 080 regression gate: the design-box "whole-domain optimize" path
   # (freeze_imported_part == false, the default) must REDUCE plastic against the
   # imported part — removes material, baseline == part mass, and the ladder walks

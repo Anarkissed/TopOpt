@@ -842,14 +842,63 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   // match the old coeffRef path exactly, so A1 is BIT-IDENTICAL to 079's. Every
   // structural (i,j) receives a nonzero contribution (verified: the resulting nnz
   // equals the coeffRef path's), so no explicit zeros are introduced.
+  //
+  // GALERKIN BLOCK CACHE (handoff 090, opt-in via fea_set_matfree_galerkin_block
+  // _cache, default OFF). The block S = W^T Ke W formed here is purely GEOMETRIC:
+  // W comes from the trilinear prolongation stencil and Ke is the single reference
+  // element stiffness — the element's modulus enters only below, as `el.factor *
+  // S`. Since axis_weights is parity-based and translation-invariant, every
+  // element whose 24 fine DOFs are all free AND whose 8 coarse nodes are all
+  // active (mloc == kDof; see below) has the SAME W — and hence the same S — as
+  // any other element of the same (i,j,k) parity, i.e. of the same COLOUR (the key
+  // m.elems is already sorted by). Such elements are the interior majority, and on
+  // the design box ~94% of them are the soft void the optimizer may grow into: the
+  // build was recomputing a handful of identical blocks ~638,000 times. Measured
+  // (090): this pass 6.32 s -> 2.25 s, the build 7.81 s -> 3.73 s, on the real
+  // 96x80x96 case; what is left of the pass is the scatter, not the arithmetic.
+  //
+  // mloc == kDof is exactly the genericity test. An element's 8 nodes span 2 coarse
+  // indices per axis whatever its parity (an even fine index maps to 1 coarse node,
+  // an odd one to 2, and the union over {i, i+1} is 2 either way), so its coarse
+  // support is always 2x2x2 nodes x 3 components = 24 coarse DOFs. mloc is the
+  // count of DISTINCT coarse DOFs actually discovered, so mloc < kDof iff some
+  // coarse DOF was inactive (dropped by `col < 0` in the P0 build); mloc == kDof
+  // therefore certifies that no stencil entry was dropped. Combined with every
+  // kg[r] >= 0 (no fine row zeroed by a fixed/void DOF), W is fully determined by
+  // the colour. Elements failing either test — the BC-fixed and void-gated ones at
+  // the boundary — take the unchanged full per-element path.
+  //
+  // BIT-IDENTICAL: the cached S is the same arithmetic on the same inputs, each
+  // element still scales by its OWN el.factor, and the element loop order and the
+  // per-(i,j) add order are untouched — so A1, the V-cycle and the iteration count
+  // are unchanged. This saves compute; it does not approximate. Nothing is skipped
+  // or frozen, so growth into the void is entirely unaffected.
   {
     const int* Aouter = A1.outerIndexPtr();
     const int* Ainner = A1.innerIndexPtr();
     double* Aval = A1.valuePtr();
     double W[kDof][kDof];   // fine-local (24) x coarse-local (<=24)
     double KW[kDof][kDof];  // Ke * W
+    double S[kDof][kDof];   // W^T Ke W (the geometric block)
     int kg[kDof];
+
+    const bool use_cache = fea_detail::mf_galerkin_block_cache_enabled() &&
+                           static_cast<int>(m.color_offsets.size()) ==
+                               fea_detail::kNumColors + 1;
+    std::vector<double> cacheS;
+    std::vector<char> cache_valid;
+    if (use_cache) {
+      cacheS.assign(static_cast<std::size_t>(fea_detail::kNumColors) * kDof * kDof,
+                    0.0);
+      cache_valid.assign(static_cast<std::size_t>(fea_detail::kNumColors), 0);
+    }
+    int color = 0;  // m.elems is colour-sorted; walk the colour ranges alongside e
+
     for (int e = 0; e < nelems; ++e) {
+      if (use_cache)
+        while (color + 1 < fea_detail::kNumColors &&
+               e >= m.color_offsets[static_cast<std::size_t>(color) + 1])
+          ++color;
       const int cb = ecds_off[static_cast<std::size_t>(e)];
       const int mloc = ecds_off[static_cast<std::size_t>(e) + 1] - cb;
       if (mloc == 0) continue;
@@ -857,28 +906,52 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
       for (int r = 0; r < kDof; ++r)
         kg[r] = active[static_cast<std::size_t>(el.edof[r])];
 
-      for (int r = 0; r < kDof; ++r)
-        for (int cl = 0; cl < mloc; ++cl) W[r][cl] = 0.0;
-      for (int r = 0; r < kDof; ++r) {
-        if (kg[r] < 0) continue;
-        for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
-          int idx = 0;
-          while (ecds[static_cast<std::size_t>(cb + idx)] != pr.first) ++idx;
-          W[r][idx] += pr.second;
+      bool generic = use_cache && mloc == kDof;
+      if (generic)
+        for (int r = 0; r < kDof; ++r)
+          if (kg[r] < 0) { generic = false; break; }
+
+      const bool hit = generic && cache_valid[static_cast<std::size_t>(color)] != 0;
+      if (hit) {
+        const double* src =
+            &cacheS[static_cast<std::size_t>(color) * kDof * kDof];
+        for (int cl = 0; cl < mloc; ++cl)
+          for (int dl = 0; dl < mloc; ++dl) S[cl][dl] = src[cl * kDof + dl];
+      } else {
+        for (int r = 0; r < kDof; ++r)
+          for (int cl = 0; cl < mloc; ++cl) W[r][cl] = 0.0;
+        for (int r = 0; r < kDof; ++r) {
+          if (kg[r] < 0) continue;
+          for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
+            int idx = 0;
+            while (ecds[static_cast<std::size_t>(cb + idx)] != pr.first) ++idx;
+            W[r][idx] += pr.second;
+          }
+        }
+        for (int r = 0; r < kDof; ++r)
+          for (int cl = 0; cl < mloc; ++cl) {
+            double s = 0.0;
+            for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
+            KW[r][cl] = s;
+          }
+        for (int cl = 0; cl < mloc; ++cl)
+          for (int dl = 0; dl < mloc; ++dl) {
+            double s = 0.0;
+            for (int r = 0; r < kDof; ++r) s += W[r][cl] * KW[r][dl];
+            S[cl][dl] = s;
+          }
+        if (generic) {  // first generic element of this colour seeds the cache
+          double* dst = &cacheS[static_cast<std::size_t>(color) * kDof * kDof];
+          for (int cl = 0; cl < mloc; ++cl)
+            for (int dl = 0; dl < mloc; ++dl) dst[cl * kDof + dl] = S[cl][dl];
+          cache_valid[static_cast<std::size_t>(color)] = 1;
         }
       }
-      for (int r = 0; r < kDof; ++r)
-        for (int cl = 0; cl < mloc; ++cl) {
-          double s = 0.0;
-          for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
-          KW[r][cl] = s;
-        }
+
       for (int cl = 0; cl < mloc; ++cl) {
         const int i = ecds[static_cast<std::size_t>(cb + cl)];
         for (int dl = 0; dl < mloc; ++dl) {
-          double s = 0.0;
-          for (int r = 0; r < kDof; ++r) s += W[r][cl] * KW[r][dl];
-          const double v = el.factor * s;
+          const double v = el.factor * S[cl][dl];
           if (v == 0.0) continue;
           const int j = ecds[static_cast<std::size_t>(cb + dl)];
           int lo = Aouter[j], hi = Aouter[j + 1];
