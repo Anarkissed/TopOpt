@@ -771,6 +771,15 @@ OptimizeResult run_minimize_plastic_loadcase(
     // if reached — and it is not: the core reference process never links bridge.cpp.
     topopt::fea_set_matfree_galerkin_block_cache(true);
     opts.external_loads = external;  // the user's load case (mode a); empty => self-weight
+    // Diagnosis 095 — silent-self-weight-fall-through guard. This is the LOAD-CASE
+    // entry point: when the user defined load groups (load_group_sizes non-empty),
+    // an EMPTY `external` means every group was zero-force / the force never
+    // reached the solver. Falling through to self-weight there strips the unloaded
+    // tab and fragments the design, shipping garbage as if it succeeded (the "load
+    // tab removed / floating fragments" report). Require the external load so a
+    // lost force surfaces as a clear error instead. A run with NO load groups
+    // declared is left as-is (self-weight is a legitimate mode there).
+    opts.require_external_loads = !load_case.load_group_sizes.empty();
     // gravity_direction defines the reported build orientation = its unit negation.
     opts.gravity_direction =
         topopt::Vec3{-build_dir.x, -build_dir.y, -build_dir.z};

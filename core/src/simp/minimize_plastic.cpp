@@ -136,6 +136,19 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (!std::isfinite(options.infill_percent))
     throw std::invalid_argument(
         "minimize_plastic: infill_percent must be finite");
+  // Diagnosis 095 — the silent-self-weight-fall-through guard. A load-case caller
+  // sets require_external_loads; an empty external_loads then means the user's
+  // force never reached the solver, and falling through to self-weight would ship
+  // a fragmented, tab-removed design as if it succeeded. Refuse it explicitly.
+  // Default false, so genuine self-weight runs and every existing caller are
+  // unaffected (byte-identical).
+  if (options.require_external_loads && options.external_loads.empty())
+    throw std::invalid_argument(
+        "minimize_plastic: require_external_loads is set but external_loads is "
+        "empty — a load case produced no non-zero force, so the run would fall "
+        "through to a self-weight optimize (which strips the unloaded tab and "
+        "fragments the design). Refusing to silently run self-weight; check that "
+        "the load case's force reached the solver.");
   // `gravity` is only the SELF-WEIGHT magnitude; it is unused when the caller
   // supplies an external load case, so only require it there.
   if (options.external_loads.empty() &&
