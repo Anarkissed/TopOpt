@@ -1252,14 +1252,30 @@ int main() {
     // switchover does not regress the ladder: MMA compliance <= OC * (1 + tol)
     // at each rung's matched volume fraction (MMA should match or beat OC).
     check_v3_on_accepted(rmma);
+    // The "same achieved volume" parity is measured on the optimizer's CONTINUOUS
+    // volume fraction Σρ/solid_count — the quantity the volume constraint drives to
+    // the target — NOT `optimization.volume_fraction`, which handoff 094 repurposes
+    // to the reported part-relative THRESHOLDED count printed_voxels/part_solid. OC
+    // and MMA satisfy the same continuous volume constraint (so their Σρ matches),
+    // but they distribute the grayscale interface differently, so their #{ρ>0.5}
+    // counts legitimately diverge on a gray rung — comparing the reported field here
+    // would test gray-distribution noise, not convergence. Σρ is the honest measure.
+    auto continuous_frac = [&g](const MinimizePlasticVariant& v) {
+      const std::vector<double>& rho = v.optimization.physical_density;
+      double s = 0.0;
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = 0; i < g.nx; ++i)
+            if (g.solid(i, j, k)) s += rho[g.index(i, j, k)];
+      return s / static_cast<double>(g.solid_count());
+    };
     const double kTol = 0.02;  // MMA within 2% of the OC compliance (matches or beats)
     for (std::size_t v = 0;
          v < rmma.evaluated.size() && v < roc.evaluated.size(); ++v) {
       const MinimizePlasticVariant& em = rmma.evaluated[v];
       const MinimizePlasticVariant& eo = roc.evaluated[v];
-      CHECK(std::fabs(em.optimization.volume_fraction -
-                      eo.optimization.volume_fraction) <= 1e-2,
-            "O: OC and MMA hit the same achieved volume fraction per rung");
+      CHECK(std::fabs(continuous_frac(em) - continuous_frac(eo)) <= 1e-2,
+            "O: OC and MMA hit the same achieved (continuous) volume fraction per rung");
       const double rel =
           std::fabs(em.optimization.compliance - eo.optimization.compliance) /
           std::fabs(eo.optimization.compliance);
