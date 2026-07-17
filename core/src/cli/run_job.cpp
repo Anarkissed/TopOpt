@@ -11,8 +11,10 @@
 #include <vector>
 
 #include "topopt/fea.hpp"
+#include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/production.hpp"
 #include "topopt/report.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
@@ -55,12 +57,83 @@ void write_text_file(const std::string& path, const std::string& text) {
   if (!out) throw JobError("failed writing output file: " + path);
 }
 
+// Resolve a list of GEOMETRIC face selectors against an imported model to the
+// B-rep face ids they match (the same locked rule fixture_faces uses: match by
+// surface property, never raw index). Every selector must match >= 1 face — a
+// selector that finds nothing is a user error, not an empty no-op. `what` names
+// the block in the diagnostic. Shared by fixture_faces, loadcase anchors and
+// load-group faces so all three resolve identically.
+std::vector<int> resolve_selectors(const StepModel& model,
+                                   const std::vector<JobFaceSelector>& selectors,
+                                   const std::string& what) {
+  std::vector<int> ids;
+  for (const JobFaceSelector& sel : selectors) {
+    if (sel.kind != "cylindrical")
+      throw JobError("unsupported " + what + " selector kind: " + sel.kind);
+    bool matched = false;
+    for (int f = 0; f < model.face_count; ++f) {
+      const StepFaceInfo& info = model.faces[static_cast<std::size_t>(f)];
+      if (info.kind == StepSurfaceKind::Cylinder &&
+          std::fabs(info.cylinder_radius_mm - sel.radius_mm) <=
+              kJobFaceRadiusToleranceMm) {
+        ids.push_back(f);
+        matched = true;
+      }
+    }
+    if (!matched)
+      throw JobError(what + " selector (cylindrical, radius_mm " +
+                     std::to_string(sel.radius_mm) + ") matched no face of the model");
+  }
+  return ids;
+}
+
+// A job.json box -> the core DesignBox it describes.
+DesignBox to_design_box(const JobBox& b) {
+  DesignBox d;
+  d.min = b.min;
+  d.max = b.max;
+  return d;
+}
+
+// Write one accepted variant's mesh into out_dir and return its path. Smooth-
+// export (handoff 086): factor 1 writes v3.mesh verbatim; factor > 1 re-extracts
+// the SAME iso-surface from the SAME physical density resampled finer on `sg` (the
+// solved grid). Shared by the batch export loop and the streaming on_variant
+// callback so both write byte-identical files.
+std::string export_variant_mesh(const MinimizePlasticVariant& variant,
+                                const std::string& out_dir, const JobOutput& out,
+                                const VoxelGrid& sg) {
+  const std::string path = join_path(
+      out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
+                              out.mesh_format));
+  const int sf = out.smooth_factor;
+  TriangleMesh smooth;  // only populated when sf > 1
+  if (sf > 1) {
+    const TriangleMesh raw = marching_cubes_resampled(
+        sg.nx, sg.ny, sg.nz, sg.spacing, sg.origin,
+        variant.optimization.physical_density, /*iso=*/0.5, sf,
+        ResampleInterp::Tricubic);
+    smooth = keep_largest_component(raw);
+  }
+  const TriangleMesh& export_mesh = (sf > 1) ? smooth : variant.v3.mesh;
+  if (out.mesh_format == "3mf") {
+#ifdef TOPOPT_HAVE_3MF
+    write_3mf_file(path, export_mesh);
+#else
+    throw JobError("3MF support unavailable in this build");  // unreachable
+#endif
+  } else {
+    write_stl_file(path, export_mesh);
+  }
+  return path;
+}
+
 }  // namespace
 
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
                      const MaterialLibrary& materials,
-                     const SettingsRules& rules) {
+                     const SettingsRules& rules, bool emit_progress) {
   // Fail fast on everything checkable before heavy work: the mode, the
   // material, and whether this build can write the requested mesh format.
   if (job.mode != "minimize_plastic")
@@ -82,63 +155,97 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // §5 pipeline: STEP ──OCCT──▶ tessellated surface.
   result.model = import_step_file(join_path(job_dir, job.model));
 
-  // Geometric fixture-face selection (locked rule, DECISIONS.md 2026-07-09).
-  // Every selector must match at least one face — a job whose selector finds
-  // nothing is a user error, not an empty no-op.
-  for (const JobFaceSelector& sel : job.fixture_faces) {
-    // parse_job admits only "cylindrical"; keep the check so a future selector
-    // kind cannot silently select nothing.
-    if (sel.kind != "cylindrical")
-      throw JobError("unsupported fixture_faces selector kind: " + sel.kind);
-    bool matched = false;
-    for (int f = 0; f < result.model.face_count; ++f) {
-      const StepFaceInfo& info = result.model.faces[static_cast<std::size_t>(f)];
-      if (info.kind == StepSurfaceKind::Cylinder &&
-          std::fabs(info.cylinder_radius_mm - sel.radius_mm) <=
-              kJobFaceRadiusToleranceMm) {
-        result.fixture_face_ids.push_back(f);
-        matched = true;
-      }
-    }
-    if (!matched)
-      throw JobError("fixture_faces selector (cylindrical, radius_mm " +
-                     std::to_string(sel.radius_mm) +
-                     ") matched no face of the model");
-  }
-
-  // ──▶ watertight check.
+  // ──▶ watertight check (both modes).
   if (!check_watertight(result.model.mesh).watertight)
     throw JobError("model tessellation is not watertight: " + job.model);
 
-  // ──▶ voxelize + tag the fixture voxels of every matched face.
-  VoxelGrid grid = voxelize(result.model.mesh, job.resolution);
-  std::size_t tagged = 0;
-  for (const int f : result.fixture_face_ids)
-    tagged += tag_step_face(grid, result.model, f, VoxelTag::Fixture);
-  if (tagged == 0)
-    throw JobError("fixture faces tagged no voxels (resolution too coarse "
-                   "for the selected faces?)");
-
-  // Mounting BCs: every node of every Fixture voxel is fully clamped.
-  const std::vector<int> fixture_nodes =
-      fea_tagged_nodes(grid, VoxelTag::Fixture);
+  // Two modes, both driving the SAME production optimizer configuration as the
+  // iPad app (handoff 093): a "loads" block => the shared build_production_loadcase
+  // (anchors + declared forces, the app's mode a); otherwise the self-weight +
+  // fixture_faces path, now also carrying the production solver config + optional
+  // design box so it matches what the app produces for the same input.
+  VoxelGrid grid;
   std::vector<DirichletBC> bcs;
-  bcs.reserve(fixture_nodes.size() * 3);
-  for (const int n : fixture_nodes)
-    for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
-
-  // ──▶ FEA + SIMP ladder + report assembly (the M5.3 driver).
   MinimizePlasticOptions options;
-  options.volume_fraction_ladder = job.ladder;
-  options.margin_stop = job.margin_stop;
-  options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
-  options.gravity_direction = job.gravity.direction;
-  if (job.simp_max_iterations > 0)
-    options.simp.max_iterations = job.simp_max_iterations;
-  result.pipeline =
-      minimize_plastic(grid, material, job.material, bcs, rules, options);
 
-  // ──▶ report + one exported mesh per ACCEPTED variant, into out_dir.
+  if (job.loads.present) {
+    // ── LOADCASE mode: resolve the geometric selectors to face ids, build the
+    // front-end-neutral ProductionLoadCase, and hand it to the SAME core builder
+    // the bridge calls. The CLI and app therefore produce the same design for the
+    // same STEP + load case + resolution.
+    ProductionLoadCase lc;
+    // Anchors: raw B-rep ids (from the app) and/or geometric selectors compose.
+    lc.anchor_face_ids = job.loads.anchor_face_ids;
+    for (const int id : resolve_selectors(result.model, job.loads.anchors, "anchors"))
+      lc.anchor_face_ids.push_back(id);
+    result.fixture_face_ids = lc.anchor_face_ids;
+    for (const JobLoadGroup& g : job.loads.groups) {
+      ProductionLoadCase::LoadGroup lg;
+      lg.face_ids = g.face_ids;
+      for (const int id : resolve_selectors(result.model, g.faces, "loads group faces"))
+        lg.face_ids.push_back(id);
+      lg.force = g.force;
+      lc.load_groups.push_back(std::move(lg));
+    }
+    lc.minimize_plastic = job.loads.minimize_plastic;
+    lc.build_dir = job.loads.build_dir;
+    lc.infill_percent = job.loads.infill_percent;
+    lc.has_design_box = job.has_design_box;
+    if (job.has_design_box) {
+      lc.design_box = to_design_box(job.design_box);
+      for (const JobBox& ko : job.keep_out_boxes)
+        lc.keep_out_boxes.push_back(to_design_box(ko));
+    }
+
+    ProductionRunSetup setup =
+        build_production_loadcase(result.model, job.resolution, lc);
+    grid = std::move(setup.grid);
+    bcs = std::move(setup.bcs);
+    options = std::move(setup.options);
+    // The CLI exports meshes, not playback: keyframe_count stays 0 (the app sets
+    // 12). This is viz only and does not change the design.
+  } else {
+    // ── SELF-WEIGHT mode: geometric fixture-face selection (locked rule,
+    // DECISIONS.md 2026-07-09).
+    result.fixture_face_ids =
+        resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
+
+    // ──▶ voxelize + tag the fixture voxels of every matched face.
+    grid = voxelize(result.model.mesh, job.resolution);
+    std::size_t tagged = 0;
+    for (const int f : result.fixture_face_ids)
+      tagged += tag_step_face(grid, result.model, f, VoxelTag::Fixture);
+    if (tagged == 0)
+      throw JobError("fixture faces tagged no voxels (resolution too coarse "
+                     "for the selected faces?)");
+
+    // Mounting BCs: every node of every Fixture voxel is fully clamped.
+    const std::vector<int> fixture_nodes =
+        fea_tagged_nodes(grid, VoxelTag::Fixture);
+    bcs.reserve(fixture_nodes.size() * 3);
+    for (const int n : fixture_nodes)
+      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+
+    // ──▶ FEA + SIMP ladder + report assembly (the M5.3 driver). The production
+    // solver config (matrix-free multigrid + Galerkin cache + physical
+    // min-feature) is applied here so the CLI matches the app; the job supplies
+    // the self-weight load case (ladder, margin, gravity).
+    configure_production_options(options);
+    options.volume_fraction_ladder = job.ladder;
+    options.margin_stop = job.margin_stop;
+    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
+    options.gravity_direction = job.gravity.direction;
+    if (job.simp_max_iterations > 0)
+      options.simp.max_iterations = job.simp_max_iterations;
+    // Optional design-domain expansion (the "add material" feature).
+    if (job.has_design_box) {
+      options.design_box = to_design_box(job.design_box);
+      for (const JobBox& ko : job.keep_out_boxes)
+        options.keep_out_boxes.push_back(to_design_box(ko));
+    }
+  }
+
+  // ──▶ output dir (created before the run so streamed artifacts can land in it).
   {
     std::error_code ec;
     std::filesystem::create_directories(out_dir, ec);
@@ -146,45 +253,52 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       throw JobError("cannot create output directory " + out_dir + ": " +
                      ec.message());
   }
+
+  // The grid the run solves on (the expanded domain under a design box), needed
+  // up front so a streamed variant's mesh is resampled on the right grid.
+  const VoxelGrid solved_grid = minimize_plastic_solved_grid(grid, options);
+
+  // Streaming (topopt-cli binary): print machine-parseable checkpoints and export
+  // each accepted variant's mesh AS IT COMPLETES, so a wrapper can forward live
+  // progress + progressive artifacts. Pure observers — the design/report/mesh
+  // bytes are unchanged, so run_job stays deterministic (the default, false, is
+  // the exact batch path the tests exercise). See job.hpp.
+  std::vector<std::string> streamed_paths;
+  if (emit_progress) {
+    options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
+      std::printf("PROGRESS rung=%zu rungs=%zu iter=%d\n", rung, rungs, iter);
+      std::fflush(stdout);
+    };
+    options.on_variant = [&](const MinimizePlasticVariant& v) {
+      if (!v.accepted) return;
+      const std::string p =
+          export_variant_mesh(v, out_dir, job.output, solved_grid);
+      streamed_paths.push_back(p);
+      std::printf("VARIANT vf=%.6f achieved=%.6f margin=%.6g accepted=1 mesh=%s\n",
+                  v.requested_volume_fraction, v.optimization.volume_fraction,
+                  v.report.margin.worst_case, p.c_str());
+      std::fflush(stdout);
+    };
+  }
+
+  result.pipeline =
+      minimize_plastic(grid, material, job.material, bcs, rules, options);
+
+  // ──▶ report (both paths).
   result.report_json = job_report_json(result.pipeline.report);
   result.report_path = join_path(out_dir, job.output.report);
   write_text_file(result.report_path, result.report_json);
 
-  // Smooth-export (handoff 086): with smooth_factor > 1 the exported mesh is
-  // re-extracted from the SAME converged physical density resampled finer, so the
-  // STL/3MF surface is tessellated more finely. This touches ONLY the exported
-  // geometry — variant.v3.mesh (the V3-gated + displayed mesh) and the JobReport
-  // are unchanged, and factor 1 (the default) writes variant.v3.mesh verbatim.
-  const int sf = job.output.smooth_factor;
-  const VoxelGrid& sg = result.pipeline.solved_grid;
-  for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
-    if (!variant.accepted) continue;
-    const std::string path = join_path(
-        out_dir, mesh_file_name(job.output.mesh_prefix,
-                                variant.requested_volume_fraction,
-                                job.output.mesh_format));
-
-    TriangleMesh smooth;  // only populated when sf > 1
-    if (sf > 1) {
-      const TriangleMesh raw = marching_cubes_resampled(
-          sg.nx, sg.ny, sg.nz, sg.spacing, sg.origin,
-          variant.optimization.physical_density, /*iso=*/0.5, sf,
-          ResampleInterp::Tricubic);
-      smooth = keep_largest_component(raw);
+  // ──▶ meshes: already written progressively when streaming; otherwise one
+  // exported mesh per accepted variant now (byte-identical to the streamed files).
+  if (emit_progress) {
+    result.mesh_paths = std::move(streamed_paths);
+  } else {
+    for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
+      if (!variant.accepted) continue;
+      result.mesh_paths.push_back(export_variant_mesh(
+          variant, out_dir, job.output, result.pipeline.solved_grid));
     }
-    const TriangleMesh& export_mesh = (sf > 1) ? smooth : variant.v3.mesh;
-
-    if (job.output.mesh_format == "3mf") {
-#ifdef TOPOPT_HAVE_3MF
-      write_3mf_file(path, export_mesh);
-#else
-      // Unreachable: rejected before the pipeline ran.
-      throw JobError("3MF support unavailable in this build");
-#endif
-    } else {
-      write_stl_file(path, export_mesh);
-    }
-    result.mesh_paths.push_back(path);
   }
 
   return result;
