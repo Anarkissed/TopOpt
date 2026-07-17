@@ -1,4 +1,4 @@
-# 095 — 3D solid-block cantilever: fragmented / tab-removed result
+# 097 — 3D solid-block cantilever: fragmented / tab-removed result
 
 Status: **DIAGNOSED + FIXED.** The fragmented, "load-tab-removed" result is the
 **self-weight** signature, not the external-load one. An externally loaded tab is
