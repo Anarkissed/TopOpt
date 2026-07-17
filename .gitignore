@@ -21,3 +21,4 @@ app/TopOpt.xcodeproj/xcuserdata/nadim.xcuserdatad/xcschemes/xcschememanagement.p
 app/TopOptKit/.swiftpm/xcode/xcuserdata/nadim.xcuserdatad/xcschemes/xcschememanagement.plist
 build-asan/
 build-release/
+build-probe/
