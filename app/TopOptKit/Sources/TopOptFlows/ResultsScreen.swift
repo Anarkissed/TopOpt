@@ -72,8 +72,13 @@ public struct ResultsScreen: View {
                 streaming: Bool = false, run: RunModel? = nil,
                 runResolution: Int = 64, runMaterialName: String = "",
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
-                onSeeOriginal: @escaping () -> Void = {}) {
-        _model = StateObject(wrappedValue: ResultsModel(
+                onSeeOriginal: @escaping () -> Void = {},
+                resultsModel: ResultsModel? = nil) {
+        // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
+        // through an injected scheduler / runner / notifier the same way). The screen
+        // owns its ResultsModel as a @StateObject, so a test hosting this view has no
+        // other way to read what the screen actually shows. Production passes nil.
+        _model = StateObject(wrappedValue: resultsModel ?? ResultsModel(
             projectName: projectName, outcome: outcome,
             materialName: materialName, yieldStrengthMPa: yieldStrengthMPa,
             appliedLoadKg: appliedLoadKg, loadUnit: loadUnit,
@@ -89,6 +94,23 @@ public struct ResultsScreen: View {
         self.onExport = onExport
         self.onSeeOriginal = onSeeOriginal
     }
+
+    /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
+    /// `.onChange` action. SwiftUI runs the action closure CAPTURED BY THE PREVIOUS
+    /// body evaluation, so an action that reads `self.liveOutcome` re-applies the
+    /// outcome this screen ALREADY had, and the newly streamed variant never reaches
+    /// the model (handoff 089 — the screen sat one variant behind until a rebuild).
+    /// The new VALUE SwiftUI passes to the action is fresh, so the outcome rides
+    /// along inside it. Equality is the variant COUNT only — the outcome carries
+    /// meshes and per-voxel fields, and comparing those every body pass would cost
+    /// far more than the merge it guards.
+    struct MergeTrigger: Equatable {
+        let outcome: OptimizeOutcome
+        static func == (a: MergeTrigger, b: MergeTrigger) -> Bool {
+            a.outcome.variants.count == b.outcome.variants.count
+        }
+    }
+    private var mergeTrigger: MergeTrigger { MergeTrigger(outcome: liveOutcome) }
 
     public var body: some View {
         ZStack {
@@ -142,9 +164,10 @@ public struct ResultsScreen: View {
                 model.advanceFlowClock(1.0 / 30.0)
             }
         }
-        .onChange(of: liveOutcome.variants.count) { _ in
-            // A variant streamed in (or the final outcome landed) — merge it.
-            model.update(from: liveOutcome)
+        .onChange(of: mergeTrigger) { trigger in
+            // A variant streamed in (or the final outcome landed) — merge it. Merge
+            // `trigger.outcome`, NEVER `self.liveOutcome`: see `MergeTrigger`.
+            model.update(from: trigger.outcome)
         }
         .sheet(isPresented: Binding(
             get: { if case .ready = videoExport.state { return true } else { return false } },

@@ -600,7 +600,15 @@ public final class RunModel: ObservableObject {
             acceptedCount: variants.count, voxelVolumeMM3: partial.voxelVolumeMM3,
             gridNx: partial.gridNx, gridNy: partial.gridNy, gridNz: partial.gridNz,
             gridOrigin: partial.gridOrigin, spacing: partial.spacing)
-        progress = nil   // the running card yields to the (now visible) results
+        // `progress` is deliberately KEPT (handoff 089). Clearing it here bought
+        // nothing — the running card yields on `outcome` having variants, not on
+        // progress (RunScreen) — and it cost the readout its rung: it forced the
+        // readout to latch the last non-nil snapshot in view-local @State, and that
+        // latch silently misses the rung whenever this append lands in the SAME
+        // runloop turn as the tick before it (SwiftUI then only ever observes
+        // nil → nil, `remainingEstimate` never sees a completed rung, and the ETA
+        // reads "estimating…" for the rest of an 80-minute run). Holding the last
+        // snapshot lets the readout read the model instead of latching a copy.
     }
 
     /// Request cancellation of the in-flight run (the callback returns `false` on

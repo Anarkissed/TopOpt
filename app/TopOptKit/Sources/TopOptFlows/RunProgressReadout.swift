@@ -35,9 +35,6 @@ public struct RunProgressReadout: View {
     /// math itself lives in `RunProgress.remainingEstimate` (unit-tested).
     @State private var rungStartedAt: Date?
     @State private var lastRung: Int?
-    /// Last non-nil progress, held across the brief inter-rung nil (`appendStreamed`
-    /// clears `progress` until the next OC tick) so the readout never blanks.
-    @State private var held: RunProgress?
 
     public init(model: RunModel, resolution: Int, materialName: String, compact: Bool = false) {
         self.model = model
@@ -54,24 +51,24 @@ public struct RunProgressReadout: View {
             }
         }
         .onAppear {
-            if held == nil { held = model.progress }
             if rungStartedAt == nil { rungStartedAt = model.startedAt ?? Date() }
             lastRung = model.progress?.rung ?? lastRung
         }
-        .onChange(of: model.progress) { newValue in
-            guard let p = newValue else { return }   // ignore the brief inter-rung nil
-            held = p
-            if lastRung != p.rung {                  // a new variant started
-                lastRung = p.rung
-                rungStartedAt = Date()
-            }
+        .onChange(of: model.progress?.rung) { newRung in
+            guard let rung = newRung, lastRung != rung else { return }
+            lastRung = rung                          // a new variant started
+            rungStartedAt = Date()
         }
     }
 
     // MARK: derived values
 
+    /// Read STRAIGHT off the model — never latched into view-local @State. A latch
+    /// only updates when SwiftUI happens to observe the change, so it silently drops
+    /// snapshots that are superseded within one runloop turn (handoff 089); the model
+    /// holds the last snapshot for the life of the run, so reading it cannot go stale.
     private var snapshot: RunProgress {
-        held ?? model.progress ?? RunProgress(rung: 0, rungCount: 1, iteration: 0)
+        model.progress ?? RunProgress(rung: 0, rungCount: 1, iteration: 0)
     }
 
     private func elapsed(_ now: Date) -> TimeInterval {
