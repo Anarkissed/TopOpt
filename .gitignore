@@ -22,3 +22,4 @@ app/TopOptKit/.swiftpm/xcode/xcuserdata/nadim.xcuserdatad/xcschemes/xcschememana
 build-asan/
 build-release/
 build-probe/
+build-diag/

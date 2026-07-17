@@ -430,6 +430,17 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME anchor_integrity COMMAND test_anchor_integrity)
 
+  # Diagnosis 095 (3D-block fragmentation): an externally loaded tab is retained
+  # and its printed field is a single connected body (load + anchor in one
+  # component), and the load-case driver REFUSES to silently fall through to a
+  # self-weight optimize when its external load is empty (require_external_loads).
+  add_executable(test_load_retention_connectivity
+    tests/validation/test_load_retention_connectivity.cpp)
+  target_link_libraries(test_load_retention_connectivity PRIVATE topopt)
+  target_compile_definitions(test_load_retention_connectivity PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME load_retention_connectivity COMMAND test_load_retention_connectivity)
+
   # Design-domain expansion (M7.dom-core) — the "add material" feature: a
   # user-defined design-volume box expands the run onto a larger grid whose mask
   # freezes the imported part (FrozenSolid), voids the keep-out boxes (FrozenVoid)

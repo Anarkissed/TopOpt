@@ -283,6 +283,27 @@ struct MinimizePlasticOptions {
   // orientation and the interlayer-tension axis, M4.4); `gravity` is only
   // consulted in the self-weight (empty) case.
   std::vector<NodalLoad> external_loads;
+
+  // Diagnosis 095 (3D-block fragmentation) — the SILENT-SELF-WEIGHT-FALL-THROUGH
+  // guard. `external_loads` empty means "self-weight" (mode (b) above), which is
+  // correct for a genuine self-weight run but WRONG for a load-case run whose
+  // force never reached the solver: the app builds `external_loads` from the
+  // user's tagged Load faces, and if every load group is zero-force (or the
+  // forces were lost upstream) the vector comes back EMPTY and the driver would
+  // silently optimize under self-weight instead. With no external load the tab is
+  // never tagged Load / frozen, so self-weight strips it (its far-cantilever
+  // weight contributes ~nothing to a ~1e-7 noise-dominated compliance) and the
+  // design fragments into disconnected islands — the reported "load tab removed /
+  // floating fragments" result, shipped as if it succeeded.
+  //
+  // When TRUE, the driver REFUSES to fall through to self-weight: an empty
+  // `external_loads` throws std::invalid_argument instead of silently running a
+  // self-weight optimize. The app's LOAD-CASE entry point sets this whenever the
+  // user defined load groups, so a lost/zero force surfaces as a clear error
+  // ("your load did not reach the solver") rather than a plausible-looking but
+  // garbage design. DEFAULT false: a genuine self-weight run (and every existing
+  // caller/fixture/Gate-V2 path) leaves it false and is byte-for-byte unchanged.
+  bool require_external_loads = false;
 };
 
 // One ladder rung actually evaluated by the driver.
