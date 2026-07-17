@@ -21,9 +21,11 @@
 #endif
 
 #include "topopt/fea.hpp"
+#include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/pipeline.hpp"
+#include "topopt/production.hpp"
 #include "topopt/report.hpp"
 #include "topopt/settings.hpp"
 #include "topopt/step.hpp"
@@ -138,19 +140,16 @@ topopt::TriangleMesh import_any(const std::string& path) {
 // fewer/heavier ones) and the lightest safe rung is the recommendation the app
 // surfaces. minimize_plastic stops at the first rung below margin_stop, so this
 // never returns an unsafe variant — it just walks further down for strong parts.
-std::vector<double> reduction_ladder() { return {0.68, 0.52, 0.38, 0.26}; }
+// The literal lives in ONE place (production_reduction_ladder) so the bridge and
+// the CLI cannot drift; this wrapper keeps the call sites/local name unchanged.
+std::vector<double> reduction_ladder() {
+  return topopt::production_reduction_ladder();
+}
 
-// M7.anchor-integrity (FIX 1) — depth, in voxels, of the FrozenSolid structural
-// pad frozen behind each anchor/load face on the loadcase run path. tag_step_face
-// freezes only a ~1-voxel BC skin (thr2 = 0.25*h*h; step.cpp), so the material
-// behind it is a free design variable the optimizer carves away, leaving the
-// anchor boss a paper-thin film that then gets isolated and discarded (diagnosis
-// 064). Freezing a pad this many voxels deep (via mask_step_face, FrozenSolid)
-// ties the boundary condition into the body so the optimizer must route load
-// through a real structural region. 3 is a conservative default: deep enough to
-// be a structural pad (> the 2-voxel min-feature size, §7 V3) without pinning a
-// large fraction of a small part. Tunable — raise for chunkier anchors.
-constexpr int kAnchorPadDepthVoxels = 3;
+// M7.anchor-integrity (FIX 1) — the FrozenSolid structural pad behind each
+// anchor/load face is now built inside build_production_loadcase (core), so the
+// depth constant lives there too (kProductionAnchorPadDepthVoxels). See the
+// shared builder in core/loadcase.hpp.
 
 // M7.anchor-integrity (FIX 2) — WITHDRAWN (diagnosis 084-ladder-collapse-diagnosis). The
 // "ladder floor" halted the walk at the first accepted rung whose worst-case margin
@@ -170,38 +169,13 @@ constexpr int kAnchorPadDepthVoxels = 3;
 // at the recommendation-SELECTION layer (which rung to highlight), never as a walk
 // terminator that deletes the other rungs. See docs/handoffs/084-ladder-collapse-diagnosis-*.
 
-// Turn on the M6.3 single-field Heaviside projection + beta-continuation on a
-// run's SIMP options, for crisp (near-0/1) density with a minimum length scale.
-// Uses the locked continuation schedule. Non-empty `projection` makes the loop
-// run the staged schedule (its own iterations/move) instead of the plain M3.4
-// loop — noticeably more compute per variant, in exchange for printable,
-// threshold-stable geometry.
-//
-// The minimum length scale is set PHYSICALLY (M7.rmin): min_feature_mm is a
-// nozzle-scale FDM feature size in mm, and minimize_plastic converts it to the
-// voxel-unit filter radius per rung from the grid spacing, so the minimum
-// member thickness is the same in mm at every voxel resolution (a fixed voxel
-// radius is not — it shrinks in mm as the grid refines, so thin members
-// proliferate at high resolution: diagnosis 060). 2.5 mm reproduces the M6.3
-// rmin = 2.5 voxels exactly on the 1.0 mm-spaced Gate-V2 benchmark geometry
-// (DECISIONS 2026-07-10), keeping that decision numerically continuous, while
-// scaling correctly for real parts voxelized at 64^3..128^3.
-void enable_projection(topopt::MinimizePlasticOptions& opts) {
-  // TEMPORARY (Option B): the Heaviside projection schedule is OC-only. The
-  // M7.mma.4 switchover made MMA the production default (MinimizePlasticOptions::
-  // updater), and simp_optimize rejects MMA + a non-empty projection schedule
-  // (the projected chain is the OC-locked Gate-V2 formulation) — so enabling
-  // projection unconditionally makes every real MMA run throw. Gate it on the
-  // updater: apply the projection schedule only when the run uses OC. When MMA
-  // drives the ladder we skip projection, so the run completes cleanly at the
-  // cost of slightly softer density boundaries. Crisp-density projection on MMA
-  // is a deferred future task (Option A). The physical min-feature length scale
-  // is set for BOTH updaters — it is a filter radius, not projection, and keeps
-  // the OC + projection Gate-V2 chain byte-identical.
-  if (topopt::projection_supported(opts.updater))
-    opts.simp.projection = topopt::heaviside_continuation_schedule();
-  opts.min_feature_mm = 2.5;  // mm; per-rung -> filter_radius = 2.5 / spacing
-}
+// The solver, projection, physical min-feature length scale and Galerkin block
+// cache that used to be set inline here (M6.3 projection + M7.rmin min-feature +
+// the handoff 079/091 matrix-free solver + cache) now live in ONE shared place,
+// topopt::configure_production_options (core/production.hpp), which BOTH this
+// bridge and topopt-cli call — see the divergence audit in handoff 093. The
+// bridge sets the load case (loads, ladder, box, anchor pad, gravity, keyframes)
+// and then calls configure_production_options for the shared solver config.
 
 // Smooth-export tessellation factor (handoff 087-wire-smooth-export, building on
 // core handoff 086-surface-resample). The optimizer's physical density is a
@@ -557,30 +531,11 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
     topopt::MinimizePlasticOptions opts;
     opts.cancel = &cancelled;
-    // Production runs use the MATRIX-FREE geometric-multigrid accelerator (handoff
-    // 072/073/078 + design-box on-device fix): it solves the identical system to
-    // the same tolerance and falls back to exact Jacobi-CG if a hierarchy is not
-    // applicable, so the result is always correct. Matrix-free never assembles the
-    // fine stiffness K, whose ~7 GB peak was the design-box std::bad_alloc; the
-    // design-box grid is padded to coarsening-friendly dims so multigrid actually
-    // engages (an odd axis otherwise falls back to an effectively-hung Jacobi-CG).
-    // The library default stays JacobiCG so Gate-V2 and the locked reference are
-    // untouched. This is the flip.
-    opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
-    // Galerkin block cache (handoff 090): the coarse-operator build recomputes the
-    // same 8 geometric blocks W^T Ke W ~638,000 times per solve; this caches them
-    // once per parity colour (the colour m.elems is already sorted by). It is a
-    // pure compute saving, BIT-IDENTICAL — measured 0 differing DOFs of 2,286,387,
-    // same 94 iterations, peak RSS unchanged (the cache is 36 KB) — so the field,
-    // the sensitivities that drive growth, and every accept/reject decision are
-    // unchanged. Measured build 7.81 -> 3.73 s (2.09x), solve 16.40 -> 12.21 s
-    // (1.34x) on the real design-box case. This is a GLOBAL (an atomic), not a
-    // per-call SimpOptions field: it is set here, at the production entry point,
-    // exactly like SolverKind above, so it stays confined to the app process and
-    // never touches the library default. Gate-V2 and the CLI run JacobiCG, which
-    // never builds a matrix-free hierarchy, so this setter is a no-op for them even
-    // if reached — and it is not: the core reference process never links bridge.cpp.
-    topopt::fea_set_matfree_galerkin_block_cache(true);
+    // Shared production solver config (matrix-free multigrid + Galerkin cache +
+    // physical min-feature + projection): ONE place the bridge and topopt-cli
+    // both call, so they cannot drift into producing different parts (handoff
+    // 093). The self-weight LOAD CASE (gravity, ladder, keyframes) is set below.
+    topopt::configure_production_options(opts);
     // Self-weight body load in mm-MPa-consistent units. The material density from
     // materials.json is g/cm^3 and lengths are mm, so density*gravity must be in
     // N/mm^3: fold the g/cm^3 -> t/mm^3 factor (1e-9) into standard gravity in
@@ -593,8 +548,7 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     opts.gravity = 9810.0 * kGramPerCm3ToTonnePerMm3;
     opts.gravity_direction = topopt::Vec3{0.0, 0.0, -1.0};
     opts.volume_fraction_ladder = reduction_ladder();  // recommendation-driven variants
-    enable_projection(opts);                           // M6.3 crisp density
-    opts.keyframe_count = 12;   // optimization-history playback
+    opts.keyframe_count = 12;   // optimization-history playback (viz only)
     // The forwarder relays the payload to the caller's function pointer FIRST,
     // then mirrors the caller's bool flag into the atomic the driver polls at
     // the start of the next OC iteration. Calling progress first means a cancel
@@ -643,194 +597,45 @@ OptimizeResult run_minimize_plastic_loadcase(
                " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0));
     bridge_log("loadcase: importing STEP '" + step_path + "'");
     topopt::StepModel model = topopt::import_step_file(step_path);
-    bridge_log("loadcase: STEP imported; voxelizing");
-    topopt::VoxelGrid grid = topopt::voxelize(model.mesh, resolution);
-    bridge_log("loadcase: voxelized " + grid_summary(grid));
+    bridge_log("loadcase: STEP imported; building shared production setup");
 
-    // Anchors -> Fixture (clamped + retained). Snapshot the anchors-only grid as
-    // the clean base for per-group traction, so each group's traction covers ONLY
-    // its own faces (traction_loads spreads a force over every Load voxel it sees).
-    for (int32_t fid : load_case.anchor_face_ids)
-      topopt::tag_step_face(grid, model, fid, topopt::VoxelTag::Fixture);
-    const topopt::VoxelGrid base_grid = grid;
-
-    std::vector<topopt::NodalLoad> external;
-    // M7.anchor-integrity (FIX 1): the load faces actually retained on the main
-    // grid (the non-zero groups), collected so their structural pad is frozen
-    // alongside the anchors' below. Mirrors exactly the faces tagged Load at the
-    // "retain the load faces" step, so no zero-force / empty group is padded.
-    std::vector<int32_t> retained_load_faces;
-    const std::size_t group_count = load_case.load_group_sizes.size();
-    std::size_t face_off = 0;
-    for (std::size_t g = 0; g < group_count; ++g) {
-      const std::size_t n = static_cast<std::size_t>(load_case.load_group_sizes[g]);
-      const topopt::Vec3 force{
-          3 * g + 0 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 0] : 0.0,
-          3 * g + 1 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 1] : 0.0,
-          3 * g + 2 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 2] : 0.0};
-      // The face ids of this group (a slice of the flattened load_face_ids).
-      std::vector<int32_t> faces;
-      for (std::size_t f = 0; f < n && face_off + f < load_case.load_face_ids.size(); ++f)
-        faces.push_back(load_case.load_face_ids[face_off + f]);
-      face_off += n;
-      if (!(std::fabs(force.x) + std::fabs(force.y) + std::fabs(force.z) > 0.0))
-        continue;  // a zero-force group contributes nothing
-      topopt::VoxelGrid gg = base_grid;  // anchors only, no other group's Load
-      bool any = false;
-      for (int32_t fid : faces)
-        if (topopt::tag_step_face(gg, model, fid, topopt::VoxelTag::Load) > 0)
-          any = true;
-      if (!any) continue;
-      const std::vector<topopt::NodalLoad> tl =
-          topopt::traction_loads(gg, topopt::VoxelTag::Load, force);
-      external.insert(external.end(), tl.begin(), tl.end());
-      // Retain the load faces on the MAIN grid (Load voxels are implicitly
-      // FrozenSolid, so the surface the traction sits on is never optimized away).
-      for (int32_t fid : faces) {
-        topopt::tag_step_face(grid, model, fid, topopt::VoxelTag::Load);
-        retained_load_faces.push_back(fid);
+    // Map the flat BridgeLoadCase to the front-end-neutral ProductionLoadCase and
+    // hand it to build_production_loadcase — the SINGLE grid/BC/options builder the
+    // CLI also calls, so the app and topopt-cli produce the same design for the
+    // same STEP + load case + resolution (handoff 093). The flattened load groups
+    // (group g's faces are the load_group_sizes[g] entries of load_face_ids after
+    // the earlier groups', its force load_forces[3g..3g+2]) unflatten here.
+    topopt::ProductionLoadCase lc;
+    lc.anchor_face_ids.assign(load_case.anchor_face_ids.begin(),
+                              load_case.anchor_face_ids.end());
+    {
+      const std::size_t group_count = load_case.load_group_sizes.size();
+      std::size_t face_off = 0;
+      for (std::size_t g = 0; g < group_count; ++g) {
+        topopt::ProductionLoadCase::LoadGroup lg;
+        lg.force = topopt::Vec3{
+            3 * g + 0 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 0] : 0.0,
+            3 * g + 1 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 1] : 0.0,
+            3 * g + 2 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 2] : 0.0};
+        const std::size_t n = static_cast<std::size_t>(load_case.load_group_sizes[g]);
+        for (std::size_t f = 0; f < n && face_off + f < load_case.load_face_ids.size(); ++f)
+          lg.face_ids.push_back(load_case.load_face_ids[face_off + f]);
+        face_off += n;
+        lc.load_groups.push_back(std::move(lg));
       }
     }
-
-    // Dirichlet BCs from the Fixture voxels (clamp all 8 corner nodes, deduped).
-    std::vector<topopt::DirichletBC> bcs;
-    std::set<int> clamped;
-    auto clamp_node = [&](int n) {
-      if (clamped.insert(n).second) {
-        bcs.push_back({n, 0, 0.0});
-        bcs.push_back({n, 1, 0.0});
-        bcs.push_back({n, 2, 0.0});
-      }
-    };
-    bool any_fixture = false;
-    for (int k = 0; k < grid.nz; ++k)
-      for (int j = 0; j < grid.ny; ++j)
-        for (int i = 0; i < grid.nx; ++i)
-          if (grid.tag(i, j, k) == topopt::VoxelTag::Fixture) {
-            any_fixture = true;
-            for (int dk = 0; dk <= 1; ++dk)
-              for (int dj = 0; dj <= 1; ++dj)
-                for (int di = 0; di <= 1; ++di)
-                  clamp_node(
-                      topopt::fea_node_index(grid, i + di, j + dj, k + dk));
-          }
-    if (!any_fixture) {
-      // No anchors declared: fall back to clamping the min-x boundary so the
-      // system is well-posed (mirrors run_minimize_plastic).
-      for (int k = 0; k < grid.nz; ++k)
-        for (int j = 0; j < grid.ny; ++j)
-          if (grid.solid(0, j, k))
-            grid.set_tag(0, j, k, topopt::VoxelTag::Fixture);
-      for (int c = 0; c <= grid.nz; ++c)
-        for (int b = 0; b <= grid.ny; ++b)
-          clamp_node(topopt::fea_node_index(grid, 0, b, c));
-    }
-
-    topopt::MaterialLibrary lib = topopt::load_materials_file(materials_path);
-    auto it = lib.find(material_name);
-    if (it == lib.end()) {
-      err.ok = false;
-      err.message = "material not found: " + material_name;
-      return OptimizeResult{};
-    }
-    topopt::SettingsRules rules = topopt::load_settings_rules_file(rules_path);
-
-    // Build direction (orientation for the interlayer margin); default +Z.
-    topopt::Vec3 build_dir{load_case.build_dir_x, load_case.build_dir_y,
-                           load_case.build_dir_z};
-    if (!(std::fabs(build_dir.x) + std::fabs(build_dir.y) +
-              std::fabs(build_dir.z) >
-          0.0))
-      build_dir = topopt::Vec3{0.0, 0.0, 1.0};
-
-    std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
-    topopt::MinimizePlasticOptions opts;
-    opts.cancel = &cancelled;
-    // Production runs use the MATRIX-FREE geometric-multigrid accelerator (handoff
-    // 072/073/078 + design-box on-device fix): it solves the identical system to
-    // the same tolerance and falls back to exact Jacobi-CG if a hierarchy is not
-    // applicable, so the result is always correct. Matrix-free never assembles the
-    // fine stiffness K, whose ~7 GB peak was the design-box std::bad_alloc; the
-    // design-box grid is padded to coarsening-friendly dims so multigrid actually
-    // engages (an odd axis otherwise falls back to an effectively-hung Jacobi-CG).
-    // The library default stays JacobiCG so Gate-V2 and the locked reference are
-    // untouched. This is the flip.
-    opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
-    // Galerkin block cache (handoff 090): the coarse-operator build recomputes the
-    // same 8 geometric blocks W^T Ke W ~638,000 times per solve; this caches them
-    // once per parity colour (the colour m.elems is already sorted by). It is a
-    // pure compute saving, BIT-IDENTICAL — measured 0 differing DOFs of 2,286,387,
-    // same 94 iterations, peak RSS unchanged (the cache is 36 KB) — so the field,
-    // the sensitivities that drive growth, and every accept/reject decision are
-    // unchanged. Measured build 7.81 -> 3.73 s (2.09x), solve 16.40 -> 12.21 s
-    // (1.34x) on the real design-box case. This is a GLOBAL (an atomic), not a
-    // per-call SimpOptions field: it is set here, at the production entry point,
-    // exactly like SolverKind above, so it stays confined to the app process and
-    // never touches the library default. Gate-V2 and the CLI run JacobiCG, which
-    // never builds a matrix-free hierarchy, so this setter is a no-op for them even
-    // if reached — and it is not: the core reference process never links bridge.cpp.
-    topopt::fea_set_matfree_galerkin_block_cache(true);
-    opts.external_loads = external;  // the user's load case (mode a); empty => self-weight
-    // gravity_direction defines the reported build orientation = its unit negation.
-    opts.gravity_direction =
-        topopt::Vec3{-build_dir.x, -build_dir.y, -build_dir.z};
-    opts.gravity = 9810.0 * 1e-9;  // self-weight magnitude, used only if external is empty
-    opts.volume_fraction_ladder = load_case.minimize_plastic
-                                      ? reduction_ladder()
-                                      : std::vector<double>{0.9};
-
-    // M7.anchor-integrity (FIX 1): freeze an N-voxel structural PAD behind every
-    // anchor and (retained) load face, not just the 1-voxel BC skin tag_step_face
-    // produces. mask_step_face marks the first kAnchorPadDepthVoxels solid layers
-    // FrozenSolid; minimize_plastic pins them to density 1 and keeps them out of
-    // the design, so the anchor boss + hole bosses are tied into the body and the
-    // optimizer must route load through them instead of carving them away
-    // (diagnosis 064). Composes with the M1.6 Load/Fixture tags (still forced
-    // FrozenSolid by the core), so the mask only ADDS keep-in pad voxels. Only the
-    // loadcase (recommendation-ladder) path pads; the fixed single-fraction
-    // preview (minimize_plastic == false) is left untouched.
-    //
-    // M7.anchor-integrity on the box path (handoff 082): build the pad on BOTH the
-    // no-box AND the design-box path. The old code skipped it under a design box on
-    // the assumption that "expand_design_domain freezes EVERY imported-part solid
-    // voxel as FrozenSolid, so the bosses are already tied into the frozen body."
-    // Handoff 080 (whole-domain optimize, freeze_imported_part == false — now the
-    // box default) made the imported part Active/REMOVABLE: only the 1-voxel
-    // Load/Fixture BC skin is pinned, and the optimizer can carve the boss behind an
-    // anchor thin. So that assumption is FALSE and the pad IS needed here. The pad is
-    // built on the PART grid (mask_step_face walks the part's solid layers); the core
-    // remaps it onto the expanded grid by the same offset it applies to the BCs/loads
-    // and merges it into the effective mask (minimize_plastic, design_box +
-    // design_mask are now compatible on the whole-domain path). The ladder floor
-    // (FIX 2) is orthogonal and applies either way.
-    if (load_case.minimize_plastic) {
-      topopt::DesignMask pad = topopt::make_active_mask(grid);
-      for (int32_t fid : load_case.anchor_face_ids)
-        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                               kAnchorPadDepthVoxels, pad);
-      for (int32_t fid : retained_load_faces)
-        topopt::mask_step_face(grid, model, fid, topopt::MaskValue::FrozenSolid,
-                               kAnchorPadDepthVoxels, pad);
-      opts.design_mask = std::move(pad);
-      // M7.anchor-integrity (FIX 2) WITHDRAWN — the ladder floor is no longer set
-      // here; opts.margin_floor_multiple keeps its +infinity default (disabled), so
-      // the ladder walks to the lightest safe rung on BOTH the no-box and box paths.
-      // See the constant's comment above and docs/handoffs/084-ladder-collapse-diagnosis-*.
-    }
-
-    // M7.dom-app: the design-domain expansion. When the app defined a design box,
-    // hand it (and any keep-outs) to the core so the optimizer voxelizes onto the
-    // larger grid and grows material into the box beyond the frozen import
-    // (dom-core expand_design_domain). Model space matches the voxel/mesh frame, so
-    // the box coordinates pass straight through. Left unset → BYTE-IDENTICAL to the
-    // pre-M7.dom-app run (the default no-box path).
+    lc.minimize_plastic = load_case.minimize_plastic;
+    lc.build_dir = topopt::Vec3{load_case.build_dir_x, load_case.build_dir_y,
+                                load_case.build_dir_z};
+    lc.infill_percent = static_cast<double>(load_case.infill_percent);
+    lc.has_design_box = load_case.has_design_box;
     if (load_case.has_design_box) {
-      topopt::DesignBox db;
-      db.min = topopt::Vec3{load_case.design_box_min_x, load_case.design_box_min_y,
-                            load_case.design_box_min_z};
-      db.max = topopt::Vec3{load_case.design_box_max_x, load_case.design_box_max_y,
-                            load_case.design_box_max_z};
-      opts.design_box = db;
+      lc.design_box.min = topopt::Vec3{load_case.design_box_min_x,
+                                       load_case.design_box_min_y,
+                                       load_case.design_box_min_z};
+      lc.design_box.max = topopt::Vec3{load_case.design_box_max_x,
+                                       load_case.design_box_max_y,
+                                       load_case.design_box_max_z};
       const std::size_t kn =
           std::min(load_case.keep_out_min.size(), load_case.keep_out_max.size()) / 3;
       for (std::size_t b = 0; b < kn; ++b) {
@@ -841,71 +646,49 @@ OptimizeResult run_minimize_plastic_loadcase(
         ko.max = topopt::Vec3{load_case.keep_out_max[3 * b + 0],
                               load_case.keep_out_max[3 * b + 1],
                               load_case.keep_out_max[3 * b + 2]};
-        opts.keep_out_boxes.push_back(ko);
+        lc.keep_out_boxes.push_back(ko);
       }
     }
 
-    enable_projection(opts);   // M6.3 crisp density
-    opts.keyframe_count = 12;   // optimization-history playback
-    // M7.infill-margin — feed the user's infill-density override into the ladder
-    // acceptance-gate knockdown. load_case.infill_percent is a PERCENT in [0, 100],
-    // or < 0 for "no override" (use the M5.1 recommendation, i.e. no knockdown).
-    // The core defaults opts.infill_percent to 100 (solid => knockdown 1.0 =>
-    // current behavior EXACTLY), so only forward an actual override; a negative
-    // value leaves the default untouched. This scales ONLY the acceptance margin —
-    // infill never enters the FEA (ARCHITECTURE §2 unchanged); see
-    // minimize_plastic infill_margin_knockdown().
-    if (load_case.infill_percent >= 0)
-      opts.infill_percent = static_cast<double>(load_case.infill_percent);
-    opts.progress = [&](std::size_t r, std::size_t rc, int iter) {
+    topopt::ProductionRunSetup setup =
+        topopt::build_production_loadcase(model, resolution, lc);
+    bridge_log("loadcase: setup built; part " + grid_summary(setup.grid));
+
+    // Front-end wiring the shared builder deliberately leaves to the caller:
+    // cancellation, playback keyframes (viz only), the progress relay and the
+    // progressive-variant stream. None of these change the design.
+    std::atomic<bool> cancelled{cancel_flag != nullptr && *cancel_flag};
+    setup.options.cancel = &cancelled;
+    setup.options.keyframe_count = 12;  // optimization-history playback (viz only)
+    setup.options.progress = [&](std::size_t r, std::size_t rc, int iter) {
       if (progress != nullptr)
         progress(ctx, static_cast<uint64_t>(r), static_cast<uint64_t>(rc), iter);
       if (cancel_flag != nullptr && *cancel_flag) cancelled.store(true);
     };
+    set_variant_stream(setup.options, setup.solved_grid, variant_fn, variant_ctx);
 
-    // M7.dom-app: which grid the RESULT arrays live on. minimize_plastic takes the
-    // PART grid and (when design_box is set) expands INTERNALLY, so every variant's
-    // mesh, von-Mises/displacement field and playback are indexed to the EXPANDED
-    // grid. The reported grid metadata (dims/origin/spacing — used by the app to
-    // sample the grid-indexed fields at a mesh vertex) must therefore describe that
-    // grid, not the part grid. Ask the solver which grid it will solve on rather
-    // than re-deriving the expansion here: minimize_plastic_solved_grid runs the
-    // SAME expand_design_domain call the driver runs (options.freeze_imported_part,
-    // kDesignBoxCoarsenAlign — no defaults to drift out of sync), and the value it
-    // returns equals the mp.solved_grid the driver reports below, voxel-for-voxel.
-    // We need it up front because the progressive-variant stream is registered on
-    // `opts` (below) BEFORE minimize_plastic returns, so it must carry the correct
-    // grid at registration time. With no design box the solved grid IS the part
-    // grid (byte-identical default). Held in a named local: set_variant_stream
-    // captures it by reference for the duration of the solve.
-    const topopt::VoxelGrid result_grid =
-        topopt::minimize_plastic_solved_grid(grid, opts);
-
-    set_variant_stream(opts, result_grid, variant_fn, variant_ctx);  // progressive results
+    topopt::MaterialLibrary lib = topopt::load_materials_file(materials_path);
+    auto it = lib.find(material_name);
+    if (it == lib.end()) {
+      err.ok = false;
+      err.message = "material not found: " + material_name;
+      return OptimizeResult{};
+    }
+    topopt::SettingsRules rules = topopt::load_settings_rules_file(rules_path);
 
     // The last checkpoint before the solve: if the device log stops here, the
-    // stall is INSIDE minimize_plastic (the first FEA solve runs before the first
-    // progress tick), not in the app-side setup. Report the exact system size and
-    // BC/load counts handed to the solver — an empty external set means the run
-    // fell back to self-weight + a min-x clamp (see any_fixture above).
-    //
-    // When a design box is set, minimize_plastic solves on the EXPANDED grid
-    // (`result_grid`), not the part grid — and that expanded grid is the diagnosed
-    // trigger (odd dims force the Jacobi-CG fallback over a large soft-void domain).
-    // Log both so the device console shows the grid that actually hangs.
+    // stall is INSIDE minimize_plastic. Report the grid the solver actually runs
+    // on (the expanded domain when a design box is set) plus BC/load counts.
     bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG_Matfree)")
                + " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0)
-               + " part " + grid_summary(grid)
-               + (load_case.has_design_box ? " | SOLVED-ON expanded " + grid_summary(result_grid)
+               + " part " + grid_summary(setup.grid)
+               + (load_case.has_design_box ? " | SOLVED-ON expanded " + grid_summary(setup.solved_grid)
                                            : std::string(" | SOLVED-ON part grid"))
-               + " nodal_loads=" + std::to_string(external.size())
-               + " dirichlet_bcs=" + std::to_string(bcs.size()));
+               + " nodal_loads=" + std::to_string(setup.options.external_loads.size())
+               + " dirichlet_bcs=" + std::to_string(setup.bcs.size()));
     topopt::MinimizePlasticResult mp = topopt::minimize_plastic(
-        grid, it->second, material_name, bcs, rules, opts);
-    // Report the grid the driver ACTUALLY solved on (mp.solved_grid), not the
-    // up-front derivation: they are equal by construction, but sourcing the final
-    // metadata straight from the result closes any remaining gap between the grid
-    // the fields are indexed to and the grid metadata the app samples them with.
+        setup.grid, it->second, material_name, setup.bcs, rules, setup.options);
+    // Report the grid the driver ACTUALLY solved on (mp.solved_grid).
     result = to_optimize_result(mp, mp.solved_grid);
     bridge_log("loadcase: minimize_plastic returned variants=" +
                std::to_string(result.variants.size()) +

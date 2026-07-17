@@ -19,14 +19,25 @@
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/settings.hpp"
+#include "topopt/version.hpp"
+
+// A build fingerprint (typically the core git commit SHA), injected by CMake. A
+// LAN worker exposes it via /health so the iPad app can REFUSE a worker whose
+// core differs from its own — the version-skew guard (handoff 093 STEP 3d): two
+// cores that differ silently produce different parts. Defaults to "dev" for an
+// un-instrumented local build.
+#ifndef TOPOPT_BUILD_FINGERPRINT
+#define TOPOPT_BUILD_FINGERPRINT "dev"
+#endif
 
 namespace {
 
 int usage(const char* argv0) {
   std::fprintf(stderr,
                "usage: %s run <job.json> [--out DIR] [--materials PATH] "
-               "[--rules PATH]\n",
-               argv0);
+               "[--rules PATH]\n"
+               "       %s --version\n",
+               argv0, argv0);
   return 2;
 }
 
@@ -40,6 +51,13 @@ std::string dirname_of(const std::string& path) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // Version / build fingerprint, one parseable line, for the worker /health probe.
+  if (argc >= 2 &&
+      (std::string(argv[1]) == "--version" || std::string(argv[1]) == "version")) {
+    std::printf("topopt-cli version=%s fingerprint=%s\n", topopt::version(),
+                TOPOPT_BUILD_FINGERPRINT);
+    return 0;
+  }
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";
@@ -66,8 +84,11 @@ int main(int argc, char** argv) {
     const topopt::SettingsRules rules =
         topopt::load_settings_rules_file(rules_path);
 
-    const topopt::RunJobResult result =
-        topopt::run_job(job, dirname_of(job_path), out_dir, materials, rules);
+    // emit_progress = true: stream PROGRESS/VARIANT checkpoint lines to stdout and
+    // export each accepted variant as it completes, so a wrapper (the LAN worker,
+    // handoff 093) can forward live progress + progressive artifacts.
+    const topopt::RunJobResult result = topopt::run_job(
+        job, dirname_of(job_path), out_dir, materials, rules, /*emit_progress=*/true);
 
     std::printf("model: %s (%d B-rep faces, %zu fixture faces matched)\n",
                 job.model.c_str(), result.model.face_count,
