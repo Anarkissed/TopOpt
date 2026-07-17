@@ -567,6 +567,20 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     // The library default stays JacobiCG so Gate-V2 and the locked reference are
     // untouched. This is the flip.
     opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
+    // Galerkin block cache (handoff 090): the coarse-operator build recomputes the
+    // same 8 geometric blocks W^T Ke W ~638,000 times per solve; this caches them
+    // once per parity colour (the colour m.elems is already sorted by). It is a
+    // pure compute saving, BIT-IDENTICAL — measured 0 differing DOFs of 2,286,387,
+    // same 94 iterations, peak RSS unchanged (the cache is 36 KB) — so the field,
+    // the sensitivities that drive growth, and every accept/reject decision are
+    // unchanged. Measured build 7.81 -> 3.73 s (2.09x), solve 16.40 -> 12.21 s
+    // (1.34x) on the real design-box case. This is a GLOBAL (an atomic), not a
+    // per-call SimpOptions field: it is set here, at the production entry point,
+    // exactly like SolverKind above, so it stays confined to the app process and
+    // never touches the library default. Gate-V2 and the CLI run JacobiCG, which
+    // never builds a matrix-free hierarchy, so this setter is a no-op for them even
+    // if reached — and it is not: the core reference process never links bridge.cpp.
+    topopt::fea_set_matfree_galerkin_block_cache(true);
     // Self-weight body load in mm-MPa-consistent units. The material density from
     // materials.json is g/cm^3 and lengths are mm, so density*gravity must be in
     // N/mm^3: fold the g/cm^3 -> t/mm^3 factor (1e-9) into standard gravity in
@@ -742,6 +756,20 @@ OptimizeResult run_minimize_plastic_loadcase(
     // The library default stays JacobiCG so Gate-V2 and the locked reference are
     // untouched. This is the flip.
     opts.simp.solver = topopt::SolverKind::MultigridCG_Matfree;
+    // Galerkin block cache (handoff 090): the coarse-operator build recomputes the
+    // same 8 geometric blocks W^T Ke W ~638,000 times per solve; this caches them
+    // once per parity colour (the colour m.elems is already sorted by). It is a
+    // pure compute saving, BIT-IDENTICAL — measured 0 differing DOFs of 2,286,387,
+    // same 94 iterations, peak RSS unchanged (the cache is 36 KB) — so the field,
+    // the sensitivities that drive growth, and every accept/reject decision are
+    // unchanged. Measured build 7.81 -> 3.73 s (2.09x), solve 16.40 -> 12.21 s
+    // (1.34x) on the real design-box case. This is a GLOBAL (an atomic), not a
+    // per-call SimpOptions field: it is set here, at the production entry point,
+    // exactly like SolverKind above, so it stays confined to the app process and
+    // never touches the library default. Gate-V2 and the CLI run JacobiCG, which
+    // never builds a matrix-free hierarchy, so this setter is a no-op for them even
+    // if reached — and it is not: the core reference process never links bridge.cpp.
+    topopt::fea_set_matfree_galerkin_block_cache(true);
     opts.external_loads = external;  // the user's load case (mode a); empty => self-weight
     // gravity_direction defines the reported build orientation = its unit negation.
     opts.gravity_direction =
