@@ -128,8 +128,7 @@ for it** and CI's vcpkg OCCT is unaffected.
 
 After STEP 0, the maintainer can run Fine+box headless, before any network work.
 The CLI now supports a design box (both self-weight and load-case modes), raw
-B-rep face ids (the app's selection form) as well as geometric selectors, and STL
-or STEP input.
+B-rep face ids (the app's selection form) as well as geometric selectors, and STEP input (STL import is planned but not yet wired — run_job currently imports STEP only).
 
 **Command:**
 ```sh
