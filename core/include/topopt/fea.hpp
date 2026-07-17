@@ -464,6 +464,47 @@ std::size_t fea_matfree_operator_storage_doubles();
 // affects the computed field. Thread-global (not per-call).
 int fea_set_matfree_threads(int n);
 
+// Enable the GALERKIN BLOCK CACHE in the matrix-free multigrid's coarse-operator
+// build (handoff 090). OPT-IN, DEFAULT OFF; returns the previous setting.
+//
+// WHY (measured, handoff 090 STEP 1). On the design box ~94% of the elements are
+// soft void (rho == rho_min) that the optimizer may later grow into. After 085's
+// SIMD+threaded apply the matvec is no longer where that costs: it is the
+// hierarchy build, rebuilt on EVERY solve (i.e. every MMA iteration) — 7.8 s of a
+// 16.4 s solve on the real 96x80x96 case, of which the numeric pass is ~80%, and
+// ~91% of that is near-void elements. That numeric pass forms each element's
+// Galerkin block S = W^T Ke W, and S is a purely GEOMETRIC quantity: W comes from
+// the trilinear prolongation stencil, Ke is the single reference element
+// stiffness, and the element's modulus enters ONLY afterwards as the scalar
+// `factor * S`. A near-void element therefore costs the build EXACTLY as much as
+// a solid one — the waste is not near-zero arithmetic that could be skipped for
+// being small, it is the same handful of blocks recomputed ~638,000 times.
+//
+// WHAT. axis_weights is parity-based and translation-invariant, so for any
+// element whose 24 fine DOFs are all free and whose 8 coarse nodes are all active
+// ("generic" — the overwhelming interior majority, void and solid alike), W — and
+// hence S — depends ONLY on the parity of (i,j,k). That parity is exactly the
+// existing 8-colour key the element table is already sorted by. The cache
+// computes S ONCE per colour and reuses it for every generic element of that
+// colour; non-generic elements (BC-fixed or void-gated DOFs at the boundary) fall
+// back to the full per-element computation.
+//
+// SAME ANSWER, BIT-FOR-BIT. This changes only HOW S is obtained, never its value:
+// the cached S is the same arithmetic on the same inputs, the element loop order
+// and the per-(i,j) add order are unchanged, and each element still scales by its
+// OWN factor. A1 is bit-identical, so the V-cycle, the iteration count and the
+// solved field are identical — this is a pure compute saving, not an
+// approximation. Measured on that case: build 7.8 s -> 3.7 s, solve 16.4 s ->
+// 12.2 s, SAME 94 iterations, peak RSS unchanged (the cache is 36 KB).
+//
+// GROWTH IS UNTOUCHED. Nothing is skipped, frozen, coarsened away or thresholded:
+// every element — including every near-void one — remains fully represented in
+// both the exact matrix-free fine operator and in A1. The fine operator (which
+// alone determines the field, and hence the sensitivities that tell the optimizer
+// where to grow) is not touched at all. There is no region to "re-activate"
+// because no region is ever deactivated.
+bool fea_set_matfree_galerkin_block_cache(bool enable);
+
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
 // stress at its Hex8 element centroid, recovered from the displacement solution

@@ -239,6 +239,18 @@ inline void parallel_ranges(int begin, int end, int nthreads,
 
 int mf_set_thread_count(int n) { return g_mf_threads.exchange(n); }
 
+// Galerkin block cache toggle (handoff 090). Opt-in, DEFAULT OFF, so the
+// pre-090 build path is what runs unless a caller asks for the cache.
+namespace {
+std::atomic<bool> g_mf_galerkin_block_cache{false};
+}
+bool mf_set_galerkin_block_cache(bool enable) {
+  return g_mf_galerkin_block_cache.exchange(enable);
+}
+bool mf_galerkin_block_cache_enabled() {
+  return g_mf_galerkin_block_cache.load();
+}
+
 int mf_thread_count() {
   int n = g_mf_threads.load();
   if (n <= 0) {
@@ -641,6 +653,10 @@ std::size_t fea_matfree_operator_storage_doubles() {
 }
 
 int fea_set_matfree_threads(int n) { return fea_detail::mf_set_thread_count(n); }
+
+bool fea_set_matfree_galerkin_block_cache(bool enable) {
+  return fea_detail::mf_set_galerkin_block_cache(enable);
+}
 
 FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                  double poisson,
