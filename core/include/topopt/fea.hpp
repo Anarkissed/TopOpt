@@ -505,6 +505,40 @@ int fea_set_matfree_threads(int n);
 // because no region is ever deactivated.
 bool fea_set_matfree_galerkin_block_cache(bool enable);
 
+// Enable the MIXED-PRECISION V-cycle in the matrix-free multigrid (handoff 092).
+// OPT-IN, DEFAULT OFF; returns the previous setting. Thread-global, safe to change
+// between solves; it never affects correctness, only iteration count.
+//
+// WHY (Kronbichler, Ljungkvist et al. 2019, "Fast matrix-free multigrid": a
+// single-precision geometric-multigrid V-cycle preconditioning a double-precision
+// Krylov solver, reported 47%-83% faster with comparable discretization error).
+// TopOpt's matrix-free matvec is BANDWIDTH-bound (the 24-DOF gather/scatter over
+// the ~2.29M-DOF field dominates; the 24x24 reference Ke stays in L1), so halving
+// the bytes moved by the V-cycle's fine apply, Jacobi smoother, restriction and
+// prolongation is close to halving their time. Of the four fine applies per CG
+// iteration, three are inside the V-cycle (both Jacobi sweeps + the residual) and
+// so become FP32; only the one CG operator apply stays FP64.
+//
+// WHY IT IS SAFE. The V-cycle is only the PRECONDITIONER. The outer CG — residual,
+// dot products, alpha/beta, x/r/p AND the convergence test ||b - A x||/||b|| <= tol
+// — is FP64 throughout, and the CG operator apply A*p is FP64. A sloppier
+// preconditioner can only cost ITERATIONS, never accuracy: "larger round-off
+// errors in the multigrid cycle can be tolerated since multigrid is only a
+// preconditioner applied to the residual of the outer Krylov solver." The coarse
+// direct solve (SimplicialLDLT, <= a few thousand DOFs) stays FP64 for robustness;
+// its time/memory saving would be negligible. The format is converted on entering
+// and exiting the V-cycle.
+//
+// NOT BIT-IDENTICAL, BY DESIGN. FP32 is genuinely different arithmetic, so the
+// preconditioner really differs and the CG iteration count moves — expected, and
+// unlike every other matrix-free lever this one is NOT held to bit-parity. The
+// guard is instead: the FP32 path converges to the SAME field as the FP64 path
+// DOF-for-DOF within max|du|/max|u| <= 1e-6 (solid AND the rho_min^p=1e-9 soft-void
+// graded grid), in a bounded number of extra iterations, and falls back to the
+// exact path if it ever fails to converge in budget. The FP64 matrix-free path and
+// the assembled path are untouched and stay byte-identical (078's parity intact).
+bool fea_set_matfree_mixed_precision(bool enable);
+
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
 // stress at its Hex8 element centroid, recovered from the displacement solution

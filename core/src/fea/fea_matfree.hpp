@@ -68,6 +68,15 @@ int mf_thread_count();  // effective count actually used (>= 1)
 bool mf_set_galerkin_block_cache(bool enable);
 bool mf_galerkin_block_cache_enabled();
 
+// Mixed-precision V-cycle toggle (handoff 092; public face:
+// fea_set_matfree_mixed_precision). Opt-in, DEFAULT OFF. Read by the matrix-free
+// multigrid solve in multigrid.cpp: when ON the V-cycle PRECONDITIONER runs in
+// FP32 (fine apply, Jacobi smoother, restriction, prolongation) while the OUTER CG
+// stays FP64 (residual, dot products, x/r/p, the convergence test) and the coarse
+// direct solve stays FP64. The FP64 path is byte-unchanged when OFF.
+bool mf_set_mixed_precision(bool enable);
+bool mf_mixed_precision_enabled();
+
 // y = K x over the FULL global stiffness, element-by-element, COLOUR by COLOUR in
 // fixed order; each colour's elements are apply'd (optionally across threads, no
 // races). `x` and `y` are full ndof vectors; `y` is overwritten (zeroed) then
@@ -76,6 +85,14 @@ bool mf_galerkin_block_cache_enabled();
 void mf_apply_full(const std::vector<MfElem>& elems,
                    const std::vector<int>& color_offsets, const Hex8Stiffness& Ke,
                    const std::vector<double>& x, std::vector<double>& y);
+
+// Single-precision twin of mf_apply_full (mixed-precision V-cycle, handoff 092).
+// Same 8-colour fixed-order, race-free threading, so it is deterministic and
+// bit-identical across thread counts; only the arithmetic width is FP32.
+void mf_apply_full_f32(const std::vector<MfElem>& elems,
+                       const std::vector<int>& color_offsets,
+                       const Hex8Stiffness& Ke, const std::vector<float>& x,
+                       std::vector<float>& y);
 
 // The reduced, void-gated system in matrix-free form. `kept_global[kg]` is the
 // global DOF of surviving free DOF kg; `apply_kgg` realises y_g = K_gg x_g by
@@ -95,6 +112,9 @@ struct MatfreeReduced {
   std::vector<double> invdiag;      // ng Jacobi inverse diagonal (matrix-free)
   // Reused full-length scratch for the matvec.
   mutable std::vector<double> xfull, yfull;
+  // Reused full-length FP32 scratch for the mixed-precision matvec, sized lazily
+  // on first use so the FP64-only path never allocates it (handoff 092).
+  mutable std::vector<float> xfull_f, yfull_f;
 
   void apply_kgg(const std::vector<double>& xg, std::vector<double>& yg) const;
   // Raw-pointer core of apply_kgg: yg[0..ng) = K_gg xg[0..ng). `xg` and `yg` must
@@ -104,6 +124,9 @@ struct MatfreeReduced {
   // the caller's buffers across CG/V-cycle iterations. Same arithmetic (and thus
   // same result, bit-for-bit) as the std::vector overload.
   void apply_kgg_raw(const double* xg, double* yg) const;
+  // FP32 core of the reduced matvec: yg[0..ng) = K_gg xg[0..ng), driven off
+  // contiguous float storage (handoff 092). Same operator, single precision.
+  void apply_kgg_raw_f32(const float* xg, float* yg) const;
 };
 
 // Build the matrix-free reduced system. Mirrors assemble_reduced + the M3.1 gate

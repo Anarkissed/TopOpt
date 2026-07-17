@@ -119,6 +119,68 @@ inline void apply_one_element(const MfElem& el, const double* KeCM,
     y[static_cast<std::size_t>(el.edof[r])] += el.factor * res[r];
 }
 
+// --- SINGLE-PRECISION apply kernel (mixed-precision V-cycle, handoff 092) ------
+//
+// The FP32 twin of axpy24/apply_one_element, used ONLY inside the mixed-precision
+// multigrid V-cycle (the preconditioner). The outer CG — residual, dot products,
+// x/r/p, the convergence test — stays FP64 and drives the FP64 kernel above; this
+// float kernel never touches the correctness-defining residual. Halving the bytes
+// moved per element (24 float loads/stores vs 24 double) is the bandwidth win the
+// task targets: the apply is memory-bound on x/y, and Ke stays in L1 either way.
+//
+// DETERMINISM is preserved exactly as in the FP64 kernel: the 8-colour partition
+// still guarantees each node is written by exactly one element per colour, so a
+// node's (<=8) contributions accumulate in strict colour order independent of
+// thread count; within an element the terms sum in ascending-c order. Float add is
+// non-associative, but the ORDER is fixed, so the result is bit-identical for 1 vs
+// N threads and run-to-run. Plain mul+add (never FMA), matching axpy24, so no lane
+// depends on the compiler's fp-contraction setting.
+inline void axpy24_f32(float* acc, float w, const float* col) {
+#if defined(__ARM_NEON)
+  const float32x4_t wv = vdupq_n_f32(w);
+  for (int r = 0; r < kDof; r += 4) {
+    float32x4_t a = vld1q_f32(acc + r);
+    a = vaddq_f32(a, vmulq_f32(wv, vld1q_f32(col + r)));  // mul+add, no FMA
+    vst1q_f32(acc + r, a);
+  }
+#elif defined(__SSE2__)
+  const __m128 wv = _mm_set1_ps(w);
+  for (int r = 0; r < kDof; r += 4) {
+    __m128 a = _mm_loadu_ps(acc + r);
+    a = _mm_add_ps(a, _mm_mul_ps(wv, _mm_loadu_ps(col + r)));  // mul+add, no FMA
+    _mm_storeu_ps(acc + r, a);
+  }
+#else
+  for (int r = 0; r < kDof; ++r) acc[r] += w * col[r];
+#endif
+}
+
+// Column-major FLOAT copy of the reference block: KeCM[c*24+r] = float(Ke[r][c]).
+// The reference Ke is a geometric constant (576 doubles); rounding it to float once
+// per apply is negligible and keeps the hot loop reading contiguous float columns.
+inline void build_ke_colmajor_f32(const Hex8Stiffness& Ke, float* KeCM) {
+  for (int r = 0; r < kDof; ++r)
+    for (int c = 0; c < kDof; ++c)
+      KeCM[static_cast<std::size_t>(c) * kDof + r] =
+          static_cast<float>(Ke.k[static_cast<std::size_t>(r) * kDof + c]);
+}
+
+inline void apply_one_element_f32(const MfElem& el, const float* KeCM,
+                                  const std::vector<float>& x,
+                                  std::vector<float>& y) {
+  alignas(16) float ul[kDof];
+  alignas(16) float res[kDof];
+  for (int r = 0; r < kDof; ++r) {
+    ul[r] = x[static_cast<std::size_t>(el.edof[r])];
+    res[r] = 0.0f;
+  }
+  for (int c = 0; c < kDof; ++c)
+    axpy24_f32(res, ul[c], &KeCM[static_cast<std::size_t>(c) * kDof]);
+  const float f = static_cast<float>(el.factor);
+  for (int r = 0; r < kDof; ++r)
+    y[static_cast<std::size_t>(el.edof[r])] += f * res[r];
+}
+
 // Requested worker-thread count (0 = auto). Global, set once per run; the apply
 // reads it. Determinism does NOT depend on it (colour partition), so it is a pure
 // performance knob.
@@ -251,6 +313,19 @@ bool mf_galerkin_block_cache_enabled() {
   return g_mf_galerkin_block_cache.load();
 }
 
+// Mixed-precision V-cycle toggle (handoff 092). Opt-in, DEFAULT OFF: the FP64
+// matrix-free multigrid path is what runs — byte-identical, 078 parity intact —
+// unless a caller asks for the single-precision V-cycle.
+namespace {
+std::atomic<bool> g_mf_mixed_precision{false};
+}
+bool mf_set_mixed_precision(bool enable) {
+  return g_mf_mixed_precision.exchange(enable);
+}
+bool mf_mixed_precision_enabled() {
+  return g_mf_mixed_precision.load();
+}
+
 int mf_thread_count() {
   int n = g_mf_threads.load();
   if (n <= 0) {
@@ -345,6 +420,48 @@ void MatfreeReduced::apply_kgg_raw(const double* xg, double* yg) const {
   for (int k = 0; k < ng; ++k)
     yg[static_cast<std::size_t>(k)] =
         yfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])];
+}
+
+// Single-precision twin of mf_apply_full: y = K x over the full stiffness, FP32,
+// colour by colour in the SAME fixed order 0..7 with the SAME race-free threading,
+// so it is bit-identical for any thread count (see axpy24_f32). Used only by the
+// mixed-precision V-cycle.
+void mf_apply_full_f32(const std::vector<MfElem>& elems,
+                       const std::vector<int>& color_offsets,
+                       const Hex8Stiffness& Ke, const std::vector<float>& x,
+                       std::vector<float>& y) {
+  std::fill(y.begin(), y.end(), 0.0f);
+  alignas(16) float KeCM[static_cast<std::size_t>(kDof) * kDof];
+  build_ke_colmajor_f32(Ke, KeCM);
+  const int nthreads = mf_thread_count();
+  const std::function<void(int, int)> body = [&](int lo, int hi) {
+    for (int i = lo; i < hi; ++i)
+      apply_one_element_f32(elems[static_cast<std::size_t>(i)], KeCM, x, y);
+  };
+  for (int color = 0; color < kNumColors; ++color) {
+    const int b = color_offsets[static_cast<std::size_t>(color)];
+    const int e = color_offsets[static_cast<std::size_t>(color) + 1];
+    parallel_ranges(b, e, nthreads, body);
+  }
+}
+
+// Raw FP32 reduced matvec yg[0..ng) = K_gg xg[0..ng), driven off contiguous float
+// storage with NO marshalling copies (the mixed-precision V-cycle reuses the
+// caller's float buffers across iterations). Full-length float scratch is sized
+// lazily on first use, so the FP64 path pays nothing for it.
+void MatfreeReduced::apply_kgg_raw_f32(const float* xg, float* yg) const {
+  if (xfull_f.size() != static_cast<std::size_t>(ndof)) {
+    xfull_f.assign(static_cast<std::size_t>(ndof), 0.0f);
+    yfull_f.assign(static_cast<std::size_t>(ndof), 0.0f);
+  }
+  std::fill(xfull_f.begin(), xfull_f.end(), 0.0f);
+  for (int k = 0; k < ng; ++k)
+    xfull_f[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
+        xg[static_cast<std::size_t>(k)];
+  mf_apply_full_f32(elems, color_offsets, Ke, xfull_f, yfull_f);
+  for (int k = 0; k < ng; ++k)
+    yg[static_cast<std::size_t>(k)] =
+        yfull_f[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])];
 }
 
 void MatfreeReduced::apply_kgg(const std::vector<double>& xg,
@@ -656,6 +773,10 @@ int fea_set_matfree_threads(int n) { return fea_detail::mf_set_thread_count(n); 
 
 bool fea_set_matfree_galerkin_block_cache(bool enable) {
   return fea_detail::mf_set_galerkin_block_cache(enable);
+}
+
+bool fea_set_matfree_mixed_precision(bool enable) {
+  return fea_detail::mf_set_mixed_precision(enable);
 }
 
 FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid, double youngs_modulus,
