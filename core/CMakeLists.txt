@@ -467,6 +467,19 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME designbox_reduction COMMAND test_designbox_reduction)
 
+  # Savings % reporting-basis regression (handoff 094): the displayed
+  # `savings = 1 - achieved` must be part-relative (printed_voxels/part_solid) on
+  # BOTH the no-box and box paths, so the % and the voxel-count mass share one basis
+  # on the grayscale MMA field. FAILS against pre-094 core on the no-box path (which
+  # reported the optimizer's continuous Σρ/n_active target). Drives minimize_plastic,
+  # so Eigen-gated like the other optimizer gates; the real settings rule table is
+  # injected. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_savings_part_relative tests/validation/test_savings_part_relative.cpp)
+  target_link_libraries(test_savings_part_relative PRIVATE topopt)
+  target_compile_definitions(test_savings_part_relative PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME savings_part_relative COMMAND test_savings_part_relative)
+
   # Savings-ladder rung-collapse regression (diagnosis 084-ladder-collapse-diagnosis): a
   # comfortably-strong part must produce MULTIPLE savings rungs on BOTH the no-box
   # and box paths (the ladder walks to the lightest safe rung, which the app

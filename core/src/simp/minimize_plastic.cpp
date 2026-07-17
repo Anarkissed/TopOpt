@@ -301,6 +301,23 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // voxels minus the Empty/Load/Fixture voxels it reclassifies out of the budget.
   // Gated on the box path only, so the no-box run is byte-identical.
   const bool part_relative = expanded && !options.freeze_imported_part;
+  // Handoff 094 (savings-basis fix): the REPORTED achieved fraction is part-relative
+  // on the no-box path too. `part_relative` above gates the BUDGET rescale and the
+  // effective-count loop — box-only, because with a box `vf` means "fraction of the
+  // Active envelope" and must be renormalised to the part; on the no-box path the
+  // solve already targets `vf` of the part and must NOT be rescaled (that would move
+  // the design, i.e. Gate-V2 / the ladder). But the *reporting* overwrite below is a
+  // pure read of `printed_voxels / part_solid`, and on the no-box path `G == grid`,
+  // so `part_solid` is the whole part and `printed_voxels` is the printed shape on
+  // that same grid — exactly the honest ratio. Without this the no-box path shipped
+  // the optimizer's CONTINUOUS active fraction `Σρ / n_active` (simp), which the
+  // volume constraint drives to the ladder TARGET, so the displayed savings was
+  // `1 - vf_target` (a target) while the mass counted `#{ρ>0.5}` (a measurement);
+  // on the grayscale MMA field the two disagree and grow apart with finer features
+  // (093). Reporting `printed_voxels / part_solid` makes the % and the mass two views
+  // of one voxel count, so they can no longer disagree. True when there is no box, OR
+  // on the box path where 080 already overwrites (expanded && !freeze_imported_part).
+  const bool report_part_relative = !expanded || part_relative;
   const double part_solid = static_cast<double>(grid.solid_count());
   double active_effective = 0.0;   // voxels simp's volume constraint moves
   double frozen_effective = 0.0;   // voxels effective_mask pins solid (always printed)
@@ -525,15 +542,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     variant.support_volume_voxels =
         support_overhang_voxels(printed_grid, build_dir);
 
-    // Whole-domain optimize (handoff 080): report the achieved fraction relative to
-    // the PART, not the Active envelope. printed_voxels already counts every printed
-    // voxel (kept part + grown material). Overwriting the optimizer's active-envelope
-    // fraction here makes `savings = 1 - achieved` and the app's implied baseline
-    // (mass / achieved) resolve to the part's mass: mass / (printed/part_solid) =
-    // density * part_solid * voxel_volume / 1000 == the imported part's mass. The
-    // value can exceed 1 (net material added → negative savings), which is honest.
-    // vr.volume_fraction below reads this same field, so the report line agrees.
-    if (part_relative && part_solid > 0.0)
+    // Report the achieved fraction relative to the PART, not the Active envelope
+    // (handoff 080 on the box path; handoff 094 extends it to the no-box path).
+    // printed_voxels already counts every printed voxel (kept part + grown material).
+    // Overwriting the optimizer's fraction here makes `savings = 1 - achieved` and the
+    // app's implied baseline (mass / achieved) resolve to the part's mass: mass /
+    // (printed/part_solid) = density * part_solid * voxel_volume / 1000 == the imported
+    // part's mass. The value can exceed 1 (net material added → negative savings),
+    // which is honest. vr.volume_fraction below reads this same field, so the report
+    // line agrees. On the no-box path this replaces the optimizer's continuous active
+    // fraction (Σρ/n_active, which tracks the ladder TARGET) with the same #{ρ>0.5}
+    // count the mass uses, so the displayed % and the mass share one basis (093).
+    if (report_part_relative && part_solid > 0.0)
       variant.optimization.volume_fraction =
           static_cast<double>(printed_voxels) / part_solid;
 
