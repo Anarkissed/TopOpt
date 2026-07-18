@@ -50,6 +50,14 @@ enum OutcomeCodec {
         let gridNx, gridNy, gridNz: Int
         let gridOrigin: [Double]       // 3 components
         let spacing: Double
+        // LAN offload (097): the remote-compute flag MUST survive the persist/restore
+        // round-trip, or a reopened remote result forgets it was computed on the Mac
+        // and lies — the withheld mass renders as a plausible "0.0 g", the "computed on
+        // Mac" note vanishes, and the stress/playback controls come back dead (the exact
+        // 097 honesty gap this DTO once silently dropped). Optional so blobs written
+        // before this field existed still decode (→ nil → false, correct: they predate
+        // remote runs, and there is no honest value to recover for one anyway).
+        let computedRemotely: Bool?
     }
 
     // MARK: OptimizeOutcome → DTO (cheap: array→Data is a memcpy)
@@ -60,8 +68,8 @@ enum OutcomeCodec {
                 VariantDTO(
                     requestedVolumeFraction: v.requestedVolumeFraction,
                     achievedVolumeFraction: v.achievedVolumeFraction,
-                    printedFraction: v.printedFraction,
                     massGrams: v.massGrams,
+                    printedFraction: v.printedFraction,
                     supportVolumeVoxels: v.supportVolumeVoxels,
                     meshTriangleCount: v.meshTriangleCount,
                     worstCaseMargin: v.worstCaseMargin,
@@ -82,7 +90,8 @@ enum OutcomeCodec {
             acceptedCount: o.acceptedCount, voxelVolumeMM3: o.voxelVolumeMM3,
             gridNx: o.gridNx, gridNy: o.gridNy, gridNz: o.gridNz,
             gridOrigin: [o.gridOrigin.x, o.gridOrigin.y, o.gridOrigin.z],
-            spacing: o.spacing)
+            spacing: o.spacing,
+            computedRemotely: o.computedRemotely)
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -115,7 +124,8 @@ enum OutcomeCodec {
             stoppedOnMargin: d.stoppedOnMargin, cancelled: d.cancelled,
             acceptedCount: d.acceptedCount, voxelVolumeMM3: d.voxelVolumeMM3,
             gridNx: d.gridNx, gridNy: d.gridNy, gridNz: d.gridNz,
-            gridOrigin: vec(d.gridOrigin), spacing: d.spacing)
+            gridOrigin: vec(d.gridOrigin), spacing: d.spacing,
+            computedRemotely: d.computedRemotely ?? false)
     }
 
     // MARK: Encode / decode (binary plist)
