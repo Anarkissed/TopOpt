@@ -15,34 +15,54 @@
 // returns what a local run would have — PROVIDED the worker's core matches the
 // app's (see the version-skew guard below).
 //
-// STATUS (handoff 097 — LAN offload Tier 2): this file is now COMPILED and
-// exercised on the iOS simulator against the real worker on localhost. It is not
-// covered by the Linux CI host (no Xcode); its verification standard is
-// `xcodebuild` on the package + the simulator end-to-end in handoff 097.
+// ── LIVENESS (handoff 101) ─────────────────────────────────────────────────
+// The whole point of remote is runs too big for the iPad — a 128³ four-rung run
+// is HOURS. So this file must never treat a slow-but-progressing run as a
+// failure, and must never destroy the Mac's work. The redesign:
+//
+//   * NO WALL-CLOCK CEILING. The old `RemoteRunnerConfig.timeout` (a fixed
+//     28800s) doubled as the semaphore wait AND URLSession's
+//     `timeoutIntervalForResource`, which caps an SSE task's TOTAL lifetime even
+//     while data flows. That killed a real 128³ run at exactly 3600s. Gone.
+//     Liveness is now PROGRESS-based: an inactivity watchdog, not a clock.
+//   * INACTIVITY WATCHDOG. If NO SSE traffic (a typed event OR the worker's
+//     keepalive ping) arrives for `inactivityGrace` (~180s), we do NOT fail — we
+//     PROBE `GET /jobs/{id}`: `running` → keep waiting; a terminal status →
+//     reconnect and drain it; unreachable after retries → fail with a message
+//     that says the WORKER became unreachable (and that the Mac keeps solving),
+//     never "timed out".
+//   * RECONNECT. A dropped/ended events stream is NOT terminal. The worker
+//     replays every event from the start on reconnect (handoff 093), so we reopen
+//     `/events` with backoff (1,2,4… cap 30s) and DEDUPE the replay by event
+//     index (+ variant mesh basename) so progress and variants are never
+//     double-emitted.
+//   * NEVER CANCEL THE MAC'S JOB except on EXPLICIT USER CANCEL. Watchdog
+//     failure, stream loss, app death — the worker keeps solving; its result
+//     persists and `/result` works after completion. The DELETE fires ONLY from
+//     the user-cancel path.
+//   * RE-ATTACH. The active job id + worker address are persisted
+//     (`RemoteJobStore`), so a slept/relaunched iPad can reopen `/events` and
+//     resume rather than orphaning the Mac's run.
+//
+// STATUS (handoff 097 — LAN offload Tier 2): this file is COMPILED and exercised
+// on the iOS simulator / a macOS test destination against the real worker on
+// localhost. It is not covered by the Linux CI host (no Xcode); its verification
+// standard is `xcodebuild test` on the package + the `RemoteRunnerE2ETests`
+// harness (handoffs 097 + 101).
 //
 // Honest limitations (see docs/handoffs/097 + 093-lan-offload.md STEP 3):
 //   * The worker delivers each variant's MESH + the scalar report (volume
 //     fraction, margins, orientation, stresses, settings). It does NOT deliver the
 //     per-voxel vonMises / displacement / stressTensor fields, the playback
-//     keyframes, or the mass — the CLI writes meshes + report.json, not those
-//     arrays. So remote variants render with their margins/settings, but the
-//     stress overlay, flex animation, mass readout and playback are UNAVAILABLE.
-//     The outcome is flagged `computedRemotely` so the results screen shows those
-//     as "computed on Mac — n/a in this build" rather than a plausible 0 g / blank
-//     overlay (a wrong-but-plausible readout is a reject-class bug here). Full
-//     result serialisation over the wire is the tracked follow-up.
+//     keyframes, or the mass. So remote variants render with their margins/settings,
+//     but the stress overlay, flex animation, mass readout and playback are
+//     UNAVAILABLE. The outcome is flagged `computedRemotely` so the results screen
+//     shows those as "computed on Mac — n/a in this build".
 //
-// 097 review-carry fixes applied here (were open on the 093 draft):
-//   (1) `smooth_factor` is sent so remote meshes match the local tricubic
-//       smoothing (bridge.cpp kSmoothExportFactor = 2); without it the CLI would
-//       export the raw v3 iso-surface and remote parts would differ from local.
-//   (2) a failed mesh fetch FAILS THE RUN with a clear message — never a silent
-//       empty part on screen (an empty part that looks like a real result is the
-//       worst failure mode).
-//   (3) the authoritative streamed mesh basenames drive final assembly, so meshes
-//       are never re-derived from a guessed filename (the report's volume_fraction
-//       is the ACHIEVED fraction, but files are named by the REQUESTED fraction —
-//       reconstructing the name silently fetched the wrong / no file).
+// 097 review-carry fixes still hold here: `smooth_factor` is sent so remote meshes
+// match the local tricubic smoothing; a failed mesh fetch FAILS THE RUN with a
+// clear message (never a silent empty part); the authoritative streamed mesh
+// basenames drive final assembly (never re-derived from a guessed filename).
 
 import Foundation
 import TopOptKit
@@ -56,18 +76,34 @@ public struct RemoteRunnerConfig: Sendable {
     public let port: Int
     /// The core build fingerprint (git commit) THIS app was built against. The
     /// worker's `/health` fingerprint must equal it or the run is refused — two
-    /// cores that differ silently produce different parts (STEP 3d). Wire this to
-    /// the same build id the CLI reports (`topopt-cli --version`).
+    /// cores that differ silently produce different parts (STEP 3d).
     public let expectedFingerprint: String
-    /// Overall wall-clock ceiling for a remote run (a Fine+box run is minutes).
-    public let timeout: TimeInterval
+    /// Inactivity grace (handoff 101). If NO SSE traffic — a typed event OR the
+    /// worker's keepalive ping — arrives for this long, the client stops trusting
+    /// the stream and PROBES the status endpoint. This is NOT a run ceiling: a
+    /// provably-progressing run can take 10+ hours. The default (180s) comfortably
+    /// clears the worker's 20s heartbeat even across several missed pings.
+    public let inactivityGrace: TimeInterval
+    /// Per-request idle timeout for the long-lived events stream. The heartbeat
+    /// keeps it fed, so this is generous; the stream task's RESOURCE (total
+    /// lifetime) timeout is left effectively unbounded so a 10-hour run is never
+    /// capped by the transport.
+    public let requestTimeout: TimeInterval
+    /// SHORT timeout for the pre-run `/health`, `POST /jobs`, status probes and
+    /// artifact fetches — these must FAIL FAST (the offline fast-fail negative
+    /// control), never hang.
+    public let controlTimeout: TimeInterval
 
-    public init(host: String, port: Int = 8757,
-                expectedFingerprint: String, timeout: TimeInterval = 28800) {
+    public init(host: String, port: Int = 8757, expectedFingerprint: String,
+                inactivityGrace: TimeInterval = 180,
+                requestTimeout: TimeInterval = 120,
+                controlTimeout: TimeInterval = 12) {
         self.host = host
         self.port = port
         self.expectedFingerprint = expectedFingerprint
-        self.timeout = timeout
+        self.inactivityGrace = inactivityGrace
+        self.requestTimeout = requestTimeout
+        self.controlTimeout = controlTimeout
     }
 
     var baseURL: URL { URL(string: "http://\(host):\(port)")! }
@@ -80,43 +116,130 @@ public struct RemoteRunError: Error, CustomStringConvertible {
     public init(_ message: String) { self.message = message }
 }
 
+/// The active remote job, persisted so a slept/relaunched iPad can RE-ATTACH to a
+/// run still solving on the Mac instead of orphaning it (handoff 101, requirement
+/// 5). Identity is the worker address + the CLI's job id; the fingerprint lets a
+/// re-attach re-assert the version guard.
+public struct PersistedRemoteJob: Codable, Equatable, Sendable {
+    public let host: String
+    public let port: Int
+    public let fingerprint: String
+    public let jobID: String
+    public init(host: String, port: Int, fingerprint: String, jobID: String) {
+        self.host = host
+        self.port = port
+        self.fingerprint = fingerprint
+        self.jobID = jobID
+    }
+}
+
+/// Single-slot store for the active remote job (UserDefaults). Single-slot because
+/// only one remote run is in flight at a time; a new submit overwrites, a terminal
+/// resolution clears. Deliberately NOT cleared on a client-side liveness failure
+/// (watchdog/unreachable): the Mac keeps solving, so the record must survive for a
+/// later re-attach — it is cleared only when the WORKER's job is known finished or
+/// the user cancelled.
+public enum RemoteJobStore {
+    static let key = "topopt.activeRemoteJob.v1"
+
+    public static func save(_ job: PersistedRemoteJob, defaults: UserDefaults = .standard) {
+        if let data = try? JSONEncoder().encode(job) { defaults.set(data, forKey: key) }
+    }
+    public static func load(defaults: UserDefaults = .standard) -> PersistedRemoteJob? {
+        guard let data = defaults.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(PersistedRemoteJob.self, from: data)
+    }
+    public static func clear(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
+    }
+}
+
 public extension RunModel {
 
     /// Build a `Runner` that offloads the run to a LAN worker. Drop-in beside
     /// `bridgeRunner`; the run flow cannot tell the difference beyond where the
     /// compute happens.
-    static func remoteRunner(_ config: RemoteRunnerConfig) -> Runner {
+    static func remoteRunner(_ config: RemoteRunnerConfig,
+                             defaults: UserDefaults = .standard) -> Runner {
         return { request, progress, onVariant in
             try RemoteRun(config: config, request: request,
-                          progress: progress, onVariant: onVariant).run()
+                          progress: progress, onVariant: onVariant,
+                          defaults: defaults).run()
+        }
+    }
+
+    /// Build a `Runner` that RE-ATTACHES to a job already running on the worker
+    /// (handoff 101, requirement 5): it skips `/health` + `POST /jobs` and streams
+    /// the existing job's `/events` (whose replay rebuilds the streamed variants),
+    /// then assembles the same final outcome. Used after the iPad slept/relaunched
+    /// with a `RemoteJobStore` record.
+    static func remoteReattachRunner(_ config: RemoteRunnerConfig, jobID: String,
+                                     defaults: UserDefaults = .standard) -> Runner {
+        return { request, progress, onVariant in
+            try RemoteRun(config: config, request: request,
+                          progress: progress, onVariant: onVariant,
+                          defaults: defaults, existingJobID: jobID).run()
         }
     }
 }
 
 // ---------------------------------------------------------------------------
 // One remote run. Synchronous (the Runner contract is `throws -> OptimizeOutcome`
-// and RunModel calls it on a background queue), so it blocks on URLSession with a
-// semaphore rather than adopting async/await.
+// and RunModel calls it on a background queue), so it drives the event stream via
+// URLSession delegate callbacks and blocks the run thread in a poll loop rather
+// than adopting async/await.
 
 final class RemoteRun: NSObject, URLSessionDataDelegate {
     private let config: RemoteRunnerConfig
     private let request: RunRequest
     private let progress: (Int, Int, Int) -> Bool
     private let onVariant: (OptimizeOutcome) -> Void
+    private let defaults: UserDefaults
+    /// Non-nil → re-attach to this existing job (skip health + submit).
+    private let existingJobID: String?
 
     private var jobID: String?
+
+    // MARK: shared state (run thread ⇄ delegate queue) — guarded by `lock`
+    private let lock = NSLock()
+    /// Instant of the last SSE traffic of ANY kind (event or keepalive ping). The
+    /// inactivity watchdog measures against this.
+    private var lastActivity = Date()
+    /// The current events stream has ended (didCompleteWithError) without a terminal
+    /// event — a dropped connection, not a finished run.
+    private var streamEnded = false
+    /// A terminal event was delivered.
+    private var terminal = false
+    private var terminalError: String?
+    private var terminalCancelled = false
+    /// True when the terminal state came from the WORKER (a done/error/cancelled
+    /// event) rather than a client-side abort (a mesh-fetch failure). Only a
+    /// worker-terminal (or the user cancel) clears the re-attach record — a
+    /// client-side failure leaves the Mac's work, and the record, intact.
+    private var terminalFromWorker = false
+    /// The user cancelled (the progress callback returned false). The ONLY thing
+    /// that makes the run DELETE the worker's job.
+    private var userCancelled = false
+    /// The events task we currently believe is live; a completion from any other
+    /// (older, superseded) task is ignored, so a deliberate reconnect never looks
+    /// like an unexpected drop.
+    private var currentTask: URLSessionTask?
+    /// Wakes the run-thread poll loop promptly on any state change.
+    private let tick = DispatchSemaphore(value: 0)
+
+    // MARK: delegate-queue-only state (URLSession serialises delegate callbacks)
     private var buffer = Data()
-    private var streamDone = false
-    private var streamError: String?
-    private let doneSignal = DispatchSemaphore(value: 0)
-    private var cancelled = false
+    /// Events delivered so far across ALL connections — the dedup high-water mark.
+    /// Persists across reconnects (that is the point).
+    private var deliveredCount = 0
+    /// Index within the CURRENT connection's replay; reset when the task changes.
+    private var connIndex = 0
+    private var lastSeenTask: URLSessionTask?
 
     /// The AUTHORITATIVE per-variant record built from the VARIANT stream events,
     /// in ladder order: each carries the mesh basename the worker actually wrote
     /// (not a reconstructed guess) and the geometry already fetched for the live
-    /// streamed-variant screen. `assembleFinalOutcome` reuses these — joining the
-    /// scalar report by order — so a variant's mesh is never re-derived from the
-    /// report's ACHIEVED volume_fraction (files are named by the REQUESTED one).
+    /// streamed-variant screen. `assembleFinalOutcome` reuses these.
     private struct StreamedVariant {
         let requestedVF: Double
         let achievedVF: Double        // optimizer-achieved (continuous) — report join key
@@ -127,78 +250,189 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         let vertices: [Float]
         let indices: [Int32]
     }
-    /// Guards `streamed` — appended on the URLSession delegate queue, read back on
-    /// the run thread after `doneSignal`. (The semaphore already establishes the
-    /// happens-before; the lock keeps the read/write pair explicit and safe.)
+    /// Guards `streamed` + `seenMeshes`. Held only for the brief append (never
+    /// across the mesh network fetch).
     private let streamedLock = NSLock()
     private var streamed: [StreamedVariant] = []
+    /// Mesh basenames already emitted — a belt-and-suspenders guard so a replayed
+    /// variant is never double-emitted even if the index dedup ever misaligns
+    /// (handoff 101: "variants are already recorded by mesh basename — reuse that").
+    private var seenMeshes: Set<String> = []
 
     #if canImport(os)
     private static let log = Logger(subsystem: "app.topopt", category: "remote")
     #endif
 
+    /// Probe retries before declaring the worker unreachable, and the reconnect
+    /// backoff schedule (seconds): 1, 2, 4, … capped at 30.
+    private let maxProbeFailures = 3
+    private let backoffCap: TimeInterval = 30
+
     init(config: RemoteRunnerConfig, request: RunRequest,
          progress: @escaping (Int, Int, Int) -> Bool,
-         onVariant: @escaping (OptimizeOutcome) -> Void) {
+         onVariant: @escaping (OptimizeOutcome) -> Void,
+         defaults: UserDefaults = .standard,
+         existingJobID: String? = nil) {
         self.config = config
         self.request = request
         self.progress = progress
         self.onVariant = onVariant
+        self.defaults = defaults
+        self.existingJobID = existingJobID
     }
 
     // MARK: run
 
     func run() throws -> OptimizeOutcome {
-        // 1) VERSION-SKEW GUARD (STEP 3d). Refuse a worker whose core differs from
-        //    ours BEFORE running — a silent core mismatch is a different product.
-        let health = try getJSON(config.baseURL.appendingPathComponent("health"))
-        let fp = (health["fingerprint"] as? String) ?? "unknown"
-        guard fp == config.expectedFingerprint else {
-            throw RemoteRunError(
-                "worker core mismatch: worker \(fp), app \(config.expectedFingerprint). " +
-                "Refusing to run — a different core produces a different part. " +
-                "Rebuild the worker's topopt-cli from the same commit.")
+        if let existing = existingJobID {
+            // RE-ATTACH path: the job already exists on the worker. Skip the
+            // version guard + submit; the worker's replay rebuilds progress and
+            // variants. (The persisted record already passed the guard at submit.)
+            jobID = existing
+        } else {
+            // 1) VERSION-SKEW GUARD (STEP 3d). Refuse a worker whose core differs
+            //    from ours BEFORE running — a silent core mismatch is a different
+            //    product. Uses the SHORT control timeout: an offline worker here is
+            //    the fast-fail negative control, not a hang.
+            let health = try getJSON(config.baseURL.appendingPathComponent("health"))
+            let fp = (health["fingerprint"] as? String) ?? "unknown"
+            guard fp == config.expectedFingerprint else {
+                throw RemoteRunError(
+                    "worker core mismatch: worker \(fp), app \(config.expectedFingerprint). " +
+                    "Refusing to run — a different core produces a different part. " +
+                    "Rebuild the worker's topopt-cli from the same commit.")
+            }
+
+            // 2) SUBMIT: POST the STEP/STL + a job.json built from the request.
+            let jobJSON = try buildJobJSON()
+            let modelData = try Data(contentsOf: URL(fileURLWithPath: request.modelPath))
+            let modelName = (request.modelPath as NSString).lastPathComponent
+            jobID = try postJob(model: modelData, modelName: modelName, jobJSON: jobJSON)
         }
 
-        // 2) SUBMIT: POST the STEP/STL + a job.json built from the request.
-        let jobJSON = try buildJobJSON()
-        let modelData = try Data(contentsOf: URL(fileURLWithPath: request.modelPath))
-        let modelName = (request.modelPath as NSString).lastPathComponent
-        jobID = try postJob(model: modelData, modelName: modelName, jobJSON: jobJSON)
-
-        // 3) STREAM events. `openEvents` drives the callbacks; we block until a
-        //    terminal event (done/error/cancelled) or the timeout.
-        openEvents()
-        let waited = doneSignal.wait(timeout: .now() + config.timeout)
-        if waited == .timedOut {
-            cancelRemote()
-            throw RemoteRunError("remote run timed out after \(Int(config.timeout))s")
-        }
-        if let e = streamError { throw RemoteRunError(e) }
-        if cancelled {
-            // Match the local cancel outcome: a cancelled run yields no accepted set.
-            return OptimizeOutcome(variants: [], stoppedOnMargin: false,
-                                   cancelled: true, acceptedCount: 0,
-                                   computedRemotely: true)
+        // Persist the active job so a slept/relaunched iPad can re-attach rather
+        // than orphan the Mac's run (requirement 5). Cleared ONLY on a terminal
+        // resolution or user cancel — never on a client-side liveness failure.
+        if let id = jobID {
+            RemoteJobStore.save(PersistedRemoteJob(host: config.host, port: config.port,
+                                                   fingerprint: config.expectedFingerprint,
+                                                   jobID: id), defaults: defaults)
         }
 
-        // 4) ASSEMBLE the final outcome from report.json + the exported meshes.
-        return try assembleFinalOutcome()
+        // 3) STREAM events, driven by the progress-based liveness loop (no clock).
+        markActivity()
+        openConnection()
+        return try driveEvents()
+    }
+
+    // MARK: - liveness loop
+
+    /// The progress-based run loop (handoff 101). Polls ~1s; resolves on a terminal
+    /// event / user cancel; on a dropped OR silent stream, PROBES the worker and
+    /// reconnects (never kills its job); fails ONLY when the worker is unreachable
+    /// after retries — with a worker-unreachable message, and WITHOUT a DELETE.
+    private func driveEvents() throws -> OptimizeOutcome {
+        var backoff: TimeInterval = 1
+        var probeFailures = 0
+        var nextAttempt = Date.distantPast   // first recovery attempt is immediate
+
+        while true {
+            _ = tick.wait(timeout: .now() + 1.0)
+
+            lock.lock()
+            let uc = userCancelled
+            let te = terminalError
+            let tc = terminalCancelled
+            let tm = terminal
+            let ended = streamEnded
+            let last = lastActivity
+            let fromWorker = terminalFromWorker
+            lock.unlock()
+
+            // Terminal / cancel — checked every tick so cancel stays responsive.
+            if uc {
+                // The ONLY place a non-terminal DELETE fires: an explicit user cancel.
+                cancelRemote()
+                RemoteJobStore.clear(defaults: defaults)
+                return cancelledOutcome()
+            }
+            if let te = te {
+                // A worker-reported error is a real terminal outcome (job done on
+                // the worker) → clear the re-attach record. A CLIENT-side abort (a
+                // mesh-fetch failure via failStream) leaves the Mac's work + the
+                // record intact, so a later attempt can still re-attach.
+                if fromWorker { RemoteJobStore.clear(defaults: defaults) }
+                throw RemoteRunError(te)
+            }
+            if tc {
+                RemoteJobStore.clear(defaults: defaults)
+                return cancelledOutcome()
+            }
+            if tm {
+                let outcome = try assembleFinalOutcome()
+                RemoteJobStore.clear(defaults: defaults)
+                return outcome
+            }
+
+            let stale = Date().timeIntervalSince(last) > config.inactivityGrace
+            if ended || stale {
+                if Date() < nextAttempt { continue }   // waiting out the backoff
+
+                if probeStatus() != nil {
+                    // The worker answered — it is alive (running or already finished).
+                    // Reopen the events stream; the replay rebuilds progress +
+                    // variants (deduped) and delivers any terminal event we missed.
+                    probeFailures = 0
+                    diag("remote stream \(ended ? "dropped" : "went silent") — worker reachable, reconnecting")
+                    openConnection()
+                } else {
+                    probeFailures += 1
+                    if probeFailures >= maxProbeFailures {
+                        // NEVER a DELETE. The Mac may still be solving; its result
+                        // persists and /result works after it finishes. Leave the
+                        // re-attach record in place so a later attempt can resume.
+                        diag("remote worker unreachable after \(probeFailures) probes — failing WITHOUT cancelling the Mac's job")
+                        throw RemoteRunError(Self.workerUnreachableMessage)
+                    }
+                    diag("remote status probe failed (\(probeFailures)/\(maxProbeFailures)) — retrying, not failing yet")
+                }
+                nextAttempt = Date().addingTimeInterval(backoff)
+                backoff = Swift.min(backoff * 2, backoffCap)
+            } else {
+                // Healthy (fresh traffic, stream open): reset the recovery schedule.
+                backoff = 1
+                probeFailures = 0
+                nextAttempt = Date.distantPast
+            }
+        }
+    }
+
+    static let workerUnreachableMessage =
+        "The Mac worker became unreachable, so this run can’t be followed from the "
+      + "iPad any more. This is NOT a timeout — the run was not stopped: the Mac "
+      + "keeps solving and its result is saved on the Mac, available when it "
+      + "finishes. Check the Mac and your Wi-Fi, then reconnect."
+
+    private func cancelledOutcome() -> OptimizeOutcome {
+        OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: true,
+                        acceptedCount: 0, computedRemotely: true)
+    }
+
+    private func markActivity() {
+        lock.lock(); lastActivity = Date(); lock.unlock()
+    }
+
+    private func diag(_ message: String) {
+        #if canImport(os)
+        Self.log.log("\(message, privacy: .public)")
+        #endif
     }
 
     // MARK: request -> job.json
 
-    /// Map the RunRequest to the CLI job schema (handoff 093). STEP parts use the
-    /// "loads" block with RAW face ids (the id form the app's selection produces,
-    /// which the CLI now accepts). STL parts use the self-weight + no-fixture path
-    /// — represented here as an empty loads block so the CLI's min-x clamp
-    /// fallback applies (mirrors bridgeRunner's STL branch).
     /// Export smoothing the CLI must apply so a remote mesh matches what the app's
     /// local bridge produces. MUST equal the bridge's `kSmoothExportFactor`
-    /// (bridge.cpp) — the local path re-extracts every variant's iso-surface at 2×
-    /// (tricubic Catmull-Rom) before handing it to the app, so a worker exporting
-    /// at the CLI's default of 1 (raw v3 mesh) would return a visibly different,
-    /// coarser part. Kept as a documented mirror (Swift can't read the C++
+    /// (bridge.cpp). Kept as a documented mirror (Swift can't read the C++
     /// constexpr); if the bridge factor changes, change this with it.
     static let smoothExportFactor = 2
 
@@ -210,7 +444,6 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             "resolution": request.resolution,
             "output": ["report": "report.json", "mesh_format": "stl",
                        "mesh_prefix": "variant",
-                       // 097 fix (1): match the local bridge's export smoothing.
                        "smooth_factor": Self.smoothExportFactor],
         ]
         if let box = request.designBox {
@@ -241,10 +474,6 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             if request.infillPercent >= 0 {
                 loads["infill_percent"] = request.infillPercent
             }
-            // Handoff 100 — forward "Keep clear" clearances so a Mac worker running
-            // topopt-cli honours protected holes IDENTICALLY to the local bridge
-            // (both feed the same build_production_loadcase). A distance left at 0 is
-            // omitted so the CLI fills the same geometry-derived suggestion.
             if !request.clearances.isEmpty {
                 loads["clearances"] = request.clearances.map { c -> [String: Any] in
                     var entry: [String: Any] = [
@@ -259,20 +488,34 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             }
             job["loads"] = loads
         } else {
-            // STL: no faces. Empty loads => the CLI clamps the min-x boundary and
-            // runs self-weight, matching bridgeRunner's STL path.
             job["loads"] = ["build_dir": [0, 0, 1]]
         }
         return try JSONSerialization.data(withJSONObject: job)
     }
 
-    // MARK: HTTP
+    // MARK: HTTP sessions
 
+    /// The long-lived events stream. Idle (request) timeout is generous — the
+    /// worker heartbeat keeps it fed; the RESOURCE (total lifetime) timeout is left
+    /// effectively unbounded so a 10-hour run is NEVER capped by the transport
+    /// (the 3600s incident was exactly this cap).
     private lazy var eventSession: URLSession = {
         let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = config.timeout
-        cfg.timeoutIntervalForResource = config.timeout
+        cfg.timeoutIntervalForRequest = config.requestTimeout
+        cfg.timeoutIntervalForResource = 60 * 60 * 24 * 365   // ~unbounded
+        cfg.waitsForConnectivity = false
         return URLSession(configuration: cfg, delegate: self, delegateQueue: nil)
+    }()
+
+    /// SHORT-timeout session for /health, POST /jobs, status probes and artifact
+    /// fetches — the offline fast-fail path. Idle timeout is the control timeout;
+    /// the resource timeout is bounded but larger so a mesh transfer isn't clipped.
+    private lazy var controlSession: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = config.controlTimeout
+        cfg.timeoutIntervalForResource = Swift.max(config.controlTimeout, config.requestTimeout)
+        cfg.waitsForConnectivity = false
+        return URLSession(configuration: cfg)
     }()
 
     private func getJSON(_ url: URL) throws -> [String: Any] {
@@ -287,7 +530,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         var out: (Data, URLResponse)?
         var err: Error?
         let sem = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: url) { d, r, e in
+        controlSession.dataTask(with: url) { d, r, e in
             if let d = d, let r = r { out = (d, r) } else { err = e }
             sem.signal()
         }.resume()
@@ -296,10 +539,21 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         throw RemoteRunError("request failed: \(url.path): \(err?.localizedDescription ?? "no response")")
     }
 
+    /// Probe the status endpoint (handoff 101). Returns the worker's job status
+    /// string ("running"/"done"/"error"/"cancelled") when REACHABLE, or nil when
+    /// the worker could not be reached — the sole signal that turns a stalled
+    /// stream into a run failure. Uses the short control timeout so it fails fast.
+    private func probeStatus() -> String? {
+        guard let id = jobID else { return nil }
+        let url = config.baseURL.appendingPathComponent("jobs").appendingPathComponent(id)
+        guard let obj = try? getJSON(url) else { return nil }
+        return obj["status"] as? String
+    }
+
     /// Fetch one variant's exported mesh by basename and parse it. THROWS on any
     /// failure (transport error, non-200, or a body that is not a usable STL) —
-    /// 097 fix (2): a missing/corrupt mesh must surface as a run failure, never as
-    /// a silently-empty part that renders as a plausible-but-wrong blank result.
+    /// a missing/corrupt mesh must surface as a run failure, never as a silently-
+    /// empty part that renders as a plausible-but-wrong blank result.
     private func fetchMesh(named name: String) throws -> ([Float], [Int32]) {
         guard let id = jobID else { throw RemoteRunError("no job id for mesh \(name)") }
         let url = config.baseURL.appendingPathComponent("jobs")
@@ -343,7 +597,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
 
         var out: Data?; var err: Error?
         let sem = DispatchSemaphore(value: 0)
-        URLSession.shared.dataTask(with: req) { d, _, e in out = d; err = e; sem.signal() }.resume()
+        controlSession.dataTask(with: req) { d, _, e in out = d; err = e; sem.signal() }.resume()
         sem.wait()
         guard let data = out,
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -352,44 +606,80 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         return id
     }
 
-    private func openEvents() {
+    /// Open (or reopen) the events stream. Supersedes any current task — a
+    /// completion from the old one is then ignored, so a deliberate reconnect never
+    /// looks like an unexpected drop. Clears the ended flag + refreshes activity so
+    /// the loop treats the fresh connection as alive.
+    private func openConnection() {
         guard let id = jobID else { return }
-        let url = config.baseURL.appendingPathComponent("jobs").appendingPathComponent(id).appendingPathComponent("events")
-        eventSession.dataTask(with: url).resume()
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("events")
+        let task = eventSession.dataTask(with: url)
+        lock.lock()
+        let old = currentTask
+        currentTask = task
+        streamEnded = false
+        lastActivity = Date()
+        lock.unlock()
+        old?.cancel()
+        task.resume()
     }
 
+    /// Cancel the worker's job — the DELETE. Called ONLY from the explicit
+    /// user-cancel path (handoff 101, requirement 4).
     private func cancelRemote() {
         guard let id = jobID else { return }
         var req = URLRequest(url: config.baseURL.appendingPathComponent("jobs").appendingPathComponent(id))
         req.httpMethod = "DELETE"
-        URLSession.shared.dataTask(with: req).resume()
+        controlSession.dataTask(with: req).resume()
     }
 
     // MARK: SSE parsing (URLSessionDataDelegate)
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        // A new connection's replay starts over — reset the per-connection index +
+        // buffer. All of this runs on URLSession's serial delegate queue, so
+        // `connIndex`/`deliveredCount`/`buffer` need no lock.
+        if dataTask !== lastSeenTask {
+            lastSeenTask = dataTask
+            connIndex = 0
+            buffer = Data()
+        }
+        // ANY bytes — a typed event OR a ": ping" keepalive comment — are liveness.
+        markActivity()
+
         buffer.append(data)
-        // SSE frames are separated by a blank line; each `data: ` line is JSON.
+        // SSE frames are separated by a blank line. A frame's `data:` line is JSON;
+        // a `:`-prefixed comment line (the heartbeat) carries no `data:` and is
+        // skipped here — it already did its job by refreshing `lastActivity` above.
         while let range = buffer.range(of: Data("\n\n".utf8)) {
             let frame = buffer.subdata(in: buffer.startIndex..<range.lowerBound)
             buffer.removeSubrange(buffer.startIndex..<range.upperBound)
             guard let text = String(data: frame, encoding: .utf8) else { continue }
             for line in text.split(separator: "\n") where line.hasPrefix("data: ") {
+                // DEDUPE the replay by event index: the worker replays every event
+                // from index 0 on each (re)connect, so anything at or below the
+                // high-water mark was already delivered.
+                let isReplay = connIndex < deliveredCount
+                connIndex += 1
+                if isReplay { continue }
+                deliveredCount = connIndex          // == old high-water + 1
                 handleEvent(String(line.dropFirst(6)))
             }
         }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        // The stream closed. If we never saw a terminal event, that's a dropped
-        // connection mid-run (STEP 3c): report it rather than hanging. A run that
-        // actually finished already signalled `doneSignal`.
-        if !streamDone {
-            streamError = "remote event stream ended unexpectedly" +
-                (error.map { ": \($0.localizedDescription)" } ?? "")
-            streamDone = true
-            doneSignal.signal()
+        // The stream closed. If this is the CURRENT task and we never saw a terminal
+        // event, it is a dropped connection (not a finished run) — record it so the
+        // liveness loop probes + reconnects. A completion from a superseded task (a
+        // deliberate reconnect) is ignored. A run that finished already set `terminal`.
+        lock.lock()
+        if task === currentTask && !terminal {
+            streamEnded = true
         }
+        lock.unlock()
+        tick.signal()
     }
 
     private func handleEvent(_ json: String) {
@@ -402,20 +692,30 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             let rungs = ev["rungs"] as? Int ?? 0
             let iter = ev["iter"] as? Int ?? 0
             // The keep-going decision drives cancellation exactly like local runs.
+            // A false return is an EXPLICIT user cancel → record it; the run loop
+            // (not here) issues the single DELETE.
             if !progress(rung, rungs, iter) {
-                cancelled = true
-                cancelRemote()
+                lock.lock(); userCancelled = true; lock.unlock()
+                tick.signal()
             }
+        case "ping":
+            break   // a typed keepalive, if a worker ever sends one; liveness only
         case "variant":
             emitStreamedVariant(ev)
         case "done":
-            streamDone = true
-            doneSignal.signal()
+            lock.lock(); terminal = true; terminalFromWorker = true; lock.unlock()
+            tick.signal()
         case "cancelled":
-            cancelled = true; streamDone = true; doneSignal.signal()
+            lock.lock()
+            terminalCancelled = true; terminal = true; terminalFromWorker = true
+            lock.unlock()
+            tick.signal()
         case "error":
-            streamError = (ev["message"] as? String) ?? "remote run failed"
-            streamDone = true; doneSignal.signal()
+            lock.lock()
+            terminalError = (ev["message"] as? String) ?? "remote run failed"
+            terminal = true; terminalFromWorker = true
+            lock.unlock()
+            tick.signal()
         default:
             break  // log lines: ignored for the outcome
         }
@@ -428,11 +728,19 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// hand it to `onVariant`, so PR 109's streamed-variant screen grows live.
     private func emitStreamedVariant(_ ev: [String: Any]) {
         guard let meshName = ev["mesh"] as? String, !meshName.isEmpty else {
-            // A VARIANT event with no mesh is malformed — fail rather than show a
-            // bodiless variant (097 fix 2). The CLI always names the exported mesh.
             failStream("worker reported a completed variant without a mesh file")
             return
         }
+        // Variant-basename dedup (handoff 101): a replayed variant we already
+        // emitted must never fire `onVariant` twice or double-count. The index
+        // dedup above already prevents this on a clean replay; this is the explicit
+        // second guard the task asks for.
+        streamedLock.lock()
+        let already = seenMeshes.contains(meshName)
+        if !already { seenMeshes.insert(meshName) }
+        streamedLock.unlock()
+        if already { return }
+
         let mesh: ([Float], [Int32])
         do {
             mesh = try fetchMesh(named: meshName)
@@ -468,32 +776,32 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             accepted: accepted,
             v3Passes: true,
             meshVertices: mesh.0, meshIndices: mesh.1)
-        // `computedRemotely: true` so the live results screen renders mass/stress/
-        // flex/playback as n/a from the first streamed variant (097 fix 3).
         onVariant(OptimizeOutcome(variants: [v], stoppedOnMargin: false,
                                   cancelled: false, acceptedCount: 1,
                                   computedRemotely: true))
     }
 
     /// Abort the run with a diagnostic (used when a streamed mesh can't be fetched).
-    /// Best-effort cancels the worker so it stops solving, then wakes `run()`.
+    /// Records a terminal error and wakes the loop. Handoff 101, requirement 4: it
+    /// does NOT DELETE the worker's job — a mesh-transfer failure on the client must
+    /// not destroy the Mac's solve; the result persists and /result still works.
     private func failStream(_ message: String) {
-        if streamDone { return }
-        streamError = message
-        streamDone = true
-        cancelRemote()
-        doneSignal.signal()
+        lock.lock()
+        if !terminal {
+            terminalError = message
+            terminal = true
+        }
+        lock.unlock()
+        tick.signal()
     }
 
     /// Build the authoritative final outcome from report.json + the meshes ALREADY
     /// fetched during streaming. The scalar fields come from the report; the mesh
-    /// geometry comes from the recorded streamed variants (097 fix 3 — never
-    /// re-derive a filename). The per-voxel fields stay empty and the outcome is
-    /// flagged `computedRemotely` (the CLI does not serialise them — see the header).
+    /// geometry comes from the recorded streamed variants (never re-derive a
+    /// filename). Flagged `computedRemotely` (the CLI does not serialise the
+    /// per-voxel fields — see the header).
     private func assembleFinalOutcome() throws -> OptimizeOutcome {
         guard let id = jobID else { throw RemoteRunError("no job id") }
-        // A finished run MUST have written its report; a missing/short report is a
-        // real failure (`getJSON` throws on non-200), never a silent empty result.
         let base = config.baseURL.appendingPathComponent("jobs")
             .appendingPathComponent(id).appendingPathComponent("files")
         let report = try getJSON(base.appendingPathComponent("report.json"))
@@ -527,18 +835,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                                    computedRemotely: true)
         }
 
-        // No accepted variant streamed → an all-rejected run. Build meshless
-        // variants from the report so RunModel surfaces the honest "not strong
-        // enough" sheet (it reads the terminal rung's worst-case margin).
         let rejected = reportVariants.map { makeVariant(streamed: nil, report: $0) }
         return OptimizeOutcome(variants: rejected, stoppedOnMargin: false,
                                cancelled: false, acceptedCount: 0,
                                computedRemotely: true)
     }
 
-    /// Assemble one final variant from an optional fetched mesh + optional report
-    /// scalars. A streamed variant is accepted (and carries its mesh); a report-only
-    /// variant is a rejected rung (meshless — the worker exports only accepted ones).
     private func makeVariant(streamed s: StreamedVariant?,
                              report rv: [String: Any]?) -> OptimizeVariant {
         let margin = rv?["margin"] as? [String: Any]
@@ -581,7 +883,6 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         var off = 84
         for _ in 0..<Int(count) {
             guard off + 50 <= data.count else { break }
-            // skip the 12-byte normal; read 3 vertices (9 floats)
             for v in 0..<3 {
                 let base = off + 12 + v * 12
                 for c in 0..<3 {
