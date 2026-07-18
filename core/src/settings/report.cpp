@@ -80,10 +80,14 @@ void emit_variant(std::string& out, const VariantReport& v,
                   const std::string& indent) {
   const std::string in2 = indent + "  ";
   out += "{\n";
+  // (1) optimizer-achieved fraction, (2) printed/count basis (handoff 104).
   out += in2 + "\"volume_fraction\": " + num_json(v.volume_fraction) + ",\n";
-  // "Volume saved" is the material removed vs the original solid part.
+  out += in2 + "\"printed_fraction\": " + num_json(v.printed_fraction) + ",\n";
+  // "Volume saved" is the material removed vs the original solid part, on the
+  // PRINTED/count basis (handoff 094/104): savings% and mass then share one voxel
+  // count and can never disagree.
   out += in2 + "\"volume_saved_fraction\": " +
-         num_json(1.0 - v.volume_fraction) + ",\n";
+         num_json(1.0 - v.printed_fraction) + ",\n";
   out += in2 + "\"max_stress_mpa\": " + num_json(v.max_stress_mpa) + ",\n";
   out += in2 + "\"max_interlayer_tension_mpa\": " +
          num_json(v.max_interlayer_tension_mpa) + ",\n";
@@ -450,9 +454,24 @@ void validate_job_report_json(const std::string& json_text) {
     const double vsf = require_number(v, "volume_saved_fraction", ctx);
     if (!(vsf >= 0.0 && vsf <= 1.0))
       throw ReportError(ctx + ": volume_saved_fraction must be in [0, 1]");
-    if (std::fabs(vsf - (1.0 - vf)) > 1e-9)
-      throw ReportError(ctx +
-                        ": volume_saved_fraction must equal 1 - volume_fraction");
+    // Savings basis (handoff 104): `volume_saved_fraction` derives from the
+    // PRINTED/count basis `printed_fraction` when present (so savings% and mass
+    // share one voxel count and can never disagree — handoff 094), else from the
+    // legacy `volume_fraction` (backward compatible with pre-104 documents).
+    // `printed_fraction` is a NEW optional field; when present it is a number in
+    // [0, 1] (matching the [0,1] cap the two savings fractions already carry).
+    const JsonValue* pf = find_field(v, "printed_fraction");
+    double savings_basis = vf;
+    if (pf != nullptr) {
+      if (pf->type != JsonValue::Type::Number)
+        throw ReportError(ctx + ": printed_fraction must be a number");
+      if (!(pf->num >= 0.0 && pf->num <= 1.0))
+        throw ReportError(ctx + ": printed_fraction must be in [0, 1]");
+      savings_basis = pf->num;
+    }
+    if (std::fabs(vsf - (1.0 - savings_basis)) > 1e-9)
+      throw ReportError(
+          ctx + ": volume_saved_fraction must equal 1 - printed_fraction");
 
     const double ms = require_number(v, "max_stress_mpa", ctx);
     if (!(ms >= 0.0))

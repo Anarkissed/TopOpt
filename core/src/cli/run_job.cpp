@@ -296,9 +296,14 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid);
       streamed_paths.push_back(p);
-      std::printf("VARIANT vf=%.6f achieved=%.6f margin=%.6g accepted=1 mesh=%s\n",
-                  v.requested_volume_fraction, v.optimization.volume_fraction,
-                  v.report.margin.worst_case, p.c_str());
+      // `achieved` is the optimizer-achieved (continuous) fraction — the stream's
+      // join key against the report's volume_fraction; `printed` is the printed/count
+      // basis the app's savings uses (handoff 104, additive — a new field; older
+      // readers ignore it). Both come from the same variant.
+      std::printf(
+          "VARIANT vf=%.6f achieved=%.6f printed=%.6f margin=%.6g accepted=1 mesh=%s\n",
+          v.requested_volume_fraction, v.optimization.volume_fraction,
+          v.report.printed_fraction, v.report.margin.worst_case, p.c_str());
       std::fflush(stdout);
     };
   }

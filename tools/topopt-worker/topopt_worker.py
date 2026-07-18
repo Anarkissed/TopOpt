@@ -117,7 +117,7 @@ def parse_cli_line(line):
 
     The CLI emits (run_job emit_progress, job.hpp):
       PROGRESS rung=<i> rungs=<n> iter=<k>
-      VARIANT vf=<req> achieved=<vf> margin=<m> accepted=<0|1> mesh=<path>
+      VARIANT vf=<req> achieved=<vf> printed=<pf> margin=<m> accepted=<0|1> mesh=<path>
     plus a human summary at the end (model:/variants:/report:/mesh:). We forward
     the structured lines as typed events and everything else as a log line. We do
     NOT fabricate progress the CLI did not emit.
@@ -132,9 +132,15 @@ def parse_cli_line(line):
     if line.startswith("VARIANT "):
         kv = _kv(line[len("VARIANT "):])
         mesh = kv.get("mesh")
+        # `achieved` = optimizer-achieved (continuous) fraction, the join key;
+        # `printed` = printed/count basis the app's savings uses (handoff 104, a new
+        # field — falls back to `achieved` for a pre-104 CLI that omits it).
+        printed = kv.get("printed")
         return {"type": "variant",
                 "vf": _float(kv.get("vf")),
                 "achieved": _float(kv.get("achieved")),
+                "printed": _float(printed) if printed is not None
+                           else _float(kv.get("achieved")),
                 "margin": _float(kv.get("margin")),
                 "accepted": kv.get("accepted") == "1",
                 "mesh": os.path.basename(mesh) if mesh else None}

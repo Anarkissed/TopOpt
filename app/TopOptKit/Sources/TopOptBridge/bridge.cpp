@@ -228,7 +228,15 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v,
                                     int smooth_factor) {
   OptimizeVariant ov;
   ov.requested_volume_fraction = v.requested_volume_fraction;
-  ov.achieved_volume_fraction = v.optimization.volume_fraction;
+  // Handoff 104: the app's savings basis is the PRINTED/count fraction, so it stays
+  // in lock-step with the reported mass (savings = 1 - achieved can never disagree
+  // with mass). Read it from v.report.printed_fraction rather than
+  // v.optimization.volume_fraction — the latter reverted to the optimizer's
+  // CONTINUOUS achieved fraction on the no-box path (102/104), which would silently
+  // change the displayed savings. On the box path the two are equal (080), so this
+  // is byte-identical there. `printed_fraction` carries the same value by name.
+  ov.achieved_volume_fraction = v.report.printed_fraction;
+  ov.printed_fraction = v.report.printed_fraction;
   ov.mass_grams = v.mass_grams;
   ov.support_volume_voxels = v.support_volume_voxels;
   // The exported/displayed surface: smoothed at smooth_factor > 1, else v.mesh().

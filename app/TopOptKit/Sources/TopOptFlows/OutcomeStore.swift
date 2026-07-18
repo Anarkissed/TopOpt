@@ -20,6 +20,10 @@ enum OutcomeCodec {
 
     struct VariantDTO: Codable, Sendable {
         let requestedVolumeFraction, achievedVolumeFraction, massGrams: Double
+        // Handoff 104: the printed/count basis by name. Optional so blobs written
+        // before this field existed still decode (→ nil → OptimizeVariant defaults it
+        // to achievedVolumeFraction, i.e. the same count basis → identical savings).
+        let printedFraction: Double?
         let supportVolumeVoxels, meshTriangleCount: Int
         let worstCaseMargin: Double
         let accepted, v3Passes: Bool
@@ -56,6 +60,7 @@ enum OutcomeCodec {
                 VariantDTO(
                     requestedVolumeFraction: v.requestedVolumeFraction,
                     achievedVolumeFraction: v.achievedVolumeFraction,
+                    printedFraction: v.printedFraction,
                     massGrams: v.massGrams,
                     supportVolumeVoxels: v.supportVolumeVoxels,
                     meshTriangleCount: v.meshTriangleCount,
@@ -88,6 +93,7 @@ enum OutcomeCodec {
                 OptimizeVariant(
                     requestedVolumeFraction: v.requestedVolumeFraction,
                     achievedVolumeFraction: v.achievedVolumeFraction,
+                    printedFraction: v.printedFraction,
                     massGrams: v.massGrams,
                     supportVolumeVoxels: v.supportVolumeVoxels,
                     meshTriangleCount: v.meshTriangleCount,

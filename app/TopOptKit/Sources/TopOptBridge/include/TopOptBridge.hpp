@@ -129,7 +129,16 @@ using ProgressFn = void (*)(void* ctx, uint64_t rung_index,
 // flag from the progress callback (same thread) to cancel mid-run.
 struct OptimizeVariant {
   double requested_volume_fraction = 0.0;
+  // The printed/count basis #{ρ>0.5}/part_solid the app's savings% is built from
+  // (savings = 1 - achieved_volume_fraction). Handoff 104 split the core report into
+  // two bases; `achieved_volume_fraction` here carries the PRINTED/count basis (its
+  // historical meaning — it feeds savings, which must stay the count basis so it can
+  // never disagree with mass), and `printed_fraction` names that basis explicitly.
   double achieved_volume_fraction = 0.0;
+  // Handoff 104 (additive): the printed/count basis by its canonical name. Equal to
+  // achieved_volume_fraction; carried so consumers can reference it distinctly from
+  // the core's optimizer-achieved (continuous) volume_fraction. #{ρ>0.5}/part_solid.
+  double printed_fraction = 0.0;
   double mass_grams = 0.0;              // M7.0b
   int32_t support_volume_voxels = 0;   // M7.0b
   int32_t mesh_triangle_count = 0;     // M7.0b variant mesh

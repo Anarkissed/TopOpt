@@ -119,7 +119,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// report's ACHIEVED volume_fraction (files are named by the REQUESTED one).
     private struct StreamedVariant {
         let requestedVF: Double
-        let achievedVF: Double
+        let achievedVF: Double        // optimizer-achieved (continuous) — report join key
+        let printedFraction: Double   // printed/count basis — the savings basis (104)
         let margin: Double
         let accepted: Bool
         let meshName: String
@@ -441,17 +442,25 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         }
         let requestedVF = ev["vf"] as? Double ?? 0
         let achievedVF = ev["achieved"] as? Double ?? 0
+        // Handoff 104: the app's savings uses the printed/count basis (`printed`);
+        // fall back to `achieved` if a pre-104 worker omitted it.
+        let printedVF = ev["printed"] as? Double ?? achievedVF
         let margin = ev["margin"] as? Double ?? 0
         let accepted = (ev["accepted"] as? Bool) ?? true
         streamedLock.lock()
         streamed.append(StreamedVariant(requestedVF: requestedVF, achievedVF: achievedVF,
+                                        printedFraction: printedVF,
                                         margin: margin, accepted: accepted,
                                         meshName: meshName,
                                         vertices: mesh.0, indices: mesh.1))
         streamedLock.unlock()
         let v = OptimizeVariant(
             requestedVolumeFraction: requestedVF,
-            achievedVolumeFraction: achievedVF,
+            // achievedVolumeFraction is the app's savings basis (= printed/count);
+            // printedFraction names it. (The continuous achievedVF is the report join
+            // key, kept in StreamedVariant.)
+            achievedVolumeFraction: printedVF,
+            printedFraction: printedVF,
             massGrams: 0,                 // not emitted by the CLI (see file header)
             supportVolumeVoxels: 0,       // not emitted by the CLI
             meshTriangleCount: mesh.1.count / 3,
@@ -492,11 +501,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 
-        // Join a report variant to a streamed (accepted) one by ACHIEVED volume
-        // fraction: the stream carries only accepted variants, the report the whole
-        // ladder, so an index join would misalign. The VARIANT event's `achieved`
-        // and the report's `volume_fraction` are the same quantity
-        // (v.optimization.volume_fraction), so they match to float tolerance.
+        // Join a report variant to a streamed (accepted) one by the OPTIMIZER-ACHIEVED
+        // (continuous) volume fraction: the stream carries only accepted variants, the
+        // report the whole ladder, so an index join would misalign. The VARIANT event's
+        // `achieved` and the report's `volume_fraction` are the same quantity
+        // (v.optimization.volume_fraction), so they match to float tolerance. (The
+        // savings basis — `printed`/`printed_fraction` — is read separately in
+        // makeVariant; it is NOT the join key. Handoff 104.)
         func reportVariant(forAchieved vf: Double) -> [String: Any]? {
             var best: [String: Any]?
             var bestErr = 1e-4      // require a real match, don't grab the nearest
@@ -532,11 +543,18 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                              report rv: [String: Any]?) -> OptimizeVariant {
         let margin = rv?["margin"] as? [String: Any]
         let orient = rv?["orientation"] as? [String: Any]
-        let vf = s?.achievedVF ?? (rv?["volume_fraction"] as? Double ?? 0)
+        // Savings/count basis (handoff 104): the app's savings is 1 - achievedVolume-
+        // Fraction, which must stay the PRINTED/count basis. Prefer the streamed
+        // printed fraction, else the report's printed_fraction, falling back to the
+        // report's volume_fraction only for a pre-104 report that lacks the field.
+        let printedVF = s?.printedFraction
+            ?? (rv?["printed_fraction"] as? Double)
+            ?? (rv?["volume_fraction"] as? Double ?? 0)
         let worst = (margin?["worst_case"] as? Double) ?? (s?.margin) ?? 0
         return OptimizeVariant(
-            requestedVolumeFraction: s?.requestedVF ?? vf,
-            achievedVolumeFraction: vf,
+            requestedVolumeFraction: s?.requestedVF ?? printedVF,
+            achievedVolumeFraction: printedVF,
+            printedFraction: printedVF,
             massGrams: 0, supportVolumeVoxels: 0,        // not over the wire (header)
             meshTriangleCount: (s?.indices.count ?? 0) / 3,
             worstCaseMargin: worst,
