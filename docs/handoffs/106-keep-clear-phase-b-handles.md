@@ -1,4 +1,4 @@
-# 105 — Keep-clear Phase B: drag handles + liquid-glass value pill
+# 106 — Keep-clear Phase B: drag handles + liquid-glass value pill
 
 **Status:** DONE (code complete). App-only change under `/app/TopOptKit`. Builds are
 `xcodebuild`/macOS — the maintainer's device-QA standard (this package is NOT covered
