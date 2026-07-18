@@ -165,22 +165,57 @@ final class OrientationGizmoTests: XCTestCase {
         XCTAssertEqual(hitCentre("Top-Front")?.kind, .edge)
     }
 
-    func testTopTapIsNotAnAdjacentFace() {
-        // A tap near the TOP edge of a straight-on front view resolves to the top region
-        // (edge/face), never the front face centre or a side.
-        let r = rotation(forID: "Front")           // identity — looking at +Z
-        let s = CGSize(width: 74, height: 74)
-        // y near the top of the drawn cube (front face spans center ± 74/4 = ±18.5).
-        let hit = OrientationGizmo.hitTest(point: CGPoint(x: 37, y: 20), in: s, rotation: r)
-        XCTAssertNotNil(hit)
-        XCTAssertTrue(hit!.id.contains("Top"), "upper tap should involve Top, got \(hit!.id)")
+    /// Synthetic rays on the FRONT view (rotation ≈ identity): a tap above centre lands on the
+    /// Top-Front edge, up-and-right on the Top-Front-Right corner, dead-centre on Front. The
+    /// exact (point, id) values are the ground truth from the C++ SDF oracle
+    /// (Testing/gizmo_pick_oracle.cpp), which mirrors the design mock byte-for-byte.
+    func testSyntheticRaysOnFrontViewResolveFaceEdgeCorner() {
+        let r = rotation(forID: "Front")
+        let s = CGSize(width: 200, height: 200)
+        func hit(_ x: CGFloat, _ y: CGFloat) -> GizmoRegion? {
+            OrientationGizmo.hitTest(point: CGPoint(x: x, y: y), in: s, rotation: r)
+        }
+        XCTAssertEqual(hit(100, 100)?.id, "Front", "dead-centre is the Front face")
+        let edge = hit(100, 70)
+        XCTAssertEqual(edge?.kind, .edge)
+        XCTAssertTrue(edge?.id.contains("Top") ?? false, "the upper band is the Top-Front edge, got \(edge?.id ?? "nil")")
+        let corner = hit(130, 70)
+        XCTAssertEqual(corner?.id, "Top-Front-Right")
+        XCTAssertEqual(corner?.kind, .corner)
     }
 
-    func testTapOutsideCubeMisses() {
+    func testTapOutsideGlassMisses() {
         let r = rotation(forID: "Front")
-        let s = CGSize(width: 74, height: 74)
-        XCTAssertNil(OrientationGizmo.hitTest(point: CGPoint(x: 2, y: 2), in: s, rotation: r),
-                     "a tap in the corner, outside the silhouette, hits nothing")
+        // The glass fills the central ~38% of the frame (FOV 38 / CAMZ 9.25 — it renders with
+        // a deliberate margin), so a tap far into the margin hits nothing.
+        XCTAssertNil(OrientationGizmo.hitTest(point: CGPoint(x: 100, y: 10),
+                                              in: CGSize(width: 200, height: 200), rotation: r),
+                     "a tap in the margin above the floating glass hits nothing")
+        XCTAssertNil(OrientationGizmo.hitTest(point: CGPoint(x: 2, y: 2),
+                                              in: CGSize(width: 74, height: 74), rotation: r),
+                     "a corner tap outside the silhouette hits nothing")
+    }
+
+    /// The picker and the Metal shader must agree on the numeric cell id (the mock's
+    /// `globalId`), or the hover glow would light the wrong cell. This pins the shared scheme.
+    func testNumericIdMatchesSharedGlobalIdScheme() {
+        func nid(_ id: String) -> Float { OrientationGizmo.numericId(anchor: OrientationGizmo.region(id)!.anchor) }
+        XCTAssertEqual(nid("Right"), 1);  XCTAssertEqual(nid("Left"), 2)
+        XCTAssertEqual(nid("Top"), 3);    XCTAssertEqual(nid("Bottom"), 4)
+        XCTAssertEqual(nid("Front"), 5);  XCTAssertEqual(nid("Back"), 6)
+        XCTAssertEqual(nid("Top-Front"), 11, "Y+Z+ edge is globalId 11")
+        XCTAssertEqual(nid("Top-Front-Right"), 19, "the +++ corner is globalId 19")
+        XCTAssertEqual(OrientationGizmo.homeNumericId, 0)
+    }
+
+    /// `pick` distinguishes a region from a margin miss (the view routes `.home` and `.miss`
+    /// differently, so the enum must be exact — not collapsed to nil like `hitTest`).
+    func testPickReturnsRegionOrMiss() {
+        let r = rotation(forID: "Front")
+        let s = CGSize(width: 200, height: 200)
+        XCTAssertEqual(OrientationGizmo.pick(point: CGPoint(x: 100, y: 100), in: s, rotation: r),
+                       .region(OrientationGizmo.region("Front")!))
+        XCTAssertEqual(OrientationGizmo.pick(point: CGPoint(x: 100, y: 10), in: s, rotation: r), .miss)
     }
 
     func testAllTwentySixRegionsExist() {
