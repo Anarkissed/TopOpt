@@ -1,4 +1,4 @@
-# 105 — Orientation gizmo: liquid-glass redesign (raymarched SDF port)
+# 107 — Orientation gizmo: liquid-glass redesign (raymarched SDF port)
 
 **Branch:** `claude/orientation-gizmo-redesign-n4u1op` (developed on the dedicated feature
 branch, isolated from `main`; the CCR session is an ephemeral fresh clone).
