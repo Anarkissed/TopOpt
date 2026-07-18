@@ -58,10 +58,24 @@ StressMargin compute_stress_margin(double yield_strength_mpa, double z_knockdown
 
 // One variant's line in the job report (§5 "per variant").
 struct VariantReport {
-  // Achieved physical volume fraction of the optimized variant relative to the
-  // original solid part (SimpOptimizeResult.volume_fraction). "Volume saved" is
-  // the complement 1 - volume_fraction and is emitted in the JSON.
+  // TWO volume bases, each answering one question (handoff 104, resolving 102).
+  // They diverge on the grayscale MMA field (no Heaviside projection) and coincide
+  // when the field is crisp; the divergence grows as the target shrinks.
+  //
+  // `volume_fraction` — the OPTIMIZER'S ACHIEVED fraction ("did the solve hit its
+  // volume target?"). No-box path: the optimizer's continuous fraction Σρ/n_active
+  // over the active design set (≈ the request). Design-box path: handoff 080's
+  // part-relative count printed_voxels/part_solid (the solve targets the Active
+  // envelope, so its raw fraction is not part-relative). This is the quantity the
+  // cli_demo "achieved vf ≈ request" invariant tests.
   double volume_fraction = 0.0;
+  // `printed_fraction` — the PRINTED / thresholded count basis ("how much material
+  // actually prints?") = #{ρ>0.5}/part_solid, the SAME voxel count the reported mass
+  // is built from. The emitted "volume_saved_fraction" is 1 - printed_fraction, so
+  // savings% and mass are two views of one count and can never disagree (handoff
+  // 094's fix, kept in its own field). Matches the exported mesh's mass basis; can
+  // exceed 1 on the box add-material path (net material added → negative savings).
+  double printed_fraction = 0.0;
   // Peak stresses for the chosen orientation (MPa): the max von Mises stress
   // ("max stress") and the max tension across layer planes (M4.4 field).
   double max_stress_mpa = 0.0;
@@ -91,16 +105,17 @@ struct JobReport {
 // Serialize a job report to a single JSON document (2-space indented). Numeric
 // fields that are not finite (e.g. an unbounded margin term when a stress is 0)
 // are emitted as JSON null. Each variant additionally carries the derived
-// "volume_saved_fraction" = 1 - volume_fraction. The output always satisfies
-// validate_job_report_json below.
+// "volume_saved_fraction" = 1 - printed_fraction (savings is the printed/count
+// basis — handoff 104). The output always satisfies validate_job_report_json below.
 std::string job_report_json(const JobReport& report);
 
 // Schema-validate a job report JSON document (the report schema this module
 // emits). Parses `json_text` and checks that every required field is present
 // with the right type, that counts are integers, that volume_saved_fraction is
-// consistent with volume_fraction, and that stresses / volume fractions are in
-// range. Throws ReportError on malformed JSON or any schema violation; returns
-// normally when the document conforms.
+// consistent with the savings basis (1 - printed_fraction when printed_fraction is
+// present, else the legacy 1 - volume_fraction), and that stresses / volume
+// fractions are in range. Throws ReportError on malformed JSON or any schema
+// violation; returns normally when the document conforms.
 void validate_job_report_json(const std::string& json_text);
 
 }  // namespace topopt

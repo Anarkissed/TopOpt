@@ -162,6 +162,7 @@ void test_serialize_validate() {
 
   VariantReport v0;
   v0.volume_fraction = 0.5;
+  v0.printed_fraction = 0.5;
   v0.max_stress_mpa = 20.0;
   v0.max_interlayer_tension_mpa = 5.0;
   v0.margin = compute_stress_margin(55.0, 0.55, 20.0, 5.0);
@@ -171,6 +172,7 @@ void test_serialize_validate() {
 
   VariantReport v1;
   v1.volume_fraction = 0.3;
+  v1.printed_fraction = 0.3;
   v1.max_stress_mpa = 30.0;
   v1.max_interlayer_tension_mpa = 8.0;
   v1.margin = compute_stress_margin(60.0, 1.0, 30.0, 8.0);
@@ -188,6 +190,7 @@ void test_serialize_validate() {
   CHECK(contains(json, "\"material\": \"PLA\""), "material emitted");
   CHECK(contains(json, "\"variants\""), "variants key emitted");
   CHECK(contains(json, "\"volume_fraction\""), "volume_fraction emitted");
+  CHECK(contains(json, "\"printed_fraction\""), "printed_fraction emitted");
   CHECK(contains(json, "\"volume_saved_fraction\""),
         "derived volume_saved_fraction emitted");
   CHECK(contains(json, "\"max_stress_mpa\""), "max_stress emitted");
@@ -209,11 +212,15 @@ void test_serialize_validate() {
 }
 
 void test_volume_saved_derived() {
-  // volume_saved_fraction must be emitted as exactly 1 - volume_fraction.
+  // volume_saved_fraction must be emitted as exactly 1 - printed_fraction (the
+  // savings/count basis, handoff 104) — NOT 1 - volume_fraction. Give the two
+  // bases distinct values so the derivation is unambiguous: an achieved (continuous)
+  // fraction of 0.35 with a printed (count) fraction of 0.3 -> savings 0.7.
   JobReport r;
   r.material = "PETG";
   VariantReport v;
-  v.volume_fraction = 0.3;  // -> volume_saved_fraction 0.7
+  v.volume_fraction = 0.35;  // optimizer-achieved (continuous)
+  v.printed_fraction = 0.3;  // printed/count basis -> volume_saved_fraction 0.7
   v.max_stress_mpa = 10.0;
   v.max_interlayer_tension_mpa = 2.0;
   v.margin = compute_stress_margin(50.0, 0.7, 10.0, 2.0);
@@ -222,9 +229,12 @@ void test_volume_saved_derived() {
   r.variants.push_back(v);
 
   std::string json = job_report_json(r);
-  CHECK(contains(json, "\"volume_fraction\": 0.3"), "volume_fraction 0.3 emitted");
+  CHECK(contains(json, "\"volume_fraction\": 0.35"),
+        "volume_fraction 0.35 emitted (optimizer-achieved)");
+  CHECK(contains(json, "\"printed_fraction\": 0.3"),
+        "printed_fraction 0.3 emitted (count basis)");
   CHECK(contains(json, "\"volume_saved_fraction\": 0.7"),
-        "volume_saved_fraction 0.7 derived");
+        "volume_saved_fraction 0.7 derived from printed_fraction");
   CHECK(!throws_report_error([&] { validate_job_report_json(json); }),
         "derived report validates");
 }
@@ -236,6 +246,7 @@ void test_nonfinite_margin_null() {
   r.material = "ASA";
   VariantReport v;
   v.volume_fraction = 0.5;
+  v.printed_fraction = 0.5;
   v.max_stress_mpa = 20.0;
   v.max_interlayer_tension_mpa = 0.0;
   v.margin = compute_stress_margin(50.0, 0.6, 20.0, 0.0);  // interlayer = inf
@@ -264,6 +275,7 @@ void test_string_escaping() {
   r.material = "PL\"A\\x";  // quote + backslash
   VariantReport v;
   v.volume_fraction = 0.5;
+  v.printed_fraction = 0.5;
   v.max_stress_mpa = 20.0;
   v.max_interlayer_tension_mpa = 5.0;
   v.margin = compute_stress_margin(55.0, 0.55, 20.0, 5.0);
@@ -288,6 +300,7 @@ const char* kValid = R"({
   "variants": [
     {
       "volume_fraction": 0.5,
+      "printed_fraction": 0.5,
       "volume_saved_fraction": 0.5,
       "max_stress_mpa": 20.0,
       "max_interlayer_tension_mpa": 5.0,
@@ -398,6 +411,7 @@ void test_min_feature_emitted() {
   // settings min_feature_warning_text).
   VariantReport v0;
   v0.volume_fraction = 0.3;
+  v0.printed_fraction = 0.3;
   v0.max_stress_mpa = 20.0;
   v0.max_interlayer_tension_mpa = 5.0;
   v0.margin = compute_stress_margin(55.0, 0.55, 20.0, 5.0);
@@ -410,6 +424,7 @@ void test_min_feature_emitted() {
   // A clean variant: no violations, no warning (the defaults).
   VariantReport v1;
   v1.volume_fraction = 0.5;
+  v1.printed_fraction = 0.5;
   v1.max_stress_mpa = 10.0;
   v1.max_interlayer_tension_mpa = 2.0;
   v1.margin = compute_stress_margin(55.0, 0.55, 10.0, 2.0);
@@ -495,6 +510,64 @@ void test_min_feature_validator() {
         "omitted min-feature fields accepted (backward compatible)");
 }
 
+// --- printed_fraction: the savings/count basis (handoff 104) ---------------
+
+void test_printed_fraction_validator() {
+  auto rejects = [](const std::string& doc) {
+    return throws_report_error([&] { validate_job_report_json(doc); });
+  };
+
+  // When printed_fraction is present, volume_saved_fraction must equal
+  // 1 - printed_fraction (NOT 1 - volume_fraction). Here vf 0.35, printed 0.30 →
+  // savings must be 0.70; a document that instead sets 0.65 (= 1 - vf) is rejected.
+  CHECK(rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.35, "printed_fraction": 0.30, "volume_saved_fraction": 0.65,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" } } ] })"),
+        "volume_saved_fraction inconsistent with printed_fraction rejected");
+
+  // Positive control: the SAME variant with savings derived from printed_fraction
+  // (0.70) is accepted even though volume_fraction (0.35) differs — the two bases
+  // are independent, and savings tracks the printed/count basis.
+  CHECK(!rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.35, "printed_fraction": 0.30, "volume_saved_fraction": 0.70,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" } } ] })"),
+        "savings derived from printed_fraction accepted (bases may differ)");
+
+  // printed_fraction out of [0, 1].
+  CHECK(rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "printed_fraction": 1.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" } } ] })"),
+        "printed_fraction out of range rejected");
+
+  // Non-number printed_fraction.
+  CHECK(rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "printed_fraction": "x", "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" } } ] })"),
+        "non-number printed_fraction rejected");
+
+  // Backward compatible: a pre-104 document WITHOUT printed_fraction still validates
+  // against the legacy 1 - volume_fraction rule.
+  CHECK(!rejects(R"({ "material": "PLA", "variants": [ {
+        "volume_fraction": 0.5, "volume_saved_fraction": 0.5,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" } } ] })"),
+        "pre-104 document without printed_fraction accepted (legacy basis)");
+}
+
 }  // namespace
 
 int main() {
@@ -511,6 +584,7 @@ int main() {
   test_validator_rejects();
   test_min_feature_emitted();
   test_min_feature_validator();
+  test_printed_fraction_validator();
 
   if (g_failures == 0) {
     std::printf("job report (M5.2): all %d checks passed\n", g_checks);

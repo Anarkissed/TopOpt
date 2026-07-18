@@ -117,7 +117,16 @@ public struct KeyframeMesh: Equatable, Sendable {
 /// One evaluated volume-fraction rung of a minimize_plastic run.
 public struct OptimizeVariant {
     public let requestedVolumeFraction: Double
+    /// The PRINTED/count-basis volume fraction (#{ρ>0.5}/part_solid); savings is its
+    /// complement (1 - achievedVolumeFraction) and shares the reported mass's voxel
+    /// count, so the two can never disagree (handoff 094/104). Kept as the app's
+    /// savings basis under this name for continuity; `printedFraction` names it too.
     public let achievedVolumeFraction: Double
+    /// Handoff 104 (additive): the printed/count basis by its canonical name — equal
+    /// to `achievedVolumeFraction`. Distinct from the core report's optimizer-achieved
+    /// (continuous) `volume_fraction`; surfaced so any UI showing both can label them
+    /// "optimizer achieved" vs "printed" rather than two unlabeled percentages.
+    public let printedFraction: Double
     public let massGrams: Double
     public let supportVolumeVoxels: Int
     public let meshTriangleCount: Int
@@ -167,6 +176,7 @@ public struct OptimizeVariant {
     public let keyframeMeshes: [KeyframeMesh]
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
+                printedFraction: Double? = nil,
                 massGrams: Double, supportVolumeVoxels: Int, meshTriangleCount: Int,
                 worstCaseMargin: Double, accepted: Bool, v3Passes: Bool,
                 minFeatureViolations: Int = 0, minFeatureWarning: String = "",
@@ -178,6 +188,10 @@ public struct OptimizeVariant {
                 keyframeMeshes: [KeyframeMesh] = []) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
+        // printedFraction defaults to achievedVolumeFraction: on the app the two are
+        // the same count basis (handoff 104), and this keeps every existing caller
+        // (and persisted blobs decoded before this field existed) byte-identical.
+        self.printedFraction = printedFraction ?? achievedVolumeFraction
         self.massGrams = massGrams
         self.supportVolumeVoxels = supportVolumeVoxels
         self.meshTriangleCount = meshTriangleCount
@@ -609,6 +623,7 @@ public enum TopOptKit {
             variants.append(OptimizeVariant(
                 requestedVolumeFraction: v.requested_volume_fraction,
                 achievedVolumeFraction: v.achieved_volume_fraction,
+                printedFraction: v.printed_fraction,
                 massGrams: v.mass_grams,
                 supportVolumeVoxels: Int(v.support_volume_voxels),
                 meshTriangleCount: Int(v.mesh_triangle_count),

@@ -23,11 +23,16 @@
 //   (gray)   #{ρ>0.5} strictly exceeds Σρ — the count over-reads the continuous
 //            sum, i.e. we are in the regime where the two bases diverge. Without
 //            this the fixture could be crisp and the gate would not bite.
-//   (no-box) reported achieved == printed_voxels / part_solid, and equivalently
-//            mass / achieved == the part's mass. This is what 094 fixes; it FAILS
-//            against pre-094 core (which reports Σρ/n_active ≠ #{ρ>0.5}/part).
+//   (no-box) the printed/count basis == printed_voxels / part_solid, and
+//            equivalently mass / printed == the part's mass. This is what 094 fixes.
 //   (box)    the same identity still holds on the 080 design-box path (no
 //            regression).
+//
+// Handoff 104 update: the savings/count basis is now the dedicated `printed_fraction`
+// report field (this gate reads v.report.printed_fraction), because 104 reverted
+// optimization.volume_fraction to the optimizer's CONTINUOUS achieved fraction on
+// the no-box path (the number the cli_demo invariant tests — see 102). The COUNT
+// basis 094 established is unchanged in value; only the field it lives in moved.
 //
 // Drives minimize_plastic (Eigen), so it is Eigen-gated in CMake like the other
 // optimizer gates; the real settings rule table is injected (SETTINGS_RULES_PATH).
@@ -173,7 +178,11 @@ void check_no_box(const VoxelGrid& part, double part_mass,
   const FieldMeasures fm = measure_field(part, v);
   const double part_solid = static_cast<double>(part.solid_count());
   const double expected = static_cast<double>(fm.printed) / part_solid;
-  const double reported = v.optimization.volume_fraction;
+  // Handoff 104: the savings/mass basis is now the dedicated `printed_fraction`
+  // field (#{ρ>0.5}/part_solid), NOT `optimization.volume_fraction` — which on the
+  // no-box path reverted to the optimizer's CONTINUOUS achieved fraction (102).
+  // Reading printed_fraction keeps this 094 gate testing the same count basis.
+  const double reported = v.report.printed_fraction;
 
   // (gray) the whole-voxel count strictly exceeds the continuous sum by a clear
   // margin, so a Σρ-based basis and a #{ρ>0.5}-based basis DO diverge here.
@@ -188,6 +197,17 @@ void check_no_box(const VoxelGrid& part, double part_mass,
   const double implied_baseline = v.mass_grams / reported;
   CHECK(std::fabs(implied_baseline - part_mass) <= 1e-6 * part_mass + 1e-12,
         "(no-box): mass / achieved == the part's mass (one shared basis)");
+
+  // (104 split) the OPTIMIZER-ACHIEVED fraction (volume_fraction) is a SEPARATE,
+  // continuous basis: it equals simp's own value verbatim (handoff 094's no-box
+  // overwrite to the count basis is reverted) and, on this grayscale field, differs
+  // from the printed/count basis by a clear margin. If a future change re-clobbered
+  // volume_fraction with the count, this would fail — the two labeled fields must
+  // stay distinct (handoff 104, resolving 102).
+  CHECK(v.report.volume_fraction == v.optimization.volume_fraction,
+        "(104): report.volume_fraction is simp's continuous achieved fraction, not overwritten");
+  CHECK(std::fabs(v.report.volume_fraction - v.report.printed_fraction) > 1e-3,
+        "(104): optimizer-achieved fraction is distinct from the printed count basis");
 
   std::printf(
       "[094] no-box printed=%zu sum_rho=%.2f part_solid=%.0f  achieved=%.4f "
@@ -204,7 +224,10 @@ void check_no_box(const VoxelGrid& part, double part_mass,
 // invariant test_designbox_reduction locks; asserted here so 094's shared gate
 // covers BOTH paths (guard a).
 void check_box(double part_mass, const MinimizePlasticVariant& v) {
-  const double reported = v.optimization.volume_fraction;
+  // Handoff 104: read the printed/count basis (see check_no_box). On the box path
+  // optimization.volume_fraction still equals printed_fraction (080's overwrite),
+  // but printed_fraction is the canonical savings basis, so read it here too.
+  const double reported = v.report.printed_fraction;
   const double implied_baseline = v.mass_grams / reported;
   CHECK(std::fabs(implied_baseline - part_mass) <= 1e-6 * part_mass + 1e-12,
         "(box): mass / achieved == the part's mass (080 part-relative, one basis)");
