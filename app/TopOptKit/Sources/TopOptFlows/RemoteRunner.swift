@@ -874,28 +874,10 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     }
 
     /// Minimal binary-STL reader → (interleaved xyz floats, triangle-soup indices).
-    /// The mesh is unindexed (STL has no shared vertices); fine for display.
+    /// The mesh is unindexed (STL has no shared vertices); fine for display. Shares
+    /// the exact reader `MeshExport` writes against, so the app's STL export round-
+    /// trips through the same parse the remote mesh path relies on.
     private func parseBinarySTL(_ data: Data) -> ([Float], [Int32]) {
-        guard data.count > 84 else { return ([], []) }
-        let count = data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: 80, as: UInt32.self) }
-        var verts: [Float] = []; var idx: [Int32] = []
-        verts.reserveCapacity(Int(count) * 9)
-        var off = 84
-        for _ in 0..<Int(count) {
-            guard off + 50 <= data.count else { break }
-            for v in 0..<3 {
-                let base = off + 12 + v * 12
-                for c in 0..<3 {
-                    let f = data.withUnsafeBytes {
-                        $0.loadUnaligned(fromByteOffset: base + c * 4, as: Float32.self)
-                    }
-                    verts.append(f)
-                }
-            }
-            let n = Int32(idx.count)
-            idx.append(contentsOf: [n, n + 1, n + 2])
-            off += 50
-        }
-        return (verts, idx)
+        MeshExport.parseBinarySTL(data)
     }
 }

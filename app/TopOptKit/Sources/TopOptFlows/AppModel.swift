@@ -216,6 +216,15 @@ public final class AppModel: ObservableObject {
         materialsByName[materialName]?.yieldStrengthMPa ?? 0
     }
 
+    /// The density (g/cm³) of a material by name, for the results-screen STL export's
+    /// honest mesh mass (handoff 105 / Open #6). 0 when the material isn't loaded — the
+    /// export then falls back to resolving density from the bundled materials.json, and
+    /// finally to a voxel-only mass. Provided so a future `ResultsScreen` call site can
+    /// thread density in directly (`materialDensityGCm3:`), matching `yieldStrengthMPa`.
+    public func densityGCm3(for materialName: String) -> Double {
+        materialsByName[materialName]?.densityGCm3 ?? 0
+    }
+
     /// Rename the open project (tap the title). Updates the recents grid + persists.
     public func renameCurrentProject(to newName: String) {
         guard let project else { return }
