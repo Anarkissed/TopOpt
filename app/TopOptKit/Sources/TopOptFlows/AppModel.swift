@@ -160,7 +160,8 @@ public final class AppModel: ObservableObject {
                           buildDirection: lc.buildDirection,
                           infillPercent: project.printParams.infillPercent,
                           designBox: project.designBox.bridgeBox,
-                          keepOutBoxes: project.designBox.bridgeKeepOuts)
+                          keepOutBoxes: project.designBox.bridgeKeepOuts,
+                          clearances: project.clearanceSpecs())
     }
 
     // MARK: - Materials

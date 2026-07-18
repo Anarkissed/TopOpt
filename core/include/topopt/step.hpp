@@ -38,10 +38,29 @@ struct StepTessellation {
 enum class StepSurfaceKind { Plane, Cylinder, Other };
 
 // Per-face surface geometry: the surface class and, for a cylinder, its radius
-// (mm — the STEP length unit is converted to millimetres on import).
+// (mm — the STEP length unit is converted to millimetres on import), plus the
+// EXACT axis/normal the clearance rasterizer (handoff 100) needs. Only the app's
+// opaque `face_id` crosses the language boundary; the precise geometry stays
+// core-side and is re-read from the B-rep on every import (STEP 0c of the
+// clearance design). All lengths are millimetres, in the model/voxel frame.
 struct StepFaceInfo {
   StepSurfaceKind kind = StepSurfaceKind::Other;
   double cylinder_radius_mm = 0.0;  // meaningful iff kind == Cylinder
+
+  // Cylinder axis (meaningful iff kind == Cylinder): a point on the axis and a
+  // UNIT direction, from OCCT surf.Cylinder().Axis() (position + direction).
+  // `axis_dir` is (0,0,0) when the face is not a cylinder. A swept-cylinder
+  // bolt-clearance keep-out is generated along this axis.
+  Vec3 axis_point{0.0, 0.0, 0.0};
+  Vec3 axis_dir{0.0, 0.0, 0.0};
+
+  // Plane geometry (meaningful iff kind == Plane): the OUTWARD unit normal and a
+  // point on the plane, from OCCT surf.Plane(). The normal honours the face's
+  // TopAbs_REVERSED orientation (as the tessellation winding does at line ~148),
+  // so it points OUT of the solid — the direction a bounded-slab face clearance
+  // extrudes. `plane_normal` is (0,0,0) when the face is not a plane.
+  Vec3 plane_normal{0.0, 0.0, 0.0};
+  Vec3 plane_origin{0.0, 0.0, 0.0};
 };
 
 // A STEP model imported via OCCT: exact B-rep measures plus a triangle mesh

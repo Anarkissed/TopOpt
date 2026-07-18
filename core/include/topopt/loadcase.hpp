@@ -4,11 +4,12 @@
 #include <string>
 #include <vector>
 
-#include "topopt/fea.hpp"       // DirichletBC, NodalLoad
-#include "topopt/mesh.hpp"      // Vec3
-#include "topopt/pipeline.hpp"  // MinimizePlasticOptions
-#include "topopt/step.hpp"      // StepModel
-#include "topopt/voxel.hpp"     // VoxelGrid, DesignBox
+#include "topopt/clearance.hpp"  // ClearanceParams, ClearanceKind
+#include "topopt/fea.hpp"        // DirichletBC, NodalLoad
+#include "topopt/mesh.hpp"       // Vec3
+#include "topopt/pipeline.hpp"   // MinimizePlasticOptions
+#include "topopt/step.hpp"       // StepModel
+#include "topopt/voxel.hpp"      // VoxelGrid, DesignBox
 
 namespace topopt {
 
@@ -66,6 +67,19 @@ struct ProductionLoadCase {
   bool has_design_box = false;
   DesignBox design_box;
   std::vector<DesignBox> keep_out_boxes;
+
+  // Handoff 100 — "Keep clear" clearance regions. Each entry is a B-rep face and
+  // its (editable) clearance distances; build_production_loadcase derives the
+  // exact swept-cylinder (bore) / bounded-slab (plane) keep-out from the face's
+  // StepFaceInfo geometry and ORs it into the effective mask as FrozenVoid. The
+  // app AUTO-adds a Bolt clearance for an anchored bore and takes an EXPLICIT Face
+  // clearance for a mounting plane; the CLI reads them from job.json "clearances".
+  // Empty (the default) → no clearance → byte-identical to the pre-100 path.
+  struct Clearance {
+    int face_id = -1;
+    ClearanceParams params;  // kind (Bolt/Face) + the editable mm distances
+  };
+  std::vector<Clearance> clearances;
 };
 
 // Permanent per-load-group instrumentation (handoff 099, small-face load loss).
@@ -103,6 +117,21 @@ struct ProductionRunSetup {
   std::vector<DirichletBC> bcs;    // clamped anchor nodes (or min-x fallback)
   MinimizePlasticOptions options;  // production config + the load case
   VoxelGrid solved_grid;           // minimize_plastic_solved_grid(grid, options)
+
+  // Handoff 100 — what each declared clearance actually did on the solved grid,
+  // so a front-end can report HONESTLY: which face, which kind, how many voxels
+  // it forbade, and whether the region reached the grid at all. `in_grid == false`
+  // means the region fell entirely outside the solved domain (a silent no-op the
+  // UI must SURFACE, not hide — e.g. a clearance in unreachable void with no design
+  // box). Numbers shown to the user are these numbers. Empty when no clearance was
+  // declared.
+  struct ClearanceReport {
+    int face_id = -1;
+    ClearanceKind kind = ClearanceKind::Bolt;
+    std::size_t voxels_frozen = 0;  // voxels this clearance set FrozenVoid
+    bool in_grid = false;           // the region intersected the solved grid
+  };
+  std::vector<ClearanceReport> clearance_reports;
 };
 
 // Build the production run setup for `lc` from the imported `model`, voxelized at

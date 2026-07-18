@@ -36,6 +36,7 @@ add_library(topopt
   src/io/stl.cpp
   src/mesh/mesh.cpp
   src/voxel/voxelize.cpp
+  src/voxel/clearance.cpp
   src/fea/hex_element.cpp
   src/orient/orient.cpp
   src/settings/settings.cpp
@@ -210,6 +211,14 @@ add_test(NAME job_schema COMMAND test_job)
 add_executable(test_resample tests/unit/test_resample.cpp)
 target_link_libraries(test_resample PRIVATE topopt)
 add_test(NAME resample COMMAND test_resample)
+
+# Shape-aware clearance rasterizer (handoff 100). Pure C++/std (no OCCT, no
+# Eigen): mask_clearance_region lives in the always-built src/voxel/clearance.cpp
+# and the test builds a synthetic cylinder+plane StepModel in code, so it runs in
+# every configuration like the other geometry tests.
+add_executable(test_clearance tests/unit/test_clearance.cpp)
+target_link_libraries(test_clearance PRIVATE topopt)
+add_test(NAME clearance COMMAND test_clearance)
 
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
@@ -598,7 +607,8 @@ if(OpenCASCADE_FOUND)
   add_executable(test_step tests/unit/test_step.cpp)
   target_link_libraries(test_step PRIVATE topopt)
   target_compile_definitions(test_step PRIVATE
-    STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step")
+    STEP_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/step"
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
   add_test(NAME step_import COMMAND test_step)
 
   # STEP face -> voxel tagging test (M1.6). Drives the STEP cube fixture, so it
@@ -703,6 +713,19 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME production_parity COMMAND test_production_parity)
+
+  # Clearance parity + effect gate (handoff 100): on the SAME shared seam, an
+  # empty clearance list is byte-identical to the pre-100 path (THE ONE RULE), and
+  # a declared bolt clearance rasterizes a FrozenVoid swept cylinder that forbids
+  # growth so the bore stays open — a real, reported design change. Drives OCCT
+  # (STEP) + Eigen (minimize_plastic).
+  add_executable(test_clearance_parity tests/validation/test_clearance_parity.cpp)
+  target_link_libraries(test_clearance_parity PRIVATE topopt)
+  target_compile_definitions(test_clearance_parity PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME clearance_parity COMMAND test_clearance_parity)
 
   # Small-face load loss (handoff 099): a load face smaller than a voxel footprint
   # at a coarse resolution tags ZERO voxels, so build_production_loadcase skips the

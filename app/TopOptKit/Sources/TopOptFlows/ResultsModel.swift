@@ -602,6 +602,31 @@ public final class ResultsModel: ObservableObject {
     /// reject-class bug here. Default false → a local outcome is unchanged.
     public private(set) var computedRemotely = false
 
+    /// Handoff 100 — honest "Keep clear" notes: one line per applied clearance
+    /// region (which face + kind, how much it reserved, or "outside the solved area"
+    /// when the region missed the grid). Clearance affects the DESIGN (it forbids
+    /// growth), so the results state it rather than leaving it silent. Empty when no
+    /// clearance was declared. The numbers shown are the numbers the run used.
+    public private(set) var clearanceNotes: [String] = []
+
+    /// Format the clearance diagnostics from a finished outcome into honest lines.
+    public static func clearanceNotes(_ applied: [AppliedClearance]) -> [String] {
+        applied.map { c in
+            let kind = c.kind == .face ? "Face clearance" : "Bolt clearance"
+            let face = "face \(c.faceID)"
+            if !c.inGrid {
+                return "\(kind) on \(face): its region fell outside the solved area — "
+                     + "no effect. (With no design box, a clearance in unreachable void "
+                     + "does nothing; check the selection or add a design box.)"
+            }
+            if c.voxelsFrozen == 0 {
+                return "\(kind) on \(face): applied, but forbade no new material here."
+            }
+            let vox = c.voxelsFrozen == 1 ? "1 voxel" : "\(c.voxelsFrozen) voxels"
+            return "\(kind) on \(face): kept clear (\(vox) reserved as empty)."
+        }
+    }
+
     /// The n/a placeholder for a field a remote run does not compute over the wire.
     public static let remoteNA = "n/a — computed on Mac"
 
@@ -665,6 +690,7 @@ public final class ResultsModel: ObservableObject {
         let acc = outcome.variants.filter { $0.accepted }
         accepted = acc
         computedRemotely = outcome.computedRemotely
+        clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
         gridOrigin = SIMD3<Float>(outcome.gridOrigin)
         spacing = Float(outcome.spacing)

@@ -27,10 +27,16 @@ using topopt::check_watertight;
 using topopt::import_step_file;
 using topopt::signed_volume;
 using topopt::StepError;
+using topopt::StepFaceInfo;
 using topopt::StepModel;
+using topopt::StepSurfaceKind;
 using topopt::StepTessellation;
 using topopt::Vec3;
 using topopt::WatertightReport;
+
+static double vlen(const Vec3& v) {
+  return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
 
 static int g_failures = 0;
 static int g_checks = 0;
@@ -172,6 +178,118 @@ int main() {
           "cylinder bbox max X/Y ~ 5");
     CHECK(abs_close(lo.z, 0.0, 1e-6) && abs_close(hi.z, 20.0, 1e-6),
           "cylinder bbox Z is exact (0 to 20)");
+  }
+
+  // === StepFaceInfo geometry (handoff 100 — clearance rasterizer input) =====
+  // The cube is 6 axis-aligned planar faces. Every face must classify Plane with
+  // a UNIT outward normal along one of the 6 axis directions, and its stored
+  // origin must sit on that face of the [-5,5]x[-5.385,4.615]x[0,10] box (the
+  // outward normal points AWAY from the solid interior). This pins that the
+  // plane normal/origin are captured and outward-oriented (TopAbs_REVERSED
+  // respected).
+  {
+    StepModel m = load_cube(0.1);
+    CHECK(m.faces.size() == 6, "cube exposes 6 StepFaceInfo");
+    int axis_hits = 0;
+    for (const StepFaceInfo& f : m.faces) {
+      CHECK(f.kind == StepSurfaceKind::Plane, "cube face is a Plane");
+      CHECK(abs_close(vlen(f.plane_normal), 1.0, 1e-9),
+            "cube plane normal is unit length");
+      // Exactly one component is +/-1 (axis-aligned), the others ~0.
+      const double ax = std::fabs(f.plane_normal.x);
+      const double ay = std::fabs(f.plane_normal.y);
+      const double az = std::fabs(f.plane_normal.z);
+      const bool axis_aligned =
+          (abs_close(ax, 1.0, 1e-9) && ay < 1e-9 && az < 1e-9) ||
+          (abs_close(ay, 1.0, 1e-9) && ax < 1e-9 && az < 1e-9) ||
+          (abs_close(az, 1.0, 1e-9) && ax < 1e-9 && ay < 1e-9);
+      CHECK(axis_aligned, "cube plane normal is axis-aligned");
+      if (axis_aligned) ++axis_hits;
+      // The origin lies on the box face the outward normal points to.
+      if (abs_close(f.plane_normal.x, 1.0, 1e-9))
+        CHECK(abs_close(f.plane_origin.x, 5.0, 1e-6), "+X face origin at x=5");
+      if (abs_close(f.plane_normal.x, -1.0, 1e-9))
+        CHECK(abs_close(f.plane_origin.x, -5.0, 1e-6), "-X face origin at x=-5");
+      if (abs_close(f.plane_normal.z, 1.0, 1e-9))
+        CHECK(abs_close(f.plane_origin.z, 10.0, 1e-6), "+Z face origin at z=10");
+      if (abs_close(f.plane_normal.z, -1.0, 1e-9))
+        CHECK(abs_close(f.plane_origin.z, 0.0, 1e-6), "-Z face origin at z=0");
+    }
+    CHECK(axis_hits == 6, "all 6 cube faces are axis-aligned planes");
+  }
+
+  // The cylinder is r=5, h=20, axis along Z through the origin: 2 planar caps
+  // (normals +/-Z) + 1 cylindrical lateral face. The lateral face must classify
+  // Cylinder with radius 5, a UNIT axis direction parallel to Z, and an axis
+  // point on the Z axis (x=y=0). This pins the exact axis/radius the swept-
+  // cylinder bolt clearance is built from.
+  {
+    StepModel m = load_cylinder(0.002);
+    CHECK(m.faces.size() == 3, "cylinder exposes 3 StepFaceInfo");
+    int cyl_faces = 0, cap_faces = 0;
+    for (const StepFaceInfo& f : m.faces) {
+      if (f.kind == StepSurfaceKind::Cylinder) {
+        ++cyl_faces;
+        CHECK(abs_close(f.cylinder_radius_mm, 5.0, 1e-6),
+              "cylinder lateral radius is 5 mm");
+        CHECK(abs_close(vlen(f.axis_dir), 1.0, 1e-9),
+              "cylinder axis_dir is unit length");
+        CHECK(abs_close(std::fabs(f.axis_dir.z), 1.0, 1e-6),
+              "cylinder axis is parallel to Z");
+        CHECK(abs_close(f.axis_point.x, 0.0, 1e-6) &&
+                  abs_close(f.axis_point.y, 0.0, 1e-6),
+              "cylinder axis passes through x=y=0");
+      } else if (f.kind == StepSurfaceKind::Plane) {
+        ++cap_faces;
+        CHECK(abs_close(std::fabs(f.plane_normal.z), 1.0, 1e-6),
+              "cylinder cap normal is +/-Z");
+      }
+    }
+    CHECK(cyl_faces == 1, "cylinder has exactly 1 lateral cylindrical face");
+    CHECK(cap_faces == 2, "cylinder has 2 planar caps");
+  }
+
+  // === demo l-bracket: the real clearance target (handoff 100) =============
+  // The demo L-bracket the app and CLI ship with: 10 B-rep faces — 8 planar,
+  // 2 cylindrical bolt holes. Both holes are r=2.5 mm, axis parallel to Z, at
+  // (x,y) = (-17, 0) and (9, 0). These are the "known hole axes/radii" a bolt
+  // clearance is swept from; every planar face is axis-aligned with a unit
+  // outward normal. Pinning them proves the geometry the app never carries is
+  // recovered exactly core-side.
+  {
+    StepModel m = import_step_file(std::string(DEMO_FIXTURE_DIR) + "/l-bracket.step");
+    CHECK(m.face_count == 10, "l-bracket has 10 B-rep faces");
+    int cyls = 0, holeA = 0, holeB = 0;
+    for (const StepFaceInfo& f : m.faces) {
+      if (f.kind == StepSurfaceKind::Cylinder) {
+        ++cyls;
+        CHECK(abs_close(f.cylinder_radius_mm, 2.5, 1e-6),
+              "l-bracket bolt hole radius is 2.5 mm");
+        CHECK(abs_close(vlen(f.axis_dir), 1.0, 1e-9),
+              "l-bracket hole axis_dir is unit");
+        CHECK(abs_close(std::fabs(f.axis_dir.z), 1.0, 1e-6),
+              "l-bracket hole axis is parallel to Z");
+        if (abs_close(f.axis_point.x, -17.0, 1e-3) &&
+            abs_close(f.axis_point.y, 0.0, 1e-3))
+          ++holeA;
+        if (abs_close(f.axis_point.x, 9.0, 1e-3) &&
+            abs_close(f.axis_point.y, 0.0, 1e-3))
+          ++holeB;
+      } else if (f.kind == StepSurfaceKind::Plane) {
+        CHECK(abs_close(vlen(f.plane_normal), 1.0, 1e-9),
+              "l-bracket plane normal is unit");
+        const double ax = std::fabs(f.plane_normal.x);
+        const double ay = std::fabs(f.plane_normal.y);
+        const double az = std::fabs(f.plane_normal.z);
+        CHECK((abs_close(ax, 1.0, 1e-6) && ay < 1e-6 && az < 1e-6) ||
+                  (abs_close(ay, 1.0, 1e-6) && ax < 1e-6 && az < 1e-6) ||
+                  (abs_close(az, 1.0, 1e-6) && ax < 1e-6 && ay < 1e-6),
+              "l-bracket plane normal is axis-aligned");
+      }
+    }
+    CHECK(cyls == 2, "l-bracket has 2 cylindrical bolt holes");
+    CHECK(holeA == 1, "l-bracket hole A axis at (-17, 0)");
+    CHECK(holeB == 1, "l-bracket hole B axis at (9, 0)");
   }
 
   // === Missing file is a StepError, not a crash ============================

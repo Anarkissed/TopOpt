@@ -92,6 +92,21 @@ struct JobLoadGroup {
   Vec3 force{0.0, 0.0, 0.0};           // fx, fy, fz in N
 };
 
+// One "Keep clear" clearance region (handoff 100) — the CLI counterpart of the
+// app's per-face clearance. `face_id` is a raw B-rep face id (the id form the app
+// / LAN worker forwards); `kind` is "bolt" (swept cylinder about a bore) or
+// "face" (a bounded slab in front of a plane). The mm distances are the editable,
+// judgement-call numbers the app prefills — the CLI defaults them to the same
+// suggestions when omitted. So a desktop worker honours protected holes
+// identically to the app (production_parity: one builder, both front-ends).
+struct JobClearance {
+  int face_id = -1;
+  std::string kind;  // "bolt" | "face"
+  double concentric_margin_mm = 0.0;  // bolt: keep-out radius = bore_r + this
+  double axial_clearance_mm = 0.0;    // bolt: sweep this far past each face
+  double slab_depth_mm = 0.0;         // face: extrude the outline outward this far
+};
+
 // A declared load case (ARCHITECTURE §1 mode (a)) — the CLI counterpart of the
 // app's BridgeLoadCase. Optional in job.json (the "loads" block). When present,
 // the run optimizes under these anchors + forces instead of self-weight; when
@@ -102,6 +117,7 @@ struct JobLoadCase {
   std::vector<JobFaceSelector> anchors;     // geometric selectors -> FIXTURE
   std::vector<int> anchor_face_ids;         // OR raw B-rep face ids -> FIXTURE
   std::vector<JobLoadGroup> groups;         // distributed tractions
+  std::vector<JobClearance> clearances;     // "Keep clear" keep-out regions
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
   bool minimize_plastic = true;             // true = reduction ladder + pad

@@ -8,41 +8,37 @@
 // Role → bridge mapping:
 //   * .fixture → tag_step_face(asFixture: true)   — clamped mounting face
 //   * .load    → tag_step_face(asFixture: false)  — loaded face
-//   * .frozen  → mask_step_face(...)              — NOT EXPOSED BY THE BRIDGE.
+//   * .frozen  → mask_step_face(.frozenSolid, N)  — passive keep-in shell
 //
-// The core has `mask_step_face` (M3.7 passive keep-in/keep-out) but the bridge
-// (TopOptBridge.hpp) only forwards `tag_step_face`, so Frozen groups cannot be
-// applied yet. Per the M7.5 rules ("do not widen the bridge yourself; file
-// Blocked") this reports `.frozenUnsupported` instead of silently dropping the
-// group; the handoff's Blocked section requests the accessor.
+// The bridge now forwards `mask_step_face` (TopOptKit.maskStepFace, added for the
+// M7.6 passive shell / handoff 100 clearance work), so a Frozen group is applied
+// as an N-voxel FrozenSolid keep-in shell instead of the old `.frozenUnsupported`
+// error — that throw is gone (handoff 100). (Keep-OUT clearance — the "Keep clear"
+// FrozenVoid regions — is derived shape-aware core-side from the load case, not
+// through this per-face tagger; see ProjectModel.clearanceSpecs.)
 //
-// The bridge call is injected (defaulting to `TopOptKit.tagStepFace`) so the
-// mapping is unit-tested headlessly with a spy — proving each group tags with the
-// right face ids and Fixture/Load flags — the M7 /app/ verification standard.
+// Both bridge calls are injected (defaulting to the real TopOptKit) so the mapping
+// is unit-tested headlessly with spies — proving each group tags/masks with the
+// right face ids — the M7 /app/ verification standard.
 
 import Foundation
 import TopOptKit
-
-/// A failure applying a selection group to the grid.
-public enum SelectionTagError: Error, Equatable, CustomStringConvertible {
-    /// A group is Frozen, but the bridge does not expose `mask_step_face` yet.
-    case frozenUnsupported
-    public var description: String {
-        switch self {
-        case .frozenUnsupported:
-            return "Frozen (keep-in/keep-out) groups need the core's mask_step_face, "
-                 + "which the bridge does not expose yet."
-        }
-    }
-}
 
 /// The per-face bridge call the tagger made (one per face id in a group), for
 /// verification and reporting.
 public struct FaceTagCall: Equatable, Sendable {
     public let faceID: FaceID
+    /// The role applied to this face (fixture/load → tag, frozen → mask).
+    public let role: GroupRole
     public let asFixture: Bool
-    /// Voxels the bridge reported tagging against this face.
+    /// Voxels the bridge reported tagging (fixture/load) or masking (frozen).
     public let voxelsTagged: Int
+    public init(faceID: FaceID, role: GroupRole, asFixture: Bool, voxelsTagged: Int) {
+        self.faceID = faceID
+        self.role = role
+        self.asFixture = asFixture
+        self.voxelsTagged = voxelsTagged
+    }
 }
 
 /// The outcome of tagging one group.
@@ -54,23 +50,35 @@ public struct GroupTagResult: Equatable, Sendable {
     public var voxelsTagged: Int { calls.reduce(0) { $0 + $1.voxelsTagged } }
 }
 
-/// Maps selection groups onto the core's `tag_step_face` bridge entry point.
-public struct SelectionTagger {
-    /// Injected bridge seam: `(stepPath, faceID, asFixture, resolution) -> voxels`.
-    private let tagFace: (String, FaceID, Bool, Int) throws -> Int
+/// The FrozenSolid keep-in shell depth (voxels) a `.frozen` group masks. Matches
+/// the LoadCaseTagger passive-shell default.
+public let kSelectionFrozenShellDepthVoxels = 2
 
-    public init(tagFace: @escaping (String, FaceID, Bool, Int) throws -> Int = {
-        try TopOptKit.tagStepFace(stepPath: $0, faceID: Int($1), asFixture: $2, resolution: $3)
-    }) {
+/// Maps selection groups onto the core's `tag_step_face` / `mask_step_face` bridge
+/// entry points.
+public struct SelectionTagger {
+    /// Injected bridge seams. `tagFace`: `(stepPath, faceID, asFixture, resolution)
+    /// -> voxels`; `maskFace`: `(stepPath, faceID, depthVoxels, resolution) -> voxels`.
+    private let tagFace: (String, FaceID, Bool, Int) throws -> Int
+    private let maskFace: (String, FaceID, Int, Int) throws -> Int
+
+    public init(
+        tagFace: @escaping (String, FaceID, Bool, Int) throws -> Int = {
+            try TopOptKit.tagStepFace(stepPath: $0, faceID: Int($1), asFixture: $2, resolution: $3)
+        },
+        maskFace: @escaping (String, FaceID, Int, Int) throws -> Int = {
+            try TopOptKit.maskStepFace(stepPath: $0, faceID: Int($1), mask: .frozenSolid,
+                                       depthVoxels: $2, resolution: $3)
+        }
+    ) {
         self.tagFace = tagFace
+        self.maskFace = maskFace
     }
 
     /// Apply every group to the STEP part at `stepPath`, voxelized at `resolution`,
-    /// tagging each group's faces per its role.
-    ///
-    /// Frozen groups are rejected UP FRONT (before any tagging) with
-    /// `.frozenUnsupported`, so a run never half-applies. Fixture/Load groups tag
-    /// each of their face ids via the bridge; a group with no faces makes no calls.
+    /// per its role: Fixture/Load faces are tagged (tag_step_face), Frozen faces are
+    /// masked as an N-voxel FrozenSolid keep-in shell (mask_step_face). A group with
+    /// no faces makes no calls.
     ///
     /// - Returns: one `GroupTagResult` per group, in `groups` order.
     @discardableResult
@@ -78,19 +86,22 @@ public struct SelectionTagger {
                       role: (SelectionGroup) -> GroupRole,
                       stepPath: String,
                       resolution: Int) throws -> [GroupTagResult] {
-        // Validate first: no partial tagging if any group is Frozen.
-        for g in groups where role(g) == .frozen {
-            throw SelectionTagError.frozenUnsupported
-        }
         var results: [GroupTagResult] = []
         for g in groups {
-            let asFixture = role(g) == .fixture
+            let r = role(g)
+            let asFixture = r == .fixture
             var calls: [FaceTagCall] = []
             for face in g.faces {
-                let voxels = try tagFace(stepPath, face, asFixture, resolution)
-                calls.append(FaceTagCall(faceID: face, asFixture: asFixture, voxelsTagged: voxels))
+                let voxels: Int
+                if r == .frozen {
+                    voxels = try maskFace(stepPath, face, kSelectionFrozenShellDepthVoxels, resolution)
+                } else {
+                    voxels = try tagFace(stepPath, face, asFixture, resolution)
+                }
+                calls.append(FaceTagCall(faceID: face, role: r, asFixture: asFixture,
+                                         voxelsTagged: voxels))
             }
-            results.append(GroupTagResult(groupID: g.id, role: role(g), calls: calls))
+            results.append(GroupTagResult(groupID: g.id, role: r, calls: calls))
         }
         return results
     }

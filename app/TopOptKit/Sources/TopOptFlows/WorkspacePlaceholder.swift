@@ -949,6 +949,7 @@ public struct WorkspacePlaceholder: View {
                 Text(force.panelKindLabel(for: g.id))
                     .dsStyle(DS.TypeScale.footnote)
                     .foregroundStyle(DS.Color.textQuaternary.color)
+                clearanceEditor(g)
                 if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
                     // Sub-voxel load face (099 D2): the load may tag no voxels at
                     // this resolution, so flag it in plain English. A warning, not a
@@ -981,6 +982,76 @@ public struct WorkspacePlaceholder: View {
     private func binding(for g: SelectionGroup) -> Binding<String> {
         Binding(get: { selection.groups.first { $0.id == g.id }?.name ?? g.name },
                 set: { selection.rename(g.id, to: $0) })
+    }
+
+    /// Whether a group contributes a bolt clearance (has a curved/bore face) and/or a
+    /// face-slab clearance (has a planar face while explicitly Keep-clear). Handoff 100.
+    private func groupClearanceShape(_ g: SelectionGroup) -> (bolt: Bool, slab: Bool) {
+        guard let mesh = viewerMesh else { return (false, false) }
+        let k = force.kind(for: g.id)
+        guard k.isAnchor || k.isClearance else { return (false, false) }
+        var bolt = false, slab = false
+        for f in g.faces {
+            if FaceTopology.isCurved(f, in: mesh) { bolt = true }
+            else if k.isClearance { slab = true }   // anchor groups only clear bores
+        }
+        return (bolt, slab)
+    }
+
+    /// The editable clearance numbers for a group that produces one (handoff 100):
+    /// bolt margin + axial length for an anchored/keep-clear bore, slab depth for a
+    /// keep-clear planar face. 0 shows/means "auto" (the core's geometry-derived
+    /// suggestion) — an honest label, not a fabricated mm. The number the user types
+    /// is exactly the number the run uses.
+    @ViewBuilder private func clearanceEditor(_ g: SelectionGroup) -> some View {
+        let shape = groupClearanceShape(g)
+        if shape.bolt || shape.slab {
+            let ov = force.clearanceOverride(for: g.id)
+            HStack(spacing: DS.Space.m) {
+                Image(systemName: "nosign").font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                if shape.bolt {
+                    clearanceField("margin", ov.concentricMarginMM) {
+                        force.setClearanceMargin(g.id, mm: $0)
+                    }
+                    clearanceField("axial", ov.axialClearanceMM) {
+                        force.setClearanceAxial(g.id, mm: $0)
+                    }
+                }
+                if shape.slab {
+                    clearanceField("slab", ov.slabDepthMM) {
+                        force.setClearanceSlab(g.id, mm: $0)
+                    }
+                }
+                Text("mm").dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+        }
+    }
+
+    /// One clearance mm field. Empty text = nil = "auto" (the suggestion). Commits on
+    /// submit; a non-positive / unparseable value reverts to auto.
+    private func clearanceField(_ label: String, _ value: Double?,
+                                _ set: @escaping (Double?) -> Void) -> some View {
+        let text = Binding<String>(
+            get: { value.map { String(format: "%g", $0) } ?? "" },
+            set: { s in
+                let t = s.trimmingCharacters(in: .whitespaces)
+                if let v = Double(t), v > 0 { set(v) } else if t.isEmpty { set(nil) }
+            })
+        return HStack(spacing: 2) {
+            Text(label).dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+            TextField("auto", text: text)
+                .textFieldStyle(.plain)
+                .frame(width: 34)
+                .multilineTextAlignment(.center)
+                .font(.system(size: DS.TypeScale.caption.size, weight: .semibold))
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .overlay(alignment: .bottom) {
+                    Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1)
+                }
+        }
     }
 
     private func removeGroup(_ id: UUID) {
@@ -1110,6 +1181,19 @@ public struct WorkspacePlaceholder: View {
                 chipLabel("arrow.down", "Load")
                     .foregroundStyle(DS.Color.textPrimary.color)
                     .background(Capsule().fill(DS.Color.accent.color))
+            }
+            .buttonStyle(.plain)
+            // Handoff 100 — "Keep clear": reserve the space in front of this face as
+            // empty (a bounded slab). An anchored BORE gets a bolt clearance
+            // automatically; this is the explicit opt-in for a planar mounting face.
+            Button {
+                force.makeClearance(g.id)
+                selection.clearActive()
+                model.toast = "Keep clear — the optimizer won't grow material here"
+            } label: {
+                chipLabel("nosign", "Keep clear")
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .background(Capsule().fill(DS.Color.fillSelected.color))
             }
             .buttonStyle(.plain)
         }

@@ -40,6 +40,24 @@ void log_load_group(std::size_t index, std::size_t face_count, double force_mag,
   sink(std::string(buf));
 }
 
+// Emit one clearance diagnostic line (handoff 100) through the same sink: the
+// face, its kind, how many voxels it forbade, and — the honest bit — whether the
+// region reached the solved grid at all. An out-of-grid region is flagged SKIP so
+// a front-end (and the device/CLI log) surfaces the silent no-op instead of
+// pretending the clearance took effect.
+void log_clearance(int face_id, ClearanceKind kind, std::size_t voxels_frozen,
+                   bool in_grid) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  char buf[256];
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] clearance face=%d kind=%s voxels_frozen=%zu %s",
+                face_id, kind == ClearanceKind::Bolt ? "bolt" : "face",
+                voxels_frozen,
+                in_grid ? "status=ok" : "SKIP=region-outside-grid");
+  sink(std::string(buf));
+}
+
 // Count the voxels currently carrying `tag` in `grid`.
 std::size_t count_tagged(const VoxelGrid& grid, VoxelTag tag) {
   std::size_t n = 0;
@@ -205,6 +223,34 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // progressive-variant stream a front-end registers before minimize_plastic
   // returns.
   setup.solved_grid = minimize_plastic_solved_grid(grid, opts);
+
+  // Handoff 100 — rasterize the declared "Keep clear" clearances onto the SOLVED
+  // grid as a FrozenVoid overlay (mask_clearance_region), which minimize_plastic
+  // ORs into the effective mask (FrozenSolid/part wins). The part sits inside the
+  // solved grid at a whole-voxel offset — 0 on the no-box path (solved == part),
+  // (part.origin − solved.origin)/spacing on the design-box path (only the high
+  // side of the expanded grid grows, so this offset is exact; see voxel.hpp). The
+  // rasterizer's precedence guard needs that offset to protect part material. No
+  // clearance → the overlay stays empty and the run is byte-identical.
+  if (!lc.clearances.empty()) {
+    const VoxelGrid& solved = setup.solved_grid;
+    const double s = solved.spacing;
+    const int oi = static_cast<int>(std::lround((grid.origin.x - solved.origin.x) / s));
+    const int oj = static_cast<int>(std::lround((grid.origin.y - solved.origin.y) / s));
+    const int ok = static_cast<int>(std::lround((grid.origin.z - solved.origin.z) / s));
+    DesignMask clearance(solved.voxel_count(), MaskValue::Active);
+    setup.clearance_reports.reserve(lc.clearances.size());
+    for (const ProductionLoadCase::Clearance& c : lc.clearances) {
+      if (c.face_id < 0 || c.face_id >= model.face_count) continue;
+      const ClearanceRasterResult rr = mask_clearance_region(
+          solved, grid, oi, oj, ok, model, c.face_id, c.params, clearance);
+      setup.clearance_reports.push_back(
+          {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
+      log_clearance(c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid);
+    }
+    opts.clearance_void = std::move(clearance);  // opts aliases setup.options
+  }
+
   return setup;
 }
 

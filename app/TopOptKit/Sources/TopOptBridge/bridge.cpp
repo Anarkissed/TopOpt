@@ -650,8 +650,44 @@ OptimizeResult run_minimize_plastic_loadcase(
       }
     }
 
+    // Handoff 100 — unflatten the "Keep clear" clearances. Each region ships only
+    // a face id + kind + editable distances; build_production_loadcase re-reads
+    // the exact bore axis/radius or plane normal from the STEP. A distance the app
+    // left at 0 defaults to the same spec suggestion the CLI uses (for a bolt,
+    // derived from the bore radius). No clearance → byte-identical to today.
+    {
+      const std::size_t cn = load_case.clearance_face_ids.size();
+      for (std::size_t c = 0; c < cn; ++c) {
+        topopt::ProductionLoadCase::Clearance cl;
+        cl.face_id = load_case.clearance_face_ids[c];
+        const bool bolt =
+            c < load_case.clearance_kinds.size() && load_case.clearance_kinds[c] == 0;
+        double bore_r = 0.0;
+        if (bolt && cl.face_id >= 0 && cl.face_id < model.face_count)
+          bore_r = model.faces[static_cast<std::size_t>(cl.face_id)]
+                       .cylinder_radius_mm;
+        cl.params = bolt ? topopt::default_bolt_clearance(bore_r)
+                         : topopt::default_face_clearance();
+        if (c < load_case.clearance_margin_mm.size() &&
+            load_case.clearance_margin_mm[c] > 0.0)
+          cl.params.concentric_margin_mm = load_case.clearance_margin_mm[c];
+        if (c < load_case.clearance_axial_mm.size() &&
+            load_case.clearance_axial_mm[c] > 0.0)
+          cl.params.axial_clearance_mm = load_case.clearance_axial_mm[c];
+        if (c < load_case.clearance_slab_mm.size() &&
+            load_case.clearance_slab_mm[c] > 0.0)
+          cl.params.slab_depth_mm = load_case.clearance_slab_mm[c];
+        lc.clearances.push_back(cl);
+      }
+    }
+
     topopt::ProductionRunSetup setup =
         topopt::build_production_loadcase(model, resolution, lc);
+    for (const auto& cr : setup.clearance_reports)
+      bridge_log("loadcase: clearance face=" + std::to_string(cr.face_id) +
+                 " kind=" + (cr.kind == topopt::ClearanceKind::Bolt ? "bolt" : "face") +
+                 " voxels_frozen=" + std::to_string(cr.voxels_frozen) +
+                 (cr.in_grid ? "" : " OUTSIDE-GRID"));
     bridge_log("loadcase: setup built; part " + grid_summary(setup.grid));
 
     // Front-end wiring the shared builder deliberately leaves to the caller:
@@ -690,6 +726,16 @@ OptimizeResult run_minimize_plastic_loadcase(
         setup.grid, it->second, material_name, setup.bcs, rules, setup.options);
     // Report the grid the driver ACTUALLY solved on (mp.solved_grid).
     result = to_optimize_result(mp, mp.solved_grid);
+    // Handoff 100 — surface what each clearance forbade so the results screen can
+    // state it honestly (which faces, how many voxels, whether it reached the grid).
+    for (const auto& cr : setup.clearance_reports) {
+      result.clearance_face_ids.push_back(cr.face_id);
+      result.clearance_kinds.push_back(
+          cr.kind == topopt::ClearanceKind::Bolt ? 0 : 1);
+      result.clearance_voxels_frozen.push_back(
+          static_cast<int32_t>(cr.voxels_frozen));
+      result.clearance_in_grid.push_back(cr.in_grid ? 1 : 0);
+    }
     bridge_log("loadcase: minimize_plastic returned variants=" +
                std::to_string(result.variants.size()) +
                " accepted=" + std::to_string(result.accepted_count));

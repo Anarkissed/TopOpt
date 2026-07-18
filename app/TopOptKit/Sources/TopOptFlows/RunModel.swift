@@ -55,6 +55,11 @@ public struct RunRequest: Equatable, Sendable {
     /// The M7.dom-app keep-out boxes (regions the optimizer must leave empty). Only
     /// meaningful alongside a `designBox`.
     public let keepOutBoxes: [TopOptKit.DesignBoxSpec]
+    /// The "Keep clear" clearances (handoff 100): swept-cylinder bolt keep-outs for
+    /// anchored bores + bounded-slab face clearances. Consumed only on the STEP
+    /// load-case path. Part of the request identity, so editing a clearance
+    /// re-enables Optimize (it forbids growth, changing the design).
+    public let clearances: [TopOptKit.ClearanceSpec]
 
     /// STEP parts carry a B-rep face selection, so the run uses the load-case path;
     /// STL parts have no faces and fall back to the self-weight path.
@@ -69,7 +74,8 @@ public struct RunRequest: Equatable, Sendable {
                 minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
                 infillPercent: Int = -1,
                 designBox: TopOptKit.DesignBoxSpec? = nil,
-                keepOutBoxes: [TopOptKit.DesignBoxSpec] = []) {
+                keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
+                clearances: [TopOptKit.ClearanceSpec] = []) {
         self.modelPath = modelPath
         self.material = material
         self.materialsPath = materialsPath
@@ -83,6 +89,7 @@ public struct RunRequest: Equatable, Sendable {
         self.infillPercent = infillPercent
         self.designBox = designBox
         self.keepOutBoxes = keepOutBoxes
+        self.clearances = clearances
     }
 }
 
@@ -497,6 +504,7 @@ public final class RunModel: ObservableObject {
                 loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
                 buildDirection: request.buildDirection, infillPercent: request.infillPercent,
                 designBox: request.designBox, keepOutBoxes: request.keepOutBoxes,
+                clearances: request.clearances,
                 progress: progress, onVariant: onVariant)
         }
         return try TopOptKit.minimizePlastic(

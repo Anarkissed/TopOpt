@@ -292,10 +292,28 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       options.design_mask.size() != grid.voxel_count())
     throw std::invalid_argument(
         "minimize_plastic: design_mask size != grid.voxel_count()");
-  const DesignMask mask =
+  DesignMask mask =
       expanded ? domain.mask
                : (options.design_mask.empty() ? make_active_mask(G)
                                               : options.design_mask);
+
+  // Handoff 100 — OR the "Keep clear" clearance overlay into the effective mask.
+  // `clearance_void` is SOLVED-grid-indexed (G): each FrozenVoid entry forbids
+  // NEW growth into a declared clearance region (a swept bolt cylinder / a slab
+  // in front of a mounting face), EXCEPT where the effective mask already pins
+  // the voxel FrozenSolid — the imported part / anchor pad WINS (design 095
+  // STEP 1c; the rasterizer already excluded part material, this guards the pad
+  // + frozen box too). EMPTY (the default) → no clearance → this is skipped and
+  // the run is byte-for-byte identical to before (THE ONE RULE).
+  if (!options.clearance_void.empty()) {
+    if (options.clearance_void.size() != G.voxel_count())
+      throw std::invalid_argument(
+          "minimize_plastic: clearance_void size != solved grid voxel_count()");
+    for (std::size_t idx = 0; idx < mask.size(); ++idx)
+      if (options.clearance_void[idx] == MaskValue::FrozenVoid &&
+          mask[idx] != MaskValue::FrozenSolid)
+        mask[idx] = MaskValue::FrozenVoid;
+  }
 
   // Handoff 080 (Option 2 — "whole-domain optimize"): on a design-box run that does
   // NOT freeze the imported part, the part is an Active design region the optimizer

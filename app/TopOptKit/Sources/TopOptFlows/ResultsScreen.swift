@@ -135,6 +135,7 @@ public struct ResultsScreen: View {
             topBar
             resolutionNote                            // 083: honest voxel-size note
             remoteComputeNote                         // 097: LAN-run unavailable fields
+            clearanceNote                             // 100: "Keep clear" applied-to honesty
             // The viz toggles (Stress / Flex / Load path / Failure) and their
             // now-compact controls cluster at the BOTTOM-RIGHT; each chip slides its own
             // drawer open to the LEFT rather than dropping a big panel over the model.
@@ -229,6 +230,32 @@ public struct ResultsScreen: View {
                     .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .padding(.top, 76)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// Handoff 100 — the "Keep clear" honesty note: clearance forbids growth, so the
+    /// results STATE what it did (which faces were kept clear, how much was reserved)
+    /// and flag any region that fell outside the solved area. Shown only when a
+    /// clearance was declared.
+    @ViewBuilder private var clearanceNote: some View {
+        if !model.clearanceNotes.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                Label("Keep clear applied", systemImage: "nosign")
+                    .font(.system(size: DS.TypeScale.footnote.size, weight: .bold))
+                ForEach(Array(model.clearanceNotes.enumerated()), id: \.offset) { _, line in
+                    Text(line).dsStyle(DS.TypeScale.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .frame(maxWidth: 360, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, model.remoteComputeNote == nil ? 76 : 200)
             .allowsHitTesting(false)
         }
     }

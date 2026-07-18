@@ -210,6 +210,21 @@ struct OptimizeResult {
   double grid_origin_y = 0.0;
   double grid_origin_z = 0.0;
   double spacing = 0.0;  // == cbrt(voxel_volume_mm3); carried explicitly for sampling
+
+  // Handoff 100 — what each declared clearance actually did, so the results
+  // screen can state HONESTLY that clearance was applied and to which faces, and
+  // flag a region that fell entirely outside the solved grid. Parallel arrays,
+  // one entry per applied clearance (in BridgeLoadCase order):
+  //   clearance_face_ids[c]        the B-rep face the region came from
+  //   clearance_kinds[c]           0 = bolt, 1 = face
+  //   clearance_voxels_frozen[c]   voxels the region forbade (set FrozenVoid)
+  //   clearance_in_grid[c]         1 iff the region reached the solved grid (0 =
+  //                                a silent no-op the UI must SURFACE)
+  // Empty when no clearance was declared.
+  std::vector<int32_t> clearance_face_ids;
+  std::vector<int32_t> clearance_kinds;
+  std::vector<int32_t> clearance_voxels_frozen;
+  std::vector<uint8_t> clearance_in_grid;
 };
 
 // Progressive results: invoked once per ACCEPTED variant as it completes (before
@@ -297,6 +312,24 @@ struct BridgeLoadCase {
   // keep-out never carves into the imported part (part voxels stay FrozenSolid).
   std::vector<double> keep_out_min;
   std::vector<double> keep_out_max;
+
+  // Handoff 100 — "Keep clear" clearance regions, flattened POD (one entry per
+  // region, so the Swift C++ importer builds it member-wise). The app derives a
+  // clearance's exact geometry NOWHERE — it ships only the face id + kind + the
+  // editable mm distances, and the bridge/core re-read the bore axis/radius or
+  // plane normal from the STEP (design 095 STEP 0c). Region c is:
+  //   clearance_face_ids[c]     the B-rep face the region is built from
+  //   clearance_kinds[c]        0 = bolt (swept cylinder), 1 = face (bounded slab)
+  //   clearance_margin_mm[c]    bolt: keep-out radius = bore_radius + this
+  //   clearance_axial_mm[c]     bolt: sweep this far past the bore each side
+  //   clearance_slab_mm[c]      face: extrude the outline outward this far
+  // Empty (the default) → no clearance → byte-identical to today. Independent of
+  // has_design_box: a bolt clearance keeps a hole open on any run.
+  std::vector<int32_t> clearance_face_ids;
+  std::vector<int32_t> clearance_kinds;
+  std::vector<double> clearance_margin_mm;
+  std::vector<double> clearance_axial_mm;
+  std::vector<double> clearance_slab_mm;
 };
 
 // Voxelize the STEP part once, tag the anchor faces Fixture (clamped) and each

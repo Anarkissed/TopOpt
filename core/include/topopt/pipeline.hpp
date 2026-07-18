@@ -238,6 +238,25 @@ struct MinimizePlasticOptions {
   // finite.
   double infill_percent = 100.0;
 
+  // Handoff 100 — "Keep clear" clearance keep-out overlay. A SOLVED-grid-indexed
+  // mask (size == the grid minimize_plastic solves on, i.e.
+  // minimize_plastic_solved_grid(grid, *this)) carrying MaskValue::FrozenVoid on
+  // the voxels a declared clearance region forbids growth into. The shared
+  // builder (build_production_loadcase) rasterizes it from the STEP bore/plane
+  // geometry via mask_clearance_region; the rasterizer has already excluded part
+  // material. After the effective mask is built, each FrozenVoid entry is OR'd in
+  // wherever the effective mask is not already FrozenSolid — so FrozenSolid
+  // (imported part / anchor pad) WINS and clearance only removes NEW growth,
+  // never declared/preserved material. A cleared voxel becomes FrozenVoid exactly
+  // like a keep_out_boxes voxel: it carries no FEA element and no design variable.
+  //
+  // Must be empty or size == the solved grid's voxel_count(). EMPTY (the DEFAULT)
+  // means "no clearance declared": the OR-step is skipped and the run is
+  // BYTE-FOR-BYTE identical to the pre-clearance driver (the same opt-in
+  // discipline as design_mask / design_box). This is THE ONE RULE — no clearance
+  // → nothing changes.
+  DesignMask clearance_void;
+
   // Per-rung progress + cancellation (M7.0a). Both optional, absent by
   // default; when absent the run is unchanged.
   //
