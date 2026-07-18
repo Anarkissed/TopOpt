@@ -42,6 +42,16 @@ enum OutcomeCodec {
         let keyframes: [MeshDTO]
     }
 
+    // Handoff 100's per-face "Keep clear" outcome, mirrored for persistence so a
+    // reopened run keeps its honest clearance notes (ResultsModel.clearanceNotes).
+    // `kind` is the raw value of `TopOptKit.ClearanceKind` (an Int enum).
+    struct AppliedClearanceDTO: Codable, Sendable {
+        let faceID: Int
+        let kind: Int
+        let voxelsFrozen: Int
+        let inGrid: Bool
+    }
+
     struct OutcomeDTO: Codable, Sendable {
         let variants: [VariantDTO]
         let stoppedOnMargin, cancelled: Bool
@@ -50,6 +60,10 @@ enum OutcomeCodec {
         let gridNx, gridNy, gridNz: Int
         let gridOrigin: [Double]       // 3 components
         let spacing: Double
+        // Optional so blobs written before this field existed still decode (→ nil →
+        // no clearance notes), rather than failing the whole outcome. Empty when no
+        // "Keep clear" clearance was declared.
+        let appliedClearances: [AppliedClearanceDTO]?
     }
 
     // MARK: OptimizeOutcome → DTO (cheap: array→Data is a memcpy)
@@ -60,8 +74,8 @@ enum OutcomeCodec {
                 VariantDTO(
                     requestedVolumeFraction: v.requestedVolumeFraction,
                     achievedVolumeFraction: v.achievedVolumeFraction,
-                    printedFraction: v.printedFraction,
                     massGrams: v.massGrams,
+                    printedFraction: v.printedFraction,
                     supportVolumeVoxels: v.supportVolumeVoxels,
                     meshTriangleCount: v.meshTriangleCount,
                     worstCaseMargin: v.worstCaseMargin,
@@ -82,7 +96,10 @@ enum OutcomeCodec {
             acceptedCount: o.acceptedCount, voxelVolumeMM3: o.voxelVolumeMM3,
             gridNx: o.gridNx, gridNy: o.gridNy, gridNz: o.gridNz,
             gridOrigin: [o.gridOrigin.x, o.gridOrigin.y, o.gridOrigin.z],
-            spacing: o.spacing)
+            spacing: o.spacing,
+            appliedClearances: o.appliedClearances.map {
+                AppliedClearanceDTO(faceID: $0.faceID, kind: $0.kind.rawValue,
+                                    voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) })
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -115,7 +132,11 @@ enum OutcomeCodec {
             stoppedOnMargin: d.stoppedOnMargin, cancelled: d.cancelled,
             acceptedCount: d.acceptedCount, voxelVolumeMM3: d.voxelVolumeMM3,
             gridNx: d.gridNx, gridNy: d.gridNy, gridNz: d.gridNz,
-            gridOrigin: vec(d.gridOrigin), spacing: d.spacing)
+            gridOrigin: vec(d.gridOrigin), spacing: d.spacing,
+            appliedClearances: (d.appliedClearances ?? []).map {
+                AppliedClearance(faceID: $0.faceID,
+                                 kind: TopOptKit.ClearanceKind(rawValue: $0.kind) ?? .face,
+                                 voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) })
     }
 
     // MARK: Encode / decode (binary plist)

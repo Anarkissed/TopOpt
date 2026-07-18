@@ -31,7 +31,16 @@ final class OutcomeStoreTests: XCTestCase {
         return OptimizeOutcome(variants: [v0, v1], stoppedOnMargin: true,
                                cancelled: false, acceptedCount: 1, voxelVolumeMM3: 0.125,
                                gridNx: 8, gridNy: 6, gridNz: 4,
-                               gridOrigin: SIMD3<Double>(-1, -2, -3), spacing: 0.5)
+                               gridOrigin: SIMD3<Double>(-1, -2, -3), spacing: 0.5,
+                               appliedClearances: [
+                                   // A bolt clearance that reached the grid...
+                                   AppliedClearance(faceID: 7, kind: .bolt,
+                                                    voxelsFrozen: 512, inGrid: true),
+                                   // ...and a face clearance that fell outside it (silent
+                                   // no-op the results screen SURFACES — inGrid == false).
+                                   AppliedClearance(faceID: 12, kind: .face,
+                                                    voxelsFrozen: 0, inGrid: false),
+                               ])
     }
 
     func testOutcomeRoundTripsThroughEncodeDecode() throws {
@@ -73,6 +82,27 @@ final class OutcomeStoreTests: XCTestCase {
         XCTAssertTrue(b.meshVertices.isEmpty)
         XCTAssertTrue(b.keyframeMeshes.isEmpty)
         XCTAssertTrue(b.displacementField.isEmpty)   // rejected rung carries no flex data
+
+        // Handoff 100's "Keep clear" outcome survives so a reopened run keeps its
+        // honest clearance notes (ResultsModel.clearanceNotes), including the kind
+        // enum and the inGrid == false silent-no-op flag.
+        XCTAssertEqual(decoded.appliedClearances, o.appliedClearances)
+    }
+
+    /// A persist-c blob written BEFORE this field existed has no `appliedClearances`
+    /// key. It must still decode (→ empty notes), not fail the whole outcome — that
+    /// is why the DTO field is optional. Simulate the legacy blob by stripping it.
+    func testDecodesLegacyBlobWithoutAppliedClearances() throws {
+        let data = try OutcomeCodec.encode(OutcomeCodec.dto(from: sampleOutcome()))
+        let obj = try PropertyListSerialization.propertyList(
+            from: data, options: PropertyListSerialization.ReadOptions(), format: nil)
+        var plist = try XCTUnwrap(obj as? [String: Any])
+        plist.removeValue(forKey: "appliedClearances")
+        let stripped = try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)
+
+        let decoded = try OutcomeCodec.decode(stripped)
+        XCTAssertEqual(decoded.variants.count, 2)          // rest of the outcome is intact
+        XCTAssertTrue(decoded.appliedClearances.isEmpty)   // only the notes degrade to empty
     }
 
     /// A persist-c blob written BEFORE M7.viz.3 has no `displacementField` key. It
