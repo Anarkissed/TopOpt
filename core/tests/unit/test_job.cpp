@@ -276,6 +276,60 @@ static void test_malformed() {
   CHECK(threw, "load_job_file on a missing file throws JobError");
 }
 
+// --- Loadcase "clearances" block (handoff 100) ------------------------------
+// A loads job may carry "Keep clear" regions; each is a raw face id + kind
+// ("bolt"/"face") + optional editable mm distances. The self-weight keys are
+// dropped (loadcase mode). Proves the block parses, populates job.loads.clearances,
+// and rejects a bad kind / negative distance / non-integer face id.
+static void test_clearances() {
+  const std::string base = R"({
+  "model": "part.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "loads": {
+    "anchor_face_ids": [8, 9],
+    "groups": [ { "face_ids": [0], "force": [0, 0, -50] } ],
+    "clearances": [
+      { "face_id": 8, "kind": "bolt", "concentric_margin_mm": 2.5, "axial_clearance_mm": 5.0 },
+      { "face_id": 3, "kind": "face", "slab_depth_mm": 4.0 },
+      { "face_id": 9, "kind": "bolt" }
+    ]
+  }
+})";
+  const JobDescription j = parse_job(base);
+  CHECK(j.loads.present, "clearances: loads block present");
+  CHECK(j.loads.clearances.size() == 3, "clearances: 3 entries parsed");
+  CHECK(j.loads.clearances[0].face_id == 8 && j.loads.clearances[0].kind == "bolt",
+        "clearances: bolt face id + kind");
+  CHECK(j.loads.clearances[0].concentric_margin_mm == 2.5 &&
+            j.loads.clearances[0].axial_clearance_mm == 5.0,
+        "clearances: bolt distances");
+  CHECK(j.loads.clearances[1].kind == "face" &&
+            j.loads.clearances[1].slab_depth_mm == 4.0,
+        "clearances: face slab depth");
+  CHECK(j.loads.clearances[2].concentric_margin_mm == 0.0,
+        "clearances: omitted distance defaults to 0 (run_job fills the suggestion)");
+
+  auto with_clearance = [&](const std::string& entry) {
+    std::string s = base;
+    const std::string needle = "\"clearances\": [";
+    const auto at = s.find(needle);
+    return s.replace(at + needle.size(), 0, entry + ",");
+  };
+  check_rejects(with_clearance(R"({ "face_id": 8, "kind": "slot" })"),
+                "clearances: unknown kind rejected");
+  check_rejects(with_clearance(R"({ "face_id": -1, "kind": "bolt" })"),
+                "clearances: negative face id rejected");
+  check_rejects(with_clearance(R"({ "face_id": 8, "kind": "face", "slab_depth_mm": -1 })"),
+                "clearances: negative slab depth rejected");
+  check_rejects(with_clearance(R"({ "face_id": 8, "kind": "bolt", "bogus": 1 })"),
+                "clearances: unknown key rejected");
+  check_rejects(with_clearance(R"({ "kind": "bolt" })"),
+                "clearances: missing face_id rejected");
+}
+
 int main() {
   test_valid_baseline();
   test_demo_fixture();
@@ -284,6 +338,7 @@ int main() {
   test_missing_required();
   test_types_and_values();
   test_malformed();
+  test_clearances();
 
   if (g_failures == 0) {
     std::printf("job schema (M6.2): all %d checks passed\n", g_checks);

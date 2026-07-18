@@ -373,4 +373,57 @@ final class ForceModelTests: XCTestCase {
         _ = sel.addGroup(); sel.pickFace(3)   // undeclared → pending
         XCTAssertFalse(fm.canOptimize(in: sel.groups, minimizePlastic: true))
     }
+
+    // MARK: - "Keep clear" clearance role + overrides (handoff 100)
+
+    func testMakeClearanceSetsRoleAndIsNotPending() {
+        let (sel, ids) = groups([1])
+        var fm = ForceModel()
+        fm.setGravity(faceNormal: SIMD3<Float>(0, 0, -1), face: 0)
+        fm.makeClearance(ids[0])
+        XCTAssertTrue(fm.kind(for: ids[0]).isClearance)
+        XCTAssertFalse(fm.kind(for: ids[0]).isPending)
+        XCTAssertFalse(fm.kind(for: ids[0]).isAnchor || fm.kind(for: ids[0]).isLoad)
+        XCTAssertEqual(fm.panelKindLabel(for: ids[0]), "Keep clear")
+        XCTAssertEqual(fm.clearanceCount(in: sel.groups), 1)
+        XCTAssertFalse(fm.hasPending(in: sel.groups),
+                       "a clearance-only group is not pending, so it never blocks Optimize")
+    }
+
+    func testClearanceOverridesRoundTripAndRevertToAuto() {
+        let (_, ids) = groups([1])
+        var fm = ForceModel()
+        XCTAssertTrue(fm.clearanceOverride(for: ids[0]).isEmpty, "default is all-suggestion")
+        fm.setClearanceMargin(ids[0], mm: 3.5)
+        fm.setClearanceAxial(ids[0], mm: 6.0)
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 3.5)
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).axialClearanceMM, 6.0)
+        fm.setClearanceMargin(ids[0], mm: -1)  // negative ignored
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 3.5)
+        fm.setClearanceMargin(ids[0], mm: nil)  // revert to suggestion
+        XCTAssertNil(fm.clearanceOverride(for: ids[0]).concentricMarginMM)
+    }
+
+    func testSyncPrunesClearanceOverridesForRemovedGroups() {
+        let (sel, ids) = groups([1, 2])
+        var fm = ForceModel()
+        fm.setClearanceSlab(ids[0], mm: 4.0)
+        fm.setClearanceSlab(ids[1], mm: 5.0)
+        var sel2 = sel
+        sel2.remove(ids[0])
+        fm.sync(groups: sel2.groups)
+        XCTAssertNil(fm.clearanceOverride(for: ids[0]).slabDepthMM, "stale override pruned")
+        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).slabDepthMM, 5.0, "live override kept")
+    }
+
+    func testForceModelCodableCarriesClearanceState() throws {
+        let (_, ids) = groups([1])
+        var fm = ForceModel()
+        fm.makeClearance(ids[0])
+        fm.setClearanceSlab(ids[0], mm: 4.0)
+        let data = try JSONEncoder().encode(fm)
+        let back = try JSONDecoder().decode(ForceModel.self, from: data)
+        XCTAssertTrue(back.kind(for: ids[0]).isClearance)
+        XCTAssertEqual(back.clearanceOverride(for: ids[0]).slabDepthMM, 4.0)
+    }
 }

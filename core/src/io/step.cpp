@@ -23,7 +23,10 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
 
@@ -103,13 +106,30 @@ StepModel import_step_file(const std::string& path,
                                    /*restriction=*/Standard_False);
     StepFaceInfo info;
     switch (surf.GetType()) {
-      case GeomAbs_Plane:
+      case GeomAbs_Plane: {
         info.kind = StepSurfaceKind::Plane;
+        const gp_Pln pln = surf.Plane();
+        const gp_Pnt o = pln.Location();
+        // The plane's parametric normal; flip it for a REVERSED face so the
+        // stored normal points OUT of the solid, matching the outward
+        // tessellation winding step.cpp already establishes below.
+        gp_Dir n = pln.Axis().Direction();
+        if (e.Current().Orientation() == TopAbs_REVERSED) n.Reverse();
+        info.plane_origin = Vec3{o.X(), o.Y(), o.Z()};
+        info.plane_normal = Vec3{n.X(), n.Y(), n.Z()};
         break;
-      case GeomAbs_Cylinder:
+      }
+      case GeomAbs_Cylinder: {
         info.kind = StepSurfaceKind::Cylinder;
-        info.cylinder_radius_mm = surf.Cylinder().Radius();
+        const gp_Cylinder cyl = surf.Cylinder();
+        info.cylinder_radius_mm = cyl.Radius();
+        const gp_Ax1 axis = cyl.Axis();
+        const gp_Pnt p = axis.Location();
+        const gp_Dir d = axis.Direction();  // already unit
+        info.axis_point = Vec3{p.X(), p.Y(), p.Z()};
+        info.axis_dir = Vec3{d.X(), d.Y(), d.Z()};
         break;
+      }
       default:
         info.kind = StepSurfaceKind::Other;
         break;

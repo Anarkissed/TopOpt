@@ -45,6 +45,33 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.tabs[0].subLabel(active: false), "199 g · plastic")
     }
 
+    // MARK: - "Keep clear" honesty notes (handoff 100)
+
+    func testClearanceNotesFormatting() {
+        let notes = ResultsModel.clearanceNotes([
+            AppliedClearance(faceID: 8, kind: .bolt, voxelsFrozen: 54, inGrid: true),
+            AppliedClearance(faceID: 3, kind: .face, voxelsFrozen: 0, inGrid: true),
+            AppliedClearance(faceID: 9, kind: .bolt, voxelsFrozen: 0, inGrid: false),
+        ])
+        XCTAssertEqual(notes.count, 3)
+        XCTAssertTrue(notes[0].contains("Bolt clearance") && notes[0].contains("54 voxels"),
+                      "an applied bolt clearance states what it reserved")
+        XCTAssertTrue(notes[1].contains("forbade no new material"),
+                      "a clearance that froze nothing says so")
+        XCTAssertTrue(notes[2].contains("outside the solved area"),
+                      "an out-of-grid clearance is surfaced, not hidden")
+    }
+
+    func testClearanceNotesSurfacedOnResultsModel() {
+        let oc = OptimizeOutcome(
+            variants: [variant(vf: 0.5)], stoppedOnMargin: false, cancelled: false,
+            acceptedCount: 1, voxelVolumeMM3: 1,
+            appliedClearances: [AppliedClearance(faceID: 8, kind: .bolt, voxelsFrozen: 40, inGrid: true)])
+        let m = ResultsModel(projectName: "P", outcome: oc)
+        XCTAssertEqual(m.clearanceNotes.count, 1)
+        XCTAssertTrue(m.clearanceNotes[0].contains("40 voxels"))
+    }
+
     func testMassLabelFormatting() {
         XCTAssertEqual(ResultsModel.massLabel(199), "199 g")
         XCTAssertEqual(ResultsModel.massLabel(9.4), "9.4 g")

@@ -187,6 +187,28 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lg.force = g.force;
       lc.load_groups.push_back(std::move(lg));
     }
+    // Clearances (handoff 100): map each job clearance to a ProductionLoadCase
+    // clearance. A distance the job omitted (== 0) defaults to the same spec
+    // suggestion the app prefills — for a bolt those depend on the bore radius,
+    // read from the imported face geometry, so a hand-authored job need only give
+    // face_id + kind.
+    for (const JobClearance& jc : job.loads.clearances) {
+      ProductionLoadCase::Clearance c;
+      c.face_id = jc.face_id;
+      const bool bolt = jc.kind == "bolt";
+      double bore_r = 0.0;
+      if (bolt && jc.face_id >= 0 && jc.face_id < result.model.face_count)
+        bore_r = result.model.faces[static_cast<std::size_t>(jc.face_id)]
+                     .cylinder_radius_mm;
+      c.params = bolt ? topopt::default_bolt_clearance(bore_r)
+                      : topopt::default_face_clearance();
+      if (jc.concentric_margin_mm > 0.0)
+        c.params.concentric_margin_mm = jc.concentric_margin_mm;
+      if (jc.axial_clearance_mm > 0.0)
+        c.params.axial_clearance_mm = jc.axial_clearance_mm;
+      if (jc.slab_depth_mm > 0.0) c.params.slab_depth_mm = jc.slab_depth_mm;
+      lc.clearances.push_back(c);
+    }
     lc.minimize_plastic = job.loads.minimize_plastic;
     lc.build_dir = job.loads.build_dir;
     lc.infill_percent = job.loads.infill_percent;

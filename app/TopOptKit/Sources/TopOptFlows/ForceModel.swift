@@ -28,6 +28,7 @@
 import Foundation
 import simd
 import TopOptDesign
+import TopOptKit
 
 /// The global weight display unit (design's kg / lbs segment). Storage is always
 /// kgf; this only changes presentation and the scrub step.
@@ -63,10 +64,16 @@ public enum GroupKind: Equatable, Sendable, Codable {
     case anchor
     /// A loaded region with a direction + weight in kgf (design `kind:'load'`).
     case load(direction: LoadDirection, weightKg: Double)
+    /// An explicit "Keep clear" region on a planar face (handoff 100): a bounded
+    /// slab the optimizer may not grow material into. Bores anchored as fasteners
+    /// get an AUTOMATIC bolt clearance instead (design 095: auto for bores, explicit
+    /// for planes), so this role is only ever chosen for a mounting/planar face.
+    case clearance
 
     public var isPending: Bool { self == .pending }
     public var isAnchor: Bool { self == .anchor }
     public var isLoad: Bool { if case .load = self { return true }; return false }
+    public var isClearance: Bool { self == .clearance }
 
     /// The load direction, or nil for pending/anchor.
     public var loadDirection: LoadDirection? {
@@ -77,6 +84,27 @@ public enum GroupKind: Equatable, Sendable, Codable {
     public var weightKg: Double? {
         if case let .load(_, kg) = self { return kg }
         return nil
+    }
+}
+
+/// Per-group editable overrides of the SUGGESTED clearance distances (mm, handoff
+/// 100). The GEOMETRY is derived core-side; these are the judgement-call numbers.
+/// A nil field means "use the suggestion" (for a bolt that is the bore radius /
+/// diameter, which only the core knows — so an un-overridden bolt margin shows as
+/// a suggestion, not a fabricated number). Applied to a group's auto-bolt (anchor
+/// groups) or explicit face slab (clearance groups).
+public struct ClearanceOverride: Equatable, Sendable, Codable {
+    public var concentricMarginMM: Double?
+    public var axialClearanceMM: Double?
+    public var slabDepthMM: Double?
+    public init(concentricMarginMM: Double? = nil, axialClearanceMM: Double? = nil,
+                slabDepthMM: Double? = nil) {
+        self.concentricMarginMM = concentricMarginMM
+        self.axialClearanceMM = axialClearanceMM
+        self.slabDepthMM = slabDepthMM
+    }
+    public var isEmpty: Bool {
+        concentricMarginMM == nil && axialClearanceMM == nil && slabDepthMM == nil
     }
 }
 
@@ -121,6 +149,10 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// Per selection-group role/direction/weight, keyed by `SelectionGroup.id`.
     /// A group with no entry here is `.pending`.
     private var kinds: [UUID: GroupKind] = [:]
+
+    /// Per-group clearance distance overrides (handoff 100). OPTIONAL so snapshots
+    /// written before this field still decode (nil → no overrides, all suggestions).
+    private var clearanceOverrides: [UUID: ClearanceOverride]? = nil
 
     public init() {}
 
@@ -170,6 +202,41 @@ public struct ForceModel: Equatable, Sendable, Codable {
         kinds[id] = .load(direction: .gravity, weightKg: kg)
     }
 
+    /// Declare a group an explicit "Keep clear" planar-face clearance (handoff 100).
+    /// For a fastener hole, prefer Anchor — an anchored bore gets an automatic bolt
+    /// clearance; this role is for a mounting/planar face you want kept empty.
+    public mutating func makeClearance(_ id: UUID) { kinds[id] = .clearance }
+
+    // MARK: - clearance overrides (handoff 100)
+
+    /// The editable-distance override for a group (nil-fields → use the suggestion).
+    public func clearanceOverride(for id: UUID) -> ClearanceOverride {
+        clearanceOverrides?[id] ?? ClearanceOverride()
+    }
+    private mutating func mutateOverride(_ id: UUID, _ body: (inout ClearanceOverride) -> Void) {
+        var map = clearanceOverrides ?? [:]
+        var ov = map[id] ?? ClearanceOverride()
+        body(&ov)
+        if ov.isEmpty { map[id] = nil } else { map[id] = ov }
+        clearanceOverrides = map.isEmpty ? nil : map
+    }
+    /// Override a bolt clearance's concentric margin (mm); pass nil to revert to the
+    /// suggestion. Negative values are ignored.
+    public mutating func setClearanceMargin(_ id: UUID, mm: Double?) {
+        if let v = mm, v < 0 { return }
+        mutateOverride(id) { $0.concentricMarginMM = mm }
+    }
+    /// Override a bolt clearance's axial length (mm); nil reverts to the suggestion.
+    public mutating func setClearanceAxial(_ id: UUID, mm: Double?) {
+        if let v = mm, v < 0 { return }
+        mutateOverride(id) { $0.axialClearanceMM = mm }
+    }
+    /// Override a face clearance's slab depth (mm); nil reverts to the suggestion.
+    public mutating func setClearanceSlab(_ id: UUID, mm: Double?) {
+        if let v = mm, v < 0 { return }
+        mutateOverride(id) { $0.slabDepthMM = mm }
+    }
+
     /// Change a load's direction via the snap row (no-op unless it is a load).
     public mutating func setDirection(_ id: UUID, _ direction: LoadDirection) {
         guard case let .load(_, kg) = kinds[id] else { return }
@@ -182,14 +249,21 @@ public struct ForceModel: Equatable, Sendable, Codable {
         kinds[id] = .load(direction: dir, weightKg: clampWeight(kg))
     }
 
-    /// Forget a removed group's role.
-    public mutating func clearKind(_ id: UUID) { kinds[id] = nil }
+    /// Forget a removed group's role (and any clearance override).
+    public mutating func clearKind(_ id: UUID) {
+        kinds[id] = nil
+        if var map = clearanceOverrides { map[id] = nil; clearanceOverrides = map.isEmpty ? nil : map }
+    }
 
     /// Drop role entries for groups that no longer exist (call after the selection
     /// changes so removed groups don't linger as stale anchors/loads).
     public mutating func sync(groups: [SelectionGroup]) {
         let live = Set(groups.map { $0.id })
         kinds = kinds.filter { live.contains($0.key) }
+        if let map = clearanceOverrides {
+            let pruned = map.filter { live.contains($0.key) }
+            clearanceOverrides = pruned.isEmpty ? nil : pruned
+        }
     }
 
     private func clampWeight(_ kg: Double) -> Double {
@@ -323,8 +397,14 @@ public struct ForceModel: Equatable, Sendable, Codable {
         switch kind(for: id) {
         case .anchor: return "Anchor"
         case let .load(direction, kg): return "\(formattedWeight(kg: kg)) · \(direction.rawValue)"
+        case .clearance: return "Keep clear"
         case .pending: return "Pending…"
         }
+    }
+
+    /// Groups declared an explicit "Keep clear" clearance (handoff 100).
+    public func clearanceCount(in groups: [SelectionGroup]) -> Int {
+        groups.filter { kind(for: $0.id).isClearance }.count
     }
 
     /// The tint a group's faces should render with in the viewer: anchor green for

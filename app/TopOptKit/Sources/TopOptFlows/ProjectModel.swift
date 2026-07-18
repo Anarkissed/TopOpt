@@ -160,6 +160,38 @@ public final class ProjectModel: ObservableObject {
         return (anchors, loads, SIMD3<Double>(up))
     }
 
+    /// The run's "Keep clear" clearances (handoff 100), derived from the selection +
+    /// roles: an AUTOMATIC bolt clearance for every anchored BORE face (an anchored
+    /// hole is a fastener hole — design 095), and an EXPLICIT clearance for every
+    /// group the user marked "Keep clear" (a bore → bolt, a planar face → bounded
+    /// slab). Editable per-group distance overrides are threaded through; a nil
+    /// override sends 0, which the core reads as "use the geometry-derived
+    /// suggestion". Empty for an STL project (no B-rep faces) → no clearance.
+    public func clearanceSpecs() -> [TopOptKit.ClearanceSpec] {
+        guard let mesh = viewerMesh else { return [] }
+        var specs: [TopOptKit.ClearanceSpec] = []
+        for g in selection.groups {
+            let k = force.kind(for: g.id)
+            let ov = force.clearanceOverride(for: g.id)
+            guard k.isAnchor || k.isClearance else { continue }
+            for f in g.faces {
+                let bore = FaceTopology.isCurved(f, in: mesh)
+                // Anchor groups contribute clearance ONLY for their bore faces (the
+                // fastener holes); a clearance group contributes for every face.
+                if k.isAnchor && !bore { continue }
+                if bore {
+                    specs.append(.init(faceID: Int(f), kind: .bolt,
+                                       concentricMarginMM: ov.concentricMarginMM ?? 0,
+                                       axialClearanceMM: ov.axialClearanceMM ?? 0))
+                } else {
+                    specs.append(.init(faceID: Int(f), kind: .face,
+                                       slabDepthMM: ov.slabDepthMM ?? 0))
+                }
+            }
+        }
+        return specs
+    }
+
     /// A group's model-space outward normal (mean of its faces' normals), or nil.
     private func groupNormalModel(_ g: SelectionGroup) -> SIMD3<Float>? {
         guard let mesh = viewerMesh else { return nil }

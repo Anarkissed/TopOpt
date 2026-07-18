@@ -421,7 +421,7 @@ JobDescription parse_job(const std::string& json_text) {
 
     const JsonValue& lv = require_object(*loads_v, "loads");
     reject_unknown_keys(
-        lv, {"anchors", "anchor_face_ids", "groups", "build_dir",
+        lv, {"anchors", "anchor_face_ids", "groups", "clearances", "build_dir",
              "infill_percent", "minimize_plastic"},
         "loads");
     job.loads.present = true;
@@ -450,6 +450,48 @@ JobDescription parse_job(const std::string& json_text) {
         grp.force = parse_vec3(require_key(gv, "force", "a loads group"),
                                "a loads group force");
         job.loads.groups.push_back(std::move(grp));
+      }
+    }
+    // clearances: optional "Keep clear" keep-out regions (handoff 100). Each is a
+    // raw B-rep face id + a kind ("bolt"/"face") + the editable mm distances (the
+    // relevant ones; the others default to the same spec suggestions the app
+    // prefills). Empty/absent => no clearance => byte-identical to the pre-100 run.
+    if (const JsonValue* cs = find_key(lv, "clearances")) {
+      if (cs->type != JsonValue::Type::Array)
+        schema_fail("\"loads.clearances\" must be an array");
+      for (const JsonValue& cv : cs->arr) {
+        require_object(cv, "a clearance");
+        reject_unknown_keys(cv,
+                            {"face_id", "kind", "concentric_margin_mm",
+                             "axial_clearance_mm", "slab_depth_mm"},
+                            "a clearance");
+        JobClearance cl;
+        const double fid = require_number(
+            require_key(cv, "face_id", "a clearance"), "clearance face_id");
+        if (fid < 0.0 || fid != std::floor(fid))
+          schema_fail("a clearance \"face_id\" must be a non-negative integer");
+        cl.face_id = static_cast<int>(fid);
+        cl.kind = require_nonempty_string(
+            require_key(cv, "kind", "a clearance"), "clearance kind");
+        if (cl.kind != "bolt" && cl.kind != "face")
+          schema_fail("a clearance \"kind\" must be \"bolt\" or \"face\" (got \"" +
+                      cl.kind + "\")");
+        if (const JsonValue* m = find_key(cv, "concentric_margin_mm")) {
+          cl.concentric_margin_mm = require_number(*m, "concentric_margin_mm");
+          if (cl.concentric_margin_mm < 0.0)
+            schema_fail("\"concentric_margin_mm\" must be >= 0");
+        }
+        if (const JsonValue* a = find_key(cv, "axial_clearance_mm")) {
+          cl.axial_clearance_mm = require_number(*a, "axial_clearance_mm");
+          if (cl.axial_clearance_mm < 0.0)
+            schema_fail("\"axial_clearance_mm\" must be >= 0");
+        }
+        if (const JsonValue* d = find_key(cv, "slab_depth_mm")) {
+          cl.slab_depth_mm = require_number(*d, "slab_depth_mm");
+          if (cl.slab_depth_mm < 0.0)
+            schema_fail("\"slab_depth_mm\" must be >= 0");
+        }
+        job.loads.clearances.push_back(std::move(cl));
       }
     }
     if (const JsonValue* bd = find_key(lv, "build_dir")) {

@@ -240,6 +240,22 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             if request.infillPercent >= 0 {
                 loads["infill_percent"] = request.infillPercent
             }
+            // Handoff 100 — forward "Keep clear" clearances so a Mac worker running
+            // topopt-cli honours protected holes IDENTICALLY to the local bridge
+            // (both feed the same build_production_loadcase). A distance left at 0 is
+            // omitted so the CLI fills the same geometry-derived suggestion.
+            if !request.clearances.isEmpty {
+                loads["clearances"] = request.clearances.map { c -> [String: Any] in
+                    var entry: [String: Any] = [
+                        "face_id": c.faceID,
+                        "kind": c.kind == .face ? "face" : "bolt",
+                    ]
+                    if c.concentricMarginMM > 0 { entry["concentric_margin_mm"] = c.concentricMarginMM }
+                    if c.axialClearanceMM > 0 { entry["axial_clearance_mm"] = c.axialClearanceMM }
+                    if c.slabDepthMM > 0 { entry["slab_depth_mm"] = c.slabDepthMM }
+                    return entry
+                }
+            }
             job["loads"] = loads
         } else {
             // STL: no faces. Empty loads => the CLI clamps the min-x boundary and

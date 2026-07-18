@@ -170,11 +170,19 @@ public struct OptimizeOutcome {
     /// byte-identical (a local outcome never sets this).
     public let computedRemotely: Bool
 
+    /// Handoff 100 — what each declared "Keep clear" clearance actually did on the
+    /// solved grid, so the results screen states it HONESTLY: which face, which
+    /// kind, how many voxels it forbade, and whether the region reached the grid at
+    /// all (`inGrid == false` → a silent no-op the UI SURFACES rather than hides).
+    /// Empty when no clearance was declared.
+    public let appliedClearances: [AppliedClearance]
+
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
                 gridOrigin: SIMD3<Double> = .zero, spacing: Double = 0,
-                computedRemotely: Bool = false) {
+                computedRemotely: Bool = false,
+                appliedClearances: [AppliedClearance] = []) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -186,6 +194,22 @@ public struct OptimizeOutcome {
         self.gridOrigin = gridOrigin
         self.spacing = spacing
         self.computedRemotely = computedRemotely
+        self.appliedClearances = appliedClearances
+    }
+}
+
+/// One clearance region's outcome (handoff 100): the face it came from, its kind,
+/// how many voxels it forbade, and whether it reached the solved grid.
+public struct AppliedClearance: Equatable, Sendable {
+    public let faceID: Int
+    public let kind: TopOptKit.ClearanceKind
+    public let voxelsFrozen: Int
+    public let inGrid: Bool
+    public init(faceID: Int, kind: TopOptKit.ClearanceKind, voxelsFrozen: Int, inGrid: Bool) {
+        self.faceID = faceID
+        self.kind = kind
+        self.voxelsFrozen = voxelsFrozen
+        self.inGrid = inGrid
     }
 }
 
@@ -392,6 +416,33 @@ public enum TopOptKit {
     /// - Parameter infillPercent: the M7.params user infill-density override (0–100),
     ///   or < 0 for "no override". Threaded to the core through
     ///   `BridgeLoadCase.infill_percent` for the M7.infill-margin ladder knockdown.
+    /// Which keep-out volume a "Keep clear" clearance builds (handoff 100).
+    public enum ClearanceKind: Int, Equatable, Sendable, Codable {
+        case bolt = 0  // swept cylinder about a bore's axis
+        case face = 1  // bounded slab in front of a planar face
+    }
+
+    /// A "Keep clear" clearance region for `minimizePlasticLoadCase`: a B-rep face
+    /// id + kind + the editable clearance distances (mm). The app ships ONLY these;
+    /// the bridge/core re-read the exact bore axis/radius or plane normal from the
+    /// STEP. A distance left at 0 means "use the core's geometry-derived suggestion"
+    /// (for a bolt that is the bore radius / diameter). Empty list → byte-identical.
+    public struct ClearanceSpec: Equatable, Sendable {
+        public let faceID: Int
+        public let kind: ClearanceKind
+        public let concentricMarginMM: Double
+        public let axialClearanceMM: Double
+        public let slabDepthMM: Double
+        public init(faceID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
+                    axialClearanceMM: Double = 0, slabDepthMM: Double = 0) {
+            self.faceID = faceID
+            self.kind = kind
+            self.concentricMarginMM = concentricMarginMM
+            self.axialClearanceMM = axialClearanceMM
+            self.slabDepthMM = slabDepthMM
+        }
+    }
+
     /// A design box / keep-out box for `minimizePlasticLoadCase`: an axis-aligned
     /// volume in MODEL space (mm) — the same frame as the mesh and the load faces.
     /// `min` must be <= `max` componentwise (the caller enforces this).
@@ -410,6 +461,7 @@ public enum TopOptKit {
         minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
         infillPercent: Int = -1,
         designBox: DesignBoxSpec? = nil, keepOutBoxes: [DesignBoxSpec] = [],
+        clearances: [ClearanceSpec] = [],
         progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
         onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
@@ -421,6 +473,14 @@ public enum TopOptKit {
             lc.load_forces.push_back(g.force.x)
             lc.load_forces.push_back(g.force.y)
             lc.load_forces.push_back(g.force.z)
+        }
+        // Handoff 100 — flatten the "Keep clear" clearances into the POD load case.
+        for c in clearances {
+            lc.clearance_face_ids.push_back(Int32(c.faceID))
+            lc.clearance_kinds.push_back(Int32(c.kind.rawValue))
+            lc.clearance_margin_mm.push_back(c.concentricMarginMM)
+            lc.clearance_axial_mm.push_back(c.axialClearanceMM)
+            lc.clearance_slab_mm.push_back(c.slabDepthMM)
         }
         lc.minimize_plastic = minimizePlastic
         lc.build_dir_x = buildDirection.x
@@ -514,6 +574,19 @@ public enum TopOptKit {
                 stressTensorField: Array(v.stress_tensor_field),
                 keyframeMeshes: reconstructKeyframes(v)))
         }
+        // Handoff 100 — the clearance diagnostics (parallel arrays), for honest results.
+        let cFaces = Array(raw.clearance_face_ids)
+        let cKinds = Array(raw.clearance_kinds)
+        let cFrozen = Array(raw.clearance_voxels_frozen)
+        let cInGrid = Array(raw.clearance_in_grid)
+        var applied: [AppliedClearance] = []
+        for i in 0..<cFaces.count {
+            applied.append(AppliedClearance(
+                faceID: Int(cFaces[i]),
+                kind: (i < cKinds.count && cKinds[i] == 1) ? .face : .bolt,
+                voxelsFrozen: i < cFrozen.count ? Int(cFrozen[i]) : 0,
+                inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false))
+        }
         return OptimizeOutcome(variants: variants,
                                stoppedOnMargin: raw.stopped_on_margin,
                                cancelled: raw.cancelled,
@@ -522,7 +595,8 @@ public enum TopOptKit {
                                gridNx: Int(raw.grid_nx), gridNy: Int(raw.grid_ny),
                                gridNz: Int(raw.grid_nz),
                                gridOrigin: SIMD3<Double>(raw.grid_origin_x, raw.grid_origin_y, raw.grid_origin_z),
-                               spacing: raw.spacing)
+                               spacing: raw.spacing,
+                               appliedClearances: applied)
     }
 
     /// The M7.1 smoke summary shared by the app's smoke screen and the tests.
