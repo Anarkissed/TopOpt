@@ -234,7 +234,6 @@ public struct WorkspacePlaceholder: View {
                               // left, and returned to). Cancelling here used to wipe the
                               // streamed results (RunModel.finish cancelled branch → nil).
                               onClose: { model.backHome() },
-                              onExport: { model.toast = "Export (.3mf) arrives in M7.9" },
                               onSeeOriginal: { viewOriginal = true })
                     .ignoresSafeArea()
             }
