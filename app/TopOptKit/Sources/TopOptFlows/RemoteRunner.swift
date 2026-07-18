@@ -63,7 +63,7 @@ public struct RemoteRunnerConfig: Sendable {
     public let timeout: TimeInterval
 
     public init(host: String, port: Int = 8757,
-                expectedFingerprint: String, timeout: TimeInterval = 3600) {
+                expectedFingerprint: String, timeout: TimeInterval = 28800) {
         self.host = host
         self.port = port
         self.expectedFingerprint = expectedFingerprint
