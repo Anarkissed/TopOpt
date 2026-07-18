@@ -155,3 +155,22 @@ Eigen-free public API. Approved by Nadim.
   continuous with the M6.3-locked rmin=2.5 so V2 stays valid without fixture
   regeneration. The filter radius is now a physical length scale; simp.filter_radius
   (voxel units) remains the low-level knob for direct callers.
+## 2026-07-18 — Camera roll: 074 roll-pin partially overridden for the gizmo
+
+Handoff 074 pinned camera roll to zero (turntable orbit: the horizon stays
+level, and touch-drag can never tumble the view). That decision stands for
+DRAG input — orbiting by finger still accumulates no roll.
+
+Overridden for DELIBERATE input: the orientation gizmo's rotate arrows now
+roll the view about the visual (view/screen) axis, because that is what the
+arrows visually promise. Constraints that keep 074's intent intact:
+- Roll enters ONLY through the gizmo arrows (and programmatic snap), never
+  through drag.
+- Home resets roll to 0 along with azimuth/elevation — one tap always
+  restores a level horizon.
+- Roll round-trips consistently across the gizmo cube, OrbitCamera, and
+  MetalMeshView; face/edge/corner snaps land at roll 0.
+
+Rationale: with roll pinned, the arrows could only fake it (azimuth steps),
+which read as broken. A roll the user asks for explicitly, and can always
+undo with one tap, is not the disorientation 074 guarded against.
