@@ -35,8 +35,11 @@ public struct ResultsScreen: View {
     let runMaterialName: String
     /// Back to Home (KEEPS the variants on the project so reopening shows them).
     var onClose: () -> Void
-    /// Export (.3mf) — M7.9. Passed in so the button exists per the design now;
-    /// the workspace wires the real export sheet in M7.9.
+    /// RETAINED for API/source compatibility with the workspace call site. The Export
+    /// button is now REAL and self-contained (`exportSTL()` writes a binary STL of the
+    /// selected variant and presents the share sheet), so this closure is no longer
+    /// invoked — the workspace's old "Export (.3mf) arrives in M7.9" toast is dead.
+    /// (.3mf itself is still planned: lib3mf isn't in the app build yet.)
     var onExport: () -> Void
     /// "See Original Model" — reveal the editable workspace (the variants stay
     /// saved; re-optimizing there starts over).
@@ -53,6 +56,12 @@ public struct ResultsScreen: View {
     /// the compact, honest readout of the in-flight run + a Cancel affordance.
     @State private var progressDrawerOpen = false
     @StateObject private var videoExport = VideoExportModel()
+    /// The written STL file awaiting the share sheet (nil when no export is in flight).
+    /// Set when the user taps Export; drives the UIActivityViewController presentation.
+    @State private var stlExportURL: URL?
+    /// An export failure message (rare — a temp-dir write error), surfaced as an alert
+    /// rather than failing silently.
+    @State private var stlExportError: String?
     /// The ONE shared orbit camera for this results stage (STEP 1). The Metal viewer AND
     /// the orientation gizmo both drive it, so dragging the model turns the cube and
     /// tapping the cube orbits the model.
@@ -182,6 +191,37 @@ public struct ResultsScreen: View {
             Button("OK") { videoExport.reset() }
         } message: {
             if case let .failed(msg) = videoExport.state { Text(msg) }
+        }
+        // The real STL export share sheet (EXPORT task): AirDrop / Files / Mail via
+        // UIActivityViewController. Present flows are device QA (the M7 /app/ standard);
+        // the file bytes + filename + mass math are headlessly tested on the model.
+        .sheet(isPresented: Binding(
+            get: { stlExportURL != nil },
+            set: { if !$0 { stlExportURL = nil } })) {
+            if let url = stlExportURL { ShareSheet(items: [url]) }
+        }
+        .alert("Couldn’t export STL", isPresented: Binding(
+            get: { stlExportError != nil },
+            set: { if !$0 { stlExportError = nil } })) {
+            Button("OK") { stlExportError = nil }
+        } message: {
+            if let msg = stlExportError { Text(msg) }
+        }
+    }
+
+    /// Write the selected variant's STL to a temp file and hand it to the share sheet.
+    /// The bytes + filename come from the headlessly-tested model; only the file write
+    /// + presentation live here. No-op when the variant has no exportable mesh (the
+    /// button is disabled in that case anyway).
+    private func exportSTL() {
+        guard let data = model.exportSTLData() else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(model.exportFilename)
+        do {
+            try data.write(to: url, options: .atomic)
+            stlExportURL = url
+        } catch {
+            stlExportError = "Couldn’t write the STL file: \(error.localizedDescription)"
         }
     }
 
@@ -978,20 +1018,30 @@ public struct ResultsScreen: View {
         }
     }
 
+    /// The Export button — now REAL (EXPORT task): writes a binary STL of the selected
+    /// variant and presents the share sheet. STL today; .3mf is planned (lib3mf isn't in
+    /// the app build yet), so the label reads ".stl" honestly. Disabled with honest
+    /// wording when the selected variant carries no mesh (a cancelled rung). The
+    /// `onExport` closure is retained for API compatibility; the export flow is now
+    /// self-contained here (the old "arrives in M7.9" toast is dead).
     private var exportButton: some View {
-        Button(action: onExport) {
+        let enabled = model.canExport
+        return Button(action: exportSTL) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "square.and.arrow.up").font(.system(size: 13, weight: .semibold))
-                Text("Export .3mf").dsStyle(DS.TypeScale.bodyStrong)
+                Text("Export .stl").dsStyle(DS.TypeScale.bodyStrong)
             }
             .fixedSize()
             .foregroundStyle(.white)
             .padding(.vertical, DS.Space.m)
             .padding(.horizontal, DS.Space.xl4)
-            .background(Capsule().fill(DS.Color.accent.color))
-            .dsShadow(.accentGlow)
+            .background(Capsule().fill(enabled ? DS.Color.accent.color : DS.Color.textTertiary.color))
+            .dsShadow(enabled ? .accentGlow : .panel)
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.55)
+        .accessibilityLabel(enabled ? "Export STL" : (model.exportDisabledReason ?? "Export unavailable"))
     }
 
     // MARK: - Bottom-left: savings tabs
@@ -1000,6 +1050,7 @@ public struct ResultsScreen: View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             Spacer()
             streamingChip   // "optimizing more…" sits right above the variant tabs
+            massDetailCaption   // honest mesh-vs-voxel mass when they diverge (Open #6)
             HStack(alignment: .bottom, spacing: DS.Space.s) {
                 ForEach(model.tabs, id: \.index) { tab in
                     let active = tab.index == model.selectedIndex
@@ -1035,6 +1086,25 @@ public struct ResultsScreen: View {
         .padding(.horizontal, DS.Space.xl4)
         .padding(.top, DS.Space.xl4)
         .padding(.bottom, 92)
+    }
+
+    /// The honest mass readout (Open #6): the exported MESH's mass beside the voxel-
+    /// count estimate, shown when they diverge beyond 1% (the voxel count runs heavy on
+    /// lacy parts) or the mesh isn't watertight (its mass is then an estimate). Within
+    /// 1% and watertight, the tab's mass already agrees, so this stays hidden. The
+    /// comparison logic is headlessly tested on the model; this caption is device QA.
+    @ViewBuilder private var massDetailCaption: some View {
+        if let c = model.selectedMassComparison, c.divergesBeyond1Percent || c.meshIsEstimate {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "scalemass").font(.system(size: 11, weight: .semibold))
+                Text(c.summary).dsStyle(DS.TypeScale.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
     }
 
     // MARK: - Bottom-center: morph media player

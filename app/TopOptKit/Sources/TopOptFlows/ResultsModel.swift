@@ -451,6 +451,91 @@ public struct FailurePrediction: Equatable, Sendable {
     public let subtitle: String
 }
 
+/// The honest mass readout shown AT EXPORT (Open #6 — the mass gap). The displayed
+/// VOXEL-count mass runs a percent or two heavy on lacy parts versus the mesh that
+/// actually exports, so the export states BOTH the exported mesh's mass (density ×
+/// enclosed volume, divergence theorem) and the voxel-count estimate — labeled,
+/// never silently swapped. When the mesh isn't watertight its enclosed volume is
+/// only approximate, so its mass is labeled an estimate.
+public struct MassComparison: Equatable, Sendable {
+    /// The exported mesh's mass (g): material density × the mesh's enclosed volume.
+    public let meshGrams: Double
+    /// The displayed voxel-count mass (g), or nil when unavailable (a remote run does
+    /// not serialise the Mac-computed mass — 097 — so there is no estimate to show).
+    public let voxelGrams: Double?
+    /// True when the mesh is not watertight: the enclosed volume (and thus the mass)
+    /// is approximate, so the mesh number is labeled an estimate.
+    public let meshIsEstimate: Bool
+
+    public init(meshGrams: Double, voxelGrams: Double?, meshIsEstimate: Bool) {
+        self.meshGrams = meshGrams
+        self.voxelGrams = voxelGrams
+        self.meshIsEstimate = meshIsEstimate
+    }
+
+    /// Whether the mesh mass and the voxel estimate diverge by more than 1% — the
+    /// threshold beyond which BOTH numbers are shown so the gap is stated, not hidden.
+    public var divergesBeyond1Percent: Bool {
+        guard let voxel = voxelGrams, voxel > 0 else { return false }
+        return abs(meshGrams - voxel) / voxel > 0.01
+    }
+
+    /// The mesh mass phrased alone, e.g. "41.3 g" (or "41.3 g (est.)" when the mesh
+    /// isn't watertight — the enclosed volume, and thus the mass, is approximate).
+    public var meshLabel: String {
+        let g = MassComparison.grams(meshGrams)
+        return meshIsEstimate ? "\(g) (est.)" : g
+    }
+
+    /// The one-line readout. Both numbers, each labeled, when they diverge beyond 1%
+    /// ("Mesh: 41.3 g · voxel estimate: 43.1 g"); otherwise just the honest mesh mass
+    /// ("Mesh: 41.3 g"). The voxel figure is never silently substituted for the mesh.
+    public var summary: String {
+        guard divergesBeyond1Percent, let voxel = voxelGrams else {
+            return "Mesh: \(meshLabel)"
+        }
+        return "Mesh: \(meshLabel) · voxel estimate: \(MassComparison.grams(voxel))"
+    }
+
+    /// Grams formatted with the precision the comparison needs: the gap is often
+    /// sub-gram, so keep one decimal below 100 g (unlike the tab's whole-gram label).
+    static func grams(_ g: Double) -> String {
+        if g >= 1000 { return String(format: "%.2f kg", g / 1000) }
+        if g >= 100 { return String(format: "%.0f g", g) }
+        return String(format: "%.1f g", g)
+    }
+}
+
+/// A process-wide cache of material densities (g/cm³) parsed from the bundled
+/// materials.json, so the results screen can resolve a density from a material NAME
+/// without the caller threading it in. A dependency-free Foundation read (no bridge)
+/// loaded once; absent in a headless unit bundle (→ empty → 0, and tests inject the
+/// density explicitly instead).
+final class MaterialDensityTable: @unchecked Sendable {
+    private let lock = NSLock()
+    private var table: [String: Double]?
+
+    func value(for name: String) -> Double {
+        lock.lock(); defer { lock.unlock() }
+        if table == nil { table = MaterialDensityTable.load() }
+        return table?[name] ?? 0
+    }
+
+    private static func load() -> [String: Double] {
+        guard let url = Bundle.main.url(forResource: "materials", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        var out: [String: Double] = [:]
+        for (name, value) in root {
+            if let obj = value as? [String: Any], let d = obj["density_g_cm3"] as? Double {
+                out[name] = d
+            }
+        }
+        return out
+    }
+}
+
 /// The results screen's state + derived presentation. Constructed from a finished,
 /// accepted `OptimizeOutcome` (the run screen only routes here when
 /// `acceptedCount >= 1`, so `tabs` is never empty).
@@ -473,6 +558,13 @@ public final class ResultsModel: ObservableObject {
     /// The workspace's kg/lbs display unit, so the failure load reads in the user's
     /// current units (M7.viz.6 surfaces the prediction in the same toggle).
     public let loadUnit: WeightUnit
+    /// The material density (g/cm³) used to derive the EXPORTED MESH's mass at export
+    /// (Open #6 — the mass gap). Resolved from `materialName` via the bundled
+    /// materials.json when the caller doesn't pass it explicitly (the results screen
+    /// is constructed with the material name, not its density), and 0 when unknown
+    /// (no material, or a lookup miss) — in which case the export shows only the
+    /// voxel-count estimate, honestly, rather than a fabricated mesh mass.
+    public let materialDensityGCm3: Double
     /// The project's infill % (M7.params). Fixed per project (lock-at-creation), so
     /// EVERY displayed physics figure is knocked down to this infill consistently
     /// (`infillKnockdown` / `effectiveYieldStrengthMPa`). 100 means solid (knockdown 1).
@@ -656,12 +748,20 @@ public final class ResultsModel: ObservableObject {
                 appliedLoadKg: Double = 0, loadUnit: WeightUnit = .kg,
                 infillPercent: Int = 100, infillPattern: String = "gyroid",
                 loadLocations: [SIMD3<Float>] = [],
-                loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = []) {
+                loadDirections: [SIMD3<Float>] = [], anchorPoints: [SIMD3<Float>] = [],
+                materialDensityGCm3: Double? = nil) {
         self.projectName = projectName
         self.materialName = materialName
         self.yieldStrengthMPa = max(0, yieldStrengthMPa)
         self.appliedLoadKg = max(0, appliedLoadKg)
         self.loadUnit = loadUnit
+        // Explicit density wins (tests / any future call-site wiring); otherwise
+        // resolve it from the material name against the bundled materials.json, so the
+        // production results screen — constructed with only the material NAME — still
+        // gets the real density for the mesh-mass export without the caller threading
+        // it through. 0 (unknown) degrades to a voxel-only mass, never a guess.
+        self.materialDensityGCm3 = max(0, materialDensityGCm3
+            ?? ResultsModel.bundledMaterialDensity(named: materialName))
         self.infillPercent = infillPercent
         self.infillPattern = infillPattern
         self.loadLocations = loadLocations
@@ -725,6 +825,120 @@ public final class ResultsModel: ObservableObject {
 
     private var selectedVariant: OptimizeVariant? {
         accepted.indices.contains(selectedIndex) ? accepted[selectedIndex] : nil
+    }
+
+    // MARK: - STL export (EXPORT task) + honest mesh mass (Open #6)
+
+    /// Whether the selected variant carries an exportable mesh. Both local and remote
+    /// variants keep their geometry as local `meshVertices`/`meshIndices` buffers
+    /// (the worker returns the mesh even when it withholds the fields — 097), so a
+    /// remote variant exports identically; only a genuinely empty mesh disables it.
+    public var canExport: Bool {
+        guard let v = selectedVariant else { return false }
+        return !v.meshVertices.isEmpty && v.meshIndices.count >= 3
+    }
+
+    /// The honest disabled-state reason when `canExport` is false, for the button's
+    /// accessible label (a variant with no mesh — e.g. a cancelled rung — can't be
+    /// written). nil when export is available.
+    public var exportDisabledReason: String? {
+        canExport ? nil : "This variant has no mesh to export."
+    }
+
+    /// The export filename: `{project}-{material}-{NN}pct.stl`, where NN is the
+    /// PRINTED SAVINGS percent of the selected variant (the same headline the savings
+    /// tab shows — the number the user is choosing by). Non-filename-safe characters
+    /// in the project / material names collapse to underscores. Falls back to
+    /// "variant" when nothing is selected.
+    public var exportFilename: String {
+        let pct = selected?.savingsPercent ?? 0
+        let proj = ResultsModel.fileToken(projectName, fallback: "part")
+        let mat = ResultsModel.fileToken(materialName, fallback: "material")
+        return "\(proj)-\(mat)-\(pct)pct.stl"
+    }
+
+    /// The 80-byte STL header detail naming the variant, e.g.
+    /// "MyBracket · PLA · −30% · mm". Kept short so it survives the 80-byte truncation.
+    private var exportHeaderDetail: String {
+        let pct = selected?.savingsLabel ?? ""
+        let mat = materialName.isEmpty ? "" : "\(materialName) · "
+        return "\(projectName) · \(mat)\(pct) · mm"
+    }
+
+    /// The binary-STL bytes of the selected variant's mesh (units mm, as stored), or
+    /// nil when there is no exportable mesh. This is the file the share sheet writes;
+    /// it is derived purely from the local mesh buffers, so a remote variant exports
+    /// the same way a local one does.
+    public func exportSTLData() -> Data? {
+        guard let v = selectedVariant, canExport else { return nil }
+        return MeshExport.binarySTL(vertices: v.meshVertices, indices: v.meshIndices,
+                                    header: MeshExport.header(detail: exportHeaderDetail))
+    }
+
+    /// The exported mesh's true enclosed volume (mm³) — the divergence-theorem sum
+    /// over the selected variant's triangles. 0 when nothing exportable.
+    public var selectedMeshVolumeMM3: Double {
+        guard let v = selectedVariant, canExport else { return 0 }
+        return MeshExport.meshVolume(vertices: v.meshVertices, indices: v.meshIndices)
+    }
+
+    /// Whether the selected variant's exported mesh is watertight (closed + manifold).
+    /// Derived from the mesh topology (the variant carries no stored flag); when
+    /// false the mesh mass is labeled an ESTIMATE — an open surface has no
+    /// well-defined enclosed volume.
+    public var selectedMeshWatertight: Bool {
+        guard let v = selectedVariant, canExport else { return false }
+        return MeshExport.isWatertight(vertices: v.meshVertices, indices: v.meshIndices)
+    }
+
+    /// The honest mass comparison shown AT EXPORT (Open #6): the exported MESH's mass
+    /// (density × mesh volume) beside the displayed VOXEL-count estimate. The two
+    /// disagree by a percent or two on lacy parts (the voxel count runs heavy), so
+    /// both are labeled and shown — never silently swapped. nil when there is no
+    /// exportable mesh or no material density (nothing honest to compare).
+    public var selectedMassComparison: MassComparison? {
+        guard canExport else { return nil }
+        let voxelG = selectedVariant?.massGrams ?? 0
+        // A remote variant does not carry a Mac-computed voxel mass over the wire
+        // (097); with no density we also can't compute a mesh mass — nothing to show.
+        guard materialDensityGCm3 > 0 else { return nil }
+        let meshG = MeshExport.meshMassGrams(vertices: selectedVariant?.meshVertices ?? [],
+                                             indices: selectedVariant?.meshIndices ?? [],
+                                             densityGCm3: materialDensityGCm3)
+        guard meshG > 0 else { return nil }
+        return MassComparison(meshGrams: meshG,
+                              voxelGrams: computedRemotely ? nil : (voxelG > 0 ? voxelG : nil),
+                              meshIsEstimate: !selectedMeshWatertight)
+    }
+
+    /// Resolve a material's density (g/cm³) from the bundled materials.json by name.
+    /// A lightweight Foundation JSON read (no bridge), cached per process, so the
+    /// production results screen — which is handed only the material NAME — still
+    /// gets the real density for the mesh-mass export. Returns 0 for an empty name, a
+    /// missing bundle resource (e.g. a headless unit test, where density is injected
+    /// instead), or a lookup miss.
+    static func bundledMaterialDensity(named name: String) -> Double {
+        guard !name.isEmpty else { return 0 }
+        return densityCache.value(for: name)
+    }
+
+    /// Process-wide cache of the parsed materials.json density table, loaded once.
+    private static let densityCache = MaterialDensityTable()
+
+    /// Collapse a display string into a filename-safe token (alphanumerics, dash,
+    /// underscore; runs of anything else → one underscore; trimmed). Empty → fallback.
+    static func fileToken(_ s: String, fallback: String) -> String {
+        var out = ""
+        var lastUnderscore = false
+        for ch in s {
+            if ch.isLetter || ch.isNumber || ch == "-" {
+                out.append(ch); lastUnderscore = false
+            } else if !lastUnderscore {
+                out.append("_"); lastUnderscore = true
+            }
+        }
+        let trimmed = out.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        return trimmed.isEmpty ? fallback : trimmed
     }
 
     /// Honest surface-resolution note (083, reworded once smooth export was wired —
