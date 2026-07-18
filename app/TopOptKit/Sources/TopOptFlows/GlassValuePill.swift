@@ -115,24 +115,34 @@ struct GlassValuePill: View {
         }
     }
 
+    /// How far the finger must travel before a scrub BEGINS. Below this a touch is a
+    /// tap (→ type), so a pure tap on an Auto pill never writes `autoMM` as an explicit
+    /// override just to open the field.
+    private static let scrubThreshold: CGFloat = 2
+
     private var scrubGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { v in
                 if scrubValue == nil {
+                    // Don't begin (or write anything) until the finger actually moves —
+                    // otherwise the zero-delta tap flips Auto → explicit before `onEnded`
+                    // can classify it as a tap-to-type.
+                    guard abs(v.translation.width) > Self.scrubThreshold else { return }
                     scrubValue = Float(displayedMM ?? 0)
-                    scrubLastX = 0
+                    scrubLastX = 0                // measure the first delta from the start
                 }
                 let dx = v.translation.width - scrubLastX
                 scrubLastX = v.translation.width
+                guard dx != 0 else { return }
                 let nv = ClearanceScrub.scrub(value: scrubValue ?? 0, deltaPoints: Float(dx))
                 scrubValue = nv
                 onSet(Double(nv))
             }
-            .onEnded { v in
-                let moved = abs(v.translation.width) > 3
+            .onEnded { _ in
+                let didScrub = scrubValue != nil     // a scrub actually began → not a tap
                 scrubValue = nil
                 scrubLastX = 0
-                if !moved {                       // a tap → type
+                if !didScrub {                       // a tap → type
                     draft = Self.number(displayedMM)
                     typing = true
                 }
