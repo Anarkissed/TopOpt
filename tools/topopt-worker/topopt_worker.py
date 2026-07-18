@@ -51,6 +51,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WORKER_VERSION = "1.0.0"
 
+# SSE keepalive cadence (handoff 101). While a job runs, the events loop emits a
+# ": ping" comment every this-many seconds if no real event was ready, so the
+# client's inactivity watchdog stays fed through minutes-long optimizer iterations.
+# Overridable via env for the E2E harness (which drives a fast heartbeat so the
+# slow-sparse liveness path is provable in seconds, not minutes).
+HEARTBEAT_SECONDS = float(os.environ.get("TOPOPT_HEARTBEAT_SECONDS", "20"))
+
 # ---------------------------------------------------------------------------
 # Configuration, resolved once at startup.
 
@@ -386,16 +393,30 @@ class Handler(BaseHTTPRequestHandler):
         try:
             while True:
                 with job.cond:
-                    while idx >= len(job.events):
-                        if job.done:
-                            return
-                        job.cond.wait(timeout=15.0)
-                    batch = job.events[idx:]
-                    idx = len(job.events)
+                    # Wait for new events OR the job to finish, but wake every
+                    # HEARTBEAT_SECONDS so a long-but-live solve can send a
+                    # keepalive instead of going silent.
+                    if idx >= len(job.events) and not job.done:
+                        job.cond.wait(timeout=HEARTBEAT_SECONDS)
+                    if idx < len(job.events):
+                        batch = job.events[idx:]
+                        idx = len(job.events)
+                    elif job.done:
+                        return
+                    else:
+                        batch = None  # timed out with nothing new -> heartbeat
+                if batch is None:
+                    # No new event within the window: send a keepalive comment. The
+                    # job is still running (we hold no terminal event), so this line
+                    # tells the client "the worker is alive" without inventing
+                    # progress the CLI did not emit.
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    continue
                 for ev in batch:
                     self.wfile.write(f"data: {json.dumps(ev)}\n\n".encode())
                 self.wfile.flush()
-                if batch and batch[-1].get("type") in ("done", "error", "cancelled"):
+                if batch[-1].get("type") in ("done", "error", "cancelled"):
                     return
         except (BrokenPipeError, ConnectionResetError):
             return  # client went away; the job keeps running, events persist

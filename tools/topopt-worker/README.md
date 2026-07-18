@@ -106,3 +106,23 @@ A worked `job.json` (128³ design-box run) is in
 - **Bad job / disk full / solver error:** `topopt-cli` exits non-zero; the
   worker emits an `error` event carrying the CLI's stderr diagnostic.
 - **Cancel:** `DELETE /jobs/{id}` kills the subprocess and emits `cancelled`.
+
+## Liveness heartbeat (handoff 101)
+
+While a job runs, `/jobs/{id}/events` emits an SSE keepalive comment `: ping`
+every `TOPOPT_HEARTBEAT_SECONDS` (default 20) whenever no real event is ready.
+SSE comments are ignored by clients except as liveness, so the typed event stream
+is unchanged — but the ping lets the iPad's inactivity watchdog tell "a Fine
+iteration is just slow" from "the worker died", so a long-but-live run is never
+mistaken for a hang. The client treats a dropped stream as recoverable (reconnect
++ replay-dedup) and only fails when the worker is genuinely unreachable — it never
+`DELETE`s a job except on an explicit user cancel.
+
+## E2E harness (`e2e/`)
+
+`e2e/run_e2e.sh <case>` stands up this worker wrapping a protocol-faithful
+`e2e/stub_cli.py` (and, for drop/observe cases, `e2e/proxy.py`) and runs the
+`RemoteRunnerE2ETests` liveness cases against it: `slow_sparse`, `stream_drop`,
+`worker_dies`, `cancel`, `offline` (+ the 097 controls). `e2e/protocol_smoke.py`
+is a pure-Python, HTTP-level proof of the heartbeat, the reconnect replay, and
+DELETE-only cancel — no Xcode needed. See `docs/handoffs/101-remote-run-liveness.md`.

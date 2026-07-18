@@ -1,0 +1,6 @@
+# E2E harness scratch (worker/proxy logs, per-job work dirs)
+.e2e-work-*/
+.smoke-work*/
+.worker-*.log
+.proxy-*.log
+.proxy-reqs-*.log
