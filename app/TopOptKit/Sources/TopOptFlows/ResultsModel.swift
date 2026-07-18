@@ -994,6 +994,17 @@ public final class ResultsModel: ObservableObject {
                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
     }
 
+    /// Whether the selected variant carries a von Mises stress field to overlay. False
+    /// for a remote run (the worker withholds the per-voxel field — 097) and for a
+    /// cancelled/legacy variant, so the Stress chip HIDES rather than sitting there as a
+    /// dead control that opens a legend over a body it can't colour. Mirrors `hasFlex`;
+    /// the results screen gates the Stress chip on this exactly as it gates Flex on
+    /// `hasFlex`. Its own tests guard the remote/local split.
+    public var hasStress: Bool {
+        guard let f = selectedStressField else { return false }
+        return !f.isEmpty
+    }
+
     /// The selected variant's per-voxel Cauchy stress TENSOR field (M7.viz.5), tied to
     /// the run's grid geometry — the flux source `σ` the load→anchor flow integrates.
     /// Empty (`isEmpty`) for a cancelled/legacy variant that carries no tensor.
