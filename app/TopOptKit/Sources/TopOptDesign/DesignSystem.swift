@@ -67,6 +67,10 @@ public enum DS {
         /// Caution / non-blocking warning amber `#FF9F0A` (e.g. the sub-voxel
         /// load-face "may not register" badge, handoff 099).
         public static let warning = RGBA(hex: 0xFF9F0A)
+        /// Keep-clear volume red — the tint the MetalMeshView keep-out render and the
+        /// SwiftUI affix / value pill share. `rgb(0.95, 0.42, 0.38)` (keep-clear v2 /
+        /// Phase B); stored so call sites read a token, not a literal.
+        public static let clearance = RGBA(0.95 * 255, 0.42 * 255, 0.38 * 255)
 
         // Text ramp — `#f2f2f5` at the opacities the design reuses.
         /// `rgba(242,242,245,0.55)` — secondary text.
@@ -139,6 +143,10 @@ public enum DS {
         public static let bar = RGBA(28, 28, 34, 0.60)
         /// Toast `rgba(40,40,48,0.85)`.
         public static let toast = RGBA(40, 40, 48, 0.85)
+        /// Floating value pill `rgba(20,20,26,0.72)` — the darker, ultra-thin-material
+        /// glass of the keep-clear scrub pill (Phase B). Sits over `.ultraThinMaterial`
+        /// like the other surfaces; a touch deeper than `panel` so the big number reads.
+        public static let valuePill = RGBA(20, 20, 26, 0.72)
     }
 
     // MARK: - Radius (corner radii, px == pt)
@@ -156,6 +164,8 @@ public enum DS {
         public static let panel: CGFloat = 22
         /// Small panel / popover `20`.
         public static let panelSmall: CGFloat = 20
+        /// Value pill / squircle `18` — the keep-clear scrub pill (Phase B).
+        public static let valuePill: CGFloat = 18
         /// Control / input `14`.
         public static let control: CGFloat = 14
         /// Field / select `12`.

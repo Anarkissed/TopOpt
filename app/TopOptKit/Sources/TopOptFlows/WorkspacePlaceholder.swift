@@ -70,6 +70,11 @@ public struct WorkspacePlaceholder: View {
     /// (nil = no drag in progress). Same for a keep-out (with its index).
     @State private var dragBaseBox: DesignBoxBounds?
     @State private var dragBaseKeepOut: (index: Int, bounds: DesignBoxBounds)?
+    /// Keep-clear Phase B: which clearance handle is currently being dragged (id =
+    /// "group:face:role"), nil = none. Drives the live-readout highlight + haptics.
+    @State private var draggingHandleID: String?
+    /// The last mm value written this drag, to fire a haptic tick when it crosses Auto.
+    @State private var lastHandleValue: Float?
 
     // Forwarders onto the project's persistent state. The `nonmutating set`
     // mutates the ProjectModel (a reference), so `selection.mutate()` /
@@ -168,6 +173,9 @@ public struct WorkspacePlaceholder: View {
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
             if showDesignGizmo { designGizmoOverlay.ignoresSafeArea() }  // dom-app resize/move handles
+            // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
+            // axial, face → depth) and the floating glass value pill near the selection.
+            if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
 
             chrome
             if force.phase == .setup {
@@ -855,6 +863,191 @@ public struct WorkspacePlaceholder: View {
             .onEnded { _ in dragBaseKeepOut = nil }
     }
 
+    // MARK: keep-clear Phase B — draggable clearance handles + floating value pill
+
+    /// The named coordinate space the handle drags read their touch LOCATION in — the
+    /// full-stage space the camera projection also lives in, so `projection.ray` builds
+    /// the right camera ray. (The design-box handles get by with `.translation`, which
+    /// is space-invariant; a ray needs the absolute point, hence a named space.)
+    private static let clearanceStageSpace = "clearanceStage"
+
+    /// One flattened clearance handle for the overlay: a stable id, the owning group,
+    /// and the pure handle (model space).
+    private struct ClearanceHandleItem: Identifiable {
+        let id: String
+        let groupID: UUID
+        let handle: ClearanceHandle
+    }
+
+    /// Every clearance handle to draw, flattened across groups/faces. Degenerate
+    /// volumes contribute none (ProjectModel already dropped them).
+    private var clearanceHandleItems: [ClearanceHandleItem] {
+        guard force.gravityIsSet else { return [] }
+        var items: [ClearanceHandleItem] = []
+        for entry in project.clearanceHandles() {
+            for h in entry.handles {
+                items.append(ClearanceHandleItem(
+                    id: "\(entry.groupID.uuidString):\(entry.faceID):\(h.role)",
+                    groupID: entry.groupID, handle: h))
+            }
+        }
+        return items
+    }
+
+    /// The draggable clearance handles + the floating glass value pill for the active
+    /// clearance selection. Each handle binds its gesture to the SIZED knob BEFORE
+    /// `.position` (same rule as the design-box gizmo): a gesture applied after
+    /// `.position` fills the stage and swallows the orbit camera. So a touch on a knob
+    /// owns the drag; anywhere else orbits as today.
+    private var clearanceHandlesOverlay: some View {
+        ZStack(alignment: .topLeading) {
+            if let proj = projection {
+                ForEach(clearanceHandleItems) { item in
+                    if let pt = proj.project(settledWorld(item.handle.anchor)) {
+                        clearanceHandleKnob(role: item.handle.role, active: draggingHandleID == item.id)
+                            .gesture(clearanceHandleDrag(item))
+                            .position(pt)
+                    }
+                }
+                clearanceValuePill(proj)
+            }
+        }
+        // Fill the stage so the named coordinate space (and the `.position` anchors)
+        // share the origin the camera projection uses (top-left of the full stage).
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .coordinateSpace(name: Self.clearanceStageSpace)
+    }
+
+    /// The floating glass value pill(s) for the ACTIVE clearance group, anchored just
+    /// above its projected centroid — the primary editor AND the live readout while a
+    /// handle is dragged (it reads the same override the drag writes). Falls back to the
+    /// Selections row when nothing projects (handled by the row pills).
+    @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection) -> some View {
+        if let g = activeGroup, project.keepClearIsOn(g), let pt = groupScreen(g) {
+            let shape = groupClearanceShape(g)
+            let ov = force.clearanceOverride(for: g.id)
+            let r = project.clearanceBoreRadius(for: g)
+            if shape.bolt || shape.slab {
+                VStack(spacing: DS.Space.xs) {
+                    if shape.bolt {
+                        GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                                       autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                                       active: isDraggingRole(g.id, .margin)) {
+                            force.setClearanceMargin(g.id, mm: $0)
+                        }
+                        GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                                       autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                                       active: isDraggingRole(g.id, .axialHi) || isDraggingRole(g.id, .axialLo)) {
+                            force.setClearanceAxial(g.id, mm: $0)
+                        }
+                    }
+                    if shape.slab {
+                        GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                                       autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                                       active: isDraggingRole(g.id, .slabDepth)) {
+                            force.setClearanceSlab(g.id, mm: $0)
+                        }
+                    }
+                }
+                .fixedSize()
+                .position(x: clampX(pt.x, proj.viewportSize.width),
+                          y: clamp(pt.y - 96, proj.viewportSize.height))
+                .animation(DS.Motion.emphasized, value: pt)
+            }
+        }
+    }
+
+    private func isDraggingRole(_ gid: UUID, _ role: ClearanceHandle.Role) -> Bool {
+        draggingHandleID?.hasPrefix(gid.uuidString) == true
+            && draggingHandleID?.hasSuffix(":\(role)") == true
+    }
+
+    /// A clearance drag knob — a red glass dot with a role glyph and a generous (~44pt)
+    /// hit target. Brightens while it owns the drag.
+    private func clearanceHandleKnob(role: ClearanceHandle.Role, active: Bool) -> some View {
+        let tint = Self.clearanceTint
+        let size: CGFloat = active ? 26 : 22
+        return Circle()
+            .fill(tint.opacity(active ? 0.9 : 0.34))
+            .frame(width: size, height: size)
+            .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 1.5))
+            .overlay(Image(systemName: clearanceRoleIcon(role))
+                .font(.system(size: 10, weight: .bold)).foregroundStyle(.white))
+            .shadow(color: tint.opacity(0.5), radius: 4)
+            .contentShape(Circle().inset(by: -12))   // generous ~46pt target
+    }
+
+    private func clearanceRoleIcon(_ role: ClearanceHandle.Role) -> String {
+        switch role {
+        case .margin: return "arrow.left.and.right"
+        case .axialHi: return "arrow.up"
+        case .axialLo: return "arrow.down"
+        case .slabDepth: return "arrow.up.to.line"
+        }
+    }
+
+    /// Route a handle pan through `ClearanceDragMath` (via the pure `ClearanceHandle`):
+    /// build the per-frame camera ray at the touch, run the value math in settled-world
+    /// space, and WRITE the mm continuously (Auto → explicit happens on the first write;
+    /// the volume re-tessellates live via the Equatable-gated path). Haptics on grab /
+    /// release and when the value crosses its Auto suggestion.
+    private func clearanceHandleDrag(_ item: ClearanceHandleItem) -> some Gesture {
+        // Fixed geometry: `settled` only rotates it, and the value math reads none of the
+        // moving fields, so capturing it here (even across body updates) stays correct.
+        let world = item.handle.settled(center: meshCenter, rotation: settleQuat)
+        return DragGesture(minimumDistance: 1, coordinateSpace: CoordinateSpace.named(Self.clearanceStageSpace))
+            .onChanged { v in
+                guard let proj = projection else { return }
+                if draggingHandleID != item.id {
+                    draggingHandleID = item.id
+                    lastHandleValue = nil
+                    ClearanceHaptics.grab()
+                }
+                guard let ray = proj.ray(throughViewPoint: v.location),
+                      let value = world.value(rayOrigin: ray.origin, rayDir: ray.dir) else { return }
+                writeClearance(item.groupID, role: item.handle.role, mm: Double(value))
+                if let auto = clearanceAutoValue(item.groupID, role: item.handle.role),
+                   let last = lastHandleValue,
+                   (last - auto).sign != (value - auto).sign {
+                    ClearanceHaptics.crossedAuto()
+                }
+                lastHandleValue = value
+            }
+            .onEnded { _ in
+                draggingHandleID = nil
+                lastHandleValue = nil
+                ClearanceHaptics.release()
+            }
+    }
+
+    /// Write the dragged mm to the right override on the group.
+    private func writeClearance(_ gid: UUID, role: ClearanceHandle.Role, mm: Double) {
+        switch role {
+        case .margin: force.setClearanceMargin(gid, mm: mm)
+        case .axialLo, .axialHi: force.setClearanceAxial(gid, mm: mm)
+        case .slabDepth: force.setClearanceSlab(gid, mm: mm)
+        }
+    }
+
+    /// The Auto suggestion (mm) for a group's role — the reference the crossing haptic
+    /// fires at. Nil for a bolt role with no bore geometry.
+    private func clearanceAutoValue(_ gid: UUID, role: ClearanceHandle.Role) -> Float? {
+        guard let g = selection.groups.first(where: { $0.id == gid }) else { return nil }
+        switch role {
+        case .margin:
+            return project.clearanceBoreRadius(for: g).map { Float(ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0)) }
+        case .axialLo, .axialHi:
+            return project.clearanceBoreRadius(for: g).map { Float(ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0)) }
+        case .slabDepth:
+            return Float(ClearanceSuggestion.faceSlabDepthMM)
+        }
+    }
+
+    /// Keep a floated overlay on-screen horizontally (mirror of `clamp` for y).
+    private func clampX(_ x: CGFloat, _ width: CGFloat) -> CGFloat {
+        Swift.min(Swift.max(x, 90), Swift.max(100, width - 90))
+    }
+
     // MARK: left Selections panel (design) with the kg/lbs toggle
 
     private var selectionsPanel: some View {
@@ -1048,85 +1241,39 @@ public struct WorkspacePlaceholder: View {
     /// now that the bore radius crosses the bridge — no longer the bare word "auto".
     /// The 0-sentinel wire path is unchanged: an Auto field still sends 0 and the core
     /// re-derives it; any number the user types is exactly the number the run uses.
+    /// Keep-clear Phase B: the row's compact liquid-glass value pills (margin + axial
+    /// for a bore, depth for a planar face). The floating pill near the selection is the
+    /// primary editor when the group projects on-screen; these row pills are the
+    /// always-reachable panel copy (both write the same override, like the weight pill).
     @ViewBuilder private func clearanceEditor(_ g: SelectionGroup) -> some View {
         let shape = groupClearanceShape(g)
         if shape.bolt || shape.slab {
             let ov = force.clearanceOverride(for: g.id)
             let r = project.clearanceBoreRadius(for: g)
-            HStack(spacing: DS.Space.m) {
-                Image(systemName: "nosign").font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(Self.clearanceTint)
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
                 if shape.bolt {
-                    clearanceField("margin", ov.concentricMarginMM,
-                                   auto: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) }) {
-                        force.setClearanceMargin(g.id, mm: $0)
-                    }
-                    clearanceField("axial", ov.axialClearanceMM,
-                                   auto: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) }) {
-                        force.setClearanceAxial(g.id, mm: $0)
+                    HStack(spacing: DS.Space.xs) {
+                        GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                                       autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                                       compact: true) { force.setClearanceMargin(g.id, mm: $0) }
+                        GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                                       autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                                       compact: true) { force.setClearanceAxial(g.id, mm: $0) }
                     }
                 }
                 if shape.slab {
-                    clearanceField("slab", ov.slabDepthMM,
-                                   auto: ClearanceSuggestion.faceSlabDepthMM) {
-                        force.setClearanceSlab(g.id, mm: $0)
-                    }
+                    GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                                   autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                                   compact: true) { force.setClearanceSlab(g.id, mm: $0) }
                 }
             }
-        }
-    }
-
-    /// One clearance mm field. When un-overridden it reads "margin · Auto · N mm" with
-    /// the REAL derived suggestion as the (dimmed) placeholder; typing a value flips it
-    /// to the explicit number, and the ↺ reset (shown once explicit) restores the Auto
-    /// sentinel. A single real TextField (placeholder = the Auto number) so the tap
-    /// target is unambiguous. Commits on change; a non-positive value reverts to Auto.
-    @ViewBuilder private func clearanceField(_ label: String, _ value: Double?, auto: Double?,
-                                             _ set: @escaping (Double?) -> Void) -> some View {
-        let isAuto = value == nil
-        let text = Binding<String>(
-            get: { value.map { String(format: "%g", $0) } ?? "" },
-            set: { s in
-                let t = s.trimmingCharacters(in: .whitespaces)
-                if let v = Double(t), v > 0 { set(v) } else if t.isEmpty { set(nil) }
-            })
-        HStack(spacing: 3) {
-            Text(label).dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.textQuaternary.color)
-            if isAuto {
-                Text("Auto ·").dsStyle(DS.TypeScale.caption).fontWeight(.bold)
-                    .foregroundStyle(Self.clearanceTint)
-            }
-            TextField(Self.mmString(auto), text: text)     // placeholder = the Auto number
-                .textFieldStyle(.plain)
-                .frame(width: 32)
-                .multilineTextAlignment(.center)
-                .font(.system(size: DS.TypeScale.caption.size, weight: .semibold))
-                .foregroundStyle((isAuto ? DS.Color.textQuaternary : DS.Color.textSecondary).color)
-                .overlay(alignment: .bottom) {
-                    Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1)
-                }
-            Text("mm").dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.textQuaternary.color)
-            if !isAuto {
-                Button { set(nil) } label: {               // reset to Auto
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(DS.Color.textQuaternary.color)
-                }
-                .buttonStyle(.plain)
-            }
+            .padding(.top, 2)
         }
     }
 
     /// The clearance-volume red, matched to the viewport render (MetalMeshView keep-out).
-    static let clearanceTint = Color(red: 0.95, green: 0.42, blue: 0.38)
-
-    /// Format an Auto suggestion mm compactly ("2.5"), or "—" if unknown (no bore geo).
-    private static func mmString(_ v: Double?) -> String {
-        guard let v = v else { return "—" }
-        return String(format: "%g", (v * 100).rounded() / 100)
-    }
+    /// Sourced from the shared `DS.Color.clearance` token (keep-clear Phase B).
+    static let clearanceTint = DS.Color.clearance.color
 
     /// The row's keep-clear AFFIX control (keep-clear v2): a nosign toggle in the same
     /// row as the group's role. It reads ON for an auto-clearanced anchored bore

@@ -169,4 +169,125 @@ final class ClearanceGeometryTests: XCTestCase {
             rayOrigin: .zero, rayDir: .zero, axisPoint: .zero,
             axisDir: SIMD3(0, 0, 1), boreRadiusMM: 1))
     }
+
+    // MARK: - Handle anchors (Phase B)
+
+    /// A resolved bore volume (r=2.5, span 0–10, auto margin 2.5, auto axial 5).
+    private func boreVolume() -> ClearanceVolume {
+        let geo = cylinderFace(radius: 2.5, axisPoint: .zero, axisDir: SIMD3(0, 0, 1))
+        return .bolt(faceID: 1, geometry: geo, axialSpan: (0, 10), marginMM: 2.5, axialMM: 5)
+    }
+
+    func testCylinderHandlesAnchorsAndGeometry() {
+        let handles = ClearanceHandles.handles(for: boreVolume(), boreRadiusMM: 2.5,
+                                               axialSpan: (0, 10))
+        XCTAssertEqual(handles.count, 3)   // wall + two caps
+
+        let margin = try! XCTUnwrap(handles.first { $0.role == .margin })
+        // Wall handle at mid-length (z=5), out along +X by the drawn radius (5).
+        XCTAssertEqual(margin.anchor, SIMD3<Float>(5, 0, 5))
+        XCTAssertEqual(margin.boreRadiusMM, 2.5, accuracy: 1e-5)
+        XCTAssertEqual(margin.axisDir, SIMD3<Float>(0, 0, 1))
+
+        let hi = try! XCTUnwrap(handles.first { $0.role == .axialHi })
+        XCTAssertEqual(hi.anchor, SIMD3<Float>(0, 0, 15))   // outer +cap (tHi)
+        XCTAssertEqual(hi.boreEndT, 10, accuracy: 1e-5)     // FIXED bore end (span.hi)
+        XCTAssertEqual(hi.outward, 1, accuracy: 1e-5)
+
+        let lo = try! XCTUnwrap(handles.first { $0.role == .axialLo })
+        XCTAssertEqual(lo.anchor, SIMD3<Float>(0, 0, -5))   // outer −cap (tLo)
+        XCTAssertEqual(lo.boreEndT, 0, accuracy: 1e-5)      // span.lo
+        XCTAssertEqual(lo.outward, -1, accuracy: 1e-5)
+    }
+
+    func testSlabHandleAnchorAndGeometry() {
+        let plane = StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 0, 1),
+                                     planeOrigin: SIMD3(0, 0, 4))
+        let outline = PlaneOutline(center: SIMD3(0, 0, 4), uAxis: SIMD3(1, 0, 0),
+                                   vAxis: SIMD3(0, 1, 0), halfU: 3, halfV: 2)
+        let vol = ClearanceVolume.slab(faceID: 7, geometry: plane, outline: outline, depthMM: 3)
+        let handles = ClearanceHandles.handles(for: vol, boreRadiusMM: 0, axialSpan: nil)
+        XCTAssertEqual(handles.count, 1)
+        let d = handles[0]
+        XCTAssertEqual(d.role, .slabDepth)
+        XCTAssertEqual(d.anchor, SIMD3<Float>(0, 0, 7))     // outer face = plane + depth·n
+        XCTAssertEqual(d.planeOrigin, SIMD3<Float>(0, 0, 4))
+        XCTAssertEqual(d.planeNormal, SIMD3<Float>(0, 0, 1))
+    }
+
+    func testDegenerateVolumeHasNoHandles() {
+        let plane = StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 0, 1))
+        let degen = ClearanceVolume.bolt(faceID: 1, geometry: plane, axialSpan: (0, 5),
+                                         marginMM: 1, axialMM: 1)   // bolt on a plane → degenerate
+        XCTAssertTrue(degen.isDegenerate)
+        XCTAssertTrue(ClearanceHandles.handles(for: degen, boreRadiusMM: 0, axialSpan: nil).isEmpty)
+    }
+
+    // MARK: - Value-write path (drag simulated as a ray sequence)
+
+    func testMarginValueWritePathFromRaySequence() {
+        let margin = try! XCTUnwrap(
+            ClearanceHandles.handles(for: boreVolume(), boreRadiusMM: 2.5, axialSpan: (0, 10))
+                .first { $0.role == .margin })
+        // A sequence of drag rays, each grazing a known distance from the +Z axis; the
+        // written margin = grazing distance − bore radius (2.5), clamped ≥ 0.
+        let grazes: [(Float, Float)] = [(6, 3.5), (4, 1.5), (2, 0)]   // (graze, expected margin)
+        for (graze, expected) in grazes {
+            let v = margin.value(rayOrigin: SIMD3(-10, graze, 5), rayDir: SIMD3(1, 0, 0))
+            XCTAssertEqual(try! XCTUnwrap(v), expected, accuracy: 1e-4)
+        }
+    }
+
+    func testAxialAndSlabValueWritePath() {
+        let handles = ClearanceHandles.handles(for: boreVolume(), boreRadiusMM: 2.5, axialSpan: (0, 10))
+        let hi = try! XCTUnwrap(handles.first { $0.role == .axialHi })
+        // Drag the +cap out to z=14 → axial = 14 − boreEnd(10) = 4.
+        XCTAssertEqual(try! XCTUnwrap(hi.value(rayOrigin: SIMD3(-10, 0, 14), rayDir: SIMD3(1, 0, 0))),
+                       4, accuracy: 1e-4)
+        // Slab depth handle: drag to z=3 from a plane at origin → depth 3.
+        let plane = StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 0, 1), planeOrigin: .zero)
+        let outline = PlaneOutline(center: .zero, uAxis: SIMD3(1, 0, 0), vAxis: SIMD3(0, 1, 0),
+                                   halfU: 1, halfV: 1)
+        let slab = ClearanceVolume.slab(faceID: 2, geometry: plane, outline: outline, depthMM: 1)
+        let d = try! XCTUnwrap(ClearanceHandles.handles(for: slab, boreRadiusMM: 0, axialSpan: nil).first)
+        XCTAssertEqual(try! XCTUnwrap(d.value(rayOrigin: SIMD3(-10, 0, 3), rayDir: SIMD3(1, 0, 0))),
+                       3, accuracy: 1e-4)
+    }
+
+    /// A handle re-posed into settled-world space, and the drag ray rigidly re-posed the
+    /// same way, must write the SAME mm — the invariance that lets the view compute in
+    /// world space against a world-space camera ray.
+    func testSettledHandlePreservesValueUnderRigidTransform() {
+        let margin = try! XCTUnwrap(
+            ClearanceHandles.handles(for: boreVolume(), boreRadiusMM: 2.5, axialSpan: (0, 10))
+                .first { $0.role == .margin })
+        let center = SIMD3<Float>(3, -2, 7)
+        let q = simd_quatf(angle: 0.7, axis: simd_normalize(SIMD3<Float>(0.3, 1, 0.2)))
+        func p(_ x: SIMD3<Float>) -> SIMD3<Float> { center + q.act(x - center) }
+        func d(_ x: SIMD3<Float>) -> SIMD3<Float> { q.act(x) }
+
+        let o = SIMD3<Float>(-10, 6, 5), dir = SIMD3<Float>(1, 0, 0)
+        let vModel = try! XCTUnwrap(margin.value(rayOrigin: o, rayDir: dir))
+        let world = margin.settled(center: center, rotation: q)
+        let vWorld = try! XCTUnwrap(world.value(rayOrigin: p(o), rayDir: d(dir)))
+        XCTAssertEqual(vWorld, vModel, accuracy: 1e-3)
+        XCTAssertEqual(vModel, 3.5, accuracy: 1e-3)
+    }
+
+    // MARK: - Precision scrub (slower finger → finer steps)
+
+    func testScrubStepIsFinerWhenSlow() {
+        // Per-point step at a slow drag (|dx| = 0.5) is smaller than at a fast flick.
+        let slowPerPoint = ClearanceScrub.increment(deltaPoints: 0.5) / 0.5
+        let fastPerPoint = ClearanceScrub.increment(deltaPoints: 16) / 16
+        XCTAssertLessThan(slowPerPoint, fastPerPoint)
+        XCTAssertEqual(fastPerPoint, ClearanceScrub.coarseStepMMPerPoint, accuracy: 1e-4)
+        XCTAssertGreaterThanOrEqual(slowPerPoint, ClearanceScrub.fineStepMMPerPoint)
+    }
+
+    func testScrubDirectionAndClampAtZero() {
+        // Positive delta grows the value; a big negative delta clamps at 0.
+        XCTAssertGreaterThan(ClearanceScrub.scrub(value: 1, deltaPoints: 4), 1)
+        XCTAssertEqual(ClearanceScrub.scrub(value: 0.1, deltaPoints: -50), 0, accuracy: 1e-6)
+    }
 }

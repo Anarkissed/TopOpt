@@ -133,4 +133,39 @@ final class ClearanceDerivationTests: XCTestCase {
         p.force.setKeepClearAffix(boreID, .suppressed)
         XCTAssertTrue(p.clearanceVolumes().isEmpty)
     }
+
+    // MARK: - clearanceHandles (Phase B drag anchors)
+
+    func testBoreHandlesMatchTheRenderedVolume() {
+        let (p, _, _) = project()
+        let entries = p.clearanceHandles()
+        XCTAssertEqual(entries.count, 1, "one cleared face (the anchored bore)")
+        let handles = entries[0].handles
+        // Wall (margin) + two end caps (axial) — from the resolved cylinder.
+        XCTAssertEqual(handles.count, 3)
+        XCTAssertNotNil(handles.first { $0.role == .margin })
+        XCTAssertNotNil(handles.first { $0.role == .axialHi })
+        XCTAssertNotNil(handles.first { $0.role == .axialLo })
+        // The wall handle carries the EXACT bore radius (2.5), and the +cap measures
+        // from the fixed tessellation end (span.hi = 10) — the same numbers the run
+        // freezes, so a drag reads off the true geometry.
+        let margin = handles.first { $0.role == .margin }!
+        XCTAssertEqual(margin.boreRadiusMM, 2.5, accuracy: 1e-4)
+        let hi = handles.first { $0.role == .axialHi }!
+        XCTAssertEqual(hi.boreEndT, 10, accuracy: 1e-3)
+    }
+
+    func testSuppressedBoreHasNoHandles() {
+        let (p, boreID, _) = project()
+        p.force.setKeepClearAffix(boreID, .suppressed)
+        XCTAssertTrue(p.clearanceHandles().isEmpty)
+    }
+
+    func testExplicitPlaneAffixAddsDepthHandle() {
+        let (p, _, planeID) = project()
+        p.force.setKeepClearAffix(planeID, .on)
+        let planeEntry = try! XCTUnwrap(p.clearanceHandles().first { $0.faceID == 3 })
+        XCTAssertEqual(planeEntry.handles.count, 1)
+        XCTAssertEqual(planeEntry.handles[0].role, .slabDepth)
+    }
 }
