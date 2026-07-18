@@ -109,4 +109,40 @@ final class CameraProjectionTests: XCTestCase {
         XCTAssertEqual(cam.elevation, -OrbitCamera.maxElevation, accuracy: 1e-5)
         XCTAssertGreaterThan(cam.elevation, -(.pi / 2))
     }
+
+    // MARK: - Screen → world ray (keep-clear Phase B drag inverse of `project`)
+
+    /// The distance from a point to the line `origin + t·dir` (dir unit).
+    private func distance(_ p: SIMD3<Float>, toRayOrigin o: SIMD3<Float>, dir: SIMD3<Float>) -> Float {
+        let w = p - o
+        let along = simd_dot(w, dir)
+        return simd_length(w - dir * along)
+    }
+
+    func testRayThroughProjectedPointHitsThatPoint() {
+        let cam = framedCamera()
+        let proj = CameraProjection(camera: cam, viewportSize: CGSize(width: 800, height: 600))
+        // Take a world point in front of the camera, project it, then unproject a ray
+        // through that pixel — the ray must pass (essentially) through the world point.
+        let world = cam.target + simd_normalize(SIMD3<Float>(0.4, 0.3, -0.2)) * 0.5
+        let screen = try! XCTUnwrap(proj.project(world))
+        let ray = try! XCTUnwrap(proj.ray(throughViewPoint: screen))
+        XCTAssertEqual(simd_length(ray.dir), 1, accuracy: 1e-4)         // unit direction
+        XCTAssertLessThan(distance(world, toRayOrigin: ray.origin, dir: ray.dir), 1e-2)
+    }
+
+    func testRayThroughViewportCentreLooksAtTarget() {
+        let cam = framedCamera()
+        let proj = CameraProjection(camera: cam, viewportSize: CGSize(width: 800, height: 600))
+        // The centre pixel's ray is the camera's view direction, so the target lies on it.
+        let ray = try! XCTUnwrap(proj.ray(throughViewPoint: CGPoint(x: 400, y: 300)))
+        XCTAssertLessThan(distance(cam.target, toRayOrigin: ray.origin, dir: ray.dir), 1e-2)
+        // It points from the eye toward the scene (roughly opposite the eye direction).
+        XCTAssertLessThan(simd_dot(ray.dir, cam.direction), 0)
+    }
+
+    func testRayNilOnDegenerateViewport() {
+        let proj = CameraProjection(camera: framedCamera(), viewportSize: .zero)
+        XCTAssertNil(proj.ray(throughViewPoint: CGPoint(x: 1, y: 1)))
+    }
 }

@@ -231,8 +231,26 @@ public final class ProjectModel: ObservableObject {
     /// A bore whose B-rep face is not actually a cylinder yields a `.degenerate`
     /// volume (rendered hollow/dashed) — the same safe no-op the core produces.
     public func clearanceVolumes() -> [(groupID: UUID, volume: ClearanceVolume)] {
+        resolvedClearances().map { ($0.groupID, $0.volume) }
+    }
+
+    /// A resolved clearance for ONE cleared face: the rendered volume plus the FIXED
+    /// bore facts (radius, tessellation span) the Phase B drag handles need. Shared by
+    /// `clearanceVolumes()` (the render) and `clearanceHandles()` (the drag anchors) so
+    /// the picture and the handles can never derive from different numbers.
+    private struct ResolvedClearance {
+        let groupID: UUID
+        let faceID: Int
+        let volume: ClearanceVolume
+        /// The bore's exact radius (mm); 0 for a slab.
+        let boreRadiusMM: Float
+        /// The bore's through-part tessellation span along its axis; nil for a slab.
+        let axialSpan: (lo: Float, hi: Float)?
+    }
+
+    private func resolvedClearances() -> [ResolvedClearance] {
         guard let mesh = viewerMesh else { return [] }
-        var out: [(UUID, ClearanceVolume)] = []
+        var out: [ResolvedClearance] = []
         for g in selection.groups {
             let auto = autoClearanceApplies(g, in: mesh)
             guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
@@ -248,17 +266,37 @@ public final class ProjectModel: ObservableObject {
                     let axial = ov.axialClearanceMM ?? ClearanceSuggestion.boltAxialMM(boreRadiusMM: r)
                     let span = mesh.faceAxialSpan(f, axisPoint: SIMD3<Float>(geo.axisPoint),
                                                   axisDir: SIMD3<Float>(geo.axisDir))
-                    out.append((g.id, .bolt(faceID: Int(f), geometry: geo, axialSpan: span,
-                                            marginMM: margin, axialMM: axial)))
+                    out.append(ResolvedClearance(
+                        groupID: g.id, faceID: Int(f),
+                        volume: .bolt(faceID: Int(f), geometry: geo, axialSpan: span,
+                                      marginMM: margin, axialMM: axial),
+                        boreRadiusMM: Float(r), axialSpan: span))
                 } else {
                     let depth = ov.slabDepthMM ?? ClearanceSuggestion.faceSlabDepthMM
                     let outline = mesh.facePlaneOutline(f, planeNormal: SIMD3<Float>(geo.planeNormal),
                                                         planeOrigin: SIMD3<Float>(geo.planeOrigin))
-                    out.append((g.id, .slab(faceID: Int(f), geometry: geo, outline: outline, depthMM: depth)))
+                    out.append(ResolvedClearance(
+                        groupID: g.id, faceID: Int(f),
+                        volume: .slab(faceID: Int(f), geometry: geo, outline: outline, depthMM: depth),
+                        boreRadiusMM: 0, axialSpan: nil))
                 }
             }
         }
         return out
+    }
+
+    /// The Phase B drag-handle anchors for every rendered clearance volume, grouped by
+    /// the owning selection group + face. Built from the SAME resolved geometry as
+    /// `clearanceVolumes()`, so a handle sits on the exact wall / cap / face the run
+    /// keeps clear. A degenerate volume contributes no handles (nothing to drag); such
+    /// entries are dropped so the caller iterates only live handles.
+    public func clearanceHandles() -> [(groupID: UUID, faceID: Int, handles: [ClearanceHandle])] {
+        resolvedClearances().compactMap { rc in
+            let hs = ClearanceHandles.handles(for: rc.volume,
+                                              boreRadiusMM: rc.boreRadiusMM,
+                                              axialSpan: rc.axialSpan)
+            return hs.isEmpty ? nil : (rc.groupID, rc.faceID, hs)
+        }
     }
 
     /// The representative bore radius (mm) of a group — the first cylindrical face's

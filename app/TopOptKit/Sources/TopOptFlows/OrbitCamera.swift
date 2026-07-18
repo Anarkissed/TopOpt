@@ -60,6 +60,29 @@ public struct CameraProjection: Equatable, Sendable {
         guard x.isFinite, y.isFinite else { return nil }
         return CGPoint(x: CGFloat(x), y: CGFloat(y))
     }
+
+    /// The world-space ray (origin, unit direction) through a view-space point (points,
+    /// top-left origin, y down) — the INVERSE of `project`. Unprojects the near and far
+    /// clip points of the pixel and connects them, so the keep-clear drag handles
+    /// (Phase B) turn a touch into the exact camera ray the volumes were drawn with.
+    /// Nil for a degenerate viewport or a non-invertible transform. Pure (no MetalKit),
+    /// so the round-trip with `project` is unit-tested headlessly.
+    public func ray(throughViewPoint p: CGPoint) -> (origin: SIMD3<Float>, dir: SIMD3<Float>)? {
+        guard isUsable else { return nil }
+        let ndcX = Float(p.x / viewportSize.width) * 2 - 1
+        let ndcY = 1 - Float(p.y / viewportSize.height) * 2      // tap y is down, NDC y up
+        let inv = viewProjection.inverse
+        func unproject(_ z: Float) -> SIMD3<Float>? {            // Metal clip z ∈ [0, 1]
+            let clip = inv * SIMD4<Float>(ndcX, ndcY, z, 1)
+            guard abs(clip.w) > 1e-9 else { return nil }
+            return SIMD3<Float>(clip.x, clip.y, clip.z) / clip.w
+        }
+        guard let near = unproject(0), let far = unproject(1) else { return nil }
+        let d = far - near
+        let len = simd_length(d)
+        guard len > 1e-9, d.x.isFinite, d.y.isFinite, d.z.isFinite else { return nil }
+        return (near, d / len)
+    }
 }
 
 public struct OrbitCamera: Equatable {
