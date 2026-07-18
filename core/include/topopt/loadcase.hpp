@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+#include <string>
 #include <vector>
 
 #include "topopt/fea.hpp"       // DirichletBC, NodalLoad
@@ -65,6 +67,26 @@ struct ProductionLoadCase {
   DesignBox design_box;
   std::vector<DesignBox> keep_out_boxes;
 };
+
+// Permanent per-load-group instrumentation (handoff 099, small-face load loss).
+// build_production_loadcase emits ONE line through this sink for every declared
+// load group: the group index, its face count, |force| in newtons, the number of
+// solid voxels the group's faces tagged Load, and — when the group contributes
+// nothing to the run — WHY it was skipped ("zero-force" vs "zero-tagged"). A
+// "zero-tagged" line is the fingerprint of the failure this handoff addresses: a
+// load face smaller than a voxel footprint at a coarse resolution tags no voxels,
+// so its traction never reaches the solver and `external_loads` arrives empty.
+// Surfacing it here is the observability that would have caught the silent loss in
+// week one — it is NOT the guard (require_external_loads stays the hard backstop).
+//
+// The default sink writes one line to stderr (surfaced on device via the process
+// log, and by topopt-cli). A front-end MAY override it (e.g. to route to os_log),
+// and a test MAY capture it. set_loadcase_log_sink installs a new sink and returns
+// the previous one; passing an empty std::function silences the log. The sink is a
+// process-global set up once before a run (build_production_loadcase runs one at a
+// time on a background queue), so it needs no internal locking.
+using LoadcaseLogFn = std::function<void(const std::string& line)>;
+LoadcaseLogFn set_loadcase_log_sink(LoadcaseLogFn sink);
 
 // The grid, Dirichlet BCs and fully-configured options a production load-case run
 // hands to minimize_plastic. `options` already has configure_production_options

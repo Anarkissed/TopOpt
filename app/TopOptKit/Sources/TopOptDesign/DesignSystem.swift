@@ -64,6 +64,9 @@ public enum DS {
         public static let okGreen = RGBA(hex: 0x30D158)
         /// Destructive / remove red `#FF453A` (also group color A).
         public static let danger = RGBA(hex: 0xFF453A)
+        /// Caution / non-blocking warning amber `#FF9F0A` (e.g. the sub-voxel
+        /// load-face "may not register" badge, handoff 099).
+        public static let warning = RGBA(hex: 0xFF9F0A)
 
         // Text ramp — `#f2f2f5` at the opacities the design reuses.
         /// `rgba(242,242,245,0.55)` — secondary text.

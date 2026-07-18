@@ -3,13 +3,60 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "topopt/production.hpp"  // configure_production_options, production_reduction_ladder
 
 namespace topopt {
+
+namespace {
+
+// The process-global per-load-group log sink (loadcase.hpp). Defaults to one line
+// on stderr; a front-end can reroute it (e.g. os_log) and a test can capture it.
+LoadcaseLogFn& loadcase_sink() {
+  static LoadcaseLogFn sink = [](const std::string& line) {
+    std::fprintf(stderr, "%s\n", line.c_str());
+  };
+  return sink;
+}
+
+// Emit one per-group diagnostic line. `status` is "ok", "zero-force", or
+// "zero-tagged"; a skipped group is flagged so it stands out in the log.
+void log_load_group(std::size_t index, std::size_t face_count, double force_mag,
+                    std::size_t voxels_tagged, const char* status) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  const bool skipped =
+      std::string(status) == "zero-force" || std::string(status) == "zero-tagged";
+  char buf[256];
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] load-group %zu: faces=%zu |F|=%.3gN voxels_tagged=%zu %s=%s",
+                index, face_count, force_mag, voxels_tagged,
+                skipped ? "SKIP" : "status", status);
+  sink(std::string(buf));
+}
+
+// Count the voxels currently carrying `tag` in `grid`.
+std::size_t count_tagged(const VoxelGrid& grid, VoxelTag tag) {
+  std::size_t n = 0;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i)
+        if (grid.tag(i, j, k) == tag) ++n;
+  return n;
+}
+
+}  // namespace
+
+LoadcaseLogFn set_loadcase_log_sink(LoadcaseLogFn sink) {
+  LoadcaseLogFn prev = loadcase_sink();
+  loadcase_sink() = std::move(sink);
+  return prev;
+}
 
 ProductionRunSetup build_production_loadcase(const StepModel& model,
                                              int resolution,
@@ -29,15 +76,29 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // The load faces actually retained on the main grid (the non-zero groups),
   // collected so their structural pad is frozen alongside the anchors' below.
   std::vector<int> retained_load_faces;
-  for (const ProductionLoadCase::LoadGroup& group : lc.load_groups) {
+  for (std::size_t gi = 0; gi < lc.load_groups.size(); ++gi) {
+    const ProductionLoadCase::LoadGroup& group = lc.load_groups[gi];
     const Vec3 force = group.force;
-    if (!(std::fabs(force.x) + std::fabs(force.y) + std::fabs(force.z) > 0.0))
-      continue;  // a zero-force group contributes nothing
+    const double force_mag =
+        std::sqrt(force.x * force.x + force.y * force.y + force.z * force.z);
+    if (!(std::fabs(force.x) + std::fabs(force.y) + std::fabs(force.z) > 0.0)) {
+      // A zero-force group contributes nothing (the user left it unset / the
+      // force was lost upstream). Log why, then skip.
+      log_load_group(gi, group.face_ids.size(), force_mag, 0, "zero-force");
+      continue;
+    }
     VoxelGrid gg = base_grid;  // anchors only, no other group's Load
-    bool any = false;
     for (int fid : group.face_ids)
-      if (tag_step_face(gg, model, fid, VoxelTag::Load) > 0) any = true;
-    if (!any) continue;
+      tag_step_face(gg, model, fid, VoxelTag::Load);
+    const std::size_t tagged = count_tagged(gg, VoxelTag::Load);
+    if (tagged == 0) {
+      // The group's faces tagged NO solid voxels — a face smaller than a voxel
+      // footprint at this resolution (handoff 099). Its traction can't be built,
+      // so it contributes nothing and `external` stays empty for this group. Log
+      // the reason (this is what the require_external_loads guard then refuses on).
+      log_load_group(gi, group.face_ids.size(), force_mag, 0, "zero-tagged");
+      continue;
+    }
     const std::vector<NodalLoad> tl = traction_loads(gg, VoxelTag::Load, force);
     external.insert(external.end(), tl.begin(), tl.end());
     // Retain the load faces on the MAIN grid (Load voxels are implicitly
@@ -46,6 +107,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       tag_step_face(grid, model, fid, VoxelTag::Load);
       retained_load_faces.push_back(fid);
     }
+    log_load_group(gi, group.face_ids.size(), force_mag, tagged, "ok");
   }
 
   // Dirichlet BCs from the Fixture voxels (clamp all 8 corner nodes, deduped).
