@@ -775,7 +775,41 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             for e in edges { push(&lines, c[e[0]], ecol); push(&lines, c[e[1]], ecol) }
         }
 
-        if let d = design { appendBox(d, designColor, faceAlpha: 0.10) }
+        // A fully transparent design box: no faces, a bright cool-white glass wireframe, and a
+        // fainter wireframe inset toward the centre. The gap between the two doubled edges reads
+        // as translucent wall thickness — a refractive optical boundary, not a coloured solid.
+        func appendGlassBox(_ b: DesignBoxBounds) {
+            let ctr = b.center
+            let glass = SIMD3<Float>(0.72, 0.82, 1.0)                 // cool-white / faint blue
+            let edges = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6],
+                         [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+            func corners(_ box: DesignBoxBounds) -> [SIMD3<Float>] {
+                let lo = box.min, hi = box.max
+                return [SIMD3<Float>(lo.x, lo.y, lo.z), SIMD3<Float>(hi.x, lo.y, lo.z),
+                        SIMD3<Float>(hi.x, hi.y, lo.z), SIMD3<Float>(lo.x, hi.y, lo.z),
+                        SIMD3<Float>(lo.x, lo.y, hi.z), SIMD3<Float>(hi.x, lo.y, hi.z),
+                        SIMD3<Float>(hi.x, hi.y, hi.z), SIMD3<Float>(lo.x, hi.y, hi.z)]
+            }
+            func wire(_ box: DesignBoxBounds, alpha: Float) {
+                let c = corners(box)
+                let col = SIMD4<Float>(glass.x * alpha, glass.y * alpha, glass.z * alpha, alpha)
+                for e in edges { push(&lines, c[e[0]], col); push(&lines, c[e[1]], col) }
+            }
+            wire(b, alpha: 0.92)                                      // bright outer glass edge
+            // Inner wireframe, corners pulled ~4% toward the centre → the refractive "wobble".
+            let inset = SIMD3<Float>(repeating: 0.04)
+            let innerLo = ctr + (b.min - ctr) * (1 - inset)
+            let innerHi = ctr + (b.max - ctr) * (1 - inset)
+            wire(DesignBoxBounds(min: innerLo, max: innerHi), alpha: 0.34)
+        }
+
+        // The DESIGN box (grow room) reads as an optical BOUNDARY, not a solid (design-overhaul
+        // 109): NO face fill and NO colour tint — a fully transparent volume bounded by a
+        // "refractive wobble" faked with a bright cool-white glass wireframe plus a fainter
+        // wireframe inset just inside it, so the doubled edge reads as translucent wall
+        // thickness (an optical edge, not a coloured box). Keep-outs stay tinted-solid: they
+        // are forbidden volume and keep the red colour language.
+        if let d = design { appendGlassBox(d) }
         for k in keepOuts { appendBox(k, keepOutColor, faceAlpha: 0.16) }
 
         designBoxFaceCount = faces.count / 7

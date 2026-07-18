@@ -198,6 +198,29 @@ final class TopOptDesignTests: XCTestCase {
         _ = SegmentedGlass([.init("a", "A"), .init("b", "B")], selection: .constant("a"))
         _ = Toast("hello")
         _ = ProgressBar(value: 0.5)
+        // LiquidGlass (design-overhaul 109) — the shared material and its container.
+        _ = Text("x").liquidGlass(.blue)
+        _ = Text("x").liquidGlassCapsule(.red)
+        _ = Text("x").liquidGlass(.neutral, in: Circle())
+        _ = LiquidGlassContainer(tint: .blue) { Text("x") }
+    }
+
+    // MARK: LiquidGlass tint tokens (design-overhaul 109)
+
+    func testLiquidGlassTintTokens() {
+        // Blue frost = the design accent; red frost = the clearance token — the two signature
+        // tints, distinct so chips (blue) and clearance handles (red) never share a colour.
+        XCTAssertEqual(LiquidGlass.Tint.blue.color, DS.Color.accent)
+        XCTAssertEqual(LiquidGlass.Tint.red.color, DS.Color.clearance)
+        XCTAssertNotEqual(LiquidGlass.Tint.blue.color, LiquidGlass.Tint.red.color)
+        // Neutral casts no colour.
+        XCTAssertEqual(LiquidGlass.Tint.neutral.intensity, 0)
+        XCTAssertGreaterThan(LiquidGlass.Tint.blue.intensity, 0)
+    }
+
+    func testLiquidGlassIntensityClamps() {
+        XCTAssertEqual(LiquidGlass.Tint(color: DS.Color.accent, intensity: 5).intensity, 1)
+        XCTAssertEqual(LiquidGlass.Tint(color: DS.Color.accent, intensity: -2).intensity, 0)
     }
 
     func testProgressBarClampsValue() {

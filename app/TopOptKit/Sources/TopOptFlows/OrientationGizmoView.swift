@@ -145,63 +145,98 @@ public struct OrientationGizmoView: View {
             .overlay(shape.strokeBorder(                               // top-edge sheen line
                 LinearGradient(colors: [Color.white.opacity(0.30), Color.white.opacity(0.04)],
                                startPoint: .top, endPoint: .bottom), lineWidth: 1))
-            .overlay(shape.strokeBorder(DS.Color.accent.opacity(0.14).color, lineWidth: 1.5)
+            .overlay(shape.strokeBorder(DS.Color.accent.opacity(0.16).color, lineWidth: 1.5)
                         .blur(radius: 1.5))                            // faint blue edge glow
-            .frame(width: size * 0.98, height: size * 0.82)
-            .offset(y: size * 0.07)                                    // sit low so the glass floats above it
+            // CENTERED (design-overhaul 109): the cube renders at the frame centre, so the
+            // housing is centred on the frame too (was offset down `size*0.07`, which left the
+            // cube sitting high / off-centre). Square-ish so the cube sits dead centre.
+            .frame(width: size * 0.90, height: size * 0.90)
             .dsShadow(.panel)
     }
 
-    /// The shadow the floating glass casts straight back onto the housing plane.
+    /// The shadow the floating glass casts straight back onto the housing plane — centred
+    /// under the (now centred) cube.
     private var dropShadow: some View {
         Circle()
             .fill(RadialGradient(
                 colors: [Color.black.opacity(0.55), Color.black.opacity(0.22), .clear],
-                center: .init(x: 0.46, y: 0.42), startRadius: 0, endRadius: size * 0.30))
+                center: .init(x: 0.5, y: 0.5), startRadius: 0, endRadius: size * 0.30))
             .frame(width: size * 0.62, height: size * 0.62)
             .blur(radius: size * 0.06)
-            .offset(y: -size * 0.02)
-            .opacity(0.85)
+            .opacity(0.8)
     }
 
-    // MARK: - Face labels (projected with the shader's virtual camera)
+    // MARK: - Face labels (ATTACHED decals — etched on the glass, transform with the cube)
 
+    /// The etched-decal colour: a bright cool-white so the label reads on the blue frost.
+    private let labelColor = Color(red: 0.86, green: 0.93, blue: 1.0)
+
+    /// Labels ETCHED onto the cube faces (design-overhaul 109): each label is drawn in a
+    /// `Canvas` with a per-face affine that maps its local axes onto the face's projected
+    /// tangent axes, so it rotates, shears and fades WITH the cube — not the rejected upright
+    /// billboards of 107. The projection is the shader's own virtual camera (FOV/CAMZ + the
+    /// live view rotation), so the decals sit exactly where the glass faces are drawn.
     private var labels: some View {
-        ZStack {
-            ForEach(OrientationGizmo.faces) { face in
-                if let l = projectLabel(face) {
-                    Text((face.label ?? "").uppercased())
-                        .font(.system(size: max(11, size * 0.052), weight: .heavy, design: .rounded))
-                        .tracking(1)
-                        .foregroundStyle(Color.white.opacity(0.55 + 0.44 * Double(l.opacity)))
-                        .shadow(color: DS.Color.accentCyan.opacity(0.75 * Double(l.opacity)).color,
-                                radius: 5)
-                        .position(l.point)
-                }
+        Canvas { ctx, sz in
+            let R = camera.viewRotation
+            let font = Font.system(size: max(11, size * 0.05), weight: .heavy, design: .rounded)
+            for face in OrientationGizmo.faces {
+                guard let d = faceDecal(face, rotation: R, size: sz) else { continue }
+                var c = ctx
+                c.opacity = Double(d.opacity)
+                c.transform = d.transform
+                c.addFilter(.shadow(color: DS.Color.accentCyan.opacity(0.55).color, radius: 2.5))
+                var text = c.resolve(Text((face.label ?? "").uppercased()).font(font))
+                text.shading = .color(labelColor)
+                c.draw(text, at: .zero, anchor: .center)
             }
         }
         .frame(width: size, height: size)
     }
 
-    /// Project a face's label anchor with the SAME perspective (FOV/CAMZ + camera rotation) the
-    /// Metal shader renders with, and fade it as the face turns away. Returns nil for a face
-    /// pointing away from the viewer. (Divergence from the mock, which etches curved decals into
-    /// the glass — here they are upright billboards; disclosed in the handoff.)
-    private func projectLabel(_ face: GizmoRegion) -> (point: CGPoint, opacity: Float)? {
+    /// Project a model-space point through the gizmo's virtual camera (the SAME FOV/CAMZ the
+    /// Metal shader uses), into view-space points (top-left origin, y down). Nil behind the cam.
+    private func projectGizmo(_ p: SIMD3<Float>, rotation R: simd_float3x3, size: CGSize) -> CGPoint? {
         let c = GizmoConstants.standard
-        let R = camera.viewRotation
-        let normal = face.anchor                                        // (±1,0,0) etc — already unit
-        let facing = (R * normal).z
-        guard facing > 0.28 else { return nil }
-        let v = R * (normal * 1.05)                                     // a touch proud of the dome
+        let v = R * p
         let tf = tanf(c.fov * 0.5 * .pi / 180)
         let dz = c.camZ - v.z
         guard dz > 0.05 else { return nil }
         let ndcX = v.x / (dz * tf), ndcY = v.y / (dz * tf)
-        let x = CGFloat((ndcX * 0.5 + 0.5)) * size
-        let y = CGFloat(1 - (ndcY * 0.5 + 0.5)) * size
-        let opacity = smoothstep(0.28, 0.62, facing)
-        return (CGPoint(x: x, y: y), opacity)
+        return CGPoint(x: CGFloat(ndcX * 0.5 + 0.5) * size.width,
+                       y: CGFloat(1 - (ndcY * 0.5 + 0.5)) * size.height)
+    }
+
+    /// The affine + opacity that paints a face's label onto the glass. Builds the face's local
+    /// text axes (right `t`, down `b`) in model space, projects the face centre and a small
+    /// step along each axis, and uses the resulting screen vectors as the decal's basis — so
+    /// the label follows the face through any orbit/roll. Nil when the face turns away.
+    private func faceDecal(_ face: GizmoRegion, rotation R: simd_float3x3,
+                           size: CGSize) -> (transform: CGAffineTransform, opacity: Float)? {
+        let n = face.anchor                                   // (±1,0,0)… already unit
+        let facing = (R * n).z
+        guard facing > 0.12 else { return nil }               // face is turned away
+        // Face "up" in model space: side/front/back use world +Y; the poles use ∓Z so the
+        // label has a defined heading. `t` = text-right, `b` = text-down.
+        let faceUp: SIMD3<Float> = abs(n.y) > 0.5 ? SIMD3<Float>(0, 0, n.y > 0 ? -1 : 1)
+                                                  : SIMD3<Float>(0, 1, 0)
+        let t = simd_normalize(simd_cross(faceUp, n))
+        let b = -faceUp
+        let delta: Float = 0.34
+        let cM = n * 1.0                                       // on the glass face
+        guard let p0 = projectGizmo(cM, rotation: R, size: size),
+              let pt = projectGizmo(cM + t * delta, rotation: R, size: size),
+              let pb = projectGizmo(cM + b * delta, rotation: R, size: size) else { return nil }
+        var ux = CGVector(dx: pt.x - p0.x, dy: pt.y - p0.y)
+        var uy = CGVector(dx: pb.x - p0.x, dy: pb.y - p0.y)
+        let lx = hypot(ux.dx, ux.dy), ly = hypot(uy.dx, uy.dy)
+        guard lx > 0.5, ly > 0.5 else { return nil }
+        // Unit orientation basis × a foreshortening scale (shrinks as the face turns away).
+        let scl = CGFloat(0.72 + 0.28 * facing)
+        ux = CGVector(dx: ux.dx / lx * scl, dy: ux.dy / lx * scl)
+        uy = CGVector(dx: uy.dx / ly * scl, dy: uy.dy / ly * scl)
+        let transform = CGAffineTransform(a: ux.dx, b: ux.dy, c: uy.dx, d: uy.dy, tx: p0.x, ty: p0.y)
+        return (transform, smoothstep(0.12, 0.5, facing))
     }
 
     // MARK: - Controls (the corner ring: two swoosh buttons + Home, ~48px inset)
@@ -210,10 +245,10 @@ public struct OrientationGizmoView: View {
         let inset = size * 0.16                                         // ~48pt at the 300 default
         let btn = size * 0.22
         return ZStack {
-            RotateButton(clockwise: false) { turn(by: .pi / 4, "Turned ⟲ 45°") }
+            RotateButton(clockwise: false) { roll(by: Self.rollStep, "Rolled ⟲") }
                 .frame(width: btn, height: btn)
                 .position(x: inset, y: inset)
-            RotateButton(clockwise: true) { turn(by: -.pi / 4, "Turned ⟳ 45°") }
+            RotateButton(clockwise: true) { roll(by: -Self.rollStep, "Rolled ⟳") }
                 .frame(width: btn, height: btn)
                 .position(x: size - inset, y: inset)
             HomeButton {
@@ -225,16 +260,16 @@ public struct OrientationGizmoView: View {
         .frame(width: size, height: size)
     }
 
-    /// Step the turntable by `delta` radians of azimuth via the shared camera's existing orbit
-    /// API (azimuth -= dx·sensitivity), so no new camera surface is needed.
-    ///
-    /// DIVERGENCE (disclosed): the mock's arrows ROLL about the screen-Z axis. The shared
-    /// `OrbitCamera` is a turntable with up hard-pinned to world +Y — it has no roll DOF, and
-    /// adding one would touch `OrbitCamera`/`MetalMeshView` (out of territory; see handoff 105
-    /// "Blocked"). A ±45° azimuth step is the faithful in-territory analogue: it steps to the
-    /// next quarter-diagonal view, which is what the buttons are useful for here.
-    private func turn(by delta: Float, _ label: String) {
-        camera.orbit(dx: -delta / OrbitCamera.orbitSensitivity, dy: 0)
+    /// Radians of view-roll per arrow tap (15°).
+    private static let rollStep: Float = .pi / 12
+
+    /// ROLL the view about the visual (line-of-sight) axis by `delta` radians — what the
+    /// arrows visually promise (design-overhaul 109). This drives the roll DOF added to
+    /// `OrbitCamera` for this task (the 074 roll=0 decision is overridden by the maintainer;
+    /// handoff 107 Blocked-stopped here). The gizmo cube and the Metal viewer share this exact
+    /// camera, so both roll together; Home levels it back.
+    private func roll(by delta: Float, _ label: String) {
+        camera.rollBy(delta)
         showToast(label)
     }
 
@@ -301,9 +336,11 @@ private struct HoverPick: ViewModifier {
 
 // MARK: - Control glyphs
 
-/// A glass swoosh rotate button. A near-half-circle arc with an arrowhead, filled with the
-/// mock's top-lit glass gradient and topped by a thin bright sheen line. `clockwise` mirrors
-/// it; the whole glyph is spun 45° into its corner like the mock's `rotate(±45deg)`.
+/// A matched blue-glass ROLL arrow — an upright ~270° circular arrow that visually promises a
+/// roll of the view. The left button is the base glyph (counter-clockwise); the right button is
+/// its exact MIRROR (clockwise), so the two read as one matched pair (design-overhaul 109 —
+/// replaces the 107 corner-spun swoosh the maintainer called "mirrored and ugly"). The blue
+/// glass gradient + white sheen match the cube's frost.
 private struct RotateButton: View {
     let clockwise: Bool
     let action: () -> Void
@@ -311,49 +348,50 @@ private struct RotateButton: View {
     var body: some View {
         Button(action: action) {
             Canvas { ctx, sz in draw(&ctx, sz) }
-                .scaleEffect(x: clockwise ? -1 : 1, y: 1)           // mirror for CW
-                .rotationEffect(.degrees(clockwise ? 45 : -45))     // spin into the corner
+                .scaleEffect(x: clockwise ? -1 : 1, y: 1)           // true mirror for the pair
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(clockwise ? "Rotate view right" : "Rotate view left")
+        .accessibilityLabel(clockwise ? "Roll view right" : "Roll view left")
+        .accessibilityHint("Rotate the view about the viewing axis")
     }
 
     private func draw(_ ctx: inout GraphicsContext, _ sz: CGSize) {
-        let c = CGPoint(x: sz.width / 2, y: sz.height * 0.52)
+        let c = CGPoint(x: sz.width / 2, y: sz.height / 2)
         let r = min(sz.width, sz.height) * 0.30
-        let lw = r * 0.55
-        // Arc over the top: from the right (-10°) counter-clockwise to the left (200°).
-        let a0 = Angle.degrees(-10), a1 = Angle.degrees(200)
+        let lw = r * 0.42
+        // A ~270° ring, open at the top-right where the arrowhead flies off (counter-clockwise).
+        let a0 = Angle.degrees(-60), a1 = Angle.degrees(210)
         var arc = Path()
         arc.addArc(center: c, radius: r, startAngle: a0, endAngle: a1, clockwise: false)
         let glass = Gradient(colors: [
-            Color.white.opacity(0.95), Color(white: 0.86).opacity(0.66),
-            Color(red: 0.58, green: 0.66, blue: 0.82).opacity(0.42)])
+            Color(red: 0.80, green: 0.90, blue: 1.0).opacity(0.98),   // bright blue-white
+            Color(red: 0.44, green: 0.68, blue: 1.0).opacity(0.80),   // accent blue
+            Color(red: 0.30, green: 0.52, blue: 0.92).opacity(0.55)]) // deeper blue
         ctx.stroke(arc, with: .linearGradient(glass,
                                               startPoint: CGPoint(x: c.x, y: c.y - r),
                                               endPoint: CGPoint(x: c.x, y: c.y + r)),
                    style: StrokeStyle(lineWidth: lw, lineCap: .round))
 
-        // Arrowhead at the left (200°) end, pointing along the tangent (downward-ish).
-        let end = CGPoint(x: c.x + r * CGFloat(cos(a1.radians)),
-                          y: c.y + r * CGFloat(sin(a1.radians)))
-        let tang = CGVector(dx: CGFloat(sin(a1.radians)), dy: CGFloat(-cos(a1.radians)))  // CCW tangent
-        let head = lw * 1.35
-        var tri = Path()
-        let tip = CGPoint(x: end.x + tang.dx * head, y: end.y + tang.dy * head)
+        // Arrowhead at the a0 (-60°) end, pointing along the CCW tangent.
+        let end = CGPoint(x: c.x + r * CGFloat(cos(a0.radians)),
+                          y: c.y + r * CGFloat(sin(a0.radians)))
+        let tang = CGVector(dx: CGFloat(-sin(a0.radians)), dy: CGFloat(cos(a0.radians)))   // CCW tangent
+        let head = lw * 1.5
         let normal = CGVector(dx: -tang.dy, dy: tang.dx)
-        let bL = CGPoint(x: end.x + normal.dx * head * 0.9, y: end.y + normal.dy * head * 0.9)
-        let bR = CGPoint(x: end.x - normal.dx * head * 0.9, y: end.y - normal.dy * head * 0.9)
+        let tip = CGPoint(x: end.x + tang.dx * head, y: end.y + tang.dy * head)
+        let bL = CGPoint(x: end.x + normal.dx * head * 0.85, y: end.y + normal.dy * head * 0.85)
+        let bR = CGPoint(x: end.x - normal.dx * head * 0.85, y: end.y - normal.dy * head * 0.85)
+        var tri = Path()
         tri.move(to: tip); tri.addLine(to: bL); tri.addLine(to: bR); tri.closeSubpath()
-        ctx.fill(tri, with: .color(Color.white.opacity(0.9)))
+        ctx.fill(tri, with: .color(Color(red: 0.85, green: 0.93, blue: 1.0).opacity(0.98)))
 
-        // Sheen: a thin bright line riding the top of the glass tube.
+        // Sheen: a thin bright highlight riding the top of the glass tube.
         var sheen = Path()
-        sheen.addArc(center: CGPoint(x: c.x, y: c.y - lw * 0.28), radius: r,
-                     startAngle: .degrees(8), endAngle: .degrees(172), clockwise: false)
+        sheen.addArc(center: CGPoint(x: c.x, y: c.y - lw * 0.24), radius: r,
+                     startAngle: .degrees(200), endAngle: .degrees(320), clockwise: false)
         ctx.stroke(sheen, with: .color(Color.white.opacity(0.8)),
-                   style: StrokeStyle(lineWidth: lw * 0.14, lineCap: .round))
+                   style: StrokeStyle(lineWidth: lw * 0.16, lineCap: .round))
     }
 }
 
