@@ -92,6 +92,15 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // physical min-feature + projection): the SAME call the app makes.
   configure_production_options(opts);
   opts.external_loads = external;  // the user's load case; empty => self-weight
+  // Diagnosis (3D-block fragmentation): the silent-self-weight-fall-through
+  // guard, relocated here from bridge.cpp during the PR-119 reconcile — this is
+  // the ONE builder both the app and topopt-cli call, so both front-ends get it.
+  // When the user declared load groups but every group was zero-force / tagged
+  // no voxels / was lost upstream, `external` is empty and the run would
+  // silently optimize under self-weight — stripping the unfrozen tab and
+  // fragmenting the design. Surface it as a clear error instead. A load case
+  // with NO groups declared keeps self-weight as a legitimate mode.
+  opts.require_external_loads = !lc.load_groups.empty();
   // gravity_direction defines the reported build orientation = its unit negation.
   opts.gravity_direction = Vec3{-build_dir.x, -build_dir.y, -build_dir.z};
   opts.gravity = 9810.0 * 1e-9;  // self-weight magnitude, used only if external empty

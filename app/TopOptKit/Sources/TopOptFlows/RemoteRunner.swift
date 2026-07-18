@@ -45,7 +45,7 @@
 //       reconstructing the name silently fetched the wrong / no file).
 
 import Foundation
-import TopOptKit   // OptimizeOutcome / OptimizeVariant / *Spec live in the core module
+import TopOptKit
 #if canImport(os)
 import os
 #endif
