@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- LAN compute offload (handoff 097): browse `_topopt._tcp` (NWBrowser) to
+	     discover a Mac worker by name. iOS requires the service type to be declared
+	     and a local-network usage string. Merged into the generated Info.plist via
+	     INFOPLIST_FILE + GENERATE_INFOPLIST_FILE. -->
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_topopt._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TopOpt finds your Mac worker on the local network so you can run optimizations on it.</string>
+</dict>
+</plist>

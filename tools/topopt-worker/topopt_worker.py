@@ -91,6 +91,21 @@ class Job:
                 self.done = True
                 self.status = event["type"]
             self.cond.notify_all()
+        # Echo a compact, line-oriented status to the server's OWN stdout so a
+        # supervisor (the TopOpt Worker menu-bar app, handoff 097) can show the
+        # active job + current rung/iter and hold a keep-awake assertion while a
+        # job runs — WITHOUT a second HTTP client. This does not touch the SSE/HTTP
+        # protocol; it is additive logging on top of the existing server.
+        t = event.get("type")
+        if t == "progress":
+            print("STATUS job=%s state=running rung=%s rungs=%s iter=%s"
+                  % (self.id, event.get("rung"), event.get("rungs"), event.get("iter")),
+                  flush=True)
+        elif t == "variant":
+            print("STATUS job=%s state=running variant=%s"
+                  % (self.id, event.get("mesh")), flush=True)
+        elif t in ("done", "error", "cancelled"):
+            print("STATUS job=%s state=%s" % (self.id, t), flush=True)
 
 
 JOBS = {}

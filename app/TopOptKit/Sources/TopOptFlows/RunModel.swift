@@ -599,7 +599,11 @@ public final class RunModel: ObservableObject {
             variants: variants, stoppedOnMargin: false, cancelled: false,
             acceptedCount: variants.count, voxelVolumeMM3: partial.voxelVolumeMM3,
             gridNx: partial.gridNx, gridNy: partial.gridNy, gridNz: partial.gridNz,
-            gridOrigin: partial.gridOrigin, spacing: partial.spacing)
+            gridOrigin: partial.gridOrigin, spacing: partial.spacing,
+            // Carry the remote flag so the live/progressive results screen renders
+            // the worker-unavailable fields (mass/stress/flex/playback) as n/a from
+            // the first streamed variant, not just after the run resolves (097).
+            computedRemotely: partial.computedRemotely)
         // `progress` is deliberately KEPT (handoff 089). Clearing it here bought
         // nothing — the running card yields on `outcome` having variants, not on
         // progress (RunScreen) — and it cost the readout its rung: it forced the

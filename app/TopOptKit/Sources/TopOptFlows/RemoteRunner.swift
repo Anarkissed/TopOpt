@@ -15,19 +15,37 @@
 // returns what a local run would have — PROVIDED the worker's core matches the
 // app's (see the version-skew guard below).
 //
-// STATUS / honest limitations (see docs/handoffs/093-lan-offload.md STEP 3):
-//   * This file is not built or exercised on the Linux CI host (no Xcode). It is
-//     written against the real TopOptKit types and the worker's real protocol,
-//     but must be compiled + run on device before it ships.
+// STATUS (handoff 097 — LAN offload Tier 2): this file is now COMPILED and
+// exercised on the iOS simulator against the real worker on localhost. It is not
+// covered by the Linux CI host (no Xcode); its verification standard is
+// `xcodebuild` on the package + the simulator end-to-end in handoff 097.
+//
+// Honest limitations (see docs/handoffs/097 + 093-lan-offload.md STEP 3):
 //   * The worker delivers each variant's MESH + the scalar report (volume
-//     fraction, margins, orientation, stresses, settings). It does NOT yet
-//     deliver the per-voxel vonMises / displacement / stressTensor fields or the
-//     playback keyframes — the CLI writes meshes + report.json, not those arrays.
-//     So remote variants render and show their margins/settings, but the stress
-//     overlay, flex animation, mass readout and playback are empty until the CLI
-//     serialises a full result. This is called out at each empty field.
+//     fraction, margins, orientation, stresses, settings). It does NOT deliver the
+//     per-voxel vonMises / displacement / stressTensor fields, the playback
+//     keyframes, or the mass — the CLI writes meshes + report.json, not those
+//     arrays. So remote variants render with their margins/settings, but the
+//     stress overlay, flex animation, mass readout and playback are UNAVAILABLE.
+//     The outcome is flagged `computedRemotely` so the results screen shows those
+//     as "computed on Mac — n/a in this build" rather than a plausible 0 g / blank
+//     overlay (a wrong-but-plausible readout is a reject-class bug here). Full
+//     result serialisation over the wire is the tracked follow-up.
+//
+// 097 review-carry fixes applied here (were open on the 093 draft):
+//   (1) `smooth_factor` is sent so remote meshes match the local tricubic
+//       smoothing (bridge.cpp kSmoothExportFactor = 2); without it the CLI would
+//       export the raw v3 iso-surface and remote parts would differ from local.
+//   (2) a failed mesh fetch FAILS THE RUN with a clear message — never a silent
+//       empty part on screen (an empty part that looks like a real result is the
+//       worst failure mode).
+//   (3) the authoritative streamed mesh basenames drive final assembly, so meshes
+//       are never re-derived from a guessed filename (the report's volume_fraction
+//       is the ACHIEVED fraction, but files are named by the REQUESTED fraction —
+//       reconstructing the name silently fetched the wrong / no file).
 
 import Foundation
+import TopOptKit   // OptimizeOutcome / OptimizeVariant / *Spec live in the core module
 #if canImport(os)
 import os
 #endif
@@ -93,6 +111,27 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private let doneSignal = DispatchSemaphore(value: 0)
     private var cancelled = false
 
+    /// The AUTHORITATIVE per-variant record built from the VARIANT stream events,
+    /// in ladder order: each carries the mesh basename the worker actually wrote
+    /// (not a reconstructed guess) and the geometry already fetched for the live
+    /// streamed-variant screen. `assembleFinalOutcome` reuses these — joining the
+    /// scalar report by order — so a variant's mesh is never re-derived from the
+    /// report's ACHIEVED volume_fraction (files are named by the REQUESTED one).
+    private struct StreamedVariant {
+        let requestedVF: Double
+        let achievedVF: Double
+        let margin: Double
+        let accepted: Bool
+        let meshName: String
+        let vertices: [Float]
+        let indices: [Int32]
+    }
+    /// Guards `streamed` — appended on the URLSession delegate queue, read back on
+    /// the run thread after `doneSignal`. (The semaphore already establishes the
+    /// happens-before; the lock keeps the read/write pair explicit and safe.)
+    private let streamedLock = NSLock()
+    private var streamed: [StreamedVariant] = []
+
     #if canImport(os)
     private static let log = Logger(subsystem: "app.topopt", category: "remote")
     #endif
@@ -138,7 +177,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         if cancelled {
             // Match the local cancel outcome: a cancelled run yields no accepted set.
             return OptimizeOutcome(variants: [], stoppedOnMargin: false,
-                                   cancelled: true, acceptedCount: 0)
+                                   cancelled: true, acceptedCount: 0,
+                                   computedRemotely: true)
         }
 
         // 4) ASSEMBLE the final outcome from report.json + the exported meshes.
@@ -152,6 +192,15 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// which the CLI now accepts). STL parts use the self-weight + no-fixture path
     /// — represented here as an empty loads block so the CLI's min-x clamp
     /// fallback applies (mirrors bridgeRunner's STL branch).
+    /// Export smoothing the CLI must apply so a remote mesh matches what the app's
+    /// local bridge produces. MUST equal the bridge's `kSmoothExportFactor`
+    /// (bridge.cpp) — the local path re-extracts every variant's iso-surface at 2×
+    /// (tricubic Catmull-Rom) before handing it to the app, so a worker exporting
+    /// at the CLI's default of 1 (raw v3 mesh) would return a visibly different,
+    /// coarser part. Kept as a documented mirror (Swift can't read the C++
+    /// constexpr); if the bridge factor changes, change this with it.
+    static let smoothExportFactor = 2
+
     private func buildJobJSON() throws -> Data {
         var job: [String: Any] = [
             "model": (request.modelPath as NSString).lastPathComponent,
@@ -159,7 +208,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             "mode": "minimize_plastic",
             "resolution": request.resolution,
             "output": ["report": "report.json", "mesh_format": "stl",
-                       "mesh_prefix": "variant"],
+                       "mesh_prefix": "variant",
+                       // 097 fix (1): match the local bridge's export smoothing.
+                       "smooth_factor": Self.smoothExportFactor],
         ]
         if let box = request.designBox {
             job["design_box"] = ["min": [box.min.x, box.min.y, box.min.z],
@@ -226,6 +277,30 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         sem.wait()
         if let out = out { return out }
         throw RemoteRunError("request failed: \(url.path): \(err?.localizedDescription ?? "no response")")
+    }
+
+    /// Fetch one variant's exported mesh by basename and parse it. THROWS on any
+    /// failure (transport error, non-200, or a body that is not a usable STL) —
+    /// 097 fix (2): a missing/corrupt mesh must surface as a run failure, never as
+    /// a silently-empty part that renders as a plausible-but-wrong blank result.
+    private func fetchMesh(named name: String) throws -> ([Float], [Int32]) {
+        guard let id = jobID else { throw RemoteRunError("no job id for mesh \(name)") }
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+            .appendingPathComponent(name)
+        let (data, resp) = try syncGET(url)
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            throw RemoteRunError("could not fetch variant mesh \"\(name)\" from the " +
+                "worker (HTTP \(code)). The run produced a result on the Mac but its " +
+                "geometry could not be transferred — not showing an empty part.")
+        }
+        let mesh = parseBinarySTL(data)
+        guard !mesh.0.isEmpty, !mesh.1.isEmpty else {
+            throw RemoteRunError("variant mesh \"\(name)\" arrived empty or unreadable " +
+                "(\(data.count) bytes) — not showing an empty part.")
+        }
+        return mesh
     }
 
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {
@@ -335,58 +410,131 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// already written). Fetch the mesh + build a one-variant OptimizeOutcome and
     /// hand it to `onVariant`, so PR 109's streamed-variant screen grows live.
     private func emitStreamedVariant(_ ev: [String: Any]) {
-        guard let id = jobID, let meshName = ev["mesh"] as? String else { return }
-        let url = config.baseURL.appendingPathComponent("jobs").appendingPathComponent(id).appendingPathComponent("files").appendingPathComponent(meshName)
-        let mesh = (try? syncGET(url)).map { parseBinarySTL($0.0) } ?? ([], [])
+        guard let meshName = ev["mesh"] as? String, !meshName.isEmpty else {
+            // A VARIANT event with no mesh is malformed — fail rather than show a
+            // bodiless variant (097 fix 2). The CLI always names the exported mesh.
+            failStream("worker reported a completed variant without a mesh file")
+            return
+        }
+        let mesh: ([Float], [Int32])
+        do {
+            mesh = try fetchMesh(named: meshName)
+        } catch {
+            failStream((error as? RemoteRunError)?.message ?? "\(error)")
+            return
+        }
+        let requestedVF = ev["vf"] as? Double ?? 0
+        let achievedVF = ev["achieved"] as? Double ?? 0
+        let margin = ev["margin"] as? Double ?? 0
+        let accepted = (ev["accepted"] as? Bool) ?? true
+        streamedLock.lock()
+        streamed.append(StreamedVariant(requestedVF: requestedVF, achievedVF: achievedVF,
+                                        margin: margin, accepted: accepted,
+                                        meshName: meshName,
+                                        vertices: mesh.0, indices: mesh.1))
+        streamedLock.unlock()
         let v = OptimizeVariant(
-            requestedVolumeFraction: ev["vf"] as? Double ?? 0,
-            achievedVolumeFraction: ev["achieved"] as? Double ?? 0,
+            requestedVolumeFraction: requestedVF,
+            achievedVolumeFraction: achievedVF,
             massGrams: 0,                 // not emitted by the CLI (see file header)
             supportVolumeVoxels: 0,       // not emitted by the CLI
             meshTriangleCount: mesh.1.count / 3,
-            worstCaseMargin: ev["margin"] as? Double ?? 0,
-            accepted: (ev["accepted"] as? Bool) ?? true,
+            worstCaseMargin: margin,
+            accepted: accepted,
             v3Passes: true,
             meshVertices: mesh.0, meshIndices: mesh.1)
+        // `computedRemotely: true` so the live results screen renders mass/stress/
+        // flex/playback as n/a from the first streamed variant (097 fix 3).
         onVariant(OptimizeOutcome(variants: [v], stoppedOnMargin: false,
-                                  cancelled: false, acceptedCount: 1))
+                                  cancelled: false, acceptedCount: 1,
+                                  computedRemotely: true))
     }
 
-    /// Build the authoritative final outcome from report.json + the meshes. The
-    /// scalar fields come from the report; the per-voxel fields stay empty (the
-    /// CLI does not serialise them yet — see the file header).
+    /// Abort the run with a diagnostic (used when a streamed mesh can't be fetched).
+    /// Best-effort cancels the worker so it stops solving, then wakes `run()`.
+    private func failStream(_ message: String) {
+        if streamDone { return }
+        streamError = message
+        streamDone = true
+        cancelRemote()
+        doneSignal.signal()
+    }
+
+    /// Build the authoritative final outcome from report.json + the meshes ALREADY
+    /// fetched during streaming. The scalar fields come from the report; the mesh
+    /// geometry comes from the recorded streamed variants (097 fix 3 — never
+    /// re-derive a filename). The per-voxel fields stay empty and the outcome is
+    /// flagged `computedRemotely` (the CLI does not serialise them — see the header).
     private func assembleFinalOutcome() throws -> OptimizeOutcome {
         guard let id = jobID else { throw RemoteRunError("no job id") }
-        let base = config.baseURL.appendingPathComponent("jobs").appendingPathComponent(id).appendingPathComponent("files")
+        // A finished run MUST have written its report; a missing/short report is a
+        // real failure (`getJSON` throws on non-200), never a silent empty result.
+        let base = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
         let report = try getJSON(base.appendingPathComponent("report.json"))
         let reportVariants = report["variants"] as? [[String: Any]] ?? []
-        var variants: [OptimizeVariant] = []
-        for rv in reportVariants {
-            let vf = rv["volume_fraction"] as? Double ?? 0
-            let name = String(format: "variant_%03d.stl", Int((vf * 100).rounded()))
-            let mesh = (try? syncGET(base.appendingPathComponent(name))).map { parseBinarySTL($0.0) } ?? ([], [])
-            let margin = rv["margin"] as? [String: Any]
-            let orient = rv["orientation"] as? [String: Any]
-            variants.append(OptimizeVariant(
-                requestedVolumeFraction: vf,
-                achievedVolumeFraction: vf,
-                massGrams: 0, supportVolumeVoxels: 0,
-                meshTriangleCount: mesh.1.count / 3,
-                worstCaseMargin: (margin?["worst_case"] as? Double) ?? 0,
-                accepted: true, v3Passes: true,
-                minFeatureViolations: rv["min_feature_violations"] as? Int ?? 0,
-                minFeatureWarning: rv["min_feature_warning"] as? String ?? "",
-                orientation: SIMD3(orient?["x"] as? Double ?? 0,
-                                   orient?["y"] as? Double ?? 0,
-                                   orient?["z"] as? Double ?? 1),
-                maxStressMPa: rv["max_stress_mpa"] as? Double ?? 0,
-                maxInterlayerTensionMPa: rv["max_interlayer_tension_mpa"] as? Double ?? 0,
-                inPlaneMargin: (margin?["in_plane"] as? Double) ?? 0,
-                interlayerMargin: (margin?["interlayer"] as? Double) ?? 0,
-                meshVertices: mesh.0, meshIndices: mesh.1))
+
+        streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
+
+        // Join a report variant to a streamed (accepted) one by ACHIEVED volume
+        // fraction: the stream carries only accepted variants, the report the whole
+        // ladder, so an index join would misalign. The VARIANT event's `achieved`
+        // and the report's `volume_fraction` are the same quantity
+        // (v.optimization.volume_fraction), so they match to float tolerance.
+        func reportVariant(forAchieved vf: Double) -> [String: Any]? {
+            var best: [String: Any]?
+            var bestErr = 1e-4      // require a real match, don't grab the nearest
+            for rv in reportVariants {
+                let rvf = rv["volume_fraction"] as? Double ?? .infinity
+                let e = abs(rvf - vf)
+                if e < bestErr { bestErr = e; best = rv }
+            }
+            return best
         }
-        return OptimizeOutcome(variants: variants, stoppedOnMargin: false,
-                               cancelled: false, acceptedCount: variants.count)
+
+        if !accepted.isEmpty {
+            let variants = accepted.map { makeVariant(streamed: $0,
+                                                      report: reportVariant(forAchieved: $0.achievedVF)) }
+            return OptimizeOutcome(variants: variants, stoppedOnMargin: false,
+                                   cancelled: false, acceptedCount: variants.count,
+                                   computedRemotely: true)
+        }
+
+        // No accepted variant streamed → an all-rejected run. Build meshless
+        // variants from the report so RunModel surfaces the honest "not strong
+        // enough" sheet (it reads the terminal rung's worst-case margin).
+        let rejected = reportVariants.map { makeVariant(streamed: nil, report: $0) }
+        return OptimizeOutcome(variants: rejected, stoppedOnMargin: false,
+                               cancelled: false, acceptedCount: 0,
+                               computedRemotely: true)
+    }
+
+    /// Assemble one final variant from an optional fetched mesh + optional report
+    /// scalars. A streamed variant is accepted (and carries its mesh); a report-only
+    /// variant is a rejected rung (meshless — the worker exports only accepted ones).
+    private func makeVariant(streamed s: StreamedVariant?,
+                             report rv: [String: Any]?) -> OptimizeVariant {
+        let margin = rv?["margin"] as? [String: Any]
+        let orient = rv?["orientation"] as? [String: Any]
+        let vf = s?.achievedVF ?? (rv?["volume_fraction"] as? Double ?? 0)
+        let worst = (margin?["worst_case"] as? Double) ?? (s?.margin) ?? 0
+        return OptimizeVariant(
+            requestedVolumeFraction: s?.requestedVF ?? vf,
+            achievedVolumeFraction: vf,
+            massGrams: 0, supportVolumeVoxels: 0,        // not over the wire (header)
+            meshTriangleCount: (s?.indices.count ?? 0) / 3,
+            worstCaseMargin: worst,
+            accepted: s != nil, v3Passes: true,
+            minFeatureViolations: rv?["min_feature_violations"] as? Int ?? 0,
+            minFeatureWarning: rv?["min_feature_warning"] as? String ?? "",
+            orientation: SIMD3(orient?["x"] as? Double ?? 0,
+                               orient?["y"] as? Double ?? 0,
+                               orient?["z"] as? Double ?? 1),
+            maxStressMPa: rv?["max_stress_mpa"] as? Double ?? 0,
+            maxInterlayerTensionMPa: rv?["max_interlayer_tension_mpa"] as? Double ?? 0,
+            inPlaneMargin: (margin?["in_plane"] as? Double) ?? 0,
+            interlayerMargin: (margin?["interlayer"] as? Double) ?? 0,
+            meshVertices: s?.vertices ?? [], meshIndices: s?.indices ?? [])
     }
 
     /// Minimal binary-STL reader → (interleaved xyz floats, triangle-soup indices).

@@ -161,11 +161,20 @@ public struct OptimizeOutcome {
     public let gridNz: Int
     public let gridOrigin: SIMD3<Double>
     public let spacing: Double
+    /// LAN offload (handoff 097): true when this outcome was computed on a remote
+    /// worker via `topopt-cli`, which serialises meshes + the scalar report but NOT
+    /// the per-voxel von Mises / displacement / stress-tensor fields, the playback
+    /// keyframes, or the mass. The results screen uses this to render those fields
+    /// as explicitly UNAVAILABLE ("computed on Mac — n/a in this build") rather than
+    /// as a plausible-but-wrong 0 g / blank overlay. Default false → local runs are
+    /// byte-identical (a local outcome never sets this).
+    public let computedRemotely: Bool
 
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
-                gridOrigin: SIMD3<Double> = .zero, spacing: Double = 0) {
+                gridOrigin: SIMD3<Double> = .zero, spacing: Double = 0,
+                computedRemotely: Bool = false) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -176,6 +185,7 @@ public struct OptimizeOutcome {
         self.gridNz = gridNz
         self.gridOrigin = gridOrigin
         self.spacing = spacing
+        self.computedRemotely = computedRemotely
     }
 }
 
