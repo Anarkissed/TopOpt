@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TopOpt — Liquid Glass View Gizmo v21</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif; }
+
+  /* ── dark backdrop with deep color pools for the glass to refract ── */
+  body { background:#0a0d15; }
+  .blob { position:fixed; border-radius:50%; filter:blur(100px); opacity:.55; }
+  .b1 { width:55vw; height:55vw; background:#1c2f63; top:-15vw; left:-12vw; animation:drift1 26s ease-in-out infinite alternate; }
+  .b2 { width:48vw; height:48vw; background:#47204f; bottom:-14vw; right:-10vw; animation:drift2 31s ease-in-out infinite alternate; }
+  .b3 { width:38vw; height:38vw; background:#0f3d44; top:38%; left:52%; animation:drift3 23s ease-in-out infinite alternate; }
+  .b4 { width:30vw; height:30vw; background:#3d1e33; top:12%; right:22%; animation:drift1 37s ease-in-out infinite alternate-reverse; }
+  @keyframes drift1 { to { transform:translate(9vw,6vh) scale(1.12);} }
+  @keyframes drift2 { to { transform:translate(-7vw,-8vh) scale(.92);} }
+  @keyframes drift3 { to { transform:translate(-10vw,5vh) scale(1.18);} }
+
+  .stage { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:24px; }
+  .caption { font-size:12px; letter-spacing:.14em; text-transform:uppercase; color:rgba(215,228,255,.45); font-weight:600; }
+
+  /* ── dark frosted squircle ── */
+  .squircle {
+    position:relative;
+    width:min(380px, 92vw);
+    height:min(310px, 62vh);
+    border-radius:24%/28%;
+    background:linear-gradient(160deg, rgba(46,54,76,.5), rgba(18,22,34,.42) 55%, rgba(30,36,54,.48));
+    backdrop-filter:blur(36px) saturate(1.6);
+    -webkit-backdrop-filter:blur(36px) saturate(1.6);
+    box-shadow:
+      0 36px 80px -18px rgba(0,0,0,.65),
+      inset 0 1.5px 0 rgba(255,255,255,.22),
+      inset 0 -1px 0 rgba(255,255,255,.06),
+      inset 1px 0 0 rgba(255,255,255,.1);
+    border:1px solid rgba(255,255,255,.14);
+  }
+
+  #gizmo {
+    position:absolute; left:50%; top:-36px; transform:translateX(-50%);
+    width:380px; height:380px; max-width:96vw;
+    touch-action:none; cursor:grab;
+    z-index:2;              /* the gizmo floats above the control layer */
+  }
+  #gizmo.dragging { cursor:grabbing; }
+
+  /* shadow cast straight back onto the screen plane — the gizmo floats in FRONT of the panel */
+  .drop-shadow {
+    position:absolute; left:50%; top:22px;
+    width:235px; height:235px; border-radius:50%;
+    background:radial-gradient(circle at 46% 42%, rgba(0,0,0,.62), rgba(0,0,0,.28) 45%, rgba(0,0,0,0) 68%);
+    filter:blur(22px);
+    transform:translateX(-50%);
+    pointer-events:none;
+  }
+
+  .toast {
+    position:absolute; left:50%; bottom:12px; transform:translateX(-50%) translateY(6px);
+    padding:7px 18px; border-radius:100px;
+    background:rgba(35,42,62,.55); backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+    border:1px solid rgba(255,255,255,.16);
+    font-size:13px; font-weight:600; color:rgba(226,236,255,.88); letter-spacing:.02em;
+    opacity:0; transition:opacity .35s ease, transform .35s cubic-bezier(.2,.9,.3,1.2);
+    pointer-events:none; white-space:nowrap;
+    box-shadow:0 8px 22px -6px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.18);
+  }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* controls: the button IS the shape — no chrome around it. Corner-anchored,
+     layered beneath the floating gizmo. */
+  .ctl {
+    position:absolute; z-index:1;
+    background:none; border:none; padding:8px;
+    cursor:pointer;
+    transition:transform .18s cubic-bezier(.3,1.4,.5,1), filter .18s ease;
+    -webkit-tap-highlight-color:transparent;
+    filter:drop-shadow(0 7px 14px rgba(0,0,0,.6)) drop-shadow(0 0 9px rgba(140,190,255,.22));
+  }
+  .ctl:hover { transform:scale(1.1) translateY(-2px); filter:drop-shadow(0 10px 18px rgba(0,0,0,.7)) drop-shadow(0 0 14px rgba(150,200,255,.4)) brightness(1.25); }
+  .ctl:active { transform:scale(.92); }
+  .ctl:focus-visible { outline:3px solid rgba(120,170,255,.75); outline-offset:3px; border-radius:14px; }
+  .ctl svg { width:74px; height:74px; display:block; overflow:visible; }
+  .ctl .arc { fill:none; stroke-width:11; stroke-linecap:round; }
+  .ctl .arcHi {   /* the sheen: a thin bright line riding the top of the glass tube */
+    fill:none; stroke:rgba(255,255,255,.8); stroke-width:2.6; stroke-linecap:round;
+    transform:translateY(-3px);
+  }
+  .ctl .head { stroke:none; }
+  .ctl .cubeTop, .ctl .cubeLeft, .ctl .cubeRight { stroke:rgba(245,250,255,.9); stroke-width:1; stroke-linejoin:round; }
+  /* concentric with the fillets: each arrow spun into its corner, arcs parallel to the corner radius.
+     All controls share one visible margin ring: ~48px from their nearest edges. */
+  #rotL { top:29px; left:33px; }
+  #rotL svg { transform:rotate(-45deg); }
+  #rotR { top:29px; right:33px; }
+  #rotR svg { transform:rotate(45deg); }
+  #homeBtn { bottom:32px; right:30px; }   /* visible cube: ~48px from bottom AND right, same ring as the arrows */
+  #homeBtn svg { width:50px; height:50px; }
+
+  @media (prefers-reduced-motion: reduce) { .blob { animation:none; } }
+</style>
+</head>
+<body>
+<div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div><div class="blob b4"></div>
+
+<div class="stage">
+  <div class="caption">TopOpt · Liquid Glass View Gizmo</div>
+
+  <div class="squircle">
+    <div class="drop-shadow" id="dropShadow"></div>
+    <button class="ctl" id="rotL" aria-label="Rotate counter-clockwise" title="Rotate counter-clockwise">
+      <svg viewBox="0 0 64 64">
+        <defs>
+          <linearGradient id="glassL" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(255,255,255,0.95)"/>
+            <stop offset="0.5" stop-color="rgba(205,222,250,0.66)"/>
+            <stop offset="1" stop-color="rgba(148,168,210,0.40)"/>
+          </linearGradient>
+        </defs>
+        <path class="arc" stroke="url(#glassL)" d="M48.4 24.5 A20 20 0 0 0 13.9 27.5"/>
+        <path class="arcHi" d="M48.4 24.5 A20 20 0 0 0 13.9 27.5"/>
+        <path class="head" fill="url(#glassL)" d="M6.4 21.2 L23.6 29.2 L7.6 41.1 Z"/>
+      </svg>
+    </button>
+    <button class="ctl" id="rotR" aria-label="Rotate clockwise" title="Rotate clockwise">
+      <svg viewBox="0 0 64 64">
+        <defs>
+          <linearGradient id="glassR" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(255,255,255,0.95)"/>
+            <stop offset="0.5" stop-color="rgba(205,222,250,0.66)"/>
+            <stop offset="1" stop-color="rgba(148,168,210,0.40)"/>
+          </linearGradient>
+        </defs>
+        <path class="arc" stroke="url(#glassR)" d="M15.6 24.5 A20 20 0 0 1 50.1 27.5"/>
+        <path class="arcHi" d="M15.6 24.5 A20 20 0 0 1 50.1 27.5"/>
+        <path class="head" fill="url(#glassR)" d="M57.6 21.2 L40.4 29.2 L56.4 41.1 Z"/>
+      </svg>
+    </button>
+    <button class="ctl" id="homeBtn" aria-label="Home view" title="Home view">
+      <svg viewBox="0 0 24 24">
+        <defs>
+          <linearGradient id="cgTop" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(255,255,255,0.92)"/>
+            <stop offset="1" stop-color="rgba(200,220,255,0.55)"/>
+          </linearGradient>
+          <linearGradient id="cgLeft" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(140,160,200,0.42)"/>
+            <stop offset="1" stop-color="rgba(85,100,140,0.52)"/>
+          </linearGradient>
+          <linearGradient id="cgRight" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="rgba(200,215,248,0.66)"/>
+            <stop offset="1" stop-color="rgba(130,152,200,0.42)"/>
+          </linearGradient>
+        </defs>
+        <path class="cubeTop"  fill="url(#cgTop)"  d="M12 3.6 L19.4 7.4 L12 11.2 L4.6 7.4 Z"/>
+        <path class="cubeLeft" fill="url(#cgLeft)" d="M4.6 7.4 L12 11.2 L12 20.4 L4.6 16.6 Z"/>
+        <path class="cubeRight" fill="url(#cgRight)" d="M12 11.2 L19.4 7.4 L19.4 16.6 L12 20.4 Z"/>
+      </svg>
+    </button>
+
+    <canvas id="gizmo" width="380" height="380"></canvas>
+    <div class="toast" id="toast">Home</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  /* ═════════ shared geometry constants (JS + shader use the SAME numbers) ═════════ */
+  const CFG = {
+    KCELL: 0.09,      // crisper welds — the compression does the joining now
+    KLOBE: 0.095,
+    CENTER_R: 0.72,
+    FACE_C: 0.80, FACE_N: 0.38, FACE_T: 0.92,           // faces compressed slightly flatter (apex ~1.18)
+    FSH_C: 0.80, FSH_D: 0.68, FSH_R1: 0.20, FSH_R2: 0.34,
+    EM_C: 0.92, EM_R: 0.18, EM_L: 0.74,                 // edges pressed hard against the faces
+    EF_IN: 0.86, EF_R: 0.18, EF_L: 0.62,
+    CN_C: 0.885, CN_R: 0.22,                            // corners crushed in against everything
+    CL_IN: 0.70, CL_R: [0.13, 0.14, 0.16],
+    GROOVE: 0.045,    // seams: a touch shallower…
+    GROOVE_W: 0.085,  // …and noticeably narrower — tight compression lines
+    FOV: 38, CAMZ: 9.25,  // 7.4 / 0.8 — same perspective character, gizmo renders 20% smaller
+  };
+
+  const canvas = document.getElementById('gizmo');
+  const toast = document.getElementById('toast');
+  const shadowEl = document.getElementById('dropShadow');
+  const DPR = Math.min(window.devicePixelRatio || 1, 1.5);
+
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:false });
+  renderer.setPixelRatio(DPR);
+  renderer.setSize(380, 380, false);
+  renderer.setClearColor(0x000000, 0);
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(CFG.FOV, 1, 0.1, 100);
+  camera.position.set(0, 0, CFG.CAMZ);
+
+  const uniforms = {
+    uRotInv: { value: new THREE.Matrix3() },
+    uOffset: { value: new THREE.Vector3() },
+    uTime:   { value: 0 },
+    uHoverId:{ value: -1 },
+    uHoverAmt:{ value: 0 },
+  };
+
+  const frag = `
+    precision highp float;
+    varying vec2 vUv;
+    uniform mat3 uRotInv; uniform vec3 uOffset; uniform float uTime;
+    uniform float uHoverId; uniform float uHoverAmt;
+
+    const float KC = ${CFG.KCELL};
+    const float KL = ${CFG.KLOBE};
+
+    float smin(float a, float b, float k){
+      float h = clamp(0.5 + 0.5*(b-a)/k, 0.0, 1.0);
+      return mix(b, a, h) - k*h*(1.0-h);
+    }
+    float sdEll(vec3 p, vec3 r){
+      float k0 = length(p/r);
+      float k1 = length(p/(r*r));
+      return k0*(k0-1.0)/max(k1, 1e-4);
+    }
+
+    void cellDists(vec3 p, out float dc[8]){
+      vec3 q = abs(p);
+      dc[0] = length(p) - ${CFG.CENTER_R};
+
+      float fx = sdEll(q - vec3(${CFG.FACE_C},0.,0.), vec3(${CFG.FACE_N},${CFG.FACE_T},${CFG.FACE_T}));
+      fx = smin(fx, sdEll(q - vec3(${CFG.FSH_C},${CFG.FSH_D},${CFG.FSH_D}), vec3(${CFG.FSH_R1},${CFG.FSH_R2},${CFG.FSH_R2})), KL);
+      float fy = sdEll(q - vec3(0.,${CFG.FACE_C},0.), vec3(${CFG.FACE_T},${CFG.FACE_N},${CFG.FACE_T}));
+      fy = smin(fy, sdEll(q - vec3(${CFG.FSH_D},${CFG.FSH_C},${CFG.FSH_D}), vec3(${CFG.FSH_R2},${CFG.FSH_R1},${CFG.FSH_R2})), KL);
+      float fz = sdEll(q - vec3(0.,0.,${CFG.FACE_C}), vec3(${CFG.FACE_T},${CFG.FACE_T},${CFG.FACE_N}));
+      fz = smin(fz, sdEll(q - vec3(${CFG.FSH_D},${CFG.FSH_D},${CFG.FSH_C}), vec3(${CFG.FSH_R2},${CFG.FSH_R2},${CFG.FSH_R1})), KL);
+      dc[1] = fx; dc[2] = fy; dc[3] = fz;
+
+      float exy = sdEll(q - vec3(${CFG.EM_C},${CFG.EM_C},0.), vec3(${CFG.EM_R},${CFG.EM_R},${CFG.EM_L}));
+      exy = smin(exy, sdEll(q - vec3(${CFG.EF_IN},1.0,0.), vec3(${CFG.EF_R},${CFG.EF_R},${CFG.EF_L})), KL);
+      exy = smin(exy, sdEll(q - vec3(1.0,${CFG.EF_IN},0.), vec3(${CFG.EF_R},${CFG.EF_R},${CFG.EF_L})), KL);
+      float eyz = sdEll(q - vec3(0.,${CFG.EM_C},${CFG.EM_C}), vec3(${CFG.EM_L},${CFG.EM_R},${CFG.EM_R}));
+      eyz = smin(eyz, sdEll(q - vec3(0.,${CFG.EF_IN},1.0), vec3(${CFG.EF_L},${CFG.EF_R},${CFG.EF_R})), KL);
+      eyz = smin(eyz, sdEll(q - vec3(0.,1.0,${CFG.EF_IN}), vec3(${CFG.EF_L},${CFG.EF_R},${CFG.EF_R})), KL);
+      float ezx = sdEll(q - vec3(${CFG.EM_C},0.,${CFG.EM_C}), vec3(${CFG.EM_R},${CFG.EM_L},${CFG.EM_R}));
+      ezx = smin(ezx, sdEll(q - vec3(${CFG.EF_IN},0.,1.0), vec3(${CFG.EF_R},${CFG.EF_L},${CFG.EF_R})), KL);
+      ezx = smin(ezx, sdEll(q - vec3(1.0,0.,${CFG.EF_IN}), vec3(${CFG.EF_R},${CFG.EF_L},${CFG.EF_R})), KL);
+      dc[4] = exy; dc[5] = eyz; dc[6] = ezx;
+
+      float co = length(q - vec3(${CFG.CN_C})) - ${CFG.CN_R};
+      co = smin(co, sdEll(q - vec3(${CFG.CL_IN},1.0,1.0), vec3(${CFG.CL_R[0]*1.5},${CFG.CL_R[0]},${CFG.CL_R[0]})), KL);
+      co = smin(co, sdEll(q - vec3(1.0,${CFG.CL_IN},1.0), vec3(${CFG.CL_R[1]},${CFG.CL_R[1]*1.5},${CFG.CL_R[1]})), KL);
+      co = smin(co, sdEll(q - vec3(1.0,1.0,${CFG.CL_IN}), vec3(${CFG.CL_R[2]},${CFG.CL_R[2]},${CFG.CL_R[2]*1.5})), KL);
+      dc[7] = co;
+    }
+
+    float map(vec3 p){
+      float dc[8]; cellDists(p, dc);
+      float d = dc[0];
+      float m1 = dc[0], m2 = 1e9;
+      for (int i = 1; i < 8; i++){
+        d = smin(d, dc[i], KC);
+        if (dc[i] < m1) { m2 = m1; m1 = dc[i]; }
+        else if (dc[i] < m2) { m2 = dc[i]; }
+      }
+      // groove carve: push the surface in ONLY where two cells are equally close
+      // (the junction line). Away from junctions m2-m1 grows and the carve
+      // vanishes — the bubbles keep their exact shape.
+      d += ${CFG.GROOVE} * (1.0 - smoothstep(0.0, ${CFG.GROOVE_W}, m2 - m1));
+      return d;
+    }
+
+    vec3 calcNormal(vec3 p){
+      const vec2 e = vec2(0.004, -0.004);
+      return normalize(
+        e.xyy*map(p+e.xyy) + e.yyx*map(p+e.yyx) +
+        e.yxy*map(p+e.yxy) + e.xxx*map(p+e.xxx));
+    }
+
+    float globalId(int fi, vec3 p){
+      float bx = p.x > 0.0 ? 0.0 : 1.0;
+      float by = p.y > 0.0 ? 0.0 : 1.0;
+      float bz = p.z > 0.0 ? 0.0 : 1.0;
+      if (fi == 0) return 0.0;
+      if (fi == 1) return 1.0 + bx;
+      if (fi == 2) return 3.0 + by;
+      if (fi == 3) return 5.0 + bz;
+      if (fi == 4) return 7.0  + bx*2.0 + by;
+      if (fi == 5) return 11.0 + by*2.0 + bz;
+      if (fi == 6) return 15.0 + bz*2.0 + bx;
+      return 19.0 + bx*4.0 + by*2.0 + bz;
+    }
+
+    vec3 hue2rgb(float h){
+      vec3 p = abs(fract(h + vec3(0.0, .333, .667)) * 6.0 - 3.0);
+      return clamp(p - 1.0, 0.0, 1.0);
+    }
+
+    void main(){
+      float tf = tan(radians(${CFG.FOV}.0 * 0.5));
+      vec3 roW = vec3(0.0, 0.0, ${CFG.CAMZ});
+      vec3 rdW = normalize(vec3(vUv * tf, -1.0));
+
+      vec3 ro = uRotInv * (roW - uOffset);
+      vec3 rd = normalize(uRotInv * rdW);
+
+      float t = ${CFG.CAMZ} - 3.0;
+      float d; vec3 pos;
+      bool hit = false;
+      for (int i = 0; i < 80; i++){
+        pos = ro + rd * t;
+        d = map(pos);
+        if (d < 0.0025) { hit = true; break; }
+        t += d * 0.7;   // smaller steps: the carve bends the field near grooves
+        if (t > ${CFG.CAMZ} + 3.0) break;
+      }
+      if (!hit) { gl_FragColor = vec4(0.0); return; }
+
+      vec3 n = calcNormal(pos);
+      vec3 nW = n * uRotInv;              // object → world (transpose of inverse rotation)
+      vec3 vW = -rdW;
+      float ndv = clamp(dot(nW, vW), 0.0, 1.0);
+      float fres = pow(1.0 - ndv, 2.6);
+
+      float dc[8]; cellDists(pos, dc);
+      float d1 = 1e9, d2 = 1e9; int i1 = 0;
+      for (int i = 0; i < 8; i++){
+        if (dc[i] < d1) { d2 = d1; d1 = dc[i]; i1 = i; }
+        else if (dc[i] < d2) { d2 = dc[i]; }
+      }
+      float border = 1.0 - smoothstep(0.010, 0.10, d2);
+      float id = globalId(i1, pos);
+
+      /* ── dark liquid glass ── */
+      vec3 base = vec3(0.045, 0.06, 0.095);
+
+      // reduced interior mist: face-on gains a little smoke, rays near the
+      // frosted core gain a little more — but the volume stays see-through
+      float coreNear = length(ro - rd * dot(ro, rd));
+      float core = smoothstep(0.85, 0.15, coreNear) * 0.20;
+      float haze = 0.13 * ndv + core;
+      vec3 col = mix(base, vec3(0.42, 0.47, 0.60), haze);
+
+      // bright glass rim with a whisper of spectrum
+      float h = ndv * 1.1 + pos.x*0.06 + uTime*0.012;
+      vec3 rimCol = mix(vec3(0.72, 0.80, 1.0), hue2rgb(fract(h)), 0.30);
+      col += rimCol * fres * 0.85;
+
+      // carved junction grooves shade as deep recesses between the bubbles
+      col = mix(col, vec3(0.015, 0.025, 0.05), border * 0.62);
+
+      // the Siri-style spectral streak: top reflection band, hue sliding across it
+      vec3 refl = reflect(rdW, nW);
+      float band = smoothstep(0.55, 0.92, refl.y) * pow(clamp(refl.y, 0.0, 1.0), 2.0);
+      col += hue2rgb(fract(refl.x * 0.30 + 0.58)) * band * 0.55;
+
+      // key speculars (world-fixed, so light stays put while the gizmo turns)
+      vec3 l1 = normalize(vec3(0.35, 0.9, 0.6));
+      vec3 l2 = normalize(vec3(-0.6, -0.35, 0.7));
+      float s1 = pow(max(dot(reflect(-l1, nW), vW), 0.0), 90.0);
+      float s2 = pow(max(dot(reflect(-l2, nW), vW), 0.0), 160.0) * 0.6;
+      col += vec3(1.0) * (s1 + s2);
+
+      /* ── far side, seen through the glass: march backward from beyond ── */
+      float tb = ${CFG.CAMZ} + 3.0;
+      bool hitB = false; vec3 posB;
+      for (int i = 0; i < 48; i++){
+        posB = ro + rd * tb;
+        float db = map(posB);
+        if (db < 0.004) { hitB = true; break; }
+        tb -= db * 0.7;
+        if (tb < t + 0.05) break;
+      }
+      if (hitB && tb > t + 0.08) {
+        vec3 nB = calcNormal(posB) * uRotInv;
+        float glint = pow(1.0 - abs(dot(nB, rdW)), 3.0);
+        col += vec3(0.45, 0.55, 0.82) * glint * 0.30 * (1.0 - haze * 2.5);
+      }
+
+      // hover lift
+      float hov = (abs(id - uHoverId) < 0.5) ? uHoverAmt : 0.0;
+      col += vec3(0.40, 0.58, 1.0) * hov * 0.32;
+
+      float a = 0.44 + fres*0.42 + haze*0.5 + border*0.24 + (s1+s2)*0.5 + band*0.3 + hov*0.12;
+      gl_FragColor = vec4(col, clamp(a, 0.0, 0.97));
+    }
+  `;
+
+  const quad = new THREE.Mesh(
+    new THREE.PlaneGeometry(2, 2),
+    new THREE.ShaderMaterial({
+      uniforms, transparent:true, depthWrite:false, depthTest:false,
+      vertexShader:`varying vec2 vUv; void main(){ vUv = position.xy; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: frag,
+    })
+  );
+  quad.frustumCulled = false;
+  quad.renderOrder = 1;
+  scene.add(quad);
+  
+  /* ═════════ JS mirror of the SDF (for picking) ═════════ */
+  const abs3 = p => [Math.abs(p[0]), Math.abs(p[1]), Math.abs(p[2])];
+  const smin = (a,b,k) => { const h = Math.min(Math.max(0.5+0.5*(b-a)/k,0),1); return b*(1-h)+a*h - k*h*(1-h); };
+  function sdEll(p, c, r){
+    const q = [(p[0]-c[0])/r[0], (p[1]-c[1])/r[1], (p[2]-c[2])/r[2]];
+    const k0 = Math.hypot(q[0],q[1],q[2]);
+    const k1 = Math.hypot(q[0]/r[0], q[1]/r[1], q[2]/r[2]);
+    return k0*(k0-1)/Math.max(k1,1e-4);
+  }
+  function cellDistsJS(p){
+    const q = abs3(p), C = CFG, dc = new Array(8);
+    dc[0] = Math.hypot(p[0],p[1],p[2]) - C.CENTER_R;
+    let fx = sdEll(q,[C.FACE_C,0,0],[C.FACE_N,C.FACE_T,C.FACE_T]);
+    fx = smin(fx, sdEll(q,[C.FSH_C,C.FSH_D,C.FSH_D],[C.FSH_R1,C.FSH_R2,C.FSH_R2]), C.KLOBE);
+    let fy = sdEll(q,[0,C.FACE_C,0],[C.FACE_T,C.FACE_N,C.FACE_T]);
+    fy = smin(fy, sdEll(q,[C.FSH_D,C.FSH_C,C.FSH_D],[C.FSH_R2,C.FSH_R1,C.FSH_R2]), C.KLOBE);
+    let fz = sdEll(q,[0,0,C.FACE_C],[C.FACE_T,C.FACE_T,C.FACE_N]);
+    fz = smin(fz, sdEll(q,[C.FSH_D,C.FSH_D,C.FSH_C],[C.FSH_R2,C.FSH_R2,C.FSH_R1]), C.KLOBE);
+    dc[1]=fx; dc[2]=fy; dc[3]=fz;
+    let exy = sdEll(q,[C.EM_C,C.EM_C,0],[C.EM_R,C.EM_R,C.EM_L]);
+    exy = smin(exy, sdEll(q,[C.EF_IN,1,0],[C.EF_R,C.EF_R,C.EF_L]), C.KLOBE);
+    exy = smin(exy, sdEll(q,[1,C.EF_IN,0],[C.EF_R,C.EF_R,C.EF_L]), C.KLOBE);
+    let eyz = sdEll(q,[0,C.EM_C,C.EM_C],[C.EM_L,C.EM_R,C.EM_R]);
+    eyz = smin(eyz, sdEll(q,[0,C.EF_IN,1],[C.EF_L,C.EF_R,C.EF_R]), C.KLOBE);
+    eyz = smin(eyz, sdEll(q,[0,1,C.EF_IN],[C.EF_L,C.EF_R,C.EF_R]), C.KLOBE);
+    let ezx = sdEll(q,[C.EM_C,0,C.EM_C],[C.EM_R,C.EM_L,C.EM_R]);
+    ezx = smin(ezx, sdEll(q,[C.EF_IN,0,1],[C.EF_R,C.EF_L,C.EF_R]), C.KLOBE);
+    ezx = smin(ezx, sdEll(q,[1,0,C.EF_IN],[C.EF_R,C.EF_L,C.EF_R]), C.KLOBE);
+    dc[4]=exy; dc[5]=eyz; dc[6]=ezx;
+    let co = Math.hypot(q[0]-C.CN_C, q[1]-C.CN_C, q[2]-C.CN_C) - C.CN_R;
+    co = smin(co, sdEll(q,[C.CL_IN,1,1],[C.CL_R[0]*1.5,C.CL_R[0],C.CL_R[0]]), C.KLOBE);
+    co = smin(co, sdEll(q,[1,C.CL_IN,1],[C.CL_R[1],C.CL_R[1]*1.5,C.CL_R[1]]), C.KLOBE);
+    co = smin(co, sdEll(q,[1,1,C.CL_IN],[C.CL_R[2],C.CL_R[2],C.CL_R[2]*1.5]), C.KLOBE);
+    dc[7]=co;
+    return dc;
+  }
+  const mapJS = p => {
+    const dc = cellDistsJS(p);
+    let d = dc[0], m1 = dc[0], m2 = 1e9;
+    for (let i = 1; i < 8; i++){
+      d = smin(d, dc[i], CFG.KCELL);
+      if (dc[i] < m1) { m2 = m1; m1 = dc[i]; }
+      else if (dc[i] < m2) { m2 = dc[i]; }
+    }
+    const s = Math.min(Math.max((m2 - m1) / CFG.GROOVE_W, 0), 1);
+    return d + CFG.GROOVE * (1 - s*s*(3 - 2*s));   // same smoothstep as the shader
+  };
+  function globalIdJS(fi, p){
+    const bx = p[0]>0?0:1, by = p[1]>0?0:1, bz = p[2]>0?0:1;
+    if (fi===0) return 0;
+    if (fi===1) return 1+bx; if (fi===2) return 3+by; if (fi===3) return 5+bz;
+    if (fi===4) return 7+bx*2+by; if (fi===5) return 11+by*2+bz; if (fi===6) return 15+bz*2+bx;
+    return 19+bx*4+by*2+bz;
+  }
+
+  const idInfo = {};
+  idInfo[0] = { name:'Home', home:true };
+  [['x',1,'Right'],['x',2,'Left'],['y',3,'Top'],['y',4,'Bottom'],['z',5,'Front'],['z',6,'Back']].forEach(([ax,id,name],i) => {
+    const d = new THREE.Vector3(); d[ax] = (i%2===0) ? 1 : -1;
+    idInfo[id] = { name, dir:d };
+  });
+  [['x','y',7],['y','z',11],['z','x',15]].forEach(([a,b,base]) => {
+    [[1,1,0],[1,-1,1],[-1,1,2],[-1,-1,3]].forEach(([sa,sb,off]) => {
+      const d = new THREE.Vector3(); d[a]=sa; d[b]=sb; d.normalize();
+      idInfo[base+off] = { name:`Edge ${a.toUpperCase()}${sa>0?'+':'−'} ${b.toUpperCase()}${sb>0?'+':'−'}`, dir:d };
+    });
+  });
+  [[1,1,1],[1,1,-1],[1,-1,1],[1,-1,-1],[-1,1,1],[-1,1,-1],[-1,-1,1],[-1,-1,-1]].forEach(([x,y,z]) => {
+    const bx = x>0?0:1, by = y>0?0:1, bz = z>0?0:1;
+    idInfo[19+bx*4+by*2+bz] = {
+      name:`Corner X${x>0?'+':'−'} Y${y>0?'+':'−'} Z${z>0?'+':'−'}`,
+      dir:new THREE.Vector3(x,y,z).normalize()
+    };
+  });
+
+  /* ═════════ face labels — etched into the glass: curved decals hugging each dome,
+        drawn as dark inset glyphs with a light lower lip (letterpress) ═════════ */
+  const labelGroup = new THREE.Group();
+  scene.add(labelGroup);
+  const HALF = Math.PI / 2;
+  function makeFaceLabel(text, euler){
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 192;
+    const ctx = cv.getContext('2d');
+    // heavy condensed caps: the word is the focus
+    ctx.font = '800 condensed 118px -apple-system, "SF Pro Display", "Arial Narrow", "Helvetica Neue", sans-serif';
+    if (typeof ctx.letterSpacing !== 'undefined') ctx.letterSpacing = '3px';
+    const label = text.toUpperCase();
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    // LED-lit etching: wide soft halo bleeding into the glass...
+    ctx.shadowColor = 'rgba(120, 200, 255, 0.9)'; ctx.shadowBlur = 30;
+    ctx.fillStyle = 'rgba(140, 205, 255, 0.55)';
+    ctx.fillText(label, 256, 102, 490);
+    // ...then a hot bright core, like the light pooling in the incision
+    ctx.shadowBlur = 9;
+    ctx.fillStyle = 'rgba(232, 247, 255, 0.99)';
+    ctx.fillText(label, 256, 102, 490);
+
+    // curved decal: each vertex lifted to the dome surface so the text wraps the bubble
+    const geo = new THREE.PlaneGeometry(1.08, 0.405, 32, 12);
+    const posAttr = geo.attributes.position;
+    for (let i = 0; i < posAttr.count; i++){
+      const x = posAttr.getX(i), y = posAttr.getY(i);
+      const rho = Math.min(Math.hypot(x, y), CFG.FACE_T - 0.02);
+      const z = CFG.FACE_C + CFG.FACE_N * Math.sqrt(Math.max(0, 1 - (rho / CFG.FACE_T) ** 2));
+      posAttr.setZ(i, z + 0.012);
+    }
+    geo.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+      map:new THREE.CanvasTexture(cv), transparent:true,
+      blending:THREE.AdditiveBlending,   // emitted light: glows over the glass, never occludes it
+      depthWrite:false, depthTest:false, side:THREE.FrontSide
+    }));
+    mesh.rotation.set(euler[0], euler[1], euler[2]);   // curvature is baked into the geometry
+    mesh.renderOrder = 5;
+    labelGroup.add(mesh);
+    return mesh;
+  }
+  [
+    ['Front',  [0, 0, 0]],
+    ['Back',   [0, Math.PI, 0]],
+    ['Right',  [0,  HALF, 0]],
+    ['Left',   [0, -HALF, 0]],
+    ['Top',    [-HALF, 0, 0]],
+    ['Bottom', [ HALF, 0, 0]],
+  ].forEach(([n, e]) => makeFaceLabel(n, e));
+
+  /* ═════════ orientation, snapping, toast ═════════ */
+  function viewFor(dir){
+    const q = new THREE.Quaternion().setFromUnitVectors(dir, new THREE.Vector3(0,0,1));
+    const tilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(-8), THREE.MathUtils.degToRad(8), 0));
+    return tilt.multiply(q);
+  }
+  // home = the Left/Bottom/Front corner facing the viewer (the pose you approved)
+  const HOME = viewFor(new THREE.Vector3(-1, -1, 1).normalize());
+  const orient = HOME.clone();
+  let qFrom = orient.clone(), qTo = orient.clone(), qT = 1;
+
+  function animateTo(q, label){
+    qFrom = orient.clone(); qTo = q.clone(); qT = 0;
+    if (label) showToast(label);
+  }
+  function showToast(text){
+    toast.textContent = text;
+    toast.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => toast.classList.remove('show'), 1400);
+  }
+
+  /* ═════════ picking ═════════ */
+  const poseQ = orient.clone();          // rendered orientation incl. hover wobble
+  const poseOff = new THREE.Vector3();   // rendered hover offset
+  function pickId(clientX, clientY){
+    const r = canvas.getBoundingClientRect();
+    const ux = ((clientX - r.left) / r.width) * 2 - 1;
+    const uy = -((clientY - r.top) / r.height) * 2 + 1;
+    const tf = Math.tan(THREE.MathUtils.degToRad(CFG.FOV * 0.5));
+    const qInv = poseQ.clone().conjugate();
+    const roV = new THREE.Vector3(-poseOff.x, -poseOff.y, CFG.CAMZ - poseOff.z).applyQuaternion(qInv);
+    const rdV = new THREE.Vector3(ux*tf, uy*tf, -1).normalize().applyQuaternion(qInv);
+    const ro = [roV.x, roV.y, roV.z], rd = [rdV.x, rdV.y, rdV.z];
+    let t = CFG.CAMZ - 3.0;
+    for (let i = 0; i < 72; i++){
+      const p = [ro[0]+rd[0]*t, ro[1]+rd[1]*t, ro[2]+rd[2]*t];
+      const d = mapJS(p);
+      if (d < 0.003){
+        const dc = cellDistsJS(p);
+        let d1 = 1e9, i1 = 0;
+        dc.forEach((x,i) => { if (x < d1) { d1 = x; i1 = i; } });
+        return globalIdJS(i1, p);
+      }
+      t += d * 0.7;   // smaller steps: the carve bends the field near grooves
+      if (t > CFG.CAMZ + 3.0) break;
+    }
+    return -1;
+  }
+
+  /* ═════════ pointer interaction ═════════ */
+  let dragging = false, moved = 0, px = 0, py = 0, hoverId = -1, hoverAmt = 0;
+
+  canvas.addEventListener('pointerdown', e => {
+    dragging = true; moved = 0; px = e.clientX; py = e.clientY;
+    canvas.classList.add('dragging');
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (dragging) {
+      const dx = e.clientX - px, dy = e.clientY - py;
+      moved += Math.abs(dx) + Math.abs(dy);
+      px = e.clientX; py = e.clientY;
+      if (moved > 4) {
+        qT = 1;
+        const qx = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), dx * 0.011);
+        const qy = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), dy * 0.011);
+        orient.premultiply(qx).premultiply(qy);
+      }
+    } else {
+      const id = pickId(e.clientX, e.clientY);
+      if (id !== hoverId) { hoverId = id; hoverAmt = 0; canvas.style.cursor = id >= 0 ? 'pointer' : 'grab'; }
+    }
+  });
+  canvas.addEventListener('pointerup', e => {
+    canvas.classList.remove('dragging');
+    if (dragging && moved <= 4) {
+      const id = pickId(e.clientX, e.clientY);
+      const info = idInfo[id];
+      if (info) {
+        if (info.home) animateTo(HOME, 'Home');
+        else animateTo(viewFor(info.dir), info.name);
+      } else {
+        // the canvas spans the panel, so taps that miss the gizmo fall through
+        // to whichever control sits beneath the tap point
+        const btn = document.elementsFromPoint(e.clientX, e.clientY)
+          .find(el => el.classList && el.classList.contains('ctl'));
+        if (btn) btn.click();
+      }
+    }
+    dragging = false;
+  });
+
+  /* ═════════ controls: the arrows roll the gizmo about the SCREEN axis — the
+        axis the circular arrows themselves depict ═════════ */
+  const ROLL45 = a => new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), THREE.MathUtils.degToRad(a));
+  const currentTarget = () => (qT < 1 ? qTo : orient);
+  document.getElementById('rotL').onclick = () => animateTo(ROLL45( 45).multiply(currentTarget()), 'Rolled counter-clockwise');
+  document.getElementById('rotR').onclick = () => animateTo(ROLL45(-45).multiply(currentTarget()), 'Rolled clockwise');
+  document.getElementById('homeBtn').onclick = () => animateTo(HOME, 'Home');
+
+  /* ═════════ loop ═════════ */
+  const clock = new THREE.Clock();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ease = t => 1 - Math.pow(1 - t, 3.2);
+  const m4 = new THREE.Matrix4();
+  const eul = new THREE.Euler();
+
+  function loop(){
+    requestAnimationFrame(loop);
+    const t = clock.getElapsedTime();
+
+    if (qT < 1) {
+      qT = Math.min(1, qT + 0.045);
+      orient.copy(qFrom).slerp(qTo, ease(qT));
+    }
+
+    // hover: slow lateral drift + gentle rise/fall + breathing toward the viewer + a whisper of tilt.
+    // Incommensurate frequencies so the path never visibly repeats — it floats, it doesn't oscillate.
+    const hx = reduced ? 0 : Math.sin(t * 0.70) * 0.05;
+    const hy = reduced ? 0 : Math.sin(t * 1.13 + 1.0) * 0.045;
+    const hz = reduced ? 0 : (Math.sin(t * 0.90 + 2.0) * 0.5 + 0.5) * 0.30;   // 0 → 0.30 out of the screen
+    const wobX = reduced ? 0 : Math.sin(t * 0.60) * 0.022;
+    const wobZ = reduced ? 0 : Math.sin(t * 0.83 + 1.3) * 0.016;
+    poseQ.setFromEuler(eul.set(wobX, 0, wobZ)).multiply(orient);
+    poseOff.set(hx, hy, hz);
+    hoverAmt += ((hoverId >= 0 ? 1 : 0) - hoverAmt) * 0.16;
+
+    // depth cue: as the gizmo breathes toward the viewer, its screen-plane shadow
+    // recedes — smaller, softer, sliding opposite the drift
+    shadowEl.style.transform =
+      `translate(calc(-50% + ${(hx * 70).toFixed(1)}px), ${(-hy * 70 - hz * 28).toFixed(1)}px) scale(${(1 - hz * 0.5 - hy * 0.5).toFixed(3)})`;
+    shadowEl.style.opacity = (0.82 - hz * 1.5 - hy * 1.2).toFixed(3);
+
+    m4.makeRotationFromQuaternion(poseQ.clone().conjugate());
+    uniforms.uRotInv.value.setFromMatrix4(m4);
+    uniforms.uOffset.value.copy(poseOff);
+    uniforms.uTime.value = t;
+    uniforms.uHoverId.value = hoverId;
+    uniforms.uHoverAmt.value = hoverAmt;
+
+    labelGroup.quaternion.copy(poseQ);
+    labelGroup.position.copy(poseOff);   // labels are pinned to faces; the group transform is all they need
+
+    renderer.render(scene, camera);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
