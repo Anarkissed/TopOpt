@@ -444,6 +444,31 @@ public final class RunModel: ObservableObject {
     /// 80-minute run backgrounded and reopened still shows a truthful elapsed time.
     @Published public private(set) var startedAt: Date?
 
+    /// Wall-clock instant of the most recent live signal from the runner — a
+    /// progress tick OR a streamed variant (set in `publish`/`appendStreamed`,
+    /// cleared in `start`/`reset`). PRESENTATION-ONLY, like `startedAt`: it feeds
+    /// the REMOTE run's "last update Xs ago" freshness cue (handoff 101,
+    /// requirement 6) so a stalled worker reads as stale instead of an eternally-
+    /// spinning pill. A local run updates it too (harmless — the readout only
+    /// surfaces the cue for a remote run, via `remoteFreshnessNote`).
+    @Published public private(set) var lastProgressAt: Date?
+
+    /// The freshness cue for a REMOTE run's progress readout (handoff 101). Returns
+    /// "last update Xs ago" once the gap since the last live signal exceeds ~2× the
+    /// worker heartbeat (so a healthy sub-heartbeat cadence shows nothing), else
+    /// nil. Pure + static so the threshold/format is unit-tested without a view or a
+    /// clock; the RunScreen calls it with `lastProgressAt` only when the run is
+    /// remote. The inactivity WATCHDOG (client liveness, in RemoteRunner) is a
+    /// separate mechanism keyed off SSE pings; this is the USER-facing "is it still
+    /// alive?" honesty cue keyed off visible progress.
+    public static func remoteFreshnessNote(lastUpdate: Date?, now: Date = Date(),
+                                           heartbeat: TimeInterval = 20) -> String? {
+        guard let last = lastUpdate else { return nil }
+        let dt = now.timeIntervalSince(last)
+        guard dt >= 2 * heartbeat else { return nil }
+        return "last update \(Int(dt.rounded()))s ago"
+    }
+
     /// The optimize call. Injected for tests; defaults to the real bridge. Streams
     /// each accepted variant through `onVariant` (a one-variant partial outcome) as
     /// it completes, then returns the full final outcome.
@@ -533,6 +558,7 @@ public final class RunModel: ObservableObject {
         outcome = nil
         isStreaming = true
         startedAt = Date()      // anchor the elapsed clock / ETA (presentation-only)
+        lastProgressAt = Date() // seed the freshness cue (presentation-only)
         runningInBackground = false
         isMinimized = false
 
@@ -601,6 +627,7 @@ public final class RunModel: ObservableObject {
     private func appendStreamed(_ partial: OptimizeOutcome) {
         guard phase == .running else { return }   // ignore ticks after resolve/reset
         disarmWatchdog()                          // a streamed variant is progress
+        lastProgressAt = Date()                   // a live signal → freshness cue
         var variants = outcome?.variants ?? []
         variants.append(contentsOf: partial.variants)
         outcome = OptimizeOutcome(
@@ -665,6 +692,7 @@ public final class RunModel: ObservableObject {
         outcome = nil
         isStreaming = false
         startedAt = nil
+        lastProgressAt = nil
         runningInBackground = false
     }
 
@@ -673,6 +701,7 @@ public final class RunModel: ObservableObject {
     private func publish(_ snapshot: RunProgress) {
         guard phase == .running else { return }   // ignore ticks after cancel/reset
         disarmWatchdog()                          // the run is alive — stand the watchdog down
+        lastProgressAt = Date()                   // a live signal → freshness cue
         progress = snapshot
     }
 
