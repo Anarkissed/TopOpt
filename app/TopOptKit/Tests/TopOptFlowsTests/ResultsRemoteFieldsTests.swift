@@ -45,6 +45,11 @@ final class ResultsRemoteFieldsTests: XCTestCase {
         XCTAssertNil(m.selectedStressField, "no stress overlay for a remote run")
         XCTAssertNil(m.selectedDisplacementField, "no flex field for a remote run")
         XCTAssertNil(m.selectedTensorField, "no load-path tensor for a remote run")
+        // The screen shows the Stress / Flex / playback controls ONLY when these gates
+        // are true (`if model.hasStress`, `if model.hasFlex`, `if model.hasHistory`).
+        // A remote run has none of the data, so all three must be false — the assertion
+        // that ties this test to what the SCREEN actually renders, not just the labels.
+        XCTAssertFalse(m.hasStress, "no stress control for a remote run")
         XCTAssertFalse(m.hasFlex)
         XCTAssertFalse(m.hasHistory, "no optimization playback for a remote run")
 
@@ -59,6 +64,30 @@ final class ResultsRemoteFieldsTests: XCTestCase {
         XCTAssertEqual(rec.orientation, SIMD3(0, 0, 1))
         XCTAssertGreaterThan(rec.worstCaseMargin, 0, "safety margin is real")
         XCTAssertNotNil(m.selectedMesh, "the geometry renders")
+    }
+
+    /// THE regression guard for handoffs 097/105 (a)+(d): the results screen persists,
+    /// so the honesty of a remote run must survive persist → reopen. The prior tests
+    /// built the model from an IN-MEMORY outcome and stayed green while a REOPENED remote
+    /// result lied — the persistence DTO dropped `computedRemotely`, so the restored
+    /// outcome defaulted to local: "0.0 g" on the chips, no "computed on Mac" note, the
+    /// dead stress/playback controls back. This drives the model through the SAME
+    /// encode→decode `OutcomeStore` uses, then asserts the restored model is still honest.
+    func testRemoteHonestySurvivesPersistRoundTrip() throws {
+        let restored = try OutcomeCodec.decode(
+            try OutcomeCodec.encode(OutcomeCodec.dto(from: remoteOutcome())))
+        XCTAssertTrue(restored.computedRemotely, "the flag must survive persistence")
+
+        let m = ResultsModel(projectName: "P", outcome: restored)
+        XCTAssertTrue(m.computedRemotely, "a reopened remote run is still remote")
+        for tab in m.tabs {
+            XCTAssertEqual(tab.massLabel, ResultsModel.remoteNA, "reopened mass must be n/a, not 0 g")
+            XCTAssertFalse(tab.subLabel(active: false).contains("0 g"))
+        }
+        XCTAssertNotNil(m.remoteComputeNote, "the 'computed on Mac' note must reappear on reopen")
+        XCTAssertFalse(m.hasStress, "the Stress control stays hidden on reopen")
+        XCTAssertFalse(m.hasHistory, "no playbar on reopen")
+        XCTAssertNotNil(m.selectedMesh, "the geometry still renders on reopen")
     }
 
     func testLocalOutcomeUnchanged() {

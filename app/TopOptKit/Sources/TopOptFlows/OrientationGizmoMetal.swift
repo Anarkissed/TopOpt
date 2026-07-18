@@ -28,6 +28,14 @@ import SwiftUI
 import Combine
 import QuartzCore
 import simd
+import os
+
+/// Signpost log for the results-screen frame audit (handoff — results honesty +
+/// perf). Emit an interval around each gizmo raymarch so Instruments' os_signpost
+/// track shows how often the gizmo actually draws — near-continuous is the bug this
+/// idle fix targets; near-silent when parked is the fix working. Subsystem/category
+/// match the results-screen ticker signposts so both land in one lane.
+let gizmoSignpost = OSLog(subsystem: "com.topopt.results", category: "GizmoFrame")
 
 // MARK: - Per-frame uniforms (layout MUST match `GizmoUniforms` in the MSL below)
 
@@ -118,6 +126,9 @@ final class GizmoRenderer: NSObject, MTKViewDelegate {
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
+        let spid = OSSignpostID(log: gizmoSignpost)
+        os_signpost(.begin, log: gizmoSignpost, name: "gizmo_draw", signpostID: spid)
+        defer { os_signpost(.end, log: gizmoSignpost, name: "gizmo_draw", signpostID: spid) }
         guard let drawable = view.currentDrawable,
               let rpd = view.currentRenderPassDescriptor,
               let cmd = queue.makeCommandBuffer(),
@@ -459,11 +470,25 @@ struct GizmoMetalView {
         coordinator.renderer?.hoverId = hoverId
         coordinator.renderer?.freezePose = interacting
         coordinator.renderer?.reduceMotion = reduceMotion
-        // Continuous while animated; on-demand (battery) when motion is reduced.
-        view.isPaused = reduceMotion
-        view.enableSetNeedsDisplay = reduceMotion
+        // IDLE WHEN NOTHING MOVES (perf). The SDF raymarch is not cheap; a free-running
+        // 60 fps display link that redraws it forever — even sitting untouched on the
+        // results screen — burns the GPU for a decorative idle-float and is a prime
+        // suspect for the results screen's frame collapse. So run the link CONTINUOUSLY
+        // only while the user is actively dragging the glass; otherwise PAUSE it and
+        // redraw on demand. Every pose change that matters still paints exactly once:
+        //   • a viewer/gizmo drag publishes each orbit delta,
+        //   • an animated snap/home eases via the camera's own display link (per-frame
+        //     `@Published camera`),
+        //   • hover/reduce-motion changes come through `apply` (the explicit redraw below),
+        // all caught by the camera sink in `bind` (which requests a redraw while paused).
+        // Trade-off (disclosed): the decorative idle wobble no longer plays while idle —
+        // which is precisely "idle when the orientation is unchanged". Reduce Motion keeps
+        // its existing on-demand, perfectly-still behaviour (it was never continuous).
+        let continuous = interacting && !reduceMotion
+        view.isPaused = !continuous
+        view.enableSetNeedsDisplay = !continuous
         view.preferredFramesPerSecond = 60
-        if reduceMotion {
+        if !continuous {
             #if os(iOS)
             view.setNeedsDisplay()
             #elseif os(macOS)
