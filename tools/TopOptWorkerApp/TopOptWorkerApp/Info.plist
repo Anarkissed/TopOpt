@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>TopOpt Worker</string>
+	<key>CFBundleDisplayName</key>
+	<string>TopOpt Worker</string>
+	<key>CFBundleIdentifier</key>
+	<string>app.topopt.worker</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<!-- Menu-bar-only accessory: no Dock icon, no main window. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>TopOpt LAN compute worker</string>
+	<!-- Advertise + serve the optimizer on the local network so the iPad discovers
+	     this Mac by name (handoff 097). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>TopOpt Worker lets your iPad find this Mac on your network and run optimizations here.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_topopt._tcp</string>
+	</array>
+</dict>
+</plist>

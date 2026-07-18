@@ -46,6 +46,10 @@ public struct WorkspacePlaceholder: View {
     /// The ONE shared orbit camera for the workspace stage (STEP 1) — driven by both the
     /// Metal viewer's drag and the orientation gizmo.
     @StateObject private var cameraModel = OrbitCameraModel()
+    /// WHERE the run executes (handoff 097): iPad by default, or a LAN worker
+    /// discovered by Bonjour. Owned here so the choice + discovery live for the
+    /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
+    @StateObject private var compute = ComputeLocationModel()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When a project has saved variants, results show by default; tapping "See
@@ -239,6 +243,11 @@ public struct WorkspacePlaceholder: View {
             return
         }
         lastRunRequest = request   // Optimize greys out until the inputs change
+        // Pick the runner for THIS run from the compute-location choice. A remote
+        // config (a worker was selected + resolved) offloads to the LAN worker;
+        // otherwise the on-device bridge runs it, byte-identical to before. Always
+        // set explicitly so switching back to iPad after a remote run restores local.
+        run.runner = compute.activeRemote.map { RunModel.remoteRunner($0) } ?? RunModel.bridgeRunner
         run.start(request)
     }
 
@@ -1146,6 +1155,7 @@ public struct WorkspacePlaceholder: View {
                 .background(Capsule().fill(DS.Surface.bar.color))
                 .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.1).color, lineWidth: 1))
             Spacer()
+            ComputeLocationControl(compute: compute)
             printParamsButton
             optimizeButton
         }

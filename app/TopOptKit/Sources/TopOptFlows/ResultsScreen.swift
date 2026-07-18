@@ -134,6 +134,7 @@ public struct ResultsScreen: View {
 
             topBar
             resolutionNote                            // 083: honest voxel-size note
+            remoteComputeNote                         // 097: LAN-run unavailable fields
             // The viz toggles (Stress / Flex / Load path / Failure) and their
             // now-compact controls cluster at the BOTTOM-RIGHT; each chip slides its own
             // drawer open to the LEFT rather than dropping a big panel over the model.
@@ -194,6 +195,29 @@ public struct ResultsScreen: View {
         if let note = model.surfaceResolutionNote {
             HStack(alignment: .top, spacing: DS.Space.s) {
                 Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
+                Text(note).dsStyle(DS.TypeScale.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .frame(maxWidth: 360, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, 76)
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// The honest "computed on Mac" note for a LAN run (097): the geometry, savings,
+    /// orientation and margins are real, but mass / stress overlay / flex / playback
+    /// are computed on the Mac and not delivered over the wire in this build. Shown so
+    /// their absence reads as a stated gap, never a plausible-but-wrong 0 g / blank.
+    @ViewBuilder private var remoteComputeNote: some View {
+        if let note = model.remoteComputeNote {
+            HStack(alignment: .top, spacing: DS.Space.s) {
+                Image(systemName: "desktopcomputer").font(.system(size: 12, weight: .semibold))
                 Text(note).dsStyle(DS.TypeScale.caption)
                     .fixedSize(horizontal: false, vertical: true)
             }

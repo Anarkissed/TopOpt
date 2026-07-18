@@ -15,6 +15,13 @@ TopOptKit/vendor/
 # committed default is "absent" == OCCT-free). See run 039 / M7.1c.
 TopOptKit/occt-frameworks.generated.json
 
+# Generated core build fingerprint (the git SHA the vendored core was built from),
+# written by scripts/build_core.sh with the SAME derivation the CLI's CMake uses.
+# Gitignored for the same reason as vendor/ above: build_core.sh already MUST run
+# before the app builds (it produces the vendored xcframework this file pairs with),
+# so regenerating the fingerprint is not a new step. See handoff 097.
+TopOptKit/Sources/TopOptFlows/CoreFingerprint.generated.swift
+
 # SwiftPM / Xcode build products
 TopOptKit/.build/
 .swiftpm/

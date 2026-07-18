@@ -594,6 +594,28 @@ public final class ResultsModel: ObservableObject {
     /// Whether the morph is auto-playing (a UI timer advances `playT` in the view).
     @Published public private(set) var playing: Bool = false
 
+    /// True when this outcome was computed on a LAN worker (handoff 097). The CLI
+    /// serialises meshes + the scalar report but NOT the per-voxel stress /
+    /// displacement fields, the playback keyframes, or the mass, so those readouts
+    /// render as explicitly unavailable ("computed on Mac") instead of a plausible
+    /// 0 g / blank — a number describing a different object than the file is a
+    /// reject-class bug here. Default false → a local outcome is unchanged.
+    public private(set) var computedRemotely = false
+
+    /// The n/a placeholder for a field a remote run does not compute over the wire.
+    public static let remoteNA = "n/a — computed on Mac"
+
+    /// A one-line explanation shown on the results screen for a remote run, so the
+    /// missing stress/flex/mass/playback readouts read as an honest gap, not a bug.
+    /// nil for a local run.
+    public var remoteComputeNote: String? {
+        guard computedRemotely else { return nil }
+        return "This variant was optimized on your Mac. Mass, the stress overlay, "
+             + "flex/deflection and the optimization playback are computed there and "
+             + "aren't available for a LAN run in this build — the geometry, savings, "
+             + "orientation and safety margins are."
+    }
+
     /// The accepted variants' raw geometry + fields (parallel to `tabs`), kept for
     /// the viewer to build the selected variant's mesh + sample its stress field.
     private var accepted: [OptimizeVariant] = []
@@ -642,11 +664,13 @@ public final class ResultsModel: ObservableObject {
     private func apply(_ outcome: OptimizeOutcome) {
         let acc = outcome.variants.filter { $0.accepted }
         accepted = acc
+        computedRemotely = outcome.computedRemotely
         gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
         gridOrigin = SIMD3<Float>(outcome.gridOrigin)
         spacing = Float(outcome.spacing)
         tabs = ResultsModel.buildTabs(acc, voxelVolumeMM3: outcome.voxelVolumeMM3,
-                                      knockdown: infillKnockdown)
+                                      knockdown: infillKnockdown,
+                                      remote: outcome.computedRemotely)
         // M7.viz.1 "honest heatmap": key the shared stress scale to the MATERIAL
         // LIMIT (yield) so a color means the same physical safety everywhere — not
         // to the per-run data range. M7.params infill-aware: the limit is the
@@ -721,9 +745,11 @@ public final class ResultsModel: ObservableObject {
                           smoothShaded: true)
     }
 
-    /// The selected variant's stress field, tied to the run's grid geometry.
+    /// The selected variant's stress field, tied to the run's grid geometry. nil for
+    /// a remote run (the worker doesn't serialise the per-voxel field — 097), so the
+    /// stress overlay stays hidden rather than drawing a blank/empty grid.
     public var selectedStressField: StressField? {
-        guard let v = selectedVariant else { return nil }
+        guard !computedRemotely, let v = selectedVariant else { return nil }
         return StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
     }
@@ -732,7 +758,7 @@ public final class ResultsModel: ObservableObject {
     /// the run's grid geometry — the flux source `σ` the load→anchor flow integrates.
     /// Empty (`isEmpty`) for a cancelled/legacy variant that carries no tensor.
     public var selectedTensorField: StressTensorField? {
-        guard let v = selectedVariant else { return nil }
+        guard !computedRemotely, let v = selectedVariant else { return nil }
         return StressTensorField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                                  origin: gridOrigin, spacing: spacing, values: v.stressTensorField)
     }
@@ -742,7 +768,7 @@ public final class ResultsModel: ObservableObject {
     /// The selected variant's per-node displacement field (M7.disp), tied to the
     /// run's grid geometry — the field the flex animation displaces vertices by.
     public var selectedDisplacementField: DisplacementField? {
-        guard let v = selectedVariant else { return nil }
+        guard !computedRemotely, let v = selectedVariant else { return nil }
         return DisplacementField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
                                  origin: gridOrigin, spacing: spacing, values: v.displacementField)
     }
@@ -1224,7 +1250,10 @@ public final class ResultsModel: ObservableObject {
     // MARK: - optimization-history playback (keyframes)
 
     /// Whether the selected variant carries an optimization history to play back.
-    public var hasHistory: Bool { !(selectedVariant?.keyframeMeshes.isEmpty ?? true) }
+    public var hasHistory: Bool {
+        guard !computedRemotely else { return false }   // no playback keyframes over the wire (097)
+        return !(selectedVariant?.keyframeMeshes.isEmpty ?? true)
+    }
 
     private var keyframeCache: (index: Int, meshes: [ViewerMesh])?
 
@@ -1472,7 +1501,7 @@ public final class ResultsModel: ObservableObject {
     ///   (worst-case margin, layer-shear classification) are knocked down here to the
     ///   printed part's infill, consistently with the failure load + hot spot.
     static func buildTabs(_ variants: [OptimizeVariant], voxelVolumeMM3: Double,
-                          knockdown: Double = 1) -> [ResultVariantVM] {
+                          knockdown: Double = 1, remote: Bool = false) -> [ResultVariantVM] {
         // Variants arrive heaviest-first (ladder order); the LAST accepted rung is
         // the lightest safe one — the recommendation.
         let recommendedIndex = variants.count - 1
@@ -1480,7 +1509,10 @@ public final class ResultsModel: ObservableObject {
             let savings = 1 - v.achievedVolumeFraction
             let pct = Int((savings * 100).rounded())
             let cm3 = Double(v.supportVolumeVoxels) * voxelVolumeMM3 / 1000.0
-            let supportLabel = cm3 <= 0.05 ? "minimal" : String(format: "%.1f cm³", cm3)
+            // Mass + support are computed on the Mac and not serialised over the wire
+            // (097): show n/a for a remote run rather than a plausible 0 g / "minimal".
+            let supportLabel = remote ? ResultsModel.remoteNA
+                                      : (cm3 <= 0.05 ? "minimal" : String(format: "%.1f cm³", cm3))
             let tilt = tiltFromVertical(v.orientation)
             return ResultVariantVM(
                 index: i,
@@ -1488,12 +1520,13 @@ public final class ResultsModel: ObservableObject {
                 savingsPercent: pct,
                 savingsLabel: "\u{2212}\(pct)%",
                 massGrams: v.massGrams,
-                massLabel: massLabel(v.massGrams),
+                massLabel: remote ? ResultsModel.remoteNA : massLabel(v.massGrams),
                 supportCm3: cm3,
                 supportLabel: supportLabel,
                 orientation: v.orientation,
                 tiltDegrees: tilt,
-                orientationSummary: orientationSummary(tiltDegrees: tilt, supportCm3: cm3, supportLabel: supportLabel),
+                orientationSummary: orientationSummary(tiltDegrees: tilt, supportCm3: cm3,
+                                                       supportLabel: supportLabel, remote: remote),
                 layerShear: LayerShear.classify(interlayerMargin: v.interlayerMargin * knockdown),
                 maxStressMPa: v.maxStressMPa,
                 worstCaseMargin: v.worstCaseMargin * knockdown,
@@ -1520,10 +1553,15 @@ public final class ResultsModel: ObservableObject {
 
     /// The recommended-orientation sentence — tilt + support, NO print time
     /// (DECISIONS 2026-07-11 chose (b) omit).
-    static func orientationSummary(tiltDegrees tilt: Int, supportCm3 cm3: Double, supportLabel: String) -> String {
+    static func orientationSummary(tiltDegrees tilt: Int, supportCm3 cm3: Double,
+                                   supportLabel: String, remote: Bool = false) -> String {
         let base = tilt <= 6
             ? "Print upright — load paths align with the layer direction."
             : "Tilt \(tilt)° from vertical — load paths align with the layer direction."
+        // The orientation itself is in the report (valid for a remote run); only the
+        // support estimate is unavailable, so omit that clause rather than claim a
+        // support figure the worker didn't compute (097).
+        if remote { return base + " Support estimate computed on Mac." }
         let support = cm3 <= 0.05 ? "Minimal supports needed." : "Est. \(supportLabel) support under overhangs."
         return base + " " + support
     }

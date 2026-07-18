@@ -19,6 +19,11 @@ import TopOptKit
 import AppKit
 #endif
 
+// This suite HOSTS the real SwiftUI ResultsScreen in an AppKit window, so it is
+// macOS-only (the M7 test standard runs on `-destination platform=macOS`). Guarded
+// so the same test target also COMPILES for an iOS-simulator destination — needed
+// by the handoff-097 RemoteRunner E2E, which must run on the simulator (097).
+#if canImport(AppKit)
 @MainActor
 final class StreamedVariantVisibilityTests: XCTestCase {
 
@@ -209,3 +214,4 @@ final class StreamedVariantVisibilityTests: XCTestCase {
         XCTAssertEqual(run.phase, .succeeded)
     }
 }
+#endif  // canImport(AppKit)
