@@ -86,15 +86,15 @@ final class MeshExportTests: XCTestCase {
         // A 2×1×1 box is two unit cubes' worth of volume.
         let (verts, idx) = box(2, 1, 1)
         XCTAssertEqual(MeshExport.meshVolume(vertices: verts, indices: idx), 2.0, accuracy: 1e-5)
-        // Two DISJOINT unit cubes sum too (divergence theorem is additive over the
-        // closed surface): translate a second cube and concatenate.
+        // Disjoint closed components sum (divergence theorem is additive): the
+                // 2×1×1 box above plus a translated unit cube = 3.0 total.
         let (v2, i2) = box(1, 1, 1)
         var verts2 = v2
         for k in stride(from: 0, to: verts2.count, by: 3) { verts2[k] += 10 } // shift +x by 10
         let merged = verts + verts2
         let offset = Int32(verts.count / 3)
         let mergedIdx = idx + i2.map { $0 + offset }
-        XCTAssertEqual(MeshExport.meshVolume(vertices: merged, indices: mergedIdx), 2.0, accuracy: 1e-5)
+        XCTAssertEqual(MeshExport.meshVolume(vertices: merged, indices: mergedIdx), 3.0, accuracy: 1e-5)
     }
 
     func testVolumeIsOrientationIndependent() {
