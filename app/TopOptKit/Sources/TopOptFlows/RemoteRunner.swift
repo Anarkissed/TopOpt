@@ -28,6 +28,7 @@
 //     serialises a full result. This is called out at each empty field.
 
 import Foundation
+import TopOptKit
 #if canImport(os)
 import os
 #endif
