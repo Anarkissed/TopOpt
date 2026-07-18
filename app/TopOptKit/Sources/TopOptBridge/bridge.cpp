@@ -67,9 +67,14 @@ std::string grid_summary(const topopt::VoxelGrid& g) {
          std::to_string(g.solid_count());
 }
 
-// TriangleMesh -> ImportedMesh (flattened buffers + watertight flag).
+// TriangleMesh -> ImportedMesh (flattened buffers + watertight flag). `faces`
+// (optional) is the STEP's per-B-rep-face geometry (StepModel::faces, size
+// face_count); when present it is flattened into the additive per-face geometry
+// arrays so the app can draw clearance volumes from the exact axis/radius/normal
+// the core rasterizer uses. Null (STL) → those arrays stay empty.
 ImportedMesh to_imported(const topopt::TriangleMesh& m,
-                         const std::vector<int>* face_ids, int face_count) {
+                         const std::vector<int>* face_ids, int face_count,
+                         const std::vector<topopt::StepFaceInfo>* faces = nullptr) {
   ImportedMesh out;
   out.vertices.reserve(m.vertices.size() * 3);
   for (const auto& v : m.vertices) {
@@ -88,6 +93,38 @@ ImportedMesh to_imported(const topopt::TriangleMesh& m,
   out.triangle_count = static_cast<int32_t>(m.triangle_count());
   out.face_count = face_count;
   out.watertight = topopt::check_watertight(m).watertight;
+
+  // Additive per-face geometry (keep-clear v2). Kind int matches
+  // topopt::StepSurfaceKind (Plane=0, Cylinder=1, Other=2); vec3 fields are xyz
+  // triples indexed by face id. No behaviour change: purely extra output.
+  if (faces) {
+    const std::size_t n = faces->size();
+    out.face_kinds.reserve(n);
+    out.face_cyl_radius.reserve(n);
+    out.face_axis_point.reserve(n * 3);
+    out.face_axis_dir.reserve(n * 3);
+    out.face_plane_normal.reserve(n * 3);
+    out.face_plane_origin.reserve(n * 3);
+    auto push3 = [](std::vector<double>& dst, const topopt::Vec3& v) {
+      dst.push_back(v.x);
+      dst.push_back(v.y);
+      dst.push_back(v.z);
+    };
+    for (const auto& f : *faces) {
+      int kind = 2;  // Other
+      switch (f.kind) {
+        case topopt::StepSurfaceKind::Plane: kind = 0; break;
+        case topopt::StepSurfaceKind::Cylinder: kind = 1; break;
+        case topopt::StepSurfaceKind::Other: kind = 2; break;
+      }
+      out.face_kinds.push_back(kind);
+      out.face_cyl_radius.push_back(f.cylinder_radius_mm);
+      push3(out.face_axis_point, f.axis_point);
+      push3(out.face_axis_dir, f.axis_dir);
+      push3(out.face_plane_normal, f.plane_normal);
+      push3(out.face_plane_origin, f.plane_origin);
+    }
+  }
   return out;
 }
 
@@ -377,7 +414,8 @@ ImportedMesh import_step(const std::string& path, double linear_deflection,
     topopt::StepTessellation tess;
     if (linear_deflection > 0.0) tess.linear_deflection = linear_deflection;
     topopt::StepModel model = topopt::import_step_file(path, tess);
-    return to_imported(model.mesh, &model.triangle_face, model.face_count);
+    return to_imported(model.mesh, &model.triangle_face, model.face_count,
+                       &model.faces);
   } catch (const std::exception& e) {
     err.ok = false;
     err.message = e.what();

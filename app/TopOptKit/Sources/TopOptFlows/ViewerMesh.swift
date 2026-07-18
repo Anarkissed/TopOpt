@@ -13,6 +13,7 @@
 
 import Foundation
 import simd
+import TopOptKit
 
 /// Axis-aligned bounds of a mesh, plus the derived framing quantities the camera
 /// uses. `radius` is the bounding-sphere radius (half the diagonal), so a camera
@@ -237,6 +238,11 @@ public struct ViewerMesh {
     public let indices: [UInt32]
     /// Per-triangle B-rep face id (empty for STL; kept for M7.5 face selection).
     public let faceIDs: [Int32]
+    /// Per-B-rep-face EXACT surface geometry, indexed by face id (empty for STL or
+    /// an optimized-result mesh). Keep-clear v2: the axis/radius/normal the app
+    /// draws clearance volumes and derives "Auto · N mm" labels from — the SAME
+    /// numbers the core rasterizer freezes.
+    public let faceGeometry: [StepFaceGeometry]
     /// Axis-aligned bounds (drives camera framing).
     public let bounds: MeshBounds
     /// The flat-shaded render buffer (unshared vertices + per-face normals). This
@@ -262,11 +268,13 @@ public struct ViewerMesh {
     /// visible terrace. Smooth shading is display-only — geometry, mass, and the
     /// exported STL/3MF are unchanged.
     public init(vertices: [Float], indices: [Int32], faceIDs: [Int32],
+                faceGeometry: [StepFaceGeometry] = [],
                 smoothShaded: Bool = false) {
         self.positions = vertices
         self.normals = MeshGeometry.vertexNormals(vertices: vertices, indices: indices)
         self.indices = indices.map { UInt32(bitPattern: $0) }
         self.faceIDs = faceIDs
+        self.faceGeometry = faceGeometry
         self.bounds = MeshGeometry.bounds(vertices: vertices)
         self.flat = smoothShaded
             ? MeshGeometry.flatShadedSmooth(vertices: vertices, indices: indices)
@@ -341,5 +349,69 @@ public struct ViewerMesh {
             t += 3
         }
         return count > 0 ? sum / Float(count) : nil
+    }
+
+    /// The EXACT B-rep surface geometry of face `faceID` (keep-clear v2), or nil if
+    /// the face id is out of range / the mesh carries none (STL, optimized result).
+    public func faceGeometry(_ faceID: Int32) -> StepFaceGeometry? {
+        let i = Int(faceID)
+        guard i >= 0, i < faceGeometry.count else { return nil }
+        return faceGeometry[i]
+    }
+
+    /// The signed span of face `faceID`'s tessellated vertices projected onto the
+    /// ray through `axisPoint` along the UNIT `axisDir` (t=0 at axisPoint). This is
+    /// the bore's through-part axial extent the swept-cylinder clearance sweeps
+    /// from — computed from the SAME tessellation the core reads, so the app's
+    /// rendered cylinder length matches the run. Nil if the face has no triangles.
+    public func faceAxialSpan(_ faceID: Int32, axisPoint: SIMD3<Float>,
+                              axisDir: SIMD3<Float>) -> (lo: Float, hi: Float)? {
+        guard !faceIDs.isEmpty else { return nil }
+        let vc = vertexCount
+        let dir = simd_length(axisDir) > 1e-9 ? simd_normalize(axisDir) : axisDir
+        var lo = Float.greatestFiniteMagnitude
+        var hi = -Float.greatestFiniteMagnitude
+        var found = false
+        var t = 0
+        while t + 2 < indices.count {
+            let tri = t / 3
+            if tri < faceIDs.count, faceIDs[tri] == faceID {
+                for k in 0..<3 {
+                    let i = Int(indices[t + k])
+                    if i < vc {
+                        let p = SIMD3<Float>(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2])
+                        let s = simd_dot(p - axisPoint, dir)
+                        lo = Swift.min(lo, s); hi = Swift.max(hi, s); found = true
+                    }
+                }
+            }
+            t += 3
+        }
+        return found ? (lo, hi) : nil
+    }
+
+    /// The in-plane bounding rectangle (slab footprint) of planar face `faceID`,
+    /// from its tessellated corner positions projected onto `planeBasis(normal)` —
+    /// the same in-plane extent the core's bounded slab extrudes. Nil if the face
+    /// has no triangles / the mesh has no face ids.
+    public func facePlaneOutline(_ faceID: Int32, planeNormal: SIMD3<Float>,
+                                 planeOrigin: SIMD3<Float>) -> PlaneOutline? {
+        guard !faceIDs.isEmpty else { return nil }
+        let vc = vertexCount
+        var pts: [SIMD3<Float>] = []
+        var t = 0
+        while t + 2 < indices.count {
+            let tri = t / 3
+            if tri < faceIDs.count, faceIDs[tri] == faceID {
+                for k in 0..<3 {
+                    let i = Int(indices[t + k])
+                    if i < vc {
+                        pts.append(SIMD3<Float>(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]))
+                    }
+                }
+            }
+            t += 3
+        }
+        return PlaneOutline.fit(points: pts, normal: planeNormal, origin: planeOrigin)
     }
 }

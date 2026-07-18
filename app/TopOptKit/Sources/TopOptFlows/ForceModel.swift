@@ -64,15 +64,19 @@ public enum GroupKind: Equatable, Sendable, Codable {
     case anchor
     /// A loaded region with a direction + weight in kgf (design `kind:'load'`).
     case load(direction: LoadDirection, weightKg: Double)
-    /// An explicit "Keep clear" region on a planar face (handoff 100): a bounded
-    /// slab the optimizer may not grow material into. Bores anchored as fasteners
-    /// get an AUTOMATIC bolt clearance instead (design 095: auto for bores, explicit
-    /// for planes), so this role is only ever chosen for a mounting/planar face.
+    /// LEGACY (handoff 100): "Keep clear" used to be a competing role. Keep-clear v2
+    /// demotes it to an ATTRIBUTE (`KeepClearAffix`) that rides alongside a group's
+    /// real role, so this case is no longer produced — `makeClearance` is gone. It
+    /// stays in the enum ONLY so pre-v2 snapshots still DECODE; `ForceModel`'s
+    /// decoder migrates any `.clearance` group to a keep-clear-only affix
+    /// (role → pending, affix → on). Never set it directly.
     case clearance
 
     public var isPending: Bool { self == .pending }
     public var isAnchor: Bool { self == .anchor }
     public var isLoad: Bool { if case .load = self { return true }; return false }
+    /// LEGACY — true only for a not-yet-migrated pre-v2 snapshot value; new code
+    /// asks `ForceModel.keepClearIsOn(_:autoDefault:)` for the attribute instead.
     public var isClearance: Bool { self == .clearance }
 
     /// The load direction, or nil for pending/anchor.
@@ -106,6 +110,28 @@ public struct ClearanceOverride: Equatable, Sendable, Codable {
     public var isEmpty: Bool {
         concentricMarginMM == nil && axialClearanceMM == nil && slabDepthMM == nil
     }
+}
+
+/// A group's STORED "Keep clear" attribute choice, keyed by group id (keep-clear
+/// v2). Absence means "follow the default": an anchored bore auto-gets a bolt
+/// clearance (design 095), everything else is clear-free. Only a DEVIATION from
+/// that default is stored, so the wire path and empty-clearance parity are
+/// untouched — a group with no entry and no auto contributes nothing.
+public enum KeepClearAffix: String, Equatable, Sendable, Codable {
+    /// The user affixed "Keep clear" to this group (explicit ON) — a plane slab, a
+    /// standalone keep-clear-only selection, or an explicit add-on to an anchor/load.
+    case on
+    /// The user turned OFF an auto (anchored-bore) clearance — an explicit override
+    /// that SUPPRESSES that bore's automatic bolt clearance for the run.
+    case suppressed
+}
+
+/// Where an effectively-ON keep-clear came from, for the row's origin label.
+public enum KeepClearOrigin: Equatable, Sendable {
+    /// Derived from the anchored-bore rule (shown "Auto"); user can toggle it off.
+    case auto
+    /// The user affixed it explicitly.
+    case explicit
 }
 
 /// Which step the workspace is in. Setup shows the "which way is down?" prompt and
@@ -153,6 +179,13 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// Per-group clearance distance overrides (handoff 100). OPTIONAL so snapshots
     /// written before this field still decode (nil → no overrides, all suggestions).
     private var clearanceOverrides: [UUID: ClearanceOverride]? = nil
+
+    /// Per-group "Keep clear" attribute deviations from the default (keep-clear v2).
+    /// OPTIONAL + only-deviations-stored: a group absent here follows the auto rule
+    /// (anchored bore → on, else off). `.on` = affixed, `.suppressed` = auto turned
+    /// off. Snapshots written before v2 decode with this nil; the pre-v2 `.clearance`
+    /// ROLE is migrated into this map by the decoder.
+    private var keepClear: [UUID: KeepClearAffix]? = nil
 
     public init() {}
 
@@ -202,10 +235,59 @@ public struct ForceModel: Equatable, Sendable, Codable {
         kinds[id] = .load(direction: .gravity, weightKg: kg)
     }
 
-    /// Declare a group an explicit "Keep clear" planar-face clearance (handoff 100).
-    /// For a fastener hole, prefer Anchor — an anchored bore gets an automatic bolt
-    /// clearance; this role is for a mounting/planar face you want kept empty.
-    public mutating func makeClearance(_ id: UUID) { kinds[id] = .clearance }
+    // MARK: - keep-clear attribute (keep-clear v2)
+
+    /// The group's STORED keep-clear deviation (nil = follow the auto default).
+    public func keepClearAffix(for id: UUID) -> KeepClearAffix? { keepClear?[id] }
+
+    /// Whether "Keep clear" is EFFECTIVELY on for a group. `autoDefault` is whether
+    /// the anchored-bore rule would auto-clear it (the caller supplies it because it
+    /// needs the mesh geometry ForceModel does not hold). A stored `.on`/`.suppressed`
+    /// overrides the default; absence follows it.
+    public func keepClearIsOn(_ id: UUID, autoDefault: Bool) -> Bool {
+        switch keepClear?[id] {
+        case .on: return true
+        case .suppressed: return false
+        case nil: return autoDefault
+        }
+    }
+
+    /// The origin of an effectively-ON keep-clear: `.auto` when it comes from the
+    /// default rule (no stored deviation), `.explicit` when the user affixed it.
+    public func keepClearOrigin(_ id: UUID) -> KeepClearOrigin {
+        keepClear?[id] == nil ? .auto : .explicit
+    }
+
+    /// Store a keep-clear deviation for a group (`.on` affix, `.suppressed` override),
+    /// or pass nil to REVERT to the auto default. Callers pick the value by comparing
+    /// the desired effective state with `autoDefault` so only true deviations persist.
+    public mutating func setKeepClearAffix(_ id: UUID, _ affix: KeepClearAffix?) {
+        var map = keepClear ?? [:]
+        if let a = affix { map[id] = a } else { map[id] = nil }
+        keepClear = map.isEmpty ? nil : map
+    }
+
+    /// Toggle a group's EFFECTIVE keep-clear to `on`, given whether the auto rule
+    /// applies. Stores the minimal deviation: a choice matching the default clears
+    /// the override (so the row reverts to "Auto"), a choice against it stores `.on`
+    /// or `.suppressed`. This is the single control the affix toggle drives.
+    public mutating func setKeepClear(_ id: UUID, on: Bool, autoDefault: Bool) {
+        if on == autoDefault { setKeepClearAffix(id, nil) }
+        else { setKeepClearAffix(id, on ? .on : .suppressed) }
+    }
+
+    /// Groups the user has EXPLICITLY affixed keep-clear to (`.on`). Distinct from the
+    /// effective count (which needs geometry for the auto bores — see ProjectModel).
+    public func explicitKeepClearCount(in groups: [SelectionGroup]) -> Int {
+        groups.filter { keepClear?[$0.id] == .on }.count
+    }
+
+    /// Whether a group is a keep-clear-ONLY selection: no anchor/load role, but the
+    /// keep-clear attribute affixed. Such a group is a COMPLETE declaration (it does
+    /// not block Optimize the way a bare pending group does).
+    public func isKeepClearOnly(_ id: UUID) -> Bool {
+        kind(for: id).isPending && keepClear?[id] == .on
+    }
 
     // MARK: - clearance overrides (handoff 100)
 
@@ -249,10 +331,11 @@ public struct ForceModel: Equatable, Sendable, Codable {
         kinds[id] = .load(direction: dir, weightKg: clampWeight(kg))
     }
 
-    /// Forget a removed group's role (and any clearance override).
+    /// Forget a removed group's role (and any clearance override / keep-clear affix).
     public mutating func clearKind(_ id: UUID) {
         kinds[id] = nil
         if var map = clearanceOverrides { map[id] = nil; clearanceOverrides = map.isEmpty ? nil : map }
+        if var map = keepClear { map[id] = nil; keepClear = map.isEmpty ? nil : map }
     }
 
     /// Drop role entries for groups that no longer exist (call after the selection
@@ -263,6 +346,10 @@ public struct ForceModel: Equatable, Sendable, Codable {
         if let map = clearanceOverrides {
             let pruned = map.filter { live.contains($0.key) }
             clearanceOverrides = pruned.isEmpty ? nil : pruned
+        }
+        if let map = keepClear {
+            let pruned = map.filter { live.contains($0.key) }
+            keepClear = pruned.isEmpty ? nil : pruned
         }
     }
 
@@ -350,9 +437,11 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public func loadCount(in groups: [SelectionGroup]) -> Int {
         groups.filter { kind(for: $0.id).isLoad }.count
     }
-    /// Any group still awaiting an Anchor/Load decision (proto `kind==='pending'`).
+    /// Any group still awaiting a decision: a bare pending group with NO keep-clear
+    /// affix (a keep-clear-only selection is a complete declaration and never blocks
+    /// Optimize — keep-clear v2).
     public func hasPending(in groups: [SelectionGroup]) -> Bool {
-        groups.contains { kind(for: $0.id).isPending }
+        groups.contains { kind(for: $0.id).isPending && !isKeepClearOnly($0.id) }
     }
     /// Total load weight across all load groups, in kgf.
     public func totalLoadKg(in groups: [SelectionGroup]) -> Double {
@@ -397,19 +486,60 @@ public struct ForceModel: Equatable, Sendable, Codable {
         switch kind(for: id) {
         case .anchor: return "Anchor"
         case let .load(direction, kg): return "\(formattedWeight(kg: kg)) · \(direction.rawValue)"
-        case .clearance: return "Keep clear"
-        case .pending: return "Pending…"
+        case .clearance: return "Keep clear"  // legacy value; migrated away on decode
+        case .pending:
+            // A keep-clear-only selection reads as "Keep clear", not "Pending…".
+            return keepClear?[id] == .on ? "Keep clear" : "Pending…"
         }
-    }
-
-    /// Groups declared an explicit "Keep clear" clearance (handoff 100).
-    public func clearanceCount(in groups: [SelectionGroup]) -> Int {
-        groups.filter { kind(for: $0.id).isClearance }.count
     }
 
     /// The tint a group's faces should render with in the viewer: anchor green for
     /// anchors (proto `a.color=ANCHOR_C`), otherwise the group's own palette colour.
     public func tint(for group: SelectionGroup) -> RGBA {
         kind(for: group.id).isAnchor ? Self.anchorColor : group.color
+    }
+}
+
+// MARK: - Codable (with pre-v2 keep-clear-role migration)
+
+extension ForceModel {
+    private enum CodingKeys: String, CodingKey {
+        // Keys match the pre-v2 synthesized coder's property names, so on-disk
+        // snapshots keep decoding; `keepClear` is the only new (optional) key.
+        case gravity, gravityFace, phase, unit, kinds, clearanceOverrides, keepClear
+    }
+
+    public init(from decoder: Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        gravity = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .gravity)
+        gravityFace = try c.decodeIfPresent(FaceID.self, forKey: .gravityFace)
+        phase = try c.decodeIfPresent(GravityPhase.self, forKey: .phase) ?? .setup
+        unit = try c.decodeIfPresent(WeightUnit.self, forKey: .unit) ?? .kg
+        var decodedKinds = try c.decodeIfPresent([UUID: GroupKind].self, forKey: .kinds) ?? [:]
+        clearanceOverrides = try c.decodeIfPresent([UUID: ClearanceOverride].self, forKey: .clearanceOverrides)
+        var affixes = try c.decodeIfPresent([UUID: KeepClearAffix].self, forKey: .keepClear) ?? [:]
+
+        // MIGRATION: a pre-v2 `.clearance` ROLE becomes a keep-clear-only affix — the
+        // group loses its (competing) role and gains the attribute (role → pending,
+        // affix → on). New snapshots never carry `.clearance`, so this is a no-op
+        // for them and keep-clear-v2 behaviour is preserved end-to-end.
+        for (id, kind) in decodedKinds where kind.isClearance {
+            decodedKinds[id] = nil
+            if affixes[id] == nil { affixes[id] = .on }
+        }
+        kinds = decodedKinds
+        keepClear = affixes.isEmpty ? nil : affixes
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(gravity, forKey: .gravity)
+        try c.encodeIfPresent(gravityFace, forKey: .gravityFace)
+        try c.encode(phase, forKey: .phase)
+        try c.encode(unit, forKey: .unit)
+        try c.encode(kinds, forKey: .kinds)
+        try c.encodeIfPresent(clearanceOverrides, forKey: .clearanceOverrides)
+        try c.encodeIfPresent(keepClear, forKey: .keepClear)
     }
 }

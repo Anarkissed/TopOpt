@@ -26,6 +26,45 @@ public struct Material: Equatable, Sendable {
     public let family: String
 }
 
+/// The EXACT B-rep surface geometry of one STEP face (keep-clear v2), the same
+/// `topopt::StepFaceInfo` numbers the core clearance rasterizer freezes. The app
+/// renders clearance volumes and derives "Auto · N mm" labels from THIS — never
+/// an app-side tessellation fit, which would draw a different object than the run
+/// actually keeps clear. All lengths mm, in the model/voxel frame.
+public struct StepFaceGeometry: Equatable, Sendable, Codable {
+    /// The face's surface class (mirrors `topopt::StepSurfaceKind`).
+    public enum Kind: Int, Equatable, Sendable, Codable {
+        case plane = 0
+        case cylinder = 1
+        case other = 2
+    }
+    public let kind: Kind
+    /// Cylinder radius (mm); meaningful iff `kind == .cylinder`.
+    public let cylinderRadiusMM: Double
+    /// A point on the cylinder axis, and the UNIT axis direction (both zero unless
+    /// `kind == .cylinder`). A swept-cylinder bolt clearance runs along this axis.
+    public let axisPoint: SIMD3<Double>
+    public let axisDir: SIMD3<Double>
+    /// The OUTWARD unit plane normal and a point on the plane (both zero unless
+    /// `kind == .plane`). A bounded-slab face clearance extrudes along the normal.
+    public let planeNormal: SIMD3<Double>
+    public let planeOrigin: SIMD3<Double>
+    public init(kind: Kind, cylinderRadiusMM: Double = 0,
+                axisPoint: SIMD3<Double> = .zero, axisDir: SIMD3<Double> = .zero,
+                planeNormal: SIMD3<Double> = .zero, planeOrigin: SIMD3<Double> = .zero) {
+        self.kind = kind
+        self.cylinderRadiusMM = cylinderRadiusMM
+        self.axisPoint = axisPoint
+        self.axisDir = axisDir
+        self.planeNormal = planeNormal
+        self.planeOrigin = planeOrigin
+    }
+    /// A bore face the app can build a swept-cylinder clearance from.
+    public var isCylinder: Bool { kind == .cylinder && cylinderRadiusMM > 0 }
+    /// A planar face the app can build a bounded slab from.
+    public var isPlane: Bool { kind == .plane }
+}
+
 /// An imported triangle mesh, laid out for a Metal vertex/index buffer
 /// (ROADMAP M7.4). `vertices` is flattened xyz; `indices` is flattened triangle
 /// corners; `faceIDs` is the per-triangle B-rep face id for STEP (empty for STL).
@@ -37,6 +76,22 @@ public struct ImportedMesh {
     public let triangleCount: Int
     public let faceCount: Int
     public let watertight: Bool
+    /// Per-B-rep-face exact surface geometry, indexed by face id (size
+    /// `faceCount`; empty for STL). Keep-clear v2: lets the app draw clearance
+    /// volumes from the same axis/radius/normal the core uses.
+    public let faceGeometry: [StepFaceGeometry]
+    public init(vertices: [Float], indices: [Int32], faceIDs: [Int32],
+                vertexCount: Int, triangleCount: Int, faceCount: Int,
+                watertight: Bool, faceGeometry: [StepFaceGeometry] = []) {
+        self.vertices = vertices
+        self.indices = indices
+        self.faceIDs = faceIDs
+        self.vertexCount = vertexCount
+        self.triangleCount = triangleCount
+        self.faceCount = faceCount
+        self.watertight = watertight
+        self.faceGeometry = faceGeometry
+    }
 }
 
 /// A voxel-grid summary (ROADMAP M1.5).
@@ -617,7 +672,38 @@ public enum TopOptKit {
                      vertexCount: Int(raw.vertex_count),
                      triangleCount: Int(raw.triangle_count),
                      faceCount: Int(raw.face_count),
-                     watertight: raw.watertight)
+                     watertight: raw.watertight,
+                     faceGeometry: convertFaceGeometry(raw))
+    }
+
+    /// Rebuild the per-face geometry (keep-clear v2) from the bridge's flat arrays
+    /// (kinds size faceCount, vec3 fields 3×faceCount). Empty for STL. Defensive on
+    /// length so a short/absent array degrades to `.other` rather than crashing.
+    private static func convertFaceGeometry(_ raw: topoptbridge.ImportedMesh) -> [StepFaceGeometry] {
+        let count = Int(raw.face_count)
+        guard count > 0, raw.face_kinds.count == count else { return [] }
+        let kinds = Array(raw.face_kinds)
+        let radius = Array(raw.face_cyl_radius)
+        let axisPt = Array(raw.face_axis_point)
+        let axisDr = Array(raw.face_axis_dir)
+        let planeN = Array(raw.face_plane_normal)
+        let planeO = Array(raw.face_plane_origin)
+        func vec3(_ a: [Double], _ f: Int) -> SIMD3<Double> {
+            let b = f * 3
+            guard b + 2 < a.count else { return .zero }
+            return SIMD3<Double>(a[b], a[b + 1], a[b + 2])
+        }
+        var out: [StepFaceGeometry] = []
+        out.reserveCapacity(count)
+        for f in 0..<count {
+            let kind = StepFaceGeometry.Kind(rawValue: Int(kinds[f])) ?? .other
+            out.append(StepFaceGeometry(
+                kind: kind,
+                cylinderRadiusMM: f < radius.count ? radius[f] : 0,
+                axisPoint: vec3(axisPt, f), axisDir: vec3(axisDr, f),
+                planeNormal: vec3(planeN, f), planeOrigin: vec3(planeO, f)))
+        }
+        return out
     }
 
     private static func throwIfFailed(_ err: topoptbridge.BridgeError) throws {
