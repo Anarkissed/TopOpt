@@ -58,6 +58,27 @@ struct ImportedMesh {
   int32_t triangle_count = 0;
   int32_t face_count = 0;   // B-rep faces (STEP); 0 for STL
   bool watertight = false;  // check_watertight on the imported mesh
+
+  // Handoff (keep-clear v2) — per-B-rep-FACE surface geometry, ADDITIVE: the
+  // EXACT numbers topopt::StepFaceInfo captured, so the app can render a
+  // clearance volume from the SAME axis/radius/normal the core rasterizer
+  // freezes (never an app-side tessellation fit that draws a different object).
+  // Flat arrays INDEXED BY FACE ID (parallel to face_ids' values), size
+  // face_count for the vec1 arrays and 3*face_count for the vec3 arrays (xyz
+  // triples). Empty for STL (no B-rep). The 0-sentinel wire protocol to the core
+  // is UNCHANGED — this only lets the app DISPLAY real numbers and draw volumes.
+  //   face_kinds[f]        0 = Plane, 1 = Cylinder, 2 = Other (topopt::StepSurfaceKind)
+  //   face_cyl_radius[f]   cylinder radius (mm); 0 unless kind == Cylinder
+  //   face_axis_point[3f..] point on the cylinder axis (mm); (0,0,0) unless Cylinder
+  //   face_axis_dir[3f..]   UNIT cylinder axis direction; (0,0,0) unless Cylinder
+  //   face_plane_normal[3f..] OUTWARD unit plane normal; (0,0,0) unless Plane
+  //   face_plane_origin[3f..] point on the plane (mm); (0,0,0) unless Plane
+  std::vector<int32_t> face_kinds;
+  std::vector<double> face_cyl_radius;
+  std::vector<double> face_axis_point;
+  std::vector<double> face_axis_dir;
+  std::vector<double> face_plane_normal;
+  std::vector<double> face_plane_origin;
 };
 
 // Import an STL (ASCII or binary, auto-detected). Geometry only — does NOT

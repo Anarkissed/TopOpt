@@ -105,7 +105,8 @@ public final class ProjectModel: ObservableObject {
         self.importedMesh = importedMesh
         self.paramsLocked = paramsLocked
         if let m = importedMesh {
-            self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices, faceIDs: m.faceIDs)
+            self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices,
+                                         faceIDs: m.faceIDs, faceGeometry: m.faceGeometry)
         }
         self.run = run ?? ProjectModel.makeRun()
         // The two initial value-replays fire here during init, before any view
@@ -171,14 +172,21 @@ public final class ProjectModel: ObservableObject {
         guard let mesh = viewerMesh else { return [] }
         var specs: [TopOptKit.ClearanceSpec] = []
         for g in selection.groups {
-            let k = force.kind(for: g.id)
+            // Keep-clear v2: the attribute, not a role. A group clears if its keep-clear
+            // is EFFECTIVELY on — either the anchored-bore auto rule, or an explicit
+            // affix. Suppressing an auto bore (affix `.suppressed`) drops it here — that
+            // is the auto-suppression override, "sent as such" by omission (the wire
+            // format is unchanged; a clearance the run must skip is simply not listed).
+            let auto = autoClearanceApplies(g, in: mesh)
+            guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
+            // An EXPLICIT affix keeps every face of the group clear (bore → bolt,
+            // plane → slab); the auto default affixes ONLY the bore faces (fastener
+            // holes), never a plane, exactly as handoff 100 shipped.
+            let explicit = force.keepClearAffix(for: g.id) == .on
             let ov = force.clearanceOverride(for: g.id)
-            guard k.isAnchor || k.isClearance else { continue }
             for f in g.faces {
                 let bore = FaceTopology.isCurved(f, in: mesh)
-                // Anchor groups contribute clearance ONLY for their bore faces (the
-                // fastener holes); a clearance group contributes for every face.
-                if k.isAnchor && !bore { continue }
+                if !explicit && !bore { continue }
                 if bore {
                     specs.append(.init(faceID: Int(f), kind: .bolt,
                                        concentricMarginMM: ov.concentricMarginMM ?? 0,
@@ -190,6 +198,78 @@ public final class ProjectModel: ObservableObject {
             }
         }
         return specs
+    }
+
+    /// Whether the anchored-bore AUTO clearance rule applies to a group (keep-clear
+    /// v2): an anchor group with at least one bore (curved) face — a fastener hole
+    /// (design 095). This is the default the keep-clear attribute deviates from.
+    public func autoClearanceApplies(_ g: SelectionGroup, in mesh: ViewerMesh) -> Bool {
+        guard force.kind(for: g.id).isAnchor else { return false }
+        return g.faces.contains { FaceTopology.isCurved($0, in: mesh) }
+    }
+
+    /// Whether "Keep clear" is effectively on for a group given the current mesh —
+    /// the single source the row control + the rendered volume both read.
+    public func keepClearIsOn(_ g: SelectionGroup) -> Bool {
+        guard let mesh = viewerMesh else { return false }
+        return force.keepClearIsOn(g.id, autoDefault: autoClearanceApplies(g, in: mesh))
+    }
+
+    /// Whether the anchored-bore auto rule applies to a group (the default the affix
+    /// toggle deviates from) — the mesh-aware convenience the UI passes to
+    /// `ForceModel.setKeepClear(_:on:autoDefault:)`.
+    public func keepClearAutoDefault(_ g: SelectionGroup) -> Bool {
+        guard let mesh = viewerMesh else { return false }
+        return autoClearanceApplies(g, in: mesh)
+    }
+
+    /// The TRUE 3D clearance volumes to render (keep-clear v2 Part 3), one per cleared
+    /// face, tagged with the owning group so the viewport can brighten the selected
+    /// one. Built from the EXACT bridge geometry + the SAME resolved distances the run
+    /// freezes: an un-overridden distance resolves to the Auto suggestion (the real mm
+    /// the core would derive), never 0, so the drawn cylinder/slab is the run's region.
+    /// A bore whose B-rep face is not actually a cylinder yields a `.degenerate`
+    /// volume (rendered hollow/dashed) — the same safe no-op the core produces.
+    public func clearanceVolumes() -> [(groupID: UUID, volume: ClearanceVolume)] {
+        guard let mesh = viewerMesh else { return [] }
+        var out: [(UUID, ClearanceVolume)] = []
+        for g in selection.groups {
+            let auto = autoClearanceApplies(g, in: mesh)
+            guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
+            let explicit = force.keepClearAffix(for: g.id) == .on
+            let ov = force.clearanceOverride(for: g.id)
+            for f in g.faces {
+                let bore = FaceTopology.isCurved(f, in: mesh)
+                if !explicit && !bore { continue }
+                guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
+                if bore {
+                    let r = geo.cylinderRadiusMM
+                    let margin = ov.concentricMarginMM ?? ClearanceSuggestion.boltMarginMM(boreRadiusMM: r)
+                    let axial = ov.axialClearanceMM ?? ClearanceSuggestion.boltAxialMM(boreRadiusMM: r)
+                    let span = mesh.faceAxialSpan(f, axisPoint: SIMD3<Float>(geo.axisPoint),
+                                                  axisDir: SIMD3<Float>(geo.axisDir))
+                    out.append((g.id, .bolt(faceID: Int(f), geometry: geo, axialSpan: span,
+                                            marginMM: margin, axialMM: axial)))
+                } else {
+                    let depth = ov.slabDepthMM ?? ClearanceSuggestion.faceSlabDepthMM
+                    let outline = mesh.facePlaneOutline(f, planeNormal: SIMD3<Float>(geo.planeNormal),
+                                                        planeOrigin: SIMD3<Float>(geo.planeOrigin))
+                    out.append((g.id, .slab(faceID: Int(f), geometry: geo, outline: outline, depthMM: depth)))
+                }
+            }
+        }
+        return out
+    }
+
+    /// The representative bore radius (mm) of a group — the first cylindrical face's
+    /// EXACT radius — for its "Auto · N mm" labels. Nil if the group has no bore
+    /// geometry (STL, or a non-cylindrical selection).
+    public func clearanceBoreRadius(for g: SelectionGroup) -> Double? {
+        guard let mesh = viewerMesh else { return nil }
+        for f in g.faces {
+            if let geo = mesh.faceGeometry(f), geo.isCylinder { return geo.cylinderRadiusMM }
+        }
+        return nil
     }
 
     /// A group's model-space outward normal (mean of its faces' normals), or nil.

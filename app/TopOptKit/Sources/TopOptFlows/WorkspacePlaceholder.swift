@@ -159,7 +159,11 @@ public struct WorkspacePlaceholder: View {
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn.
                           designBox: showDesignGizmo ? project.designBox.box : nil,
-                          keepOutBoxes: showDesignGizmo ? project.designBox.keepOuts : [])
+                          keepOutBoxes: showDesignGizmo ? project.designBox.keepOuts : [],
+                          // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
+                          // whenever gravity is set (edit phase) so the user can SEE and
+                          // reason about every keep-out; the selected group's volume brightens.
+                          clearanceVolumes: force.phase == .edit ? clearanceRenderItems : [])
                 .ignoresSafeArea()
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
@@ -329,6 +333,16 @@ public struct WorkspacePlaceholder: View {
             for f in g.faces { tints[f] = v }
         }
         return tints
+    }
+
+    /// The clearance volumes to render (keep-clear v2 Part 3), each tagged whether its
+    /// group is the ACTIVE selection so the viewport brightens it. Built from the same
+    /// resolved geometry the run freezes (`ProjectModel.clearanceVolumes`).
+    private var clearanceRenderItems: [ClearanceRenderItem] {
+        let active = selection.activeGroupID
+        return project.clearanceVolumes().map {
+            ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active)
+        }
     }
 
     // MARK: tap routing (D1/D2)
@@ -862,7 +876,10 @@ public struct WorkspacePlaceholder: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                if !selectionsCollapsed { unitToggle }
+                if !selectionsCollapsed {
+                    keepClearQuickAction
+                    unitToggle
+                }
             }
             .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
 
@@ -895,6 +912,29 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         .padding(.leading, DS.Space.xl4)
         .padding(.bottom, 96)
+    }
+
+    /// The Selections-header "Keep clear" quick-action (keep-clear v2): affixes /
+    /// removes the keep-clear attribute on the ACTIVE group, alongside the role
+    /// actions the in-scene chip offers. Shown only when a group is active on a
+    /// face-selectable (STEP) part.
+    @ViewBuilder private var keepClearQuickAction: some View {
+        if let g = activeGroup, let mesh = viewerMesh, !mesh.faceGeometry.isEmpty {
+            let on = project.keepClearIsOn(g)
+            Button {
+                force.setKeepClear(g.id, on: !on, autoDefault: project.keepClearAutoDefault(g))
+            } label: {
+                HStack(spacing: DS.Space.xs) {
+                    Image(systemName: "nosign").font(.system(size: 11, weight: .bold))
+                    Text("Keep clear").dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+                }
+                .foregroundStyle(on ? Self.clearanceTint : DS.Color.textTertiary.color)
+                .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
+                .background(Capsule().fill(on ? Self.clearanceTint.opacity(0.18) : DS.Color.fillSelected.color))
+            }
+            .buttonStyle(.plain)
+            .help("Toggle Keep clear on the active selection")
+        }
     }
 
     private var unitToggle: some View {
@@ -946,9 +986,12 @@ public struct WorkspacePlaceholder: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: DS.TypeScale.callout.size, weight: .semibold))
                     .foregroundStyle(DS.Color.textPrimary.color)
-                Text(force.panelKindLabel(for: g.id))
-                    .dsStyle(DS.TypeScale.footnote)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
+                HStack(spacing: DS.Space.s) {
+                    Text(force.panelKindLabel(for: g.id))
+                        .dsStyle(DS.TypeScale.footnote)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                    keepClearAffixToggle(g)
+                }
                 clearanceEditor(g)
                 if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
                     // Sub-voxel load face (099 D2): the load may tag no voxels at
@@ -984,73 +1027,134 @@ public struct WorkspacePlaceholder: View {
                 set: { selection.rename(g.id, to: $0) })
     }
 
-    /// Whether a group contributes a bolt clearance (has a curved/bore face) and/or a
-    /// face-slab clearance (has a planar face while explicitly Keep-clear). Handoff 100.
+    /// Whether a group's EFFECTIVE clearance contributes a bolt (bore) region and/or a
+    /// slab (planar-face) region — the fields the editor shows. Keep-clear v2: driven
+    /// by the attribute, not a role. The auto rule affixes only bores; an EXPLICIT
+    /// affix affixes every face (bore → bolt, plane → slab).
     private func groupClearanceShape(_ g: SelectionGroup) -> (bolt: Bool, slab: Bool) {
-        guard let mesh = viewerMesh else { return (false, false) }
-        let k = force.kind(for: g.id)
-        guard k.isAnchor || k.isClearance else { return (false, false) }
+        guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return (false, false) }
+        let explicit = force.keepClearAffix(for: g.id) == .on
         var bolt = false, slab = false
         for f in g.faces {
             if FaceTopology.isCurved(f, in: mesh) { bolt = true }
-            else if k.isClearance { slab = true }   // anchor groups only clear bores
+            else if explicit { slab = true }   // auto affixes only bores
         }
         return (bolt, slab)
     }
 
-    /// The editable clearance numbers for a group that produces one (handoff 100):
-    /// bolt margin + axial length for an anchored/keep-clear bore, slab depth for a
-    /// keep-clear planar face. 0 shows/means "auto" (the core's geometry-derived
-    /// suggestion) — an honest label, not a fabricated mm. The number the user types
-    /// is exactly the number the run uses.
+    /// The editable clearance numbers for a group whose keep-clear is on (keep-clear
+    /// v2): bolt margin + axial for a bore, slab depth for a planar face. A field left
+    /// at "Auto" shows the REAL geometry-derived suggestion (e.g. "Auto · 2.5 mm"),
+    /// now that the bore radius crosses the bridge — no longer the bare word "auto".
+    /// The 0-sentinel wire path is unchanged: an Auto field still sends 0 and the core
+    /// re-derives it; any number the user types is exactly the number the run uses.
     @ViewBuilder private func clearanceEditor(_ g: SelectionGroup) -> some View {
         let shape = groupClearanceShape(g)
         if shape.bolt || shape.slab {
             let ov = force.clearanceOverride(for: g.id)
+            let r = project.clearanceBoreRadius(for: g)
             HStack(spacing: DS.Space.m) {
                 Image(systemName: "nosign").font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .foregroundStyle(Self.clearanceTint)
                 if shape.bolt {
-                    clearanceField("margin", ov.concentricMarginMM) {
+                    clearanceField("margin", ov.concentricMarginMM,
+                                   auto: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) }) {
                         force.setClearanceMargin(g.id, mm: $0)
                     }
-                    clearanceField("axial", ov.axialClearanceMM) {
+                    clearanceField("axial", ov.axialClearanceMM,
+                                   auto: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) }) {
                         force.setClearanceAxial(g.id, mm: $0)
                     }
                 }
                 if shape.slab {
-                    clearanceField("slab", ov.slabDepthMM) {
+                    clearanceField("slab", ov.slabDepthMM,
+                                   auto: ClearanceSuggestion.faceSlabDepthMM) {
                         force.setClearanceSlab(g.id, mm: $0)
                     }
                 }
-                Text("mm").dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
             }
         }
     }
 
-    /// One clearance mm field. Empty text = nil = "auto" (the suggestion). Commits on
-    /// submit; a non-positive / unparseable value reverts to auto.
-    private func clearanceField(_ label: String, _ value: Double?,
-                                _ set: @escaping (Double?) -> Void) -> some View {
+    /// One clearance mm field. When un-overridden it reads "margin · Auto · N mm" with
+    /// the REAL derived suggestion as the (dimmed) placeholder; typing a value flips it
+    /// to the explicit number, and the ↺ reset (shown once explicit) restores the Auto
+    /// sentinel. A single real TextField (placeholder = the Auto number) so the tap
+    /// target is unambiguous. Commits on change; a non-positive value reverts to Auto.
+    @ViewBuilder private func clearanceField(_ label: String, _ value: Double?, auto: Double?,
+                                             _ set: @escaping (Double?) -> Void) -> some View {
+        let isAuto = value == nil
         let text = Binding<String>(
             get: { value.map { String(format: "%g", $0) } ?? "" },
             set: { s in
                 let t = s.trimmingCharacters(in: .whitespaces)
                 if let v = Double(t), v > 0 { set(v) } else if t.isEmpty { set(nil) }
             })
-        return HStack(spacing: 2) {
+        HStack(spacing: 3) {
             Text(label).dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(DS.Color.textQuaternary.color)
-            TextField("auto", text: text)
+            if isAuto {
+                Text("Auto ·").dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                    .foregroundStyle(Self.clearanceTint)
+            }
+            TextField(Self.mmString(auto), text: text)     // placeholder = the Auto number
                 .textFieldStyle(.plain)
-                .frame(width: 34)
+                .frame(width: 32)
                 .multilineTextAlignment(.center)
                 .font(.system(size: DS.TypeScale.caption.size, weight: .semibold))
-                .foregroundStyle(DS.Color.textSecondary.color)
+                .foregroundStyle((isAuto ? DS.Color.textQuaternary : DS.Color.textSecondary).color)
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(DS.Color.strokeSubtle.color).frame(height: 1)
                 }
+            Text("mm").dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+            if !isAuto {
+                Button { set(nil) } label: {               // reset to Auto
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// The clearance-volume red, matched to the viewport render (MetalMeshView keep-out).
+    static let clearanceTint = Color(red: 0.95, green: 0.42, blue: 0.38)
+
+    /// Format an Auto suggestion mm compactly ("2.5"), or "—" if unknown (no bore geo).
+    private static func mmString(_ v: Double?) -> String {
+        guard let v = v else { return "—" }
+        return String(format: "%g", (v * 100).rounded() / 100)
+    }
+
+    /// The row's keep-clear AFFIX control (keep-clear v2): a nosign toggle in the same
+    /// row as the group's role. It reads ON for an auto-clearanced anchored bore
+    /// (labelled "Auto") or an explicit affix; tapping toggles it. Turning OFF an auto
+    /// bore SUPPRESSES that bore's automatic clearance for the run (an explicit
+    /// override). Hidden for a part with no B-rep faces (STL — nothing to keep clear).
+    @ViewBuilder private func keepClearAffixToggle(_ g: SelectionGroup) -> some View {
+        if let mesh = viewerMesh, !mesh.faceGeometry.isEmpty {
+            let on = project.keepClearIsOn(g)
+            let isAuto = on && force.keepClearOrigin(g.id) == .auto
+            Button {
+                force.setKeepClear(g.id, on: !on, autoDefault: project.keepClearAutoDefault(g))
+            } label: {
+                HStack(spacing: 2) {
+                    Image(systemName: "nosign").font(.system(size: 10, weight: .bold))
+                    if isAuto {
+                        Text("Auto").dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                    }
+                }
+                .foregroundStyle(on ? Self.clearanceTint : DS.Color.textQuaternary.color)
+                .padding(.vertical, 2).padding(.horizontal, on ? 6 : 4)
+                .background(Capsule().fill(on ? Self.clearanceTint.opacity(0.16) : Color.clear)
+                    .overlay(Capsule().strokeBorder(
+                        on ? Color.clear : DS.Color.strokeSubtle.color, lineWidth: 1)))
+            }
+            .buttonStyle(.plain)
+            .help(on ? "Keep clear is on — the optimizer won’t grow material in this volume. Tap to turn it off."
+                     : "Keep clear — reserve this volume as empty for a bolt head / washer / mating face.")
         }
     }
 
@@ -1183,17 +1287,18 @@ public struct WorkspacePlaceholder: View {
                     .background(Capsule().fill(DS.Color.accent.color))
             }
             .buttonStyle(.plain)
-            // Handoff 100 — "Keep clear": reserve the space in front of this face as
-            // empty (a bounded slab). An anchored BORE gets a bolt clearance
-            // automatically; this is the explicit opt-in for a planar mounting face.
+            // Keep-clear v2 — "Keep clear" is an ATTRIBUTE, not a role: on a bare face
+            // it creates a keep-clear-only selection; on a face that already has a role
+            // it AFFIXES (the row control toggles it there). Either way it never
+            // changes the group's role — `setKeepClearAffix` sets the attribute only.
             Button {
-                force.makeClearance(g.id)
+                force.setKeepClearAffix(g.id, .on)
                 selection.clearActive()
-                model.toast = "Keep clear — the optimizer won't grow material here"
+                model.toast = "Keep clear — the optimizer won't grow material in this volume"
             } label: {
                 chipLabel("nosign", "Keep clear")
-                    .foregroundStyle(DS.Color.textSecondary.color)
-                    .background(Capsule().fill(DS.Color.fillSelected.color))
+                    .foregroundStyle(Self.clearanceTint)
+                    .background(Capsule().fill(Self.clearanceTint.opacity(0.16)))
             }
             .buttonStyle(.plain)
         }

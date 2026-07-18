@@ -328,6 +328,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var designBoxLineBuffer: MTLBuffer?
     private var designBoxLineCount = 0
 
+    // Keep-clear v2 (Part 3): the TRUE clearance volumes — swept cylinders (bolt) and
+    // bounded slabs (face) — as translucent red faces + bright edges, in MODEL space so
+    // they settle with the part. Same alpha-blended `groundPipeline` (position + rgba,
+    // stride 7) under the MESH's mvp as the design box. A degenerate (no-op) region
+    // draws edges only (hollow) — the picture must not promise what the run won't do.
+    private var clearanceFaceBuffer: MTLBuffer?
+    private var clearanceFaceCount = 0
+    private var clearanceLineBuffer: MTLBuffer?
+    private var clearanceLineCount = 0
+
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
     static let idFormat: MTLPixelFormat = .r32Uint
@@ -782,6 +792,100 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// Tessellate the keep-clear v2 clearance volumes (Part 3) into translucent red
+    /// faces + bright edges, in MODEL space (settles with the part under uniforms.mvp).
+    /// A `.cylinder` becomes a capped tube of radius = bore + margin over [tLo, tHi];
+    /// a `.slab` becomes the outline rectangle extruded by depth; a `.degenerate`
+    /// region draws NOTHING filled — an honest hollow. Selected volumes brighten.
+    func setClearanceVolumes(_ items: [ClearanceRenderItem]) {
+        clearanceFaceBuffer = nil; clearanceFaceCount = 0
+        clearanceLineBuffer = nil; clearanceLineCount = 0
+        guard !items.isEmpty else { return }
+
+        // Base clearance red (matches the SwiftUI affix/label tint). ~50% fill (task),
+        // brighter when the group is selected; edges near-opaque so the shape reads.
+        let baseRGB = SIMD3<Float>(0.95, 0.38, 0.36)
+        var faces: [Float] = []
+        var lines: [Float] = []
+        func push(_ dst: inout [Float], _ p: SIMD3<Float>, _ c: SIMD4<Float>) {
+            dst.append(p.x); dst.append(p.y); dst.append(p.z)
+            dst.append(c.x); dst.append(c.y); dst.append(c.z); dst.append(c.w)
+        }
+        // Premultiplied alpha (ground pipeline blends src .one / dst 1−srcA).
+        func premul(_ rgb: SIMD3<Float>, _ a: Float) -> SIMD4<Float> {
+            SIMD4<Float>(rgb.x * a, rgb.y * a, rgb.z * a, a)
+        }
+        func tri(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ col: SIMD4<Float>) {
+            push(&faces, a, col); push(&faces, b, col); push(&faces, c, col)
+        }
+        func seg(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ col: SIMD4<Float>) {
+            push(&lines, a, col); push(&lines, b, col)
+        }
+
+        let ring = 28  // circle tessellation
+        for item in items {
+            let selected = item.selected
+            let faceAlpha: Float = selected ? 0.60 : 0.42
+            let edgeAlpha: Float = selected ? 0.98 : 0.80
+            let fcol = premul(baseRGB, faceAlpha)
+            let ecol = premul(baseRGB, edgeAlpha)
+            switch item.volume.shape {
+            case let .cylinder(axisPoint, axisDir, radius, tLo, tHi):
+                let dir = simd_length(axisDir) > 1e-6 ? simd_normalize(axisDir) : SIMD3<Float>(0, 0, 1)
+                let (u, v) = planeBasis(normal: dir)
+                let c0 = axisPoint + dir * tLo
+                let c1 = axisPoint + dir * tHi
+                func rim(_ centre: SIMD3<Float>, _ k: Int) -> SIMD3<Float> {
+                    let a = Float(k) * (2 * .pi / Float(ring))
+                    return centre + (u * cos(a) + v * sin(a)) * radius
+                }
+                for k in 0..<ring {
+                    let a0 = rim(c0, k), a1 = rim(c0, k + 1)
+                    let b0 = rim(c1, k), b1 = rim(c1, k + 1)
+                    tri(a0, a1, b1, fcol); tri(a0, b1, b0, fcol)     // side wall
+                    tri(c0, a1, a0, fcol)                            // lo cap fan
+                    tri(c1, b0, b1, fcol)                            // hi cap fan
+                    seg(a0, a1, ecol); seg(b0, b1, ecol)            // rim rings
+                    if k % 7 == 0 { seg(a0, b0, ecol) }             // a few axial edges
+                }
+            case let .slab(centre, normal, uAxis, vAxis, halfU, halfV, depthMM):
+                let n = simd_length(normal) > 1e-6 ? simd_normalize(normal) : SIMD3<Float>(0, 0, 1)
+                let du = uAxis * halfU, dv = vAxis * halfV, dn = n * depthMM
+                // 8 corners: inner rectangle (on the face) + outer (extruded by depth).
+                let inner = [centre - du - dv, centre + du - dv, centre + du + dv, centre - du + dv]
+                let outer = inner.map { $0 + dn }
+                let all = inner + outer
+                let quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+                             [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3]]
+                for q in quads {
+                    tri(all[q[0]], all[q[1]], all[q[2]], fcol)
+                    tri(all[q[0]], all[q[2]], all[q[3]], fcol)
+                }
+                let edges = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6],
+                             [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+                for e in edges { seg(all[e[0]], all[e[1]], ecol) }
+            case .degenerate:
+                // Hollow honesty: a small dashed cross-ring at the face-derived point is
+                // meaningless without geometry, so a degenerate volume simply draws
+                // nothing here — the SwiftUI row already carries the "no effect" wording.
+                break
+            }
+        }
+
+        clearanceFaceCount = faces.count / 7
+        if clearanceFaceCount > 0 {
+            clearanceFaceBuffer = faces.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+        }
+        clearanceLineCount = lines.count / 7
+        if clearanceLineCount > 0 {
+            clearanceLineBuffer = lines.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+        }
+    }
+
     /// Rebuild the per-vertex tint buffer from the selection: each grouped face's
     /// vertices carry that group's colour; the active group is tinted more strongly.
     func setHighlights(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>) {
@@ -1044,6 +1148,24 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             }
         }
 
+        // Keep-clear v2 (Part 3): the clearance volumes, same MODEL-space mvp + blended
+        // depth-tested pass as the design box (the part occludes far faces, no depth
+        // write so the volume never hides the part). Faces first, then bright edges.
+        if (clearanceFaceCount > 0 || clearanceLineCount > 0), let gpipe = groundPipeline {
+            var mvp = uniforms.mvp
+            enc.setRenderPipelineState(gpipe)
+            enc.setDepthStencilState(groundDepthState)
+            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            if let fbuf = clearanceFaceBuffer, clearanceFaceCount > 0 {
+                enc.setVertexBuffer(fbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: clearanceFaceCount)
+            }
+            if let lbuf = clearanceLineBuffer, clearanceLineCount > 0 {
+                enc.setVertexBuffer(lbuf, offset: 0, index: 0)
+                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: clearanceLineCount)
+            }
+        }
+
         // Load-path overlay (M7.viz.4): principal-stress-direction glyphs drawn under
         // the MESH's model·view·proj (uniforms.mvp) so they lock to the part (the ground
         // pass uses a world MVP). Drawn depth-ALWAYS (lineOverlayDepthState): the glyphs
@@ -1267,6 +1389,10 @@ struct MeshViewInputs {
     /// in model space. Rendered as translucent volumes with bright edges.
     var designBox: DesignBoxBounds? = nil
     var keepOutBoxes: [DesignBoxBounds] = []
+    /// Keep-clear v2 (Part 3): the true clearance volumes to draw (swept cylinders +
+    /// bounded slabs), tagged selected. Empty hides them; Equatable so the coordinator
+    /// only re-tessellates on change.
+    var clearanceVolumes: [ClearanceRenderItem] = []
     /// Load-path FLOW (handoff 070): the comet-arrow tube geometry (pos+rgba, stride 7)
     /// for THIS frame, rebuilt each tick from the model's comet frames. nil = flow off.
     var loadFlowVertices: [Float]? = nil
@@ -1295,6 +1421,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
@@ -1304,6 +1431,7 @@ public struct MetalMeshView: UIViewRepresentable {
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
             designBox: designBox, keepOutBoxes: keepOutBoxes,
+            clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha)
     }
@@ -1343,6 +1471,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
@@ -1352,6 +1481,7 @@ public struct MetalMeshView: NSViewRepresentable {
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
             designBox: designBox, keepOutBoxes: keepOutBoxes,
+            clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha)
     }
@@ -1437,6 +1567,8 @@ extension MetalMeshView {
         private var appliedDesignBox: DesignBoxBounds?
         private var appliedKeepOuts: [DesignBoxBounds] = []
         private var appliedDesignBoxSet = false
+        private var appliedClearanceVolumes: [ClearanceRenderItem] = []
+        private var appliedClearanceSet = false
         private var lastPublished: CameraProjection?
         private var faceToolActive = false
         private var onPickFace: ((FaceID) -> Void)?
@@ -1631,6 +1763,16 @@ extension MetalMeshView {
                 dirty = true
             }
 
+            // Keep-clear v2 (Part 3): rebuild the clearance volumes only when they change
+            // (a mesh change resets the buffers and forces a rebuild via `dirty`). The
+            // affix toggle / numeric edit changes the item set, which re-tessellates live.
+            if dirty || !appliedClearanceSet || inputs.clearanceVolumes != appliedClearanceVolumes {
+                appliedClearanceSet = true
+                appliedClearanceVolumes = inputs.clearanceVolumes
+                renderer.setClearanceVolumes(inputs.clearanceVolumes)
+                dirty = true
+            }
+
             if dirty { redraw(view) }
             // Publish the camera projection (deduped) on the NEXT runloop, never inline:
             // `onProjection` writes the host view's `@State projection`, and `apply` runs
@@ -1784,6 +1926,7 @@ public struct MetalMeshView: View {
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
+                clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {}
     public var body: some View { DS.Color.background.color }

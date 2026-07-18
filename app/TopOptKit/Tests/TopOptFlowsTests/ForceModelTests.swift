@@ -374,20 +374,57 @@ final class ForceModelTests: XCTestCase {
         XCTAssertFalse(fm.canOptimize(in: sel.groups, minimizePlastic: true))
     }
 
-    // MARK: - "Keep clear" clearance role + overrides (handoff 100)
+    // MARK: - "Keep clear" attribute + overrides (keep-clear v2)
 
-    func testMakeClearanceSetsRoleAndIsNotPending() {
-        let (sel, ids) = groups([1])
+    func testKeepClearAffixIsAttributeNotRole() {
+        let (sel, ids) = groups([1, 2])
         var fm = ForceModel()
         fm.setGravity(faceNormal: SIMD3<Float>(0, 0, -1), face: 0)
-        fm.makeClearance(ids[0])
-        XCTAssertTrue(fm.kind(for: ids[0]).isClearance)
-        XCTAssertFalse(fm.kind(for: ids[0]).isPending)
-        XCTAssertFalse(fm.kind(for: ids[0]).isAnchor || fm.kind(for: ids[0]).isLoad)
+        // A bare face affixed keep-clear → a keep-clear-only selection.
+        fm.setKeepClearAffix(ids[0], .on)
+        XCTAssertTrue(fm.isKeepClearOnly(ids[0]))
         XCTAssertEqual(fm.panelKindLabel(for: ids[0]), "Keep clear")
-        XCTAssertEqual(fm.clearanceCount(in: sel.groups), 1)
+        // The affix RIDES ALONGSIDE a real role — anchor stays anchor, keep-clear on.
+        fm.makeAnchor(ids[1])
+        fm.setKeepClearAffix(ids[1], .on)
+        XCTAssertTrue(fm.kind(for: ids[1]).isAnchor)
+        XCTAssertEqual(fm.keepClearAffix(for: ids[1]), .on)
+        XCTAssertEqual(fm.panelKindLabel(for: ids[1]), "Anchor", "role label, not the affix")
+        XCTAssertEqual(fm.explicitKeepClearCount(in: sel.groups), 2)
+        // Both groups are now declared (keep-clear-only + anchor) → nothing pending.
         XCTAssertFalse(fm.hasPending(in: sel.groups),
-                       "a clearance-only group is not pending, so it never blocks Optimize")
+                       "a keep-clear-only group is a complete declaration, never blocks Optimize")
+    }
+
+    func testKeepClearEffectiveStateAndAutoSuppression() {
+        let (_, ids) = groups([1])
+        var fm = ForceModel()
+        // No stored deviation: follows the auto default the caller supplies.
+        XCTAssertTrue(fm.keepClearIsOn(ids[0], autoDefault: true), "anchored-bore auto on")
+        XCTAssertFalse(fm.keepClearIsOn(ids[0], autoDefault: false))
+        XCTAssertEqual(fm.keepClearOrigin(ids[0]), .auto)
+        // SUPPRESS an auto clearance — an explicit override that turns the bore off.
+        fm.setKeepClearAffix(ids[0], .suppressed)
+        XCTAssertFalse(fm.keepClearIsOn(ids[0], autoDefault: true), "suppressed beats auto")
+        XCTAssertEqual(fm.keepClearOrigin(ids[0]), .explicit)
+        // Explicit ON beats a false default.
+        fm.setKeepClearAffix(ids[0], .on)
+        XCTAssertTrue(fm.keepClearIsOn(ids[0], autoDefault: false))
+    }
+
+    func testSetKeepClearStoresMinimalDeviation() {
+        let (_, ids) = groups([1])
+        var fm = ForceModel()
+        // Choosing ON where the default is already ON stores NOTHING (row stays "Auto").
+        fm.setKeepClear(ids[0], on: true, autoDefault: true)
+        XCTAssertNil(fm.keepClearAffix(for: ids[0]))
+        XCTAssertEqual(fm.keepClearOrigin(ids[0]), .auto)
+        // Turning it OFF against an auto default stores a suppression.
+        fm.setKeepClear(ids[0], on: false, autoDefault: true)
+        XCTAssertEqual(fm.keepClearAffix(for: ids[0]), .suppressed)
+        // Turning ON where the default is off stores an explicit affix.
+        fm.setKeepClear(ids[0], on: true, autoDefault: false)
+        XCTAssertEqual(fm.keepClearAffix(for: ids[0]), .on)
     }
 
     func testClearanceOverridesRoundTripAndRevertToAuto() {
@@ -404,26 +441,45 @@ final class ForceModelTests: XCTestCase {
         XCTAssertNil(fm.clearanceOverride(for: ids[0]).concentricMarginMM)
     }
 
-    func testSyncPrunesClearanceOverridesForRemovedGroups() {
+    func testSyncPrunesClearanceOverridesAndKeepClearForRemovedGroups() {
         let (sel, ids) = groups([1, 2])
         var fm = ForceModel()
         fm.setClearanceSlab(ids[0], mm: 4.0)
+        fm.setKeepClearAffix(ids[0], .on)
         fm.setClearanceSlab(ids[1], mm: 5.0)
+        fm.setKeepClearAffix(ids[1], .suppressed)
         var sel2 = sel
         sel2.remove(ids[0])
         fm.sync(groups: sel2.groups)
         XCTAssertNil(fm.clearanceOverride(for: ids[0]).slabDepthMM, "stale override pruned")
+        XCTAssertNil(fm.keepClearAffix(for: ids[0]), "stale affix pruned")
         XCTAssertEqual(fm.clearanceOverride(for: ids[1]).slabDepthMM, 5.0, "live override kept")
+        XCTAssertEqual(fm.keepClearAffix(for: ids[1]), .suppressed, "live affix kept")
     }
 
-    func testForceModelCodableCarriesClearanceState() throws {
+    func testForceModelCodableCarriesKeepClearState() throws {
         let (_, ids) = groups([1])
         var fm = ForceModel()
-        fm.makeClearance(ids[0])
+        fm.setKeepClearAffix(ids[0], .on)
         fm.setClearanceSlab(ids[0], mm: 4.0)
         let data = try JSONEncoder().encode(fm)
         let back = try JSONDecoder().decode(ForceModel.self, from: data)
-        XCTAssertTrue(back.kind(for: ids[0]).isClearance)
+        XCTAssertEqual(back.keepClearAffix(for: ids[0]), .on)
         XCTAssertEqual(back.clearanceOverride(for: ids[0]).slabDepthMM, 4.0)
+    }
+
+    /// A pre-v2 snapshot stored "Keep clear" as a GroupKind ROLE (`.clearance`). The
+    /// decoder must migrate it to the keep-clear-only ATTRIBUTE (role → pending,
+    /// affix → on) so the shipped behaviour is preserved without a competing role.
+    func testDecodeMigratesLegacyClearanceRole() throws {
+        let (_, ids) = groups([1])
+        struct Legacy: Encodable { let kinds: [UUID: GroupKind]; let phase: GravityPhase; let unit: WeightUnit }
+        let data = try JSONEncoder().encode(
+            Legacy(kinds: [ids[0]: .clearance], phase: .edit, unit: .kg))
+        let fm = try JSONDecoder().decode(ForceModel.self, from: data)
+        XCTAssertFalse(fm.kind(for: ids[0]).isClearance, "legacy role migrated away")
+        XCTAssertTrue(fm.isKeepClearOnly(ids[0]))
+        XCTAssertEqual(fm.keepClearAffix(for: ids[0]), .on)
+        XCTAssertEqual(fm.panelKindLabel(for: ids[0]), "Keep clear")
     }
 }
