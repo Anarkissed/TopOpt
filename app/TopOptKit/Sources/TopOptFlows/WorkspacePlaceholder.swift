@@ -94,6 +94,50 @@ public struct WorkspacePlaceholder: View {
     /// The run resolution, from the project's chosen quality (Fast/Balanced/Fine).
     private var runResolution: Int { project.quality.resolution }
 
+    // MARK: - sub-voxel load-face warning (handoff 099)
+
+    /// The voxelizer's spacing at the current resolution (mm) — `longest bbox axis /
+    /// resolution`, the same `h` topopt::voxelize uses. Nil until a mesh is loaded.
+    private var voxelSpacingMM: Double? {
+        guard let mesh = viewerMesh else { return nil }
+        return VoxelFit.spacing(forBounds: mesh.bounds, resolution: runResolution)
+    }
+
+    /// Whether a LOAD group is likely to tag zero voxels at the current resolution:
+    /// true only when EVERY face in the group is sub-voxel (the group tags nothing
+    /// iff all of its faces do — matching the core, where a group registers if ANY
+    /// face tags a voxel). A heuristic — labelled "may not register", never certain.
+    private func loadGroupMayNotRegister(_ g: SelectionGroup) -> Bool {
+        guard force.kind(for: g.id).isLoad, !g.faces.isEmpty,
+              let mesh = viewerMesh, let h = voxelSpacingMM else { return false }
+        for f in g.faces {
+            guard let fp = VoxelFit.footprint(ofFace: f, in: mesh) else { continue }
+            if !VoxelFit.mayTagZeroVoxels(fp, spacing: h) { return false }
+        }
+        return true
+    }
+
+    /// Per load group, its pre-run health for the Optimize pre-flight (099 D3):
+    /// zero-force, may-not-register, or ok. Anchors and pending groups are ignored
+    /// (only load groups carry a force the run must apply).
+    private func loadGroupDiagnoses() -> [LoadGroupDiagnosis] {
+        selection.groups.compactMap { g in
+            let kind = force.kind(for: g.id)
+            guard kind.isLoad else { return nil }
+            let n = groupNormalModel(g) ?? SIMD3<Float>(0, 1, 0)
+            let f = force.loadForceVectorModel(g.id, groupNormal: n) ?? .zero
+            let health: LoadGroupHealth
+            if simd_length(f) < 1e-6 {
+                health = .zeroForce
+            } else if loadGroupMayNotRegister(g) {
+                health = .mayNotRegister
+            } else {
+                health = .ok
+            }
+            return LoadGroupDiagnosis(label: g.name, health: health)
+        }
+    }
+
     public init(model: AppModel, project: ProjectModel) {
         self.model = model
         self.project = project
@@ -237,6 +281,24 @@ public struct WorkspacePlaceholder: View {
 
     private func startRun() {
         guard canOptimize else { return }
+        // Pre-flight (099 D3): if EVERY load group is zero-force or on a sub-voxel
+        // face, the run would reach the core with empty external_loads and be
+        // refused — so block it up front with an actionable message naming the group
+        // and the fix, not the solver's exception text. If only some groups are
+        // dead, warn but proceed. The core's require_external_loads guard still backs
+        // this. Skipped for a no-load-group (self-weight / STL) case.
+        if let h = voxelSpacingMM {
+            switch LoadCasePreflight.evaluate(loadGroupDiagnoses(),
+                                              qualityTitle: project.quality.title, spacingMM: h) {
+            case .block(let message):
+                model.toast = message
+                return
+            case .warn(let message):
+                model.toast = message
+            case .allow:
+                break
+            }
+        }
         viewOriginal = false   // a fresh run replaces the saved variants → show results
         guard let request = model.makeRunRequest() else {
             model.toast = "Can’t start — import a model and choose a material first."
@@ -887,6 +949,16 @@ public struct WorkspacePlaceholder: View {
                 Text(force.panelKindLabel(for: g.id))
                     .dsStyle(DS.TypeScale.footnote)
                     .foregroundStyle(DS.Color.textQuaternary.color)
+                if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
+                    // Sub-voxel load face (099 D2): the load may tag no voxels at
+                    // this resolution, so flag it in plain English. A warning, not a
+                    // verdict — only the voxelizer knows for sure.
+                    Label(VoxelFit.badgeText(qualityTitle: project.quality.title, spacingMM: h),
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: DS.TypeScale.footnote.size))
+                        .foregroundStyle(DS.Color.warning.color)
+                        .help(VoxelFit.warningText(qualityTitle: project.quality.title, spacingMM: h))
+                }
             }
             Spacer(minLength: 0)
             Button { removeGroup(g.id) } label: {

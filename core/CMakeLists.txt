@@ -703,4 +703,15 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME production_parity COMMAND test_production_parity)
+
+  # Small-face load loss (handoff 099): a load face smaller than a voxel footprint
+  # at a coarse resolution tags ZERO voxels, so build_production_loadcase skips the
+  # group and external_loads arrives empty. This locks the new per-group
+  # instrumentation (the "zero-tagged"/"zero-force" skip reasons) AND the
+  # empty-external-set outcome, on a synthetic in-code StepModel (no OCCT/fixture);
+  # it lives here because build_production_loadcase is compiled in this block.
+  add_executable(test_loadcase_small_face
+    tests/validation/test_loadcase_small_face.cpp)
+  target_link_libraries(test_loadcase_small_face PRIVATE topopt)
+  add_test(NAME loadcase_small_face COMMAND test_loadcase_small_face)
 endif()
