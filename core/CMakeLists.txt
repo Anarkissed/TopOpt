@@ -601,6 +601,20 @@ if(Eigen3_FOUND)
   target_link_libraries(test_mma_projection_gate PRIVATE topopt)
   add_test(NAME mma_projection_gate COMMAND test_mma_projection_gate)
 
+  # MMA Heaviside projection + beta continuation (handoff 114). The opt-in
+  # mma_projection path: OFF is byte-identical to plain MMA (THE ONE RULE), ON
+  # collapses the discreteness Mnd and the continuous-vs-printed volume
+  # divergence, meets the volume target on the projected density, advances beta
+  # by continuation and terminates on a plateau at the capped beta (composing
+  # with 086). Also pins the scoping/rejection rules and the masked overload.
+  # Drives simp_optimize (both overloads) + simp_optimize_stress, so Eigen-gated
+  # like the other optimizer tests; separate from the projection GATE test, which
+  # still pins that MMA rejects the OC `projection` schedule.
+  add_executable(test_mma_projection
+    tests/validation/test_mma_projection.cpp)
+  target_link_libraries(test_mma_projection PRIVATE topopt)
+  add_test(NAME mma_projection COMMAND test_mma_projection)
+
   # Stress-constrained optimization (M7.mma.2): the aggregated von Mises
   # constraint on the MMA path — a finite-difference check of the adjoint
   # sensitivity of simp_stress_aggregate, and the behavioral invariants (a)/(b)/

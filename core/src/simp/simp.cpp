@@ -77,6 +77,55 @@ void validate_updater_options(const SimpOptions& o) {
         "schedule; use OC or clear options.projection");
 }
 
+// Validate the MMA Heaviside-projection opt-in (handoff 114). This is the
+// MMA-CORRECT projection path — SEPARATE from the OC-locked `projection`
+// schedule (validate_updater_options above still rejects that under MMA, so the
+// projection-gate contract is untouched). The two mechanisms are mutually
+// exclusive and MMA-only. When mma_projection is false (default) nothing here
+// fires and the run is byte-identical.
+void validate_mma_projection_options(const SimpOptions& o) {
+  if (!o.mma_projection) return;
+  if (o.updater != SimpUpdater::MMA)
+    throw std::invalid_argument(
+        "simp_optimize: mma_projection requires the MMA updater");
+  if (!o.projection.empty())
+    throw std::invalid_argument(
+        "simp_optimize: mma_projection and a Heaviside projection schedule "
+        "(options.projection) are mutually exclusive; set only one");
+  if (!(o.projection_eta > 0.0 && o.projection_eta < 1.0))
+    throw std::invalid_argument(
+        "simp_optimize: projection_eta must be in (0, 1)");
+  if (!(o.mma_projection_beta0 > 0.0) || !std::isfinite(o.mma_projection_beta0))
+    throw std::invalid_argument(
+        "simp_optimize: mma_projection_beta0 must be finite and > 0");
+  if (!(o.mma_projection_beta_max >= o.mma_projection_beta0) ||
+      !std::isfinite(o.mma_projection_beta_max))
+    throw std::invalid_argument(
+        "simp_optimize: mma_projection_beta_max must be finite and "
+        ">= mma_projection_beta0");
+}
+
+// Whether the MMA Heaviside-projection continuation path is active for this run.
+// The default (mma_projection == false) is false, so every existing MMA run
+// takes the unchanged grayscale branch.
+bool mma_projection_active(const SimpOptions& o) {
+  return o.updater == SimpUpdater::MMA && o.mma_projection;
+}
+
+// Move limit for the MMA continuation stage at sharpness `beta` (handoff 114).
+// High-beta Heaviside stages OSCILLATE (structure-splitting) under an undamped
+// move — the SAME failure the locked OC continuation schedule damps by dropping
+// move to 0.1 at beta 16 and 0.05 at beta 32. Mirror that here:
+//   move_eff = move * min(1, 8/beta)
+// so beta <= 8 keeps the full move, beta = 16 halves it (0.1 from a 0.2 base)
+// and beta = 32 quarters it (0.05) — the exact OC-schedule damping — with a
+// smooth 1/beta taper for any intermediate/higher cap. Without this the final
+// stage churns and never plateaus (measured: it runs to the iteration cap).
+double mma_continuation_move(double move, double beta) {
+  const double damp = beta > 8.0 ? 8.0 / beta : 1.0;
+  return move * damp;
+}
+
 }  // namespace
 
 double simp_youngs(const SimpParams& params, double density) {
@@ -456,21 +505,33 @@ namespace {
 
 // One executed stage of the loop: the pre-M6.3 loop is a single stage with
 // project == false, move/iterations from the top-level options.
+//
+// `mma_continuation` (handoff 114) marks the SINGLE dynamic stage of the MMA
+// Heaviside-projection path: unlike the fixed OC `projection` schedule (one
+// StagePlan per beta stage, `iterations` fixed), the MMA path is one stage whose
+// beta advances by continuation inside the loop (starting at beta0, doubling on
+// a plateau up to beta_max) and whose `iterations` is the whole-run safety cap.
 struct StagePlan {
   bool project = false;
   double beta = 0.0;
   double move = 0.2;
   int iterations = 0;
+  bool mma_continuation = false;
 };
 
 std::vector<StagePlan> build_stage_plan(const SimpOptions& options) {
   std::vector<StagePlan> plan;
-  if (options.projection.empty()) {
-    plan.push_back({false, 0.0, options.move, options.max_iterations});
+  if (mma_projection_active(options)) {
+    // One continuation stage; beta is handled dynamically in the loop (starting
+    // at beta0), so StagePlan::beta is unused here. `iterations` is the global
+    // safety cap that backstops the plateau-driven continuation.
+    plan.push_back({false, 0.0, options.move, options.max_iterations, true});
+  } else if (options.projection.empty()) {
+    plan.push_back({false, 0.0, options.move, options.max_iterations, false});
   } else {
     plan.reserve(options.projection.size());
     for (const ProjectionStage& ps : options.projection)
-      plan.push_back({true, ps.beta, ps.move, ps.iterations});
+      plan.push_back({true, ps.beta, ps.move, ps.iterations, false});
   }
   return plan;
 }
@@ -710,6 +771,152 @@ std::vector<double> mma_update(MmaState& st, int mma_iter, const VoxelGrid& grid
   return xnew;
 }
 
+// One MMA design update with a Heaviside projection (handoff 114). The MMA-
+// correct analogue of oc_update_projected: it is mma_update with the projection
+// chain-rule folded into the sensitivities the subproblem consumes, so the SAME
+// moving-asymptote machinery, convex separable approximation and 1-D dual
+// bisection run — only the gradients and the constraint VALUE change:
+//   * the compliance sensitivity chains the projection derivative BEFORE the
+//     filter transpose: dc/dx = H^T( (dc/drho_bar) * drho_bar/drho_tilde );
+//   * the volume-constraint sensitivity is dV/dx = H^T( drho_bar/drho_tilde )
+//     (the PROJECTED volume's gradient), replacing mma_update's H^T(ones);
+//   * the current constraint value g0 = V_projected(x) - target, where
+//     V_projected = sum_e rho_bar(filter(x)_e) over design voxels (the volume
+//     constraint sees the PROJECTED density — what prints).
+// `xtilde` is the current filtered design filter_density(density); `beta`/`eta`
+// are this stage's projection parameters. As in mma_update the compliance
+// sensitivity is normalized to O(1) so the fixed raa0 stays negligible under any
+// load scale (the dual multiplier absorbs the positive scaling). With
+// beta -> 0 / eta = 0.5 the projection derivative -> a constant and the update
+// approaches plain mma_update; it is a strict superset, never taken unless
+// mma_projection is set.
+std::vector<double> mma_update_projected(
+    MmaState& st, int mma_iter, const VoxelGrid& grid,
+    const DensityFilter& filter, const std::vector<double>& density,
+    const std::vector<double>& xtilde, const std::vector<double>& dcompliance,
+    double beta, double eta, double volume_fraction, double move,
+    double density_min) {
+  const std::size_t N = grid.voxel_count();
+
+  // Projection chain-rule prep: dproj = drho_bar/drho_tilde on the filtered
+  // field, the compliance sensitivity times dproj, and the design set.
+  std::vector<double> dc_phys(N, 0.0), dproj(N, 0.0);
+  std::vector<std::size_t> dof;  // design (solid) voxel indices
+  double vol_proj = 0.0;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i)
+        if (grid.solid(i, j, k)) {
+          const std::size_t e = grid.index(i, j, k);
+          dproj[e] = heaviside_project_derivative(xtilde[e], beta, eta);
+          dc_phys[e] = dcompliance[e] * dproj[e];
+          vol_proj += heaviside_project(xtilde[e], beta, eta);
+          dof.push_back(e);
+        }
+  // Chain rule into design space (H symmetric): both sensitivities carry the
+  // projection factor, then transpose through the filter.
+  std::vector<double> dc = filter.filter_sensitivity(dc_phys);
+  const std::vector<double> dv = filter.filter_sensitivity(dproj);
+  const double target = volume_fraction * static_cast<double>(dof.size());
+
+  // Scale-invariance (as in mma_update): normalize dc to O(1) so raa0 stays
+  // negligible regardless of the load magnitude; the dual absorbs the scaling.
+  double dc_scale = 0.0;
+  for (std::size_t e : dof) dc_scale = std::max(dc_scale, std::fabs(dc[e]));
+  if (dc_scale > 0.0)
+    for (std::size_t e : dof) dc[e] /= dc_scale;
+
+  // Constraint value on the PROJECTED density (what prints), not the filtered
+  // fog: g0 = V_projected(x) - target.
+  const double g0 = vol_proj - target;
+
+  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
+  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
+  const double albefa = 0.1, raa0 = 1e-5;
+
+  if (st.low.size() != N) {
+    st.low.assign(N, 0.0);
+    st.upp.assign(N, 0.0);
+  }
+
+  // 1. Moving asymptotes L_j, U_j (identical rule to mma_update).
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    if (mma_iter <= 2) {
+      st.low[e] = xe - asyinit * xrange;
+      st.upp[e] = xe + asyinit * xrange;
+    } else {
+      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
+      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
+      double L = xe - gamma * (st.xold1[e] - st.low[e]);
+      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
+      L = std::min(L, xe - 0.01 * xrange);
+      L = std::max(L, xe - 10.0 * xrange);
+      U = std::max(U, xe + 0.01 * xrange);
+      U = std::min(U, xe + 10.0 * xrange);
+      st.low[e] = L;
+      st.upp[e] = U;
+    }
+  }
+
+  // 2. Separable convex coefficients + move box (identical form to mma_update).
+  std::vector<double> p0(N, 0.0), q0(N, 0.0), p1(N, 0.0), q1(N, 0.0);
+  std::vector<double> alpha(N, 0.0), beta_box(N, 0.0);
+  double b = -g0;
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    const double L = st.low[e], U = st.upp[e];
+    const double ux1 = U - xe, xl1 = xe - L;
+    const double dcp = std::max(dc[e], 0.0), dcm = std::max(-dc[e], 0.0);
+    const double dvp = std::max(dv[e], 0.0), dvm = std::max(-dv[e], 0.0);
+    p0[e] = ux1 * ux1 * (1.001 * dcp + 0.001 * dcm + raa0 / xrange);
+    q0[e] = xl1 * xl1 * (0.001 * dcp + 1.001 * dcm + raa0 / xrange);
+    p1[e] = ux1 * ux1 * (1.001 * dvp + 0.001 * dvm + raa0 / xrange);
+    q1[e] = xl1 * xl1 * (0.001 * dvp + 1.001 * dvm + raa0 / xrange);
+    b += p1[e] / ux1 + q1[e] / xl1;
+    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
+    beta_box[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
+  }
+
+  // 3. Dual solve for the single volume constraint (identical to mma_update).
+  auto candidate = [&](double lambda) {
+    std::vector<double> xnew(N, 0.0);
+    for (std::size_t e : dof) {
+      const double pl = std::sqrt(p0[e] + lambda * p1[e]);
+      const double ql = std::sqrt(q0[e] + lambda * q1[e]);
+      double xt = (pl * st.low[e] + ql * st.upp[e]) / (pl + ql);
+      if (xt < alpha[e]) xt = alpha[e];
+      if (xt > beta_box[e]) xt = beta_box[e];
+      xnew[e] = xt;
+    }
+    return xnew;
+  };
+  auto gval = [&](const std::vector<double>& x) {
+    double s = 0.0;
+    for (std::size_t e : dof)
+      s += p1[e] / (st.upp[e] - x[e]) + q1[e] / (x[e] - st.low[e]);
+    return s - b;
+  };
+  double lambda = 0.0;
+  if (gval(candidate(0.0)) > 0.0) {
+    double l1 = 0.0, l2 = 1.0;
+    while (l2 < 1e30 && gval(candidate(l2)) > 0.0) l2 *= 2.0;
+    for (int it = 0; it < 100 && (l2 - l1) > 1e-9 * (1.0 + l1 + l2); ++it) {
+      const double lmid = 0.5 * (l1 + l2);
+      if (gval(candidate(lmid)) > 0.0)
+        l1 = lmid;
+      else
+        l2 = lmid;
+    }
+    lambda = 0.5 * (l1 + l2);
+  }
+  std::vector<double> xnew = candidate(lambda);
+
+  st.xold2 = st.xold1;
+  st.xold1 = density;
+  return xnew;
+}
+
 // Project the design (solid) voxels of a filtered field in place; Empty
 // voxels stay exactly 0.
 void project_solid(const VoxelGrid& grid, std::vector<double>& x, double beta,
@@ -824,6 +1031,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     throw std::invalid_argument("simp_optimize: change_tol must be >= 0");
   validate_projection_options(options);
   validate_updater_options(options);  // MMA + projection rejected (M7.mma.1)
+  validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
 
   // make_density_filter validates filter_radius > 0.
   const DensityFilter filter = make_density_filter(grid, options.filter_radius);
@@ -835,6 +1043,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // (unprojected) branch below owns the single continuous MMA iteration count.
   MmaState mma_state;
   int mma_iter = 0;
+
+  // MMA Heaviside beta-continuation state (handoff 114). `mma_beta` is the
+  // current sharpness (starts at beta0, doubles on a plateau up to beta_max);
+  // `mma_stage_start` marks the result.history index where the current beta
+  // stage began, so the plateau detector sees only that stage's compliance
+  // curve. Inert unless the plan carries the single mma_continuation stage.
+  double mma_beta = options.mma_projection_beta0;
+  const double mma_beta_max = options.mma_projection_beta_max;
+  std::size_t mma_stage_start = 0;
 
   // Physical volume fraction of a grid-indexed physical density field.
   auto phys_volfrac = [&](const std::vector<double>& xphys) {
@@ -891,8 +1108,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         result.cancelled = true;
         break;
       }
+      // The projecting branches (OC `projection` schedule OR the MMA
+      // continuation stage) use the analysis density rho_bar = project(filter);
+      // for the MMA stage the sharpness is the dynamic `mma_beta`.
+      const bool projecting = st.project || st.mma_continuation;
+      const double cur_beta = st.mma_continuation ? mma_beta : st.beta;
+      const double cur_move =
+          st.mma_continuation ? mma_continuation_move(st.move, cur_beta)
+                              : st.move;
       std::vector<double> xphys = filter.filter_density(x);
-      if (st.project) project_solid(grid, xphys, st.beta, eta);
+      if (projecting) project_solid(grid, xphys, cur_beta, eta);
       const SimpCompliance c = simp_compliance(
           grid, params, xphys, bcs, loads, options.cg_tolerance,
           options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
@@ -903,7 +1128,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
             "simp_optimize: penalized CG solve did not converge");
 
       std::vector<double> x_new;
-      if (st.project) {
+      if (st.mma_continuation) {
+        // MMA + Heaviside projection (handoff 114): the projection-aware MMA
+        // subproblem at the current continuation sharpness.
+        const std::vector<double> xtilde = filter.filter_density(x);
+        x_new = mma_update_projected(mma_state, ++mma_iter, grid, filter, x,
+                                     xtilde, c.dcompliance, cur_beta, eta,
+                                     options.volume_fraction, cur_move,
+                                     params.density_min);
+      } else if (st.project) {
         // dproj needs the UNprojected filtered field: recompute it (xphys was
         // projected in place above).
         const std::vector<double> xtilde = filter.filter_density(x);
@@ -911,8 +1144,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                     st.beta, eta, options.volume_fraction,
                                     st.move, params.density_min);
       } else if (options.updater == SimpUpdater::MMA) {
-        // MMA and projection are mutually exclusive here (validated above), so
-        // this is always the plain unprojected stage.
+        // Plain (unprojected) MMA stage.
         x_new = mma_update(mma_state, ++mma_iter, grid, filter, x, c.dcompliance,
                            options.volume_fraction, st.move, params.density_min);
       } else {
@@ -929,7 +1161,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (result.iterations == 0) result.initial_compliance = c.compliance;
       ++result.iterations;
       std::vector<double> xafter = filter.filter_density(x);
-      if (st.project) project_solid(grid, xafter, st.beta, eta);
+      if (projecting) project_solid(grid, xafter, cur_beta, eta);
       result.history.push_back({c.compliance, change, phys_volfrac(xafter)});
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
@@ -939,7 +1171,37 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
            result.iterations % options.keyframe_stride == 0))
         options.keyframe(xafter);
 
-      if (stage_should_stop(options, result.history, change)) {
+      if (st.mma_continuation) {
+        // Beta continuation (handoff 114): reuse the 086 plateau detector on the
+        // CURRENT beta stage's compliance curve. On a stall, advance beta
+        // (double, capped) and re-arm the stage; a stall at the final beta is
+        // the run's termination (composes with 086). Resetting the MMA
+        // asymptote state lets each sharper stage re-converge cleanly.
+        std::vector<double> curve;
+        curve.reserve(result.history.size() - mma_stage_start);
+        for (std::size_t hi = mma_stage_start; hi < result.history.size(); ++hi)
+          curve.push_back(result.history[hi].compliance);
+        // The 086 progress gate (min_drop) guards ONLY the first (beta0) stage:
+        // its spike-heavy forming phase from the uniform/warm start is what the
+        // gate exists to survive. Later stages start from a formed design (no
+        // forming spikes) and often improve less than min_drop, so keeping the
+        // gate would block their plateau and run the final stage to the cap —
+        // use pure flatness (min_drop 0) there.
+        const double stage_min_drop =
+            (mma_stage_start == 0) ? options.mma_plateau_min_drop : 0.0;
+        if (mma_objective_plateau(curve, options.mma_plateau_window,
+                                  options.mma_plateau_tol, stage_min_drop)) {
+          if (mma_beta < mma_beta_max) {
+            mma_beta = std::min(mma_beta * 2.0, mma_beta_max);
+            mma_stage_start = result.history.size();
+            mma_state = MmaState{};
+            mma_iter = 0;
+          } else {
+            stage_converged = true;
+            break;
+          }
+        }
+      } else if (stage_should_stop(options, result.history, change)) {
         stage_converged = true;
         break;
       }
@@ -954,11 +1216,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // Report a self-consistent final state: physical_density = filter(design)
   // (projected at the final stage's beta when projecting) and compliance =
   // compliance(physical_density) via one final solve on the converged field
-  // (so callers/property checks see matching values).
+  // (so callers/property checks see matching values). For the MMA continuation
+  // stage the final sharpness is `mma_beta`.
   result.design = x;
   result.physical_density = filter.filter_density(x);
   if (plan.back().project)
     project_solid(grid, result.physical_density, plan.back().beta, eta);
+  else if (plan.back().mma_continuation)
+    project_solid(grid, result.physical_density, mma_beta, eta);
   const SimpCompliance fc = simp_compliance(
       grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
       options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
@@ -1306,6 +1571,133 @@ std::vector<double> oc_update_masked_projected(
   return candidate(0.5 * (l1 + l2));
 }
 
+// MMA + Heaviside projection restricted to Active voxels (handoff 114): the
+// mask-aware analogue of mma_update_projected, standing to mma_update_masked
+// exactly as mma_update_projected stands to mma_update. FrozenSolid (x=1) /
+// FrozenVoid (x=0) entries are carried through unchanged; only Active voxels
+// move, under the single volume constraint on the PROJECTED Active density. The
+// mask-aware (Active-only) filter confines dc/dv to Active voxels. `xtilde` is
+// the current mask-aware filtered design; `beta`/`eta` this stage's projection.
+std::vector<double> mma_update_masked_projected(
+    MmaState& st, int mma_iter, const VoxelGrid& grid,
+    const DensityFilter& filter, const DesignMask& eff,
+    const std::vector<double>& density, const std::vector<double>& xtilde,
+    const std::vector<double>& dcompliance, double beta, double eta,
+    double volume_fraction, double move, double density_min) {
+  const std::size_t N = grid.voxel_count();
+
+  // Projection chain-rule prep over the Active set: dproj, dc*dproj, projected
+  // Active volume, and the Active design DOFs.
+  std::vector<double> dc_phys(N, 0.0), dproj(N, 0.0);
+  std::vector<std::size_t> dof;
+  double vol_proj = 0.0;
+  for (std::size_t e = 0; e < N; ++e)
+    if (eff[e] == MaskValue::Active) {
+      dproj[e] = heaviside_project_derivative(xtilde[e], beta, eta);
+      dc_phys[e] = dcompliance[e] * dproj[e];
+      vol_proj += heaviside_project(xtilde[e], beta, eta);
+      dof.push_back(e);
+    }
+  std::vector<double> dc = filter.filter_sensitivity(dc_phys);
+  const std::vector<double> dv = filter.filter_sensitivity(dproj);
+  const double target = volume_fraction * static_cast<double>(dof.size());
+
+  // Scale-invariance (as in mma_update_masked): normalize dc to O(1).
+  double dc_scale = 0.0;
+  for (std::size_t e : dof) dc_scale = std::max(dc_scale, std::fabs(dc[e]));
+  if (dc_scale > 0.0)
+    for (std::size_t e : dof) dc[e] /= dc_scale;
+
+  const double g0 = vol_proj - target;  // constraint on the PROJECTED density
+
+  const double xmin = density_min, xmax = 1.0, xrange = xmax - xmin;
+  const double asyinit = 0.5, asyincr = 1.2, asydecr = 0.7;
+  const double albefa = 0.1, raa0 = 1e-5;
+
+  if (st.low.size() != N) {
+    st.low.assign(N, 0.0);
+    st.upp.assign(N, 0.0);
+  }
+
+  // 1. Moving asymptotes (identical rule to mma_update_masked).
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    if (mma_iter <= 2) {
+      st.low[e] = xe - asyinit * xrange;
+      st.upp[e] = xe + asyinit * xrange;
+    } else {
+      const double s = (xe - st.xold1[e]) * (st.xold1[e] - st.xold2[e]);
+      const double gamma = (s < 0.0) ? asydecr : (s > 0.0) ? asyincr : 1.0;
+      double L = xe - gamma * (st.xold1[e] - st.low[e]);
+      double U = xe + gamma * (st.upp[e] - st.xold1[e]);
+      L = std::min(L, xe - 0.01 * xrange);
+      L = std::max(L, xe - 10.0 * xrange);
+      U = std::max(U, xe + 0.01 * xrange);
+      U = std::min(U, xe + 10.0 * xrange);
+      st.low[e] = L;
+      st.upp[e] = U;
+    }
+  }
+
+  // 2. Separable convex coefficients + move box.
+  std::vector<double> p0(N, 0.0), q0(N, 0.0), p1(N, 0.0), q1(N, 0.0);
+  std::vector<double> alpha(N, 0.0), beta_box(N, 0.0);
+  double b = -g0;
+  for (std::size_t e : dof) {
+    const double xe = density[e];
+    const double L = st.low[e], U = st.upp[e];
+    const double ux1 = U - xe, xl1 = xe - L;
+    const double dcp = std::max(dc[e], 0.0), dcm = std::max(-dc[e], 0.0);
+    const double dvp = std::max(dv[e], 0.0), dvm = std::max(-dv[e], 0.0);
+    p0[e] = ux1 * ux1 * (1.001 * dcp + 0.001 * dcm + raa0 / xrange);
+    q0[e] = xl1 * xl1 * (0.001 * dcp + 1.001 * dcm + raa0 / xrange);
+    p1[e] = ux1 * ux1 * (1.001 * dvp + 0.001 * dvm + raa0 / xrange);
+    q1[e] = xl1 * xl1 * (0.001 * dvp + 1.001 * dvm + raa0 / xrange);
+    b += p1[e] / ux1 + q1[e] / xl1;
+    alpha[e] = std::max({xmin, L + albefa * (xe - L), xe - move * xrange});
+    beta_box[e] = std::min({xmax, U - albefa * (U - xe), xe + move * xrange});
+  }
+
+  // 3. Dual solve for the single volume constraint; frozen voxels keep their
+  // pinned x (candidate starts from `density`).
+  auto candidate = [&](double lambda) {
+    std::vector<double> xnew = density;  // preserves FrozenSolid=1, FrozenVoid=0
+    for (std::size_t e : dof) {
+      const double pl = std::sqrt(p0[e] + lambda * p1[e]);
+      const double ql = std::sqrt(q0[e] + lambda * q1[e]);
+      double xt = (pl * st.low[e] + ql * st.upp[e]) / (pl + ql);
+      if (xt < alpha[e]) xt = alpha[e];
+      if (xt > beta_box[e]) xt = beta_box[e];
+      xnew[e] = xt;
+    }
+    return xnew;
+  };
+  auto gval = [&](const std::vector<double>& x) {
+    double s = 0.0;
+    for (std::size_t e : dof)
+      s += p1[e] / (st.upp[e] - x[e]) + q1[e] / (x[e] - st.low[e]);
+    return s - b;
+  };
+  double lambda = 0.0;
+  if (gval(candidate(0.0)) > 0.0) {
+    double l1 = 0.0, l2 = 1.0;
+    while (l2 < 1e30 && gval(candidate(l2)) > 0.0) l2 *= 2.0;
+    for (int it = 0; it < 100 && (l2 - l1) > 1e-9 * (1.0 + l1 + l2); ++it) {
+      const double lmid = 0.5 * (l1 + l2);
+      if (gval(candidate(lmid)) > 0.0)
+        l1 = lmid;
+      else
+        l2 = lmid;
+    }
+    lambda = 0.5 * (l1 + l2);
+  }
+  std::vector<double> xnew = candidate(lambda);
+
+  st.xold2 = st.xold1;
+  st.xold1 = density;
+  return xnew;
+}
+
 }  // namespace
 
 SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
@@ -1329,6 +1721,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // only MMA + a Heaviside projection schedule is rejected (the projected path
   // is the OC-locked Gate-V2 formulation — see validate_updater_options).
   validate_updater_options(options);
+  validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
 
   // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
   // analysis grid (FrozenVoid removed), and the Active-voxel budget.
@@ -1380,10 +1773,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 
   // MMA updater state (ROADMAP M7.mma.4). Unused when updater == OC; the masked
   // loop owns a single continuous MMA iteration count across all stages, exactly
-  // like the unconstrained overload. MMA + projection is rejected above, so the
-  // MMA branch below is always the plain (unprojected) masked stage.
+  // like the unconstrained overload.
   MmaState mma_state;
   int mma_iter = 0;
+
+  // MMA Heaviside beta-continuation state (handoff 114); see the unconstrained
+  // overload for the contract. Inert unless the plan carries the single
+  // mma_continuation stage.
+  double mma_beta = options.mma_projection_beta0;
+  const double mma_beta_max = options.mma_projection_beta_max;
+  std::size_t mma_stage_start = 0;
 
   // Persistent solver over the FIXED analysis grid / BCs / loads (see the
   // unconstrained overload): assembles the reduced operator once, then per
@@ -1412,8 +1811,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         result.cancelled = true;
         break;
       }
+      const bool projecting = st.project || st.mma_continuation;
+      const double cur_beta = st.mma_continuation ? mma_beta : st.beta;
+      const double cur_move =
+          st.mma_continuation ? mma_continuation_move(st.move, cur_beta)
+                              : st.move;
       std::vector<double> xphys = filter.filter_density(x);
-      if (st.project) project_active(eff, xphys, st.beta, eta);
+      if (projecting) project_active(eff, xphys, cur_beta, eta);
       apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
       const SimpCompliance c =
           simp_compliance(analysis, params, xphys, bcs, loads,
@@ -1426,7 +1830,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
             "simp_optimize: penalized CG solve did not converge");
 
       std::vector<double> x_new;
-      if (st.project) {
+      if (st.mma_continuation) {
+        // MMA + Heaviside projection (handoff 114), restricted to Active voxels.
+        const std::vector<double> xtilde = filter.filter_density(x);
+        x_new = mma_update_masked_projected(
+            mma_state, ++mma_iter, grid, filter, eff, x, xtilde, c.dcompliance,
+            cur_beta, eta, options.volume_fraction, cur_move,
+            params.density_min);
+      } else if (st.project) {
         // dproj needs the UNprojected filtered field: recompute it (xphys was
         // projected + pinned in place above).
         const std::vector<double> xtilde = filter.filter_density(x);
@@ -1454,7 +1865,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (result.iterations == 0) result.initial_compliance = c.compliance;
       ++result.iterations;
       std::vector<double> xafter = filter.filter_density(x);
-      if (st.project) project_active(eff, xafter, st.beta, eta);
+      if (projecting) project_active(eff, xafter, cur_beta, eta);
       result.history.push_back(
           {c.compliance, change, active_volfrac(xafter)});
       if (options.progress)
@@ -1470,7 +1881,31 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         options.keyframe(kf);
       }
 
-      if (stage_should_stop(options, result.history, change)) {
+      if (st.mma_continuation) {
+        // Beta continuation (handoff 114): 086 plateau on the current beta
+        // stage; advance beta on a stall, terminate at a stall on the final
+        // beta. See the unconstrained overload for the rationale.
+        std::vector<double> curve;
+        curve.reserve(result.history.size() - mma_stage_start);
+        for (std::size_t hi = mma_stage_start; hi < result.history.size(); ++hi)
+          curve.push_back(result.history[hi].compliance);
+        // Progress gate on the first (beta0) stage only — see the unconstrained
+        // overload for the rationale.
+        const double stage_min_drop =
+            (mma_stage_start == 0) ? options.mma_plateau_min_drop : 0.0;
+        if (mma_objective_plateau(curve, options.mma_plateau_window,
+                                  options.mma_plateau_tol, stage_min_drop)) {
+          if (mma_beta < mma_beta_max) {
+            mma_beta = std::min(mma_beta * 2.0, mma_beta_max);
+            mma_stage_start = result.history.size();
+            mma_state = MmaState{};
+            mma_iter = 0;
+          } else {
+            stage_converged = true;
+            break;
+          }
+        }
+      } else if (stage_should_stop(options, result.history, change)) {
         stage_converged = true;
         break;
       }
@@ -1483,11 +1918,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 
   // Self-consistent final state (projected at the final stage's beta when
   // projecting, pins applied to the physical density) via one final solve on
-  // the converged field.
+  // the converged field. For the MMA continuation stage the final sharpness is
+  // `mma_beta`.
   result.design = x;
   result.physical_density = filter.filter_density(x);
   if (plan.back().project)
     project_active(eff, result.physical_density, plan.back().beta, eta);
+  else if (plan.back().mma_continuation)
+    project_active(eff, result.physical_density, mma_beta, eta);
   std::vector<double> xfinal_unpinned = result.physical_density;
   apply_mask_pins(eff, result.physical_density);
   const SimpCompliance fc = simp_compliance(
@@ -1970,6 +2408,10 @@ SimpOptimizeResult simp_optimize_stress(const VoxelGrid& grid,
     throw std::invalid_argument(
         "simp_optimize_stress: Heaviside projection is not supported on the "
         "stress-constrained MMA path (ROADMAP M7.mma.2)");
+  if (options.mma_projection)
+    throw std::invalid_argument(
+        "simp_optimize_stress: mma_projection is not supported on the "
+        "stress-constrained MMA path (handoff 114)");
   if (!(stress.stress_cap > 0.0))
     throw std::invalid_argument("simp_optimize_stress: stress_cap must be > 0");
   if (!(stress.p_norm > 1.0))
