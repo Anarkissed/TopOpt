@@ -1,4 +1,4 @@
-# 114 — Density-trajectory extrapolation: STEP-0 go/no-go (skip iterations by extrapolating the fixed-point?)
+# 118 — Density-trajectory extrapolation: STEP-0 go/no-go (skip iterations by extrapolating the fixed-point?)
 
 **Track:** core (exploratory, go/no-go gated). **Territory intended:** `/core/`
 only — offline analysis (STEP 0a) + an opt-in in-solver Anderson step (STEP 0b).
