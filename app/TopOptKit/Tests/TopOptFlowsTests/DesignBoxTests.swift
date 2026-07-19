@@ -349,4 +349,66 @@ final class DesignBoxTests: XCTestCase {
         let expected = faceResize(unitBox, to: 4.0)   // pure owner-only result
         XCTAssertEqual(box, expected, "the intruder's frame left no trace — no ghost box")
     }
+
+    // MARK: - Single-gesture hit-test chooser (handoff 111 — the teleport/ghost fix)
+
+    private func target(_ h: DesignBoxDragSession.HandleID, _ x: CGFloat, _ y: CGFloat)
+        -> DesignBoxHitTest.Target {
+        DesignBoxHitTest.Target(handle: h, screen: CGPoint(x: x, y: y))
+    }
+
+    /// The chooser picks the NEAREST handle to the touch, so an overlapping cluster
+    /// resolves to exactly one — the whole point of collapsing to one gesture.
+    func testHitTestPicksNearestHandle() {
+        let a = target(move(), 100, 100)
+        let b = target(face(0, true), 140, 100)
+        let picked = DesignBoxHitTest.choose(at: CGPoint(x: 132, y: 100), among: [a, b], radius: 30)
+        XCTAssertEqual(picked, face(0, true), "the closer handle (b) wins")
+    }
+
+    /// A touch outside every handle's grab radius selects nothing (nil), so the touch
+    /// falls through to the camera instead of grabbing a distant handle.
+    func testHitTestRejectsTouchOutsideRadius() {
+        let a = target(move(), 100, 100)
+        XCTAssertNil(DesignBoxHitTest.choose(at: CGPoint(x: 200, y: 200), among: [a], radius: 30))
+    }
+
+    /// An EXACT distance tie is broken by `tieBreakRank`, deterministically and
+    /// independent of the order candidates are supplied in (the move handle, rank 0,
+    /// beats the +x face, rank 2). Both orders must agree.
+    func testHitTestTieBreakIsDeterministicAndOrderIndependent() {
+        let p = CGPoint(x: 100, y: 100)
+        let mv = target(move(), 110, 100)              // both exactly 10 pt away
+        let fx = target(face(0, true), 90, 100)
+        XCTAssertEqual(DesignBoxHitTest.choose(at: p, among: [mv, fx], radius: 30), move())
+        XCTAssertEqual(DesignBoxHitTest.choose(at: p, among: [fx, mv], radius: 30), move(),
+                       "the tie resolves the same regardless of candidate order")
+    }
+
+    /// A keep-out handle and a design-box handle never collide: distinct targets get
+    /// distinct ranks, and the nearest still wins.
+    func testHitTestSeparatesKeepOutFromDesignBox() {
+        let boxMove = target(move(), 100, 100)
+        let koMove = target(move(target: .keepOut(0)), 300, 300)
+        XCTAssertEqual(DesignBoxHitTest.choose(at: CGPoint(x: 296, y: 300), among: [boxMove, koMove], radius: 30),
+                       move(target: .keepOut(0)))
+    }
+
+    /// The canonical candidate builder projects the box's move + 6 faces (and each
+    /// keep-out's) in `tieBreakRank` order via the supplied closures — pure, so the
+    /// overlay's hit-set is exercised headlessly. An identity projection lets us assert
+    /// the count and the leading handle.
+    func testCandidateBuilderProducesCanonicalHandleSet() {
+        let box = DesignBoxBounds(min: .zero, max: SIMD3<Float>(repeating: 10))
+        let ko = DesignBoxBounds(min: SIMD3<Float>(1, 1, 1), max: SIMD3<Float>(3, 3, 3))
+        let cands = DesignBoxHandles.candidates(
+            box: box, keepOuts: [ko],
+            settledWorld: { $0 },                                   // no settle
+            project: { CGPoint(x: CGFloat($0.x), y: CGFloat($0.y)) }) // identity xy
+        // 7 handles for the box + 7 for the one keep-out.
+        XCTAssertEqual(cands.count, 14)
+        XCTAssertEqual(cands.first?.handle, move(), "the design-box move handle leads")
+        // Every handle is unique (no two share an identity → no accidental overlap).
+        XCTAssertEqual(Set(cands.map(\.handle.tieBreakRank)).count, 14)
+    }
 }

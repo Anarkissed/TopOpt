@@ -71,6 +71,21 @@ public struct WorkspacePlaceholder: View {
     /// two overlapping gestures can't fight over the box (the "ghost duplicate boxes" bug — see
     /// `DesignBoxDragSession`).
     @State private var boxDrag = DesignBoxDragSession()
+    /// handoff 111: a debug-toggleable diagnostic HUD for the design-box drag (chosen
+    /// handle, owner, base→current delta in points + mm). Toggled by a long-press on
+    /// the design-box panel header. Ships off; the maintainer flips it on and a
+    /// screenshot then carries the diagnosis if the drag ever misbehaves again.
+    @State private var boxDragDebug = false
+    /// The live diagnostic for the in-flight box drag (nil between drags).
+    @State private var boxDragDiag: BoxDragDiagnostic?
+
+    /// The debug HUD payload for a box drag (handoff 111).
+    struct BoxDragDiagnostic: Equatable {
+        var handle: DesignBoxDragSession.HandleID
+        var owner: DesignBoxDragSession.HandleID?
+        var deltaPoints: CGSize
+        var deltaMM: Float
+    }
     /// Keep-clear Phase B: which clearance handle is currently being dragged (id =
     /// "group:face:role"), nil = none. Drives the live-readout highlight + haptics.
     @State private var draggingHandleID: String?
@@ -640,6 +655,14 @@ public struct WorkspacePlaceholder: View {
                 Text("Design Box").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
+            // Long-press the header to toggle the drag diagnostic HUD (handoff 111):
+            // if the box drag ever misbehaves again, the maintainer's screenshot then
+            // carries the chosen handle / owner / delta.
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 1.2) {
+                boxDragDebug.toggle()
+                model.toast = boxDragDebug ? "Box-drag diagnostics ON" : "Box-drag diagnostics off"
+            }
             Text("Drag the green handles to size the space the optimizer may grow material into — it can extend past the part.")
                 .dsStyle(DS.TypeScale.footnote)
                 .foregroundStyle(DS.Color.textSecondary.color)
@@ -723,51 +746,117 @@ public struct WorkspacePlaceholder: View {
     /// The probe step (mm) the drag math uses to measure an axis' on-screen scale.
     private var handleProbe: Float { Swift.max(viewerMesh?.bounds.radius ?? 1, 1e-3) * 0.1 }
 
-    /// The full on-scene gizmo: six resize handles + a centre move handle for the
-    /// design box, and the same for each keep-out.
+    /// handoff 111 — the SINGLE-GESTURE design-box gizmo. Every box + keep-out handle
+    /// used to carry its OWN `DragGesture`; overlapping ~44 pt targets let one touch
+    /// drive two gestures (the "ghost duplicate boxes") and each gesture measured
+    /// `.translation` in its handle's LOCAL space, which shifts as the box moves under
+    /// the finger (the teleport). Now:
+    ///   * the VISIBLE handles are pure chrome (`.allowsHitTesting(false)`), and
+    ///   * ONE `DragGesture` on the hit layer, in ONE named stage space, hit-tests the
+    ///     touch-down point ONCE to pick exactly one handle (`DesignBoxHitTest`).
+    /// Overlapping handles are impossible by construction, and all math reads the touch
+    /// in the stable stage space (`boxStageSpace`), so a repositioning handle can't
+    /// corrupt the delta. `DesignBoxDragSession` stays as the write guard beneath.
+    private static let boxStageSpace = "designBoxStage"
+    /// Grab radius (points) for the touch-down hit-test — a touch this far from a
+    /// handle centre still selects it (matches the ~44 pt visual target).
+    private static let boxHandleGrabRadius: CGFloat = 30
+
     private var designGizmoOverlay: some View {
-        GeometryReader { _ in
-            ZStack(alignment: .topLeading) {
-                if let proj = projection, let box = project.designBox.box {
-                    // Design-box centre move handle. The drag gesture is attached to
-                    // the SIZED handle BEFORE `.position`: `.position` makes a view
-                    // greedily fill all offered space, so a gesture applied AFTER it
-                    // would capture drags across the WHOLE stage — swallowing the
-                    // camera's orbit/pinch-zoom while the gizmo is up (the bug). Bound
-                    // before positioning, each drag only fires on its own handle, so
-                    // camera navigation still reaches the Metal view underneath.
-                    if let c = proj.project(settledWorld(box.center)) {
-                        moveHandle(tint: Self.designGlass)
-                            .gesture(designMoveDrag())
-                            .position(c)
-                    }
-                    // Design-box face resize handles.
-                    ForEach(0..<6, id: \.self) { i in
-                        let axis = i / 2, isMax = (i % 2 == 1)
-                        if let pt = faceHandleScreen(box, axis: axis, isMax: isMax, proj: proj) {
-                            resizeHandle(tint: Self.designGlass)
-                                .gesture(designFaceDrag(axis: axis, isMax: isMax))
-                                .position(pt)
-                        }
-                    }
-                    // Keep-out handles.
-                    ForEach(Array(project.designBox.keepOuts.enumerated()), id: \.offset) { idx, ko in
-                        if let c = proj.project(settledWorld(ko.center)) {
-                            moveHandle(tint: Self.keepOutGlass)
-                                .gesture(keepOutMoveDrag(idx))
-                                .position(c)
-                        }
-                        ForEach(0..<6, id: \.self) { i in
-                            let axis = i / 2, isMax = (i % 2 == 1)
-                            if let pt = faceHandleScreen(ko, axis: axis, isMax: isMax, proj: proj) {
-                                resizeHandle(tint: Self.keepOutGlass)
-                                    .gesture(keepOutFaceDrag(idx, axis: axis, isMax: isMax))
-                                    .position(pt)
-                            }
-                        }
-                    }
+        ZStack(alignment: .topLeading) {
+            if let proj = projection, let box = project.designBox.box {
+                boxHandleVisuals(box: box, proj: proj)
+                    .allowsHitTesting(false)                 // chrome only — the hit layer owns touches
+                boxHitLayer(boxCandidates(proj))
+                if boxDragDebug, let d = boxDragDiag { boxDragDiagnosticHUD(d) }
+            }
+        }
+        // Fill the stage so the named space shares the top-left origin the camera
+        // projection uses, and the ONE gesture reads the touch in that stable frame.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .coordinateSpace(name: Self.boxStageSpace)
+    }
+
+    /// The visible handles — a centre move dot + six face squares for the design box,
+    /// and the same per keep-out. Pure chrome; the hit layer below owns all touches.
+    @ViewBuilder private func boxHandleVisuals(box: DesignBoxBounds, proj: CameraProjection) -> some View {
+        if let c = proj.project(settledWorld(box.center)) {
+            moveHandle(tint: Self.designGlass).position(c)
+        }
+        ForEach(0..<6, id: \.self) { i in
+            let axis = i / 2, isMax = (i % 2 == 1)
+            if let pt = faceHandleScreen(box, axis: axis, isMax: isMax, proj: proj) {
+                resizeHandle(tint: Self.designGlass).position(pt)
+            }
+        }
+        ForEach(Array(project.designBox.keepOuts.enumerated()), id: \.offset) { _, ko in
+            if let c = proj.project(settledWorld(ko.center)) {
+                moveHandle(tint: Self.keepOutGlass).position(c)
+            }
+            ForEach(0..<6, id: \.self) { i in
+                let axis = i / 2, isMax = (i % 2 == 1)
+                if let pt = faceHandleScreen(ko, axis: axis, isMax: isMax, proj: proj) {
+                    resizeHandle(tint: Self.keepOutGlass).position(pt)
                 }
             }
+        }
+    }
+
+    /// The canonical hit-test candidates (design box, then each keep-out) projected to
+    /// stage points — the input to `DesignBoxHitTest.choose`.
+    private func boxCandidates(_ proj: CameraProjection) -> [DesignBoxHitTest.Target] {
+        DesignBoxHandles.candidates(box: project.designBox.box, keepOuts: project.designBox.keepOuts,
+                                    settledWorld: settledWorld, project: proj.project)
+    }
+
+    /// The ONE interactive layer: a transparent grab circle per handle, offset into
+    /// place, with the single drag gesture attached to the container. Because the
+    /// container has no fill/`contentShape`, only the grab circles are hittable — a
+    /// touch on empty space still falls through to the camera (orbit/zoom keep working
+    /// while the gizmo is up). `.offset` (not `.position`) keeps each grab area SMALL,
+    /// so the container's hit region is exactly the union of the circles.
+    private func boxHitLayer(_ targets: [DesignBoxHitTest.Target]) -> some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(targets.indices, id: \.self) { i in
+                Color.clear
+                    .frame(width: 44, height: 44)
+                    .contentShape(Circle())
+                    .offset(x: targets[i].screen.x - 22, y: targets[i].screen.y - 22)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .gesture(designBoxDrag())
+    }
+
+    /// The diagnostic HUD (debug-toggleable) — chosen handle, current owner, and the
+    /// base→current delta in points and mm. The maintainer flips it on with a long-
+    /// press on the panel header; a screenshot then carries the diagnosis.
+    private func boxDragDiagnosticHUD(_ d: BoxDragDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("box drag · debug").foregroundStyle(DS.Color.accentGreen.color)
+            Text("handle: \(Self.handleLabel(d.handle))")
+            Text("owner:  \(d.owner.map(Self.handleLabel) ?? "—")")
+            Text(String(format: "Δ pts:  %.0f, %.0f", d.deltaPoints.width, d.deltaPoints.height))
+            Text(String(format: "Δ mm:   %.2f", d.deltaMM))
+        }
+        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .foregroundStyle(.white)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.72)))
+        .position(x: 150, y: 150)
+        .allowsHitTesting(false)
+    }
+
+    /// A short label for a handle in the diagnostic HUD, e.g. "box/x+", "ko0/move".
+    private static func handleLabel(_ h: DesignBoxDragSession.HandleID) -> String {
+        let t: String
+        switch h.target {
+        case .designBox: t = "box"
+        case .keepOut(let i): t = "ko\(i)"
+        }
+        switch h.kind {
+        case .move: return "\(t)/move"
+        case .face(let axis, let isMax): return "\(t)/\(["x", "y", "z"][axis])\(isMax ? "+" : "-")"
         }
     }
 
@@ -798,68 +887,86 @@ public struct WorkspacePlaceholder: View {
                                 projection: proj, probe: handleProbe)
     }
 
-    private func designFaceDrag(axis: Int, isMax: Bool) -> some Gesture {
-        let handle = DesignBoxDragSession.HandleID(target: .designBox, kind: .face(axis: axis, isMax: isMax))
-        return DragGesture()
+    /// The ONE design-box drag gesture (handoff 111). On the first frame it hit-tests
+    /// the touch-down point to choose exactly one handle, then holds that choice for
+    /// the whole drag; every later frame applies an ABSOLUTE delta from the drag-start
+    /// snapshot the session captured. Reads the touch in the stable `boxStageSpace`, so
+    /// the box repositioning under the finger can't skew the delta (no teleport), and
+    /// there is only ever one gesture, so overlapping handles can't fight (no ghosts).
+    private func designBoxDrag() -> some Gesture {
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.boxStageSpace))
             .onChanged { v in
                 guard let proj = projection, let mesh = viewerMesh else { return }
-                // Claim the drag (rejected — nil — if another handle already owns it), reading
-                // the drag-start snapshot so the delta is absolute.
-                guard let base = boxDrag.begin(handle, current: project.designBox.box) else { return }
-                let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
-                let delta = axisDelta(fromWorld: world, axis: axis, drag: v.translation, proj: proj)
-                let target = (isMax ? base.max[axis] : base.min[axis]) + delta
-                project.designBox.box = base.movingFace(axis: axis, isMax: isMax, to: target,
-                                                        minSize: DesignBoxModel.minSize(for: mesh.bounds))
+                // Choose the handle ONCE: reuse the live owner if the drag is already
+                // claimed, else hit-test the touch-DOWN point. No handle → fall through.
+                let chosen: DesignBoxDragSession.HandleID
+                if let owner = boxDrag.activeOwner {
+                    chosen = owner
+                } else if let hit = DesignBoxHitTest.choose(at: v.startLocation,
+                                                            among: boxCandidates(proj),
+                                                            radius: Self.boxHandleGrabRadius) {
+                    chosen = hit
+                } else {
+                    return
+                }
+                // Claim/continue the drag; the session hands back the drag-start base
+                // (and rejects any stray second claim — defence in depth beneath the
+                // single gesture).
+                guard let current = boxBounds(for: chosen),
+                      let base = boxDrag.begin(chosen, current: current) else { return }
+                let result = applyBoxDrag(chosen, base: base, drag: v.translation, proj: proj, mesh: mesh)
+                writeBox(chosen, result.bounds)
+                if boxDragDebug {
+                    boxDragDiag = BoxDragDiagnostic(handle: chosen, owner: boxDrag.activeOwner,
+                                                    deltaPoints: v.translation, deltaMM: result.mm)
+                }
             }
-            .onEnded { _ in boxDrag.end(handle) }
+            .onEnded { _ in
+                if let owner = boxDrag.activeOwner { boxDrag.end(owner) }
+                boxDragDiag = nil
+            }
     }
 
-    private func designMoveDrag() -> some Gesture {
-        let handle = DesignBoxDragSession.HandleID(target: .designBox, kind: .move)
-        return DragGesture()
-            .onChanged { v in
-                guard let proj = projection else { return }
-                guard let base = boxDrag.begin(handle, current: project.designBox.box) else { return }
-                let world = settledWorld(base.center)
-                // Slide in the ground plane (model X + Z); vertical is via face handles.
-                let dx = axisDelta(fromWorld: world, axis: 0, drag: v.translation, proj: proj)
-                let dz = axisDelta(fromWorld: world, axis: 2, drag: v.translation, proj: proj)
-                project.designBox.box = base.translated(by: SIMD3<Float>(dx, 0, dz))
-            }
-            .onEnded { _ in boxDrag.end(handle) }
+    /// The current model bounds a handle edits (the design box, or a keep-out by index).
+    private func boxBounds(for handle: DesignBoxDragSession.HandleID) -> DesignBoxBounds? {
+        switch handle.target {
+        case .designBox: return project.designBox.box
+        case .keepOut(let i):
+            return project.designBox.keepOuts.indices.contains(i) ? project.designBox.keepOuts[i] : nil
+        }
     }
 
-    private func keepOutFaceDrag(_ index: Int, axis: Int, isMax: Bool) -> some Gesture {
-        let handle = DesignBoxDragSession.HandleID(target: .keepOut(index), kind: .face(axis: axis, isMax: isMax))
-        return DragGesture()
-            .onChanged { v in
-                guard let proj = projection, let mesh = viewerMesh,
-                      project.designBox.keepOuts.indices.contains(index) else { return }
-                guard let base = boxDrag.begin(handle, current: project.designBox.keepOuts[index]) else { return }
-                let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
-                let delta = axisDelta(fromWorld: world, axis: axis, drag: v.translation, proj: proj)
-                let target = (isMax ? base.max[axis] : base.min[axis]) + delta
-                project.designBox.keepOuts[index] = base.movingFace(
-                    axis: axis, isMax: isMax, to: target,
-                    minSize: DesignBoxModel.minSize(for: mesh.bounds))
-            }
-            .onEnded { _ in boxDrag.end(handle) }
+    /// Write a handle's new bounds back to the model (index-checked for keep-outs).
+    private func writeBox(_ handle: DesignBoxDragSession.HandleID, _ bounds: DesignBoxBounds) {
+        switch handle.target {
+        case .designBox: project.designBox.box = bounds
+        case .keepOut(let i):
+            guard project.designBox.keepOuts.indices.contains(i) else { return }
+            project.designBox.keepOuts[i] = bounds
+        }
     }
 
-    private func keepOutMoveDrag(_ index: Int) -> some Gesture {
-        let handle = DesignBoxDragSession.HandleID(target: .keepOut(index), kind: .move)
-        return DragGesture()
-            .onChanged { v in
-                guard let proj = projection,
-                      project.designBox.keepOuts.indices.contains(index) else { return }
-                guard let base = boxDrag.begin(handle, current: project.designBox.keepOuts[index]) else { return }
-                let world = settledWorld(base.center)
-                let dx = axisDelta(fromWorld: world, axis: 0, drag: v.translation, proj: proj)
-                let dz = axisDelta(fromWorld: world, axis: 2, drag: v.translation, proj: proj)
-                project.designBox.keepOuts[index] = base.translated(by: SIMD3<Float>(dx, 0, dz))
-            }
-            .onEnded { _ in boxDrag.end(handle) }
+    /// Apply a stage-space drag translation to a handle's base bounds, returning the
+    /// new bounds and the model-space (mm) delta (for the diagnostic HUD). Move handles
+    /// slide in the ground plane (model X + Z); face handles resize along their axis.
+    private func applyBoxDrag(_ handle: DesignBoxDragSession.HandleID, base: DesignBoxBounds,
+                              drag: CGSize, proj: CameraProjection, mesh: ViewerMesh)
+        -> (bounds: DesignBoxBounds, mm: Float) {
+        switch handle.kind {
+        case .move:
+            let world = settledWorld(base.center)
+            let dx = axisDelta(fromWorld: world, axis: 0, drag: drag, proj: proj)
+            let dz = axisDelta(fromWorld: world, axis: 2, drag: drag, proj: proj)
+            return (base.translated(by: SIMD3<Float>(dx, 0, dz)), (dx * dx + dz * dz).squareRoot())
+        case .face(let axis, let isMax):
+            let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
+            let delta = axisDelta(fromWorld: world, axis: axis, drag: drag, proj: proj)
+            let target = (isMax ? base.max[axis] : base.min[axis]) + delta
+            let moved = base.movingFace(axis: axis, isMax: isMax, to: target,
+                                        minSize: DesignBoxModel.minSize(for: mesh.bounds))
+            let mm = (isMax ? moved.max[axis] - base.max[axis] : moved.min[axis] - base.min[axis])
+            return (moved, abs(mm))
+        }
     }
 
     // MARK: keep-clear Phase B — draggable clearance handles + floating value pill
