@@ -261,4 +261,92 @@ final class DesignBoxTests: XCTestCase {
                                         drag: CGVector(dx: 30, dy: 30), projection: proj, probe: 0.4)
         XCTAssertEqual(d, 0, accuracy: 1e-3)
     }
+
+    // MARK: - Single-owner drag session (design-overhaul 109 — the "ghost duplicate boxes" fix)
+
+    private func face(_ axis: Int, _ isMax: Bool, target: DesignBoxDragSession.HandleID.Target = .designBox)
+        -> DesignBoxDragSession.HandleID {
+        DesignBoxDragSession.HandleID(target: target, kind: .face(axis: axis, isMax: isMax))
+    }
+    private func move(target: DesignBoxDragSession.HandleID.Target = .designBox) -> DesignBoxDragSession.HandleID {
+        DesignBoxDragSession.HandleID(target: target, kind: .move)
+    }
+    private let unitBox = DesignBoxBounds(min: SIMD3<Float>(0, 0, 0), max: SIMD3<Float>(2, 2, 2))
+
+    /// The core regression: a SECOND handle firing during another handle's live drag is rejected,
+    /// so two gestures can never both write the box from the shared base (the ghost-duplicate
+    /// cause). The owner keeps its own untouched base throughout.
+    func testConcurrentSecondHandleIsRejected() {
+        var s = DesignBoxDragSession()
+        let faceH = face(0, true), moveH = move()
+        // Face handle claims the drag.
+        XCTAssertEqual(s.begin(faceH, current: unitBox), unitBox)
+        XCTAssertEqual(s.activeOwner, faceH)
+        // An overlapping move handle fires in the SAME interaction with a DIFFERENT box → rejected.
+        XCTAssertNil(s.begin(moveH, current: unitBox.translated(by: SIMD3<Float>(9, 0, 0))),
+                     "a second handle must not seize a live drag")
+        XCTAssertNil(s.base(for: moveH))
+        // The owner's base is intact — the intruder could not corrupt it.
+        XCTAssertEqual(s.base(for: faceH), unitBox)
+    }
+
+    /// The base is the drag-START snapshot: passing the live (already-moved) box on later frames
+    /// must NOT re-capture it, or the delta would compound and the box would run away.
+    func testBaseCapturedOncePerDrag() {
+        var s = DesignBoxDragSession()
+        let h = move()
+        XCTAssertEqual(s.begin(h, current: unitBox), unitBox)
+        let moved = unitBox.translated(by: SIMD3<Float>(10, 0, 0))
+        XCTAssertEqual(s.begin(h, current: moved), unitBox,
+                       "base stays the drag-start snapshot across frames, never re-captured")
+    }
+
+    /// A stale `end` from a non-owner (e.g. a dropped gesture) must NOT tear down the live drag —
+    /// the old code cleared the single shared base on ANY end, stranding the real drag.
+    func testStaleEndFromNonOwnerIsIgnored() {
+        var s = DesignBoxDragSession()
+        let faceH = face(1, false), moveH = move()
+        s.begin(faceH, current: unitBox)
+        s.end(moveH)                                   // a different handle's end
+        XCTAssertTrue(s.isActive, "a non-owner's end can't release the drag")
+        XCTAssertEqual(s.activeOwner, faceH)
+        s.end(faceH)                                   // the owner ends → released
+        XCTAssertFalse(s.isActive)
+    }
+
+    /// After the owner ends, a fresh handle can claim its own drag with its own base — including
+    /// a keep-out, which shares the one session but never collides with the design box.
+    func testDragReleasesAndNextHandleClaimsFreshBase() {
+        var s = DesignBoxDragSession()
+        let a = face(2, true)
+        XCTAssertEqual(s.begin(a, current: unitBox), unitBox)
+        s.end(a)
+        let koBox = DesignBoxBounds(min: SIMD3<Float>(-1, -1, -1), max: SIMD3<Float>(1, 1, 1))
+        let ko = move(target: .keepOut(0))
+        XCTAssertEqual(s.begin(ko, current: koBox), koBox, "a freed session accepts the next handle")
+        XCTAssertEqual(s.activeOwner, ko)
+        XCTAssertNil(s.base(for: a), "the previous owner no longer has a base")
+    }
+
+    /// End-to-end proof that the fix prevents the ghost: two handles interleave onChanged frames,
+    /// but only the OWNER's writes land, so the box equals an owner-only drag (no contamination).
+    func testInterleavedWritesMatchOwnerOnlyDrag() {
+        let minSize: Float = 0.1
+        // Owner-only reference: three frames of a +X max-face resize, absolute from the base.
+        func faceResize(_ base: DesignBoxBounds, to value: Float) -> DesignBoxBounds {
+            base.movingFace(axis: 0, isMax: true, to: value, minSize: minSize)
+        }
+        var s = DesignBoxDragSession()
+        let owner = face(0, true), intruder = move()
+        var box = unitBox
+        // Frame 1: owner claims.
+        if let base = s.begin(owner, current: box) { box = faceResize(base, to: 3.0) }
+        // Frame 2: an intruder tries to translate — rejected, no write.
+        if let base = s.begin(intruder, current: box) { box = base.translated(by: SIMD3<Float>(5, 5, 5)) }
+        // Frame 3: owner continues from its ORIGINAL base.
+        if let base = s.begin(owner, current: box) { box = faceResize(base, to: 4.0) }
+
+        let expected = faceResize(unitBox, to: 4.0)   // pure owner-only result
+        XCTAssertEqual(box, expected, "the intruder's frame left no trace — no ghost box")
+    }
 }

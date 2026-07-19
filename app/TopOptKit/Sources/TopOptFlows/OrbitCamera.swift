@@ -94,6 +94,15 @@ public struct OrbitCamera: Equatable {
     public var azimuth: Float
     /// Pitch, in radians. Clamped to ±`maxElevation` to avoid flipping over the pole.
     public private(set) var elevation: Float
+    /// ROLL about the view axis (the line of sight), in radians — the "visual axis"
+    /// rotation the gizmo's swoosh arrows drive (design-overhaul, handoff 109). Unbounded
+    /// (wraps naturally). This is the DOF handoff 107 Blocked-stopped on: the 074 "roll=0"
+    /// decision is overridden by the maintainer FOR THIS TASK (he records it in DECISIONS.md;
+    /// this code does not). Rolls the horizon by tilting the camera up-vector about the
+    /// direction of view; it never moves the eye, so it composes freely with azimuth/
+    /// elevation and does not affect the canonical-view `direction`. `roll == 0` is the
+    /// level view Home and every snap return to.
+    public private(set) var roll: Float = 0
     /// Vertical field of view, in radians.
     public var fovY: Float
     public var minDistance: Float
@@ -109,12 +118,14 @@ public struct OrbitCamera: Equatable {
                 distance: Float = 3,
                 azimuth: Float = .pi / 4,
                 elevation: Float = .pi / 6,
+                roll: Float = 0,
                 fovY: Float = .pi / 4,
                 minDistance: Float = 0.01,
                 maxDistance: Float = 1_000) {
         self.target = target
         self.distance = distance
         self.azimuth = azimuth
+        self.roll = roll
         self.fovY = fovY
         self.minDistance = minDistance
         self.maxDistance = maxDistance
@@ -181,6 +192,20 @@ public struct OrbitCamera: Equatable {
         distance = Swift.min(Swift.max(distance * factor, minDistance), maxDistance)
     }
 
+    /// Roll the view by `delta` radians about the line of sight (the swoosh arrows). Positive
+    /// spins the horizon one way, negative the other; unbounded (wraps). Does not move the eye.
+    public mutating func rollBy(_ delta: Float) {
+        guard delta.isFinite else { return }
+        roll += delta
+    }
+
+    /// Set the roll angle directly (radians). Used by the shared model when animating a
+    /// snap/home back to a level horizon (`roll = 0`).
+    public mutating func setRoll(_ r: Float) {
+        guard r.isFinite else { return }
+        roll = r
+    }
+
     /// Unit direction from `target` toward the eye.
     public var direction: SIMD3<Float> {
         let ce = cos(elevation), se = sin(elevation)
@@ -191,10 +216,23 @@ public struct OrbitCamera: Equatable {
     /// The eye (camera) position in world space.
     public var eye: SIMD3<Float> { target + direction * distance }
 
+    /// The camera up-vector: world +Y rolled about the line of sight by `roll` (Rodrigues
+    /// rotation about `direction`). At `roll == 0` this is exactly `(0,1,0)`, so the levelled
+    /// view is byte-identical to the pre-roll camera. The rotation preserves the component of
+    /// up along the view axis, so `cross(up, z)` in `lookAt` stays well-conditioned wherever
+    /// it already was (elevation is clamped shy of the pole regardless).
+    public var up: SIMD3<Float> {
+        let base = SIMD3<Float>(0, 1, 0)
+        guard roll != 0 else { return base }
+        let k = direction                        // unit rotation axis (line of sight, toward eye)
+        let c = cos(roll), s = sin(roll)
+        return base * c + simd_cross(k, base) * s + k * (simd_dot(k, base) * (1 - c))
+    }
+
     /// World → view (camera) space. `eye` maps to the origin and `target` to
-    /// `(0, 0, -distance)` (straight ahead down −Z).
+    /// `(0, 0, -distance)` (straight ahead down −Z); `roll` tilts the horizon via `up`.
     public func viewMatrix() -> simd_float4x4 {
-        Self.lookAt(eye: eye, center: target, up: SIMD3<Float>(0, 1, 0))
+        Self.lookAt(eye: eye, center: target, up: up)
     }
 
     /// View → clip space (right-handed, Metal [0,1] depth).

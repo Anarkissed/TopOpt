@@ -187,6 +187,15 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// ROLE is migrated into this map by the decoder.
     private var keepClear: [UUID: KeepClearAffix]? = nil
 
+    /// "Same clearance for all" (design-overhaul 109). DEFAULT ON: editing any margin/axial/
+    /// depth writes the SAME number to every keep-clear site of that shape, so one number
+    /// governs them all. OFF: each site keeps its own value. Persisted; snapshots written
+    /// before this field decode as `true` (the default), which is a no-op when there is ≤1
+    /// site. See `setClearanceMargin(_:mm:syncTo:)` for the fan-out and how it interacts with
+    /// Auto: a site the fan-out never touches keeps NO override → stays Auto (and the wire
+    /// still sends the 0 sentinel, so the core re-derives it).
+    public var syncClearances: Bool = true
+
     public init() {}
 
     /// Whether a gravity direction has been chosen (stays true across re-entering
@@ -317,6 +326,33 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public mutating func setClearanceSlab(_ id: UUID, mm: Double?) {
         if let v = mm, v < 0 { return }
         mutateOverride(id) { $0.slabDepthMM = mm }
+    }
+
+    // MARK: - sync fan-out ("Same clearance for all", design-overhaul 109)
+
+    /// Set the sync toggle.
+    public mutating func setSyncClearances(_ on: Bool) { syncClearances = on }
+
+    /// The write targets for a clearance edit on `id`: when sync is ON, every id in
+    /// `peers` (the caller's set of same-shape keep-clear sites — bolt sites for margin/axial,
+    /// slab sites for depth; ForceModel can't classify geometry itself); when OFF, just `id`.
+    /// A site absent from `peers` is never written, so it stays Auto.
+    private func syncTargets(_ id: UUID, peers: [UUID]) -> [UUID] {
+        syncClearances ? (peers.isEmpty ? [id] : peers) : [id]
+    }
+
+    /// Margin edit honouring the sync toggle: writes `mm` to `id` alone (sync OFF) or to every
+    /// bolt site in `peers` (sync ON). `nil` reverts the touched sites to Auto.
+    public mutating func setClearanceMargin(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
+        for t in syncTargets(id, peers: peers) { setClearanceMargin(t, mm: mm) }
+    }
+    /// Axial edit honouring the sync toggle (see `setClearanceMargin(_:mm:syncTo:)`).
+    public mutating func setClearanceAxial(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
+        for t in syncTargets(id, peers: peers) { setClearanceAxial(t, mm: mm) }
+    }
+    /// Slab-depth edit honouring the sync toggle (peers are the slab sites).
+    public mutating func setClearanceSlab(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
+        for t in syncTargets(id, peers: peers) { setClearanceSlab(t, mm: mm) }
     }
 
     /// Change a load's direction via the snap row (no-op unless it is a load).
@@ -507,6 +543,7 @@ extension ForceModel {
         // Keys match the pre-v2 synthesized coder's property names, so on-disk
         // snapshots keep decoding; `keepClear` is the only new (optional) key.
         case gravity, gravityFace, phase, unit, kinds, clearanceOverrides, keepClear
+        case syncClearances
     }
 
     public init(from decoder: Decoder) throws {
@@ -518,6 +555,7 @@ extension ForceModel {
         unit = try c.decodeIfPresent(WeightUnit.self, forKey: .unit) ?? .kg
         var decodedKinds = try c.decodeIfPresent([UUID: GroupKind].self, forKey: .kinds) ?? [:]
         clearanceOverrides = try c.decodeIfPresent([UUID: ClearanceOverride].self, forKey: .clearanceOverrides)
+        syncClearances = try c.decodeIfPresent(Bool.self, forKey: .syncClearances) ?? true
         var affixes = try c.decodeIfPresent([UUID: KeepClearAffix].self, forKey: .keepClear) ?? [:]
 
         // MIGRATION: a pre-v2 `.clearance` ROLE becomes a keep-clear-only affix — the
@@ -540,6 +578,7 @@ extension ForceModel {
         try c.encode(unit, forKey: .unit)
         try c.encode(kinds, forKey: .kinds)
         try c.encodeIfPresent(clearanceOverrides, forKey: .clearanceOverrides)
+        try c.encode(syncClearances, forKey: .syncClearances)
         try c.encodeIfPresent(keepClear, forKey: .keepClear)
     }
 }

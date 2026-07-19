@@ -34,6 +34,9 @@ public final class OrbitCameraModel: ObservableObject {
     /// stock `OrbitCamera()` this is azimuth π/4, elevation π/6 (the M7.4 default view).
     public let defaultAzimuth: Float
     public let defaultElevation: Float
+    /// Home levels the horizon: the default roll is always 0 (the level view). Captured for
+    /// symmetry with az/el (design-overhaul, handoff 109 — roll DOF).
+    public let defaultRoll: Float
 
     /// ~0.3s eased snap/home transition (the task's target; NOT an instant teleport).
     public static let transitionDuration: CFTimeInterval = 0.3
@@ -42,6 +45,7 @@ public final class OrbitCameraModel: ObservableObject {
         self.camera = camera
         self.defaultAzimuth = camera.azimuth
         self.defaultElevation = camera.elevation
+        self.defaultRoll = 0
     }
 
     // MARK: - Live drag / zoom (STEP 2: full orbit, elevation clamped)
@@ -58,6 +62,15 @@ public final class OrbitCameraModel: ObservableObject {
     public func zoom(_ factor: Float) {
         stopAnimation()
         camera.zoom(factor)
+    }
+
+    /// Live ROLL about the line of sight (the gizmo's swoosh arrows). Cancels any running
+    /// snap so a roll always wins, then rolls the horizon by `delta` radians. The gizmo cube,
+    /// the Metal viewer and any projection overlays all read `camera.viewRotation()` / the
+    /// same view matrix, so they stay in lockstep — roll can never make them diverge.
+    public func rollBy(_ delta: Float) {
+        stopAnimation()
+        camera.rollBy(delta)
     }
 
     /// Refit distance/target/limits to a new mesh WITHOUT disturbing the user's
@@ -79,7 +92,8 @@ public final class OrbitCameraModel: ObservableObject {
     /// `animated == false` snaps immediately (reduced-motion / tests).
     public func snap(to region: GizmoRegion, animated: Bool = true) {
         let target = region.orientation(currentAzimuth: camera.azimuth)
-        setOrientation(azimuth: target.azimuth, elevation: target.elevation, animated: animated)
+        // Snapping to a canonical view LEVELS the horizon (roll → 0): a named view is upright.
+        setOrientation(azimuth: target.azimuth, elevation: target.elevation, roll: 0, animated: animated)
     }
 
     /// Convenience: snap to a region id ("Front", "Top", "Front-Top-Right").
@@ -88,9 +102,11 @@ public final class OrbitCameraModel: ObservableObject {
         snap(to: region, animated: animated)
     }
 
-    /// Return to the viewer's default view angle (the Home button).
+    /// Return to the viewer's default view angle (the Home button) — az/el AND a level
+    /// horizon (roll → 0), so Home un-rolls whatever the arrows spun.
     public func home(animated: Bool = true) {
-        setOrientation(azimuth: defaultAzimuth, elevation: defaultElevation, animated: animated)
+        setOrientation(azimuth: defaultAzimuth, elevation: defaultElevation,
+                       roll: defaultRoll, animated: animated)
     }
 
     /// The world→view rotation the gizmo renders the cube with — taken verbatim from the
@@ -99,14 +115,15 @@ public final class OrbitCameraModel: ObservableObject {
 
     // MARK: - Orientation transition
 
-    private func setOrientation(azimuth: Float, elevation: Float, animated: Bool) {
+    private func setOrientation(azimuth: Float, elevation: Float, roll: Float, animated: Bool) {
         let targetEl = OrbitCamera.clampElevation(elevation)
         guard animated else {
             stopAnimation()
             camera.setOrientation(azimuth: azimuth, elevation: targetEl)
+            camera.setRoll(roll)
             return
         }
-        startAnimation(toAzimuth: azimuth, toElevation: targetEl)
+        startAnimation(toAzimuth: azimuth, toElevation: targetEl, toRoll: roll)
     }
 
     // MARK: - Eased animation (needs a clock; excluded from the headless end-state tests)
@@ -114,22 +131,26 @@ public final class OrbitCameraModel: ObservableObject {
     private var displayLink: AnyObject?
     private var animFromAz: Float = 0
     private var animFromEl: Float = 0
+    private var animFromRoll: Float = 0
     private var animToAz: Float = 0
     private var animToEl: Float = 0
+    private var animToRoll: Float = 0
     private var animStart: CFTimeInterval = 0
 
     /// True while a snap/home transition is running (drivable by a host that prefers to
     /// tick the animation itself).
     public private(set) var isAnimating = false
 
-    private func startAnimation(toAzimuth: Float, toElevation: Float) {
+    private func startAnimation(toAzimuth: Float, toElevation: Float, toRoll: Float) {
         animFromAz = camera.azimuth
         animFromEl = camera.elevation
-        // Shortest angular path for azimuth (it wraps); elevation is bounded so it lerps
-        // linearly. Unwrapping the target relative to the start avoids a 350°-the-long-way
-        // spin when the numeric values straddle ±π.
+        animFromRoll = camera.roll
+        // Shortest angular path for azimuth AND roll (both wrap); elevation is bounded so it
+        // lerps linearly. Unwrapping each target relative to the start avoids a 350°-the-long-
+        // way spin when the numeric values straddle ±π.
         animToAz = animFromAz + shortestDelta(from: animFromAz, to: toAzimuth)
         animToEl = toElevation
+        animToRoll = animFromRoll + shortestDelta(from: animFromRoll, to: toRoll)
         animStart = now()
         isAnimating = true
         startClock()
@@ -143,9 +164,12 @@ public final class OrbitCameraModel: ObservableObject {
         let e = easeInOut(t)
         let az = animFromAz + (animToAz - animFromAz) * e
         let el = animFromEl + (animToEl - animFromEl) * e
+        let rl = animFromRoll + (animToRoll - animFromRoll) * e
         camera.setOrientation(azimuth: az, elevation: el)
+        camera.setRoll(rl)
         if t >= 1 {
             camera.setOrientation(azimuth: animToAz, elevation: animToEl)
+            camera.setRoll(animToRoll)
             stopAnimation()
         }
     }

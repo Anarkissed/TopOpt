@@ -65,11 +65,12 @@ public struct WorkspacePlaceholder: View {
     @State private var lastRunRequest: RunRequest?
     /// The group whose colour-swatch popover is open (nil = none).
     @State private var recoloringGroup: UUID?
-    /// M7.dom-app: the design box captured at the start of a handle drag, so each
-    /// drag applies an absolute delta from where the box was when the drag began
-    /// (nil = no drag in progress). Same for a keep-out (with its index).
-    @State private var dragBaseBox: DesignBoxBounds?
-    @State private var dragBaseKeepOut: (index: Int, bounds: DesignBoxBounds)?
+    /// M7.dom-app / design-overhaul 109: the SINGLE-OWNER design-box drag session. Captures the
+    /// box (or keep-out) at the start of the owning handle's drag so each frame applies an
+    /// absolute delta from the drag-start snapshot, and REJECTS any concurrent second handle so
+    /// two overlapping gestures can't fight over the box (the "ghost duplicate boxes" bug — see
+    /// `DesignBoxDragSession`).
+    @State private var boxDrag = DesignBoxDragSession()
     /// Keep-clear Phase B: which clearance handle is currently being dragged (id =
     /// "group:face:role"), nil = none. Drives the live-readout highlight + haptics.
     @State private var draggingHandleID: String?
@@ -181,12 +182,12 @@ public struct WorkspacePlaceholder: View {
             if force.phase == .setup {
                 gravityBanner
             } else {
-                if force.gravityIsSet { topRightControls }
+                if force.gravityIsSet { bottomRightControls }
                 if viewerMesh != nil { selectionsPanel }
                 if showDesignGizmo { designBoxPanel }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
-            if viewerMesh != nil { orientationGizmo }           // shared ViewCube (top-left)
+            if viewerMesh != nil { orientationGizmo }           // orientation gizmo — top-right, always
             bottomBar
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
@@ -267,27 +268,23 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// The liquid-glass orientation widget, moved to the RIGHT side (gizmo-liquid-glass-
-    /// reskin task, item 2). Unlike ResultsScreen — whose right rail is clear below the
-    /// Export button — the SETUP screen's right rail is congested: the gravity / minimize /
-    /// quality / design-box chips (`topRightControls`) fill the top-right (≈y 22–230) and
-    /// the design-box PANEL (`designBoxPanel`, 260pt wide, top inset 210 ⇒ ≈y 210–460) takes
-    /// the upper-right whenever that tool is active. There is no ~300pt top-right slot free
-    /// of both, so the gizmo is anchored BOTTOM-right instead — clear of the top controls
-    /// and, in portrait, clear of the design-box panel; it clears the bottom bar's
-    /// Optimize / print-params buttons via the bottom inset. Residual caveat (handoff): in
-    /// SHORT LANDSCAPE with the design-box tool open the case's top edge can graze the
-    /// panel's lower edge (~70pt) — reported, not silently worked around.
+    /// The orientation gizmo lives TOP-RIGHT, ALWAYS (design-overhaul 109, item 2 — the
+    /// maintainer's placement). The settings chips that used to crowd this corner now stack
+    /// BOTTOM-right above Optimize (`bottomRightControls`), so the top-right is clear. Sized
+    /// ~210pt so the widget + its corner control-ring fit the corner without reaching the
+    /// design-box panel (which now opens BELOW it — see `designBoxPanel`). Matches the
+    /// ResultsScreen gizmo (also top-right) for a consistent home.
+    private var gizmoSize: CGFloat { 210 }
     private var orientationGizmo: some View {
         VStack {
-            Spacer()
             HStack {
                 Spacer()
-                OrientationGizmoView(camera: cameraModel)
+                OrientationGizmoView(camera: cameraModel, size: gizmoSize)
             }
+            Spacer()
         }
-        .padding(.trailing, DS.Space.xl3)
-        .padding(.bottom, DS.Space.xl4 + 50 + DS.Space.m)   // clear the bottom bar buttons
+        .padding(.top, DS.Space.s)
+        .padding(.trailing, DS.Space.s)
     }
 
     private func startRun() {
@@ -522,18 +519,20 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, DS.Space.xl4)
     }
 
-    /// Top-right stack: the gravity chip and, below it, the "Minimize plastic"
-    /// toggle (per the maintainer's placement — below the Gravity set · Change area).
-    private var topRightControls: some View {
+    /// The settings chips (Gravity · Minimize plastic · quality · Design Box) stack BOTTOM-right
+    /// now, above the Optimize button (design-overhaul 109, item 2 — they used to be top-right,
+    /// which the gizmo now owns). Bottom-anchored and lifted to clear the bottom bar's button row.
+    private var bottomRightControls: some View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
+            Spacer()
             gravityChip
             minimizePlasticChip
             qualityChip
             designBoxChip
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.top, DS.Space.xl3)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, DS.Space.xl4)
+        .padding(.bottom, DS.Space.xl4 + 50 + DS.Space.m)   // clear the bottom bar buttons (Optimize)
     }
 
     /// Resolution / quality picker chip (Fast 64³ / Balanced 96³ / Fine 128³).
@@ -681,9 +680,12 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-        .padding(.top, 210)          // clear the gravity / minimize / quality / design chips
-        .padding(.trailing, DS.Space.xl4)
+        // Design-overhaul 109: the top-RIGHT now belongs to the gizmo (always), so the design-
+        // box panel opens TOP-LEFT, below the back/title chrome and above the bottom-left
+        // Selections panel — the one clear column left.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(.top, 76)           // clear the top-left back/title chrome row
+        .padding(.leading, DS.Space.xl4)
     }
 
     private func designBoxPanelButton(_ icon: String, _ text: String) -> some View {
@@ -701,6 +703,10 @@ public struct WorkspacePlaceholder: View {
 
     private static let designGreen = Color(red: 0.30, green: 0.78, blue: 0.55)
     private static let keepOutRed = Color(red: 0.95, green: 0.42, blue: 0.38)
+    /// Liquid-glass tints for the on-scene handles (design-overhaul 109): the design box keeps
+    /// its green identity, keep-outs the forbidden-space red — both as the shared glass.
+    private static let designGlass = LiquidGlass.Tint.frost(RGBA(0.30 * 255, 0.78 * 255, 0.55 * 255), intensity: 0.6)
+    private static let keepOutGlass = LiquidGlass.Tint.red
 
     /// A model-space axis' settled world direction (unit), for the drag-projection math.
     private func settledAxis(_ axis: Int) -> SIMD3<Float> {
@@ -731,7 +737,7 @@ public struct WorkspacePlaceholder: View {
                     // before positioning, each drag only fires on its own handle, so
                     // camera navigation still reaches the Metal view underneath.
                     if let c = proj.project(settledWorld(box.center)) {
-                        moveHandle(color: Self.designGreen)
+                        moveHandle(tint: Self.designGlass)
                             .gesture(designMoveDrag())
                             .position(c)
                     }
@@ -739,7 +745,7 @@ public struct WorkspacePlaceholder: View {
                     ForEach(0..<6, id: \.self) { i in
                         let axis = i / 2, isMax = (i % 2 == 1)
                         if let pt = faceHandleScreen(box, axis: axis, isMax: isMax, proj: proj) {
-                            resizeHandle(color: Self.designGreen, axis: axis)
+                            resizeHandle(tint: Self.designGlass)
                                 .gesture(designFaceDrag(axis: axis, isMax: isMax))
                                 .position(pt)
                         }
@@ -747,14 +753,14 @@ public struct WorkspacePlaceholder: View {
                     // Keep-out handles.
                     ForEach(Array(project.designBox.keepOuts.enumerated()), id: \.offset) { idx, ko in
                         if let c = proj.project(settledWorld(ko.center)) {
-                            moveHandle(color: Self.keepOutRed)
+                            moveHandle(tint: Self.keepOutGlass)
                                 .gesture(keepOutMoveDrag(idx))
                                 .position(c)
                         }
                         ForEach(0..<6, id: \.self) { i in
                             let axis = i / 2, isMax = (i % 2 == 1)
                             if let pt = faceHandleScreen(ko, axis: axis, isMax: isMax, proj: proj) {
-                                resizeHandle(color: Self.keepOutRed, axis: axis)
+                                resizeHandle(tint: Self.keepOutGlass)
                                     .gesture(keepOutFaceDrag(idx, axis: axis, isMax: isMax))
                                     .position(pt)
                             }
@@ -765,24 +771,22 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// A face-resize handle: a small coloured square (draggable along its axis).
-    private func resizeHandle(color: Color, axis: Int) -> some View {
-        RoundedRectangle(cornerRadius: 4)
-            .fill(color)
-            .frame(width: 20, height: 20)
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.white.opacity(0.85), lineWidth: 1.5))
-            .shadow(color: color.opacity(0.5), radius: 4)
+    /// A face-resize handle: a small LIQUID-GLASS square (draggable along its axis).
+    private func resizeHandle(tint: LiquidGlass.Tint) -> some View {
+        Color.clear
+            .frame(width: 22, height: 22)
+            .liquidGlass(tint, cornerRadius: 7)
+            .shadow(color: tint.accent(0.45), radius: 4)
             .contentShape(Rectangle().inset(by: -12))
     }
 
-    /// A centre move handle: a ringed dot (draggable to slide the whole box).
-    private func moveHandle(color: Color) -> some View {
-        Circle()
-            .fill(color.opacity(0.28))
+    /// A centre move handle: a LIQUID-GLASS dot with the move glyph (slides the whole box).
+    private func moveHandle(tint: LiquidGlass.Tint) -> some View {
+        Image(systemName: "move.3d").font(.system(size: 12, weight: .bold))
+            .foregroundStyle(.white)
             .frame(width: 30, height: 30)
-            .overlay(Circle().strokeBorder(color, lineWidth: 2))
-            .overlay(Image(systemName: "move.3d").font(.system(size: 12, weight: .bold))
-                .foregroundStyle(.white))
+            .liquidGlass(tint, in: Circle())
+            .shadow(color: tint.accent(0.45), radius: 4)
             .contentShape(Circle())
     }
 
@@ -795,46 +799,44 @@ public struct WorkspacePlaceholder: View {
     }
 
     private func designFaceDrag(axis: Int, isMax: Bool) -> some Gesture {
-        DragGesture()
+        let handle = DesignBoxDragSession.HandleID(target: .designBox, kind: .face(axis: axis, isMax: isMax))
+        return DragGesture()
             .onChanged { v in
                 guard let proj = projection, let mesh = viewerMesh else { return }
-                if dragBaseBox == nil { dragBaseBox = project.designBox.box }
-                guard let base = dragBaseBox else { return }
+                // Claim the drag (rejected — nil — if another handle already owns it), reading
+                // the drag-start snapshot so the delta is absolute.
+                guard let base = boxDrag.begin(handle, current: project.designBox.box) else { return }
                 let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
                 let delta = axisDelta(fromWorld: world, axis: axis, drag: v.translation, proj: proj)
                 let target = (isMax ? base.max[axis] : base.min[axis]) + delta
-                var next = base
-                next = next.movingFace(axis: axis, isMax: isMax, to: target,
-                                       minSize: DesignBoxModel.minSize(for: mesh.bounds))
-                project.designBox.box = next
+                project.designBox.box = base.movingFace(axis: axis, isMax: isMax, to: target,
+                                                        minSize: DesignBoxModel.minSize(for: mesh.bounds))
             }
-            .onEnded { _ in dragBaseBox = nil }
+            .onEnded { _ in boxDrag.end(handle) }
     }
 
     private func designMoveDrag() -> some Gesture {
-        DragGesture()
+        let handle = DesignBoxDragSession.HandleID(target: .designBox, kind: .move)
+        return DragGesture()
             .onChanged { v in
                 guard let proj = projection else { return }
-                if dragBaseBox == nil { dragBaseBox = project.designBox.box }
-                guard let base = dragBaseBox else { return }
+                guard let base = boxDrag.begin(handle, current: project.designBox.box) else { return }
                 let world = settledWorld(base.center)
                 // Slide in the ground plane (model X + Z); vertical is via face handles.
                 let dx = axisDelta(fromWorld: world, axis: 0, drag: v.translation, proj: proj)
                 let dz = axisDelta(fromWorld: world, axis: 2, drag: v.translation, proj: proj)
                 project.designBox.box = base.translated(by: SIMD3<Float>(dx, 0, dz))
             }
-            .onEnded { _ in dragBaseBox = nil }
+            .onEnded { _ in boxDrag.end(handle) }
     }
 
     private func keepOutFaceDrag(_ index: Int, axis: Int, isMax: Bool) -> some Gesture {
-        DragGesture()
+        let handle = DesignBoxDragSession.HandleID(target: .keepOut(index), kind: .face(axis: axis, isMax: isMax))
+        return DragGesture()
             .onChanged { v in
                 guard let proj = projection, let mesh = viewerMesh,
                       project.designBox.keepOuts.indices.contains(index) else { return }
-                if dragBaseKeepOut?.index != index {
-                    dragBaseKeepOut = (index, project.designBox.keepOuts[index])
-                }
-                guard let base = dragBaseKeepOut?.bounds else { return }
+                guard let base = boxDrag.begin(handle, current: project.designBox.keepOuts[index]) else { return }
                 let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
                 let delta = axisDelta(fromWorld: world, axis: axis, drag: v.translation, proj: proj)
                 let target = (isMax ? base.max[axis] : base.min[axis]) + delta
@@ -842,24 +844,22 @@ public struct WorkspacePlaceholder: View {
                     axis: axis, isMax: isMax, to: target,
                     minSize: DesignBoxModel.minSize(for: mesh.bounds))
             }
-            .onEnded { _ in dragBaseKeepOut = nil }
+            .onEnded { _ in boxDrag.end(handle) }
     }
 
     private func keepOutMoveDrag(_ index: Int) -> some Gesture {
-        DragGesture()
+        let handle = DesignBoxDragSession.HandleID(target: .keepOut(index), kind: .move)
+        return DragGesture()
             .onChanged { v in
                 guard let proj = projection,
                       project.designBox.keepOuts.indices.contains(index) else { return }
-                if dragBaseKeepOut?.index != index {
-                    dragBaseKeepOut = (index, project.designBox.keepOuts[index])
-                }
-                guard let base = dragBaseKeepOut?.bounds else { return }
+                guard let base = boxDrag.begin(handle, current: project.designBox.keepOuts[index]) else { return }
                 let world = settledWorld(base.center)
                 let dx = axisDelta(fromWorld: world, axis: 0, drag: v.translation, proj: proj)
                 let dz = axisDelta(fromWorld: world, axis: 2, drag: v.translation, proj: proj)
                 project.designBox.keepOuts[index] = base.translated(by: SIMD3<Float>(dx, 0, dz))
             }
-            .onEnded { _ in dragBaseKeepOut = nil }
+            .onEnded { _ in boxDrag.end(handle) }
     }
 
     // MARK: keep-clear Phase B — draggable clearance handles + floating value pill
@@ -927,30 +927,33 @@ public struct WorkspacePlaceholder: View {
             let ov = force.clearanceOverride(for: g.id)
             let r = project.clearanceBoreRadius(for: g)
             if shape.bolt || shape.slab {
-                VStack(spacing: DS.Space.xs) {
+                VStack(alignment: .trailing, spacing: DS.Space.xxs) {
+                    clearanceSyncToggle
                     if shape.bolt {
                         GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
                                        autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
                                        active: isDraggingRole(g.id, .margin)) {
-                            force.setClearanceMargin(g.id, mm: $0)
+                            force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
                         }
                         GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
                                        autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
                                        active: isDraggingRole(g.id, .axialHi) || isDraggingRole(g.id, .axialLo)) {
-                            force.setClearanceAxial(g.id, mm: $0)
+                            force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
                         }
                     }
                     if shape.slab {
                         GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
                                        autoMM: ClearanceSuggestion.faceSlabDepthMM,
                                        active: isDraggingRole(g.id, .slabDepth)) {
-                            force.setClearanceSlab(g.id, mm: $0)
+                            force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false))
                         }
                     }
                 }
                 .fixedSize()
+                // Sit just ABOVE-beside the group's handle cluster (the small chips no longer
+                // need the old 96pt clearance).
                 .position(x: clampX(pt.x, proj.viewportSize.width),
-                          y: clamp(pt.y - 96, proj.viewportSize.height))
+                          y: clamp(pt.y - 54, proj.viewportSize.height))
                 .animation(DS.Motion.emphasized, value: pt)
             }
         }
@@ -961,18 +964,18 @@ public struct WorkspacePlaceholder: View {
             && draggingHandleID?.hasSuffix(":\(role)") == true
     }
 
-    /// A clearance drag knob — a red glass dot with a role glyph and a generous (~44pt)
-    /// hit target. Brightens while it owns the drag.
+    /// A clearance drag knob — a LIQUID-GLASS RED dot with a role glyph and a generous (~46pt)
+    /// hit target (design-overhaul 109: a reskin of the chrome only — the grab target and drag
+    /// math are unchanged; red keeps the forbidden-space colour language). Brightens (stronger
+    /// frost + specular) while it owns the drag.
     private func clearanceHandleKnob(role: ClearanceHandle.Role, active: Bool) -> some View {
-        let tint = Self.clearanceTint
+        let tint = LiquidGlass.Tint.frost(DS.Color.clearance, intensity: active ? 0.85 : 0.55)
         let size: CGFloat = active ? 26 : 22
-        return Circle()
-            .fill(tint.opacity(active ? 0.9 : 0.34))
+        return Image(systemName: clearanceRoleIcon(role))
+            .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
             .frame(width: size, height: size)
-            .overlay(Circle().strokeBorder(.white.opacity(0.9), lineWidth: 1.5))
-            .overlay(Image(systemName: clearanceRoleIcon(role))
-                .font(.system(size: 10, weight: .bold)).foregroundStyle(.white))
-            .shadow(color: tint.opacity(0.5), radius: 4)
+            .liquidGlass(tint, in: Circle(), specular: active ? 1.3 : 1)
+            .shadow(color: Self.clearanceTint.opacity(0.5), radius: 4)
             .contentShape(Circle().inset(by: -12))   // generous ~46pt target
     }
 
@@ -1234,6 +1237,47 @@ public struct WorkspacePlaceholder: View {
         return (bolt, slab)
     }
 
+    /// The keep-clear sites (group ids) whose shape matches — bolt sites for a margin/axial
+    /// edit, slab sites for a depth edit. This is the fan-out set the sync toggle writes to
+    /// (ForceModel can't classify geometry itself; design-overhaul 109).
+    private func clearanceSyncPeers(bolt: Bool) -> [UUID] {
+        selection.groups.compactMap { g in
+            let s = groupClearanceShape(g)
+            return (bolt ? s.bolt : s.slab) ? g.id : nil
+        }
+    }
+
+    /// How many keep-clear sites carry an editable shape — the sync toggle only matters (and
+    /// only shows) with ≥2, where "one number governs all" is a real choice.
+    private var keepClearSiteCount: Int {
+        selection.groups.reduce(0) { n, g in
+            let s = groupClearanceShape(g); return n + ((s.bolt || s.slab) ? 1 : 0)
+        }
+    }
+
+    /// The "Same clearance for all" toggle chip — a small blue liquid-glass control that rides
+    /// the ONE active clearance editor (design-overhaul 109, item 4). Wording chosen over "All
+    /// holes match" (bolt-only — wrong for slab faces) and "Apply to every keep-clear" (jargon):
+    /// "Same clearance for all" reads plainly and covers bores AND faces. DEFAULT ON.
+    @ViewBuilder private var clearanceSyncToggle: some View {
+        if keepClearSiteCount >= 2 {
+            Button { force.setSyncClearances(!force.syncClearances) } label: {
+                HStack(spacing: DS.Space.xs) {
+                    Image(systemName: force.syncClearances ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Same clearance for all")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .foregroundStyle(force.syncClearances ? DS.Color.accent.color : DS.Color.textSecondary.color)
+                .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
+                .liquidGlassCapsule(force.syncClearances ? .blue : .neutral)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Same clearance for all keep-clear sites")
+            .accessibilityValue(force.syncClearances ? "On" : "Off")
+        }
+    }
+
     /// The editable clearance numbers for a group whose keep-clear is on (keep-clear
     /// v2): bolt margin + axial for a bore, slab depth for a planar face. A field left
     /// at "Auto" shows the REAL geometry-derived suggestion (e.g. "Auto · 2.5 mm"),
@@ -1249,23 +1293,24 @@ public struct WorkspacePlaceholder: View {
         if shape.bolt || shape.slab {
             let ov = force.clearanceOverride(for: g.id)
             let r = project.clearanceBoreRadius(for: g)
-            VStack(alignment: .leading, spacing: DS.Space.xs) {
+            // Design-overhaul 109: the value chips right-align as a COLUMN growing from the
+            // bottom-right of the (bottom-left) Selections panel — a tight trailing stack.
+            VStack(alignment: .trailing, spacing: DS.Space.xxs) {
                 if shape.bolt {
-                    HStack(spacing: DS.Space.xs) {
-                        GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
-                                       autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                                       compact: true) { force.setClearanceMargin(g.id, mm: $0) }
-                        GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
-                                       autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                                       compact: true) { force.setClearanceAxial(g.id, mm: $0) }
-                    }
+                    GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                                   autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                                   compact: true) { force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true)) }
+                    GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                                   autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                                   compact: true) { force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true)) }
                 }
                 if shape.slab {
                     GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
                                    autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                                   compact: true) { force.setClearanceSlab(g.id, mm: $0) }
+                                   compact: true) { force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false)) }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 2)
         }
     }

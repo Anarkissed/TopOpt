@@ -482,4 +482,61 @@ final class ForceModelTests: XCTestCase {
         XCTAssertEqual(fm.keepClearAffix(for: ids[0]), .on)
         XCTAssertEqual(fm.panelKindLabel(for: ids[0]), "Keep clear")
     }
+
+    // MARK: - "Same clearance for all" sync fan-out (design-overhaul 109)
+
+    func testSyncDefaultsOn() {
+        XCTAssertTrue(ForceModel().syncClearances, "the sync toggle defaults ON")
+    }
+
+    /// Sync ON: editing one bolt site's margin writes the SAME number to every peer bolt site,
+    /// so one number governs them all. Sites NOT in the peer list are untouched → stay Auto.
+    func testSyncOnWritesAllPeersAndLeavesOthersAuto() {
+        let (_, ids) = groups([1, 2, 3])
+        var fm = ForceModel()            // sync on by default
+        let bolts = [ids[0], ids[1]]     // two bolt sites; ids[2] is a different (slab) site
+        fm.setClearanceMargin(ids[0], mm: 5.0, syncTo: bolts)
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 5.0)
+        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 5.0, "peer got the same number")
+        XCTAssertNil(fm.clearanceOverride(for: ids[2]).concentricMarginMM, "a non-peer stays Auto")
+    }
+
+    /// Sync OFF: the same edit writes ONLY the touched site; the peer keeps its own value (Auto).
+    func testSyncOffWritesOnlyTheTouchedSite() {
+        let (_, ids) = groups([1, 2])
+        var fm = ForceModel()
+        fm.setSyncClearances(false)
+        fm.setClearanceMargin(ids[0], mm: 7.0, syncTo: [ids[0], ids[1]])
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 7.0)
+        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "sync off → peer untouched, stays Auto")
+    }
+
+    /// Sync ON: writing nil (reset) fans out too, reverting every peer back to Auto (the wire
+    /// sentinel), so "reset one" resets all when the toggle governs them.
+    func testSyncOnResetRevertsAllPeersToAuto() {
+        let (_, ids) = groups([1, 2])
+        var fm = ForceModel()
+        fm.setClearanceAxial(ids[0], mm: 3.0, syncTo: [ids[0], ids[1]])
+        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).axialClearanceMM, 3.0)
+        fm.setClearanceAxial(ids[0], mm: nil, syncTo: [ids[0], ids[1]])   // reset
+        XCTAssertNil(fm.clearanceOverride(for: ids[0]).axialClearanceMM, "reset clears the touched site")
+        XCTAssertNil(fm.clearanceOverride(for: ids[1]).axialClearanceMM, "and every governed peer → Auto")
+    }
+
+    /// Slab depth fans out only across slab peers, independent of the bolt margin/axial channel.
+    func testSyncDepthChannelIsIndependent() {
+        let (_, ids) = groups([1, 2])
+        var fm = ForceModel()
+        fm.setClearanceSlab(ids[0], mm: 6.0, syncTo: [ids[0], ids[1]])
+        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).slabDepthMM, 6.0)
+        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "depth sync doesn't touch margin")
+    }
+
+    /// The toggle round-trips through the snapshot codec (false must survive; default true when absent).
+    func testSyncTogglePersists() throws {
+        var fm = ForceModel()
+        fm.setSyncClearances(false)
+        let back = try JSONDecoder().decode(ForceModel.self, from: try JSONEncoder().encode(fm))
+        XCTAssertFalse(back.syncClearances)
+    }
 }

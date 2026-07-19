@@ -24,8 +24,10 @@ struct GlassValuePill: View {
     let valueMM: Double?
     /// The geometry-derived Auto suggestion (mm), or nil when unknown (no bore geo).
     let autoMM: Double?
-    /// The pill's accent (keep-clear red by default).
-    var tint: Color = DS.Color.clearance.color
+    /// The pill's accent. Design-overhaul 109: the value chips are BLUE liquid glass (the app's
+    /// signature material) — distinct from the RED 3D clearance HANDLES, which keep the
+    /// forbidden-space colour. Blue by default; callers may override.
+    var tint: Color = DS.Color.accent.color
     /// Highlight the pill (e.g. while its 3D handle is being dragged — the live readout).
     var active: Bool = false
     /// Compact row variant (Selections panel) vs the larger floating variant.
@@ -41,9 +43,10 @@ struct GlassValuePill: View {
     @State private var scrubLastX: CGFloat = 0
     @FocusState private var fieldFocused: Bool
 
-    /// The number size scales with Dynamic Type (base 22 floating / 15 compact).
-    @ScaledMetric(relativeTo: .title2) private var numberSizeFloating: CGFloat = 22
-    @ScaledMetric(relativeTo: .body) private var numberSizeCompact: CGFloat = 15
+    /// The number size scales with Dynamic Type. Design-overhaul 109: tightened from 22/15 to
+    /// 17/13 — the old pills were far too large.
+    @ScaledMetric(relativeTo: .title3) private var numberSizeFloating: CGFloat = 17
+    @ScaledMetric(relativeTo: .body) private var numberSizeCompact: CGFloat = 13
 
     private var isAuto: Bool { valueMM == nil }
     private var displayedMM: Double? { valueMM ?? autoMM }
@@ -63,12 +66,11 @@ struct GlassValuePill: View {
             }
             if !isAuto { resetButton }
         }
-        .padding(.vertical, compact ? 6 : DS.Space.sm)
-        .padding(.horizontal, compact ? DS.Space.sm : DS.Space.l)
-        .background(glassBackground)
-        .overlay(sheen)
-        .overlay(border)
-        .clipShape(RoundedRectangle(cornerRadius: DS.Radius.valuePill, style: .continuous))
+        .padding(.vertical, compact ? 4 : 6)
+        .padding(.horizontal, compact ? DS.Space.s : DS.Space.sm)
+        .liquidGlass(LiquidGlass.Tint.frost(DS.Color.accent, intensity: active ? 0.75 : 0.5),
+                     cornerRadius: Self.radius, specular: active ? 1.3 : 1)
+        .overlay(activeBorder)
         .compositingGroup()
         .dsShadow(.panel)
         .animation(DS.Motion.emphasized, value: active)
@@ -179,26 +181,16 @@ struct GlassValuePill: View {
         .accessibilityLabel("Reset \(title) to Auto")
     }
 
-    private var glassBackground: some View {
-        RoundedRectangle(cornerRadius: DS.Radius.valuePill, style: .continuous)
-            .fill(.ultraThinMaterial)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill, style: .continuous)
-                .fill(DS.Surface.valuePill.color))
-    }
+    /// The chip's corner radius — tightened for the 2026-small redesign (was `DS.Radius.valuePill`).
+    private static let radius: CGFloat = 12
 
-    /// Soft inner sheen — a faint top-down white highlight the design's glass carries.
-    private var sheen: some View {
-        RoundedRectangle(cornerRadius: DS.Radius.valuePill, style: .continuous)
-            .fill(LinearGradient(
-                colors: [.white.opacity(0.10), .clear],
-                startPoint: .top, endPoint: .center))
-            .allowsHitTesting(false)
-    }
-
-    private var border: some View {
-        RoundedRectangle(cornerRadius: DS.Radius.valuePill, style: .continuous)
-            .strokeBorder(active ? tint.opacity(0.7) : DS.Color.strokeStrong.color,
-                          lineWidth: active ? 1.5 : 1)
+    /// A brighter blue rim while the chip owns a live drag (the glass supplies the resting edge).
+    @ViewBuilder private var activeBorder: some View {
+        if active {
+            RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
+                .strokeBorder(tint.opacity(0.8), lineWidth: 1.5)
+                .allowsHitTesting(false)
+        }
     }
 
     // MARK: formatting

@@ -208,6 +208,76 @@ public struct DesignBoxModel: Equatable, Sendable, Codable {
     }
 }
 
+/// Single-owner drag arbitration for the design-box handles (design-overhaul 109 — fixes the
+/// "ghost duplicate boxes" bug).
+///
+/// THE BUG: the workspace draws 6 face handles + a move handle for the design box, and the
+/// same set per keep-out. Every one of them mutated ONE `project.designBox.box` from a single
+/// shared drag-base snapshot (`dragBaseBox`) that was captured when nil and cleared only on
+/// `.onEnded`. The handle hit-targets are each expanded to ~44 pt (`contentShape(inset: -12)`),
+/// so when they overlap — a small or edge-on box clusters the face handles near the centre
+/// move handle — a single touch drives TWO gestures at once. Both read the SAME shared base but
+/// computed COMPETING poses (a whole-box translate vs a single-face resize), and both wrote the
+/// box every frame, so it flipped between two transforms — read on screen as ghost duplicate
+/// boxes tracking at different speeds/directions. A missed `.onEnded` compounded it by leaving
+/// a stale base the NEXT handle's drag then applied its delta to.
+///
+/// THE FIX: make the drag single-owner. The first handle to `begin` claims the drag and
+/// captures ITS OWN base once; any `begin`/`base` from a different handle while it is held is
+/// REJECTED (nil) until the owner `end`s. Exactly one handle ever writes the box, and a stale
+/// or duplicate gesture can't corrupt it. Pure value type + headless-tested; the SwiftUI
+/// gesture wiring that calls it is device QA.
+public struct DesignBoxDragSession: Equatable, Sendable {
+    /// Which handle a drag belongs to — the identity that arbitrates ownership.
+    public struct HandleID: Equatable, Sendable {
+        /// The design box itself, or a keep-out by index.
+        public enum Target: Equatable, Sendable { case designBox; case keepOut(Int) }
+        /// The centre move handle, or a face-resize handle (axis 0/1/2, ±face).
+        public enum Kind: Equatable, Sendable { case move; case face(axis: Int, isMax: Bool) }
+        public let target: Target
+        public let kind: Kind
+        public init(target: Target, kind: Kind) {
+            self.target = target
+            self.kind = kind
+        }
+    }
+
+    private var owner: HandleID?
+    private var snapshot: DesignBoxBounds?
+
+    public init() {}
+
+    /// True while some handle owns an in-flight drag.
+    public var isActive: Bool { owner != nil }
+    /// The handle currently owning the drag, if any.
+    public var activeOwner: HandleID? { owner }
+
+    /// Claim (or continue) the drag for `handle`, returning the base bounds to compute the
+    /// drag against — but ONLY if the drag is free or already owned by this SAME handle. If a
+    /// different handle owns it, returns nil so the caller drops the stray gesture. The base is
+    /// captured exactly ONCE, on the claiming call, and never re-captured mid-drag, so each
+    /// frame's absolute delta measures from where the box was when the drag began.
+    @discardableResult
+    public mutating func begin(_ handle: HandleID, current: DesignBoxBounds?) -> DesignBoxBounds? {
+        if let owner, owner != handle { return nil }   // another handle owns the drag → reject
+        if owner == nil { owner = handle; snapshot = current }
+        return snapshot
+    }
+
+    /// The captured base for `handle` if it owns the drag, else nil.
+    public func base(for handle: HandleID) -> DesignBoxBounds? {
+        owner == handle ? snapshot : nil
+    }
+
+    /// Release the drag if `handle` owns it (a stale `end` from a non-owner is ignored, so it
+    /// can't tear down another handle's live drag).
+    public mutating func end(_ handle: HandleID) {
+        guard owner == handle else { return }
+        owner = nil
+        snapshot = nil
+    }
+}
+
 /// Pure camera math for the design-box drag handles: turning an on-screen drag into
 /// a model-space displacement along one axis. Kept out of SwiftUI so the projection
 /// arithmetic is unit-tested headlessly (the gizmo gesture that calls it is device QA).

@@ -76,6 +76,75 @@ final class OrientationGizmoTests: XCTestCase {
         XCTAssertEqual(m.camera.elevation, OrbitCamera.maxElevation, accuracy: tol)
     }
 
+    // MARK: - Roll DOF (design-overhaul, handoff 109 — the gizmo arrows' rotation)
+
+    /// Roll tilts the horizon (the up-vector) but NEVER moves the eye or the canonical
+    /// view direction — it composes freely with azimuth/elevation.
+    func testRollTiltsUpButNotEyeOrDirection() {
+        var cam = OrbitCamera(azimuth: 0, elevation: 0)   // front view
+        cam.frame(unitCube)
+        let eye0 = cam.eye, dir0 = cam.direction
+        XCTAssertEqual(cam.up.x, 0, accuracy: tol)
+        XCTAssertEqual(cam.up.y, 1, accuracy: tol, "roll 0 → up is world +Y")
+
+        cam.rollBy(0.6)
+        XCTAssertEqual(cam.eye, eye0, "roll must not move the eye")
+        assertDirection(cam.direction, dir0)
+        // Front view: rolling by θ takes up to (−sinθ, cosθ, 0).
+        XCTAssertEqual(cam.up.x, -sinf(0.6), accuracy: 1e-4)
+        XCTAssertEqual(cam.up.y,  cosf(0.6), accuracy: 1e-4)
+        XCTAssertEqual(cam.up.z, 0, accuracy: 1e-4)
+    }
+
+    /// roll == 0 is byte-identical to the pre-roll camera (the level view is unchanged).
+    func testRollZeroMatchesPreRollViewMatrix() {
+        let cam = OrbitCamera(azimuth: 0.7, elevation: 0.3)   // roll defaults to 0
+        let level = OrbitCamera.lookAt(eye: cam.eye, center: cam.target, up: SIMD3<Float>(0, 1, 0))
+        XCTAssertEqual(cam.viewMatrix(), level, "roll 0 view matrix equals the classic up=+Y look-at")
+    }
+
+    /// Roll enters `viewRotation()` (what the gizmo cube AND the Metal viewer both draw with),
+    /// so the cube can never diverge from the rolled view. A full 2π roll round-trips back.
+    func testRollFlowsIntoViewRotationAndWraps() {
+        var cam = OrbitCamera(azimuth: 0.4, elevation: -0.2)
+        let r0 = cam.viewRotation()
+        cam.rollBy(0.5)
+        XCTAssertNotEqual(cam.viewRotation(), r0, "a roll must change the view rotation the cube uses")
+        cam.rollBy(2 * .pi)                      // one full turn beyond
+        let rWrap = cam.viewRotation()
+        cam.setRoll(0.5)                         // same net angle, no wrap
+        assertMatrixClose(cam.viewRotation(), rWrap, "roll is periodic in 2π")
+    }
+
+    @MainActor
+    func testModelRollByRoutesAndCancelsSnap() {
+        let m = OrbitCameraModel(); m.reframe(unitCube)
+        m.snap(toID: "Top", animated: true)      // start an animated snap
+        m.rollBy(0.3)                            // a roll must win over the running snap
+        XCTAssertFalse(m.isAnimating, "rollBy cancels a running snap")
+        XCTAssertEqual(m.camera.roll, 0.3, accuracy: tol)
+    }
+
+    @MainActor
+    func testHomeLevelsRoll() {
+        let m = OrbitCameraModel(); m.reframe(unitCube)
+        m.rollBy(1.1)
+        m.orbit(dx: 20, dy: 10)
+        m.home(animated: false)
+        XCTAssertEqual(m.camera.roll, 0, accuracy: tol, "Home resets roll to a level horizon")
+        XCTAssertEqual(m.camera.azimuth, m.defaultAzimuth, accuracy: tol)
+        XCTAssertEqual(m.camera.elevation, m.defaultElevation, accuracy: tol)
+    }
+
+    @MainActor
+    func testSnapLevelsRoll() {
+        let m = OrbitCameraModel(); m.reframe(unitCube)
+        m.rollBy(-0.9)
+        m.snap(toID: "Front", animated: false)
+        XCTAssertEqual(m.camera.roll, 0, accuracy: tol, "a canonical-view snap levels the horizon")
+        assertDirection(m.camera.direction, SIMD3<Float>(0, 0, 1))
+    }
+
     // MARK: - Snap to canonical views
 
     @MainActor
@@ -247,5 +316,14 @@ final class OrientationGizmoTests: XCTestCase {
         XCTAssertEqual(a.x, b.x, accuracy: 1e-3, file: file, line: line)
         XCTAssertEqual(a.y, b.y, accuracy: 1e-3, file: file, line: line)
         XCTAssertEqual(a.z, b.z, accuracy: 1e-3, file: file, line: line)
+    }
+
+    private func assertMatrixClose(_ a: simd_float3x3, _ b: simd_float3x3, _ msg: String = "",
+                                   file: StaticString = #filePath, line: UInt = #line) {
+        for c in 0..<3 {
+            XCTAssertEqual(a[c].x, b[c].x, accuracy: 1e-3, msg, file: file, line: line)
+            XCTAssertEqual(a[c].y, b[c].y, accuracy: 1e-3, msg, file: file, line: line)
+            XCTAssertEqual(a[c].z, b[c].z, accuracy: 1e-3, msg, file: file, line: line)
+        }
     }
 }

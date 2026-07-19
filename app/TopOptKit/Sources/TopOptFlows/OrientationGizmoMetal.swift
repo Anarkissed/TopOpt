@@ -289,10 +289,6 @@ final class GizmoRenderer: NSObject, MTKViewDelegate {
                 e.xyy*mapF(p+e.xyy) + e.yyx*mapF(p+e.yyx) +
                 e.yxy*mapF(p+e.yxy) + e.xxx*mapF(p+e.xxx));
         }
-        static float3 hue2rgb(float h){
-            float3 p = abs(fract(h + float3(0.0, .333, .667)) * 6.0 - 3.0);
-            return clamp(p - 1.0, 0.0, 1.0);
-        }
         // The mock's globalId: cell index + hit-position sign bits → a stable 0…26 id, so the
         // CPU (which sets uHoverId) and the shader agree on which cell to light.
         static float globalId(int fi, float3 p){
@@ -350,21 +346,26 @@ final class GizmoRenderer: NSObject, MTKViewDelegate {
             }
             float border = 1.0 - smoothstep(0.010, 0.10, d2);
 
-            float3 base = float3(0.045, 0.06, 0.095);
+            // BLUE FROST (design-overhaul 109). The maintainer rejected the 107 mock's palette
+            // replication — its rim/reflection bands ran through the full hue wheel and read as
+            // GREEN pools. This is a deliberately monochromatic BLUE frost: a deep blue body, a
+            // cool-white/blue fresnel rim, and a blue-white top reflection — NO hue2rgb rainbow.
+            // Only colour literals changed; the SDF `GizmoConstants` are untouched, so the CPU
+            // pick oracle and every pick test stay valid.
+            float3 base = float3(0.038, 0.065, 0.135);       // deep frosted blue body
             float coreNear = length(ro - rd * dot(ro, rd));
             float core = smoothstep(0.85, 0.15, coreNear) * 0.20;
             float haze = 0.13 * ndv + core;
-            float3 col = mix(base, float3(0.42, 0.47, 0.60), haze);
+            float3 col = mix(base, float3(0.34, 0.52, 0.86), haze);   // bluer inner haze
 
-            float h = ndv * 1.1 + pos.x * 0.06 + U.uTime * 0.012;
-            float3 rimCol = mix(float3(0.72, 0.80, 1.0), hue2rgb(fract(h)), 0.30);
+            float3 rimCol = float3(0.60, 0.78, 1.0);          // cool-white → blue fresnel rim
             col += rimCol * fres * 0.85;
 
-            col = mix(col, float3(0.015, 0.025, 0.05), border * 0.62);
+            col = mix(col, float3(0.012, 0.03, 0.075), border * 0.62);   // deep-blue seam shadow
 
             float3 refl = reflect(rdW, nW);
             float band = smoothstep(0.55, 0.92, refl.y) * pow(clamp(refl.y, 0.0, 1.0), 2.0);
-            col += hue2rgb(fract(refl.x * 0.30 + 0.58)) * band * 0.55;
+            col += float3(0.55, 0.74, 1.0) * band * 0.5;      // blue-white top reflection (was rainbow)
 
             float3 l1 = normalize(float3(0.35, 0.9, 0.6));
             float3 l2 = normalize(float3(-0.6, -0.35, 0.7));
