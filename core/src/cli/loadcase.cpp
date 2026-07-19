@@ -58,6 +58,20 @@ void log_clearance(int face_id, ClearanceKind kind, std::size_t voxels_frozen,
   sink(std::string(buf));
 }
 
+// Echo the warm-start decision through the same per-group sink (handoff 114), so
+// a device / CLI log confirms which start the shared builder chose and that BOTH
+// front-ends inherited it here — no separate wiring. `inherit` is the flip's
+// result; `self_weight` (external loads empty) names the mode the gate saw.
+void log_warm_start_config(bool inherit, bool self_weight) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  char buf[128];
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] warm_start_inherit=%d mode=%s",
+                inherit ? 1 : 0, self_weight ? "self-weight" : "load-case");
+  sink(std::string(buf));
+}
+
 // Count the voxels currently carrying `tag` in `grid`.
 std::size_t count_tagged(const VoxelGrid& grid, VoxelTag tag) {
   std::size_t n = 0;
@@ -172,6 +186,27 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // physical min-feature + projection): the SAME call the app makes.
   configure_production_options(opts);
   opts.external_loads = external;  // the user's load case; empty => self-weight
+
+  // Warm-start production flip — LOAD-CASE MODE ONLY (handoff 114; evidence:
+  // handoff 113's ~64-scale warm-gate table). With inheritance on, each ladder
+  // rung seeds from its predecessor's converged design instead of uniform grey.
+  // 113 measured this on both modes at production scale:
+  //   * LOAD-CASE: ~20% fewer iters, terminal |Δρ|=0.0227, margins comparable
+  //     (warmA 15.03 vs cold 15.31) — a small, measured design change the
+  //     maintainer signs off on. ADOPTED here.
+  //   * SELF-WEIGHT: the SAME ~20% savings but |Δρ|=0.284 — a materially
+  //     different optimum (086: a non-convex MMA lands on another valid
+  //     plateau). Explicitly NOT flipped; self-weight stays COLD and its output
+  //     is byte-identical to today. Revisitable by a future measured decision.
+  // The gate is "does this run actually carry external loads?" — i.e. the run IS
+  // the load-case mode. `external` empty => self-weight, so a builder-driven
+  // self-weight run (no load groups declared) is covered by the same predicate
+  // and keeps the cold start. This is the ONE conditional the flip needs; the
+  // app (TopOptBridge) and topopt-cli both build load cases through here, so both
+  // inherit it with no per-front-end wiring. Their direct self-weight paths call
+  // configure_production_options() without the builder and never see it (cold).
+  opts.warm_start_inherit = !external.empty();
+  log_warm_start_config(opts.warm_start_inherit, external.empty());
   // Diagnosis (3D-block fragmentation): the silent-self-weight-fall-through
   // guard, relocated here from bridge.cpp during the PR-119 reconcile — this is
   // the ONE builder both the app and topopt-cli call, so both front-ends get it.
