@@ -12,9 +12,17 @@
 import SwiftUI
 import TopOptDesign
 import TopOptKit
+import os
 #if canImport(UIKit)
 import UIKit
 #endif
+
+/// Signpost log for the results-screen frame audit (handoff — results honesty +
+/// perf). `body` marks each SwiftUI re-evaluation (an "invalidation") and the ticker
+/// marks each playback/flex/flow advance, so Instruments' os_signpost track shows
+/// whether the screen is being invalidated when nothing should be moving. Shares the
+/// subsystem with the gizmo-frame log so both tracks read side by side.
+let resultsSignpost = OSLog(subsystem: "com.topopt.results", category: "ResultsFrame")
 
 public struct ResultsScreen: View {
     @StateObject private var model: ResultsModel
@@ -122,7 +130,12 @@ public struct ResultsScreen: View {
     private var mergeTrigger: MergeTrigger { MergeTrigger(outcome: liveOutcome) }
 
     public var body: some View {
-        ZStack {
+        // Mark every SwiftUI re-evaluation of the results screen. A burst of "body_eval"
+        // events while the user isn't touching anything localises the frame collapse to a
+        // state source that keeps invalidating the view (vs. a pure GPU cost, which shows
+        // on the GizmoFrame track instead). Zero-cost when Instruments isn't recording.
+        let _ = os_signpost(.event, log: resultsSignpost, name: "body_eval")
+        return ZStack {
             // The variant stage: its own viewer (opaque over the workspace) showing
             // the selected variant's isosurface, optionally stress-colored, morphing
             // with the scrub. Pixels are device QA (the M7 /app/ standard).
@@ -153,7 +166,12 @@ public struct ResultsScreen: View {
             hotSpotMarker.ignoresSafeArea()           // M7.viz.2: worst-point callout
             failureMarker.ignoresSafeArea()           // M7.viz.6: failure-point marker
             savingsTabs
-            mediaPlayer
+            // The optimization-history playbar exists ONLY when the variant carries real
+            // keyframes (`hasHistory`). Without them the slider used to reveal-SLICE the
+            // finished mesh bottom-to-top — a fake "layer sweep" that is NOT optimization
+            // history — which is a reject-class honesty violation for a remote run (the
+            // worker never serialises keyframes, 097). No keyframes → no playbar.
+            if model.hasHistory { mediaPlayer }
             orientationCorner
             orientationGizmo
         }
@@ -161,6 +179,16 @@ public struct ResultsScreen: View {
         .transition(.opacity)
         .animation(DS.Motion.sheetIn, value: orientOpen)
         .onReceive(ticker) { _ in
+            // Signpost only the ticks that DO work (advance an animation). A quiet run
+            // of "playback_tick" events here while the screen looks idle means a timer
+            // is driving the whole view — the maintainer reads this against the
+            // GizmoFrame track to localise the frame collapse (see the handoff).
+            let animating = model.playing
+                || (model.flexOn && !reduceMotion)
+                || (model.loadPathOn && !model.flowReduced(reduceMotion: reduceMotion))
+            if animating {
+                os_signpost(.event, log: resultsSignpost, name: "playback_tick")
+            }
             if model.playing { model.advance((1.0 / 30.0) / Self.morphDuration) }
             // M7.viz.3: loop the flex while it's on — UNLESS reduced-motion, which
             // holds the static full-deflection frame (no advance → phase stays put,
@@ -930,8 +958,13 @@ public struct ResultsScreen: View {
     private var vizRail: some View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
             Spacer()
-            // Stress — the ramp legend drawer.
-            vizRow(open: model.stressOn, drawer: { stressDrawer }, chip: { stressChip })
+            // Stress — the ramp legend drawer. Only when the variant actually carries a
+            // von Mises field to colour: a remote run withholds it (097), so the chip
+            // must HIDE, not sit dead and open an empty legend over a body it can't tint.
+            // Same data-presence gate the Flex / Load path / Failure chips already use.
+            if model.hasStress {
+                vizRow(open: model.stressOn, drawer: { stressDrawer }, chip: { stressChip })
+            }
             // M7.viz.3 Flex — only when the variant carries a displacement field.
             if model.hasFlex {
                 vizRow(open: flexActive, drawer: { flexDrawer }, chip: { flexChip })

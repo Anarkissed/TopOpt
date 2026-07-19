@@ -55,6 +55,8 @@ final class OutcomeStoreTests: XCTestCase {
         XCTAssertEqual(decoded.gridNx, 8); XCTAssertEqual(decoded.gridNy, 6); XCTAssertEqual(decoded.gridNz, 4)
         XCTAssertEqual(decoded.gridOrigin, SIMD3<Double>(-1, -2, -3))
         XCTAssertEqual(decoded.spacing, 0.5)
+        // A local outcome round-trips as local (the default) — never spuriously remote.
+        XCTAssertFalse(decoded.computedRemotely)
 
         let a = decoded.variants[0]
         XCTAssertEqual(a.massGrams, 27.5)
@@ -124,6 +126,38 @@ final class OutcomeStoreTests: XCTestCase {
         XCTAssertEqual(decoded.variants[0].vonMisesField, [1.5, 2.5, 3.5, 4.5])
         XCTAssertTrue(decoded.variants[0].displacementField.isEmpty)
         XCTAssertTrue(decoded.variants[1].displacementField.isEmpty)
+    }
+
+    /// LAN offload (097): the `computedRemotely` flag MUST survive persist → restore.
+    /// It once did NOT (the DTO silently dropped it), so a reopened remote result forgot
+    /// it was Mac-computed — the withheld mass rendered as "0.0 g", the "computed on Mac"
+    /// note vanished, and the dead stress/playback controls came back. This is the guard
+    /// against that regression: encode a remote outcome, decode it, and the flag holds.
+    func testComputedRemotelySurvivesRoundTrip() throws {
+        let remote = OptimizeOutcome(
+            variants: [OptimizeVariant(
+                requestedVolumeFraction: 0.68, achievedVolumeFraction: 0.68, massGrams: 0,
+                supportVolumeVoxels: 0, meshTriangleCount: 1, worstCaseMargin: 1.9,
+                accepted: true, v3Passes: true, orientation: SIMD3<Double>(0, 0, 1),
+                meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2])],
+            stoppedOnMargin: false, cancelled: false, acceptedCount: 1,
+            computedRemotely: true)
+        let decoded = try OutcomeCodec.decode(try OutcomeCodec.encode(OutcomeCodec.dto(from: remote)))
+        XCTAssertTrue(decoded.computedRemotely, "the remote-compute flag must survive persistence")
+    }
+
+    /// A blob written BEFORE the flag was persisted has no `computedRemotely` key. It
+    /// must still decode (→ false), not fail — that is why the DTO field is optional.
+    /// False is the honest default: such blobs predate remote runs.
+    func testDecodesLegacyBlobWithoutComputedRemotely() throws {
+        let data = try OutcomeCodec.encode(OutcomeCodec.dto(from: sampleOutcome()))
+        var plist = try XCTUnwrap(try PropertyListSerialization.propertyList(
+            from: data, options: PropertyListSerialization.ReadOptions(), format: nil) as? [String: Any])
+        plist.removeValue(forKey: "computedRemotely")
+        let stripped = try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)
+        let decoded = try OutcomeCodec.decode(stripped)
+        XCTAssertEqual(decoded.variants.count, 2)
+        XCTAssertFalse(decoded.computedRemotely)
     }
 
     func testStoreSavesAndLoadsResultsBlob() throws {

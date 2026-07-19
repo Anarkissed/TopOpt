@@ -60,6 +60,14 @@ enum OutcomeCodec {
         let gridNx, gridNy, gridNz: Int
         let gridOrigin: [Double]       // 3 components
         let spacing: Double
+        // LAN offload (097): the remote-compute flag MUST survive the persist/restore
+        // round-trip, or a reopened remote result forgets it was computed on the Mac
+        // and lies — the withheld mass renders as a plausible "0.0 g", the "computed on
+        // Mac" note vanishes, and the stress/playback controls come back dead (the exact
+        // 097 honesty gap this DTO once silently dropped). Optional so blobs written
+        // before this field existed still decode (→ nil → false, correct: they predate
+        // remote runs, and there is no honest value to recover for one anyway).
+        let computedRemotely: Bool?
         // Optional so blobs written before this field existed still decode (→ nil →
         // no clearance notes), rather than failing the whole outcome. Empty when no
         // "Keep clear" clearance was declared.
@@ -97,6 +105,7 @@ enum OutcomeCodec {
             gridNx: o.gridNx, gridNy: o.gridNy, gridNz: o.gridNz,
             gridOrigin: [o.gridOrigin.x, o.gridOrigin.y, o.gridOrigin.z],
             spacing: o.spacing,
+            computedRemotely: o.computedRemotely,
             appliedClearances: o.appliedClearances.map {
                 AppliedClearanceDTO(faceID: $0.faceID, kind: $0.kind.rawValue,
                                     voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) })
@@ -133,6 +142,7 @@ enum OutcomeCodec {
             acceptedCount: d.acceptedCount, voxelVolumeMM3: d.voxelVolumeMM3,
             gridNx: d.gridNx, gridNy: d.gridNy, gridNz: d.gridNz,
             gridOrigin: vec(d.gridOrigin), spacing: d.spacing,
+            computedRemotely: d.computedRemotely ?? false,
             appliedClearances: (d.appliedClearances ?? []).map {
                 AppliedClearance(faceID: $0.faceID,
                                  kind: TopOptKit.ClearanceKind(rawValue: $0.kind) ?? .face,
