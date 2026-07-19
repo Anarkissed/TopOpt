@@ -78,6 +78,9 @@ public struct WorkspacePlaceholder: View {
     @State private var boxDragDebug = false
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
+    /// Measured intrinsic width (points) of each bottom-right settings chip, so the cluster
+    /// orders them smallest→largest (design-overhaul round 2, item 12; `BottomChipOrder`).
+    @State private var settingsChipWidths: [SettingsChipID: CGFloat] = [:]
 
     /// The debug HUD payload for a box drag (handoff 111).
     struct BoxDragDiagnostic: Equatable {
@@ -197,9 +200,10 @@ public struct WorkspacePlaceholder: View {
             if force.phase == .setup {
                 gravityBanner
             } else {
+                // The Design Box drawer now lives INSIDE `bottomRightControls` (item 11), so it
+                // is no longer placed separately here.
                 if force.gravityIsSet { bottomRightControls }
                 if viewerMesh != nil { selectionsPanel }
-                if showDesignGizmo { designBoxPanel }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
             if viewerMesh != nil { orientationGizmo }           // orientation gizmo — top-right, always
@@ -263,7 +267,10 @@ public struct WorkspacePlaceholder: View {
     /// Start the M7.7 optimize run for the current load case. Gated on the same
     /// `canOptimize` the button uses; nil request only if a file/material is
     /// somehow missing (Optimize is disabled in that case).
-    /// A top-center chip to return to the saved variants from the original view.
+    /// The "See Results" chip — pinned to the TOP EDGE at the EXACT horizontal centre, in
+    /// every workspace state it appears in (design-overhaul round 2, item 8). Vertically
+    /// aligned with the top-left chrome row so it reads as part of the top bar; the chrome is
+    /// top-left and the gizmo top-right, so the centre is always clear.
     private var seeResultsChip: some View {
         VStack {
             Button { viewOriginal = false } label: {
@@ -277,19 +284,18 @@ public struct WorkspacePlaceholder: View {
                     .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.6).color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
-            .padding(.top, 80)   // clear the top chrome row
+            .padding(.top, DS.Space.xl3)   // align with the top chrome row
             Spacer()
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .top)   // exact horizontal centre
     }
 
-    /// The orientation gizmo lives TOP-RIGHT, ALWAYS (design-overhaul 109, item 2 — the
-    /// maintainer's placement). The settings chips that used to crowd this corner now stack
-    /// BOTTOM-right above Optimize (`bottomRightControls`), so the top-right is clear. Sized
-    /// ~210pt so the widget + its corner control-ring fit the corner without reaching the
-    /// design-box panel (which now opens BELOW it — see `designBoxPanel`). Matches the
-    /// ResultsScreen gizmo (also top-right) for a consistent home.
-    private var gizmoSize: CGFloat { 210 }
+    /// The orientation gizmo lives in the ABSOLUTE top-right corner, ALWAYS (design-overhaul
+    /// 109; round 2 item 4). The settings chips that used to crowd this corner stack BOTTOM-
+    /// right above Optimize (`bottomRightControls`). ONE shared size (`standardSize`) on every
+    /// screen — the workspace-210 / results-300 divergence is dead; the ResultsScreen gizmo
+    /// uses the same constant + corner.
+    private var gizmoSize: CGFloat { OrientationGizmoView.standardSize }
     private var orientationGizmo: some View {
         VStack {
             HStack {
@@ -534,20 +540,53 @@ public struct WorkspacePlaceholder: View {
         .padding(.top, DS.Space.xl4)
     }
 
-    /// The settings chips (Gravity · Minimize plastic · quality · Design Box) stack BOTTOM-right
-    /// now, above the Optimize button (design-overhaul 109, item 2 — they used to be top-right,
-    /// which the gizmo now owns). Bottom-anchored and lifted to clear the bottom bar's button row.
+    /// The settings chips (Gravity · Minimize plastic · quality · Design Box) stack BOTTOM-right,
+    /// above the Optimize button (design-overhaul 109; round 2). Ordered SMALLEST width at the
+    /// top → LARGEST at the bottom by their MEASURED width (item 12, `BottomChipOrder`), so the
+    /// column reads as a tidy width ramp. The Design Box chip carries its own DRAWER, which
+    /// slides out LEFTWARD from it when the tool is on (item 11) — a taller row that pushes the
+    /// chips above it up. Bottom-anchored and lifted to clear the bottom bar's Optimize button.
     private var bottomRightControls: some View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
             Spacer()
-            gravityChip
-            minimizePlasticChip
-            qualityChip
-            designBoxChip
+            ForEach(BottomChipOrder.sorted(SettingsChipID.allCases, widths: settingsChipWidths), id: \.self) { id in
+                settingsChipRow(id)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, DS.Space.xl4)
         .padding(.bottom, DS.Space.xl4 + 50 + DS.Space.m)   // clear the bottom bar buttons (Optimize)
+        .onPreferenceChange(SettingsChipWidthKey.self) { settingsChipWidths = $0 }
+        .animation(DS.Motion.emphasized, value: showDesignGizmo)   // drawer open/close + reflow
+    }
+
+    /// One chip in the ordered cluster. Each chip measures its OWN width (`chipWidthReader`) so
+    /// the sort is by the chip alone. The Design Box row is special: when the tool is on it
+    /// becomes an HStack whose leading element is the Design Box DRAWER, sliding in from the
+    /// trailing edge so it reads as pulled LEFT out of the chip (item 11). The chip stays at the
+    /// bottom of the row (`.bottom` alignment); the drawer's height grows the row, pushing the
+    /// chips above it up — the drawer is NOT measured, so opening it never reshuffles the sort.
+    @ViewBuilder private func settingsChipRow(_ id: SettingsChipID) -> some View {
+        switch id {
+        case .gravity: gravityChip.background(chipWidthReader(id))
+        case .minimizePlastic: minimizePlasticChip.background(chipWidthReader(id))
+        case .quality: qualityChip.background(chipWidthReader(id))
+        case .designBox:
+            HStack(alignment: .bottom, spacing: DS.Space.m) {
+                if showDesignGizmo {
+                    designBoxDrawer
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+                designBoxChip.background(chipWidthReader(id))
+            }
+        }
+    }
+
+    /// Reads a chip's rendered width into `SettingsChipWidthKey` (item 12: MEASURED width).
+    private func chipWidthReader(_ id: SettingsChipID) -> some View {
+        GeometryReader { proxy in
+            Color.clear.preference(key: SettingsChipWidthKey.self, value: [id: proxy.size.width])
+        }
     }
 
     /// Resolution / quality picker chip (Fast 64³ / Balanced 96³ / Fine 128³).
@@ -644,10 +683,12 @@ public struct WorkspacePlaceholder: View {
         .buttonStyle(.plain)
     }
 
-    /// The design-box control panel (top-right, below the chips): a short explainer,
-    /// Reset (back to the default grow-room box), Add keep-out, and per-keep-out
-    /// remove. The sizing itself is the on-scene drag handles.
-    private var designBoxPanel: some View {
+    /// The design-box control DRAWER (design-overhaul round 2, item 11): a short explainer,
+    /// Reset (back to the default grow-room box), Add keep-out, and per-keep-out remove. It
+    /// slides out LEFTWARD from the Design Box chip in the bottom-right cluster (the placement +
+    /// slide transition live in `settingsChipRow`); this is just the card content. The sizing
+    /// itself is the on-scene drag handles.
+    private var designBoxDrawer: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "cube.fill").font(.system(size: 12, weight: .semibold))
@@ -703,12 +744,6 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
-        // Design-overhaul 109: the top-RIGHT now belongs to the gizmo (always), so the design-
-        // box panel opens TOP-LEFT, below the back/title chrome and above the bottom-left
-        // Selections panel — the one clear column left.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(.top, 76)           // clear the top-left back/title chrome row
-        .padding(.leading, DS.Space.xl4)
     }
 
     private func designBoxPanelButton(_ icon: String, _ text: String) -> some View {
@@ -1034,27 +1069,32 @@ public struct WorkspacePlaceholder: View {
             let ov = force.clearanceOverride(for: g.id)
             let r = project.clearanceBoreRadius(for: g)
             if shape.bolt || shape.slab {
+                // On-model cluster (design-overhaul round 2, items 6+7): the value chips sit
+                // ADJACENT in one row, and the "Same clearance for all" checkbox rides beside
+                // them (visible whenever the chips are; disabled-with-explanation at 1 site).
                 VStack(alignment: .trailing, spacing: DS.Space.xxs) {
-                    clearanceSyncToggle
-                    if shape.bolt {
-                        GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
-                                       autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                                       active: isDraggingRole(g.id, .margin)) {
-                            force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
+                    HStack(spacing: DS.Space.xs) {
+                        if shape.bolt {
+                            GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                                           autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                                           active: isDraggingRole(g.id, .margin)) {
+                                force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
+                            }
+                            GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                                           autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                                           active: isDraggingRole(g.id, .axialHi) || isDraggingRole(g.id, .axialLo)) {
+                                force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
+                            }
                         }
-                        GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
-                                       autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                                       active: isDraggingRole(g.id, .axialHi) || isDraggingRole(g.id, .axialLo)) {
-                            force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
+                        if shape.slab {
+                            GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                                           autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                                           active: isDraggingRole(g.id, .slabDepth)) {
+                                force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false))
+                            }
                         }
                     }
-                    if shape.slab {
-                        GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
-                                       autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                                       active: isDraggingRole(g.id, .slabDepth)) {
-                            force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false))
-                        }
-                    }
+                    clearanceSyncCheckbox
                 }
                 .fixedSize()
                 // Sit just ABOVE-beside the group's handle cluster (the small chips no longer
@@ -1187,6 +1227,17 @@ public struct WorkspacePlaceholder: View {
 
             if !selectionsCollapsed {
                 Divider().overlay(DS.Color.strokeSubtle.color)
+                // The "Same clearance for all" checkbox, mirrored in the Selections panel
+                // (design-overhaul round 2, item 7) so it's reachable here too — shown whenever
+                // there's ≥1 keep-clear site, disabled-with-explanation at exactly one.
+                if keepClearSiteCount >= 1 {
+                    HStack {
+                        clearanceSyncCheckboxCompact
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
+                    Divider().overlay(DS.Color.strokeSubtle.color)
+                }
                 if selection.isEmpty {
                     Text("Tap faces on the model to select them — a chip asks whether they’re an **anchor** or a **load**.")
                         .dsStyle(DS.TypeScale.caption)
@@ -1362,26 +1413,21 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// The "Same clearance for all" toggle chip — a small blue liquid-glass control that rides
-    /// the ONE active clearance editor (design-overhaul 109, item 4). Wording chosen over "All
-    /// holes match" (bolt-only — wrong for slab faces) and "Apply to every keep-clear" (jargon):
-    /// "Same clearance for all" reads plainly and covers bores AND faces. DEFAULT ON.
-    @ViewBuilder private var clearanceSyncToggle: some View {
-        if keepClearSiteCount >= 2 {
-            Button { force.setSyncClearances(!force.syncClearances) } label: {
-                HStack(spacing: DS.Space.xs) {
-                    Image(systemName: force.syncClearances ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Same clearance for all")
-                        .font(.system(size: 11, weight: .semibold))
-                }
-                .foregroundStyle(force.syncClearances ? DS.Color.accent.color : DS.Color.textSecondary.color)
-                .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
-                .liquidGlassCapsule(force.syncClearances ? .blue : .neutral)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Same clearance for all keep-clear sites")
-            .accessibilityValue(force.syncClearances ? "On" : "Off")
+    /// The "Same clearance for all" CHECKBOX beside the on-model chips (design-overhaul round 2,
+    /// item 7). Visible whenever there's ≥1 keep-clear site; disabled with an explanation at
+    /// exactly 1 (nothing to link yet); actionable at ≥2, DEFAULT ON. The fan-out semantics are
+    /// unchanged (`ForceModel.setSyncClearances`, proven by the 109 tests).
+    private var clearanceSyncCheckbox: some View {
+        ClearanceSyncCheckbox(siteCount: keepClearSiteCount, isOn: force.syncClearances) {
+            force.setSyncClearances($0)
+        }
+    }
+
+    /// The Selections-panel copy of the same checkbox (compact), so the control is reachable
+    /// from the panel too — mirrored next to the row clearance chips.
+    private var clearanceSyncCheckboxCompact: some View {
+        ClearanceSyncCheckbox(siteCount: keepClearSiteCount, isOn: force.syncClearances, compact: true) {
+            force.setSyncClearances($0)
         }
     }
 
@@ -1400,9 +1446,10 @@ public struct WorkspacePlaceholder: View {
         if shape.bolt || shape.slab {
             let ov = force.clearanceOverride(for: g.id)
             let r = project.clearanceBoreRadius(for: g)
-            // Design-overhaul 109: the value chips right-align as a COLUMN growing from the
-            // bottom-right of the (bottom-left) Selections panel — a tight trailing stack.
-            VStack(alignment: .trailing, spacing: DS.Space.xxs) {
+            // Design-overhaul round 2 (item 5): the compact value chips sit SIDE BY SIDE in one
+            // row — Margin next to Axial — so the group row is only slightly taller than a plain
+            // one (was a tall trailing COLUMN). Wraps if the panel is narrow.
+            HStack(spacing: DS.Space.xs) {
                 if shape.bolt {
                     GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
                                    autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
@@ -1417,7 +1464,7 @@ public struct WorkspacePlaceholder: View {
                                    compact: true) { force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false)) }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 2)
         }
     }

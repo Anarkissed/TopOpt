@@ -27,11 +27,56 @@ import SwiftUI
 import TopOptDesign
 import simd
 
+// MARK: - Gizmo layout (the ONE source for every control's placement — headless-tested)
+
+/// The squircle-relative geometry that positions the three controls (both roll arrows +
+/// the Home cube) and the housing. Design-overhaul round 2 (items 2–4): all three controls
+/// share ONE inset from their nearest edges (equal margins, comfortably inside), and the
+/// glass cube sits at the EXACT centre of the squircle (`housingOffset == .zero` — the
+/// housing-offset bug that pushed the cube high has recurred once, so it is asserted here
+/// and in `OrientationLayoutTests`). Pure fractions of the widget `size`, so a test can
+/// prove the equal-margin + centred invariants without touching SwiftUI.
+public enum GizmoLayout {
+    /// The single inset (fraction of `size`) every control sits at from its NEAREST edges.
+    /// One constant → the two arrows and the Home cube share an identical corner margin.
+    public static let controlInsetFraction: CGFloat = 0.20
+    /// The roll-arrow button footprint (fraction of `size`).
+    public static let arrowButtonFraction: CGFloat = 0.22
+    /// The Home-cube button footprint (fraction of `size`).
+    public static let homeButtonFraction: CGFloat = 0.17
+    /// The frosted housing squircle side (fraction of `size`), CENTRED in the frame.
+    public static let housingFraction: CGFloat = 0.90
+    /// The housing's offset from the frame centre — ZERO, so the raymarched cube (which
+    /// renders at the frame centre) sits dead-centre of the squircle. Do not reintroduce a
+    /// vertical nudge here: that is exactly the recurring "cube sits high / off-centre" bug.
+    public static let housingOffset: CGSize = .zero
+
+    /// The inset (points) for a given widget size.
+    public static func controlInset(_ size: CGFloat) -> CGFloat { size * controlInsetFraction }
+    /// Centre of the left (counter-clockwise) roll arrow — top-left corner.
+    public static func rotateLeftCenter(_ size: CGFloat) -> CGPoint {
+        CGPoint(x: controlInset(size), y: controlInset(size))
+    }
+    /// Centre of the right (clockwise) roll arrow — top-right corner, mirror of the left.
+    public static func rotateRightCenter(_ size: CGFloat) -> CGPoint {
+        CGPoint(x: size - controlInset(size), y: controlInset(size))
+    }
+    /// Centre of the Home cube — bottom-right corner, the SAME inset as the arrows.
+    public static func homeCenter(_ size: CGFloat) -> CGPoint {
+        CGPoint(x: size - controlInset(size), y: size - controlInset(size))
+    }
+}
+
 public struct OrientationGizmoView: View {
     @ObservedObject private var camera: OrbitCameraModel
-    /// The widget's square footprint. Default 300 — sized to read on iPad and hold the
-    /// floating glass, the pinned labels, and the corner control ring.
+    /// The widget's square footprint. Defaults to `standardSize` — ONE size on every screen
+    /// (design-overhaul round 2, item 4: the workspace-210 / results-300 divergence is dead).
     private let size: CGFloat
+
+    /// The single gizmo size used on EVERY screen (workspace + results). Big enough to read
+    /// the etched face labels and hold the corner control-ring, small enough to sit in the
+    /// absolute top-right corner without reaching the other panels.
+    public static let standardSize: CGFloat = 210
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -48,7 +93,7 @@ public struct OrientationGizmoView: View {
     @State private var toastText = ""
     @State private var toastShown = false
 
-    public init(camera: OrbitCameraModel, size: CGFloat = 300) {
+    public init(camera: OrbitCameraModel, size: CGFloat = OrientationGizmoView.standardSize) {
         self.camera = camera
         self.size = size
     }
@@ -147,10 +192,13 @@ public struct OrientationGizmoView: View {
                                startPoint: .top, endPoint: .bottom), lineWidth: 1))
             .overlay(shape.strokeBorder(DS.Color.accent.opacity(0.16).color, lineWidth: 1.5)
                         .blur(radius: 1.5))                            // faint blue edge glow
-            // CENTERED (design-overhaul 109): the cube renders at the frame centre, so the
-            // housing is centred on the frame too (was offset down `size*0.07`, which left the
-            // cube sitting high / off-centre). Square-ish so the cube sits dead centre.
-            .frame(width: size * 0.90, height: size * 0.90)
+            // CENTERED (design-overhaul 109, re-asserted round 2 item 3): the cube renders at
+            // the frame centre, so the housing is centred on the frame too — `GizmoLayout
+            // .housingOffset` is ZERO. The old `size*0.07` downward nudge left the cube high /
+            // off-centre; that bug has recurred once, so the offset is a named constant proven
+            // zero in `OrientationLayoutTests`.
+            .frame(width: size * GizmoLayout.housingFraction, height: size * GizmoLayout.housingFraction)
+            .offset(x: GizmoLayout.housingOffset.width, y: GizmoLayout.housingOffset.height)
             .dsShadow(.panel)
     }
 
@@ -242,20 +290,22 @@ public struct OrientationGizmoView: View {
     // MARK: - Controls (the corner ring: two swoosh buttons + Home, ~48px inset)
 
     private var controls: some View {
-        let inset = size * 0.16                                         // ~48pt at the 300 default
-        let btn = size * 0.22
+        let arrow = size * GizmoLayout.arrowButtonFraction
+        let home = size * GizmoLayout.homeButtonFraction
         return ZStack {
+            // Both arrows and the Home cube share ONE inset from their nearest edges
+            // (`GizmoLayout`, item 2): equal margins, comfortably inside the squircle.
             RotateButton(clockwise: false) { roll(by: Self.rollStep, "Rolled ⟲") }
-                .frame(width: btn, height: btn)
-                .position(x: inset, y: inset)
+                .frame(width: arrow, height: arrow)
+                .position(GizmoLayout.rotateLeftCenter(size))
             RotateButton(clockwise: true) { roll(by: -Self.rollStep, "Rolled ⟳") }
-                .frame(width: btn, height: btn)
-                .position(x: size - inset, y: inset)
+                .frame(width: arrow, height: arrow)
+                .position(GizmoLayout.rotateRightCenter(size))
             HomeButton {
                 camera.home(animated: true); flash(OrientationGizmo.homeNumericId); showToast("Home")
             }
-            .frame(width: btn * 0.78, height: btn * 0.78)
-            .position(x: size - inset, y: size - inset * 0.95)
+            .frame(width: home, height: home)
+            .position(GizmoLayout.homeCenter(size))
         }
         .frame(width: size, height: size)
     }
@@ -336,11 +386,14 @@ private struct HoverPick: ViewModifier {
 
 // MARK: - Control glyphs
 
-/// A matched blue-glass ROLL arrow — an upright ~270° circular arrow that visually promises a
-/// roll of the view. The left button is the base glyph (counter-clockwise); the right button is
-/// its exact MIRROR (clockwise), so the two read as one matched pair (design-overhaul 109 —
-/// replaces the 107 corner-spun swoosh the maintainer called "mirrored and ugly"). The blue
-/// glass gradient + white sheen match the cube's frost.
+/// A matched glossy-WHITE 3D swoosh ROLL arrow — a faithful port of the maintainer's HTML mock
+/// (design-overhaul round 2, item 1; `docs/design/gizmo_redesign.html` `#rotL`/`#rotR`). The
+/// 109 "blue-glass rotate pair" is REJECTED. Each arrow is a ~200° tube stroked with the mock's
+/// white→cool-white glass gradient (top white → mid cool-white → foot faint blue), a thin bright
+/// sheen riding the top, and a filled arrowhead in the same gradient; a soft black drop-shadow +
+/// faint blue glow give it dimension. Like the mock, each arrow is spun 45° INTO its corner so
+/// the arc runs parallel to the squircle's fillet, and the right button is the exact MIRROR of
+/// the left, so the two read as one matched pair. Taps roll the view ±15° about the view axis.
 private struct RotateButton: View {
     let clockwise: Bool
     let action: () -> Void
@@ -348,50 +401,61 @@ private struct RotateButton: View {
     var body: some View {
         Button(action: action) {
             Canvas { ctx, sz in draw(&ctx, sz) }
-                .scaleEffect(x: clockwise ? -1 : 1, y: 1)           // true mirror for the pair
+                // Mirror the pair, then spin each into its corner (mock: rotL −45°, rotR +45°).
+                .scaleEffect(x: clockwise ? -1 : 1, y: 1)
+                .rotationEffect(.degrees(clockwise ? 45 : -45))
                 .contentShape(Rectangle())
+                // Soft drop-shadow + faint blue glow (mock's `filter: drop-shadow(…)`), giving
+                // the white gloss its 3D lift off the housing.
+                .shadow(color: .black.opacity(0.55), radius: 5, x: 0, y: 4)
+                .shadow(color: Color(red: 0.55, green: 0.75, blue: 1.0).opacity(0.22), radius: 6)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(clockwise ? "Roll view right" : "Roll view left")
         .accessibilityHint("Rotate the view about the viewing axis")
     }
 
+    /// The mock's glass gradient stops: white(0.95) → cool-white(0.66) → faint blue(0.40).
+    private static let glass = Gradient(stops: [
+        .init(color: Color(red: 1.0, green: 1.0, blue: 1.0).opacity(0.96), location: 0),
+        .init(color: Color(red: 0.80, green: 0.87, blue: 0.98).opacity(0.66), location: 0.5),
+        .init(color: Color(red: 0.58, green: 0.66, blue: 0.82).opacity(0.42), location: 1)])
+
     private func draw(_ ctx: inout GraphicsContext, _ sz: CGSize) {
         let c = CGPoint(x: sz.width / 2, y: sz.height / 2)
-        let r = min(sz.width, sz.height) * 0.30
-        let lw = r * 0.42
-        // A ~270° ring, open at the top-right where the arrowhead flies off (counter-clockwise).
-        let a0 = Angle.degrees(-60), a1 = Angle.degrees(210)
+        let r = min(sz.width, sz.height) * 0.31
+        let lw = r * 0.46
+        // A ~200° tube arcing OVER THE TOP, open at the bottom-left where the arrowhead flies
+        // off (counter-clockwise, like the mock's `rotL`).
+        let a0 = Angle.degrees(200), a1 = Angle.degrees(-20)
         var arc = Path()
-        arc.addArc(center: c, radius: r, startAngle: a0, endAngle: a1, clockwise: false)
-        let glass = Gradient(colors: [
-            Color(red: 0.80, green: 0.90, blue: 1.0).opacity(0.98),   // bright blue-white
-            Color(red: 0.44, green: 0.68, blue: 1.0).opacity(0.80),   // accent blue
-            Color(red: 0.30, green: 0.52, blue: 0.92).opacity(0.55)]) // deeper blue
-        ctx.stroke(arc, with: .linearGradient(glass,
+        arc.addArc(center: c, radius: r, startAngle: a0, endAngle: a1, clockwise: true)
+        ctx.stroke(arc, with: .linearGradient(Self.glass,
                                               startPoint: CGPoint(x: c.x, y: c.y - r),
                                               endPoint: CGPoint(x: c.x, y: c.y + r)),
                    style: StrokeStyle(lineWidth: lw, lineCap: .round))
 
-        // Arrowhead at the a0 (-60°) end, pointing along the CCW tangent.
+        // Arrowhead at the a0 (200°) end, pointing along the CCW tangent (down-and-left).
         let end = CGPoint(x: c.x + r * CGFloat(cos(a0.radians)),
                           y: c.y + r * CGFloat(sin(a0.radians)))
-        let tang = CGVector(dx: CGFloat(-sin(a0.radians)), dy: CGFloat(cos(a0.radians)))   // CCW tangent
-        let head = lw * 1.5
+        let tang = CGVector(dx: CGFloat(sin(a0.radians)), dy: CGFloat(-cos(a0.radians)))   // CCW tangent
+        let head = lw * 1.55
         let normal = CGVector(dx: -tang.dy, dy: tang.dx)
         let tip = CGPoint(x: end.x + tang.dx * head, y: end.y + tang.dy * head)
         let bL = CGPoint(x: end.x + normal.dx * head * 0.85, y: end.y + normal.dy * head * 0.85)
         let bR = CGPoint(x: end.x - normal.dx * head * 0.85, y: end.y - normal.dy * head * 0.85)
         var tri = Path()
         tri.move(to: tip); tri.addLine(to: bL); tri.addLine(to: bR); tri.closeSubpath()
-        ctx.fill(tri, with: .color(Color(red: 0.85, green: 0.93, blue: 1.0).opacity(0.98)))
+        ctx.fill(tri, with: .linearGradient(Self.glass,
+                                            startPoint: CGPoint(x: end.x, y: end.y - head),
+                                            endPoint: CGPoint(x: end.x, y: end.y + head)))
 
-        // Sheen: a thin bright highlight riding the top of the glass tube.
+        // Sheen: a thin bright white highlight riding the top of the glass tube.
         var sheen = Path()
-        sheen.addArc(center: CGPoint(x: c.x, y: c.y - lw * 0.24), radius: r,
-                     startAngle: .degrees(200), endAngle: .degrees(320), clockwise: false)
-        ctx.stroke(sheen, with: .color(Color.white.opacity(0.8)),
-                   style: StrokeStyle(lineWidth: lw * 0.16, lineCap: .round))
+        sheen.addArc(center: CGPoint(x: c.x, y: c.y - lw * 0.26), radius: r,
+                     startAngle: .degrees(210), endAngle: .degrees(330), clockwise: false)
+        ctx.stroke(sheen, with: .color(Color.white.opacity(0.85)),
+                   style: StrokeStyle(lineWidth: lw * 0.18, lineCap: .round))
     }
 }
 

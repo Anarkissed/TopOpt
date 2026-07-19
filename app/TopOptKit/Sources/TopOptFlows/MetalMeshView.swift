@@ -44,6 +44,19 @@ private struct LoadPathUniforms {
     var params: SIMD4<Float>
 }
 
+// The CAD-stage backdrop uniforms — byte-identical to `StageUniforms` in `stageShaderSource`.
+// Only reconstructed when the camera or mesh changes (the on-demand redraw), never per idle
+// frame, so the stage is static (item 9 / the 108 rule).
+private struct StageUniforms {
+    var invVP: simd_float4x4     // inverse(projection · view)
+    var eye: SIMD3<Float>        // camera world position
+    var floorY: Float
+    var centerXZ: SIMD2<Float>   // floor-plane centre (fade origin)
+    var spacing: Float           // minor grid spacing
+    var fadeRadius: Float
+    var _pad: Float = 0          // 16-byte tail alignment
+}
+
 // The neutral-clay shader (M7.4) + a selection tint (M7.5), compiled at runtime so
 // the SwiftPM target needs no .metal resource bundling (identical on iOS/macOS).
 private let viewerShaderSource = """
@@ -212,6 +225,92 @@ fragment float4 loadpath_fragment(LPOut in [[stage_in]], constant LPUniforms& u 
 }
 """
 
+// The CAD STAGE backdrop (design-overhaul round 2, item 9): replaces the flat black clear with
+// a proper shaded room in the app's own liquid-glass language — a deep charcoal-blue radial
+// gradient, a mathematically-correct infinite floor grid (blue-tinted, major/minor hierarchy,
+// fading with distance), and a soft horizon glow. It is a FULL-SCREEN pass (no vertex buffer,
+// the gl_VertexID triangle trick) drawn FIRST, depth-ALWAYS + no depth-write, so the part / box
+// / grid drawn after it occlude it with correct depth. The floor grid is reconstructed per-pixel
+// by intersecting each view ray with the world floor plane, so it tracks the camera EXACTLY
+// from one uniform (`invVP`/`eye`/`floorY`) refreshed only when the camera changes — STATIC,
+// zero continuous cost (the 108 rule): the view is on-demand, so this shader runs only on a
+// redraw, never on an idle timer.
+private let stageShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct StageUniforms {
+    float4x4 invVP;     // inverse(projection · view), world reconstruction from clip
+    float3   eye;       // camera world position
+    float    floorY;    // world y of the stage floor plane
+    float2   centerXZ;  // floor plane centre (x,z) — the fade origin
+    float    spacing;   // minor grid spacing (world units)
+    float    fadeRadius;// world distance at which the grid fully fades out
+};
+
+struct SOut { float4 pos [[position]]; float2 uv; };
+
+vertex SOut stage_vertex(uint vid [[vertex_id]]) {
+    float2 p = float2(float((vid << 1) & 2), float(vid & 2));   // (0,0)(2,0)(0,2)
+    SOut o;
+    o.pos = float4(p * 2.0 - 1.0, 1.0, 1.0);   // z = far; depth-always + no-write anyway
+    o.uv  = p * 2.0 - 1.0;
+    return o;
+}
+
+static float gridMask(float2 coord) {
+    float2 d = fwidth(coord);
+    float2 g = abs(fract(coord - 0.5) - 0.5) / max(d, float2(1e-5));
+    return 1.0 - min(min(g.x, g.y), 1.0);
+}
+
+fragment float4 stage_fragment(SOut in [[stage_in]], constant StageUniforms& U [[buffer(0)]]) {
+    float2 ndc = in.uv;
+
+    // Backdrop: a deep charcoal-blue vertical gradient (darker up top, a touch lighter toward
+    // the floor) with a soft radial vignette — tuned to the liquid-glass chrome.
+    float v = ndc.y * 0.5 + 0.5;                       // 0 bottom → 1 top
+    float3 top   = float3(0.020, 0.028, 0.052);
+    float3 low   = float3(0.045, 0.060, 0.090);
+    float3 col   = mix(low, top, smoothstep(0.0, 1.0, v));
+    float vign   = 1.0 - 0.35 * dot(ndc, ndc);
+    col *= clamp(vign, 0.6, 1.0);
+
+    // View ray for this pixel (world space).
+    float4 nh = U.invVP * float4(ndc, 0.0, 1.0);
+    float4 fh = U.invVP * float4(ndc, 1.0, 1.0);
+    float3 np = nh.xyz / nh.w;
+    float3 fp = fh.xyz / fh.w;
+    float3 rd = normalize(fp - np);
+    float3 ro = U.eye;
+
+    // Soft horizon glow: rays grazing the floor plane (|rd.y| small) get a faint blue lift.
+    float horizon = 1.0 - smoothstep(0.0, 0.14, abs(rd.y));
+    col += float3(0.10, 0.16, 0.28) * horizon * 0.5;
+
+    // Infinite floor grid: intersect the ray with y = floorY.
+    if (abs(rd.y) > 1e-5) {
+        float t = (U.floorY - ro.y) / rd.y;
+        if (t > 0.0) {
+            float3 hit = ro + rd * t;
+            float2 xz = hit.xz;
+            float minor = gridMask(xz / U.spacing);
+            float major = gridMask(xz / (U.spacing * 5.0));
+            // Fade with distance from the floor centre, and with grazing angle (kills moiré
+            // near the horizon), so far lines dissolve into the gradient.
+            float dist  = length(xz - U.centerXZ);
+            float fade  = 1.0 - smoothstep(U.fadeRadius * 0.35, U.fadeRadius, dist);
+            float graze = smoothstep(0.02, 0.22, abs(rd.y));
+            float3 gridCol = float3(0.34, 0.52, 0.80);
+            float a = (minor * 0.16 + major * 0.34) * fade * graze;
+            col = mix(col, gridCol, clamp(a, 0.0, 1.0));
+        }
+    }
+
+    return float4(col, 1.0);   // opaque backdrop (replaces the flat clear)
+}
+"""
+
 /// The sentinel face id written to the id target's background (no face under the
 /// pixel). Face ids are non-negative, so `UInt32.max` never collides.
 private let idBackground: UInt32 = .max
@@ -303,6 +402,16 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Depth state for the translucent body: test `.less` but DO NOT write depth, so
     /// back walls show through the front (the x-ray read).
     private let translucentBodyDepthState: MTLDepthStencilState
+    /// The CAD-stage backdrop pipeline (item 9): a full-screen gradient + infinite floor grid,
+    /// drawn FIRST with `lineOverlayDepthState` (depth-always, no write) so everything occludes
+    /// it. Optional — a nil just falls back to the flat clear colour.
+    private let stagePipeline: MTLRenderPipelineState?
+    /// Whether the CAD-stage backdrop pipeline built (its MSL compiled). A test asserts this is
+    /// true on a real GPU so a shader typo fails loudly instead of silently disabling the stage.
+    var stagePipelineDidBuild: Bool { stagePipeline != nil }
+    /// The exact stage MSL the app ships — exposed so a headless test can compile it and fail
+    /// loudly on a typo (the pipeline is otherwise built with `try?`, i.e. nil-on-failure).
+    static var stageShaderSourceForTesting: String { stageShaderSource }
     private var modelCenter = SIMD3<Float>.zero
     /// The currently-displayed model rotation (animates toward `settleTo`).
     private var modelRotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
@@ -450,6 +559,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             gpd.depthAttachmentPixelFormat = Self.depthFormat
             groundPipe = try? device.makeRenderPipelineState(descriptor: gpd)
         }
+        // CAD-stage backdrop pipeline (item 9, optional: nil → the flat clear colour). No vertex
+        // buffer (the gl_VertexID full-screen triangle); opaque (it REPLACES the clear), no
+        // depth involvement (drawn first, `lineOverlayDepthState`).
+        var stagePipe: MTLRenderPipelineState? = nil
+        if let sLib = try? device.makeLibrary(source: stageShaderSource, options: nil),
+           let svf = sLib.makeFunction(name: "stage_vertex"),
+           let sff = sLib.makeFunction(name: "stage_fragment") {
+            let spd = MTLRenderPipelineDescriptor()
+            spd.vertexFunction = svf
+            spd.fragmentFunction = sff
+            spd.colorAttachments[0].pixelFormat = Self.colorFormat
+            spd.depthAttachmentPixelFormat = Self.depthFormat
+            stagePipe = try? device.makeRenderPipelineState(descriptor: spd)
+        }
         // Load-path ribbon pipeline (optional: falls back to the ground line pipeline).
         // Vertex layout (stride 48): segStart(12) + segEnd(12) + side/endFlag(8) + rgba(16).
         var lpPipe: MTLRenderPipelineState? = nil
@@ -562,6 +685,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.depthState = depth
         self.idPipeline = idPipe
         self.groundPipeline = groundPipe
+        self.stagePipeline = stagePipe
         self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
         self.lineOverlayDepthState = device.makeDepthStencilState(descriptor: odsd) ?? depth
         self.loadPathPipeline = lpPipe
@@ -775,14 +899,24 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             for e in edges { push(&lines, c[e[0]], ecol); push(&lines, c[e[1]], ecol) }
         }
 
-        // A fully transparent design box: no faces, a bright cool-white glass wireframe, and a
-        // fainter wireframe inset toward the centre. The gap between the two doubled edges reads
-        // as translucent wall thickness — a refractive optical boundary, not a coloured solid.
+        // The design box as a GLASS VOLUME (design-overhaul round 2, item 10): a barely-there
+        // cool-white/blue face tint so it reads as a volume the part PASSES THROUGH — the part
+        // stays visible through the tint, and the box stays visible through the part where it
+        // extends past it — plus a bright doubled "refractive wobble" edge that stands in for the
+        // fresnel-edge reflection. Depth-correct translucency (the box pass is depth-TESTED so
+        // the part occludes the box's far faces, but writes NO depth so it never hides the part),
+        // NOT a flat outline. The `faceAlpha` is deliberately tiny; the edge carries the read.
         func appendGlassBox(_ b: DesignBoxBounds) {
             let ctr = b.center
-            let glass = SIMD3<Float>(0.72, 0.82, 1.0)                 // cool-white / faint blue
+            let glass = SIMD3<Float>(0.72, 0.82, 1.0)                 // bright cool-white edge glass
+            // A frosted BLUE tint for the faces (design-overhaul round 2, item 10 revision): the
+            // maintainer wants to READ that the box has passed through the part, so the faces are
+            // a clear frosty blue with a small amount of frosting — not the near-invisible 0.055.
+            let faceTint = SIMD3<Float>(0.40, 0.58, 1.0)            // frosty blue
             let edges = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 6],
                          [6, 7], [7, 4], [0, 4], [1, 5], [2, 6], [3, 7]]
+            let quads = [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4],
+                         [2, 3, 7, 6], [1, 2, 6, 5], [0, 4, 7, 3]]
             func corners(_ box: DesignBoxBounds) -> [SIMD3<Float>] {
                 let lo = box.min, hi = box.max
                 return [SIMD3<Float>(lo.x, lo.y, lo.z), SIMD3<Float>(hi.x, lo.y, lo.z),
@@ -795,6 +929,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 let col = SIMD4<Float>(glass.x * alpha, glass.y * alpha, glass.z * alpha, alpha)
                 for e in edges { push(&lines, c[e[0]], col); push(&lines, c[e[1]], col) }
             }
+            // Frosted-blue translucent faces → the "volume passing THROUGH the part" read
+            // (premultiplied, so scale rgb). Enough alpha to tint the part visibly, still
+            // see-through. Depth-tested / no depth-write, so the part occludes the box's far
+            // faces and the box tints the part where it overhangs it.
+            let c = corners(b)
+            let faceAlpha: Float = 0.22
+            let fcol = SIMD4<Float>(faceTint.x * faceAlpha, faceTint.y * faceAlpha, faceTint.z * faceAlpha, faceAlpha)
+            for q in quads {
+                push(&faces, c[q[0]], fcol); push(&faces, c[q[1]], fcol); push(&faces, c[q[2]], fcol)
+                push(&faces, c[q[0]], fcol); push(&faces, c[q[2]], fcol); push(&faces, c[q[3]], fcol)
+            }
             wire(b, alpha: 0.92)                                      // bright outer glass edge
             // Inner wireframe, corners pulled ~4% toward the centre → the refractive "wobble".
             let inset = SIMD3<Float>(repeating: 0.04)
@@ -803,12 +948,10 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             wire(DesignBoxBounds(min: innerLo, max: innerHi), alpha: 0.34)
         }
 
-        // The DESIGN box (grow room) reads as an optical BOUNDARY, not a solid (design-overhaul
-        // 109): NO face fill and NO colour tint — a fully transparent volume bounded by a
-        // "refractive wobble" faked with a bright cool-white glass wireframe plus a fainter
-        // wireframe inset just inside it, so the doubled edge reads as translucent wall
-        // thickness (an optical edge, not a coloured box). Keep-outs stay tinted-solid: they
-        // are forbidden volume and keep the red colour language.
+        // The DESIGN box (grow room) reads as a translucent GLASS VOLUME, not a solid: a barely-
+        // there cool-white tint the part shows through, bounded by the bright doubled "refractive
+        // wobble" edge (see `appendGlassBox`). Keep-outs stay tinted-solid: they are forbidden
+        // volume and keep the red colour language.
         if let d = design { appendGlassBox(d) }
         for k in keepOuts { appendBox(k, keepOutColor, faceAlpha: 0.16) }
 
@@ -1111,7 +1254,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         if wasSettling { stepSettle() }
         guard let cmd = queue.makeCommandBuffer() else { return }
         if let rpd = view.currentRenderPassDescriptor {
-            encode(into: rpd, aspect: aspect, into: cmd)
+            encode(into: rpd, aspect: aspect, into: cmd, drawStage: true)
         }
         if let drawable = view.currentDrawable { cmd.present(drawable) }
         cmd.commit()
@@ -1122,13 +1265,29 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    /// Encode the shaded mesh draw into an arbitrary render pass. Shared by the
-    /// on-screen `draw(in:)` and the headless `renderOffscreen`.
-    private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, into cmd: MTLCommandBuffer) {
+    /// Encode the shaded mesh draw into an arbitrary render pass. Shared by the on-screen
+    /// `draw(in:)` and the headless `renderOffscreen`. `drawStage` gates the CAD-stage backdrop
+    /// (item 9): ON for the live viewer, OFF for offscreen output (thumbnails / exported video
+    /// keep their own clear colour) — so the backdrop is a live-viewer treatment only.
+    private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, into cmd: MTLCommandBuffer,
+                        drawStage: Bool) {
         guard vertexDrawCount > 0, let vbuf = vertexBuffer, let tbuf = tintBuffer,
               let fbuf = flexBuffer,
               let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
         var uniforms = makeUniforms(aspect: aspect)
+
+        // CAD-STAGE backdrop (item 9): the shaded room, drawn FIRST — depth-always + no write
+        // (`lineOverlayDepthState`), so the part / box / grid drawn after occlude it. Its uniform
+        // is rebuilt only here, on a redraw (camera/mesh change), never on an idle frame.
+        if drawStage, let spipe = stagePipeline {
+            var su = makeStageUniforms(aspect: aspect)
+            enc.setRenderPipelineState(spipe)
+            enc.setDepthStencilState(lineOverlayDepthState)
+            enc.setVertexBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
+            enc.setFragmentBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+        }
+
         // Load-flow body modes (handoff 070): a body alpha < 1 draws the mesh through
         // the translucent pipeline (premultiplied "over", no depth write) so the comet
         // arrows show through the walls; alpha 1 is the unchanged opaque draw.
@@ -1273,10 +1432,42 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         camera.projectionMatrix(aspect: aspect) * camera.viewMatrix()
     }
 
+    /// Build the CAD-stage backdrop uniform (item 9): the inverse world→clip transform for the
+    /// per-pixel ray reconstruction, the camera eye, and the floor plane + grid extent derived
+    /// from the SETTLED part bounds (so the grid sits just under the part and scales with it).
+    /// Falls back to a camera-relative box when no mesh is loaded. Pure of any per-frame timer —
+    /// it reads only the current camera + mesh, so it changes only on a redraw.
+    private func makeStageUniforms(aspect: Float) -> StageUniforms {
+        let inv = groundMVP(aspect: aspect).inverse
+        var lo = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var hi = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        if let mesh, !mesh.isEmpty {
+            let m = modelMatrix()
+            let mn = mesh.bounds.min, mx = mesh.bounds.max
+            for xi in [mn.x, mx.x] { for yi in [mn.y, mx.y] { for zi in [mn.z, mx.z] {
+                let w = m * SIMD4<Float>(xi, yi, zi, 1)
+                lo = simd_min(lo, SIMD3<Float>(w.x, w.y, w.z))
+                hi = simd_max(hi, SIMD3<Float>(w.x, w.y, w.z))
+            }}}
+        } else {
+            let r = Swift.max(camera.distance * 0.2, 0.5)
+            lo = camera.target - SIMD3<Float>(r, r, r)
+            hi = camera.target + SIMD3<Float>(r, r, r)
+        }
+        let extent = Swift.max(hi.x - lo.x, hi.z - lo.z, 1e-3)
+        return StageUniforms(invVP: inv,
+                             eye: camera.eye,
+                             floorY: lo.y - extent * 0.02,
+                             centerXZ: SIMD2<Float>((lo.x + hi.x) * 0.5, (lo.z + hi.z) * 0.5),
+                             spacing: extent / 6,
+                             fadeRadius: extent * 6)
+    }
+
     /// Render the current mesh + camera to an offscreen BGRA texture and return the
     /// raw pixel bytes (B,G,R,A per pixel). Used by headless tests to verify the
     /// pipeline rasterizes the mesh — no MTKView/display needed. Nil if nothing to draw.
-    func renderOffscreen(size: Int, clear: MTLClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)) -> [UInt8]? {
+    func renderOffscreen(size: Int, clear: MTLClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1),
+                         stage: Bool = false) -> [UInt8]? {
         guard vertexDrawCount > 0 else { return nil }
         let cdesc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: Self.colorFormat, width: size, height: size, mipmapped: false)
@@ -1300,7 +1491,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         rpd.depthAttachment.clearDepth = 1.0
         rpd.depthAttachment.storeAction = .dontCare
 
-        encode(into: rpd, aspect: 1, into: cmd)
+        encode(into: rpd, aspect: 1, into: cmd, drawStage: stage)
         cmd.commit()
         cmd.waitUntilCompleted()
 
