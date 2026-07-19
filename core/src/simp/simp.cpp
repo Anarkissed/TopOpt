@@ -94,6 +94,38 @@ std::vector<double> simp_uniform_density(const VoxelGrid& grid, double value) {
   return density;
 }
 
+// Warm-start (handoff 110): build the initial design x0 from a RAW seed density
+// field. (1) rescale the seed's MEAN over the design set (is_design[e] != 0) to
+// `target_vf` by a uniform multiplicative factor, (2) clamp each design entry to
+// [density_min, 1], (3) apply ONE pass of the loop's own `filter`, so x0 is a
+// filtered field — consistent with what the optimizer expects — rather than a raw
+// upsample/rescale that may carry grid- or clamp-scale steps the filter cannot
+// represent. Non-design voxels contribute 0 to the pre-filter field (the filter
+// excludes them anyway); the caller reapplies any solid pins afterwards. A
+// (near-)zero-mean seed cannot be rescaled and falls back to a uniform design at
+// `target_vf` (still filtered) so x0 is always well-defined and deterministic.
+std::vector<double> warm_start_design(const std::vector<double>& seed,
+                                      const DensityFilter& filter,
+                                      const std::vector<char>& is_design,
+                                      double target_vf, double density_min) {
+  double sum = 0.0;
+  std::size_t n = 0;
+  for (std::size_t e = 0; e < seed.size(); ++e)
+    if (is_design[e]) { sum += seed[e]; ++n; }
+  const double mean = n > 0 ? sum / static_cast<double>(n) : 0.0;
+  std::vector<double> raw(seed.size(), 0.0);
+  if (mean > 1e-12) {
+    const double scale = target_vf / mean;
+    for (std::size_t e = 0; e < seed.size(); ++e)
+      if (is_design[e])
+        raw[e] = std::min(1.0, std::max(density_min, scale * seed[e]));
+  } else {
+    for (std::size_t e = 0; e < seed.size(); ++e)
+      if (is_design[e]) raw[e] = target_vf;
+  }
+  return filter.filter_density(raw);
+}
+
 // ---------------------------------------------------------------------------
 // Single-field Heaviside projection (ROADMAP M6.3). The tanh threshold of
 // Wang/Lazarov/Sigmund (2011) and its derivative, exactly as locked by
@@ -811,8 +843,24 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     return n_design > 0.0 ? vol / n_design : 0.0;
   };
 
-  // Initial design: uniform at the target volume fraction on every solid voxel.
-  std::vector<double> x = simp_uniform_density(grid, options.volume_fraction);
+  // Initial design: uniform at the target volume fraction on every solid voxel,
+  // UNLESS a warm-start seed is supplied (handoff 110). EMPTY initial_design keeps
+  // the uniform start byte-for-byte identical to every pre-110 run.
+  std::vector<double> x;
+  if (options.initial_design.empty()) {
+    x = simp_uniform_density(grid, options.volume_fraction);
+  } else {
+    if (options.initial_design.size() != grid.voxel_count())
+      throw std::invalid_argument(
+          "simp_optimize: initial_design size != grid.voxel_count()");
+    std::vector<char> is_design(grid.voxel_count(), 0);
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i)
+          if (grid.solid(i, j, k)) is_design[grid.index(i, j, k)] = 1;
+    x = warm_start_design(options.initial_design, filter, is_design,
+                          options.volume_fraction, params.density_min);
+  }
 
   // Persistent solver: the grid, Poisson ratio, BCs and loads are fixed across
   // the run, so this assembles the BC-reduced operator once and per iteration
@@ -1303,12 +1351,31 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   };
 
   // Initial design: Active voxels at the target fraction, FrozenSolid at 1,
-  // FrozenVoid at 0, Empty at 0.
+  // FrozenVoid at 0, Empty at 0 — UNLESS a warm-start seed is supplied (handoff
+  // 110). EMPTY initial_design keeps the uniform start byte-for-byte identical.
   std::vector<double> x(grid.voxel_count(), 0.0);
-  for (std::size_t e = 0; e < x.size(); ++e) {
-    if (eff[e] == MaskValue::Active) x[e] = options.volume_fraction;
-    else if (eff[e] == MaskValue::FrozenSolid) x[e] = 1.0;
-    // FrozenVoid / Empty stay 0
+  if (options.initial_design.empty()) {
+    for (std::size_t e = 0; e < x.size(); ++e) {
+      if (eff[e] == MaskValue::Active) x[e] = options.volume_fraction;
+      else if (eff[e] == MaskValue::FrozenSolid) x[e] = 1.0;
+      // FrozenVoid / Empty stay 0
+    }
+  } else {
+    if (options.initial_design.size() != grid.voxel_count())
+      throw std::invalid_argument(
+          "simp_optimize: initial_design size != grid.voxel_count()");
+    std::vector<char> is_design(grid.voxel_count(), 0);
+    for (std::size_t e = 0; e < x.size(); ++e)
+      if (eff[e] == MaskValue::Active) is_design[e] = 1;
+    x = warm_start_design(options.initial_design, filter, is_design,
+                          options.volume_fraction, params.density_min);
+    // Reapply the pins the uniform start carries: FrozenSolid -> 1, every
+    // non-Active voxel -> 0 (the Active-only filter already yields 0 off the
+    // Active set, but pin explicitly so FrozenSolid is full material).
+    for (std::size_t e = 0; e < x.size(); ++e) {
+      if (eff[e] == MaskValue::FrozenSolid) x[e] = 1.0;
+      else if (eff[e] != MaskValue::Active) x[e] = 0.0;
+    }
   }
 
   // MMA updater state (ROADMAP M7.mma.4). Unused when updater == OC; the masked

@@ -483,6 +483,26 @@ struct SimpOptions {
   // or the optimization. Runs on the optimizing thread; must not throw.
   int keyframe_stride = 0;
   std::function<void(const std::vector<double>& analysis_density)> keyframe;
+
+  // Warm-start initialization (handoff 110). EMPTY (the DEFAULT) => the initial
+  // design is uniform at `volume_fraction` on every design voxel — byte-for-byte
+  // identical to every pre-110 run (the same opt-in discipline as min_feature_mm
+  // == 0). NON-EMPTY => a grid-indexed RAW density field (size grid.voxel_count())
+  // used to build the initial design x0 IN PLACE OF the uniform field: the loop
+  //   (1) rescales the field's MEAN over the design set to `volume_fraction`
+  //       (uniform multiplicative scale; a ~zero-mean field falls back to
+  //       uniform), (2) clamps each entry to [density_min, 1], (3) applies ONE
+  //       pass of the SAME density filter the loop uses — so x0 is consistent with
+  //       the filtered field the optimizer expects, with frozen/empty voxels
+  //       pinned exactly as the uniform start pins them.
+  // This changes ONLY the initialization: the identical loop, filter, FEA solver,
+  // updater and termination test then run, so a warm start may converge to a
+  // DIFFERENT local optimum than the uniform start (expected — see pipeline.hpp
+  // warm_start_inherit / warm_start_coarse). Determinism is preserved (same field
+  // -> same run). The volume CONSTRAINT still drives the achieved fraction to the
+  // target, so the seed need not hit the target exactly. Throws if the size is
+  // neither 0 nor grid.voxel_count().
+  std::vector<double> initial_design;
 };
 
 // One recorded step of the SIMP trajectory.

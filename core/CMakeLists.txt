@@ -37,6 +37,7 @@ add_library(topopt
   src/mesh/mesh.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
+  src/simp/warm_start.cpp
   src/fea/hex_element.cpp
   src/orient/orient.cpp
   src/settings/settings.cpp
@@ -211,6 +212,14 @@ add_test(NAME job_schema COMMAND test_job)
 add_executable(test_resample tests/unit/test_resample.cpp)
 target_link_libraries(test_resample PRIVATE topopt)
 add_test(NAME resample COMMAND test_resample)
+
+# Warm-start restrict / prolong utilities (handoff 110, Part B). Pure geometry
+# (src/simp/warm_start.cpp is Eigen-free and in the always-built base library), so
+# the upsample/restrict/coarsen operators unit-test in every configuration like
+# the other geometry tests.
+add_executable(test_warm_start tests/unit/test_warm_start.cpp)
+target_link_libraries(test_warm_start PRIVATE topopt)
+add_test(NAME warm_start COMMAND test_warm_start)
 
 # Shape-aware clearance rasterizer (handoff 100). Pure C++/std (no OCCT, no
 # Eigen): mask_clearance_region lives in the always-built src/voxel/clearance.cpp
@@ -518,6 +527,17 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_ladder_rung_count PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME ladder_rung_count COMMAND test_ladder_rung_count)
+
+  # Warm-start integration + parity (handoff 110): both features OFF is byte-for-
+  # byte identical (parity/determinism); coarse-only warm-starts ONLY rung 0
+  # (structural skip); inheritance and warmAB cut total iterations while the accept
+  # gate still passes on every rung. Drives minimize_plastic, so Eigen-gated; the
+  # real settings rule table is injected. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_warm_start_integration tests/validation/test_warm_start_integration.cpp)
+  target_link_libraries(test_warm_start_integration PRIVATE topopt)
+  target_compile_definitions(test_warm_start_integration PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME warm_start_integration COMMAND test_warm_start_integration)
 
   # Anchor integrity on the design-box path (handoff 082): with the imported part
   # Active/removable (whole-domain optimize), a caller anchor pad (FrozenSolid
