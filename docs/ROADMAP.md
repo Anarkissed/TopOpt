@@ -653,6 +653,15 @@
       user sees, never raw model output. xcodebuild tests for the fallback
       and plumbing; maintainer device QA.
 
+> EXPLORATORY (handoff 114): "skip iterations by extrapolating the density
+> trajectory?" is BLOCKED before measurement — its instrument, a **capture
+> bundle** (per-iteration projection-era analysis-density snapshots, ≥2 fixtures
+> + one 64-scale, both load modes; its own prerequisite task), does not exist
+> yet. Do NOT start 114's STEP 0a until that capture bundle lands. 114 specs the
+> capture contract, the STEP 0a offline-ceiling method, the opt-in in-solver
+> Anderson (STEP 0b), and the ML GO/NO-GO framework; the go/no-go is un-evaluable
+> until 0a runs on captured data.
+
 - [ ] M7.10 Maintainer QA milestone (human, no agent): full-flow device pass,
       performance profile on target iPad (128³ end-to-end timing vs the M6.3
       projection cost decision), accessibility pass (Dynamic Type on sheets,
