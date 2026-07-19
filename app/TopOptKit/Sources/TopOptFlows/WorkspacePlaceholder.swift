@@ -78,6 +78,10 @@ public struct WorkspacePlaceholder: View {
     @State private var boxDragDebug = false
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
+    /// The magnetic face-detent candidate the dragged box face is currently HELD on (device
+    /// round 3, item 10), or nil when the face is free. Carried across drag frames to drive the
+    /// snap/release hysteresis; reset when the drag ends.
+    @State private var boxFaceDetent: Float?
     /// Measured intrinsic width (points) of each bottom-right settings chip, so the cluster
     /// orders them smallest→largest (design-overhaul round 2, item 12; `BottomChipOrder`).
     @State private var settingsChipWidths: [SettingsChipID: CGFloat] = [:]
@@ -543,9 +547,9 @@ public struct WorkspacePlaceholder: View {
     /// The settings chips (Gravity · Minimize plastic · quality · Design Box) stack BOTTOM-right,
     /// above the Optimize button (design-overhaul 109; round 2). Ordered SMALLEST width at the
     /// top → LARGEST at the bottom by their MEASURED width (item 12, `BottomChipOrder`), so the
-    /// column reads as a tidy width ramp. The Design Box chip carries its own DRAWER, which
-    /// slides out LEFTWARD from it when the tool is on (item 11) — a taller row that pushes the
-    /// chips above it up. Bottom-anchored and lifted to clear the bottom bar's Optimize button.
+    /// column reads as a tidy width ramp. The Design Box chip carries its own DRAWER, which opens
+    /// BENEATH it (extending LEFT) when the tool is on (device round 3, item 11) — a taller row
+    /// that pushes the chips above it up. Bottom-anchored and lifted to clear the Optimize button.
     private var bottomRightControls: some View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
             Spacer()
@@ -562,22 +566,24 @@ public struct WorkspacePlaceholder: View {
 
     /// One chip in the ordered cluster. Each chip measures its OWN width (`chipWidthReader`) so
     /// the sort is by the chip alone. The Design Box row is special: when the tool is on it
-    /// becomes an HStack whose leading element is the Design Box DRAWER, sliding in from the
-    /// trailing edge so it reads as pulled LEFT out of the chip (item 11). The chip stays at the
-    /// bottom of the row (`.bottom` alignment); the drawer's height grows the row, pushing the
-    /// chips above it up — the drawer is NOT measured, so opening it never reshuffles the sort.
+    /// becomes a trailing-aligned VStack whose chip sits ON TOP and the Design Box DRAWER opens
+    /// BENEATH it (device round 3, item 11 — round 2 put it above; corrected). The drawer is
+    /// wider than the chip and right-aligned, so it extends LEFT out from under the chip; its
+    /// height grows the row and, because the cluster is bottom-anchored, pushes the chips ABOVE
+    /// it up to make room. The drawer is NOT measured, so opening it never reshuffles the sort.
     @ViewBuilder private func settingsChipRow(_ id: SettingsChipID) -> some View {
         switch id {
         case .gravity: gravityChip.background(chipWidthReader(id))
         case .minimizePlastic: minimizePlasticChip.background(chipWidthReader(id))
         case .quality: qualityChip.background(chipWidthReader(id))
         case .designBox:
-            HStack(alignment: .bottom, spacing: DS.Space.m) {
+            VStack(alignment: .trailing, spacing: DS.Space.s) {
+                designBoxChip.background(chipWidthReader(id))
                 if showDesignGizmo {
                     designBoxDrawer
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        // Unfurl DOWNWARD from beneath the chip (slides in from the top edge).
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
-                designBoxChip.background(chipWidthReader(id))
             }
         }
     }
@@ -959,6 +965,7 @@ public struct WorkspacePlaceholder: View {
             .onEnded { _ in
                 if let owner = boxDrag.activeOwner { boxDrag.end(owner) }
                 boxDragDiag = nil
+                boxFaceDetent = nil          // release the magnetic detent (item 10)
             }
     }
 
@@ -996,12 +1003,27 @@ public struct WorkspacePlaceholder: View {
         case .face(let axis, let isMax):
             let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
             let delta = axisDelta(fromWorld: world, axis: axis, drag: drag, proj: proj)
-            let target = (isMax ? base.max[axis] : base.min[axis]) + delta
-            let moved = base.movingFace(axis: axis, isMax: isMax, to: target,
+            let rawTarget = (isMax ? base.max[axis] : base.min[axis]) + delta
+            // Magnetic face detent (item 10): snap the raw face coordinate to a nearby part
+            // feature plane perpendicular to this axis (planar faces + AABB extents), with
+            // snap/release hysteresis. A fresh entry flashes the match + ticks the haptic.
+            let cands = DesignBoxDetent.candidates(axis: axis, faces: mesh.faceGeometry,
+                                                   aabbMin: mesh.bounds.min, aabbMax: mesh.bounds.max)
+            let d = DesignBoxDetent.resolve(rawCoord: rawTarget, candidates: cands, current: boxFaceDetent)
+            boxFaceDetent = d.snapped
+            if d.didSnap { flashDesignBoxDetent(); ClearanceHaptics.detent() }
+            let moved = base.movingFace(axis: axis, isMax: isMax, to: d.coord,
                                         minSize: DesignBoxModel.minSize(for: mesh.bounds))
             let mm = (isMax ? moved.max[axis] - base.max[axis] : moved.min[axis] - base.min[axis])
             return (moved, abs(mm))
         }
+    }
+
+    /// The brief highlight pulse when a box face snaps to a part face (device round 3, item 10).
+    /// A short-lived toast is the always-safe feedback; the precise part-face highlight-pulse in
+    /// the Metal viewer is device-QA polish layered on the same trigger.
+    private func flashDesignBoxDetent() {
+        model.toast = "Snapped to face"
     }
 
     // MARK: keep-clear Phase B — draggable clearance handles + floating value pill

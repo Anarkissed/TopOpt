@@ -411,4 +411,55 @@ final class DesignBoxTests: XCTestCase {
         // Every handle is unique (no two share an identity → no accidental overlap).
         XCTAssertEqual(Set(cands.map(\.handle.tieBreakRank)).count, 14)
     }
+
+    // MARK: - Magnetic face detent (device round 3, item 10)
+
+    /// Candidate targets along an axis = part planar faces PERPENDICULAR to that axis (their plane
+    /// coordinate) plus the part AABB extents; faces parallel to the axis are ignored, and
+    /// coincident targets are de-duplicated.
+    func testDetentCandidatesFromFaceGeometryAndAABB() {
+        let faces = [
+            StepFaceGeometry(kind: .plane, planeNormal: SIMD3(1, 0, 0), planeOrigin: SIMD3(4, 0, 0)),   // ⟂ X at x=4
+            StepFaceGeometry(kind: .plane, planeNormal: SIMD3(-1, 0, 0), planeOrigin: SIMD3(-2, 0, 0)), // ⟂ X at x=-2
+            StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 1, 0), planeOrigin: SIMD3(9, 5, 0)),   // ⟂ Y → ignored for X
+            StepFaceGeometry(kind: .cylinder, cylinderRadiusMM: 2, axisPoint: SIMD3(0, 0, 0), axisDir: SIMD3(1, 0, 0)),
+        ]
+        let cands = DesignBoxDetent.candidates(axis: 0, faces: faces,
+                                               aabbMin: SIMD3(-2, -3, -3), aabbMax: SIMD3(6, 3, 3))
+        // AABB min (−2, coincident with the −X face → deduped), AABB max (6), and the +X face (4).
+        XCTAssertEqual(cands, [-2, 4, 6])
+    }
+
+    /// Snap ENTERS within the 1.5 mm threshold; a face farther than that stays free.
+    func testDetentSnapEntersWithinThreshold() {
+        let cands: [Float] = [0, 10]
+        // 1.0 mm away → snaps to 0.
+        let a = DesignBoxDetent.resolve(rawCoord: 1.0, candidates: cands, current: nil)
+        XCTAssertEqual(a.coord, 0, accuracy: 1e-5); XCTAssertEqual(a.snapped, 0); XCTAssertTrue(a.didSnap)
+        // 2.0 mm away (> 1.5) → free, no snap.
+        let b = DesignBoxDetent.resolve(rawCoord: 2.0, candidates: cands, current: nil)
+        XCTAssertEqual(b.coord, 2.0, accuracy: 1e-5); XCTAssertNil(b.snapped); XCTAssertFalse(b.didSnap)
+    }
+
+    /// Hysteresis: once detented, the face HOLDS on the candidate until the raw drag exceeds the
+    /// 2× (3.0 mm) release band — then it lets go.
+    func testDetentReleaseHysteresis() {
+        let cands: [Float] = [0, 10]
+        // Held at 0 while within the escape band (2.5 mm ≤ 3.0).
+        let held = DesignBoxDetent.resolve(rawCoord: 2.5, candidates: cands, current: 0)
+        XCTAssertEqual(held.coord, 0, accuracy: 1e-5); XCTAssertEqual(held.snapped, 0)
+        XCTAssertFalse(held.didSnap, "holding is not a fresh snap")
+        // Past 3.0 mm → releases (no other candidate near 3.5 → free).
+        let freed = DesignBoxDetent.resolve(rawCoord: 3.5, candidates: cands, current: 0)
+        XCTAssertEqual(freed.coord, 3.5, accuracy: 1e-5); XCTAssertNil(freed.snapped)
+    }
+
+    /// Entering a NEW detent (not the one currently held) reports a fresh snap so the flash/haptic
+    /// re-fires on the new target.
+    func testDetentSwitchingReportsFreshSnap() {
+        let cands: [Float] = [0, 10]
+        // Dragged far from 0 (escaped) and within threshold of 10 → snaps to 10, fresh.
+        let r = DesignBoxDetent.resolve(rawCoord: 9.4, candidates: cands, current: 0)
+        XCTAssertEqual(r.coord, 10, accuracy: 1e-5); XCTAssertEqual(r.snapped, 10); XCTAssertTrue(r.didSnap)
+    }
 }
