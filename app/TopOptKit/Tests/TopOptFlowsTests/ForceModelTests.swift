@@ -576,11 +576,16 @@ final class ForceModelTests: XCTestCase {
     }
 
     /// A pre-round-3 snapshot carrying the legacy global `syncClearances` key still decodes
-    /// (the key is decoded-and-dropped), landing at the default all-checked membership.
+    /// (the key is decoded-and-dropped), landing at the default all-checked membership. Built by
+    /// injecting the legacy key into a real encoded model, so it doesn't depend on the exact
+    /// on-disk shape of the other enums.
     func testLegacySyncClearancesKeyStillDecodes() throws {
         let (_, ids) = groups([1])
-        let legacy = "{\"phase\":\"edit\",\"unit\":\"kg\",\"kinds\":{},\"syncClearances\":false}"
-        let back = try JSONDecoder().decode(ForceModel.self, from: Data(legacy.utf8))
+        let fm = ForceModel()
+        var obj = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(fm)) as! [String: Any]
+        obj["syncClearances"] = false                      // the withdrawn 109 global toggle
+        let data = try JSONSerialization.data(withJSONObject: obj)
+        let back = try JSONDecoder().decode(ForceModel.self, from: data)
         XCTAssertTrue(back.isClearanceSynced(ids[0]), "legacy toggle dropped → rows open checked")
     }
 }

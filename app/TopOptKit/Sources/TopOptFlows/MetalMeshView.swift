@@ -450,6 +450,13 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
     static let idFormat: MTLPixelFormat = .r32Uint
+    /// Depth-bias (polygon offset) for the translucent design-box + clearance FACE passes, so they
+    /// don't z-fight (shimmer) with the part surface where the volumes graze/coincide with it
+    /// (device round 3, items 7+8, part a — the shimmer). Pulls the translucent fragments a hair
+    /// toward the camera so a near-tie resolves cleanly in their favour instead of flickering
+    /// per-pixel. Static render state applied only to those draws — no per-frame CPU work (108).
+    static let translucentDepthBias: Float = -3.0
+    static let translucentDepthSlopeBias: Float = -1.5
     /// Half-width of a load-path ribbon in NDC-y units (the vertex shader billboards to
     /// this constant screen thickness). ~0.006 ≈ a few pixels — legible without hiding
     /// the part underneath.
@@ -1332,8 +1339,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setDepthStencilState(groundDepthState)
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             if let fbuf = designBoxFaceBuffer, designBoxFaceCount > 0 {
+                // Depth-bias the FACES only (items 7+8, part a) so the box glass stops shimmering
+                // where it passes through the part; reset before the crisp edge lines.
+                enc.setDepthBias(Self.translucentDepthBias, slopeScale: Self.translucentDepthSlopeBias, clamp: 0)
                 enc.setVertexBuffer(fbuf, offset: 0, index: 0)
                 enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: designBoxFaceCount)
+                enc.setDepthBias(0, slopeScale: 0, clamp: 0)
             }
             if let lbuf = designBoxLineBuffer, designBoxLineCount > 0 {
                 enc.setVertexBuffer(lbuf, offset: 0, index: 0)
@@ -1350,8 +1361,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setDepthStencilState(groundDepthState)
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             if let fbuf = clearanceFaceBuffer, clearanceFaceCount > 0 {
+                // Same z-fighting fix (items 7+8, part a) for the translucent cylinder/slab faces
+                // where they pass through the part; reset before the bright edge lines.
+                enc.setDepthBias(Self.translucentDepthBias, slopeScale: Self.translucentDepthSlopeBias, clamp: 0)
                 enc.setVertexBuffer(fbuf, offset: 0, index: 0)
                 enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: clearanceFaceCount)
+                enc.setDepthBias(0, slopeScale: 0, clamp: 0)
             }
             if let lbuf = clearanceLineBuffer, clearanceLineCount > 0 {
                 enc.setVertexBuffer(lbuf, offset: 0, index: 0)
