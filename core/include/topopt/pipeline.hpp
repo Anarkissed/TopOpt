@@ -77,6 +77,23 @@ struct MinimizePlasticVariant;
 // stay in lockstep by construction. See minimize_plastic_solved_grid.
 inline constexpr int kDesignBoxCoarsenAlign = 8;
 
+// Handoff 114 — one density-snapshot event the driver feeds to
+// MinimizePlasticOptions::on_density_snapshot. It carries the raw physical
+// density field plus the coordinates a snapshot sidecar records; the consumer
+// owns the cadence/cap/encoding policy. `density` and `grid` are borrowed
+// (non-owning) and valid only for the duration of the callback.
+struct DensitySnapshotEvent {
+  std::size_t rung_index = 0;   // 0-based ladder index
+  std::size_t rung_count = 0;   // == volume_fraction_ladder.size()
+  int iteration = 0;            // 1-based iteration within the rung; for a
+                                // boundary event, the rung's final iteration
+  bool boundary = false;        // true = the rung's CONVERGED density (a rung
+                                // boundary; the last boundary is the terminal)
+  const std::vector<double>* density = nullptr;  // pinned physical density,
+                                                 // grid-indexed (size voxel_count)
+  const VoxelGrid* grid = nullptr;               // the solved grid (dims/spacing/origin)
+};
+
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
@@ -274,6 +291,30 @@ struct MinimizePlasticOptions {
                      int iteration)>
       progress;
   const std::atomic<bool>* cancel = nullptr;
+
+  // Handoff 114 — per-iteration OBSERVABILITY forwarder (additive to `progress`).
+  // Forwarded once per completed optimizer iteration of every rung with the rung
+  // index [0-based], the rung count, and the full SimpIterationObservation
+  // (compliance, achieved vf, CG iters, plateau verdict) for that step. It is the
+  // richer sibling of `progress`, driving the CLI per-iteration CSV. Read-only —
+  // designs are byte-identical whether it is set or not. The coarse pre-solve
+  // (warm_start_coarse) is NOT forwarded (it is not a reported rung), exactly like
+  // `progress`. Absent by default; when absent the run is unchanged. Runs on the
+  // optimizing thread; must not throw.
+  std::function<void(std::size_t rung_index, std::size_t rung_count,
+                     const SimpIterationObservation& obs)>
+      on_iteration;
+
+  // Handoff 114 — density SNAPSHOT forwarder (opt-in observability). When set, it
+  // is invoked (a) once per optimizer iteration of every rung with that step's
+  // pinned physical density (`boundary` false), and (b) once per non-cancelled
+  // evaluated rung with the rung's CONVERGED density (`boundary` true — a rung
+  // boundary; the last such is the terminal design). The consumer (the CLI
+  // snapshot writer) applies its own every-N cadence, per-job cap and float16
+  // encoding — the driver only feeds the raw field + coordinates. Read-only; the
+  // coarse pre-solve is NOT forwarded. Absent by default (no per-iteration density
+  // copy is taken — SimpOptions::density_observer stays null). Must not throw.
+  std::function<void(const DensitySnapshotEvent&)> on_density_snapshot;
 
   // Progressive results: invoked once per ACCEPTED rung, right after its full
   // analysis (V3 + report + M7.0b viz fields), BEFORE the next lighter rung is

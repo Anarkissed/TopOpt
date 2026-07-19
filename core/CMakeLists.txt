@@ -38,6 +38,7 @@ add_library(topopt
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
+  src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/orient/orient.cpp
   src/settings/settings.cpp
@@ -228,6 +229,18 @@ add_test(NAME warm_start COMMAND test_warm_start)
 add_executable(test_clearance tests/unit/test_clearance.cpp)
 target_link_libraries(test_clearance PRIVATE topopt)
 add_test(NAME clearance COMMAND test_clearance)
+
+# Observability primitives (handoff 114): the float16 codec, the per-iteration
+# CSV schema (GOLDEN), density-snapshot write/read round-trip, SnapshotCapture
+# cadence + cap eviction, and the run version record. All live in the always-built
+# Eigen-free src/simp/observability.cpp, so this runs in every configuration like
+# the other pure-C++/std tests. EXPORT_TMP_DIR (the build dir) is injected for the
+# temporary files it writes.
+add_executable(test_observability tests/unit/test_observability.cpp)
+target_link_libraries(test_observability PRIVATE topopt)
+target_compile_definitions(test_observability PRIVATE
+  EXPORT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME observability COMMAND test_observability)
 
 # Global FEA assembly/solve test (M2.2). Builds its 2x1x1 grid in code (no
 # fixture) and needs the fea_solve implementation, so it is gated on Eigen like
@@ -434,6 +447,21 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_minimize_plastic PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME minimize_plastic COMMAND test_minimize_plastic)
+
+  # Observability capture (handoff 114) — THE ONE RULE on the REAL driver: a
+  # minimize_plastic run with the per-iteration CSV + density snapshots captured
+  # yields a BYTE-IDENTICAL design to capture-off, and the capture path is correct
+  # end-to-end (CSV rows == total iterations, schema parses, every rung boundary
+  # snapshot round-trips within float16). Drives minimize_plastic, so it is
+  # Eigen-gated; the real settings rule table and the build-dir temp path are
+  # injected. CI configures with -DTOPOPT_REQUIRE_DEPS=ON, so it always runs.
+  add_executable(test_observability_capture
+    tests/validation/test_observability_capture.cpp)
+  target_link_libraries(test_observability_capture PRIVATE topopt)
+  target_compile_definitions(test_observability_capture PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    EXPORT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME observability_capture COMMAND test_observability_capture)
 
   # M7.anchor-integrity — the diagnosis-064 policy/display fixes on the core
   # mechanisms: the design-mask structural PAD (FIX 1), the reduction-ladder

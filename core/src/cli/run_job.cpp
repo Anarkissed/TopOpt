@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -14,10 +15,12 @@
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/observability.hpp"
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
+#include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
 #ifdef TOPOPT_HAVE_3MF
 #include "topopt/threemf.hpp"
@@ -87,6 +90,50 @@ std::vector<int> resolve_selectors(const StepModel& model,
   return ids;
 }
 
+// Handoff 114 — the resolved solver name for the version record.
+const char* solver_name(SolverKind k) {
+  switch (k) {
+    case SolverKind::JacobiCG: return "JacobiCG";
+    case SolverKind::MultigridCG: return "MultigridCG";
+    case SolverKind::MultigridCG_Matfree: return "MultigridCG_Matfree";
+  }
+  return "unknown";
+}
+
+// Handoff 114 — assemble the run version record from the ACTUAL configuration
+// (options after configure_production_options / build_production_loadcase, plus
+// the live matrix-free thread-global state) so run_info.json is provable, not
+// inferred. Never again reconstruct "which build ran this" (the 113 lesson).
+RunInfo build_run_info(const JobDescription& job,
+                       const MinimizePlasticOptions& options,
+                       const RunObservability& obs) {
+  RunInfo info;
+  info.cli_version = version();
+  info.fingerprint = obs.fingerprint;
+  info.mode = job.mode;
+  info.material = job.material;
+  info.resolution = job.resolution;
+  info.load_source = job.loads.present ? "loadcase" : "self_weight";
+  info.solver = solver_name(options.simp.solver);
+  info.galerkin_block_cache = fea_matfree_galerkin_block_cache_enabled();
+  info.mixed_precision = fea_matfree_mixed_precision_enabled();
+  info.matfree_threads = fea_matfree_thread_count();
+  info.warm_start_inherit = options.warm_start_inherit;
+  info.warm_start_coarse = options.warm_start_coarse;
+  info.projection = !options.simp.projection.empty();
+  info.min_feature_mm = options.min_feature_mm;
+  info.margin_stop = options.margin_stop;
+  info.infill_percent = options.infill_percent;
+  info.has_design_box = options.design_box.has_value();
+  info.ladder = options.volume_fraction_ladder;
+  info.created_wall_ms = wall_clock_ms();
+  info.iteration_csv = obs.iteration_csv;
+  info.density_snapshots = obs.density_snapshots;
+  info.snapshot_every = obs.snapshot_every;
+  info.snapshot_cap = obs.snapshot_cap;
+  return info;
+}
+
 // A job.json box -> the core DesignBox it describes.
 DesignBox to_design_box(const JobBox& b) {
   DesignBox d;
@@ -133,7 +180,8 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
                      const MaterialLibrary& materials,
-                     const SettingsRules& rules, bool emit_progress) {
+                     const SettingsRules& rules, bool emit_progress,
+                     const RunObservability& obs) {
   // Fail fast on everything checkable before heavy work: the mode, the
   // material, and whether this build can write the requested mesh format.
   if (job.mode != "minimize_plastic")
@@ -285,6 +333,34 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // progress + progressive artifacts. Pure observers — the design/report/mesh
   // bytes are unchanged, so run_job stays deterministic (the default, false, is
   // the exact batch path the tests exercise). See job.hpp.
+  // Handoff 114 — observability capture (CLI path only). run_info.json is written
+  // now (config is finalized); the per-iteration CSV + density snapshots are wired
+  // as read-only observers on `options`. Declared here so they outlive the
+  // synchronous minimize_plastic call below. All artifacts land in out_dir.
+  std::unique_ptr<IterationCsvWriter> csv;
+  std::unique_ptr<SnapshotCapture> snaps;
+  if (emit_progress) {
+    const RunInfo info = build_run_info(job, options, obs);
+    result.run_info_path = join_path(out_dir, "run_info.json");
+    write_run_info(result.run_info_path, info);
+    if (obs.iteration_csv) {
+      result.iteration_csv_path = join_path(out_dir, "iterations.csv");
+      csv = std::make_unique<IterationCsvWriter>(result.iteration_csv_path);
+      options.on_iteration = [&csv](std::size_t rung, std::size_t /*rungs*/,
+                                    const SimpIterationObservation& o) {
+        csv->append(rung, o);
+      };
+    }
+    if (obs.density_snapshots) {
+      snaps = std::make_unique<SnapshotCapture>(
+          join_path(out_dir, "snapshots"), obs.snapshot_every, obs.snapshot_cap);
+      options.on_density_snapshot = [&snaps](const DensitySnapshotEvent& ev) {
+        snaps->capture(*ev.grid, *ev.density, ev.rung_index, ev.iteration,
+                       ev.boundary);
+      };
+    }
+  }
+
   std::vector<std::string> streamed_paths;
   if (emit_progress) {
     options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
@@ -310,6 +386,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
 
   result.pipeline =
       minimize_plastic(grid, material, job.material, bcs, rules, options);
+
+  // Handoff 114 — record how many density snapshots were written (0 unless
+  // opt-in snapshots ran). The CSV/run_info paths are already set above.
+  if (snaps) result.snapshot_count = snaps->written();
 
   // ──▶ report (both paths).
   result.report_json = job_report_json(result.pipeline.report);
