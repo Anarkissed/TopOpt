@@ -181,6 +181,24 @@ int main() {
   CHECK(s1.solved_grid.voxel_count() > s1.grid.voxel_count(),
         "the design box expands the solved grid beyond the part grid");
 
+  // (e) Warm-start production flip (handoff 114) — LOAD-CASE MODE ONLY. This
+  // parity gate has no stored golden design (it proves determinism run-to-run,
+  // which the flip preserves — both s1/s2 get the same config), so the flip is
+  // asserted here as a CONFIG ECHO: a load-case build (external loads present)
+  // enables inheritance; a self-weight build (no load groups → external loads
+  // empty) leaves it OFF so self-weight stays byte-identical to the pre-flip run.
+  CHECK(s1.options.warm_start_inherit,
+        "load-case build enables warm-start inheritance (114 flip)");
+  {
+    ProductionLoadCase sw = lc;
+    sw.load_groups.clear();  // no external loads → self-weight mode
+    const ProductionRunSetup sws = build_production_loadcase(model, resolution, sw);
+    CHECK(sws.options.external_loads.empty(),
+          "self-weight build has no external loads");
+    CHECK(!sws.options.warm_start_inherit,
+          "self-weight build keeps COLD start (114: not flipped)");
+  }
+
   // (c) minimize_plastic on the setup is bit-identical run to run. Cap iterations
   // (identically on both) so the gate stays fast; determinism is the point.
   s1.options.simp.max_iterations = 8;
