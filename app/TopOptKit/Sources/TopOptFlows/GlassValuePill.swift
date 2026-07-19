@@ -137,8 +137,8 @@ struct GlassValuePill: View {
                 scrubLastX = v.translation.width
                 guard dx != 0 else { return }
                 let nv = ClearanceScrub.scrub(value: scrubValue ?? 0, deltaPoints: Float(dx))
-                scrubValue = nv
-                onSet(Double(nv))
+                scrubValue = nv                                          // accumulate the raw value
+                onSet(ClearanceQuantize.snap(Double(nv)))                // emit on the 0.25 mm grid (item 12)
             }
             .onEnded { _ in
                 let didScrub = scrubValue != nil     // a scrub actually began → not a tap
@@ -154,7 +154,8 @@ struct GlassValuePill: View {
     private func commitTyped() {
         guard typing else { return }              // idempotent (onSubmit + focus-loss)
         let t = draft.trimmingCharacters(in: .whitespaces)
-        if let v = Double(t), v > 0 { onSet(v) } else if t.isEmpty { onSet(nil) }
+        // Typed values round to the nearest 0.25 mm step on commit (item 12); empty reverts to Auto.
+        if let v = Double(t), v > 0 { onSet(ClearanceQuantize.snap(v)) } else if t.isEmpty { onSet(nil) }
         typing = false
     }
 

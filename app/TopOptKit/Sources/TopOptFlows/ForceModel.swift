@@ -187,14 +187,15 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// ROLE is migrated into this map by the decoder.
     private var keepClear: [UUID: KeepClearAffix]? = nil
 
-    /// "Same clearance for all" (design-overhaul 109). DEFAULT ON: editing any margin/axial/
-    /// depth writes the SAME number to every keep-clear site of that shape, so one number
-    /// governs them all. OFF: each site keeps its own value. Persisted; snapshots written
-    /// before this field decode as `true` (the default), which is a no-op when there is ≤1
-    /// site. See `setClearanceMargin(_:mm:syncTo:)` for the fan-out and how it interacts with
-    /// Auto: a site the fan-out never touches keeps NO override → stays Auto (and the wire
-    /// still sends the 0 sentinel, so the core re-derives it).
-    public var syncClearances: Bool = true
+    /// Per-row clearance SYNC MEMBERSHIP (device round 3, items 5+6 — this REPLACES the 109
+    /// global all-or-nothing `syncClearances` toggle, which is gone). Each keep-clear row owns a
+    /// checkbox: CHECKED rows form ONE shared group (editing any checked row's value writes every
+    /// checked row); an UNCHECKED row is INDEPENDENT and keeps its own value. DEFAULT CHECKED, so
+    /// only the exclusions (unchecked rows) are stored — an id absent here is synced. See
+    /// `setClearanceMargin(_:mm:syncTo:)` for the fan-out and `setClearanceSynced(_:_:peers:)`
+    /// for adopt-on-check. Auto is untouched: a checked row the fan-out never wrote keeps NO
+    /// override → stays Auto (the wire still sends the 0 sentinel) until a shared edit lands.
+    private var syncExcluded: Set<UUID>? = nil
 
     public init() {}
 
@@ -328,29 +329,54 @@ public struct ForceModel: Equatable, Sendable, Codable {
         mutateOverride(id) { $0.slabDepthMM = mm }
     }
 
-    // MARK: - sync fan-out ("Same clearance for all", design-overhaul 109)
+    // MARK: - per-row sync membership (device round 3, items 5+6)
 
-    /// Set the sync toggle.
-    public mutating func setSyncClearances(_ on: Bool) { syncClearances = on }
+    /// Whether a keep-clear row's per-row sync box is CHECKED (a member of the shared group).
+    /// Default checked — an id with no stored exclusion is synced.
+    public func isClearanceSynced(_ id: UUID) -> Bool { !(syncExcluded?.contains(id) ?? false) }
 
-    /// The write targets for a clearance edit on `id`: when sync is ON, every id in
-    /// `peers` (the caller's set of same-shape keep-clear sites — bolt sites for margin/axial,
-    /// slab sites for depth; ForceModel can't classify geometry itself); when OFF, just `id`.
-    /// A site absent from `peers` is never written, so it stays Auto.
+    /// The write targets for a clearance edit on `id`, given the caller's same-shape peer set
+    /// (`peers` — bolt sites for margin/axial, slab sites for depth; ForceModel can't classify
+    /// geometry itself). A CHECKED (synced) row writes every OTHER checked peer too — the shared
+    /// group; an UNCHECKED (independent) row writes only itself. `id` is always a target. A
+    /// checked peer absent from `peers` is never written, so it stays Auto.
     private func syncTargets(_ id: UUID, peers: [UUID]) -> [UUID] {
-        syncClearances ? (peers.isEmpty ? [id] : peers) : [id]
+        guard isClearanceSynced(id) else { return [id] }        // independent row → itself only
+        var targets = peers.filter { isClearanceSynced($0) }    // the shared (checked) group
+        if !targets.contains(id) { targets.append(id) }
+        return targets
     }
 
-    /// Margin edit honouring the sync toggle: writes `mm` to `id` alone (sync OFF) or to every
-    /// bolt site in `peers` (sync ON). `nil` reverts the touched sites to Auto.
+    /// Set a keep-clear row's per-row sync membership. Unchecking makes the row INDEPENDENT (it
+    /// keeps its current values untouched). Re-checking ADOPTS the shared group's value
+    /// (adopt-on-check, stated): the row takes the override of a currently-checked peer — or
+    /// reverts to Auto when the shared group has no edit yet, so it resumes sending the 0
+    /// sentinel until a shared edit lands. `peers` is the caller's same-shape site set.
+    public mutating func setClearanceSynced(_ id: UUID, _ synced: Bool, peers: [UUID]) {
+        var set = syncExcluded ?? []
+        if synced {
+            set.remove(id)
+            syncExcluded = set.isEmpty ? nil : set
+            // adopt-on-check: copy the shared group's current value in (empty → Auto).
+            let rep = peers.first { $0 != id && isClearanceSynced($0) }
+            let shared = rep.map { clearanceOverride(for: $0) } ?? ClearanceOverride()
+            mutateOverride(id) { $0 = shared }
+        } else {
+            set.insert(id)
+            syncExcluded = set                                  // independent: values kept as-is
+        }
+    }
+
+    /// Margin edit honouring per-row membership: writes `mm` to `id` alone (unchecked) or to
+    /// every checked bolt peer (checked). `nil` reverts the touched sites to Auto.
     public mutating func setClearanceMargin(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
         for t in syncTargets(id, peers: peers) { setClearanceMargin(t, mm: mm) }
     }
-    /// Axial edit honouring the sync toggle (see `setClearanceMargin(_:mm:syncTo:)`).
+    /// Axial edit honouring per-row membership (see `setClearanceMargin(_:mm:syncTo:)`).
     public mutating func setClearanceAxial(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
         for t in syncTargets(id, peers: peers) { setClearanceAxial(t, mm: mm) }
     }
-    /// Slab-depth edit honouring the sync toggle (peers are the slab sites).
+    /// Slab-depth edit honouring per-row membership (peers are the slab sites).
     public mutating func setClearanceSlab(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
         for t in syncTargets(id, peers: peers) { setClearanceSlab(t, mm: mm) }
     }
@@ -367,11 +393,13 @@ public struct ForceModel: Equatable, Sendable, Codable {
         kinds[id] = .load(direction: dir, weightKg: clampWeight(kg))
     }
 
-    /// Forget a removed group's role (and any clearance override / keep-clear affix).
+    /// Forget a removed group's role (and any clearance override / keep-clear affix / sync
+    /// membership).
     public mutating func clearKind(_ id: UUID) {
         kinds[id] = nil
         if var map = clearanceOverrides { map[id] = nil; clearanceOverrides = map.isEmpty ? nil : map }
         if var map = keepClear { map[id] = nil; keepClear = map.isEmpty ? nil : map }
+        if var set = syncExcluded { set.remove(id); syncExcluded = set.isEmpty ? nil : set }
     }
 
     /// Drop role entries for groups that no longer exist (call after the selection
@@ -386,6 +414,10 @@ public struct ForceModel: Equatable, Sendable, Codable {
         if let map = keepClear {
             let pruned = map.filter { live.contains($0.key) }
             keepClear = pruned.isEmpty ? nil : pruned
+        }
+        if let set = syncExcluded {
+            let pruned = set.intersection(live)
+            syncExcluded = pruned.isEmpty ? nil : pruned
         }
     }
 
@@ -543,7 +575,8 @@ extension ForceModel {
         // Keys match the pre-v2 synthesized coder's property names, so on-disk
         // snapshots keep decoding; `keepClear` is the only new (optional) key.
         case gravity, gravityFace, phase, unit, kinds, clearanceOverrides, keepClear
-        case syncClearances
+        case syncClearances     // LEGACY (109 global toggle) — decoded-and-dropped for back-compat
+        case syncExcluded       // per-row sync membership exclusions (device round 3)
     }
 
     public init(from decoder: Decoder) throws {
@@ -555,7 +588,12 @@ extension ForceModel {
         unit = try c.decodeIfPresent(WeightUnit.self, forKey: .unit) ?? .kg
         var decodedKinds = try c.decodeIfPresent([UUID: GroupKind].self, forKey: .kinds) ?? [:]
         clearanceOverrides = try c.decodeIfPresent([UUID: ClearanceOverride].self, forKey: .clearanceOverrides)
-        syncClearances = try c.decodeIfPresent(Bool.self, forKey: .syncClearances) ?? true
+        syncExcluded = try c.decodeIfPresent(Set<UUID>.self, forKey: .syncExcluded)
+        // LEGACY: the 109 global `syncClearances` toggle is gone (per-row membership replaces it).
+        // Decode-and-drop the key so pre-round-3 snapshots still load; the intent of a legacy
+        // `false` (every site independent) can't be reconstructed without the geometry, so rows
+        // open at the default checked and the user sets membership per-row from here.
+        _ = try c.decodeIfPresent(Bool.self, forKey: .syncClearances)
         var affixes = try c.decodeIfPresent([UUID: KeepClearAffix].self, forKey: .keepClear) ?? [:]
 
         // MIGRATION: a pre-v2 `.clearance` ROLE becomes a keep-clear-only affix — the
@@ -578,7 +616,7 @@ extension ForceModel {
         try c.encode(unit, forKey: .unit)
         try c.encode(kinds, forKey: .kinds)
         try c.encodeIfPresent(clearanceOverrides, forKey: .clearanceOverrides)
-        try c.encode(syncClearances, forKey: .syncClearances)
+        try c.encodeIfPresent(syncExcluded, forKey: .syncExcluded)
         try c.encodeIfPresent(keepClear, forKey: .keepClear)
     }
 }

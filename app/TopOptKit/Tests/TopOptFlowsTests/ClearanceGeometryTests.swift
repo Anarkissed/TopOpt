@@ -181,7 +181,7 @@ final class ClearanceGeometryTests: XCTestCase {
     func testCylinderHandlesAnchorsAndGeometry() {
         let handles = ClearanceHandles.handles(for: boreVolume(), boreRadiusMM: 2.5,
                                                axialSpan: (0, 10))
-        XCTAssertEqual(handles.count, 3)   // wall + two caps
+        XCTAssertEqual(handles.count, 2)   // wall + ONE cap (device round 3, item 9)
 
         let margin = try! XCTUnwrap(handles.first { $0.role == .margin })
         // Wall handle at mid-length (z=5), out along +X by the drawn radius (5).
@@ -189,15 +189,14 @@ final class ClearanceGeometryTests: XCTestCase {
         XCTAssertEqual(margin.boreRadiusMM, 2.5, accuracy: 1e-5)
         XCTAssertEqual(margin.axisDir, SIMD3<Float>(0, 0, 1))
 
+        // ONE end-cap icon (the +axis / hi end); the axial value is symmetric so the drag math
+        // handles either end from this single handle.
         let hi = try! XCTUnwrap(handles.first { $0.role == .axialHi })
         XCTAssertEqual(hi.anchor, SIMD3<Float>(0, 0, 15))   // outer +cap (tHi)
         XCTAssertEqual(hi.boreEndT, 10, accuracy: 1e-5)     // FIXED bore end (span.hi)
         XCTAssertEqual(hi.outward, 1, accuracy: 1e-5)
 
-        let lo = try! XCTUnwrap(handles.first { $0.role == .axialLo })
-        XCTAssertEqual(lo.anchor, SIMD3<Float>(0, 0, -5))   // outer −cap (tLo)
-        XCTAssertEqual(lo.boreEndT, 0, accuracy: 1e-5)      // span.lo
-        XCTAssertEqual(lo.outward, -1, accuracy: 1e-5)
+        XCTAssertNil(handles.first { $0.role == .axialLo }, "the redundant −cap icon is gone")
     }
 
     func testSlabHandleAnchorAndGeometry() {
@@ -289,5 +288,24 @@ final class ClearanceGeometryTests: XCTestCase {
         // Positive delta grows the value; a big negative delta clamps at 0.
         XCTAssertGreaterThan(ClearanceScrub.scrub(value: 1, deltaPoints: 4), 1)
         XCTAssertEqual(ClearanceScrub.scrub(value: 0.1, deltaPoints: -50), 0, accuracy: 1e-6)
+    }
+
+    // MARK: - Distance quantization (device round 3, item 12)
+
+    func testQuantizeSnapsToQuarterMillimetreGrid() {
+        XCTAssertEqual(ClearanceQuantize.stepMM, 0.25, accuracy: 1e-9)
+        // Round to the nearest 0.25 mm step.
+        XCTAssertEqual(ClearanceQuantize.snap(2.6), 2.5, accuracy: 1e-9)
+        XCTAssertEqual(ClearanceQuantize.snap(2.63), 2.75, accuracy: 1e-9)
+        XCTAssertEqual(ClearanceQuantize.snap(2.5), 2.5, accuracy: 1e-9)      // already on-grid
+        XCTAssertEqual(ClearanceQuantize.snap(0.12), 0.0, accuracy: 1e-9)     // rounds down to 0
+        XCTAssertEqual(ClearanceQuantize.snap(0.13), 0.25, accuracy: 1e-9)    // rounds up
+    }
+
+    func testQuantizeNeverNegativeAndFloatMatchesDouble() {
+        XCTAssertEqual(ClearanceQuantize.snap(-3.0), 0.0, accuracy: 1e-9)
+        XCTAssertEqual(ClearanceQuantize.snap(Float(2.6)), Float(2.5), accuracy: 1e-6)
+        // A degenerate step is a no-op clamp (defensive), not a divide-by-zero.
+        XCTAssertEqual(ClearanceQuantize.snap(2.6, step: 0), 2.6, accuracy: 1e-9)
     }
 }

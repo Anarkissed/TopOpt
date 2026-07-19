@@ -403,3 +403,67 @@ public enum DesignBoxHandles {
         return out
     }
 }
+
+/// Magnetic face-detent math for design-box (and keep-out) face dragging (device round 3, item
+/// 10). While a face handle drags along an axis, its plane can SNAP to a nearby part feature
+/// plane perpendicular to that axis — a part planar face, or the part AABB extent. Enter the
+/// detent within `snapThresholdMM`; escape only past `releaseThresholdMM` (~2×) — hysteresis so
+/// the snap holds without chattering. Pure + headless-tested; the flash/haptic feedback and the
+/// gesture that calls this are device QA.
+public enum DesignBoxDetent {
+    /// Snap radius (model-space mm). A face within this of a candidate detents to it.
+    public static let snapThresholdMM: Float = 1.5
+    /// Escape band as a multiple of the snap threshold (drag past this to leave a detent).
+    public static let releaseMultiple: Float = 2.0
+    /// The escape distance (mm): the raw drag must leave this band around the held candidate.
+    public static var releaseThresholdMM: Float { snapThresholdMM * releaseMultiple }
+
+    /// The candidate snap coordinates along `axis` (0=x,1=y,2=z): every part planar face whose
+    /// normal is (anti)parallel to that axis contributes its plane coordinate, plus the part AABB
+    /// min/max extents on that axis. Sorted + de-duplicated within `epsilon` so coincident
+    /// faces/AABB don't yield redundant targets. `faces` is the 127-bridge per-face geometry.
+    public static func candidates(axis: Int, faces: [StepFaceGeometry],
+                                  aabbMin: SIMD3<Float>, aabbMax: SIMD3<Float>,
+                                  epsilon: Float = 1e-3) -> [Float] {
+        var raw: [Float] = [aabbMin[axis], aabbMax[axis]]
+        for f in faces where f.isPlane {
+            let n = SIMD3<Float>(f.planeNormal)
+            let len = simd_length(n)
+            guard len > 1e-6, abs(n[axis]) >= 0.999 * len else { continue }   // ⟂ to the drag axis
+            raw.append(SIMD3<Float>(f.planeOrigin)[axis])
+        }
+        var uniq: [Float] = []
+        for c in raw.sorted() where (uniq.last.map { abs($0 - c) > epsilon } ?? true) { uniq.append(c) }
+        return uniq
+    }
+
+    /// The nearest candidate to `coord` within `threshold`, or nil if none is close enough.
+    public static func nearestCandidate(to coord: Float, candidates: [Float],
+                                        threshold: Float = snapThresholdMM) -> Float? {
+        var best: Float?
+        var bestD = threshold
+        for c in candidates {
+            let d = abs(c - coord)
+            if d < bestD { bestD = d; best = c }
+        }
+        return best
+    }
+
+    /// Resolve a dragged face coordinate with hysteresis. `rawCoord` is where the un-snapped drag
+    /// would place the face; `current` is the candidate the face is presently detented to (nil =
+    /// free). Returns the coordinate to apply and the candidate now held (nil = free). While
+    /// detented the face STAYS on the candidate until the raw drag exceeds the release band; when
+    /// free it snaps to any candidate within the snap threshold. `didSnap` is true whenever the
+    /// result is a fresh entry into a detent (the caller flashes the matched face + ticks haptics).
+    public static func resolve(rawCoord: Float, candidates: [Float], current: Float?)
+        -> (coord: Float, snapped: Float?, didSnap: Bool) {
+        if let c = current, abs(rawCoord - c) <= releaseThresholdMM {
+            return (c, c, false)                      // held at the detent (inside the escape band)
+        }
+        if let near = nearestCandidate(to: rawCoord, candidates: candidates) {
+            let fresh = current != near               // entered or switched detents
+            return (near, near, fresh)
+        }
+        return (rawCoord, nil, false)                 // free
+    }
+}

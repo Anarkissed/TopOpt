@@ -178,11 +178,24 @@ public struct OrbitCamera: Equatable {
         distance = Swift.min(Swift.max(fit, minDistance), maxDistance)
     }
 
-    /// Orbit by a drag delta in points: horizontal drag turns azimuth, vertical
-    /// drag changes elevation (clamped near the poles).
+    /// Orbit by a drag delta in points (dx = screen-right, dy = screen-DOWN — both gesture
+    /// paths normalize to this): horizontal drag turns azimuth, vertical drag changes
+    /// elevation (clamped near the poles).
+    ///
+    /// ROLL-AWARE (device round 3, item 2): azimuth/elevation are WORLD-frame rotations, but a
+    /// drag is a SCREEN vector — and once the view is rolled the screen no longer aligns with
+    /// that world frame, so feeding the raw delta made a screen-DOWN drag slide the view
+    /// sideways (the 074 roll-pin's exact concern). Fix: decompose the drag in the CAMERA frame
+    /// by undoing the roll (rotate the delta by −roll) BEFORE mapping, so screen-down always
+    /// moves the view down regardless of roll. The image rotates by +roll in this y-down screen
+    /// space (see `up`); the inverse rotation R(−roll) is the transpose below. At roll == 0 the
+    /// rotation is the identity, so the mapping is bit-identical to the pre-roll camera.
     public mutating func orbit(dx: Float, dy: Float) {
-        azimuth -= dx * Self.orbitSensitivity
-        elevation = Self.clampElevation(elevation + dy * Self.orbitSensitivity)
+        let c = cos(roll), s = sin(roll)
+        let rx =  c * dx + s * dy        // R(−roll) · (dx, dy): drag delta in the un-rolled frame
+        let ry = -s * dx + c * dy
+        azimuth -= rx * Self.orbitSensitivity
+        elevation = Self.clampElevation(elevation + ry * Self.orbitSensitivity)
     }
 
     /// Zoom by a multiplicative factor (`< 1` moves closer, `> 1` farther),

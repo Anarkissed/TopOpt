@@ -310,8 +310,9 @@ public struct OrientationGizmoView: View {
         .frame(width: size, height: size)
     }
 
-    /// Radians of view-roll per arrow tap (15°).
-    private static let rollStep: Float = .pi / 12
+    /// Radians of view-roll per arrow tap (45° — device round 3, item 1; was 15°). One
+    /// constant drives both arrows, so the ⟲/⟳ pair stay symmetric.
+    private static let rollStep: Float = .pi / 4
 
     /// ROLL the view about the visual (line-of-sight) axis by `delta` radians — what the
     /// arrows visually promise (design-overhaul 109). This drives the roll DOF added to
@@ -393,7 +394,7 @@ private struct HoverPick: ViewModifier {
 /// sheen riding the top, and a filled arrowhead in the same gradient; a soft black drop-shadow +
 /// faint blue glow give it dimension. Like the mock, each arrow is spun 45° INTO its corner so
 /// the arc runs parallel to the squircle's fillet, and the right button is the exact MIRROR of
-/// the left, so the two read as one matched pair. Taps roll the view ±15° about the view axis.
+/// the left, so the two read as one matched pair. Taps roll the view ±45° about the view axis.
 private struct RotateButton: View {
     let clockwise: Bool
     let action: () -> Void
@@ -425,11 +426,16 @@ private struct RotateButton: View {
         let c = CGPoint(x: sz.width / 2, y: sz.height / 2)
         let r = min(sz.width, sz.height) * 0.31
         let lw = r * 0.46
-        // A ~200° tube arcing OVER THE TOP, open at the bottom-left where the arrowhead flies
-        // off (counter-clockwise, like the mock's `rotL`).
-        let a0 = Angle.degrees(200), a1 = Angle.degrees(-20)
+        // The tube arcs OVER THE TOP from the arrowhead end (a0, lower-left) up across the
+        // crown to the right (a1), open at the bottom-left where the arrowhead flies off — the
+        // mock's `rotL` minor arc. Device round 3, item 13: the previous `clockwise: true` swept
+        // 200°→−20° through the BOTTOM (90°) in Canvas' y-down space, putting the body 180° off
+        // from the (correct) arrowhead + sheen, which ride the top. `clockwise: false` sweeps
+        // 200°→340° through the top (270°), so the body rejoins its highlight. Arrowhead and
+        // sheen geometry below are unchanged; the pair's mirror is applied to the whole Canvas.
+        let a0 = Angle.degrees(200), a1 = Angle.degrees(340)
         var arc = Path()
-        arc.addArc(center: c, radius: r, startAngle: a0, endAngle: a1, clockwise: true)
+        arc.addArc(center: c, radius: r, startAngle: a0, endAngle: a1, clockwise: false)
         ctx.stroke(arc, with: .linearGradient(Self.glass,
                                               startPoint: CGPoint(x: c.x, y: c.y - r),
                                               endPoint: CGPoint(x: c.x, y: c.y + r)),

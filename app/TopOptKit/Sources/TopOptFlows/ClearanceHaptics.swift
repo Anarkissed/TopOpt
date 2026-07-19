@@ -22,6 +22,9 @@ enum ClearanceHaptics {
         g.prepare()
         g.selectionChanged()
     }
+    /// A design-box face snapped into a magnetic detent (device round 3, item 10) — a crisp
+    /// rigid tick so the snap is felt as well as seen.
+    static func detent() { impact(.rigid) }
 
     private static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         let g = UIImpactFeedbackGenerator(style: style)
@@ -34,5 +37,6 @@ enum ClearanceHaptics {
     static func grab() {}
     static func release() {}
     static func crossedAuto() {}
+    static func detent() {}
 }
 #endif
