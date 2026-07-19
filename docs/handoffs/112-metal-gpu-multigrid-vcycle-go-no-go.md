@@ -202,7 +202,7 @@ directory — so path A (seam) and a future full-Metal attempt remain open to th
 maintainer without an ARCHITECTURE change. Nothing in the file forbids the seam;
 the block is on cost/benefit, not architecture.
 
-### Wrap-up item 4 — warmA-vs-cold @ 128-scale (warm-start production-flip gate)
+### Wrap-up item 4 — warmA-vs-cold @ ~64-scale (warm-start production-flip gate)
 
 **Status: not captured by Step 0** (the Metal roofline instrumentation measured
 the matvec + MG-CG *solve* only — it never ran the `minimize_plastic` ladder or
@@ -215,15 +215,66 @@ divergence is mode-dependent: |Δρ|=0.0013 load-case vs 0.197 self-weight, so b
 must be checked), cold vs warmA, production-faithful (MMA ladder, matrix-free
 MG-CG, Galerkin cache + mixed precision + 6 P-cores). Reported on the 110 template:
 per-rung iters, wall, achieved fraction, worst-case margin, savings %, and terminal
-|Δρ|, all costs counted. **Result table appended below on completion.**
+|Δρ|, all costs counted.
 
-**Follow-up if savings hold:** the warmA production flip is its own small,
-114-style task (add `o.warm_start_inherit = true` to the production config). That
-handoff **must state plainly** that flipping *changes production self-weight
-designs* — a different optimum with comparable margins, not a byte-identical
-speedup (110's self-weight |Δρ|=0.197 is a real geometry change) — so the
-maintainer signs off on the design change with eyes open, not as a footnote. This
-is the *warm-start* flip (110 lineage), orthogonal to this Metal NO-GO.
+**RESULTS (raw, `scratchpad/warm64_probe.cpp`):**
+
+```
+===== L-BRACKET LOADCASE @64  (grid 64x16x64, 22272 solid voxels) =====
+[cold ] fine_iters=208 wall=1255.6s
+    rung 0 vf=0.68 iters= 33 achieved=0.6800 margin=25.407 accept
+    rung 1 vf=0.52 iters= 36 achieved=0.5200 margin=22.757 accept
+    rung 2 vf=0.38 iters= 68 achieved=0.3800 margin=20.849 accept
+    rung 3 vf=0.26 iters= 71 achieved=0.2600 margin=15.311 accept
+[warmA] fine_iters=166 wall=1009.6s
+    rung 0 vf=0.68 iters= 33 achieved=0.6800 margin=25.407 accept   (== cold: no predecessor)
+    rung 1 vf=0.52 iters= 31 achieved=0.5200 margin=24.520 accept
+    rung 2 vf=0.38 iters= 39 achieved=0.3800 margin=21.736 accept
+    rung 3 vf=0.26 iters= 63 achieved=0.2600 margin=15.026 accept
+SUMMARY  cold_iters=208 warmA_iters=166  savings=20%  |Δρ|=0.0227 (MODERATE)
+
+===== SELF-WEIGHT BLOCK @64  (grid 64x24x24, 36864 solid voxels) =====
+[cold ] fine_iters=413 wall=1469.4s
+    rung 0 vf=0.68 iters= 80  margin=7357.226 accept
+    rung 1 vf=0.52 iters= 98  margin=6496.600 accept
+    rung 2 vf=0.38 iters=119  margin=3967.867 accept
+    rung 3 vf=0.26 iters=116  margin=2759.242 accept
+[warmA] fine_iters=333 wall=2120.0s
+    rung 0 vf=0.68 iters= 80  margin=7357.226 accept   (== cold: no predecessor)
+    rung 1 vf=0.52 iters= 61  margin=6741.852 accept
+    rung 2 vf=0.38 iters= 81  margin=3955.884 accept
+    rung 3 vf=0.26 iters=111  margin=3043.499 accept
+SUMMARY  cold_iters=413 warmA_iters=333  savings=19%  |Δρ|=0.2841 (DIVERGENT)
+```
+
+**Reading (honest):**
+1. **Iteration savings hold at production scale: ~19–20% fewer iters, both modes**
+   (rung 0 identical — no predecessor to inherit; savings come from rungs 1–3, as
+   designed). Smaller than 110's tiny-scale 39–48%, but real and consistent.
+2. **Wall-clock does NOT track iterations here — it is thermally contaminated and
+   must not be quoted as the speedup.** Load-case warmA tracks iters (1.24×), but
+   self-weight warmA is *slower* wall-clock (0.69×) **despite 19% fewer iters**:
+   6.37 s/iter vs cold's 3.56 s/iter. It ran 4th, ~1 h into sustained load — pure
+   thermal throttling on this fanless-adjacent mini (the brief's caveat, and §B's
+   build-bound single-thread profile makes the ladder a thermal soak). **The
+   iteration count is the clean signal; sequential multi-ladder wall-clock is not.**
+3. **Divergence is real, mode-dependent, and LARGER at production scale than 110
+   measured.** Load-case terminal |Δρ|=0.0227 (vs 110's 0.0013) — moderate, margins
+   comparable (warmA 15.03 vs cold 15.31 at the terminal rung). Self-weight
+   |Δρ|=0.2841 (vs 110's 0.197) — **divergent: a materially different design** at
+   comparable/better margins (warmA 3043 vs cold 2759). Not "wrong" — warm-starting
+   a non-convex MMA lands on a different valid plateau (086) — but **not invisible.**
+
+**Verdict on the flip (maintainer's call, stated honestly):** the gate passes on
+*savings* (~20% iters) but the benefit is modest and the **self-weight design
+change is real and grew with scale** (|Δρ| 0.197 → 0.284). If flipped, the warmA
+production flip is its own small 114-style task (`o.warm_start_inherit = true` in
+the production config). That handoff **must state plainly, in the body not a
+footnote**, that flipping *changes production self-weight geometry* (different
+optimum, comparable margins) — the maintainer signs off on a design change, not a
+free speedup. This is the *warm-start* flip (110 lineage), orthogonal to this Metal
+NO-GO. **Recommendation: weigh ~20% iter savings against a 0.28 |Δρ| self-weight
+redesign — not an obvious yes; the maintainer decides.**
 
 ## Evidence — raw test output (baseline unchanged; no source modified)
 
