@@ -483,44 +483,76 @@ final class ForceModelTests: XCTestCase {
         XCTAssertEqual(fm.panelKindLabel(for: ids[0]), "Keep clear")
     }
 
-    // MARK: - "Same clearance for all" sync fan-out (design-overhaul 109)
+    // MARK: - per-row clearance sync membership (device round 3, items 5+6)
 
-    func testSyncDefaultsOn() {
-        XCTAssertTrue(ForceModel().syncClearances, "the sync toggle defaults ON")
+    func testSyncMembershipDefaultsChecked() {
+        let (_, ids) = groups([1])
+        XCTAssertTrue(ForceModel().isClearanceSynced(ids[0]), "every row opens checked (synced) by default")
     }
 
-    /// Sync ON: editing one bolt site's margin writes the SAME number to every peer bolt site,
-    /// so one number governs them all. Sites NOT in the peer list are untouched → stay Auto.
-    func testSyncOnWritesAllPeersAndLeavesOthersAuto() {
-        let (_, ids) = groups([1, 2, 3])
-        var fm = ForceModel()            // sync on by default
-        let bolts = [ids[0], ids[1]]     // two bolt sites; ids[2] is a different (slab) site
+    /// Editing a CHECKED row's value writes every CHECKED peer only; an UNCHECKED peer is
+    /// untouched (stays Auto), and a checked peer absent from the shape set stays Auto too.
+    func testEditCheckedWritesCheckedOnly() {
+        let (_, ids) = groups([1, 2, 3, 4])
+        var fm = ForceModel()
+        let bolts = [ids[0], ids[1], ids[2]]        // ids[3] is a different (slab) site
+        fm.setClearanceSynced(ids[1], false, peers: bolts)   // uncheck the second bolt → independent
         fm.setClearanceMargin(ids[0], mm: 5.0, syncTo: bolts)
-        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 5.0)
-        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 5.0, "peer got the same number")
-        XCTAssertNil(fm.clearanceOverride(for: ids[2]).concentricMarginMM, "a non-peer stays Auto")
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 5.0, "the edited checked row")
+        XCTAssertEqual(fm.clearanceOverride(for: ids[2]).concentricMarginMM, 5.0, "the other checked peer got it")
+        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "the unchecked row is untouched → Auto")
+        XCTAssertNil(fm.clearanceOverride(for: ids[3]).concentricMarginMM, "a non-peer stays Auto")
     }
 
-    /// Sync OFF: the same edit writes ONLY the touched site; the peer keeps its own value (Auto).
-    func testSyncOffWritesOnlyTheTouchedSite() {
+    /// An UNCHECKED (independent) row: editing IT writes only itself, and editing a CHECKED peer
+    /// never reaches back into it.
+    func testUncheckedRowIsIndependent() {
         let (_, ids) = groups([1, 2])
         var fm = ForceModel()
-        fm.setSyncClearances(false)
-        fm.setClearanceMargin(ids[0], mm: 7.0, syncTo: [ids[0], ids[1]])
+        let bolts = [ids[0], ids[1]]
+        fm.setClearanceSynced(ids[0], false, peers: bolts)   // ids[0] independent
+        fm.setClearanceMargin(ids[0], mm: 7.0, syncTo: bolts)
         XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 7.0)
-        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "sync off → peer untouched, stays Auto")
+        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "editing the independent row spares the peer")
+        fm.setClearanceMargin(ids[1], mm: 3.0, syncTo: bolts)  // edit the checked row
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 7.0, "independent row kept its own value")
     }
 
-    /// Sync ON: writing nil (reset) fans out too, reverting every peer back to Auto (the wire
-    /// sentinel), so "reset one" resets all when the toggle governs them.
-    func testSyncOnResetRevertsAllPeersToAuto() {
+    /// adopt-on-check: re-checking a row ADOPTS the shared group's current value.
+    func testRecheckAdoptsSharedValue() {
+        let (_, ids) = groups([1, 2, 3])
+        var fm = ForceModel()
+        let bolts = [ids[0], ids[1], ids[2]]
+        fm.setClearanceMargin(ids[0], mm: 8.0, syncTo: bolts)     // shared group → 8.0 everywhere
+        fm.setClearanceSynced(ids[1], false, peers: bolts)        // uncheck ids[1]
+        fm.setClearanceMargin(ids[1], mm: 2.0, syncTo: bolts)     // independent edit → 2.0
+        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 2.0)
+        fm.setClearanceSynced(ids[1], true, peers: bolts)         // re-check → adopt shared 8.0
+        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 8.0, "re-checking adopts the shared value")
+    }
+
+    /// adopt-on-check when the shared group is still Auto: re-checking reverts the row to Auto
+    /// (adopts the shared "no edit yet"), so it resumes sending the 0 sentinel.
+    func testRecheckAdoptsAutoWhenSharedUnedited() {
         let (_, ids) = groups([1, 2])
         var fm = ForceModel()
-        fm.setClearanceAxial(ids[0], mm: 3.0, syncTo: [ids[0], ids[1]])
-        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).axialClearanceMM, 3.0)
-        fm.setClearanceAxial(ids[0], mm: nil, syncTo: [ids[0], ids[1]])   // reset
-        XCTAssertNil(fm.clearanceOverride(for: ids[0]).axialClearanceMM, "reset clears the touched site")
-        XCTAssertNil(fm.clearanceOverride(for: ids[1]).axialClearanceMM, "and every governed peer → Auto")
+        let bolts = [ids[0], ids[1]]
+        fm.setClearanceSynced(ids[0], false, peers: bolts)
+        fm.setClearanceMargin(ids[0], mm: 9.0, syncTo: bolts)     // independent value while unchecked
+        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 9.0)
+        fm.setClearanceSynced(ids[0], true, peers: bolts)         // shared group (ids[1]) is Auto
+        XCTAssertNil(fm.clearanceOverride(for: ids[0]).concentricMarginMM, "adopts the shared Auto → back to sentinel")
+    }
+
+    /// Auto interaction: an untouched CHECKED row holds NO override (stays Auto / sends the
+    /// sentinel) until a shared edit lands, at which point it takes the value.
+    func testUntouchedCheckedRowStaysAutoUntilSharedEdit() {
+        let (_, ids) = groups([1, 2])
+        var fm = ForceModel()
+        let bolts = [ids[0], ids[1]]
+        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "checked but untouched → Auto")
+        fm.setClearanceMargin(ids[0], mm: 4.0, syncTo: bolts)
+        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 4.0, "a shared edit lands on it")
     }
 
     /// Slab depth fans out only across slab peers, independent of the bolt margin/axial channel.
@@ -532,11 +564,23 @@ final class ForceModelTests: XCTestCase {
         XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "depth sync doesn't touch margin")
     }
 
-    /// The toggle round-trips through the snapshot codec (false must survive; default true when absent).
-    func testSyncTogglePersists() throws {
+    /// Membership round-trips through the snapshot codec (an unchecked row stays unchecked;
+    /// default checked when absent).
+    func testMembershipPersists() throws {
+        let (_, ids) = groups([1, 2])
         var fm = ForceModel()
-        fm.setSyncClearances(false)
+        fm.setClearanceSynced(ids[0], false, peers: [ids[0], ids[1]])
         let back = try JSONDecoder().decode(ForceModel.self, from: try JSONEncoder().encode(fm))
-        XCTAssertFalse(back.syncClearances)
+        XCTAssertFalse(back.isClearanceSynced(ids[0]), "unchecked row survives the round-trip")
+        XCTAssertTrue(back.isClearanceSynced(ids[1]), "the other stays checked")
+    }
+
+    /// A pre-round-3 snapshot carrying the legacy global `syncClearances` key still decodes
+    /// (the key is decoded-and-dropped), landing at the default all-checked membership.
+    func testLegacySyncClearancesKeyStillDecodes() throws {
+        let (_, ids) = groups([1])
+        let legacy = "{\"phase\":\"edit\",\"unit\":\"kg\",\"kinds\":{},\"syncClearances\":false}"
+        let back = try JSONDecoder().decode(ForceModel.self, from: Data(legacy.utf8))
+        XCTAssertTrue(back.isClearanceSynced(ids[0]), "legacy toggle dropped → rows open checked")
     }
 }

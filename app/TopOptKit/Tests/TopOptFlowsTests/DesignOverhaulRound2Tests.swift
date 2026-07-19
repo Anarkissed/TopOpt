@@ -55,40 +55,17 @@ final class DesignOverhaulRound2Tests: XCTestCase {
         XCTAssertGreaterThan(GizmoLayout.rotateRightCenter(400).x, GizmoLayout.rotateLeftCenter(400).x)
     }
 
-    // MARK: - Item 7: "Same clearance for all" checkbox visibility/enablement
+    // MARK: - Clearance sync (device round 3, items 5+6: per-row membership)
 
-    func testSyncCheckboxHiddenWithNoSites() {
-        XCTAssertEqual(SyncCheckboxState.forSiteCount(0, isOn: true), .hidden)
-        XCTAssertFalse(SyncCheckboxState.hidden.isVisible)
-    }
-
-    /// Exactly one site: SHOWN (visible whenever the chips are) but disabled, checked by default,
-    /// with a plain-English explanation.
-    func testSyncCheckboxSingleSiteIsVisibleButDisabledWithExplanation() {
-        let s = SyncCheckboxState.forSiteCount(1, isOn: true)
-        XCTAssertEqual(s, .disabledSingleSite)
-        XCTAssertTrue(s.isVisible, "the checkbox must be visible at ≥1 site (the 109 invisibility bug)")
-        XCTAssertFalse(s.isEnabled, "one site → nothing to sync yet → disabled")
-        XCTAssertTrue(s.isChecked, "default checked so the intent reads even when disabled")
-        XCTAssertNotNil(s.explanation, "one site must carry an explanation")
-    }
-
-    /// Two or more sites: actionable, reflects the on/off, no explanation needed.
-    func testSyncCheckboxActiveAtTwoSites() {
-        XCTAssertEqual(SyncCheckboxState.forSiteCount(2, isOn: true), .active(true))
-        XCTAssertEqual(SyncCheckboxState.forSiteCount(3, isOn: false), .active(false))
-        let on = SyncCheckboxState.forSiteCount(2, isOn: true)
-        XCTAssertTrue(on.isVisible); XCTAssertTrue(on.isEnabled); XCTAssertTrue(on.isChecked)
-        XCTAssertNil(on.explanation)
-        XCTAssertFalse(SyncCheckboxState.forSiteCount(2, isOn: false).isChecked)
-    }
-
-    /// The default `ForceModel.syncClearances` is ON, so a fresh multi-site checkbox reads
-    /// checked (mirrors the 109 fan-out default the checkbox drives; the fan-out itself is proven
-    /// in `ForceModelTests`).
-    func testSyncCheckboxDefaultReflectsForceModelDefaultOn() {
-        XCTAssertTrue(ForceModel().syncClearances)
-        XCTAssertTrue(SyncCheckboxState.forSiteCount(2, isOn: ForceModel().syncClearances).isChecked)
+    /// The round-2 `SyncCheckboxState` (hidden / disabled-single-site / active) and the 109 global
+    /// toggle are BOTH withdrawn. Sync is per-row now: every keep-clear row carries an
+    /// always-enabled checkbox defaulting checked. The membership + fan-out + adopt-on-check
+    /// semantics are proven in `ForceModelTests` ("per-row clearance sync membership" block); here
+    /// we just pin the default so the row opens checked.
+    func testClearanceRowSyncDefaultsChecked() {
+        var m = SelectionModel(); m.addGroup()
+        let id = m.groups[0].id
+        XCTAssertTrue(ForceModel().isClearanceSynced(id), "a fresh keep-clear row opens checked (synced)")
     }
 
     // MARK: - Item 12: bottom-right chip ordering by measured width, stable

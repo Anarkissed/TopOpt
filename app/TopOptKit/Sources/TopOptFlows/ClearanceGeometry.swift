@@ -374,13 +374,14 @@ public enum ClearanceHandles {
                 ClearanceHandle(role: .margin, anchor: mid + u * radiusMM,
                                 axisPoint: axisPoint, axisDir: dir, boreRadiusMM: boreRadiusMM)
             ]
-            // End-cap handles: at each current cap (tLo/tHi), measuring from the FIXED
-            // bore tessellation end (span.lo/span.hi) so the axial value is stable.
+            // End-cap handle: ONE per cylinder (device round 3, item 9 — was one per cap). The
+            // axial CLEARANCE is a single value applied to BOTH ends (`tLo = span.lo − axial`,
+            // `tHi = span.hi + axial`), so a second cap icon was redundant. Keep the +axis (hi)
+            // end, measuring from the FIXED bore tessellation end so the value is stable; the
+            // drag math already resolves the same axial mm from either end.
             if let span = axialSpan {
                 out.append(ClearanceHandle(role: .axialHi, anchor: axisPoint + dir * tHi,
                     axisPoint: axisPoint, axisDir: dir, boreEndT: span.hi, outward: 1))
-                out.append(ClearanceHandle(role: .axialLo, anchor: axisPoint + dir * tLo,
-                    axisPoint: axisPoint, axisDir: dir, boreEndT: span.lo, outward: -1))
             }
             return out
         case let .slab(center, normal, _, _, _, _, depthMM):
@@ -424,5 +425,29 @@ public enum ClearanceScrub {
     /// Apply one scrub update to `value` (mm), clamped ≥ 0.
     public static func scrub(value: Float, deltaPoints: Float) -> Float {
         Swift.max(0, value + increment(deltaPoints: deltaPoints))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARK: - Distance quantization (device round 3, item 12)
+
+/// Snaps clearance distances to a fixed grid. Scrub AND handle-drag quantize LIVE (the emitted
+/// value is snapped every update, so the number ticks in whole steps as you drag); a typed value
+/// rounds to the nearest step on commit. Auto is never quantized — it carries no explicit value,
+/// so the caller only ever snaps a real number, and `onSet(nil)` (revert to Auto) is untouched.
+/// Pure + headless-tested; the pill/gesture that call it are device QA.
+public enum ClearanceQuantize {
+    /// The distance grid: margin / axial / depth land on 0.25 mm steps.
+    public static let stepMM: Double = 0.25
+
+    /// Round `mm` to the nearest `step` (default 0.25 mm), never below 0.
+    public static func snap(_ mm: Double, step: Double = stepMM) -> Double {
+        guard step > 0 else { return Swift.max(0, mm) }
+        return Swift.max(0, (mm / step).rounded() * step)
+    }
+    /// Float overload for the scrub / handle-drag paths (same grid).
+    public static func snap(_ mm: Float, step: Float = Float(stepMM)) -> Float {
+        guard step > 0 else { return Swift.max(0, mm) }
+        return Swift.max(0, (mm / step).rounded() * step)
     }
 }

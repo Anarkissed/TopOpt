@@ -116,6 +116,51 @@ final class OrientationGizmoTests: XCTestCase {
         assertMatrixClose(cam.viewRotation(), rWrap, "roll is periodic in 2π")
     }
 
+    // MARK: - Roll-aware orbit (device round 3, item 2)
+
+    /// The closed form the fix implements: the screen delta is rotated by −roll into the
+    /// un-rolled camera frame BEFORE mapping to azimuth/elevation.
+    private func expectedOrbit(_ cam: OrbitCamera, dx: Float, dy: Float) -> (az: Float, el: Float) {
+        let s = OrbitCamera.orbitSensitivity
+        let c = cosf(cam.roll), sn = sinf(cam.roll)
+        let rx =  c * dx + sn * dy
+        let ry = -sn * dx + c * dy
+        return (cam.azimuth - rx * s, OrbitCamera.clampElevation(cam.elevation + ry * s))
+    }
+
+    /// roll == 0: the decomposition is the identity, so orbit is bit-identical to the classic
+    /// azimuth −= dx·s / elevation += dy·s mapping (today's behaviour is unchanged).
+    func testRollZeroOrbitIsBitIdenticalToClassic() {
+        var cam = OrbitCamera(azimuth: 0.3, elevation: 0.1)   // roll defaults to 0
+        let s = OrbitCamera.orbitSensitivity
+        let dx: Float = 12, dy: Float = -7
+        cam.orbit(dx: dx, dy: dy)
+        XCTAssertEqual(cam.azimuth, 0.3 - dx * s, accuracy: tol)
+        XCTAssertEqual(cam.elevation, 0.1 + dy * s, accuracy: tol)
+    }
+
+    /// roll == 90°: a screen-DOWN drag must still move the view down. A quarter-turn puts the
+    /// elevation axis horizontal on screen, so screen-down now drives AZIMUTH and leaves
+    /// elevation put — "changes what it must" rather than sliding sideways.
+    func testRollNinetyScreenDownDrivesAzimuthNotElevation() {
+        var cam = OrbitCamera(azimuth: 0.5, elevation: 0.0, roll: .pi / 2)
+        let az0 = cam.azimuth, el0 = cam.elevation
+        let exp = expectedOrbit(cam, dx: 0, dy: 10)
+        cam.orbit(dx: 0, dy: 10)                               // pure screen-down
+        XCTAssertEqual(cam.elevation, el0, accuracy: tol, "screen-down leaves elevation put at roll 90°")
+        XCTAssertNotEqual(cam.azimuth, az0, accuracy: 1e-3, "screen-down drives azimuth at roll 90°")
+        XCTAssertEqual(cam.azimuth, exp.az, accuracy: tol)
+    }
+
+    /// roll == 45°: the mapping is exactly the −roll rotation of the delta on BOTH axes.
+    func testRollFortyFiveIsTheRotatedDelta() {
+        var cam = OrbitCamera(azimuth: 0.2, elevation: 0.05, roll: .pi / 4)
+        let exp = expectedOrbit(cam, dx: 8, dy: 5)
+        cam.orbit(dx: 8, dy: 5)
+        XCTAssertEqual(cam.azimuth, exp.az, accuracy: tol)
+        XCTAssertEqual(cam.elevation, exp.el, accuracy: tol)
+    }
+
     @MainActor
     func testModelRollByRoutesAndCancelsSnap() {
         let m = OrbitCameraModel(); m.reframe(unitCube)

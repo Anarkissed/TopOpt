@@ -1059,51 +1059,62 @@ public struct WorkspacePlaceholder: View {
         .coordinateSpace(name: Self.clearanceStageSpace)
     }
 
-    /// The floating glass value pill(s) for the ACTIVE clearance group, anchored just
-    /// above its projected centroid — the primary editor AND the live readout while a
-    /// handle is dragged (it reads the same override the drag writes). Falls back to the
-    /// Selections row when nothing projects (handled by the row pills).
+    /// Every keep-clear site with an editable shape — the on-model chips show for ALL of them,
+    /// no selection required (device round 3, item 3). SelectionGroup is Identifiable, so this
+    /// drives the `ForEach` below.
+    private var keepClearChipGroups: [SelectionGroup] {
+        selection.groups.filter { g in
+            guard project.keepClearIsOn(g) else { return false }
+            let s = groupClearanceShape(g); return s.bolt || s.slab
+        }
+    }
+
+    /// The on-model glass value chips for EVERY keep-clear site (device round 3, item 3 — was the
+    /// ACTIVE group only, hidden until tapped). Each cluster is anchored beside its site's handle
+    /// icon and sized to the weight-label class (`compact`, smaller than "See Results" — the
+    /// maintainer's round-2 correction). They are the primary editor AND the live readout while a
+    /// handle is dragged (reading the same override the drag writes).
     @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection) -> some View {
-        if let g = activeGroup, project.keepClearIsOn(g), let pt = groupScreen(g) {
-            let shape = groupClearanceShape(g)
-            let ov = force.clearanceOverride(for: g.id)
-            let r = project.clearanceBoreRadius(for: g)
-            if shape.bolt || shape.slab {
-                // On-model cluster (design-overhaul round 2, items 6+7): the value chips sit
-                // ADJACENT in one row, and the "Same clearance for all" checkbox rides beside
-                // them (visible whenever the chips are; disabled-with-explanation at 1 site).
-                VStack(alignment: .trailing, spacing: DS.Space.xxs) {
-                    HStack(spacing: DS.Space.xs) {
-                        if shape.bolt {
-                            GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
-                                           autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                                           active: isDraggingRole(g.id, .margin)) {
-                                force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
-                            }
-                            GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
-                                           autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                                           active: isDraggingRole(g.id, .axialHi) || isDraggingRole(g.id, .axialLo)) {
-                                force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
-                            }
-                        }
-                        if shape.slab {
-                            GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
-                                           autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                                           active: isDraggingRole(g.id, .slabDepth)) {
-                                force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false))
-                            }
-                        }
-                    }
-                    clearanceSyncCheckbox
-                }
-                .fixedSize()
-                // Sit just ABOVE-beside the group's handle cluster (the small chips no longer
-                // need the old 96pt clearance).
-                .position(x: clampX(pt.x, proj.viewportSize.width),
-                          y: clamp(pt.y - 54, proj.viewportSize.height))
-                .animation(DS.Motion.emphasized, value: pt)
+        ForEach(keepClearChipGroups) { g in
+            if let pt = groupScreen(g) {
+                clearanceChipCluster(g)
+                    // Beside the handle icon (the handle cluster projects near the group centroid);
+                    // lifted just clear of the ~44pt knob so the chip doesn't cover it.
+                    .position(x: clampX(pt.x, proj.viewportSize.width),
+                              y: clamp(pt.y - 40, proj.viewportSize.height))
+                    .animation(DS.Motion.emphasized, value: pt)
             }
         }
+    }
+
+    /// One keep-clear site's compact chip cluster (Margin + Axial for a bore, Depth for a plane).
+    @ViewBuilder private func clearanceChipCluster(_ g: SelectionGroup) -> some View {
+        let shape = groupClearanceShape(g)
+        let ov = force.clearanceOverride(for: g.id)
+        let r = project.clearanceBoreRadius(for: g)
+        HStack(spacing: DS.Space.xs) {
+            if shape.bolt {
+                GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                               autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                               active: isDraggingRole(g.id, .margin), compact: true) {
+                    force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
+                }
+                GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                               autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                               active: isDraggingRole(g.id, .axialHi) || isDraggingRole(g.id, .axialLo),
+                               compact: true) {
+                    force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
+                }
+            }
+            if shape.slab {
+                GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                               autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                               active: isDraggingRole(g.id, .slabDepth), compact: true) {
+                    force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false))
+                }
+            }
+        }
+        .fixedSize()
     }
 
     private func isDraggingRole(_ gid: UUID, _ role: ClearanceHandle.Role) -> Bool {
@@ -1169,12 +1180,14 @@ public struct WorkspacePlaceholder: View {
             }
     }
 
-    /// Write the dragged mm to the right override on the group.
+    /// Write the dragged mm to the right override on the group, quantized to the 0.25 mm grid
+    /// live (item 12) so a handle-drag ticks in whole steps just like the scrub pill.
     private func writeClearance(_ gid: UUID, role: ClearanceHandle.Role, mm: Double) {
+        let q = ClearanceQuantize.snap(mm)
         switch role {
-        case .margin: force.setClearanceMargin(gid, mm: mm)
-        case .axialLo, .axialHi: force.setClearanceAxial(gid, mm: mm)
-        case .slabDepth: force.setClearanceSlab(gid, mm: mm)
+        case .margin: force.setClearanceMargin(gid, mm: q)
+        case .axialLo, .axialHi: force.setClearanceAxial(gid, mm: q)
+        case .slabDepth: force.setClearanceSlab(gid, mm: q)
         }
     }
 
@@ -1227,17 +1240,9 @@ public struct WorkspacePlaceholder: View {
 
             if !selectionsCollapsed {
                 Divider().overlay(DS.Color.strokeSubtle.color)
-                // The "Same clearance for all" checkbox, mirrored in the Selections panel
-                // (design-overhaul round 2, item 7) so it's reachable here too — shown whenever
-                // there's ≥1 keep-clear site, disabled-with-explanation at exactly one.
-                if keepClearSiteCount >= 1 {
-                    HStack {
-                        clearanceSyncCheckboxCompact
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.s)
-                    Divider().overlay(DS.Color.strokeSubtle.color)
-                }
+                // Sync is per-row now (device round 3, items 5+6): the checkbox rides EACH
+                // keep-clear row (see `clearanceEditor`), not a single panel-wide control, so the
+                // 109 global toggle and its round-2 on-model checkbox are both gone from here.
                 if selection.isEmpty {
                     Text("Tap faces on the model to select them — a chip asks whether they’re an **anchor** or a **load**.")
                         .dsStyle(DS.TypeScale.caption)
@@ -1311,7 +1316,8 @@ public struct WorkspacePlaceholder: View {
     private func groupRow(_ g: SelectionGroup) -> some View {
         let active = g.id == selection.activeGroupID
         let tint = force.tint(for: g)
-        return HStack(alignment: .top, spacing: DS.Space.s) {
+        return VStack(alignment: .trailing, spacing: 5) {
+          HStack(alignment: .top, spacing: DS.Space.s) {
             // Tap the swatch to recolor the group — a row of colour swatches.
             Button { recoloringGroup = g.id } label: {
                 RoundedRectangle(cornerRadius: 4).fill(tint.color)
@@ -1345,7 +1351,6 @@ public struct WorkspacePlaceholder: View {
                         .foregroundStyle(DS.Color.textQuaternary.color)
                     keepClearAffixToggle(g)
                 }
-                clearanceEditor(g)
                 if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
                     // Sub-voxel load face (099 D2): the load may tag no voxels at
                     // this resolution, so flag it in plain English. A warning, not a
@@ -1364,6 +1369,10 @@ public struct WorkspacePlaceholder: View {
                     .foregroundStyle(DS.Color.textPrimary.opacity(0.4).color)
             }
             .buttonStyle(.plain)
+          }
+          // Item 4: the clearance chips (+ per-row Sync box) sit right-aligned to the row's
+          // trailing edge, directly below the trash icon — not left-aligned in the name column.
+          clearanceEditor(g)
         }
         .padding(.vertical, 11).padding(.leading, DS.Space.l).padding(.trailing, DS.Space.m)
         .background(active ? DS.Color.fillSubtle.color : .clear)
@@ -1405,29 +1414,17 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// How many keep-clear sites carry an editable shape — the sync toggle only matters (and
-    /// only shows) with ≥2, where "one number governs all" is a real choice.
-    private var keepClearSiteCount: Int {
-        selection.groups.reduce(0) { n, g in
-            let s = groupClearanceShape(g); return n + ((s.bolt || s.slab) ? 1 : 0)
-        }
+    /// The same-shape peer set a group's per-row sync uses for its fan-out and adopt-on-check
+    /// (bolt sites for a bore, slab sites for a planar face).
+    private func clearanceSyncPeersForGroup(_ g: SelectionGroup) -> [UUID] {
+        clearanceSyncPeers(bolt: groupClearanceShape(g).bolt)
     }
 
-    /// The "Same clearance for all" CHECKBOX beside the on-model chips (design-overhaul round 2,
-    /// item 7). Visible whenever there's ≥1 keep-clear site; disabled with an explanation at
-    /// exactly 1 (nothing to link yet); actionable at ≥2, DEFAULT ON. The fan-out semantics are
-    /// unchanged (`ForceModel.setSyncClearances`, proven by the 109 tests).
-    private var clearanceSyncCheckbox: some View {
-        ClearanceSyncCheckbox(siteCount: keepClearSiteCount, isOn: force.syncClearances) {
-            force.setSyncClearances($0)
-        }
-    }
-
-    /// The Selections-panel copy of the same checkbox (compact), so the control is reachable
-    /// from the panel too — mirrored next to the row clearance chips.
-    private var clearanceSyncCheckboxCompact: some View {
-        ClearanceSyncCheckbox(siteCount: keepClearSiteCount, isOn: force.syncClearances, compact: true) {
-            force.setSyncClearances($0)
+    /// The PER-ROW "Sync" checkbox (device round 3, items 5+6), always enabled, default checked.
+    /// Toggling writes membership through `ForceModel` (fan-out + adopt-on-check proven headlessly).
+    private func clearanceSyncRowCheckbox(_ g: SelectionGroup) -> some View {
+        ClearanceSyncRowCheckbox(isOn: force.isClearanceSynced(g.id)) { on in
+            force.setClearanceSynced(g.id, on, peers: clearanceSyncPeersForGroup(g))
         }
     }
 
@@ -1446,10 +1443,12 @@ public struct WorkspacePlaceholder: View {
         if shape.bolt || shape.slab {
             let ov = force.clearanceOverride(for: g.id)
             let r = project.clearanceBoreRadius(for: g)
-            // Design-overhaul round 2 (item 5): the compact value chips sit SIDE BY SIDE in one
-            // row — Margin next to Axial — so the group row is only slightly taller than a plain
-            // one (was a tall trailing COLUMN). Wraps if the panel is narrow.
+            // The compact value chips sit SIDE BY SIDE, with the per-row Sync checkbox leading
+            // them (device round 3, items 4+5+6). The cluster is RIGHT-ALIGNED to the row's
+            // trailing edge (item 4 — was left-aligned in the name column); the row wraps it
+            // below the trash icon.
             HStack(spacing: DS.Space.xs) {
+                clearanceSyncRowCheckbox(g)
                 if shape.bolt {
                     GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
                                    autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
@@ -1464,7 +1463,7 @@ public struct WorkspacePlaceholder: View {
                                    compact: true) { force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false)) }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 2)
         }
     }
