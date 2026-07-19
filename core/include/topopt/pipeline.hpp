@@ -323,6 +323,41 @@ struct MinimizePlasticOptions {
   // garbage design. DEFAULT false: a genuine self-weight run (and every existing
   // caller/fixture/Gate-V2 path) leaves it false and is byte-for-byte unchanged.
   bool require_external_loads = false;
+
+  // Handoff 110 — WARM START (both opt-in, DEFAULT OFF; with both false the driver
+  // is byte-for-byte identical to the pre-110 ladder — THE ONE RULE). Both cut
+  // ITERATIONS, never PEAK MEMORY: peak memory is the iteration-0 build transient
+  // and it recurs on every rung regardless (handoff 091), so warm starting does
+  // NOT shrink the transient and does NOT enable Fine-on-iPad — it only removes
+  // iterations from the middle of each solve.
+  //
+  // A warm start changes ONLY the INITIALIZATION, so the optimizer may converge to
+  // a DIFFERENT local optimum than a cold start — that is expected, not a bug. The
+  // accept gate (margin * knockdown >= margin_stop, plus the floor) certifies every
+  // variant EXACTLY as before: safety is initialization-independent and NO gate
+  // logic changes. Determinism is preserved (same inputs -> same outputs).
+
+  // (A) Rung-to-rung inheritance. The ladder walks HEAVIEST -> lightest; with this
+  // on, rung k+1 starts from rung k's CONVERGED density (rescaled to rung k+1's
+  // lighter target, clamped, one filter pass — see SimpOptions::initial_design)
+  // instead of uniform grey, so each lighter rung CARVES FURTHER from a good design
+  // rather than rediscovering it from scratch. Rung 0 still starts uniform (it has
+  // no predecessor) unless warm_start_coarse also seeds it. FALSE (default) => every
+  // rung starts uniform (byte-identical).
+  bool warm_start_inherit = false;
+
+  // (B) Coarse-to-fine cascade. BEFORE the ladder, solve the SAME effective problem
+  // (grid / BCs / loads / mask the driver actually solves on, after any design-box
+  // expansion) at HALF RESOLUTION — an ordinary simp_optimize at res/2, with its
+  // OWN guard rails — at the heaviest rung's volume fraction, then trilinear-
+  // UPSAMPLE the converged coarse density to the fine grid (warm_start.hpp) and seed
+  // the FIRST fine rung from it. The coarse grid uses the same align-2 halving as
+  // the multigrid hierarchy expects; its ~1/8-DOF solve is cheap but NOT free, and
+  // its iteration count is reported in MinimizePlasticResult::warm_start_coarse_
+  // iterations so every speedup claim can include it. FALSE (default) => no coarse
+  // pre-solve (byte-identical). COMPOSES with warm_start_inherit: the coarse solve
+  // seeds rung 0, then inheritance carries the warm start down the rest of the ladder.
+  bool warm_start_coarse = false;
 };
 
 // One ladder rung actually evaluated by the driver.
@@ -444,6 +479,13 @@ struct MinimizePlasticResult {
   // that need this grid BEFORE the solve returns (e.g. to seed a progressive
   // stream) get the identical grid from minimize_plastic_solved_grid().
   VoxelGrid solved_grid;
+
+  // Handoff 110 (Part B) — iterations spent in the coarse-to-fine PRE-SOLVE (the
+  // res/2 warm-start solve). 0 when warm_start_coarse is off (its default). These
+  // iterations run at ~1/8 the fine DOF count but are NOT free — count them toward
+  // the run's total cost in any speedup claim. The per-rung fine iterations are in
+  // evaluated[i].optimization.iterations as usual.
+  int warm_start_coarse_iterations = 0;
 };
 
 // Run the minimize_plastic pipeline over `grid` (an already-voxelized part with

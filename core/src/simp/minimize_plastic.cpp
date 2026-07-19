@@ -20,6 +20,7 @@
 
 #include "topopt/fea.hpp"
 #include "topopt/orient.hpp"
+#include "topopt/warm_start.hpp"
 
 namespace topopt {
 
@@ -391,6 +392,63 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // removes the reallocation entirely; the per-push assert guards the invariant.
   result.evaluated.reserve(ladder.size());
 
+  // Rung-vf helper (handoff 110): the SAME "fraction of Active envelope" the loop
+  // below computes for a rung, so the Part B coarse pre-solve targets rung 0 at the
+  // identical effective fraction. Off the box path this is exactly `vf`.
+  auto effective_vf = [&](double vf) {
+    if (part_relative && active_effective > 0.0) {
+      const double active_target = vf * part_solid - frozen_effective;
+      return std::min(1.0,
+                      std::max(params.density_min, active_target / active_effective));
+    }
+    return vf;
+  };
+
+  // --- Handoff 110 (Part B): coarse-to-fine cascade ------------------------
+  // The fine-grid warm-start seed handed to the NEXT rung's simp_optimize
+  // (SimpOptions::initial_design). EMPTY => that rung starts uniform. With
+  // warm_start_coarse we fill it now from a res/2 pre-solve so RUNG 0 starts warm;
+  // with warm_start_inherit each rung then re-seeds it from its own converged
+  // density (below). With BOTH features off it stays empty for the whole ladder and
+  // every simp_optimize call takes the uniform-start path — byte-for-byte identical
+  // to the pre-110 driver (THE ONE RULE). The coarse solve is an ORDINARY
+  // simp_optimize on the coarsened effective problem (grid/BCs/loads/mask), with its
+  // own guard rails; its cost is reported in result.warm_start_coarse_iterations so
+  // no speedup claim can hide it. Peak memory is unchanged: the coarse transient is
+  // smaller but the fine rungs still each pay the full iteration-0 build (091).
+  std::vector<double> warm_seed;
+  if (options.warm_start_coarse) {
+    const VoxelGrid Gc = coarsen_grid(G);
+    const std::vector<DirichletBC> Bc = coarsen_bcs(G, Gc, B);
+    const std::vector<NodalLoad> loads_c =
+        !options.external_loads.empty()
+            ? restrict_loads(G, Gc, loads)
+            : self_weight_loads(Gc, material.density_g_cm3, options.gravity,
+                                options.gravity_direction);
+    const DesignMask mask_c = coarsen_mask(G, Gc, mask);
+
+    SimpOptions opt_c = options.simp;
+    opt_c.updater = options.updater;
+    opt_c.volume_fraction = effective_vf(ladder[0]);
+    if (options.min_feature_mm > 0.0)
+      opt_c.filter_radius =
+          physical_filter_radius(options.min_feature_mm, Gc.spacing);
+    opt_c.cancel = options.cancel;   // a cancel during the pre-solve aborts it
+    opt_c.progress = nullptr;        // the pre-solve is not a reported rung
+    opt_c.keyframe = nullptr;
+    opt_c.keyframe_stride = 0;
+    opt_c.initial_design.clear();    // the coarse solve itself starts uniform
+
+    const SimpOptimizeResult coarse =
+        simp_optimize(Gc, params, Bc, loads_c, opt_c, mask_c);
+    result.warm_start_coarse_iterations = coarse.iterations;
+    // Upsample the converged coarse density to the fine grid to seed rung 0. A
+    // cancelled pre-solve leaves the seed empty (rung 0 then starts uniform and the
+    // ladder's own cancel poll stops it immediately).
+    if (!coarse.cancelled)
+      warm_seed = prolong_density(Gc, G, coarse.physical_density);
+  }
+
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
@@ -414,6 +472,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
     // set options.updater = OC to fall back. Overrides any simp.updater.
     opt.updater = options.updater;
+
+    // Handoff 110 — the warm-start seed for THIS rung (Part B coarse upsample for
+    // rung 0, Part A carry-over from the previous rung otherwise). EMPTY (the
+    // default with both features off) selects simp_optimize's uniform start, so
+    // the default path is byte-identical. The driver OWNS this field: any value on
+    // options.simp.initial_design is overridden here, exactly like progress/cancel.
+    opt.initial_design = warm_seed;
 
     // M7.rmin: derive the density-filter radius from a PHYSICAL length scale so
     // the filtered minimum member thickness is resolution independent. When
@@ -473,6 +538,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     }
 
     const std::vector<double>& rho = variant.optimization.physical_density;
+
+    // Handoff 110 (Part A) — carry this rung's CONVERGED density forward to seed
+    // the next (lighter) rung when inheritance is on; otherwise clear the seed so
+    // the next rung starts uniform (Part B only warm-starts rung 0). Copied HERE,
+    // before `variant` is moved into result.evaluated below, since `rho` aliases
+    // its density. With warm_start_inherit off this always clears to empty, so the
+    // next rung's opt.initial_design is empty — the uniform, byte-identical path.
+    warm_seed = options.warm_start_inherit ? rho : std::vector<double>();
 
     // Final penalized solve on the converged density to recover the
     // displacement field (simp_optimize returns compliance/density, not u).
