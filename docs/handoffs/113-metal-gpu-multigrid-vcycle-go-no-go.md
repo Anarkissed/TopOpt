@@ -1,4 +1,4 @@
-# 112 — Metal GPU multigrid V-cycle: STEP-0 roofline + go/no-go
+# 113 — Metal GPU multigrid V-cycle: STEP-0 roofline + go/no-go
 
 **Outcome: NO-GO (Blocked-stop before any Metal code, exactly as STEP 0 mandates).**
 No kernel was written. No `accel/` directory was created. No `/core/` source was
