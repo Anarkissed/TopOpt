@@ -452,6 +452,42 @@ struct SimpOptions {
   std::vector<ProjectionStage> projection;
   double projection_eta = 0.5;  // projection threshold, in (0, 1)
 
+  // Heaviside projection + beta continuation for the MMA path (handoff 114 —
+  // "finish the design"). This is the MMA-CORRECT analogue of the OC-locked
+  // `projection` schedule above: `projection` is Gate-V2's formulation and MMA
+  // rejects it (validate_updater_options / projection_supported); this is a
+  // SEPARATE opt-in that carries the projection chain-rule through the MMA
+  // subproblem instead of the OC ratio, so the gate that withholds `projection`
+  // from MMA is untouched.
+  //
+  // FALSE (the DEFAULT) => no MMA projection: the MMA loop is the unchanged
+  // M7.mma.1/M7.mma.4 grayscale formulation and every existing MMA caller /
+  // fixture is BYTE-FOR-BYTE identical (THE ONE RULE — the same opt-in
+  // discipline as min_feature_mm == 0). Only consulted when updater == MMA; a
+  // true value with updater == OC, with a non-empty `projection` schedule, or on
+  // the stress path is rejected (the two projection mechanisms are exclusive).
+  //
+  // TRUE => the MMA loop runs the smoothed Heaviside threshold (tanh, eta =
+  // projection_eta) on the FILTERED field, and the PROJECTED density rho_bar =
+  // heaviside_project(filter(x), beta, eta) drives BOTH the stiffness AND the
+  // volume constraint (the constraint sees what prints, not the filtered fog).
+  // The MMA compliance and volume sensitivities gain the projection chain-rule
+  // term drho_bar/drho_tilde BEFORE the filter transpose, exactly as the OC
+  // projected update chains it. beta advances by CONTINUATION: it starts at
+  // `mma_projection_beta0`, and whenever the objective plateaus (the SAME
+  // mma_objective_plateau detector the plain MMA path uses for termination —
+  // handoff 086 — evaluated over the CURRENT beta stage's compliance curve) it
+  // DOUBLES, capped at `mma_projection_beta_max`. Termination is a plateau at
+  // the final (capped) beta, composing with 086; `max_iterations` is the
+  // whole-run safety cap across all stages. On each beta advance the MMA moving-
+  // asymptote state is reset so the sharper stage re-converges cleanly. Wall-
+  // clock INCREASES (the continuation stages are extra iterations) — this buys
+  // design QUALITY and honesty (crisp near-0/1 density; printed_fraction ==
+  // volume_fraction), NOT speed.
+  bool mma_projection = false;
+  double mma_projection_beta0 = 1.0;      // starting sharpness (> 0), ~1-2
+  double mma_projection_beta_max = 32.0;  // continuation cap (>= beta0), ~32-64
+
   // Progress + cancellation (M7.0a). Both are optional and absent by default;
   // when absent the loop's behavior and per-iteration work are unchanged (the
   // only added cost is one null check per OC iteration).
@@ -515,9 +551,11 @@ struct SimpIteration {
 // Result of simp_optimize. `design`, `physical_density` and `compliance` are
 // mutually consistent: compliance == compliance(physical_density) (a final solve
 // on the converged field), and physical_density == filter(design) — or, when a
-// projection schedule is set (M6.3), physical_density ==
-// heaviside_project(filter(design), last stage's beta, projection_eta) and
-// `volume_fraction` is the achieved PROJECTED volume fraction.
+// projection schedule is set (M6.3) OR mma_projection is on (handoff 114),
+// physical_density == heaviside_project(filter(design), final beta,
+// projection_eta) and `volume_fraction` is the achieved PROJECTED volume
+// fraction (for mma_projection the final beta is the continuation's last, capped
+// beta).
 struct SimpOptimizeResult {
   std::vector<double> design;            // final design variable x (grid-indexed)
   std::vector<double> physical_density;  // final xPhys = filter(x) (grid-indexed)
