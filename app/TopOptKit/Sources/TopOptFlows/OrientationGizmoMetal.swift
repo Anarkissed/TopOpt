@@ -382,18 +382,28 @@ final class GizmoRenderer: NSObject, MTKViewDelegate {
                 tb -= db * 0.7;
                 if (tb < t + 0.05) break;
             }
+            // SEE-THROUGH glass (design-overhaul round 2, item 3): the FAR side must read
+            // through the near faces. So the back-face march contributes MORE — its bright
+            // edge glint is a real "you can see the far wall" cue, not a faint hint — and it
+            // also lifts alpha a touch there so the far silhouette shows through the near body.
+            float backEdge = 0.0;
             if (hitB && tb > t + 0.08) {
                 float3 nB = calcNormal(posB) * U.uRotInv;
                 float glint = pow(1.0 - abs(dot(nB, rdW)), 3.0);
-                col += float3(0.45, 0.55, 0.82) * glint * 0.30 * (1.0 - haze * 2.5);
+                backEdge = glint;
+                col += float3(0.52, 0.64, 0.92) * glint * 0.55 * (1.0 - haze * 2.0);
             }
 
             float id = globalId(i1, pos);
             float hov = (abs(id - U.uHoverId) < 0.5) ? U.uHoverAmt : 0.0;
             col += float3(0.40, 0.58, 1.0) * hov * 0.32;
 
-            float a = 0.44 + fres*0.42 + haze*0.5 + border*0.24 + (s1+s2)*0.5 + band*0.3 + hov*0.12;
-            a = clamp(a, 0.0, 0.97);
+            // Lower base opacity + gentler haze so the near faces are genuinely translucent
+            // (was base 0.44 / haze·0.5 / cap 0.97 — too milky to see through). The fresnel
+            // RIM stays strong so the silhouette + edges still read crisply.
+            float a = 0.22 + fres*0.44 + haze*0.30 + border*0.20
+                    + (s1+s2)*0.5 + band*0.3 + backEdge*0.18 + hov*0.12;
+            a = clamp(a, 0.0, 0.84);
             return float4(col * a, a);   // premultiplied for the transparent overlay
         }
         """

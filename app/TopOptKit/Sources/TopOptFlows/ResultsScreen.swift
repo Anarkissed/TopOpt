@@ -929,9 +929,12 @@ public struct ResultsScreen: View {
                 }
                 .buttonStyle(.plain)
 
-                Spacer(minLength: DS.Space.m)
-
+                // Export sits NEXT TO "See Original" (design-overhaul round 2, item 4), not
+                // pushed to the far right — the absolute top-right corner now belongs to the
+                // orientation gizmo alone.
                 exportButton
+
+                Spacer(minLength: DS.Space.m)
             }
             Spacer()
         }
@@ -1202,24 +1205,22 @@ public struct ResultsScreen: View {
 
     // MARK: - Top-right: orientation gizmo (ViewCube), below Export
 
-    /// The liquid-glass orientation widget, pinned TOP-RIGHT directly below the Export
-    /// button (gizmo-liquid-glass-reskin task, item 2). The right rail is clear in that
-    /// band: the viz chips + their left-opening drawers and the recommended-orientation
-    /// cube all sit at the BOTTOM-right (`vizRail` / `orientationCorner`, lifted by
-    /// `cubeClearance`), the savings tabs are bottom-left, and the media player is
-    /// bottom-centre — so a ~300pt gizmo below Export (≈y 96–396) never reaches them even
-    /// on the shortest supported iPad (landscape ~768pt tall; the bottom cluster starts
-    /// ≈y 480). Right-aligned to the Export button's `xl3` gutter.
+    /// The liquid-glass orientation widget, pinned to the ABSOLUTE top-right corner —
+    /// the SAME size and placement as the workspace (design-overhaul round 2, item 4: one
+    /// gizmo, one size, every screen; the old results-300 / below-Export placement is
+    /// dead). Export now sits next to "See Original" in the top bar, so the corner is
+    /// clear. The viz chips + recommended-orientation cube live BOTTOM-right, the savings
+    /// tabs bottom-left, the media player bottom-centre — none reach the top-right cube.
     private var orientationGizmo: some View {
-        VStack(alignment: .trailing) {
+        VStack {
             HStack {
                 Spacer()
                 OrientationGizmoView(camera: cameraModel)
             }
             Spacer()
         }
-        .padding(.top, 96)
-        .padding(.trailing, DS.Space.xl3)
+        .padding(.top, DS.Space.s)
+        .padding(.trailing, DS.Space.s)
     }
 
     // MARK: - Bottom-right: orientation cube + sheet
