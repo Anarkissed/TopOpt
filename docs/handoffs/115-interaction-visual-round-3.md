@@ -1,4 +1,4 @@
-# Handoff 114 — Interaction / visual round 3 (maintainer device punch list)
+# Handoff 115 — Interaction / visual round 3 (maintainer device punch list)
 
 Branch: `claude/interaction-visual-round-3-drvj1u`, on top of `main` (through #138). The open
 Metal-NO-GO PR (#139) takes the next number **113**, so this is **114**.
