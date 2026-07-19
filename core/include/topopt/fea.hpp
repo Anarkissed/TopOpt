@@ -539,6 +539,17 @@ bool fea_set_matfree_galerkin_block_cache(bool enable);
 // the assembled path are untouched and stay byte-identical (078's parity intact).
 bool fea_set_matfree_mixed_precision(bool enable);
 
+// Handoff 114 — READ-ONLY accessors for the matrix-free thread-global state, so a
+// run's VERSION RECORD (topopt-cli run_info.json) can echo the ACTUAL solver
+// configuration it ran under instead of inferring it. Pure reads: they never
+// change the state, so they are safe to call at any point and do not perturb any
+// solve. `fea_matfree_thread_count()` returns the RESOLVED count (the automatic
+// hardware-concurrency value when the setting is <= 0, i.e. what the apply will
+// actually use), matching mf_thread_count()'s resolution.
+int fea_matfree_thread_count();
+bool fea_matfree_galerkin_block_cache_enabled();
+bool fea_matfree_mixed_precision_enabled();
+
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
 // stress at its Hex8 element centroid, recovered from the displacement solution

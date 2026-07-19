@@ -367,6 +367,30 @@ constexpr bool projection_supported(SimpUpdater updater) {
   return updater == SimpUpdater::OC;
 }
 
+// Handoff 114 — per-iteration OBSERVABILITY record. A read-only snapshot of one
+// completed optimizer iteration, handed to SimpOptions::observe (below) once per
+// iteration alongside the lighter `progress` callback. It carries exactly the
+// per-row data the CLI iteration CSV needs: the objective, the achieved
+// continuous volume fraction, the plateau-detector verdict and the CG iteration
+// count of that step's penalized solve — none of which the (rung, iter, ...)
+// `progress` triple exposes. Populating it is pure observation: it never touches
+// the design, so a run with `observe` set is byte-for-byte identical to one
+// without (THE ONE RULE, observability edition; proven in the golden test).
+struct SimpIterationObservation {
+  int iteration = 0;             // 1-based, monotone across stages (== progress)
+  double compliance = 0.0;       // compliance of xPhys at the START of the step
+  double change = 0.0;           // max_e |x_new - x| this step produced
+  double volume_fraction = 0.0;  // achieved physical volume fraction after the step
+  int cg_iterations = 0;         // CG iters of this step's penalized solve (c.cg)
+  bool cg_used_multigrid = false;  // whether MG-CG ran vs Jacobi-CG fallback
+  // The MMA objective-plateau detector's verdict AT this iteration (the exact
+  // predicate stage_should_stop consults for MMA — see mma_objective_plateau).
+  // False for the OC / projected path (plateau termination is MMA-only) and until
+  // the detector has enough samples. The iteration where this first turns true is
+  // the iteration the run terminates on (plateau stop).
+  bool plateau = false;
+};
+
 struct SimpOptions {
   double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
   double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
@@ -483,6 +507,29 @@ struct SimpOptions {
   // or the optimization. Runs on the optimizing thread; must not throw.
   int keyframe_stride = 0;
   std::function<void(const std::vector<double>& analysis_density)> keyframe;
+
+  // Handoff 114 — per-iteration OBSERVABILITY hook. Invoked once per completed
+  // iteration, at the same point as `progress`, with the full
+  // SimpIterationObservation (compliance, change, achieved vf, CG iters, plateau
+  // verdict) for that step. Optional and absent by default; when absent the only
+  // added cost is one null check per iteration and the run is byte-identical. It
+  // is READ-ONLY — it never changes `x` or the optimization — so a captured run
+  // produces the identical design (the CLI iteration CSV is driven from here).
+  // Runs on the optimizing thread; must not throw.
+  std::function<void(const SimpIterationObservation&)> observe;
+
+  // Handoff 114 — per-iteration ANALYSIS-DENSITY hook, the raw-field sibling of
+  // `keyframe` for density SNAPSHOTS. When set it is invoked once per completed
+  // iteration with the current physical (analysis) density — the SAME field a
+  // mesh/keyframe is extracted from (filtered, projected, and mask-pins applied),
+  // grid-indexed. Unlike `keyframe` it hands the raw field (not a mesh) and fires
+  // every iteration; the consumer (the CLI snapshot writer) applies its own
+  // every-N cadence and per-job cap. Optional, absent by default: when absent the
+  // per-iteration mask-pin COPY is never built, so the default path is
+  // byte-identical AND pays no copy. Read-only (a pinned copy — `x` is untouched).
+  // Runs on the optimizing thread; must not throw.
+  std::function<void(int iteration, const std::vector<double>& analysis_density)>
+      density_observer;
 
   // Warm-start initialization (handoff 110). EMPTY (the DEFAULT) => the initial
   // design is uniform at `volume_fraction` on every design voxel — byte-for-byte

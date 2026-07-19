@@ -38,6 +38,7 @@ Endpoints:
 """
 
 import argparse
+import datetime
 import io
 import json
 import os
@@ -50,6 +51,18 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WORKER_VERSION = "1.0.0"
+
+# Handoff 114 — worker.log rotation/retention. The child's stdout + stderr are
+# tee'd, timestamped, to <workdir>/<job-id>/worker.log so a run's per-iteration
+# history is durable on the desktop even if the iPad client dropped (handoff 106
+# had to reconstruct a 10-hour run from three STL mtimes for lack of exactly this
+# file). A size cap with a single rotation (worker.log -> worker.log.1) bounds the
+# log to ~(1 + backups) * MAX bytes so a long run can't fill the disk. Both are
+# env-overridable. The CLI stdout is ~1 short line/iteration (~60 B), so a full
+# 4-rung production run is well under the default cap; the cap is the backstop.
+WORKER_LOG_MAX_BYTES = int(
+    os.environ.get("TOPOPT_WORKER_LOG_MAX_BYTES", str(8 * 1024 * 1024)))
+WORKER_LOG_BACKUPS = int(os.environ.get("TOPOPT_WORKER_LOG_BACKUPS", "1"))
 
 # SSE keepalive cadence (handoff 101). While a job runs, the events loop emits a
 # ": ping" comment every this-many seconds if no real event was ready, so the
@@ -179,33 +192,122 @@ def _float(v):
         return None
 
 
+class RotatingLog:
+    """Timestamped, size-capped tee of the CLI child's stdout/stderr to
+    <workdir>/<job-id>/worker.log (handoff 114). Each line is prefixed with an ISO
+    wall-clock timestamp and a `stdout`/`stderr`/`meta` stream tag, so a run's
+    per-iteration history is durable and directly readable on the desktop even
+    after the SSE client drops. When the file reaches `max_bytes` it is rotated to
+    `worker.log.1` (older backup dropped) and a fresh file started, bounding disk
+    to ~(1 + backups) * max_bytes. Thread-safe: the stdout loop and the stderr
+    pump thread both write. A failure to open/write the log NEVER breaks the run —
+    the log is best-effort observability, not part of the compute path.
+    """
+
+    def __init__(self, path, max_bytes=WORKER_LOG_MAX_BYTES,
+                 backups=WORKER_LOG_BACKUPS):
+        self.path = path
+        self.max_bytes = max_bytes
+        self.backups = backups
+        self._lock = threading.Lock()
+        self._size = 0
+        try:
+            self._f = open(path, "w", buffering=1)  # line-buffered
+        except OSError:
+            self._f = None
+
+    def write(self, stream, text):
+        if self._f is None:
+            return
+        ts = datetime.datetime.now().isoformat(timespec="milliseconds")
+        line = "%s %-6s %s\n" % (ts, stream, text.rstrip("\n"))
+        data = line.encode("utf-8", "replace")
+        with self._lock:
+            if self._f is None:
+                return
+            try:
+                self._rotate_if_needed(len(data))
+                self._f.write(line)
+                self._f.flush()
+                self._size += len(data)
+            except OSError:
+                pass
+
+    def _rotate_if_needed(self, incoming):
+        # Called under _lock. Rotate BEFORE writing a line that would exceed the cap.
+        if self.max_bytes <= 0 or self._size + incoming <= self.max_bytes:
+            return
+        try:
+            self._f.close()
+        except OSError:
+            pass
+        self._f = None
+        try:
+            if self.backups > 0:
+                bak = self.path + ".1"
+                if os.path.exists(bak):
+                    os.remove(bak)
+                os.replace(self.path, bak)
+        except OSError:
+            pass
+        # If reopen fails, self._f stays None and logging quietly stops.
+        try:
+            self._f = open(self.path, "w", buffering=1)
+        except OSError:
+            self._f = None
+        self._size = 0
+
+    def close(self):
+        with self._lock:
+            if self._f is not None:
+                try:
+                    self._f.close()
+                except OSError:
+                    pass
+                self._f = None
+
+
 def run_job_thread(job, cmd):
     """Launch topopt-cli, stream its stdout as events, and post a terminal event.
 
     stderr is captured separately so a failure (bad job, disk full, solver error)
-    surfaces its diagnostic in the `error` event instead of being lost.
+    surfaces its diagnostic in the `error` event instead of being lost. Both
+    stdout and stderr are ALSO tee'd, timestamped, to <workdir>/<job-id>/worker.log
+    (handoff 114) with rotation/retention so a long run can't fill the disk.
     """
+    log = RotatingLog(os.path.join(job.tmpdir, "worker.log"))
+    log.write("meta", "launch " + " ".join(cmd))
     try:
         job.proc = subprocess.Popen(
             cmd, cwd=job.tmpdir,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1)
     except OSError as e:
+        log.write("meta", f"failed to launch topopt-cli: {e}")
+        log.close()
         job.emit({"type": "error", "message": f"failed to launch topopt-cli: {e}"})
         return
 
     stderr_buf = []
-    stderr_t = threading.Thread(
-        target=lambda: stderr_buf.extend(job.proc.stderr.readlines()), daemon=True)
+
+    def _pump_stderr():
+        for line in job.proc.stderr:
+            stderr_buf.append(line)
+            log.write("stderr", line)
+
+    stderr_t = threading.Thread(target=_pump_stderr, daemon=True)
     stderr_t.start()
 
     for line in job.proc.stdout:
+        log.write("stdout", line)
         ev = parse_cli_line(line)
         if ev is not None:
             job.emit(ev)
 
     rc = job.proc.wait()
     stderr_t.join(timeout=5)
+    log.write("meta", f"exit rc={rc}")
+    log.close()
 
     if job.status == "cancelled":
         return  # a DELETE already posted the terminal event

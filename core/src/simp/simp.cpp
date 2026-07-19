@@ -533,6 +533,24 @@ bool stage_should_stop(const SimpOptions& options,
   return change < options.change_tol;
 }
 
+// Handoff 114 — the MMA objective-plateau detector's verdict at the current
+// iteration, for the per-iteration observability record (SimpIterationObservation
+// ::plateau). It is exactly the predicate stage_should_stop consults for MMA (so
+// the iteration it first returns true on is the plateau-stop iteration), and
+// false for the OC / projected path where plateau termination does not apply.
+// Read-only: builds a throwaway compliance curve from the recorded history.
+bool observe_plateau(const SimpOptions& options,
+                     const std::vector<SimpIteration>& history) {
+  if (options.updater != SimpUpdater::MMA || options.mma_plateau_window <= 0)
+    return false;
+  std::vector<double> curve;
+  curve.reserve(history.size());
+  for (const SimpIteration& h : history) curve.push_back(h.compliance);
+  return mma_objective_plateau(curve, options.mma_plateau_window,
+                               options.mma_plateau_tol,
+                               options.mma_plateau_min_drop);
+}
+
 // ---------------------------------------------------------------------------
 // MMA updater (ROADMAP M7.mma.1), Svanberg, "The method of moving asymptotes -
 // a new method for structural optimization", Int. J. Numer. Methods Eng. 24
@@ -930,14 +948,33 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       ++result.iterations;
       std::vector<double> xafter = filter.filter_density(x);
       if (st.project) project_solid(grid, xafter, st.beta, eta);
-      result.history.push_back({c.compliance, change, phys_volfrac(xafter)});
+      const double vf_now = phys_volfrac(xafter);
+      result.history.push_back({c.compliance, change, vf_now});
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
+      // Handoff 114 — per-iteration observability (read-only). The richer record
+      // (achieved vf, CG iters, plateau verdict) the CLI iteration CSV needs.
+      if (options.observe) {
+        SimpIterationObservation obs;
+        obs.iteration = result.iterations;
+        obs.compliance = c.compliance;
+        obs.change = change;
+        obs.volume_fraction = vf_now;
+        obs.cg_iterations = c.cg.iterations;
+        obs.cg_used_multigrid = c.cg.used_multigrid;
+        obs.plateau = observe_plateau(options, result.history);
+        options.observe(obs);
+      }
       // Playback keyframe: the analysis density as the shape evolves (read-only).
       if (options.keyframe && options.keyframe_stride > 0 &&
           (result.iterations == 1 ||
            result.iterations % options.keyframe_stride == 0))
         options.keyframe(xafter);
+      // Handoff 114 — density SNAPSHOT feed: the raw physical field every
+      // iteration (the consumer applies its own cadence). No mask on this
+      // overload, so xafter IS the physical density. Read-only.
+      if (options.density_observer)
+        options.density_observer(result.iterations, xafter);
 
       if (stage_should_stop(options, result.history, change)) {
         stage_converged = true;
@@ -1455,10 +1492,24 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       ++result.iterations;
       std::vector<double> xafter = filter.filter_density(x);
       if (st.project) project_active(eff, xafter, st.beta, eta);
-      result.history.push_back(
-          {c.compliance, change, active_volfrac(xafter)});
+      const double vf_now = active_volfrac(xafter);
+      result.history.push_back({c.compliance, change, vf_now});
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
+      // Handoff 114 — per-iteration observability (read-only), as in the
+      // unconstrained overload. `active_volfrac` is the achieved fraction over
+      // the Active voxels — the same value recorded in history.
+      if (options.observe) {
+        SimpIterationObservation obs;
+        obs.iteration = result.iterations;
+        obs.compliance = c.compliance;
+        obs.change = change;
+        obs.volume_fraction = vf_now;
+        obs.cg_iterations = c.cg.iterations;
+        obs.cg_used_multigrid = c.cg.used_multigrid;
+        obs.plateau = observe_plateau(options, result.history);
+        options.observe(obs);
+      }
       // Playback keyframe: the printed-shape density (mask pins applied) as it
       // evolves. Read-only — a pinned COPY, so `x` and the optimization are
       // untouched.
@@ -1468,6 +1519,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         std::vector<double> kf = xafter;
         apply_mask_pins(eff, kf);
         options.keyframe(kf);
+      }
+      // Handoff 114 — density SNAPSHOT feed: the pinned physical field (the
+      // printed shape) every iteration. The pinned COPY is built ONLY when a
+      // consumer is attached, so the default path pays no copy. Read-only.
+      if (options.density_observer) {
+        std::vector<double> pd = xafter;
+        apply_mask_pins(eff, pd);
+        options.density_observer(result.iterations, pd);
       }
 
       if (stage_should_stop(options, result.history, change)) {

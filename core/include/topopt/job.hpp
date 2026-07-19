@@ -168,6 +168,35 @@ JobDescription parse_job(const std::string& json_text);
 // file cannot be opened.
 JobDescription load_job_file(const std::string& path);
 
+// Handoff 114 — per-run OBSERVABILITY configuration for run_job. Only consulted
+// when `emit_progress` is true (the topopt-cli path); in-process callers leave it
+// default and write nothing, so their runs are byte-identical. Observability
+// artifacts land in `out_dir` (so they are zipped/served alongside the meshes):
+//   run_info.json     the version + config record (always, on the CLI path)
+//   iterations.csv    the per-iteration CSV (default ON; iteration_csv disables)
+//   snapshots/*.f16   density snapshots (opt-in; default OFF — disk cost is real)
+// Capture is a pure OBSERVER: the design bytes are identical whatever is enabled.
+struct RunObservability {
+  // Per-iteration CSV. DEFAULT ON for CLI runs — it is observability, not solver
+  // behavior, and ~80 KB for a full production run; set false (--no-iteration-csv)
+  // to disable.
+  bool iteration_csv = true;
+
+  // Density snapshots. DEFAULT OFF — one float16 snapshot of the real 5.4M-voxel
+  // domain is ~10.8 MB, and a 500-iter run at every=10 is ~550 MB. Opt in with
+  // --snapshots. Written every `snapshot_every` iterations, plus every rung
+  // boundary + terminal; the per-job `snapshot_cap` bounds disk by evicting the
+  // oldest per-iteration snapshot (rung-boundary snapshots are never evicted).
+  bool density_snapshots = false;
+  int snapshot_every = 10;
+  int snapshot_cap = 40;  // ~430 MB worst case at 10.8 MB/snapshot
+
+  // The core build fingerprint (topopt-cli --version fingerprint), stamped into
+  // run_info.json so the era is provable (the 113 lesson). The CLI passes its
+  // compiled TOPOPT_BUILD_FINGERPRINT; other callers may leave it empty.
+  std::string fingerprint = "unknown";
+};
+
 // The outcome of run_job, exposing enough for callers (the CLI main and the
 // integration test) to summarize and verify the run without re-reading files.
 struct RunJobResult {
@@ -177,6 +206,11 @@ struct RunJobResult {
   std::string report_path;             // <out_dir>/<output.report>
   std::string report_json;             // the bytes written to report_path
   std::vector<std::string> mesh_paths; // one exported mesh per accepted variant
+  // Handoff 114 — observability artifacts written to out_dir (empty when not
+  // written, e.g. in-process callers with emit_progress=false).
+  std::string run_info_path;           // <out_dir>/run_info.json (CLI path)
+  std::string iteration_csv_path;      // <out_dir>/iterations.csv (when enabled)
+  std::size_t snapshot_count = 0;      // density snapshots written (when enabled)
 };
 
 // Run one job end-to-end (§5): import the STEP model (relative `job.model`
@@ -203,9 +237,14 @@ struct RunJobResult {
 //                                                 (once per accepted rung)
 // These lines are OBSERVERS: they do not change the design, the report, or the
 // exported meshes (identical bytes to the batch path), so determinism holds.
+// When `emit_progress` is true, run_job ALSO writes observability artifacts to
+// `out_dir` per `obs` (handoff 114): run_info.json (always), the per-iteration
+// iterations.csv (default ON), and opt-in density snapshots. These are pure
+// observers — the report/mesh bytes are unchanged — so determinism holds.
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
                      const MaterialLibrary& materials,
-                     const SettingsRules& rules, bool emit_progress = false);
+                     const SettingsRules& rules, bool emit_progress = false,
+                     const RunObservability& obs = RunObservability{});
 
 }  // namespace topopt

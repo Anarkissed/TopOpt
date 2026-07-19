@@ -437,6 +437,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     opt_c.progress = nullptr;        // the pre-solve is not a reported rung
     opt_c.keyframe = nullptr;
     opt_c.keyframe_stride = 0;
+    opt_c.observe = nullptr;         // handoff 114: not a reported rung, not observed
+    opt_c.density_observer = nullptr;
     opt_c.initial_design.clear();    // the coarse solve itself starts uniform
 
     const SimpOptimizeResult coarse =
@@ -503,6 +505,36 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       };
     }
 
+    // Handoff 114 — per-iteration observability forwarding. `observe` carries the
+    // rich per-row record (CSV) with the rung index attached; `density_observer`
+    // feeds the raw per-iteration physical field to the snapshot writer as a
+    // non-boundary event. Both wired only when the caller attached the driver-level
+    // sink, so the default path leaves opt.observe / opt.density_observer null and
+    // is byte-identical. `G` (the solved grid) outlives the synchronous solve.
+    opt.observe = nullptr;
+    if (options.on_iteration) {
+      const std::size_t rung_count = ladder.size();
+      opt.observe = [&options, rung, rung_count](
+                        const SimpIterationObservation& obs) {
+        options.on_iteration(rung, rung_count, obs);
+      };
+    }
+    opt.density_observer = nullptr;
+    if (options.on_density_snapshot) {
+      const std::size_t rung_count = ladder.size();
+      opt.density_observer = [&options, &G, rung, rung_count](
+                                 int iteration, const std::vector<double>& d) {
+        DensitySnapshotEvent ev;
+        ev.rung_index = rung;
+        ev.rung_count = rung_count;
+        ev.iteration = iteration;
+        ev.boundary = false;
+        ev.density = &d;
+        ev.grid = &G;
+        options.on_density_snapshot(ev);
+      };
+    }
+
     MinimizePlasticVariant variant;
     variant.requested_volume_fraction = vf;
 
@@ -546,6 +578,21 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // its density. With warm_start_inherit off this always clears to empty, so the
     // next rung's opt.initial_design is empty — the uniform, byte-identical path.
     warm_seed = options.warm_start_inherit ? rho : std::vector<double>();
+
+    // Handoff 114 — rung-BOUNDARY density snapshot: the converged physical field
+    // of this (non-cancelled) rung. `rho` already carries the mask pins (it is
+    // variant.optimization.physical_density). The last boundary emitted across the
+    // ladder is the terminal design. Only fired when a sink is attached.
+    if (options.on_density_snapshot) {
+      DensitySnapshotEvent ev;
+      ev.rung_index = rung;
+      ev.rung_count = ladder.size();
+      ev.iteration = variant.optimization.iterations;
+      ev.boundary = true;
+      ev.density = &rho;
+      ev.grid = &G;
+      options.on_density_snapshot(ev);
+    }
 
     // Final penalized solve on the converged density to recover the
     // displacement field (simp_optimize returns compliance/density, not u).

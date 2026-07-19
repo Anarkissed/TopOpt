@@ -35,6 +35,32 @@ Options (all have env fallbacks): `--cli`/`TOPOPT_CLI`, `--workdir`/
 `--host`, `--port`. `--materials`/`--rules` are optional — omit them to use the
 values compiled into `topopt-cli`.
 
+## Per-job artifacts on disk (handoff 114)
+
+Each job runs in `<workdir>/<job-id>/` and leaves a durable record there, so a
+run's history survives even if the iPad client dropped (handoff 106 had to
+reconstruct a 10-hour run from three STL mtimes for lack of this):
+
+- **`worker.log`** — the child's stdout **and** stderr, tee'd here **timestamped**
+  (ISO wall-clock + a `stdout`/`stderr`/`meta` tag per line). It is **rotated**
+  when it reaches `TOPOPT_WORKER_LOG_MAX_BYTES` (default **8 MB**) to
+  `worker.log.1` (`TOPOPT_WORKER_LOG_BACKUPS` backups, default 1), so the log is
+  bounded to ~`(1 + backups) × MAX` bytes and a long run can't fill the disk. CLI
+  stdout is ~1 short line/iteration, so a full production run is far under the cap;
+  the cap is the backstop.
+- **`out/run_info.json`** — the CLI's version + config record (fingerprint,
+  solver, warm/mixed-precision/thread flags, ladder, …); never reconstruct "which
+  build ran this" from inference again.
+- **`out/iterations.csv`** — the per-iteration trace (rung, iter, wall_ms,
+  compliance, achieved vf, plateau state, CG iters). Default ON; the CLI's
+  `--no-iteration-csv` disables it. ~80 KB for a full run.
+- **`out/snapshots/*.f16`** — opt-in float16 density snapshots (CLI `--snapshots`;
+  **default OFF** — ~10.8 MB each at 5.4M voxels). Bounded by a per-job cap.
+
+`run_info.json`, `iterations.csv` and `snapshots/` live in `out/`, so they are
+included in the `/jobs/{id}/result` zip and fetchable via `/jobs/{id}/files/{name}`.
+`worker.log` is in the job dir (not `out/`), so it stays on the desktop.
+
 ## Security
 
 **No authentication.** This is a single-user tool for a trusted LAN. Bind it to

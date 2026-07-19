@@ -779,6 +779,15 @@ bool fea_set_matfree_mixed_precision(bool enable) {
   return fea_detail::mf_set_mixed_precision(enable);
 }
 
+// Handoff 114 — read-only accessors for the run version record. Pure reads.
+int fea_matfree_thread_count() { return fea_detail::mf_thread_count(); }
+bool fea_matfree_galerkin_block_cache_enabled() {
+  return fea_detail::mf_galerkin_block_cache_enabled();
+}
+bool fea_matfree_mixed_precision_enabled() {
+  return fea_detail::mf_mixed_precision_enabled();
+}
+
 FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                  double poisson,
                                  const std::vector<DirichletBC>& bcs,

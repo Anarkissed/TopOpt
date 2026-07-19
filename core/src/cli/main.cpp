@@ -13,6 +13,7 @@
 // 2 usage error.
 
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <string>
 
@@ -36,7 +37,16 @@ int usage(const char* argv0) {
   std::fprintf(stderr,
                "usage: %s run <job.json> [--out DIR] [--materials PATH] "
                "[--rules PATH]\n"
-               "       %s --version\n",
+               "              [--no-iteration-csv] [--snapshots] "
+               "[--snapshot-every N] [--snapshot-cap N]\n"
+               "       %s --version\n"
+               "\n"
+               "Observability (handoff 114), written to --out:\n"
+               "  run_info.json      version + config record (always)\n"
+               "  iterations.csv     per-iteration trace (default ON; "
+               "--no-iteration-csv disables)\n"
+               "  snapshots/*.f16    float16 density snapshots (opt-in "
+               "--snapshots; ~10.8 MB each at 5.4M voxels)\n",
                argv0, argv0);
   return 2;
 }
@@ -63,15 +73,34 @@ int main(int argc, char** argv) {
   std::string out_dir = ".";
   std::string materials_path = TOPOPT_CLI_DEFAULT_MATERIALS;
   std::string rules_path = TOPOPT_CLI_DEFAULT_RULES;
+  // Handoff 114 — observability config. The build fingerprint (this binary's
+  // TOPOPT_BUILD_FINGERPRINT) is stamped into run_info.json so the era is provable.
+  topopt::RunObservability obs;
+  obs.fingerprint = TOPOPT_BUILD_FINGERPRINT;
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (i + 1 >= argc) return usage(argv[0]);  // every flag takes a value
+    // Value-less flags first.
+    if (arg == "--no-iteration-csv") {
+      obs.iteration_csv = false;
+      continue;
+    }
+    if (arg == "--snapshots") {
+      obs.density_snapshots = true;
+      continue;
+    }
+    // Every remaining flag takes a value.
+    if (i + 1 >= argc) return usage(argv[0]);
     if (arg == "--out") {
       out_dir = argv[++i];
     } else if (arg == "--materials") {
       materials_path = argv[++i];
     } else if (arg == "--rules") {
       rules_path = argv[++i];
+    } else if (arg == "--snapshot-every") {
+      obs.snapshot_every = std::atoi(argv[++i]);
+      if (obs.snapshot_every < 1) return usage(argv[0]);
+    } else if (arg == "--snapshot-cap") {
+      obs.snapshot_cap = std::atoi(argv[++i]);
     } else {
       return usage(argv[0]);
     }
@@ -87,8 +116,9 @@ int main(int argc, char** argv) {
     // emit_progress = true: stream PROGRESS/VARIANT checkpoint lines to stdout and
     // export each accepted variant as it completes, so a wrapper (the LAN worker,
     // handoff 093) can forward live progress + progressive artifacts.
-    const topopt::RunJobResult result = topopt::run_job(
-        job, dirname_of(job_path), out_dir, materials, rules, /*emit_progress=*/true);
+    const topopt::RunJobResult result =
+        topopt::run_job(job, dirname_of(job_path), out_dir, materials, rules,
+                        /*emit_progress=*/true, obs);
 
     std::printf("model: %s (%d B-rep faces, %zu fixture faces matched)\n",
                 job.model.c_str(), result.model.face_count,
@@ -107,6 +137,14 @@ int main(int argc, char** argv) {
     std::printf("report: %s\n", result.report_path.c_str());
     for (const std::string& p : result.mesh_paths)
       std::printf("mesh: %s\n", p.c_str());
+    // Handoff 114 — surface the observability artifacts (forwarded to the worker
+    // log / SSE as plain log lines; they do not affect the SSE protocol).
+    if (!result.run_info_path.empty())
+      std::printf("run_info: %s\n", result.run_info_path.c_str());
+    if (!result.iteration_csv_path.empty())
+      std::printf("iterations: %s\n", result.iteration_csv_path.c_str());
+    if (result.snapshot_count > 0)
+      std::printf("snapshots: %zu written\n", result.snapshot_count);
     return 0;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
