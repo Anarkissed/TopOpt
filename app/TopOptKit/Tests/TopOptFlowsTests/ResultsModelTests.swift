@@ -45,6 +45,28 @@ final class ResultsModelTests: XCTestCase {
         XCTAssertEqual(m.tabs[0].subLabel(active: false), "199 g · plastic")
     }
 
+    /// Display invariant (handoff 111): a variant whose mass is 0 (unknown — e.g. a
+    /// pre-108 legacy blob that lost its provenance) renders "n/a", never "0.0 g".
+    /// Zero grams is not an honest mass for a physical part.
+    func testZeroMassRendersNAneverZeroGrams() {
+        let m = ResultsModel(projectName: "P", outcome: outcome([variant(vf: 0.5, mass: 0)]))
+        let vm = m.tabs[0]
+        XCTAssertEqual(vm.massLabel, "n/a", "0 g → n/a, not a dishonest 0.0 g")
+        // No chip / caption anywhere in the view model may spell "0.0 g".
+        let strings = [vm.massLabel, vm.subLabel(active: true), vm.subLabel(active: false),
+                       vm.savingsLabel, vm.supportLabel, vm.orientationSummary, vm.minFeatureWarning]
+        for s in strings {
+            XCTAssertFalse(s.contains("0.0 g"), "no readout may show 0.0 g — got: \(s)")
+        }
+    }
+
+    /// The invariant does not over-fire: a real positive mass still formats normally.
+    func testPositiveMassStillFormats() {
+        XCTAssertEqual(ResultsModel.massLabel(41.3), "41 g")
+        XCTAssertEqual(ResultsModel.massLabel(4.2), "4.2 g")
+        XCTAssertEqual(ResultsModel.massLabel(0), "n/a")
+    }
+
     // MARK: - "Keep clear" honesty notes (handoff 100)
 
     func testClearanceNotesFormatting() {

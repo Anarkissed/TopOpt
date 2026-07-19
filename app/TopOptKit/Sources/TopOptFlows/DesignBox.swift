@@ -19,6 +19,7 @@
 // without this feature (dom-core's opt-in guarantee).
 
 import Foundation
+import CoreGraphics
 import simd
 import TopOptKit
 
@@ -240,6 +241,25 @@ public struct DesignBoxDragSession: Equatable, Sendable {
             self.target = target
             self.kind = kind
         }
+
+        /// A STABLE total order over every handle, so the single-gesture hit-test
+        /// (handoff 111) breaks an exact-distance tie the SAME way every frame,
+        /// independent of the order candidates are supplied in: the design box before
+        /// any keep-out (by index), the move handle before the faces, faces by axis
+        /// (0→2) then min-before-max. Two handles never share a rank.
+        public var tieBreakRank: Int {
+            let targetRank: Int
+            switch target {
+            case .designBox: targetRank = 0
+            case .keepOut(let i): targetRank = 1 + Swift.max(0, i)
+            }
+            let kindRank: Int
+            switch kind {
+            case .move: kindRank = 0
+            case .face(let axis, let isMax): kindRank = 1 + axis * 2 + (isMax ? 1 : 0)
+            }
+            return targetRank * 100 + kindRank
+        }
     }
 
     private var owner: HandleID?
@@ -304,5 +324,82 @@ public enum DesignBoxDrag {
         let along = Float(drag.dx) * ux + Float(drag.dy) * uy  // drag component along it (points)
         let screenPerWorld = screenLen / probe                 // points per mm
         return along / screenPerWorld
+    }
+}
+
+/// The single-gesture hit-test that replaces the per-handle gestures (handoff 111 —
+/// the design-box drag redesign). BEFORE 111 every box/keep-out handle carried its
+/// OWN `DragGesture`; when the ~44 pt targets overlapped (a small or edge-on box)
+/// a single touch drove two gestures at once and the box flipped between competing
+/// poses (teleport + "ghost duplicate boxes"). Now ONE gesture on the overlay hit-
+/// tests the touch-down point HERE, picking exactly one handle, so overlapping
+/// handles are impossible by construction — there is only ever one gesture and one
+/// chosen handle. Pure value math (points in one coordinate space), unit-tested; the
+/// SwiftUI gesture that calls it is device QA.
+public enum DesignBoxHitTest {
+    /// One candidate handle for the chooser: its identity and where it sits on screen
+    /// (points, in the overlay's coordinate space — the same space the touch is read
+    /// in, so the distance is a straight subtraction).
+    public struct Target: Equatable, Sendable {
+        public let handle: DesignBoxDragSession.HandleID
+        public let screen: CGPoint
+        public init(handle: DesignBoxDragSession.HandleID, screen: CGPoint) {
+            self.handle = handle
+            self.screen = screen
+        }
+    }
+
+    /// The handle whose screen point is NEAREST `point`, but only if within `radius`
+    /// points; nil when the touch landed outside every handle's grab circle (so the
+    /// caller drops the drag and the touch falls through to the camera). An exact
+    /// distance tie is broken by `HandleID.tieBreakRank` — deterministic and
+    /// independent of the order `targets` is supplied in.
+    public static func choose(at point: CGPoint, among targets: [Target],
+                              radius: CGFloat) -> DesignBoxDragSession.HandleID? {
+        let r2 = radius * radius
+        var best: (handle: DesignBoxDragSession.HandleID, d2: CGFloat)?
+        for t in targets {
+            let dx = t.screen.x - point.x, dy = t.screen.y - point.y
+            let d2 = dx * dx + dy * dy
+            guard d2 <= r2 else { continue }
+            if let b = best {
+                if d2 < b.d2 || (d2 == b.d2 && t.handle.tieBreakRank < b.handle.tieBreakRank) {
+                    best = (t.handle, d2)
+                }
+            } else {
+                best = (t.handle, d2)
+            }
+        }
+        return best?.handle
+    }
+}
+
+/// Builds the CANONICAL handle set for a design box + keep-outs, each projected to a
+/// screen point (handoff 111). `settledWorld` rotates a model point into its settled
+/// world pose; `project` turns a world point into an overlay point (nil = off-screen /
+/// behind the camera → the handle is skipped). Order matches `HandleID.tieBreakRank`
+/// so the on-screen candidates and the tie order agree. Pure (closures carry all the
+/// view/camera state), so the overlay's hit-set is unit-tested headlessly.
+public enum DesignBoxHandles {
+    public static func candidates(box: DesignBoxBounds?, keepOuts: [DesignBoxBounds],
+                                  settledWorld: (SIMD3<Float>) -> SIMD3<Float>,
+                                  project: (SIMD3<Float>) -> CGPoint?) -> [DesignBoxHitTest.Target] {
+        var out: [DesignBoxHitTest.Target] = []
+        func add(_ handle: DesignBoxDragSession.HandleID, _ modelPoint: SIMD3<Float>) {
+            if let pt = project(settledWorld(modelPoint)) {
+                out.append(DesignBoxHitTest.Target(handle: handle, screen: pt))
+            }
+        }
+        func addBox(_ b: DesignBoxBounds, target: DesignBoxDragSession.HandleID.Target) {
+            add(DesignBoxDragSession.HandleID(target: target, kind: .move), b.center)
+            for i in 0..<6 {
+                let axis = i / 2, isMax = (i % 2 == 1)
+                add(DesignBoxDragSession.HandleID(target: target, kind: .face(axis: axis, isMax: isMax)),
+                    b.faceCenter(axis: axis, isMax: isMax))
+            }
+        }
+        if let box { addBox(box, target: .designBox) }
+        for (idx, ko) in keepOuts.enumerated() { addBox(ko, target: .keepOut(idx)) }
+        return out
     }
 }

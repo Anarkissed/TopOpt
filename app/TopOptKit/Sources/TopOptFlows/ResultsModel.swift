@@ -722,6 +722,13 @@ public final class ResultsModel: ObservableObject {
     /// The n/a placeholder for a field a remote run does not compute over the wire.
     public static let remoteNA = "n/a — computed on Mac"
 
+    /// The n/a placeholder for a mass we do NOT have (handoff 111). Zero grams is not
+    /// an honest mass for a physical part — it means "not computed / unknown" (e.g. a
+    /// pre-108 legacy outcome that lost its provenance), so it renders "n/a" WITHOUT
+    /// inventing a "computed on Mac" claim the data can't support. A remote run whose
+    /// mass is genuinely off-device uses `remoteNA` instead (that flag is trustworthy).
+    public static let massNA = "n/a"
+
     /// A one-line explanation shown on the results screen for a remote run, so the
     /// missing stress/flex/mass/playback readouts read as an honest gap, not a bug.
     /// nil for a local run.
@@ -1797,6 +1804,10 @@ public final class ResultsModel: ObservableObject {
     }
 
     static func massLabel(_ g: Double) -> String {
+        // Display invariant (handoff 111): a zero / non-positive mass is unknown, not
+        // "0.0 g" — a physical part never weighs zero. Render n/a instead so no chip,
+        // caption or export ever shows a dishonest 0.0 g.
+        guard g > 0 else { return massNA }
         if g >= 1000 { return String(format: "%.2f kg", g / 1000) }
         if g >= 10 { return String(format: "%.0f g", g) }
         return String(format: "%.1f g", g)

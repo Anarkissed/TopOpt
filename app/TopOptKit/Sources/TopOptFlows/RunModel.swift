@@ -174,6 +174,145 @@ public struct RunProgress: Equatable, Sendable {
     }
 }
 
+/// One TIMESTAMPED progress observation (handoff 111 — the honest ETA). The bridge
+/// callback carries (rung, rungCount, iteration); `time` is when it was OBSERVED, in
+/// seconds on any steady clock (production stamps `Date().timeIntervalSinceReferenceDate`;
+/// the pure tests pass synthetic seconds). The ETA is derived from the SPACING of these
+/// timestamps rather than accumulated wall-clock, so it survives a reconnect (the gap
+/// is one measured interval, not double-counted elapsed time).
+public struct RunProgressSample: Equatable, Sendable {
+    public let time: TimeInterval
+    public let rung: Int
+    public let rungCount: Int
+    public let iteration: Int
+    public init(time: TimeInterval, rung: Int, rungCount: Int, iteration: Int) {
+        self.time = time
+        self.rungCount = Swift.max(1, rungCount)
+        self.rung = Swift.min(Swift.max(0, rung), self.rungCount - 1)
+        self.iteration = Swift.max(0, iteration)
+    }
+}
+
+/// An honest remaining-time estimate (handoff 111): a magnitude, the BOUND it carries
+/// (an upper bound before any rung finishes, else a live approximation), the smoothed
+/// per-iteration rate it was built from, and the timestamp it was computed AT — so the
+/// view ticks it down between events and dims it once the stream goes stale.
+public struct RunETA: Equatable, Sendable {
+    public enum Bound: Equatable, Sendable {
+        /// Built on the iteration CAP (no rung has finished yet) → a true UPPER bound;
+        /// the view labels it "≤ …". Plateau termination usually fires well before the
+        /// cap, so the real time lands under this.
+        case upper
+        /// Built on OBSERVED iterations-per-rung (≥1 rung done) → a live approximation;
+        /// the view labels it "~ …" and it updates each rung.
+        case approximate
+    }
+    public let secondsRemaining: TimeInterval
+    public let bound: Bound
+    public let secondsPerIteration: TimeInterval
+    public let asOf: TimeInterval
+    public init(secondsRemaining: TimeInterval, bound: Bound,
+                secondsPerIteration: TimeInterval, asOf: TimeInterval) {
+        self.secondsRemaining = Swift.max(0, secondsRemaining)
+        self.bound = bound
+        self.secondsPerIteration = secondsPerIteration
+        self.asOf = asOf
+    }
+}
+
+/// The pure ETA estimator (handoff 111). Folds a sequence of timestamped progress
+/// samples into a smoothed per-iteration rate (EMA) and a remaining-iteration count,
+/// then multiplies. Two regimes:
+///   * BEFORE the first rung finishes, the per-rung length is unknown, so it uses the
+///     iteration CAP: `remainingIters = (cap − doneInRung) + cap × rungsLeft` — an
+///     UPPER bound, labelled ≤ (plateau usually terminates a rung early).
+///   * ONCE ≥1 rung has finished, it swaps the cap for the running MEAN of observed
+///     iterations-per-rung — a live approximation, labelled ~ and refined each rung.
+/// The rate EMA folds WITHIN-rung deltas only (a rung boundary spans a full FEA solve,
+/// not one iteration) and rejects extreme outliers (a reconnect replay's giant Δtime),
+/// so a dropped connection can't corrupt it. Pure + `Equatable`, so it is unit-tested by
+/// feeding synthetic sequences and asserting the magnitude/bound transitions.
+public struct RunETAEstimator: Equatable, Sendable {
+    /// The core's per-rung SIMP safety cap (handoff 086: iter 100–145 typical, cap 200).
+    /// Using the cap makes the pre-first-rung estimate a genuine upper bound.
+    public static let iterationCap = 200
+    /// EMA weight on the newest per-iteration sample — smooths jitter while still
+    /// following a rung that genuinely runs slower or faster.
+    public static let emaWeight = 0.3
+    /// Warm-up: the per-iteration samples required before an ETA is offered (~5
+    /// iterations); below this the rate is too noisy to project honestly.
+    public static let warmupSamples = 4
+    /// Reject a per-iteration sample whose rate exceeds this multiple of the running
+    /// EMA — a reconnect gap (huge Δtime over a couple of iterations) is an outlier,
+    /// not a real slowdown, and must not pull the estimate.
+    public static let outlierFactor = 6.0
+
+    private var ema: Double?
+    private var sampleCount = 0
+    private var last: RunProgressSample?
+    private var completedRungIters: [Int] = []
+    private var currentRungMaxIter = 0
+
+    public init() {}
+
+    /// Fold one sample into the running estimate.
+    public mutating func ingest(_ s: RunProgressSample) {
+        defer { last = s }
+        guard let prev = last else {          // first sample: nothing to measure yet
+            currentRungMaxIter = s.iteration
+            return
+        }
+        guard s.time >= prev.time else { return }   // drop a stale / replayed event
+        if s.rung != prev.rung {
+            // Rung boundary: bank the rung that just finished (its final iteration
+            // count) and start the new one. No per-iteration sample here — the interval
+            // spans a full solve, not one iteration.
+            if s.rung > prev.rung { completedRungIters.append(currentRungMaxIter) }
+            currentRungMaxIter = s.iteration
+        } else {
+            currentRungMaxIter = Swift.max(currentRungMaxIter, s.iteration)
+            let dIter = s.iteration - prev.iteration
+            let dTime = s.time - prev.time
+            if dIter > 0, dTime > 0 {
+                let perIter = dTime / Double(dIter)
+                if let e = ema, perIter > Self.outlierFactor * e {
+                    // reconnect-sized outlier → ignore for the rate (but the sample's
+                    // rung/iteration bookkeeping above still stands)
+                } else {
+                    ema = ema.map { Self.emaWeight * perIter + (1 - Self.emaWeight) * $0 } ?? perIter
+                    sampleCount += 1
+                }
+            }
+        }
+    }
+
+    /// The current estimate, or nil before warm-up (or with no rate yet).
+    public var eta: RunETA? {
+        guard let ema, let cur = last, sampleCount >= Self.warmupSamples else { return nil }
+        let perRung: Double
+        let bound: RunETA.Bound
+        if completedRungIters.isEmpty {
+            perRung = Double(Self.iterationCap)
+            bound = .upper
+        } else {
+            perRung = Double(completedRungIters.reduce(0, +)) / Double(completedRungIters.count)
+            bound = .approximate
+        }
+        let rungsLeft = Swift.max(0, cur.rungCount - cur.rung - 1)
+        let remainingInCurrent = Swift.max(0, perRung - Double(cur.iteration))
+        let remainingIters = remainingInCurrent + perRung * Double(rungsLeft)
+        return RunETA(secondsRemaining: ema * remainingIters, bound: bound,
+                      secondsPerIteration: ema, asOf: cur.time)
+    }
+
+    /// Fold an entire sequence — the pure entry point the tests drive.
+    public static func estimate(from samples: [RunProgressSample]) -> RunETA? {
+        var e = RunETAEstimator()
+        for s in samples { e.ingest(s) }
+        return e.eta
+    }
+}
+
 /// A run failure the design renders as a sheet (ROADMAP M7.7: "not alerts").
 public enum RunFailure: Equatable, Sendable {
     /// The core threw — e.g. CG non-convergence / singular system (the M3.1 guard).
@@ -453,6 +592,16 @@ public final class RunModel: ObservableObject {
     /// surfaces the cue for a remote run, via `remoteFreshnessNote`).
     @Published public private(set) var lastProgressAt: Date?
 
+    /// The live remaining-time estimate (handoff 111), recomputed on every progress
+    /// tick from the per-iteration event stream (`RunETAEstimator`). nil until warm-up.
+    /// PRESENTATION-ONLY, like `startedAt` — the readout ticks it down between events
+    /// and dims it when the stream goes stale. Both local and remote runs feed it,
+    /// since both drive `publish`.
+    @Published public private(set) var eta: RunETA?
+
+    /// The per-iteration ETA estimator, folded in `publish` and reset per run.
+    private var etaEstimator = RunETAEstimator()
+
     /// The freshness cue for a REMOTE run's progress readout (handoff 101). Returns
     /// "last update Xs ago" once the gap since the last live signal exceeds ~2× the
     /// worker heartbeat (so a healthy sub-heartbeat cadence shows nothing), else
@@ -559,6 +708,8 @@ public final class RunModel: ObservableObject {
         isStreaming = true
         startedAt = Date()      // anchor the elapsed clock / ETA (presentation-only)
         lastProgressAt = Date() // seed the freshness cue (presentation-only)
+        etaEstimator = RunETAEstimator()   // fresh per-iteration ETA history
+        eta = nil
         runningInBackground = false
         isMinimized = false
 
@@ -693,6 +844,8 @@ public final class RunModel: ObservableObject {
         isStreaming = false
         startedAt = nil
         lastProgressAt = nil
+        etaEstimator = RunETAEstimator()
+        eta = nil
         runningInBackground = false
     }
 
@@ -701,8 +854,15 @@ public final class RunModel: ObservableObject {
     private func publish(_ snapshot: RunProgress) {
         guard phase == .running else { return }   // ignore ticks after cancel/reset
         disarmWatchdog()                          // the run is alive — stand the watchdog down
-        lastProgressAt = Date()                   // a live signal → freshness cue
+        let now = Date()
+        lastProgressAt = now                      // a live signal → freshness cue
         progress = snapshot
+        // Feed the per-iteration ETA estimator with this timestamped event and republish
+        // the refined estimate (handoff 111). Both local and remote runs reach here.
+        etaEstimator.ingest(RunProgressSample(time: now.timeIntervalSinceReferenceDate,
+                                              rung: snapshot.rung, rungCount: snapshot.rungCount,
+                                              iteration: snapshot.iteration))
+        eta = etaEstimator.eta
     }
 
     private func finish(_ request: RunRequest, _ token: CancelToken,

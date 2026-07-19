@@ -582,4 +582,89 @@ final class RunModelTests: XCTestCase {
         XCTAssertFalse(model.phase.isRunning, "production MultigridCG path must terminate, not hang")
         XCTAssertGreaterThan(progressTicks, 0, "expected at least one SIMP iteration callback")
     }
+
+    // MARK: - RunETAEstimator (handoff 111 — the honest per-iteration ETA)
+
+    /// A steady sequence at a fixed rate: within the FIRST rung the estimate is an
+    /// UPPER bound built on the iteration cap, and it labels itself `.upper`. At 10
+    /// s/iter, iteration 10 of 4 rungs → (cap−10) + cap×3 ≈ 790 iters × 10 s ≈ 7900 s.
+    private func steadyRung(rung: Int, count: Int, from t0: Double, iters: Int,
+                            perIter: Double, startIter: Int = 1) -> [RunProgressSample] {
+        (0..<iters).map { i in
+            RunProgressSample(time: t0 + Double(i) * perIter, rung: rung, rungCount: count,
+                              iteration: startIter + i)
+        }
+    }
+
+    func testETAisUpperBoundBeforeFirstRungCompletes() {
+        let samples = steadyRung(rung: 0, count: 4, from: 0, iters: 10, perIter: 10)
+        let eta = RunETAEstimator.estimate(from: samples)
+        let e = try! XCTUnwrap(eta)
+        XCTAssertEqual(e.bound, .upper, "no rung has finished → the cap-based upper bound")
+        XCTAssertEqual(e.secondsPerIteration, 10, accuracy: 0.01)
+        // (200-10) remaining in rung 0 + 200×3 not-started = 790 iters × 10 s.
+        XCTAssertEqual(e.secondsRemaining, 7900, accuracy: 50)
+        XCTAssertEqual(e.asOf, 90, accuracy: 0.01, "computed at the last event's timestamp")
+    }
+
+    func testETAisNilDuringWarmup() {
+        // Fewer than the warm-up number of per-iteration samples → no honest estimate.
+        let samples = steadyRung(rung: 0, count: 4, from: 0, iters: 3, perIter: 10)
+        XCTAssertNil(RunETAEstimator.estimate(from: samples))
+    }
+
+    func testETAswitchesToApproximateAfterARungCompletes() {
+        // Rung 0 completes at 40 iterations, then rung 1 runs. Once a rung is banked
+        // the estimate switches to the OBSERVED iterations-per-rung (40), labelled ~.
+        var samples = steadyRung(rung: 0, count: 4, from: 0, iters: 40, perIter: 10)
+        samples += steadyRung(rung: 1, count: 4, from: 400, iters: 6, perIter: 10)
+        let e = try! XCTUnwrap(RunETAEstimator.estimate(from: samples))
+        XCTAssertEqual(e.bound, .approximate, "a completed rung → observed-rate approximation")
+        // observed perRung = 40; at rung 1 iter 6: (40-6) + 40×2 = 114 iters × 10 s.
+        XCTAssertEqual(e.secondsRemaining, 1140, accuracy: 30)
+    }
+
+    func testETAtracksASlowerRung() {
+        // Rung 0 at 10 s/iter, rung 1 genuinely 3× slower (30 s/iter): the EMA climbs,
+        // so the per-iteration rate reported is well above the fast rung's.
+        var samples = steadyRung(rung: 0, count: 3, from: 0, iters: 40, perIter: 10)
+        samples += steadyRung(rung: 1, count: 3, from: 400, iters: 20, perIter: 30)
+        let e = try! XCTUnwrap(RunETAEstimator.estimate(from: samples))
+        XCTAssertGreaterThan(e.secondsPerIteration, 18, "a sustained slower rung pulls the rate up")
+    }
+
+    func testETAcountsDownAsARungProgresses() {
+        // Deeper into the same rung → fewer remaining iterations → smaller estimate.
+        let early = try! XCTUnwrap(RunETAEstimator.estimate(
+            from: steadyRung(rung: 0, count: 4, from: 0, iters: 10, perIter: 10)))
+        let later = try! XCTUnwrap(RunETAEstimator.estimate(
+            from: steadyRung(rung: 0, count: 4, from: 0, iters: 60, perIter: 10)))
+        XCTAssertLessThan(later.secondsRemaining, early.secondsRemaining)
+    }
+
+    func testETAsurvivesAReconnectGap() {
+        // A fast rung, then a single event arriving after a huge silence (a reconnect):
+        // the outlier is rejected for the rate, so the estimate stays sane rather than
+        // exploding — derived from event timestamps, robust to one bad interval.
+        var samples = steadyRung(rung: 0, count: 3, from: 0, iters: 20, perIter: 5)
+        // Reconnect: 600 s later, only +2 iterations advanced in the (visible) stream.
+        samples.append(RunProgressSample(time: 20 * 5 + 600, rung: 0, rungCount: 3, iteration: 22))
+        // Then the stream resumes at the real rate.
+        samples += steadyRung(rung: 0, count: 3, from: 20 * 5 + 605, iters: 5, perIter: 5, startIter: 23)
+        let e = try! XCTUnwrap(RunETAEstimator.estimate(from: samples))
+        XCTAssertEqual(e.secondsPerIteration, 5, accuracy: 2,
+                       "the 300 s/iter reconnect spike is rejected, not folded into the rate")
+    }
+
+    func testETAplateauEarlyIsBoundedByTheUpperEstimate() {
+        // The upper bound assumes the cap; a rung that plateaus EARLY (well under the
+        // cap) must land under that bound — the ≤ label is honest.
+        let e = try! XCTUnwrap(RunETAEstimator.estimate(
+            from: steadyRung(rung: 0, count: 2, from: 0, iters: 30, perIter: 8)))
+        // Upper bound at iter 30 of 2 rungs: (200-30) + 200 = 370 iters × 8 s = 2960 s.
+        // The true cost if it plateaus at ~120 iters/rung would be far less — so the
+        // bound is an over-estimate, as intended.
+        XCTAssertEqual(e.bound, .upper)
+        XCTAssertGreaterThan(e.secondsRemaining, 100 * 8, "the cap-based bound sits high on purpose")
+    }
 }
