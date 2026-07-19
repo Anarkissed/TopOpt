@@ -1182,8 +1182,6 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (st.project) project_solid(grid, xafter, st.beta, eta);
       const double vf_now = phys_volfrac(xafter);
       result.history.push_back({c.compliance, change, vf_now});
-      if (projecting) project_solid(grid, xafter, cur_beta, eta);
-      result.history.push_back({c.compliance, change, phys_volfrac(xafter)});
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
       // Handoff 114 — per-iteration observability (read-only). The richer record
@@ -1907,9 +1905,6 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (st.project) project_active(eff, xafter, st.beta, eta);
       const double vf_now = active_volfrac(xafter);
       result.history.push_back({c.compliance, change, vf_now});
-      if (projecting) project_active(eff, xafter, cur_beta, eta);
-      result.history.push_back(
-          {c.compliance, change, active_volfrac(xafter)});
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
       // Handoff 114 — per-iteration observability (read-only), as in the
