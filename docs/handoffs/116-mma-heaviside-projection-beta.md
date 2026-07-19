@@ -1,4 +1,4 @@
-# 114 — MMA Heaviside projection + β-continuation ("finish the design")
+# 116 — MMA Heaviside projection + β-continuation ("finish the design")
 
 **Track:** core. **Territory:** `/core/` only — `src/simp/simp.cpp` (the two
 `simp_optimize` loops + new MMA-projected updaters), `include/topopt/simp.hpp`
