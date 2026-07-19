@@ -1,4 +1,4 @@
-# 114 — Per-iteration observability: the capture bundle (CSV + snapshots + version record + worker.log)
+# 117 — Per-iteration observability: the capture bundle (CSV + snapshots + version record + worker.log)
 
 **Track:** core + CLI + worker. **Territory:** `/core/` (`src/simp`, `src/cli`,
 `src/fea` getters, headers, tests), `tools/topopt-worker`. **NO app change, NO
