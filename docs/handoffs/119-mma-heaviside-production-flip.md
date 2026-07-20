@@ -1,15 +1,27 @@
 # 119 — MMA Heaviside projection: PRODUCTION FLIP
 
-**Outcome: SHIPPED (small, core-only, 141-lineage).** The MMA production ladder —
-the updater every real run has used since 066 — now runs with the MMA-correct
-Heaviside projection ON. Production designs are **crisp and honest** (near-0/1
-density; the volume constraint measures what prints), where they used to ship a
-grayscale field. This is the "later flip" that handoff 116 built the feature for
-and deliberately left OFF; 116's evidence is the basis for turning it on.
+**Outcome: IMPLEMENTED and gate-safe, but the 64-scale confirmation did NOT
+validate the premise — flagged for a maintainer decision before merge.** The
+code flip is done, minimal, and green on every gate; 116's regression still
+reproduces its payoff on 116's fixture. But my independent 64-scale confirmation
+(the gate this task asked for) surfaced that on a well-conditioned L-bracket the
+flip pays **~4× iterations for a near-zero quality gain** — because warm-gray is
+*already crisp* on that part, so there is no gray fringe to recover. My fixture
+does **not** reproduce the maintainer's grayscale baseline (114–192 violations/
+variant), so the confirmation neither confirms nor refutes the payoff at the
+maintainer's scale. **See "64-scale confirmation" — this is the headline, not a
+footnote.** The always-on-in-production decision should weigh this.
+
+The MMA production ladder — the updater every real run has used since 066 — now
+runs with the MMA-correct Heaviside projection ON. Where projection *does* help
+(116's fixture: coarse mesh / grayscale gray solution), designs become crisp and
+honest (near-0/1 density; the volume constraint measures what prints). This is
+the "later flip" 116 built the feature for and deliberately left OFF.
 
 This is a **design-QUALITY and HONESTY** change, **not a speedup** — the run is
 **slower** (see "The cost", below). The maintainer signs for slower runs in
-exchange for finished, honest designs.
+exchange for finished, honest designs — but the confirmation shows the trade is
+**fixture-dependent**, and on already-crisp parts it is close to pure cost.
 
 ---
 
@@ -54,22 +66,33 @@ parity gate asserts it as a **config echo** (see Gates).
 
 ## The cost, stated in the body (not a footnote)
 
-**Projection makes production runs slower.** β-continuation adds sharpening
-stages, so the ladder does **~1.9× the iterations** of today's warm-gray
-production. 116 measured this on the cantilever fixture (plain MMA 54 iters →
-MMA+proj 210, ≈3–4× on that coarse mesh) and through `minimize_plastic` on the
-L-bracket 2-rung ladder (gray-cold 176 → proj-cold 258, +47%). The app-scale
-64-ladder confirmation below reproduces the same order of increase.
+**Projection makes production runs slower, and the multiplier is fixture-
+dependent — measured ~4×, not the premise's ~1.9×.** β-continuation adds
+sharpening stages. The task's premise was ~1.9× ladder iterations vs warm-gray;
+my 64-scale L-bracket confirmation measured **4.0×** (proj 293 total iters vs
+warm-gray 73). The reason: warm-gray converges *fast* on a well-conditioned part
+(16–20 iters/rung via the 086 plateau + 114 warm start), while projection
+re-forms each rung through β-continuation (71–75 iters/rung) with warm-start's
+savings **subsumed** (β restarts at β0 per rung — 116 interaction a, confirmed
+here). So the ratio is governed by how fast warm-gray already is; on a fixture
+where warm-gray needs few iterations, projection's fixed β-continuation cost
+dominates and the multiple climbs well past 1.9×.
+
+Prior points for calibration: 116 measured ≈3.9× on the coarse cantilever (54 →
+210) and +47% through `minimize_plastic` on its L-bracket 2-rung ladder (176 →
+258). The spread (1.5×–4×) is real and fixture-driven — do not quote a single
+number as "the cost."
 
 **Warm start's speedup is largely subsumed** (116 interaction a): β restarts at β0
 per rung, so an inherited crisp field is re-softened at each rung's first stage and
-most of 110/114's head-start is spent re-forming. Warm start remains correct and
-never harmful (it converges to the same design), but it is no longer a material
-speedup once projection is on. That is an accepted consequence, not a regression.
+most of 110/114's head-start is spent re-forming — measured directly here (proj
+warm rungs 1–3 cost 72/75/75 iters, no better than the cold rung 0's 71). Warm
+start remains correct and never harmful (it converges to the same design), but it
+is no longer a material speedup once projection is on.
 
 **The designated payer is the next task.** The stale-preconditioner work (lever B)
-is queued to buy back the iteration cost; this flip does not wait on it — the
-quality/honesty win ships now, the speed comes back next.
+is queued to buy back the iteration cost; this flip does not wait on it. On this
+evidence the amount to buy back is **larger than the 1.9× premised** (≈4× here).
 
 ---
 
@@ -104,6 +127,12 @@ mma-proj 24x8x8: Mnd 0.5593 -> 0.0259 (OC-ref 0.0700) | vol-basis div 0.0265 -> 
 mma-projection: all 23 checks passed
 ```
 
+**This payoff is real but fixture-specific.** 116's fixture (a coarse 24×8×8
+cantilever) genuinely goes grayscale under gray MMA — that is *why* projection
+helps it so much. It does **not** follow that every production part sees this: the
+64-scale confirmation below runs a part that does NOT go grayscale, and there the
+same flip is nearly all cost. Read the two together.
+
 ---
 
 ## Gates
@@ -131,25 +160,55 @@ mma-projection: all 23 checks passed
 
 - **mma_projection (116's 23-check regression) — green** (quoted above).
 
-### 64-scale confirmation ladder (thermal protocol per 113)
+### 64-scale confirmation ladder (thermal protocol per 113) — THE HEADLINE
 
-Production-faithful L-bracket load case (the parity gate's exact case: two Ø5 holes
-anchored, 50 N down over the planar faces, design box, anchor pad), voxelized at
-resolution 64 through the shared seam, run as the full production reduction ladder
-{0.68, 0.52, 0.38, 0.26}, MMA + matrix-free MG-CG + Galerkin cache. Run **proj
-first** so any thermal soak biases *against* the flip. Per 113, only the
-**deterministic** signals are quoted (iterations, Mnd, min-feature-violation
-count) — wall-clock on this laptop is thermally contaminated and is not the metric.
+L-bracket load case (two Ø5 holes anchored, 50 N down over the planar faces,
+anchor pad), voxelized at resolution 64 through the shared seam, run as the full
+production reduction ladder {0.68, 0.52, 0.38, 0.26}, MMA + matrix-free MG-CG +
+Galerkin cache. Per 113, only the **deterministic** signals are quoted
+(iterations, Mnd, min-feature violations) — wall-clock is thermally contaminated
+and is not the metric. Harness: `scratchpad/confirm_ladder_nobox.cpp` (a one-shot
+measurement, not a checked-in gate). Solved grid 64×43×64.
 
-<!-- CONFIRM_LADDER_64: filled from the harness run below -->
-_(table pending — see run output; harness:
-`scratchpad/confirm_ladder.cpp`)_
+| rung | vf | **warm-gray** it / Mnd / mfv | **proj** it / Mnd / mfv | achieved (gray/proj) |
+|---|---|---|---|---|
+| 0 | 0.68 | 16 / 0.020 / **0** | 71 / 0.0002 / **0** | 0.680 / 0.680 |
+| 1 | 0.52 | 17 / 0.026 / **8** | 72 / 0.0002 / **3** | 0.520 / 0.520 |
+| 2 | 0.38 | 20 / 0.026 / **3** | 75 / 0.0002 / **3** | 0.380 / 0.380 |
+| 3 | 0.26 | 20 / 0.029 / **6** | 75 / 0.0002 / **3** | 0.260 / 0.260 |
+| **total** | | **73 it** | **293 it (4.0×)** | every rung `accept`, conv=1 |
 
-**Reading:** the cold-gray baseline this week showed **114–192 min-feature
-violation regions per variant**; with projection ON the per-rung violation counts
-**collapse**, Mnd drops per rung into the crisp regime, and every rung still
-`accept`s at a comparable worst-case margin — the honesty payoff reproduces at
-app scale, at the ~1.9× iteration cost named above.
+**Reading — the confirmation does NOT reproduce the premise, and that is the
+finding:**
+
+- **The ladder is correct and safe.** Both configs reduce cleanly (achieved tracks
+  every requested vf exactly), every rung converges (conv=1) and accepts, margins
+  are identical rung-for-rung (rung 0: 27.712 both). The flip does not break or
+  destabilize production. Determinism holds.
+- **But warm-gray is ALREADY crisp on this fixture** — Mnd ≈ 0.02–0.03 and **0–8**
+  min-feature violations, **nowhere near** the maintainer's cold-gray baseline of
+  114–192 violations/variant. The decisive tell: **gray's final compliance (0.314)
+  already equals proj's (0.3138)**. In 116's payoff the gray fringe was soft
+  material and projection *improved* compliance 88→38; here there is no soft
+  fringe to recover, so projection only sharpens Mnd 0.02→0.0002 (a cosmetic
+  crispening) while costing 4× the iterations.
+- **Therefore this fixture cannot exhibit the honesty payoff**, and cannot stand in
+  for the maintainer's baseline. The L-bracket at 64 with a single clean load path
+  is too well-conditioned to go grayscale; the 114–192-violation baseline is a
+  harder part. **The maintainer must re-run this confirmation against that exact
+  baseline geometry** before concluding the collapse reproduces at their scale.
+- **Orthogonal finding (perf, not correctness):** every solve fell back to
+  **Jacobi-CG** (`cg≈2200`, never multigrid) because the 64×43×64 grid's odd `43`
+  extent cannot coarsen — the same multigrid-fallback signature as handoff 076.
+  It does not change any metric above (same converged field to the same
+  tolerance), but it is why these runs are slow, and it is worth its own task.
+
+**Bottom line for the flip decision:** always-on projection pays ~4× on parts that
+were already crisp (most simple parts) to buy honesty only on parts that go
+grayscale. The maintainer may want to reconsider *always-on* vs *conditional* (gate
+projection on a measured grayness/volume-basis-divergence threshold), or confirm on
+the real baseline that the always-on cost is acceptable fleet-wide. **I did not
+merge this on my own judgment; it awaits that call.**
 
 ---
 
@@ -161,11 +220,29 @@ app scale, at the ~1.9× iteration cost named above.
   lists `simp.mma_projection` (config echo, honesty win + cost).
 - `core/tests/validation/test_production_parity.cpp` — config-echo assertions for
   the flip (before: default OFF + MMA updater; after: ON).
-- `scratchpad/confirm_ladder.cpp` — the 64-scale confirmation harness (NOT a
-  checked-in gate; a one-shot measurement, like 114's 64-scale reproduction).
+- `scratchpad/confirm_ladder_nobox.cpp` — the 64-scale confirmation harness (NOT
+  a checked-in gate; a one-shot measurement, like 114's 64-scale reproduction).
+  Reduces the L-bracket production ladder twice (proj vs forced-gray) with a live
+  per-iteration `on_iteration` trace. (`scratchpad/confirm_ladder.cpp` is the
+  design-box variant that surfaced 080's whole-domain volume artifact — kept for
+  reference; the no-box variant is the one whose numbers are quoted.)
+
+## Open question for the maintainer (do not skip)
+
+Given the confirmation, is **always-on** projection the right production policy, or
+should it be **conditional** — gated on a measured grayness signal (e.g. the
+volume-basis divergence 104 already computes, or Mnd over a threshold) so the ~4×
+cost is paid only on parts that actually go grayscale? The code as written is
+always-on for MMA. If conditional is preferred, the gate belongs right here in
+`configure_production_options` (or per-rung in the driver) and is a small follow-up.
+Either way, **re-run the confirmation against the exact 114–192-violation baseline
+part first** — that is the evidence this task was supposed to produce and could not,
+because the L-bracket does not go grayscale.
 
 ## Not touched (scope discipline)
 
 `simp.cpp` / `simp.hpp` (the feature and its defaults, 116), the bridge, the app,
 the CLI schema, benchmarks/fixtures, Gate-V2. The stale-preconditioner task
-(lever B) — the designated payer for the iteration cost — follows next.
+(lever B) — the designated payer for the iteration cost — follows next; the
+multigrid→Jacobi fallback on non-coarsening grid extents (surfaced above) is a
+separate, pre-existing issue worth its own task.
