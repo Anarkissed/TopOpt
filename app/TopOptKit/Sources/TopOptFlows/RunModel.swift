@@ -520,6 +520,17 @@ public final class LocalRunNotifier: RunNotifier {
 
     public init() {}
 
+    /// Ask for notification permission up front (handoff 121). A remote run can
+    /// finish while the user is in the foreground OR via the cold-launch re-attach,
+    /// and either fires a completion notification — so we request permission at app
+    /// launch rather than only when a run is backgrounded. Idempotent; a denial just
+    /// means no banners.
+    public static func requestAuthorization() {
+        #if canImport(UserNotifications)
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        #endif
+    }
+
     public func willRunInBackground() {
         #if canImport(UserNotifications)
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -931,7 +942,15 @@ public final class RunModel: ObservableObject {
         }
         isStreaming = false
         isMinimized = false   // resolved: let a failure sheet / success surface
-        if runningInBackground {
+        // Fire the completion notification when the app OBSERVED a run finish while
+        // the user may not be watching: a backgrounded on-device run (as before), OR
+        // a REMOTE run the app was streaming (handoff 121, requirement 5) — whether in
+        // the foreground or landed via the cold-launch re-attach. A remote outcome is
+        // flagged `computedRemotely`. We skip a user-cancelled remote run (the user
+        // just cancelled it themselves — a "cancelled" banner would be noise); a
+        // backgrounded local run keeps its prior behaviour unchanged.
+        let observedRemoteFinish = (outcome?.computedRemotely ?? false) && phase != .cancelled
+        if runningInBackground || observedRemoteFinish {
             notifier.runDidComplete(summary: completionSummary(request))
         }
     }

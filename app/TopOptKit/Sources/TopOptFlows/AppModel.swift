@@ -85,12 +85,16 @@ public final class AppModel: ObservableObject {
 
     // MARK: Cold-launch remote re-attach (handoff 119)
 
-    /// A remote job that was still live when the app last died (read from
-    /// `RemoteJobStore` at launch). Non-nil drives the Home re-attach banner: the
-    /// incident behind 119 was a 7-hour run whose relaunched client had NO path back
-    /// to the still-solving Mac. Cleared when the user taps Re-attach (this launch's
-    /// banner is done) or Dismiss (which also clears the persisted record).
-    @Published public private(set) var pendingReattach: PersistedRemoteJob?
+    /// Remote jobs that were still outstanding when the app last died (read from the
+    /// MULTI-SLOT `RemoteJobStore` at launch, handoff 121). Drives the Home re-attach
+    /// UI: the 119 incident was a 7-hour run whose relaunched client had NO path back
+    /// to the still-solving Mac; 121 generalises it to MORE THAN ONE outstanding job
+    /// (a queued sibling, or two projects' runs) — the banner becomes a list when >1.
+    /// A job is removed from the list when the user re-attaches or dismisses it.
+    @Published public private(set) var pendingReattachJobs: [PersistedRemoteJob] = []
+
+    /// Back-compat convenience: the first outstanding job (drives a single banner).
+    public var pendingReattach: PersistedRemoteJob? { pendingReattachJobs.first }
 
     // MARK: Print-parameter presets (M7.params — app-wide named presets)
 
@@ -163,10 +167,12 @@ public final class AppModel: ObservableObject {
             RecentProject(id: $0.id, name: $0.name, materialName: $0.material,
                           process: $0.process, optimized: $0.optimized ?? false)
         }
-        // Cold-launch re-attach (handoff 119): if a remote job was still live when the
-        // app last died, surface it. `RemoteRun` clears the record on any terminal
-        // resolution or user cancel, so a leftover record means the app died mid-run.
-        pendingReattach = RemoteJobStore.load(defaults: remoteJobDefaults)
+        // Cold-launch re-attach (handoffs 119 + 121): surface EVERY remote job still
+        // outstanding when the app last died. `RemoteRun` removes a job's record on its
+        // terminal resolution or user cancel, so leftover records mean the app died
+        // with those runs still in flight. `loadAll` also migrates a pre-121 single-slot
+        // record on first read.
+        pendingReattachJobs = RemoteJobStore.loadAll(defaults: remoteJobDefaults)
     }
 
     /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
@@ -568,7 +574,13 @@ public final class AppModel: ObservableObject {
     /// explicit Dismiss clears it, so a failed re-attach can be retried next launch.
     public func reattach() {
         guard let job = pendingReattach else { return }
-        pendingReattach = nil   // this launch's banner is spent regardless of outcome
+        reattach(job)
+    }
+
+    /// Re-attach to ONE specific outstanding job (handoff 121: the list may hold
+    /// several). Spends just that job's banner entry, leaving any others.
+    public func reattach(_ job: PersistedRemoteJob) {
+        pendingReattachJobs.removeAll { $0.jobID == job.jobID }
         // Reopen the owning project so the stream lands in the normal workspace →
         // results flow. If it can't be resolved (no id, or it was deleted) there is
         // nowhere to host the result: say so honestly and leave the record for a
@@ -589,12 +601,41 @@ public final class AppModel: ObservableObject {
         project.run.start(reattachRequest(for: job, project: project))
     }
 
-    /// Dismiss the re-attach offer: the ONLY place the user's action clears the
-    /// persisted record (handoff 119 / the 101 rule that a client-side path never
-    /// destroys the Mac's job — only the user does).
+    /// Dismiss the re-attach offer (back-compat single-banner path). Clears the
+    /// persisted record(s) even after `reattach()` already spent the visible banner —
+    /// the pre-121 contract was "Dismiss is the only user clear" and it always cleared.
     public func dismissReattach() {
+        dismissAllReattach()
+    }
+
+    /// Dismiss ONE re-attach offer: the user's action removes just that job's
+    /// persisted record (handoff 119 / the 101 rule that a client-side path never
+    /// destroys the Mac's job — only the user does). Other outstanding jobs survive.
+    public func dismissReattach(_ job: PersistedRemoteJob) {
+        RemoteJobStore.remove(jobID: job.jobID, defaults: remoteJobDefaults)
+        pendingReattachJobs.removeAll { $0.jobID == job.jobID }
+    }
+
+    /// Dismiss every outstanding re-attach offer at once (the list's "Dismiss all").
+    public func dismissAllReattach() {
         RemoteJobStore.clear(defaults: remoteJobDefaults)
-        pendingReattach = nil
+        pendingReattachJobs = []
+    }
+
+    /// Ask the worker to move a still-QUEUED job to the front of its queue (handoff
+    /// 121, requirement 6): a quick Balanced check shouldn't wait behind an 8-hour
+    /// Fine run. Best-effort and fire-and-forget — the worker no-ops if the job is
+    /// already running (a running job is never preempted). A network failure is
+    /// silent (the record stays; the user can retry).
+    public func moveReattachJobToFront(_ job: PersistedRemoteJob) {
+        guard let url = URL(string: "http://\(job.host):\(job.port)/jobs/\(job.jobID)/front")
+        else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 8
+        URLSession.shared.dataTask(with: req) { [weak self] _, _, _ in
+            Task { @MainActor in self?.toast = "Asked the Mac to run “\(job.projectName ?? "this job")” next." }
+        }.resume()
     }
 
     /// The request the re-attach run starts with. `remoteReattachRunner` skips submit,

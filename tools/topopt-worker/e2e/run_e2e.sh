@@ -123,10 +123,22 @@ PY
 # fingerprint and is refused before submit) — no second worker needed.
 start_worker_noop() { :; }
 
+# The handoff-121 QUEUE harness is pure-Python (no Xcode): the queue state machine
+# (headless) + the HTTP-level /jobs golden, webhook, reorder, and pause/resume.
+run_queue() {
+  echo; echo "############################################################"
+  echo "# CASE: queue (handoff 121 — headless + HTTP)"
+  echo "############################################################"
+  python3 "$HERE/queue_state_machine.py" && python3 "$HERE/queue_http_e2e.py"
+}
+
 if [ "${1:-}" = "all" ]; then
   for c in offline mismatch happy bad_mesh reject_all cancel slow_sparse stream_drop worker_dies; do
     run_case "$c"
   done
+  run_queue
+elif [ "${1:-}" = "queue" ]; then
+  run_queue
 else
-  run_case "${1:?usage: run_e2e.sh <case|all>}"
+  run_case "${1:?usage: run_e2e.sh <case|queue|all>}"
 fi

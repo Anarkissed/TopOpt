@@ -152,24 +152,78 @@ public struct PersistedRemoteJob: Codable, Equatable, Sendable {
     }
 }
 
-/// Single-slot store for the active remote job (UserDefaults). Single-slot because
-/// only one remote run is in flight at a time; a new submit overwrites, a terminal
-/// resolution clears. Deliberately NOT cleared on a client-side liveness failure
-/// (watchdog/unreachable): the Mac keeps solving, so the record must survive for a
-/// later re-attach — it is cleared only when the WORKER's job is known finished or
-/// the user cancelled.
+/// MULTI-SLOT store for outstanding remote jobs (UserDefaults). Handoff 121 made
+/// the worker human-facing: more than one remote job can be in flight (a queued job
+/// behind a running one, or runs from two projects), so a single slot is wrong — a
+/// second submit used to OVERWRITE the first, orphaning it (the reproduction
+/// incident behind 121). This keeps EVERY outstanding job, keyed by jobID: a submit
+/// upserts, a terminal resolution / user dismiss removes just that one, and the
+/// others survive.
+///
+/// Deliberately NOT cleared on a client-side liveness failure (watchdog/unreachable):
+/// the Mac keeps solving, so a record must survive for a later re-attach — it is
+/// removed only when the WORKER's job is known finished or the user dismisses it.
+///
+/// A pre-121 record written under the old single-slot key is MIGRATED on first read
+/// (the handoff-119 pattern): folded into the multi-slot array exactly once, then
+/// the legacy key is dropped.
 public enum RemoteJobStore {
-    static let key = "topopt.activeRemoteJob.v1"
+    /// Multi-slot key (handoff 121): a JSON array of every outstanding job.
+    static let multiKey = "topopt.activeRemoteJobs.v2"
+    /// The pre-121 single-slot key. Kept only so an older build's record migrates in.
+    static let legacyKey = "topopt.activeRemoteJob.v1"
+    /// Back-compat alias — the legacy single-slot location, used by migration tests.
+    static let key = legacyKey
 
+    /// Upsert one job: replace any existing record with the same jobID, else append
+    /// (newest last). A SECOND submit no longer overwrites the first.
     public static func save(_ job: PersistedRemoteJob, defaults: UserDefaults = .standard) {
-        if let data = try? JSONEncoder().encode(job) { defaults.set(data, forKey: key) }
+        var all = loadAll(defaults: defaults)
+        all.removeAll { $0.jobID == job.jobID }
+        all.append(job)
+        persist(all, defaults: defaults)
     }
+
+    /// Every outstanding remote job (newest last). Migrates a legacy single-slot
+    /// record on read: fold it in (dedupe by jobID), rewrite as multi-slot, and drop
+    /// the legacy key so the migration happens exactly once.
+    public static func loadAll(defaults: UserDefaults = .standard) -> [PersistedRemoteJob] {
+        var all: [PersistedRemoteJob] = []
+        if let data = defaults.data(forKey: multiKey),
+           let arr = try? JSONDecoder().decode([PersistedRemoteJob].self, from: data) {
+            all = arr
+        }
+        if let data = defaults.data(forKey: legacyKey),
+           let legacy = try? JSONDecoder().decode(PersistedRemoteJob.self, from: data) {
+            if !all.contains(where: { $0.jobID == legacy.jobID }) { all.append(legacy) }
+            defaults.removeObject(forKey: legacyKey)
+            persist(all, defaults: defaults)
+        }
+        return all
+    }
+
+    /// The most-recently-saved job, or nil. Back-compat for single-job callers.
     public static func load(defaults: UserDefaults = .standard) -> PersistedRemoteJob? {
-        guard let data = defaults.data(forKey: key) else { return nil }
-        return try? JSONDecoder().decode(PersistedRemoteJob.self, from: data)
+        loadAll(defaults: defaults).last
     }
+
+    /// Remove just this job (a terminal resolution or a user dismiss); the rest stay.
+    public static func remove(jobID: String, defaults: UserDefaults = .standard) {
+        var all = loadAll(defaults: defaults)
+        let before = all.count
+        all.removeAll { $0.jobID == jobID }
+        if all.count != before { persist(all, defaults: defaults) }
+    }
+
+    /// Clear EVERY record (both keys). The nuclear option; prefer `remove(jobID:)`.
     public static func clear(defaults: UserDefaults = .standard) {
-        defaults.removeObject(forKey: key)
+        defaults.removeObject(forKey: multiKey)
+        defaults.removeObject(forKey: legacyKey)
+    }
+
+    private static func persist(_ all: [PersistedRemoteJob], defaults: UserDefaults) {
+        if all.isEmpty { defaults.removeObject(forKey: multiKey); return }
+        if let data = try? JSONEncoder().encode(all) { defaults.set(data, forKey: multiKey) }
     }
 }
 
@@ -420,24 +474,24 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             if uc {
                 // The ONLY place a non-terminal DELETE fires: an explicit user cancel.
                 cancelRemote()
-                RemoteJobStore.clear(defaults: defaults)
+                clearOwnRecord()
                 return cancelledOutcome()
             }
             if let te = te {
                 // A worker-reported error is a real terminal outcome (job done on
-                // the worker) → clear the re-attach record. A CLIENT-side abort (a
-                // mesh-fetch failure via failStream) leaves the Mac's work + the
+                // the worker) → clear THIS run's re-attach record. A CLIENT-side abort
+                // (a mesh-fetch failure via failStream) leaves the Mac's work + the
                 // record intact, so a later attempt can still re-attach.
-                if fromWorker { RemoteJobStore.clear(defaults: defaults) }
+                if fromWorker { clearOwnRecord() }
                 throw RemoteRunError(te)
             }
             if tc {
-                RemoteJobStore.clear(defaults: defaults)
+                clearOwnRecord()
                 return cancelledOutcome()
             }
             if tm {
                 let outcome = try assembleFinalOutcome()
-                RemoteJobStore.clear(defaults: defaults)
+                clearOwnRecord()
                 return outcome
             }
 
@@ -483,6 +537,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private func cancelledOutcome() -> OptimizeOutcome {
         OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: true,
                         acceptedCount: 0, computedRemotely: true)
+    }
+
+    /// Remove ONLY this run's record from the multi-slot store (handoff 121): a
+    /// terminal resolution or user cancel clears this job while leaving any other
+    /// outstanding remote jobs (a queued sibling, another project's run) intact.
+    private func clearOwnRecord() {
+        if let id = jobID { RemoteJobStore.remove(jobID: id, defaults: defaults) }
     }
 
     private func markActivity() {
