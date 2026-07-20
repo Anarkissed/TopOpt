@@ -466,4 +466,23 @@ public enum DesignBoxDetent {
         }
         return (rawCoord, nil, false)                 // free
     }
+
+    /// The B-rep face id whose planar face (perpendicular to `axis`) sits at `coord`, or nil when
+    /// the snap target was a part AABB extent rather than a real face (nothing to highlight). Used
+    /// by the viewer to PULSE the matched part face on a fresh detent (device round 3, item 2). The
+    /// index into `faces` IS the face id (`ViewerMesh.faceGeometry` is indexed by face id); when
+    /// several coincident faces share the plane the lowest id wins (deterministic).
+    public static func matchedFace(axis: Int, coord: Float, faces: [StepFaceGeometry],
+                                   epsilon: Float = snapThresholdMM) -> FaceID? {
+        var best: (id: FaceID, d: Float)?
+        for (i, f) in faces.enumerated() where f.isPlane {
+            let n = SIMD3<Float>(f.planeNormal)
+            let len = simd_length(n)
+            guard len > 1e-6, abs(n[axis]) >= 0.999 * len else { continue }   // ⟂ to the drag axis
+            let d = abs(SIMD3<Float>(f.planeOrigin)[axis] - coord)
+            guard d <= epsilon else { continue }
+            if best == nil || d < best!.d { best = (FaceID(i), d) }
+        }
+        return best?.id
+    }
 }

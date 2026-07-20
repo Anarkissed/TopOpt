@@ -82,6 +82,10 @@ public struct WorkspacePlaceholder: View {
     /// round 3, item 10), or nil when the face is free. Carried across drag frames to drive the
     /// snap/release hysteresis; reset when the drag ends.
     @State private var boxFaceDetent: Float?
+    /// The pending detent face-highlight pulse (device round 3, item 2): the part face a box-face
+    /// drag just snapped to, flashed in the Metal viewer (replaces the old "Snapped to face"
+    /// toast). The token advances on every fresh snap so re-snapping the SAME face re-pulses.
+    @State private var detentPulse: DetentPulse?
     /// Measured intrinsic width (points) of each bottom-right settings chip, so the cluster
     /// orders them smallest→largest (design-overhaul round 2, item 12; `BottomChipOrder`).
     @State private var settingsChipWidths: [SettingsChipID: CGFloat] = [:]
@@ -191,7 +195,9 @@ public struct WorkspacePlaceholder: View {
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
                           // reason about every keep-out; the selected group's volume brightens.
-                          clearanceVolumes: force.phase == .edit ? clearanceRenderItems : [])
+                          clearanceVolumes: force.phase == .edit ? clearanceRenderItems : [],
+                          // Detent face-highlight pulse (item 2): flash the snapped part face.
+                          detentPulse: detentPulse)
                 .ignoresSafeArea()
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
@@ -1011,7 +1017,14 @@ public struct WorkspacePlaceholder: View {
                                                    aabbMin: mesh.bounds.min, aabbMax: mesh.bounds.max)
             let d = DesignBoxDetent.resolve(rawCoord: rawTarget, candidates: cands, current: boxFaceDetent)
             boxFaceDetent = d.snapped
-            if d.didSnap { flashDesignBoxDetent(); ClearanceHaptics.detent() }
+            if d.didSnap {
+                // Flash the matched part face in the viewer + tick the haptic (item 2, replacing the
+                // toast). `matchedFace` is nil when the snap was to a bare AABB extent (no face to
+                // highlight) — then only the haptic fires.
+                let face = DesignBoxDetent.matchedFace(axis: axis, coord: d.coord, faces: mesh.faceGeometry)
+                flashDesignBoxDetent(face)
+                ClearanceHaptics.detent()
+            }
             let moved = base.movingFace(axis: axis, isMax: isMax, to: d.coord,
                                         minSize: DesignBoxModel.minSize(for: mesh.bounds))
             let mm = (isMax ? moved.max[axis] - base.max[axis] : moved.min[axis] - base.min[axis])
@@ -1019,11 +1032,14 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// The brief highlight pulse when a box face snaps to a part face (device round 3, item 10).
-    /// A short-lived toast is the always-safe feedback; the precise part-face highlight-pulse in
-    /// the Metal viewer is device-QA polish layered on the same trigger.
-    private func flashDesignBoxDetent() {
-        model.toast = "Snapped to face"
+    /// The brief highlight PULSE of the snapped part face in the Metal viewer (device round 3,
+    /// item 2 — the finished in-viewer feedback that replaces the old "Snapped to face" toast).
+    /// Advances the pulse token so the coordinator flashes even when the same face is re-snapped;
+    /// a nil `face` (an AABB-extent snap with no part face) leaves the pulse untouched.
+    private func flashDesignBoxDetent(_ face: FaceID?) {
+        guard let face else { return }
+        let token = (detentPulse?.token ?? 0) + 1
+        detentPulse = DetentPulse(faceID: face, token: token)
     }
 
     // MARK: keep-clear Phase B — draggable clearance handles + floating value pill
