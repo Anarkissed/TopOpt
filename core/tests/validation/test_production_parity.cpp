@@ -139,11 +139,21 @@ int main() {
     CHECK(opts.simp.solver == SolverKind::JacobiCG,
           "library default is JacobiCG (Gate-V2 / reference untouched)");
     CHECK(opts.min_feature_mm == 0.0, "library default min_feature is 0");
+    CHECK(!opts.simp.mma_projection,
+          "library default leaves MMA projection OFF (reference untouched)");
+    CHECK(opts.updater == topopt::SimpUpdater::MMA,
+          "production default updater is MMA");
     configure_production_options(opts);
     CHECK(opts.simp.solver == SolverKind::MultigridCG_Matfree,
           "production config selects the matrix-free multigrid solver");
     CHECK(opts.min_feature_mm == 2.5,
           "production config sets the 2.5 mm physical min-feature scale");
+    // Handoff 116 production flip: the MMA path gets the MMA-correct Heaviside
+    // projection so the constraint measures the printed (near-0/1) density, not
+    // the gray fringe. Asserted as a CONFIG ECHO (per the 141-lineage mechanism):
+    // this gate proves determinism/config, not a golden design.
+    CHECK(opts.simp.mma_projection,
+          "production config enables MMA Heaviside projection (116 flip)");
     // The Galerkin cache is a process global; configure_production_options must
     // have turned it on (the setter returns the PREVIOUS value).
     const bool prev = topopt::fea_set_matfree_galerkin_block_cache(true);

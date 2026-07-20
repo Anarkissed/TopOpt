@@ -35,6 +35,14 @@ namespace topopt {
 //     supports it (OC). MMA (the production default updater) rejects a projection
 //     schedule, so with MMA this is skipped and the run uses the physical
 //     min-feature filter alone; the OC + projection Gate-V2 chain is untouched.
+//   * simp.mma_projection = true — ONLY on the MMA path (the production default
+//     updater; handoff 116). The MMA-correct Heaviside projection + beta
+//     continuation, the mutually-exclusive counterpart of the OC `projection`
+//     schedule. It makes the constraint measure the PRINTED (near-0/1) density
+//     instead of the gray fringe (Mnd 0.559 → 0.032, volume-basis divergence
+//     collapses 53×, compliance improves), at the cost of ~1.9× ladder iterations.
+//     The library default stays false, so Gate-V2 and the core reference runs —
+//     which never call this function — remain byte-identical.
 //   * the process-global matrix-free Galerkin block cache is ENABLED (see below).
 //
 // What it deliberately does NOT set (per-front-end / per-job, not shared config):
