@@ -83,6 +83,15 @@ public final class AppModel: ObservableObject {
     /// Non-nil shows a transient toast (the design pill); the view clears it.
     @Published public var toast: String?
 
+    // MARK: Cold-launch remote re-attach (handoff 119)
+
+    /// A remote job that was still live when the app last died (read from
+    /// `RemoteJobStore` at launch). Non-nil drives the Home re-attach banner: the
+    /// incident behind 119 was a 7-hour run whose relaunched client had NO path back
+    /// to the still-solving Mac. Cleared when the user taps Re-attach (this launch's
+    /// banner is done) or Dismiss (which also clears the persisted record).
+    @Published public private(set) var pendingReattach: PersistedRemoteJob?
+
     // MARK: Print-parameter presets (M7.params — app-wide named presets)
 
     /// The user's saved print-parameter presets (app-level, shared by every project).
@@ -108,6 +117,14 @@ public final class AppModel: ObservableObject {
     /// App-wide print-preset persistence (separate from per-project `store`).
     private let presetStore: PrintParamsPresetStore
     private let now: () -> Date
+    /// Where the active-remote-job record lives (handoff 119). Injected so tests use a
+    /// scratch suite; production reads/clears the real `UserDefaults.standard` that
+    /// `RemoteRun` wrote at submit time.
+    private let remoteJobDefaults: UserDefaults
+    /// Builds the runner that re-attaches to an existing job. Injected so tests drive
+    /// the flow with a stub (the real one streams the worker's `/events`); nil → the
+    /// production `RunModel.remoteReattachRunner`.
+    private let reattachRunnerFactory: ((RemoteRunnerConfig, String) -> RunModel.Runner)?
 
     /// - Parameters:
     ///   - materialsPath: path to materials.json (defaults to the app bundle's
@@ -125,7 +142,9 @@ public final class AppModel: ObservableObject {
         importer: @escaping (String) throws -> ImportedMesh = { try TopOptKit.importMesh(path: $0) },
         store: ProjectStore = ProjectStore(),
         presetStore: PrintParamsPresetStore = PrintParamsPresetStore(),
-        now: @escaping () -> Date = { Date() }
+        now: @escaping () -> Date = { Date() },
+        remoteJobDefaults: UserDefaults = .standard,
+        reattachRunnerFactory: ((RemoteRunnerConfig, String) -> RunModel.Runner)? = nil
     ) {
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath
@@ -134,6 +153,8 @@ public final class AppModel: ObservableObject {
         self.store = store
         self.presetStore = presetStore
         self.now = now
+        self.remoteJobDefaults = remoteJobDefaults
+        self.reattachRunnerFactory = reattachRunnerFactory
         // App-wide print presets survive relaunch (loaded once; Default is synthesized).
         savedPresets = presetStore.load()
         // Seed the recents grid from disk (lazy: projects are re-imported only when
@@ -142,6 +163,10 @@ public final class AppModel: ObservableObject {
             RecentProject(id: $0.id, name: $0.name, materialName: $0.material,
                           process: $0.process, optimized: $0.optimized ?? false)
         }
+        // Cold-launch re-attach (handoff 119): if a remote job was still live when the
+        // app last died, surface it. `RemoteRun` clears the record on any terminal
+        // resolution or user cancel, so a leftover record means the app died mid-run.
+        pendingReattach = RemoteJobStore.load(defaults: remoteJobDefaults)
     }
 
     /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
@@ -161,7 +186,8 @@ public final class AppModel: ObservableObject {
                           infillPercent: project.printParams.infillPercent,
                           designBox: project.designBox.bridgeBox,
                           keepOutBoxes: project.designBox.bridgeKeepOuts,
-                          clearances: project.clearanceSpecs())
+                          clearances: project.clearanceSpecs(),
+                          projectID: project.id)
     }
 
     // MARK: - Materials
@@ -507,6 +533,84 @@ public final class AppModel: ObservableObject {
         screen = .home
     }
 
+    // MARK: - Cold-launch remote re-attach (handoff 119)
+
+    /// The banner copy for a pending re-attach: names the age and the worker (and the
+    /// project, when known). Pure + static so it is unit-tested without a view or the
+    /// wall clock. Example: "A run for Bracket, started about 7 hours ago, may still
+    /// be running on 10.0.0.4. Re-attach to follow it and get the result."
+    public static func reattachBannerText(for job: PersistedRemoteJob, now: Date = Date()) -> String {
+        let subject = job.projectName.map { "A run for “\($0)”" } ?? "A remote run"
+        let age = job.submittedAt.map { ", started \(relativeAge(now.timeIntervalSince($0)))," } ?? ""
+        return "\(subject)\(age) may still be running on \(job.host). "
+             + "Re-attach to follow it and get the result."
+    }
+
+    /// A coarse, locale-independent age phrase (so the banner copy is deterministic in
+    /// tests). "just now" / "N min ago" / "about N hour(s) ago" / "about N day(s) ago".
+    static func relativeAge(_ seconds: TimeInterval) -> String {
+        let s = Swift.max(0, seconds)
+        if s < 60 { return "just now" }
+        let minutes = Int(s / 60)
+        if minutes < 60 { return "\(minutes) min ago" }
+        let hours = Int(s / 3600)
+        if hours < 24 { return "about \(hours) hour\(hours == 1 ? "" : "s") ago" }
+        let days = Int(s / 86_400)
+        return "about \(days) day\(days == 1 ? "" : "s") ago"
+    }
+
+    /// Re-attach to the pending remote job: reopen the project it belonged to and
+    /// stream the worker's existing job (`remoteReattachRunner`) into that project's
+    /// run. A still-running job resumes live; a job that COMPLETED while the app was
+    /// gone has its full outcome replayed and lands on results; a dead/unknown job
+    /// fails with the honest 101 worker-unreachable message. The persisted record is
+    /// NOT cleared here — only a worker-terminal resolution (inside `RemoteRun`) or an
+    /// explicit Dismiss clears it, so a failed re-attach can be retried next launch.
+    public func reattach() {
+        guard let job = pendingReattach else { return }
+        pendingReattach = nil   // this launch's banner is spent regardless of outcome
+        // Reopen the owning project so the stream lands in the normal workspace →
+        // results flow. If it can't be resolved (no id, or it was deleted) there is
+        // nowhere to host the result: say so honestly and leave the record for a
+        // Dismiss (never silently drop it).
+        guard let recent = job.projectID.flatMap({ id in recentProjects.first { $0.id == id } }) else {
+            toast = "Couldn’t reopen the project for the run on \(job.host) — it may have been deleted."
+            return
+        }
+        open(recent)
+        guard let project else {
+            toast = "Couldn’t reopen the project for the run on \(job.host)."
+            return
+        }
+        let config = RemoteRunnerConfig(host: job.host, port: job.port,
+                                        expectedFingerprint: job.fingerprint)
+        project.run.runner = reattachRunnerFactory?(config, job.jobID)
+            ?? RunModel.remoteReattachRunner(config, jobID: job.jobID, defaults: remoteJobDefaults)
+        project.run.start(reattachRequest(for: job, project: project))
+    }
+
+    /// Dismiss the re-attach offer: the ONLY place the user's action clears the
+    /// persisted record (handoff 119 / the 101 rule that a client-side path never
+    /// destroys the Mac's job — only the user does).
+    public func dismissReattach() {
+        RemoteJobStore.clear(defaults: remoteJobDefaults)
+        pendingReattach = nil
+    }
+
+    /// The request the re-attach run starts with. `remoteReattachRunner` skips submit,
+    /// so the request's optimization inputs are unused for streaming — but it still
+    /// carries the project id/name so a re-save keeps the record's routing metadata.
+    /// Prefer the project's real request; fall back to a minimal carrier.
+    private func reattachRequest(for job: PersistedRemoteJob, project: ProjectModel) -> RunRequest {
+        if let real = makeRunRequest() { return real }
+        return RunRequest(modelPath: project.importedFile?.path ?? "",
+                          material: project.material,
+                          materialsPath: materialsPath ?? "", rulesPath: rulesPath ?? "",
+                          resolution: project.quality.resolution,
+                          projectName: job.projectName ?? project.name,
+                          projectID: job.projectID ?? project.id)
+    }
+
     // MARK: - Persistence (M7.x-persist-b)
 
     /// Write the current project's latest state to disk. Called on leaving the
@@ -581,5 +685,18 @@ public final class AppModel: ObservableObject {
                          .replacingOccurrences(of: "-", with: " ")
         let trimmed = spaced.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? base : trimmed
+    }
+
+    // MARK: - test support (handoff 119)
+
+    /// Preload a live project + its recents entry so a re-attach test can resolve the
+    /// project WITHOUT disk IO and drive its run synchronously (the project's injected
+    /// RunModel uses a synchronous scheduler). Internal; never used by production.
+    func testSeedLiveProject(_ pm: ProjectModel, recent: RecentProject) {
+        projectsById[pm.id] = pm
+        if !recentProjects.contains(where: { $0.id == recent.id }) {
+            recentProjects.insert(recent, at: 0)
+        }
+        observeRun(pm)
     }
 }
