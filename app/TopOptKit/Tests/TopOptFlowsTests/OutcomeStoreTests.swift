@@ -19,6 +19,8 @@ final class OutcomeStoreTests: XCTestCase {
             meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2],
             vonMisesField: [1.5, 2.5, 3.5, 4.5],
             displacementField: [0.1, -0.2, 0.3, 0.4, 0.5, -0.6],
+            stressTensorField: [11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26,
+                                31, 32, 33, 34, 35, 36, 41, 42, 43, 44, 45, 46],
             keyframeMeshes: [
                 KeyframeMesh(vertices: [0, 0, 0, 2, 0, 0, 0, 2, 0], indices: [0, 1, 2]),
                 KeyframeMesh(vertices: [0, 0, 0, 1, 1, 1], indices: [0, 1]),
@@ -74,6 +76,10 @@ final class OutcomeStoreTests: XCTestCase {
         // M7.viz.3: the per-node displacement field survives so a reopened project
         // flexes without re-optimizing (the whole point of persisting it).
         XCTAssertEqual(a.displacementField, [0.1, -0.2, 0.3, 0.4, 0.5, -0.6])
+        // Handoff 122: the per-voxel stress TENSOR survives so a reopened run keeps the
+        // load→anchor flow overlay (it was silently DROPPED before this handoff).
+        XCTAssertEqual(a.stressTensorField, [11, 12, 13, 14, 15, 16, 21, 22, 23, 24, 25, 26,
+                                             31, 32, 33, 34, 35, 36, 41, 42, 43, 44, 45, 46])
         XCTAssertEqual(a.keyframeMeshes.count, 2)
         XCTAssertEqual(a.keyframeMeshes[0].vertices, [0, 0, 0, 2, 0, 0, 0, 2, 0])
         XCTAssertEqual(a.keyframeMeshes[0].indices, [0, 1, 2])
@@ -126,6 +132,26 @@ final class OutcomeStoreTests: XCTestCase {
         XCTAssertEqual(decoded.variants[0].vonMisesField, [1.5, 2.5, 3.5, 4.5])
         XCTAssertTrue(decoded.variants[0].displacementField.isEmpty)
         XCTAssertTrue(decoded.variants[1].displacementField.isEmpty)
+    }
+
+    /// A blob written BEFORE handoff 122 has no `stressTensorField` key. It must still
+    /// decode (→ empty tensor → the anchor-flow sub-mode stays gated until a re-run),
+    /// not fail — that is why the DTO field is optional.
+    func testDecodesLegacyBlobWithoutStressTensorField() throws {
+        let data = try OutcomeCodec.encode(OutcomeCodec.dto(from: sampleOutcome()))
+        let obj = try PropertyListSerialization.propertyList(
+            from: data, options: PropertyListSerialization.ReadOptions(), format: nil)
+        var plist = try XCTUnwrap(obj as? [String: Any])
+        var variants = try XCTUnwrap(plist["variants"] as? [[String: Any]])
+        for i in variants.indices { variants[i].removeValue(forKey: "stressTensorField") }
+        plist["variants"] = variants
+        let stripped = try PropertyListSerialization.data(fromPropertyList: plist, format: .binary, options: 0)
+
+        let decoded = try OutcomeCodec.decode(stripped)
+        XCTAssertEqual(decoded.variants.count, 2)
+        // The rest is intact; only the tensor degrades to empty.
+        XCTAssertEqual(decoded.variants[0].vonMisesField, [1.5, 2.5, 3.5, 4.5])
+        XCTAssertTrue(decoded.variants[0].stressTensorField.isEmpty)
     }
 
     /// LAN offload (097): the `computedRemotely` flag MUST survive persist → restore.

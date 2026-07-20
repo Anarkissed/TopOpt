@@ -206,6 +206,13 @@ struct RunJobResult {
   std::string report_path;             // <out_dir>/<output.report>
   std::string report_json;             // the bytes written to report_path
   std::vector<std::string> mesh_paths; // one exported mesh per accepted variant
+  // Handoff 122 — the per-voxel result FIELDS container (<out_dir>/fields.bin):
+  // one versioned block per accepted variant carrying the von Mises / displacement
+  // fields + the voxel mass & support summary, so a LAN remote run gets the same
+  // overlays a local run does. Written for every run (batch AND streaming). See
+  // topopt/fields.hpp for the format. Empty only if the run produced no output dir.
+  std::string fields_path;             // <out_dir>/fields.bin
+  int fields_variant_count = 0;        // accepted-variant blocks written
   // Handoff 114 — observability artifacts written to out_dir (empty when not
   // written, e.g. in-process callers with emit_progress=false).
   std::string run_info_path;           // <out_dir>/run_info.json (CLI path)
