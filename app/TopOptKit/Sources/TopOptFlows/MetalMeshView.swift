@@ -57,6 +57,23 @@ private struct StageUniforms {
     var _pad: Float = 0          // 16-byte tail alignment
 }
 
+// The depth-prepass uniforms — must match `DUniforms` in `depthPrepassShaderSource`.
+// `modelView` = view·model (eye-space transform); `flex.x` = the displacement scale (so the
+// captured depth tracks the visible, flexed part).
+private struct DepthPrepassUniforms {
+    var mvp: simd_float4x4
+    var modelView: simd_float4x4
+    var flex: SIMD4<Float> = .zero
+}
+
+// The contact-pass uniforms — must match `CUniforms` in `contactShaderSource`.
+// `params` = (contact-line feather, occlusion band, unused, unused) in eye-space/world mm.
+private struct ContactUniforms {
+    var mvp: simd_float4x4
+    var modelView: simd_float4x4
+    var params: SIMD4<Float>
+}
+
 // The neutral-clay shader (M7.4) + a selection tint (M7.5), compiled at runtime so
 // the SwiftPM target needs no .metal resource bundling (identical on iOS/macOS).
 private let viewerShaderSource = """
@@ -160,6 +177,93 @@ vertex GOut ground_vertex(GIn in [[stage_in]], constant GUniforms& u [[buffer(1)
 
 fragment float4 ground_fragment(GOut in [[stage_in]]) {
     return float4(in.color.rgb * in.color.a, in.color.a);   // premultiplied
+}
+"""
+
+// The DEPTH PREPASS (device round 3, items 7+8, parts b+c): render ONLY the opaque part into an
+// R32Float target holding each nearest surface's EYE-SPACE depth (positive, increasing into the
+// screen). The translucent contact pass (below) reads it to know how far the part surface is at
+// each pixel — you cannot sample the depth attachment you are currently rendering into, so the
+// part's depth is captured here in its own pass first. Clears to a large sentinel where no part
+// covers the pixel (→ the contact read finds "nothing behind" and shades the volume normally).
+// Reuses the mesh's position+flex buffers so the captured depth matches the visible part EXACTLY
+// (same mvp, same flex displacement). Runs only on a redraw when a translucent volume is present
+// (gated in `encode`) — STATIC, no idle-time cost (the 108 rule).
+private let depthPrepassShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct DIn  { float3 position [[attribute(0)]]; };
+struct DOut { float4 position [[position]]; float eyeZ; };
+struct DUniforms { float4x4 mvp; float4x4 modelView; float4 flex; };
+
+vertex DOut depth_vertex(DIn in [[stage_in]], constant DUniforms& u [[buffer(1)]],
+                         constant packed_float3* disp [[buffer(3)]], uint vid [[vertex_id]]) {
+    float3 p = in.position + u.flex.x * float3(disp[vid]);   // match viewer_vertex's flex
+    DOut o;
+    o.position = u.mvp * float4(p, 1.0);
+    o.eyeZ = -(u.modelView * float4(p, 1.0)).z;   // eye looks down −Z → positive into the screen
+    return o;
+}
+
+fragment float depth_fragment(DOut in [[stage_in]]) { return in.eyeZ; }
+"""
+
+// The CONTACT pass (device round 3, items 7+8, parts b+c): ONE shader variant shared by BOTH the
+// design-box glass and the keep-clear clearance FACE draws (the two consumers). It replaces
+// `ground_fragment` for those faces, adding (b) a bright additive CONTACT LINE where the
+// translucent surface meets the part and (c) an interior contact-occlusion darkening just inside
+// it. Both are driven by |fragmentEyeDepth − sceneEyeDepth| read from the depth-prepass texture.
+// Away from the part (large depth gap) it is BYTE-IDENTICAL to `ground_fragment`, so only the
+// contact region changes.
+//
+// HONESTY (bake this into the doc too): this is a screen-space depth-proximity effect, not a true
+// analytic intersection curve. Known failure mode: at grazing angles the depth gradient is
+// shallow, so `d` stays small across many pixels and the contact line thickens. That's expected
+// and acceptable for the contact read.
+private let contactShaderSource = """
+#include <metal_stdlib>
+using namespace metal;
+
+struct CIn  { float3 position [[attribute(0)]]; float4 color [[attribute(1)]]; };
+struct COut { float4 position [[position]]; float4 color; float eyeZ; };
+// params: (x = contact-line feather in PIXELS, y = occlusion falloff in PIXELS; z,w unused).
+struct CUniforms { float4x4 mvp; float4x4 modelView; float4 params; };
+
+vertex COut contact_vertex(CIn in [[stage_in]], constant CUniforms& u [[buffer(1)]]) {
+    COut o;
+    float4 p = float4(in.position, 1.0);
+    o.position = u.mvp * p;
+    o.color = in.color;
+    o.eyeZ = -(u.modelView * p).z;   // same eye-space depth convention as the prepass
+    return o;
+}
+
+fragment float4 contact_fragment(COut in [[stage_in]], constant CUniforms& u [[buffer(1)]],
+                                 texture2d<float, access::read> sceneDepth [[texture(0)]]) {
+    float featherPx = max(u.params.x, 1e-3);
+    float occPx     = max(u.params.y, 1e-3);
+    // The opaque part's eye-space depth at THIS pixel (a large sentinel where no part covers it).
+    float sceneEyeZ = sceneDepth.read(uint2(in.position.xy)).x;
+    float d = abs(sceneEyeZ - in.eyeZ);
+    // Convert the eye-space gap to a SCREEN-space one: dividing by how fast eye-Z changes per pixel
+    // (fwidth) gives the contact's width in pixels, so the feather is a consistent ~1–2 px at any
+    // model scale or resolution. This is what makes the grazing-angle thickening in the honesty
+    // caveat emerge for free: at a grazing angle eye-Z changes fast per pixel (large fwidth), so
+    // `dPix` stays small across many pixels and the line thickens.
+    float dPix = d / max(fwidth(in.eyeZ), 1e-6);
+    // ground_fragment's premultiplied output — the untouched look away from the part.
+    float3 groundRGB = in.color.rgb * in.color.a;
+    // (c) interior contact-occlusion: darken the volume right at the contact (dPix≈0), fading back
+    // to the full look away from the part surface.
+    float occ = mix(0.42, 1.0, saturate(dPix / occPx));
+    float3 baseRGB = groundRGB * occ;
+    // (b) bright additive contact LINE where the translucent surface meets the part (dPix≈0),
+    // tinted toward the volume's own hue so a red clearance glows red-hot and the blue box cool.
+    float line = smoothstep(featherPx, 0.0, dPix);
+    float3 hue = normalize(in.color.rgb + 1e-4);
+    float3 lineCol = mix(float3(1.0), hue, 0.35) * line * 0.9;
+    return float4(baseRGB + lineCol, in.color.a);   // premultiplied; == ground_fragment far from contact
 }
 """
 
@@ -409,6 +513,27 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Whether the CAD-stage backdrop pipeline built (its MSL compiled). A test asserts this is
     /// true on a real GPU so a shader typo fails loudly instead of silently disabling the stage.
     var stagePipelineDidBuild: Bool { stagePipeline != nil }
+    /// The DEPTH PREPASS pipeline (items 7+8, parts b+c): writes the opaque part's eye-space depth
+    /// into an R32Float texture the contact pass reads. Optional — a nil disables the contact
+    /// treatment (the faces fall back to the plain `groundPipeline` draw, part-a depth-bias only).
+    private let depthPrepassPipeline: MTLRenderPipelineState?
+    /// The CONTACT pipeline (items 7+8, parts b+c): the one shader variant BOTH the design-box and
+    /// clearance face draws use to add the contact line + interior occlusion. Optional (same fallback).
+    private let contactPipeline: MTLRenderPipelineState?
+    /// True on a real GPU when both round-3 contact pipelines built — a test pins this so a shader
+    /// typo (built with `try?`) fails loudly instead of silently reverting to the plain draw.
+    var contactPipelinesDidBuild: Bool { depthPrepassPipeline != nil && contactPipeline != nil }
+    /// The exact contact/prepass MSL the app ships, exposed so a headless test can compile it and
+    /// fail loudly on a typo.
+    static var depthPrepassShaderSourceForTesting: String { depthPrepassShaderSource }
+    static var contactShaderSourceForTesting: String { contactShaderSource }
+    /// Reused offscreen textures for the depth prepass (colour = eye-Z, plus its own z-buffer),
+    /// re-created only when the drawable size changes — so a steady camera reuses them.
+    private var sceneDepthColorTex: MTLTexture?
+    private var sceneDepthZTex: MTLTexture?
+    /// Whether the contact treatment (parts b+c) runs. Always true in production; a test flips it
+    /// off to capture the BEFORE (plain depth-biased faces) against the AFTER for the same geometry.
+    var contactShadingEnabled = true
     /// The exact stage MSL the app ships — exposed so a headless test can compile it and fail
     /// loudly on a typo (the pipeline is otherwise built with `try?`, i.e. nil-on-failure).
     static var stageShaderSourceForTesting: String { stageShaderSource }
@@ -421,6 +546,23 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private var settleDuration: CFTimeInterval = 0
     /// True while the settle animation is running (drives continuous redraw).
     private(set) var isSettling = false
+
+    // Detent face-highlight PULSE (device round 3, item 2): a brief gold flash of the part face a
+    // design-box drag just snapped to — the in-viewer replacement for the old "Snapped to face"
+    // toast. Reuses the per-face tint buffer (no new pass): the pulsed face's tint animates a
+    // sin-envelope alpha up then back down over `pulseDuration`, layered over the last-applied
+    // highlight tints. Like the settle, it drives continuous redraw only WHILE active, then returns
+    // to on-demand — a bounded, user-triggered animation, not an idle loop (the 108 rule).
+    private var pulseFaceID: FaceID?
+    private var pulseStart: CFTimeInterval = 0
+    private let pulseDuration: CFTimeInterval = 0.42
+    /// The last highlight tints applied (so a pulse can layer over them without the SwiftUI side
+    /// re-pushing every frame).
+    private var lastFaceTint: [FaceID: SIMD4<Float>] = [:]
+    private var lastActiveFaces: Set<FaceID> = []
+    /// True while a detent pulse is animating (drives continuous redraw, like `isSettling`).
+    private(set) var isPulsing = false
+
     /// Whether to draw the ground grid + contact shadow (set once gravity is set).
     var showGround = false
     private var groundLineBuffer: MTLBuffer?
@@ -450,6 +592,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     static let colorFormat: MTLPixelFormat = .bgra8Unorm
     static let depthFormat: MTLPixelFormat = .depth32Float
     static let idFormat: MTLPixelFormat = .r32Uint
+    /// The depth-prepass colour target (items 7+8, parts b+c): one float per pixel = the opaque
+    /// part's eye-space depth, read by the contact fragment.
+    static let sceneDepthFormat: MTLPixelFormat = .r32Float
+    /// The eye-space depth written where NO part covers a pixel — large enough that the contact
+    /// read sees "nothing behind" (no line, full brightness) for a volume floating in free space.
+    static let sceneDepthFar: Float = 1e30
     /// Depth-bias (polygon offset) for the translucent design-box + clearance FACE passes, so they
     /// don't z-fight (shimmer) with the part surface where the volumes graze/coincide with it
     /// (device round 3, items 7+8, part a — the shimmer). Pulls the translucent fragments a hair
@@ -580,6 +728,57 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             spd.depthAttachmentPixelFormat = Self.depthFormat
             stagePipe = try? device.makeRenderPipelineState(descriptor: spd)
         }
+        // Depth-prepass pipeline (items 7+8, parts b+c): the opaque part → eye-space depth in an
+        // R32Float target, so the contact pass can read the part's depth per pixel. Vertex layout:
+        // just the position (attribute 0) from the mesh's stride-24 pos+normal buffer, plus the
+        // flex displacement at buffer 3 (so the captured depth matches the visible flexed part).
+        var depthPrepassPipe: MTLRenderPipelineState? = nil
+        if let dLib = try? device.makeLibrary(source: depthPrepassShaderSource, options: nil),
+           let dvf = dLib.makeFunction(name: "depth_vertex"),
+           let dff = dLib.makeFunction(name: "depth_fragment") {
+            let dvd = MTLVertexDescriptor()
+            dvd.attributes[0].format = .float3     // position
+            dvd.attributes[0].offset = 0
+            dvd.attributes[0].bufferIndex = 0
+            dvd.layouts[0].stride = MemoryLayout<Float>.stride * 6   // pos+normal (normal unused)
+            let dpd = MTLRenderPipelineDescriptor()
+            dpd.vertexFunction = dvf
+            dpd.fragmentFunction = dff
+            dpd.vertexDescriptor = dvd
+            dpd.colorAttachments[0].pixelFormat = Self.sceneDepthFormat   // R32Float eye-Z
+            dpd.depthAttachmentPixelFormat = Self.depthFormat
+            depthPrepassPipe = try? device.makeRenderPipelineState(descriptor: dpd)
+        }
+        // Contact pipeline (items 7+8, parts b+c): the ONE variant both the design-box and
+        // clearance FACE draws use. Same vertex layout + premultiplied "over" blend as the ground
+        // pipeline (so it's byte-identical away from the part), plus the scene-depth texture read.
+        var contactPipe: MTLRenderPipelineState? = nil
+        if let cLib = try? device.makeLibrary(source: contactShaderSource, options: nil),
+           let cvf = cLib.makeFunction(name: "contact_vertex"),
+           let cff = cLib.makeFunction(name: "contact_fragment") {
+            let cvd = MTLVertexDescriptor()
+            cvd.attributes[0].format = .float3     // position
+            cvd.attributes[0].offset = 0
+            cvd.attributes[0].bufferIndex = 0
+            cvd.attributes[1].format = .float4     // rgba (premultiplied)
+            cvd.attributes[1].offset = MemoryLayout<Float>.stride * 3
+            cvd.attributes[1].bufferIndex = 0
+            cvd.layouts[0].stride = MemoryLayout<Float>.stride * 7
+            let cpd = MTLRenderPipelineDescriptor()
+            cpd.vertexFunction = cvf
+            cpd.fragmentFunction = cff
+            cpd.vertexDescriptor = cvd
+            cpd.colorAttachments[0].pixelFormat = Self.colorFormat
+            cpd.colorAttachments[0].isBlendingEnabled = true          // premultiplied alpha (as ground)
+            cpd.colorAttachments[0].rgbBlendOperation = .add
+            cpd.colorAttachments[0].alphaBlendOperation = .add
+            cpd.colorAttachments[0].sourceRGBBlendFactor = .one
+            cpd.colorAttachments[0].sourceAlphaBlendFactor = .one
+            cpd.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            cpd.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            cpd.depthAttachmentPixelFormat = Self.depthFormat
+            contactPipe = try? device.makeRenderPipelineState(descriptor: cpd)
+        }
         // Load-path ribbon pipeline (optional: falls back to the ground line pipeline).
         // Vertex layout (stride 48): segStart(12) + segEnd(12) + side/endFlag(8) + rgba(16).
         var lpPipe: MTLRenderPipelineState? = nil
@@ -693,6 +892,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         self.idPipeline = idPipe
         self.groundPipeline = groundPipe
         self.stagePipeline = stagePipe
+        self.depthPrepassPipeline = depthPrepassPipe
+        self.contactPipeline = contactPipe
         self.groundDepthState = device.makeDepthStencilState(descriptor: gdsd) ?? depth
         self.lineOverlayDepthState = device.makeDepthStencilState(descriptor: odsd) ?? depth
         self.loadPathPipeline = lpPipe
@@ -1073,7 +1274,41 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Rebuild the per-vertex tint buffer from the selection: each grouped face's
     /// vertices carry that group's colour; the active group is tinted more strongly.
     func setHighlights(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>) {
-        buildTintBuffer(faceTint: faceTint, activeFaces: activeFaces)
+        lastFaceTint = faceTint       // remembered so a detent pulse can layer over them (item 2)
+        lastActiveFaces = activeFaces
+        buildTintBuffer(faceTint: faceTint, activeFaces: activeFaces, pulse: currentPulse())
+    }
+
+    /// Start a brief highlight pulse of `faceID` (device round 3, item 2), the in-viewer feedback
+    /// when a design-box face snaps to that part face. Re-triggering (a fresh snap) restarts the
+    /// envelope. The caller (`apply`) flips the view to continuous redraw; the pulse ends itself.
+    func beginDetentPulse(faceID: FaceID) {
+        pulseFaceID = faceID
+        pulseStart = CACurrentMediaTime()
+        isPulsing = true
+        buildTintBuffer(faceTint: lastFaceTint, activeFaces: lastActiveFaces, pulse: currentPulse())
+    }
+
+    /// The pulse override for the tint buffer at the current time: the pulsed face id + a gold rgba
+    /// whose alpha follows a sin envelope (0 → peak → 0) over `pulseDuration`. Nil when no pulse is
+    /// active. Ends the pulse (clears `isPulsing`) once the envelope completes.
+    private func currentPulse() -> (face: FaceID, color: SIMD4<Float>)? {
+        guard let f = pulseFaceID else { return nil }
+        let t = Float((CACurrentMediaTime() - pulseStart) / pulseDuration)
+        if t >= 1 || t < 0 { pulseFaceID = nil; isPulsing = false; return nil }
+        let env = sin(Float.pi * t)                       // 0 → 1 → 0 across the pulse
+        let gold = SIMD4<Float>(1.0, 0.82, 0.35, 0.9 * env)
+        return (f, gold)
+    }
+
+    /// Advance the detent pulse: re-upload the tint buffer for the current envelope value. Returns
+    /// true while the pulse is still animating (so `draw` keeps requesting frames).
+    @discardableResult
+    func stepPulse() -> Bool {
+        guard isPulsing else { return false }
+        let pulse = currentPulse()                        // may clear `isPulsing` when it completes
+        buildTintBuffer(faceTint: lastFaceTint, activeFaces: lastActiveFaces, pulse: pulse)
+        return isPulsing
     }
 
     /// M7.8 stress overlay: upload per-flat-vertex colors (alpha 1) directly as the
@@ -1237,11 +1472,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private func buildTintBuffer(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>) {
+    private func buildTintBuffer(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>,
+                                 pulse: (face: FaceID, color: SIMD4<Float>)? = nil) {
         guard vertexDrawCount > 0 else { tintBuffer = nil; return }
         var tints = [Float](repeating: 0, count: vertexDrawCount * 4)
         for v in 0..<vertexDrawCount {
             let fid = v < flatFaceIDs.count ? FaceID(bitPattern: flatFaceIDs[v]) : -1
+            // The detent PULSE overrides its face's tint with the gold envelope colour, bypassing
+            // the selection alpha-clamp so the flash can outshine a highlight (item 2).
+            if let pulse, fid == pulse.face {
+                let c = pulse.color
+                tints[v * 4] = c.x; tints[v * 4 + 1] = c.y
+                tints[v * 4 + 2] = c.z; tints[v * 4 + 3] = c.w
+                continue
+            }
             guard var c = faceTint[fid] else { continue }
             c.w = activeFaces.contains(fid) ? 0.75 : 0.45   // active group brighter
             tints[v * 4] = c.x; tints[v * 4 + 1] = c.y
@@ -1257,16 +1501,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     }
 
     func draw(in view: MTKView) {
-        let wasSettling = isSettling
-        if wasSettling { stepSettle() }
+        let wasAnimating = isSettling || isPulsing
+        if isSettling { stepSettle() }
+        if isPulsing { stepPulse() }   // advance the detent flash (item 2), re-uploading its tint
         guard let cmd = queue.makeCommandBuffer() else { return }
         if let rpd = view.currentRenderPassDescriptor {
             encode(into: rpd, aspect: aspect, into: cmd, drawStage: true)
         }
         if let drawable = view.currentDrawable { cmd.present(drawable) }
         cmd.commit()
-        // The settle finished this frame → return to on-demand drawing (battery).
-        if wasSettling && !isSettling {
+        // The settle/pulse finished this frame → return to on-demand drawing (battery).
+        if wasAnimating && !isSettling && !isPulsing {
             view.isPaused = true
             view.enableSetNeedsDisplay = true
         }
@@ -1279,9 +1524,23 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, into cmd: MTLCommandBuffer,
                         drawStage: Bool) {
         guard vertexDrawCount > 0, let vbuf = vertexBuffer, let tbuf = tintBuffer,
-              let fbuf = flexBuffer,
-              let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
+              let fbuf = flexBuffer else { return }
         var uniforms = makeUniforms(aspect: aspect)
+
+        // DEPTH PREPASS (items 7+8, parts b+c): when a translucent volume is present, capture the
+        // opaque part's eye-space depth into a texture FIRST (its own render pass — you cannot read
+        // the depth attachment you are rendering into), so the contact pass below can add a contact
+        // line + interior occlusion where the volume meets the part. Gated on there being a volume
+        // AND both contact pipelines having built, so it costs NOTHING otherwise, and — like every
+        // other pass here — runs only on a redraw, never on an idle frame (the 108 rule).
+        var sceneDepthTex: MTLTexture? = nil
+        if contactShadingEnabled, (designBoxFaceCount > 0 || clearanceFaceCount > 0), contactPipeline != nil,
+           let ctex = rpd.colorAttachments[0].texture {
+            sceneDepthTex = encodeDepthPrepass(width: ctex.width, height: ctex.height,
+                                               uniforms: uniforms, into: cmd)
+        }
+
+        guard let enc = cmd.makeRenderCommandEncoder(descriptor: rpd) else { return }
 
         // CAD-STAGE backdrop (item 9): the shaded room, drawn FIRST — depth-always + no write
         // (`lineOverlayDepthState`), so the part / box / grid drawn after occlude it. Its uniform
@@ -1328,51 +1587,22 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             }
         }
 
-        // M7.dom-app design-box gizmo: translucent box faces + bright edges, drawn
-        // under the MESH's mvp (uniforms.mvp) so they lock to the part and settle
-        // with it. Blended + depth-tested (groundDepthState: test against the part so
-        // the part occludes the box's far faces, but no depth write so the box never
-        // hides the part). Faces first, then edges on top.
-        if (designBoxFaceCount > 0 || designBoxLineCount > 0), let gpipe = groundPipeline {
-            var mvp = uniforms.mvp
-            enc.setRenderPipelineState(gpipe)
-            enc.setDepthStencilState(groundDepthState)
-            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
-            if let fbuf = designBoxFaceBuffer, designBoxFaceCount > 0 {
-                // Depth-bias the FACES only (items 7+8, part a) so the box glass stops shimmering
-                // where it passes through the part; reset before the crisp edge lines.
-                enc.setDepthBias(Self.translucentDepthBias, slopeScale: Self.translucentDepthSlopeBias, clamp: 0)
-                enc.setVertexBuffer(fbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: designBoxFaceCount)
-                enc.setDepthBias(0, slopeScale: 0, clamp: 0)
-            }
-            if let lbuf = designBoxLineBuffer, designBoxLineCount > 0 {
-                enc.setVertexBuffer(lbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: designBoxLineCount)
-            }
-        }
+        // M7.dom-app design-box gizmo: translucent box faces + bright edges, drawn under the
+        // MESH's mvp (uniforms.mvp) so they lock to the part and settle with it. Depth-tested
+        // (groundDepthState: the part occludes the box's far faces; no depth write so the box
+        // never hides the part). The faces carry the contact treatment (parts b+c) when the
+        // prepass ran; the edges stay crisp. See `encodeVolume`.
+        encodeVolume(enc: enc, mvp: uniforms.mvp,
+                     faceBuffer: designBoxFaceBuffer, faceCount: designBoxFaceCount,
+                     lineBuffer: designBoxLineBuffer, lineCount: designBoxLineCount,
+                     sceneDepthTex: sceneDepthTex)
 
-        // Keep-clear v2 (Part 3): the clearance volumes, same MODEL-space mvp + blended
-        // depth-tested pass as the design box (the part occludes far faces, no depth
-        // write so the volume never hides the part). Faces first, then bright edges.
-        if (clearanceFaceCount > 0 || clearanceLineCount > 0), let gpipe = groundPipeline {
-            var mvp = uniforms.mvp
-            enc.setRenderPipelineState(gpipe)
-            enc.setDepthStencilState(groundDepthState)
-            enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
-            if let fbuf = clearanceFaceBuffer, clearanceFaceCount > 0 {
-                // Same z-fighting fix (items 7+8, part a) for the translucent cylinder/slab faces
-                // where they pass through the part; reset before the bright edge lines.
-                enc.setDepthBias(Self.translucentDepthBias, slopeScale: Self.translucentDepthSlopeBias, clamp: 0)
-                enc.setVertexBuffer(fbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: clearanceFaceCount)
-                enc.setDepthBias(0, slopeScale: 0, clamp: 0)
-            }
-            if let lbuf = clearanceLineBuffer, clearanceLineCount > 0 {
-                enc.setVertexBuffer(lbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: clearanceLineCount)
-            }
-        }
+        // Keep-clear v2 (Part 3): the clearance volumes — the SAME MODEL-space depth-tested pass
+        // and the SAME contact variant as the design box (one shader, both consumers).
+        encodeVolume(enc: enc, mvp: uniforms.mvp,
+                     faceBuffer: clearanceFaceBuffer, faceCount: clearanceFaceCount,
+                     lineBuffer: clearanceLineBuffer, lineCount: clearanceLineCount,
+                     sceneDepthTex: sceneDepthTex)
 
         // Load-path overlay (M7.viz.4): principal-stress-direction glyphs drawn under
         // the MESH's model·view·proj (uniforms.mvp) so they lock to the part (the ground
@@ -1445,6 +1675,118 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// The ground's MVP: plain camera view·projection (world-space floor).
     private func groundMVP(aspect: Float) -> simd_float4x4 {
         camera.projectionMatrix(aspect: aspect) * camera.viewMatrix()
+    }
+
+    /// The eye-space transform (view·model) for the settled part — used by the depth prepass and
+    /// the contact pass to compute a fragment's eye-space depth (aspect-independent: aspect only
+    /// enters the projection, not the view·model).
+    private func modelViewMatrix() -> simd_float4x4 {
+        camera.viewMatrix() * modelMatrix()
+    }
+
+    /// The contact-line feather + interior-occlusion falloff, in SCREEN PIXELS (the contact shader
+    /// divides the eye-space gap by `fwidth` to work in pixel space). Scale-/resolution-independent:
+    /// a crisp ~1.5 px line with a ~7 px occlusion falloff just inside it.
+    static let contactFeatherPixels: Float = 1.5
+    static let contactOcclusionPixels: Float = 7.0
+
+    /// Fetch (re-creating on a size change) the depth-prepass colour + depth textures. `.private`
+    /// (GPU-only): the prepass writes them and the contact pass reads them within one command
+    /// buffer, so they never touch the CPU. Nil if the device can't allocate them.
+    private func sceneDepthTextures(width: Int, height: Int) -> (color: MTLTexture, depth: MTLTexture)? {
+        if let c = sceneDepthColorTex, let z = sceneDepthZTex, c.width == width, c.height == height {
+            return (c, z)
+        }
+        let cd = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.sceneDepthFormat, width: width, height: height, mipmapped: false)
+        cd.usage = [.renderTarget, .shaderRead]
+        cd.storageMode = .private
+        let zd = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.depthFormat, width: width, height: height, mipmapped: false)
+        zd.usage = [.renderTarget]
+        zd.storageMode = .private
+        guard let c = device.makeTexture(descriptor: cd), let z = device.makeTexture(descriptor: zd) else {
+            return nil
+        }
+        sceneDepthColorTex = c; sceneDepthZTex = z
+        return (c, z)
+    }
+
+    /// Run the depth prepass (items 7+8, parts b+c): render the opaque part's eye-space depth into
+    /// `color` (its own z-buffer `depth`) so the contact pass can read the part surface per pixel.
+    /// Called only when a translucent volume is present (gated by the caller). Returns the colour
+    /// texture on success, nil if the prepass could not be encoded (→ the caller keeps the plain draw).
+    private func encodeDepthPrepass(width: Int, height: Int, uniforms: ViewerUniforms,
+                                    into cmd: MTLCommandBuffer) -> MTLTexture? {
+        guard let dpipe = depthPrepassPipeline, vertexDrawCount > 0,
+              let vbuf = vertexBuffer, let fbuf = flexBuffer,
+              let tex = sceneDepthTextures(width: width, height: height) else { return nil }
+        let pd = MTLRenderPassDescriptor()
+        pd.colorAttachments[0].texture = tex.color
+        pd.colorAttachments[0].loadAction = .clear
+        pd.colorAttachments[0].clearColor = MTLClearColor(red: Double(Self.sceneDepthFar), green: 0, blue: 0, alpha: 0)
+        pd.colorAttachments[0].storeAction = .store
+        pd.depthAttachment.texture = tex.depth
+        pd.depthAttachment.loadAction = .clear
+        pd.depthAttachment.clearDepth = 1.0
+        pd.depthAttachment.storeAction = .dontCare
+        guard let penc = cmd.makeRenderCommandEncoder(descriptor: pd) else { return nil }
+        var du = DepthPrepassUniforms(mvp: uniforms.mvp, modelView: modelViewMatrix(),
+                                      flex: SIMD4<Float>(flexScale, 0, 0, 0))
+        penc.setRenderPipelineState(dpipe)
+        penc.setDepthStencilState(depthState)   // .less, write on — nearest part surface wins
+        penc.setCullMode(.none)                  // match the main mesh draw
+        penc.setVertexBuffer(vbuf, offset: 0, index: 0)
+        penc.setVertexBuffer(fbuf, offset: 0, index: 3)
+        penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
+        penc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
+        penc.endEncoding()
+        return tex.color
+    }
+
+    /// Draw one translucent MODEL-space volume (the design box OR a clearance region) — its faces
+    /// then its bright edges — under `mvp`. The FACES go through the shared CONTACT variant (items
+    /// 7+8, parts b+c) when the prepass produced a `sceneDepthTex`, adding the contact line +
+    /// interior occlusion where the volume meets the part; otherwise they fall back to the plain
+    /// `groundPipeline` draw (part-a depth-bias only). The edges always use `groundPipeline`. This
+    /// is the ONE place both consumers share the contact shader.
+    private func encodeVolume(enc: MTLRenderCommandEncoder, mvp: simd_float4x4,
+                              faceBuffer: MTLBuffer?, faceCount: Int,
+                              lineBuffer: MTLBuffer?, lineCount: Int, sceneDepthTex: MTLTexture?) {
+        guard faceCount > 0 || lineCount > 0 else { return }
+        enc.setDepthStencilState(groundDepthState)
+        if faceCount > 0, let fbuf = faceBuffer {
+            // Depth-bias the FACES (items 7+8, part a) so the glass stops z-fighting where it
+            // passes through the part; reset before the crisp edge lines.
+            enc.setDepthBias(Self.translucentDepthBias, slopeScale: Self.translucentDepthSlopeBias, clamp: 0)
+            if let cpipe = contactPipeline, let sceneTex = sceneDepthTex {
+                var cu = ContactUniforms(mvp: mvp, modelView: modelViewMatrix(),
+                                         params: SIMD4<Float>(Self.contactFeatherPixels,
+                                                              Self.contactOcclusionPixels, 0, 0))
+                enc.setRenderPipelineState(cpipe)
+                enc.setVertexBytes(&cu, length: MemoryLayout<ContactUniforms>.stride, index: 1)
+                // `contact_fragment` ALSO declares `CUniforms u [[buffer(1)]]` (it reads the pixel
+                // feather + occlusion band), so the FRAGMENT index-1 buffer must be bound too —
+                // without this Metal drops the draw ("missing Buffer binding at index 1"), the same
+                // trap `loadpath_fragment` documents.
+                enc.setFragmentBytes(&cu, length: MemoryLayout<ContactUniforms>.stride, index: 1)
+                enc.setFragmentTexture(sceneTex, index: 0)
+            } else if let gpipe = groundPipeline {
+                var m = mvp
+                enc.setRenderPipelineState(gpipe)
+                enc.setVertexBytes(&m, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            }
+            enc.setVertexBuffer(fbuf, offset: 0, index: 0)
+            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: faceCount)
+            enc.setDepthBias(0, slopeScale: 0, clamp: 0)
+        }
+        if lineCount > 0, let lbuf = lineBuffer, let gpipe = groundPipeline {
+            var m = mvp
+            enc.setRenderPipelineState(gpipe)
+            enc.setVertexBytes(&m, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            enc.setVertexBuffer(lbuf, offset: 0, index: 0)
+            enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: lineCount)
+        }
     }
 
     /// Build the CAD-stage backdrop uniform (item 9): the inverse world→clip transform for the
@@ -1645,6 +1987,21 @@ struct MeshViewInputs {
     var loadFlowGuides: [Float]? = nil
     /// Load-path FLOW: body opacity (1 opaque; < 1 = translucent x-ray/stress body).
     var bodyAlpha: Float = 1
+    /// Detent face-highlight PULSE (device round 3, item 2): the part face a design-box drag just
+    /// snapped to + a monotonic token. The coordinator fires a fresh viewer flash whenever the
+    /// token advances (so re-snapping the SAME face re-pulses). nil = no pulse pending.
+    var detentPulse: DetentPulse? = nil
+}
+
+/// A pending detent face-highlight pulse (item 2): which part face to flash, and a token that
+/// advances on every fresh snap so the coordinator can tell a NEW snap from an unchanged input.
+public struct DetentPulse: Equatable, Sendable {
+    public var faceID: FaceID
+    public var token: Int
+    public init(faceID: FaceID, token: Int) {
+        self.faceID = faceID
+        self.token = token
+    }
 }
 
 #if os(iOS)
@@ -1663,7 +2020,8 @@ public struct MetalMeshView: UIViewRepresentable {
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
-                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
+                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
+                detentPulse: DetentPulse? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
@@ -1673,7 +2031,7 @@ public struct MetalMeshView: UIViewRepresentable {
             designBox: designBox, keepOutBoxes: keepOutBoxes,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
-            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha)
+            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1713,7 +2071,8 @@ public struct MetalMeshView: NSViewRepresentable {
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
-                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {
+                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
+                detentPulse: DetentPulse? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
@@ -1723,7 +2082,7 @@ public struct MetalMeshView: NSViewRepresentable {
             designBox: designBox, keepOutBoxes: keepOutBoxes,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
-            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha)
+            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -1801,6 +2160,8 @@ extension MetalMeshView {
         private var appliedFlow = false
         private var appliedFlowKey: Double = -1
         private var appliedGuideSig = -1
+        /// The detent-pulse token last fired (item 2); a fresh token flashes the matched face.
+        private var appliedPulseToken = -1
         private var appliedBodyAlpha: Float = 1
         /// M7.dom-app: the design box + keep-outs last uploaded, so the gizmo geometry
         /// rebuilds only when the boxes actually change (not every camera tick).
@@ -1869,6 +2230,17 @@ extension MetalMeshView {
                     view.isPaused = false
                     view.enableSetNeedsDisplay = false
                 }
+                dirty = true
+            }
+
+            // Detent face-highlight PULSE (item 2): a fresh token (a new snap) flashes the matched
+            // part face in the viewer, then the pulse runs continuous frames until it fades out —
+            // the in-viewer replacement for the old "Snapped to face" toast.
+            if let pulse = inputs.detentPulse, pulse.token != appliedPulseToken {
+                appliedPulseToken = pulse.token
+                renderer.beginDetentPulse(faceID: pulse.faceID)
+                view.isPaused = false
+                view.enableSetNeedsDisplay = false
                 dirty = true
             }
 
@@ -2168,7 +2540,19 @@ public struct MetalMeshView: View {
                 designBox: DesignBoxBounds? = nil, keepOutBoxes: [DesignBoxBounds] = [],
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
-                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1) {}
+                loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
+                detentPulse: DetentPulse? = nil) {}
     public var body: some View { DS.Color.background.color }
+}
+
+/// A pending detent face-highlight pulse (item 2) — the non-Metal stub mirror of the MetalKit
+/// declaration so call sites compile on every platform.
+public struct DetentPulse: Equatable, Sendable {
+    public var faceID: FaceID
+    public var token: Int
+    public init(faceID: FaceID, token: Int) {
+        self.faceID = faceID
+        self.token = token
+    }
 }
 #endif

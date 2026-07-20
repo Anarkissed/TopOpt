@@ -462,4 +462,30 @@ final class DesignBoxTests: XCTestCase {
         let r = DesignBoxDetent.resolve(rawCoord: 9.4, candidates: cands, current: 0)
         XCTAssertEqual(r.coord, 10, accuracy: 1e-5); XCTAssertEqual(r.snapped, 10); XCTAssertTrue(r.didSnap)
     }
+
+    // MARK: matched-face resolution (device round 3, item 2 — the pulse trigger)
+
+    private static let detentFaces = [
+        StepFaceGeometry(kind: .plane, planeNormal: SIMD3(1, 0, 0), planeOrigin: SIMD3(4, 0, 0)),    // id 0: ⟂ X at x=4
+        StepFaceGeometry(kind: .plane, planeNormal: SIMD3(-1, 0, 0), planeOrigin: SIMD3(-2, 0, 0)),  // id 1: ⟂ X at x=-2
+        StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 1, 0), planeOrigin: SIMD3(9, 5, 0)),    // id 2: ⟂ Y (parallel to X drag)
+        StepFaceGeometry(kind: .cylinder, cylinderRadiusMM: 2, axisPoint: .zero, axisDir: SIMD3(1, 0, 0)), // id 3: not a plane
+    ]
+
+    /// A snap along X to a plane coordinate returns THAT plane's face id (so the viewer pulses it).
+    func testMatchedFaceReturnsPerpendicularPlaneFace() {
+        XCTAssertEqual(DesignBoxDetent.matchedFace(axis: 0, coord: 4, faces: Self.detentFaces), 0)
+        XCTAssertEqual(DesignBoxDetent.matchedFace(axis: 0, coord: -2, faces: Self.detentFaces), 1)
+    }
+
+    /// A snap that landed on an AABB extent (no ⟂ plane there) — or to a coord matched only by a
+    /// PARALLEL / non-planar face — returns nil, so only the haptic fires (nothing to flash).
+    func testMatchedFaceNilWhenNoPerpendicularPlane() {
+        // x=9 is where the ⟂-Y plane sits, but it is PARALLEL to the X drag → ignored → nil.
+        XCTAssertNil(DesignBoxDetent.matchedFace(axis: 0, coord: 9, faces: Self.detentFaces))
+        // A coord far from every ⟂ plane (an AABB-extent snap) → nil.
+        XCTAssertNil(DesignBoxDetent.matchedFace(axis: 0, coord: 0, faces: Self.detentFaces))
+        // No planar faces at all (an STL part) → nil.
+        XCTAssertNil(DesignBoxDetent.matchedFace(axis: 0, coord: 4, faces: []))
+    }
 }
