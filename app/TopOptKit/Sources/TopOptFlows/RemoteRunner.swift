@@ -120,16 +120,35 @@ public struct RemoteRunError: Error, CustomStringConvertible {
 /// run still solving on the Mac instead of orphaning it (handoff 101, requirement
 /// 5). Identity is the worker address + the CLI's job id; the fingerprint lets a
 /// re-attach re-assert the version guard.
+///
+/// Handoff 119 (cold-launch re-attach) added three fields the RELAUNCHED app needs
+/// to offer the re-attach and land it in the right place — they are ALL OPTIONAL so
+/// a record written by a pre-119 build (the `.v1` key is unchanged) still decodes:
+///   * `submittedAt` powers the banner's "a run from <time>…" line;
+///   * `projectID`/`projectName` let the cold-launch flow reopen the project the run
+///     belonged to, so the streamed result lands in the normal workspace→results
+///     path rather than an orphaned view.
 public struct PersistedRemoteJob: Codable, Equatable, Sendable {
     public let host: String
     public let port: Int
     public let fingerprint: String
     public let jobID: String
-    public init(host: String, port: Int, fingerprint: String, jobID: String) {
+    /// When the job was SUBMITTED. Preserved across a re-attach re-save so the
+    /// banner's age stays truthful. Optional for pre-119 backward compatibility.
+    public let submittedAt: Date?
+    /// The project the run belongs to, so a cold-launch re-attach reopens it.
+    public let projectID: UUID?
+    /// The project's display name, for the banner copy. Optional (pre-119 / unknown).
+    public let projectName: String?
+    public init(host: String, port: Int, fingerprint: String, jobID: String,
+                submittedAt: Date? = nil, projectID: UUID? = nil, projectName: String? = nil) {
         self.host = host
         self.port = port
         self.fingerprint = fingerprint
         self.jobID = jobID
+        self.submittedAt = submittedAt
+        self.projectID = projectID
+        self.projectName = projectName
     }
 }
 
@@ -227,10 +246,43 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// Wakes the run-thread poll loop promptly on any state change.
     private let tick = DispatchSemaphore(value: 0)
 
+    // ── LONG-STREAM RETENTION AUDIT (handoff 119) ──────────────────────────────
+    // The incident behind 119: a 7-hour remote run's client was Jetsam-killed, so
+    // this path must retain O(1)+O(ladder) across a multi-HOUR stream — NEVER O(events).
+    // A 7-hour run emits thousands of `progress` events but only ~4 `variant` events
+    // (the ladder). The full inventory of what a live RemoteRun holds:
+    //
+    //   FIELD            KIND            WHAT / WHY                         BOUND
+    //   deliveredCount   Int             dedup high-water mark (event      O(1) — one Int,
+    //                                    INDEX, not the body)              not the event log
+    //   connIndex        Int             per-connection replay cursor      O(1)
+    //   buffer           Data            un-parsed SSE tail; each "\n\n"   O(1 frame) —
+    //                                    frame is removed once parsed      drained every frame
+    //   lastSeenTask     weak-ish ref    task-identity for replay reset    O(1)
+    //   seenMeshes       Set<String>     variant BASENAMES already emitted O(ladder ≈ 4)
+    //   streamed         [StreamedVariant] accepted variants' geometry,    O(ladder ≈ 4) —
+    //                                    reused by assembleFinalOutcome     NOT per-event
+    //   etaEstimator*    (RunModel side) EMA + completedRungIters[]        O(rungs ≈ 4)
+    //   outcome*         (RunModel side) accumulated accepted variants     O(ladder ≈ 4)
+    //
+    // FINDING: dedupe was ALREADY index/basename-based (deliveredCount + seenMeshes) —
+    // it never retained full event bodies, so there was no unbounded growth to fix
+    // there. The only per-run growth is the accepted-variant MESHES, and those are
+    // bounded by the LADDER (≈4), not by run length. DECISION: keep them in memory —
+    // the results screen shows every accepted rung SIMULTANEOUSLY for comparison, so
+    // no earlier rung is ever "superseded"; disk-backing ≤4 meshes would add fragility
+    // for no bounded win. `streamed` and RunModel.outcome each hold a copy of the same
+    // ≤4 meshes for the run's life — a known, bounded double-hold, not a leak.
+    // The `memoryCheckpoint(rung:)` os_signpost below stamps the live footprint per
+    // rung so the NEXT long run PROVES this bound empirically; the synthetic
+    // long-stream test (RemoteLongStreamMemoryTests) proves it in CI by asserting the
+    // retained collections stay flat across thousands of events.
+
     // MARK: delegate-queue-only state (URLSession serialises delegate callbacks)
     private var buffer = Data()
     /// Events delivered so far across ALL connections — the dedup high-water mark.
-    /// Persists across reconnects (that is the point).
+    /// Persists across reconnects (that is the point). An INDEX (Int), never the event
+    /// bodies — dedupe stays O(1) across a multi-hour stream (119 retention audit).
     private var deliveredCount = 0
     /// Index within the CURRENT connection's replay; reset when the task changes.
     private var connIndex = 0
@@ -261,6 +313,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
 
     #if canImport(os)
     private static let log = Logger(subsystem: "app.topopt", category: "remote")
+    /// Per-rung memory checkpoint (handoff 119). Emitted as a signpost EVENT so a
+    /// long run traced in Instruments shows retained-footprint markers at each rung
+    /// boundary — the empirical proof that long-stream retention stays bounded.
+    private static let memoryLog = Logger(subsystem: "app.topopt", category: "remote-memory")
+    private static let signposter = OSSignposter(logger: memoryLog)
     #endif
 
     /// Probe retries before declaring the worker unreachable, and the reconnect
@@ -313,10 +370,20 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // Persist the active job so a slept/relaunched iPad can re-attach rather
         // than orphan the Mac's run (requirement 5). Cleared ONLY on a terminal
         // resolution or user cancel — never on a client-side liveness failure.
+        // Carries the 119 banner/routing metadata (submit time + project). On a
+        // RE-ATTACH we PRESERVE the original submit time from the stored record so
+        // the banner's "run from <time>" never resets to "now"; a fresh submit
+        // stamps the current time.
         if let id = jobID {
+            let priorSubmit = existingJobID != nil
+                ? RemoteJobStore.load(defaults: defaults)?.submittedAt : nil
             RemoteJobStore.save(PersistedRemoteJob(host: config.host, port: config.port,
                                                    fingerprint: config.expectedFingerprint,
-                                                   jobID: id), defaults: defaults)
+                                                   jobID: id,
+                                                   submittedAt: priorSubmit ?? Date(),
+                                                   projectID: request.projectID,
+                                                   projectName: request.projectName),
+                                defaults: defaults)
         }
 
         // 3) STREAM events, driven by the progress-based liveness loop (no clock).
@@ -762,6 +829,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                                         meshName: meshName,
                                         vertices: mesh.0, indices: mesh.1))
         streamedLock.unlock()
+        // Stamp the live retained footprint at this rung boundary (119 retention
+        // audit) so a long run measures its own bound.
+        memoryCheckpoint(rung: ev["rung"] as? Int ?? streamedCount)
         let v = OptimizeVariant(
             requestedVolumeFraction: requestedVF,
             // achievedVolumeFraction is the app's savings basis (= printed/count);
@@ -879,5 +949,75 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// trips through the same parse the remote mesh path relies on.
     private func parseBinarySTL(_ data: Data) -> ([Float], [Int32]) {
         MeshExport.parseBinarySTL(data)
+    }
+
+    // MARK: - long-stream memory checkpoint (handoff 119)
+
+    /// The number of accepted variant meshes currently retained (delegate-queue read;
+    /// guarded because the run thread's `assembleFinalOutcome` also reads `streamed`).
+    private var streamedCount: Int {
+        streamedLock.lock(); defer { streamedLock.unlock() }; return streamed.count
+    }
+
+    /// Stamp the process's retained footprint + this run's own retained sizes at a
+    /// rung boundary (handoff 119). Emits an os_signpost EVENT (so an Instruments
+    /// trace of a long run shows per-rung memory markers) and an os_log line (so the
+    /// device Console shows the same without a trace). The point is empirical proof,
+    /// on the NEXT real long run, that retention is bounded by the ladder — see the
+    /// retention-audit block above.
+    private func memoryCheckpoint(rung: Int) {
+        let footprintMB = Self.residentFootprintBytes() / 1_000_000
+        streamedLock.lock()
+        let variants = streamed.count
+        // Total mesh scalars held across all accepted variants (vertices + indices) —
+        // the dominant per-variant cost; bounded by the ladder, not the event count.
+        let meshScalars = streamed.reduce(0) { $0 + $1.vertices.count + $1.indices.count }
+        let basenames = seenMeshes.count
+        streamedLock.unlock()
+        let delivered = deliveredCount   // local (the signpost message is an autoclosure)
+        #if canImport(os)
+        // A single interpolated literal — os_signpost's message is an OSLogMessage,
+        // not a runtime String (no `+` concatenation here).
+        Self.signposter.emitEvent("rung-memory", "rung=\(rung) footprintMB=\(footprintMB) variants=\(variants) meshScalars=\(meshScalars) delivered=\(delivered) basenames=\(basenames)")
+        #endif
+        diag("memory@rung \(rung): footprint=\(footprintMB)MB variants=\(variants) "
+           + "meshScalars=\(meshScalars) deliveredEvents=\(delivered) basenames=\(basenames)")
+    }
+
+    /// The process's physical footprint in bytes (Jetsam's yardstick), or 0 if the
+    /// query fails. Darwin-only; the whole checkpoint compiles to a diag no-op off it.
+    static func residentFootprintBytes() -> UInt64 {
+        #if canImport(Darwin)
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return kr == KERN_SUCCESS ? UInt64(info.phys_footprint) : 0
+        #else
+        return 0
+        #endif
+    }
+
+    // MARK: - test support (handoff 119 synthetic long-stream audit)
+    // The SSE parse + dedupe path is otherwise reachable only through the network;
+    // these let RemoteLongStreamMemoryTests feed thousands of synthetic frames and
+    // assert the retained collections stay flat. Internal (not private) so
+    // `@testable import` reaches them; never called by production code.
+
+    var testRetainedBufferBytes: Int { buffer.count }
+    var testDeliveredEventCount: Int { deliveredCount }
+    var testStreamedVariantCount: Int { streamedCount }
+    var testSeenMeshCount: Int {
+        streamedLock.lock(); defer { streamedLock.unlock() }; return seenMeshes.count
+    }
+    /// Drive one chunk of raw SSE bytes through the real delegate parse/dedupe path,
+    /// tagged with a task identity so the test can simulate a reconnect replay (a new
+    /// task resets the per-connection cursor exactly as the network path does).
+    func testFeedSSE(_ data: Data, task: URLSessionDataTask) {
+        urlSession(eventSession, dataTask: task, didReceive: data)
     }
 }
