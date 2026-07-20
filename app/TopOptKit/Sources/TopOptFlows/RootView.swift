@@ -29,6 +29,15 @@ public struct RootView: View {
                 }
             }
 
+            // Cold-launch re-attach (handoff 119): a non-blocking top banner offering
+            // to reconnect to a remote run that outlived the app. Sits above the
+            // screen but takes no scrim — the user can ignore it and keep working.
+            if let job = model.pendingReattach {
+                reattachBanner(job)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(1)
+            }
+
             if model.importSheetPresented {
                 importOverlay
                     .transition(.opacity)
@@ -48,6 +57,54 @@ public struct RootView: View {
         // stays light and `Material` backings render dark, regardless of the device's
         // light/dark setting (otherwise labels + glass go unreadable in light mode).
         .preferredColorScheme(.dark)
+    }
+
+    /// The cold-launch re-attach banner (handoff 119). Non-blocking, top-anchored,
+    /// styled like the workspace's panel notices.
+    private func reattachBanner(_ job: PersistedRemoteJob) -> some View {
+        VStack {
+            VStack(spacing: DS.Space.sm) {
+                HStack(spacing: DS.Space.xs) {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(DS.Color.accent.color)
+                    Text("Run still on your Mac").dsStyle(DS.TypeScale.headline)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                }
+                Text(AppModel.reattachBannerText(for: job))
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: DS.Space.sm) {
+                    Button { withAnimation(DS.Motion.sheetIn) { model.dismissReattach() } } label: {
+                        Text("Dismiss").dsStyle(DS.TypeScale.bodyStrong)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                            .background(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1))
+                    }
+                    .buttonStyle(.plain)
+                    Button { withAnimation(DS.Motion.sheetIn) { model.reattach() } } label: {
+                        Text("Re-attach").dsStyle(DS.TypeScale.bodyStrong)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                            .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                            .background(Capsule().fill(DS.Color.accent.opacity(0.22).color)
+                                .overlay(Capsule().strokeBorder(DS.Color.accent.opacity(0.6).color, lineWidth: 1)))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.top, DS.Space.xs)
+            }
+            .padding(.vertical, DS.Space.ml).padding(.horizontal, DS.Space.xl3)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall).fill(DS.Surface.panel.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            .dsShadow(DS.Shadow.panel)
+            .frame(maxWidth: 460)
+            .padding(.top, DS.Space.xl4)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private var importOverlay: some View {

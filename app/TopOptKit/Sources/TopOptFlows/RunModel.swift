@@ -60,6 +60,12 @@ public struct RunRequest: Equatable, Sendable {
     /// load-case path. Part of the request identity, so editing a clearance
     /// re-enables Optimize (it forbids growth, changing the design).
     public let clearances: [TopOptKit.ClearanceSpec]
+    /// The owning project's id (handoff 119). Carried so a REMOTE run persists which
+    /// project it belongs to (`PersistedRemoteJob.projectID`), letting a cold-launch
+    /// re-attach reopen that project and land the streamed result in the normal
+    /// workspace→results flow. NOT part of the request identity (it doesn't change the
+    /// optimization) and unused by the local bridge path; nil for an ad-hoc run.
+    public let projectID: UUID?
 
     /// STEP parts carry a B-rep face selection, so the run uses the load-case path;
     /// STL parts have no faces and fall back to the self-weight path.
@@ -75,7 +81,8 @@ public struct RunRequest: Equatable, Sendable {
                 infillPercent: Int = -1,
                 designBox: TopOptKit.DesignBoxSpec? = nil,
                 keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
-                clearances: [TopOptKit.ClearanceSpec] = []) {
+                clearances: [TopOptKit.ClearanceSpec] = [],
+                projectID: UUID? = nil) {
         self.modelPath = modelPath
         self.material = material
         self.materialsPath = materialsPath
@@ -90,6 +97,7 @@ public struct RunRequest: Equatable, Sendable {
         self.designBox = designBox
         self.keepOutBoxes = keepOutBoxes
         self.clearances = clearances
+        self.projectID = projectID
     }
 }
 
