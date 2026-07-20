@@ -183,10 +183,11 @@ public final class ProjectModel: ObservableObject {
             // plane → slab); the auto default affixes ONLY the bore faces (fastener
             // holes), never a plane, exactly as handoff 100 shipped.
             let explicit = force.keepClearAffix(for: g.id) == .on
-            let ov = force.clearanceOverride(for: g.id)
             for f in g.faces {
                 let bore = FaceTopology.isCurved(f, in: mesh)
                 if !explicit && !bore { continue }
+                // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
+                let ov = force.clearanceOverride(forGroup: g.id, face: f)
                 if bore {
                     specs.append(.init(faceID: Int(f), kind: .bolt,
                                        concentricMarginMM: ov.concentricMarginMM ?? 0,
@@ -255,11 +256,12 @@ public final class ProjectModel: ObservableObject {
             let auto = autoClearanceApplies(g, in: mesh)
             guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
             let explicit = force.keepClearAffix(for: g.id) == .on
-            let ov = force.clearanceOverride(for: g.id)
             for f in g.faces {
                 let bore = FaceTopology.isCurved(f, in: mesh)
                 if !explicit && !bore { continue }
                 guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
+                // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
+                let ov = force.clearanceOverride(forGroup: g.id, face: f)
                 if bore {
                     let r = geo.cylinderRadiusMM
                     let margin = ov.concentricMarginMM ?? ClearanceSuggestion.boltMarginMM(boreRadiusMM: r)

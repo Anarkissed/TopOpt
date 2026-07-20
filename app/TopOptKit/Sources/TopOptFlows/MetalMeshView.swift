@@ -2045,6 +2045,11 @@ public struct MetalMeshView: UIViewRepresentable {
                                              action: #selector(Coordinator.handlePinch(_:)))
         let tap = UITapGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handleTap(_:)))
+        // Two-finger pan (item 2) and pinch-zoom must coexist on the same two touches, so let the
+        // pan + pinch recognizers fire simultaneously (a two-finger drag pans; any pinch delta on
+        // the same gesture still zooms). The tap is left exclusive.
+        pan.delegate = context.coordinator
+        pinch.delegate = context.coordinator
         view.addGestureRecognizer(pan)
         view.addGestureRecognizer(pinch)
         view.addGestureRecognizer(tap)
@@ -2467,7 +2472,17 @@ extension MetalMeshView {
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
             let t = g.translation(in: view)
-            if let model = cameraModel {
+            // Two fingers → CAD pan; one finger → orbit (item 2). A two-finger drag with little
+            // pinch delta reads as a pure pan (the pinch recognizer contributes ~no zoom).
+            if g.numberOfTouches >= 2 {
+                let h = Float(view.bounds.height)
+                if let model = cameraModel {
+                    model.pan(dx: Float(t.x), dy: Float(t.y), viewportHeight: h)
+                } else {
+                    renderer?.camera.pan(dx: Float(t.x), dy: Float(t.y), viewportHeight: h)
+                    redraw(view); publishProjection(from: view)
+                }
+            } else if let model = cameraModel {
                 model.orbit(dx: Float(t.x), dy: Float(t.y))   // sink redraws + publishes
             } else {
                 renderer?.camera.orbit(dx: Float(t.x), dy: Float(t.y))
@@ -2495,8 +2510,19 @@ extension MetalMeshView {
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
             let t = g.translation(in: view)
-            if let model = cameraModel {
-                model.orbit(dx: Float(t.x), dy: Float(-t.y))   // AppKit y is up
+            // AppKit y is up → negate to the screen-down convention `pan`/`orbit` take. A two-finger
+            // trackpad drag isn't a pan-recognizer event on macOS, so Option-drag pans (item 2); a
+            // plain drag orbits.
+            if NSEvent.modifierFlags.contains(.option) {
+                let h = Float(view.bounds.height)
+                if let model = cameraModel {
+                    model.pan(dx: Float(t.x), dy: Float(-t.y), viewportHeight: h)
+                } else {
+                    renderer?.camera.pan(dx: Float(t.x), dy: Float(-t.y), viewportHeight: h)
+                    redraw(view); publishProjection(from: view)
+                }
+            } else if let model = cameraModel {
+                model.orbit(dx: Float(t.x), dy: Float(-t.y))
             } else {
                 renderer?.camera.orbit(dx: Float(t.x), dy: Float(-t.y))
                 redraw(view); publishProjection(from: view)
@@ -2525,6 +2551,17 @@ extension MetalMeshView {
         #endif
     }
 }
+
+#if os(iOS)
+extension MetalMeshView.Coordinator: UIGestureRecognizerDelegate {
+    /// Let the pan + pinch recognizers fire on the same two touches (two-finger pan while
+    /// pinch-zooming, item 2); keep the tap exclusive. Stateless, so it stays off the main actor.
+    public nonisolated func gestureRecognizer(_ g: UIGestureRecognizer,
+                                              shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+        !(g is UITapGestureRecognizer) && !(other is UITapGestureRecognizer)
+    }
+}
+#endif
 
 #else  // !canImport(MetalKit) — keep the workspace compiling everywhere.
 public struct MetalMeshView: View {

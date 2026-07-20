@@ -485,4 +485,33 @@ public enum DesignBoxDetent {
         }
         return best?.id
     }
+
+    /// The result of running the whole face-drag detent pipeline: the applied box, the candidate
+    /// now held (nil = free), whether this call freshly ENTERED a detent (→ flash + haptic), and
+    /// the matched part face to pulse (nil for an AABB-extent snap or no snap).
+    public struct FaceDragResult: Equatable {
+        public let bounds: DesignBoxBounds
+        public let detent: Float?
+        public let didSnap: Bool
+        public let matchedFace: FaceID?
+        public init(bounds: DesignBoxBounds, detent: Float?, didSnap: Bool, matchedFace: FaceID?) {
+            self.bounds = bounds; self.detent = detent; self.didSnap = didSnap; self.matchedFace = matchedFace
+        }
+    }
+
+    /// The COMPLETE face-drag detent pipeline the drag gesture runs (round-4 item 5): from a raw
+    /// (un-snapped) face-plane coordinate `rawTarget` to the applied box + detent state + the face
+    /// to pulse. Composes `candidates` → `resolve` (hysteresis) → `DesignBoxBounds.movingFace` →
+    /// `matchedFace` in one place, so the gesture and its integration test share the exact same
+    /// path — a dead wire here fails the test, not just the isolated math. `current` is the detent
+    /// held from the previous drag frame; pass `result.detent` back in on the next frame.
+    public static func applyFaceDrag(axis: Int, isMax: Bool, base: DesignBoxBounds, rawTarget: Float,
+                                     faces: [StepFaceGeometry], aabbMin: SIMD3<Float>, aabbMax: SIMD3<Float>,
+                                     current: Float?, minSize: Float) -> FaceDragResult {
+        let cands = candidates(axis: axis, faces: faces, aabbMin: aabbMin, aabbMax: aabbMax)
+        let d = resolve(rawCoord: rawTarget, candidates: cands, current: current)
+        let moved = base.movingFace(axis: axis, isMax: isMax, to: d.coord, minSize: minSize)
+        let face = d.didSnap ? matchedFace(axis: axis, coord: d.coord, faces: faces) : nil
+        return FaceDragResult(bounds: moved, detent: d.snapped, didSnap: d.didSnap, matchedFace: face)
+    }
 }
