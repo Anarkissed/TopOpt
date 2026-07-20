@@ -30,7 +30,12 @@ Endpoints:
                                Replays from the start on (re)connect, so a dropped
                                connection (iPad sleeps) never loses a finished run.
   GET    /jobs/{id}/result     application/zip of the job's output directory.
-  GET    /jobs/{id}/files/{n}  a single output artifact (progressive mesh fetch).
+  GET    /jobs/{id}/files/{n}  a single output artifact by basename (progressive
+                               mesh fetch, report.json, and — handoff 122 — the
+                               per-voxel result container fields.bin). This route
+                               already serves ANY file the CLI wrote to the job's
+                               out dir, so fields.bin needs no new endpoint; it is
+                               also listed in the `done` event's `artifacts`.
   DELETE /jobs/{id}            cancel: kill the subprocess.
   GET    /health               {ok, cli_version, fingerprint, worker_version, ...}
                                fingerprint = the core build id, so the app can

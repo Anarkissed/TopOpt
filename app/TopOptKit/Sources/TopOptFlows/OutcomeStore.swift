@@ -39,6 +39,12 @@ enum OutcomeCodec {
         // blobs written before this field existed still decode (→ empty → no flex
         // until a re-run), rather than failing the whole outcome.
         let displacementField: Data?
+        // M7.viz.5 / handoff 122: the per-voxel Cauchy stress TENSOR, persisted so a
+        // reopened run keeps the load→anchor flow overlay (previously DROPPED on the
+        // round-trip — the exact 108/134 class of honesty bug, fixed here preemptively).
+        // Optional so blobs written before this field existed still decode (→ empty →
+        // the anchor-flow sub-mode stays gated until a re-run), never failing the outcome.
+        let stressTensorField: Data?
         let keyframes: [MeshDTO]
     }
 
@@ -98,6 +104,7 @@ enum OutcomeCodec {
                     meshIndices: pack(v.meshIndices),
                     vonMisesField: pack(v.vonMisesField),
                     displacementField: pack(v.displacementField),
+                    stressTensorField: pack(v.stressTensorField),
                     keyframes: v.keyframeMeshes.map { MeshDTO(v: pack($0.vertices), i: pack($0.indices)) })
             },
             stoppedOnMargin: o.stoppedOnMargin, cancelled: o.cancelled,
@@ -135,6 +142,7 @@ enum OutcomeCodec {
                     meshIndices: unpackInts(v.meshIndices),
                     vonMisesField: unpackFloats(v.vonMisesField),
                     displacementField: unpackFloats(v.displacementField ?? Data()),
+                    stressTensorField: unpackFloats(v.stressTensorField ?? Data()),
                     keyframeMeshes: v.keyframes.map {
                         KeyframeMesh(vertices: unpackFloats($0.v), indices: unpackInts($0.i)) })
             },

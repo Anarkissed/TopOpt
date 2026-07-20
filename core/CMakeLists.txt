@@ -34,6 +34,7 @@ add_library(topopt
   src/version.cpp
   src/materials/materials.cpp
   src/io/stl.cpp
+  src/io/fields.cpp
   src/mesh/mesh.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
@@ -194,6 +195,17 @@ target_link_libraries(test_export PRIVATE topopt)
 target_compile_definitions(test_export PRIVATE
   EXPORT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME export_stl COMMAND test_export)
+
+# Per-voxel result FIELDS container round-trip (handoff 122). Pure C++/std (no
+# OCCT, no Eigen, no lib3mf): write_fields_file lives in the always-built
+# src/io/fields.cpp and the test builds a synthetic MinimizePlasticResult in code,
+# so it runs in every configuration. FIELDS_TMP_DIR (the build dir) is injected so
+# the test writes its temporary containers independent of ctest's working dir.
+add_executable(test_fields tests/unit/test_fields.cpp)
+target_link_libraries(test_fields PRIVATE topopt)
+target_compile_definitions(test_fields PRIVATE
+  FIELDS_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME fields COMMAND test_fields)
 
 # Job-file schema (M6.2). Pure C++/std (no OCCT, no Eigen, no lib3mf): the
 # parser lives in the always-built src/cli/job.cpp, so the schema test runs in
