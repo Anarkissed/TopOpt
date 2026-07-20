@@ -267,6 +267,67 @@ final class ViewerTests: XCTestCase {
         XCTAssertEqual(cam.distance, d, accuracy: 1e-6)
     }
 
+    // MARK: OrbitCamera two-finger pan (round-4 item 2)
+
+    /// A pan slides the target in the VIEW PLANE: the moved target is perpendicular to the
+    /// view direction, and the eye follows it (distance/orientation unchanged).
+    func testPanMovesTargetInTheViewPlane() {
+        var cam = OrbitCamera(azimuth: 0.7, elevation: 0.3)
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let dir0 = cam.direction, d0 = cam.distance, t0 = cam.target
+        cam.pan(dx: 60, dy: -25, viewportHeight: 800)
+        let moved = cam.target - t0
+        XCTAssertGreaterThan(simd_length(moved), 1e-4, "pan actually moves the target")
+        XCTAssertEqual(simd_dot(simd_normalize(moved), dir0), 0, accuracy: 1e-4,
+                       "the target moves in the plane perpendicular to the view direction")
+        XCTAssertEqual(cam.distance, d0, accuracy: 1e-6, "pan does not zoom")
+        XCTAssertEqual(simd_length(cam.eye - cam.target), d0, accuracy: 1e-3, "eye follows the target")
+    }
+
+    /// Screen-right pans right and screen-down pans down along the camera basis (grab-pan signs).
+    func testPanSignsFollowTheCameraBasis() {
+        var cam = OrbitCamera(azimuth: 0, elevation: 0)   // looking down +Z, up = +Y, right = +X
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let t0 = cam.target
+        cam.pan(dx: 50, dy: 0, viewportHeight: 800)       // screen-right → target slides -X
+        XCTAssertLessThan(cam.target.x, t0.x)
+        XCTAssertEqual(cam.target.y, t0.y, accuracy: 1e-5)
+        cam.target = t0
+        cam.pan(dx: 0, dy: 50, viewportHeight: 800)       // screen-down → target slides +Y
+        XCTAssertGreaterThan(cam.target.y, t0.y)
+    }
+
+    /// Pan THEN orbit turns about the NEW (panned) target — the target is untouched by orbit.
+    func testPanThenOrbitOrbitsAboutTheNewTarget() {
+        var cam = OrbitCamera(azimuth: 0.2, elevation: 0.1)
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        cam.pan(dx: 40, dy: 30, viewportHeight: 800)
+        let panned = cam.target
+        cam.orbit(dx: 25, dy: -10)
+        XCTAssertEqual(cam.target, panned, "orbit rotates about the panned target, not the origin")
+        XCTAssertEqual(simd_length(cam.eye - panned), cam.distance, accuracy: 1e-3)
+    }
+
+    /// resetPan (Home) returns the target to the framed centre, clearing any pan.
+    func testResetPanReturnsToFramedCentre() {
+        var cam = OrbitCamera()
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let home = cam.target
+        cam.pan(dx: 120, dy: -80, viewportHeight: 800)
+        XCTAssertNotEqual(cam.target, home)
+        cam.resetPan()
+        XCTAssertEqual(cam.target, home, "Home clears the pan")
+        XCTAssertEqual(cam.target, cam.homeTarget)
+    }
+
+    func testPanIgnoresDegenerateViewport() {
+        var cam = OrbitCamera()
+        cam.frame(MeshGeometry.bounds(vertices: Self.cubeVerts))
+        let t0 = cam.target
+        cam.pan(dx: 50, dy: 50, viewportHeight: 0)
+        XCTAssertEqual(cam.target, t0, "a zero-height viewport is a no-op")
+    }
+
     // MARK: OrbitCamera matrices
 
     func testEyeIsDistanceFromTarget() {

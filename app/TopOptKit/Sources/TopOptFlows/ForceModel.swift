@@ -187,15 +187,24 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// ROLE is migrated into this map by the decoder.
     private var keepClear: [UUID: KeepClearAffix]? = nil
 
-    /// Per-row clearance SYNC MEMBERSHIP (device round 3, items 5+6 — this REPLACES the 109
-    /// global all-or-nothing `syncClearances` toggle, which is gone). Each keep-clear row owns a
-    /// checkbox: CHECKED rows form ONE shared group (editing any checked row's value writes every
-    /// checked row); an UNCHECKED row is INDEPENDENT and keeps its own value. DEFAULT CHECKED, so
-    /// only the exclusions (unchecked rows) are stored — an id absent here is synced. See
-    /// `setClearanceMargin(_:mm:syncTo:)` for the fan-out and `setClearanceSynced(_:_:peers:)`
-    /// for adopt-on-check. Auto is untouched: a checked row the fan-out never wrote keeps NO
-    /// override → stays Auto (the wire still sends the 0 sentinel) until a shared edit lands.
+    /// Per-GROUP clearance SYNC flag (device round 4, item 3 — corrects round-3's CROSS-group
+    /// membership to WITHIN-group scope). A group's several keep-clear bores share margin/axial
+    /// when its Sync box is CHECKED; groups NEVER couple to each other. DEFAULT CHECKED, so only
+    /// the exclusions (unchecked groups) are stored — a group id absent here is synced.
+    ///
+    /// Synced (checked): the group edits its ONE shared `clearanceOverrides[group]`, which every
+    /// bore of the group reads — so they stay equal (this is the pre-round-4 behaviour and wire).
+    /// Unsynced (unchecked): each bore edits its OWN `clearanceBoreOverrides[group:face]` and is
+    /// independent. See `setClearance*(group:face:mm:)` for the write split and
+    /// `setClearanceSynced(_:_:boreFaces:)` for the adopt-on-check / seed-on-uncheck.
     private var syncExcluded: Set<UUID>? = nil
+
+    /// Per-BORE clearance overrides, used ONLY while a group is UNSYNCED (item 3). Keyed by
+    /// `"group.uuidString:faceID"` so it JSON-encodes as a plain object; a bore absent here falls
+    /// back to the group's shared override, then to Auto. Optional + only-deviations-stored, so a
+    /// project with every group synced (the default) carries none and the on-disk format + wire
+    /// are byte-identical to before round 4.
+    private var clearanceBoreOverrides: [String: ClearanceOverride]? = nil
 
     public init() {}
 
@@ -329,56 +338,78 @@ public struct ForceModel: Equatable, Sendable, Codable {
         mutateOverride(id) { $0.slabDepthMM = mm }
     }
 
-    // MARK: - per-row sync membership (device round 3, items 5+6)
+    // MARK: - per-group clearance sync (device round 4, item 3)
 
-    /// Whether a keep-clear row's per-row sync box is CHECKED (a member of the shared group).
-    /// Default checked — an id with no stored exclusion is synced.
-    public func isClearanceSynced(_ id: UUID) -> Bool { !(syncExcluded?.contains(id) ?? false) }
+    /// The per-bore override map key ("group:face"), so a bore's independent value survives a
+    /// Codable round-trip as a plain string-keyed entry.
+    static func boreKey(_ group: UUID, _ face: FaceID) -> String { "\(group.uuidString):\(face)" }
 
-    /// The write targets for a clearance edit on `id`, given the caller's same-shape peer set
-    /// (`peers` — bolt sites for margin/axial, slab sites for depth; ForceModel can't classify
-    /// geometry itself). A CHECKED (synced) row writes every OTHER checked peer too — the shared
-    /// group; an UNCHECKED (independent) row writes only itself. `id` is always a target. A
-    /// checked peer absent from `peers` is never written, so it stays Auto.
-    private func syncTargets(_ id: UUID, peers: [UUID]) -> [UUID] {
-        guard isClearanceSynced(id) else { return [id] }        // independent row → itself only
-        var targets = peers.filter { isClearanceSynced($0) }    // the shared (checked) group
-        if !targets.contains(id) { targets.append(id) }
-        return targets
+    /// Whether a group's Sync box is CHECKED (its bores share one value). Default checked — a
+    /// group with no stored exclusion is synced.
+    public func isClearanceSynced(_ group: UUID) -> Bool { !(syncExcluded?.contains(group) ?? false) }
+
+    private mutating func mutateBoreOverride(_ group: UUID, _ face: FaceID,
+                                             _ body: (inout ClearanceOverride) -> Void) {
+        var map = clearanceBoreOverrides ?? [:]
+        let key = Self.boreKey(group, face)
+        var ov = map[key] ?? ClearanceOverride()
+        body(&ov)
+        if ov.isEmpty { map[key] = nil } else { map[key] = ov }
+        clearanceBoreOverrides = map.isEmpty ? nil : map
     }
 
-    /// Set a keep-clear row's per-row sync membership. Unchecking makes the row INDEPENDENT (it
-    /// keeps its current values untouched). Re-checking ADOPTS the shared group's value
-    /// (adopt-on-check, stated): the row takes the override of a currently-checked peer — or
-    /// reverts to Auto when the shared group has no edit yet, so it resumes sending the 0
-    /// sentinel until a shared edit lands. `peers` is the caller's same-shape site set.
-    public mutating func setClearanceSynced(_ id: UUID, _ synced: Bool, peers: [UUID]) {
+    /// The EFFECTIVE clearance override for one bore of a group, honouring the group's Sync flag:
+    /// a synced group reads its shared override (every bore the same); an unsynced group reads the
+    /// bore's own override, falling back to the shared value then Auto. This is what the render /
+    /// wire and the value chips resolve.
+    public func clearanceOverride(forGroup group: UUID, face: FaceID) -> ClearanceOverride {
+        if isClearanceSynced(group) { return clearanceOverride(for: group) }
+        return clearanceBoreOverrides?[Self.boreKey(group, face)] ?? clearanceOverride(for: group)
+    }
+
+    /// Set a bore's concentric margin (mm; nil reverts to Auto). A SYNCED group writes its shared
+    /// override so every bore follows; an UNSYNCED group writes only this bore. Negative ignored.
+    public mutating func setClearanceMargin(group: UUID, face: FaceID, mm: Double?) {
+        if let v = mm, v < 0 { return }
+        if isClearanceSynced(group) { setClearanceMargin(group, mm: mm) }
+        else { mutateBoreOverride(group, face) { $0.concentricMarginMM = mm } }
+    }
+    /// Set a bore's axial length (see `setClearanceMargin(group:face:mm:)`).
+    public mutating func setClearanceAxial(group: UUID, face: FaceID, mm: Double?) {
+        if let v = mm, v < 0 { return }
+        if isClearanceSynced(group) { setClearanceAxial(group, mm: mm) }
+        else { mutateBoreOverride(group, face) { $0.axialClearanceMM = mm } }
+    }
+    /// Set a face's slab depth (see `setClearanceMargin(group:face:mm:)`).
+    public mutating func setClearanceSlab(group: UUID, face: FaceID, mm: Double?) {
+        if let v = mm, v < 0 { return }
+        if isClearanceSynced(group) { setClearanceSlab(group, mm: mm) }
+        else { mutateBoreOverride(group, face) { $0.slabDepthMM = mm } }
+    }
+
+    /// Set a group's Sync flag. `boreFaces` are the group's OWN keep-clear faces (the caller
+    /// classifies geometry). WITHIN-group scope only — no other group is ever touched, so two
+    /// groups can never cross-talk. Semantics (adopt-on-check, scoped from round 3):
+    ///   * UNCHECK → the group's bores become INDEPENDENT; each is SEEDED from the shared value so
+    ///     it keeps its current number, then can diverge.
+    ///   * RE-CHECK → the bores ADOPT the shared value: their per-bore overrides are dropped, so
+    ///     every bore reads the group's shared override (or Auto when it has no edit yet).
+    public mutating func setClearanceSynced(_ group: UUID, _ synced: Bool, boreFaces: [FaceID]) {
         var set = syncExcluded ?? []
         if synced {
-            set.remove(id)
+            set.remove(group)
             syncExcluded = set.isEmpty ? nil : set
-            // adopt-on-check: copy the shared group's current value in (empty → Auto).
-            let rep = peers.first { $0 != id && isClearanceSynced($0) }
-            let shared = rep.map { clearanceOverride(for: $0) } ?? ClearanceOverride()
-            mutateOverride(id) { $0 = shared }
+            // adopt shared: drop the group's per-bore divergence so bores snap back to the shared value.
+            if var map = clearanceBoreOverrides {
+                for f in boreFaces { map[Self.boreKey(group, f)] = nil }
+                clearanceBoreOverrides = map.isEmpty ? nil : map
+            }
         } else {
-            set.insert(id)
-            syncExcluded = set                                  // independent: values kept as-is
+            let shared = clearanceOverride(for: group)          // capture BEFORE flipping the flag
+            set.insert(group)
+            syncExcluded = set
+            for f in boreFaces { mutateBoreOverride(group, f) { $0 = shared } }
         }
-    }
-
-    /// Margin edit honouring per-row membership: writes `mm` to `id` alone (unchecked) or to
-    /// every checked bolt peer (checked). `nil` reverts the touched sites to Auto.
-    public mutating func setClearanceMargin(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
-        for t in syncTargets(id, peers: peers) { setClearanceMargin(t, mm: mm) }
-    }
-    /// Axial edit honouring per-row membership (see `setClearanceMargin(_:mm:syncTo:)`).
-    public mutating func setClearanceAxial(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
-        for t in syncTargets(id, peers: peers) { setClearanceAxial(t, mm: mm) }
-    }
-    /// Slab-depth edit honouring per-row membership (peers are the slab sites).
-    public mutating func setClearanceSlab(_ id: UUID, mm: Double?, syncTo peers: [UUID]) {
-        for t in syncTargets(id, peers: peers) { setClearanceSlab(t, mm: mm) }
     }
 
     /// Change a load's direction via the snap row (no-op unless it is a load).
@@ -400,6 +431,17 @@ public struct ForceModel: Equatable, Sendable, Codable {
         if var map = clearanceOverrides { map[id] = nil; clearanceOverrides = map.isEmpty ? nil : map }
         if var map = keepClear { map[id] = nil; keepClear = map.isEmpty ? nil : map }
         if var set = syncExcluded { set.remove(id); syncExcluded = set.isEmpty ? nil : set }
+        pruneBoreOverrides { $0 != id }
+    }
+
+    /// Drop per-bore overrides whose owning group id fails `keepGroup` (a removed/absent group).
+    private mutating func pruneBoreOverrides(_ keepGroup: (UUID) -> Bool) {
+        guard let map = clearanceBoreOverrides else { return }
+        let pruned = map.filter { entry in
+            guard let g = UUID(uuidString: String(entry.key.prefix(36))) else { return false }
+            return keepGroup(g)
+        }
+        clearanceBoreOverrides = pruned.isEmpty ? nil : pruned
     }
 
     /// Drop role entries for groups that no longer exist (call after the selection
@@ -419,6 +461,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
             let pruned = set.intersection(live)
             syncExcluded = pruned.isEmpty ? nil : pruned
         }
+        pruneBoreOverrides { live.contains($0) }
     }
 
     private func clampWeight(_ kg: Double) -> Double {
@@ -575,8 +618,9 @@ extension ForceModel {
         // Keys match the pre-v2 synthesized coder's property names, so on-disk
         // snapshots keep decoding; `keepClear` is the only new (optional) key.
         case gravity, gravityFace, phase, unit, kinds, clearanceOverrides, keepClear
-        case syncClearances     // LEGACY (109 global toggle) — decoded-and-dropped for back-compat
-        case syncExcluded       // per-row sync membership exclusions (device round 3)
+        case syncClearances         // LEGACY (109 global toggle) — decoded-and-dropped for back-compat
+        case syncExcluded           // per-GROUP sync flag exclusions (round 3 → round 4 scope)
+        case clearanceBoreOverrides // per-bore overrides for unsynced groups (round 4, item 3)
     }
 
     public init(from decoder: Decoder) throws {
@@ -589,6 +633,7 @@ extension ForceModel {
         var decodedKinds = try c.decodeIfPresent([UUID: GroupKind].self, forKey: .kinds) ?? [:]
         clearanceOverrides = try c.decodeIfPresent([UUID: ClearanceOverride].self, forKey: .clearanceOverrides)
         syncExcluded = try c.decodeIfPresent(Set<UUID>.self, forKey: .syncExcluded)
+        clearanceBoreOverrides = try c.decodeIfPresent([String: ClearanceOverride].self, forKey: .clearanceBoreOverrides)
         // LEGACY: the 109 global `syncClearances` toggle is gone (per-row membership replaces it).
         // Decode-and-drop the key so pre-round-3 snapshots still load; the intent of a legacy
         // `false` (every site independent) can't be reconstructed without the geometry, so rows
@@ -617,6 +662,7 @@ extension ForceModel {
         try c.encode(kinds, forKey: .kinds)
         try c.encodeIfPresent(clearanceOverrides, forKey: .clearanceOverrides)
         try c.encodeIfPresent(syncExcluded, forKey: .syncExcluded)
+        try c.encodeIfPresent(clearanceBoreOverrides, forKey: .clearanceBoreOverrides)
         try c.encodeIfPresent(keepClear, forKey: .keepClear)
     }
 }

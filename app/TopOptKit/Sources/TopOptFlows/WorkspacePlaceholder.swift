@@ -1010,25 +1010,22 @@ public struct WorkspacePlaceholder: View {
             let world = settledWorld(base.faceCenter(axis: axis, isMax: isMax))
             let delta = axisDelta(fromWorld: world, axis: axis, drag: drag, proj: proj)
             let rawTarget = (isMax ? base.max[axis] : base.min[axis]) + delta
-            // Magnetic face detent (item 10): snap the raw face coordinate to a nearby part
-            // feature plane perpendicular to this axis (planar faces + AABB extents), with
-            // snap/release hysteresis. A fresh entry flashes the match + ticks the haptic.
-            let cands = DesignBoxDetent.candidates(axis: axis, faces: mesh.faceGeometry,
-                                                   aabbMin: mesh.bounds.min, aabbMax: mesh.bounds.max)
-            let d = DesignBoxDetent.resolve(rawCoord: rawTarget, candidates: cands, current: boxFaceDetent)
-            boxFaceDetent = d.snapped
-            if d.didSnap {
-                // Flash the matched part face in the viewer + tick the haptic (item 2, replacing the
-                // toast). `matchedFace` is nil when the snap was to a bare AABB extent (no face to
-                // highlight) — then only the haptic fires.
-                let face = DesignBoxDetent.matchedFace(axis: axis, coord: d.coord, faces: mesh.faceGeometry)
-                flashDesignBoxDetent(face)
+            // Magnetic face detent (item 10 / round-4 item 5): the WHOLE snap pipeline (candidates
+            // → hysteresis resolve → movingFace → matched face) runs in `applyFaceDrag`, the exact
+            // function the integration test drives — so the wiring can't silently go dead.
+            let r = DesignBoxDetent.applyFaceDrag(
+                axis: axis, isMax: isMax, base: base, rawTarget: rawTarget,
+                faces: mesh.faceGeometry, aabbMin: mesh.bounds.min, aabbMax: mesh.bounds.max,
+                current: boxFaceDetent, minSize: DesignBoxModel.minSize(for: mesh.bounds))
+            boxFaceDetent = r.detent
+            if r.didSnap {
+                // A fresh detent: PULSE the matched part face in the viewer + tick the haptic (item 2,
+                // replacing the toast). `matchedFace` is nil for a bare AABB-extent snap → only haptic.
+                flashDesignBoxDetent(r.matchedFace)
                 ClearanceHaptics.detent()
             }
-            let moved = base.movingFace(axis: axis, isMax: isMax, to: d.coord,
-                                        minSize: DesignBoxModel.minSize(for: mesh.bounds))
-            let mm = (isMax ? moved.max[axis] - base.max[axis] : moved.min[axis] - base.min[axis])
-            return (moved, abs(mm))
+            let mm = (isMax ? r.bounds.max[axis] - base.max[axis] : r.bounds.min[axis] - base.min[axis])
+            return (r.bounds, abs(mm))
         }
     }
 
@@ -1055,6 +1052,7 @@ public struct WorkspacePlaceholder: View {
     private struct ClearanceHandleItem: Identifiable {
         let id: String
         let groupID: UUID
+        let faceID: FaceID
         let handle: ClearanceHandle
     }
 
@@ -1067,7 +1065,7 @@ public struct WorkspacePlaceholder: View {
             for h in entry.handles {
                 items.append(ClearanceHandleItem(
                     id: "\(entry.groupID.uuidString):\(entry.faceID):\(h.role)",
-                    groupID: entry.groupID, handle: h))
+                    groupID: entry.groupID, faceID: FaceID(entry.faceID), handle: h))
             }
         }
         return items
@@ -1097,67 +1095,54 @@ public struct WorkspacePlaceholder: View {
         .coordinateSpace(name: Self.clearanceStageSpace)
     }
 
-    /// Every keep-clear site with an editable shape — the on-model chips show for ALL of them,
-    /// no selection required (device round 3, item 3). SelectionGroup is Identifiable, so this
-    /// drives the `ForEach` below.
-    private var keepClearChipGroups: [SelectionGroup] {
-        selection.groups.filter { g in
-            guard project.keepClearIsOn(g) else { return false }
-            let s = groupClearanceShape(g); return s.bolt || s.slab
-        }
-    }
-
-    /// The on-model glass value chips for EVERY keep-clear site (device round 3, item 3 — was the
-    /// ACTIVE group only, hidden until tapped). Each cluster is anchored beside its site's handle
-    /// icon and sized to the weight-label class (`compact`, smaller than "See Results" — the
-    /// maintainer's round-2 correction). They are the primary editor AND the live readout while a
-    /// handle is dragged (reading the same override the drag writes).
+    /// The on-model glass value chips — round-4 items 3+4: ONE chip PER HANDLE, anchored right
+    /// beside its handle icon (adjacency is the point — each chip visually belongs to its handle),
+    /// shown for EVERY keep-clear site with no selection required. When a group is UNSYNCED each
+    /// bore's chips edit that bore alone; when synced they edit the shared value (item 3). Sized to
+    /// the weight-pill class (`compact`). Each is the primary editor AND the live readout while its
+    /// handle drags (reading the same per-bore override the drag writes).
     @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection) -> some View {
-        ForEach(keepClearChipGroups) { g in
-            if let pt = groupScreen(g) {
-                clearanceChipCluster(g)
-                    // Beside the handle icon (the handle cluster projects near the group centroid);
-                    // lifted just clear of the ~44pt knob so the chip doesn't cover it.
-                    .position(x: clampX(pt.x, proj.viewportSize.width),
-                              y: clamp(pt.y - 40, proj.viewportSize.height))
+        ForEach(clearanceHandleItems) { item in
+            if let pt = proj.project(settledWorld(item.handle.anchor)) {
+                clearanceHandleChip(item)
+                    // Right beside the handle icon, offset clear of the ~46 pt knob (device-QA tune).
+                    .fixedSize()
+                    .position(x: clampX(pt.x + 46, proj.viewportSize.width),
+                              y: clamp(pt.y, proj.viewportSize.height))
                     .animation(DS.Motion.emphasized, value: pt)
             }
         }
     }
 
-    /// One keep-clear site's compact chip cluster (Margin + Axial for a bore, Depth for a plane).
-    @ViewBuilder private func clearanceChipCluster(_ g: SelectionGroup) -> some View {
-        let shape = groupClearanceShape(g)
-        let ov = force.clearanceOverride(for: g.id)
-        let r = project.clearanceBoreRadius(for: g)
-        HStack(spacing: DS.Space.xs) {
-            if shape.bolt {
-                GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
-                               autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                               active: isDraggingRole(g.id, .margin), compact: true) {
-                    force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
-                }
-                GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
-                               autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                               active: isDraggingRole(g.id, .axialHi) || isDraggingRole(g.id, .axialLo),
-                               compact: true) {
-                    force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true))
-                }
-            }
-            if shape.slab {
-                GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
-                               autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                               active: isDraggingRole(g.id, .slabDepth), compact: true) {
-                    force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false))
-                }
-            }
+    /// The value chip for ONE clearance handle (Margin/Axial for a bore, Depth for a plane),
+    /// reading and writing that bore's effective override (per-bore when unsynced, shared when
+    /// synced — item 3). Highlights while its own handle owns the drag.
+    @ViewBuilder private func clearanceHandleChip(_ item: ClearanceHandleItem) -> some View {
+        let gid = item.groupID, f = item.faceID
+        let ov = force.clearanceOverride(forGroup: gid, face: f)
+        let r = faceBoreRadius(f)
+        let live = draggingHandleID == item.id
+        switch item.handle.role {
+        case .margin:
+            GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                           autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                           active: live, compact: true) { force.setClearanceMargin(group: gid, face: f, mm: $0) }
+        case .axialHi, .axialLo:
+            GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                           autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                           active: live, compact: true) { force.setClearanceAxial(group: gid, face: f, mm: $0) }
+        case .slabDepth:
+            GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                           autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                           active: live, compact: true) { force.setClearanceSlab(group: gid, face: f, mm: $0) }
         }
-        .fixedSize()
     }
 
-    private func isDraggingRole(_ gid: UUID, _ role: ClearanceHandle.Role) -> Bool {
-        draggingHandleID?.hasPrefix(gid.uuidString) == true
-            && draggingHandleID?.hasSuffix(":\(role)") == true
+    /// One bore face's exact cylinder radius (mm) for its "Auto · N mm" chip labels; nil for a
+    /// non-cylindrical / STL face.
+    private func faceBoreRadius(_ f: FaceID) -> Double? {
+        guard let mesh = viewerMesh, let geo = mesh.faceGeometry(f), geo.isCylinder else { return nil }
+        return geo.cylinderRadiusMM
     }
 
     /// A clearance drag knob — a LIQUID-GLASS RED dot with a role glyph and a generous (~46pt)
@@ -1203,7 +1188,7 @@ public struct WorkspacePlaceholder: View {
                 }
                 guard let ray = proj.ray(throughViewPoint: v.location),
                       let value = world.value(rayOrigin: ray.origin, rayDir: ray.dir) else { return }
-                writeClearance(item.groupID, role: item.handle.role, mm: Double(value))
+                writeClearance(item.groupID, face: item.faceID, role: item.handle.role, mm: Double(value))
                 if let auto = clearanceAutoValue(item.groupID, role: item.handle.role),
                    let last = lastHandleValue,
                    (last - auto).sign != (value - auto).sign {
@@ -1218,14 +1203,15 @@ public struct WorkspacePlaceholder: View {
             }
     }
 
-    /// Write the dragged mm to the right override on the group, quantized to the 0.25 mm grid
-    /// live (item 12) so a handle-drag ticks in whole steps just like the scrub pill.
-    private func writeClearance(_ gid: UUID, role: ClearanceHandle.Role, mm: Double) {
+    /// Write the dragged mm to this bore's override (per-bore when the group is unsynced, shared
+    /// when synced — round-4 item 3), quantized to the 0.25 mm grid live (item 12) so a handle-drag
+    /// ticks in whole steps just like the scrub pill.
+    private func writeClearance(_ gid: UUID, face: FaceID, role: ClearanceHandle.Role, mm: Double) {
         let q = ClearanceQuantize.snap(mm)
         switch role {
-        case .margin: force.setClearanceMargin(gid, mm: q)
-        case .axialLo, .axialHi: force.setClearanceAxial(gid, mm: q)
-        case .slabDepth: force.setClearanceSlab(gid, mm: q)
+        case .margin: force.setClearanceMargin(group: gid, face: face, mm: q)
+        case .axialLo, .axialHi: force.setClearanceAxial(group: gid, face: face, mm: q)
+        case .slabDepth: force.setClearanceSlab(group: gid, face: face, mm: q)
         }
     }
 
@@ -1442,27 +1428,33 @@ public struct WorkspacePlaceholder: View {
         return (bolt, slab)
     }
 
-    /// The keep-clear sites (group ids) whose shape matches — bolt sites for a margin/axial
-    /// edit, slab sites for a depth edit. This is the fan-out set the sync toggle writes to
-    /// (ForceModel can't classify geometry itself; design-overhaul 109).
-    private func clearanceSyncPeers(bolt: Bool) -> [UUID] {
-        selection.groups.compactMap { g in
-            let s = groupClearanceShape(g)
-            return (bolt ? s.bolt : s.slab) ? g.id : nil
-        }
+    /// A group's OWN keep-clear faces (bores + explicit slabs) — the WITHIN-group scope the Sync
+    /// flag couples (round-4 item 3). ForceModel can't classify geometry, so the view supplies them.
+    private func groupClearanceFaces(_ g: SelectionGroup) -> [FaceID] {
+        guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return [] }
+        let explicit = force.keepClearAffix(for: g.id) == .on
+        return g.faces.filter { FaceTopology.isCurved($0, in: mesh) || explicit }
     }
 
-    /// The same-shape peer set a group's per-row sync uses for its fan-out and adopt-on-check
-    /// (bolt sites for a bore, slab sites for a planar face).
-    private func clearanceSyncPeersForGroup(_ g: SelectionGroup) -> [UUID] {
-        clearanceSyncPeers(bolt: groupClearanceShape(g).bolt)
+    /// The group's representative bore face (first cylindrical) — what the row's Margin/Axial chips
+    /// read+write (the shared value when synced, that bore when not). Nil for a slab-only group.
+    private func groupBoltFace(_ g: SelectionGroup) -> FaceID? {
+        guard let mesh = viewerMesh else { return nil }
+        return g.faces.first { FaceTopology.isCurved($0, in: mesh) }
     }
 
-    /// The PER-ROW "Sync" checkbox (device round 3, items 5+6), always enabled, default checked.
-    /// Toggling writes membership through `ForceModel` (fan-out + adopt-on-check proven headlessly).
+    /// The group's representative slab face (first explicit planar) — what the row's Depth chip
+    /// reads+writes. Nil unless keep-clear is affixed explicitly (auto affixes only bores).
+    private func groupSlabFace(_ g: SelectionGroup) -> FaceID? {
+        guard let mesh = viewerMesh, force.keepClearAffix(for: g.id) == .on else { return nil }
+        return g.faces.first { !FaceTopology.isCurved($0, in: mesh) }
+    }
+
+    /// The PER-GROUP "Sync" checkbox (round-4 item 3), always enabled, default checked. Toggling
+    /// couples/uncouples the group's OWN bores (within-group scope), never other groups.
     private func clearanceSyncRowCheckbox(_ g: SelectionGroup) -> some View {
         ClearanceSyncRowCheckbox(isOn: force.isClearanceSynced(g.id)) { on in
-            force.setClearanceSynced(g.id, on, peers: clearanceSyncPeersForGroup(g))
+            force.setClearanceSynced(g.id, on, boreFaces: groupClearanceFaces(g))
         }
     }
 
@@ -1479,26 +1471,31 @@ public struct WorkspacePlaceholder: View {
     @ViewBuilder private func clearanceEditor(_ g: SelectionGroup) -> some View {
         let shape = groupClearanceShape(g)
         if shape.bolt || shape.slab {
-            let ov = force.clearanceOverride(for: g.id)
-            let r = project.clearanceBoreRadius(for: g)
-            // The compact value chips sit SIDE BY SIDE, with the per-row Sync checkbox leading
-            // them (device round 3, items 4+5+6). The cluster is RIGHT-ALIGNED to the row's
-            // trailing edge (item 4 — was left-aligned in the name column); the row wraps it
-            // below the trash icon.
+            let boltF = groupBoltFace(g)
+            let slabF = groupSlabFace(g)
+            // The row edits the group's REPRESENTATIVE bore/slab: when synced this is the shared
+            // value (all bores follow); when unsynced it is that first bore — per-bore editing of
+            // the rest happens via the on-model handle chips (round-4 item 3).
+            let ovBolt = boltF.map { force.clearanceOverride(forGroup: g.id, face: $0) } ?? ClearanceOverride()
+            let ovSlab = slabF.map { force.clearanceOverride(forGroup: g.id, face: $0) } ?? ClearanceOverride()
+            let r = boltF.flatMap { faceBoreRadius($0) }
+            // The compact value chips sit SIDE BY SIDE, with the per-group Sync checkbox leading
+            // them. The cluster is RIGHT-ALIGNED to the row's trailing edge (item 4 — under the
+            // trash icon); the row wraps it below the name/kind row.
             HStack(spacing: DS.Space.xs) {
                 clearanceSyncRowCheckbox(g)
-                if shape.bolt {
-                    GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                if shape.bolt, let f = boltF {
+                    GlassValuePill(title: "Margin", valueMM: ovBolt.concentricMarginMM,
                                    autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                                   compact: true) { force.setClearanceMargin(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true)) }
-                    GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                                   compact: true) { force.setClearanceMargin(group: g.id, face: f, mm: $0) }
+                    GlassValuePill(title: "Axial", valueMM: ovBolt.axialClearanceMM,
                                    autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                                   compact: true) { force.setClearanceAxial(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: true)) }
+                                   compact: true) { force.setClearanceAxial(group: g.id, face: f, mm: $0) }
                 }
-                if shape.slab {
-                    GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                if shape.slab, let f = slabF {
+                    GlassValuePill(title: "Depth", valueMM: ovSlab.slabDepthMM,
                                    autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                                   compact: true) { force.setClearanceSlab(g.id, mm: $0, syncTo: clearanceSyncPeers(bolt: false)) }
+                                   compact: true) { force.setClearanceSlab(group: g.id, face: f, mm: $0) }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)

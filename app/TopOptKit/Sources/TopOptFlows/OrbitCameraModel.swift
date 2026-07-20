@@ -64,6 +64,13 @@ public final class OrbitCameraModel: ObservableObject {
         camera.zoom(factor)
     }
 
+    /// Two-finger CAD pan (round-4 item 2): slide the look-at target in the view plane. Cancels any
+    /// running snap so a grab always wins. `viewportHeight` (points) scales the drag to world units.
+    public func pan(dx: Float, dy: Float, viewportHeight: Float) {
+        stopAnimation()
+        camera.pan(dx: dx, dy: dy, viewportHeight: viewportHeight)
+    }
+
     /// Live ROLL about the line of sight (the gizmo's swoosh arrows). Cancels any running
     /// snap so a roll always wins, then rolls the horizon by `delta` radians. The gizmo cube,
     /// the Metal viewer and any projection overlays all read `camera.viewRotation()` / the
@@ -105,6 +112,7 @@ public final class OrbitCameraModel: ObservableObject {
     /// Return to the viewer's default view angle (the Home button) — az/el AND a level
     /// horizon (roll → 0), so Home un-rolls whatever the arrows spun.
     public func home(animated: Bool = true) {
+        camera.resetPan()          // Home also clears any two-finger pan (item 2)
         setOrientation(azimuth: defaultAzimuth, elevation: defaultElevation,
                        roll: defaultRoll, animated: animated)
     }

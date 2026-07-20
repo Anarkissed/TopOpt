@@ -43,34 +43,33 @@ struct GlassValuePill: View {
     @State private var scrubLastX: CGFloat = 0
     @FocusState private var fieldFocused: Bool
 
-    /// The number size scales with Dynamic Type. Design-overhaul 109: tightened from 22/15 to
-    /// 17/13 — the old pills were far too large.
-    @ScaledMetric(relativeTo: .title3) private var numberSizeFloating: CGFloat = 17
-    @ScaledMetric(relativeTo: .body) private var numberSizeCompact: CGFloat = 13
+    /// The number size scales with Dynamic Type. Round-4 item 4: 14 pt heavy to match the
+    /// load-weight ("100 lbs") pill exactly, in both the floating and compact (row) variants.
+    @ScaledMetric(relativeTo: .body) private var numberSizeFloating: CGFloat = 14
+    @ScaledMetric(relativeTo: .body) private var numberSizeCompact: CGFloat = 14
 
     private var isAuto: Bool { valueMM == nil }
     private var displayedMM: Double? { valueMM ?? autoMM }
     private var numberSize: CGFloat { compact ? numberSizeCompact : numberSizeFloating }
 
     var body: some View {
+        // Round-4 item 4: the margin/axial/depth chips MATCH the load-weight ("100 lbs") pill —
+        // same dialog-surface capsule ("glass"), same size class, same 14 pt heavy number — with
+        // MARGIN/AXIAL kept as a small text title only. One inline row, so its height matches the
+        // weight pill. (This overrides the blue liquid-glass look handoff 109 gave the value chips.)
         HStack(spacing: compact ? DS.Space.xs : DS.Space.s) {
-            VStack(alignment: .leading, spacing: compact ? 0 : 2) {
-                HStack(spacing: DS.Space.xs) {
-                    Text(title.uppercased())
-                        .font(.system(size: compact ? 9 : 10, weight: .bold))
-                        .tracking(0.6)
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                    if isAuto { autoChip }
-                }
-                numberRow
-            }
-            if !isAuto { resetButton }
+            Text(title.uppercased())
+                .font(.system(size: compact ? 9 : 9.5, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            numberRow
+            if isAuto { autoChip } else { resetButton }
         }
-        .padding(.vertical, compact ? 4 : 6)
-        .padding(.horizontal, compact ? DS.Space.s : DS.Space.sm)
-        .liquidGlass(LiquidGlass.Tint.frost(DS.Color.accent, intensity: active ? 0.75 : 0.5),
-                     cornerRadius: Self.radius, specular: active ? 1.3 : 1)
-        .overlay(activeBorder)
+        .padding(.vertical, 8)
+        .padding(.horizontal, compact ? DS.Space.m : DS.Space.l)
+        .background(Capsule().fill(DS.Surface.dialog.color)
+            .overlay(Capsule().strokeBorder(active ? tint.opacity(0.9) : DS.Color.strokeStrong.color,
+                                            lineWidth: active ? 1.5 : 1)))
         .compositingGroup()
         .dsShadow(.panel)
         .animation(DS.Motion.emphasized, value: active)
@@ -180,18 +179,6 @@ struct GlassValuePill: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Reset \(title) to Auto")
-    }
-
-    /// The chip's corner radius — tightened for the 2026-small redesign (was `DS.Radius.valuePill`).
-    private static let radius: CGFloat = 12
-
-    /// A brighter blue rim while the chip owns a live drag (the glass supplies the resting edge).
-    @ViewBuilder private var activeBorder: some View {
-        if active {
-            RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
-                .strokeBorder(tint.opacity(0.8), lineWidth: 1.5)
-                .allowsHitTesting(false)
-        }
     }
 
     // MARK: formatting
