@@ -141,11 +141,13 @@ final class ClearanceDerivationTests: XCTestCase {
         let entries = p.clearanceHandles()
         XCTAssertEqual(entries.count, 1, "one cleared face (the anchored bore)")
         let handles = entries[0].handles
-        // Wall (margin) + two end caps (axial) — from the resolved cylinder.
-        XCTAssertEqual(handles.count, 3)
-        XCTAssertNotNil(handles.first { $0.role == .margin })
-        XCTAssertNotNil(handles.first { $0.role == .axialHi })
-        XCTAssertNotNil(handles.first { $0.role == .axialLo })
+        // Wall (margin) + ONE end cap (axial) — round 3 item 9: a single
+                // axial handle per keep-clear cylinder (the second cap was removed).
+                XCTAssertEqual(handles.count, 2)
+                XCTAssertNotNil(handles.first { $0.role == .margin })
+                XCTAssertNotNil(handles.first { $0.role == .axialHi })
+                XCTAssertNil(handles.first { $0.role == .axialLo },
+                             "the low cap must NOT come back — one axial handle only")
         // The wall handle carries the EXACT bore radius (2.5), and the +cap measures
         // from the fixed tessellation end (span.hi = 10) — the same numbers the run
         // freezes, so a drag reads off the true geometry.
