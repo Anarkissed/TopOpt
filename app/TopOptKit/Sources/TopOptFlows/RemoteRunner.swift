@@ -50,14 +50,19 @@
 // standard is `xcodebuild test` on the package + the `RemoteRunnerE2ETests`
 // harness (handoffs 097 + 101).
 //
-// Honest limitations (see docs/handoffs/097 + 093-lan-offload.md STEP 3):
-//   * The worker delivers each variant's MESH + the scalar report (volume
-//     fraction, margins, orientation, stresses, settings). It does NOT deliver the
-//     per-voxel vonMises / displacement / stressTensor fields, the playback
-//     keyframes, or the mass. So remote variants render with their margins/settings,
-//     but the stress overlay, flex animation, mass readout and playback are
-//     UNAVAILABLE. The outcome is flagged `computedRemotely` so the results screen
-//     shows those as "computed on Mac — n/a in this build".
+// What comes over the wire (handoff 122 closed most of the old gap):
+//   * Each variant's MESH + the scalar report (volume fraction, margins,
+//     orientation, stresses, settings) — as before.
+//   * NEW: the per-voxel FIELDS container out/fields.bin — von Mises + displacement
+//     fields + the voxel mass & support summary — fetched once after the meshes
+//     stream (`fetchFields` / `assembleFinalOutcome`). So a remote run now lights up
+//     the Stress, Flex and Load-path overlays and shows the voxel mass, identical to
+//     a local run. `computedRemotely` stays set (it means "ran on a worker"); the
+//     results screen gates each overlay on the field's PRESENCE, so a fetch failure
+//     leaves it honestly "computed on Mac" rather than a dead control / fake zero.
+//   * STILL Mac-only: the optimization-playback keyframes (not serialised), and the
+//     6-component stress tensor (v1 omits it for wire cost → the load→anchor flow
+//     sub-mode stays gated). fields.bin is versioned so a later handoff can add them.
 //
 // 097 review-carry fixes still hold here: `smooth_factor` is sent so remote meshes
 // match the local tricubic smoothing; a failed mesh fetch FAILS THE RUN with a
@@ -702,6 +707,29 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         return mesh
     }
 
+    /// Fetch + parse the run's per-voxel result FIELDS container (handoff 122),
+    /// written by the CLI to out/fields.bin at run end and served by the SAME
+    /// `/files/{name}` route the meshes use (no protocol change). Returns nil on
+    /// ANY failure — a missing file (a pre-122 worker), a transport error, or an
+    /// unparseable body — because the fields are ENRICHMENT: without them the run
+    /// still shows geometry + margins and the overlays stay honestly gated ("computed
+    /// on Mac"). A fields failure must never fail the run the way a missing MESH does
+    /// (fetchMesh throws; this does not). Called once after the meshes have already
+    /// streamed, so progressive results stay progressive.
+    private func fetchFields() -> RemoteFieldsContainer? {
+        guard let id = jobID else { return nil }
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+            .appendingPathComponent("fields.bin")
+        guard let (data, resp) = try? syncGET(url),
+              (resp as? HTTPURLResponse)?.statusCode == 200,
+              let container = RemoteFieldsContainer.parse(data) else {
+            diag("remote fields.bin unavailable — overlays stay computed-on-Mac for this run")
+            return nil
+        }
+        return container
+    }
+
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {
         let boundary = "topopt-\(UUID().uuidString)"
         var body = Data()
@@ -927,16 +955,25 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     }
 
     /// Build the authoritative final outcome from report.json + the meshes ALREADY
-    /// fetched during streaming. The scalar fields come from the report; the mesh
-    /// geometry comes from the recorded streamed variants (never re-derive a
-    /// filename). Flagged `computedRemotely` (the CLI does not serialise the
-    /// per-voxel fields — see the header).
+    /// fetched during streaming, ENRICHED with the per-voxel fields (handoff 122):
+    /// after the meshes have streamed, fetch out/fields.bin ONCE and splice each
+    /// accepted variant's von Mises / displacement fields + voxel mass & support,
+    /// and carry the run's grid metadata so the results screen can index them. The
+    /// mesh geometry comes from the recorded streamed variants (never re-derive a
+    /// filename); the scalar report supplies margins/orientation. Still flagged
+    /// `computedRemotely` (the flag now means "computed on a worker", not "fields
+    /// unavailable" — ResultsModel gates each overlay on the field's PRESENCE). When
+    /// fields.bin can't be fetched (a pre-122 worker, a transport error), `fields` is
+    /// nil and the overlays stay honestly gated, exactly as before this handoff.
     private func assembleFinalOutcome() throws -> OptimizeOutcome {
         guard let id = jobID else { throw RemoteRunError("no job id") }
         let base = config.baseURL.appendingPathComponent("jobs")
             .appendingPathComponent(id).appendingPathComponent("files")
         let report = try getJSON(base.appendingPathComponent("report.json"))
         let reportVariants = report["variants"] as? [[String: Any]] ?? []
+
+        // Per-voxel fields (best-effort; nil leaves the overlays gated).
+        let fields = fetchFields()
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 
@@ -959,21 +996,38 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         }
 
         if !accepted.isEmpty {
-            let variants = accepted.map { makeVariant(streamed: $0,
-                                                      report: reportVariant(forAchieved: $0.achievedVF)) }
-            return OptimizeOutcome(variants: variants, stoppedOnMargin: false,
-                                   cancelled: false, acceptedCount: variants.count,
-                                   computedRemotely: true)
+            let variants = accepted.map { s in
+                makeVariant(streamed: s,
+                            report: reportVariant(forAchieved: s.achievedVF),
+                            fields: fields?.variant(forRequestedVF: s.requestedVF))
+            }
+            return remoteOutcome(variants: variants, acceptedCount: variants.count,
+                                 fields: fields)
         }
 
-        let rejected = reportVariants.map { makeVariant(streamed: nil, report: $0) }
-        return OptimizeOutcome(variants: rejected, stoppedOnMargin: false,
-                               cancelled: false, acceptedCount: 0,
-                               computedRemotely: true)
+        let rejected = reportVariants.map { makeVariant(streamed: nil, report: $0, fields: nil) }
+        return remoteOutcome(variants: rejected, acceptedCount: 0, fields: fields)
+    }
+
+    /// Wrap remote variants in an OptimizeOutcome, carrying the run's grid metadata
+    /// from fields.bin when present (0 otherwise). The overlays need the grid dims to
+    /// index a variant's von Mises / displacement field, so without fields.bin they
+    /// stay `isEmpty` (gated) even if — hypothetically — a variant carried arrays.
+    private func remoteOutcome(variants: [OptimizeVariant], acceptedCount: Int,
+                               fields: RemoteFieldsContainer?) -> OptimizeOutcome {
+        OptimizeOutcome(variants: variants, stoppedOnMargin: false, cancelled: false,
+                        acceptedCount: acceptedCount,
+                        voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
+                        gridNx: fields?.gridNx ?? 0, gridNy: fields?.gridNy ?? 0,
+                        gridNz: fields?.gridNz ?? 0,
+                        gridOrigin: fields?.gridOrigin ?? .zero,
+                        spacing: fields?.spacing ?? 0,
+                        computedRemotely: true)
     }
 
     private func makeVariant(streamed s: StreamedVariant?,
-                             report rv: [String: Any]?) -> OptimizeVariant {
+                             report rv: [String: Any]?,
+                             fields f: RemoteFieldsContainer.Variant?) -> OptimizeVariant {
         let margin = rv?["margin"] as? [String: Any]
         let orient = rv?["orientation"] as? [String: Any]
         // Savings/count basis (handoff 104): the app's savings is 1 - achievedVolume-
@@ -988,7 +1042,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             requestedVolumeFraction: s?.requestedVF ?? printedVF,
             achievedVolumeFraction: printedVF,
             printedFraction: printedVF,
-            massGrams: 0, supportVolumeVoxels: 0,        // not over the wire (header)
+            // Mass + support now come over the wire in fields.bin (handoff 122) when
+            // present; 0 when it wasn't fetched (a pre-122 worker / a fetch failure),
+            // which ResultsModel renders as n/a — never a plausible-but-wrong 0 g.
+            massGrams: f?.massGrams ?? 0,
+            supportVolumeVoxels: f?.supportVolumeVoxels ?? 0,
             meshTriangleCount: (s?.indices.count ?? 0) / 3,
             worstCaseMargin: worst,
             accepted: s != nil, v3Passes: true,
@@ -1001,7 +1059,14 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             maxInterlayerTensionMPa: rv?["max_interlayer_tension_mpa"] as? Double ?? 0,
             inPlaneMargin: (margin?["in_plane"] as? Double) ?? 0,
             interlayerMargin: (margin?["interlayer"] as? Double) ?? 0,
-            meshVertices: s?.vertices ?? [], meshIndices: s?.indices ?? [])
+            meshVertices: s?.vertices ?? [], meshIndices: s?.indices ?? [],
+            // The per-voxel fields the results overlays consume (handoff 122). Empty
+            // when fields.bin wasn't fetched → the overlays stay honestly gated. v1
+            // does not serialise the 6-component tensor (wire cost), so the load→
+            // anchor flow sub-mode stays Mac-only; stress/flex/load-path light up.
+            vonMisesField: f?.vonMises ?? [],
+            displacementField: f?.displacement ?? [],
+            stressTensorField: f?.stressTensor ?? [])
     }
 
     /// Minimal binary-STL reader → (interleaved xyz floats, triangle-soup indices).

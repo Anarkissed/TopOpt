@@ -54,7 +54,7 @@ Endpoints:
   POST   /jobs/{id}/front      move a QUEUED job to the front of the queue.
   POST   /jobs/{id}/pause      pause a RUNNING solve (SIGSTOP the child).
   POST   /jobs/{id}/resume     resume a paused solve (SIGCONT the child).
-  DELETE /jobs/{id}            cancel: dequeue a queued job, or kill a running one.
+  DELETE /jobs/{id}            cancel: kill the subprocess.
   GET    /health               {ok, cli_version, fingerprint, worker_version, ...}
                                fingerprint = the core build id, so the app can
                                REFUSE a worker whose core differs from its own.

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "topopt/fea.hpp"
+#include "topopt/fields.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -407,6 +408,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           variant, out_dir, job.output, result.pipeline.solved_grid));
     }
   }
+
+  // ──▶ per-voxel result fields (handoff 122): one versioned container for the
+  // accepted variants' von Mises / displacement fields + voxel mass & support,
+  // so a LAN remote run lights up the same overlays a local run does. Indexed to
+  // the grid the run actually solved on (the expanded domain under a design box).
+  // Additive: older readers ignore it; the meshes/report above are unchanged.
+  result.fields_path = join_path(out_dir, "fields.bin");
+  result.fields_variant_count =
+      write_fields_file(result.fields_path, result.pipeline,
+                        result.pipeline.solved_grid);
 
   return result;
 }

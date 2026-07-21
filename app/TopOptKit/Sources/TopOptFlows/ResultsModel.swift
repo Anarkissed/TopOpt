@@ -729,14 +729,36 @@ public final class ResultsModel: ObservableObject {
     /// mass is genuinely off-device uses `remoteNA` instead (that flag is trustworthy).
     public static let massNA = "n/a"
 
-    /// A one-line explanation shown on the results screen for a remote run, so the
-    /// missing stress/flex/mass/playback readouts read as an honest gap, not a bug.
-    /// nil for a local run.
+    /// A one-line explanation shown on the results screen for a remote run, so any
+    /// still-unavailable readouts read as an honest gap, not a bug. nil for a local
+    /// run — and, since handoff 122, nil for a remote run whose fields all arrived.
+    ///
+    /// The note is now DATA-DRIVEN: it names ONLY the readouts genuinely missing for
+    /// THIS outcome. When the worker served fields.bin, mass + the stress/flex/load-
+    /// path overlays are present, so their clauses drop out and the note dies where
+    /// real data replaced it (the 122 invariant); it survives only for what is still
+    /// Mac-only — the optimization playback (keyframes aren't serialised), and, on a
+    /// partial/failed fetch, whichever fields didn't arrive.
     public var remoteComputeNote: String? {
         guard computedRemotely else { return nil }
-        return "This variant was optimized on your Mac. Mass, the stress overlay, "
-             + "flex/deflection and the optimization playback are computed there and "
-             + "aren't available for a LAN run in this build — the geometry, savings, "
+        var missing: [String] = []
+        if !hasStress { missing.append("the stress overlay") }
+        if !hasFlex { missing.append("flex/deflection and the load-path overlay") }
+        if (selectedVariant?.massGrams ?? 0) <= 0 { missing.append("mass") }
+        if !hasHistory { missing.append("the optimization playback") }
+        guard !missing.isEmpty else { return nil }
+        // Grammatical list: "a" / "a and b" / "a, b and c".
+        let joined: String
+        switch missing.count {
+        case 1: joined = missing[0]
+        case 2: joined = "\(missing[0]) and \(missing[1])"
+        default: joined = missing.dropLast().joined(separator: ", ") + " and " + missing.last!
+        }
+        let head = joined.prefix(1).uppercased() + joined.dropFirst()
+        let verb = missing.count == 1 ? "is" : "are"
+        let neg = missing.count == 1 ? "isn’t" : "aren’t"
+        return "This variant was optimized on your Mac. \(head) \(verb) computed there "
+             + "and \(neg) available for a LAN run in this build — the geometry, savings, "
              + "orientation and safety margins are."
     }
 
@@ -906,15 +928,18 @@ public final class ResultsModel: ObservableObject {
     public var selectedMassComparison: MassComparison? {
         guard canExport else { return nil }
         let voxelG = selectedVariant?.massGrams ?? 0
-        // A remote variant does not carry a Mac-computed voxel mass over the wire
-        // (097); with no density we also can't compute a mesh mass — nothing to show.
+        // With no material density we can't compute a mesh mass — nothing to compare.
         guard materialDensityGCm3 > 0 else { return nil }
         let meshG = MeshExport.meshMassGrams(vertices: selectedVariant?.meshVertices ?? [],
                                              indices: selectedVariant?.meshIndices ?? [],
                                              densityGCm3: materialDensityGCm3)
         guard meshG > 0 else { return nil }
+        // Show the voxel-count mass whenever it's PRESENT (handoff 122): a remote run
+        // that fetched fields.bin now carries it (voxelG > 0), so the comparison is
+        // no longer gated on provenance — only on the mass actually being known. A
+        // remote run without it (or any g<=0) shows the mesh mass alone, never 0 g.
         return MassComparison(meshGrams: meshG,
-                              voxelGrams: computedRemotely ? nil : (voxelG > 0 ? voxelG : nil),
+                              voxelGrams: voxelG > 0 ? voxelG : nil,
                               meshIsEstimate: !selectedMeshWatertight)
     }
 
@@ -992,13 +1017,16 @@ public final class ResultsModel: ObservableObject {
                           smoothShaded: true)
     }
 
-    /// The selected variant's stress field, tied to the run's grid geometry. nil for
-    /// a remote run (the worker doesn't serialise the per-voxel field — 097), so the
-    /// stress overlay stays hidden rather than drawing a blank/empty grid.
+    /// The selected variant's stress field, tied to the run's grid geometry. Gated on
+    /// the field's PRESENCE, not on provenance (handoff 122): a remote run that fetched
+    /// fields.bin carries a real von Mises field + grid dims and lights the overlay up;
+    /// a fetch failure (or a cancelled/legacy variant) leaves the field/grid empty, so
+    /// `StressField.isEmpty` is true and the overlay stays hidden — never a blank grid.
     public var selectedStressField: StressField? {
-        guard !computedRemotely, let v = selectedVariant else { return nil }
-        return StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
-                           origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+        guard let v = selectedVariant else { return nil }
+        let f = StressField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
+                            origin: gridOrigin, spacing: spacing, values: v.vonMisesField)
+        return f.isEmpty ? nil : f   // nil when there's nothing to show (no field / no grid)
     }
 
     /// Whether the selected variant carries a von Mises stress field to overlay. False
@@ -1016,9 +1044,14 @@ public final class ResultsModel: ObservableObject {
     /// the run's grid geometry — the flux source `σ` the load→anchor flow integrates.
     /// Empty (`isEmpty`) for a cancelled/legacy variant that carries no tensor.
     public var selectedTensorField: StressTensorField? {
-        guard !computedRemotely, let v = selectedVariant else { return nil }
-        return StressTensorField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
-                                 origin: gridOrigin, spacing: spacing, values: v.stressTensorField)
+        // Presence-gated (handoff 122). The 6-component tensor is NOT serialised over
+        // the wire in v1 (wire cost), so a remote variant's tensor stays empty and the
+        // load→anchor flow sub-mode stays gated even when stress/flex/load-path light
+        // up; a local run carries it as before.
+        guard let v = selectedVariant else { return nil }
+        let f = StressTensorField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
+                                  origin: gridOrigin, spacing: spacing, values: v.stressTensorField)
+        return f.isEmpty ? nil : f   // nil when absent (v1 never sends the tensor over the wire)
     }
 
     // MARK: - flex animation (M7.viz.3)
@@ -1026,9 +1059,13 @@ public final class ResultsModel: ObservableObject {
     /// The selected variant's per-node displacement field (M7.disp), tied to the
     /// run's grid geometry — the field the flex animation displaces vertices by.
     public var selectedDisplacementField: DisplacementField? {
-        guard !computedRemotely, let v = selectedVariant else { return nil }
-        return DisplacementField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
-                                 origin: gridOrigin, spacing: spacing, values: v.displacementField)
+        // Presence-gated (handoff 122): a remote run that fetched fields.bin carries the
+        // per-node displacement field, so Flex and the load-path overlay (both derived
+        // from it) light up; a fetch failure leaves it empty and they stay hidden.
+        guard let v = selectedVariant else { return nil }
+        let f = DisplacementField(nx: gridDim.0, ny: gridDim.1, nz: gridDim.2,
+                                  origin: gridOrigin, spacing: spacing, values: v.displacementField)
+        return f.isEmpty ? nil : f   // nil when there's nothing to flex (no field / no grid)
     }
 
     /// Whether the selected variant carries a displacement field to flex (a
@@ -1508,8 +1545,11 @@ public final class ResultsModel: ObservableObject {
     // MARK: - optimization-history playback (keyframes)
 
     /// Whether the selected variant carries an optimization history to play back.
+    /// Presence-gated (handoff 122): playback keyframes are still NOT serialised over
+    /// the wire, so a remote variant carries none and this stays false — but it is now
+    /// the empty-keyframes fact that hides the control, not the remote flag, so a
+    /// hypothetical future that DID stream keyframes would light up without a new gate.
     public var hasHistory: Bool {
-        guard !computedRemotely else { return false }   // no playback keyframes over the wire (097)
         return !(selectedVariant?.keyframeMeshes.isEmpty ?? true)
     }
 
@@ -1767,10 +1807,17 @@ public final class ResultsModel: ObservableObject {
             let savings = 1 - v.achievedVolumeFraction
             let pct = Int((savings * 100).rounded())
             let cm3 = Double(v.supportVolumeVoxels) * voxelVolumeMM3 / 1000.0
-            // Mass + support are computed on the Mac and not serialised over the wire
-            // (097): show n/a for a remote run rather than a plausible 0 g / "minimal".
-            let supportLabel = remote ? ResultsModel.remoteNA
-                                      : (cm3 <= 0.05 ? "minimal" : String(format: "%.1f cm³", cm3))
+            // Handoff 122: mass + support now arrive over the wire (fields.bin) for a
+            // remote run too. Gate their labels on the SCALAR BLOCK actually being
+            // present, not on the remote flag — a real printed part always weighs > 0,
+            // and a fields-less remote variant is left at 0 (support voxels 0 is a
+            // legitimate "minimal", so mass is the honest presence signal for both).
+            // Present → the real figure (local OR fetched-remote); a remote run WITHOUT
+            // it → n/a computed-on-Mac; otherwise the 111 invariant ("n/a", not 0.0 g).
+            let hasScalars = v.massGrams > 0
+            let realSupport = cm3 <= 0.05 ? "minimal" : String(format: "%.1f cm³", cm3)
+            let supportLabel = hasScalars ? realSupport
+                                          : (remote ? ResultsModel.remoteNA : realSupport)
             let tilt = tiltFromVertical(v.orientation)
             return ResultVariantVM(
                 index: i,
@@ -1778,13 +1825,15 @@ public final class ResultsModel: ObservableObject {
                 savingsPercent: pct,
                 savingsLabel: "\u{2212}\(pct)%",
                 massGrams: v.massGrams,
-                massLabel: remote ? ResultsModel.remoteNA : massLabel(v.massGrams),
+                massLabel: hasScalars ? massLabel(v.massGrams)
+                                      : (remote ? ResultsModel.remoteNA : massLabel(v.massGrams)),
                 supportCm3: cm3,
                 supportLabel: supportLabel,
                 orientation: v.orientation,
                 tiltDegrees: tilt,
                 orientationSummary: orientationSummary(tiltDegrees: tilt, supportCm3: cm3,
-                                                       supportLabel: supportLabel, remote: remote),
+                                                       supportLabel: supportLabel,
+                                                       remote: !hasScalars),
                 layerShear: LayerShear.classify(interlayerMargin: v.interlayerMargin * knockdown),
                 maxStressMPa: v.maxStressMPa,
                 worstCaseMargin: v.worstCaseMargin * knockdown,

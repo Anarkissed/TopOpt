@@ -181,6 +181,17 @@ final class OrientationGizmoTests: XCTestCase {
         XCTAssertEqual(m.camera.elevation, m.defaultElevation, accuracy: tol)
     }
 
+    // Item 2: Home also clears any two-finger pan (the target returns to the framed centre).
+    @MainActor
+    func testHomeResetsPan() {
+        let m = OrbitCameraModel(); m.reframe(unitCube)
+        let home = m.camera.target
+        m.pan(dx: 90, dy: -40, viewportHeight: 800)
+        XCTAssertNotEqual(m.camera.target, home, "the pan moved the target")
+        m.home(animated: false)
+        XCTAssertEqual(m.camera.target, home, "Home returns the target to the framed centre")
+    }
+
     @MainActor
     func testSnapLevelsRoll() {
         let m = OrbitCameraModel(); m.reframe(unitCube)

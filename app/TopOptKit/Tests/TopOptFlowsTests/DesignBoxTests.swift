@@ -488,4 +488,56 @@ final class DesignBoxTests: XCTestCase {
         // No planar faces at all (an STL part) → nil.
         XCTAssertNil(DesignBoxDetent.matchedFace(axis: 0, coord: 4, faces: []))
     }
+
+    // MARK: face-drag detent PIPELINE (round-4 item 5 — the integration path the gesture runs)
+
+    // An AABB wider than the planes so its extents (±10) are distinct snap targets from the faces.
+    private static let detentAABBMin = SIMD3<Float>(-10, -5, -5)
+    private static let detentAABBMax = SIMD3<Float>(10, 5, 5)
+
+    private func faceDrag(_ base: DesignBoxBounds, rawTarget: Float, current: Float?)
+        -> DesignBoxDetent.FaceDragResult {
+        DesignBoxDetent.applyFaceDrag(axis: 0, isMax: true, base: base, rawTarget: rawTarget,
+                                      faces: Self.detentFaces, aabbMin: Self.detentAABBMin,
+                                      aabbMax: Self.detentAABBMax, current: current, minSize: 0.1)
+    }
+
+    /// Drive a full +X face drag through the WHOLE pipeline (candidates → resolve → movingFace →
+    /// matchedFace), the exact call `applyBoxDrag` makes — a dead wire would fail here, not just the
+    /// isolated math. Frame 1 enters the detent at the part face; frame 2 holds it (hysteresis);
+    /// frame 3 escapes it. The box face lands on the snapped coordinate each frame.
+    func testFaceDragPipelineSnapsHoldsAndReleases() {
+        let base = DesignBoxBounds(min: SIMD3<Float>(-8, -4, -4), max: SIMD3<Float>(0, 4, 4))
+
+        // Frame 1: raw target 3.0 is 1.0 mm from the ⟂-X part face at x=4 → fresh snap.
+        let f1 = faceDrag(base, rawTarget: 3.0, current: nil)
+        XCTAssertTrue(f1.didSnap, "the drag engages the detent")
+        XCTAssertEqual(f1.detent, 4)
+        XCTAssertEqual(f1.bounds.max.x, 4, accuracy: 1e-5, "the box face snaps onto the part plane")
+        XCTAssertEqual(f1.matchedFace, 0, "the ⟂-X face id is returned so the viewer pulses it")
+
+        // Frame 2: raw target 5.5 (1.5 mm past the detent, inside the 3.0 release band) → held, not fresh.
+        let f2 = faceDrag(base, rawTarget: 5.5, current: f1.detent)
+        XCTAssertFalse(f2.didSnap, "holding inside the escape band is not a fresh snap (no re-pulse)")
+        XCTAssertEqual(f2.detent, 4)
+        XCTAssertEqual(f2.bounds.max.x, 4, accuracy: 1e-5, "the face stays magnetised to the plane")
+        XCTAssertNil(f2.matchedFace)
+
+        // Frame 3: raw target 8.0 (4.0 mm past the detent, beyond release, no nearby candidate) → free.
+        let f3 = faceDrag(base, rawTarget: 8.0, current: f2.detent)
+        XCTAssertFalse(f3.didSnap)
+        XCTAssertNil(f3.detent, "the detent releases")
+        XCTAssertEqual(f3.bounds.max.x, 8.0, accuracy: 1e-5, "the face follows the raw drag once free")
+    }
+
+    /// A snap onto a bare AABB extent (no part face there) still fires — `didSnap` true — but
+    /// returns no face, so only the haptic ticks (nothing to flash).
+    func testFaceDragSnapToAABBExtentHasNoFace() {
+        let base = DesignBoxBounds(min: SIMD3<Float>(0, -4, -4), max: SIMD3<Float>(6, 4, 4))
+        let f = faceDrag(base, rawTarget: 9.0, current: nil)   // 1.0 mm from the AABB max extent (x=10)
+        XCTAssertTrue(f.didSnap, "the AABB extent is a valid detent")
+        XCTAssertEqual(f.detent, 10)
+        XCTAssertEqual(f.bounds.max.x, 10, accuracy: 1e-5)
+        XCTAssertNil(f.matchedFace, "no ⟂ part face at the AABB extent → haptic only, no pulse")
+    }
 }

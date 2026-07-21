@@ -86,8 +86,13 @@ public struct CameraProjection: Equatable, Sendable {
 }
 
 public struct OrbitCamera: Equatable {
-    /// The point the camera looks at (set to the model centre by `frame`).
+    /// The point the camera looks at (set to the model centre by `frame`; slid off it by
+    /// `pan`, restored by `resetPan`).
     public var target: SIMD3<Float>
+    /// The un-panned orbit centre — the framed model centre `frame` computed. `pan` moves
+    /// `target` away from it; `resetPan` (the Home button, round-4 item 2) returns to it, so
+    /// Home clears any pan. Captured by `init`/`frame` so it always tracks the current framing.
+    public private(set) var homeTarget: SIMD3<Float>
     /// Distance from `target` to the eye. Clamped to `[minDistance, maxDistance]`.
     public var distance: Float
     /// Yaw about the world +Y axis, in radians. Unbounded (wraps naturally).
@@ -123,6 +128,7 @@ public struct OrbitCamera: Equatable {
                 minDistance: Float = 0.01,
                 maxDistance: Float = 1_000) {
         self.target = target
+        self.homeTarget = target
         self.distance = distance
         self.azimuth = azimuth
         self.roll = roll
@@ -172,6 +178,7 @@ public struct OrbitCamera: Equatable {
     public mutating func frame(_ bounds: MeshBounds, margin: Float = 1.15) {
         let radius = Swift.max(bounds.radius, 1e-4)
         target = bounds.isEmpty ? .zero : bounds.center
+        homeTarget = target           // reframing re-anchors Home to the new model centre
         minDistance = radius * 0.2
         maxDistance = radius * 12
         let fit = radius / sin(fovY * 0.5) * margin
@@ -204,6 +211,35 @@ public struct OrbitCamera: Equatable {
         guard factor > 0, factor.isFinite else { return }
         distance = Swift.min(Swift.max(distance * factor, minDistance), maxDistance)
     }
+
+    /// Two-finger CAD pan (round-4 item 2): slide the look-at `target` in the VIEW PLANE by a
+    /// screen drag (`dx` = screen-right, `dy` = screen-DOWN, both in points — the same convention
+    /// `orbit` takes). The world distance per screen point is derived from the view frustum at the
+    /// target (`2·distance·tan(fovY/2) / viewportHeight`), so the grabbed point tracks the finger
+    /// 1:1 at any zoom. The eye follows `target` (see `eye`), so pan translates the whole camera
+    /// sideways without changing orientation; a subsequent `orbit` therefore turns about the NEW
+    /// target. Roll-aware for the same reason `orbit` is: the drag is decomposed in the rolled
+    /// camera frame so screen-right always slides the view right. `homeTarget` is untouched, so
+    /// `resetPan`/Home can always return.
+    public mutating func pan(dx: Float, dy: Float, viewportHeight: Float) {
+        guard viewportHeight > 0, dx.isFinite, dy.isFinite else { return }
+        let worldPerPixel = 2 * distance * tan(fovY * 0.5) / viewportHeight
+        // Undo roll so a screen-down drag pans down regardless of the horizon tilt (see `orbit`).
+        let c = cos(roll), s = sin(roll)
+        let rx =  c * dx + s * dy
+        let ry = -s * dx + c * dy
+        let dir = direction
+        var right = simd_cross(up, dir)
+        var camUp = simd_cross(dir, right)
+        guard simd_length(right) > 1e-6, simd_length(camUp) > 1e-6 else { return }
+        right = simd_normalize(right); camUp = simd_normalize(camUp)
+        // Grab-pan: the camera moves OPPOSITE the finger so the world point under it follows the
+        // finger. Screen-right → target left (−right); screen-down → target up (+camUp).
+        target += (-right * rx + camUp * ry) * worldPerPixel
+    }
+
+    /// Return the look-at to the framed centre, clearing any `pan` (the Home button, item 2).
+    public mutating func resetPan() { target = homeTarget }
 
     /// Roll the view by `delta` radians about the line of sight (the swoosh arrows). Positive
     /// spins the horizon one way, negative the other; unbounded (wraps). Does not move the eye.

@@ -483,96 +483,138 @@ final class ForceModelTests: XCTestCase {
         XCTAssertEqual(fm.panelKindLabel(for: ids[0]), "Keep clear")
     }
 
-    // MARK: - per-row clearance sync membership (device round 3, items 5+6)
+    // MARK: - per-GROUP clearance sync, WITHIN-group scope (device round 4, item 3)
 
-    func testSyncMembershipDefaultsChecked() {
+    // A group's several bores are addressed by (group id, face id). Faces here are literal
+    // FaceIDs; a group with two bores is faces [10, 11].
+
+    func testSyncDefaultsChecked() {
         let (_, ids) = groups([1])
-        XCTAssertTrue(ForceModel().isClearanceSynced(ids[0]), "every row opens checked (synced) by default")
+        XCTAssertTrue(ForceModel().isClearanceSynced(ids[0]), "every group opens checked (synced) by default")
     }
 
-    /// Editing a CHECKED row's value writes every CHECKED peer only; an UNCHECKED peer is
-    /// untouched (stays Auto), and a checked peer absent from the shape set stays Auto too.
-    func testEditCheckedWritesCheckedOnly() {
-        let (_, ids) = groups([1, 2, 3, 4])
+    /// SYNCED (default): a group's several bores share ONE value — editing one writes all.
+    func testSyncedGroupBoresShareOneValue() {
+        let (_, ids) = groups([1])
+        let g = ids[0]
         var fm = ForceModel()
-        let bolts = [ids[0], ids[1], ids[2]]        // ids[3] is a different (slab) site
-        fm.setClearanceSynced(ids[1], false, peers: bolts)   // uncheck the second bolt → independent
-        fm.setClearanceMargin(ids[0], mm: 5.0, syncTo: bolts)
-        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 5.0, "the edited checked row")
-        XCTAssertEqual(fm.clearanceOverride(for: ids[2]).concentricMarginMM, 5.0, "the other checked peer got it")
-        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "the unchecked row is untouched → Auto")
-        XCTAssertNil(fm.clearanceOverride(for: ids[3]).concentricMarginMM, "a non-peer stays Auto")
+        fm.setClearanceMargin(group: g, face: 10, mm: 5.0)   // synced → shared
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM, 5.0)
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 11).concentricMarginMM, 5.0,
+                       "the group's other bore shares the value")
     }
 
-    /// An UNCHECKED (independent) row: editing IT writes only itself, and editing a CHECKED peer
-    /// never reaches back into it.
-    func testUncheckedRowIsIndependent() {
-        let (_, ids) = groups([1, 2])
+    /// UNSYNCED: each bore is independent — editing one leaves the others alone.
+    func testUnsyncedGroupBoresAreIndependent() {
+        let (_, ids) = groups([1])
+        let g = ids[0]
         var fm = ForceModel()
-        let bolts = [ids[0], ids[1]]
-        fm.setClearanceSynced(ids[0], false, peers: bolts)   // ids[0] independent
-        fm.setClearanceMargin(ids[0], mm: 7.0, syncTo: bolts)
-        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 7.0)
-        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "editing the independent row spares the peer")
-        fm.setClearanceMargin(ids[1], mm: 3.0, syncTo: bolts)  // edit the checked row
-        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 7.0, "independent row kept its own value")
+        fm.setClearanceSynced(g, false, boreFaces: [10, 11])
+        fm.setClearanceMargin(group: g, face: 10, mm: 7.0)
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM, 7.0)
+        XCTAssertNil(fm.clearanceOverride(forGroup: g, face: 11).concentricMarginMM,
+                     "the sibling bore is independent (still Auto)")
+        fm.setClearanceMargin(group: g, face: 11, mm: 3.0)
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM, 7.0,
+                       "bore 10 keeps its own value")
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 11).concentricMarginMM, 3.0)
     }
 
-    /// adopt-on-check: re-checking a row ADOPTS the shared group's current value.
-    func testRecheckAdoptsSharedValue() {
-        let (_, ids) = groups([1, 2, 3])
+    /// Unchecking SEEDS each bore from the shared value so it keeps its current number, then diverges.
+    func testUncheckSeedsBoresFromShared() {
+        let (_, ids) = groups([1])
+        let g = ids[0]
         var fm = ForceModel()
-        let bolts = [ids[0], ids[1], ids[2]]
-        fm.setClearanceMargin(ids[0], mm: 8.0, syncTo: bolts)     // shared group → 8.0 everywhere
-        fm.setClearanceSynced(ids[1], false, peers: bolts)        // uncheck ids[1]
-        fm.setClearanceMargin(ids[1], mm: 2.0, syncTo: bolts)     // independent edit → 2.0
-        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 2.0)
-        fm.setClearanceSynced(ids[1], true, peers: bolts)         // re-check → adopt shared 8.0
-        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 8.0, "re-checking adopts the shared value")
+        fm.setClearanceMargin(group: g, face: 10, mm: 8.0)   // shared 8.0 (synced)
+        fm.setClearanceSynced(g, false, boreFaces: [10, 11]) // uncheck → seed both at 8.0
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM, 8.0)
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 11).concentricMarginMM, 8.0,
+                       "unchecking keeps current values")
+        fm.setClearanceMargin(group: g, face: 10, mm: 2.0)   // now diverge
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM, 2.0)
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 11).concentricMarginMM, 8.0,
+                       "the other bore is unaffected")
     }
 
-    /// adopt-on-check when the shared group is still Auto: re-checking reverts the row to Auto
-    /// (adopts the shared "no edit yet"), so it resumes sending the 0 sentinel.
+    /// adopt-on-check: re-checking DROPS the per-bore divergence — every bore re-adopts the shared value.
+    func testRecheckAdoptsSharedDroppingDivergence() {
+        let (_, ids) = groups([1])
+        let g = ids[0]
+        var fm = ForceModel()
+        fm.setClearanceMargin(group: g, face: 10, mm: 8.0)   // shared 8.0
+        fm.setClearanceSynced(g, false, boreFaces: [10, 11])
+        fm.setClearanceMargin(group: g, face: 10, mm: 2.0)   // bore 10 diverges to 2.0
+        fm.setClearanceSynced(g, true, boreFaces: [10, 11])  // re-check → adopt shared 8.0
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM, 8.0,
+                       "the diverged bore snaps back to the shared value")
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 11).concentricMarginMM, 8.0)
+    }
+
+    /// adopt-on-check when the shared value is still Auto: re-checking reverts each bore to Auto.
     func testRecheckAdoptsAutoWhenSharedUnedited() {
-        let (_, ids) = groups([1, 2])
+        let (_, ids) = groups([1])
+        let g = ids[0]
         var fm = ForceModel()
-        let bolts = [ids[0], ids[1]]
-        fm.setClearanceSynced(ids[0], false, peers: bolts)
-        fm.setClearanceMargin(ids[0], mm: 9.0, syncTo: bolts)     // independent value while unchecked
-        XCTAssertEqual(fm.clearanceOverride(for: ids[0]).concentricMarginMM, 9.0)
-        fm.setClearanceSynced(ids[0], true, peers: bolts)         // shared group (ids[1]) is Auto
-        XCTAssertNil(fm.clearanceOverride(for: ids[0]).concentricMarginMM, "adopts the shared Auto → back to sentinel")
+        fm.setClearanceSynced(g, false, boreFaces: [10, 11]) // shared is Auto (never edited)
+        fm.setClearanceMargin(group: g, face: 10, mm: 9.0)   // independent value while unchecked
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM, 9.0)
+        fm.setClearanceSynced(g, true, boreFaces: [10, 11])  // adopt the shared Auto
+        XCTAssertNil(fm.clearanceOverride(forGroup: g, face: 10).concentricMarginMM,
+                     "adopts the shared Auto → back to the sentinel")
     }
 
-    /// Auto interaction: an untouched CHECKED row holds NO override (stays Auto / sends the
-    /// sentinel) until a shared edit lands, at which point it takes the value.
-    func testUntouchedCheckedRowStaysAutoUntilSharedEdit() {
+    /// THE fix: two groups NEVER couple — editing group A's margin does not touch group B, synced or not.
+    func testTwoGroupsNeverCrossTalk() {
         let (_, ids) = groups([1, 2])
+        let a = ids[0], b = ids[1]
         var fm = ForceModel()
-        let bolts = [ids[0], ids[1]]
-        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "checked but untouched → Auto")
-        fm.setClearanceMargin(ids[0], mm: 4.0, syncTo: bolts)
-        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).concentricMarginMM, 4.0, "a shared edit lands on it")
+        // Both synced (default). Editing A's bore must not reach B's bores.
+        fm.setClearanceMargin(group: a, face: 10, mm: 5.0)
+        XCTAssertEqual(fm.clearanceOverride(forGroup: a, face: 10).concentricMarginMM, 5.0)
+        XCTAssertNil(fm.clearanceOverride(forGroup: b, face: 20).concentricMarginMM, "group B is untouched")
+        XCTAssertNil(fm.clearanceOverride(forGroup: b, face: 21).concentricMarginMM, "group B stays Auto")
+        // Unsyncing A must not leak into B either.
+        fm.setClearanceSynced(a, false, boreFaces: [10, 11])
+        fm.setClearanceMargin(group: a, face: 11, mm: 6.0)
+        XCTAssertNil(fm.clearanceOverride(forGroup: b, face: 20).concentricMarginMM, "still no cross-talk")
+        XCTAssertTrue(fm.isClearanceSynced(b), "B's Sync flag is untouched by A")
     }
 
-    /// Slab depth fans out only across slab peers, independent of the bolt margin/axial channel.
-    func testSyncDepthChannelIsIndependent() {
-        let (_, ids) = groups([1, 2])
+    /// The slab-depth channel shares within the group like margin/axial, independent of it.
+    func testSyncedDepthSharesWithinGroupIndependentOfMargin() {
+        let (_, ids) = groups([1])
+        let g = ids[0]
         var fm = ForceModel()
-        fm.setClearanceSlab(ids[0], mm: 6.0, syncTo: [ids[0], ids[1]])
-        XCTAssertEqual(fm.clearanceOverride(for: ids[1]).slabDepthMM, 6.0)
-        XCTAssertNil(fm.clearanceOverride(for: ids[1]).concentricMarginMM, "depth sync doesn't touch margin")
+        fm.setClearanceSlab(group: g, face: 10, mm: 6.0)     // synced → shared depth
+        XCTAssertEqual(fm.clearanceOverride(forGroup: g, face: 11).slabDepthMM, 6.0)
+        XCTAssertNil(fm.clearanceOverride(forGroup: g, face: 11).concentricMarginMM, "depth doesn't touch margin")
     }
 
-    /// Membership round-trips through the snapshot codec (an unchecked row stays unchecked;
-    /// default checked when absent).
-    func testMembershipPersists() throws {
+    /// The Sync flag AND per-bore values round-trip through the snapshot codec.
+    func testMembershipAndBoreOverridesPersist() throws {
         let (_, ids) = groups([1, 2])
         var fm = ForceModel()
-        fm.setClearanceSynced(ids[0], false, peers: [ids[0], ids[1]])
+        fm.setClearanceSynced(ids[0], false, boreFaces: [10, 11])
+        fm.setClearanceMargin(group: ids[0], face: 10, mm: 4.25)   // a diverged per-bore value
         let back = try JSONDecoder().decode(ForceModel.self, from: try JSONEncoder().encode(fm))
-        XCTAssertFalse(back.isClearanceSynced(ids[0]), "unchecked row survives the round-trip")
+        XCTAssertFalse(back.isClearanceSynced(ids[0]), "the unchecked group survives the round-trip")
         XCTAssertTrue(back.isClearanceSynced(ids[1]), "the other stays checked")
+        XCTAssertEqual(back.clearanceOverride(forGroup: ids[0], face: 10).concentricMarginMM, 4.25,
+                       "the per-bore override survives")
+    }
+
+    /// sync() prunes per-bore overrides SELECTIVELY: a still-live group keeps its diverged value
+    /// while a removed group's entries are dropped.
+    func testSyncRetainsLiveGroupBoreOverrides() {
+        let (sel, ids) = groups([1, 2])
+        var fm = ForceModel()
+        fm.setClearanceSynced(ids[1], false, boreFaces: [20])
+        fm.setClearanceMargin(group: ids[1], face: 20, mm: 3.0)
+        var sel2 = sel
+        sel2.remove(ids[0])                 // remove the OTHER group
+        fm.sync(groups: sel2.groups)        // ids[1] still live
+        XCTAssertEqual(fm.clearanceOverride(forGroup: ids[1], face: 20).concentricMarginMM, 3.0,
+                       "a live group's per-bore override survives a sync")
     }
 
     /// A pre-round-3 snapshot carrying the legacy global `syncClearances` key still decodes
