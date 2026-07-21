@@ -94,18 +94,22 @@ int main() {
       b.cg_iterations = 11;
       b.cg_used_multigrid = true;
       b.plateau = true;
+      b.beta = 8.0;  // handoff 123: a projecting iteration carries its stage β
       w.append_at(0, b, 1050);
       check(w.rows() == 2, "CSV writer counted 2 rows");
     }
     const std::string body = read_all(path);
+    // Row a leaves beta at its default 0 (not projecting); row b sets β=8.
     const std::string expected =
-        "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid\n"
-        "0,1,1000,12.5,0.680000,0,14,1\n"
-        "0,2,1050,9.25,0.680100,1,11,1\n";
+        "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,"
+        "beta\n"
+        "0,1,1000,12.5,0.680000,0,14,1,0\n"
+        "0,2,1050,9.25,0.680100,1,11,1,8\n";
     check(body == expected, "CSV golden: header + rows are byte-exact");
     // Schema string is the documented one.
     check(std::string(kIterationCsvHeader) ==
-              "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid",
+              "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
+              "cg_multigrid,beta",
           "CSV header constant matches documented schema");
   }
 

@@ -367,6 +367,27 @@ constexpr bool projection_supported(SimpUpdater updater) {
   return updater == SimpUpdater::OC;
 }
 
+// Discreteness measure M_nd = mean over the DESIGN voxels of 4 rho (1 - rho):
+// 0 for a fully black/white (printable) field, 1 for a uniform-0.5 (maximally
+// gray) field. It is the standard single-number grayness metric (the same
+// 4 rho (1-rho) the Gate-V2 / mma_projection tests use), and the signal the
+// CONDITIONAL MMA-projection gate thresholds on (handoff 123): how much of the
+// design is stuck in the intermediate, unprintable fringe.
+//
+// The design set is voxels that are BOTH solid (grid.solid — real material, so
+// Empty out-of-part voxels never dilute the measure) AND `mask`-Active (so
+// FrozenSolid==1 / FrozenVoid==0 pins, which are trivially discrete, are
+// excluded — the measure reflects only the region the optimizer actually moves).
+// With the all-Active mask a no-box run passes (make_active_mask), this reduces
+// to the mean over grid.solid voxels — the exact basis 116/PR146 measured, so
+// the crisp (~0.02-0.03) vs gray (~0.27-0.56) calibration transfers directly.
+//
+// `density` and `mask` are grid-indexed (size grid.voxel_count()). Returns 0
+// when the design set is empty. Throws std::invalid_argument on a size mismatch.
+double design_discreteness_mnd(const VoxelGrid& grid,
+                               const std::vector<double>& density,
+                               const DesignMask& mask);
+
 // Handoff 114 — per-iteration OBSERVABILITY record. A read-only snapshot of one
 // completed optimizer iteration, handed to SimpOptions::observe (below) once per
 // iteration alongside the lighter `progress` callback. It carries exactly the
@@ -390,6 +411,16 @@ struct SimpIterationObservation {
   // the detector has enough samples. The iteration where this first turns true is
   // the iteration the run terminates on (plateau stop).
   bool plateau = false;
+  // Handoff 123 (117 follow-up) — the Heaviside-projection continuation sharpness
+  // β ACTIVE at this iteration, or 0 when this iteration is NOT projecting. It is
+  // the `cur_beta` the projected updater used this step: the OC `projection`
+  // stage's beta, or the MMA continuation's dynamic beta (starting at
+  // mma_projection_beta0, doubling on a plateau to mma_projection_beta_max). 0 on
+  // the plain (unprojected) OC/MMA path — including a conditional run's grayscale
+  // phase before the gate fires — so the CSV beta column reads 0 exactly when the
+  // design is being optimized WITHOUT projection. Pure observation (never touches
+  // the design).
+  double beta = 0.0;
 };
 
 struct SimpOptions {
