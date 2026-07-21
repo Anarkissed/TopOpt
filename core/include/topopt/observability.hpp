@@ -41,10 +41,11 @@ float half_to_float(std::uint16_t half);
 //
 // The schema (documented here, in the handoff, and pinned by the golden test):
 //
-//   rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid
+//   rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta
 //
 //   rung          0-based ladder index
-//   iter          1-based iteration within the rung (monotone)
+//   iter          1-based iteration within the rung (monotone; a conditional
+//                 run's projection phase continues the same rung's numbering)
 //   wall_ms       wall-clock epoch milliseconds when the row was written (the
 //                 durable timestamp handoff 106 had to reconstruct from mtimes)
 //   compliance    objective of the analysis density at the START of the step
@@ -53,8 +54,13 @@ float half_to_float(std::uint16_t half);
 //                 iter it first reads 1 is the plateau-stop iter
 //   cg_iters      CG iterations of this step's penalized solve
 //   cg_multigrid  1 if MG-CG ran, 0 if it fell back to Jacobi-CG
+//   beta          Heaviside-projection continuation sharpness β active this iter
+//                 (handoff 123): 0 while NOT projecting (plain OC/MMA, incl. a
+//                 conditional run's grayscale phase before the gate fires), else
+//                 the stage β (1/2/4/…). The iter beta first reads > 0 is where
+//                 conditional projection FIRED for that rung.
 //
-// A row is ~60-90 bytes, so a full 4-rung production run (~800 rows) is < 80 KB.
+// A row is ~60-95 bytes, so a full 4-rung production run (~800 rows) is < 80 KB.
 extern const char kIterationCsvHeader[];
 
 // Streams per-iteration rows to a file, one header + one row per call, FLUSHING
@@ -162,6 +168,18 @@ struct RunInfo {
   bool warm_start_inherit = false;
   bool warm_start_coarse = false;
   bool projection = false;
+  // Handoff 123 — CONDITIONAL MMA Heaviside projection echo. `..._threshold` is
+  // the armed grayness gate threshold (0 = disabled). The two per-rung vectors are
+  // filled AFTER the run from MinimizePlasticResult (like cg_multigrid): one entry
+  // per evaluated rung. `conditional_projection_fired[i]` is 1 iff rung i's
+  // grayscale field exceeded the threshold and was continued into β-projection;
+  // `conditional_projection_rung_mnd[i]` is the design-region Mnd measured on that
+  // rung's grayscale field (NaN — serialized as JSON `null` — if the rung was
+  // cancelled before it converged, so nothing was measured). Both vectors are
+  // EMPTY when the gate was disarmed (threshold 0, OC, or always-on projection).
+  double conditional_mma_projection_mnd_threshold = 0.0;
+  std::vector<int> conditional_projection_fired;
+  std::vector<double> conditional_projection_rung_mnd;
   double min_feature_mm = 0.0;
   double margin_stop = 0.0;
   double infill_percent = 100.0;

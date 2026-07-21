@@ -130,6 +130,11 @@ RunInfo build_run_info(const JobDescription& job,
   info.warm_start_inherit = options.warm_start_inherit;
   info.warm_start_coarse = options.warm_start_coarse;
   info.projection = !options.simp.projection.empty();
+  // Handoff 123 — the armed conditional-projection threshold (config echo). The
+  // per-rung fired/Mnd vectors are filled post-run (finalize below), like
+  // cg_multigrid, since they are an OBSERVED outcome of the ladder.
+  info.conditional_mma_projection_mnd_threshold =
+      options.conditional_mma_projection_mnd_threshold;
   info.min_feature_mm = options.min_feature_mm;
   info.margin_stop = options.margin_stop;
   info.infill_percent = options.infill_percent;
@@ -413,6 +418,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   if (wrote_run_info) {
     run_info.cg_multigrid = result.pipeline.used_multigrid;
     run_info.mg_levels = result.pipeline.mg_levels;
+    // Handoff 123 — finalize the conditional-projection outcome: which rungs fired
+    // and the grayscale Mnd measured on each (empty when the gate was disarmed).
+    run_info.conditional_projection_fired.assign(
+        result.pipeline.conditional_projection_fired.begin(),
+        result.pipeline.conditional_projection_fired.end());
+    run_info.conditional_projection_rung_mnd =
+        result.pipeline.rung_grayscale_mnd;
     write_run_info(result.run_info_path, run_info);
   }
   // A recovery solve (which sets used_multigrid) runs only for a non-cancelled

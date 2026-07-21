@@ -664,6 +664,21 @@ if(Eigen3_FOUND)
   target_link_libraries(test_mma_projection PRIVATE topopt)
   add_test(NAME mma_projection COMMAND test_mma_projection)
 
+  # Conditional MMA Heaviside projection — "polish only when gray" (handoff 123),
+  # the driver-level per-rung gate that supersedes always-on production projection
+  # (PR 146). Proves: disabled == byte-identical (THE ONE RULE); a CRISP heavy rung
+  # never fires and adds zero cost (the 4× tax is dead); a GRAY light rung fires and
+  # Mnd collapses to <= 0.05 at a reported cost; per-rung gating on a mixed ladder;
+  # determinism; scoping (inert under OC / always-on projection; bad threshold
+  # throws); and the gate metric design_discreteness_mnd. Drives minimize_plastic,
+  # so Eigen-gated; the real settings rule table is injected.
+  add_executable(test_conditional_projection
+    tests/validation/test_conditional_projection.cpp)
+  target_link_libraries(test_conditional_projection PRIVATE topopt)
+  target_compile_definitions(test_conditional_projection PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME conditional_projection COMMAND test_conditional_projection)
+
   # Stress-constrained optimization (M7.mma.2): the aggregated von Mises
   # constraint on the MMA path — a finite-difference check of the adjoint
   # sensitivity of simp_stress_aggregate, and the behavioral invariants (a)/(b)/

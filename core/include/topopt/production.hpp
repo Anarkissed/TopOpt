@@ -35,6 +35,14 @@ namespace topopt {
 //     supports it (OC). MMA (the production default updater) rejects a projection
 //     schedule, so with MMA this is skipped and the run uses the physical
 //     min-feature filter alone; the OC + projection Gate-V2 chain is untouched.
+//   * conditional_mma_projection_mnd_threshold = 0.07 — CONDITIONAL MMA Heaviside
+//     projection (handoff 123, superseding always-on PR 146). Arms the driver's
+//     per-rung grayness gate: a converged grayscale MMA rung whose design-region
+//     Mnd exceeds 0.07 is continued into β-projection to crisp it; an already-crisp
+//     rung is kept as-is. Projection's ~4× iteration cost is paid ONLY on rungs
+//     that go gray — never the tax on already-crisp parts PR 146's evidence
+//     surfaced. Library default 0 (gate off) keeps Gate-V2 / reference byte-
+//     identical; the threshold is echoed into run_info.json (+ per-rung fired).
 //   * the process-global matrix-free Galerkin block cache is ENABLED (see below).
 //
 // What it deliberately does NOT set (per-front-end / per-job, not shared config):
