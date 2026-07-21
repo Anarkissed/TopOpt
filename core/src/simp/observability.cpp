@@ -1,6 +1,7 @@
 #include "topopt/observability.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -90,7 +91,7 @@ long long wall_clock_ms() {
 // Per-iteration CSV.
 
 const char kIterationCsvHeader[] =
-    "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid";
+    "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta";
 
 IterationCsvWriter::IterationCsvWriter(const std::string& path) : path_(path) {
   out_.open(path, std::ios::binary | std::ios::trunc);
@@ -112,12 +113,15 @@ void IterationCsvWriter::append_at(std::size_t rung,
                                    const SimpIterationObservation& obs,
                                    long long wall_ms) {
   // %.10g keeps the objective's magnitude honest across the ~30x drop of a solve;
-  // %.6f is ample for the [0,1] volume fraction. append+flush = crash-safe.
+  // %.6f is ample for the [0,1] volume fraction. `beta` (handoff 123) is the
+  // continuation sharpness this iteration — 0 while not projecting, else the
+  // integer-valued stage β (1/2/4/…), so %.6g prints it exactly and compactly.
+  // append+flush = crash-safe.
   char buf[192];
-  std::snprintf(buf, sizeof(buf), "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d\n", rung,
+  std::snprintf(buf, sizeof(buf), "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g\n", rung,
                 obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
                 obs.plateau ? 1 : 0, obs.cg_iterations,
-                obs.cg_used_multigrid ? 1 : 0);
+                obs.cg_used_multigrid ? 1 : 0, obs.beta);
   out_ << buf;
   out_.flush();
   if (!out_)
@@ -307,6 +311,30 @@ std::string run_info_json(const RunInfo& info) {
   num("warm_start_inherit", bool_json(info.warm_start_inherit));
   num("warm_start_coarse", bool_json(info.warm_start_coarse));
   num("projection", bool_json(info.projection));
+  // Handoff 123 — conditional MMA-projection echo: the armed threshold plus the
+  // per-rung fired flags and measured grayscale Mnd (the honest cost readout).
+  num("conditional_mma_projection_mnd_threshold",
+      fmt(info.conditional_mma_projection_mnd_threshold));
+  {
+    std::string fired = "[";
+    for (std::size_t i = 0; i < info.conditional_projection_fired.size(); ++i) {
+      if (i) fired += ", ";
+      fired += info.conditional_projection_fired[i] ? "true" : "false";
+    }
+    fired += "]";
+    num("conditional_projection_fired", fired);
+    std::string mnd = "[";
+    for (std::size_t i = 0; i < info.conditional_projection_rung_mnd.size();
+         ++i) {
+      if (i) mnd += ", ";
+      // A rung cancelled before it converged has no measured grayness — emit
+      // JSON `null` (NaN is not valid JSON) rather than a bogus number.
+      const double v = info.conditional_projection_rung_mnd[i];
+      mnd += std::isfinite(v) ? fmt(v) : std::string("null");
+    }
+    mnd += "]";
+    num("conditional_projection_rung_mnd", mnd);
+  }
   num("min_feature_mm", fmt(info.min_feature_mm));
   num("margin_stop", fmt(info.margin_stop));
   num("infill_percent", fmt(info.infill_percent));

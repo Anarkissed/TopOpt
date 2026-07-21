@@ -573,6 +573,30 @@ bool mma_objective_plateau(const std::vector<double>& c, int window,
   return rel_improve < rel_tol;
 }
 
+// Design-region discreteness M_nd (handoff 123). Public + non-namespaced so the
+// conditional-projection gate (minimize_plastic) and its test share ONE
+// definition. See simp.hpp for the design-set rationale (solid AND mask-Active).
+double design_discreteness_mnd(const VoxelGrid& grid,
+                               const std::vector<double>& density,
+                               const DesignMask& mask) {
+  if (density.size() != grid.voxel_count() ||
+      mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "design_discreteness_mnd: density/mask size != grid.voxel_count()");
+  double acc = 0.0;
+  std::size_t n = 0;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!grid.solid(i, j, k) || mask[e] != MaskValue::Active) continue;
+        const double r = density[e];
+        acc += 4.0 * r * (1.0 - r);
+        ++n;
+      }
+  return n > 0 ? acc / static_cast<double>(n) : 0.0;
+}
+
 namespace {
 
 // The per-iteration termination test, shared by both simp_optimize overloads.
@@ -1196,6 +1220,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_used_multigrid = c.cg.used_multigrid;
         obs.cg_mg_levels = c.cg.mg_levels;
         obs.plateau = observe_plateau(options, result.history);
+        // Handoff 123 — the continuation β active this iteration (0 when not
+        // projecting), so the CSV beta column reflects the sharpening stage.
+        obs.beta = projecting ? cur_beta : 0.0;
         options.observe(obs);
       }
       // Playback keyframe: the analysis density as the shape evolves (read-only).
@@ -1921,6 +1948,9 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_used_multigrid = c.cg.used_multigrid;
         obs.cg_mg_levels = c.cg.mg_levels;
         obs.plateau = observe_plateau(options, result.history);
+        // Handoff 123 — the continuation β active this iteration (0 when not
+        // projecting), so the CSV beta column reflects the sharpening stage.
+        obs.beta = projecting ? cur_beta : 0.0;
         options.observe(obs);
       }
       // Playback keyframe: the printed-shape density (mask pins applied) as it

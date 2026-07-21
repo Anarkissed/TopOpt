@@ -228,6 +228,31 @@ struct MinimizePlasticOptions {
   // V3 suite, viz fields) is unchanged.
   SimpUpdater updater = SimpUpdater::MMA;
 
+  // Handoff 123 — CONDITIONAL MMA Heaviside projection ("polish only when gray").
+  // The design-region grayness threshold (Mnd; see design_discreteness_mnd) above
+  // which a converged GRAYSCALE MMA rung is continued into β-projection to crisp
+  // it. Supersedes always-on production projection (PR 146): projection's ~4×
+  // iteration cost is paid ONLY on rungs that actually go gray, never on parts
+  // that are already crisp.
+  //
+  // 0 (the DEFAULT) DISABLES the gate: the driver never measures grayness and
+  // never projects, so every existing caller / fixture / Gate-V2 is BYTE-FOR-BYTE
+  // identical (the same opt-in discipline as min_feature_mm == 0). > 0 arms it,
+  // PER RUNG: after a rung's grayscale MMA (simp.mma_projection == false)
+  // converges, the driver measures the design-region Mnd of the converged field;
+  // if it EXCEEDS this threshold the SAME rung is continued into mma_projection
+  // β-continuation seeded from the converged gray field (handoff 116's machinery,
+  // β restarting at β0 and staging to the capped-β plateau), otherwise the rung
+  // is already crisp and kept as-is (cost ≈ one field scan). Per-rung gating is
+  // deliberate: a ladder can have crisp heavy rungs (gate silent) and gray light
+  // ones (gate fires). configure_production_options sets the production value.
+  //
+  // INERT (no-op, byte-identical to gray) when it cannot apply: updater == OC
+  // (projection there is the OC `projection` schedule), or simp.mma_projection is
+  // already true (every rung then projects unconditionally — the always-on path).
+  // Must be finite and >= 0.
+  double conditional_mma_projection_mnd_threshold = 0.0;
+
   // PHYSICAL minimum-feature length scale in millimetres (model units). When
   // > 0, the driver sets each rung's `simp.filter_radius` from the grid spacing
   // via physical_filter_radius(min_feature_mm, grid.spacing) — so the filtered
@@ -544,6 +569,22 @@ struct MinimizePlasticResult {
   // rung completed a recovery solve (e.g. cancelled at rung 0).
   bool used_multigrid = false;
   int mg_levels = 0;
+
+  // Handoff 123 — CONDITIONAL MMA-projection outcome, one entry per EVALUATED rung
+  // (same order and length as `evaluated`). Empty when the gate is disarmed
+  // (conditional_mma_projection_mnd_threshold == 0, updater == OC, or an always-on
+  // simp.mma_projection) — nothing was measured. When armed:
+  //   * rung_grayscale_mnd[i] — the design-region Mnd measured on rung i's
+  //     converged GRAYSCALE field (the gate input). NaN for a rung cancelled
+  //     before it converged (grayness was never measured).
+  //   * conditional_projection_fired[i] — 1 iff that Mnd exceeded the threshold and
+  //     the rung was continued into β-projection (its iterations then include both
+  //     the grayscale and the projection phase), else 0 (the rung was already crisp
+  //     and kept as grayscale).
+  // Echoed per-rung into run_info.json so a completed run states which rungs paid
+  // for polish and which were already crisp — the honest cost readout.
+  std::vector<double> rung_grayscale_mnd;
+  std::vector<char> conditional_projection_fired;
 };
 
 // Run the minimize_plastic pipeline over `grid` (an already-voxelized part with

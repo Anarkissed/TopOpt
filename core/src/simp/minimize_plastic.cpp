@@ -13,6 +13,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -134,6 +135,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (!std::isfinite(options.min_feature_mm) || options.min_feature_mm < 0.0)
     throw std::invalid_argument(
         "minimize_plastic: min_feature_mm must be finite and >= 0");
+  // Handoff 123 — the conditional MMA-projection grayness gate threshold; 0 (the
+  // default) disables it, so this rejects only a genuinely malformed value and
+  // every existing caller is unaffected.
+  if (!std::isfinite(options.conditional_mma_projection_mnd_threshold) ||
+      options.conditional_mma_projection_mnd_threshold < 0.0)
+    throw std::invalid_argument(
+        "minimize_plastic: conditional_mma_projection_mnd_threshold must be "
+        "finite and >= 0");
   if (!std::isfinite(options.infill_percent))
     throw std::invalid_argument(
         "minimize_plastic: infill_percent must be finite");
@@ -467,10 +476,30 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   std::size_t total_solve_count = 0;
   int observed_mg_levels = 0;
 
+  // --- Handoff 123: conditional MMA-projection gate ------------------------
+  // The gate is ARMED only on the MMA grayscale path with a positive threshold.
+  // With updater == OC projection is the OC `projection` schedule (not this), and
+  // with simp.mma_projection already true every rung projects unconditionally
+  // (the always-on path), so in both cases the gate is inert and the run is
+  // byte-identical to what it would be without this field. Loop-invariant, so
+  // computed once. When disarmed the per-rung result vectors below stay EMPTY.
+  const bool conditional_projection_armed =
+      options.conditional_mma_projection_mnd_threshold > 0.0 &&
+      options.updater == SimpUpdater::MMA && !options.simp.mma_projection;
+
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
     SimpOptions opt = options.simp;
+    // Handoff 123 — when the conditional gate fires, this rung runs in TWO
+    // phases (grayscale MMA, then β-projection seeded from it) as two
+    // simp_optimize calls. The projection phase's own iteration counter restarts
+    // at 1, so this base offsets its forwarded progress/observe/snapshot iteration
+    // numbers by the grayscale phase's iteration count, keeping `iter` MONOTONE
+    // within the rung across both phases. 0 for the (single-phase) grayscale phase
+    // and for every non-firing rung; captured by reference by the hooks below and
+    // raised to the grayscale iteration count just before the projection phase.
+    std::size_t rung_iter_base = 0;
     // Whole-domain optimize (handoff 080): rescale the rung's fraction from
     // "fraction of the Active envelope" to "fraction of the part" so a loose box
     // does not let the optimizer keep MORE material than the part. Target total
@@ -515,9 +544,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     opt.progress = nullptr;
     if (options.progress) {
       const std::size_t rung_count = ladder.size();
-      opt.progress = [&options, rung, rung_count](int iteration, double,
-                                                  double) {
-        options.progress(rung, rung_count, iteration);
+      opt.progress = [&options, &rung_iter_base, rung, rung_count](
+                         int iteration, double, double) {
+        options.progress(rung, rung_count,
+                         iteration + static_cast<int>(rung_iter_base));
       };
     }
 
@@ -540,18 +570,25 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           ++mg_solve_count;
           observed_mg_levels = obs.cg_mg_levels;
         }
-        if (options.on_iteration) options.on_iteration(rung, rung_count, obs);
+        if (options.on_iteration) {
+          // Offset the projection phase's restarted iteration counter so `iter`
+          // stays monotone within the rung (handoff 123). obs.beta already carries
+          // the continuation sharpness (0 in the grayscale phase).
+          SimpIterationObservation o = obs;
+          o.iteration += static_cast<int>(rung_iter_base);
+          options.on_iteration(rung, rung_count, o);
+        }
       };
     }
     opt.density_observer = nullptr;
     if (options.on_density_snapshot) {
       const std::size_t rung_count = ladder.size();
-      opt.density_observer = [&options, &G, rung, rung_count](
+      opt.density_observer = [&options, &G, &rung_iter_base, rung, rung_count](
                                  int iteration, const std::vector<double>& d) {
         DensitySnapshotEvent ev;
         ev.rung_index = rung;
         ev.rung_count = rung_count;
-        ev.iteration = iteration;
+        ev.iteration = iteration + static_cast<int>(rung_iter_base);
         ev.boundary = false;
         ev.density = &d;
         ev.grid = &G;
@@ -581,6 +618,60 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     }
 
     variant.optimization = simp_optimize(G, params, B, loads, opt, mask);
+
+    // --- Handoff 123: conditional MMA projection ("polish only when gray") ----
+    // After the rung's GRAYSCALE MMA converges, measure the design-region
+    // grayness of the converged field. BELOW the threshold the rung is already
+    // crisp — keep it as-is (the whole cost was one field scan; the always-on
+    // ~4× projection tax is never charged). ABOVE it, continue THE SAME RUNG into
+    // β-continuation seeded from the converged gray field (handoff 116's
+    // machinery, β restarting at β0 and staging to the capped-β plateau, exactly
+    // as a warm-started rung projects — 116 interaction a). The two phases are
+    // merged into one rung result: summed iterations, contiguous history, the
+    // rung's true grayscale start compliance, and the CRISP projected field the
+    // downstream stress/mass/V3 analysis reads. Only on a non-cancelled rung; a
+    // cancel in either phase falls through to the cancelled branch below. When the
+    // gate is disarmed this block is skipped entirely (byte-identical).
+    double rung_mnd = std::numeric_limits<double>::quiet_NaN();
+    bool rung_fired = false;
+    if (conditional_projection_armed && !variant.optimization.cancelled) {
+      rung_mnd = design_discreteness_mnd(G, variant.optimization.physical_density,
+                                         mask);
+      if (rung_mnd > options.conditional_mma_projection_mnd_threshold) {
+        rung_fired = true;
+        std::vector<double> gray_field = variant.optimization.physical_density;
+        std::vector<SimpIteration> gray_history =
+            std::move(variant.optimization.history);
+        const int gray_iters = variant.optimization.iterations;
+        const double gray_initial_c = variant.optimization.initial_compliance;
+
+        // Seed the projection phase from the converged gray density and turn the
+        // MMA-correct Heaviside continuation ON for this rung only. `opt` is a
+        // per-rung copy (rebuilt from options.simp next iteration), so this never
+        // leaks to another rung. rung_iter_base makes the forwarded progress/
+        // observe/snapshot iteration numbers continue this rung's count.
+        opt.mma_projection = true;
+        opt.initial_design = std::move(gray_field);
+        rung_iter_base = static_cast<std::size_t>(gray_iters);
+
+        SimpOptimizeResult proj =
+            simp_optimize(G, params, B, loads, opt, mask);
+
+        proj.iterations += gray_iters;
+        proj.initial_compliance = gray_initial_c;
+        std::vector<SimpIteration> merged = std::move(gray_history);
+        merged.insert(merged.end(), proj.history.begin(), proj.history.end());
+        proj.history = std::move(merged);
+        variant.optimization = std::move(proj);
+      }
+    }
+    // Record the per-rung gate outcome (aligned with `evaluated` — one push per
+    // loop iteration, exactly like the evaluated push below / in the cancel
+    // branch). Left EMPTY across the whole run when the gate is disarmed.
+    if (conditional_projection_armed) {
+      result.rung_grayscale_mnd.push_back(rung_mnd);
+      result.conditional_projection_fired.push_back(rung_fired ? 1 : 0);
+    }
 
     if (variant.optimization.cancelled) {
       // Cancelled mid-rung: report this rung as the rejected terminal rung and

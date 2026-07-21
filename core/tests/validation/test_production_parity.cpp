@@ -139,11 +139,32 @@ int main() {
     CHECK(opts.simp.solver == SolverKind::JacobiCG,
           "library default is JacobiCG (Gate-V2 / reference untouched)");
     CHECK(opts.min_feature_mm == 0.0, "library default min_feature is 0");
+    // Handoff 123 — the CONDITIONAL projection gate is a PRODUCTION-config setting,
+    // not a library default: the library leaves the threshold 0 (gate disabled) and
+    // simp.mma_projection false, so Gate-V2 and every core reference run — which
+    // never call configure_production_options — stay byte-identical. (This
+    // supersedes PR 146's always-on flip, which set simp.mma_projection = true here;
+    // the conditional never sets that bool — the driver flips it per-rung when the
+    // gate fires.)
+    CHECK(opts.conditional_mma_projection_mnd_threshold == 0.0,
+          "library default leaves the conditional-projection gate OFF");
+    CHECK(!opts.simp.mma_projection,
+          "library default leaves MMA projection OFF (reference untouched)");
+    CHECK(opts.updater == topopt::SimpUpdater::MMA,
+          "production default updater is MMA (the gate's target path)");
     configure_production_options(opts);
     CHECK(opts.simp.solver == SolverKind::MultigridCG_Matfree,
           "production config selects the matrix-free multigrid solver");
     CHECK(opts.min_feature_mm == 2.5,
           "production config sets the 2.5 mm physical min-feature scale");
+    // Config echo (per the 141-lineage mechanism): the production config ARMS the
+    // conditional gate at the 0.07 grayness threshold and does NOT set the always-on
+    // simp.mma_projection bool — projection is now per-rung and gate-driven.
+    CHECK(opts.conditional_mma_projection_mnd_threshold == 0.07,
+          "production config arms the conditional-projection gate at Mnd 0.07");
+    CHECK(!opts.simp.mma_projection,
+          "production config leaves the always-on MMA projection bool OFF "
+          "(the driver flips it per-rung when the gate fires)");
     // The Galerkin cache is a process global; configure_production_options must
     // have turned it on (the setter returns the PREVIOUS value).
     const bool prev = topopt::fea_set_matfree_galerkin_block_cache(true);
