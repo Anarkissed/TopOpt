@@ -67,14 +67,18 @@ namespace topopt {
 // references a fully-analysed variant, whose definition follows the options.
 struct MinimizePlasticVariant;
 
-// The design-box coarsening alignment minimize_plastic passes to
-// expand_design_domain: it rounds each expanded element dim UP to a multiple of
-// this value with inert Empty high-side padding so the geometric-multigrid
-// hierarchy can coarsen (>= 3 levels) instead of bailing to an effectively-hung
-// Jacobi-CG on the ~1e-9-contrast design-box system (voxel.hpp). Exposed as a
-// SINGLE public constant so no caller re-deriving the solved grid has to repeat
-// the literal 8 — the grid the driver solves on and any externally-derived grid
-// stay in lockstep by construction. See minimize_plastic_solved_grid.
+// The design-box coarsening-alignment FLOOR minimize_plastic passes to
+// expand_design_domain: each expanded element dim is rounded UP to a common
+// power-of-two multiple (>= this floor) with inert Empty high-side padding so the
+// geometric-multigrid hierarchy can coarsen under its DOF cap instead of bailing
+// to an effectively-hung Jacobi-CG on the ~1e-9-contrast design-box system. The
+// ACTUAL alignment grows above this floor for large grids (res ~128 with a box),
+// where a fixed multiple of 8 leaves the coarsest MG level over the cap — the
+// rule and the computed alignment live in topopt/coarsen.hpp (voxel.hpp).
+// Exposed as a SINGLE public constant so no caller re-deriving the solved grid
+// has to repeat the literal 8 — the grid the driver solves on and any
+// externally-derived grid stay in lockstep by construction (they run the same
+// adaptive computation from the same inputs). See minimize_plastic_solved_grid.
 inline constexpr int kDesignBoxCoarsenAlign = 8;
 
 // Handoff 114 — one density-snapshot event the driver feeds to
@@ -527,6 +531,19 @@ struct MinimizePlasticResult {
   // the run's total cost in any speedup claim. The per-rung fine iterations are in
   // evaluated[i].optimization.iterations as usual.
   int warm_start_coarse_iterations = 0;
+
+  // Whether the run's linear solves ACTUALLY used the geometric-multigrid
+  // accelerator, and its hierarchy depth — captured from the per-rung recovery
+  // solve (representative: coarsenability is grid-determined, so every solve of a
+  // run agrees). `used_multigrid` is false when solver == JacobiCG (MG not
+  // requested) AND when a multigrid solver silently fell back to Jacobi-CG because
+  // the grid could not be coarsened under the DOF cap (the res-128 design-box bug;
+  // topopt/coarsen.hpp). A caller compares this against the REQUESTED solver kind
+  // to detect a silent fallback and report it (run_info.json cg_multigrid + the
+  // CLI warning). `mg_levels` is 0 when MG did not run. Default false/0 when no
+  // rung completed a recovery solve (e.g. cancelled at rung 0).
+  bool used_multigrid = false;
+  int mg_levels = 0;
 };
 
 // Run the minimize_plastic pipeline over `grid` (an already-voxelized part with

@@ -549,6 +549,27 @@ int main() {
           "C: the driver walks the whole ladder before the final rung stops it");
     CHECK(r.report.variants.size() == o.volume_fraction_ladder.size() - 1,
           "C: all rungs but the last (too-weak) one are accepted");
+    // Report-honesty (handoff: multigrid-coarsenability-padding): the rejected
+    // terminal rung is NOT omitted — it appears in report.rejected with
+    // accepted=false and its own margin-vs-required numbers.
+    CHECK(r.report.rejected.size() == 1,
+          "C: the rejected terminal rung appears in report.rejected (not omitted)");
+    if (r.report.rejected.size() == 1) {
+      const topopt::VariantReport& rej = r.report.rejected.front();
+      CHECK(!rej.accepted, "C: the rejected rung carries accepted=false");
+      CHECK(rej.margin_required == o.margin_stop,
+            "C: the rejected rung reports the required margin (margin_stop)");
+      CHECK(rej.margin_effective < rej.margin_required,
+            "C: the rejected rung's effective margin is below the required margin");
+      // It IS the terminal evaluated rung (same worst_case as the last evaluated).
+      CHECK(rej.margin.worst_case == r.evaluated.back().report.margin.worst_case,
+            "C: report.rejected mirrors the terminal evaluated rung");
+    }
+    // The emitted JSON carries a rejected_variants array (schema round-trips).
+    const std::string cjson = topopt::job_report_json(r.report);
+    CHECK(cjson.find("\"rejected_variants\"") != std::string::npos,
+          "C: report.json emits a rejected_variants array");
+    topopt::validate_job_report_json(cjson);  // throws on schema violation
     // Margins are non-increasing as volume fraction drops (less material under
     // the same self-weight => weaker). Checked across the evaluated rungs.
     for (std::size_t v = 1; v < r.evaluated.size(); ++v)
@@ -1091,10 +1112,11 @@ int main() {
                 "M: an accepted rung still clears the raw solid margin");
     }
 
-    // The knockdown touches ONLY the accept/reject decision — NOT the stored
-    // margin, stress, or optimized geometry. For every rung the low-infill run
-    // retained, its report line is identical to the solid run's (same FEA, same
-    // deterministic optimization; infill never entered the solver).
+    // The knockdown touches ONLY the accept/reject decision and the reported
+    // slicer infill — NOT the stored margin, stress, or optimized geometry. For
+    // every rung the low-infill run retained, its FEA-derived report line matches
+    // the solid run's (same FEA, same deterministic optimization; infill never
+    // entered the solver).
     for (std::size_t v = 0; v < low.report.variants.size(); ++v) {
       const topopt::VariantReport& a = solid.report.variants[v];
       const topopt::VariantReport& b = low.report.variants[v];
@@ -1102,6 +1124,14 @@ int main() {
                 a.volume_fraction == b.volume_fraction &&
                 a.max_stress_mpa == b.max_stress_mpa,
             "M: a retained rung's stored margin/stress/vf are unchanged by infill");
+      // Report-honesty (handoff: multigrid-coarsenability-padding): the report's
+      // slicer infill ECHOES the job's requested sparse infill (30%) on EVERY
+      // retained rung — the value run_info.json records and the margin was knocked
+      // down for. That it is a constant 30 across rungs of differing margin (unlike
+      // the solid run, whose per-rung infill follows the margin-derived engine
+      // recommendation) proves the echo overrides the engine, not coincidence.
+      CHECK(b.settings.infill_percent == 30,
+            "M: the report echoes the job's requested 30% infill (not the engine's)");
     }
 
     std::printf("[M infill-margin] solid_accepted=%zu low(30%%)_accepted=%zu "

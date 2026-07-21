@@ -94,12 +94,31 @@ struct VariantReport {
   // does not gate or modify geometry.
   int min_feature_violations = 0;
   std::string min_feature_warning;
+  // Acceptance-gate outcome (handoff: multigrid-coarsenability-padding). A rung is
+  // accepted iff its infill-adjusted worst-case margin clears the stop threshold.
+  // `accepted` is that verdict; `margin_effective` is the value actually compared
+  // at the gate (margin.worst_case × the infill knockdown — equal to worst_case for
+  // solid/100% infill); `margin_required` is the margin_stop threshold. Reported on
+  // BOTH accepted and rejected rungs so a rejection carries its own margin-vs-required
+  // numbers, rather than vanishing (a lie of absence). accepted == (margin_effective
+  // >= margin_required).
+  bool accepted = true;
+  double margin_required = 0.0;
+  double margin_effective = 0.0;
 };
 
 // The whole run's report: the material used and one entry per requested variant.
 struct JobReport {
   std::string material;  // material name (key into materials.json)
+  // ACCEPTED rungs, in ladder order (the savings ladder). Unchanged contract:
+  // callers that count accepted variants read this.
   std::vector<VariantReport> variants;
+  // Evaluated-but-gate-REJECTED rungs (at most the one terminal too-weak rung the
+  // ladder stopped on; empty when the whole ladder was accepted). Each carries
+  // accepted=false and its margin_effective vs margin_required. Emitted as
+  // report.json "rejected_variants" so a gate rejection is REPORTED, not silently
+  // omitted — the honesty fix for the vanished-rung-3 lie of absence.
+  std::vector<VariantReport> rejected;
 };
 
 // Serialize a job report to a single JSON document (2-space indented). Numeric

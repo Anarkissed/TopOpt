@@ -594,6 +594,15 @@ if(Eigen3_FOUND)
   target_link_libraries(test_designbox_padding PRIVATE topopt)
   add_test(NAME designbox_padding COMMAND test_designbox_padding)
 
+  # Coarsenability rule + adaptive design-box padding: the seam pads to the SAME
+  # rule the solver enforces (topopt/coarsen.hpp), so a res-128 box no longer
+  # silently falls back to Jacobi-CG. Proves the rule, byte-identity of the extra
+  # pad (079 precedent), and that multigrid engages on an adaptively-padded large
+  # grid. Drives simp_optimize / fea_solve_mgcg_matfree, so it is Eigen-gated.
+  add_executable(test_coarsen_rule tests/validation/test_coarsen_rule.cpp)
+  target_link_libraries(test_coarsen_rule PRIVATE topopt)
+  add_test(NAME coarsen_rule COMMAND test_coarsen_rule)
+
   # Design-box grid-report guard: the grid minimize_plastic REPORTS (solved_grid /
   # minimize_plastic_solved_grid) must equal the grid it SOLVED on, voxel-for-voxel,
   # so the app samples the von-Mises / displacement / playback fields at the right

@@ -383,6 +383,7 @@ struct SimpIterationObservation {
   double volume_fraction = 0.0;  // achieved physical volume fraction after the step
   int cg_iterations = 0;         // CG iters of this step's penalized solve (c.cg)
   bool cg_used_multigrid = false;  // whether MG-CG ran vs Jacobi-CG fallback
+  int cg_mg_levels = 0;          // MG hierarchy depth this step (0 = Jacobi fallback)
   // The MMA objective-plateau detector's verdict AT this iteration (the exact
   // predicate stage_should_stop consults for MMA — see mma_objective_plateau).
   // False for the OC / projected path (plateau termination is MMA-only) and until
