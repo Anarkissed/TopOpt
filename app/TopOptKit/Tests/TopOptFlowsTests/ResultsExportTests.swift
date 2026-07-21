@@ -146,12 +146,21 @@ final class ResultsExportTests: XCTestCase {
         XCTAssertTrue(c.meshLabel.contains("(est.)"))
     }
 
-    func testRemoteVariantMassComparisonHasNoVoxelEstimate() {
-        // A remote run doesn't carry the Mac-computed voxel mass (097): the comparison
-        // shows the mesh mass alone, never a stale/absent voxel number.
-        let m = model([meshedVariant(vf: 0.7, mass: 10.32)], remote: true)
-        guard let c = m.selectedMassComparison else { return XCTFail("expected a comparison") }
-        XCTAssertNil(c.voxelGrams)
-        XCTAssertFalse(c.summary.contains("voxel estimate:"))
-    }
+    func testRemoteVariantWithoutFieldsHasNoVoxelEstimate() {
+            // A remote run whose fields fetch failed (or a pre-122 worker) carries
+            // no Mac-computed voxel mass — the 097 degradation path: mesh mass
+            // alone, never a stale/absent voxel number.
+            let m = model([meshedVariant(vf: 0.7, mass: 0)], remote: true)
+            guard let c = m.selectedMassComparison else { return XCTFail("expected a comparison") }
+            XCTAssertNil(c.voxelGrams)
+            XCTAssertFalse(c.summary.contains("voxel estimate:"))
+        }
+
+        func testRemoteVariantWithFetchedFieldsShowsVoxelEstimate() {
+            // Handoff 122: a remote variant WITH fetched fields carries the real
+            // Mac-computed mass — the comparison shows it, same as a local run.
+            let m = model([meshedVariant(vf: 0.7, mass: 10.32)], remote: true)
+            guard let c = m.selectedMassComparison else { return XCTFail("expected a comparison") }
+            XCTAssertEqual(c.voxelGrams ?? 0, 10.32, accuracy: 0.001)
+        }
 }
