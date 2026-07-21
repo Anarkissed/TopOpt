@@ -402,6 +402,36 @@ final class RunModelTests: XCTestCase {
         XCTAssertTrue(spy.completions.isEmpty)        // never backgrounded => no notification
     }
 
+    /// Handoff 121, requirement 5: a REMOTE run the app OBSERVED finishing fires a
+    /// completion notification even in the foreground (a run on the Mac can finish
+    /// while the user isn't watching / after a cold-launch re-attach). Signalled by
+    /// the outcome's `computedRemotely` flag — no `runInBackground()` needed.
+    func testForegroundRemoteCompletionNotifies() {
+        let spy = NotifierSpy()
+        let model = RunModel(scheduler: SynchronousRunScheduler(), notifier: spy)
+        model.runner = { _, _, _ in
+            OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: false,
+                            acceptedCount: 2, computedRemotely: true)
+        }
+        model.start(request())
+        XCTAssertEqual(spy.willCount, 0, "no background assertion for a foreground run")
+        XCTAssertEqual(spy.completions, ["Cube: 2 variants ready"],
+                       "an observed remote completion notifies")
+    }
+
+    /// A user-cancelled remote run does NOT notify — the user just cancelled it
+    /// themselves, so a "cancelled" banner would be noise.
+    func testCancelledRemoteRunDoesNotNotify() {
+        let spy = NotifierSpy()
+        let model = RunModel(scheduler: SynchronousRunScheduler(), notifier: spy)
+        model.runner = { _, _, _ in
+            OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: true,
+                            acceptedCount: 0, computedRemotely: true)
+        }
+        model.start(request())
+        XCTAssertTrue(spy.completions.isEmpty, "a cancelled remote run is not announced")
+    }
+
     // MARK: - guards
 
     func testStartIsNoOpWhileRunning() {
