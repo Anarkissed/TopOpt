@@ -116,6 +116,14 @@ RunInfo build_run_info(const JobDescription& job,
   info.resolution = job.resolution;
   info.load_source = job.loads.present ? "loadcase" : "self_weight";
   info.solver = solver_name(options.simp.solver);
+  // Up-front INTENT: true iff a multigrid solver was requested. Overwritten post-
+  // run with the OBSERVED outcome (finalize_run_info_multigrid), so a completed
+  // run's run_info.json states whether MG actually ran, not merely what was asked.
+  const bool solver_is_multigrid =
+      options.simp.solver == SolverKind::MultigridCG ||
+      options.simp.solver == SolverKind::MultigridCG_Matfree;
+  info.cg_multigrid = solver_is_multigrid;
+  info.mg_levels = 0;
   info.galerkin_block_cache = fea_matfree_galerkin_block_cache_enabled();
   info.mixed_precision = fea_matfree_mixed_precision_enabled();
   info.matfree_threads = fea_matfree_thread_count();
@@ -340,10 +348,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // synchronous minimize_plastic call below. All artifacts land in out_dir.
   std::unique_ptr<IterationCsvWriter> csv;
   std::unique_ptr<SnapshotCapture> snaps;
+  // Held across the run so its cg_multigrid / mg_levels can be finalized from the
+  // OBSERVED solver outcome after minimize_plastic returns (below).
+  RunInfo run_info;
+  bool wrote_run_info = false;
   if (emit_progress) {
-    const RunInfo info = build_run_info(job, options, obs);
+    run_info = build_run_info(job, options, obs);
     result.run_info_path = join_path(out_dir, "run_info.json");
-    write_run_info(result.run_info_path, info);
+    write_run_info(result.run_info_path, run_info);
+    wrote_run_info = true;
     if (obs.iteration_csv) {
       result.iteration_csv_path = join_path(out_dir, "iterations.csv");
       csv = std::make_unique<IterationCsvWriter>(result.iteration_csv_path);
@@ -387,6 +400,36 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
 
   result.pipeline =
       minimize_plastic(grid, material, job.material, bcs, rules, options);
+
+  // LOUD FALLBACK (handoff: multigrid-coarsenability-padding). Finalize the
+  // multigrid outcome now the run is done: overwrite run_info.json's up-front
+  // INTENT with what the solver ACTUALLY did, and — if a multigrid solver was
+  // requested but silently fell back to Jacobi-CG (the coarsenability bug) — print
+  // a WARNING. A silent ~4x slowdown violates the honesty principle exactly like a
+  // wrong number does, so it must be reported, not swallowed.
+  const bool solver_is_multigrid =
+      options.simp.solver == SolverKind::MultigridCG ||
+      options.simp.solver == SolverKind::MultigridCG_Matfree;
+  if (wrote_run_info) {
+    run_info.cg_multigrid = result.pipeline.used_multigrid;
+    run_info.mg_levels = result.pipeline.mg_levels;
+    write_run_info(result.run_info_path, run_info);
+  }
+  // A recovery solve (which sets used_multigrid) runs only for a non-cancelled
+  // rung; without one, used_multigrid is its unobserved default and must not warn.
+  bool any_solve = false;
+  for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+    if (!v.optimization.cancelled) { any_solve = true; break; }
+  if (solver_is_multigrid && any_solve && !result.pipeline.used_multigrid) {
+    const VoxelGrid& sg = result.pipeline.solved_grid;
+    std::fprintf(stderr,
+                 "WARNING: multigrid solver \"%s\" fell back to Jacobi-CG on the "
+                 "%dx%dx%d solved grid (it could not be coarsened under the "
+                 "multigrid DOF cap) — expect a ~4x slowdown. Every linear solve "
+                 "ran Jacobi-CG; run_info.json records cg_multigrid=false.\n",
+                 solver_name(options.simp.solver), sg.nx, sg.ny, sg.nz);
+    std::fflush(stderr);
+  }
 
   // Handoff 114 — record how many density snapshots were written (0 unless
   // opt-in snapshots ran). The CSV/run_info paths are already set above.

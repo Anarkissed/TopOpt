@@ -1194,6 +1194,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.volume_fraction = vf_now;
         obs.cg_iterations = c.cg.iterations;
         obs.cg_used_multigrid = c.cg.used_multigrid;
+        obs.cg_mg_levels = c.cg.mg_levels;
         obs.plateau = observe_plateau(options, result.history);
         options.observe(obs);
       }
@@ -1918,6 +1919,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.volume_fraction = vf_now;
         obs.cg_iterations = c.cg.iterations;
         obs.cg_used_multigrid = c.cg.used_multigrid;
+        obs.cg_mg_levels = c.cg.mg_levels;
         obs.plateau = observe_plateau(options, result.history);
         options.observe(obs);
       }

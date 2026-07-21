@@ -299,6 +299,8 @@ std::string run_info_json(const RunInfo& info) {
   num("resolution", fmt_i(info.resolution));
   str("load_source", info.load_source);
   str("solver", info.solver);
+  num("cg_multigrid", bool_json(info.cg_multigrid));
+  num("mg_levels", fmt_i(info.mg_levels));
   num("galerkin_block_cache", bool_json(info.galerkin_block_cache));
   num("mixed_precision", bool_json(info.mixed_precision));
   num("matfree_threads", fmt_i(info.matfree_threads));

@@ -181,23 +181,30 @@ struct DesignDomain {
 // exactly matches the part's bounding box, no keep-out and freeze_part=true, every
 // part voxel is FrozenSolid and every in-box empty voxel is Active — offsets 0.
 //
-// COARSENING ALIGNMENT (design-box on-device fix): `coarsen_align` rounds each
-// expanded element dimension (new_nx/ny/nz) UP to the next multiple of that value
-// by APPENDING voxels on the HIGH side of each axis (never the low side). The
-// appended voxels lie beyond `design_box` (the pre-alignment grid already reached
-// design_box.max), so they are classified Empty exactly like any other
-// out-of-box voxel: no FEA element, no self-weight, no design variable — the
-// void-DOF gate removes their DOFs, so they add NO physics and do NOT change the
-// solved result. Because only the high side grows, `offset_i/j/k` and `origin`
-// are UNCHANGED, so remap_node_to_domain stays correct with no adjustment.
+// COARSENING ALIGNMENT (design-box on-device fix): `coarsen_align` is the FLOOR
+// alignment; the expanded element dimensions (new_nx/ny/nz) are rounded UP to a
+// common power-of-two multiple (>= coarsen_align) by APPENDING voxels on the HIGH
+// side of each axis (never the low side). The appended voxels lie beyond
+// `design_box` (the pre-alignment grid already reached design_box.max), so they
+// are classified Empty exactly like any other out-of-box voxel: no FEA element,
+// no self-weight, no design variable — the void-DOF gate removes their DOFs, so
+// they add NO physics and do NOT change the solved result. Because only the high
+// side grows, `offset_i/j/k` and `origin` are UNCHANGED, so remap_node_to_domain
+// stays correct with no adjustment.
 //
-// The purpose is the geometric-multigrid solver: its hierarchy can only coarsen
-// (halve) axes whose element count is even, and bails entirely if any axis is
-// odd, falling back to an effectively-hung Jacobi-CG on the ~1e-9-contrast
-// design-box system. Aligning to a power of two (the driver passes 8) guarantees
-// the expanded grid coarsens deep enough for a real hierarchy (>= 3 levels).
-// `coarsen_align <= 1` is the exact pre-existing behaviour (no rounding,
-// byte-for-byte identical grid); the default is 1 so every existing caller and
+// The purpose is the geometric-multigrid solver: its hierarchy halves every axis
+// per level and REJECTS the hierarchy (falling back to an effectively-hung
+// Jacobi-CG on the ~1e-9-contrast design-box system) if it cannot coarsen deep
+// enough to bring the coarsest level under its direct-solve DOF cap. A fixed
+// multiple of 8 (=2^3) guarantees only 3 halvings, which suffices at res ~64 but
+// NOT at res ~128 with a design box: there the coarsest of those 3 levels still
+// holds tens of thousands of DOFs, over the cap, so multigrid silently fell back.
+// The alignment is therefore COMPUTED (required_coarsen_align, topopt/coarsen.hpp)
+// as the smallest power of two >= coarsen_align that makes the padded grid
+// coarsenable under the cap. For the small grids that already coarsen at the floor
+// the computed align equals the floor, so their dims are byte-identical to the
+// pre-fix (fixed-8) behaviour. `coarsen_align <= 1` disables rounding entirely
+// (byte-for-byte identical grid); the default is 1 so every existing caller and
 // test is unaffected. Throws std::invalid_argument if `coarsen_align < 1`.
 DesignDomain expand_design_domain(const VoxelGrid& part,
                                   const DesignBox& design_box,

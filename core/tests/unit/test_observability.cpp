@@ -171,6 +171,8 @@ int main() {
     info.resolution = 96;
     info.load_source = "self_weight";
     info.solver = "MultigridCG_Matfree";
+    info.cg_multigrid = true;
+    info.mg_levels = 4;
     info.galerkin_block_cache = true;
     info.mixed_precision = false;
     info.matfree_threads = 6;
@@ -192,6 +194,9 @@ int main() {
           "run_info fingerprint");
     check(js.find("\"solver\": \"MultigridCG_Matfree\"") != std::string::npos,
           "run_info solver");
+    check(js.find("\"cg_multigrid\": true") != std::string::npos,
+          "run_info cg_multigrid (observed MG outcome)");
+    check(js.find("\"mg_levels\": 4") != std::string::npos, "run_info mg_levels");
     check(js.find("\"galerkin_block_cache\": true") != std::string::npos,
           "run_info galerkin cache");
     check(js.find("\"matfree_threads\": 6") != std::string::npos,

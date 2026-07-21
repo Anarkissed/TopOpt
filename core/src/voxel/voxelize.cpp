@@ -21,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "topopt/coarsen.hpp"
 #include "topopt/mesh.hpp"
 
 namespace topopt {
@@ -80,13 +81,10 @@ DesignDomain expand_design_domain(const VoxelGrid& part,
   // Per axis, pad the part grid DOWN to cover design_box.min and UP to cover
   // design_box.max, in whole voxels, keeping the part's lattice (so part voxels
   // map to integer offsets). lo_pad voxels are prepended below the part origin;
-  // the total count also covers the part and any voxels needed above it. Finally
-  // round `total` UP to a multiple of coarsen_align by appending HIGH-side voxels
-  // only (lo_pad — and therefore the offset and origin — is never touched), so
-  // the multigrid hierarchy can coarsen every axis (see voxel.hpp). The appended
-  // voxels sit beyond design_box.max and are classified Empty below.
-  auto axis = [&](double origin, int n, double bmin, double bmax, int& lo_pad,
-                  int& total) {
+  // `raw` is the resulting count (lo_pad + part + any voxels needed above it),
+  // BEFORE coarsening alignment.
+  auto raw_axis = [&](double origin, int n, double bmin, double bmax,
+                      int& lo_pad, int& raw) {
     // Voxels to prepend so the new origin (origin - lo_pad*s) is <= bmin.
     lo_pad = static_cast<int>(std::ceil((origin - bmin) / s - 1e-9));
     if (lo_pad < 0) lo_pad = 0;
@@ -94,17 +92,29 @@ DesignDomain expand_design_domain(const VoxelGrid& part,
     const double part_far = origin + static_cast<double>(n) * s;
     int hi_pad = static_cast<int>(std::ceil((bmax - part_far) / s - 1e-9));
     if (hi_pad < 0) hi_pad = 0;
-    total = lo_pad + n + hi_pad;
-    if (coarsen_align > 1) {
-      const int rem = total % coarsen_align;
-      if (rem != 0) total += coarsen_align - rem;  // grow the HIGH side only
-    }
+    raw = lo_pad + n + hi_pad;
   };
 
-  int oi, oj, ok, new_nx, new_ny, new_nz;
-  axis(part.origin.x, part.nx, design_box.min.x, design_box.max.x, oi, new_nx);
-  axis(part.origin.y, part.ny, design_box.min.y, design_box.max.y, oj, new_ny);
-  axis(part.origin.z, part.nz, design_box.min.z, design_box.max.z, ok, new_nz);
+  int oi, oj, ok, raw_nx, raw_ny, raw_nz;
+  raw_axis(part.origin.x, part.nx, design_box.min.x, design_box.max.x, oi, raw_nx);
+  raw_axis(part.origin.y, part.ny, design_box.min.y, design_box.max.y, oj, raw_ny);
+  raw_axis(part.origin.z, part.nz, design_box.min.z, design_box.max.z, ok, raw_nz);
+
+  // Round each element extent UP to a common multiple of `align` by appending
+  // HIGH-side voxels only (lo_pad — and therefore the offset and origin — is
+  // never touched), so the multigrid hierarchy can coarsen every axis under its
+  // DOF cap (topopt/coarsen.hpp). `coarsen_align` is the FLOOR: the actual align
+  // GROWS above it (a deeper power of two) only when the grid is large enough
+  // that the floor alignment would leave the coarsest MG level over the cap —
+  // exactly the res-128 design-box case that silently fell back to Jacobi-CG.
+  // For the small grids that already coarsen at the floor (the 079 regime), the
+  // computed align equals the floor and the dims are byte-identical. The
+  // appended voxels sit beyond design_box.max and are classified Empty below.
+  // coarsen_align <= 1 disables rounding (the exact pre-fix, legacy behaviour).
+  const int align = required_coarsen_align(raw_nx, raw_ny, raw_nz, coarsen_align);
+  const int new_nx = round_up_to(raw_nx, align);
+  const int new_ny = round_up_to(raw_ny, align);
+  const int new_nz = round_up_to(raw_nz, align);
 
   DesignDomain domain;
   domain.offset_i = oi;

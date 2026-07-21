@@ -41,6 +41,8 @@
 #include <utility>
 #include <vector>
 
+#include "topopt/coarsen.hpp"
+
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
@@ -61,9 +63,13 @@ using Trip = Eigen::Triplet<double>;
 constexpr double kJacobiOmega = 0.6;   // damped-Jacobi smoother weight
 constexpr int kPreSmooth = 1;          // pre-smoothing sweeps (== post: SPD V-cycle)
 constexpr int kPostSmooth = 1;         // 1+1 is the most wall-efficient on these grids
-constexpr int kMinCoarseElems = 2;     // stop coarsening below this many elems/axis
-constexpr int kCoarseDofCap = 6000;    // coarsest solved directly; cap its size
-constexpr int kMinLevels = 2;          // < 2 usable levels -> not worth MG, fall back
+// The coarsenability constants live in topopt/coarsen.hpp so the SEAM that pads
+// the grid (expand_design_domain) and this SOLVER that enforces the rule cannot
+// drift (handoff: multigrid-coarsenability-padding). Local aliases keep the hot
+// loops below reading the short names.
+constexpr int kMinCoarseElems = kMgMinCoarseElems;  // stop coarsening below this many elems/axis
+constexpr int kCoarseDofCap = kMgCoarseDofCap;      // coarsest solved directly; cap its size
+constexpr int kMinLevels = kMgMinLevels;            // < 2 usable levels -> not worth MG, fall back
 
 // MG-CG iteration budget before giving up and falling back to Jacobi-CG. On
 // well-conditioned / coherent SIMP fields MG-CG converges in ~10-30 iterations;

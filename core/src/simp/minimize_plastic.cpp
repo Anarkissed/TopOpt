@@ -451,6 +451,22 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       warm_seed = prolong_density(Gc, G, coarse.physical_density);
   }
 
+  // --- Multigrid-usage tally (loud-fallback honesty) -----------------------
+  // Aggregate whether the linear solves actually engaged the geometric-multigrid
+  // accelerator across ALL optimize iterations of the run, so a caller can report
+  // a silent Jacobi-CG fallback (run_info.json cg_multigrid + the CLI warning).
+  // A single solve is NOT representative: the first iterations of a rung start
+  // from a near-uniform density on which MG can stagnate past its budget and fall
+  // back, even when the grid coarsens fine and the steady-state iterations run MG.
+  // So `used_multigrid` is reported only when MG carried the MAJORITY of solves —
+  // that cleanly separates the coarsenability BUG (MG never engages, all fall
+  // back) from benign early-iteration stagnation. Tallied via the always-present
+  // observe hook below; the reported grid coarsenability is grid-determined, so
+  // these counts are stable run-to-run.
+  std::size_t mg_solve_count = 0;
+  std::size_t total_solve_count = 0;
+  int observed_mg_levels = 0;
+
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
@@ -511,12 +527,20 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // non-boundary event. Both wired only when the caller attached the driver-level
     // sink, so the default path leaves opt.observe / opt.density_observer null and
     // is byte-identical. `G` (the solved grid) outlives the synchronous solve.
-    opt.observe = nullptr;
-    if (options.on_iteration) {
+    // The observe hook is ALWAYS set now (read-only, does not change the design):
+    // it tallies multigrid engagement for the loud-fallback report, and ALSO
+    // forwards to the caller's on_iteration sink when one is attached. With no
+    // sink attached the tally is the only effect, and the design is byte-identical
+    // (observability, not solver behavior — THE ONE RULE, handoff 114).
+    {
       const std::size_t rung_count = ladder.size();
-      opt.observe = [&options, rung, rung_count](
-                        const SimpIterationObservation& obs) {
-        options.on_iteration(rung, rung_count, obs);
+      opt.observe = [&, rung, rung_count](const SimpIterationObservation& obs) {
+        ++total_solve_count;
+        if (obs.cg_used_multigrid) {
+          ++mg_solve_count;
+          observed_mg_levels = obs.cg_mg_levels;
+        }
+        if (options.on_iteration) options.on_iteration(rung, rung_count, obs);
       };
     }
     opt.density_observer = nullptr;
@@ -735,6 +759,17 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.orientation = build_dir;
     vr.settings = recommend_settings(rules, material.family, margin.worst_case,
                                      part_dim_mm);
+    // Report-honesty (handoff: multigrid-coarsenability-padding): when the job
+    // requested a SPARSE infill (< 100), the run gated the margin for THAT infill
+    // (the knockdown below), so the report's slicer infill must ECHO the job's
+    // infill — the value the part is actually printed at and that run_info.json
+    // records — not the rules engine's margin-derived recommendation, which would
+    // slice the part at a different infill than its accepted margin assumes. At
+    // solid/unset infill (100) the knockdown is a no-op and the engine
+    // recommendation stands, so this is byte-identical for every existing run.
+    if (options.infill_percent < 100.0)
+      vr.settings.infill_percent =
+          static_cast<int>(std::lround(options.infill_percent));
     vr.min_feature_violations = variant.v3.min_feature_violations;
     vr.min_feature_warning =
         min_feature_warning_text(rules, variant.v3.min_feature_violations);
@@ -745,8 +780,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // stress field, or the displayed value. infill_knockdown == 1.0 for
     // solid/unset infill, so `margin.worst_case * 1.0 >= margin_stop` is
     // bit-for-bit the pre-M7.infill gate `margin.worst_case >= margin_stop`.
-    variant.accepted =
-        margin.worst_case * infill_knockdown >= options.margin_stop;
+    const double margin_effective = margin.worst_case * infill_knockdown;
+    variant.accepted = margin_effective >= options.margin_stop;
+    // The acceptance verdict and the numbers behind it, carried on the report line
+    // so a REJECTED rung reports its own margin-vs-required (not a silent omission).
+    vr.accepted = variant.accepted;
+    vr.margin_required = options.margin_stop;
+    vr.margin_effective = margin_effective;
     result.evaluated.push_back(std::move(variant));
     // Storage never reallocates (reserved to ladder.size() above), so the
     // references taken below stay valid for the whole run — see the reserve() note.
@@ -780,11 +820,22 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         break;
       }
     } else {
-      // First too-weak rung: stop the ladder here (do not run lighter rungs).
+      // First too-weak rung: stop the ladder here (do not run lighter rungs). The
+      // rejected rung is NOT dropped from the report — record it in report.rejected
+      // (accepted=false, with its margin_effective vs margin_required) so the
+      // gate rejection is reported, not a silent lie of absence.
+      result.report.rejected.push_back(result.evaluated.back().report);
       result.stopped_on_margin = true;
       break;
     }
   }
+
+  // Finalize the multigrid-usage report: MG "ran" for the run iff it carried the
+  // majority of the optimize solves (see the tally note above). mg_levels is the
+  // hierarchy depth observed on those MG solves (0 when MG did not carry the run).
+  result.used_multigrid =
+      total_solve_count > 0 && 2 * mg_solve_count >= total_solve_count;
+  result.mg_levels = result.used_multigrid ? observed_mg_levels : 0;
 
   return result;
 }

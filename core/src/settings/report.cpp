@@ -108,7 +108,12 @@ void emit_variant(std::string& out, const VariantReport& v,
   out += in2 + "\"min_feature_violations\": " +
          std::to_string(v.min_feature_violations) + ",\n";
   out += in2 + "\"min_feature_warning\": " +
-         str_json(v.min_feature_warning) + "\n";
+         str_json(v.min_feature_warning) + ",\n";
+  // Acceptance-gate verdict + the numbers behind it (a rejected rung's own
+  // margin-vs-required, so a rejection is reported not omitted).
+  out += in2 + "\"accepted\": " + (v.accepted ? "true" : "false") + ",\n";
+  out += in2 + "\"margin_required\": " + num_json(v.margin_required) + ",\n";
+  out += in2 + "\"margin_effective\": " + num_json(v.margin_effective) + "\n";
   out += indent + "}";
 }
 
@@ -416,38 +421,46 @@ StressMargin compute_stress_margin(double yield_strength_mpa, double z_knockdown
   return m;
 }
 
+// Emit a named variant array ("<key>": [ ... ]) with a trailing comma when it is
+// not the last member of the object.
+static void emit_variant_array(std::string& out, const char* key,
+                        const std::vector<VariantReport>& vs, bool trailing_comma) {
+  out += "  \"";
+  out += key;
+  out += "\": ";
+  if (vs.empty()) {
+    out += "[]";
+  } else {
+    out += "[\n";
+    for (std::size_t i = 0; i < vs.size(); ++i) {
+      out += "    ";
+      emit_variant(out, vs[i], "    ");
+      out += (i + 1 < vs.size()) ? ",\n" : "\n";
+    }
+    out += "  ]";
+  }
+  out += trailing_comma ? ",\n" : "\n";
+}
+
 std::string job_report_json(const JobReport& report) {
   std::string out = "{\n";
   out += "  \"material\": " + str_json(report.material) + ",\n";
-  if (report.variants.empty()) {
-    out += "  \"variants\": []\n";
-  } else {
-    out += "  \"variants\": [\n";
-    for (std::size_t i = 0; i < report.variants.size(); ++i) {
-      out += "    ";
-      emit_variant(out, report.variants[i], "    ");
-      out += (i + 1 < report.variants.size()) ? ",\n" : "\n";
-    }
-    out += "  ]\n";
-  }
+  emit_variant_array(out, "variants", report.variants, /*trailing_comma=*/true);
+  // Evaluated-but-rejected rungs (the honesty rider): always emitted (as [] when
+  // the whole ladder was accepted) so a report reader can trust the field's
+  // presence and never mistake omission for "nothing was rejected".
+  emit_variant_array(out, "rejected_variants", report.rejected,
+                     /*trailing_comma=*/false);
   out += "}\n";
   return out;
 }
 
-void validate_job_report_json(const std::string& json_text) {
-  JsonValue root = JsonParser(json_text).parse();
-  if (root.type != JsonValue::Type::Object)
-    throw ReportError("report: root must be an object");
-
-  require_string(root, "material", "report");
-  const JsonValue& variants = require_array(root, "variants", "report");
-
-  for (std::size_t i = 0; i < variants.arr.size(); ++i) {
-    const std::string ctx = "variant[" + std::to_string(i) + "]";
-    const JsonValue& v = variants.arr[i];
-    if (v.type != JsonValue::Type::Object)
-      throw ReportError(ctx + ": must be an object");
-
+// Validate one variant object (shared by the accepted "variants" and the
+// "rejected_variants" arrays). `ctx` names the element in diagnostics.
+static void validate_variant_object(const JsonValue& v, const std::string& ctx) {
+  if (v.type != JsonValue::Type::Object)
+    throw ReportError(ctx + ": must be an object");
+  {
     const double vf = require_number(v, "volume_fraction", ctx);
     if (!(vf >= 0.0 && vf <= 1.0))
       throw ReportError(ctx + ": volume_fraction must be in [0, 1]");
@@ -523,6 +536,47 @@ void validate_job_report_json(const std::string& json_text) {
         throw ReportError(
             ctx +
             ": non-empty min_feature_warning requires min_feature_violations > 0");
+    }
+
+    // Acceptance-gate fields (handoff: multigrid-coarsenability-padding). Optional
+    // for backward compatibility with pre-existing documents; when present,
+    // `accepted` is a bool and the two margins are finite numbers.
+    const JsonValue* acc = find_field(v, "accepted");
+    if (acc != nullptr && acc->type != JsonValue::Type::Bool)
+      throw ReportError(ctx + ": accepted must be a boolean");
+    const JsonValue* mreq = find_field(v, "margin_required");
+    if (mreq != nullptr && mreq->type != JsonValue::Type::Number)
+      throw ReportError(ctx + ": margin_required must be a number");
+    const JsonValue* meff = find_field(v, "margin_effective");
+    if (meff != nullptr && meff->type != JsonValue::Type::Number)
+      throw ReportError(ctx + ": margin_effective must be a number");
+  }
+}
+
+void validate_job_report_json(const std::string& json_text) {
+  JsonValue root = JsonParser(json_text).parse();
+  if (root.type != JsonValue::Type::Object)
+    throw ReportError("report: root must be an object");
+
+  require_string(root, "material", "report");
+  const JsonValue& variants = require_array(root, "variants", "report");
+  for (std::size_t i = 0; i < variants.arr.size(); ++i)
+    validate_variant_object(variants.arr[i],
+                            "variant[" + std::to_string(i) + "]");
+
+  // "rejected_variants" is a NEW optional array (same variant schema); older
+  // documents omit it entirely. When present it must be an array, and every
+  // entry must declare accepted=false (a rejected rung, not an accepted one).
+  const JsonValue* rejected = find_field(root, "rejected_variants");
+  if (rejected != nullptr) {
+    if (rejected->type != JsonValue::Type::Array)
+      throw ReportError("report: rejected_variants must be an array");
+    for (std::size_t i = 0; i < rejected->arr.size(); ++i) {
+      const std::string ctx = "rejected_variant[" + std::to_string(i) + "]";
+      validate_variant_object(rejected->arr[i], ctx);
+      const JsonValue* acc = find_field(rejected->arr[i], "accepted");
+      if (acc != nullptr && !(acc->type == JsonValue::Type::Bool && !acc->boolean))
+        throw ReportError(ctx + ": a rejected variant must have accepted=false");
     }
   }
 }

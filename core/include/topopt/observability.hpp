@@ -146,7 +146,16 @@ struct RunInfo {
   std::string material;      // job.material
   int resolution = 0;
   std::string load_source;   // "loadcase" | "self_weight"
-  std::string solver;        // resolved SolverKind name
+  std::string solver;        // resolved SolverKind name (the REQUESTED solver)
+  // Whether the geometric-multigrid accelerator ACTUALLY ran (the observed
+  // outcome), and its hierarchy depth. Written up-front as the requested intent
+  // (true iff `solver` is a multigrid kind), then OVERWRITTEN post-run with the
+  // value the solver reported. cg_multigrid == false while `solver` names a
+  // multigrid kind is a SILENT FALLBACK to Jacobi-CG — a ~4x slowdown the CLI
+  // also prints a WARNING for. mg_levels is 0 when MG did not run. Mirrors the
+  // per-iteration iterations.csv `cg_multigrid` column at run granularity.
+  bool cg_multigrid = false;
+  int mg_levels = 0;
   bool galerkin_block_cache = false;
   bool mixed_precision = false;
   int matfree_threads = 0;   // resolved matrix-free thread count
