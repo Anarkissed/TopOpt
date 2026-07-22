@@ -177,6 +177,7 @@ int main() {
     info.solver = "MultigridCG_Matfree";
     info.cg_multigrid = true;
     info.mg_levels = 4;
+    info.cg_multigrid_observed = true;  // OBSERVED outcome -> emit the real values
     info.galerkin_block_cache = true;
     info.mixed_precision = false;
     info.matfree_threads = 6;
@@ -201,6 +202,15 @@ int main() {
     check(js.find("\"cg_multigrid\": true") != std::string::npos,
           "run_info cg_multigrid (observed MG outcome)");
     check(js.find("\"mg_levels\": 4") != std::string::npos, "run_info mg_levels");
+    // Walk-back Amendment 1: before the outcome is observed, cg_multigrid /
+    // mg_levels are null — an unfinished run asserts NOTHING about multigrid.
+    RunInfo pending = info;
+    pending.cg_multigrid_observed = false;
+    const std::string pjs = run_info_json(pending);
+    check(pjs.find("\"cg_multigrid\": null") != std::string::npos,
+          "run_info cg_multigrid is null until observed");
+    check(pjs.find("\"mg_levels\": null") != std::string::npos,
+          "run_info mg_levels is null until observed");
     check(js.find("\"galerkin_block_cache\": true") != std::string::npos,
           "run_info galerkin cache");
     check(js.find("\"matfree_threads\": 6") != std::string::npos,

@@ -116,14 +116,12 @@ RunInfo build_run_info(const JobDescription& job,
   info.resolution = job.resolution;
   info.load_source = job.loads.present ? "loadcase" : "self_weight";
   info.solver = solver_name(options.simp.solver);
-  // Up-front INTENT: true iff a multigrid solver was requested. Overwritten post-
-  // run with the OBSERVED outcome (finalize_run_info_multigrid), so a completed
-  // run's run_info.json states whether MG actually ran, not merely what was asked.
-  const bool solver_is_multigrid =
-      options.simp.solver == SolverKind::MultigridCG ||
-      options.simp.solver == SolverKind::MultigridCG_Matfree;
-  info.cg_multigrid = solver_is_multigrid;
-  info.mg_levels = 0;
+  // cg_multigrid / mg_levels are an OBSERVED outcome, unknown until the run
+  // finishes. Leave cg_multigrid_observed false so the up-front write emits null
+  // for both (Amendment 1): we do NOT write the requested-solver INTENT here — a
+  // multigrid solver can silently fall back, and a run that never reaches the
+  // post-run finalize must assert NOTHING rather than the optimistic `true` that
+  // misdiagnosed the res-128 fallback. The finalize below records the real values.
   info.galerkin_block_cache = fea_matfree_galerkin_block_cache_enabled();
   info.mixed_precision = fea_matfree_mixed_precision_enabled();
   info.matfree_threads = fea_matfree_thread_count();
@@ -413,11 +411,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   result.pipeline =
       minimize_plastic(grid, material, job.material, bcs, rules, options);
 
-  // LOUD FALLBACK (handoff: multigrid-coarsenability-padding). Finalize the
-  // multigrid outcome now the run is done: overwrite run_info.json's up-front
-  // INTENT with what the solver ACTUALLY did, and — if a multigrid solver was
-  // requested but silently fell back to Jacobi-CG (the coarsenability bug) — print
-  // a WARNING. A silent ~4x slowdown violates the honesty principle exactly like a
+  // LOUD FALLBACK (handoff: multigrid-coarsenability-padding). Record the OBSERVED
+  // multigrid outcome now the run is done (the up-front write left it null), and —
+  // if a multigrid solver was requested but silently fell back to Jacobi-CG — print
+  // a WARNING. A silent slowdown violates the honesty principle exactly like a
   // wrong number does, so it must be reported, not swallowed.
   const bool solver_is_multigrid =
       options.simp.solver == SolverKind::MultigridCG ||
@@ -425,6 +422,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   if (wrote_run_info) {
     run_info.cg_multigrid = result.pipeline.used_multigrid;
     run_info.mg_levels = result.pipeline.mg_levels;
+    run_info.cg_multigrid_observed = true;  // outcome now known -> emit real values
     // Handoff 123 — finalize the conditional-projection outcome: which rungs fired
     // and the grayscale Mnd measured on each (empty when the gate was disarmed).
     run_info.conditional_projection_fired.assign(
@@ -443,9 +441,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     const VoxelGrid& sg = result.pipeline.solved_grid;
     std::fprintf(stderr,
                  "WARNING: multigrid solver \"%s\" fell back to Jacobi-CG on the "
-                 "%dx%dx%d solved grid (it could not be coarsened under the "
-                 "multigrid DOF cap) — expect a ~4x slowdown. Every linear solve "
-                 "ran Jacobi-CG; run_info.json records cg_multigrid=false.\n",
+                 "%dx%dx%d solved grid (the hierarchy could not be built, OR the "
+                 "V-cycle stagnated on a high-contrast field) — expect a large "
+                 "slowdown. Linear solves ran Jacobi-CG; run_info.json records "
+                 "cg_multigrid=false. See iterations.csv for the per-solve record.\n",
                  solver_name(options.simp.solver), sg.nx, sg.ny, sg.nz);
     std::fflush(stderr);
   }

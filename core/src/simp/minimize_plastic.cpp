@@ -262,6 +262,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   const VoxelGrid& G = expanded ? domain.grid : grid;
   const std::vector<DirichletBC>& B = expanded ? remapped_bcs : bcs;
 
+  // Handoff 127 (Amendment 2): start this run's multigrid stagnation latch fresh,
+  // on the (single) thread that will issue every solve below — the warm-start
+  // pre-solve, the ladder rungs, and the recovery solves. The latch is sticky
+  // within a run and per-thread, so without this reset a prior run's stagnation
+  // could carry over. Inert for the JacobiCG library default (nothing reads it).
+  fea_matfree_reset_mg_stagnation_latch();
+
   // --- Fixed pipeline setup (shared across every rung) ---------------------
   // The design load, computed once and held across rungs (pipeline.hpp modeling
   // note). Mode (a): a caller-supplied external load case (the user's tagged Load

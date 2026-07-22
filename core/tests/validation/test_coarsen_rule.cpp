@@ -1,23 +1,21 @@
-// Coarsenability rule + adaptive design-box padding (handoff:
-// multigrid-coarsenability-padding). The geometric-multigrid solver rejects a
-// hierarchy whose coarsest level exceeds kMgCoarseDofCap and silently falls back
-// to Jacobi-CG (thousands of iterations instead of ~10). A fixed multiple-of-8
-// pad guarantees only 3 coarsenings, enough at res ~64 but NOT at res ~128 with a
-// design box: there the coarsest of 3 levels still holds tens of thousands of
-// DOFs, so multigrid fell back on every iteration of a real 128^3 run.
-//
-// expand_design_domain now sizes the pad from topopt/coarsen.hpp — the SAME rule
-// the solver enforces — so the pad is always sufficient. This test proves:
-//   (1) THE RULE: mg_grid_coarsenable / required_coarsen_align agree with the
-//       solver's actual behaviour, and the align GROWS above 8 only when 8 is
-//       insufficient (byte-identical dims otherwise);
-//   (2) BYTE-IDENTITY: extra padding (align-8 vs align-16 on a case coarsenable
-//       at both) does not change the design SPACE, the solved field, the achieved
-//       volume fraction, or the design bytes (the 079 precedent);
-//   (3) THE FLIP: a large design-box grid that a fixed-8 pad leaves NON-
-//       coarsenable is padded to a coarsenable grid, and the matrix-free
-//       multigrid solver ENGAGES (used_multigrid == true) on the ~1e-9-contrast
-//       field instead of falling back.
+// Coarsenability rule + design-box padding + multigrid stagnation guard
+// (handoff 122/127). The geometric-multigrid solver rejects a hierarchy whose
+// coarsest level exceeds kMgCoarseDofCap and falls back to Jacobi-CG. PR #151
+// tried to fix a production res-128 fallback by ESCALATING the design-box pad to
+// force coarsenability; a real run disproved the premise (its grid was already
+// coarsenable, yet MG stagnated and fell back anyway). The walk-back removed the
+// escalation and added a stagnation fast-fail + latch. This test proves:
+//   (1) THE RULE: mg_grid_coarsenable matches the solver's coarsest-DOF cap (the
+//       rule is TRUE and retained; it just no longer sizes the pad);
+//   (2) BYTE-IDENTITY: extra padding (a deeper alignment floor) does not change
+//       the design SPACE, the solved field, the achieved volume fraction, or the
+//       design bytes (the 079 precedent);
+//   (4) LOUD-FALLBACK REPORTING: minimize_plastic reports used_multigrid honestly
+//       (true on a coarsenable run, false when MG never engaged);
+//   (5) STAGNATION LATCH: a synthetic stagnating field makes MG fall back on every
+//       solve and, after a few in a row, latches MG off for the run (skipping the
+//       doomed hierarchy build); a healthy solve is unaffected (bit-identical) —
+//       the latch is inert unless MG actually stagnates.
 
 #include "topopt/coarsen.hpp"
 #include "topopt/fea.hpp"
@@ -33,6 +31,8 @@
 #include <vector>
 
 using topopt::CgInfo;
+using topopt::fea_matfree_mg_stagnation_latched;
+using topopt::fea_matfree_reset_mg_stagnation_latch;
 using topopt::DesignBox;
 using topopt::DesignDomain;
 using topopt::DirichletBC;
@@ -115,47 +115,32 @@ void mask_histogram(const DesignDomain& d, int& active, int& frozen_solid,
 
 int main() {
   // ---------------------------------------------------------------------------
-  // (1) THE RULE — the predicate matches the solver's coarsest-DOF cap, and the
-  // required alignment grows past 8 only when 8 is insufficient.
+  // (1) THE RULE — mg_grid_coarsenable matches the solver's coarsest-DOF cap.
+  // The rule is TRUE and retained (documentation + future gate); PR #151's error
+  // was ACTING on it to escalate the design-box pad, which the walk-back removed.
   // ---------------------------------------------------------------------------
   using topopt::mg_grid_coarsenable;
-  using topopt::required_coarsen_align;
-  using topopt::round_up_to;
 
-  // res ~64 regime: coarsens fine at 8 (the 079 baseline).
-  CHECK(mg_grid_coarsenable(96, 80, 96), "96x80x96 is coarsenable (res~64)");
-  // res ~128 regime: a multiple of 8 that is NOT deeply 2-divisible on one axis
-  // (104 = 8*13) leaves the coarsest of 3 levels over the DOF cap -> NOT
-  // coarsenable. This is the exact class of the maintainer's 128^3 box run.
+  // A grid that coarsens under the DOF cap at plain align-8.
+  CHECK(mg_grid_coarsenable(96, 80, 96), "96x80x96 is coarsenable");
+  // A multiple of 8 that is NOT deeply 2-divisible on one axis (104 = 8*13)
+  // leaves the coarsest of its 3 halvings over the DOF cap -> NOT coarsenable.
   CHECK(!mg_grid_coarsenable(104, 104, 104),
         "104^3 is NOT coarsenable at its own extents (coarsest > DOF cap)");
   CHECK(!mg_grid_coarsenable(184, 104, 128),
-        "a res-128 box (184x104x128, y=104 depth-3 limiter) is NOT coarsenable");
+        "184x104x128 (y=104 depth-3 limiter) is NOT coarsenable");
   // An odd axis never coarsens at all.
   CHECK(!mg_grid_coarsenable(41, 40, 40), "an odd axis is never coarsenable");
-  // Bumping the limiter axis to a deeper power-of-two multiple fixes it.
-  CHECK(mg_grid_coarsenable(112, 112, 112), "112^3 (align-16) is coarsenable");
-  CHECK(mg_grid_coarsenable(192, 112, 128),
-        "192x112x128 (the align-16 pad of 184x104x128) is coarsenable");
-
-  // required_coarsen_align: floor 8, grows only when needed.
-  CHECK(required_coarsen_align(90, 78, 91, 8) == 8,
-        "079 case (90x78x91) needs only align-8");
-  CHECK(required_coarsen_align(104, 104, 104, 8) == 16,
-        "104^3 needs align-16 (align-8 leaves coarsest over cap)");
-  CHECK(required_coarsen_align(183, 100, 125, 8) == 16,
-        "handoff-106 box (183x100x125) needs align-16");
-  CHECK(required_coarsen_align(235, 128, 160, 8) == 8,
-        "a deeply-2-divisible res-128 box already coarsens at align-8 (no over-pad)");
-  // floor <= 1 disables rounding (legacy byte-identical path).
-  CHECK(required_coarsen_align(90, 78, 91, 1) == 1, "floor 1 disables rounding");
-  // The chosen align always yields a coarsenable padded grid.
-  for (const int L : {104, 128, 183, 200, 235, 256}) {
-    const int a = required_coarsen_align(L, L / 2 + 3, L - 7, 8);
-    CHECK(mg_grid_coarsenable(round_up_to(L, a), round_up_to(L / 2 + 3, a),
-                              round_up_to(L - 7, a)),
-          "required_coarsen_align always returns a coarsenable alignment");
-  }
+  // The real production job: at the FIXED align-8 floor its grid is 232x64x216
+  // (NOT coarsenable). PR #151's escalation grew it to 240x64x224 (coarsenable) —
+  // where MG BUILT a hierarchy, then STAGNATED and fell back anyway. So neither
+  // grid gets multigrid: the true failure is convergence, not coarsenability
+  // (see part (5)), which is why the escalation was withdrawn.
+  CHECK(!mg_grid_coarsenable(232, 64, 216),
+        "232x64x216 (production grid at fixed align-8) is NOT coarsenable");
+  CHECK(mg_grid_coarsenable(240, 64, 224),
+        "240x64x224 (#151's escalated grid) IS coarsenable — yet MG stagnated there");
+  CHECK(mg_grid_coarsenable(112, 112, 112), "112^3 is coarsenable");
 
   // ---------------------------------------------------------------------------
   // (2) BYTE-IDENTITY — the extra padding of a deeper alignment does not change
@@ -247,58 +232,6 @@ int main() {
   CHECK(max_drho < 1e-6, "design bytes are IDENTICAL across alignments (079)");
 
   // ---------------------------------------------------------------------------
-  // (3) THE FLIP — a large design-box grid a fixed-8 pad would leave NON-
-  // coarsenable is padded (via the same seam) to a coarsenable grid, and the
-  // matrix-free multigrid ENGAGES on the ~1e-9-contrast field.
-  // ---------------------------------------------------------------------------
-  const VoxelGrid big_part = solid_block(100, 100, 100);
-  DesignBox big_box;
-  big_box.min = Vec3{-0.5, -0.5, -0.5};
-  big_box.max = Vec3{103.5, 103.5, 103.5};  // raw 104 -> fixed-8 stays 104
-
-  // A fixed multiple-of-8 pad would leave 104^3, which the solver CANNOT coarsen.
-  CHECK(!mg_grid_coarsenable(104, 104, 104),
-        "the fixed-8 pad (104^3) is NOT coarsenable — the silent-fallback bug");
-
-  const DesignDomain big =
-      topopt::expand_design_domain(big_part, big_box, {}, /*freeze_part=*/false, 8);
-  std::printf("[coarsen] large box: fixed-8 -> 104^3 (fallback); adaptive -> "
-              "%dx%dx%d\n", big.grid.nx, big.grid.ny, big.grid.nz);
-  CHECK(mg_grid_coarsenable(big.grid.nx, big.grid.ny, big.grid.nz),
-        "the adaptive pad makes the large grid coarsenable");
-
-  // Solve the real ~1e-9-contrast field on the adaptive grid: multigrid ENGAGES.
-  const double rho_min = 1e-3;  // rho_min^p = 1e-9 with p=3
-  std::vector<double> ey(big.grid.voxel_count(), 0.0);
-  for (int k = 0; k < big.grid.nz; ++k)
-    for (int j = 0; j < big.grid.ny; ++j)
-      for (int i = 0; i < big.grid.nx; ++i) {
-        const std::size_t e = big.grid.index(i, j, k);
-        if (!big.grid.solid(i, j, k)) continue;
-        const double rho =
-            (big.mask[e] == MaskValue::FrozenSolid) ? 1.0 : rho_min;
-        ey[e] = std::pow(rho, params.penalty) * params.youngs_modulus;
-      }
-  std::vector<DirichletBC> bb;
-  std::vector<NodalLoad> bl;
-  remapped_bcs_loads(big_part, big, bb, bl);
-
-  CgInfo big_info;
-  const topopt::FeaSolution sol = topopt::fea_solve_mgcg_matfree(
-      big.grid, ey, params.poisson, bb, bl, 1e-6, 0, &big_info);
-  std::printf("[coarsen] adaptive-grid solve: used_mg=%d levels=%d iters=%d conv=%d\n",
-              big_info.used_multigrid, big_info.mg_levels, big_info.iterations,
-              big_info.converged);
-  CHECK(big_info.used_multigrid,
-        "THE FLIP: multigrid ENGAGES on the adaptively-padded large grid");
-  CHECK(big_info.converged, "the multigrid solve converged");
-  CHECK(big_info.iterations < 100,
-        "multigrid converges in far fewer iterations than the Jacobi fallback");
-  CHECK(sol.u.size() ==
-            static_cast<std::size_t>(3) * topopt::fea_node_count(big.grid),
-        "solution is sized to the adaptive grid");
-
-  // ---------------------------------------------------------------------------
   // (4) LOUD-FALLBACK REPORTING — minimize_plastic aggregates the run's actual
   // multigrid engagement into MinimizePlasticResult::used_multigrid / mg_levels
   // (what run_info.json cg_multigrid and the CLI warning report). A coarsenable
@@ -370,6 +303,77 @@ int main() {
   CHECK(!rf.used_multigrid,
         "REPORT: a non-coarsenable run reports used_multigrid=false (loud fallback)");
   CHECK(rf.mg_levels == 0, "REPORT: mg_levels is 0 when MG never engaged");
+
+  // ---------------------------------------------------------------------------
+  // (5) STAGNATION LATCH (Amendment 2) — a high-contrast checkerboard field on a
+  // COARSENABLE grid makes the matrix-free MG build a hierarchy then stagnate
+  // (fall back to Jacobi). After kMgLatchThreshold consecutive stagnations the run
+  // latches MG off — the doomed hierarchy build is skipped thereafter. A healthy
+  // (solid) solve is unaffected — MG engages and the latch never arms — proving the
+  // guard is inert unless MG actually stagnates.
+  // ---------------------------------------------------------------------------
+  {
+    const int n = 16;  // coarsenable, cheap; the checkerboard stagnates reliably
+    const VoxelGrid gg = solid_block(n, n, n);
+    const int nnx = n + 1, nny = n + 1, nnz = n + 1;
+    auto nid = [&](int a, int b, int c) { return (c * nny + b) * nnx + a; };
+    std::vector<DirichletBC> sbcs;
+    std::vector<NodalLoad> sloads;
+    for (int c = 0; c < nnz; ++c)
+      for (int b = 0; b < nny; ++b) {
+        for (int k = 0; k < 3; ++k) sbcs.push_back({nid(0, b, c), k, 0.0});
+        sloads.push_back({nid(n, b, c), 1, -1.0});
+      }
+    // A checkerboard 1e-9-contrast modulus (the MG-adversarial regime) and a
+    // uniform-solid modulus (healthy) on the SAME grid/BCs/loads.
+    std::vector<double> ey_checker(gg.voxel_count()), ey_solid(gg.voxel_count());
+    for (int k = 0; k < n; ++k)
+      for (int j = 0; j < n; ++j)
+        for (int i = 0; i < n; ++i) {
+          const std::size_t e = gg.index(i, j, k);
+          ey_solid[e] = 1000.0;
+          ey_checker[e] = (((i + j + k) & 1) ? 1e-9 : 1.0) * 1000.0;
+        }
+    auto solve = [&](const std::vector<double>& ey, CgInfo& info) {
+      return topopt::fea_solve_mgcg_matfree(gg, ey, 0.3, sbcs, sloads, 1e-6, 0,
+                                            &info);
+    };
+
+    CHECK(mg_grid_coarsenable(n, n, n), "the stagnation fixture grid is coarsenable");
+
+    // Healthy baseline: MG engages, converges, and the latch never arms (inert).
+    fea_matfree_reset_mg_stagnation_latch();
+    CgInfo h0;
+    solve(ey_solid, h0);
+    CHECK(h0.used_multigrid && h0.converged,
+          "healthy solid field: MG engages and converges");
+    CHECK(!fea_matfree_mg_stagnation_latched(),
+          "a converging solve never arms the latch (inert on healthy solves)");
+
+    // Stagnating field: MG builds but never contracts -> fast-fail to Jacobi on
+    // EVERY solve, and after kMgLatchThreshold in a row the run latches MG off.
+    fea_matfree_reset_mg_stagnation_latch();
+    for (int s = 0; s < 4; ++s) {
+      CgInfo si;
+      solve(ey_checker, si);
+      CHECK(!si.used_multigrid,
+            "stagnating field: MG falls back to Jacobi-CG every solve");
+      CHECK(si.converged,
+            "the Jacobi fallback still converges (correctness certificate intact)");
+    }
+    CHECK(fea_matfree_mg_stagnation_latched(),
+          "after N consecutive stagnations the run latches MG off (skips the build)");
+
+    // The latch does not leak past a run: a reset re-arms MG, and a healthy solve
+    // engages it again. (The driver calls this reset at the start of every run.)
+    fea_matfree_reset_mg_stagnation_latch();
+    CgInfo h1;
+    solve(ey_solid, h1);
+    CHECK(h1.used_multigrid && !fea_matfree_mg_stagnation_latched(),
+          "reset re-arms MG; the latch never leaks across runs");
+    std::printf("[coarsen] stagnation guard: healthy used_mg=%d, checker used_mg=0, "
+                "latched after 3 stagnations\n", h1.used_multigrid);
+  }
 
   if (g_failures == 0)
     std::printf("coarsen_rule: all %d checks passed\n", g_checks);

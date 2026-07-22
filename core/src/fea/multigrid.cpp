@@ -82,6 +82,35 @@ constexpr int kMinLevels = kMgMinLevels;            // < 2 usable levels -> not 
 // V-cycles while never bailing on a case multigrid would actually have solved.
 constexpr int kMgIterBudget = 100;
 
+// --- Per-run multigrid stagnation LATCH (handoff 127, Amendment 2) -----------
+// A high-contrast SIMP field (the ~1e-9 design-box + clearance-void case) can
+// make the V-cycle stagnate: the hierarchy BUILDS but MG-CG never contracts, so it
+// burns the full kMgIterBudget before falling back — and pays the expensive
+// hierarchy build on EVERY solve of the run for nothing. The latch stops that:
+// after kMgLatchThreshold consecutive STAGNATED solves (built a hierarchy but hit
+// the budget without converging), stop attempting MG for the rest of the run —
+// skip the build, go straight to the matrix-free Jacobi-CG. State is thread-local
+// and RESET at run start by the driver (fea_matfree_reset_mg_stagnation_latch); a
+// solve that DOES converge resets the consecutive counter, so a healthy run never
+// latches and is bit-identical to before. Deterministic; cg_multigrid stays 0 in
+// iterations.csv while latched. The build is ~60% of a stagnating solve, so
+// skipping it is the dominant saving (measured ~2.5x faster once latched).
+//
+// NO EARLY (within-solve) FAST-FAIL. An earlier revision bailed a solve to Jacobi
+// once its residual was still above a threshold after a probe iteration. Measured
+// on real design-box solves that was UNSAFE: they routinely sit at relative
+// residual 2-8 at iter 15 (a CG transient under a weak V-cycle) yet converge by
+// iter ~60-90 — well within the budget. No early residual signature separates
+// "slow-but-converging" from "stagnating" on these systems, and the binding rule
+// is never to abandon a solve MG would have solved. So the only cutoff stays the
+// existing full-budget one; the latch merely stops REPEATING a proven-doomed build.
+constexpr int kMgLatchThreshold = 3;  // consecutive stagnations -> latch MG off
+
+// Thread-local because the driver issues a run's solves sequentially on one
+// thread (the matvec worker threads never touch this); reset per run.
+thread_local int g_mg_consecutive_stagnations = 0;
+thread_local bool g_mg_latched = false;
+
 // One grid level of the hierarchy. Active DOFs are the free, non-void DOFs at
 // this level, numbered 0..n-1 (matching the rows/cols of A).
 struct Level {
@@ -1104,8 +1133,13 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     const int cap =
         max_iterations > 0 ? max_iterations : std::max(1000, 2 * m.ng);
 
+    // Per-run stagnation latch (handoff 127): once MG has stagnated on
+    // kMgLatchThreshold consecutive solves this run, stop even BUILDING the
+    // hierarchy (the build is the expensive part) — go straight to Jacobi. The
+    // latch is reset per run by the driver; a converging solve clears it below.
     MfHierarchy H;
-    const bool have_h = build_mf_hierarchy(m, nnx, nny, nnz, H);
+    const bool try_mg = !g_mg_latched;
+    const bool have_h = try_mg && build_mf_hierarchy(m, nnx, nny, nnz, H);
 
     std::vector<double> xkept(static_cast<std::size_t>(m.ng), 0.0);
     bool solved = false;
@@ -1140,6 +1174,19 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         solved = true;
       }
       // MG did not converge / broke down -> fall through to the exact fallback.
+    }
+
+    // Latch bookkeeping (handoff 127): only when a hierarchy was actually built
+    // and attempted. A converging solve clears the counter (so a healthy run never
+    // latches and is bit-identical); a stagnated one advances it, latching MG off
+    // for the rest of the run once kMgLatchThreshold consecutive stagnations pile
+    // up. A build-FAILURE (never coarsenable) is neither — leave the counter alone.
+    if (have_h) {
+      if (solved) {
+        g_mg_consecutive_stagnations = 0;
+      } else if (++g_mg_consecutive_stagnations >= kMgLatchThreshold) {
+        g_mg_latched = true;
+      }
     }
 
     if (!solved) {
@@ -1236,6 +1283,18 @@ std::size_t matfree_hierarchy_nonzeros(const VoxelGrid& grid,
 }
 
 }  // namespace
+
+// Per-run multigrid stagnation latch (handoff 127, Amendment 2). The driver
+// calls the reset once at the start of a run so consecutive-stagnation counting
+// starts fresh; the getter is for tests/diagnostics. Thread-local: valid on the
+// thread that issues the run's solves. Off the matrix-free multigrid path these
+// are inert (nothing reads the latch).
+void fea_matfree_reset_mg_stagnation_latch() {
+  g_mg_consecutive_stagnations = 0;
+  g_mg_latched = false;
+}
+
+bool fea_matfree_mg_stagnation_latched() { return g_mg_latched; }
 
 FeaSolution fea_solve_mgcg(const VoxelGrid& grid, double youngs_modulus,
                            double poisson, const std::vector<DirichletBC>& bcs,
