@@ -62,6 +62,7 @@ Endpoints:
 
 import argparse
 import datetime
+import errno
 import io
 import json
 import os
@@ -151,6 +152,9 @@ class Job:
         self.rung = None
         self.rungs = None
         self.iter = None
+        # Count of ACCEPTED variant meshes so far (handoff 124): the History pane on the
+        # Mac shows a real outcome summary ("3 variants · 12m") rather than a placeholder.
+        self.variants = 0
         # Timestamps (epoch seconds). created = submit; started = promoted to
         # running; finished = terminal.
         self.created_at = time.time()
@@ -166,6 +170,8 @@ class Job:
                 self.rung = event.get("rung")
                 self.rungs = event.get("rungs")
                 self.iter = event.get("iter")
+            elif t == "variant" and event.get("accepted"):
+                self.variants += 1
             elif t in ("done", "error", "cancelled"):
                 self.done = True
                 self.state = t
@@ -214,6 +220,7 @@ class Job:
             "rung": self.rung,
             "rungs": self.rungs,
             "iter": self.iter,
+            "variants": self.variants,
             "position": position,
             "created_at": self.created_at,
             "started_at": self.started_at,
@@ -944,20 +951,41 @@ def main():
                  max_concurrency=args.max_concurrency, webhook_url=args.webhook_url)
     SCHED = Scheduler(max_concurrency=args.max_concurrency)
 
-    # Fail fast if the CLI is not runnable — the whole point is to wrap it.
+    # Fail fast if the CLI is not runnable — the whole point is to wrap it. The
+    # fingerprint (the core build id) is parsed out here so the identity line below
+    # can name it without a second probe.
+    fingerprint = "unknown"
     try:
         v = subprocess.run([CFG.cli, "--version"], capture_output=True,
                            text=True, timeout=15)
-        print(f"topopt-worker {WORKER_VERSION}: {v.stdout.strip() or CFG.cli}")
+        fingerprint = _kv(v.stdout.strip()).get("fingerprint") or "unknown"
     except (OSError, subprocess.SubprocessError) as e:
         print(f"WARNING: could not run '{CFG.cli} --version': {e}", file=sys.stderr)
         print("         set --cli or TOPOPT_CLI to the topopt-cli binary path.",
               file=sys.stderr)
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"listening on http://{args.host}:{args.port}  (LAN only; no auth)")
-    print(f"work dir: {args.workdir}  ·  max-concurrency: {args.max_concurrency}"
-          + (f"  ·  webhook: on" if args.webhook_url else ""))
+    # Bind BEFORE announcing anything (handoff 124, requirement 3). A second worker
+    # on the same port fails here with EADDRINUSE; turn the naked traceback into one
+    # actionable line + a clean non-zero exit — the maintainer's tonight-bootloop
+    # diagnosis, banked. Uses the real port so a non-default --port stays honest.
+    try:
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            print(f"port {args.port} in use — is another worker already running? "
+                  f"(lsof -i :{args.port})", file=sys.stderr)
+            sys.exit(1)
+        raise
+
+    # ONE identity line (handoff 124, requirement 4): worker version + the core
+    # fingerprint it will serve + the workdir its per-job folders live under. The
+    # supervisor's log can grep this to answer "which worker is this?" with no
+    # archaeology.
+    print(f"topopt-worker {WORKER_VERSION}  ·  core {fingerprint}  ·  "
+          f"workdir {args.workdir}", flush=True)
+    print(f"listening on http://{args.host}:{args.port}  (LAN only; no auth)  ·  "
+          f"max-concurrency: {args.max_concurrency}"
+          + (f"  ·  webhook: on" if args.webhook_url else ""), flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

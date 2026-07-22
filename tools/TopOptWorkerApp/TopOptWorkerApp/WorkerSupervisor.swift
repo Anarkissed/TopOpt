@@ -22,93 +22,10 @@ import Combine
 import UserNotifications
 #endif
 
-/// One job as reported by the worker's `GET /jobs` (handoff 121). Decoded straight
-/// from the worker JSON; all progress/timestamp fields are optional because a
-/// queued job has no progress yet and a running one has no finish time.
-struct WorkerJob: Identifiable, Equatable, Decodable {
-    let id: String
-    let project: String?
-    let state: String        // queued | running | done | error | cancelled
-    let paused: Bool
-    let rung: Int?
-    let rungs: Int?
-    let iter: Int?
-    let position: Int?
-    let createdAt: Double?
-    let startedAt: Double?
-    let finishedAt: Double?
-
-    enum CodingKeys: String, CodingKey {
-        case id, project, state, paused, rung, rungs, iter, position
-        case createdAt = "created_at"
-        case startedAt = "started_at"
-        case finishedAt = "finished_at"
-    }
-
-    var isActive: Bool { state == "queued" || state == "running" }
-    var isTerminal: Bool { state == "done" || state == "error" || state == "cancelled" }
-    var displayName: String { (project?.isEmpty == false ? project! : nil) ?? "Untitled" }
-
-    /// Human state word for the menu row (a paused running job reads "Paused").
-    var stateWord: String {
-        switch state {
-        case "queued":    return "Queued"
-        case "running":   return paused ? "Paused" : "Solving"
-        case "done":      return "Done"
-        case "error":     return "Failed"
-        case "cancelled": return "Cancelled"
-        default:          return state.capitalized
-        }
-    }
-
-    /// "rung 2/4 · iter 41" while solving, "position 2" while queued, else "".
-    var progressWord: String {
-        if state == "running", let n = rungs {
-            let r = (rung ?? 0) + 1
-            let i = iter.map { " · iter \($0)" } ?? ""
-            return "rung \(r)/\(n)\(i)"
-        }
-        if state == "queued", let p = position { return "position \(p)" }
-        return ""
-    }
-
-    /// A short "started 12 min ago" style phrase from the start (or submit) time.
-    func startedWord(now: Date = Date()) -> String {
-        guard let t = startedAt ?? createdAt else { return "" }
-        let secs = max(0, now.timeIntervalSince1970 - t)
-        return "started \(Self.age(secs))"
-    }
-
-    /// The completion-notification body: project + outcome summary.
-    var completionSummary: String {
-        switch state {
-        case "done":  return "\(displayName): optimization finished"
-        case "error": return "\(displayName): optimization failed"
-        default:      return "\(displayName): \(stateWord.lowercased())"
-        }
-    }
-
-    static func age(_ seconds: TimeInterval) -> String {
-        if seconds < 60 { return "just now" }
-        let m = Int(seconds / 60)
-        if m < 60 { return "\(m) min ago" }
-        let h = Int(seconds / 3600)
-        if h < 24 { return "\(h) hour\(h == 1 ? "" : "s") ago" }
-        let d = Int(seconds / 86_400)
-        return "\(d) day\(d == 1 ? "" : "s") ago"
-    }
-}
-
-private struct JobsResponse: Decodable {
-    let jobs: [WorkerJob]
-    let maxConcurrency: Int?
-    let running: Int?
-    let queued: Int?
-    enum CodingKeys: String, CodingKey {
-        case jobs, running, queued
-        case maxConcurrency = "max_concurrency"
-    }
-}
+// `WorkerJob`, `JobsResponse`, `WorkerHealth`, `JobAction`, `JobControls`, and
+// `WorkerClient` now live in WorkerClient.swift (the shared, Foundation-only action
+// layer, handoff 124) so the menu, the window, and the SwiftPM tests all agree on
+// one definition of a job, one per-state control list, and one set of requests.
 
 @MainActor
 final class WorkerSupervisor: ObservableObject {
@@ -129,6 +46,27 @@ final class WorkerSupervisor: ObservableObject {
     /// The menu derives its active/queued list + recent completions from this.
     @Published private(set) var jobs: [WorkerJob] = []
 
+    /// Whether the last poll reached the worker. While the process is up but the HTTP
+    /// server is unreachable (starting, wedged), the window shows an HONEST unreachable
+    /// state rather than a frozen-but-green UI (handoff 124, item 8).
+    @Published private(set) var reachable = false
+
+    /// When the current worker process started — the window header's uptime readout.
+    @Published private(set) var workerStartedAt: Date?
+
+    /// Consecutive failed polls; `reachable` flips false after a couple so a single
+    /// dropped tick doesn't flicker the UI.
+    private var pollFailures = 0
+
+    /// The one request factory both faces + the supervisor use (handoff 124).
+    var client: WorkerClient { WorkerClient(port: port) }
+
+    /// A job the window should scroll to / highlight, set when a menu job row is
+    /// clicked to open the window (handoff 124, item 5). Cleared once consumed.
+    @Published var focusedJobID: String?
+
+    var queuedCount: Int { jobs.filter { $0.state == "queued" }.count }
+
     /// User setting: an explicit topopt-cli path when it isn't bundled.
     @Published var cliPathSetting: String {
         didSet { UserDefaults.standard.set(cliPathSetting, forKey: "cliPath") }
@@ -138,6 +76,11 @@ final class WorkerSupervisor: ObservableObject {
     /// documented recipe is an ntfy.sh topic URL for a free phone push.
     @Published var webhookURL: String {
         didSet { UserDefaults.standard.set(webhookURL, forKey: "webhookURL") }
+    }
+    /// The port the worker binds. Editable in Settings; takes effect on restart (the
+    /// live `port` is updated in `start()`). Default 8757 (handoff 097).
+    @Published var portSetting: Int {
+        didSet { UserDefaults.standard.set(portSetting, forKey: "port") }
     }
     /// How many solves run at once. Default 1 — solves are memory-bandwidth-bound
     /// (handoff 113), so a second concurrent job runs BOTH slower. Raise only on
@@ -175,6 +118,9 @@ final class WorkerSupervisor: ObservableObject {
         webhookURL = UserDefaults.standard.string(forKey: "webhookURL") ?? ""
         let mc = UserDefaults.standard.integer(forKey: "maxConcurrency")
         maxConcurrency = mc > 0 ? mc : 1
+        let savedPort = UserDefaults.standard.integer(forKey: "port")
+        portSetting = savedPort > 0 ? savedPort : 8757
+        port = savedPort > 0 ? savedPort : 8757
         launchAtLogin = LoginItem.isEnabled
     }
 
@@ -205,16 +151,25 @@ final class WorkerSupervisor: ObservableObject {
         }
     }
 
-    var statusText: String {
+    /// The window header's one-word liveness treatment. A running-but-paused job reads
+    /// "Paused"; an up-but-unreachable server reads "Unreachable" (honest, item 8).
+    enum Liveness { case solving, paused, idle, unreachable, stopped, starting }
+    var liveness: Liveness {
         switch state {
+        case .stopped, .failed: return .stopped
+        case .starting:         return .starting
         case .running:
-            let q = jobs.filter { $0.state == "queued" }.count
-            let base = "Worker running · port \(port)"
-            return q > 0 ? "\(base) · \(q) queued" : base
-        case .starting: return "Starting worker…"
-        case .stopped:  return "Worker stopped"
-        case .failed(let m): return "Problem: \(m)"
+            if !reachable { return .unreachable }
+            if jobs.contains(where: { $0.state == "running" && !$0.paused }) { return .solving }
+            if jobs.contains(where: { $0.state == "running" && $0.paused }) { return .paused }
+            return .idle
         }
+    }
+
+    /// Uptime of the current worker process, e.g. "up 12 min". Empty when stopped.
+    func uptimeText(now: Date = Date()) -> String {
+        guard let s = workerStartedAt, isRunning else { return "" }
+        return "up " + WorkerJob.duration(max(0, now.timeIntervalSince(s)))
     }
 
     // MARK: - Lifecycle
@@ -224,6 +179,7 @@ final class WorkerSupervisor: ObservableObject {
         shouldRun = true
         restartWorkItem?.cancel()
         guard process == nil else { return }
+        port = portSetting          // apply any Settings change on (re)start
         state = .starting
 
         guard let python = Self.pythonPath else {
@@ -275,6 +231,9 @@ final class WorkerSupervisor: ObservableObject {
             try p.run()
             process = p
             state = .running
+            workerStartedAt = Date()
+            reachable = false          // until the first successful poll
+            pollFailures = 0
             bonjour.publish(port: port, fingerprint: fingerprint ?? "unknown")
             startPolling()
         } catch {
@@ -293,6 +252,8 @@ final class WorkerSupervisor: ObservableObject {
         process = nil
         jobs = []
         lastStates = [:]
+        reachable = false
+        workerStartedAt = nil
         updateKeepAwake()
         state = .stopped
     }
@@ -304,6 +265,8 @@ final class WorkerSupervisor: ObservableObject {
         stopPolling()
         bonjour.stop()
         jobs = []
+        reachable = false
+        workerStartedAt = nil
         updateKeepAwake()
         guard shouldRun else { return }   // a deliberate stop
         // Unexpected exit — surface it, then auto-restart after a short backoff so a
@@ -321,9 +284,14 @@ final class WorkerSupervisor: ObservableObject {
 
     private func startPolling() {
         stopPolling()
-        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.pollJobs() }
         }
+        // `.common` so the poll keeps firing while a native menu is tracking — the
+        // default run-loop mode is starved during menu tracking, which is exactly why
+        // the rung/iter readout used to freeze the moment you opened the menu
+        // (handoff 124, item 1: "keep it updating live while the menu is open").
+        RunLoop.main.add(timer, forMode: .common)
         pollTimer = timer
         Task { @MainActor in await self.pollJobs() }   // one immediate poll
     }
@@ -334,17 +302,20 @@ final class WorkerSupervisor: ObservableObject {
     }
 
     private func pollJobs() async {
-        guard isRunning, let url = URL(string: "http://127.0.0.1:\(port)/jobs") else { return }
+        guard isRunning else { return }
         do {
-            var req = URLRequest(url: url)
-            req.timeoutInterval = 4
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await URLSession.shared.data(for: client.jobsRequest())
             guard (resp as? HTTPURLResponse)?.statusCode == 200 else { return }
             let decoded = try JSONDecoder().decode(JobsResponse.self, from: data)
+            pollFailures = 0
+            reachable = true
             applyJobs(decoded.jobs)
         } catch {
-            // Transient (worker still coming up, momentary refusal). The next tick
-            // retries; we do not surface it as a failure.
+            // Transient (worker still coming up, momentary refusal). A single miss is
+            // ignored; two in a row flips `reachable` false so the window shows the
+            // honest unreachable state (handoff 124, item 8). The next tick retries.
+            pollFailures += 1
+            if pollFailures >= 2 { reachable = false }
         }
     }
 
@@ -365,23 +336,24 @@ final class WorkerSupervisor: ObservableObject {
         updateKeepAwake()
     }
 
-    // MARK: - per-job actions (POST/DELETE to the worker)
+    // MARK: - per-job actions (POST/DELETE to the worker, handoff 124)
+    //
+    // ONE action path. The menu and the window both call `perform(_:on:)`, which routes
+    // through the shared `WorkerClient` — so a control on either face fires the identical
+    // request (proven in WorkerKitTests). The named wrappers are call-site sugar.
 
-    func cancel(_ job: WorkerJob) { jobAction(job.id, method: "DELETE", suffix: "") }
-    func moveToFront(_ job: WorkerJob) { jobAction(job.id, method: "POST", suffix: "/front") }
-    func pause(_ job: WorkerJob) { jobAction(job.id, method: "POST", suffix: "/pause") }
-    func resume(_ job: WorkerJob) { jobAction(job.id, method: "POST", suffix: "/resume") }
-
-    private func jobAction(_ id: String, method: String, suffix: String) {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/jobs/\(id)\(suffix)") else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = method
-        req.timeoutInterval = 5
+    func perform(_ action: JobAction, on job: WorkerJob) {
+        let request = client.request(action, job: job.id)
         Task { @MainActor in
-            _ = try? await URLSession.shared.data(for: req)
+            _ = try? await URLSession.shared.data(for: request)
             await self.pollJobs()   // reflect the change immediately
         }
     }
+
+    func cancel(_ job: WorkerJob) { perform(.cancel, on: job) }
+    func moveToFront(_ job: WorkerJob) { perform(.moveToFront, on: job) }
+    func pause(_ job: WorkerJob) { perform(.pause, on: job) }
+    func resume(_ job: WorkerJob) { perform(.resume, on: job) }
 
     /// Reveal a job's on-disk workdir in Finder (the menu's "Show in Finder" and the
     /// notification click both land here). <workDir>/<job-id> holds worker.log +
@@ -389,6 +361,26 @@ final class WorkerSupervisor: ObservableObject {
     func revealWorkdir(forJob id: String) {
         let dir = workDir.appendingPathComponent(id)
         NSWorkspace.shared.activateFileViewerSelecting([dir])
+    }
+
+    /// The id of the most interesting job for the log tail: a running one if any, else
+    /// the most recently created. Nil when there are no jobs.
+    var newestJobID: String? {
+        jobs.first(where: { $0.state == "running" })?.id
+            ?? jobs.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }.first?.id
+    }
+
+    /// Last `lines` of a job's worker.log (handoff 124, item 7 — the collapsible log
+    /// tail). Read on demand (no timer polls the file); the window offers a Refresh.
+    /// Returns a friendly message rather than throwing when there is nothing to show.
+    func tailWorkerLog(forJob id: String, lines: Int = 50) -> String {
+        let path = workDir.appendingPathComponent(id).appendingPathComponent("worker.log")
+        guard let data = try? Data(contentsOf: path),
+              let text = String(data: data, encoding: .utf8) else {
+            return "No worker.log yet for this job."
+        }
+        let all = text.split(separator: "\n", omittingEmptySubsequences: false)
+        return all.suffix(lines).joined(separator: "\n")
     }
 
     // MARK: - completion notification (UserNotifications)

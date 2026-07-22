@@ -12,6 +12,10 @@
 		0B0000000000000000000003 /* BonjourAdvertiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000003 /* BonjourAdvertiser.swift */; };
 		0B0000000000000000000004 /* LoginItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000004 /* LoginItem.swift */; };
 		0B0000000000000000000005 /* MenuContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000005 /* MenuContent.swift */; };
+		0B0000000000000000000008 /* WorkerGlass.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000008 /* WorkerGlass.swift */; };
+		0B0000000000000000000009 /* WorkerWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000009 /* WorkerWindow.swift */; };
+		0B000000000000000000000A /* WorkerSettingsPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A000000000000000000000A /* WorkerSettingsPane.swift */; };
+		0B000000000000000000000B /* WorkerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A000000000000000000000B /* WorkerClient.swift */; };
 		0B0000000000000000000007 /* topopt_worker.py in Resources */ = {isa = PBXBuildFile; fileRef = 0A0000000000000000000007 /* topopt_worker.py */; };
 /* End PBXBuildFile section */
 
@@ -22,6 +26,10 @@
 		0A0000000000000000000003 /* BonjourAdvertiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BonjourAdvertiser.swift; sourceTree = "<group>"; };
 		0A0000000000000000000004 /* LoginItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItem.swift; sourceTree = "<group>"; };
 		0A0000000000000000000005 /* MenuContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuContent.swift; sourceTree = "<group>"; };
+		0A0000000000000000000008 /* WorkerGlass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerGlass.swift; sourceTree = "<group>"; };
+		0A0000000000000000000009 /* WorkerWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerWindow.swift; sourceTree = "<group>"; };
+		0A000000000000000000000A /* WorkerSettingsPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkerSettingsPane.swift; sourceTree = "<group>"; };
+		0A000000000000000000000B /* WorkerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = WorkerClient.swift; path = "../WorkerKit/Sources/WorkerKit/WorkerClient.swift"; sourceTree = "<group>"; };
 		0A0000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0A0000000000000000000007 /* topopt_worker.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; name = topopt_worker.py; path = "../topopt-worker/topopt_worker.py"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
@@ -53,6 +61,10 @@
 				0A0000000000000000000003 /* BonjourAdvertiser.swift */,
 				0A0000000000000000000004 /* LoginItem.swift */,
 				0A0000000000000000000005 /* MenuContent.swift */,
+				0A0000000000000000000008 /* WorkerGlass.swift */,
+				0A0000000000000000000009 /* WorkerWindow.swift */,
+				0A000000000000000000000A /* WorkerSettingsPane.swift */,
+				0A000000000000000000000B /* WorkerClient.swift */,
 				0A0000000000000000000007 /* topopt_worker.py */,
 				0A0000000000000000000006 /* Info.plist */,
 			);
@@ -141,6 +153,10 @@
 				0B0000000000000000000003 /* BonjourAdvertiser.swift in Sources */,
 				0B0000000000000000000004 /* LoginItem.swift in Sources */,
 				0B0000000000000000000005 /* MenuContent.swift in Sources */,
+				0B0000000000000000000008 /* WorkerGlass.swift in Sources */,
+				0B0000000000000000000009 /* WorkerWindow.swift in Sources */,
+				0B000000000000000000000A /* WorkerSettingsPane.swift in Sources */,
+				0B000000000000000000000B /* WorkerClient.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
