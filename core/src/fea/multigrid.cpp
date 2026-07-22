@@ -97,22 +97,18 @@ constexpr int kMinLevels = kMgMinLevels;            // < 2 usable levels -> not 
 // wall-clock guard below (a coarse safety net, not a convergence signal).
 constexpr int kMgIterBudget = 300;
 
-// Per-attempt WALL-CLOCK guard (handoff 128, pairs with the raised budget). A
-// single MG-CG attempt is also bounded in wall time so that tripling the cycle
-// budget cannot triple the worst-case wasted time on a pathologically large or
-// slow grid (300 cycles x an expensive V-cycle could be minutes; the 127 latch
-// only caps the NUMBER of doomed attempts to 3, not the cost of each). This is a
-// COARSE SAFETY NET, not a convergence test: it is set far above the wall time a
-// converging solve needs (which finishes in <= 300 cheap cycles), so it never
-// trips inside the converging envelope and does NOT re-introduce the within-solve
-// fast-fail 127 rejected — it only fires when a V-cycle is so expensive that even
-// the (bounded) budget would run unacceptably long, in which case the exact
-// Jacobi-CG fallback (identical field) takes over. Because it keys on wall time it
-// is the ONE non-deterministic cutoff: on a grid slow enough to trip it, the
-// reported mg_cycles_attempted can vary run-to-run, but the SOLVED FIELD does not
-// (the Jacobi fallback is exact). Converging solves are unaffected and fully
-// deterministic. 0 disables the guard (cycle budget only).
-constexpr double kMgAttemptWallGuardSec = 90.0;
+// Per-attempt wall-clock guard. DEFAULT 0 = DISABLED: the deterministic
+// cycle budget (kMgIterBudget) is the sole bound. A fixed seconds value
+// cannot sit "far above the converging envelope" at every scale — on a
+// 128³ production grid one V-cycle costs ~1-2 s, so a legitimately
+// converging borderline solve (200-300 cycles) takes 5-10 MINUTES; any
+// wall cutoff below that kills exactly the solves budget-300 exists to
+// rescue, and does so non-deterministically (thermal variation moves
+// the trip point run to run). Worst case disabled: one stagnating
+// attempt burns the full cycle budget, at most kMgLatchThreshold times
+// per run before the latch stops building. Set > 0 explicitly only as
+// an opt-in pathology net.
+constexpr double kMgAttemptWallGuardSec = 0.0;
 
 // --- Per-run multigrid stagnation LATCH (handoff 127, Amendment 2) -----------
 // A high-contrast SIMP field (the ~1e-9 design-box + clearance-void case) can
