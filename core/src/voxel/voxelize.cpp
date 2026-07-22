@@ -100,21 +100,35 @@ DesignDomain expand_design_domain(const VoxelGrid& part,
   raw_axis(part.origin.y, part.ny, design_box.min.y, design_box.max.y, oj, raw_ny);
   raw_axis(part.origin.z, part.nz, design_box.min.z, design_box.max.z, ok, raw_nz);
 
-  // Round each element extent UP to a common multiple of `align` by appending
-  // HIGH-side voxels only (lo_pad — and therefore the offset and origin — is
-  // never touched), so the multigrid hierarchy can coarsen every axis under its
-  // DOF cap (topopt/coarsen.hpp). `coarsen_align` is the FLOOR: the actual align
-  // GROWS above it (a deeper power of two) only when the grid is large enough
-  // that the floor alignment would leave the coarsest MG level over the cap —
-  // exactly the res-128 design-box case that silently fell back to Jacobi-CG.
-  // For the small grids that already coarsen at the floor (the 079 regime), the
-  // computed align equals the floor and the dims are byte-identical. The
-  // appended voxels sit beyond design_box.max and are classified Empty below.
-  // coarsen_align <= 1 disables rounding (the exact pre-fix, legacy behaviour).
-  const int align = required_coarsen_align(raw_nx, raw_ny, raw_nz, coarsen_align);
-  const int new_nx = round_up_to(raw_nx, align);
-  const int new_ny = round_up_to(raw_ny, align);
-  const int new_nz = round_up_to(raw_nz, align);
+  // Round each element extent UP to a multiple of the FIXED `coarsen_align` by
+  // appending HIGH-side voxels only (lo_pad — and therefore the offset and origin
+  // — is never touched), so the geometric-multigrid hierarchy can coarsen
+  // (handoff 079). The driver passes kDesignBoxCoarsenAlign = 8; coarsen_align <= 1
+  // disables rounding (legacy byte-identical grid).
+  //
+  // WALK-BACK (handoff 122/127): PR #151 escalated this alignment ADAPTIVELY
+  // (required_coarsen_align) to a deeper power of two, to force the coarsest MG
+  // level under its DOF cap — on the theory that res-128 design-box runs fell back
+  // to Jacobi-CG because the grid could not coarsen. A real res-128 loadcase run
+  // (fingerprint 92e702008a9b) disproved the premise. At the FIXED align-8 floor
+  // that job's grid is 232x64x216, which is NOT coarsenable; PR #151's escalation
+  // grew it to 240x64x224, which IS — so multigrid BUILT the hierarchy there and
+  // then STAGNATED, falling back on every one of 158 iterations while paying the
+  // (now futile) build each solve. The fallback is a CONVERGENCE failure — the
+  // geometric V-cycle stagnates past kMgIterBudget on the ~1e-9-contrast SIMP field
+  // with a large clearance keep-out void (the adversarial-coefficient regime
+  // multigrid.cpp's own comments warn about), which no amount of padding fixes.
+  // Forcing coarsenability was in fact WORSE than inert here: it converted a cheap
+  // build-fast-fail into an expensive build-then-stagnate-then-Jacobi every solve
+  // (measured ~2.5x slower per stagnating solve). The escalation is withdrawn; the
+  // fixed floor restores the exact pre-#151 grid. The coarsenability RULE
+  // (mg_grid_coarsenable, topopt/coarsen.hpp) remains as documentation and a future
+  // gate once the MG-convergence problem is fixed, but it no longer sizes the pad.
+  // The residual stagnation risk is handled in the SOLVER now, not here: see the
+  // per-run stagnation latch in multigrid.cpp (handoff 127).
+  const int new_nx = round_up_to(raw_nx, coarsen_align);
+  const int new_ny = round_up_to(raw_ny, coarsen_align);
+  const int new_nz = round_up_to(raw_nz, coarsen_align);
 
   DesignDomain domain;
   domain.offset_i = oi;

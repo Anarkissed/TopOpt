@@ -550,6 +550,18 @@ int fea_matfree_thread_count();
 bool fea_matfree_galerkin_block_cache_enabled();
 bool fea_matfree_mixed_precision_enabled();
 
+// Per-run multigrid stagnation latch (handoff 127). When the matrix-free MG-CG
+// stagnates (builds a hierarchy but never contracts — the high-contrast
+// design-box regime) on several consecutive solves, it stops attempting MG for
+// the rest of the run and goes straight to Jacobi-CG, skipping the doomed
+// hierarchy build every solve. That state is thread-local and STICKY, so the
+// driver must reset it once at the start of each run (on the thread that issues
+// the solves); a solve that converges clears it on its own, so a healthy run
+// never latches and is bit-identical to before. `fea_matfree_mg_stagnation_latched`
+// is for tests/diagnostics. Both are inert off the matrix-free multigrid path.
+void fea_matfree_reset_mg_stagnation_latch();
+bool fea_matfree_mg_stagnation_latched();
+
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises
 // stress at its Hex8 element centroid, recovered from the displacement solution

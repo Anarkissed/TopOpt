@@ -5,6 +5,48 @@
 **Builds on:** 079 (design-box coarsening padding), 117 (per-iteration CSV that
 made the bug measurable), 106 (the 10-hour forensic that this finally explains).
 
+---
+
+> ## ⚠️ WALK-BACK (handoff 127) — the central FIX in this handoff was reverted
+>
+> A res-128 loadcase+box+clearance **production** run on the build shipped here
+> (fingerprint `92e702008a9b`) **falsified the premise** the fix rested on. The fix
+> — escalating the design-box pad to force the grid coarsenable — does **not**
+> address the production slowness:
+>
+> - That job's grid at the fixed align-8 floor is **232×64×216 (NOT coarsenable)**;
+>   PR #151's escalation grew it to **240×64×224 (coarsenable)**. So multigrid
+>   **built** a hierarchy there — and then **stagnated**, falling back to Jacobi-CG
+>   on **every one of 158 iterations** (`cg_multigrid=0` throughout, ~7–10 min/iter,
+>   stuck in rung 0 for 19.4 h). The real failure is **CONVERGENCE STAGNATION** on
+>   the ~1e-9-contrast field with a large clearance void — the adversarial-coefficient
+>   regime `multigrid.cpp` already warns about — which **no amount of padding fixes**.
+> - Worse, forcing the build was **net-negative**: it converted a cheap
+>   build-fast-fail into an expensive build-then-stagnate-then-Jacobi every solve
+>   (measured ~2.5× slower per stagnating solve on a 64³ probe).
+>
+> **What remains TRUE here** (do not over-correct): the coarsenability RULE itself
+> (`mg_grid_coarsenable`) and the fixture-scale flip are correct — a grid that
+> genuinely cannot coarsen *does* fall back. The error was **extrapolating that
+> relevance to the production job**, whose grid coarsens once escalated yet still
+> fails for a different reason. The rule/predicate are retained (documentation +
+> future gate); only the *escalation of the pad* was withdrawn.
+>
+> **The original 128³ bracket run's "non-coarsenable" diagnosis (§ below,
+> `cg_multigrid=0` on 535 iters) is now UNVERIFIED.** The CSV cannot distinguish a
+> build-REJECTION (non-coarsenable) from a build-then-STAGNATE; that run's grid was
+> never reconstructed. Do not read the sections below as confirmed for it — and do
+> not replace one confident story with its mirror.
+>
+> **Shipped by the walk-back (127):** the pad reverts to the fixed align-8 floor;
+> the solver gains a stagnation **fast-fail + per-run latch**; `run_info.json`
+> `cg_multigrid` is emitted as **null until observed** (an earlier bug wrote the
+> optimistic intent `true`, which misdiagnosed this very run). The observability and
+> honesty-rider from this handoff are kept. See **handoff 127** for the two real
+> blockers this leaves open (MG convergence; the plateau-stop that never fired).
+
+---
+
 **Handoff-number note:** `docs/handoffs/` tops at 121; the next free number is
 **122**. A memory note references a "122" remote-result-fields lane in a separate
 worktree — same collision pattern as the two "121"s. This is the core/CLI lane.
