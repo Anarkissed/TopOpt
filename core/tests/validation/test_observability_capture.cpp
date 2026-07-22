@@ -164,7 +164,7 @@ int main() {
   std::getline(ss, header);
   check(header ==
             "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
-            "cg_multigrid,beta",
+            "cg_multigrid,beta,hier_built,mg_cycles_attempted",
         "CSV header matches the documented schema");
   std::size_t data_rows = 0;
   int prev_rung = -1, prev_iter = 0;
@@ -173,22 +173,29 @@ int main() {
     if (line.empty()) continue;
     ++data_rows;
     int rung = -1, iter = -1, plateau = -1, cgit = -1, cgmg = -1;
+    int hier = -1, mgcyc = -1;
     long long wall = 0;
     double comp = 0, vf = -1, beta = -1;
-    const int n =
-        std::sscanf(line.c_str(), "%d,%d,%lld,%lf,%lf,%d,%d,%d,%lf", &rung, &iter,
-                    &wall, &comp, &vf, &plateau, &cgit, &cgmg, &beta);
-    if (n != 9) rows_ok = false;
+    const int n = std::sscanf(
+        line.c_str(), "%d,%d,%lld,%lf,%lf,%d,%d,%d,%lf,%d,%d", &rung, &iter,
+        &wall, &comp, &vf, &plateau, &cgit, &cgmg, &beta, &hier, &mgcyc);
+    if (n != 11) rows_ok = false;
     if (rung < 0 || rung >= 2) rows_ok = false;
     if (rung == prev_rung && iter != prev_iter + 1) rows_ok = false;  // monotone
     if (vf < 0.0 || vf > 1.0) rows_ok = false;
     if (plateau != 0 && plateau != 1) rows_ok = false;
     if (cgit < 0) rows_ok = false;
     if (beta < 0.0) rows_ok = false;  // 0 (not projecting) or a positive stage β
+    // Handoff 128 — fallback diagnostics: hier_built is 0/1; cycles are >= 0 and
+    // 0 whenever no hierarchy was built. On the JacobiCG default path (this test)
+    // both are 0.
+    if (hier != 0 && hier != 1) rows_ok = false;
+    if (mgcyc < 0) rows_ok = false;
+    if (hier == 0 && mgcyc != 0) rows_ok = false;
     prev_rung = rung;
     prev_iter = iter;
   }
-  check(rows_ok, "every CSV row parses to 9 typed, in-range fields");
+  check(rows_ok, "every CSV row parses to 11 typed, in-range fields");
   check(data_rows == total_iters, "CSV data row count == total iterations");
 
   // --- snapshots: a boundary per evaluated rung, round-trips within f16 ------

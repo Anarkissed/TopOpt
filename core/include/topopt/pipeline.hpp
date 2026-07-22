@@ -569,6 +569,13 @@ struct MinimizePlasticResult {
   // rung completed a recovery solve (e.g. cancelled at rung 0).
   bool used_multigrid = false;
   int mg_levels = 0;
+  // Handoff 128 — true iff ANY optimize solve of the run built a multigrid
+  // hierarchy (whether or not the V-cycle then converged). With `used_multigrid`
+  // this classifies a multigrid fallback: used_multigrid=false && this=true is
+  // STAGNATION (built but never carried; the 127 latch may have engaged),
+  // this=false is BUILD-REJECTION (never coarsenable). Consumed by run_job to set
+  // run_info.json mg_mode. False when solver==JacobiCG (MG never attempted).
+  bool mg_hierarchy_ever_built = false;
 
   // Handoff 123 — CONDITIONAL MMA-projection outcome, one entry per EVALUATED rung
   // (same order and length as `evaluated`). Empty when the gate is disarmed

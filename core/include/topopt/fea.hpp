@@ -219,6 +219,22 @@ struct CgInfo {
   // defaults.
   bool used_multigrid = false;
   int mg_levels = 0;
+  // Fallback-mode diagnostics (handoff 128). `used_multigrid == false` has two
+  // byte-identical causes the surviving artifacts could not tell apart (125 §0):
+  // the hierarchy never BUILT (grid not coarsenable — build-rejection, 122), or it
+  // built and the V-cycle STAGNATED past the budget (stagnation, 125). These make
+  // the distinction a direct read:
+  //   hier_built            true iff build_mf_hierarchy succeeded this solve (so
+  //                         used_multigrid==false && hier_built==true == STAGNATION;
+  //                         false == build-rejection, OR the 127 latch skipped the
+  //                         build after 3 prior stagnations).
+  //   mg_cycles_attempted   MG-CG V-cycles actually run this solve: the converged
+  //                         count when MG carried, the budget when it stagnated, 0
+  //                         when no hierarchy was built/attempted.
+  // Only the geometric-multigrid entry points set these; the Jacobi-CG paths leave
+  // them at their defaults (false / 0).
+  bool hier_built = false;
+  int mg_cycles_attempted = 0;
 };
 
 // Solve the same global linear-elastic system as fea_solve, but with a Jacobi

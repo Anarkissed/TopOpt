@@ -423,6 +423,19 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.cg_multigrid = result.pipeline.used_multigrid;
     run_info.mg_levels = result.pipeline.mg_levels;
     run_info.cg_multigrid_observed = true;  // outcome now known -> emit real values
+    // Handoff 128 — the run-level fallback mode. Only meaningful for a multigrid
+    // solver; for JacobiCG leave mg_mode empty (serialized null). "carried" when
+    // MG carried the run; otherwise "stagnated-latched" if a hierarchy ever built
+    // (built-but-never-carried == stagnation, the 127 latch may have engaged) or
+    // "build-rejected" if none ever did (never coarsenable).
+    if (solver_is_multigrid) {
+      run_info.mg_mode =
+          result.pipeline.used_multigrid
+              ? "carried"
+              : (result.pipeline.mg_hierarchy_ever_built ? "stagnated-latched"
+                                                         : "build-rejected");
+      run_info.mg_mode_observed = true;
+    }
     // Handoff 123 — finalize the conditional-projection outcome: which rungs fired
     // and the grayscale Mnd measured on each (empty when the gate was disarmed).
     run_info.conditional_projection_fired.assign(

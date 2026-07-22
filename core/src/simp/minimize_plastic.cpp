@@ -482,6 +482,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   std::size_t mg_solve_count = 0;
   std::size_t total_solve_count = 0;
   int observed_mg_levels = 0;
+  // Handoff 128 — did ANY solve build a hierarchy? Splits a fallback into
+  // stagnation (built but never carried) vs build-rejection (never coarsenable)
+  // for run_info.json mg_mode. Tallied by the same always-present observe hook.
+  bool mg_hierarchy_ever_built = false;
 
   // --- Handoff 123: conditional MMA-projection gate ------------------------
   // The gate is ARMED only on the MMA grayscale path with a positive threshold.
@@ -577,6 +581,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           ++mg_solve_count;
           observed_mg_levels = obs.cg_mg_levels;
         }
+        if (obs.cg_hier_built) mg_hierarchy_ever_built = true;
         if (options.on_iteration) {
           // Offset the projection phase's restarted iteration counter so `iter`
           // stays monotone within the rung (handoff 123). obs.beta already carries
@@ -934,6 +939,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   result.used_multigrid =
       total_solve_count > 0 && 2 * mg_solve_count >= total_solve_count;
   result.mg_levels = result.used_multigrid ? observed_mg_levels : 0;
+  result.mg_hierarchy_ever_built = mg_hierarchy_ever_built;
 
   return result;
 }

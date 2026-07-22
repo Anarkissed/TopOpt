@@ -34,6 +34,7 @@
 #include "topopt/fea.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -76,11 +77,42 @@ constexpr int kMinLevels = kMgMinLevels;            // < 2 usable levels -> not 
 // under adversarial random high-contrast coefficients geometric MG degrades and
 // can need thousands of iterations (much SLOWER than Jacobi). Rather than grind
 // through that, bail after this budget and let the exact Jacobi-CG fallback
-// finish. A well-posed V-cycle either converges fast (mesh-independent, ~15-30
-// iterations on these grids) or stagnates; there is no legitimate "needs 100+"
-// regime, so this bounds the wasted work before the fallback to ~100 cheap
-// V-cycles while never bailing on a case multigrid would actually have solved.
-constexpr int kMgIterBudget = 100;
+// finish.
+//
+// RAISED 100 -> 300 (handoff 128). The stagnation diagnosis (125) measured a
+// BORDERLINE band of real design-box + clearance systems whose V-cycle DOES
+// contract but slowly: they need ~120-300 cycles (their Jacobi fallback converged
+// in <= ~20 k iters, i.e. the operator is well-posed, just weakly preconditioned
+// by geometric MG). At the old 100-cycle budget those bailed to Jacobi every
+// solve; at 300 they now CARRY MG at a fraction of the Jacobi cost. Healthy grids
+// still converge in ~11-40 cycles (§1b of 125) — far under both budgets — so
+// raising the ceiling is byte-identical for them (the budget is never reached).
+// The genuinely pathological end (occ0.4+hole; §1d) does not converge even at
+// 2000 cycles, so it still bails — but now it bails at most 3 times before the
+// 127 stagnation LATCH stops even building the hierarchy. There is deliberately
+// NO within-solve early residual/rate bail: 127 MEASURED that no early signature
+// separates slow-but-converging (relative residual 2-8 at iter 15, converges by
+// ~60-90) from truly stagnating, and the binding rule is never to abandon a solve
+// MG would have solved. The only cutoffs are this full-cycle budget and the
+// wall-clock guard below (a coarse safety net, not a convergence signal).
+constexpr int kMgIterBudget = 300;
+
+// Per-attempt WALL-CLOCK guard (handoff 128, pairs with the raised budget). A
+// single MG-CG attempt is also bounded in wall time so that tripling the cycle
+// budget cannot triple the worst-case wasted time on a pathologically large or
+// slow grid (300 cycles x an expensive V-cycle could be minutes; the 127 latch
+// only caps the NUMBER of doomed attempts to 3, not the cost of each). This is a
+// COARSE SAFETY NET, not a convergence test: it is set far above the wall time a
+// converging solve needs (which finishes in <= 300 cheap cycles), so it never
+// trips inside the converging envelope and does NOT re-introduce the within-solve
+// fast-fail 127 rejected — it only fires when a V-cycle is so expensive that even
+// the (bounded) budget would run unacceptably long, in which case the exact
+// Jacobi-CG fallback (identical field) takes over. Because it keys on wall time it
+// is the ONE non-deterministic cutoff: on a grid slow enough to trip it, the
+// reported mg_cycles_attempted can vary run-to-run, but the SOLVED FIELD does not
+// (the Jacobi fallback is exact). Converging solves are unaffected and fully
+// deterministic. 0 disables the guard (cycle budget only).
+constexpr double kMgAttemptWallGuardSec = 90.0;
 
 // --- Per-run multigrid stagnation LATCH (handoff 127, Amendment 2) -----------
 // A high-contrast SIMP field (the ~1e-9 design-box + clearance-void case) can
@@ -110,6 +142,17 @@ constexpr int kMgLatchThreshold = 3;  // consecutive stagnations -> latch MG off
 // thread (the matvec worker threads never touch this); reset per run.
 thread_local int g_mg_consecutive_stagnations = 0;
 thread_local bool g_mg_latched = false;
+
+// Wall-clock deadline for a single MG-CG attempt (handoff 128). steady_clock is
+// monotone (unaffected by wall-clock adjustments). Returns time_point::max() when
+// the guard is disabled (guard_sec <= 0) so the comparison in the loop is a cheap
+// always-false and the attempt runs to the cycle budget.
+std::chrono::steady_clock::time_point mg_attempt_deadline(double guard_sec) {
+  if (!(guard_sec > 0.0)) return std::chrono::steady_clock::time_point::max();
+  return std::chrono::steady_clock::now() +
+         std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+             std::chrono::duration<double>(guard_sec));
+}
 
 // One grid level of the hierarchy. Active DOFs are the free, non-void DOFs at
 // this level, numbered 0..n-1 (matching the rows/cols of A).
@@ -357,7 +400,12 @@ bool mgpcg(const std::vector<Level>& levels, const Vec& b, double tol,
   double rz = r.dot(z);
   if (!std::isfinite(rz)) return false;
 
+  const auto deadline = mg_attempt_deadline(kMgAttemptWallGuardSec);
   for (int k = 1; k <= max_it; ++k) {
+    // Wall-clock safety net (handoff 128): bail this attempt to the exact
+    // Jacobi-CG fallback if it has run past the guard. `iters` already reflects
+    // the cycles done, so mg_cycles_attempted is honest on the guarded exit.
+    if (std::chrono::steady_clock::now() > deadline) return false;
     const Vec Ap = A * p;
     const double pAp = p.dot(Ap);
     if (!(pAp > 0.0) || !std::isfinite(pAp)) return false;  // breakdown -> fall back
@@ -469,6 +517,7 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
 
     std::vector<Level> levels =
         build_hierarchy(Kgg, nnx, nny, nnz, std::move(active));
+    diag.hier_built = !levels.empty();  // fallback-mode diagnostics (handoff 128)
 
     bool solved = false;
     Vec xg;
@@ -480,6 +529,7 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
       int it = 0;
       double res = 0.0;
       const bool ok = mgpcg(levels, rg, tolerance, mg_cap, xg, it, res);
+      diag.mg_cycles_attempted = it;
       if (ok) {
         diag.iterations = it;
         diag.residual = res;
@@ -698,7 +748,11 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
   double rz = r.dot(z);
   if (!std::isfinite(rz)) return false;
 
+  const auto deadline = mg_attempt_deadline(kMgAttemptWallGuardSec);
   for (int k = 1; k <= max_it; ++k) {
+    // Wall-clock safety net (handoff 128): bail to the exact Jacobi-CG fallback
+    // if this attempt has run past the guard (see mgpcg for the rationale).
+    if (std::chrono::steady_clock::now() > deadline) return false;
     mf_fine_matvec(H, p, S.Ap);           // A p is FP64 (defines the residual)
     const double pAp = p.dot(S.Ap);
     if (!(pAp > 0.0) || !std::isfinite(pAp)) return false;  // breakdown
@@ -1140,6 +1194,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     MfHierarchy H;
     const bool try_mg = !g_mg_latched;
     const bool have_h = try_mg && build_mf_hierarchy(m, nnx, nny, nnz, H);
+    // Fallback-mode diagnostics (handoff 128): whether a hierarchy built this
+    // solve, and how many MG-CG cycles it attempted. hier_built==false when the
+    // grid is not coarsenable (build-rejection) OR the 127 latch skipped the build.
+    diag.hier_built = have_h;
 
     std::vector<double> xkept(static_cast<std::size_t>(m.ng), 0.0);
     bool solved = false;
@@ -1164,6 +1222,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       if (!ok && mixed)
         ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res,
                       /*mixed=*/false);
+      // Cycles this solve burned on MG-CG (the last attempt's count when a mixed
+      // attempt was retried in FP64): honest whether it converged or stagnated.
+      diag.mg_cycles_attempted = it;
       if (ok) {
         for (int k = 0; k < m.ng; ++k) xkept[static_cast<std::size_t>(k)] = xg[k];
         diag.iterations = it;
