@@ -24,6 +24,9 @@ struct SettingsChipWidthKey: PreferenceKey {
 /// equal, so the layout is deterministic frame-to-frame.
 public enum SettingsChipID: Int, CaseIterable, Hashable, Sendable {
     case gravity, minimizePlastic, quality, designBox
+    /// The ONE global Face-protection depth (handoff 124). Only shown when ≥ 1 face
+    /// is protected — the workspace filters it out of the cluster otherwise.
+    case faceProtectDepth
 }
 
 public enum BottomChipOrder {

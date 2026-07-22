@@ -130,6 +130,25 @@ fragment float4 viewer_fragment(VOut in [[stage_in]], constant float4& reveal [[
     if (in.tint.a > 0.001) {
         color = mix(color, in.tint.rgb * (0.55 + 0.45 * lighting), in.tint.a);
     }
+    // Handoff 124 — Face protection crosshatch. A protected face carries the UNIQUE
+    // mint-teal PROTECT_RGB (WorkspacePlaceholder.protectFaceRGB); recognise it by
+    // colour and lay a screen-space DIAGONAL CROSSHATCH over it — a "preserved" mark,
+    // deliberately unlike the red clearance VOLUMES that read "forbidden". Two line
+    // families (±45°) in screen pixels; `fwidth` keeps the strokes ~1px at any zoom.
+    const float3 PROTECT_RGB = float3(0.18, 0.88, 0.78);
+    if (in.tint.a > 0.001 && all(abs(in.tint.rgb - PROTECT_RGB) < 0.04)) {
+        float2 px = in.position.xy;
+        float period = 9.0;               // hatch spacing in pixels
+        float d1 = fract((px.x + px.y) / period) - 0.5;   // "/" family
+        float d2 = fract((px.x - px.y) / period) - 0.5;   // "\" family
+        float w1 = fwidth(d1), w2 = fwidth(d2);
+        // Coverage of a ~1.3px stroke centred on each line (antialiased by fwidth).
+        float line1 = 1.0 - smoothstep(0.0, max(w1, 1e-4) * 1.3, abs(d1));
+        float line2 = 1.0 - smoothstep(0.0, max(w2, 1e-4) * 1.3, abs(d2));
+        float hatch = clamp(line1 + line2, 0.0, 1.0);
+        // Darken the strokes toward a deep teal so the weave reads on the lit clay.
+        color = mix(color, float3(0.02, 0.32, 0.28), hatch * 0.85);
+    }
     float3 rgb = clamp(color, 0.0, 1.0);
     return float4(rgb * bodyAlpha, bodyAlpha);   // premultiplied (a==1 → unchanged)
 }
@@ -527,6 +546,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// fail loudly on a typo.
     static var depthPrepassShaderSourceForTesting: String { depthPrepassShaderSource }
     static var contactShaderSourceForTesting: String { contactShaderSource }
+    /// The exact main viewer MSL the app ships (incl. the handoff-124 Face-protection
+    /// crosshatch in `viewer_fragment`), exposed so a headless test compiles it and
+    /// fails loudly on a typo — the pipeline is otherwise built with `try?` and a
+    /// malformed shader silently blanks the whole stage.
+    static var viewerShaderSourceForTesting: String { viewerShaderSource }
     /// Reused offscreen textures for the depth prepass (colour = eye-Z, plus its own z-buffer),
     /// re-created only when the drawable size changes — so a steady camera reuses them.
     private var sceneDepthColorTex: MTLTexture?

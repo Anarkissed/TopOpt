@@ -201,6 +201,24 @@ public final class ProjectModel: ObservableObject {
         return specs
     }
 
+    /// The run's Face protections (handoff 124 — preserve-skin): every B-rep face of
+    /// a group the user marked "Protect", plus the ONE global preserve-depth. The
+    /// core freezes each face's OWN part-solid skin FrozenSolid to that depth. Empty
+    /// for an STL project (no B-rep faces) or when nothing is protected → the run is
+    /// byte-identical. Face ids are deduped (a face never appears twice).
+    public func faceProtectionSpecs() -> (faceIDs: [Int], depthMM: Double) {
+        guard viewerMesh != nil else { return ([], force.faceProtectDepthMM) }
+        var ids: [Int] = []
+        var seen = Set<FaceID>()
+        for g in selection.groups where force.isProtected(g.id) {
+            for f in g.faces where !seen.contains(f) {
+                seen.insert(f)
+                ids.append(Int(f))
+            }
+        }
+        return (ids, force.faceProtectDepthMM)
+    }
+
     /// Whether the anchored-bore AUTO clearance rule applies to a group (keep-clear
     /// v2): an anchor group with at least one bore (curved) face — a fastener hole
     /// (design 095). This is the default the keep-clear attribute deviates from.

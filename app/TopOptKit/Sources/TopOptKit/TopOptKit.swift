@@ -246,12 +246,20 @@ public struct OptimizeOutcome {
     /// Empty when no clearance was declared.
     public let appliedClearances: [AppliedClearance]
 
+    /// Handoff 124 — what each declared Face protection actually preserved on the
+    /// solved grid, so the results screen states it HONESTLY: which face, how many
+    /// voxels its skin was frozen to, the depth used, and whether the face's own
+    /// solid was thinner than that depth (froze what exists, no silent over-claim).
+    /// Empty when no protection was declared.
+    public let appliedFaceProtections: [AppliedFaceProtection]
+
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
                 gridOrigin: SIMD3<Double> = .zero, spacing: Double = 0,
                 computedRemotely: Bool = false,
-                appliedClearances: [AppliedClearance] = []) {
+                appliedClearances: [AppliedClearance] = [],
+                appliedFaceProtections: [AppliedFaceProtection] = []) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -264,6 +272,7 @@ public struct OptimizeOutcome {
         self.spacing = spacing
         self.computedRemotely = computedRemotely
         self.appliedClearances = appliedClearances
+        self.appliedFaceProtections = appliedFaceProtections
     }
 }
 
@@ -279,6 +288,23 @@ public struct AppliedClearance: Equatable, Sendable {
         self.kind = kind
         self.voxelsFrozen = voxelsFrozen
         self.inGrid = inGrid
+    }
+}
+
+/// One Face protection's outcome (handoff 124): the face whose skin was preserved,
+/// how many part voxels were frozen FrozenSolid behind it, the depth (in voxels)
+/// used, and whether the face's own solid was thinner than that depth (so it froze
+/// what exists — the honest edge, no silent over-claim).
+public struct AppliedFaceProtection: Equatable, Sendable {
+    public let faceID: Int
+    public let voxelsFrozen: Int
+    public let depthVoxels: Int
+    public let thinnerThanDepth: Bool
+    public init(faceID: Int, voxelsFrozen: Int, depthVoxels: Int, thinnerThanDepth: Bool) {
+        self.faceID = faceID
+        self.voxelsFrozen = voxelsFrozen
+        self.depthVoxels = depthVoxels
+        self.thinnerThanDepth = thinnerThanDepth
     }
 }
 
@@ -531,6 +557,7 @@ public enum TopOptKit {
         infillPercent: Int = -1,
         designBox: DesignBoxSpec? = nil, keepOutBoxes: [DesignBoxSpec] = [],
         clearances: [ClearanceSpec] = [],
+        faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
         progress: ((_ rung: Int, _ rungCount: Int, _ iteration: Int) -> Bool)? = nil,
         onVariant: ((OptimizeOutcome) -> Void)? = nil
     ) throws -> OptimizeOutcome {
@@ -551,6 +578,11 @@ public enum TopOptKit {
             lc.clearance_axial_mm.push_back(c.axialClearanceMM)
             lc.clearance_slab_mm.push_back(c.slabDepthMM)
         }
+        // Handoff 124 — flatten the Face protections (preserve-skin) into the POD
+        // load case: the raw face ids + the ONE global depth (mm). A depth <= 0
+        // means "use the core default". Empty list → byte-identical.
+        for f in faceProtections { lc.face_protection_face_ids.push_back(Int32(f)) }
+        lc.face_protection_depth_mm = faceProtectionDepthMM
         lc.minimize_plastic = minimizePlastic
         lc.build_dir_x = buildDirection.x
         lc.build_dir_y = buildDirection.y
@@ -657,6 +689,19 @@ public enum TopOptKit {
                 voxelsFrozen: i < cFrozen.count ? Int(cFrozen[i]) : 0,
                 inGrid: i < cInGrid.count ? cInGrid[i] != 0 : false))
         }
+        // Handoff 124 — the Face-protection diagnostics (parallel arrays), for honest results.
+        let pFaces = Array(raw.protection_face_ids)
+        let pFrozen = Array(raw.protection_voxels_frozen)
+        let pDepth = Array(raw.protection_depth_voxels)
+        let pThin = Array(raw.protection_thinner)
+        var protections: [AppliedFaceProtection] = []
+        for i in 0..<pFaces.count {
+            protections.append(AppliedFaceProtection(
+                faceID: Int(pFaces[i]),
+                voxelsFrozen: i < pFrozen.count ? Int(pFrozen[i]) : 0,
+                depthVoxels: i < pDepth.count ? Int(pDepth[i]) : 0,
+                thinnerThanDepth: i < pThin.count ? pThin[i] != 0 : false))
+        }
         return OptimizeOutcome(variants: variants,
                                stoppedOnMargin: raw.stopped_on_margin,
                                cancelled: raw.cancelled,
@@ -666,7 +711,8 @@ public enum TopOptKit {
                                gridNz: Int(raw.grid_nz),
                                gridOrigin: SIMD3<Double>(raw.grid_origin_x, raw.grid_origin_y, raw.grid_origin_z),
                                spacing: raw.spacing,
-                               appliedClearances: applied)
+                               appliedClearances: applied,
+                               appliedFaceProtections: protections)
     }
 
     /// The M7.1 smoke summary shared by the app's smoke screen and the tests.

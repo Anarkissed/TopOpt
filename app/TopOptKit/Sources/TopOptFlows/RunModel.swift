@@ -60,6 +60,15 @@ public struct RunRequest: Equatable, Sendable {
     /// load-case path. Part of the request identity, so editing a clearance
     /// re-enables Optimize (it forbids growth, changing the design).
     public let clearances: [TopOptKit.ClearanceSpec]
+    /// The Face protections (handoff 124): B-rep faces whose OWN material the
+    /// optimizer may not touch — the core freezes each face's part-solid skin
+    /// FrozenSolid to `faceProtectionDepthMM`. Consumed only on the STEP load-case
+    /// path. Part of the request identity, so protecting/un-protecting a face (or
+    /// editing the global depth) re-enables Optimize (it changes what is preserved).
+    public let faceProtections: [Int]
+    /// The ONE global preserve-depth (mm) governing every Face protection; <= 0
+    /// means "use the core default". Part of the request identity.
+    public let faceProtectionDepthMM: Double
     /// The owning project's id (handoff 119). Carried so a REMOTE run persists which
     /// project it belongs to (`PersistedRemoteJob.projectID`), letting a cold-launch
     /// re-attach reopen that project and land the streamed result in the normal
@@ -82,6 +91,7 @@ public struct RunRequest: Equatable, Sendable {
                 designBox: TopOptKit.DesignBoxSpec? = nil,
                 keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
                 clearances: [TopOptKit.ClearanceSpec] = [],
+                faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
                 projectID: UUID? = nil) {
         self.modelPath = modelPath
         self.material = material
@@ -97,6 +107,8 @@ public struct RunRequest: Equatable, Sendable {
         self.designBox = designBox
         self.keepOutBoxes = keepOutBoxes
         self.clearances = clearances
+        self.faceProtections = faceProtections
+        self.faceProtectionDepthMM = faceProtectionDepthMM
         self.projectID = projectID
     }
 }
@@ -698,6 +710,8 @@ public final class RunModel: ObservableObject {
                 buildDirection: request.buildDirection, infillPercent: request.infillPercent,
                 designBox: request.designBox, keepOutBoxes: request.keepOutBoxes,
                 clearances: request.clearances,
+                faceProtections: request.faceProtections,
+                faceProtectionDepthMM: request.faceProtectionDepthMM,
                 progress: progress, onVariant: onVariant)
         }
         return try TopOptKit.minimizePlastic(

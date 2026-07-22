@@ -367,6 +367,14 @@ public struct WorkspacePlaceholder: View {
             let v = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1)
             for f in g.faces { tints[f] = v }
         }
+        // Handoff 124 — a protected face gets the UNIQUE protect mint-teal, applied
+        // AFTER the role tints so it wins: the mesh shader recognises this exact
+        // colour and draws a CROSSHATCH over the face ("preserved", distinct from the
+        // red clearance VOLUMES that read "forbidden").
+        let p = Self.protectFaceRGB
+        for g in selection.groups where force.isProtected(g.id) {
+            for f in g.faces { tints[f] = SIMD4<Float>(p.x, p.y, p.z, 1) }
+        }
         return tints
     }
 
@@ -559,7 +567,7 @@ public struct WorkspacePlaceholder: View {
     private var bottomRightControls: some View {
         VStack(alignment: .trailing, spacing: DS.Space.s) {
             Spacer()
-            ForEach(BottomChipOrder.sorted(SettingsChipID.allCases, widths: settingsChipWidths), id: \.self) { id in
+            ForEach(BottomChipOrder.sorted(visibleSettingsChips, widths: settingsChipWidths), id: \.self) { id in
                 settingsChipRow(id)
             }
         }
@@ -582,6 +590,7 @@ public struct WorkspacePlaceholder: View {
         case .gravity: gravityChip.background(chipWidthReader(id))
         case .minimizePlastic: minimizePlasticChip.background(chipWidthReader(id))
         case .quality: qualityChip.background(chipWidthReader(id))
+        case .faceProtectDepth: faceProtectDepthChip.background(chipWidthReader(id))
         case .designBox:
             VStack(alignment: .trailing, spacing: DS.Space.s) {
                 designBoxChip.background(chipWidthReader(id))
@@ -592,6 +601,43 @@ public struct WorkspacePlaceholder: View {
                 }
             }
         }
+    }
+
+    /// The settings chips actually shown: the Face-protection depth chip appears ONLY
+    /// when at least one face is protected (handoff 124 — "the single global depth
+    /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
+    private var visibleSettingsChips: [SettingsChipID] {
+        SettingsChipID.allCases.filter { id in
+            id != .faceProtectDepth ||
+                force.explicitProtectCount(in: selection.groups) > 0
+        }
+    }
+
+    /// The ONE global Face-protection depth chip (handoff 124), styled like the other
+    /// settings chips. Tapping steps the shared preserve-depth through a few sensible
+    /// values (mm); every Face protection in the project uses this single number.
+    private var faceProtectDepthChip: some View {
+        Button {
+            let steps = [3.0, 5.0, 8.0, 12.0]
+            let cur = force.faceProtectDepthMM
+            let next = steps.first { $0 > cur + 0.01 } ?? steps.first!
+            force.faceProtectDepthMM = Swift.min(
+                FaceProtection.maxDepthMM, Swift.max(FaceProtection.minDepthMM, next))
+            model.toast = "Protect depth \(Int(force.faceProtectDepthMM.rounded())) mm — applies to every protected face"
+        } label: {
+            HStack(spacing: DS.Space.xs) {
+                Image(systemName: "shield.lefthalf.filled").font(.system(size: 12, weight: .bold))
+                Text("Protect \(Int(force.faceProtectDepthMM.rounded())) mm")
+                    .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+            }
+            .foregroundStyle(Self.protectTint)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
+            .background(Capsule().fill(DS.Surface.panel.color)
+                .overlay(Capsule().strokeBorder(Self.protectTint.opacity(0.5), lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .dsShadow(DS.Shadow.panel)
+        .help("The one preserve-depth every Face protection uses. Tap to change.")
     }
 
     /// Reads a chip's rendered width into `SettingsChipWidthKey` (item 12: MEASURED width).
@@ -1374,6 +1420,7 @@ public struct WorkspacePlaceholder: View {
                         .dsStyle(DS.TypeScale.footnote)
                         .foregroundStyle(DS.Color.textQuaternary.color)
                     keepClearAffixToggle(g)
+                    protectAffixToggle(g)   // handoff 124 — the Protect affix
                 }
                 if loadGroupMayNotRegister(g), let h = voxelSpacingMM {
                     // Sub-voxel load face (099 D2): the load may tag no voxels at
@@ -1506,6 +1553,38 @@ public struct WorkspacePlaceholder: View {
     /// The clearance-volume red, matched to the viewport render (MetalMeshView keep-out).
     /// Sourced from the shared `DS.Color.clearance` token (keep-clear Phase B).
     static let clearanceTint = DS.Color.clearance.color
+
+    /// The Face-protection (preserve-skin) mint-teal — a COOL "preserved" tint,
+    /// distinct from the WARM red "forbidden" clearance, the green anchor, AND every
+    /// group-palette accent (handoff 124). The RGB is deliberately unique so the mesh
+    /// shader recognises a protected face BY THIS COLOUR and draws the crosshatch over
+    /// it (`Self.protectFaceRGB` / the shader's `PROTECT_RGB` must stay in lockstep).
+    static let protectFaceRGB = SIMD3<Float>(0.18, 0.88, 0.78)
+    static let protectTint = Color(red: 0.18, green: 0.88, blue: 0.78)
+
+    /// The row's Protect AFFIX control (handoff 124): a shield toggle in the same row
+    /// as the group's role. Purely explicit — ON iff the user protected the group;
+    /// tapping toggles it. Hidden for a part with no B-rep faces (STL — no face skin
+    /// to preserve).
+    @ViewBuilder private func protectAffixToggle(_ g: SelectionGroup) -> some View {
+        if let mesh = viewerMesh, !mesh.faceGeometry.isEmpty {
+            let on = force.isProtected(g.id)
+            Button {
+                force.setProtected(g.id, !on)
+            } label: {
+                Image(systemName: on ? "shield.lefthalf.filled" : "shield")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(on ? Self.protectTint : DS.Color.textQuaternary.color)
+                    .padding(.vertical, 2).padding(.horizontal, on ? 6 : 4)
+                    .background(Capsule().fill(on ? Self.protectTint.opacity(0.16) : Color.clear)
+                        .overlay(Capsule().strokeBorder(
+                            on ? Color.clear : DS.Color.strokeSubtle.color, lineWidth: 1)))
+            }
+            .buttonStyle(.plain)
+            .help(on ? "Protected — the optimizer preserves this face's own material. Tap to turn it off."
+                     : "Protect — freeze this face's skin so the optimizer may not touch it.")
+        }
+    }
 
     /// The row's keep-clear AFFIX control (keep-clear v2): a nosign toggle in the same
     /// row as the group's role. It reads ON for an auto-clearanced anchored bore
@@ -1678,6 +1757,19 @@ public struct WorkspacePlaceholder: View {
                 chipLabel("nosign", "Keep clear")
                     .foregroundStyle(Self.clearanceTint)
                     .background(Capsule().fill(Self.clearanceTint.opacity(0.16)))
+            }
+            .buttonStyle(.plain)
+            // Handoff 124 — "Protect" (preserve-skin) is an ATTRIBUTE like Keep clear
+            // but the OPPOSITE polarity: it freezes the face's OWN material so the
+            // optimizer may not touch it. Affixes on the group; never changes its role.
+            Button {
+                force.setProtected(g.id, true)
+                selection.clearActive()
+                model.toast = "Protected — the optimizer will preserve this face's material"
+            } label: {
+                chipLabel("shield.lefthalf.filled", "Protect")
+                    .foregroundStyle(Self.protectTint)
+                    .background(Capsule().fill(Self.protectTint.opacity(0.16)))
             }
             .buttonStyle(.plain)
         }

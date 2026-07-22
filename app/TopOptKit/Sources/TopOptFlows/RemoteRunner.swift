@@ -619,6 +619,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                     return entry
                 }
             }
+            // Handoff 124 — Face protections (preserve-skin): the raw face ids + the
+            // ONE global depth. The worker's build_production_loadcase freezes each
+            // face's part-solid skin FrozenSolid, identically to the local bridge
+            // path. Empty list → omitted → byte-identical to a pre-124 job.
+            if !request.faceProtections.isEmpty {
+                loads["face_protections"] = request.faceProtections
+                if request.faceProtectionDepthMM > 0 {
+                    loads["face_protection_depth_mm"] = request.faceProtectionDepthMM
+                }
+            }
             job["loads"] = loads
         } else {
             job["loads"] = ["build_dir": [0, 0, 1]]

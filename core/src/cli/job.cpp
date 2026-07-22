@@ -421,7 +421,8 @@ JobDescription parse_job(const std::string& json_text) {
 
     const JsonValue& lv = require_object(*loads_v, "loads");
     reject_unknown_keys(
-        lv, {"anchors", "anchor_face_ids", "groups", "clearances", "build_dir",
+        lv, {"anchors", "anchor_face_ids", "groups", "clearances",
+             "face_protections", "face_protection_depth_mm", "build_dir",
              "infill_percent", "minimize_plastic"},
         "loads");
     job.loads.present = true;
@@ -493,6 +494,19 @@ JobDescription parse_job(const std::string& json_text) {
         }
         job.loads.clearances.push_back(std::move(cl));
       }
+    }
+    // Face protections (handoff 124): raw B-rep face ids whose own material must
+    // not be touched, plus ONE global depth (mm). A protection freezes the part-
+    // solid skin behind the face FrozenSolid. Omitted / empty => no protection =>
+    // byte-identical. A depth <= 0 (or omitted) means "use the core default".
+    if (const JsonValue* fp = find_key(lv, "face_protections"))
+      job.loads.face_protection_face_ids =
+          parse_int_array(*fp, "face_protections");
+    if (const JsonValue* fpd = find_key(lv, "face_protection_depth_mm")) {
+      job.loads.face_protection_depth_mm =
+          require_number(*fpd, "loads.face_protection_depth_mm");
+      if (!(job.loads.face_protection_depth_mm > 0.0))
+        schema_fail("\"loads.face_protection_depth_mm\" must be > 0");
     }
     if (const JsonValue* bd = find_key(lv, "build_dir")) {
       job.loads.build_dir = parse_vec3(*bd, "loads.build_dir");

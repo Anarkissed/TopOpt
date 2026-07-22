@@ -727,8 +727,22 @@ OptimizeResult run_minimize_plastic_loadcase(
       }
     }
 
+    // Handoff 124 — Face protections (preserve-skin). Ship the raw face ids + ONE
+    // global depth; the core freezes the part-solid skin behind each FrozenSolid.
+    // A depth <= 0 means "use the core default" (leave the ProductionLoadCase field
+    // at its default). Empty list → no protection → byte-identical to today.
+    lc.face_protection_face_ids.assign(load_case.face_protection_face_ids.begin(),
+                                       load_case.face_protection_face_ids.end());
+    if (load_case.face_protection_depth_mm > 0.0)
+      lc.face_protection_depth_mm = load_case.face_protection_depth_mm;
+
     topopt::ProductionRunSetup setup =
         topopt::build_production_loadcase(model, resolution, lc);
+    for (const auto& pr : setup.face_protection_reports)
+      bridge_log("loadcase: face-protection face=" + std::to_string(pr.face_id) +
+                 " voxels_frozen=" + std::to_string(pr.voxels_frozen) +
+                 " depth=" + std::to_string(pr.depth_voxels) +
+                 (pr.thinner_than_depth ? " thinner-than-depth" : ""));
     for (const auto& cr : setup.clearance_reports)
       bridge_log("loadcase: clearance face=" + std::to_string(cr.face_id) +
                  " kind=" + (cr.kind == topopt::ClearanceKind::Bolt ? "bolt" : "face") +
@@ -781,6 +795,17 @@ OptimizeResult run_minimize_plastic_loadcase(
       result.clearance_voxels_frozen.push_back(
           static_cast<int32_t>(cr.voxels_frozen));
       result.clearance_in_grid.push_back(cr.in_grid ? 1 : 0);
+    }
+    // Handoff 124 — surface what each Face protection preserved so the results
+    // screen can state it honestly (which faces, how many voxels, and whether the
+    // face's own solid was thinner than the requested depth).
+    for (const auto& pr : setup.face_protection_reports) {
+      result.protection_face_ids.push_back(pr.face_id);
+      result.protection_voxels_frozen.push_back(
+          static_cast<int32_t>(pr.voxels_frozen));
+      result.protection_depth_voxels.push_back(
+          static_cast<int32_t>(pr.depth_voxels));
+      result.protection_thinner.push_back(pr.thinner_than_depth ? 1 : 0);
     }
     bridge_log("loadcase: minimize_plastic returned variants=" +
                std::to_string(result.variants.size()) +
