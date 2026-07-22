@@ -73,10 +73,13 @@ final class DesignOverhaulRound2Tests: XCTestCase {
     /// Smallest width sits at the TOP of the list (index 0 in the returned order), largest at the
     /// bottom, so the bottom-anchored stack reads as a tidy width ramp with Optimize beneath.
     func testChipsOrderAscendingByWidth() {
+        // handoff 124 added the conditional `.faceProtectDepth` chip; measure it too so
+        // this exercises the pure width ramp (its visibility gating is tested elsewhere).
         let widths: [SettingsChipID: CGFloat] = [
-            .gravity: 140, .minimizePlastic: 175, .quality: 120, .designBox: 200]
+            .gravity: 140, .minimizePlastic: 175, .quality: 120, .designBox: 200,
+            .faceProtectDepth: 160]
         let order = BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths)
-        XCTAssertEqual(order, [.quality, .gravity, .minimizePlastic, .designBox])
+        XCTAssertEqual(order, [.quality, .gravity, .faceProtectDepth, .minimizePlastic, .designBox])
     }
 
     /// Equal widths keep their default (declaration) order — a stable tie-break.
@@ -97,7 +100,11 @@ final class DesignOverhaulRound2Tests: XCTestCase {
     /// A chip whose width hasn't arrived yet parks at the bottom (treated as maximally wide),
     /// rather than reshuffling the measured ones.
     func testChipsUnmeasuredParksAtBottom() {
-        let widths: [SettingsChipID: CGFloat] = [.quality: 120, .gravity: 130, .minimizePlastic: 150]
+        // Measure all but one; the single unmeasured chip parks at the bottom (treated as
+        // maximally wide). handoff 124's `.faceProtectDepth` is measured here so `.designBox`
+        // is the lone unmeasured one and the intent (unmeasured → last) still reads cleanly.
+        let widths: [SettingsChipID: CGFloat] = [
+            .quality: 120, .gravity: 130, .minimizePlastic: 150, .faceProtectDepth: 160]
         // .designBox unmeasured → last.
         XCTAssertEqual(BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths).last, .designBox)
     }

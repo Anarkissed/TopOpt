@@ -701,6 +701,32 @@ public final class ResultsModel: ObservableObject {
     /// clearance was declared. The numbers shown are the numbers the run used.
     public private(set) var clearanceNotes: [String] = []
 
+    /// Handoff 124 — honest Face-protection notes: one line per applied protection
+    /// (which face, how many voxels of its own skin were preserved, and — the honest
+    /// edge — a flag when the face's solid was thinner than the requested depth, so
+    /// it froze WHAT EXISTS, not a full depth). Protection changes the DESIGN (it
+    /// preserves material the optimizer would otherwise carve), so the results state
+    /// it. Empty when no protection was declared; the numbers shown are the run's.
+    public private(set) var faceProtectionNotes: [String] = []
+
+    /// Format the Face-protection diagnostics from a finished outcome into honest lines.
+    public static func faceProtectionNotes(_ applied: [AppliedFaceProtection]) -> [String] {
+        applied.map { p in
+            let face = "face \(p.faceID)"
+            if p.voxelsFrozen == 0 {
+                return "Protection on \(face): applied, but its face tagged no solid "
+                     + "to preserve here (check the selection / resolution)."
+            }
+            let vox = p.voxelsFrozen == 1 ? "1 voxel" : "\(p.voxelsFrozen) voxels"
+            let base = "Protection on \(face): preserved (\(vox) of the face's skin frozen solid)."
+            if p.thinnerThanDepth {
+                return base + " The face's own material was thinner than the depth, "
+                     + "so it froze what exists — no more."
+            }
+            return base
+        }
+    }
+
     /// Format the clearance diagnostics from a finished outcome into honest lines.
     public static func clearanceNotes(_ applied: [AppliedClearance]) -> [String] {
         applied.map { c in
@@ -820,6 +846,7 @@ public final class ResultsModel: ObservableObject {
         accepted = acc
         computedRemotely = outcome.computedRemotely
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
+        faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)
         gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
         gridOrigin = SIMD3<Float>(outcome.gridOrigin)
         spacing = Float(outcome.spacing)

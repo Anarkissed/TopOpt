@@ -302,18 +302,30 @@ public struct ResultsScreen: View {
         }
     }
 
-    /// Handoff 100 — the "Keep clear" honesty note: clearance forbids growth, so the
-    /// results STATE what it did (which faces were kept clear, how much was reserved)
-    /// and flag any region that fell outside the solved area. Shown only when a
-    /// clearance was declared.
+    /// Handoff 100 / 124 — the preservation-honesty card. "Keep clear" forbids
+    /// growth and Face "Protect" preserves existing material; both change the design,
+    /// so the results STATE what each did (which faces, how much) and flag the honest
+    /// edges (a clearance that fell outside the solved area; a protection thinner than
+    /// its depth). Shown only when a clearance or a protection was declared.
     @ViewBuilder private var clearanceNote: some View {
-        if !model.clearanceNotes.isEmpty {
+        if !model.clearanceNotes.isEmpty || !model.faceProtectionNotes.isEmpty {
             VStack(alignment: .leading, spacing: DS.Space.xs) {
-                Label("Keep clear applied", systemImage: "nosign")
-                    .font(.system(size: DS.TypeScale.footnote.size, weight: .bold))
-                ForEach(Array(model.clearanceNotes.enumerated()), id: \.offset) { _, line in
-                    Text(line).dsStyle(DS.TypeScale.caption)
-                        .fixedSize(horizontal: false, vertical: true)
+                if !model.clearanceNotes.isEmpty {
+                    Label("Keep clear applied", systemImage: "nosign")
+                        .font(.system(size: DS.TypeScale.footnote.size, weight: .bold))
+                    ForEach(Array(model.clearanceNotes.enumerated()), id: \.offset) { _, line in
+                        Text(line).dsStyle(DS.TypeScale.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if !model.faceProtectionNotes.isEmpty {
+                    Label("Protection applied", systemImage: "shield.lefthalf.filled")
+                        .font(.system(size: DS.TypeScale.footnote.size, weight: .bold))
+                        .padding(.top, model.clearanceNotes.isEmpty ? 0 : DS.Space.xs)
+                    ForEach(Array(model.faceProtectionNotes.enumerated()), id: \.offset) { _, line in
+                        Text(line).dsStyle(DS.TypeScale.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             .foregroundStyle(DS.Color.textSecondary.color)

@@ -118,6 +118,13 @@ struct JobLoadCase {
   std::vector<int> anchor_face_ids;         // OR raw B-rep face ids -> FIXTURE
   std::vector<JobLoadGroup> groups;         // distributed tractions
   std::vector<JobClearance> clearances;     // "Keep clear" keep-out regions
+  // Handoff 124 — Face protections (preserve-skin). Raw B-rep face ids whose OWN
+  // part material the optimizer may not touch; the core freezes the part-solid
+  // skin behind each to `face_protection_depth_mm` as FrozenSolid. ONE global
+  // depth governs all of them; <= 0 (or omitted) means "use the core default"
+  // (kFaceProtectionDepthDefaultMm). Empty => no protection => byte-identical.
+  std::vector<int> face_protection_face_ids;
+  double face_protection_depth_mm = -1.0;   // <= 0 => core default
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
   bool minimize_plastic = true;             // true = reduction ladder + pad

@@ -58,6 +58,24 @@ void log_clearance(int face_id, ClearanceKind kind, std::size_t voxels_frozen,
   sink(std::string(buf));
 }
 
+// Emit one Face-protection diagnostic line (handoff 124) through the same sink:
+// the face, how many part voxels it froze FrozenSolid, the depth (voxels) used,
+// and — the honest edge — whether the face's own solid was thinner than that
+// depth (so it froze what exists, no silent over-claim). A protection that tags no
+// solid voxels is flagged SKIP so the log surfaces the no-op rather than hiding it.
+void log_face_protection(int face_id, std::size_t voxels_frozen, int depth_voxels,
+                         bool thinner_than_depth) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  char buf[256];
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] face-protection face=%d voxels_frozen=%zu depth=%d %s%s",
+                face_id, voxels_frozen, depth_voxels,
+                voxels_frozen == 0 ? "SKIP=no-solid-tagged" : "status=ok",
+                thinner_than_depth ? " thinner-than-depth" : "");
+  sink(std::string(buf));
+}
+
 // Echo the warm-start decision through the same per-group sink (handoff 114), so
 // a device / CLI log confirms which start the shared builder chose and that BOTH
 // front-ends inherited it here — no separate wiring. `inherit` is the flip's
@@ -229,14 +247,55 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // (handoff 082: the whole-domain box default makes the import removable, so the
   // pad is needed there too). Only the reduction-ladder path pads; the single
   // conservative variant is left untouched.
-  if (lc.minimize_plastic) {
+  //
+  // Handoff 124 — Face protections share this ONE PART-grid FrozenSolid overlay:
+  // both the anchor/load pad and a protected face's preserved skin are keep-in
+  // (FrozenSolid) regions mask_step_face writes, and minimize_plastic merges the
+  // overlay into the effective mask (design-box path) or uses it directly (no-box).
+  // The pad is minimize_plastic-only (the {0.9} conservative variant keeps material
+  // anyway); a Face protection is the user's explicit request and is honored in
+  // BOTH modes. Built whenever there is something to freeze; with neither declared
+  // the overlay stays empty and the run is byte-identical (THE ONE RULE).
+  const bool want_pad = lc.minimize_plastic;
+  const bool want_protect = !lc.face_protection_face_ids.empty();
+  if (want_pad || want_protect) {
     DesignMask pad = make_active_mask(grid);
-    for (int fid : lc.anchor_face_ids)
-      mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
-                     kProductionAnchorPadDepthVoxels, pad);
-    for (int fid : retained_load_faces)
-      mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
-                     kProductionAnchorPadDepthVoxels, pad);
+    if (want_pad) {
+      for (int fid : lc.anchor_face_ids)
+        mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
+                       kProductionAnchorPadDepthVoxels, pad);
+      for (int fid : retained_load_faces)
+        mask_step_face(grid, model, fid, MaskValue::FrozenSolid,
+                       kProductionAnchorPadDepthVoxels, pad);
+    }
+    if (want_protect) {
+      // ONE global depth (mm) → voxel layers on THIS run's grid; floored at 1 so a
+      // protection always freezes a real skin. mask_step_face walks part-SOLID
+      // layers, so this NEVER frees void — it only pins existing part material.
+      const int depth_vox = std::max(
+          1, static_cast<int>(std::lround(lc.face_protection_depth_mm / grid.spacing)));
+      setup.face_protection_reports.reserve(lc.face_protection_face_ids.size());
+      for (int fid : lc.face_protection_face_ids) {
+        if (fid < 0 || fid >= model.face_count) continue;
+        // Freeze this face's skin into a PER-FACE mask so the report counts THIS
+        // face's frozen voxels (not ones an anchor pad or an earlier protection
+        // already froze — both are the same FrozenSolid value). Freeze once more a
+        // layer deeper: an equal count means the face's own solid was fully
+        // consumed at `depth_vox` (thinner than / equal to the requested depth) —
+        // the honest "freezes what exists and SAYS so" signal, no silent over-claim.
+        DesignMask one = make_active_mask(grid);
+        const std::size_t frozen = mask_step_face(
+            grid, model, fid, MaskValue::FrozenSolid, depth_vox, one);
+        DesignMask deeper = make_active_mask(grid);
+        const std::size_t frozen_deeper = mask_step_face(
+            grid, model, fid, MaskValue::FrozenSolid, depth_vox + 1, deeper);
+        for (std::size_t idx = 0; idx < pad.size(); ++idx)
+          if (one[idx] == MaskValue::FrozenSolid) pad[idx] = MaskValue::FrozenSolid;
+        const bool thin = frozen_deeper == frozen;
+        setup.face_protection_reports.push_back({fid, frozen, depth_vox, thin});
+        log_face_protection(fid, frozen, depth_vox, thin);
+      }
+    }
     opts.design_mask = std::move(pad);
   }
 

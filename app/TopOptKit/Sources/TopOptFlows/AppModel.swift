@@ -182,6 +182,7 @@ public final class AppModel: ObservableObject {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }
         let lc = project.loadCase()
+        let protections = project.faceProtectionSpecs()
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
@@ -193,6 +194,8 @@ public final class AppModel: ObservableObject {
                           designBox: project.designBox.bridgeBox,
                           keepOutBoxes: project.designBox.bridgeKeepOuts,
                           clearances: project.clearanceSpecs(),
+                          faceProtections: protections.faceIDs,
+                          faceProtectionDepthMM: protections.depthMM,
                           projectID: project.id)
     }
 

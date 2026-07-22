@@ -126,6 +126,17 @@ public enum KeepClearAffix: String, Equatable, Sendable, Codable {
     case suppressed
 }
 
+/// Face-protection (handoff 124) constants shared by the model + UI.
+public enum FaceProtection {
+    /// The default global preserve-depth (mm): ~2× the 2.5 mm min-feature size,
+    /// mirroring the core's `kFaceProtectionDepthDefaultMm`. Editable per project.
+    public static let defaultDepthMM = 5.0
+    /// Editable range for the global depth chip (mm) — at least one min-feature,
+    /// capped so a stray edit cannot freeze an unreasonable fraction of a part.
+    public static let minDepthMM = 1.0
+    public static let maxDepthMM = 50.0
+}
+
 /// Where an effectively-ON keep-clear came from, for the row's origin label.
 public enum KeepClearOrigin: Equatable, Sendable {
     /// Derived from the anchored-bore rule (shown "Auto"); user can toggle it off.
@@ -205,6 +216,21 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// project with every group synced (the default) carries none and the on-disk format + wire
     /// are byte-identical to before round 4.
     private var clearanceBoreOverrides: [String: ClearanceOverride]? = nil
+
+    /// Per-group "Protect" attribute (handoff 124 — Face protection / preserve-skin).
+    /// A protected group's faces have their OWN part-solid skin frozen so the
+    /// optimizer may not touch them (FrozenSolid — the opposite polarity of a
+    /// keep-clear FrozenVoid). PURELY EXPLICIT (no auto rule like keep-clear's
+    /// anchored-bore default): only groups the user marked Protect are stored, so a
+    /// project with no protection carries none and the on-disk format + wire are
+    /// byte-identical to before this handoff. `true` = protected; absence = not.
+    private var faceProtect: [UUID: Bool]? = nil
+
+    /// The ONE GLOBAL preserve-depth (mm) governing EVERY Face protection in the
+    /// project — a single editable number shown once (design 124). The default is
+    /// ~2× the min-feature size; the core reads it and floors the derived voxel
+    /// depth at 1. Persisted so it round-trips; harmless when no face is protected.
+    public var faceProtectDepthMM: Double = FaceProtection.defaultDepthMM
 
     public init() {}
 
@@ -306,6 +332,39 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// not block Optimize the way a bare pending group does).
     public func isKeepClearOnly(_ id: UUID) -> Bool {
         kind(for: id).isPending && keepClear?[id] == .on
+    }
+
+    // MARK: - Protect attribute (handoff 124 — Face protection / preserve-skin)
+
+    /// Whether the user has affixed "Protect" to a group (its faces' own skin is
+    /// preserved FrozenSolid). Purely explicit — absence means not protected.
+    public func isProtected(_ id: UUID) -> Bool { faceProtect?[id] == true }
+
+    /// Affix / remove "Protect" on a group. Only ON entries are stored, so removing
+    /// it (or setting a group that was never protected) keeps the map minimal and a
+    /// protection-free project byte-identical on disk + wire.
+    public mutating func setProtected(_ id: UUID, _ on: Bool) {
+        var map = faceProtect ?? [:]
+        if on { map[id] = true } else { map[id] = nil }
+        faceProtect = map.isEmpty ? nil : map
+    }
+
+    /// Groups the user has affixed "Protect" to.
+    public func protectedGroups(in groups: [SelectionGroup]) -> [SelectionGroup] {
+        groups.filter { faceProtect?[$0.id] == true }
+    }
+
+    /// How many groups carry a Protect affix (drives the "≥ 1 protection → show the
+    /// global depth chip" gate).
+    public func explicitProtectCount(in groups: [SelectionGroup]) -> Int {
+        groups.filter { faceProtect?[$0.id] == true }.count
+    }
+
+    /// Whether a group is a protect-ONLY selection: no anchor/load role, but the
+    /// Protect attribute affixed. Like a keep-clear-only group it is a COMPLETE
+    /// declaration and does not block Optimize the way a bare pending group does.
+    public func isProtectOnly(_ id: UUID) -> Bool {
+        kind(for: id).isPending && faceProtect?[id] == true
     }
 
     // MARK: - clearance overrides (handoff 100)
@@ -430,6 +489,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
         kinds[id] = nil
         if var map = clearanceOverrides { map[id] = nil; clearanceOverrides = map.isEmpty ? nil : map }
         if var map = keepClear { map[id] = nil; keepClear = map.isEmpty ? nil : map }
+        if var map = faceProtect { map[id] = nil; faceProtect = map.isEmpty ? nil : map }
         if var set = syncExcluded { set.remove(id); syncExcluded = set.isEmpty ? nil : set }
         pruneBoreOverrides { $0 != id }
     }
@@ -456,6 +516,10 @@ public struct ForceModel: Equatable, Sendable, Codable {
         if let map = keepClear {
             let pruned = map.filter { live.contains($0.key) }
             keepClear = pruned.isEmpty ? nil : pruned
+        }
+        if let map = faceProtect {
+            let pruned = map.filter { live.contains($0.key) }
+            faceProtect = pruned.isEmpty ? nil : pruned
         }
         if let set = syncExcluded {
             let pruned = set.intersection(live)
@@ -549,10 +613,12 @@ public struct ForceModel: Equatable, Sendable, Codable {
         groups.filter { kind(for: $0.id).isLoad }.count
     }
     /// Any group still awaiting a decision: a bare pending group with NO keep-clear
-    /// affix (a keep-clear-only selection is a complete declaration and never blocks
-    /// Optimize — keep-clear v2).
+    /// affix AND no Protect affix (a keep-clear-only OR protect-only selection is a
+    /// complete declaration and never blocks Optimize — keep-clear v2 / handoff 124).
     public func hasPending(in groups: [SelectionGroup]) -> Bool {
-        groups.contains { kind(for: $0.id).isPending && !isKeepClearOnly($0.id) }
+        groups.contains {
+            kind(for: $0.id).isPending && !isKeepClearOnly($0.id) && !isProtectOnly($0.id)
+        }
     }
     /// Total load weight across all load groups, in kgf.
     public func totalLoadKg(in groups: [SelectionGroup]) -> Double {
@@ -599,8 +665,12 @@ public struct ForceModel: Equatable, Sendable, Codable {
         case let .load(direction, kg): return "\(formattedWeight(kg: kg)) · \(direction.rawValue)"
         case .clearance: return "Keep clear"  // legacy value; migrated away on decode
         case .pending:
-            // A keep-clear-only selection reads as "Keep clear", not "Pending…".
-            return keepClear?[id] == .on ? "Keep clear" : "Pending…"
+            // A keep-clear-only or protect-only selection reads as its attribute,
+            // not "Pending…" (both are complete declarations). Keep clear (forbid)
+            // takes label precedence when a group somehow carries both.
+            if keepClear?[id] == .on { return "Keep clear" }
+            if faceProtect?[id] == true { return "Protect" }
+            return "Pending…"
         }
     }
 
@@ -621,6 +691,8 @@ extension ForceModel {
         case syncClearances         // LEGACY (109 global toggle) — decoded-and-dropped for back-compat
         case syncExcluded           // per-GROUP sync flag exclusions (round 3 → round 4 scope)
         case clearanceBoreOverrides // per-bore overrides for unsynced groups (round 4, item 3)
+        case faceProtect            // per-group Protect affix (handoff 124, optional)
+        case faceProtectDepthMM     // ONE global preserve-depth in mm (handoff 124, optional)
     }
 
     public init(from decoder: Decoder) throws {
@@ -651,6 +723,11 @@ extension ForceModel {
         }
         kinds = decodedKinds
         keepClear = affixes.isEmpty ? nil : affixes
+        // Handoff 124 — Face protections (optional keys). Absent in pre-124 snapshots
+        // → no protection + the default global depth, so old projects round-trip.
+        faceProtect = try c.decodeIfPresent([UUID: Bool].self, forKey: .faceProtect)
+        faceProtectDepthMM = try c.decodeIfPresent(Double.self, forKey: .faceProtectDepthMM)
+            ?? FaceProtection.defaultDepthMM
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -664,5 +741,11 @@ extension ForceModel {
         try c.encodeIfPresent(syncExcluded, forKey: .syncExcluded)
         try c.encodeIfPresent(clearanceBoreOverrides, forKey: .clearanceBoreOverrides)
         try c.encodeIfPresent(keepClear, forKey: .keepClear)
+        // Handoff 124 — only emit protection state when it deviates from the default,
+        // so a protection-free project's snapshot is byte-identical to a pre-124 one.
+        try c.encodeIfPresent(faceProtect, forKey: .faceProtect)
+        if faceProtectDepthMM != FaceProtection.defaultDepthMM {
+            try c.encode(faceProtectDepthMM, forKey: .faceProtectDepthMM)
+        }
     }
 }

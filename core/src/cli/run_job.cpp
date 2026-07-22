@@ -271,6 +271,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (jc.slab_depth_mm > 0.0) c.params.slab_depth_mm = jc.slab_depth_mm;
       lc.clearances.push_back(c);
     }
+    // Face protections (handoff 124): the raw face ids + the ONE global depth.
+    // A depth <= 0 in the job means "use the core default"; leave the
+    // ProductionLoadCase field at its default so the builder derives voxels from
+    // kFaceProtectionDepthDefaultMm. Empty list => byte-identical.
+    lc.face_protection_face_ids = job.loads.face_protection_face_ids;
+    if (job.loads.face_protection_depth_mm > 0.0)
+      lc.face_protection_depth_mm = job.loads.face_protection_depth_mm;
     lc.minimize_plastic = job.loads.minimize_plastic;
     lc.build_dir = job.loads.build_dir;
     lc.infill_percent = job.loads.infill_percent;

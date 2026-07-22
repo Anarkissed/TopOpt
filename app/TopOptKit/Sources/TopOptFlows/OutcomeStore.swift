@@ -58,6 +58,17 @@ enum OutcomeCodec {
         let inGrid: Bool
     }
 
+    // Handoff 124's per-face Face-protection outcome, mirrored for persistence so a
+    // reopened run keeps its honest protection notes (ResultsModel.faceProtectionNotes)
+    // — the same honesty-round-trip discipline as AppliedClearanceDTO, so a restored
+    // outcome never silently drops what was preserved.
+    struct AppliedFaceProtectionDTO: Codable, Sendable {
+        let faceID: Int
+        let voxelsFrozen: Int
+        let depthVoxels: Int
+        let thinnerThanDepth: Bool
+    }
+
     struct OutcomeDTO: Codable, Sendable {
         let variants: [VariantDTO]
         let stoppedOnMargin, cancelled: Bool
@@ -78,6 +89,9 @@ enum OutcomeCodec {
         // no clearance notes), rather than failing the whole outcome. Empty when no
         // "Keep clear" clearance was declared.
         let appliedClearances: [AppliedClearanceDTO]?
+        // Handoff 124 — same optional discipline: nil on pre-124 blobs (→ no
+        // protection notes), empty when no Face protection was declared.
+        let appliedFaceProtections: [AppliedFaceProtectionDTO]?
     }
 
     // MARK: OptimizeOutcome → DTO (cheap: array→Data is a memcpy)
@@ -115,7 +129,11 @@ enum OutcomeCodec {
             computedRemotely: o.computedRemotely,
             appliedClearances: o.appliedClearances.map {
                 AppliedClearanceDTO(faceID: $0.faceID, kind: $0.kind.rawValue,
-                                    voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) })
+                                    voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) },
+            appliedFaceProtections: o.appliedFaceProtections.map {
+                AppliedFaceProtectionDTO(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
+                                         depthVoxels: $0.depthVoxels,
+                                         thinnerThanDepth: $0.thinnerThanDepth) })
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -154,7 +172,11 @@ enum OutcomeCodec {
             appliedClearances: (d.appliedClearances ?? []).map {
                 AppliedClearance(faceID: $0.faceID,
                                  kind: TopOptKit.ClearanceKind(rawValue: $0.kind) ?? .face,
-                                 voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) })
+                                 voxelsFrozen: $0.voxelsFrozen, inGrid: $0.inGrid) },
+            appliedFaceProtections: (d.appliedFaceProtections ?? []).map {
+                AppliedFaceProtection(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
+                                      depthVoxels: $0.depthVoxels,
+                                      thinnerThanDepth: $0.thinnerThanDepth) })
     }
 
     // MARK: Encode / decode (binary plist)

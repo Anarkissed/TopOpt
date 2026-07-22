@@ -25,6 +25,17 @@ namespace topopt {
 // here with the shared builder so the app and the CLI use the identical depth.
 inline constexpr int kProductionAnchorPadDepthVoxels = 3;
 
+// Handoff 124 — the ONE GLOBAL depth (mm) that governs EVERY Face protection in a
+// project unless the front-end overrides it. A Face protection means "the
+// optimizer may not TOUCH this face": it freezes the part's OWN material solid
+// behind the selected face to this depth (FrozenSolid preservation — the opposite
+// polarity of a keep-clear FrozenVoid). The default is ~2× the 2.5mm min-feature
+// size: deep enough to keep a real skin, shallow enough not to pin a large
+// fraction of a small part. The app shows ONE editable number; the CLI reads
+// "face_protection_depth_mm". Converted to a voxel-layer count against the run's
+// grid spacing (rounded, floored at 1) so a protection always freezes ≥ 1 layer.
+inline constexpr double kFaceProtectionDepthDefaultMm = 5.0;
+
 // A front-end-neutral description of the user's declared load case (ARCHITECTURE
 // §1 mode (a)). The iPad app maps its BridgeLoadCase to this; topopt-cli maps its
 // job.json to this; both then call build_production_loadcase, so the SAME STEP +
@@ -80,6 +91,21 @@ struct ProductionLoadCase {
     ClearanceParams params;  // kind (Bolt/Face) + the editable mm distances
   };
   std::vector<Clearance> clearances;
+
+  // Handoff 124 — Face protections (preserve-skin). Each id is a B-rep face whose
+  // OWN part material the optimizer may not touch: build_production_loadcase walks
+  // the part-solid layers behind the face (mask_step_face, the SAME primitive the
+  // anchor pad uses) to `face_protection_depth_mm` and pins them FrozenSolid,
+  // footprint-only — ONLY the selected face's own solid, never surrounding void.
+  // This is the OPPOSITE polarity of a keep-clear (which voids space in FRONT of a
+  // face): a protection NEVER frees void, it only freezes EXISTING part solid, so
+  // the handoff-100 part-membership precedence runs in reverse — a protection
+  // overlapping a clearance margin keeps the part solid (FrozenSolid wins over
+  // FrozenVoid; see the merge in minimize_plastic). ONE global depth governs ALL
+  // protections. Empty (the default) → no protection → byte-identical to the run
+  // before this handoff (THE ONE RULE).
+  std::vector<int> face_protection_face_ids;
+  double face_protection_depth_mm = kFaceProtectionDepthDefaultMm;
 };
 
 // Permanent per-load-group instrumentation (handoff 099, small-face load loss).
@@ -132,6 +158,22 @@ struct ProductionRunSetup {
     bool in_grid = false;           // the region intersected the solved grid
   };
   std::vector<ClearanceReport> clearance_reports;
+
+  // Handoff 124 — what each declared Face protection actually froze, so a
+  // front-end reports HONESTLY (no silent over-claim): which face, how many part
+  // voxels it pinned FrozenSolid, the depth (in voxels) it used, and — the honest
+  // edge — whether the face's own solid was THINNER than that depth (so the
+  // protection froze what exists, not a full `depth` layers everywhere). `frozen`
+  // is the real footprint×depth intersected with the part solid, deduped against
+  // itself; a protection whose face tags no solid voxels reports frozen == 0.
+  // Numbers shown to the user are these numbers. Empty when none was declared.
+  struct FaceProtectionReport {
+    int face_id = -1;
+    std::size_t voxels_frozen = 0;   // part voxels this protection set FrozenSolid
+    int depth_voxels = 0;            // the depth (layers) used on this run's grid
+    bool thinner_than_depth = false; // the face's solid was shallower than depth
+  };
+  std::vector<FaceProtectionReport> face_protection_reports;
 };
 
 // Build the production run setup for `lc` from the imported `model`, voxelized at

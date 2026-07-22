@@ -593,6 +593,19 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME designbox_anchor_pad COMMAND test_designbox_anchor_pad)
 
+  # Face protection (handoff 124 — preserve-skin): a FrozenSolid design_mask over a
+  # selected face's own skin is RETAINED solid under an aggressive ladder while the
+  # unprotected twin skin erodes (survival vs erosion, would-fail-against-a-stub);
+  # FrozenSolid WINS over an overlapping FrozenVoid clearance (precedence, the real
+  # minimize_plastic merge); and a FIRED conditional-projection gate (handoff 123)
+  # does not thin the frozen skin. Drives minimize_plastic, so Eigen-gated; the real
+  # settings rule table is injected.
+  add_executable(test_face_protection tests/validation/test_face_protection.cpp)
+  target_link_libraries(test_face_protection PRIVATE topopt)
+  target_compile_definitions(test_face_protection PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME face_protection COMMAND test_face_protection)
+
   # Design-box coarsening alignment (design-box on-device fix): expand_design_domain
   # rounds the expanded element dims UP to a multiple of 8 with Empty high-side
   # padding so the geometric-multigrid hierarchy can coarsen (an odd axis otherwise
@@ -824,6 +837,20 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME clearance_parity COMMAND test_clearance_parity)
+
+  # Face-protection parity + builder contract (handoff 124): on the SAME shared
+  # seam, an empty protection list is byte-identical to the pre-124 path (THE ONE
+  # RULE), a declared protection freezes the face's own skin FrozenSolid and
+  # reports it honestly (which face, voxels frozen, depth in voxels), and a depth
+  # exceeding the face's solid thickness freezes what exists and SAYS so
+  # (thinner_than_depth, bounded by the part). Drives OCCT (STEP) + Eigen.
+  add_executable(test_face_protection_parity tests/validation/test_face_protection_parity.cpp)
+  target_link_libraries(test_face_protection_parity PRIVATE topopt)
+  target_compile_definitions(test_face_protection_parity PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME face_protection_parity COMMAND test_face_protection_parity)
 
   # Small-face load loss (handoff 099): a load face smaller than a voxel footprint
   # at a coarse resolution tags ZERO voxels, so build_production_loadcase skips the

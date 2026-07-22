@@ -255,6 +255,21 @@ struct OptimizeResult {
   std::vector<int32_t> clearance_kinds;
   std::vector<int32_t> clearance_voxels_frozen;
   std::vector<uint8_t> clearance_in_grid;
+
+  // Handoff 124 — what each declared Face protection actually froze, so the results
+  // screen states HONESTLY that preservation was applied and to which faces (the
+  // applied-clearances card pattern, opposite polarity). One entry per protection
+  // (in BridgeLoadCase order):
+  //   protection_face_ids[p]       the B-rep face whose skin was preserved
+  //   protection_voxels_frozen[p]  part voxels pinned FrozenSolid behind it
+  //   protection_depth_voxels[p]   the depth (layers) used on the run's grid
+  //   protection_thinner[p]        1 iff the face's own solid was thinner than the
+  //                                depth (froze what exists — no silent over-claim)
+  // Empty when no protection was declared.
+  std::vector<int32_t> protection_face_ids;
+  std::vector<int32_t> protection_voxels_frozen;
+  std::vector<int32_t> protection_depth_voxels;
+  std::vector<uint8_t> protection_thinner;
 };
 
 // Progressive results: invoked once per ACCEPTED variant as it completes (before
@@ -360,6 +375,16 @@ struct BridgeLoadCase {
   std::vector<double> clearance_margin_mm;
   std::vector<double> clearance_axial_mm;
   std::vector<double> clearance_slab_mm;
+
+  // Handoff 124 — Face protections (preserve-skin), flattened POD. Each id is a
+  // B-rep face whose OWN material the optimizer may not touch: the core freezes the
+  // part-solid skin behind it FrozenSolid (footprint-only, never frees void — the
+  // opposite polarity of a keep-clear). ONE global depth (mm) governs all of them;
+  // `face_protection_depth_mm <= 0` means "use the core default". Empty (the
+  // default) → no protection → byte-identical to today. Independent of
+  // has_design_box: a protection preserves a face's skin on any run.
+  std::vector<int32_t> face_protection_face_ids;
+  double face_protection_depth_mm = -1.0;  // <= 0 => core default
 };
 
 // Voxelize the STEP part once, tag the anchor faces Fixture (clamped) and each
