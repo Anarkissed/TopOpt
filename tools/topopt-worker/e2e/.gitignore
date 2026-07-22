@@ -4,3 +4,7 @@
 .worker-*.log
 .proxy-*.log
 .proxy-reqs-*.log
+.qe2e-work-*/
+.qe2e-bind-*/
+.qe2e-id-*/
+__pycache__/

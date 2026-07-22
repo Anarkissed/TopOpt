@@ -36,6 +36,13 @@ Options (all have env fallbacks): `--cli`/`TOPOPT_CLI`, `--workdir`/
 `TOPOPT_WEBHOOK_URL`. `--materials`/`--rules` are optional — omit them to use the
 values compiled into `topopt-cli`.
 
+On start the worker prints **one identity line** (handoff 124) naming its version,
+the core `fingerprint` it serves, and its workdir, e.g.
+`topopt-worker 1.1.0  ·  core b9d0a2fb03e4  ·  workdir ~/.topopt-worker` — so a
+supervisor log answers "which worker is this?" without archaeology. If the port is
+already taken it prints `port 8757 in use — is another worker already running?
+(lsof -i :8757)` and exits `1` (no traceback).
+
 ## Job queue (handoff 121)
 
 The worker is **human-facing**: more than one job can be submitted. Because solves
@@ -126,7 +133,7 @@ shared-secret header is a small change if the network is not trusted.
 | Method | Path | Purpose |
 |--------|------|---------|
 | `POST` | `/jobs` | multipart `step` (STEP/STL file) + `job` (job.json). **Enqueues** a `topopt-cli` run. An optional `project` multipart field (or a `project` key in job.json) names it for the job list. → `{"job_id": "..."}` |
-| `GET`  | `/jobs` | **list every known job** (handoff 121): `{jobs:[{id, project, state, paused, rung, rungs, iter, position, created_at, started_at, finished_at}], max_concurrency, running, queued}`. The menu app + iPad read this instead of inferring from one stream. |
+| `GET`  | `/jobs` | **list every known job** (handoff 121): `{jobs:[{id, project, state, paused, rung, rungs, iter, variants, position, created_at, started_at, finished_at}], max_concurrency, running, queued}`. `variants` (handoff 124) is the count of accepted variant meshes so far, for the menu app's History. The menu app + iPad read this instead of inferring from one stream. |
 | `GET`  | `/jobs/{id}` | one job's row (plus a `status` alias of `state` for the pre-121 liveness probe). |
 | `GET`  | `/jobs/{id}/events` | Server-Sent Events: `queued`, `progress`, `variant`, `log`, `done`, `error`, `cancelled`. Replays from the start on connect. |
 | `GET`  | `/jobs/{id}/result` | `application/zip` of the job's output directory (report + meshes). |

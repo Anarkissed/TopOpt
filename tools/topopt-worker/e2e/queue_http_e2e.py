@@ -147,9 +147,10 @@ def normalize_jobs(doc, id_map):
         # Timestamps: keep only presence (a float) vs absence (null).
         for k in ("created_at", "started_at", "finished_at"):
             r[k] = "<ts>" if isinstance(r[k], (int, float)) else None
-        # A running job's live iter/rung is timing-dependent — keep only presence.
+        # A running job's live iter/rung/variants is timing-dependent — keep presence.
         for k in ("rung", "rungs", "iter"):
             r[k] = "<n>" if isinstance(r[k], int) else None
+        r["variants"] = "<n>" if isinstance(r.get("variants"), int) else None
         out["jobs"].append(r)
     return out
 
@@ -176,10 +177,12 @@ def test_jobs_golden_and_queue():
         golden = {
             "jobs": [
                 {"id": "A", "project": "Runner", "state": "running", "paused": False,
-                 "rung": "<n>", "rungs": "<n>", "iter": "<n>", "position": None,
+                 "rung": "<n>", "rungs": "<n>", "iter": "<n>", "variants": "<n>",
+                 "position": None,
                  "created_at": "<ts>", "started_at": "<ts>", "finished_at": None},
                 {"id": "B", "project": "Waiter", "state": "queued", "paused": False,
-                 "rung": None, "rungs": None, "iter": None, "position": 1,
+                 "rung": None, "rungs": None, "iter": None, "variants": "<n>",
+                 "position": 1,
                  "created_at": "<ts>", "started_at": None, "finished_at": None},
             ],
             "max_concurrency": 1, "running": 1, "queued": 1,
@@ -272,6 +275,105 @@ def test_pause_resume_freezes_progress():
         proc.terminate()
 
 
+def test_name_roundtrip_and_progress():
+    """Handoff 124, item 2 + item 1 evidence. A submitted project name survives the
+    app→worker POST→parse→/jobs round-trip; a job with NO name is reported as a null
+    project (the worker never fabricates one — the menu supplies the id fallback);
+    and a running job exposes live integer rung/rungs/iter in /jobs (the telemetry
+    the menu row renders)."""
+    port = free_port()
+    proc = start_worker(port, mode="slow", gap=0.2)  # runs long enough to observe
+    try:
+        if not wait_health(port):
+            check(False, "worker (name round-trip) came up"); return
+
+        named = submit(port, project="L-Bracket v3")
+        # Wait until it is running with a real progress tick.
+        doc = {}
+        for _ in range(50):
+            st, doc = get_json(port, "/jobs/%s" % named)
+            if doc.get("state") == "running" and doc.get("iter") is not None:
+                break
+            time.sleep(0.1)
+        check(doc.get("project") == "L-Bracket v3",
+              "the project name survives POST→parse→/jobs (%r)" % doc.get("project"))
+        check(isinstance(doc.get("iter"), int) and isinstance(doc.get("rungs"), int),
+              "a running job reports live integer rung/rungs/iter (rung=%s rungs=%s iter=%s)"
+              % (doc.get("rung"), doc.get("rungs"), doc.get("iter")))
+
+        # A job submitted with NO project → the worker reports project == null and
+        # does NOT invent a name. (The menu turns null into the job-id short form; it
+        # must never show "Untitled".) It queues behind the runner at concurrency 1.
+        anon = submit(port)  # no project
+        time.sleep(0.3)
+        st, adoc = get_json(port, "/jobs/%s" % anon)
+        check(adoc.get("project") is None,
+              "a no-name job reports project == null, not a fabricated string (%r)"
+              % adoc.get("project"))
+    finally:
+        proc.terminate()
+
+
+def test_bind_failure_is_courteous():
+    """Handoff 124, item 3. A second worker on an in-use port prints one actionable
+    line (naming the port + the lsof command) and exits non-zero — NOT a naked
+    traceback."""
+    port = free_port()
+    first = start_worker(port, mode="normal", gap=0.1)
+    try:
+        if not wait_health(port):
+            check(False, "first worker (bind) came up"); return
+        # Second worker, same port — capture its output and exit code.
+        env = dict(os.environ)
+        env["TOPOPT_CLI"] = STUB
+        second = subprocess.run(
+            [sys.executable, WORKER, "--host", "127.0.0.1", "--port", str(port),
+             "--cli", STUB, "--workdir", os.path.join(HERE, ".qe2e-bind-%d" % port)],
+            env=env, capture_output=True, text=True, timeout=20)
+        out = (second.stdout or "") + (second.stderr or "")
+        check(second.returncode == 1,
+              "the port-clash worker exits with code 1 (got %d)" % second.returncode)
+        check("in use" in out and ("lsof -i :%d" % port) in out,
+              "it prints the port-in-use + lsof hint (%r)" % out.strip().splitlines()[-1:])
+        check("Traceback" not in out,
+              "it does NOT print a raw Python traceback")
+    finally:
+        first.terminate()
+
+
+def test_startup_identity_line():
+    """Handoff 124, item 4. The worker prints ONE startup line naming its version,
+    the core fingerprint it serves, and its workdir — so a supervisor log answers
+    "which worker is this?" without archaeology."""
+    port = free_port()
+    workdir = os.path.join(HERE, ".qe2e-id-%d" % port)
+    proc = start_worker(port, mode="normal", gap=0.1,
+                        extra_env={"TOPOPT_STUB_FINGERPRINT": "cafef00d1234",
+                                   "TOPOPT_WORKER_DIR": workdir})
+    try:
+        if not wait_health(port):
+            check(False, "worker (identity) came up"); return
+        # Read a few startup lines from the captured stdout.
+        lines = []
+        for _ in range(6):
+            line = proc.stdout.readline()
+            if not line:
+                break
+            lines.append(line)
+            if line.startswith("topopt-worker "):
+                break
+        ident = next((l for l in lines if l.startswith("topopt-worker ")), "")
+        check("cafef00d1234" in ident and workdir in ident and WORKER_VERSION_HINT in ident,
+              "startup identity line names version+fingerprint+workdir (%r)" % ident.strip())
+    finally:
+        proc.terminate()
+
+
+# The worker version string, mirrored here only to assert it appears in the identity
+# line (the worker is the source of truth; this is a loose contains-check).
+WORKER_VERSION_HINT = "1.1.0"
+
+
 def main():
     print("== (1) GET /jobs golden + queue + reorder + queued-cancel ==")
     test_jobs_golden_and_queue()
@@ -279,13 +381,20 @@ def main():
     test_webhook_fires_on_completion()
     print("\n== (3) pause/resume freezes compute (SIGSTOP/SIGCONT) ==")
     test_pause_resume_freezes_progress()
+    print("\n== (4) project-name round-trip + live progress in /jobs (124 item 1+2) ==")
+    test_name_roundtrip_and_progress()
+    print("\n== (5) port-in-use is courteous, not a traceback (124 item 3) ==")
+    test_bind_failure_is_courteous()
+    print("\n== (6) startup identity line (124 item 4) ==")
+    test_startup_identity_line()
     print()
     if FAILS:
         print("FAILED: %d check(s)" % len(FAILS))
         for m in FAILS:
             print("   - " + m)
         sys.exit(1)
-    print("OK: /jobs golden, queue, reorder, queued-cancel, and webhook all verified.")
+    print("OK: /jobs golden, queue, reorder, queued-cancel, webhook, name round-trip, "
+          "live progress, port-in-use courtesy, and startup identity all verified.")
 
 
 if __name__ == "__main__":

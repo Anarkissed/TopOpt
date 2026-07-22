@@ -579,6 +579,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                        "mesh_prefix": "variant",
                        "smooth_factor": Self.smoothExportFactor],
         ]
+        // The human-facing project name for the worker's job list + completion
+        // notifications (handoff 124, item 2). Without this the worker never learns
+        // the name and every remote job reads as an anonymous id on the Mac's menu.
+        // The worker reads a top-level `project` key (topopt_worker _create_job).
+        let projectName = request.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !projectName.isEmpty { job["project"] = projectName }
         if let box = request.designBox {
             job["design_box"] = ["min": [box.min.x, box.min.y, box.min.z],
                                  "max": [box.max.x, box.max.y, box.max.z]]
