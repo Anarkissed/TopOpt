@@ -475,7 +475,7 @@ public typealias RunWatchdogCancel = () -> Void
 /// ever trips a genuine stall, never a slow-but-healthy run.
 public struct TimerRunWatchdog: RunWatchdog {
     public let graceSeconds: Double
-    public init(graceSeconds: Double = 150) { self.graceSeconds = graceSeconds }
+    public init(graceSeconds: Double = 1800) { self.graceSeconds = graceSeconds }
     public func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel {
         let work = DispatchWorkItem(block: onStall)
         DispatchQueue.main.asyncAfter(deadline: .now() + graceSeconds, execute: work)
