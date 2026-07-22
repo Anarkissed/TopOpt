@@ -347,12 +347,33 @@ enum class SimpUpdater { OC, MMA };
 // deliberately small (default 0.05) so high-volume-fraction rungs, whose total
 // optimization gain is smaller, still clear it.
 //
+// FLATNESS ESCAPE (handoff 128), guarded, `min_flat_windows > 0`. Some real runs
+// live in a regime the gate never anticipated: the objective is flat almost from
+// the start (a thin part + a large frozen region leave little compliance to
+// remove — and/or a stagnating solver reports a genuinely flat objective), so the
+// TOTAL descent from c[0] never reaches `min_drop`, the gate never opens, and the
+// run cap-walks for hours doing nothing (measured: 125). The escape lets a plateau
+// fire on FLATNESS ALONE — bypassing the min_drop gate — but ONLY once the
+// running minimum has been essentially flat (sub-`rel_tol` improvement) across the
+// last `min_flat_windows * window` samples, i.e. for at least that many full
+// windows. It is gated on flatness, NEVER on a bare iteration count, so it cannot
+// fire in the spike-heavy forming phase the gate exists to survive: there the
+// running minimum is still descending (or pinned by spikes above it, then
+// dropping), so a multi-window flat stretch has not yet occurred. Because the
+// flat-window test is strictly stronger than the single-window test the predicate
+// already applies, the escape can NEVER fire earlier than the gated detector would
+// once the gate is open — it only ADDS firing in the gate-never-opens + long-flat
+// case. `min_flat_windows <= 0` disables the escape (the exact pre-128 behavior);
+// it is also inert whenever `min_drop <= 0` (no gate to bypass). The 086 forming-
+// phase fixtures are unchanged by it (verified in the unit test).
+//
 // Returns false until at least `window + 1` samples exist, whenever
-// `window <= 0` (plateau disabled), and until the progress gate opens.
-// Compliance entries are expected > 0; a non-positive running-minimum baseline
-// returns false (cannot form a ratio).
+// `window <= 0` (plateau disabled), and until the progress gate opens (or the
+// flatness escape fires). Compliance entries are expected > 0; a non-positive
+// running-minimum baseline returns false (cannot form a ratio).
 bool mma_objective_plateau(const std::vector<double>& compliance_history,
-                           int window, double rel_tol, double min_drop);
+                           int window, double rel_tol, double min_drop,
+                           int min_flat_windows = 0);
 
 // Whether a Heaviside projection schedule may be applied for `updater`. TEMPORARY
 // (Option B): projection is compatible ONLY with OC — the projected chain is the
@@ -405,6 +426,14 @@ struct SimpIterationObservation {
   int cg_iterations = 0;         // CG iters of this step's penalized solve (c.cg)
   bool cg_used_multigrid = false;  // whether MG-CG ran vs Jacobi-CG fallback
   int cg_mg_levels = 0;          // MG hierarchy depth this step (0 = Jacobi fallback)
+  // Fallback-mode diagnostics (handoff 128), forwarded from CgInfo. Make
+  // build-rejection vs stagnation a direct per-solve read (125 §0): when
+  // cg_used_multigrid is false, cg_hier_built==true means the hierarchy BUILT but
+  // the V-cycle STAGNATED (stagnation), ==false means it never coarsened
+  // (build-rejection) or the 127 latch skipped the build. cg_mg_cycles_attempted
+  // is the V-cycles this solve burned before carrying or bailing (0 = no build).
+  bool cg_hier_built = false;
+  int cg_mg_cycles_attempted = 0;
   // The MMA objective-plateau detector's verdict AT this iteration (the exact
   // predicate stage_should_stop consults for MMA — see mma_objective_plateau).
   // False for the OC / projected path (plateau termination is MMA-only) and until
@@ -447,6 +476,23 @@ struct SimpOptions {
   double change_tol = 0.01;      // OC/projected stop: max_e |x_new - x| < change_tol
   double cg_tolerance = 1e-8;    // penalized-FEA CG tolerance (tight: §V2 gate)
   int cg_max_iterations = 0;     // 0 -> Eigen CG default (2 * n_dof)
+  // Adaptive early CG tolerance (handoff 128), OPT-IN, default 0 = DISABLED (every
+  // solve uses the tight `cg_tolerance`, byte-identical to pre-128). When set to a
+  // LOOSE value (e.g. 1e-3 > cg_tolerance), the INTERIOR / trajectory penalized
+  // solves solve only to a tolerance interpolated between this loose value and the
+  // tight `cg_tolerance`, on a deterministic schedule keyed to the design's recent
+  // motion: while the design is still moving a lot the sensitivities feed a step
+  // that will be overwritten, so an approximate solve suffices (fewer CG iters);
+  // as the design settles (max|Δρ| → 0) the tolerance tightens back toward
+  // `cg_tolerance` so the near-optimal trajectory is resolved accurately. This is
+  // the inexact-optimization idea and it is TRAJECTORY-ONLY: the ACCEPT / FINAL
+  // compliance solve (the certified number) ALWAYS uses the tight `cg_tolerance`,
+  // so the certificate is untouched (the 110 warm-start precedent — trajectory
+  // changes, certified output does not). It cuts the per-solve CG count most in the
+  // stagnation regime (125), where MG has latched off and every trajectory solve is
+  // an expensive cold Jacobi-CG grind. Must be > cg_tolerance to have any effect;
+  // a value <= cg_tolerance (or 0) leaves the tight tolerance everywhere.
+  double cg_tolerance_loose = 0.0;
 
   // Objective-plateau termination for the MMA path (handoff 086-mma-plateau).
   //
@@ -487,6 +533,16 @@ struct SimpOptions {
   // immediately and keeps a near-uniform design (measured). Small so high-vf
   // rungs still clear it.
   double mma_plateau_min_drop = 0.05;
+  // Flatness-escape width (handoff 128; see mma_objective_plateau). When the
+  // min_drop gate never opens — a run whose objective is flat almost from the
+  // start, which otherwise cap-walks for hours (125) — a plateau may still fire
+  // once the running minimum has been flat (sub-tol) for this many FULL windows.
+  // Gated on flatness, never a bare iteration count, so the 086 forming-phase
+  // fixtures are unaffected. Default 3 (fire after ~3 windows of proven flatness);
+  // 0 disables the escape (exact pre-128 behavior). Only consulted on the MMA path
+  // and only when the gate is closed, so healthy runs (real descent > min_drop)
+  // never reach it and are byte-identical.
+  int mma_plateau_flat_windows = 3;
 
   // Heaviside projection + beta continuation (M6.3). EMPTY (the default)
   // disables projection entirely: the loop is the unchanged M3.4 formulation

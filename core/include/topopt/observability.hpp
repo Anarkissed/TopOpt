@@ -41,7 +41,8 @@ float half_to_float(std::uint16_t half);
 //
 // The schema (documented here, in the handoff, and pinned by the golden test):
 //
-//   rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta
+//   rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta,
+//   hier_built,mg_cycles_attempted
 //
 //   rung          0-based ladder index
 //   iter          1-based iteration within the rung (monotone; a conditional
@@ -59,6 +60,14 @@ float half_to_float(std::uint16_t half);
 //                 conditional run's grayscale phase before the gate fires), else
 //                 the stage β (1/2/4/…). The iter beta first reads > 0 is where
 //                 conditional projection FIRED for that rung.
+//   hier_built    (handoff 128) 1 iff a multigrid hierarchy BUILT this solve. With
+//                 cg_multigrid=0 this splits the fallback: 1 = the V-cycle
+//                 STAGNATED past its budget (stagnation, 125); 0 = the grid never
+//                 coarsened (build-rejection, 122) or the 127 latch skipped the
+//                 build. Always 0 on the Jacobi-CG paths (MG not requested).
+//   mg_cycles_attempted  (handoff 128) MG-CG V-cycles this solve ran: the
+//                 converged count when cg_multigrid=1, the budget when it
+//                 stagnated, 0 when no hierarchy was built/attempted.
 //
 // A row is ~60-95 bytes, so a full 4-rung production run (~800 rows) is < 80 KB.
 extern const char kIterationCsvHeader[];
@@ -168,6 +177,21 @@ struct RunInfo {
   bool cg_multigrid = false;
   int mg_levels = 0;
   bool cg_multigrid_observed = false;  // false => emit null (outcome not yet known)
+  // Handoff 128 — the run-level fallback MODE, finalized post-run alongside
+  // cg_multigrid (null until then, same discipline as Amendment 1). One of:
+  //   "carried"           MG carried the run (cg_multigrid true).
+  //   "stagnated-latched" MG never carried, but a hierarchy DID build on at least
+  //                       one solve — the V-cycle stagnated past its budget and
+  //                       (after 3 consecutive stagnations) the 127 latch turned
+  //                       MG off for the rest of the run. A convergence problem.
+  //   "build-rejected"    no solve ever built a hierarchy — the grid could not be
+  //                       coarsened (a coarsenability problem, 122).
+  // Turns the build-rejection vs stagnation question (which the surviving CSV/JSON
+  // could not answer, 125 §0) into a one-line read. Empty string + not-observed =>
+  // JSON null; also null (and mode empty) when the requested solver is not a
+  // multigrid kind (no fallback concept applies).
+  std::string mg_mode;
+  bool mg_mode_observed = false;
   bool galerkin_block_cache = false;
   bool mixed_precision = false;
   int matfree_threads = 0;   // resolved matrix-free thread count

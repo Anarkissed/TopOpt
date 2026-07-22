@@ -548,7 +548,8 @@ std::size_t total_stage_iterations(const std::vector<StagePlan>& plan) {
 // so the anti-early-termination guard can unit-test it directly against a
 // hand-built non-monotone compliance curve. See simp.hpp for the rationale.
 bool mma_objective_plateau(const std::vector<double>& c, int window,
-                           double rel_tol, double min_drop) {
+                           double rel_tol, double min_drop,
+                           int min_flat_windows) {
   if (window <= 0) return false;
   const int n = static_cast<int>(c.size());
   if (n < window + 1) return false;
@@ -564,7 +565,35 @@ bool mma_objective_plateau(const std::vector<double>& c, int window,
   // spikes sit ABOVE c[0], so the running minimum stays pinned at c[0]) reads as
   // a plateau and fires immediately — keeping a near-uniform design. See the
   // header for the measured vf=0.20 failure this prevents.
-  if (min_drop > 0.0 && !(best_now <= c[0] * (1.0 - min_drop))) return false;
+  if (min_drop > 0.0 && !(best_now <= c[0] * (1.0 - min_drop))) {
+    // FLATNESS ESCAPE (handoff 128, guarded). The gate is closed (total descent
+    // < min_drop). Normally that vetoes the plateau — but a run whose objective is
+    // flat almost from the start would then cap-walk forever (125). Allow the gate
+    // to be bypassed IFF the running minimum has been essentially flat across the
+    // last `min_flat_windows` full windows: measure the running-min improvement
+    // over the trailing `min_flat_windows * window` samples and require it below
+    // rel_tol. This is a strictly STRONGER flatness demand than the single-window
+    // test below (a wider trailing window can only show more improvement, never
+    // less, since the running minimum is monotone), so it can never fire before
+    // the gated detector would once the gate opens — it only rescues the
+    // gate-never-opens case. It keys purely on flatness (never a bare iteration
+    // count), so the spike-heavy forming phase — where the running minimum is
+    // still moving — cannot trigger it (086 fixtures stay caught).
+    bool escape = false;
+    if (min_flat_windows > 0) {
+      const int flat_span = min_flat_windows * window;
+      if (n >= flat_span + 1) {
+        double best_before_flat = c[0];
+        for (int i = 1; i < n - flat_span; ++i)
+          if (c[i] < best_before_flat) best_before_flat = c[i];
+        if (best_before_flat > 0.0) {
+          const double flat_improve = (best_before_flat - best_now) / best_before_flat;
+          escape = flat_improve < rel_tol;
+        }
+      }
+    }
+    if (!escape) return false;
+  }
   double best_prev = c[0];
   for (int i = 1; i < n - window; ++i)
     if (c[i] < best_prev) best_prev = c[i];
@@ -613,7 +642,8 @@ bool stage_should_stop(const SimpOptions& options,
     for (const SimpIteration& h : history) curve.push_back(h.compliance);
     return mma_objective_plateau(curve, options.mma_plateau_window,
                                  options.mma_plateau_tol,
-                                 options.mma_plateau_min_drop);
+                                 options.mma_plateau_min_drop,
+                                 options.mma_plateau_flat_windows);
   }
   return change < options.change_tol;
 }
@@ -633,7 +663,29 @@ bool observe_plateau(const SimpOptions& options,
   for (const SimpIteration& h : history) curve.push_back(h.compliance);
   return mma_objective_plateau(curve, options.mma_plateau_window,
                                options.mma_plateau_tol,
-                               options.mma_plateau_min_drop);
+                               options.mma_plateau_min_drop,
+                               options.mma_plateau_flat_windows);
+}
+
+// Adaptive early CG tolerance (handoff 128; see SimpOptions::cg_tolerance_loose).
+// Returns the tolerance the INTERIOR / trajectory penalized solve should use this
+// iteration, given the design's max|Δρ| from the PREVIOUS iteration (a
+// deterministic function of the recorded history — no wall clock, no randomness).
+// Disabled (loose <= tight) => always the tight cg_tolerance, so the default path
+// is byte-identical. Enabled => geometric interpolation between loose (design
+// moving at/over the move limit) and tight (design settled), so a fast-moving
+// early design gets a cheap approximate solve and a settling design tightens back
+// toward the certified tolerance. The accept/final solve never calls this.
+double adaptive_traj_cg_tol(const SimpOptions& options, double prev_change) {
+  const double tight = options.cg_tolerance;
+  const double loose = options.cg_tolerance_loose;
+  if (!(loose > tight)) return tight;  // disabled or degenerate -> always tight
+  const double ref = options.move > 0.0 ? options.move : 0.2;
+  double frac = prev_change / ref;     // 1 at/above the move limit, 0 when still
+  if (frac < 0.0) frac = 0.0;
+  if (frac > 1.0) frac = 1.0;
+  // tight^(1-frac) * loose^frac, i.e. log-linear between the two tolerances.
+  return tight * std::pow(loose / tight, frac);
 }
 
 // ---------------------------------------------------------------------------
@@ -1141,6 +1193,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   SimpOptimizeResult result;
   result.history.reserve(total_stage_iterations(plan));
 
+  // Adaptive early CG tolerance (handoff 128): the previous iteration's max|Δρ|,
+  // seeded to the move limit so the FIRST trajectory solve (from the uniform/warm
+  // start, where an approximate solve is plenty) is loose. Inert unless
+  // cg_tolerance_loose > cg_tolerance; then it drives the trajectory tolerance.
+  double last_change = options.move;
+
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
@@ -1160,8 +1218,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                               : st.move;
       std::vector<double> xphys = filter.filter_density(x);
       if (projecting) project_solid(grid, xphys, cur_beta, eta);
+      // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
+      // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
+      const double traj_tol = adaptive_traj_cg_tol(options, last_change);
       const SimpCompliance c = simp_compliance(
-          grid, params, xphys, bcs, loads, options.cg_tolerance,
+          grid, params, xphys, bcs, loads, traj_tol,
           options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
           use_solver ? solver.get() : nullptr, options.solver);
       if (!use_solver) warm = c.solution;
@@ -1198,6 +1259,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       double change = 0.0;
       for (std::size_t e = 0; e < x.size(); ++e)
         change = std::max(change, std::fabs(x_new[e] - x[e]));
+      last_change = change;  // handoff 128: drives next iter's trajectory CG tol
 
       x = x_new;
       if (result.iterations == 0) result.initial_compliance = c.compliance;
@@ -1219,6 +1281,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_iterations = c.cg.iterations;
         obs.cg_used_multigrid = c.cg.used_multigrid;
         obs.cg_mg_levels = c.cg.mg_levels;
+        obs.cg_hier_built = c.cg.hier_built;
+        obs.cg_mg_cycles_attempted = c.cg.mg_cycles_attempted;
         obs.plateau = observe_plateau(options, result.history);
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
@@ -1255,7 +1319,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         const double stage_min_drop =
             (mma_stage_start == 0) ? options.mma_plateau_min_drop : 0.0;
         if (mma_objective_plateau(curve, options.mma_plateau_window,
-                                  options.mma_plateau_tol, stage_min_drop)) {
+                                  options.mma_plateau_tol, stage_min_drop,
+                                  options.mma_plateau_flat_windows)) {
           if (mma_beta < mma_beta_max) {
             mma_beta = std::min(mma_beta * 2.0, mma_beta_max);
             mma_stage_start = result.history.size();
@@ -1867,6 +1932,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   SimpOptimizeResult result;
   result.history.reserve(total_stage_iterations(plan));
 
+  // Adaptive early CG tolerance (handoff 128): see the unconstrained overload.
+  // Seeded to the move limit so the first trajectory solve is loose.
+  double last_change = options.move;
+
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
@@ -1884,9 +1953,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       std::vector<double> xphys = filter.filter_density(x);
       if (projecting) project_active(eff, xphys, cur_beta, eta);
       apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
+      // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
+      // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
+      const double traj_tol = adaptive_traj_cg_tol(options, last_change);
       const SimpCompliance c =
           simp_compliance(analysis, params, xphys, bcs, loads,
-                          options.cg_tolerance, options.cg_max_iterations,
+                          traj_tol, options.cg_max_iterations,
                           warm.u.empty() ? nullptr : &warm,
                           use_solver ? solver.get() : nullptr, options.solver);
       if (!use_solver) warm = c.solution;
@@ -1925,6 +1997,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       double change = 0.0;
       for (std::size_t e = 0; e < x.size(); ++e)
         change = std::max(change, std::fabs(x_new[e] - x[e]));
+      last_change = change;  // handoff 128: drives next iter's trajectory CG tol
 
       x = x_new;
       if (result.iterations == 0) result.initial_compliance = c.compliance;
@@ -1947,6 +2020,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_iterations = c.cg.iterations;
         obs.cg_used_multigrid = c.cg.used_multigrid;
         obs.cg_mg_levels = c.cg.mg_levels;
+        obs.cg_hier_built = c.cg.hier_built;
+        obs.cg_mg_cycles_attempted = c.cg.mg_cycles_attempted;
         obs.plateau = observe_plateau(options, result.history);
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
@@ -1985,7 +2060,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         const double stage_min_drop =
             (mma_stage_start == 0) ? options.mma_plateau_min_drop : 0.0;
         if (mma_objective_plateau(curve, options.mma_plateau_window,
-                                  options.mma_plateau_tol, stage_min_drop)) {
+                                  options.mma_plateau_tol, stage_min_drop,
+                                  options.mma_plateau_flat_windows)) {
           if (mma_beta < mma_beta_max) {
             mma_beta = std::min(mma_beta * 2.0, mma_beta_max);
             mma_stage_start = result.history.size();

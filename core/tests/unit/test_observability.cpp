@@ -85,31 +85,37 @@ int main() {
       a.cg_iterations = 14;
       a.cg_used_multigrid = true;
       a.plateau = false;
+      a.cg_hier_built = true;         // handoff 128: MG carried -> hierarchy built
+      a.cg_mg_cycles_attempted = 14;  // carried in 14 cycles
       w.append_at(0, a, 1000);
 
       SimpIterationObservation b;
       b.iteration = 2;
       b.compliance = 9.25;
       b.volume_fraction = 0.6801;
-      b.cg_iterations = 11;
-      b.cg_used_multigrid = true;
+      b.cg_iterations = 4390;         // Jacobi fallback count
+      b.cg_used_multigrid = false;    // fell back...
+      b.cg_hier_built = true;         // ...after the hierarchy BUILT -> stagnation
+      b.cg_mg_cycles_attempted = 300; // burned the full budget before bailing
       b.plateau = true;
       b.beta = 8.0;  // handoff 123: a projecting iteration carries its stage β
       w.append_at(0, b, 1050);
       check(w.rows() == 2, "CSV writer counted 2 rows");
     }
     const std::string body = read_all(path);
-    // Row a leaves beta at its default 0 (not projecting); row b sets β=8.
+    // Row a leaves beta at its default 0 (not projecting); row b sets β=8. Row a
+    // is an MG-carried solve (hier_built=1, cycles=14); row b is a STAGNATION
+    // fallback (cg_multigrid=0 but hier_built=1, cycles=300 = the full budget).
     const std::string expected =
         "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,"
-        "beta\n"
-        "0,1,1000,12.5,0.680000,0,14,1,0\n"
-        "0,2,1050,9.25,0.680100,1,11,1,8\n";
+        "beta,hier_built,mg_cycles_attempted\n"
+        "0,1,1000,12.5,0.680000,0,14,1,0,1,14\n"
+        "0,2,1050,9.25,0.680100,1,4390,0,8,1,300\n";
     check(body == expected, "CSV golden: header + rows are byte-exact");
     // Schema string is the documented one.
     check(std::string(kIterationCsvHeader) ==
               "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
-              "cg_multigrid,beta",
+              "cg_multigrid,beta,hier_built,mg_cycles_attempted",
           "CSV header constant matches documented schema");
   }
 

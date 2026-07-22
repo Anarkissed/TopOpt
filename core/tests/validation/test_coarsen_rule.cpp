@@ -313,7 +313,14 @@ int main() {
   // guard is inert unless MG actually stagnates.
   // ---------------------------------------------------------------------------
   {
-    const int n = 16;  // coarsenable, cheap; the checkerboard stagnates reliably
+    // Coarsenable, cheap, and the 1e-9 checkerboard stagnates past the MG budget.
+    // n MATTERS: geometric MG degrades with grid size on this maximally-incoherent
+    // field, so the fixture must be large enough to stagnate past kMgIterBudget.
+    // At the handoff-128 budget of 300, a 16^3 checker CARRIES (converges in ~118
+    // cycles — it was in the borderline band the raise exists to rescue) while 32^3
+    // still stagnates (hits the 300-cycle budget, falls back). Use 32 so the latch
+    // fixture keeps stagnating; bump it if the budget is raised again.
+    const int n = 32;
     const VoxelGrid gg = solid_block(n, n, n);
     const int nnx = n + 1, nny = n + 1, nnz = n + 1;
     auto nid = [&](int a, int b, int c) { return (c * nny + b) * nnx + a; };

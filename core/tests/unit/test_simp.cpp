@@ -1368,6 +1368,64 @@ int main() {
           "plateau GATE: at the gated fire point the design is near-optimal (~2.39)");
     std::printf("[plateau gate] ungated fires@11 (best~18.4) | gated fires@%d (best~%.2f)\n",
                 gfire, gbest);
+
+    // THE FLATNESS ESCAPE (handoff 128). `min_flat_windows > 0` lets a plateau
+    // fire on flatness ALONE — bypassing the min_drop gate — but ONLY after the
+    // running minimum has been flat for that many FULL windows. It rescues the
+    // regime the gate never anticipated: an objective flat almost from the start,
+    // whose TOTAL descent never reaches min_drop, so the gated detector never fires
+    // and the run cap-walks for hours (125).
+    const int FW = 3;  // production default (SimpOptions::mma_plateau_flat_windows)
+
+    // (a) A run flat from iter ~2 with only a ~2% total descent (below the 5% gate)
+    // NEVER fires with the escape off (the cap-walk bug), and DOES fire with the
+    // escape on — but only after >= FW*W flat samples, never before.
+    std::vector<double> flat_start;
+    flat_start.push_back(1.000);
+    flat_start.push_back(0.985);  // ~1.5% drop, then dead flat (gate needs 5%)
+    for (int i = 0; i < 60; ++i) flat_start.push_back(0.985);
+    CHECK(!mma_objective_plateau(flat_start, W, 1e-3, G, /*flat_windows=*/0),
+          "flatness ESCAPE off: a <5%-descent flat run never fires (the cap-walk)");
+    CHECK(mma_objective_plateau(flat_start, W, 1e-3, G, FW),
+          "flatness ESCAPE on: a flat-from-start run DOES eventually fire");
+    // It cannot fire before FW full windows of flatness exist (never a bare
+    // iteration count): with exactly FW*W samples present it must still be silent.
+    {
+      int efire = -1;
+      for (std::size_t nn = 1; nn <= flat_start.size(); ++nn) {
+        std::vector<double> pre(flat_start.begin(), flat_start.begin() + nn);
+        if (mma_objective_plateau(pre, W, 1e-3, G, FW)) { efire = (int)nn; break; }
+      }
+      CHECK(efire >= FW * W + 1,
+            "flatness ESCAPE: fires only after >= FW full windows of flatness");
+      std::printf("[plateau escape] flat-from-start fires@%d (>= %d)\n", efire, FW * W + 1);
+    }
+
+    // (b) THE ESCAPE MUST NOT REGRESS THE 086 FIXTURES. Re-run the spike gate curve
+    // WITH the escape enabled: it must still refuse the spike-heavy forming phase
+    // (iter 11) and still fire only after the descent settles — identical to the
+    // escape-off gated result, because the escape is strictly stronger than the
+    // single-window test and the gate opens here long before FW windows of flatness
+    // accrue. The exact fire point is unchanged.
+    CHECK(!mma_objective_plateau(spike11, W, 1e-3, G, FW),
+          "flatness ESCAPE: still does NOT fire in the forming phase (086 intact)");
+    int gfire_esc = -1;
+    for (std::size_t nn = 1; nn <= spike.size(); ++nn) {
+      std::vector<double> pre(spike.begin(), spike.begin() + nn);
+      if (mma_objective_plateau(pre, W, 1e-3, G, FW)) { gfire_esc = (int)nn; break; }
+    }
+    CHECK(gfire_esc == gfire,
+          "flatness ESCAPE: does not change the gated fire point on the 086 curve");
+
+    // (c) A steadily descending curve still never plateaus, escape on (the running
+    // minimum keeps improving, so no multi-window flat stretch ever forms).
+    {
+      std::vector<double> desc;
+      double v = 100.0;
+      for (int i = 0; i < 60; ++i) { desc.push_back(v); v *= 0.97; }
+      CHECK(!mma_objective_plateau(desc, W, 1e-3, G, FW),
+            "flatness ESCAPE: a steadily descending curve never plateaus");
+    }
   }
 
   if (g_failures == 0) {

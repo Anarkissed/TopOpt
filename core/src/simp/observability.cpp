@@ -91,7 +91,8 @@ long long wall_clock_ms() {
 // Per-iteration CSV.
 
 const char kIterationCsvHeader[] =
-    "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta";
+    "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta,"
+    "hier_built,mg_cycles_attempted";
 
 IterationCsvWriter::IterationCsvWriter(const std::string& path) : path_(path) {
   out_.open(path, std::ios::binary | std::ios::trunc);
@@ -116,12 +117,15 @@ void IterationCsvWriter::append_at(std::size_t rung,
   // %.6f is ample for the [0,1] volume fraction. `beta` (handoff 123) is the
   // continuation sharpness this iteration — 0 while not projecting, else the
   // integer-valued stage β (1/2/4/…), so %.6g prints it exactly and compactly.
-  // append+flush = crash-safe.
-  char buf[192];
-  std::snprintf(buf, sizeof(buf), "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g\n", rung,
-                obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
+  // `hier_built`/`mg_cycles_attempted` (handoff 128) make build-rejection vs
+  // stagnation a direct read: cg_multigrid=0 with hier_built=1 is stagnation,
+  // hier_built=0 is build-rejection (or the 127 latch). append+flush = crash-safe.
+  char buf[224];
+  std::snprintf(buf, sizeof(buf), "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d\n",
+                rung, obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
                 obs.plateau ? 1 : 0, obs.cg_iterations,
-                obs.cg_used_multigrid ? 1 : 0, obs.beta);
+                obs.cg_used_multigrid ? 1 : 0, obs.beta,
+                obs.cg_hier_built ? 1 : 0, obs.cg_mg_cycles_attempted);
   out_ << buf;
   out_.flush();
   if (!out_)
@@ -309,6 +313,12 @@ std::string run_info_json(const RunInfo& info) {
       info.cg_multigrid_observed ? bool_json(info.cg_multigrid) : "null");
   num("mg_levels",
       info.cg_multigrid_observed ? fmt_i(info.mg_levels) : "null");
+  // Handoff 128 — fallback mode (carried / stagnated-latched / build-rejected).
+  // A string outcome: JSON null until observed (or when the solver isn't MG).
+  num("mg_mode",
+      (info.mg_mode_observed && !info.mg_mode.empty())
+          ? std::string("\"") + json_escape(info.mg_mode) + "\""
+          : std::string("null"));
   num("galerkin_block_cache", bool_json(info.galerkin_block_cache));
   num("mixed_precision", bool_json(info.mixed_precision));
   num("matfree_threads", fmt_i(info.matfree_threads));
