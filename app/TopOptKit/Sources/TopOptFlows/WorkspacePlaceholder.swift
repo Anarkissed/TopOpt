@@ -1071,6 +1071,23 @@ public struct WorkspacePlaceholder: View {
         return items
     }
 
+    /// The kind (bore vs plane) a handle role's chip belongs to, for the sync collapse.
+    private static func chipKind(_ role: ClearanceHandle.Role) -> ClearanceChipKind {
+        role == .slabDepth ? .plane : .bore
+    }
+
+    /// The on-model value chips AFTER the sync collapse (Task A6 item 1): a synced group keeps
+    /// only its representative primitive's chips (first bore, first plane, in selection order);
+    /// an unsynced group keeps every primitive's chips. The knobs draw from the uncollapsed
+    /// `clearanceHandleItems`, so every wall/cap/face stays draggable regardless.
+    private var syncCollapsedChipItems: [ClearanceHandleItem] {
+        ClearanceChipLayout.collapseSynced(
+            clearanceHandleItems,
+            group: { $0.groupID }, face: { $0.faceID },
+            kind: { Self.chipKind($0.handle.role) },
+            isSynced: { force.isClearanceSynced($0) })
+    }
+
     /// The draggable clearance handles + the floating glass value pill for the active
     /// clearance selection. Each handle binds its gesture to the SIZED knob BEFORE
     /// `.position` (same rule as the design-box gizmo): a gesture applied after
@@ -1101,8 +1118,12 @@ public struct WorkspacePlaceholder: View {
     /// bore's chips edit that bore alone; when synced they edit the shared value (item 3). Sized to
     /// the weight-pill class (`compact`). Each is the primary editor AND the live readout while its
     /// handle drags (reading the same per-bore override the drag writes).
+    ///
+    /// Round-5 (Task A6 item 1): a SYNCED group collapses to ONE shared chip set — only its
+    /// representative primitive's chips draw (`syncCollapsedChipItems`), so the maintainer's
+    /// duplicate stacked "DEPTH 3 mm" chips are gone. The drag knobs are NOT collapsed.
     @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection) -> some View {
-        ForEach(clearanceHandleItems) { item in
+        ForEach(syncCollapsedChipItems) { item in
             if let pt = proj.project(settledWorld(item.handle.anchor)) {
                 clearanceHandleChip(item)
                     // Right beside the handle icon, offset clear of the ~46 pt knob (device-QA tune).
@@ -1413,41 +1434,12 @@ public struct WorkspacePlaceholder: View {
                 set: { selection.rename(g.id, to: $0) })
     }
 
-    /// Whether a group's EFFECTIVE clearance contributes a bolt (bore) region and/or a
-    /// slab (planar-face) region — the fields the editor shows. Keep-clear v2: driven
-    /// by the attribute, not a role. The auto rule affixes only bores; an EXPLICIT
-    /// affix affixes every face (bore → bolt, plane → slab).
-    private func groupClearanceShape(_ g: SelectionGroup) -> (bolt: Bool, slab: Bool) {
-        guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return (false, false) }
-        let explicit = force.keepClearAffix(for: g.id) == .on
-        var bolt = false, slab = false
-        for f in g.faces {
-            if FaceTopology.isCurved(f, in: mesh) { bolt = true }
-            else if explicit { slab = true }   // auto affixes only bores
-        }
-        return (bolt, slab)
-    }
-
     /// A group's OWN keep-clear faces (bores + explicit slabs) — the WITHIN-group scope the Sync
     /// flag couples (round-4 item 3). ForceModel can't classify geometry, so the view supplies them.
     private func groupClearanceFaces(_ g: SelectionGroup) -> [FaceID] {
         guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return [] }
         let explicit = force.keepClearAffix(for: g.id) == .on
         return g.faces.filter { FaceTopology.isCurved($0, in: mesh) || explicit }
-    }
-
-    /// The group's representative bore face (first cylindrical) — what the row's Margin/Axial chips
-    /// read+write (the shared value when synced, that bore when not). Nil for a slab-only group.
-    private func groupBoltFace(_ g: SelectionGroup) -> FaceID? {
-        guard let mesh = viewerMesh else { return nil }
-        return g.faces.first { FaceTopology.isCurved($0, in: mesh) }
-    }
-
-    /// The group's representative slab face (first explicit planar) — what the row's Depth chip
-    /// reads+writes. Nil unless keep-clear is affixed explicitly (auto affixes only bores).
-    private func groupSlabFace(_ g: SelectionGroup) -> FaceID? {
-        guard let mesh = viewerMesh, force.keepClearAffix(for: g.id) == .on else { return nil }
-        return g.faces.first { !FaceTopology.isCurved($0, in: mesh) }
     }
 
     /// The PER-GROUP "Sync" checkbox (round-4 item 3), always enabled, default checked. Toggling
@@ -1458,48 +1450,119 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
+    /// One keep-clear primitive of a group — a single cleared face, classified by
+    /// geometry (a curved face is a `bore`, an explicit planar face is a `plane`), with
+    /// its exact bore radius for the "Auto · N mm" labels. `id` is the face id, so
+    /// SwiftUI keeps one row per primitive.
+    private struct ClearancePrimitive: Identifiable, Equatable {
+        let id: FaceID
+        let isBore: Bool
+        let radiusMM: Double?
+        var kind: ClearanceChipKind { isBore ? .bore : .plane }
+    }
+
+    /// A group's keep-clear primitives, in selection order — the same faces
+    /// `resolvedClearances()` freezes (bores always; planes only when the affix is
+    /// explicit, since Auto affixes bores only). Empty when keep-clear is off or the
+    /// part has no B-rep geometry.
+    private func clearancePrimitives(_ g: SelectionGroup) -> [ClearancePrimitive] {
+        guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return [] }
+        let explicit = force.keepClearAffix(for: g.id) == .on
+        return g.faces.compactMap { f in
+            let bore = FaceTopology.isCurved(f, in: mesh)
+            guard bore || explicit else { return nil }        // auto affixes only bores
+            guard mesh.faceGeometry(f) != nil else { return nil }  // STL / no B-rep
+            return ClearancePrimitive(id: f, isBore: bore, radiusMM: bore ? faceBoreRadius(f) : nil)
+        }
+    }
+
     /// The editable clearance numbers for a group whose keep-clear is on (keep-clear
     /// v2): bolt margin + axial for a bore, slab depth for a planar face. A field left
     /// at "Auto" shows the REAL geometry-derived suggestion (e.g. "Auto · 2.5 mm"),
     /// now that the bore radius crosses the bridge — no longer the bare word "auto".
     /// The 0-sentinel wire path is unchanged: an Auto field still sends 0 and the core
     /// re-derives it; any number the user types is exactly the number the run uses.
-    /// Keep-clear Phase B: the row's compact liquid-glass value pills (margin + axial
-    /// for a bore, depth for a planar face). The floating pill near the selection is the
-    /// primary editor when the group projects on-screen; these row pills are the
-    /// always-reachable panel copy (both write the same override, like the weight pill).
+    ///
+    /// Round-5 (Task A6 item 2): a group holding SEVERAL mixed primitives no longer
+    /// crushes every chip into one wrapping HStack. Each primitive lists on its own
+    /// line (kind label + its chips, right-aligned) and the row grows vertically; with
+    /// Sync ON the row collapses to the ONE shared chip set plus a "N primitives ·
+    /// synced" count. A lone primitive keeps the old single-line look.
     @ViewBuilder private func clearanceEditor(_ g: SelectionGroup) -> some View {
-        let shape = groupClearanceShape(g)
-        if shape.bolt || shape.slab {
-            let boltF = groupBoltFace(g)
-            let slabF = groupSlabFace(g)
-            // The row edits the group's REPRESENTATIVE bore/slab: when synced this is the shared
-            // value (all bores follow); when unsynced it is that first bore — per-bore editing of
-            // the rest happens via the on-model handle chips (round-4 item 3).
-            let ovBolt = boltF.map { force.clearanceOverride(forGroup: g.id, face: $0) } ?? ClearanceOverride()
-            let ovSlab = slabF.map { force.clearanceOverride(forGroup: g.id, face: $0) } ?? ClearanceOverride()
-            let r = boltF.flatMap { faceBoreRadius($0) }
-            // The compact value chips sit SIDE BY SIDE, with the per-group Sync checkbox leading
-            // them. The cluster is RIGHT-ALIGNED to the row's trailing edge (item 4 — under the
-            // trash icon); the row wraps it below the name/kind row.
-            HStack(spacing: DS.Space.xs) {
+        let prims = clearancePrimitives(g)
+        let synced = force.isClearanceSynced(g.id)
+        switch ClearanceChipLayout.rowMode(primitiveCount: prims.count, synced: synced) {
+        case .none:
+            EmptyView()
+        case .single:
+            clearancePrimitiveLine(g, prims[0], showKind: true)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.top, 2)
+        case .perPrimitive:
+            // Sync OFF: one line per primitive, each independently editable. The Sync box
+            // heads the stack (right-aligned, under the trash icon); the row grows tall.
+            VStack(alignment: .trailing, spacing: 5) {
                 clearanceSyncRowCheckbox(g)
-                if shape.bolt, let f = boltF {
-                    GlassValuePill(title: "Margin", valueMM: ovBolt.concentricMarginMM,
-                                   autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                                   compact: true) { force.setClearanceMargin(group: g.id, face: f, mm: $0) }
-                    GlassValuePill(title: "Axial", valueMM: ovBolt.axialClearanceMM,
-                                   autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                                   compact: true) { force.setClearanceAxial(group: g.id, face: f, mm: $0) }
-                }
-                if shape.slab, let f = slabF {
-                    GlassValuePill(title: "Depth", valueMM: ovSlab.slabDepthMM,
-                                   autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                                   compact: true) { force.setClearanceSlab(group: g.id, face: f, mm: $0) }
-                }
+                ForEach(prims) { clearancePrimitiveLine(g, $0, showKind: true) }
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 2)
+        case .synced(let count):
+            // Sync ON: the one shared chip set (representative bore + plane) plus the count.
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: DS.Space.xs) {
+                    clearanceSyncRowCheckbox(g)
+                    Text(ClearanceChipLayout.syncedCountLabel(count))
+                        .dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle(DS.Color.textQuaternary.color)
+                }
+                sharedClearanceChips(g, prims: prims)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.top, 2)
+        }
+    }
+
+    /// One primitive's line: a kind label (Bore / Plane) leading its own compact value
+    /// chips (Margin + Axial for a bore, Depth for a plane), reading+writing THIS
+    /// primitive's effective override (per-bore when unsynced). Right-aligned.
+    @ViewBuilder private func clearancePrimitiveLine(_ g: SelectionGroup, _ p: ClearancePrimitive,
+                                                     showKind: Bool) -> some View {
+        let f = p.id
+        let ov = force.clearanceOverride(forGroup: g.id, face: f)
+        HStack(spacing: DS.Space.xs) {
+            if showKind {
+                Text(ClearanceChipLayout.kindLabel(p.kind))
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            if p.isBore {
+                GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                               autoMM: p.radiusMM.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                               compact: true) { force.setClearanceMargin(group: g.id, face: f, mm: $0) }
+                GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                               autoMM: p.radiusMM.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                               compact: true) { force.setClearanceAxial(group: g.id, face: f, mm: $0) }
+            } else {
+                GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                               autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                               compact: true) { force.setClearanceSlab(group: g.id, face: f, mm: $0) }
+            }
+        }
+    }
+
+    /// The ONE shared chip set a synced group shows (Task A6 item 2): Margin + Axial
+    /// from the representative bore and Depth from the representative plane. Every
+    /// primitive reads the group's shared override when synced, so editing here moves
+    /// them all together.
+    @ViewBuilder private func sharedClearanceChips(_ g: SelectionGroup, prims: [ClearancePrimitive]) -> some View {
+        HStack(spacing: DS.Space.xs) {
+            if let bore = prims.first(where: { $0.isBore }) {
+                clearancePrimitiveLine(g, bore, showKind: false)
+            }
+            if let plane = prims.first(where: { !$0.isBore }) {
+                clearancePrimitiveLine(g, plane, showKind: false)
+            }
         }
     }
 
