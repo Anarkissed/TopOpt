@@ -806,6 +806,14 @@ class Handler(BaseHTTPRequestHandler):
                 project_name = None
         if project_name is None:
             project_name = job_doc.get("project") or job_doc.get("project_name")
+            # Strip worker-level metadata before the CLI sees the file — the CLI's
+        # job schema is deliberately strict (unknown keys are rejected). The
+        # name lives in the Job record / multipart field, not the physics job.
+        if "project" in job_doc or "project_name" in job_doc:
+            job_doc.pop("project", None)
+            job_doc.pop("project_name", None)
+            with open(job_path, "w") as f:
+                json.dump(job_doc, f)
 
         cmd = [CFG.cli, "run", job_path, "--out", out_dir]
         if CFG.materials:
