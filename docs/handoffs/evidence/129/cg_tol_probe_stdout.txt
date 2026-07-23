@@ -1,0 +1,56 @@
+
+===== L-BRACKET LOADCASE (grid 8x3x8, 84 solid voxels) =====
+[tight ] rungs=2 total_iters=357 total_cg=60809  wall=0.45s (0.45–0.48, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=159  cg= 21223  achieved=0.6800  margin=1.612  C=29.1945  accept
+    vf=0.52  iters=198  cg= 39586  achieved=0.5200  margin=1.471  C=39.4733  REJECT
+[1e-6] rungs=2 total_iters=356 total_cg=59897  wall=0.45s (0.44–0.47, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=159  cg= 21415  achieved=0.6800  margin=1.612  C=29.1945  accept
+    vf=0.52  iters=197  cg= 38482  achieved=0.5200  margin=1.471  C=39.4733  REJECT
+[1e-5] rungs=2 total_iters=336 total_cg=55854  wall=0.42s (0.41–0.42, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=159  cg= 21704  achieved=0.6800  margin=1.612  C=29.1945  accept
+    vf=0.52  iters=177  cg= 34150  achieved=0.5200  margin=1.471  C=39.4733  REJECT
+[1e-4] rungs=2 total_iters=331 total_cg=54703  wall=0.41s (0.41–0.42, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=159  cg= 21509  achieved=0.6800  margin=1.612  C=29.1945  accept
+    vf=0.52  iters=172  cg= 33194  achieved=0.5200  margin=1.471  C=39.4733  REJECT
+[1e-3] rungs=2 total_iters=333 total_cg=57388  wall=0.43s (0.43–0.46, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=160  cg= 24570  achieved=0.6800  margin=1.612  C=29.1945  accept
+    vf=0.52  iters=173  cg= 32818  achieved=0.5200  margin=1.471  C=39.4733  REJECT
+  --- design difference vs tight (bar: SHIPPED & worst-accepted mean|drho| <= 0.03, margin_delta <= 3%, gate OK) ---
+  1e-6   cg_ratio=1.02x  wall=0.45s  gate=OK  | SHIPPED vf=0.68 mean|drho|=0.00000 max=0.000 | worst-accepted mean|drho|=0.00000 margin_delta=0.00% C_delta=0.00%
+  1e-5   cg_ratio=1.09x  wall=0.42s  gate=OK  | SHIPPED vf=0.68 mean|drho|=0.00000 max=0.000 | worst-accepted mean|drho|=0.00000 margin_delta=0.00% C_delta=0.00%
+  1e-4   cg_ratio=1.11x  wall=0.41s  gate=OK  | SHIPPED vf=0.68 mean|drho|=0.00000 max=0.000 | worst-accepted mean|drho|=0.00000 margin_delta=0.00% C_delta=0.00%
+  1e-3   cg_ratio=1.06x  wall=0.43s  gate=OK  | SHIPPED vf=0.68 mean|drho|=0.00000 max=0.000 | worst-accepted mean|drho|=0.00000 margin_delta=0.00% C_delta=0.00%
+  [wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cg-tolerance-loose-flip-a65bb2/docs/handoffs/evidence/129/fixture1_l_bracket_loadcase.csv]
+
+===== DESIGN-BOX (whole-domain) (grid 8x3x8, 84 solid voxels, whole-domain design box) =====
+[tight ] rungs=4 total_iters=1130 total_cg=223426  wall=8.64s (8.59–8.72, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=191  cg= 20990  achieved=0.6786  margin=4.170  C=4.70347  accept
+    vf=0.52  iters=271  cg= 32855  achieved=0.5238  margin=3.147  C=6.54262  accept
+    vf=0.38  iters=299  cg= 40546  achieved=0.3810  margin=2.163  C=13.3872  accept
+    vf=0.26  iters=369  cg=129035  achieved=0.2738  margin=0.786  C=57.3042  REJECT
+[1e-6] rungs=4 total_iters=1075 total_cg=194831  wall=7.92s (7.91–7.93, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=228  cg= 21148  achieved=0.6786  margin=4.033  C=4.66273  accept
+    vf=0.52  iters=264  cg= 30035  achieved=0.5238  margin=3.145  C=6.78482  accept
+    vf=0.38  iters=278  cg= 37437  achieved=0.3810  margin=2.163  C=13.3864  accept
+    vf=0.26  iters=305  cg=106211  achieved=0.2738  margin=0.753  C=56.7125  REJECT
+[1e-5] rungs=4 total_iters=1137 total_cg=196025  wall=7.99s (7.95–8.01, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=208  cg= 18467  achieved=0.6786  margin=4.033  C=4.66271  accept
+    vf=0.52  iters=301  cg= 33273  achieved=0.5238  margin=3.150  C=6.63962  accept
+    vf=0.38  iters=277  cg= 36893  achieved=0.3810  margin=2.163  C=13.3916  accept
+    vf=0.26  iters=351  cg=107392  achieved=0.2381  margin=0.411  C=614.276  REJECT
+[1e-4] rungs=4 total_iters=1065 total_cg=185228  wall=7.28s (7.24–7.43, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=204  cg= 17657  achieved=0.6786  margin=4.033  C=4.66274  accept
+    vf=0.52  iters=233  cg= 24635  achieved=0.5238  margin=3.144  C=6.78532  accept
+    vf=0.38  iters=275  cg= 35821  achieved=0.3810  margin=2.163  C=13.3871  accept
+    vf=0.26  iters=353  cg=107115  achieved=0.2738  margin=0.719  C=70.3337  REJECT
+[1e-3] rungs=4 total_iters=1095 total_cg=186429  wall=7.65s (7.57–7.72, med of 3)  repeat_max|drho|=0.00e+00
+    vf=0.68  iters=235  cg= 17525  achieved=0.6905  margin=4.093  C=4.46388  accept
+    vf=0.52  iters=243  cg= 27378  achieved=0.5238  margin=3.293  C=6.65947  accept
+    vf=0.38  iters=278  cg= 35743  achieved=0.3810  margin=2.163  C=13.3956  accept
+    vf=0.26  iters=339  cg=105783  achieved=0.2738  margin=0.772  C=57.2186  REJECT
+  --- design difference vs tight (bar: SHIPPED & worst-accepted mean|drho| <= 0.03, margin_delta <= 3%, gate OK) ---
+  1e-6   cg_ratio=1.15x  wall=7.92s  gate=OK  | SHIPPED vf=0.38 mean|drho|=0.05483 max=1.000 | worst-accepted mean|drho|=0.10371 margin_delta=3.28% C_delta=3.70%
+  1e-5   cg_ratio=1.14x  wall=7.99s  gate=OK  | SHIPPED vf=0.38 mean|drho|=0.05483 max=1.000 | worst-accepted mean|drho|=0.05483 margin_delta=3.28% C_delta=1.48%
+  1e-4   cg_ratio=1.21x  wall=7.28s  gate=OK  | SHIPPED vf=0.38 mean|drho|=0.05482 max=1.000 | worst-accepted mean|drho|=0.05482 margin_delta=3.28% C_delta=3.71%
+  1e-3   cg_ratio=1.20x  wall=7.65s  gate=OK  | SHIPPED vf=0.38 mean|drho|=0.05485 max=1.000 | worst-accepted mean|drho|=0.08470 margin_delta=4.65% C_delta=5.09%
+  [wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/cg-tolerance-loose-flip-a65bb2/docs/handoffs/evidence/129/fixture2_design_box.csv]
