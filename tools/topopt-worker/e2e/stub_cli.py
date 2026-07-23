@@ -80,8 +80,21 @@ def paced_sleep():
         time.sleep(GAP)
 
 
-def run(out_dir):
+def run(out_dir, job_path=None):
     os.makedirs(out_dir, exist_ok=True)
+
+    # Echo the job.json we were HANDED into the output dir so the E2E can assert, over
+    # the wire (GET /files/received_job.json), that the worker stripped worker-level
+    # metadata before the CLI saw it — the real CLI's schema is strict and would reject
+    # a stray `project` key on a device (handoff 129, item 2 evidence).
+    if job_path and os.path.isfile(job_path):
+        try:
+            with open(job_path) as jf:
+                received = jf.read()
+            with open(os.path.join(out_dir, "received_job.json"), "w") as rf:
+                rf.write(received)
+        except OSError:
+            pass
 
     if MODE == "dies":
         # worker_dies_midrun control: emit rung-0 progress + the first variant,
@@ -160,10 +173,11 @@ def main():
         print("topopt-cli version=stub-101 fingerprint=%s" % FINGERPRINT)
         return
     if args and args[0] == "run":
+        job_path = args[1] if len(args) > 1 and not args[1].startswith("--") else None
         out_dir = "."
         if "--out" in args:
             out_dir = args[args.index("--out") + 1]
-        run(out_dir)
+        run(out_dir, job_path)
         return
     sys.stderr.write("stub_cli: unknown invocation %r\n" % (args,))
     sys.exit(2)

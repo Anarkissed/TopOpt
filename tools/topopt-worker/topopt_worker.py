@@ -795,9 +795,10 @@ class Handler(BaseHTTPRequestHandler):
         with open(job_path, "w") as f:
             json.dump(job_doc, f)
 
-        # Project name for the human-facing job list (handoff 121). Prefer an explicit
-        # multipart `project` field, else a `project`/`project_name` key in job.json;
-        # None is fine (the UI shows "job").
+        # Project name for the human-facing job list (handoff 121). PREFER the explicit
+        # multipart `project` field (the app sends it there — handoff 129); fall back to
+        # a `project`/`project_name` key in job.json only for an OLDER client. None is
+        # fine (the UI shows "job").
         project_name = None
         if "project" in fields:
             try:
@@ -806,9 +807,11 @@ class Handler(BaseHTTPRequestHandler):
                 project_name = None
         if project_name is None:
             project_name = job_doc.get("project") or job_doc.get("project_name")
-            # Strip worker-level metadata before the CLI sees the file — the CLI's
-        # job schema is deliberately strict (unknown keys are rejected). The
-        # name lives in the Job record / multipart field, not the physics job.
+        # BELT-AND-SUSPENDERS strip: whatever the source, the CLI never sees a project
+        # key. Its job schema is deliberately strict (unknown keys are rejected — a
+        # stray key would fail the run on a device), and the name is worker-level
+        # metadata, not a physics input. A current app already omits it from job.json,
+        # so this only rewrites the file for an older client.
         if "project" in job_doc or "project_name" in job_doc:
             job_doc.pop("project", None)
             job_doc.pop("project_name", None)

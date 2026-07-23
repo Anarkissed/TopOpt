@@ -152,6 +152,11 @@ public struct RunScreen: View {
 
                         HStack(spacing: DS.Space.m) {
                             PillButton("Close", style: .secondary) { model.dismissFailure() }
+                            // A stall didn't cancel the background solve — offer to let
+                            // it keep running (an honest guard admits its own timeout).
+                            if model.canKeepWaiting {
+                                PillButton("Keep waiting", style: .secondary) { model.keepWaiting() }
+                            }
                             PillButton("Try Again") { model.dismissFailure(); onRetry() }
                         }
                         .padding(.top, DS.Space.s)

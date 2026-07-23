@@ -505,7 +505,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 if Date() < nextAttempt { continue }   // waiting out the backoff
 
                 if probeStatus() != nil {
-                    // The worker answered — it is alive (running or already finished).
+                    // The worker answered — it is alive. This is where the worker's
+                    // queued/solving STATE is consumed (handoff 129): a `queued`,
+                    // `running` (or even a just-finished) status is a reachable worker,
+                    // so we KEEP WAITING and reconnect — a queue wait or a long first
+                    // solve holds fire indefinitely, never a client-side false failure.
                     // Reopen the events stream; the replay rebuilds progress +
                     // variants (deduped) and delivers any terminal event we missed.
                     probeFailures = 0
@@ -579,12 +583,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                        "mesh_prefix": "variant",
                        "smooth_factor": Self.smoothExportFactor],
         ]
-        // The human-facing project name for the worker's job list + completion
-        // notifications (handoff 124, item 2). Without this the worker never learns
-        // the name and every remote job reads as an anonymous id on the Mac's menu.
-        // The worker reads a top-level `project` key (topopt_worker _create_job).
-        let projectName = request.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !projectName.isEmpty { job["project"] = projectName }
+        // The human-facing project name is NOT put in job.json (handoff 129): it is a
+        // worker-level label, not a physics input, and the CLI's job schema is strict
+        // (`reject_unknown_keys` — a stray "project" key fails the run ON A DEVICE). It
+        // travels as a dedicated MULTIPART FIELD instead (see `postJob`), which the
+        // worker already prefers; the worker's job.json strip stays as belt-and-
+        // suspenders for older clients. So job.json here contains only the physics.
         if let box = request.designBox {
             job["design_box"] = ["min": [box.min.x, box.min.y, box.min.z],
                                  "max": [box.max.x, box.max.y, box.max.z]]
@@ -760,6 +764,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
              "Content-Type: application/octet-stream", model)
         part("Content-Disposition: form-data; name=\"job\"; filename=\"job.json\"\r\n" +
              "Content-Type: application/json", jobJSON)
+        // The human-facing project name as a dedicated multipart FIELD (handoff 129).
+        // The worker prefers this over any job.json key (topopt_worker._create_job) and
+        // it never reaches the CLI's strict job schema. Omitted when empty.
+        let projectName = request.projectName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !projectName.isEmpty {
+            part("Content-Disposition: form-data; name=\"project\"", Data(projectName.utf8))
+        }
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
 
         var req = URLRequest(url: config.baseURL.appendingPathComponent("jobs"))

@@ -601,7 +601,9 @@ public final class AppModel: ObservableObject {
                                         expectedFingerprint: job.fingerprint)
         project.run.runner = reattachRunnerFactory?(config, job.jobID)
             ?? RunModel.remoteReattachRunner(config, jobID: job.jobID, defaults: remoteJobDefaults)
-        project.run.start(reattachRequest(for: job, project: project))
+        // A re-attach is a REMOTE run — RemoteRun owns its liveness, so it must not arm
+        // the local setup-stall watchdog (handoff 129).
+        project.run.start(reattachRequest(for: job, project: project), remote: true)
     }
 
     /// Dismiss the re-attach offer (back-compat single-banner path). Clears the

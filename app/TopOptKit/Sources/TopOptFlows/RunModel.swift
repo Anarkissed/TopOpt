@@ -352,21 +352,38 @@ public enum RunFailure: Equatable, Sendable {
 
     /// Shown when a run stalls in core setup/solve without ever emitting progress
     /// (the M7.diag setup-stall watchdog). Root-cause-agnostic and actionable so it
-    /// is honest whatever the underlying stall is, and it frees Optimize to retry.
-    public static let stalledDuringSetup =
+    /// is honest whatever the underlying stall is, and it frees Optimize to retry. It
+    /// NAMES the grace it actually waited (an honest guard admits its own timeout) and
+    /// points at "Keep waiting" for a run that may simply need longer.
+    public static func stalledDuringSetup(graceSeconds: Double) -> String {
         "The optimizer stalled before it could take its first step, so the run was "
-      + "stopped. This can happen on a dense load case or a fine resolution — try "
-      + "the Fast resolution or a simpler load case, then run again."
+      + "stopped after \(gracePhrase(graceSeconds)) with no progress. This can happen "
+      + "on a dense load case or a fine resolution — try the Fast resolution or a "
+      + "simpler load case, then run again. If you think it just needs longer, tap "
+      + "Keep waiting."
+    }
 
     /// The design-box variant of `stalledDuringSetup`. The design box (growth
     /// space) is the confirmed trigger of the on-device stall — it makes the solver
     /// work on a much larger expanded grid — so when the stalled run used one, point
     /// the user straight at it (turning it off is the reliable workaround today).
-    public static let stalledWithDesignBox =
+    public static func stalledWithDesignBox(graceSeconds: Double) -> String {
         "The optimizer stalled before it could take its first step, so the run was "
-      + "stopped. The growth space (design box) makes this much more likely — try "
-      + "turning it off or making it smaller, or use the Fast resolution, then run "
-      + "again."
+      + "stopped after \(gracePhrase(graceSeconds)) with no progress. The growth space "
+      + "(design box) makes this much more likely — try turning it off or making it "
+      + "smaller, or use the Fast resolution, then run again. If you think it just "
+      + "needs longer, tap Keep waiting."
+    }
+
+    /// Render a grace duration as human copy for the stall sheet: "45 seconds",
+    /// "2 minutes", "2 minutes 30 seconds".
+    public static func gracePhrase(_ seconds: Double) -> String {
+        let total = Swift.max(0, Int(seconds.rounded()))
+        if total < 60 { return "\(total) second\(total == 1 ? "" : "s")" }
+        let m = total / 60, r = total % 60
+        let mins = "\(m) minute\(m == 1 ? "" : "s")"
+        return r == 0 ? mins : "\(mins) \(r) second\(r == 1 ? "" : "s")"
+    }
 
     /// Substituted for an EMPTY core diagnostic so a genuine failure never renders
     /// a blank sheet (some core throws carry no `what()` text on device).
@@ -464,18 +481,24 @@ public protocol RunWatchdog {
     /// Arm a one-shot stall timer; invoke `onStall` on the main thread unless the
     /// returned handle is called first to cancel it. Called on the main actor.
     func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel
+    /// The grace this watchdog waits before firing — surfaced so the stall sheet can
+    /// name the timeout it actually enforced ("an honest guard admits its own timeout").
+    var graceSeconds: Double { get }
 }
 
 /// Cancels an armed watchdog (idempotent).
 public typealias RunWatchdogCancel = () -> Void
 
 /// Production watchdog: fire `onStall` after `graceSeconds` of no first progress.
-/// The grace is deliberately generous — it must clear the slowest LEGITIMATE
-/// first FEA solve (one solve runs before the first OC-iteration tick) so it only
-/// ever trips a genuine stall, never a slow-but-healthy run.
+/// The grace must clear the slowest LEGITIMATE first FEA solve (one solve runs
+/// before the first OC-iteration tick) so it only ever trips a genuine LOCAL stall.
+/// The default is the honest ~150s that window needs. It used to be band-aided up to
+/// 1800s because REMOTE runs shared this same guard, and a queued (or long-first-
+/// solve) remote run would otherwise trip it; remote no longer arms this watchdog
+/// (see `RunModel.start(_:remote:)`), so the local grace is back to 150s.
 public struct TimerRunWatchdog: RunWatchdog {
     public let graceSeconds: Double
-    public init(graceSeconds: Double = 1800) { self.graceSeconds = graceSeconds }
+    public init(graceSeconds: Double = 150) { self.graceSeconds = graceSeconds }
     public func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel {
         let work = DispatchWorkItem(block: onStall)
         DispatchQueue.main.asyncAfter(deadline: .now() + graceSeconds, execute: work)
@@ -486,6 +509,7 @@ public struct TimerRunWatchdog: RunWatchdog {
 /// A watchdog that never fires (for tests / previews that don't exercise it).
 public struct DisabledRunWatchdog: RunWatchdog {
     public init() {}
+    public var graceSeconds: Double { .infinity }
     public func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel { {} }
 }
 
@@ -589,6 +613,10 @@ public final class RunModel: ObservableObject {
     @Published public private(set) var progress: RunProgress?
     /// The failure to render as a sheet when `phase == .failed`.
     @Published public private(set) var failure: RunFailure?
+    /// True only for a STALL failure (the setup-stall watchdog fired): the background
+    /// solve was NOT cancelled, so the sheet offers "Keep waiting" to re-arm the guard
+    /// and give it more time. Cleared when the run resolves, is dismissed, or resumes.
+    @Published public private(set) var canKeepWaiting = false
     /// Whether the user asked to keep the run going in the background.
     @Published public private(set) var runningInBackground = false
     /// While running, whether the progress card is dismissed ("Run in Background"):
@@ -668,6 +696,10 @@ public final class RunModel: ObservableObject {
     /// the design box, the confirmed on-device stall trigger). Cleared when the run
     /// resolves.
     private var runningRequest: RunRequest?
+    /// Whether the in-flight run is REMOTE (set per run in `start`). A remote run does
+    /// NOT arm the local setup-stall watchdog: its liveness — queue-awareness and the
+    /// heartbeat/probe loop — is owned by `RemoteRun` (handoff 129).
+    private var isRemoteRun = false
 
     #if canImport(os)
     private static let log = Logger(subsystem: "app.topopt", category: "run")
@@ -732,11 +764,18 @@ public final class RunModel: ObservableObject {
         outcome = restored
     }
 
-    public func start(_ request: RunRequest) {
+    /// Start an optimize. `remote` marks a run offloaded to a LAN worker: such a run
+    /// does NOT arm the local setup-stall watchdog (handoff 129) — `RemoteRun` owns its
+    /// liveness (a QUEUED job is held open indefinitely by the worker's heartbeat, and
+    /// the run fails loudly only when the worker is unreachable, i.e. heartbeats AND
+    /// probes both absent). A LOCAL run begins solving immediately, so it arms the
+    /// guard here with the honest ~150s grace.
+    public func start(_ request: RunRequest, remote: Bool = false) {
         guard phase != .running else { return }
         phase = .running
         progress = nil
         failure = nil
+        canKeepWaiting = false
         outcome = nil
         isStreaming = true
         startedAt = Date()      // anchor the elapsed clock / ETA (presentation-only)
@@ -752,12 +791,21 @@ public final class RunModel: ObservableObject {
         let runner = self.runner
         let scheduler = self.scheduler
 
-        // Arm the setup-stall watchdog. Disarmed by the first sign of progress
-        // (`publish`/`appendStreamed`) or by the run resolving (`finish`); if it
-        // fires first, the run was stuck in core setup with no exception to
-        // surface, and `watchdogFired` turns it into an honest failure sheet.
+        // Arm the setup-stall watchdog — LOCAL runs only (handoff 129). A local run is
+        // already solving, so a 0%-forever hang is the core MultigridCG→Jacobi stall
+        // (no exception to surface). A REMOTE run's liveness is `RemoteRun`'s job: it
+        // consumes the worker's queued/solving state (POST /jobs response + GET /jobs
+        // probes) so a queued job holds fire indefinitely, and it defers to the SSE
+        // heartbeat — failing only when heartbeats are ALSO absent (a live worker with
+        // no progress is a long first solve, which the freshness UI communicates).
+        // Arming this local guard for remote too was the latent bug the 1800s band-aid
+        // hid: a queued/long remote run tripping it would cancel the token → RemoteRun
+        // reads a user-cancel → DELETEs the Mac's job. So remote does not arm it.
         watchdogCancel?()
-        watchdogCancel = watchdog.arm { [weak self] in self?.watchdogFired(token) }
+        isRemoteRun = remote
+        if !remote {
+            watchdogCancel = watchdog.arm { [weak self] in self?.watchdogFired(token) }
+        }
 
         scheduler.runInBackground { [weak self] in
             let result: Result<OptimizeOutcome, Error>
@@ -787,16 +835,37 @@ public final class RunModel: ObservableObject {
     private func watchdogFired(_ token: CancelToken) {
         guard token === self.token, phase == .running, progress == nil,
               (outcome?.variants.isEmpty ?? true) else { return }
-        token.cancel()                 // best-effort: the orphaned core run may never poll
+        // Do NOT cancel the token here (handoff 129): the run may simply be slow, and
+        // the sheet offers "Keep waiting" (`keepWaiting`) which re-arms this guard to
+        // give the still-running background solve more time. The token is cancelled
+        // only when the user ABANDONS the run (dismissFailure / Try Again).
         let hadDesignBox = runningRequest?.designBox != nil
-        diag("run stalled during setup — no progress within the watchdog grace (designBox=\(hadDesignBox)); surfacing a failure sheet")
+        let grace = watchdog.graceSeconds
+        diag("run stalled during setup — no progress within \(Int(grace))s (designBox=\(hadDesignBox)); surfacing a failure sheet with Keep-waiting")
         outcome = nil
-        failure = .solver(hadDesignBox ? RunFailure.stalledWithDesignBox
-                                       : RunFailure.stalledDuringSetup)
+        failure = .solver(hadDesignBox ? RunFailure.stalledWithDesignBox(graceSeconds: grace)
+                                       : RunFailure.stalledDuringSetup(graceSeconds: grace))
+        canKeepWaiting = true
         phase = .failed
         isStreaming = false
         isMinimized = false
         watchdogCancel = nil
+    }
+
+    /// "Keep waiting" from the stall sheet (an honest guard admits its own timeout).
+    /// The grace expired but the background solve was never cancelled, so give it
+    /// another grace period rather than abandoning it: re-arm the watchdog against the
+    /// SAME run token and return to the running card.
+    public func keepWaiting() {
+        guard phase == .failed, canKeepWaiting else { return }
+        canKeepWaiting = false
+        failure = nil
+        phase = .running
+        isStreaming = true
+        lastProgressAt = Date()   // reset the freshness cue for the extended wait
+        let token = self.token
+        watchdogCancel?()
+        watchdogCancel = watchdog.arm { [weak self] in self?.watchdogFired(token) }
     }
 
     /// Cancel any armed watchdog (idempotent).
@@ -862,6 +931,11 @@ public final class RunModel: ObservableObject {
     /// can adjust the load case and retry).
     public func dismissFailure() {
         guard phase == .failed else { return }
+        // A stall left the background solve RUNNING (watchdogFired doesn't cancel).
+        // Dismissing it — Close, or Try Again which starts a fresh run — abandons that
+        // stuck run, so cancel its token now (best-effort; the orphan may never poll).
+        if canKeepWaiting { token.cancel() }
+        canKeepWaiting = false
         phase = .idle
         failure = nil
     }
@@ -873,6 +947,7 @@ public final class RunModel: ObservableObject {
         phase = .idle
         progress = nil
         failure = nil
+        canKeepWaiting = false
         outcome = nil
         isStreaming = false
         startedAt = nil
