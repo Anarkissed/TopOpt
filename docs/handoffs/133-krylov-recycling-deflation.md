@@ -551,7 +551,8 @@ to try if the multigrid regime is revisited.
 | bar | void-heavy (Jacobi) regime | healthy-multigrid regime |
 |---|---|---|
 | (a) EXACTNESS | **PASS** — mean\|Δρ\| 0.000000 at the shipped k, worst 7e-6 vs a 1e-4 bar; margins ≤ 0.024% vs 0.1%; verdicts IDENTICAL | **PASS** — mean\|Δρ\| 0.000000 shipped, worst 7e-6; margins 0.000%; verdicts IDENTICAL; 625 MMA iters in every mode — *even in the modes that ran 2x slower* |
-| (b) PERFORMANCE ≥ 15% CG cut | **PASS** — 48.1% at k=16 (30.9% / 55.4% at k=8 / 24) | **FAIL** — a REGRESSION, see §9 |
+| (b) PERFORMANCE, bar AS WRITTEN (≥15% both regimes) | **PASS** — 48.1% at k=16 (30.9% / 55.4% at k=8 / 24) | **FAIL** — a REGRESSION, see §9 |
+| (b) PERFORMANCE, bar AS REFORMULATED by the maintainer (≥15% targeted / no-op non-targeted) | **PASS** — 45.4% Jacobi-only, re-verified on the armed head | **PASS** — 1.000x to the digit, 0 setup matvecs |
 | (c) DETERMINISM | PASS — asserted in `test_recycle` (bit-identical fields + iteration histories, and 1-vs-8-thread bit-identity), corroborated at ladder scale | PASS — same assertions |
 | (d) HONEST ACCOUNTING | PASS — reported and charged, §5 | PASS — reported, §5 |
 
@@ -622,6 +623,34 @@ itself authorise arming.** What it does establish, with numbers rather than
 argument, is that an arming posture exists which is a strict improvement on
 design-box runs and a strict no-op everywhere else — a trade the stated bar did not
 anticipate, and therefore a maintainer decision rather than an agent one.
+
+### Re-verified ON THE AMENDED HEAD (armed configuration, 2 replicates)
+
+Required by the maintainer decision: the void-ladder exactness row and the
+determinism assertions, re-run once against the armed tree — not the pre-amendment
+tree that produced the numbers above
+(`docs/handoffs/evidence/133/armed_head_void.txt`):
+
+```
+[baseline (off)  ] rungs=3 iters= 372 cg=  430330 setup_mv=    0 mg_frac=0.22 rc_frac=0.00 wall=256.7s repeat|drho|=0 iters_repeat=same
+[k=16 jacobi-only] rungs=3 iters= 359 cg=  234972 setup_mv= 4356 mg_frac=0.23 rc_frac=0.76 wall=215.3s repeat|drho|=0 iters_repeat=same
+--- verdicts vs baseline ---
+  k=16 jacobi-only  CG 0.546x (cut 45.4%) | gate=IDENTICAL | SHIPPED vf=0.52 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000000 margin_d=0.000% C_d=0.000%
+```
+
+| re-verified on the armed head | result |
+|---|---|
+| Bar (a) exactness — shipped design | mean\|Δρ\| **0.000000**, max 0.0000 |
+| Bar (a) — worst accepted rung | mean\|Δρ\| **0.000000**, margin **0.000%**, compliance **0.000%** |
+| Bar (a) — gate verdicts | **IDENTICAL** |
+| Bar (b) — targeted regime | **45.4%** CG cut (430,330 -> 234,972) |
+| Bar (c) — determinism, both modes | `repeat\|drho\| = 0`, `iters_repeat = same` |
+
+Both CG totals reproduce the pre-amendment measurements **to the digit** (430,330
+and 234,972), which is the point worth making: promoting the knob, flipping its
+default, arming production, adding a CSV column and extending three test files
+changed **nothing** about what the solver computes or how many iterations it takes.
+The amendment is configuration and observability; the numerics are untouched.
 
 ### What the amendment changed (the armed package)
 
