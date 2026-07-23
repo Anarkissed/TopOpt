@@ -155,6 +155,65 @@ final class ColdLaunchReattachTests: XCTestCase {
                       "the re-attached outcome is flagged remote")
     }
 
+    /// Handoff 134, item 2 — what the re-attached result must LOOK like once it lands.
+    /// The worker serves fields.bin whether the client watched the run or re-attached
+    /// to a finished job, so the results screen that opens after a re-attach shows the
+    /// stress overlay, flex, the load-path overlay and a REAL mass. The "computed on
+    /// Mac" note may name only what genuinely stayed on the Mac (the playback
+    /// keyframes) — it must not claim the fields are missing when they are here.
+    /// The network half (the actual fetch after a replay) is the E2E `reattach` case.
+    func testReattachedResultsShowFieldsAndTheWorkersDuration() {
+        let d = scratchDefaults()
+        let pid = UUID()
+        RemoteJobStore.save(job(projectID: pid), defaults: d)
+
+        // The outcome shape `RemoteRun.assembleFinalOutcome` builds when fields.bin
+        // was fetched: per-voxel arrays + grid metadata + the worker's own duration.
+        let nx = 2, ny = 2, nz = 2
+        let nodes = (nx + 1) * (ny + 1) * (nz + 1)
+        let enriched = OptimizeVariant(
+            requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5,
+            massGrams: 41.5, supportVolumeVoxels: 120, meshTriangleCount: 12,
+            worstCaseMargin: 3, accepted: true, v3Passes: true,
+            maxStressMPa: 12,
+            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2],
+            vonMisesField: (0..<(nx * ny * nz)).map { 1 + Float($0) },
+            displacementField: [Float](repeating: 0.01, count: 3 * nodes))
+        let finished = OptimizeOutcome(
+            variants: [enriched], stoppedOnMargin: false, cancelled: false,
+            acceptedCount: 1, voxelVolumeMM3: 15.625,
+            gridNx: nx, gridNy: ny, gridNz: nz, gridOrigin: .zero, spacing: 2.5,
+            computedRemotely: true,
+            timing: RunTiming(queuedSeconds: 252, solveSeconds: 2453))
+        let replay: (RemoteRunnerConfig, String) -> RunModel.Runner = { _, _ in
+            { _, _, _ in finished }
+        }
+
+        let app = AppModel(materialsPath: nil, store: ProjectStore(rootDir: tempDir),
+                           remoteJobDefaults: d, reattachRunnerFactory: replay)
+        seedProject(app, id: pid)
+        app.reattach()
+
+        let outcome = app.project?.run.outcome
+        XCTAssertEqual(app.project?.run.phase, .succeeded)
+        XCTAssertFalse(outcome?.variants.first?.vonMisesField.isEmpty ?? true)
+        XCTAssertGreaterThan(outcome?.variants.first?.massGrams ?? 0, 0)
+
+        let results = ResultsModel(projectName: "Bracket", outcome: try! XCTUnwrap(outcome),
+                                   materialName: "PLA", yieldStrengthMPa: 50)
+        XCTAssertTrue(results.hasStress, "stress overlay is live on a re-attached result")
+        XCTAssertTrue(results.hasFlex, "flex is live on a re-attached result")
+        XCTAssertTrue(results.hasLoadPath, "load path is live on a re-attached result")
+        XCTAssertNotEqual(results.tabs.first?.massLabel, ResultsModel.remoteNA,
+                          "mass reads real, not “computed on Mac”")
+        let note = results.remoteComputeNote ?? ""
+        XCTAssertFalse(note.contains("stress"), "the note must not claim missing fields")
+        XCTAssertFalse(note.contains("mass"), "the note must not claim a missing mass")
+
+        // And the duration is the worker's, not the moment of re-attach.
+        XCTAssertEqual(results.runDurationLabel, "waited 4m 12s · solved 40m 53s")
+    }
+
     // MARK: - unreachable / dead job: honest failure, clears on Dismiss only
 
     /// A dead/unknown job: the (stubbed) runner fails with the 101 worker-unreachable

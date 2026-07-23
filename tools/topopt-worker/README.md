@@ -217,7 +217,11 @@ mistaken for a hang. The client treats a dropped stream as recoverable (reconnec
 `e2e/run_e2e.sh <case>` stands up this worker wrapping a protocol-faithful
 `e2e/stub_cli.py` (and, for drop/observe cases, `e2e/proxy.py`) and runs the
 `RemoteRunnerE2ETests` liveness cases against it: `slow_sparse`, `stream_drop`,
-`worker_dies`, `cancel`, `offline` (+ the 097 controls). `e2e/protocol_smoke.py`
+`worker_dies`, `cancel`, `offline` (+ the 097 controls), and `reattach` — the
+handoff-134 re-attach repro, where a job runs to completion with NO client
+attached and a fresh client then re-attaches to it and must receive the per-voxel
+fields (`fields.bin`, which `stub_cli.py` now writes) and the WORKER's recorded
+duration, not the client's attach window. `e2e/protocol_smoke.py`
 is a pure-Python, HTTP-level proof of the heartbeat, the reconnect replay, and
 DELETE-only cancel — no Xcode needed. See `docs/handoffs/101-remote-run-liveness.md`.
 

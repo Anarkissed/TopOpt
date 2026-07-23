@@ -92,6 +92,15 @@ enum OutcomeCodec {
         // Handoff 124 — same optional discipline: nil on pre-124 blobs (→ no
         // protection notes), empty when no Face protection was declared.
         let appliedFaceProtections: [AppliedFaceProtectionDTO]?
+        // Handoff 134 — the run's DURATION (queue wait + solve seconds). It must
+        // survive the round-trip for the same reason `computedRemotely` must: a
+        // reopened result that lost it would have to re-derive a duration at display
+        // time, and the only clock available then is `now()` — which is exactly the
+        // observer-dependent "11 hours" this handoff removed. Optional so pre-134
+        // blobs still decode (→ nil → no duration shown, honest for a result that
+        // never recorded one).
+        let queuedSeconds: Double?
+        let solveSeconds: Double?
     }
 
     // MARK: OptimizeOutcome → DTO (cheap: array→Data is a memcpy)
@@ -133,7 +142,9 @@ enum OutcomeCodec {
             appliedFaceProtections: o.appliedFaceProtections.map {
                 AppliedFaceProtectionDTO(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
                                          depthVoxels: $0.depthVoxels,
-                                         thinnerThanDepth: $0.thinnerThanDepth) })
+                                         thinnerThanDepth: $0.thinnerThanDepth) },
+            queuedSeconds: o.timing?.queuedSeconds,
+            solveSeconds: o.timing?.solveSeconds)
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -176,7 +187,12 @@ enum OutcomeCodec {
             appliedFaceProtections: (d.appliedFaceProtections ?? []).map {
                 AppliedFaceProtection(faceID: $0.faceID, voxelsFrozen: $0.voxelsFrozen,
                                       depthVoxels: $0.depthVoxels,
-                                      thinnerThanDepth: $0.thinnerThanDepth) })
+                                      thinnerThanDepth: $0.thinnerThanDepth) },
+            // A duration exists only when the SOLVE time was recorded; a blob with
+            // just a queue wait (impossible today, but decode defensively) is not a
+            // duration and stays nil rather than reporting "solved 0s".
+            timing: d.solveSeconds.map {
+                RunTiming(queuedSeconds: d.queuedSeconds ?? 0, solveSeconds: $0) })
     }
 
     // MARK: Encode / decode (binary plist)

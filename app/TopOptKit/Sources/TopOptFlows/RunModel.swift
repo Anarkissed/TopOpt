@@ -661,6 +661,20 @@ public final class RunModel: ObservableObject {
     /// The per-iteration ETA estimator, folded in `publish` and reset per run.
     private var etaEstimator = RunETAEstimator()
 
+    /// Instant this LOCAL run's solve began, for the outcome's carried `RunTiming`
+    /// (handoff 134, item 1). Distinct from the presentation-only `startedAt` on
+    /// purpose: this one becomes a DURABLE number on the result (persisted, shown on
+    /// the summary), so its rules are stricter — it is consumed ONLY for a local run,
+    /// where this process is the thing doing the solving and start→finish here IS the
+    /// run. A REMOTE run never uses it: its client may have slept, been force-quit, or
+    /// re-attached hours later, so the honest duration is the worker's own record
+    /// (`RemoteRun.fetchTiming`), and this stamp is ignored rather than allowed to
+    /// report when someone looked.
+    private var localSolveStartedAt: Date?
+    /// Clock for the local solve stamp. Injected so the duration is unit-testable
+    /// without sleeping; production is `Date()`.
+    private let clock: () -> Date
+
     /// The freshness cue for a REMOTE run's progress readout (handoff 101). Returns
     /// "last update Xs ago" once the gap since the last live signal exceeds ~2× the
     /// worker heartbeat (so a healthy sub-heartbeat cadence shows nothing), else
@@ -708,11 +722,13 @@ public final class RunModel: ObservableObject {
     public init(scheduler: RunScheduler = GCDRunScheduler(),
                 notifier: RunNotifier = SilentRunNotifier(),
                 watchdog: RunWatchdog = TimerRunWatchdog(),
-                runner: @escaping Runner = RunModel.bridgeRunner) {
+                runner: @escaping Runner = RunModel.bridgeRunner,
+                clock: @escaping () -> Date = { Date() }) {
         self.scheduler = scheduler
         self.notifier = notifier
         self.watchdog = watchdog
         self.runner = runner
+        self.clock = clock
     }
 
     /// Diagnostic log hop (M7.diag). os_log on Apple → Console.app + Xcode; a
@@ -780,6 +796,7 @@ public final class RunModel: ObservableObject {
         isStreaming = true
         startedAt = Date()      // anchor the elapsed clock / ETA (presentation-only)
         lastProgressAt = Date() // seed the freshness cue (presentation-only)
+        localSolveStartedAt = clock()   // the DURABLE local-solve stamp (134) — see the property
         etaEstimator = RunETAEstimator()   // fresh per-iteration ETA history
         eta = nil
         runningInBackground = false
@@ -826,6 +843,20 @@ public final class RunModel: ObservableObject {
             }
             scheduler.runOnMain { self?.finish(request, token, result) }
         }
+    }
+
+    /// Re-anchor the in-flight ELAPSED clock to when the run actually began, for a
+    /// re-attach (handoff 134). `start` anchors it to "now", which for a re-attached
+    /// run means the moment the CLIENT arrived — so a run 10 hours into its solve read
+    /// "0:03" while the Mac had been at it all night. The persisted submit time is the
+    /// client's best honest knowledge of when the run began; the readout then says how
+    /// long THE RUN has been going, not how long you have been watching it. Ignored for
+    /// a future date (a clock skew must not produce a negative clock) and only while
+    /// running. PRESENTATION-ONLY, like `startedAt` itself — the DURABLE duration on
+    /// the result comes from the worker's own record (`RunTiming`), never from here.
+    public func anchorElapsed(to began: Date) {
+        guard phase == .running, began <= Date() else { return }
+        startedAt = began
     }
 
     /// The setup-stall watchdog fired: the run produced no progress and no streamed
@@ -951,6 +982,7 @@ public final class RunModel: ObservableObject {
         outcome = nil
         isStreaming = false
         startedAt = nil
+        localSolveStartedAt = nil
         lastProgressAt = nil
         etaEstimator = RunETAEstimator()
         eta = nil
@@ -981,6 +1013,19 @@ public final class RunModel: ObservableObject {
         guard token === self.token, phase == .running else { return }
         disarmWatchdog()
         runningRequest = nil
+        // Resolve the run's DURATION once, here, from the only two honest sources
+        // (handoff 134, item 1): a remote outcome already carries the worker's own
+        // record; a local run is measured by this process, which is the thing that was
+        // solving. A remote run with no worker record gets NO duration — the client's
+        // own clock is not a fallback, it is the bug (the "11 hours" a 40-minute solve
+        // reported the next morning). `withTiming` never overwrites a carried value.
+        let remote = isRemoteRun
+        let localTiming = localSolveStartedAt.map {
+            RunTiming(solveSeconds: clock().timeIntervalSince($0))
+        }
+        func stamp(_ o: OptimizeOutcome) -> OptimizeOutcome {
+            o.withTiming(o.timing ?? (remote ? nil : localTiming))
+        }
         switch result {
         case .success(let o):
             if o.cancelled {
@@ -993,20 +1038,23 @@ public final class RunModel: ObservableObject {
                 if outcome?.variants.contains(where: { $0.accepted }) == true {
                     progress = nil
                     phase = .succeeded
+                    // The streamed variants ARE the result the user keeps, so they
+                    // keep the run's duration too (the cancel is when it stopped).
+                    outcome = outcome.map(stamp)
                 } else {
                     outcome = nil
                     phase = .cancelled
                 }
             } else if o.acceptedCount == 0 {
                 // Nothing strong enough: the terminal rung failed the margin gate.
-                outcome = o
+                outcome = stamp(o)
                 let terminal = o.variants.last
                 failure = .allRejectedOnMargin(
                     worstMargin: terminal?.worstCaseMargin ?? 0,
                     minFeatureViolations: terminal?.minFeatureViolations ?? 0)
                 phase = .failed
             } else {
-                outcome = o                                // authoritative final
+                outcome = stamp(o)                         // authoritative final
                 progress = nil
                 phase = .succeeded
             }
@@ -1016,6 +1064,7 @@ public final class RunModel: ObservableObject {
             if outcome?.variants.contains(where: { $0.accepted }) == true {
                 progress = nil
                 phase = .succeeded
+                outcome = outcome.map(stamp)
             } else {
                 // Surface the core diagnostic — os_log it first so the reason is in
                 // the device log even before the sheet renders, and never leave the

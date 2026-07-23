@@ -30,7 +30,7 @@ final class RemoteRunnerE2ETests: XCTestCase {
             for (k, v) in obj { out[k] = "\(v)" }
         }
         for k in ["TOPOPT_E2E", "TOPOPT_E2E_CASE", "TOPOPT_WORKER_PORT",
-                  "TOPOPT_INACTIVITY_GRACE", "TOPOPT_PROXY_LOG"] {
+                  "TOPOPT_INACTIVITY_GRACE", "TOPOPT_PROXY_LOG", "TOPOPT_E2E_JOB_ID"] {
             if let v = env[k] { out[k] = v }
         }
         return out
@@ -85,6 +85,7 @@ final class RemoteRunnerE2ETests: XCTestCase {
         case "slow_sparse": try runSlowSparseCompletes()
         case "stream_drop": try runStreamDropReconnects()
         case "worker_dies": try runWorkerDiesUnreachable()
+        case "reattach":    try runReattachAfterCompletion()
         default: XCTFail("unknown TOPOPT_E2E_CASE \(e2eCase)")
         }
     }
@@ -124,11 +125,87 @@ final class RemoteRunnerE2ETests: XCTestCase {
         for v in outcome.variants {
             XCTAssertFalse(v.meshVertices.isEmpty, "every variant carries its fetched mesh")
             XCTAssertGreaterThan(v.meshTriangleCount, 0)
-            XCTAssertEqual(v.massGrams, 0, "mass is unavailable over the wire (rendered n/a)")
-            XCTAssertTrue(v.vonMisesField.isEmpty, "no stress field over the wire")
+            // Handoff 122 gave the worker fields.bin; handoff 134 taught the STUB to
+            // write one, so this case finally exercises the fetch-SUCCEEDED branch
+            // over real HTTP (it previously only ever proved the degraded path — the
+            // reason the re-attach half of it went unnoticed for two handoffs).
+            XCTAssertGreaterThan(v.massGrams, 0, "mass arrives in fields.bin (122)")
+            XCTAssertFalse(v.vonMisesField.isEmpty, "stress field arrives in fields.bin")
+            XCTAssertFalse(v.displacementField.isEmpty, "displacement arrives in fields.bin")
         }
+        XCTAssertGreaterThan(outcome.gridNx, 0, "the fields' grid metadata rides along")
+        // Handoff 134 item 1: the duration comes from the WORKER's record.
+        let timing = try XCTUnwrap(outcome.timing, "a finished remote run carries its duration")
+        print("  duration: \(timing.summary)")
+        XCTAssertGreaterThan(timing.solveSeconds, 0, "a real solve took real time")
         print("  RESULT: succeeded, \(outcome.variants.count) variants, "
             + "worst margins \(outcome.variants.map { String(format: "%.2f", $0.worstCaseMargin) })")
+    }
+
+    // MARK: re-attach to a job that finished while the app was GONE (handoff 134)
+
+    /// The QA repro, at the HTTP level: submit → the app dies → the job COMPLETES on
+    /// the worker → relaunch → re-attach → results. The harness has already submitted
+    /// the job and waited for it to finish (that is the "app was force-quit" window);
+    /// this test is the relaunched client, driving exactly what `AppModel.reattach`
+    /// drives — `RunModel.remoteReattachRunner` against the stored job id.
+    ///
+    /// What must hold, and did not before 134 was written against it: the re-attach
+    /// path performs the SAME fields.bin fetch the live-completion path performs, so
+    /// the stress overlay, flex, the load-path overlay and the real mass are all
+    /// present — and the run's duration is the WORKER's (finished − started), not the
+    /// time since the client re-attached.
+    private func runReattachAfterCompletion() throws {
+        let jobID = try XCTUnwrap(Self.cfg["TOPOPT_E2E_JOB_ID"],
+                                  "the harness must pass the completed job's id")
+        print("  re-attaching to completed job \(jobID) (client was 'force-quit')")
+
+        let reattachedAt = Date()
+        let model = RunModel(runner: RunModel.remoteReattachRunner(config(), jobID: jobID))
+        let resolved = expectation(description: "re-attached run resolves")
+        let obs = Observer(model: model) { phase, _, _ in
+            if phase != .running && phase != .idle { resolved.fulfill() }
+        }
+        model.start(try makeRequest(), remote: true)
+        wait(for: [resolved], timeout: 30)
+        obs.stop()
+        let clientElapsed = Date().timeIntervalSince(reattachedAt)
+
+        XCTAssertEqual(model.phase, .succeeded, "a completed job replays into a result")
+        let outcome = try XCTUnwrap(model.outcome)
+        XCTAssertEqual(outcome.acceptedCount, 2, "the replay rebuilt both accepted rungs")
+
+        // (2) FIELDS — the same fetch, the same presence gate, on the re-attach path.
+        for v in outcome.variants {
+            XCTAssertFalse(v.meshVertices.isEmpty, "geometry survives the re-attach")
+            XCTAssertGreaterThan(v.massGrams, 0, "REAL mass, not n/a, after a re-attach")
+            XCTAssertFalse(v.vonMisesField.isEmpty, "stress field fetched on re-attach")
+            XCTAssertFalse(v.displacementField.isEmpty, "displacement fetched on re-attach")
+        }
+        XCTAssertGreaterThan(outcome.gridNx, 0, "grid metadata needed to index the fields")
+
+        // …and what the RESULTS SCREEN does with it: the overlays light up and the
+        // "computed on Mac" banner is GONE, because the fields are genuinely here.
+        let results = ResultsModel(projectName: "E2E", outcome: outcome,
+                                   materialName: "PLA", yieldStrengthMPa: 50)
+        XCTAssertTrue(results.hasStress, "stress overlay control is live after re-attach")
+        XCTAssertTrue(results.hasFlex, "flex control is live after re-attach")
+        XCTAssertTrue(results.hasLoadPath, "load-path control is live after re-attach")
+        XCTAssertNotEqual(results.tabs.first?.massLabel, ResultsModel.remoteNA,
+                          "mass must read real, not “computed on Mac”")
+        print("  results: stress=\(results.hasStress) flex=\(results.hasFlex) "
+            + "mass=\(results.tabs.first?.massLabel ?? "-") note=\(results.remoteComputeNote ?? "none")")
+
+        // (1) DURATION — the worker's own record, not the client's wall clock. The
+        // re-attach itself takes ~a second here; the harness paced the solve to be
+        // clearly longer, so a client-derived duration would be visibly smaller.
+        let timing = try XCTUnwrap(outcome.timing, "the re-attached run carries a duration")
+        print(String(format: "  duration: %@ (client was attached only %.1fs)",
+                     timing.summary, clientElapsed))
+        XCTAssertGreaterThan(timing.solveSeconds, clientElapsed,
+                             "the duration is the worker's solve, not the client's attach window")
+        XCTAssertEqual(results.runDurationLabel, timing.summary,
+                       "the summary shows exactly the recorded duration")
     }
 
     // MARK: negative controls (driven directly through the Runner)

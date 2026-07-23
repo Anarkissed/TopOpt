@@ -214,6 +214,78 @@ public struct OptimizeVariant {
     }
 }
 
+/// How long a run actually took, in the run's OWN frame of reference — never the
+/// viewer's (handoff 134, results-integrity item 1).
+///
+/// The incident: a 40m53s remote solve looked at the next morning reported "11
+/// hours", because the only duration the app had was wall time measured against
+/// `now()` (or against the moment the client re-attached). Both are properties of
+/// WHEN SOMEONE LOOKED, not of the run. A duration that drifts with the observer is
+/// a number describing a different object than the file — the same reject class as
+/// a fabricated mass.
+///
+/// So the duration is CARRIED, not computed at display time:
+///   * a remote run reads the worker's own record (`created_at` / `started_at` /
+///     `finished_at` on `GET /jobs/{id}`), the same timestamps the Mac's menu shows;
+///   * a local run stamps its own start/finish while it is genuinely running.
+/// Nothing downstream may reconstruct it from `Date()`. `nil` (no timing at all)
+/// is the honest fallback — the results screen then shows NO duration rather than
+/// an observer-dependent one.
+///
+/// `queuedSeconds` is the wait BEFORE the solve began (a worker queue is real time
+/// the user waited but not time the part was being solved). It is reported
+/// separately — "waited 4m · solved 40m 53s" — so neither number absorbs the other.
+public struct RunTiming: Equatable, Sendable {
+    /// Seconds spent QUEUED before the solve started. 0 for a local run (nothing
+    /// queues) and for a remote job promoted immediately.
+    public let queuedSeconds: TimeInterval
+    /// Seconds spent SOLVING: finish − start, measured where the solve happened.
+    public let solveSeconds: TimeInterval
+
+    public init(queuedSeconds: TimeInterval = 0, solveSeconds: TimeInterval) {
+        // Clamp rather than trust: a worker clock adjustment (or a garbled field)
+        // must not produce a negative "duration" the UI would render as nonsense.
+        self.queuedSeconds = Swift.max(0, queuedSeconds)
+        self.solveSeconds = Swift.max(0, solveSeconds)
+    }
+
+    /// Build from the worker's epoch timestamps. Returns nil unless BOTH ends of the
+    /// solve are known — a job with no `finished_at` has no truthful duration yet,
+    /// and inventing one from `now()` is the bug this type exists to prevent.
+    public static func fromWorker(createdAt: Double?, startedAt: Double?,
+                                  finishedAt: Double?) -> RunTiming? {
+        guard let finished = finishedAt else { return nil }
+        // A job that never recorded a promotion start (a pre-121 worker) still has an
+        // honest total: created → finished, all of it attributed to the solve, with
+        // no queue claim we can't support.
+        guard let started = startedAt else {
+            guard let created = createdAt else { return nil }
+            return RunTiming(queuedSeconds: 0, solveSeconds: finished - created)
+        }
+        return RunTiming(queuedSeconds: createdAt.map { started - $0 } ?? 0,
+                         solveSeconds: finished - started)
+    }
+
+    /// "40m 53s" / "1h 04m" / "38s" — the exact solve time, locale-independent so it
+    /// is unit-testable and matches the worker's own reading of the same interval.
+    public static func clock(_ seconds: TimeInterval) -> String {
+        let t = Int(Swift.max(0, seconds).rounded())
+        let (h, m, s) = (t / 3600, (t % 3600) / 60, t % 60)
+        if h > 0 { return String(format: "%dh %02dm", h, m) }
+        if m > 0 { return "\(m)m \(s)s" }
+        return "\(s)s"
+    }
+
+    /// The results/summary line. "solved 40m 53s", or "waited 4m 12s · solved 40m 53s"
+    /// when the run sat in the worker's queue first. The queue wait is shown ONLY when
+    /// it is real (≥ 1s) — a zero wait is not worth a clause.
+    public var summary: String {
+        let solved = "solved \(RunTiming.clock(solveSeconds))"
+        guard queuedSeconds >= 1 else { return solved }
+        return "waited \(RunTiming.clock(queuedSeconds)) · \(solved)"
+    }
+}
+
 /// The outcome of a minimize_plastic run (ROADMAP M5.3 / M7.7).
 public struct OptimizeOutcome {
     public let variants: [OptimizeVariant]
@@ -253,13 +325,21 @@ public struct OptimizeOutcome {
     /// Empty when no protection was declared.
     public let appliedFaceProtections: [AppliedFaceProtection]
 
+    /// Handoff 134 — how long the run took, measured WHERE IT RAN (see `RunTiming`).
+    /// A remote outcome carries the worker's own created/started/finished record; a
+    /// local one carries the app's own start→finish stamp. nil when no truthful
+    /// timing is available (a legacy blob, a worker that didn't report one) — the
+    /// results screen then shows no duration rather than one derived from `now()`.
+    public let timing: RunTiming?
+
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
                 gridOrigin: SIMD3<Double> = .zero, spacing: Double = 0,
                 computedRemotely: Bool = false,
                 appliedClearances: [AppliedClearance] = [],
-                appliedFaceProtections: [AppliedFaceProtection] = []) {
+                appliedFaceProtections: [AppliedFaceProtection] = [],
+                timing: RunTiming? = nil) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -273,6 +353,23 @@ public struct OptimizeOutcome {
         self.computedRemotely = computedRemotely
         self.appliedClearances = appliedClearances
         self.appliedFaceProtections = appliedFaceProtections
+        self.timing = timing
+    }
+
+    /// A copy carrying `timing` — how the run flow stamps a LOCAL run's measured
+    /// duration onto an outcome the solver built without one. Never used to overwrite
+    /// a timing the outcome already carries (a remote outcome's worker record wins;
+    /// see `RunTiming`).
+    public func withTiming(_ timing: RunTiming?) -> OptimizeOutcome {
+        OptimizeOutcome(variants: variants, stoppedOnMargin: stoppedOnMargin,
+                        cancelled: cancelled, acceptedCount: acceptedCount,
+                        voxelVolumeMM3: voxelVolumeMM3,
+                        gridNx: gridNx, gridNy: gridNy, gridNz: gridNz,
+                        gridOrigin: gridOrigin, spacing: spacing,
+                        computedRemotely: computedRemotely,
+                        appliedClearances: appliedClearances,
+                        appliedFaceProtections: appliedFaceProtections,
+                        timing: timing ?? self.timing)
     }
 }
 

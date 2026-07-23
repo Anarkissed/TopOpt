@@ -919,6 +919,19 @@ public struct ResultsScreen: View {
                     Text("Optimized ✓").dsStyle(DS.TypeScale.callout)
                         .foregroundStyle(DS.Color.okGreen.color)
                         .fixedSize()
+                    // How long the run actually took (handoff 134). Sourced from the
+                    // run's own record — the worker's created/started/finished for a
+                    // LAN run — so it reads the same whether the results are opened as
+                    // the run lands or the next morning after a re-attach. Absent
+                    // entirely when the run recorded no duration: no clock is consulted
+                    // here, so there is nothing to show but the truth or nothing.
+                    if let duration = model.runDurationLabel {
+                        Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
+                        Text(duration).dsStyle(DS.TypeScale.callout)
+                            .foregroundStyle(DS.Color.textSecondary.color)
+                            .monospacedDigit()
+                            .fixedSize()
+                    }
                 }
                 .padding(.vertical, DS.Space.sm)
                 .padding(.horizontal, DS.Space.l)

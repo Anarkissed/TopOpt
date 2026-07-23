@@ -8,7 +8,7 @@
 #
 # Usage:  ./run_e2e.sh <case>        # one of: happy mismatch offline bad_mesh
 #                                     #   reject_all cancel slow_sparse
-#                                     #   stream_drop worker_dies
+#                                     #   stream_drop worker_dies reattach
 #         ./run_e2e.sh all           # every case, in sequence
 set -uo pipefail
 
@@ -29,7 +29,11 @@ freeport() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0))
 
 PIDS=()
 cleanup() { for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done; }
-trap cleanup EXIT
+# The config file is what ARMS the otherwise-skipped E2E test. Left behind, it makes
+# every later plain `swift test` run the gated case against a worker that is no
+# longer listening — a green suite turning red for no code reason (handoff 134).
+# Remove it when the harness exits, whatever the outcome.
+trap 'cleanup; rm -f /tmp/topopt-e2e.json' EXIT
 
 wait_health() {  # <port>
   for _ in $(seq 1 50); do
@@ -57,6 +61,40 @@ start_proxy() {  # <listen> <backend> <droparg> <logfile>
   sleep 0.4
 }
 
+# Submit one job and BLOCK until the worker reports it terminal, echoing the job id
+# (handoff 134). No SSE client is ever attached — the job runs, and finishes, with
+# nobody watching, which is exactly the force-quit window the re-attach must survive.
+submit_and_wait_done() {  # <port>  -> job_id on stdout
+  python3 - "$1" <<'PY'
+import http.client, json, sys, time
+port = int(sys.argv[1])
+boundary = "----e2e"
+doc = {"model": "m.step", "material": "PLA", "resolution": 32,
+       "mode": "minimize_plastic", "loads": {"anchor_face_ids": [1]}}
+body = (
+    '--%s\r\nContent-Disposition: form-data; name="step"; filename="m.step"\r\n'
+    'Content-Type: application/octet-stream\r\n\r\nISO-10303-21;\r\n' % boundary
+    + '--%s\r\nContent-Disposition: form-data; name="job"; filename="job.json"\r\n'
+      'Content-Type: application/json\r\n\r\n%s\r\n' % (boundary, json.dumps(doc))
+    + '--%s--\r\n' % boundary).encode()
+c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+c.request("POST", "/jobs", body,
+          {"Content-Type": "multipart/form-data; boundary=%s" % boundary})
+job = json.loads(c.getresponse().read())["job_id"]
+for _ in range(600):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("GET", "/jobs/%s" % job)
+    snap = json.loads(c.getresponse().read())
+    if snap.get("state") in ("done", "error", "cancelled"):
+        sys.stderr.write("worker record: state=%s started=%s finished=%s\n"
+                         % (snap["state"], snap["started_at"], snap["finished_at"]))
+        print(job)
+        sys.exit(0 if snap["state"] == "done" else 1)
+    time.sleep(0.1)
+sys.exit(1)
+PY
+}
+
 run_case() {
   local CASE="$1"
   echo
@@ -64,9 +102,10 @@ run_case() {
   echo "# CASE: $CASE"
   echo "############################################################"
 
-  local CLIENT_PORT GRACE PROXY_LOG WORKER_PORT
+  local CLIENT_PORT GRACE PROXY_LOG WORKER_PORT JOB_ID
   GRACE=3
   PROXY_LOG=""
+  JOB_ID=""
 
   case "$CASE" in
     offline)
@@ -95,17 +134,32 @@ run_case() {
       start_worker "$WORKER_PORT" dies 0.4 20
       wait_health "$WORKER_PORT" || { echo "worker failed"; return 1; }
       start_proxy "$CLIENT_PORT" "$WORKER_PORT" "" "$PROXY_LOG" ;;
+    reattach)
+      # Handoff 134, item 2 — the re-attach QA repro at the HTTP level: submit a job,
+      # then let it run to COMPLETION with NO client attached (the "app force-quit"
+      # window), and only then hand the finished job's id to the relaunched client.
+      # The solve is paced (0.5s × 6 progress events ≈ 3s) so the worker's recorded
+      # duration is clearly LONGER than the client's attach window — which is what
+      # makes "the duration is the worker's, not the observer's" a real assertion.
+      WORKER_PORT="$(freeport)"; CLIENT_PORT="$WORKER_PORT"
+      start_worker "$WORKER_PORT" normal 0.5 20
+      wait_health "$WORKER_PORT" || { echo "worker failed to start"; return 1; }
+      JOB_ID="$(submit_and_wait_done "$WORKER_PORT")" || {
+        echo "job did not finish"; return 1; }
+      echo "-- job $JOB_ID finished on the worker with no client attached --" ;;
     *) echo "unknown case $CASE"; return 2 ;;
   esac
 
   # Hand the client its config (a simulator/macOS xctest reads this host file).
-  python3 - "$CLIENT_PORT" "$CASE" "$GRACE" "$PROXY_LOG" >/tmp/topopt-e2e.json <<'PY'
+  python3 - "$CLIENT_PORT" "$CASE" "$GRACE" "$PROXY_LOG" "${JOB_ID:-}" >/tmp/topopt-e2e.json <<'PY'
 import json, sys
-port, case, grace, plog = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+port, case, grace, plog, job = sys.argv[1:6]
 d = {"TOPOPT_E2E": "1", "TOPOPT_E2E_CASE": case,
      "TOPOPT_WORKER_PORT": port, "TOPOPT_INACTIVITY_GRACE": grace}
 if plog:
     d["TOPOPT_PROXY_LOG"] = plog
+if job:
+    d["TOPOPT_E2E_JOB_ID"] = job     # handoff 134: the completed job to re-attach to
 print(json.dumps(d))
 PY
   echo "-- /tmp/topopt-e2e.json --"; cat /tmp/topopt-e2e.json; echo
@@ -135,7 +189,7 @@ run_queue() {
 }
 
 if [ "${1:-}" = "all" ]; then
-  for c in offline mismatch happy bad_mesh reject_all cancel slow_sparse stream_drop worker_dies; do
+  for c in offline mismatch happy bad_mesh reject_all cancel slow_sparse stream_drop worker_dies reattach; do
     run_case "$c"
   done
   run_queue

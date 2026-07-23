@@ -694,6 +694,21 @@ public final class ResultsModel: ObservableObject {
     /// reject-class bug here. Default false → a local outcome is unchanged.
     public private(set) var computedRemotely = false
 
+    /// Handoff 134 — how long the run took, as recorded WHERE IT RAN (the worker's
+    /// own created/started/finished record for a LAN run; the app's own start→finish
+    /// for a local one). Never recomputed here: this screen is often opened long
+    /// after the run finished — the next morning, after a force-quit and a re-attach
+    /// — and any duration derived from `now()` at that point describes the observer,
+    /// not the run (a 40m53s solve read as "11 hours"). nil when the run recorded no
+    /// timing, in which case the summary shows NO duration rather than a guess.
+    public private(set) var runTiming: RunTiming?
+
+    /// The summary line for `runTiming`: "solved 40m 53s", or "waited 4m 12s ·
+    /// solved 40m 53s" when the job sat in the worker's queue first (queue wait and
+    /// solve time are reported separately — neither absorbs the other). nil when
+    /// there is no recorded timing.
+    public var runDurationLabel: String? { runTiming?.summary }
+
     /// Handoff 100 — honest "Keep clear" notes: one line per applied clearance
     /// region (which face + kind, how much it reserved, or "outside the solved area"
     /// when the region missed the grid). Clearance affects the DESIGN (it forbids
@@ -845,6 +860,10 @@ public final class ResultsModel: ObservableObject {
         let acc = outcome.variants.filter { $0.accepted }
         accepted = acc
         computedRemotely = outcome.computedRemotely
+        // Only a timing-bearing outcome updates the duration: `apply` also runs for
+        // every STREAMED partial (which has no timing yet), and a partial landing
+        // after the authoritative final must not erase the run's recorded duration.
+        if let t = outcome.timing { runTiming = t }
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)
         gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)

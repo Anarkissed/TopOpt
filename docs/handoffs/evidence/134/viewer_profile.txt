@@ -1,0 +1,31 @@
+# resolution 64 — fresh l-bracket ladder (topopt-cli, 15m37s). Columns:
+# variant | tris | raw verts | welded verts | ratio | pos+nrm KB | tint KB | flex KB | total KB | GPU ms @1024^2 | GPU ms @2048^2
+
+## run 1
+results at rest/orbit: 2 draw calls, 87303 vertices/frame
+offscreen export: 1 draw calls, 87300 vertices/frame
+== VIEWER PROFILE (handoff 134 item 3) — GPU: Apple M2 Pro ==
+variant_070.stl | 36628 | 109884 | 18294 | 6.01× | 2575 | 1717 | 1288 | 5580 | 0.496 | 1.043
+variant_050.stl | 29100 | 87300 | 14528 | 6.01× | 2046 | 1364 | 1023 | 4433 | 0.436 | 0.990
+variant_030.stl | 21652 | 64956 | 10782 | 6.02× | 1522 | 1015 | 761 | 3299 | 0.382 | 0.929
+
+## run 2
+results at rest/orbit: 2 draw calls, 87303 vertices/frame
+offscreen export: 1 draw calls, 87300 vertices/frame
+== VIEWER PROFILE (handoff 134 item 3) — GPU: Apple M2 Pro ==
+variant_070.stl | 36628 | 109884 | 18294 | 6.01× | 2575 | 1717 | 1288 | 5580 | 0.497 | 1.044
+variant_050.stl | 29100 | 87300 | 14528 | 6.01× | 2046 | 1364 | 1023 | 4433 | 0.437 | 0.991
+variant_030.stl | 21652 | 64956 | 10782 | 6.02× | 1522 | 1015 | 761 | 3299 | 0.382 | 0.930
+
+## run 3
+results at rest/orbit: 2 draw calls, 87303 vertices/frame
+offscreen export: 1 draw calls, 87300 vertices/frame
+== VIEWER PROFILE (handoff 134 item 3) — GPU: Apple M2 Pro ==
+variant_070.stl | 36628 | 109884 | 18294 | 6.01× | 2575 | 1717 | 1288 | 5580 | 0.496 | 1.045
+variant_050.stl | 29100 | 87300 | 14528 | 6.01× | 2046 | 1364 | 1023 | 4433 | 0.436 | 0.990
+variant_030.stl | 21652 | 64956 | 10782 | 6.02× | 1522 | 1015 | 761 | 3299 | 0.382 | 0.930
+
+# resolution 48 — committed demo set (build/cli_out1); census columns only are load-independent
+variant_070.stl | 15684 | 47052 | 7840 | 6.00× | 1103 | 735 | 551 | 2389 | 0.329 | 0.875
+variant_050.stl | 13964 | 41892 | 6960 | 6.02× | 982 | 655 | 491 | 2127 | 0.324 | 0.874
+variant_030.stl | 9208 | 27624 | 4588 | 6.02× | 647 | 432 | 324 | 1403 | 0.282 | 0.828
