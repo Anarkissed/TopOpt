@@ -1,0 +1,22 @@
+
+
+### R4 — SETUP-VS-SOLVE ECONOMICS AND MEMORY
+Wall-clock: median of 3 interleaved repeats, [min..max] band. Single-threaded prototype vs the threaded library path — read the RATIOS, not the seconds.
+
+== stagnation(192x112x128) box 192x112x128 occ 0.40 bore 0.40(axis z) rho 0.50
+   solid=242816 bore-removed=200704 empty-expanse=2308992 | reduced DOF=804864 nodes=268288 nnz=60742584 (701 MB) | geometric coarsenable(rule)=YES
+   fine-matrix CSR assembly: 1.06s (a cost the matrix-free geometric path does NOT pay)
+   AMG hierarchy memory 2071.6 MB over 4 levels; grid-operator complexity = 1.45 (sum nnz / fine nnz)
+   GEOMETRIC: hier=1 used_mg=0 mg_cycles=300 cg_iters=3602 | wall 98.30s [81.97..141.04]
+   AMG:       pcg_cycles=37 | setup 26.94s [18.71..29.15]  solve 32.67s [19.16..33.98]  setup/(setup+solve)=45%
+   MEMORY: geometric matrix-free hierarchy stores 88.9 MB of COARSE operators and NO fine matrix (078); this AMG needs the fine matrix assembled: 701.3 MB for A0 alone.
+   VARIANT unsmoothed aggregation (P = T, no A needed to form P): setup 2.25s, stationary sustained contraction 0.969, pcg_cycles=65, memory 942.6 MB
+
+== healthy(48^3 solid)    box 48x48x48 occ 1.00 bore 0.00(axis z) rho 0.50
+   solid=110592 bore-removed=0 empty-expanse=0 | reduced DOF=345744 nodes=115248 nnz=26869950 (310 MB) | geometric coarsenable(rule)=YES
+   fine-matrix CSR assembly: 0.47s (a cost the matrix-free geometric path does NOT pay)
+   AMG hierarchy memory 1009.9 MB over 4 levels; grid-operator complexity = 1.48 (sum nnz / fine nnz)
+   GEOMETRIC: hier=0 used_mg=0 mg_cycles=0 cg_iters=404 | wall 1.65s [1.60..1.79]
+   AMG:       pcg_cycles=16 | setup 8.66s [8.48..8.93]  solve 3.59s [3.55..3.77]  setup/(setup+solve)=71%
+   MEMORY: geometric matrix-free hierarchy stores 43.8 MB of COARSE operators and NO fine matrix (078); this AMG needs the fine matrix assembled: 310.1 MB for A0 alone.
+   VARIANT unsmoothed aggregation (P = T, no A needed to form P): setup 0.68s, stationary sustained contraction 0.941, pcg_cycles=34, memory 421.5 MB

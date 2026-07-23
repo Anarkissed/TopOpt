@@ -1,0 +1,31 @@
+
+
+### R1 — THE STAGNATION REGIME (125's killer: thin part in an empty design box + a clearance bore, at the real padded extents)
+Bar stated before measuring: GO iff sustained V-cycle contraction <= ~0.5.
+
+== occ0.40+bore0.40       box 192x112x128 occ 0.40 bore 0.40(axis z) rho 0.50
+   solid=242816 bore-removed=200704 empty-expanse=2308992 | reduced DOF=804864 nodes=268288 nnz=60742584 (701 MB) | geometric coarsenable(rule)=YES
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=1 used_mg=0 levels=0 mg_cycles=300 cg_iters=3602 resid=9.97e-07  71.27s
+      -> geometric FELL BACK (STAGNATION: hierarchy built); contraction not reached within budget
+   JACOBI-CG baseline: iters=3602 resid=9.97e-07 44.62s
+    level      n        nnz    nnz/row   aggregates
+        0   804864   60742584     75.5        11210
+        1    67260   21123079    314.1         1238
+        2     7428    5355864    721.0          165
+        3      990     568764    574.5            0
+    coarsest n=990 dense-LDL^T=yes  hierarchy memory=2071.6 MB
+   AMG stationary V-cycle: cycles=60 converged=NO final_rel=4.41e-03 | contraction overall=0.914 sustained=0.902 worst=0.914
+   AMG residual history (first 12): 1.00e+00 2.98e+00 2.90e+00 2.58e+00 2.25e+00 1.97e+00 1.72e+00 1.51e+00 1.32e+00 1.16e+00 1.02e+00 8.99e-01 
+   AMG-PCG: cycles=37 converged=yes | setup 17.04s, solve 17.72s, 0.479s/cycle | memory 2071.6 MB
+   DETERMINISM (2 independent setups, bit-compare of every level's A/P + the residual history): IDENTICAL
+   per-level sub-hierarchy contraction (stationary V-cycle on each level's own system):
+      level 0 (n=  804864): cycles= 40 converged=NO  overall=0.917 sustained=0.893
+      level 1 (n=   67260): cycles= 40 converged=NO  overall=0.858 sustained=0.887
+      level 2 (n=    7428): cycles= 40 converged=NO  overall=0.761 sustained=0.793
+      level 3 (n=     990): coarsest — solved directly
+
+== occ0.40 nobore         box 192x112x128 occ 0.40 bore 0.00(axis z) rho 0.50
+   solid=443520 bore-removed=0 empty-expanse=2308992 | reduced DOF=1377792 nodes=459264 nnz=108475776 (1252 MB) | geometric coarsenable(rule)=YES
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=1 used_mg=1 levels=4 mg_cycles=157 cg_iters=157 resid=8.20e-07  19.89s
+      -> geometric rho_eff (CG-accelerated) = 0.916
+   JACOBI-CG baseline: iters=707 resid=9.74e-07 13.99s

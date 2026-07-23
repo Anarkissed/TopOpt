@@ -1,0 +1,55 @@
+
+
+### R2 — THE BUILD-REJECTION REGIME (extents the geometric builder refuses; AMG has no coarsenability arithmetic)
+Bar: GO iff AMG BUILDS and contracts (<= ~0.5) where the geometric hierarchy never builds.
+
+== reject100x96x96        box 100x96x96 occ 0.40 bore 0.40(axis z) rho 0.50
+   solid=34560 bore-removed=111360 empty-expanse=775680 | reduced DOF=142848 nodes=47616 nnz=9379656 (108 MB) | geometric coarsenable(rule)=NO
+   fine-matrix CSR assembly: 0.61s (a cost the matrix-free geometric path does NOT pay)
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=1 used_mg=0 levels=0 mg_cycles=300 cg_iters=1607 resid=9.79e-07  29.52s
+      -> geometric FELL BACK (STAGNATION: hierarchy built); contraction not reached within budget
+   JACOBI-CG baseline: iters=1607 resid=9.79e-07 16.67s
+    level      n        nnz    nnz/row   aggregates
+        0   142848    9379656     65.7         2317
+        1    13902    2800021    201.4          300
+        2     1800     399600    222.0           45
+        3      270      35244    130.5            0
+    coarsest n=270 dense-LDL^T=yes  hierarchy memory=279.7 MB
+   AMG stationary V-cycle: cycles=60 converged=NO final_rel=3.65e-02 | contraction overall=0.946 sustained=0.928 worst=0.942
+   AMG residual history (first 12): 1.00e+00 7.71e+00 7.39e+00 6.44e+00 5.55e+00 4.79e+00 4.17e+00 3.64e+00 3.20e+00 2.83e+00 2.51e+00 2.23e+00 
+   AMG-PCG: cycles=63 converged=yes | setup 2.48s, solve 5.35s, 0.085s/cycle | memory 279.7 MB
+   DETERMINISM (2 independent setups, bit-compare of every level's A/P + the residual history): IDENTICAL
+   per-level sub-hierarchy contraction (stationary V-cycle on each level's own system):
+      level 0 (n=  142848): cycles= 40 converged=NO  overall=0.953 sustained=0.915
+      level 1 (n=   13902): cycles= 40 converged=NO  overall=0.893 sustained=0.886
+      level 2 (n=    1800): cycles= 40 converged=NO  overall=0.857 sustained=0.894
+      level 3 (n=     270): coarsest — solved directly
+
+== reject184x104x128      box 184x104x128 occ 0.40 bore 0.40(axis z) rho 0.50
+   solid=222208 bore-removed=175616 empty-expanse=2051584 | reduced DOF=738048 nodes=246016 nnz=55619964 (642 MB) | geometric coarsenable(rule)=NO
+   fine-matrix CSR assembly: 1.31s (a cost the matrix-free geometric path does NOT pay)
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=1 used_mg=0 levels=0 mg_cycles=300 cg_iters=1357 resid=9.82e-07  59.06s
+      -> geometric FELL BACK (STAGNATION: hierarchy built); contraction not reached within budget
+   JACOBI-CG baseline: iters=1357 resid=9.82e-07 21.86s
+    level      n        nnz    nnz/row   aggregates
+        0   738048   55619964     75.4        10228
+        1    61368   19178015    312.5         1154
+        2     6924    4934952    712.7          149
+        3      894     350964    392.6            0
+    coarsest n=894 dense-LDL^T=yes  hierarchy memory=1972.6 MB
+   AMG stationary V-cycle: cycles=60 converged=NO final_rel=4.56e-03 | contraction overall=0.914 sustained=0.893 worst=0.901
+   AMG residual history (first 12): 1.00e+00 5.69e+00 5.46e+00 4.76e+00 4.11e+00 3.54e+00 3.05e+00 2.64e+00 2.29e+00 1.99e+00 1.74e+00 1.51e+00 
+   AMG-PCG: cycles=32 converged=yes | setup 16.50s, solve 16.05s, 0.501s/cycle | memory 1972.6 MB
+   DETERMINISM (2 independent setups, bit-compare of every level's A/P + the residual history): IDENTICAL
+   per-level sub-hierarchy contraction (stationary V-cycle on each level's own system):
+      level 0 (n=  738048): cycles= 40 converged=NO  overall=0.924 sustained=0.886
+      level 1 (n=   61368): cycles= 40 converged=NO  overall=0.828 sustained=0.830
+      level 2 (n=    6924): cycles= 40 converged=yes overall=0.704 sustained=0.729
+      level 3 (n=     894): coarsest — solved directly
+
+
+### SUMMARY TABLE
+case                     red.DOF | GEOMETRIC                  | AMG (V-cycle contraction)          | determ.
+                                 |  hier  used cycles   cg_it | levels   cycles sustained  pcg_cyc | 
+reject100x96x96           142848 |     1     0    300    1607 |      4       60     0.928       63 | ok
+reject184x104x128         738048 |     1     0    300    1357 |      4       60     0.893       32 | ok
