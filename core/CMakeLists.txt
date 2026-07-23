@@ -34,6 +34,9 @@ add_library(topopt
   src/version.cpp
   src/materials/materials.cpp
   src/io/stl.cpp
+  src/io/segment.cpp
+  src/io/part.cpp
+  src/io/face_tag.cpp
   src/io/fields.cpp
   src/mesh/mesh.cpp
   src/voxel/voxelize.cpp
@@ -62,6 +65,10 @@ target_link_libraries(topopt PUBLIC Threads::Threads)
 # imported targets are SHARED (dynamic linking only, ARCHITECTURE.md §4/§10).
 if(OpenCASCADE_FOUND)
   target_sources(topopt PRIVATE src/io/step.cpp)
+  # Lets the always-built part-import adapter (src/io/part.cpp, handoff 134)
+  # call the STEP importer; without OCCT it reports .step/.stp as unavailable
+  # and the STL/3MF paths still work. Mirrors TOPOPT_HAVE_3MF below.
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_OCCT)
   # SYSTEM: OCCT's own headers emit deprecation warnings we can't fix; keep them
   # out of our build log without suppressing warnings on our sources.
   target_include_directories(topopt SYSTEM PRIVATE ${OpenCASCADE_INCLUDE_DIR})
@@ -145,6 +152,15 @@ target_link_libraries(test_stl PRIVATE topopt)
 target_compile_definitions(test_stl PRIVATE
   STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
 add_test(NAME stl_import COMMAND test_stl)
+
+# Pseudo-face segmentation + the STL/3MF import adapter (handoff 134). The
+# synthetic meshes are built in code; the determinism and refusal tests write
+# throwaway STLs, so they need a writable directory that is not the source tree.
+add_executable(test_segment tests/unit/test_segment.cpp)
+target_link_libraries(test_segment PRIVATE topopt)
+target_compile_definitions(test_segment PRIVATE
+  SEGMENT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME mesh_segmentation COMMAND test_segment)
 
 add_executable(test_voxel tests/unit/test_voxel.cpp)
 target_link_libraries(test_voxel PRIVATE topopt)
@@ -756,6 +772,25 @@ if(OpenCASCADE_FOUND)
     DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo")
   add_test(NAME step_import COMMAND test_step)
 
+  # Pseudo-faces vs B-rep ground truth (handoff 134): export the demo L-bracket
+  # STEP to STL, re-import through the MESH path, and require the manufactured
+  # partition to match the B-rep it came from. Needs OCCT for the ground truth.
+  add_executable(test_segment_vs_step tests/unit/test_segment_vs_step.cpp)
+  target_link_libraries(test_segment_vs_step PRIVATE topopt)
+  target_compile_definitions(test_segment_vs_step PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    SEGMENT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME segment_vs_step COMMAND test_segment_vs_step)
+
+  # Evidence generator for handoff 134 (NOT a ctest — it writes images). Builds
+  # the three reference meshes, prints the dihedral-threshold sweep the shipped
+  # 35 deg value was chosen from, and renders each mesh coloured by pseudo-face
+  # with the region boundaries drawn:
+  #   cmake --build core/build --target segment_evidence
+  #   ./core/build/segment_evidence <outdir> core/tests/fixtures
+  add_executable(segment_evidence EXCLUDE_FROM_ALL tests/tools/segment_evidence.cpp)
+  target_link_libraries(segment_evidence PRIVATE topopt)
+
   # STEP face -> voxel tagging test (M1.6). Drives the STEP cube fixture, so it
   # needs OCCT to import the solid and read its per-face triangulation.
   add_executable(test_tag tests/unit/test_tag.cpp)
@@ -796,13 +831,21 @@ endif()
 # TOPOPT_HAVE_3MF (above) and is rejected with a diagnostic when absent. CI
 # configures with -DTOPOPT_REQUIRE_DEPS=ON (all three present), so the CLI and
 # its integration test always build and run in the pipeline.
+# Shared production load-case builder (handoff 093 / LAN-offload STEP 0): the
+# single grid/BC/options construction the iPad app (TopOptBridge) and the CLI
+# both use for a declared load case.
+#
+# Handoff 134 DROPPED its OCCT gate. It never used an OCCT symbol; it needed
+# tag_step_face / mask_step_face, which happened to live in the OCCT-gated
+# step.cpp. Those moved to the always-built src/io/face_tag.cpp, so this now
+# needs only Eigen (traction_loads / minimize_plastic_solved_grid). That is what
+# lets an STL/3MF part run the full load-case pipeline on a slice without OCCT.
+if(Eigen3_FOUND)
+  target_sources(topopt PRIVATE src/cli/loadcase.cpp)
+endif()
+
 if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_sources(topopt PRIVATE src/cli/run_job.cpp)
-  # Shared production load-case builder (handoff 093 / LAN-offload STEP 0): the
-  # single grid/BC/options construction the iPad app (TopOptBridge) and the CLI
-  # both use for a declared load case. Needs OCCT (STEP face selection) AND Eigen
-  # (traction_loads / minimize_plastic_solved_grid), so it is gated with run_job.
-  target_sources(topopt PRIVATE src/cli/loadcase.cpp)
 
   add_executable(topopt_cli src/cli/main.cpp)
   set_target_properties(topopt_cli PROPERTIES OUTPUT_NAME topopt-cli)

@@ -18,11 +18,12 @@ public struct ImportSheet: View {
 
     public init(model: AppModel) { self.model = model }
 
-    /// STEP + STL content types for the picker (by extension; neither has a
-    /// system UTType). Falls back to `.data` so a device without the declared
-    /// types still lets the user choose a file.
+    /// STEP + STL + 3MF content types for the picker (by extension; none has a
+    /// dependable system UTType). Falls back to `.data` so a device without the
+    /// declared types still lets the user choose a file. 3MF joined the list in
+    /// handoff 134, when mesh formats gained selectable faces.
     private static let allowedTypes: [UTType] = {
-        let exts = ["stl", "step", "stp"]
+        let exts = ["stl", "3mf", "step", "stp"]
         let types = exts.compactMap { UTType(filenameExtension: $0) }
         return types.isEmpty ? [.data] : types
     }()
@@ -89,9 +90,18 @@ public struct ImportSheet: View {
                     Text(file.detail)
                         .dsStyle(DS.TypeScale.caption2)
                         .foregroundStyle(DS.Color.textTertiary.color)
+                    // Handoff 134: the importer may have welded duplicate points
+                    // or re-oriented triangles. It changed the user's geometry,
+                    // so it says so rather than leaving them to wonder.
+                    if let repaired = model.importRepairNote {
+                        Text(repaired)
+                            .dsStyle(DS.TypeScale.caption2)
+                            .foregroundStyle(DS.Color.textQuaternary.color)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 } else {
                     Text("No model selected").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                    Text("Choose a STEP or STL file to begin")
+                    Text("Choose a STEP, STL or 3MF file to begin")
                         .dsStyle(DS.TypeScale.caption2)
                         .foregroundStyle(DS.Color.textTertiary.color)
                 }
@@ -209,7 +219,11 @@ public struct ImportSheet: View {
                 model.toast = "Couldn’t read \(url.lastPathComponent): \(error.localizedDescription)"
                 return
             }
-            model.importFile(atPath: dst.path, displayName: url.lastPathComponent)
+            // Handoff 134: `pickedFile` (not `importFile`) — it inspects a mesh
+            // first, so a broken file gets the refusal sheet and a clean one
+            // gets the unit question before anything is imported. A STEP goes
+            // straight through, exactly as before.
+            model.pickedFile(atPath: dst.path, displayName: url.lastPathComponent)
         }
     }
 }

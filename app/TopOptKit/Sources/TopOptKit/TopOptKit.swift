@@ -80,9 +80,15 @@ public struct ImportedMesh {
     /// `faceCount`; empty for STL). Keep-clear v2: lets the app draw clearance
     /// volumes from the same axis/radius/normal the core uses.
     public let faceGeometry: [StepFaceGeometry]
+    /// Handoff 134: true when the faces were MANUFACTURED by the core's dihedral
+    /// segmenter from a mesh (STL/3MF) rather than read from a B-rep. Display
+    /// only — no behaviour branches on it, because a pseudo-face and a B-rep
+    /// face are the same contract everywhere downstream.
+    public let pseudoFaces: Bool
     public init(vertices: [Float], indices: [Int32], faceIDs: [Int32],
                 vertexCount: Int, triangleCount: Int, faceCount: Int,
-                watertight: Bool, faceGeometry: [StepFaceGeometry] = []) {
+                watertight: Bool, faceGeometry: [StepFaceGeometry] = [],
+                pseudoFaces: Bool = false) {
         self.vertices = vertices
         self.indices = indices
         self.faceIDs = faceIDs
@@ -91,6 +97,74 @@ public struct ImportedMesh {
         self.faceCount = faceCount
         self.watertight = watertight
         self.faceGeometry = faceGeometry
+        self.pseudoFaces = pseudoFaces
+    }
+}
+
+/// Why a mesh import was refused, and what the importer repaired on the way
+/// (handoff 134). The app renders this as a plain-language sheet — a refusal is
+/// never a crash and never a silent half-import.
+public struct PartDiagnostics: Equatable, Sendable {
+
+    /// A structural problem that makes a mesh unusable for Phase 1. Deeper
+    /// repairs (hole filling, self-intersection resolution, shell thickening)
+    /// are explicitly Phase 2 and are not attempted.
+    public enum Defect: Int, Equatable, Sendable, CaseIterable {
+        case emptyMesh = 0
+        case nonManifoldEdges = 1
+        case openBoundary = 2
+        case nonOrientable = 3
+        case zeroThickness = 4
+    }
+
+    /// False for a STEP part: the B-rep path is not mesh-inspected.
+    public let checked: Bool
+    public let acceptable: Bool
+    public let defects: [Defect]
+    /// The core's own one-line description per defect, parallel to `defects`.
+    public let defectText: [String]
+
+    public let boundaryEdges: Int
+    public let nonManifoldEdges: Int
+    public let degenerateTriangles: Int
+    /// Repairs applied automatically (reported, not hidden).
+    public let weldedVertices: Int
+    public let flippedTriangles: Int
+
+    /// Measured in FILE units — an STL carries no unit, so the size hint on the
+    /// unit prompt is built from this.
+    public let volume: Double
+    public let bboxMin: SIMD3<Double>
+    public let bboxMax: SIMD3<Double>
+
+    public init(checked: Bool, acceptable: Bool, defects: [Defect],
+                defectText: [String], boundaryEdges: Int, nonManifoldEdges: Int,
+                degenerateTriangles: Int, weldedVertices: Int,
+                flippedTriangles: Int, volume: Double,
+                bboxMin: SIMD3<Double>, bboxMax: SIMD3<Double>) {
+        self.checked = checked
+        self.acceptable = acceptable
+        self.defects = defects
+        self.defectText = defectText
+        self.boundaryEdges = boundaryEdges
+        self.nonManifoldEdges = nonManifoldEdges
+        self.degenerateTriangles = degenerateTriangles
+        self.weldedVertices = weldedVertices
+        self.flippedTriangles = flippedTriangles
+        self.volume = volume
+        self.bboxMin = bboxMin
+        self.bboxMax = bboxMax
+    }
+
+    /// Longest bounding-box edge in file units — the number the unit prompt's
+    /// sanity hint is phrased around.
+    public var largestDimension: Double {
+        max(bboxMax.x - bboxMin.x, max(bboxMax.y - bboxMin.y, bboxMax.z - bboxMin.z))
+    }
+
+    /// True iff the importer changed the geometry to make it usable.
+    public var didRepair: Bool {
+        weldedVertices > 0 || flippedTriangles > 0 || degenerateTriangles > 0
     }
 }
 
@@ -458,19 +532,57 @@ public enum TopOptKit {
         }
     }
 
-    /// Import an STL or STEP file (dispatched by extension) into a mesh.
+    /// Import a STEP, STL or 3MF file into a face-carrying mesh.
+    ///
+    /// Handoff 134: one call for every format. The core dispatches by extension
+    /// — a STEP gets its real B-rep faces, a mesh gets pseudo-faces from the
+    /// dihedral segmenter — and both arrive with `faceIDs`, `faceCount` and
+    /// `faceGeometry` populated, which is what makes tap selection, keep-clear,
+    /// protect and optimize work identically on an STL.
+    ///
+    /// Throws on an unreadable/unparseable file OR on a mesh-quality refusal;
+    /// call `inspectPart` for the structured reason behind a refusal.
     public static func importMesh(path: String,
                                   linearDeflectionMM: Double = 0) throws -> ImportedMesh {
-        let lower = path.lowercased()
         var err = topoptbridge.BridgeError()
-        let raw: topoptbridge.ImportedMesh
-        if lower.hasSuffix(".step") || lower.hasSuffix(".stp") {
-            raw = topoptbridge.import_step(std.string(path), linearDeflectionMM, &err)
-        } else {
-            raw = topoptbridge.import_stl(std.string(path), &err)
-        }
+        let raw = topoptbridge.import_part(std.string(path), linearDeflectionMM, &err)
         try throwIfFailed(err)
         return convert(raw)
+    }
+
+    /// Inspect a part file without throwing on a mesh-quality refusal: the
+    /// structured verdict behind the refusal sheet (handoff 134). Still throws
+    /// if the file cannot be read or parsed at all — there is nothing to
+    /// inspect in that case.
+    public static func inspectPart(path: String) throws -> PartDiagnostics {
+        var err = topoptbridge.BridgeError()
+        let raw = topoptbridge.inspect_part(std.string(path), &err)
+        try throwIfFailed(err)
+        return PartDiagnostics(
+            checked: raw.checked,
+            acceptable: raw.acceptable,
+            defects: raw.defects.compactMap { PartDiagnostics.Defect(rawValue: Int($0)) },
+            defectText: raw.defect_text.map { String($0) },
+            boundaryEdges: Int(raw.boundary_edges),
+            nonManifoldEdges: Int(raw.non_manifold_edges),
+            degenerateTriangles: Int(raw.degenerate_triangles),
+            weldedVertices: Int(raw.welded_vertices),
+            flippedTriangles: Int(raw.flipped_triangles),
+            volume: raw.volume,
+            bboxMin: SIMD3<Double>(raw.bbox_min.0, raw.bbox_min.1, raw.bbox_min.2),
+            bboxMax: SIMD3<Double>(raw.bbox_max.0, raw.bbox_max.1, raw.bbox_max.2))
+    }
+
+    /// Apply a unit choice by writing a rescaled binary-STL working copy
+    /// (handoff 134). STL carries no unit, so the app asks once and bakes the
+    /// answer into the app-owned copy; every later stateless core call then
+    /// re-reads a file that is already in millimetres, so no unit has to be
+    /// threaded through the bridge, the job schema or persistence.
+    public static func rescalePart(from inPath: String, to outPath: String,
+                                   scale: Double) throws {
+        var err = topoptbridge.BridgeError()
+        topoptbridge.rescale_part(std.string(inPath), std.string(outPath), scale, &err)
+        try throwIfFailed(err)
     }
 
     /// Export a mesh to an STL file (ROADMAP M6.1 secondary format; 3MF is M7.9).
@@ -831,7 +943,8 @@ public enum TopOptKit {
                      triangleCount: Int(raw.triangle_count),
                      faceCount: Int(raw.face_count),
                      watertight: raw.watertight,
-                     faceGeometry: convertFaceGeometry(raw))
+                     faceGeometry: convertFaceGeometry(raw),
+                     pseudoFaces: raw.pseudo_faces)
     }
 
     /// Rebuild the per-face geometry (keep-clear v2) from the bridge's flat arrays
