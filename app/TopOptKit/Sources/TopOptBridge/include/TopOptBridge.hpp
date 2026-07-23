@@ -79,12 +79,75 @@ struct ImportedMesh {
   std::vector<double> face_axis_dir;
   std::vector<double> face_plane_normal;
   std::vector<double> face_plane_origin;
+
+  // Handoff 134 — true when `face_ids`/`faces` were MANUFACTURED by the core's
+  // dihedral segmenter from a mesh (STL/3MF) rather than read from a B-rep.
+  // For honest UI copy only: nothing in the app branches its BEHAVIOUR on this,
+  // because the whole point is that a pseudo-face and a B-rep face are the same
+  // contract downstream.
+  bool pseudo_faces = false;
 };
 
 // Import an STL (ASCII or binary, auto-detected). Geometry only — does NOT
 // require watertightness, but reports it in `watertight` so the app can warn
 // (ROADMAP M7.3). On failure returns an empty mesh and sets `err`.
+//
+// NOTE (handoff 134): this is the RAW reader and produces NO face ids, so a
+// mesh imported through it cannot be tapped. `import_part` is what the app
+// uses; this remains for callers that want geometry without inspection or
+// repair.
 ImportedMesh import_stl(const std::string& path, BridgeError& err);
+
+// ---------------------------------------------------------------------------
+// Part import (handoff 134) — the ONE entry point the app uses for every
+// supported format.
+//
+//   .step/.stp -> OCCT B-rep faces (unchanged)
+//   .stl/.3mf  -> mesh + dihedral segmentation -> PSEUDO-faces
+//
+// Both fill `face_ids`, `face_count` and the per-face geometry arrays, so tap
+// selection, keep-clear, protect, the design box and the optimizer all behave
+// identically regardless of which file the user picked.
+
+// Why a mesh was refused. Mirrors topopt::PartDefect one-for-one; the app turns
+// these into the plain-language refusal sheet.
+//   0 EmptyMesh  1 NonManifoldEdges  2 OpenBoundary  3 NonOrientable  4 ZeroThickness
+struct PartDiagnostics {
+  bool checked = false;      // false for STEP (the B-rep path is not inspected)
+  bool acceptable = false;
+  std::vector<int32_t> defects;  // empty iff acceptable
+  std::vector<std::string> defect_text;  // core's one-line description, parallel
+
+  int32_t boundary_edges = 0;
+  int32_t non_manifold_edges = 0;
+  int32_t degenerate_triangles = 0;
+  // Repairs the importer applied. Reported so the sheet can say what changed.
+  int32_t welded_vertices = 0;
+  int32_t flipped_triangles = 0;
+
+  // Measured in FILE units — STL carries no unit, so the app uses the bounding
+  // box to sanity-check the user's mm/inch answer.
+  double volume = 0.0;
+  double bbox_min[3] = {0.0, 0.0, 0.0};
+  double bbox_max[3] = {0.0, 0.0, 0.0};
+};
+
+// Import any supported part. `linear_deflection` applies to STEP only (<= 0
+// uses the core default). On failure returns an empty mesh and sets `err` with
+// the core diagnostic; call `inspect_part` for the structured reason.
+ImportedMesh import_part(const std::string& path, double linear_deflection,
+                         BridgeError& err);
+
+// Inspect a part WITHOUT throwing on a quality refusal: this is what builds the
+// refusal sheet. A file that cannot be read at all still sets `err`.
+PartDiagnostics inspect_part(const std::string& path, BridgeError& err);
+
+// Apply a unit choice by writing a rescaled binary-STL working copy. STL has no
+// unit, so the app asks; the answer is baked into the app-owned copy ONCE and
+// every later stateless call re-reads a file already in millimetres. Rejects a
+// STEP input (STEP carries its own unit). On failure sets `err`.
+void rescale_part(const std::string& in_path, const std::string& out_path,
+                  double scale, BridgeError& err);
 
 // Import a STEP file via OCCT, tessellated at `linear_deflection` mm (<= 0 uses
 // the core default). Populates `face_ids`/`face_count` for face selection

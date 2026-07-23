@@ -1,0 +1,42 @@
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-multigrid-coarsenability-padding-7272c1/3c707317-6354-422c-8266-98215c5170ca/scratchpad/ev/ref1_l_bracket_cad_export.stl (from /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/multigrid-coarsenability-padding-7272c1/core/tests/fixtures/demo/l-bracket.step, 236 triangles)
+
+================ DIHEDRAL THRESHOLD SWEEP ================
+
+-- reference meshes --
+
+ref1: L-bracket, CAD-exported STL (project part)  (236 triangles)
+  threshold:    15    20    25    30    35    40    45    50    60
+  regions:      10    10    10    10    10    10    10    10    10
+  at 35 deg: 10 regions (8 plane, 2 cylinder, 0 other)
+
+ref2: bolted flange bracket (printables-style, authored)  (224 triangles)
+  threshold:    15    20    25    30    35    40    45    50    60
+  regions:      14     7     7     7     7     7     7     7     7
+  at 35 deg: 7 regions (6 plane, 1 cylinder, 0 other)
+
+ref3: organic blob (everywhere-curved)  (4368 triangles)
+  threshold:    15    20    25    30    35    40    45    50    60
+  regions:       1     1     1     1     1     1     1     1     1
+  at 35 deg: 1 regions (0 plane, 0 cylinder, 1 other)
+
+-- bounding cases (these are what fix the value) --
+
+LOWER bound: 12-gon cylinder (30 deg/facet) — barrel must stay ONE face (want 3)  (48 triangles)
+  threshold:    15    20    25    30    35    40    45    50    60
+  regions:      14    14    14     9     3     3     3     3     3
+  at 35 deg: 3 regions (2 plane, 1 cylinder, 0 other)
+
+      also: 8-gon cylinder (45 deg/facet) — the known caveat, fragments (8 strips + 2 caps = 10)  (32 triangles)
+  threshold:    15    20    25    30    35    40    45    50    60
+  regions:      10    10    10    10    10    10     8     3     3
+  at 35 deg: 10 regions (10 plane, 0 cylinder, 0 other)
+
+UPPER bound: 45 deg chamfered box — the chamfer must stay its OWN face (want 7, not 6)  (16 triangles)
+  threshold:    15    20    25    30    35    40    45    50    60
+  regions:       7     7     7     7     7     7     7     5     5
+  at 35 deg: 7 regions (7 plane, 0 cylinder, 0 other)
+
+================ RENDERS ================
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-multigrid-coarsenability-padding-7272c1/3c707317-6354-422c-8266-98215c5170ca/scratchpad/ev/ref1.ppm (10 pseudo-faces)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-multigrid-coarsenability-padding-7272c1/3c707317-6354-422c-8266-98215c5170ca/scratchpad/ev/ref2.ppm (7 pseudo-faces)
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-multigrid-coarsenability-padding-7272c1/3c707317-6354-422c-8266-98215c5170ca/scratchpad/ev/ref3.ppm (1 pseudo-faces)

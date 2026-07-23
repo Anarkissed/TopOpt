@@ -123,13 +123,82 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(m.toast)  // no error toast on success
     }
 
-    func testImportNonWatertightRejectedWithToast() {
+    // Handoff 134 CHANGED THIS. A broken mesh used to be rejected with a toast
+    // saying "not watertight". The picker now routes through `pickedFile`,
+    // which inspects first and raises the plain-language REFUSAL SHEET — a
+    // toast is the wrong surface for the end of the user's attempt.
+    func testBrokenMeshIsRefusedWithASheetNotAToast() {
+        let m = realModel()
+        m.pickedFile(atPath: Self.brokenSTL, displayName: "broken_open_cube.stl")
+        XCTAssertNil(m.importedFile)
+        XCTAssertNil(m.pendingUnitPrompt)          // never gets as far as units
+        let refusal = m.importRefusal
+        XCTAssertNotNil(refusal)
+        XCTAssertEqual(refusal?.diagnostics?.defects, [.openBoundary])
+        XCTAssertEqual(refusal?.fileName, "broken_open_cube.stl")
+        // The sheet explains in the user's terms and admits the scope limit.
+        XCTAssertTrue(refusal?.reasons.first?.headline.contains("holes") == true)
+        XCTAssertFalse(refusal?.suggestions.isEmpty == true)
+        XCTAssertTrue(refusal?.scopeNote.isEmpty == false)
+
+        m.dismissRefusal()
+        XCTAssertNil(m.importRefusal)
+    }
+
+    // The direct `importFile` path still fails closed (it is the backstop for a
+    // file that slips past inspection, and the STEP path's only guard).
+    func testImportFileStillRejectsABrokenMesh() {
         let m = realModel()
         let ok = m.importFile(atPath: Self.brokenSTL)
         XCTAssertFalse(ok)
         XCTAssertNil(m.importedFile)
         XCTAssertNotNil(m.toast)
-        XCTAssertTrue(m.toast?.lowercased().contains("watertight") == true)
+    }
+
+    // A clean mesh asks the unit question BEFORE importing — an STL carries no
+    // unit, and guessing wrong is a 25.4x error in every downstream number.
+    func testCleanMeshAsksForUnitsThenImports() {
+        let m = realModel()
+        m.pickedFile(atPath: Self.cubeSTL, displayName: "cube_10mm.stl")
+        XCTAssertNil(m.importRefusal)
+        XCTAssertNil(m.importedFile)               // not imported yet
+        let prompt = m.pendingUnitPrompt
+        XCTAssertNotNil(prompt)
+        XCTAssertEqual(prompt?.fileName, "cube_10mm.stl")
+        XCTAssertEqual(prompt?.largestDimension ?? 0, 10.0, accuracy: 1e-6)
+        XCTAssertEqual(prompt?.suggestedUnit, .millimetres)  // 10 mm is part-sized
+
+        XCTAssertTrue(m.resolveUnits(.millimetres))
+        XCTAssertNil(m.pendingUnitPrompt)
+        XCTAssertEqual(m.importedFile?.name, "cube_10mm.stl")
+        XCTAssertEqual(m.importedFile?.faceCount, 6)   // pseudo-faces, tappable
+        XCTAssertTrue(m.importedFile?.pseudoFaces == true)
+        XCTAssertNil(m.toast)
+    }
+
+    // Answering "inches" rescales the working copy, so everything downstream
+    // reads a file already in millimetres.
+    func testInchUnitChoiceRescalesTheWorkingCopy() {
+        let m = realModel()
+        m.pickedFile(atPath: Self.cubeSTL, displayName: "cube_10mm.stl")
+        XCTAssertTrue(m.resolveUnits(.inches))
+        let path = m.importedFile?.path
+        XCTAssertNotNil(path)
+        XCTAssertNotEqual(path, Self.cubeSTL)      // a NEW, rescaled copy
+        let d = try? TopOptKit.inspectPart(path: path ?? "")
+        XCTAssertEqual(d?.largestDimension ?? 0, 254.0, accuracy: 1e-2)
+        XCTAssertEqual(m.importedFile?.faceCount, 6)
+    }
+
+    // Cancelling the unit question imports nothing and leaves no residue.
+    func testCancellingTheUnitPromptImportsNothing() {
+        let m = realModel()
+        m.pickedFile(atPath: Self.cubeSTL, displayName: "cube_10mm.stl")
+        XCTAssertNotNil(m.pendingUnitPrompt)
+        m.cancelUnitPrompt()
+        XCTAssertNil(m.pendingUnitPrompt)
+        XCTAssertNil(m.importedFile)
+        XCTAssertFalse(m.resolveUnits(.millimetres))  // nothing pending to resolve
     }
 
     func testImportMissingFileToastsDiagnostic() {

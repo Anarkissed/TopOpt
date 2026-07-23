@@ -57,6 +57,24 @@ public final class AppModel: ObservableObject {
     /// the M7.4 workspace viewer has a mesh to render. Set together with
     /// `importedFile` on a watertight accept; cleared on reject / new import.
     @Published public private(set) var importedMesh: ImportedMesh?
+    /// Handoff 134 — the pending unit question for a just-picked MESH file
+    /// (STL/3MF carry no reliable unit). Non-nil presents the unit sheet; the
+    /// file is not imported until it is answered.
+    @Published public internal(set) var pendingUnitPrompt: ImportUnitPrompt?
+    /// Handoff 134 — a refused import, presented as a plain-language sheet
+    /// instead of a toast. Non-nil presents the refusal sheet.
+    @Published public internal(set) var importRefusal: ImportRefusal?
+    /// What the importer repaired on the accepted file (weld / re-orient /
+    /// dropped empties), shown as a note on the import row. Nil when nothing
+    /// was changed or the part came from STEP.
+    @Published public private(set) var importRepairNote: String?
+    /// The file waiting on `pendingUnitPrompt`'s answer. Not published — it is
+    /// bookkeeping, not view state.
+    private var pendingUnitPath: String?
+    /// That file's inspection, carried forward so `importFile` neither re-parses
+    /// the mesh nor — after a unit rescale — reports the repairs of the CLEAN
+    /// rewritten copy instead of the user's original.
+    private var pendingDiagnostics: PartDiagnostics?
 
     // MARK: Materials (loaded once from the bundle via the bridge)
 
@@ -115,6 +133,11 @@ public final class AppModel: ObservableObject {
     private let rulesPath: String?
     private let materialsLoader: (String) throws -> [Material]
     private let importer: (String) throws -> ImportedMesh
+    /// Handoff 134 — structured mesh inspection (the refusal sheet's source of
+    /// truth) and the unit rescaler. Injected together with `importer` so the
+    /// whole import flow is drivable headlessly.
+    private let inspector: (String) throws -> PartDiagnostics
+    private let rescaler: (String, String, Double) throws -> Void
     /// Cross-launch persistence layer (M7.x-persist-b) and the clock used for
     /// `savedAt` (injected for deterministic tests).
     private let store: ProjectStore
@@ -144,6 +167,10 @@ public final class AppModel: ObservableObject {
         rulesPath: String? = Bundle.main.path(forResource: "rules", ofType: "json"),
         materialsLoader: @escaping (String) throws -> [Material] = { try TopOptKit.loadMaterials(path: $0) },
         importer: @escaping (String) throws -> ImportedMesh = { try TopOptKit.importMesh(path: $0) },
+        inspector: @escaping (String) throws -> PartDiagnostics = { try TopOptKit.inspectPart(path: $0) },
+        rescaler: @escaping (String, String, Double) throws -> Void = {
+            try TopOptKit.rescalePart(from: $0, to: $1, scale: $2)
+        },
         store: ProjectStore = ProjectStore(),
         presetStore: PrintParamsPresetStore = PrintParamsPresetStore(),
         now: @escaping () -> Date = { Date() },
@@ -154,6 +181,8 @@ public final class AppModel: ObservableObject {
         self.rulesPath = rulesPath
         self.materialsLoader = materialsLoader
         self.importer = importer
+        self.inspector = inspector
+        self.rescaler = rescaler
         self.store = store
         self.presetStore = presetStore
         self.now = now
@@ -398,6 +427,11 @@ public final class AppModel: ObservableObject {
     public func newTopOpt() {
         importedFile = nil
         importedMesh = nil
+        importRepairNote = nil
+        pendingUnitPrompt = nil
+        pendingUnitPath = nil
+        pendingDiagnostics = nil
+        importRefusal = nil
         minimizePlastic = true   // reset the draft toggle to the default
         quality = .fast
         importSheetPresented = true
@@ -406,14 +440,115 @@ public final class AppModel: ObservableObject {
     /// Dismiss the import sheet without starting a project.
     public func cancelImport() {
         importSheetPresented = false
+        pendingUnitPrompt = nil
+        pendingUnitPath = nil
+        pendingDiagnostics = nil
+        importRefusal = nil
+    }
+
+    /// Handle a picked file (handoff 134). This is the entry point the picker
+    /// calls; it decides whether to import straight away, ask the unit
+    /// question first, or refuse.
+    ///
+    /// A STEP file carries its own unit and its own faces, so it imports
+    /// directly — that path is unchanged. A MESH file (STL/3MF) is inspected
+    /// first: a structural problem raises the refusal sheet, and a clean mesh
+    /// raises the unit question, because neither format carries a unit the core
+    /// can trust.
+    public func pickedFile(atPath path: String, displayName: String? = nil) {
+        let name = displayName ?? (path as NSString).lastPathComponent
+        let lower = path.lowercased()
+        let isSTEP = lower.hasSuffix(".step") || lower.hasSuffix(".stp")
+        if isSTEP {
+            importFile(atPath: path, displayName: name)
+            return
+        }
+        do {
+            let d = try inspector(path)
+            guard d.acceptable else {
+                importedFile = nil
+                importedMesh = nil
+                importRefusal = ImportRefusal(fileName: name, diagnostics: d,
+                                              rawMessage: "")
+                return
+            }
+            // Clean mesh: ask what its numbers mean before importing.
+            pendingUnitPrompt = ImportUnitPrompt(fileName: name, diagnostics: d)
+            pendingUnitPath = path
+            pendingDiagnostics = d
+        } catch {
+            // Could not be read or parsed at all — no structured verdict exists.
+            importedFile = nil
+            importedMesh = nil
+            importRefusal = ImportRefusal(fileName: name, diagnostics: nil,
+                                          rawMessage: "\(error)")
+        }
+    }
+
+    /// Answer the unit question and import (handoff 134).
+    ///
+    /// Millimetres imports the file as-is. Any other unit writes a RESCALED
+    /// working copy and imports that, so every later stateless core call —
+    /// tagging, masking, clearance, the optimizer, a remote run — re-reads a
+    /// file that is already in millimetres. That is why no unit has to be
+    /// threaded through the bridge, the job schema or persistence.
+    @discardableResult
+    public func resolveUnits(_ unit: PartUnit) -> Bool {
+        guard let path = pendingUnitPath, let prompt = pendingUnitPrompt else { return false }
+        pendingUnitPrompt = nil
+        pendingUnitPath = nil
+        // The ORIGINAL file's verdict: a rescale rewrites a clean, already-welded
+        // STL, so inspecting the copy would report no repairs and understate what
+        // was actually fixed in the user's file.
+        let original = pendingDiagnostics
+        pendingDiagnostics = nil
+
+        var importPath = path
+        if unit != .millimetres {
+            let base = (prompt.fileName as NSString).deletingPathExtension
+            let dst = FileManager.default.temporaryDirectory
+                .appendingPathComponent("\(base)_mm.stl").path
+            do {
+                try rescaler(path, dst, unit.scaleToMM)
+                importPath = dst
+            } catch {
+                importRefusal = ImportRefusal(fileName: prompt.fileName, diagnostics: nil,
+                                              rawMessage: "\(error)")
+                return false
+            }
+        }
+        return importFile(atPath: importPath, displayName: prompt.fileName,
+                          diagnostics: original)
+    }
+
+    /// Abandon the unit question without importing.
+    public func cancelUnitPrompt() {
+        pendingUnitPrompt = nil
+        pendingUnitPath = nil
+        pendingDiagnostics = nil
+    }
+
+    /// Dismiss the refusal sheet. The import sheet stays open so the user can
+    /// pick a different file.
+    public func dismissRefusal() {
+        importRefusal = nil
     }
 
     /// Import a picked model file at `path`. On success (a watertight mesh) it
     /// becomes `importedFile`; a non-watertight or unreadable file is rejected and
     /// the core diagnostic is surfaced in a toast (ROADMAP M7.3).
+    ///
+    /// Handoff 134: still the direct path for STEP, and the tail of the mesh
+    /// flow once units are settled. A mesh reaching here has already been
+    /// inspected, so the watertight guard below is now a backstop rather than
+    /// the primary gate.
+    /// - Parameter diagnostics: the inspection already performed on this file by
+    ///   `pickedFile`, so the mesh is not parsed a second time. Nil re-inspects
+    ///   (the direct/STEP path).
     /// - Returns: true if the file was accepted.
     @discardableResult
-    public func importFile(atPath path: String, displayName: String? = nil) -> Bool {
+    public func importFile(atPath path: String, displayName: String? = nil,
+                           diagnostics: PartDiagnostics? = nil) -> Bool {
         let name = displayName ?? (path as NSString).lastPathComponent
         let mesh: ImportedMesh
         do {
@@ -423,6 +558,7 @@ public final class AppModel: ObservableObject {
             // OCCT): surface its diagnostic verbatim.
             importedFile = nil
             importedMesh = nil
+            importRepairNote = nil
             toast = "\(name): \(error)"
             return false
         }
@@ -430,6 +566,7 @@ public final class AppModel: ObservableObject {
             // Parses but is open / non-manifold — the core cannot optimize it.
             importedFile = nil
             importedMesh = nil
+            importRepairNote = nil
             toast = "“\(name)” isn’t watertight (open or non-manifold surface). "
                   + "TopOpt needs a closed solid — repair the mesh and re-import."
             return false
@@ -437,8 +574,13 @@ public final class AppModel: ObservableObject {
         importedFile = ImportedFile(name: name, path: path,
                                     triangleCount: mesh.triangleCount,
                                     faceCount: mesh.faceCount,
-                                    watertight: mesh.watertight)
+                                    watertight: mesh.watertight,
+                                    pseudoFaces: mesh.pseudoFaces)
         importedMesh = mesh
+        // Say what was repaired, if anything. Best-effort: a failure here must
+        // not fail an otherwise-good import.
+        importRepairNote = (diagnostics ?? (try? inspector(path)))
+            .flatMap { ImportRepairNote.text(for: $0) }
         return true
     }
 
@@ -704,9 +846,13 @@ public final class AppModel: ObservableObject {
         guard let snap = store.snapshot(id: recent.id) else { return nil }
         let path = store.modelPath(id: snap.id, fileName: snap.modelFileName)
         guard let mesh = try? importer(path) else { return nil }
+        // `pseudoFaces` is re-derived from the re-import rather than persisted:
+        // it is a property of the FILE, so the reopened project must say the same
+        // thing the original import said (handoff 134 — without this a reopened
+        // STL project would claim its faces came from a B-rep).
         let file = ImportedFile(name: snap.originalFileName, path: path,
                                 triangleCount: mesh.triangleCount, faceCount: mesh.faceCount,
-                                watertight: mesh.watertight)
+                                watertight: mesh.watertight, pseudoFaces: mesh.pseudoFaces)
         let pm = ProjectModel(restoring: snap, importedFile: file, importedMesh: mesh)
         // persist-c: if this project had results, load them (variants + playback)
         // off-main and drop them into the idle run so results reopen instantly.

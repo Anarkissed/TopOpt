@@ -87,21 +87,32 @@ public struct ImportedFile: Equatable, Sendable {
     public let triangleCount: Int
     public let faceCount: Int
     public let watertight: Bool
+    /// Handoff 134: the faces came from the mesh segmenter (STL/3MF), not from
+    /// a B-rep. Display only — selection behaves the same either way.
+    public let pseudoFaces: Bool
 
     public init(name: String, path: String, triangleCount: Int,
-                faceCount: Int, watertight: Bool) {
+                faceCount: Int, watertight: Bool, pseudoFaces: Bool = false) {
         self.name = name
         self.path = path
         self.triangleCount = triangleCount
         self.faceCount = faceCount
         self.watertight = watertight
+        self.pseudoFaces = pseudoFaces
     }
 
     /// The "2.1 MB · 1 solid body · watertight ✓"-style subline (byte size is the
     /// caller's; here we report what the core actually measured).
+    ///
+    /// Handoff 134 adds the face count, because on a mesh import that number is
+    /// the answer to "will tapping work?" — and says where the faces came from,
+    /// since "detected" and "from the CAD model" are different claims.
     public var detail: String {
         let tris = triangleCount == 1 ? "1 triangle" : "\(triangleCount) triangles"
-        return watertight ? "\(tris) · watertight ✓" : "\(tris) · not watertight"
+        let state = watertight ? "watertight ✓" : "not watertight"
+        guard faceCount > 0 else { return "\(tris) · \(state)" }
+        let faces = faceCount == 1 ? "1 face" : "\(faceCount) faces"
+        return "\(tris) · \(state) · \(pseudoFaces ? "\(faces) detected" : faces)"
     }
 }
 

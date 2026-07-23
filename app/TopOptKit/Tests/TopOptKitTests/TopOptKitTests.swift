@@ -58,15 +58,68 @@ final class TopOptKitTests: XCTestCase {
         XCTAssertEqual(mesh.indices.count, mesh.triangleCount * 3)
         XCTAssertEqual(mesh.vertices.count, mesh.vertexCount * 3)
         XCTAssertTrue(mesh.watertight)
-        XCTAssertTrue(mesh.faceIDs.isEmpty)      // STL has no B-rep faces
+
+        // Handoff 134 CHANGED THIS ASSERTION. An STL used to arrive with no
+        // faces at all (`faceIDs.isEmpty`), which made it inert: every tap
+        // missed and nothing downstream could be selected. It now arrives with
+        // MANUFACTURED pseudo-faces from the core's dihedral segmenter — one
+        // per side of the cube — carrying the same contract a STEP B-rep face
+        // does.
+        XCTAssertEqual(mesh.faceCount, 6)
+        XCTAssertEqual(mesh.faceIDs.count, mesh.triangleCount)
+        XCTAssertTrue(mesh.pseudoFaces)
+        XCTAssertEqual(Set(mesh.faceIDs).count, 6)
+        // Every side is planar, and the per-face geometry the clearance/protect
+        // features read is populated for a mesh import too.
+        XCTAssertEqual(mesh.faceGeometry.count, 6)
+        XCTAssertTrue(mesh.faceGeometry.allSatisfy { $0.kind == .plane })
     }
 
-    func testImportBrokenSTLReportsNotWatertight() throws {
-        // read path does not enforce watertightness; the flag exposes it so the
-        // app can warn (M7.3). Geometry still parses.
-        let mesh = try TopOptKit.importMesh(path: Self.brokenSTL)
-        XCTAssertGreaterThan(mesh.triangleCount, 0)
-        XCTAssertFalse(mesh.watertight)
+    func testImportBrokenSTLIsRefusedWithADiagnosis() throws {
+        // Handoff 134 CHANGED THIS CONTRACT. `importMesh` used to return an open
+        // mesh with `watertight == false` and leave the caller to notice. It now
+        // REFUSES it, because Phase 1 imports clean closed meshes and a
+        // half-imported open shell has no inside to optimize.
+        XCTAssertThrowsError(try TopOptKit.importMesh(path: Self.brokenSTL)) { err in
+            XCTAssertTrue("\(err)".contains("open"))
+        }
+        // ...and the structured verdict behind the refusal sheet is available
+        // without throwing, so the app can explain rather than just fail.
+        let d = try TopOptKit.inspectPart(path: Self.brokenSTL)
+        XCTAssertTrue(d.checked)
+        XCTAssertFalse(d.acceptable)
+        XCTAssertEqual(d.defects, [.openBoundary])
+        XCTAssertGreaterThan(d.boundaryEdges, 0)
+    }
+
+    func testInspectCleanSTLIsAcceptable() throws {
+        let d = try TopOptKit.inspectPart(path: Self.cubeSTL)
+        XCTAssertTrue(d.checked)
+        XCTAssertTrue(d.acceptable)
+        XCTAssertTrue(d.defects.isEmpty)
+        XCTAssertGreaterThan(d.volume, 0)
+        XCTAssertGreaterThan(d.largestDimension, 0)
+    }
+
+    func testPseudoFaceIDsAreDeterministicAcrossReimports() throws {
+        // The ids are persisted in a project, so re-importing the same bytes
+        // must reproduce them exactly.
+        let a = try TopOptKit.importMesh(path: Self.cubeSTL)
+        let b = try TopOptKit.importMesh(path: Self.cubeSTL)
+        XCTAssertEqual(a.faceIDs, b.faceIDs)
+        XCTAssertEqual(a.faceCount, b.faceCount)
+    }
+
+    func testRescalePartAppliesAUnitChoice() throws {
+        let dst = NSTemporaryDirectory() + "/kit_units_cube_mm.stl"
+        defer { try? FileManager.default.removeItem(atPath: dst) }
+        try TopOptKit.rescalePart(from: Self.cubeSTL, to: dst, scale: 25.4)
+        let original = try TopOptKit.inspectPart(path: Self.cubeSTL)
+        let scaled = try TopOptKit.inspectPart(path: dst)
+        XCTAssertEqual(scaled.largestDimension,
+                       original.largestDimension * 25.4, accuracy: 1e-3)
+        // Rescaling is pure geometry: the part still segments the same way.
+        XCTAssertEqual(try TopOptKit.importMesh(path: dst).faceCount, 6)
     }
 
     func testImportMissingFileThrows() {

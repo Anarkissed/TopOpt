@@ -24,6 +24,7 @@
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
+#include "topopt/part.hpp"
 #include "topopt/pipeline.hpp"
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
@@ -144,31 +145,16 @@ topopt::TriangleMesh from_imported(const ImportedMesh& mesh) {
   return tm;
 }
 
-bool has_suffix_ci(const std::string& s, const std::string& suffix) {
-  if (s.size() < suffix.size()) return false;
-  for (std::size_t i = 0; i < suffix.size(); ++i) {
-    if (std::tolower(static_cast<unsigned char>(s[s.size() - suffix.size() + i])) !=
-        std::tolower(static_cast<unsigned char>(suffix[i])))
-      return false;
-  }
-  return true;
-}
+// (handoff 134 removed the local extension sniffing here — the core's
+// `part_format_for_path` is the single place that classifies a path now.)
 
-// Import any supported geometry by file extension. STEP requires OpenCASCADE,
-// which is linked only in the desktop (macOS) build (ARCHITECTURE §4/§10);
-// TOPOPT_BRIDGE_HAS_OCCT is defined there. On platforms without it a .step/.stp
-// path is rejected with a clear message and STL remains fully available.
+// Import any supported geometry by file extension (handoff 134: this is now
+// the core's own adapter, so STEP / STL / 3MF all arrive here through ONE
+// code path and a mesh gets the same weld + normal-unification repair the
+// face-carrying import does). The core reports STEP-without-OCCT and
+// 3MF-without-lib3mf itself, with the message the app surfaces.
 topopt::TriangleMesh import_any(const std::string& path) {
-  if (has_suffix_ci(path, ".step") || has_suffix_ci(path, ".stp")) {
-#ifdef TOPOPT_BRIDGE_HAS_OCCT
-    return topopt::import_step_file(path).mesh;
-#else
-    throw std::runtime_error(
-        "STEP import requires OpenCASCADE, which is not available on this "
-        "platform; import an STL instead");
-#endif
-  }
-  return topopt::read_stl_file(path).mesh;
+  return topopt::import_part_file(path).mesh;
 }
 
 // The recommendation ladder (recommendation-driven variants): finer + lower than
@@ -439,6 +425,73 @@ ImportedMesh import_step(const std::string& path, double linear_deflection,
 #endif
 }
 
+// --- handoff 134: the one part-import entry point ---------------------------
+
+ImportedMesh import_part(const std::string& path, double linear_deflection,
+                         BridgeError& err) {
+  try {
+    topopt::PartOptions opts;
+    if (linear_deflection > 0.0) opts.tessellation.linear_deflection = linear_deflection;
+    const topopt::PartModel p = topopt::import_part(path, opts);
+    ImportedMesh out = to_imported(p.model.mesh, &p.model.triangle_face,
+                                   p.model.face_count, &p.model.faces);
+    out.pseudo_faces = p.pseudo_faces;
+    return out;
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    return ImportedMesh{};
+  }
+}
+
+PartDiagnostics inspect_part(const std::string& path, BridgeError& err) {
+  PartDiagnostics d;
+  try {
+    const topopt::PartInspection insp = topopt::inspect_part_file(path);
+    d.checked = insp.checked;
+    d.acceptable = insp.acceptable;
+    for (const auto defect : insp.defects) {
+      int code = 0;
+      switch (defect) {
+        case topopt::PartDefect::EmptyMesh: code = 0; break;
+        case topopt::PartDefect::NonManifoldEdges: code = 1; break;
+        case topopt::PartDefect::OpenBoundary: code = 2; break;
+        case topopt::PartDefect::NonOrientable: code = 3; break;
+        case topopt::PartDefect::ZeroThickness: code = 4; break;
+      }
+      d.defects.push_back(static_cast<int32_t>(code));
+      d.defect_text.push_back(topopt::describe_defect(defect));
+    }
+    d.boundary_edges = static_cast<int32_t>(insp.boundary_edges);
+    d.non_manifold_edges = static_cast<int32_t>(insp.non_manifold_edges);
+    d.degenerate_triangles = static_cast<int32_t>(insp.degenerate_triangles);
+    d.welded_vertices = static_cast<int32_t>(insp.welded_vertices);
+    d.flipped_triangles = static_cast<int32_t>(insp.flipped_triangles);
+    d.volume = insp.volume;
+    d.bbox_min[0] = insp.bbox_min.x;
+    d.bbox_min[1] = insp.bbox_min.y;
+    d.bbox_min[2] = insp.bbox_min.z;
+    d.bbox_max[0] = insp.bbox_max.x;
+    d.bbox_max[1] = insp.bbox_max.y;
+    d.bbox_max[2] = insp.bbox_max.z;
+    return d;
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    return PartDiagnostics{};
+  }
+}
+
+void rescale_part(const std::string& in_path, const std::string& out_path,
+                  double scale, BridgeError& err) {
+  try {
+    topopt::rescale_part_file(in_path, out_path, scale);
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+  }
+}
+
 void export_stl(const std::string& path, const ImportedMesh& mesh,
                 BridgeError& err) {
   try {
@@ -468,11 +521,15 @@ VoxelSummary voxelize_mesh(const std::string& path, int resolution,
   return s;
 }
 
+// Handoff 134: no longer OCCT-gated. `import_part_file` serves STEP, STL and
+// 3MF alike, and the core's tag_step_face is OCCT-free (src/io/face_tag.cpp),
+// so a mesh part can be tagged on a slice with no OCCT at all. A .step path on
+// such a slice still fails — with the core's own "requires OpenCASCADE"
+// message, raised from import_part_file and surfaced through `err`.
 int64_t tag_step_face(const std::string& step_path, int face_id,
                       bool as_fixture, int resolution, BridgeError& err) {
-#ifdef TOPOPT_BRIDGE_HAS_OCCT
   try {
-    topopt::StepModel model = topopt::import_step_file(step_path);
+    topopt::StepModel model = topopt::import_part_file(step_path);
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
     const topopt::VoxelTag tag =
         as_fixture ? topopt::VoxelTag::Fixture : topopt::VoxelTag::Load;
@@ -482,28 +539,17 @@ int64_t tag_step_face(const std::string& step_path, int face_id,
     err.message = e.what();
     return 0;
   }
-#else
-  (void)step_path;
-  (void)face_id;
-  (void)as_fixture;
-  (void)resolution;
-  err.ok = false;
-  err.message =
-      "STEP face tagging requires OpenCASCADE, which is not available on this "
-      "platform";
-  return 0;
-#endif
 }
 
+// Handoff 134: no longer OCCT-gated — same reasoning as tag_step_face above.
 int64_t mask_step_face(const std::string& step_path, int face_id,
                        int mask_value, int depth_voxels, int resolution,
                        BridgeError& err) {
-#ifdef TOPOPT_BRIDGE_HAS_OCCT
   try {
     if (mask_value < 0 || mask_value > 2)
       throw std::invalid_argument(
           "mask_value must be 0 (Active), 1 (FrozenSolid), or 2 (FrozenVoid)");
-    topopt::StepModel model = topopt::import_step_file(step_path);
+    topopt::StepModel model = topopt::import_part_file(step_path);
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
     topopt::DesignMask mask = topopt::make_active_mask(g);
     const auto mv = static_cast<topopt::MaskValue>(mask_value);
@@ -514,18 +560,6 @@ int64_t mask_step_face(const std::string& step_path, int face_id,
     err.message = e.what();
     return 0;
   }
-#else
-  (void)step_path;
-  (void)face_id;
-  (void)mask_value;
-  (void)depth_voxels;
-  (void)resolution;
-  err.ok = false;
-  err.message =
-      "STEP face masking requires OpenCASCADE, which is not available on this "
-      "platform";
-  return 0;
-#endif
 }
 
 OptimizeResult run_minimize_plastic(const std::string& stl_path,
@@ -632,7 +666,11 @@ OptimizeResult run_minimize_plastic_loadcase(
     int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
     void* ctx, const bool* cancel_flag, VariantFn variant_fn, void* variant_ctx,
     BridgeError& err) {
-#ifdef TOPOPT_BRIDGE_HAS_OCCT
+  // Handoff 134: no longer OCCT-gated. `build_production_loadcase` never used an
+  // OCCT symbol — it needed tag/mask_step_face, which now live in the core's
+  // always-built src/io/face_tag.cpp — so the whole load-case pipeline runs for
+  // an STL/3MF part on a slice without OCCT. `step_path` keeps its name because
+  // it is the wire contract with the Swift side; it is a PART path now.
   OptimizeResult result;
   try {
     bridge_log("loadcase: ENTER res=" + std::to_string(resolution) +
@@ -641,9 +679,11 @@ OptimizeResult run_minimize_plastic_loadcase(
                " load_faces=" + std::to_string(load_case.load_face_ids.size()) +
                " minimize_plastic=" + std::to_string(load_case.minimize_plastic ? 1 : 0) +
                " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0));
-    bridge_log("loadcase: importing STEP '" + step_path + "'");
-    topopt::StepModel model = topopt::import_step_file(step_path);
-    bridge_log("loadcase: STEP imported; building shared production setup");
+    bridge_log("loadcase: importing part '" + step_path + "'");
+    topopt::StepModel model = topopt::import_part_file(step_path);
+    bridge_log("loadcase: part imported (faces=" +
+               std::to_string(model.face_count) +
+               "); building shared production setup");
 
     // Map the flat BridgeLoadCase to the front-end-neutral ProductionLoadCase and
     // hand it to build_production_loadcase — the SINGLE grid/BC/options builder the
@@ -817,24 +857,6 @@ OptimizeResult run_minimize_plastic_loadcase(
     return OptimizeResult{};
   }
   return result;
-#else
-  (void)variant_fn;
-  (void)variant_ctx;
-  (void)step_path;
-  (void)material_name;
-  (void)materials_path;
-  (void)rules_path;
-  (void)resolution;
-  (void)load_case;
-  (void)progress;
-  (void)ctx;
-  (void)cancel_flag;
-  err.ok = false;
-  err.message =
-      "Load-case optimization requires OpenCASCADE (STEP face selection), which "
-      "is not available on this platform";
-  return OptimizeResult{};
-#endif
 }
 
 SmokeResult bridge_smoke(const std::string& materials_path,

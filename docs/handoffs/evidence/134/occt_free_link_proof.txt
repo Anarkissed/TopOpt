@@ -1,0 +1,17 @@
+handoff 134 §3 — OCCT-free build proof
+
+$ cmake -S core -B <dir> -DCMAKE_DISABLE_FIND_PACKAGE_OpenCASCADE=ON
+$ cmake --build <dir> --target topopt        # OK
+$ c++ -c bridge.cpp   # WITHOUT -DTOPOPT_BRIDGE_HAS_OCCT
+$ c++ link_probe.cpp bridge.o -ltopopt && ./link_probe
+
+link_probe calls, and resolves: import_part, inspect_part, rescale_part,
+tag_step_face, mask_step_face, run_minimize_plastic_loadcase.
+exit 0 = the whole mesh load-case path links with no OpenCASCADE.
+
+core symbols present in the OCCT-free libtopopt.a:
+  topopt::segment_mesh_faces(topopt::TriangleMesh const&, topopt::SegmentOptions const&)
+  topopt::import_part_file(std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char>> const&, topopt::StepTessellation const&)
+  topopt::tag_step_face(topopt::VoxelGrid&, topopt::StepModel const&, int, topopt::VoxelTag)
+  topopt::mask_step_face(topopt::VoxelGrid const&, topopt::StepModel const&, int, topopt::MaskValue, int, std::__1::vector<topopt::MaskValue, std::__1::allocator<topopt::MaskValue>>&)
+  topopt::build_production_loadcase(topopt::StepModel const&, int, topopt::ProductionLoadCase const&)

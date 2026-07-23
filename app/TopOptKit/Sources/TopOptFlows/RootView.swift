@@ -50,6 +50,23 @@ public struct RootView: View {
                     .transition(.opacity)
             }
 
+            // Handoff 134 — the two mesh-import sheets, stacked ABOVE the import
+            // sheet so the file row stays visible behind them. Refusal wins when
+            // both could somehow be set; a refused file has no unit question.
+            if let refusal = model.importRefusal {
+                sheetOverlay(onScrimTap: { model.dismissRefusal() }) {
+                    ImportRefusalSheet(model: model, refusal: refusal)
+                }
+                .transition(.opacity)
+                .zIndex(2)
+            } else if let prompt = model.pendingUnitPrompt {
+                sheetOverlay(onScrimTap: { model.cancelUnitPrompt() }) {
+                    ImportUnitSheet(model: model, prompt: prompt)
+                }
+                .transition(.opacity)
+                .zIndex(2)
+            }
+
             if model.printParamsSheetPresented, let project = model.project {
                 printParamsOverlay(project)
                     .transition(.opacity)
@@ -209,6 +226,22 @@ public struct RootView: View {
     private func rowSubtitle(_ job: PersistedRemoteJob) -> String {
         let age = job.submittedAt.map { AppModel.relativeAge(Date().timeIntervalSince($0)) }
         return [age, job.host].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    /// The shared scrim + glass-card presentation the import sheets use
+    /// (handoff 134 factored it out so the unit and refusal sheets present
+    /// identically to the import sheet rather than approximating it).
+    private func sheetOverlay<Content: View>(onScrimTap: @escaping () -> Void,
+                                             @ViewBuilder content: () -> Content) -> some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .overlay(DS.Color.scrim.color)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onScrimTap)
+            GlassSheet { content() }
+                .transition(.scale(scale: 0.97).combined(with: .opacity))
+        }
     }
 
     private var importOverlay: some View {
