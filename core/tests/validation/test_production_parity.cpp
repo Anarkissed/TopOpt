@@ -170,6 +170,13 @@ int main() {
           "library default leaves the Galerkin block cache OFF");
     CHECK(!topopt::fea_matfree_mixed_precision_enabled(),
           "library default leaves the mixed-precision V-cycle OFF (reference FP64)");
+    // Handoff 133 — Krylov recycling is a PRODUCTION setting, not a library
+    // default: the reference world never calls configure_production_options, so it
+    // sees recycling OFF and every solve byte-identical to the pre-133 tree.
+    CHECK(!topopt::fea_krylov_recycling_enabled(),
+          "library default leaves Krylov recycling OFF (reference untouched)");
+    CHECK(!opts.krylov_recycle_reset_per_rung,
+          "library default carries the recycle basis across rungs (133 §4 lifetime)");
     const int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
     const int auto_threads = hw_threads > 0 ? hw_threads : 1;
     CHECK(topopt::fea_matfree_thread_count() == auto_threads,
@@ -214,6 +221,31 @@ int main() {
     CHECK(topopt::fea_matfree_thread_count() == prod_threads,
           "production config pinned the matrix-free apply to the production "
           "(performance-core) thread count");
+
+    // Handoff 133 §10 — the ARMED Krylov recycling package. These four assertions
+    // ARE the config echo run_info.json emits (krylov_recycling / recycle_dim /
+    // wrap_multigrid come from these same accessors in run_job.cpp), so asserting
+    // them here asserts the echo. Each value is a measured decision, not a default:
+    // changing any of them requires re-running core/tests/harness/recycle_probe.cpp
+    // on BOTH regimes and landing new numbers.
+    CHECK(topopt::fea_krylov_recycling_enabled(),
+          "production config arms Krylov recycling");
+    CHECK(topopt::fea_krylov_recycle_dim() == topopt::production_krylov_recycle_dim(),
+          "production config arms the measured recycle dimension k");
+    CHECK(topopt::production_krylov_recycle_dim() == 16,
+          "the measured production k is 16 (the {8,16,24} sweep optimum)");
+    // The tripwire on the maintainer's §10 decision: wrapping the V-cycle REGRESSED
+    // the multigrid regime 1.23x-2.07x across the whole k sweep, so the armed
+    // posture is Jacobi-only and the non-targeted regime is an exact no-op.
+    CHECK(!topopt::fea_krylov_recycle_wrap_multigrid(),
+          "production config arms the JACOBI-ONLY posture (133 §10: wrapping the "
+          "V-cycle measured a 1.23x-2.07x regression)");
+    CHECK(topopt::fea_krylov_recycle_cycle() == 1,
+          "production leaves the rebuild cycle at 1 (a 4-solve-old basis measured "
+          "worth almost nothing: 48.1% -> 2.7%)");
+    CHECK(!opts.krylov_recycle_reset_per_rung,
+          "production config carries the recycle basis across rung boundaries "
+          "(133 §4: measured mildly better in both regimes, worse in neither)");
     // The pin is a DEFAULT, not a lock: an explicit fea_set_matfree_threads after
     // configure_production_options must win, and n <= 0 must restore automatic
     // hardware-concurrency resolution. (Restored to the production pin after, so

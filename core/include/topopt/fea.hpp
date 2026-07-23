@@ -664,6 +664,22 @@ bool fea_matfree_mg_stagnation_latched();
 // is also dropped automatically whenever the free-DOF count changes.
 bool fea_set_krylov_recycling(bool enable);
 bool fea_krylov_recycling_enabled();
+// WRAP-THE-V-CYCLE. false (the DEFAULT, and the ARMED production posture) applies
+// the correction ONLY to the Jacobi-preconditioned loop; the multigrid MG-CG loop
+// then constructs no session at all — no correction, no setup matvecs, no state
+// touched — so a multigrid solve is byte-identical to a recycling-off one. true
+// restores wrapping whichever preconditioner runs.
+//
+// This default is a MAINTAINER DECISION on handoff 133 §10, taken on the measured
+// split above: recycling pays 45.4% on the Jacobi regime it targets and costs
+// 1.23x-2.07x on the multigrid regime, and the mechanism (the +1 lift landing on
+// modes a strong preconditioner already handles) is structural rather than
+// tunable. Restricting to Jacobi keeps 94% of the win and makes the non-targeted
+// regime an exact no-op — measured at 1.000x, to the digit, with zero setup
+// matvecs. Do not flip this to true without re-running the multigrid regime table
+// (core/tests/harness/recycle_probe.cpp mg) and landing new numbers.
+bool fea_set_krylov_recycle_wrap_multigrid(bool enable);
+bool fea_krylov_recycle_wrap_multigrid();
 int fea_set_krylov_recycle_dim(int k);
 int fea_krylov_recycle_dim();
 // Rebuild the basis every `c`-th solve (c <= 0 means 1 = every solve; the

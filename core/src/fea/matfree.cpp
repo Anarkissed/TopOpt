@@ -821,6 +821,12 @@ bool fea_set_krylov_recycling(bool enable) {
   return fea_detail::rc_set_enabled(enable);
 }
 bool fea_krylov_recycling_enabled() { return fea_detail::rc_enabled(); }
+bool fea_set_krylov_recycle_wrap_multigrid(bool enable) {
+  return fea_detail::rc_set_wrap_multigrid(enable);
+}
+bool fea_krylov_recycle_wrap_multigrid() {
+  return fea_detail::rc_wrap_multigrid();
+}
 int fea_set_krylov_recycle_dim(int k) { return fea_detail::rc_set_dim(k); }
 int fea_krylov_recycle_dim() { return fea_detail::rc_dim(); }
 int fea_set_krylov_recycle_cycle(int c) { return fea_detail::rc_set_cycle(c); }

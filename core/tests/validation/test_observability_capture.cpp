@@ -164,7 +164,7 @@ int main() {
   std::getline(ss, header);
   check(header ==
             "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
-            "cg_multigrid,beta,hier_built,mg_cycles_attempted,infeasible",
+            "cg_multigrid,beta,hier_built,mg_cycles_attempted,infeasible,recycle_dim",
         "CSV header matches the documented schema");
   std::size_t data_rows = 0;
   int prev_rung = -1, prev_iter = 0;

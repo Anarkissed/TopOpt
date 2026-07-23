@@ -92,7 +92,7 @@ long long wall_clock_ms() {
 
 const char kIterationCsvHeader[] =
     "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta,"
-    "hier_built,mg_cycles_attempted,infeasible";
+    "hier_built,mg_cycles_attempted,infeasible,recycle_dim";
 
 IterationCsvWriter::IterationCsvWriter(const std::string& path) : path_(path) {
   out_.open(path, std::ios::binary | std::ios::trunc);
@@ -123,14 +123,14 @@ void IterationCsvWriter::append_at(std::size_t rung,
   // `infeasible` (handoff 131) is the rung-infeasibility verdict at this iteration:
   // it reads 1 on AT MOST the rung's LAST row, and that row is where the rung was
   // ended as "load path lost" (0 on every row of every healthy rung).
-  char buf[240];
+  char buf[260];
   std::snprintf(buf, sizeof(buf),
-                "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d\n",
+                "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d,%d\n",
                 rung, obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
                 obs.plateau ? 1 : 0, obs.cg_iterations,
                 obs.cg_used_multigrid ? 1 : 0, obs.beta,
                 obs.cg_hier_built ? 1 : 0, obs.cg_mg_cycles_attempted,
-                obs.infeasible ? 1 : 0);
+                obs.infeasible ? 1 : 0, obs.cg_recycle_dim);
   out_ << buf;
   out_.flush();
   if (!out_)
@@ -329,6 +329,7 @@ std::string run_info_json(const RunInfo& info) {
   num("matfree_threads", fmt_i(info.matfree_threads));
   num("krylov_recycling", bool_json(info.krylov_recycling));
   num("krylov_recycle_dim", fmt_i(info.krylov_recycle_dim));
+  num("krylov_recycle_wrap_multigrid", bool_json(info.krylov_recycle_wrap_multigrid));
   num("warm_start_inherit", bool_json(info.warm_start_inherit));
   num("warm_start_coarse", bool_json(info.warm_start_coarse));
   num("projection", bool_json(info.projection));

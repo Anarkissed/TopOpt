@@ -167,10 +167,11 @@ int rc_cycle();
 bool rc_set_metric_diagonal(bool use_diagonal);
 bool rc_metric_diagonal();
 
-// WRAP-THE-V-CYCLE knob (research; internal, not public API). true (the DEFAULT)
-// wraps WHICHEVER preconditioner runs, including the multigrid V-cycle — the
-// behaviour handoff 133 was asked to build and measure. false restricts the
-// correction to the Jacobi-preconditioned loop only.
+// WRAP-THE-V-CYCLE. Public face: fea_set_krylov_recycle_wrap_multigrid.
+// false (the DEFAULT, and the armed production posture) restricts the correction
+// to the Jacobi-preconditioned loop; true wraps WHICHEVER preconditioner runs,
+// including the multigrid V-cycle — the behaviour handoff 133 built and measured
+// before the maintainer ruled on §10.
 //
 // WHY THE KNOB EXISTS: handoff 133 §10 measured the additive form REGRESSING in
 // the healthy-multigrid regime. The mechanism is the +1 spectral lift. It is
@@ -178,7 +179,8 @@ bool rc_metric_diagonal();
 // eigenvalue was near 0, so +1 lands it near 1) and WIDENS the spectrum when M is
 // strong (a V-cycle: the mode was already near 1, so +1 lands it near 2). With
 // this false the multigrid regime is baseline BY CONSTRUCTION — no session, no
-// setup matvecs, no correction — so the two regimes can be armed independently.
+// setup matvecs, no correction — so the two regimes are armed independently.
+// Measured at exactly 1.000x with zero setup matvecs (handoff 133 §10).
 bool rc_set_wrap_multigrid(bool enable);
 bool rc_wrap_multigrid();
 

@@ -14,21 +14,24 @@ stated before measuring.
 
 ## Outcome in one line
 
-**Built, tested, measured, and NOT ARMED.** Recycling cuts CG iterations **48.1%**
-on the void-heavy design-box regime it was built for — with the accepted designs
-reproduced to **zero** in mean|Δρ| and identical gate verdicts — but it **regresses
-the healthy-multigrid regime**, because the additive coarse correction lifts a
-deflated mode's preconditioned eigenvalue by +1, which is right when the
-preconditioner is weak and spectrum-widening when it is a V-cycle. Bar (b) therefore
-fails on one of the two required regimes, so the capability ships opt-in and
-default-OFF with the evidence, per the 130/132 pattern. Library defaults, Gate-V2
-and every production front-end are byte-for-byte unchanged.
+**Built, tested, measured, and ARMED in the Jacobi-only posture** (maintainer
+decision on §10, recorded below; this section was amended after that ruling). Recycling cuts CG iterations **48.1%** on the
+void-heavy design-box regime it was built for — accepted designs reproduced to
+**zero** in mean|Δρ|, identical gate verdicts — but it **regresses the
+healthy-multigrid regime** 1.23x-2.07x, because the additive coarse correction lifts
+a deflated mode's preconditioned eigenvalue by +1: right when the preconditioner is
+weak, spectrum-widening when it is a V-cycle.
 
-A measured arming PATH exists and is handed to the maintainer rather than taken:
-restricting the correction to the Jacobi-preconditioned loop keeps **45.4%** of the
-void win (94% of it) and makes the multigrid regime baseline *by construction*. That
-still does not satisfy bar (b) as written — 0% is not 15% — so it is a maintainer
-decision, not an agent one (§10).
+Bar (b) as originally written (≥15% on BOTH regimes) therefore failed, and this
+handoff first shipped the capability opt-in and default-OFF with the evidence. The
+maintainer then ruled that failure a **bar mis-specification** and authorised the
+**Jacobi-only** posture against a reformulated bar — ≥15% on the TARGETED regime and
+a byte-identical no-op on the non-targeted one — which the measurements meet:
+**45.4%** void cut (94% of the win) and **1.000x to the digit, zero setup matvecs**
+on multigrid. Production is armed accordingly: `{recycling: true, k: 16,
+wrap_multigrid: false, reset_per_rung: false}`. The LIBRARY defaults are still
+untouched — recycling is off unless `configure_production_options` runs — so
+Gate-V2 and every core reference path remain byte-for-byte identical.
 
 ---
 
@@ -552,17 +555,21 @@ to try if the multigrid regime is revisited.
 | (c) DETERMINISM | PASS — asserted in `test_recycle` (bit-identical fields + iteration histories, and 1-vs-8-thread bit-identity), corroborated at ladder scale | PASS — same assertions |
 | (d) HONEST ACCOUNTING | PASS — reported and charged, §5 | PASS — reported, §5 |
 
-**Bar (b) fails on the multigrid regime, so production is NOT ARMED.**
-`configure_production_options` is untouched; `fea_set_krylov_recycling` defaults
-false; `run_info.json` honestly echoes `krylov_recycling: false`. This is the
-130/132 pattern: the capability ships complete, opt-in, tested and measured, and
-the evidence is the deliverable.
+**Bar (b) as WRITTEN fails on the multigrid regime.** As originally submitted this
+handoff therefore did not arm production, on the 130/132 pattern.
 
-That is the correct call even though the void number is large, because production
-runs BOTH regimes — `SolverKind::MultigridCG_Matfree` lands in the V-cycle regime
-whenever the grid coarsens and the hierarchy contracts, which is most healthy parts.
-Arming globally would trade a large win on design-box runs for a ~2x loss on
-ordinary ones.
+**MAINTAINER DECISION (amending this PR).** The bar-(b) failure was ruled a **bar
+mis-specification**: the technique targets one regime, and the meaningful bar is
+"≥15% CG cut on the TARGETED regime AND a byte-identical no-op on the non-targeted
+one". Both halves are met by the measurements below — 45.4% void, 1.000x-to-the-digit
+multigrid — so the **Jacobi-only posture is AUTHORISED and armed in this PR**.
+
+Arming the AS-BUILT (wrap-everything) posture would still be wrong, and the
+distinction is the whole point: production runs BOTH regimes —
+`SolverKind::MultigridCG_Matfree` lands in the V-cycle regime whenever the grid
+coarsens and the hierarchy contracts, i.e. most healthy parts — so wrapping
+everything would trade a large design-box win for a ~2x loss on ordinary parts. The
+Jacobi-only posture takes the win and declines the trade.
 
 ### The arming candidate, measured rather than merely recommended
 
@@ -616,10 +623,36 @@ argument, is that an arming posture exists which is a strict improvement on
 design-box runs and a strict no-op everywhere else — a trade the stated bar did not
 anticipate, and therefore a maintainer decision rather than an agent one.
 
-If the maintainer wants it, the change is: promote `rc_set_wrap_multigrid` to the
-public API, default it false, and have `configure_production_options` call
-`fea_set_krylov_recycling(true)`. That is a small PR with its own gate; this handoff
-deliberately does not make it.
+### What the amendment changed (the armed package)
+
+* `rc_set_wrap_multigrid` promoted to the public API as
+  `fea_set_krylov_recycle_wrap_multigrid` / `fea_krylov_recycle_wrap_multigrid`,
+  **defaulting false**. The doc block in `fea.hpp` carries the measured
+  justification and a "do not flip without re-running the mg table" tripwire.
+* `configure_production_options` arms the package:
+  `fea_set_krylov_recycling(true)`, `fea_set_krylov_recycle_dim(16)`,
+  `fea_set_krylov_recycle_wrap_multigrid(false)`, and
+  `opts.krylov_recycle_reset_per_rung = false` (the §4 lifetime finding). The
+  rebuild cycle stays at the library default 1 (§4: a 4-solve-old basis measured
+  worth almost nothing). k is a NAMED constant exposed as
+  `production_krylov_recycle_dim()` so the parity test asserts against it, not a
+  literal — the 132 P-core-pin pattern.
+* `test_production_parity` extended with the config echo, on BOTH halves: the
+  library-default half asserts recycling is OFF for the reference world, the armed
+  half asserts all four settings, each with the measurement that decided it.
+* `run_info.json` echoes the armed truth, now including
+  `krylov_recycle_wrap_multigrid` — without it the CSV's `recycle_dim` column could
+  not be interpreted (a 0 next to `cg_multigrid=1` is the by-design no-op, not a
+  failure).
+* `iterations.csv` gains the `recycle_dim` column; both golden header assertions and
+  the golden row bytes moved in the same commit.
+* `test_recycle` gained `test_armed_jacobi_only_is_a_noop` — with the shipped
+  default, a multigrid solve must charge zero recycle columns and zero setup
+  matvecs, take EXACTLY the recycling-off iteration count, and return a
+  BIT-IDENTICAL field, while the same configuration still recycles the Jacobi path.
+  The pre-existing multigrid scenarios now opt IN to wrapping explicitly, so the
+  still-live wrapped code path keeps its exactness and determinism coverage instead
+  of silently going vacuous under the new default.
 
 ---
 
@@ -675,13 +708,21 @@ processes, not merely within one. That is the determinism-by-construction claim 
 
 ## 12. THE ONE RULE — how default-OFF is guaranteed, not asserted
 
-Recycling is opt-in and default OFF at every level:
+Recycling is default OFF **in the library**, and armed only at the production entry
+point — the same discipline as the solver kind, the min-feature scale, the Galerkin
+cache and the P-core pin:
 
 * `fea_set_krylov_recycling` defaults false; with it false `RecycleSession::begin`
   returns before touching any state, so the session allocates nothing, charges no
   matvecs, and every `augment` / `observe` / `commit` is an early-return.
-* `configure_production_options` does NOT arm it (see §Verdict), so every production
-  front-end, Gate-V2, and every core reference run is byte-for-byte unchanged.
+* Only `configure_production_options` arms it. Gate-V2, the property suite, the
+  validation gates and every core reference run never call that function, so they
+  are byte-for-byte unchanged — asserted in `test_production_parity`, which now
+  checks the OFF state before the call and the armed state after it.
+* `fea_set_krylov_recycle_wrap_multigrid` defaults **false**, so even with recycling
+  armed a multigrid solve constructs no session at all and is bit-identical to a
+  recycling-off solve — asserted directly in
+  `test_recycle::test_armed_jacobi_only_is_a_noop`.
 * The driver's two reset calls (`minimize_plastic`, run start and rung boundary) are
   no-ops on a non-existent basis, so `krylov_recycle_reset_per_rung` cannot change
   behaviour while recycling is off — either value is byte-identical.
@@ -807,7 +848,8 @@ CI run: maintainer to fill
 PR: maintainer to fill
 
 New tests added:
-- `krylov_recycling` (`core/tests/unit/test_recycle.cpp`) — 37 checks. Proves, on
+- `krylov_recycling` (`core/tests/unit/test_recycle.cpp`) — **43 checks** (37 as
+  originally submitted, +6 from the amendment's armed-posture test). Proves, on
   BOTH matrix-free regimes: the recycled field equals the recycling-off field to
   1e-6 relative on a solid grid AND on the soft-void graded grid (exactness);
   a void-heavy sequence's NET CG work (setup matvecs included) falls >= 15% and the
@@ -820,8 +862,18 @@ New tests added:
   drops the basis and a DOF-count change drops it automatically rather than
   misapplying it (lifetime); and 20 consecutive recycled solves all reach tolerance
   (robustness).
-- `observability` (extended, +2 checks) — `run_info.json` echoes
-  `krylov_recycling` / `krylov_recycle_dim` as CONFIG (never null).
+  The amendment added `test_armed_jacobi_only_is_a_noop`: under the SHIPPED default
+  a multigrid solve must charge zero recycle columns and zero setup matvecs, take
+  EXACTLY the recycling-off iteration count and return a BIT-IDENTICAL field, while
+  the same configuration still recycles the Jacobi path. Observed:
+  `mgcg off=36 on=36 dim=0 setup=0 bytes=0`, `jacobi dim=15`.
+- `observability` (extended) — `run_info.json` echoes `krylov_recycling` /
+  `krylov_recycle_dim` / `krylov_recycle_wrap_multigrid` as CONFIG (never null), and
+  the CSV golden covers the new `recycle_dim` column on both a recycled row (16) and
+  a not-recycled MG row (0).
+- `production_parity` (extended) — the armed config echo, asserted on both halves:
+  recycling OFF for the library/reference world, and all four armed settings after
+  `configure_production_options`, each carrying the measurement that decided it.
 
 ---
 
@@ -834,13 +886,11 @@ New tests added:
   diagnostics (`recycle_dim` stays 0 — honest, not silent).
 * **Did not build the rigid-body-mode deflation** stretch item (§8 — the condition
   for it was not met).
-* **Did not add a recycle column to `iterations.csv`.** The per-solve diagnostics
-  exist and flow all the way to `SimpIterationObservation`
-  (`cg_recycle_dim`, `cg_recycle_setup_matvecs`), but the CSV schema and its golden
-  assertions are only touched when production is armed, per the task. If a later run
-  arms it, the column and the two golden header assertions
-  (`tests/unit/test_observability.cpp`, `tests/validation/test_observability_capture.cpp`)
-  move in the same commit.
+* **Did not add a `recycle_setup_matvecs` CSV column.** The CSV carries
+  `recycle_dim` only. With the production rebuild cycle at 1 the two are equal
+  (a recycled solve charges exactly k setup matvecs), so the second column would be
+  redundant — but a future run that raises `cycle` above 1 breaks that identity and
+  should add it. `SimpIterationObservation` already carries both.
 * **Did not tune `m` (the harvest sample size)** — it is fixed at `m = k`. A sweep
   over `m` independent of `k` is unexplored; it trades rebuild-solve peak memory
   (§6) against subspace quality.

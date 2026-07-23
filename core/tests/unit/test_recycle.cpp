@@ -171,6 +171,7 @@ void reset_all() {
   topopt::fea_set_krylov_recycling(false);
   topopt::fea_set_krylov_recycle_dim(0);   // 0 restores the default
   topopt::fea_set_krylov_recycle_cycle(0); // 0 restores every-solve
+  topopt::fea_set_krylov_recycle_wrap_multigrid(false);  // the armed default
   topopt::fea_reset_krylov_recycle_space();
 }
 
@@ -202,6 +203,10 @@ SeqResult run_sequence(bool multigrid, bool recycling, int k, const VoxelGrid& g
   if (recycling) {
     topopt::fea_set_krylov_recycling(true);
     topopt::fea_set_krylov_recycle_dim(k);
+    // Keep the WRAPPED multigrid path under test even though production arms the
+    // Jacobi-only posture: the code path still exists and must stay correct and
+    // deterministic. test_armed_jacobi_only_is_a_noop covers the shipped default.
+    if (multigrid) topopt::fea_set_krylov_recycle_wrap_multigrid(true);
   }
   SeqResult r;
   std::vector<double> rho(g.voxel_count(), 0.5);
@@ -242,6 +247,9 @@ void test_exactness_and_parity(bool multigrid, const char* label) {
 
     // A short recycled sequence on the SAME system, then compare the last field.
     topopt::fea_set_krylov_recycling(true);
+    // The multigrid loop is NOT wrapped by default (the armed Jacobi-only posture),
+    // so a multigrid scenario must opt in explicitly or it would assert nothing.
+    if (multigrid) topopt::fea_set_krylov_recycle_wrap_multigrid(true);
     FeaSolution rec;
     CgInfo rec_info;
     for (int s = 0; s < 3; ++s)
@@ -281,6 +289,7 @@ void test_exactness_and_parity(bool multigrid, const char* label) {
     CgInfo base_info;
     const FeaSolution base = solve_one(multigrid, g, e, vbcs, vloads, &base_info);
     topopt::fea_set_krylov_recycling(true);
+    if (multigrid) topopt::fea_set_krylov_recycle_wrap_multigrid(true);
     FeaSolution rec;
     CgInfo rec_info;
     for (int s = 0; s < 3; ++s) rec = solve_one(multigrid, g, e, vbcs, vloads, &rec_info);
@@ -378,6 +387,59 @@ void test_thread_invariance() {
   std::printf("  [threads  ] 1 vs 8 threads: identical (%lld cg)\n", one.cg_total);
 }
 
+// --- 4b: the ARMED Jacobi-only posture is an exact no-op on multigrid ---------
+// This is the guarantee the maintainer's §10 decision rests on, and the reason the
+// reformulated bar is "byte-identical no-op on the non-targeted regime": with
+// wrap_multigrid false (the DEFAULT), a solve that runs MG-CG must construct no
+// session at all — no correction, no setup matvecs — and be bit-identical to a
+// recycling-off solve. Measured on the ladder at 1.000x; asserted here.
+void test_armed_jacobi_only_is_a_noop() {
+  const VoxelGrid g = void_heavy_grid(16, 1.0);
+  std::vector<DirichletBC> bcs;
+  std::vector<NodalLoad> loads;
+  clamp_and_load(g, bcs, loads);
+  std::vector<double> rho(g.voxel_count(), 0.5);
+  const std::vector<double> e = penalized(g, rho);
+
+  reset_all();
+  CHECK(!topopt::fea_krylov_recycle_wrap_multigrid(),
+        "ARMED DEFAULT: the multigrid loop is NOT wrapped unless a caller opts in");
+
+  // Reference: recycling entirely off.
+  CgInfo off_info;
+  const FeaSolution off = solve_one(true, g, e, bcs, loads, &off_info);
+
+  // Recycling ON, armed posture. Several solves, so a basis would exist by now if
+  // the multigrid path were harvesting.
+  topopt::fea_set_krylov_recycling(true);
+  FeaSolution on;
+  CgInfo on_info;
+  for (int s = 0; s < 3; ++s) on = solve_one(true, g, e, bcs, loads, &on_info);
+
+  CHECK(on_info.recycle_dim == 0 && on_info.recycle_setup_matvecs == 0,
+        "ARMED: a multigrid solve charges no recycle columns and no setup matvecs");
+  CHECK(on_info.iterations == off_info.iterations,
+        "ARMED: a multigrid solve takes EXACTLY the recycling-off iteration count");
+  CHECK(bit_identical(off.u, on.u),
+        "ARMED: a multigrid solve returns a BIT-IDENTICAL field to recycling-off");
+  CHECK(topopt::fea_krylov_recycle_bytes() == 0,
+        "ARMED: no basis is carried when only multigrid solves ran");
+  std::printf("  [armed j-o ] mgcg off=%d on=%d dim=%d setup=%d bytes=%zu (exact no-op)\n",
+              off_info.iterations, on_info.iterations, on_info.recycle_dim,
+              on_info.recycle_setup_matvecs, topopt::fea_krylov_recycle_bytes());
+
+  // ...while the SAME configuration still recycles the Jacobi path.
+  reset_all();
+  topopt::fea_set_krylov_recycling(true);
+  CgInfo j_info;
+  for (int s = 0; s < 2; ++s) solve_one(false, g, e, bcs, loads, &j_info);
+  CHECK(j_info.recycle_dim > 0,
+        "ARMED: the Jacobi path IS still recycled under the same configuration");
+  std::printf("  [armed j-o ] jacobi dim=%d — targeted regime still armed\n",
+              j_info.recycle_dim);
+  reset_all();
+}
+
 // --- 5: lifetime plumbing ----------------------------------------------------
 void test_lifetime() {
   reset_all();
@@ -448,6 +510,7 @@ int main() {
     test_iteration_reduction();
     test_determinism();
     test_thread_invariance();
+    test_armed_jacobi_only_is_a_noop();
     test_lifetime();
     test_long_sequence_robust();
   } catch (const std::exception& e) {

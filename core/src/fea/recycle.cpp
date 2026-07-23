@@ -28,7 +28,9 @@ std::atomic<bool> g_rc_enabled{false};
 std::atomic<int> g_rc_dim{kRecycleDefaultDim};
 std::atomic<int> g_rc_cycle{1};
 std::atomic<bool> g_rc_metric_diag{true};
-std::atomic<bool> g_rc_wrap_mg{true};
+// DEFAULT FALSE — Jacobi-only. Maintainer decision on handoff 133 §10; see
+// topopt/fea.hpp for the measured justification.
+std::atomic<bool> g_rc_wrap_mg{false};
 
 // --- Carried state (thread-local, like the 127 multigrid stagnation latch) ----
 struct RcSpace {

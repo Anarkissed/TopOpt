@@ -121,6 +121,12 @@ void configure_production_options(MinimizePlasticOptions& opts);
 // AFTER configure_production_options (n <= 0 restores automatic resolution).
 int production_matfree_thread_count();
 
+// Handoff 133 — the PRODUCTION Krylov recycle dimension k that
+// configure_production_options arms (the measured optimum of the {8,16,24} sweep).
+// Exposed so the parity test asserts the echo against the named constant rather
+// than a literal, exactly as production_matfree_thread_count does for the P-core pin.
+int production_krylov_recycle_dim();
+
 // The canonical recommendation-driven volume-fraction ladder for production runs
 // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic
 // walks the margin-SAFE prefix and stops at the first rung below margin_stop, so
