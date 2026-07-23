@@ -18,6 +18,7 @@
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <string>
