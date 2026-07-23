@@ -1,4 +1,4 @@
-# 129 — `cg_tolerance_loose` production flip: BLOCKED-STOP (the table is the deliverable)
+# 130 — `cg_tolerance_loose` production flip: BLOCKED-STOP (the table is the deliverable)
 
 **Lane:** B (core-only). **Builds on:** 128/PR#158 (the adaptive early CG
 tolerance `SimpOptions::cg_tolerance_loose`, opt-in, default 0 = disabled →
