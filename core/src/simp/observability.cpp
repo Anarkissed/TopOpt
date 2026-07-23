@@ -92,7 +92,7 @@ long long wall_clock_ms() {
 
 const char kIterationCsvHeader[] =
     "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta,"
-    "hier_built,mg_cycles_attempted";
+    "hier_built,mg_cycles_attempted,infeasible";
 
 IterationCsvWriter::IterationCsvWriter(const std::string& path) : path_(path) {
   out_.open(path, std::ios::binary | std::ios::trunc);
@@ -120,12 +120,17 @@ void IterationCsvWriter::append_at(std::size_t rung,
   // `hier_built`/`mg_cycles_attempted` (handoff 128) make build-rejection vs
   // stagnation a direct read: cg_multigrid=0 with hier_built=1 is stagnation,
   // hier_built=0 is build-rejection (or the 127 latch). append+flush = crash-safe.
-  char buf[224];
-  std::snprintf(buf, sizeof(buf), "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d\n",
+  // `infeasible` (handoff 131) is the rung-infeasibility verdict at this iteration:
+  // it reads 1 on AT MOST the rung's LAST row, and that row is where the rung was
+  // ended as "load path lost" (0 on every row of every healthy rung).
+  char buf[240];
+  std::snprintf(buf, sizeof(buf),
+                "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d\n",
                 rung, obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
                 obs.plateau ? 1 : 0, obs.cg_iterations,
                 obs.cg_used_multigrid ? 1 : 0, obs.beta,
-                obs.cg_hier_built ? 1 : 0, obs.cg_mg_cycles_attempted);
+                obs.cg_hier_built ? 1 : 0, obs.cg_mg_cycles_attempted,
+                obs.infeasible ? 1 : 0);
   out_ << buf;
   out_.flush();
   if (!out_)
@@ -348,6 +353,21 @@ std::string run_info_json(const RunInfo& info) {
     }
     mnd += "]";
     num("conditional_projection_rung_mnd", mnd);
+  }
+  // Handoff 131 — rung-infeasibility: the armed thresholds (config, written
+  // up-front) and the per-rung outcome (empty until the post-run finalize).
+  num("infeasible_compliance_ratio", fmt(info.infeasible_compliance_ratio));
+  num("infeasible_cg_blowup", fmt(info.infeasible_cg_blowup));
+  num("infeasible_flat_tol", fmt(info.infeasible_flat_tol));
+  num("infeasible_window", fmt_i(info.infeasible_window));
+  {
+    std::string ri = "[";
+    for (std::size_t i = 0; i < info.rung_infeasible.size(); ++i) {
+      if (i) ri += ", ";
+      ri += info.rung_infeasible[i] ? "true" : "false";
+    }
+    ri += "]";
+    num("rung_infeasible", ri);
   }
   num("min_feature_mm", fmt(info.min_feature_mm));
   num("margin_stop", fmt(info.margin_stop));

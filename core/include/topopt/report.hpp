@@ -105,6 +105,22 @@ struct VariantReport {
   bool accepted = true;
   double margin_required = 0.0;
   double margin_effective = 0.0;
+  // Handoff 131 — WHY this rung was rejected, when the reason is not the margin
+  // gate. "" (the default) on every accepted rung AND on a rung rejected the
+  // ordinary way (too weak): there the margin numbers above already say it.
+  // Non-empty means the rung never reached the gate at all — currently the one
+  // value "rung infeasible (load path lost)": the optimizer severed the structure
+  // and the run was ended on the rung-infeasibility signature (simp.hpp
+  // rung_infeasible).
+  //
+  // READ THE REASON BEFORE THE NUMBERS on such a line. An infeasible rung's
+  // per-rung ANALYSIS IS NEVER RUN — no stress solve, no V3 suite, no settings
+  // engine — because analysing a corpse produces confident nonsense (the motivating
+  // run's severed rung measured margin 680.9, since a structure that carries
+  // nothing has no stress, and was ACCEPTED and shipped on that basis). So on a
+  // line with a non-empty rejection_reason the stress, margin, orientation and
+  // settings fields are ZERO PLACEHOLDERS meaning "not measured", not measurements.
+  std::string rejection_reason;
 };
 
 // The whole run's report: the material used and one entry per requested variant.
@@ -113,11 +129,14 @@ struct JobReport {
   // ACCEPTED rungs, in ladder order (the savings ladder). Unchanged contract:
   // callers that count accepted variants read this.
   std::vector<VariantReport> variants;
-  // Evaluated-but-gate-REJECTED rungs (at most the one terminal too-weak rung the
-  // ladder stopped on; empty when the whole ladder was accepted). Each carries
-  // accepted=false and its margin_effective vs margin_required. Emitted as
-  // report.json "rejected_variants" so a gate rejection is REPORTED, not silently
-  // omitted — the honesty fix for the vanished-rung-3 lie of absence.
+  // Evaluated-but-REJECTED rungs, in ladder order (empty when the whole ladder was
+  // accepted). Each carries accepted=false and its margin_effective vs
+  // margin_required. Emitted as report.json "rejected_variants" so a rejection is
+  // REPORTED, not silently omitted — the honesty fix for the vanished-rung-3 lie of
+  // absence. Two kinds now live here (handoff 131): the terminal TOO-WEAK rung the
+  // ladder stopped on (rejection_reason ""), and any rung the optimizer ended as
+  // INFEASIBLE (rejection_reason "rung infeasible (load path lost)"), which does
+  // NOT stop the ladder — so this array can hold more than one entry.
   std::vector<VariantReport> rejected;
 };
 

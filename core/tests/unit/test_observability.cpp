@@ -99,6 +99,7 @@ int main() {
       b.cg_mg_cycles_attempted = 300; // burned the full budget before bailing
       b.plateau = true;
       b.beta = 8.0;  // handoff 123: a projecting iteration carries its stage β
+      b.infeasible = true;  // handoff 131: the rung ends on this row
       w.append_at(0, b, 1050);
       check(w.rows() == 2, "CSV writer counted 2 rows");
     }
@@ -106,16 +107,18 @@ int main() {
     // Row a leaves beta at its default 0 (not projecting); row b sets β=8. Row a
     // is an MG-carried solve (hier_built=1, cycles=14); row b is a STAGNATION
     // fallback (cg_multigrid=0 but hier_built=1, cycles=300 = the full budget).
+    // Row b also carries handoff 131's infeasible=1 (the rung-ending verdict);
+    // row a leaves it at its default 0.
     const std::string expected =
         "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,"
-        "beta,hier_built,mg_cycles_attempted\n"
-        "0,1,1000,12.5,0.680000,0,14,1,0,1,14\n"
-        "0,2,1050,9.25,0.680100,1,4390,0,8,1,300\n";
+        "beta,hier_built,mg_cycles_attempted,infeasible\n"
+        "0,1,1000,12.5,0.680000,0,14,1,0,1,14,0\n"
+        "0,2,1050,9.25,0.680100,1,4390,0,8,1,300,1\n";
     check(body == expected, "CSV golden: header + rows are byte-exact");
     // Schema string is the documented one.
     check(std::string(kIterationCsvHeader) ==
               "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
-              "cg_multigrid,beta,hier_built,mg_cycles_attempted",
+              "cg_multigrid,beta,hier_built,mg_cycles_attempted,infeasible",
           "CSV header constant matches documented schema");
   }
 

@@ -133,6 +133,12 @@ RunInfo build_run_info(const JobDescription& job,
   // cg_multigrid, since they are an OBSERVED outcome of the ladder.
   info.conditional_mma_projection_mnd_threshold =
       options.conditional_mma_projection_mnd_threshold;
+  // Handoff 131 — the armed rung-infeasibility thresholds (config echo). The
+  // per-rung outcome vector is filled post-run (finalize below).
+  info.infeasible_compliance_ratio = options.simp.infeasible_compliance_ratio;
+  info.infeasible_cg_blowup = options.simp.infeasible_cg_blowup;
+  info.infeasible_flat_tol = options.simp.infeasible_flat_tol;
+  info.infeasible_window = options.simp.infeasible_window;
   info.min_feature_mm = options.min_feature_mm;
   info.margin_stop = options.margin_stop;
   info.infill_percent = options.infill_percent;
@@ -443,6 +449,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         result.pipeline.conditional_projection_fired.end());
     run_info.conditional_projection_rung_mnd =
         result.pipeline.rung_grayscale_mnd;
+    // Handoff 131 — finalize the per-rung infeasibility outcome (one entry per
+    // evaluated rung; all-false is the positive statement "no rung lost its load
+    // path"). Written only now, like cg_multigrid, so an unfinished run claims
+    // nothing either way.
+    run_info.rung_infeasible.assign(result.pipeline.rung_infeasible.begin(),
+                                    result.pipeline.rung_infeasible.end());
     write_run_info(result.run_info_path, run_info);
   }
   // A recovery solve (which sets used_multigrid) runs only for a non-cancelled
@@ -459,6 +471,31 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  "slowdown. Linear solves ran Jacobi-CG; run_info.json records "
                  "cg_multigrid=false. See iterations.csv for the per-solve record.\n",
                  solver_name(options.simp.solver), sg.nx, sg.ny, sg.nz);
+    std::fflush(stderr);
+  }
+
+  // Handoff 131 — LOUD INFEASIBILITY. A rung whose load path was severed is a
+  // failed rung, not a quiet one: say so on stderr, once per rung, in the same
+  // spirit as the multigrid loud fallback above. Silence here is what let the
+  // motivating run ship a corpse as an accepted variant.
+  for (std::size_t i = 0; i < result.pipeline.evaluated.size(); ++i) {
+    const MinimizePlasticVariant& v = result.pipeline.evaluated[i];
+    if (!v.infeasible) continue;
+    std::fprintf(stderr,
+                 "WARNING: rung %zu (vf %.2f) is INFEASIBLE — %s. The optimizer "
+                 "severed the load path: compliance stayed >= %.4gx this rung's "
+                 "starting value, flat to within %.4g, with a >= %.4gx CG blow-up, "
+                 "for %d consecutive iterations, and the rung was ended at "
+                 "iteration %d. No mesh, no "
+                 "stress analysis and no margin are reported for it, and no later "
+                 "rung inherits its design. See report.json rejected_variants and "
+                 "run_info.json rung_infeasible.\n",
+                 i, v.requested_volume_fraction, kRungInfeasibleReason,
+                 options.simp.infeasible_compliance_ratio,
+                 options.simp.infeasible_flat_tol,
+                 options.simp.infeasible_cg_blowup,
+                 options.simp.infeasible_window,
+                 v.optimization.infeasible_iteration);
     std::fflush(stderr);
   }
 

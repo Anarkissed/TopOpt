@@ -68,6 +68,12 @@ float half_to_float(std::uint16_t half);
 //   mg_cycles_attempted  (handoff 128) MG-CG V-cycles this solve ran: the
 //                 converged count when cg_multigrid=1, the budget when it
 //                 stagnated, 0 when no hierarchy was built/attempted.
+//   infeasible    (handoff 131) the RUNG-INFEASIBILITY verdict at this iteration
+//                 (0/1). 1 means the signature fired — the objective sustained
+//                 >= 100x this rung's starting compliance with a >= 4x CG blow-up
+//                 for 5 consecutive iterations — and the rung was ENDED there as
+//                 "load path lost". It can read 1 on at most ONE row per rung, and
+//                 that row is the rung's last. 0 on every row of a healthy rung.
 //
 // A row is ~60-95 bytes, so a full 4-rung production run (~800 rows) is < 80 KB.
 extern const char kIterationCsvHeader[];
@@ -210,6 +216,20 @@ struct RunInfo {
   double conditional_mma_projection_mnd_threshold = 0.0;
   std::vector<int> conditional_projection_fired;
   std::vector<double> conditional_projection_rung_mnd;
+  // Handoff 131 — RUNG-INFEASIBILITY echo. `infeasible_compliance_ratio` /
+  // `infeasible_cg_blowup` / `infeasible_window` are the armed thresholds of the
+  // fast-fail detector (window 0 = disarmed); they are CONFIG and are written
+  // up-front. `rung_infeasible` is the OUTCOME, filled AFTER the run from
+  // MinimizePlasticResult (same discipline as cg_multigrid): one entry per
+  // EVALUATED rung, 1 iff that rung was ended on the signature ("load path lost"),
+  // in ladder order. It is EMPTY until the run finishes, so an unfinished run
+  // asserts nothing; an entry reading 1 means that rung's design is a corpse that
+  // was neither shipped nor inherited by any later rung.
+  double infeasible_compliance_ratio = 0.0;
+  double infeasible_cg_blowup = 0.0;
+  double infeasible_flat_tol = 0.0;
+  int infeasible_window = 0;
+  std::vector<int> rung_infeasible;
   double min_feature_mm = 0.0;
   double margin_stop = 0.0;
   double infill_percent = 100.0;

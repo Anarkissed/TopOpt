@@ -692,6 +692,24 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME conditional_projection COMMAND test_conditional_projection)
 
+  # Rung-infeasibility fast-fail (handoff 131): ending a rung whose load path the
+  # optimizer severed, instead of optimizing a corpse for hours and then shipping
+  # it. Replays the COMMITTED per-iteration CSV of the real 96³ design-box run that
+  # motivated it (tests/fixtures/infeasible/) to prove detection at production
+  # thresholds on the broken rung and silence on the healthy ones; proves no false
+  # positive on a LIVE violent forming transient; proves the driver's response
+  # (ended, never accepted, never analysed, reported with its reason, ladder
+  # continues) and the inheritance rule (the next rung is seeded by the last
+  # FEASIBLE rung, never the corpse); and proves byte-identity armed vs disarmed on
+  # a run where the signature never occurs. Drives minimize_plastic, so Eigen-gated;
+  # the real settings rule table and the fixture directory are injected.
+  add_executable(test_rung_infeasible tests/validation/test_rung_infeasible.cpp)
+  target_link_libraries(test_rung_infeasible PRIVATE topopt)
+  target_compile_definitions(test_rung_infeasible PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible")
+  add_test(NAME rung_infeasible COMMAND test_rung_infeasible)
+
   # Stress-constrained optimization (M7.mma.2): the aggregated von Mises
   # constraint on the MMA path — a finite-difference check of the adjoint
   # sensitivity of simp_stress_aggregate, and the behavioral invariants (a)/(b)/

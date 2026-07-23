@@ -430,6 +430,13 @@ struct MinimizePlasticOptions {
   bool warm_start_coarse = false;
 };
 
+// Handoff 131 — the VariantReport::rejection_reason a rung ended on the
+// rung-infeasibility signature carries. One definition, shared by the driver, the
+// CLI's console line and the tests, so the string in report.json can never drift
+// from the string anything checks for.
+inline constexpr const char* kRungInfeasibleReason =
+    "rung infeasible (load path lost)";
+
 // One ladder rung actually evaluated by the driver.
 struct MinimizePlasticVariant {
   // The ladder rung this variant targeted (options.volume_fraction_ladder[i]).
@@ -446,6 +453,19 @@ struct MinimizePlasticVariant {
   // The driver appends only accepted variants to the JobReport, and stops after
   // the first rejected (too-weak) rung.
   bool accepted = false;
+
+  // Handoff 131 — true iff this rung was ENDED on the rung-infeasibility signature
+  // (simp.hpp rung_infeasible): the optimizer severed the load path, so the design
+  // is a corpse. Such a rung is NEVER accepted, its per-rung ANALYSIS IS SKIPPED
+  // (exactly like a cancelled rung: no stress solve, no V3 suite, no settings, so
+  // `v3`, the visualization fields and `mesh()` stay default-constructed), and its
+  // density NEVER seeds a later rung's warm start. Its `report` line carries
+  // rejection_reason "rung infeasible (load path lost)" with zero placeholders for
+  // every unmeasured field, and is pushed to report.rejected. Unlike a too-weak
+  // rung it does NOT stop the ladder — infeasibility is a failure of THIS carve,
+  // not a strength verdict about lighter targets, and the next rung gets a fresh
+  // attempt from the last FEASIBLE field.
+  bool infeasible = false;
 
   // --- M7.0b visualization data (for the app results screen) ---------------
   // Populated for every evaluated NON-cancelled rung, alongside `v3`/`report`.
@@ -508,9 +528,10 @@ struct MinimizePlasticVariant {
 
 // The result of a minimize_plastic run.
 struct MinimizePlasticResult {
-  // Every rung the driver actually ran, in ladder order: an accepted prefix
-  // (each margin >= margin_stop) followed by AT MOST ONE rejected terminal rung
-  // (margin < margin_stop, or cancelled — see `cancelled` below) at which the
+  // Every rung the driver actually ran, in ladder order: accepted rungs (each
+  // margin >= margin_stop) — optionally interleaved with INFEASIBLE rungs, which
+  // do not stop the walk (handoff 131) — followed by AT MOST ONE rejected terminal
+  // rung (margin < margin_stop, or cancelled — see `cancelled` below) at which the
   // driver stopped. No rung after the terminal one is evaluated.
   std::vector<MinimizePlasticVariant> evaluated;
   // True iff a rung fell below margin_stop and the driver stopped early (so the
@@ -592,6 +613,14 @@ struct MinimizePlasticResult {
   // for polish and which were already crisp — the honest cost readout.
   std::vector<double> rung_grayscale_mnd;
   std::vector<char> conditional_projection_fired;
+
+  // Handoff 131 — RUNG-INFEASIBILITY outcome, one entry per EVALUATED rung (same
+  // order and length as `evaluated`): 1 iff that rung was ended on the signature
+  // ("load path lost", simp.hpp rung_infeasible), else 0. ALWAYS filled (unlike the
+  // conditional-projection vectors, which are empty when disarmed), so all-zeros is
+  // the positive statement "no rung lost its load path". Echoed into run_info.json
+  // as `rung_infeasible`.
+  std::vector<char> rung_infeasible;
 };
 
 // Run the minimize_plastic pipeline over `grid` (an already-voxelized part with

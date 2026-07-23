@@ -646,7 +646,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // gate is disarmed this block is skipped entirely (byte-identical).
     double rung_mnd = std::numeric_limits<double>::quiet_NaN();
     bool rung_fired = false;
-    if (conditional_projection_armed && !variant.optimization.cancelled) {
+    // Handoff 131 — an INFEASIBLE grayscale phase is never polished: β-projection
+    // on a severed structure is hours spent sharpening a corpse. The gate is
+    // skipped exactly as it is for a cancelled rung.
+    if (conditional_projection_armed && !variant.optimization.cancelled &&
+        !variant.optimization.infeasible) {
       rung_mnd = design_discreteness_mnd(G, variant.optimization.physical_density,
                                          mask);
       if (rung_mnd > options.conditional_mma_projection_mnd_threshold) {
@@ -670,6 +674,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
             simp_optimize(G, params, B, loads, opt, mask);
 
         proj.iterations += gray_iters;
+        // Handoff 131 — if the PROJECTION phase is the one that went infeasible,
+        // its iteration counter restarted at 1, so offset it by the grayscale
+        // phase exactly as `iterations` and the forwarded CSV `iter` are offset.
+        // The reported firing iteration then indexes the rung, not the phase.
+        if (proj.infeasible) proj.infeasible_iteration += gray_iters;
         proj.initial_compliance = gray_initial_c;
         std::vector<SimpIteration> merged = std::move(gray_history);
         merged.insert(merged.end(), proj.history.begin(), proj.history.end());
@@ -692,8 +701,73 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       // not shipped (pipeline.hpp `cancelled` contract).
       variant.accepted = false;
       result.evaluated.push_back(std::move(variant));
+      result.rung_infeasible.push_back(0);
       result.cancelled = true;
       break;
+    }
+
+    // --- Handoff 131: RUNG INFEASIBLE (load path lost) -----------------------
+    // The optimizer ended this rung on the infeasibility signature: for 5
+    // consecutive iterations the objective sat >= 100x the rung's starting
+    // compliance, FROZEN to within 1e-3 (the design no longer moves it at all),
+    // with a >= 4x CG blow-up (simp.hpp rung_infeasible). The design is a corpse.
+    // Three things follow, and each one is a fix for something the motivating 96³
+    // run actually did:
+    //   (1) NO ANALYSIS. The stress solve, V3 suite and settings engine are
+    //       skipped, exactly as for a cancelled rung. Analysing a corpse produces
+    //       confident nonsense: that run's severed rung measured margin 680.9 —
+    //       a structure carrying nothing has no stress — and was ACCEPTED and
+    //       exported as variant_038.stl on the strength of it.
+    //   (2) NO INHERITANCE. `warm_seed` is left UNTOUCHED, so it still holds the
+    //       last FEASIBLE rung's converged density (or is empty when there has
+    //       been none / inheritance is off). That run seeded rung 3 from rung 2's
+    //       corpse and spent 27 more iterations at the same dead compliance —
+    //       and, note, a rung seeded from a corpse cannot even be DETECTED,
+    //       because its own starting compliance is already the dead value, so
+    //       nothing is ever 100x above it. Not inheriting is what keeps the
+    //       detector able to see the next rung at all.
+    //   (3) NO STOP. The ladder continues. Infeasibility is a failure of THIS
+    //       carve — not the strength verdict that `stopped_on_margin` is — so the
+    //       next (lighter) rung gets a fresh attempt from the last feasible field.
+    //       If it too disconnects it also fast-fails, so the worst case is
+    //       window+1 iterations per remaining rung instead of a full rung each.
+    // The rung is REPORTED, never silently dropped: a rejected report line whose
+    // rejection_reason says why, with the measured geometry it does have
+    // (achieved/printed fraction) and zero placeholders for everything the skipped
+    // analysis would have filled.
+    if (variant.optimization.infeasible) {
+      variant.infeasible = true;
+      variant.accepted = false;
+
+      // Geometry is a voxel count, not an analysis: report it honestly.
+      std::size_t printed_voxels = 0;
+      for (int k = 0; k < G.nz; ++k)
+        for (int j = 0; j < G.ny; ++j)
+          for (int i = 0; i < G.nx; ++i) {
+            if (!G.solid(i, j, k)) continue;
+            if (variant.optimization.physical_density[G.index(i, j, k)] > kIso)
+              ++printed_voxels;
+          }
+      const double printed_fraction =
+          part_solid > 0.0 ? static_cast<double>(printed_voxels) / part_solid
+                           : 0.0;
+
+      VariantReport& vr = variant.report;
+      vr.volume_fraction = std::min(1.0, printed_fraction);
+      vr.printed_fraction = std::min(1.0, printed_fraction);
+      vr.accepted = false;
+      vr.margin_required = options.margin_stop;
+      vr.rejection_reason = kRungInfeasibleReason;
+      // Every other field stays default-constructed: zero stress, zero margin,
+      // zero orientation, empty settings. They are NOT measurements — the
+      // rejection_reason is the flag that says so (report.hpp).
+
+      result.evaluated.push_back(std::move(variant));
+      result.rung_infeasible.push_back(1);
+      result.report.rejected.push_back(result.evaluated.back().report);
+      assert(result.evaluated.size() <= ladder.size() &&
+             "minimize_plastic: result.evaluated grew past its reserved capacity");
+      continue;  // (2) warm_seed untouched, (3) ladder continues
     }
 
     const std::vector<double>& rho = variant.optimization.physical_density;
@@ -891,6 +965,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.margin_required = options.margin_stop;
     vr.margin_effective = margin_effective;
     result.evaluated.push_back(std::move(variant));
+    result.rung_infeasible.push_back(0);  // handoff 131 (aligned with `evaluated`)
     // Storage never reallocates (reserved to ladder.size() above), so the
     // references taken below stay valid for the whole run — see the reserve() note.
     assert(result.evaluated.size() <= ladder.size() &&
