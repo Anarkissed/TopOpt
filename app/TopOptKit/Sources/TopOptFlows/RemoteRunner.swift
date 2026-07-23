@@ -434,8 +434,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // the banner's "run from <time>" never resets to "now"; a fresh submit
         // stamps the current time.
         if let id = jobID {
-            let priorSubmit = existingJobID != nil
-                ? RemoteJobStore.load(defaults: defaults)?.submittedAt : nil
+            // Look the prior record up BY JOB ID (handoff 134). `RemoteJobStore.load`
+            // returns the most-recently-saved record, which since the multi-slot store
+            // (121) is not necessarily THIS job — re-attaching to an older job while a
+            // newer one was outstanding stamped the newer job's submit time onto it,
+            // and the banner then reported the wrong age. Same class of bug as the
+            // duration this handoff fixes: a time that describes a different object.
+            let priorSubmit = existingJobID.flatMap { existing in
+                RemoteJobStore.loadAll(defaults: defaults)
+                    .first { $0.jobID == existing }?.submittedAt
+            }
             RemoteJobStore.save(PersistedRemoteJob(host: config.host, port: config.port,
                                                    fingerprint: config.expectedFingerprint,
                                                    jobID: id,
@@ -741,13 +749,49 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         let url = config.baseURL.appendingPathComponent("jobs")
             .appendingPathComponent(id).appendingPathComponent("files")
             .appendingPathComponent("fields.bin")
-        guard let (data, resp) = try? syncGET(url),
-              (resp as? HTTPURLResponse)?.statusCode == 200,
-              let container = RemoteFieldsContainer.parse(data) else {
-            diag("remote fields.bin unavailable — overlays stay computed-on-Mac for this run")
+        // Say WHICH failure this was (handoff 134). "n/a — computed on Mac" is only
+        // honest when the fields are genuinely absent; a 404 (a pre-122 worker, or a
+        // run whose CLI never wrote one), a transport error, and a truncated body are
+        // three different stories, and the device QA for the re-attach repro has to be
+        // able to tell them apart from the Console instead of guessing.
+        guard let (data, resp) = try? syncGET(url) else {
+            diag("remote fields.bin fetch failed (transport) — overlays stay computed-on-Mac")
             return nil
         }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            diag("remote fields.bin unavailable (HTTP \(code)) — overlays stay computed-on-Mac")
+            return nil
+        }
+        guard let container = RemoteFieldsContainer.parse(data) else {
+            diag("remote fields.bin unreadable (\(data.count) bytes) — overlays stay computed-on-Mac")
+            return nil
+        }
+        diag("remote fields.bin fetched: \(data.count) bytes, \(container.variants.count) variant block(s)")
         return container
+    }
+
+    /// Read the WORKER's own record of when this job was created, promoted and
+    /// finished (`GET /jobs/{id}`, handoff 121 timestamps) and turn it into the run's
+    /// `RunTiming` (handoff 134, item 1).
+    ///
+    /// This is the ONLY honest source for a remote run's duration: the client may have
+    /// been asleep, force-quit, or re-attached hours later, so anything the CLIENT
+    /// measures describes the observer, not the run. That is precisely how a 40m53s
+    /// solve came to be reported as "11 hours" the next morning. Best-effort like
+    /// `fetchFields` — a nil simply means no duration is shown (never a guess).
+    private func fetchTiming() -> RunTiming? {
+        guard let id = jobID else { return nil }
+        let url = config.baseURL.appendingPathComponent("jobs").appendingPathComponent(id)
+        guard let obj = try? getJSON(url) else {
+            diag("remote job record unavailable — no run duration shown for this run")
+            return nil
+        }
+        let t = RunTiming.fromWorker(createdAt: obj["created_at"] as? Double,
+                                     startedAt: obj["started_at"] as? Double,
+                                     finishedAt: obj["finished_at"] as? Double)
+        if t == nil { diag("worker reported no finish time — no run duration shown") }
+        return t
     }
 
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {
@@ -1000,7 +1044,14 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         let reportVariants = report["variants"] as? [[String: Any]] ?? []
 
         // Per-voxel fields (best-effort; nil leaves the overlays gated).
+        // BOTH the live-completion path and the RE-ATTACH path reach here — this is
+        // the single assembly point, so a run whose client force-quit and re-attached
+        // the next morning fetches exactly the same fields.bin, with the same presence
+        // gate and the same graceful degradation (handoff 134, item 2).
         let fields = fetchFields()
+        // The worker's own duration record (handoff 134, item 1) — never the client's
+        // wall clock, which on a re-attach measures when someone looked, not the run.
+        let timing = fetchTiming()
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 
@@ -1029,11 +1080,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                             fields: fields?.variant(forRequestedVF: s.requestedVF))
             }
             return remoteOutcome(variants: variants, acceptedCount: variants.count,
-                                 fields: fields)
+                                 fields: fields, timing: timing)
         }
 
+        // No accepted variant streamed: report-only rows. They carry no mesh, so they
+        // are joined to the fields by the report's own requested VF when it has one —
+        // a rejected rung has no overlay to light up, but the run's grid + duration
+        // still ride along on the outcome below.
         let rejected = reportVariants.map { makeVariant(streamed: nil, report: $0, fields: nil) }
-        return remoteOutcome(variants: rejected, acceptedCount: 0, fields: fields)
+        return remoteOutcome(variants: rejected, acceptedCount: 0, fields: fields,
+                             timing: timing)
     }
 
     /// Wrap remote variants in an OptimizeOutcome, carrying the run's grid metadata
@@ -1041,7 +1097,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// index a variant's von Mises / displacement field, so without fields.bin they
     /// stay `isEmpty` (gated) even if — hypothetically — a variant carried arrays.
     private func remoteOutcome(variants: [OptimizeVariant], acceptedCount: Int,
-                               fields: RemoteFieldsContainer?) -> OptimizeOutcome {
+                               fields: RemoteFieldsContainer?,
+                               timing: RunTiming? = nil) -> OptimizeOutcome {
         OptimizeOutcome(variants: variants, stoppedOnMargin: false, cancelled: false,
                         acceptedCount: acceptedCount,
                         voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
@@ -1049,7 +1106,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                         gridNz: fields?.gridNz ?? 0,
                         gridOrigin: fields?.gridOrigin ?? .zero,
                         spacing: fields?.spacing ?? 0,
-                        computedRemotely: true)
+                        computedRemotely: true,
+                        timing: timing)
     }
 
     private func makeVariant(streamed s: StreamedVariant?,

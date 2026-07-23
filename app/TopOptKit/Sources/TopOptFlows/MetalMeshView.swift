@@ -21,10 +21,23 @@ import SwiftUI
 import TopOptDesign
 import simd
 import Combine
+#if canImport(os)
+import os
+#endif
 
 #if canImport(MetalKit)
 import MetalKit
 import QuartzCore
+
+/// Signpost log for the VIEWER's own frames (handoff 134, item 3). The results
+/// screen already stamps `ResultsFrame` (SwiftUI body evaluations) and the gizmo
+/// stamps `GizmoFrame`, but the part viewer — by far the largest draw — had no
+/// track, so a device capture could not say how much of a frame was IT. Each
+/// `draw(in:)` is one interval carrying the frame's measured draw-call and vertex
+/// counts, which is what makes "GPU frame time at rest vs during orbit" a number
+/// the maintainer can read off a trace instead of estimate. Zero cost when
+/// Instruments is not recording.
+let viewerFrameSignpost = OSLog(subsystem: "com.topopt.results", category: "ViewerFrame")
 
 // ---------------------------------------------------------------------------
 // GPU uniforms — must match the `Uniforms` layout in the shaders below.
@@ -1529,9 +1542,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         if isSettling { stepSettle() }
         if isPulsing { stepPulse() }   // advance the detent flash (item 2), re-uploading its tint
         guard let cmd = queue.makeCommandBuffer() else { return }
+        // One signpost interval per drawn frame (handoff 134). The view is on-demand —
+        // paused at rest, one frame per camera change while orbiting — so the DENSITY
+        // of these intervals is itself the "at rest vs during orbit" measurement, and
+        // each interval's span is that frame's cost.
+        let spid = OSSignpostID(log: viewerFrameSignpost, object: self)
+        os_signpost(.begin, log: viewerFrameSignpost, name: "viewer_frame", signpostID: spid)
         if let rpd = view.currentRenderPassDescriptor {
             encode(into: rpd, aspect: aspect, into: cmd, drawStage: true)
         }
+        os_signpost(.end, log: viewerFrameSignpost, name: "viewer_frame", signpostID: spid,
+                    "draws=%d verts=%d", lastFrameDrawCalls, lastFrameVertices)
         if let drawable = view.currentDrawable { cmd.present(drawable) }
         cmd.commit()
         // The settle/pulse finished this frame → return to on-demand drawing (battery).
@@ -1541,12 +1562,35 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    // ── frame cost instrumentation (handoff 134, item 3) ──────────────────────
+    // Every draw in a frame goes through `countedDraw`, so the per-frame draw-call
+    // count and vertex total are MEASURED rather than hand-counted from the encode
+    // path (which branches on a dozen pieces of viewer state). Two Ints and an
+    // increment per draw — nothing here changes what is drawn or in what order.
+
+    /// Draw calls encoded in the most recently completed frame (all passes).
+    private(set) var lastFrameDrawCalls = 0
+    /// Vertices submitted in the most recently completed frame (all passes).
+    private(set) var lastFrameVertices = 0
+    private var frameDrawCalls = 0
+    private var frameVertices = 0
+
+    private func countedDraw(_ enc: MTLRenderCommandEncoder, _ type: MTLPrimitiveType,
+                             _ count: Int) {
+        frameDrawCalls += 1
+        frameVertices += count
+        enc.drawPrimitives(type: type, vertexStart: 0, vertexCount: count)
+    }
+
     /// Encode the shaded mesh draw into an arbitrary render pass. Shared by the on-screen
     /// `draw(in:)` and the headless `renderOffscreen`. `drawStage` gates the CAD-stage backdrop
     /// (item 9): ON for the live viewer, OFF for offscreen output (thumbnails / exported video
     /// keep their own clear colour) — so the backdrop is a live-viewer treatment only.
     private func encode(into rpd: MTLRenderPassDescriptor, aspect: Float, into cmd: MTLCommandBuffer,
                         drawStage: Bool) {
+        frameDrawCalls = 0
+        frameVertices = 0
+        defer { lastFrameDrawCalls = frameDrawCalls; lastFrameVertices = frameVertices }
         guard vertexDrawCount > 0, let vbuf = vertexBuffer, let tbuf = tintBuffer,
               let fbuf = flexBuffer else { return }
         var uniforms = makeUniforms(aspect: aspect)
@@ -1575,7 +1619,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setDepthStencilState(lineOverlayDepthState)
             enc.setVertexBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
             enc.setFragmentBytes(&su, length: MemoryLayout<StageUniforms>.stride, index: 0)
-            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            countedDraw(enc, .triangle, 3)
         }
 
         // Load-flow body modes (handoff 070): a body alpha < 1 draws the mesh through
@@ -1592,7 +1636,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         enc.setVertexBytes(&uniforms, length: MemoryLayout<ViewerUniforms>.stride, index: 1)
         enc.setFragmentBytes(&revealParams, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
         enc.setFragmentBytes(&bodyAlphaVal, length: MemoryLayout<Float>.stride, index: 1)
-        enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
+        countedDraw(enc, .triangle, vertexDrawCount)
 
         // Ground grid + contact shadow (M7.6 D2), drawn after the opaque mesh so it
         // blends, depth-tested so the part occludes it, depth-write off.
@@ -1603,11 +1647,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setVertexBytes(&gmvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             if let sbuf = groundShadowBuffer, groundShadowCount > 0 {
                 enc.setVertexBuffer(sbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: groundShadowCount)
+                countedDraw(enc, .triangle, groundShadowCount)
             }
             if let lbuf = groundLineBuffer, groundLineCount > 0 {
                 enc.setVertexBuffer(lbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: groundLineCount)
+                countedDraw(enc, .line, groundLineCount)
             }
         }
 
@@ -1649,14 +1693,14 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             // flow phase for the traveling dash), so the fragment index-1 buffer must be
             // bound too — without this Metal aborts: "missing Buffer binding at index 1".
             enc.setFragmentBytes(&lpu, length: MemoryLayout<LoadPathUniforms>.stride, index: 1)
-            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: loadPathRibbonVertexCount)
+            countedDraw(enc, .triangle, loadPathRibbonVertexCount)
         } else if loadPathVertexCount > 0, let lpipe = groundPipeline, let lbuf = loadPathBuffer {
             var mvp = uniforms.mvp
             enc.setRenderPipelineState(lpipe)
             enc.setDepthStencilState(lineOverlayDepthState)
             enc.setVertexBuffer(lbuf, offset: 0, index: 0)
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
-            enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: loadPathVertexCount)
+            countedDraw(enc, .line, loadPathVertexCount)
         }
 
         // Load-path FLOW (handoff 070): the faint guide routes then the glowing comet
@@ -1670,11 +1714,11 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setVertexBytes(&mvp, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             if let gbuf = flowGuideBuffer, flowGuideVertexCount > 0 {
                 enc.setVertexBuffer(gbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: flowGuideVertexCount)
+                countedDraw(enc, .line, flowGuideVertexCount)
             }
             if let fbuf = loadFlowBuffer, loadFlowVertexCount > 0 {
                 enc.setVertexBuffer(fbuf, offset: 0, index: 0)
-                enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: loadFlowVertexCount)
+                countedDraw(enc, .triangle, loadFlowVertexCount)
             }
         }
         enc.endEncoding()
@@ -1763,7 +1807,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         penc.setVertexBuffer(vbuf, offset: 0, index: 0)
         penc.setVertexBuffer(fbuf, offset: 0, index: 3)
         penc.setVertexBytes(&du, length: MemoryLayout<DepthPrepassUniforms>.stride, index: 1)
-        penc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexDrawCount)
+        countedDraw(penc, .triangle, vertexDrawCount)
         penc.endEncoding()
         return tex.color
     }
@@ -1801,7 +1845,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                 enc.setVertexBytes(&m, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             }
             enc.setVertexBuffer(fbuf, offset: 0, index: 0)
-            enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: faceCount)
+            countedDraw(enc, .triangle, faceCount)
             enc.setDepthBias(0, slopeScale: 0, clamp: 0)
         }
         if lineCount > 0, let lbuf = lineBuffer, let gpipe = groundPipeline {
@@ -1809,7 +1853,7 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
             enc.setRenderPipelineState(gpipe)
             enc.setVertexBytes(&m, length: MemoryLayout<simd_float4x4>.stride, index: 1)
             enc.setVertexBuffer(lbuf, offset: 0, index: 0)
-            enc.drawPrimitives(type: .line, vertexStart: 0, vertexCount: lineCount)
+            countedDraw(enc, .line, lineCount)
         }
     }
 
@@ -1847,6 +1891,39 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     /// Render the current mesh + camera to an offscreen BGRA texture and return the
     /// raw pixel bytes (B,G,R,A per pixel). Used by headless tests to verify the
     /// pipeline rasterizes the mesh — no MTKView/display needed. Nil if nothing to draw.
+    /// GPU time (seconds) for ONE encoded frame at `size`×`size`, measured by Metal
+    /// itself (`gpuEndTime - gpuStartTime`) with NO pixel readback — handoff 134's
+    /// item-3 probe. `renderOffscreen` is not a frame-time proxy: it copies a
+    /// megabyte of texture back to the CPU, which dwarfs the draw. Instrumentation
+    /// only; nothing in the app calls it.
+    func measureFrameGPUSeconds(size: Int, stage: Bool) -> Double? {
+        guard vertexDrawCount > 0 else { return nil }
+        let cdesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.colorFormat, width: size, height: size, mipmapped: false)
+        cdesc.usage = [.renderTarget]
+        cdesc.storageMode = .private
+        let ddesc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: Self.depthFormat, width: size, height: size, mipmapped: false)
+        ddesc.usage = [.renderTarget]
+        ddesc.storageMode = .private
+        guard let color = device.makeTexture(descriptor: cdesc),
+              let depth = device.makeTexture(descriptor: ddesc),
+              let cmd = queue.makeCommandBuffer() else { return nil }
+        let rpd = MTLRenderPassDescriptor()
+        rpd.colorAttachments[0].texture = color
+        rpd.colorAttachments[0].loadAction = .clear
+        rpd.colorAttachments[0].storeAction = .store
+        rpd.depthAttachment.texture = depth
+        rpd.depthAttachment.loadAction = .clear
+        rpd.depthAttachment.clearDepth = 1.0
+        rpd.depthAttachment.storeAction = .dontCare
+        encode(into: rpd, aspect: 1, into: cmd, drawStage: stage)
+        cmd.commit()
+        cmd.waitUntilCompleted()
+        let dt = cmd.gpuEndTime - cmd.gpuStartTime
+        return dt > 0 ? dt : nil
+    }
+
     func renderOffscreen(size: Int, clear: MTLClearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1),
                          stage: Bool = false) -> [UInt8]? {
         guard vertexDrawCount > 0 else { return nil }

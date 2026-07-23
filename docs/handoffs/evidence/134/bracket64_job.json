@@ -1,0 +1,34 @@
+{
+ "model": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/multigrid-solver-opt-in-e1bba5/core/tests/fixtures/demo/l-bracket.step",
+ "material": "PLA",
+ "mode": "minimize_plastic",
+ "resolution": 64,
+ "fixture_faces": [
+  {
+   "kind": "cylindrical",
+   "radius_mm": 2.5
+  }
+ ],
+ "gravity": {
+  "direction": [
+   0.0,
+   0.0,
+   -1.0
+  ],
+  "magnitude_mm_s2": 9810.0
+ },
+ "ladder": [
+  0.7,
+  0.5,
+  0.3
+ ],
+ "margin_stop": 1.5,
+ "simp": {
+  "max_iterations": 30
+ },
+ "output": {
+  "report": "report.json",
+  "mesh_format": "stl",
+  "mesh_prefix": "variant"
+ }
+}

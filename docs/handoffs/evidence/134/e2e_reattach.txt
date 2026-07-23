@@ -1,0 +1,11 @@
+# CASE: reattach
+worker record: state=done started=1784845727.816767 finished=1784845730.885132
+-- job de8c7a531aea46b6 finished on the worker with no client attached --
+== E2E case=reattach port=54695 grace=3.0s appFingerprint=c6c7af7c5b1c ==
+  re-attaching to completed job de8c7a531aea46b6 (client was 'force-quit')
+  results: stress=true flex=true mass=42 g note=This variant was optimized on your Mac. The optimization playback is computed there and isn’t available for a LAN run in this build — the geometry, savings, orientation and safety margins are.
+  duration: solved 3s (client was attached only 0.0s)
+Test Case '-[TopOptFlowsTests.RemoteRunnerE2ETests testEndToEnd]' passed (0.033 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.033 (0.034) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.033 (0.034) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 0.033 (0.035) seconds

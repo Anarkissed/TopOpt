@@ -1,0 +1,5 @@
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.027 (0.027) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.001 (0.002) seconds
+	 Executed 678 tests, with 3 tests skipped and 0 failures (0 unexpected) in 76.499 (76.543) seconds
+Test Suite 'All tests' passed at 2026-07-23 18:25:43.917.
+	 Executed 678 tests, with 3 tests skipped and 0 failures (0 unexpected) in 76.499 (76.544) seconds

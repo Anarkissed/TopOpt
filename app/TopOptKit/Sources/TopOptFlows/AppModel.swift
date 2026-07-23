@@ -604,6 +604,11 @@ public final class AppModel: ObservableObject {
         // A re-attach is a REMOTE run — RemoteRun owns its liveness, so it must not arm
         // the local setup-stall watchdog (handoff 129).
         project.run.start(reattachRequest(for: job, project: project), remote: true)
+        // Anchor the elapsed clock to when the run BEGAN, not to this moment (handoff
+        // 134): a re-attached run is not a new run, and a readout that restarts at
+        // 0:00 understates a solve that has been going since last night exactly as
+        // badly as a `now()`-derived summary overstates one.
+        if let began = job.submittedAt { project.run.anchorElapsed(to: began) }
     }
 
     /// Dismiss the re-attach offer (back-compat single-banner path). Clears the

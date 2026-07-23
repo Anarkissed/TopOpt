@@ -63,6 +63,48 @@ def write_cube_stl(path, s=10.0):
             f.write(struct.pack("<H", 0))
 
 
+# Grid the stub's fields.bin is written against. Deliberately TINY (4³ voxels →
+# 5³ nodes) so the container is a few kB on the wire: the point is to exercise the
+# fetch + parse + presence gates, not to move a realistic 34 MB/variant payload.
+FIELDS_NX, FIELDS_NY, FIELDS_NZ = 4, 4, 4
+FIELDS_SPACING = 2.5
+
+
+def write_fields_bin(path, variants):
+    """Write a v1 `fields.bin` (core/include/topopt/fields.hpp) for the accepted
+    variants — the per-voxel container a remote run needs for the stress overlay,
+    flex, the load-path overlay and the voxel MASS (handoff 122).
+
+    The stub did not write this before handoff 134, which meant every E2E case
+    exercised the fetch-FAILED branch only: the whole "remote results light up"
+    path — and, worse, the RE-ATTACH path's version of it — was never proven end to
+    end over real HTTP. `variants` is [(requested_vf, mass_grams, support_voxels)];
+    field VALUES are synthetic but structurally exact (counts must equal the grid's
+    voxel/node counts or the app would misindex them).
+    """
+    voxels = FIELDS_NX * FIELDS_NY * FIELDS_NZ
+    nodes = (FIELDS_NX + 1) * (FIELDS_NY + 1) * (FIELDS_NZ + 1)
+    with open(path, "wb") as f:
+        f.write(struct.pack("<B3x", 1))                       # version + reserved[3]
+        f.write(struct.pack("<3i", FIELDS_NX, FIELDS_NY, FIELDS_NZ))
+        f.write(struct.pack("<3d", 0.0, 0.0, 0.0))            # grid origin (mm)
+        f.write(struct.pack("<2d", FIELDS_SPACING, FIELDS_SPACING ** 3))
+        f.write(struct.pack("<i", len(variants)))
+        f.write(struct.pack("<i", 0))                         # reserved
+        for vf, mass, support in variants:
+            f.write(struct.pack("<2d", vf, mass))
+            f.write(struct.pack("<i", support))
+            f.write(struct.pack("<i", 0))                     # reserved
+            # von Mises (per voxel), stress tensor (EMPTY in v1), displacement
+            # (3 per node) — each length-prefixed as i64, as the format requires.
+            f.write(struct.pack("<3q", voxels, 0, 3 * nodes))
+            # A ramp, so a reader that mis-strides produces visibly wrong values
+            # rather than a plausible constant.
+            f.write(struct.pack("<%df" % voxels, *[1.0 + i * 0.5 for i in range(voxels)]))
+            f.write(struct.pack("<%df" % (3 * nodes),
+                                *[0.001 * (i % 7) for i in range(3 * nodes)]))
+
+
 def report_variant(vf, worst, in_plane, interlayer):
     return {
         "volume_fraction": vf,
@@ -165,6 +207,12 @@ def run(out_dir, job_path=None):
         report_variants.append(report_variant(vf, worst, in_plane, interlayer))
     with open(os.path.join(out_dir, "report.json"), "w") as f:
         json.dump({"variants": report_variants}, f)
+    # The real CLI writes fields.bin LAST, after the meshes + report (handoff 122);
+    # mirror that ordering so the client's post-terminal fetch is exercised the way
+    # production sees it. Masses are non-zero on purpose: "real mass present" is
+    # half of what the re-attach QA repro asserts.
+    write_fields_bin(os.path.join(out_dir, "fields.bin"),
+                     [(0.70, 41.5, 120), (0.50, 29.5, 90)])
 
 
 def main():
