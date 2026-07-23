@@ -71,11 +71,66 @@ def submit(port, project=None):
     return json.loads(c.getresponse().read())["job_id"]
 
 
+def submit_multipart_project(port, project):
+    """Submit like the iPad does since handoff 129: the project name is a dedicated
+    multipart FIELD (no filename), NOT a job.json key. Proves the worker prefers the
+    field and that the job.json handed to the CLI carries no project key."""
+    boundary = "----e2e"
+    doc = {"model": "m.step", "material": "PLA", "resolution": 32,
+           "mode": "minimize_plastic", "loads": {"anchor_face_ids": [1]}}
+    job = json.dumps(doc)
+    body = (
+        "--%s\r\nContent-Disposition: form-data; name=\"step\"; "
+        "filename=\"m.step\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        "ISO-10303-21;\r\n" % boundary
+        + "--%s\r\nContent-Disposition: form-data; name=\"job\"; "
+          "filename=\"job.json\"\r\nContent-Type: application/json\r\n\r\n%s\r\n"
+          % (boundary, job)
+        + "--%s\r\nContent-Disposition: form-data; name=\"project\"\r\n\r\n%s\r\n"
+          % (boundary, project)
+        + "--%s--\r\n" % boundary
+    ).encode()
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    c.request("POST", "/jobs", body,
+              {"Content-Type": "multipart/form-data; boundary=%s" % boundary})
+    return json.loads(c.getresponse().read())["job_id"]
+
+
 def get_json(port, path, method="GET"):
     c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     c.request(method, path)
     r = c.getresponse()
     return r.status, json.loads(r.read())
+
+
+def get_text(port, path):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    c.request("GET", path)
+    r = c.getresponse()
+    return r.status, r.read().decode("utf-8", "replace")
+
+
+def read_events_for(port, job_id, seconds):
+    """Read a job's raw SSE stream for `seconds` and return the text received. Uses a
+    bare socket (the stream never sends Content-Length, so a keep-alive HTTP client
+    would block); we just want to observe heartbeats + the absence of a terminal."""
+    s = socket.create_connection(("127.0.0.1", port), timeout=seconds + 2)
+    req = ("GET /jobs/%s/events HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+           "Connection: close\r\n\r\n" % job_id)
+    s.sendall(req.encode())
+    s.settimeout(0.5)
+    end = time.time() + seconds
+    chunks = []
+    while time.time() < end:
+        try:
+            b = s.recv(4096)
+            if not b:
+                break
+            chunks.append(b)
+        except socket.timeout:
+            continue
+    s.close()
+    return b"".join(chunks).decode("utf-8", "replace")
 
 
 def start_worker(port, mode, gap, extra_env=None, args=None):
@@ -314,6 +369,87 @@ def test_name_roundtrip_and_progress():
         proc.terminate()
 
 
+def test_project_multipart_and_no_key_in_cli_job():
+    """Handoff 129, item 2. The project name travels as a MULTIPART FIELD and round-
+    trips into /jobs, AND the job.json the worker hands the CLI carries NO project key
+    (the worker's belt-and-suspenders strip + the app not putting it there). The stub
+    CLI echoes the job.json it received to out/received_job.json for direct inspection."""
+    port = free_port()
+    proc = start_worker(port, mode="normal", gap=0.05)  # completes quickly
+    try:
+        if not wait_health(port):
+            check(False, "worker (multipart project) came up"); return
+        jid = submit_multipart_project(port, "Gearbox Mount v7")
+
+        # Wait for completion so received_job.json is written.
+        deadline = time.time() + 15
+        state = None
+        while time.time() < deadline:
+            st, doc = get_json(port, "/jobs/%s" % jid)
+            state = doc.get("state")
+            if state in ("done", "error", "cancelled"):
+                break
+            time.sleep(0.1)
+        check(state == "done", "the multipart-named job completed (state=%r)" % state)
+        check(doc.get("project") == "Gearbox Mount v7",
+              "the multipart project name round-trips into /jobs (%r)" % doc.get("project"))
+
+        # The job.json the CLI actually parsed — assert NO project key reached it.
+        st, body = get_text(port, "/jobs/%s/files/received_job.json" % jid)
+        check(st == 200, "the stub echoed the received job.json (HTTP %s)" % st)
+        received = {}
+        try:
+            received = json.loads(body)
+        except ValueError:
+            check(False, "received_job.json is valid JSON (%r)" % body[:120])
+        check("project" not in received and "project_name" not in received,
+              "the job.json handed to the CLI contains NO project key (keys=%s)"
+              % sorted(received.keys()))
+    finally:
+        proc.terminate()
+
+
+def test_queued_job_survives_past_grace():
+    """Handoff 129, item 1. A QUEUED job (behind a running one at concurrency 1) is
+    held open indefinitely by the worker's heartbeat — its /events emits `: ping`
+    keepalives and NO terminal while it waits. That is what lets the iPad's inactivity
+    guard refresh continuously, so a queued job never false-fails: it holds fire past
+    any grace. Here we read the queued job's stream for longer than a representative
+    short grace and assert heartbeats-without-terminal."""
+    grace = 3.0
+    port = free_port()
+    proc = start_worker(port, mode="slow", gap=0.2)  # job A runs effectively forever
+    try:
+        if not wait_health(port):
+            check(False, "worker (queued survives) came up"); return
+        a = submit(port, project="Runner")
+        for _ in range(50):
+            st, doc = get_json(port, "/jobs/%s" % a)
+            if doc.get("state") == "running" and doc.get("iter") is not None:
+                break
+            time.sleep(0.1)
+        b = submit(port, project="Waiter")  # queues behind A
+        st, bdoc = get_json(port, "/jobs/%s" % b)
+        check(bdoc.get("state") == "queued", "the second job is queued (%r)" % bdoc.get("state"))
+
+        # Watch the QUEUED job's stream for > grace. It must stay alive (heartbeats)
+        # and NOT terminate while queued.
+        text = read_events_for(port, b, grace)
+        pings = text.count(": ping")
+        terminal = ('"type": "done"' in text or '"type": "error"' in text
+                    or '"type": "cancelled"' in text)
+        check(pings >= 2,
+              "the queued job heartbeats past the %.0fs grace (%d ping(s))" % (grace, pings))
+        check(not terminal,
+              "a queued job emits NO terminal while it waits (holds fire indefinitely)")
+        # And it is genuinely still queued afterwards (A never finished).
+        st, bdoc2 = get_json(port, "/jobs/%s" % b)
+        check(bdoc2.get("state") == "queued",
+              "the job is still queued after the grace window (%r)" % bdoc2.get("state"))
+    finally:
+        proc.terminate()
+
+
 def test_bind_failure_is_courteous():
     """Handoff 124, item 3. A second worker on an in-use port prints one actionable
     line (naming the port + the lsof command) and exits non-zero — NOT a naked
@@ -383,9 +519,13 @@ def main():
     test_pause_resume_freezes_progress()
     print("\n== (4) project-name round-trip + live progress in /jobs (124 item 1+2) ==")
     test_name_roundtrip_and_progress()
-    print("\n== (5) port-in-use is courteous, not a traceback (124 item 3) ==")
+    print("\n== (5) project via multipart + no project key in the CLI job.json (129 item 2) ==")
+    test_project_multipart_and_no_key_in_cli_job()
+    print("\n== (6) a queued job survives past the grace via heartbeats (129 item 1) ==")
+    test_queued_job_survives_past_grace()
+    print("\n== (7) port-in-use is courteous, not a traceback (124 item 3) ==")
     test_bind_failure_is_courteous()
-    print("\n== (6) startup identity line (124 item 4) ==")
+    print("\n== (8) startup identity line (124 item 4) ==")
     test_startup_identity_line()
     print()
     if FAILS:
@@ -394,7 +534,8 @@ def main():
             print("   - " + m)
         sys.exit(1)
     print("OK: /jobs golden, queue, reorder, queued-cancel, webhook, name round-trip, "
-          "live progress, port-in-use courtesy, and startup identity all verified.")
+          "live progress, multipart project + no-CLI-key, queued-survives-grace, "
+          "port-in-use courtesy, and startup identity all verified.")
 
 
 if __name__ == "__main__":

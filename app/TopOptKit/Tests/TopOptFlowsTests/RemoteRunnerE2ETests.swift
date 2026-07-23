@@ -113,7 +113,7 @@ final class RemoteRunnerE2ETests: XCTestCase {
                 resolved.fulfill()
             }
         }
-        model.start(try makeRequest())
+        model.start(try makeRequest(), remote: true)   // a remote run: RemoteRun owns liveness
         wait(for: [progressSeen, firstVariant, resolved], timeout: 30)
         obs.stop()
 

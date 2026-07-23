@@ -469,11 +469,16 @@ final class RunModelTests: XCTestCase {
     }
 
     /// A watchdog the test fires by hand (standing in for the grace period elapsing).
+    /// `armCount` lets a test see a re-arm (Keep waiting).
     private final class ManualRunWatchdog: RunWatchdog {
+        var graceSeconds: Double = 150
         var fire: (() -> Void)?
         private(set) var cancelled = false
+        private(set) var armCount = 0
         func arm(_ onStall: @escaping () -> Void) -> RunWatchdogCancel {
             fire = onStall
+            armCount += 1
+            cancelled = false
             return { [weak self] in self?.cancelled = true }
         }
     }
@@ -492,7 +497,12 @@ final class RunModelTests: XCTestCase {
         dog.fire?()                                      // grace elapses with no progress
 
         XCTAssertEqual(model.phase, .failed, "a stall must not stay stuck in .running")
-        XCTAssertEqual(model.failure, .solver(RunFailure.stalledDuringSetup))
+        XCTAssertEqual(model.failure, .solver(RunFailure.stalledDuringSetup(graceSeconds: 150)))
+        XCTAssertTrue(model.canKeepWaiting, "a stall offers Keep waiting (background not cancelled)")
+        // The stall sheet NAMES the grace it actually waited (an honest guard).
+        if case .solver(let msg)? = model.failure {
+            XCTAssertTrue(msg.contains("2 minutes 30 seconds"), "the sheet names the 150s grace: \(msg)")
+        } else { XCTFail("expected a solver failure") }
         XCTAssertNil(model.outcome)
     }
 
@@ -510,7 +520,70 @@ final class RunModelTests: XCTestCase {
         model.start(boxed)
         dog.fire?()
         XCTAssertEqual(model.phase, .failed)
-        XCTAssertEqual(model.failure, .solver(RunFailure.stalledWithDesignBox))
+        XCTAssertEqual(model.failure, .solver(RunFailure.stalledWithDesignBox(graceSeconds: 150)))
+    }
+
+    /// Keep waiting (an honest guard admits its own timeout): the grace expired but the
+    /// background solve was never cancelled, so the sheet's "Keep waiting" returns to
+    /// running and RE-ARMS the guard against the same run. A later real progress tick
+    /// then resolves it normally.
+    func testKeepWaitingReArmsTheGuardAndResumes() {
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: HeldRunScheduler(), watchdog: dog)
+        model.runner = { _, _, _ in self.accepted() }   // held; never actually runs
+        model.start(request())
+        XCTAssertEqual(dog.armCount, 1)
+        dog.fire?()                                      // grace 1 elapses
+        XCTAssertEqual(model.phase, .failed)
+        XCTAssertTrue(model.canKeepWaiting)
+
+        model.keepWaiting()                             // "Keep waiting"
+        XCTAssertEqual(model.phase, .running, "keep waiting returns to the running card")
+        XCTAssertFalse(model.canKeepWaiting)
+        XCTAssertNil(model.failure)
+        XCTAssertEqual(dog.armCount, 2, "the guard is re-armed for another grace")
+    }
+
+    /// Close / Try Again on a stall ABANDONS the still-running background solve, so its
+    /// token is cancelled (unlike Keep waiting).
+    func testDismissingAStallCancelsTheBackgroundRun() {
+        let sched = HeldRunScheduler()
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: sched, watchdog: dog)
+        var sawCancel = false
+        model.runner = { _, progress, _ in
+            sawCancel = !progress(0, 2, 1)   // the held work checks the token when it runs
+            return self.accepted()
+        }
+        model.start(request())
+        dog.fire?()                          // stall (token NOT cancelled yet)
+        XCTAssertTrue(model.canKeepWaiting)
+        model.dismissFailure()               // Close → abandon → cancel the token
+        XCTAssertFalse(model.canKeepWaiting)
+        sched.held?()                        // the orphaned work finally runs
+        XCTAssertTrue(sawCancel, "the abandoned background run sees a cancelled token")
+    }
+
+    /// A REMOTE run does NOT arm the local setup-stall watchdog (handoff 129): its
+    /// liveness is RemoteRun's (queue- + heartbeat-aware), so a queued or long-first-
+    /// solve remote run can never trip this guard.
+    func testRemoteRunDoesNotArmTheLocalWatchdog() {
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: HeldRunScheduler(), watchdog: dog)
+        model.runner = { _, _, _ in self.accepted() }
+        model.start(request(), remote: true)
+        XCTAssertEqual(dog.armCount, 0, "remote runs never arm the local watchdog")
+        XCTAssertNil(dog.fire, "no stall timer exists to fire for a remote run")
+        XCTAssertEqual(model.phase, .running)
+    }
+
+    /// A LOCAL run arms it as before (the on-device stall guard is intact).
+    func testLocalRunArmsTheLocalWatchdog() {
+        let dog = ManualRunWatchdog()
+        let model = RunModel(scheduler: HeldRunScheduler(), watchdog: dog)
+        model.runner = { _, _, _ in self.accepted() }
+        model.start(request())                          // remote defaults to false
+        XCTAssertEqual(dog.armCount, 1, "a local run arms the setup-stall watchdog")
     }
 
     /// Once a run shows any progress, the watchdog stands down — a slow-but-healthy

@@ -348,8 +348,11 @@ public struct WorkspacePlaceholder: View {
         // config (a worker was selected + resolved) offloads to the LAN worker;
         // otherwise the on-device bridge runs it, byte-identical to before. Always
         // set explicitly so switching back to iPad after a remote run restores local.
+        let isRemote = compute.activeRemote != nil
         run.runner = compute.activeRemote.map { RunModel.remoteRunner($0) } ?? RunModel.bridgeRunner
-        run.start(request)
+        // A remote run's liveness is RemoteRun's (queue- + heartbeat-aware); only a
+        // LOCAL run arms RunModel's setup-stall watchdog (handoff 129).
+        run.start(request, remote: isRemote)
     }
 
     // MARK: derived render inputs

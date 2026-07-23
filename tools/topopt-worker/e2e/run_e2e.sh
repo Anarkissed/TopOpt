@@ -129,7 +129,9 @@ run_queue() {
   echo; echo "############################################################"
   echo "# CASE: queue (handoff 121 — headless + HTTP)"
   echo "############################################################"
-  python3 "$HERE/queue_state_machine.py" && python3 "$HERE/queue_http_e2e.py"
+  python3 "$HERE/queue_state_machine.py" \
+    && python3 "$HERE/queue_http_e2e.py" \
+    && python3 "$HERE/real_cli_smoke.py"   # handoff 129 item 3: schema-drift guard (skips if no CLI)
 }
 
 if [ "${1:-}" = "all" ]; then
