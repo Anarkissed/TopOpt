@@ -1,0 +1,14 @@
+{
+  "_comment": "Handoff 131 ACTIVE DOMAIN Phase 0 — the 'legitimate minimal design box' shape from the production complaint: the committed l-bracket.step (35525.84 mm^3) inside a 140x110x135 mm box (2.079e6 mm^3) => 1.71% part fill of the design domain, the ~1.7% the maintainer reported. Resolution 16 keeps the capture inside a probe budget; simp.max_iterations caps each rung.",
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 16,
+  "fixture_faces": [ { "kind": "cylindrical", "radius_mm": 2.5 } ],
+  "gravity": { "direction": [0.0, 0.0, -1.0], "magnitude_mm_s2": 9810.0 },
+  "ladder": [0.68, 0.52, 0.38, 0.26],
+  "margin_stop": 1.5,
+  "design_box": { "min": [-70.0, -55.0, 0.0], "max": [70.0, 55.0, 135.0] },
+  "simp": { "max_iterations": 25 },
+  "output": { "report": "report.json", "mesh_format": "stl", "mesh_prefix": "variant" }
+}
