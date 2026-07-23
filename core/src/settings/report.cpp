@@ -113,7 +113,12 @@ void emit_variant(std::string& out, const VariantReport& v,
   // margin-vs-required, so a rejection is reported not omitted).
   out += in2 + "\"accepted\": " + (v.accepted ? "true" : "false") + ",\n";
   out += in2 + "\"margin_required\": " + num_json(v.margin_required) + ",\n";
-  out += in2 + "\"margin_effective\": " + num_json(v.margin_effective) + "\n";
+  out += in2 + "\"margin_effective\": " + num_json(v.margin_effective) + ",\n";
+  // Handoff 131 — why a rung was rejected when the margin gate is not the reason.
+  // "" on accepted rungs and on ordinary too-weak rejections; non-empty means the
+  // rung never reached the gate (see report.hpp: the analysis fields on such a line
+  // are "not measured" placeholders).
+  out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason) + "\n";
   out += indent + "}";
 }
 
@@ -550,6 +555,21 @@ static void validate_variant_object(const JsonValue& v, const std::string& ctx) 
     const JsonValue* meff = find_field(v, "margin_effective");
     if (meff != nullptr && meff->type != JsonValue::Type::Number)
       throw ReportError(ctx + ": margin_effective must be a number");
+
+    // Handoff 131 — rejection_reason. Optional (older documents omit it); when
+    // present it is a string, and a NON-EMPTY reason may appear only on a line that
+    // declares accepted=false. A reason on an accepted rung would be a contradiction
+    // the reader could not resolve.
+    const JsonValue* rr = find_field(v, "rejection_reason");
+    if (rr != nullptr) {
+      if (rr->type != JsonValue::Type::String)
+        throw ReportError(ctx + ": rejection_reason must be a string");
+      if (!rr->str.empty() &&
+          !(acc != nullptr && acc->type == JsonValue::Type::Bool &&
+            !acc->boolean))
+        throw ReportError(
+            ctx + ": a non-empty rejection_reason requires accepted=false");
+    }
   }
 }
 

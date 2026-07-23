@@ -375,6 +375,80 @@ bool mma_objective_plateau(const std::vector<double>& compliance_history,
                            int window, double rel_tol, double min_drop,
                            int min_flat_windows = 0);
 
+// ---------------------------------------------------------------------------
+// RUNG-INFEASIBILITY detector (handoff 131) — "the load path is gone; stop."
+//
+// THE EVIDENCE (96³ design-box run, 2026-07-22, worker job e5ca9b258a9c4af7,
+// out/iterations.csv). Rungs 0 and 1 descended normally (10.6 -> 1.67e-3 and
+// 1.37e-2 -> 3.70e-3). Rung 2's first step severed the structure: iteration 1
+// read compliance 0.6568 with 8371 CG iterations, iteration 2 read 1.674e5 with
+// 43532 — and it stayed at 1.674e5 (flat to 6 significant figures) with ~43-44k
+// CG iterations for all 31 iterations of that rung, ~9 minutes each. The rung was
+// then ACCEPTED (margin 680.9 — a structure that carries nothing has no stress,
+// so the margin gate reads it as infinitely safe) and shipped as variant_038.stl.
+// Rung 3 inherited that corpse as its warm start (warm_start_inherit was on) and
+// ground 27 more iterations at the same 1.674e5. ~8.5 hours optimizing a load path
+// that no longer existed.
+//
+// THE SIGNATURE, as a pure function of quantities the run ALREADY logs per
+// iteration (compliance + CG iteration count — the iterations.csv columns):
+//
+//   (1) COMPLIANCE BLOW-UP: compliance[i] >= `ratio` * compliance[0], i.e. the
+//       objective is sustained at >= ratio times THE RUNG'S OWN STARTING VALUE.
+//       Healthy rungs descend from their start and never come back: on the
+//       evidence's two healthy rungs the maximum ratio-to-start is 1.0, while the
+//       broken rung sits at 2.5e5. Default ratio 100 sits ~3 orders of magnitude
+//       clear of healthy on both sides.
+//   (2) SOLVER DISTRESS: cg_iterations[i] >= `cg_blowup` * the MINIMUM CG count
+//       over the pre-window prefix. Severing the load path leaves a near-singular
+//       high-contrast operator (a frozen skin at rho=1 against a design region at
+//       density_min), and the CG cost explodes with it: 43.5k against the rung's
+//       own 8371 (5.2x) and the healthy rungs' 4.5-5.8k. Healthy rungs never
+//       exceed ~1.05x their prefix minimum. Default 4x.
+//   (3) FROZEN OBJECTIVE: the compliance across the window is FLAT — its relative
+//       spread (max - min) / min <= `flat_tol`. This is the conjunct that makes
+//       the predicate safe, and it was added because a measured counter-example
+//       demanded it. A low-volume-fraction rung warm-started from a heavier one
+//       goes through a violent forming transient: on a 24x5x6 cantilever at
+//       vf 0.03 the objective ran 8770x ABOVE its start with a 14x CG blow-up for
+//       a dozen iterations — satisfying (1) and (2) outright — and then RECOVERED
+//       to below its starting value. Conditions (1)+(2) alone would have killed a
+//       rung that was still optimizing. What tells the two apart is not magnitude
+//       but MOTION: over a 5-iteration window that transient's compliance spreads
+//       by 1.2 (121%), while the real corpse spreads by 3.8e-7 — six orders of
+//       magnitude apart, because a severed structure's compliance is fixed by the
+//       frozen skin and NOTHING the optimizer does to the design can move it. The
+//       default 1e-3 sits ~3 orders above the corpse and ~3 below the transient.
+//       (It is also why the design cannot "recover": a field the objective does
+//       not respond to produces no sensitivity to recover along.)
+//   (4) SUSTAINED: (1), (2) AND (3) hold across the last `window` iterations —
+//       (1) and (2) at every one of them, (3) over the window as a whole. Default
+//       window 5: one bad MMA step can spike the objective for an iteration or
+//       two, but five consecutive iterations pinned 100x above the start, with a
+//       4x CG blow-up and no motion at all, is not a transient. On the evidence
+//       that is a verdict at iteration 6 of the rung, against the 31 it actually
+//       ran — and against the objective-plateau detector, which only fired at
+//       iteration 31, because a flat corpse looks exactly like a converged design
+//       to it.
+//
+// HONESTY NOTE about the conjunct the task prompt named. The prompt described the
+// CG conjunct as "CG at cap (unconverged)". It is not: the CG cap here is Eigen's
+// default 2*n_dof (~10^6 DOF on that grid) and a solve that misses its tolerance
+// THROWS (fea_solve_cg_matfree / simp_optimize both do) — so an unconverged solve
+// can never be observed from the history. The 43-44k counts are genuine CONVERGED
+// counts, ~9x the rung's healthy level. Condition (2) is that observation stated
+// in terms of what the run can actually see.
+//
+// Returns false — never fires — whenever: `window <= 0` (DISARMED), `ratio` or
+// `cg_blowup` is not finite and > 0, `flat_tol` is not finite and >= 0, the two
+// histories differ in length, fewer than `window + 1` samples exist (a baseline
+// needs at least one pre-window iteration), or compliance[0] is not finite and > 0
+// (no ratio can be formed). Pure and deterministic: same history in, same verdict
+// out — no wall clock, no randomness, no solver state.
+bool rung_infeasible(const std::vector<double>& compliance_history,
+                     const std::vector<int>& cg_iteration_history, double ratio,
+                     double cg_blowup, double flat_tol, int window);
+
 // Whether a Heaviside projection schedule may be applied for `updater`. TEMPORARY
 // (Option B): projection is compatible ONLY with OC — the projected chain is the
 // OC-locked Gate-V2 formulation, and simp_optimize rejects MMA + a non-empty
@@ -450,6 +524,13 @@ struct SimpIterationObservation {
   // design is being optimized WITHOUT projection. Pure observation (never touches
   // the design).
   double beta = 0.0;
+  // Handoff 131 — the RUNG-INFEASIBILITY detector's verdict AT this iteration
+  // (the exact predicate `rung_infeasible` the loop consults). The iteration it
+  // first reads true is the iteration the rung was ENDED on as infeasible ("load
+  // path lost"), and it is the LAST row that rung emits. False for every iteration
+  // of every healthy rung and whenever the detector is disarmed
+  // (SimpOptions::infeasible_window <= 0).
+  bool infeasible = false;
 };
 
 struct SimpOptions {
@@ -543,6 +624,31 @@ struct SimpOptions {
   // and only when the gate is closed, so healthy runs (real descent > min_drop)
   // never reach it and are byte-identical.
   int mma_plateau_flat_windows = 3;
+
+  // --- Rung-infeasibility fast-fail (handoff 131) --------------------------
+  // The thresholds of the `rung_infeasible` predicate above (read that comment for
+  // the signature, the evidence and the calibration). When the signature fires the
+  // loop ENDS THE RUN immediately, with SimpOptimizeResult::infeasible set and the
+  // firing iteration recorded — an honest early stop on a provably broken design,
+  // in exactly the sense the objective-plateau stop is one.
+  //
+  // ARMED BY DEFAULT, and that is byte-identity-safe by construction: the detector
+  // is a pure read of the history that can only STOP the loop — it never touches
+  // `x`, the filter, the solver or the update. On any run where the signature never
+  // occurs (every healthy run; every existing fixture) not one iteration is added
+  // or removed and the design is bit-for-bit what it was before this handoff.
+  // `infeasible_window <= 0` DISARMS the detector entirely (the exact pre-131
+  // predicate: never stops), which is how the byte-identity test pins it.
+  //
+  // Applies to BOTH updaters and every stage: a lost load path is not an MMA
+  // phenomenon. Unlike the plateau it needs no progress gate — a rung 100x ABOVE
+  // its own start with a 4x CG blow-up is never the forming phase, which spikes
+  // above the start but recovers within an iteration or two and does not drag the
+  // solver with it.
+  double infeasible_compliance_ratio = 100.0;  // (1) x the rung's start compliance
+  double infeasible_cg_blowup = 4.0;           // (2) x the prefix-min CG count
+  double infeasible_flat_tol = 1e-3;           // (3) max relative spread in-window
+  int infeasible_window = 5;                   // (4) consecutive iters (0 disables)
 
   // Heaviside projection + beta continuation (M6.3). EMPTY (the default)
   // disables projection entirely: the loop is the unchanged M3.4 formulation
@@ -705,6 +811,17 @@ struct SimpOptimizeResult {
   // entries), but it is a partial optimization: converged is false and
   // initial_compliance is 0 when cancelled before the first iteration.
   bool cancelled = false;
+  // Handoff 131 — true iff the run ended on the RUNG-INFEASIBILITY signature
+  // (`rung_infeasible`: the objective sustained >= infeasible_compliance_ratio ×
+  // this run's STARTING compliance, with a >= infeasible_cg_blowup × CG blow-up,
+  // for infeasible_window consecutive iterations). The design is a CORPSE — the
+  // load path was severed — so the fields above describe a structure that carries
+  // nothing: `converged` is false, and a caller must NOT ship this density, seed
+  // anything from it, or read its compliance as an achievement. `history` holds
+  // the `iterations` completed steps as usual, ending at the firing iteration.
+  // `infeasible_iteration` is that 1-based iteration (0 when not infeasible).
+  bool infeasible = false;
+  int infeasible_iteration = 0;
   std::vector<SimpIteration> history;    // per-iteration trajectory (size iterations)
 };
 

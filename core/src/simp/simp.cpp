@@ -602,6 +602,58 @@ bool mma_objective_plateau(const std::vector<double>& c, int window,
   return rel_improve < rel_tol;
 }
 
+// Rung-infeasibility detector (handoff 131). Public + non-namespaced so it can be
+// unit-tested directly against a hand-built history — including the REAL
+// per-iteration rows of the 96³ run that motivated it. See simp.hpp for the
+// signature, the evidence and the calibration.
+bool rung_infeasible(const std::vector<double>& c, const std::vector<int>& cg,
+                     double ratio, double cg_blowup, double flat_tol,
+                     int window) {
+  if (window <= 0) return false;  // disarmed
+  if (!(std::isfinite(ratio) && ratio > 0.0)) return false;
+  if (!(std::isfinite(cg_blowup) && cg_blowup > 0.0)) return false;
+  if (!(std::isfinite(flat_tol) && flat_tol >= 0.0)) return false;
+  if (c.size() != cg.size()) return false;
+  const int n = static_cast<int>(c.size());
+  // A baseline needs at least one sample BEFORE the window: the compliance
+  // baseline is the rung's starting value c[0], and the CG baseline is the minimum
+  // over the pre-window prefix. So the earliest possible verdict is iteration
+  // window + 1.
+  if (n < window + 1) return false;
+  if (!(std::isfinite(c[0]) && c[0] > 0.0)) return false;  // no ratio to form
+
+  // (2)'s baseline: the CHEAPEST solve before the window. Taking the minimum (not
+  // c/cg[0]) makes the test insensitive to a first iteration that happened to be
+  // expensive — on the evidence, rung 0's iteration 1 cost 11977 CG iterations
+  // (a multigrid stagnation fallback) against a steady-state 4551, and keying off
+  // that one sample would have hidden a real 2.6x blow-up.
+  int cg_min_prefix = cg[0];
+  for (int i = 1; i < n - window; ++i)
+    if (cg[i] < cg_min_prefix) cg_min_prefix = cg[i];
+  if (cg_min_prefix <= 0) return false;  // no CG record -> cannot judge distress
+
+  const double c_bar = ratio * c[0];
+  const double cg_bar = cg_blowup * static_cast<double>(cg_min_prefix);
+  // (4): EVERY one of the trailing `window` iterations must show BOTH (1) and (2).
+  // One recovering iteration inside the window clears the verdict — a rung that
+  // spikes and comes back is not infeasible, it is optimizing.
+  double win_lo = c[n - window];
+  double win_hi = c[n - window];
+  for (int i = n - window; i < n; ++i) {
+    if (!std::isfinite(c[i])) return false;
+    if (!(c[i] >= c_bar)) return false;
+    if (!(static_cast<double>(cg[i]) >= cg_bar)) return false;
+    win_lo = std::min(win_lo, c[i]);
+    win_hi = std::max(win_hi, c[i]);
+  }
+  // (3): the objective is FROZEN across the window — the design no longer moves it
+  // at all. This is what separates a severed structure from a violent forming
+  // transient that is still optimizing (see simp.hpp: 3.8e-7 vs 1.2 measured).
+  if (!(win_lo > 0.0)) return false;  // cannot form a relative spread
+  if (!((win_hi - win_lo) / win_lo <= flat_tol)) return false;
+  return true;
+}
+
 // Design-region discreteness M_nd (handoff 123). Public + non-namespaced so the
 // conditional-projection gate (minimize_plastic) and its test share ONE
 // definition. See simp.hpp for the design-set rationale (solid AND mask-Active).
@@ -665,6 +717,25 @@ bool observe_plateau(const SimpOptions& options,
                                options.mma_plateau_tol,
                                options.mma_plateau_min_drop,
                                options.mma_plateau_flat_windows);
+}
+
+// Handoff 131 — the rung-infeasibility verdict at the current iteration, for both
+// the per-iteration observability record (SimpIterationObservation::infeasible)
+// and the loop's fast-fail stop. It is exactly the predicate `rung_infeasible`,
+// fed this run's recorded compliance history and the parallel per-iteration CG
+// record, so the iteration it first returns true on is the iteration the run ends
+// on. Read-only: builds a throwaway compliance curve, touches nothing.
+bool observe_infeasible(const SimpOptions& options,
+                        const std::vector<SimpIteration>& history,
+                        const std::vector<int>& cg_history) {
+  if (options.infeasible_window <= 0) return false;  // disarmed: skip the scan
+  std::vector<double> curve;
+  curve.reserve(history.size());
+  for (const SimpIteration& h : history) curve.push_back(h.compliance);
+  return rung_infeasible(curve, cg_history, options.infeasible_compliance_ratio,
+                         options.infeasible_cg_blowup,
+                         options.infeasible_flat_tol,
+                         options.infeasible_window);
 }
 
 // Adaptive early CG tolerance (handoff 128; see SimpOptions::cg_tolerance_loose).
@@ -1199,6 +1270,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // cg_tolerance_loose > cg_tolerance; then it drives the trajectory tolerance.
   double last_change = options.move;
 
+  // Handoff 131 — the per-iteration CG-iteration record, index-aligned with
+  // result.history (one push per completed iteration, right beside it). It is the
+  // second half of the rung-infeasibility signature; nothing else reads it.
+  std::vector<int> cg_history;
+  cg_history.reserve(total_stage_iterations(plan));
+
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
@@ -1268,6 +1345,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (st.project) project_solid(grid, xafter, st.beta, eta);
       const double vf_now = phys_volfrac(xafter);
       result.history.push_back({c.compliance, change, vf_now});
+      cg_history.push_back(c.cg.iterations);  // handoff 131 (index-aligned)
+      // Handoff 131 — rung-infeasibility verdict for THIS iteration. Computed
+      // before the hooks so the observed row carries the same verdict the loop
+      // acts on, and acted on after them so the firing iteration is fully
+      // reported (it is the rung's last row).
+      const bool infeasible_now =
+          observe_infeasible(options, result.history, cg_history);
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
       // Handoff 114 — per-iteration observability (read-only). The richer record
@@ -1287,6 +1371,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
+        obs.infeasible = infeasible_now;  // handoff 131
         options.observe(obs);
       }
       // Playback keyframe: the analysis density as the shape evolves (read-only).
@@ -1299,6 +1384,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // overload, so xafter IS the physical density. Read-only.
       if (options.density_observer)
         options.density_observer(result.iterations, xafter);
+
+      // Handoff 131 — FAST FAIL. The load path is provably gone (see
+      // rung_infeasible): every further iteration would optimize a structure that
+      // carries nothing. End the run here, honestly labelled, ahead of any stage /
+      // continuation logic — a corpse must not advance beta or "converge".
+      if (infeasible_now) {
+        result.infeasible = true;
+        result.infeasible_iteration = result.iterations;
+        break;
+      }
 
       if (st.mma_continuation) {
         // Beta continuation (handoff 114): reuse the 086 plateau detector on the
@@ -1340,7 +1435,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // continuation proceeds either way. The loop is `converged` iff its LAST
     // stage was (a cancelled stage never is).
     result.converged = stage_converged;
-    if (result.cancelled) break;
+    if (result.cancelled || result.infeasible) break;
   }
 
   // Report a self-consistent final state: physical_density = filter(design)
@@ -1354,11 +1449,26 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     project_solid(grid, result.physical_density, plan.back().beta, eta);
   else if (plan.back().mma_continuation)
     project_solid(grid, result.physical_density, mma_beta, eta);
-  const SimpCompliance fc = simp_compliance(
-      grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
-      options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
-      options.solver);
-  result.compliance = fc.compliance;
+  // Handoff 131 — an INFEASIBLE run SKIPS this final recovery solve. Two reasons,
+  // both load-bearing: (a) it is the run's most expensive single solve (the TIGHT
+  // tolerance against the near-singular operator a severed load path leaves — 43-44k
+  // CG iterations on the evidence), and a fast-fail that still pays it is not a
+  // fast-fail; (b) it is precisely the solve that can miss its tolerance and THROW,
+  // which would replace an honest "rung infeasible" verdict with an exception.
+  // `compliance` is then the LAST RECORDED objective — the corpse's flat plateau
+  // value, the same number the final CSV row carries — rather than a fresh
+  // measurement of the post-step field. With `infeasible` true and `converged`
+  // false no caller can read it as an achievement.
+  if (result.infeasible) {
+    result.compliance =
+        result.history.empty() ? 0.0 : result.history.back().compliance;
+  } else {
+    const SimpCompliance fc = simp_compliance(
+        grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
+        options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
+        options.solver);
+    result.compliance = fc.compliance;
+  }
   result.volume_fraction = phys_volfrac(result.physical_density);
   // Final playback keyframe: the converged shape.
   if (options.keyframe && options.keyframe_stride > 0)
@@ -1936,6 +2046,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // Seeded to the move limit so the first trajectory solve is loose.
   double last_change = options.move;
 
+  // Handoff 131 — per-iteration CG record, index-aligned with result.history (see
+  // the unconstrained overload). This is the overload the production design-box
+  // ladder runs, so this is the one the 96³ evidence was measured on.
+  std::vector<int> cg_history;
+  cg_history.reserve(total_stage_iterations(plan));
+
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
@@ -2006,6 +2122,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       if (st.project) project_active(eff, xafter, st.beta, eta);
       const double vf_now = active_volfrac(xafter);
       result.history.push_back({c.compliance, change, vf_now});
+      cg_history.push_back(c.cg.iterations);  // handoff 131 (index-aligned)
+      // Handoff 131 — rung-infeasibility verdict for THIS iteration (see the
+      // unconstrained overload for the ordering rationale).
+      const bool infeasible_now =
+          observe_infeasible(options, result.history, cg_history);
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
       // Handoff 114 — per-iteration observability (read-only), as in the
@@ -2026,6 +2147,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
+        obs.infeasible = infeasible_now;  // handoff 131
         options.observe(obs);
       }
       // Playback keyframe: the printed-shape density (mask pins applied) as it
@@ -2045,6 +2167,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         std::vector<double> pd = xafter;
         apply_mask_pins(eff, pd);
         options.density_observer(result.iterations, pd);
+      }
+
+      // Handoff 131 — FAST FAIL on a provably lost load path (see the
+      // unconstrained overload). Ends the rung before any stage/continuation
+      // logic can treat the corpse as a converged design.
+      if (infeasible_now) {
+        result.infeasible = true;
+        result.infeasible_iteration = result.iterations;
+        break;
       }
 
       if (st.mma_continuation) {
@@ -2080,7 +2211,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // Continuation proceeds stage by stage; `converged` reports the LAST one
     // (a cancelled stage never is).
     result.converged = stage_converged;
-    if (result.cancelled) break;
+    if (result.cancelled || result.infeasible) break;
   }
 
   // Self-consistent final state (projected at the final stage's beta when
@@ -2095,11 +2226,19 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     project_active(eff, result.physical_density, mma_beta, eta);
   std::vector<double> xfinal_unpinned = result.physical_density;
   apply_mask_pins(eff, result.physical_density);
-  const SimpCompliance fc = simp_compliance(
-      analysis, params, result.physical_density, bcs, loads,
-      options.cg_tolerance, options.cg_max_iterations, nullptr,
-      use_solver ? solver.get() : nullptr, options.solver);
-  result.compliance = fc.compliance;
+  // Handoff 131 — an INFEASIBLE run skips this final recovery solve; see the
+  // unconstrained overload for why (it is both the most expensive solve of the run
+  // and the one that could throw instead of reporting the honest verdict).
+  if (result.infeasible) {
+    result.compliance =
+        result.history.empty() ? 0.0 : result.history.back().compliance;
+  } else {
+    const SimpCompliance fc = simp_compliance(
+        analysis, params, result.physical_density, bcs, loads,
+        options.cg_tolerance, options.cg_max_iterations, nullptr,
+        use_solver ? solver.get() : nullptr, options.solver);
+    result.compliance = fc.compliance;
+  }
   result.volume_fraction = active_volfrac(xfinal_unpinned);
   // Final playback keyframe: the converged printed shape.
   if (options.keyframe && options.keyframe_stride > 0)

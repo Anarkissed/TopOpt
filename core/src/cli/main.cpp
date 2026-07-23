@@ -129,6 +129,14 @@ int main(int argc, char** argv) {
                     ? " (stopped on margin)"
                     : "");
     for (const topopt::MinimizePlasticVariant& v : result.pipeline.evaluated) {
+      // Handoff 131 — an infeasible rung has NO measured margin (its analysis was
+      // skipped), so printing one would be a fabricated number: print the reason.
+      if (v.infeasible) {
+        std::printf("  vf %.2f: %s — ended at iteration %d, not analysed\n",
+                    v.requested_volume_fraction, topopt::kRungInfeasibleReason,
+                    v.optimization.infeasible_iteration);
+        continue;
+      }
       std::printf(
           "  vf %.2f: margin %.3g, %s\n", v.requested_volume_fraction,
           v.report.margin.worst_case,
