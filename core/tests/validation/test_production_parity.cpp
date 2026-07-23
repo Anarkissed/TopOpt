@@ -9,8 +9,16 @@
 // is structurally impossible. This gate proves the seam does what STEP 0 requires:
 //
 //   (a) configure_production_options sets EXACTLY the production solver config
-//       (matrix-free multigrid, physical min-feature 2.5 mm) and enables the
-//       process-global Galerkin block cache.
+//       (matrix-free multigrid, physical min-feature 2.5 mm) and arms the right
+//       process globals: the Galerkin block cache and the performance-core thread
+//       pin (handoff 132 (C)) ON, the mixed-precision V-cycle (handoff 132 (D))
+//       deliberately OFF. Each global is checked BEFORE and AFTER the call, so the
+//       test proves both halves of the one rule: the LIBRARY defaults are untouched
+//       (cache off, FP64, automatic hardware-concurrency — what Gate-V2 and every
+//       core reference run see, since they never call this function) and PRODUCTION
+//       arms exactly what it should. These are the values run_info.json echoes.
+//   (f) the thread pin is a pure performance dial: a whole production ladder is
+//       bit-identical at the pinned count and at full hardware concurrency.
 //   (b) build_production_loadcase is DETERMINISTIC: the same model + load case
 //       twice yields byte-identical grid, BCs and options.
 //   (c) minimize_plastic on that setup is bit-identical run to run — same rung
@@ -39,6 +47,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <thread>  // hardware_concurrency — the 132 (C) thread-count assertions
 #include <vector>
 
 using topopt::build_production_loadcase;
@@ -152,6 +161,20 @@ int main() {
           "library default leaves MMA projection OFF (reference untouched)");
     CHECK(opts.updater == topopt::SimpUpdater::MMA,
           "production default updater is MMA (the gate's target path)");
+
+    // Handoff 132 — the three matrix-free PROCESS GLOBALS, read BEFORE the call.
+    // This half of the assertion is the "library defaults untouched" rule: the
+    // reference world (Gate-V2, the property suite, every core test) never calls
+    // configure_production_options, so what it sees is exactly this state.
+    CHECK(!topopt::fea_matfree_galerkin_block_cache_enabled(),
+          "library default leaves the Galerkin block cache OFF");
+    CHECK(!topopt::fea_matfree_mixed_precision_enabled(),
+          "library default leaves the mixed-precision V-cycle OFF (reference FP64)");
+    const int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
+    const int auto_threads = hw_threads > 0 ? hw_threads : 1;
+    CHECK(topopt::fea_matfree_thread_count() == auto_threads,
+          "library default resolves the thread count to hardware concurrency");
+
     configure_production_options(opts);
     CHECK(opts.simp.solver == SolverKind::MultigridCG_Matfree,
           "production config selects the matrix-free multigrid solver");
@@ -165,10 +188,43 @@ int main() {
     CHECK(!opts.simp.mma_projection,
           "production config leaves the always-on MMA projection bool OFF "
           "(the driver flips it per-rung when the gate fires)");
-    // The Galerkin cache is a process global; configure_production_options must
-    // have turned it on (the setter returns the PREVIOUS value).
-    const bool prev = topopt::fea_set_matfree_galerkin_block_cache(true);
-    CHECK(prev, "production config enabled the Galerkin block cache global");
+    // The three process globals, read AFTER the call — the "production arms them"
+    // half. Read through the 114 accessors (pure reads, they never perturb state)
+    // because these ARE the values run_info.json echoes: galerkin_block_cache,
+    // mixed_precision and matfree_threads all come from these same functions in
+    // run_job.cpp's build_run_info, so asserting them here is asserting the echo.
+    CHECK(topopt::fea_matfree_galerkin_block_cache_enabled(),
+          "production config enabled the Galerkin block cache global");
+    // Handoff 132 (D) — mixed precision stays OFF in production, and that is a
+    // MEASURED DECISION, not an oversight. The flip was implemented and gated on a
+    // full l-bracket ladder; it regressed CG iterations 40715 -> 48717 (1.197x) in
+    // both the grayscale and fired-projection phases, so it was withdrawn. This
+    // assertion is the tripwire: anyone who arms it must re-run that gate first
+    // (core/tests/harness/mixed_precision_probe.cpp) and land new numbers.
+    CHECK(!topopt::fea_matfree_mixed_precision_enabled(),
+          "production config leaves the mixed-precision V-cycle OFF "
+          "(132 (D): gated, measured a 1.197x CG-iteration regression, blocked)");
+    // Handoff 132 (C) — the performance-core pin. Asserted against the named
+    // production count rather than a literal, so this stays true on Apple silicon
+    // (P-core count), on Intel Macs and on Linux CI (hardware_concurrency).
+    const int prod_threads = topopt::production_matfree_thread_count();
+    CHECK(prod_threads >= 1, "the production thread count is at least 1");
+    CHECK(prod_threads <= auto_threads,
+          "the production thread count never exceeds hardware concurrency");
+    CHECK(topopt::fea_matfree_thread_count() == prod_threads,
+          "production config pinned the matrix-free apply to the production "
+          "(performance-core) thread count");
+    // The pin is a DEFAULT, not a lock: an explicit fea_set_matfree_threads after
+    // configure_production_options must win, and n <= 0 must restore automatic
+    // hardware-concurrency resolution. (Restored to the production pin after, so
+    // the rest of this gate runs under the real production configuration.)
+    topopt::fea_set_matfree_threads(auto_threads);
+    CHECK(topopt::fea_matfree_thread_count() == auto_threads,
+          "an explicit thread count overrides the production pin");
+    topopt::fea_set_matfree_threads(0);
+    CHECK(topopt::fea_matfree_thread_count() == auto_threads,
+          "n <= 0 restores automatic hardware-concurrency resolution");
+    topopt::fea_set_matfree_threads(prod_threads);
   }
 
   const int resolution = 24;  // small: this gate proves determinism, not scale
@@ -229,6 +285,38 @@ int main() {
   const MinimizePlasticResult r2 =
       topopt::minimize_plastic(s2.grid, material, "PLA", s2.bcs, rules, s2.options);
   check_designs_identical(r1, r2);
+
+  // (f) Handoff 132 (C) — DETERMINISM AT BOTH THREAD COUNTS, end to end. r1/r2 above
+  // ran at the production pin (the performance-core count). The matrix-free apply's
+  // 8-colour partition makes the field bit-identical at any thread count BY DESIGN,
+  // and test_matfree_threads asserts that at the solver level; this asserts it where
+  // the flip actually lands — a whole production minimize_plastic ladder — so the
+  // pin is proven to be a pure performance dial and not a design change. Re-run the
+  // SAME setup at full hardware concurrency and require the same part, bit for bit.
+  //
+  // Skipped when the two counts coincide (a non-Apple-silicon or single-core-class
+  // host), where there is no second count to compare against and r3 would be r1.
+  {
+    const int prod_threads = topopt::production_matfree_thread_count();
+    const int hw = static_cast<int>(std::thread::hardware_concurrency());
+    const int auto_threads = hw > 0 ? hw : 1;
+    if (prod_threads != auto_threads) {
+      ProductionRunSetup s3 = build_production_loadcase(model, resolution, lc);
+      s3.options.simp.max_iterations = 8;
+      topopt::fea_set_matfree_threads(auto_threads);
+      CHECK(topopt::fea_matfree_thread_count() == auto_threads,
+            "the cross-check run is really on the full hardware thread count");
+      const MinimizePlasticResult r3 = topopt::minimize_plastic(
+          s3.grid, material, "PLA", s3.bcs, rules, s3.options);
+      topopt::fea_set_matfree_threads(prod_threads);  // restore the production pin
+      check_designs_identical(r1, r3);
+      std::printf("  [132 (C)] design bit-identical at %d and %d threads\n",
+                  prod_threads, auto_threads);
+    } else {
+      std::printf("  [132 (C)] single core class (%d threads): "
+                  "no second count to cross-check\n", prod_threads);
+    }
+  }
 
   if (g_failures == 0)
     std::printf("production parity (handoff 093): all checks passed\n");
