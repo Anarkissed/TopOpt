@@ -1,0 +1,23 @@
+
+===== [CORRECTNESS] dilute box 40x24x40 = 38400 elements, part 1512 voxels (3.94% fill, 25.4x dilution) =====
+
+[ARITHMETIC] dilute40 @ iter40 (rung vf 0.26)  k=2  tol=1e-08
+  full      : elems=   38400 nodes=   42025  cg=   31 mg=1  C=45.10298       wall=0.6636s
+  restricted: elems=    4141 nodes=    5314  cg=   48 mg=1  C=45.103061      wall=0.1035s
+  ratios    : elems=0.108  nodes=0.126  cg_iters=1.548  WALL=6.41x  solver-vector bytes 6.7 MB -> 0.9 MB (7.91x)
+  per-element cost: full 17.282 us/elem/solve, restricted 25.001 us/elem/solve
+  compliance delta (restricted vs full, same field): 1.790e-06 relative
+
+[ARITHMETIC] dilute40 @ iter40 (rung vf 0.26)  k=4  tol=1e-08
+  full      : elems=   38400 nodes=   42025  cg=   31 mg=1  C=45.10298       wall=0.6598s
+  restricted: elems=    7218 nodes=    8759  cg=   54 mg=1  C=45.103044      wall=0.1932s
+  ratios    : elems=0.188  nodes=0.208  cg_iters=1.742  WALL=3.41x  solver-vector bytes 6.7 MB -> 1.4 MB (4.80x)
+  per-element cost: full 17.182 us/elem/solve, restricted 26.769 us/elem/solve
+  compliance delta (restricted vs full, same field): 1.411e-06 relative
+
+[ARITHMETIC] dilute40 @ iter40 (rung vf 0.26)  k=8  tol=1e-08
+  full      : elems=   38400 nodes=   42025  cg=   31 mg=1  C=45.10298       wall=0.6577s
+  restricted: elems=   15499 nodes=   17789  cg=   62 mg=1  C=45.103007      wall=0.4224s
+  ratios    : elems=0.404  nodes=0.423  cg_iters=2.000  WALL=1.56x  solver-vector bytes 6.7 MB -> 2.9 MB (2.36x)
+  per-element cost: full 17.128 us/elem/solve, restricted 27.252 us/elem/solve
+  compliance delta (restricted vs full, same field): 5.981e-07 relative
