@@ -235,6 +235,15 @@ struct CgInfo {
   // them at their defaults (false / 0).
   bool hier_built = false;
   int mg_cycles_attempted = 0;
+  // Krylov recycling diagnostics (handoff 133). `recycle_dim` is the number of
+  // recycle columns that ACTUALLY preconditioned this solve (0 = recycling off,
+  // or the first solve of a run, where the space does not exist yet and is only
+  // harvested). `recycle_setup_matvecs` is the operator applies CHARGED to
+  // recycling this solve (one per column, to form E = U^T A U) — they are real
+  // work and are reported separately so a net-of-overhead accounting is possible
+  // without re-deriving it. Both stay 0 on every path when recycling is off.
+  int recycle_dim = 0;
+  int recycle_setup_matvecs = 0;
 };
 
 // Solve the same global linear-elastic system as fea_solve, but with a Jacobi
@@ -577,6 +586,103 @@ bool fea_matfree_mixed_precision_enabled();
 // is for tests/diagnostics. Both are inert off the matrix-free multigrid path.
 void fea_matfree_reset_mg_stagnation_latch();
 bool fea_matfree_mg_stagnation_latched();
+
+// ---------------------------------------------------------------------------
+// KRYLOV SUBSPACE RECYCLING / DEFLATION (handoff 133). OPT-IN, DEFAULT OFF.
+//
+// WHY. Every MMA iteration solves a system that is a tiny perturbation of the
+// previous one, and the solver today discards everything it learned: CG restarts
+// from zero and re-discovers the same few slowly-converging error directions —
+// in this codebase the near-rigid-body motions of the weakly-connected solid the
+// near-void design-box regions produce (handoff 125: 4.5k-44k CG iterations per
+// solve on the stand-class fixture). Recycling keeps a small, deterministically
+// chosen subspace of exactly those directions between solves and removes them
+// from CG's workload. Published in and for topology optimization: Wang, de
+// Sturler & Paulino 2007 (IJNME 69:2441); Parks et al. 2006 (SISC 28:1651);
+// Jonsthovel et al. 2012 (deflated PCG on high-contrast void composites); Gaul
+// et al. 2013 (SIMAX 34:495 — recycling with a fixed subspace IS deflation, the
+// equivalence this implementation's determinism rests on).
+//
+// WHAT. The recycle basis enters as an ADDITIVE coarse-space correction OUTSIDE
+// the existing preconditioner:
+//     M_rec^{-1} r  =  M^{-1} r  +  U E^{-1} (U^T r),     E = U^T A U,
+// where M^{-1} is whichever preconditioner the chosen solve path already runs.
+// The MG-carried, latched-Jacobi and build-rejected regimes therefore all keep
+// their current preconditioner; recycling wraps whichever one runs. The basis is
+// extracted from CG's own Lanczos/direction process (no extra matvecs) by a
+// Rayleigh-Ritz over the union of the carried basis and a decimated sample of
+// this solve's search directions, keeping the k smallest Ritz values of the
+// pencil (A, D). The update rule is documented in full in src/fea/recycle.hpp.
+//
+// EXACTNESS. M^{-1} is SPD and U E^{-1} U^T is symmetric positive semi-definite
+// for ANY U with SPD E, so M_rec^{-1} is SPD unconditionally. PCG with an SPD
+// preconditioner converges to the true solution, and the stopping test is the
+// unchanged relative residual ||b - A x|| / ||b|| <= tolerance on the unchanged
+// recursively-updated r. A stale or useless recycle space can therefore cost
+// ITERATIONS but can never change the answer: this changes the route, not the
+// destination. (E is formed from exact FP64 matvecs; if it is not positive
+// definite the basis is dropped and the solve runs exactly as it would without
+// recycling.)
+//
+// MEASURED OUTCOME — READ BEFORE ENABLING (handoff 133). This helps a lot in one
+// regime and HURTS in the other, and the split is structural, not a tuning
+// accident:
+//   * Jacobi-preconditioned solves (the latched-Jacobi / build-rejected design-box
+//     regime, where 4.5k-44k-iteration solves live): 48.1% fewer CG iterations on
+//     the production void-heavy ladder at k=16.
+//   * V-cycle-preconditioned solves (healthy, coarsenable parts): a REGRESSION of
+//     1.23x-2.07x across k in {8,16,24}. The additive correction lifts a deflated
+//     mode's PRECONDITIONED eigenvalue by +1, which is what you want when M is weak
+//     (the mode was near 0) and widens the spectrum when M is strong (it was
+//     already near 1). Multigrid also makes the k setup matvecs a large share of a
+//     ~65-iteration solve. Raising or lowering k does not fix either.
+// The answer is unaffected in BOTH regimes (that is the point of the SPD form
+// above): handoff 133 measured mean|drho| = 0.000000 and identical gate verdicts
+// even in the modes that ran twice as slow. Production is therefore NOT armed;
+// see the handoff for the measured arming path.
+//
+// SCOPE. Wired into the MATRIX-FREE solve paths only — fea_solve_cg_matfree and
+// fea_solve_mgcg_matfree (including its Jacobi-CG fallback), i.e. every regime
+// the production SolverKind::MultigridCG_Matfree can land in. The assembled
+// fea_solve_cg / fea_solve_mgcg paths are untouched.
+//
+// DETERMINISM. Fixed k, fixed sample size, fixed traversal and accumulation
+// order, unpivoted fixed-order Cholesky rank guard, cyclic-Jacobi eigensolver
+// with a fixed sweep bound, index-tiebroken Ritz selection. No atomics inside
+// the numerics, no randomness, no wall-clock. Two runs of a job produce
+// bit-identical designs AND bit-identical residual histories.
+//
+// MEMORY. The carried basis is k float columns over the free DOFs: 4*k*n bytes
+// (fea_krylov_recycle_bytes() reports the live figure). A solve that HARVESTS
+// peaks at (k + 2k) float columns, since the sample keeps both p and A p.
+//
+// `fea_set_krylov_recycling` returns the previous enable state;
+// `fea_set_krylov_recycle_dim` returns the previous k (k <= 0 restores the
+// default). Configuration is process-global; the carried basis is thread-local
+// and STICKY across solves, so the driver resets it at each run/rung boundary
+// with fea_reset_krylov_recycle_space() — exactly the 127 latch's discipline. It
+// is also dropped automatically whenever the free-DOF count changes.
+bool fea_set_krylov_recycling(bool enable);
+bool fea_krylov_recycling_enabled();
+int fea_set_krylov_recycle_dim(int k);
+int fea_krylov_recycle_dim();
+// Rebuild the basis every `c`-th solve (c <= 0 means 1 = every solve; the
+// bootstrap solve of a run always harvests regardless). MEASURED AND LEFT AT 1:
+// handoff 133 found a 4-solve-old basis worth almost nothing (the void-regime CG
+// cut collapsed 48.1% -> 2.7% and the run came out SLOWER than baseline, because
+// the per-iteration correction is still paid in full while the basis no longer
+// describes the operator). Rebuilding is nearly free — the harvest reuses the
+// `A p` the CG loop already computed, so only the k setup matvecs and a small
+// dense eigenproblem are charged. The knob exists so that result stays
+// reproducible, not because a larger value is recommended.
+int fea_set_krylov_recycle_cycle(int c);
+int fea_krylov_recycle_cycle();
+void fea_reset_krylov_recycle_space();
+// Diagnostics: whether a basis is currently carried, its column count, and its
+// live footprint in bytes (0 when none).
+bool fea_krylov_recycle_space_active();
+int fea_krylov_recycle_space_dim();
+std::size_t fea_krylov_recycle_bytes();
 
 // Per-voxel von Mises stress field, one value per grid cell (indexed like the
 // grid, size grid.voxel_count()). Each solid voxel's value is the von Mises

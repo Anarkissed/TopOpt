@@ -1,0 +1,16 @@
+===== RECYCLING PROBE [mg] part 48x16x48, 16128 solid voxels, h=2.0 =====
+[baseline (off)        ] rungs=4 iters= 625 cg=   40715 (gray=   13741 proj=   26974) setup_mv=     0 mg_frac=1.00 rc_frac=0.00 wall=213.4s repeat|drho|=n/a iters_repeat=same
+[k=8  cyc=1 rung-reset ] rungs=4 iters= 625 cg=   84137 (gray=   16296 proj=   67841) setup_mv=  5000 mg_frac=0.98 rc_frac=0.99 wall=354.4s repeat|drho|=n/a iters_repeat=same
+[k=16 cyc=1 rung-reset ] rungs=4 iters= 625 cg=   74819 (gray=   15359 proj=   59460) setup_mv=  9988 mg_frac=0.98 rc_frac=0.99 wall=390.3s repeat|drho|=n/a iters_repeat=same
+[k=24 cyc=1 rung-reset ] rungs=4 iters= 625 cg=   49944 (gray=   15418 proj=   34526) setup_mv= 14946 mg_frac=1.00 rc_frac=0.99 wall=459.4s repeat|drho|=n/a iters_repeat=same
+[k=16 cyc=4 rung-reset ] rungs=4 iters= 625 cg=   73280 (gray=   16702 proj=   56578) setup_mv=  2468 mg_frac=0.98 rc_frac=0.99 wall=342.7s repeat|drho|=n/a iters_repeat=same
+[k=16 cyc=1 carry-rungs] rungs=4 iters= 625 cg=   72271 (gray=   14850 proj=   57421) setup_mv= 10030 mg_frac=0.98 rc_frac=1.00 wall=387.4s repeat|drho|=n/a iters_repeat=same
+[k=16 no-rescale(ident)] rungs=4 iters= 625 cg=   80574 (gray=   17664 proj=   62910) setup_mv=  9972 mg_frac=0.98 rc_frac=0.99 wall=429.5s repeat|drho|=n/a iters_repeat=same
+--- verdicts vs baseline ---
+  k=8  cyc=1 rung-reset  CG 2.066x (cut -106.6%) | NET(w/ovh 0.00) 2.189x (cut -118.9%) | gate=IDENTICAL | SHIPPED vf=0.26 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000007 margin_d=0.000% C_d=0.001%
+  k=16 cyc=1 rung-reset  CG 1.838x (cut -83.8%) | NET(w/ovh 0.00) 2.083x (cut -108.3%) | gate=IDENTICAL | SHIPPED vf=0.26 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000000 margin_d=0.000% C_d=0.000%
+  k=24 cyc=1 rung-reset  CG 1.227x (cut -22.7%) | NET(w/ovh 0.00) 1.594x (cut -59.4%) | gate=IDENTICAL | SHIPPED vf=0.26 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000002 margin_d=0.000% C_d=0.000%
+  k=16 cyc=4 rung-reset  CG 1.800x (cut -80.0%) | NET(w/ovh 0.00) 1.860x (cut -86.0%) | gate=IDENTICAL | SHIPPED vf=0.26 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000007 margin_d=0.000% C_d=0.001%
+  k=16 cyc=1 carry-rungs CG 1.775x (cut -77.5%) | NET(w/ovh 0.00) 2.021x (cut -102.1%) | gate=IDENTICAL | SHIPPED vf=0.26 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000000 margin_d=0.000% C_d=0.000%
+  k=16 no-rescale(ident) CG 1.979x (cut -97.9%) | NET(w/ovh 0.00) 2.224x (cut -122.4%) | gate=IDENTICAL | SHIPPED vf=0.26 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000005 margin_d=0.000% C_d=0.000%
+MG-PROBE-DONE

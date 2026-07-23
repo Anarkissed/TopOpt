@@ -201,6 +201,14 @@ struct RunInfo {
   bool galerkin_block_cache = false;
   bool mixed_precision = false;
   int matfree_threads = 0;   // resolved matrix-free thread count
+  // Handoff 133 — Krylov recycling echo. `krylov_recycling` is the ACTUAL
+  // process-global state the run executed under (read from
+  // fea_krylov_recycling_enabled, never inferred), and `krylov_recycle_dim` is the
+  // configured subspace dimension k. Echoed even when off — the 132 discipline: a
+  // run record that only mentions an accelerator when it fired cannot be used to
+  // rule the accelerator OUT of a later diagnosis.
+  bool krylov_recycling = false;
+  int krylov_recycle_dim = 0;
   bool warm_start_inherit = false;
   bool warm_start_coarse = false;
   bool projection = false;

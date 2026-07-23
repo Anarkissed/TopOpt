@@ -327,6 +327,8 @@ std::string run_info_json(const RunInfo& info) {
   num("galerkin_block_cache", bool_json(info.galerkin_block_cache));
   num("mixed_precision", bool_json(info.mixed_precision));
   num("matfree_threads", fmt_i(info.matfree_threads));
+  num("krylov_recycling", bool_json(info.krylov_recycling));
+  num("krylov_recycle_dim", fmt_i(info.krylov_recycle_dim));
   num("warm_start_inherit", bool_json(info.warm_start_inherit));
   num("warm_start_coarse", bool_json(info.warm_start_coarse));
   num("projection", bool_json(info.projection));

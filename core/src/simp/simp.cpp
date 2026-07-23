@@ -1367,6 +1367,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_mg_levels = c.cg.mg_levels;
         obs.cg_hier_built = c.cg.hier_built;
         obs.cg_mg_cycles_attempted = c.cg.mg_cycles_attempted;
+        obs.cg_recycle_dim = c.cg.recycle_dim;
+        obs.cg_recycle_setup_matvecs = c.cg.recycle_setup_matvecs;
         obs.plateau = observe_plateau(options, result.history);
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
@@ -2143,6 +2145,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_mg_levels = c.cg.mg_levels;
         obs.cg_hier_built = c.cg.hier_built;
         obs.cg_mg_cycles_attempted = c.cg.mg_cycles_attempted;
+        obs.cg_recycle_dim = c.cg.recycle_dim;
+        obs.cg_recycle_setup_matvecs = c.cg.recycle_setup_matvecs;
         obs.plateau = observe_plateau(options, result.history);
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.

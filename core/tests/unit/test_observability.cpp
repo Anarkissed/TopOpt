@@ -190,6 +190,8 @@ int main() {
     info.galerkin_block_cache = true;
     info.mixed_precision = false;
     info.matfree_threads = 6;
+    info.krylov_recycling = true;      // handoff 133
+    info.krylov_recycle_dim = 16;
     info.warm_start_inherit = false;
     info.warm_start_coarse = false;
     info.projection = false;
@@ -224,6 +226,13 @@ int main() {
           "run_info galerkin cache");
     check(js.find("\"matfree_threads\": 6") != std::string::npos,
           "run_info threads");
+    // Handoff 133 — the Krylov recycling echo is CONFIG, not an outcome, so it is
+    // written up front and is never null: a run record must be able to rule the
+    // accelerator OUT as well as in.
+    check(js.find("\"krylov_recycling\": true") != std::string::npos,
+          "run_info krylov recycling echo");
+    check(js.find("\"krylov_recycle_dim\": 16") != std::string::npos,
+          "run_info krylov recycle dimension echo");
     check(js.find("\"ladder\": [0.68, 0.52, 0.38, 0.26]") != std::string::npos,
           "run_info ladder echo");
     check(js.find("\"created_wall_ms\": 1234567890123") != std::string::npos,

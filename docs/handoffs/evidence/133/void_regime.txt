@@ -1,0 +1,13 @@
+===== RECYCLING PROBE [void] part 16x5x16, 372 solid voxels, h=2.0, design box =====
+[baseline (off)        ] rungs=3 iters= 372 cg=  430330 (gray=  430330 proj=       0) setup_mv=     0 mg_frac=0.22 rc_frac=0.00 wall=248.3s repeat|drho|=n/a iters_repeat=same
+[k=8  cyc=1 rung-reset ] rungs=3 iters= 359 cg=  297168 (gray=  297168 proj=       0) setup_mv=  2879 mg_frac=0.23 rc_frac=0.99 wall=223.0s repeat|drho|=n/a iters_repeat=same
+[k=16 cyc=1 rung-reset ] rungs=3 iters= 359 cg=  223305 (gray=  223305 proj=       0) setup_mv=  5748 mg_frac=0.23 rc_frac=0.99 wall=201.5s repeat|drho|=n/a iters_repeat=same
+[k=24 cyc=1 rung-reset ] rungs=3 iters= 358 cg=  191868 (gray=  191868 proj=       0) setup_mv=  8618 mg_frac=0.23 rc_frac=0.99 wall=227.6s repeat|drho|=n/a iters_repeat=same
+[k=16 cyc=4 rung-reset ] rungs=3 iters= 358 cg=  418516 (gray=  418516 proj=       0) setup_mv=  1391 mg_frac=0.23 rc_frac=0.99 wall=324.3s repeat|drho|=n/a iters_repeat=same
+[k=16 cyc=1 carry-rungs] rungs=3 iters= 359 cg=  216687 (gray=  216687 proj=       0) setup_mv=  5804 mg_frac=0.23 rc_frac=1.00 wall=201.1s repeat|drho|=n/a iters_repeat=same
+--- verdicts vs baseline ---
+  k=8  cyc=1 rung-reset  CG 0.691x (cut  30.9%) | NET(w/ovh 0.00) 0.697x (cut  30.3%) | gate=IDENTICAL | SHIPPED vf=0.52 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000000 margin_d=0.000% C_d=0.000%
+  k=16 cyc=1 rung-reset  CG 0.519x (cut  48.1%) | NET(w/ovh 0.00) 0.532x (cut  46.8%) | gate=IDENTICAL | SHIPPED vf=0.52 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000000 margin_d=0.000% C_d=0.000%
+  k=24 cyc=1 rung-reset  CG 0.446x (cut  55.4%) | NET(w/ovh 0.00) 0.466x (cut  53.4%) | gate=IDENTICAL | SHIPPED vf=0.52 mean|drho|=0.000007 max=0.0030 | worst-acc mean|drho|=0.000007 margin_d=0.024% C_d=0.000%
+  k=16 cyc=4 rung-reset  CG 0.973x (cut   2.7%) | NET(w/ovh 0.00) 0.976x (cut   2.4%) | gate=IDENTICAL | SHIPPED vf=0.52 mean|drho|=0.000007 max=0.0030 | worst-acc mean|drho|=0.000007 margin_d=0.024% C_d=0.000%
+  k=16 cyc=1 carry-rungs CG 0.504x (cut  49.6%) | NET(w/ovh 0.00) 0.517x (cut  48.3%) | gate=IDENTICAL | SHIPPED vf=0.52 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000000 margin_d=0.000% C_d=0.000%

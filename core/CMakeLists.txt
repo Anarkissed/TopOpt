@@ -90,6 +90,12 @@ if(Eigen3_FOUND)
   # assembled operator (fea_assembled_apply in assembly.cpp), so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/fea/matfree.cpp)
+  # Krylov subspace recycling / deflation (handoff 133): the opt-in SPD additive
+  # coarse-space correction that wraps BOTH matrix-free CG loops (matfree.cpp's
+  # Jacobi-CG and multigrid.cpp's MG-CG) from outside their preconditioners. Like
+  # matfree.cpp it is itself Eigen-FREE, but it is compiled into the same solver
+  # group and both its call sites are Eigen-gated, so it is gated the same way.
+  target_sources(topopt PRIVATE src/fea/recycle.cpp)
   # SIMP density interpolation + penalized compliance/sensitivities (M3.2). It
   # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
@@ -341,6 +347,16 @@ if(Eigen3_FOUND)
   add_executable(test_mixed_precision tests/unit/test_mixed_precision.cpp)
   target_link_libraries(test_mixed_precision PRIVATE topopt)
   add_test(NAME fea_mixed_precision COMMAND test_mixed_precision)
+
+  # Krylov subspace recycling / deflation (handoff 133): exactness against the
+  # recycling-off field on BOTH matrix-free regimes, a real net-of-overhead
+  # iteration cut on a void-heavy sequence, determinism, opt-in parity, the
+  # lifetime/reset plumbing, and long-sequence robustness. Drives
+  # fea_solve_cg_matfree / fea_solve_mgcg_matfree, so it is gated on Eigen like
+  # the other matrix-free tests. CI configures with -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_recycle tests/unit/test_recycle.cpp)
+  target_link_libraries(test_recycle PRIVATE topopt)
+  add_test(NAME krylov_recycling COMMAND test_recycle)
 
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises

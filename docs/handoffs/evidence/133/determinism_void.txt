@@ -1,0 +1,6 @@
+===== RECYCLING PROBE [void] part 16x5x16, 372 solid voxels, h=2.0, design box =====
+[baseline (off)        ] rungs=3 iters= 372 cg=  430330 (gray=  430330 proj=       0) setup_mv=     0 mg_frac=0.22 rc_frac=0.00 wall=262.4s repeat|drho|=0 iters_repeat=same
+[k=16 cyc=1 rung-reset ] rungs=3 iters= 359 cg=  223305 (gray=  223305 proj=       0) setup_mv=  5748 mg_frac=0.23 rc_frac=0.99 wall=201.3s repeat|drho|=0 iters_repeat=same
+--- verdicts vs baseline ---
+  k=16 cyc=1 rung-reset  CG 0.519x (cut  48.1%) | NET(w/ovh 0.00) 0.532x (cut  46.8%) | gate=IDENTICAL | SHIPPED vf=0.52 mean|drho|=0.000000 max=0.0000 | worst-acc mean|drho|=0.000000 margin_d=0.000% C_d=0.000%
+DET-VOID-DONE

@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "fea_matfree.hpp"
+#include "recycle.hpp"
 
 #if defined(__ARM_NEON)
 #include <arm_neon.h>
@@ -300,6 +301,18 @@ inline void parallel_ranges(int begin, int end, int nthreads,
 }  // namespace
 
 int mf_set_thread_count(int n) { return g_mf_threads.exchange(n); }
+
+void mf_parallel_ranges(int begin, int end, int min_per_thread,
+                        const std::function<void(int, int)>& body) {
+  const int n = end - begin;
+  if (n <= 0) return;
+  int t = mf_thread_count();
+  if (t < 1) t = 1;
+  const int floor_work = min_per_thread > 0 ? min_per_thread : 1;
+  if (t > 1) t = std::min(t, (n + floor_work - 1) / floor_work);
+  if (t <= 1) { body(begin, end); return; }
+  ApplyPool::instance().run(t, begin, end, body);
+}
 
 // Galerkin block cache toggle (handoff 090). Opt-in, DEFAULT OFF, so the
 // pre-090 build path is what runs unless a caller asks for the cache.
@@ -604,7 +617,7 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
 // zero) and holds the solution on the kept DOFs.
 void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
                  std::vector<double>& x, int& iters_out, double& error_out,
-                 bool& converged_out) {
+                 bool& converged_out, RecycleReport* rec) {
   const int n = m.ng;
   const double tol = tolerance;
   const int maxIters = (max_iterations > 0) ? max_iterations : 2 * n;
@@ -628,6 +641,17 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   double threshold = tol * tol * rhsNorm2;
   if (threshold < considerAsZero) threshold = considerAsZero;
 
+  // Krylov recycling (handoff 133): the SPD additive coarse correction wrapping
+  // the Jacobi preconditioner. Inert (and allocation-free) when recycling is off.
+  RecycleSession recycle(n, m.invdiag.data(),
+                         [&m](const double* xin, double* yout) {
+                           m.apply_kgg_raw(xin, yout);
+                         });
+  if (rec != nullptr) {
+    rec->dim = recycle.dim();
+    rec->setup_matvecs += recycle.setup_matvecs();
+  }
+
   std::vector<double> residual(static_cast<std::size_t>(n));
   std::vector<double> tmp(static_cast<std::size_t>(n));
   m.apply_kgg(x, tmp);  // tmp = K x (x is the guess)
@@ -648,11 +672,15 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   for (int i = 0; i < n; ++i)  // p = M^-1 residual
     p[static_cast<std::size_t>(i)] =
         m.invdiag[static_cast<std::size_t>(i)] * residual[static_cast<std::size_t>(i)];
+  recycle.augment(residual.data(), p.data());  // + U E^-1 U^T residual
   double absNew = dot(residual, p);
 
   int i = 0;
   while (i < maxIters) {
     m.apply_kgg(p, tmp);  // tmp = K p
+    // Hand CG's own direction and its ALREADY-computed operator image to the
+    // recycler's decimating sample. No extra matvec; no-op off a harvest solve.
+    recycle.observe(i, p.data(), tmp.data());
     const double alpha = absNew / dot(p, tmp);
     for (int q = 0; q < n; ++q) {
       x[static_cast<std::size_t>(q)] += alpha * p[static_cast<std::size_t>(q)];
@@ -663,6 +691,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     for (int q = 0; q < n; ++q)
       z[static_cast<std::size_t>(q)] =
           m.invdiag[static_cast<std::size_t>(q)] * residual[static_cast<std::size_t>(q)];
+    recycle.augment(residual.data(), z.data());  // + U E^-1 U^T residual
     const double absOld = absNew;
     absNew = dot(residual, z);
     const double beta = absNew / absOld;
@@ -677,6 +706,10 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   for (int q = 0; q < n; ++q)
     if (!std::isfinite(x[static_cast<std::size_t>(q)])) { finite = false; break; }
   converged_out = (error_out <= tol) && finite;
+  // Rebuild the carried basis ONLY from a solve that actually reached tolerance:
+  // a stagnated or broken-down solve's directions are not evidence about the
+  // operator's slow modes.
+  if (converged_out) recycle.commit();
 }
 
 }  // namespace fea_detail
@@ -731,8 +764,11 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
         x[static_cast<std::size_t>(k)] = initial_guess->u[static_cast<std::size_t>(
             m.kept_global[static_cast<std::size_t>(k)])];
 
+    fea_detail::RecycleReport rec;
     fea_detail::mf_cg_solve(m, tolerance, max_iterations, x, diag.iterations,
-                            diag.residual, diag.converged);
+                            diag.residual, diag.converged, &rec);
+    diag.recycle_dim = rec.dim;
+    diag.recycle_setup_matvecs = rec.setup_matvecs;
     if (info) *info = diag;
     if (!diag.converged)
       throw std::runtime_error(
@@ -778,6 +814,21 @@ bool fea_set_matfree_galerkin_block_cache(bool enable) {
 bool fea_set_matfree_mixed_precision(bool enable) {
   return fea_detail::mf_set_mixed_precision(enable);
 }
+
+// Handoff 133 — Krylov recycling / deflation. Opt-in, default OFF; see fea.hpp
+// for the contract, the exactness argument and the determinism argument.
+bool fea_set_krylov_recycling(bool enable) {
+  return fea_detail::rc_set_enabled(enable);
+}
+bool fea_krylov_recycling_enabled() { return fea_detail::rc_enabled(); }
+int fea_set_krylov_recycle_dim(int k) { return fea_detail::rc_set_dim(k); }
+int fea_krylov_recycle_dim() { return fea_detail::rc_dim(); }
+int fea_set_krylov_recycle_cycle(int c) { return fea_detail::rc_set_cycle(c); }
+int fea_krylov_recycle_cycle() { return fea_detail::rc_cycle(); }
+void fea_reset_krylov_recycle_space() { fea_detail::rc_reset_space(); }
+bool fea_krylov_recycle_space_active() { return fea_detail::rc_space_active(); }
+int fea_krylov_recycle_space_dim() { return fea_detail::rc_space_dim(); }
+std::size_t fea_krylov_recycle_bytes() { return fea_detail::rc_space_bytes(); }
 
 // Handoff 114 — read-only accessors for the run version record. Pure reads.
 int fea_matfree_thread_count() { return fea_detail::mf_thread_count(); }
