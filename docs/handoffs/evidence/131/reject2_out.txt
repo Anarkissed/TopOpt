@@ -1,0 +1,57 @@
+
+
+### R2 — THE BUILD-REJECTION REGIME (extents the geometric builder refuses; AMG has no coarsenability arithmetic)
+Bar: GO iff AMG BUILDS and contracts (<= ~0.5) where the geometric hierarchy never builds.
+
+== reject52^3 solid       box 52x52x52 occ 1.00 bore 0.00(axis z) rho 0.50
+   solid=140608 bore-removed=0 empty-expanse=0 | reduced DOF=438204 nodes=146068 nnz=34163514 (394 MB) | geometric coarsenable(rule)=NO
+   fine-matrix CSR assembly: 0.49s (a cost the matrix-free geometric path does NOT pay)
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=0 used_mg=0 levels=0 mg_cycles=0 cg_iters=438 resid=9.78e-07  3.31s
+      -> geometric FELL BACK (BUILD-REJECTION); contraction not reached within budget
+   JACOBI-CG baseline: iters=438 resid=9.78e-07 2.15s
+    level      n        nnz    nnz/row   aggregates
+        0   438204   34163514     78.0         5832
+        1    34992   11164155    319.0          782
+        2     4692    4408703    939.6          227
+        3     1362    1854900   1361.9          142
+        4      852     725904    852.0            0
+    coarsest n=852 dense-LDL^T=yes  hierarchy memory=1253.2 MB
+   AMG stationary V-cycle: cycles=60 converged=NO final_rel=4.52e-06 | contraction overall=0.815 sustained=0.812 worst=0.815
+   AMG residual history (first 12): 1.00e+00 1.42e+00 1.19e+00 9.42e-01 7.41e-01 5.84e-01 4.62e-01 3.66e-01 2.91e-01 2.31e-01 1.84e-01 1.47e-01 
+   AMG-PCG: cycles=19 converged=yes | setup 15.52s, solve 5.91s, 0.311s/cycle | memory 1253.2 MB
+   DETERMINISM (2 independent setups, bit-compare of every level's A/P + the residual history): IDENTICAL
+   per-level sub-hierarchy contraction (stationary V-cycle on each level's own system):
+      level 0 (n=  438204): cycles= 40 converged=NO  overall=0.815 sustained=0.808
+      level 1 (n=   34992): cycles= 27 converged=yes overall=0.598 sustained=0.605
+      level 2 (n=    4692): cycles= 15 converged=yes overall=0.389 sustained=0.398
+      level 3 (n=    1362): cycles=  9 converged=yes overall=0.214 sustained=0.223
+      level 4 (n=     852): coarsest — solved directly
+
+== reject60^3+bore0.30    box 60x60x60 occ 1.00 bore 0.30(axis z) rho 0.50
+   solid=200640 bore-removed=15360 empty-expanse=0 | reduced DOF=630000 nodes=210000 nnz=48963528 (565 MB) | geometric coarsenable(rule)=NO
+   fine-matrix CSR assembly: 0.93s (a cost the matrix-free geometric path does NOT pay)
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=0 used_mg=0 levels=0 mg_cycles=0 cg_iters=518 resid=9.89e-07  5.49s
+      -> geometric FELL BACK (BUILD-REJECTION); contraction not reached within budget
+   JACOBI-CG baseline: iters=518 resid=9.89e-07 3.71s
+    level      n        nnz    nnz/row   aggregates
+        0   630000   48963528     77.7         8383
+        1    50298   17195442    341.9          991
+        2     5946    5947668   1000.3          190
+        3     1140    1294920   1135.9            0
+    coarsest n=1140 dense-LDL^T=yes  hierarchy memory=1901.4 MB
+   AMG stationary V-cycle: cycles=60 converged=NO final_rel=5.58e-06 | contraction overall=0.817 sustained=0.814 worst=0.817
+   AMG residual history (first 12): 1.00e+00 1.47e+00 1.24e+00 9.80e-01 7.73e-01 6.11e-01 4.84e-01 3.85e-01 3.07e-01 2.45e-01 1.96e-01 1.57e-01 
+   AMG-PCG: cycles=19 converged=yes | setup 16.73s, solve 7.84s, 0.413s/cycle | memory 1901.4 MB
+   DETERMINISM (2 independent setups, bit-compare of every level's A/P + the residual history): IDENTICAL
+   per-level sub-hierarchy contraction (stationary V-cycle on each level's own system):
+      level 0 (n=  630000): cycles= 40 converged=NO  overall=0.819 sustained=0.810
+      level 1 (n=   50298): cycles= 30 converged=yes overall=0.629 sustained=0.634
+      level 2 (n=    5946): cycles= 15 converged=yes overall=0.385 sustained=0.390
+      level 3 (n=    1140): coarsest — solved directly
+
+
+### SUMMARY TABLE
+case                     red.DOF | GEOMETRIC                  | AMG (V-cycle contraction)          | determ.
+                                 |  hier  used cycles   cg_it | levels   cycles sustained  pcg_cyc | 
+reject52^3 solid          438204 |     0     0      0     438 |      5       60     0.812       19 | ok
+reject60^3+bore0.30       630000 |     0     0      0     518 |      4       60     0.814       19 | ok

@@ -1,0 +1,6 @@
+
+
+### FIXTURE HUNT — geometric MG over the occ x bore factorial at 192x112x128 (125 §1b re-run on this harness's fixture rule)
+   case                    solid    red.DOF   hier usedMG   mg_cyc    cg_it   rho_eff
+   occ1.00 bore0.00      2752512    8374656      1      1       14       14     0.373
+   occ1.00 bore0.40      2551808    7805952      1      1       43       43     0.725

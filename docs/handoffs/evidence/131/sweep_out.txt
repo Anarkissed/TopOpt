@@ -1,0 +1,10 @@
+
+
+### KNOB SENSITIVITY on the stagnation fixture (the verdict must not rest on one arbitrary default)
+
+== occ0.40+bore0.40       box 192x112x128 occ 0.40 bore 0.40(axis z) rho 0.50
+   solid=242816 bore-removed=200704 empty-expanse=2308992 | reduced DOF=804864 nodes=268288 nnz=60742584 (701 MB) | geometric coarsenable(rule)=YES
+   fine-matrix CSR assembly: 1.13s (a cost the matrix-free geometric path does NOT pay)
+   configuration                              levels   stat.cyc  sustained  pcg_cyc  setup_s
+   theta 0.08, 1 SGS, smoothed  (default)          4         60      0.902       37     20.2
+   theta 0.08, 2 SGS, smoothed                     4         60      0.896       32     18.8

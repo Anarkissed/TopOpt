@@ -1,0 +1,59 @@
+
+
+### R1b — THE SAME GEOMETRY, LATER IN THE SOLVE SEQUENCE
+Synthetic developed-design density (documented lattice, deterministic; NOT optimizer output) on the stagnation fixture: thin sub-coarse-cell members AND ~1.25e5 modulus contrast together.
+
+== occ0.40+bore0.40 LATTICE box 192x112x128 occ 0.40 bore 0.40(axis z) rho 0.50
+   solid=242816 bore-removed=200704 empty-expanse=2308992 | reduced DOF=804864 nodes=268288 nnz=60742584 (701 MB) | geometric coarsenable(rule)=YES
+   fine-matrix CSR assembly: 0.98s (a cost the matrix-free geometric path does NOT pay)
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=1 used_mg=0 levels=0 mg_cycles=300 cg_iters=13741 resid=9.72e-07  191.94s
+      -> geometric FELL BACK (STAGNATION: hierarchy built); contraction not reached within budget
+   JACOBI-CG baseline: iters=13741 resid=9.72e-07 155.64s
+    level      n        nnz    nnz/row   aggregates
+        0   804864   60742584     75.5        12681
+        1    76086   24558782    322.8         2473
+        2    14838   17049204   1149.0          807
+        3     4842   11488356   2372.6          600
+        4     3600   12960000   3600.0          587
+    coarsest n=3600 dense-LDL^T=yes  hierarchy memory=3296.3 MB
+   AMG stationary V-cycle: cycles=60 converged=NO final_rel=1.72e+00 | contraction overall=1.009 sustained=0.988 worst=0.990
+   AMG residual history (first 12): 1.00e+00 4.68e+00 5.12e+00 4.97e+00 4.73e+00 4.51e+00 4.31e+00 4.14e+00 3.98e+00 3.84e+00 3.72e+00 3.60e+00 
+   AMG-PCG: cycles=133 converged=yes | setup 113.85s, solve 99.99s, 0.752s/cycle | memory 3296.3 MB
+   DETERMINISM (2 independent setups, bit-compare of every level's A/P + the residual history): IDENTICAL
+   per-level sub-hierarchy contraction (stationary V-cycle on each level's own system):
+      level 0 (n=  804864): cycles= 40 converged=NO  overall=1.019 sustained=0.985
+      level 1 (n=   76086): cycles= 40 converged=NO  overall=1.006 sustained=0.979
+      level 2 (n=   14838): cycles= 40 converged=NO  overall=0.989 sustained=0.958
+      level 3 (n=    4842): cycles= 40 converged=NO  overall=0.914 sustained=0.900
+      level 4 (n=    3600): coarsest — solved directly
+
+== solid_box_48 LATTICE   box 48x48x48 occ 1.00 bore 0.00(axis z) rho 0.50
+   solid=110592 bore-removed=0 empty-expanse=0 | reduced DOF=345744 nodes=115248 nnz=26869950 (310 MB) | geometric coarsenable(rule)=YES
+   fine-matrix CSR assembly: 0.93s (a cost the matrix-free geometric path does NOT pay)
+   GEOMETRIC (fea_solve_mgcg_matfree): hier_built=1 used_mg=0 levels=0 mg_cycles=300 cg_iters=3565 resid=9.74e-07  18.70s
+      -> geometric FELL BACK (STAGNATION: hierarchy built); contraction not reached within budget
+   JACOBI-CG baseline: iters=3565 resid=9.74e-07 12.64s
+    level      n        nnz    nnz/row   aggregates
+        0   345744   26869950     77.7         5075
+        1    30450   10747756    353.0          937
+        2     5622    8410572   1496.0          376
+        3     2256    5089536   2256.0          291
+        4     1746    3048516   1746.0          284
+    coarsest n=1746 dense-LDL^T=yes  hierarchy memory=1464.7 MB
+   AMG stationary V-cycle: cycles=60 converged=NO final_rel=9.11e-01 | contraction overall=0.998 sustained=0.981 worst=0.984
+   AMG residual history (first 12): 1.00e+00 3.94e+00 4.16e+00 3.95e+00 3.70e+00 3.47e+00 3.27e+00 3.10e+00 2.96e+00 2.83e+00 2.72e+00 2.62e+00 
+   AMG-PCG: cycles=88 converged=yes | setup 49.30s, solve 26.84s, 0.305s/cycle | memory 1464.7 MB
+   DETERMINISM (2 independent setups, bit-compare of every level's A/P + the residual history): IDENTICAL
+   per-level sub-hierarchy contraction (stationary V-cycle on each level's own system):
+      level 0 (n=  345744): cycles= 40 converged=NO  overall=1.007 sustained=0.978
+      level 1 (n=   30450): cycles= 40 converged=NO  overall=0.987 sustained=0.968
+      level 2 (n=    5622): cycles= 40 converged=NO  overall=0.959 sustained=0.940
+      level 3 (n=    2256): cycles= 40 converged=NO  overall=0.887 sustained=0.891
+      level 4 (n=    1746): coarsest — solved directly
+
+
+### SUMMARY TABLE
+case                     red.DOF | GEOMETRIC                  | AMG (V-cycle contraction)          | determ.
+                                 |  hier  used cycles   cg_it | levels   cycles sustained  pcg_cyc | 
+occ0.40+bore0.40 LATTICE    804864 |     1     0    300   13741 |      5       60     0.988      133 | ok
+solid_box_48 LATTICE      345744 |     1     0    300    3565 |      5       60     0.981       88 | ok
