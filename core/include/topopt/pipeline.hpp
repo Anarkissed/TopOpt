@@ -253,6 +253,34 @@ struct MinimizePlasticOptions {
   // Must be finite and >= 0.
   double conditional_mma_projection_mnd_threshold = 0.0;
 
+  // Handoff 133 — KRYLOV RECYCLE-SPACE LIFETIME. The recycle basis
+  // (fea_set_krylov_recycling) is sticky across solves and must be reset at some
+  // boundary; this chooses which. The driver ALWAYS resets it once at run start
+  // (the same discipline as the 127 multigrid stagnation latch — a sticky
+  // thread-local must not leak between runs). This flag additionally resets it at
+  // every LADDER RUNG boundary.
+  //
+  // false (the DEFAULT) = carry the basis across rung boundaries. That is the
+  // MEASURED rule, not the cautious guess: handoff 133 ran both lifetimes on both
+  // regime fixtures and carrying was mildly BETTER in each (+1.5 points of CG cut
+  // on the void-heavy ladder, 3.4% fewer iterations on the multigrid one) and
+  // worse in neither, with byte-identical accepted designs either way. The volume
+  // target steps at a rung boundary but the grid, BCs and load do not, so the
+  // subspace stays meaningful. true restores the conservative reset-per-rung.
+  //
+  // NOT COVERED by either setting: the gray -> beta-projection boundary INSIDE a
+  // rung (123). The two phases are two simp_optimize calls and neither value
+  // resets between them, so the basis is always carried across that boundary. On
+  // the multigrid fixture the regression concentrated there (2.2x in the projected
+  // phase vs 1.12x in the grayscale one) — see handoff 133 §10; whether that is
+  // staleness or the V-cycle mis-scaling is unresolved, and the discriminating
+  // experiment needs a per-phase reset hook that does not exist yet.
+  //
+  // COMPLETELY INERT when recycling is off (the library default): the reset calls
+  // are no-ops on a non-existent basis, so every existing caller and fixture is
+  // byte-for-byte identical for either value.
+  bool krylov_recycle_reset_per_rung = false;
+
   // PHYSICAL minimum-feature length scale in millimetres (model units). When
   // > 0, the driver sets each rung's `simp.filter_radius` from the grid spacing
   // via physical_filter_radius(min_feature_mm, grid.spacing) — so the filtered

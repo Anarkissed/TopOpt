@@ -268,6 +268,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // within a run and per-thread, so without this reset a prior run's stagnation
   // could carry over. Inert for the JacobiCG library default (nothing reads it).
   fea_matfree_reset_mg_stagnation_latch();
+  // Handoff 133 — same discipline for the Krylov recycle basis: it is sticky and
+  // thread-local, so a prior run's subspace must never leak into this one. Inert
+  // when recycling is off (the library default).
+  fea_reset_krylov_recycle_space();
 
   // --- Fixed pipeline setup (shared across every rung) ---------------------
   // The design load, computed once and held across rungs (pipeline.hpp modeling
@@ -501,6 +505,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
+    // Handoff 133 — recycle-space lifetime (see MinimizePlasticOptions). A rung
+    // boundary steps the volume target and jumps the design, so by default the
+    // basis harvested from the previous rung is dropped here rather than applied
+    // to a system it no longer describes. Inert when recycling is off.
+    if (options.krylov_recycle_reset_per_rung) fea_reset_krylov_recycle_space();
     SimpOptions opt = options.simp;
     // Handoff 123 — when the conditional gate fires, this rung runs in TWO
     // phases (grayscale MMA, then β-projection seeded from it) as two

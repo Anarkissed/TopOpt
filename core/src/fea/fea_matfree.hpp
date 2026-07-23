@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <functional>
 #include <vector>
 
 #include "topopt/fea.hpp"
@@ -59,6 +60,21 @@ std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
 // kNumColors): the result never depends on the count. Returns the previous value.
 int mf_set_thread_count(int n);
 int mf_thread_count();  // effective count actually used (>= 1)
+
+// Run `body(lo, hi)` over the index range [begin, end) split into contiguous
+// sub-ranges across the SAME persistent worker pool the element apply uses (so no
+// second pool is spawned and the P-core pin of handoff 132 governs both).
+// `min_per_thread` is the granularity floor: fewer than that many indices per
+// worker and the range runs serially, since a dispatch must carry enough work to
+// amortise the wakeup.
+//
+// DETERMINISM IS THE CALLER'S: the split is by contiguous range, so a body whose
+// per-range result does not depend on WHICH ranges its neighbours got — e.g. one
+// that writes only its own output slice, or that accumulates per-range partials a
+// caller then reduces in ascending range order — produces the same answer for any
+// thread count. Krylov recycling (recycle.cpp) uses exactly that discipline.
+void mf_parallel_ranges(int begin, int end, int min_per_thread,
+                        const std::function<void(int, int)>& body);
 
 // Galerkin block cache toggle (handoff 090; public face:
 // fea_set_matfree_galerkin_block_cache). Opt-in, default OFF. Read by the
@@ -140,14 +156,29 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
                                 const std::vector<double>* elem_youngs,
                                 const char* who, CgInfo* info);
 
+// What Krylov recycling (handoff 133) did to ONE solve: the number of recycle
+// columns that actually preconditioned it, and the operator applies charged to
+// building E = U^T A U. Both 0 when recycling is off or no basis existed yet.
+// A solve that runs MG-CG and then falls back to Jacobi-CG pays setup twice, so
+// the caller ACCUMULATES setup_matvecs across the attempts rather than
+// overwriting — the reported figure is the honest total charged to the solve.
+struct RecycleReport {
+  int dim = 0;
+  int setup_matvecs = 0;
+};
+
 // Matrix-free Jacobi-preconditioned CG on the reduced system `m`, replicating
 // Eigen's ConjugateGradient<..., DiagonalPreconditioner> algorithm and relative-
 // residual criterion (sqrt(||r||^2/||rhs||^2) <= tolerance). `x` is seeded (warm
 // start or zero) and holds the solution on the kept DOFs on return. This is the
 // EXACT matrix-free solve; the multigrid path uses it as its exact fallback.
+//
+// When Krylov recycling is enabled the SPD additive coarse correction wraps the
+// Jacobi preconditioner (see topopt/fea.hpp and recycle.hpp); `rec` receives the
+// per-solve diagnostics. With recycling off this function is byte-unchanged.
 void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
                  std::vector<double>& x, int& iters_out, double& error_out,
-                 bool& converged_out);
+                 bool& converged_out, RecycleReport* rec = nullptr);
 
 }  // namespace fea_detail
 }  // namespace topopt

@@ -508,6 +508,14 @@ struct SimpIterationObservation {
   // is the V-cycles this solve burned before carrying or bailing (0 = no build).
   bool cg_hier_built = false;
   int cg_mg_cycles_attempted = 0;
+  // Krylov recycling diagnostics (handoff 133), forwarded from CgInfo.
+  // `cg_recycle_dim` is the number of recycle columns that actually
+  // preconditioned this step's solve (0 = recycling off, or the bootstrap solve
+  // that only harvests); `cg_recycle_setup_matvecs` is the operator applies
+  // CHARGED to recycling on this solve, so a net-of-overhead accounting reads
+  // straight off the per-iteration record instead of being re-derived.
+  int cg_recycle_dim = 0;
+  int cg_recycle_setup_matvecs = 0;
   // The MMA objective-plateau detector's verdict AT this iteration (the exact
   // predicate stage_should_stop consults for MMA — see mma_objective_plateau).
   // False for the OC / projected path (plateau termination is MMA-only) and until

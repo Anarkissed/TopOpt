@@ -49,6 +49,7 @@
 #include <Eigen/SparseCore>
 
 #include "fea_matfree.hpp"
+#include "recycle.hpp"
 #include "fea_reduced.hpp"
 
 namespace topopt {
@@ -716,7 +717,8 @@ void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x) 
 // non-convergence within max_it or a non-finite iterate -> caller falls back.
 // All work vectors come from `S` (sized once), so the loop heap-allocates nothing.
 bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
-              int max_it, Vec& x, int& iters, double& resid, bool mixed) {
+              int max_it, Vec& x, int& iters, double& resid, bool mixed,
+              fea_detail::RecycleReport* rec = nullptr) {
   // The ONLY thing `mixed` changes is which V-cycle preconditions the residual:
   // FP32 (mf_v_cycle_mixed) vs FP64 (mf_v_cycle). Every quantity that defines
   // convergence — r, x, p, rz, alpha, beta, the residual norm and the stopping
@@ -736,10 +738,24 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
   }
   const double threshold = tol * bnorm;
 
+  // Krylov recycling (handoff 133): the SPD additive coarse correction wrapping
+  // the V-cycle. Recycling is OUTSIDE the preconditioner, so the FP64 and FP32
+  // V-cycles are both untouched and both keep whatever they do today. Inert (and
+  // allocation-free) when recycling is off.
+  fea_detail::RecycleSession recycle(
+      n, H.m->invdiag.data(),
+      [&H](const double* xin, double* yout) { H.m->apply_kgg_raw(xin, yout); },
+      fea_detail::rc_wrap_multigrid());
+  if (rec != nullptr) {
+    rec->dim = recycle.dim();
+    rec->setup_matvecs += recycle.setup_matvecs();
+  }
+
   x = Vec::Zero(n);
   Vec r = b;                              // r = b - A*0
   Vec z(n);
   precondition(r, z);                      // z = M^{-1} r
+  recycle.augment(r.data(), z.data());     // + U E^-1 U^T r
   Vec p = z;
   double rz = r.dot(z);
   if (!std::isfinite(rz)) return false;
@@ -750,6 +766,8 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
     // if this attempt has run past the guard (see mgpcg for the rationale).
     if (std::chrono::steady_clock::now() > deadline) return false;
     mf_fine_matvec(H, p, S.Ap);           // A p is FP64 (defines the residual)
+    // Sample this direction with its already-computed image (no extra matvec).
+    recycle.observe(k - 1, p.data(), S.Ap.data());
     const double pAp = p.dot(S.Ap);
     if (!(pAp > 0.0) || !std::isfinite(pAp)) return false;  // breakdown
     const double alpha = rz / pAp;
@@ -758,8 +776,14 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
     iters = k;
     const double rn = r.norm();
     resid = rn / bnorm;
-    if (rn <= threshold) return x.allFinite();
+    if (rn <= threshold) {
+      const bool ok = x.allFinite();
+      // Rebuild the carried basis only from a solve that reached tolerance.
+      if (ok) recycle.commit();
+      return ok;
+    }
     precondition(r, S.zc);               // znew = M^{-1} r (reused buffer)
+    recycle.augment(r.data(), S.zc.data());  // + U E^-1 U^T r
     const double rznew = r.dot(S.zc);
     if (!std::isfinite(rznew)) return false;
     const double beta = rznew / rz;
@@ -1196,6 +1220,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     diag.hier_built = have_h;
 
     std::vector<double> xkept(static_cast<std::size_t>(m.ng), 0.0);
+    // Krylov recycling accounting for THIS solve (handoff 133). A solve that
+    // attempts MG-CG and then falls back to Jacobi-CG pays the k setup matvecs
+    // twice; the report ACCUMULATES them so the charged cost is honest.
+    fea_detail::RecycleReport rec;
     bool solved = false;
     if (have_h) {
       Vec rgv = Eigen::Map<const Vec>(m.rg.data(),
@@ -1214,10 +1242,11 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       const bool mixed = fea_detail::mf_mixed_precision_enabled() &&
                          H.fine_dinv_f.size() == m.ng;
       if (mixed) scratch.resize_f(m.ng, static_cast<int>(H.P0.cols()));
-      bool ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed);
+      bool ok =
+          mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed, &rec);
       if (!ok && mixed)
         ok = mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res,
-                      /*mixed=*/false);
+                      /*mixed=*/false, &rec);
       // Cycles this solve burned on MG-CG (the last attempt's count when a mixed
       // attempt was retried in FP64): honest whether it converged or stagnated.
       diag.mg_cycles_attempted = it;
@@ -1251,15 +1280,20 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // *info (used_multigrid=false); throws on non-convergence, parity with
       // fea_solve_cg and the assembled fea_solve_mgcg fallback.
       fea_detail::mf_cg_solve(m, tolerance, cap, xkept, diag.iterations,
-                              diag.residual, diag.converged);
+                              diag.residual, diag.converged, &rec);
       diag.used_multigrid = false;
       diag.mg_levels = 0;
+      diag.recycle_dim = rec.dim;
+      diag.recycle_setup_matvecs = rec.setup_matvecs;
       if (info) *info = diag;
       if (!diag.converged)
         throw std::runtime_error(
             "fea_solve_mgcg_matfree: CG did not reach the requested tolerance "
             "within max_iterations");
     }
+
+    diag.recycle_dim = rec.dim;
+    diag.recycle_setup_matvecs = rec.setup_matvecs;
 
     for (int k = 0; k < m.ng; ++k)
       u[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])] =

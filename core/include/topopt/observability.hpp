@@ -42,7 +42,7 @@ float half_to_float(std::uint16_t half);
 // The schema (documented here, in the handoff, and pinned by the golden test):
 //
 //   rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta,
-//   hier_built,mg_cycles_attempted
+//   hier_built,mg_cycles_attempted,infeasible,recycle_dim
 //
 //   rung          0-based ladder index
 //   iter          1-based iteration within the rung (monotone; a conditional
@@ -74,6 +74,15 @@ float half_to_float(std::uint16_t half);
 //                 for 5 consecutive iterations — and the rung was ENDED there as
 //                 "load path lost". It can read 1 on at most ONE row per rung, and
 //                 that row is the rung's last. 0 on every row of a healthy rung.
+//   recycle_dim   (handoff 133) Krylov recycle columns that actually
+//                 preconditioned this solve: 0 = recycling off, the run's bootstrap
+//                 solve (which only harvests), or — in the armed Jacobi-only
+//                 posture — a solve that ran MG-CG and was therefore not wrapped.
+//                 k (16 in production) on a recycled Jacobi solve. Read WITH
+//                 run_info's krylov_recycle_wrap_multigrid: with it false, a 0 here
+//                 next to cg_multigrid=1 is the by-design no-op, not a failure.
+//                 With cycle == 1 (the production value) the setup matvecs charged
+//                 to this solve equal this column.
 //
 // A row is ~60-95 bytes, so a full 4-rung production run (~800 rows) is < 80 KB.
 extern const char kIterationCsvHeader[];
@@ -201,6 +210,19 @@ struct RunInfo {
   bool galerkin_block_cache = false;
   bool mixed_precision = false;
   int matfree_threads = 0;   // resolved matrix-free thread count
+  // Handoff 133 — Krylov recycling echo. `krylov_recycling` is the ACTUAL
+  // process-global state the run executed under (read from
+  // fea_krylov_recycling_enabled, never inferred), and `krylov_recycle_dim` is the
+  // configured subspace dimension k. Echoed even when off — the 132 discipline: a
+  // run record that only mentions an accelerator when it fired cannot be used to
+  // rule the accelerator OUT of a later diagnosis.
+  bool krylov_recycling = false;
+  int krylov_recycle_dim = 0;
+  // Handoff 133 §10 — the ARMED posture: false = the correction wraps only the
+  // Jacobi-preconditioned loop and multigrid solves are untouched. Echoed because
+  // it changes which solves the accelerator touched at all, so a run record that
+  // omitted it could not be used to interpret the CSV's recycle_dim column.
+  bool krylov_recycle_wrap_multigrid = false;
   bool warm_start_inherit = false;
   bool warm_start_coarse = false;
   bool projection = false;

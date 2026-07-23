@@ -39,6 +39,12 @@ namespace topopt {
 // default — the library gate stays disabled at 0), echoed into run_info.json.
 constexpr double kConditionalProjectionGrayThreshold = 0.07;
 
+// Handoff 133 — the PRODUCTION Krylov recycle dimension k. The measured optimum of
+// the {8, 16, 24} sweep on the void-heavy production ladder (30.9% / 48.1% / 55.4%
+// CG cut, but k=24 is slower once the per-iteration correction is charged). Named
+// here so the parity test asserts the echo against the constant, not a literal.
+constexpr int kProductionRecycleDim = 16;
+
 // Handoff 132 (C) — the PRODUCTION matrix-free worker-thread count.
 //
 // The library default (fea_set_matfree_threads(0)) resolves to
@@ -82,6 +88,8 @@ int production_matfree_thread_count() {
   const int hw = static_cast<int>(std::thread::hardware_concurrency());
   return hw > 0 ? hw : 1;
 }
+
+int production_krylov_recycle_dim() { return kProductionRecycleDim; }
 
 void configure_production_options(MinimizePlasticOptions& opts) {
   // Matrix-free geometric-multigrid solver (handoff 079/091). Never assembles
@@ -165,6 +173,37 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // withdrawal of 092. Reviving it should mean changing what made it lose: a looser
   // trajectory cg_tolerance for the FP32 preconditioner, or FP32 only on the early
   // slack iterations. run_info.json keeps honestly echoing mixed_precision:false.
+
+  // Handoff 133 — KRYLOV RECYCLING, armed in the JACOBI-ONLY posture (maintainer
+  // decision on 133 §10). Measured: 45.4% fewer CG iterations on the void-heavy
+  // design-box ladder — the 4.5k-44k-iterations-per-solve regime of 125/131 — with
+  // the accepted designs reproduced to mean|drho| = 0.000000 and identical gate
+  // verdicts; and EXACTLY 1.000x (to the digit, zero setup matvecs) on the healthy
+  // multigrid regime, which the wrap_multigrid=false posture leaves untouched by
+  // construction.
+  //
+  // The three settings are a package and none of them is a free parameter:
+  //   * k = 16 is the measured optimum of the {8,16,24} sweep. The win is NOT
+  //     monotone in k: k=24 cuts 7 more points of iterations and is SLOWER, because
+  //     the per-iteration correction streams ~8*k*n bytes and past k~16 the extra
+  //     columns cost more than they save.
+  //   * wrap_multigrid = false restricts the correction to the Jacobi-preconditioned
+  //     loop. Wrapping the V-cycle REGRESSED it 1.23x-2.07x across the whole k
+  //     sweep; the +1 spectral lift is right for a weak preconditioner and
+  //     spectrum-widening for a strong one, which is structural, not tunable.
+  //   * reset_per_rung = false (carry the basis across rung boundaries) is the
+  //     measured lifetime rule: carrying was mildly better in BOTH regimes and
+  //     worse in neither, with byte-identical designs. Set on the options struct
+  //     below, not here, since it is a driver policy rather than a solver global.
+  // The rebuild cycle stays at the library default 1: a 4-solve-old basis measured
+  // worth almost nothing (48.1% -> 2.7%) while still paying the per-iteration cost.
+  //
+  // Anyone changing any of these must re-run core/tests/harness/recycle_probe.cpp
+  // on BOTH regimes and land new numbers; the parity test asserts the echo.
+  fea_set_krylov_recycling(true);
+  fea_set_krylov_recycle_dim(kProductionRecycleDim);
+  fea_set_krylov_recycle_wrap_multigrid(false);
+  opts.krylov_recycle_reset_per_rung = false;
 
   // Handoff 132 (C) — pin the matrix-free apply to the performance cores. See
   // production_matfree_thread_count() above for the measured justification (113's

@@ -125,6 +125,9 @@ RunInfo build_run_info(const JobDescription& job,
   info.galerkin_block_cache = fea_matfree_galerkin_block_cache_enabled();
   info.mixed_precision = fea_matfree_mixed_precision_enabled();
   info.matfree_threads = fea_matfree_thread_count();
+  info.krylov_recycling = fea_krylov_recycling_enabled();
+  info.krylov_recycle_dim = fea_krylov_recycle_dim();
+  info.krylov_recycle_wrap_multigrid = fea_krylov_recycle_wrap_multigrid();
   info.warm_start_inherit = options.warm_start_inherit;
   info.warm_start_coarse = options.warm_start_coarse;
   info.projection = !options.simp.projection.empty();
