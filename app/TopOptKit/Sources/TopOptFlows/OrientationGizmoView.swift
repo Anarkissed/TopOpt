@@ -295,10 +295,16 @@ public struct OrientationGizmoView: View {
         return ZStack {
             // Both arrows and the Home cube share ONE inset from their nearest edges
             // (`GizmoLayout`, item 2): equal margins, comfortably inside the squircle.
-            RotateButton(clockwise: false) { roll(by: Self.rollStep, "Rolled ⟲") }
+            // Round-6 item 3: the arrow→rotation mapping was MIRRORED. In `OrbitCamera`'s
+            // y-down screen space a positive `roll` rotates the image CLOCKWISE (see the
+            // `up`/`orbit` comments), so the CCW-glyph left arrow (⟲) sending +rollStep
+            // spun the view the opposite way it points, and likewise the CW-glyph right
+            // arrow (⟳). Flipped: left ⟲ → −rollStep (CCW image), right ⟳ → +rollStep (CW
+            // image), so each arrow now rotates the view the way it points.
+            RotateButton(clockwise: false) { roll(by: -Self.rollStep, "Rolled ⟲") }
                 .frame(width: arrow, height: arrow)
                 .position(GizmoLayout.rotateLeftCenter(size))
-            RotateButton(clockwise: true) { roll(by: -Self.rollStep, "Rolled ⟳") }
+            RotateButton(clockwise: true) { roll(by: Self.rollStep, "Rolled ⟳") }
                 .frame(width: arrow, height: arrow)
                 .position(GizmoLayout.rotateRightCenter(size))
             HomeButton {

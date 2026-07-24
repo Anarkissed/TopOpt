@@ -188,6 +188,9 @@ public struct WorkspacePlaceholder: View {
                           faceToolActive: true,                 // D1: tap always selects (routed by phase)
                           onPickFace: handlePick,
                           onProjection: { projection = $0 },
+                          // Round-6 item 4: two-finger double-tap undoes, triple-tap redoes.
+                          onUndo: { project.performUndo() },
+                          onRedo: { project.performRedo() },
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn.
                           designBox: showDesignGizmo ? project.designBox.box : nil,
@@ -525,6 +528,16 @@ public struct WorkspacePlaceholder: View {
             .background(Capsule().fill(DS.Surface.bar.color)
                 .overlay(Capsule().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
             .foregroundStyle(DS.Color.textPrimary.color)
+
+            // Round-6 item 4: Undo / Redo, to the RIGHT of the name/material header. They enable/
+            // disable with the history (`project.undo`); the same actions are reachable by the
+            // two-finger double-/triple-tap on the viewport (see `MetalMeshView`).
+            HStack(spacing: DS.Space.xs) {
+                undoRedoButton("arrow.uturn.backward", label: "Undo",
+                               enabled: project.canUndoNow) { project.performUndo() }
+                undoRedoButton("arrow.uturn.forward", label: "Redo",
+                               enabled: project.canRedoNow) { project.performRedo() }
+            }
         }
         .padding(.top, DS.Space.xl3)
         .padding(.leading, DS.Space.xl4)
@@ -533,6 +546,23 @@ public struct WorkspacePlaceholder: View {
             Button("Save") { model.renameCurrentProject(to: nameDraft) }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    /// A round Undo/Redo header button, matching the back-chevron chrome. Dims + disables when
+    /// there is nothing to undo/redo (round-6 item 4).
+    private func undoRedoButton(_ system: String, label: String, enabled: Bool,
+                                action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle((enabled ? DS.Color.textPrimary : DS.Color.textPrimary.opacity(0.28)).color)
+                .frame(width: 42, height: 42)
+                .background(Circle().fill(DS.Surface.bar.color)
+                    .overlay(Circle().strokeBorder(DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(label)
     }
 
     // MARK: gravity setup prompt (D2) + persistent chip
@@ -1172,17 +1202,34 @@ public struct WorkspacePlaceholder: View {
     /// representative primitive's chips draw (`syncCollapsedChipItems`), so the maintainer's
     /// duplicate stacked "DEPTH 3 mm" chips are gone. The drag knobs are NOT collapsed.
     @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection) -> some View {
+        let W = proj.viewportSize.width
         ForEach(syncCollapsedChipItems) { item in
             if let pt = proj.project(settledWorld(item.handle.anchor)) {
-                clearanceHandleChip(item)
-                    // Right beside the handle icon, offset clear of the ~46 pt knob (device-QA tune).
-                    .fixedSize()
-                    .position(x: clampX(pt.x + 46, proj.viewportSize.width),
-                              y: clamp(pt.y, proj.viewportSize.height))
-                    .animation(DS.Motion.emphasized, value: pt)
+                // Round-6 item 1 (shipping blocker): the chip must sit BESIDE the knob with the
+                // knob's full hit target clear — never on top of it. `.position` centres a view, so
+                // the old "centre at pt.x + 46" let a wider number slide its LEFT edge back onto the
+                // ~50 pt knob. Instead anchor the chip's LEADING edge a fixed clearance right of the
+                // knob centre: a right-extending, hit-transparent container (empty Spacer, no
+                // background → touches fall through to the knobs/camera) pins the number-only chip
+                // left, so its left edge lands at `leadingX` regardless of the value's width.
+                let leadingX = clampX(pt.x + Self.chipKnobClearance, W)
+                let boxW = Swift.max(1, W - leadingX)
+                HStack(spacing: 0) {
+                    clearanceHandleChip(item).fixedSize()
+                    Spacer(minLength: 0)
+                }
+                .frame(width: boxW, alignment: .leading)
+                .position(x: leadingX + boxW / 2, y: clamp(pt.y, proj.viewportSize.height))
+                .animation(DS.Motion.emphasized, value: pt)
             }
         }
     }
+
+    /// Round-6 item 1: how far right of a clearance knob's CENTRE the value chip's leading edge
+    /// sits. The knob's grab target is a circle of radius `size/2 + 12` ≈ 25 pt when active
+    /// (`clearanceHandleKnob`); 40 pt clears that with ~15 pt of breathing room, so the chip
+    /// never overlaps the hit area of the handle it belongs to.
+    private static let chipKnobClearance: CGFloat = 40
 
     /// The value chip for ONE clearance handle (Margin/Axial for a bore, Depth for a plane),
     /// reading and writing that bore's effective override (per-bore when unsynced, shared when
@@ -1192,19 +1239,26 @@ public struct WorkspacePlaceholder: View {
         let ov = force.clearanceOverride(forGroup: gid, face: f)
         let r = faceBoreRadius(f)
         let live = draggingHandleID == item.id
+        // Round-6 item 2: the 3D-viewport chips are NUMBER-ONLY (like the load-weight chip) —
+        // `showTitle`/`showChrome` off. The handle's own glyph (↔ margin, ↕ axial, ⊤ depth) names
+        // the value, so the caption is redundant here, and dropping it + the Auto/reset chrome makes
+        // the chip narrow enough to clear its knob (item 1). Reset-to-Auto lives in the panel.
         switch item.handle.role {
         case .margin:
             GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
                            autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                           active: live, compact: true) { force.setClearanceMargin(group: gid, face: f, mm: $0) }
+                           active: live, compact: true, showTitle: false,
+                           showChrome: false) { force.setClearanceMargin(group: gid, face: f, mm: $0) }
         case .axialHi, .axialLo:
             GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
                            autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                           active: live, compact: true) { force.setClearanceAxial(group: gid, face: f, mm: $0) }
+                           active: live, compact: true, showTitle: false,
+                           showChrome: false) { force.setClearanceAxial(group: gid, face: f, mm: $0) }
         case .slabDepth:
             GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
                            autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                           active: live, compact: true) { force.setClearanceSlab(group: gid, face: f, mm: $0) }
+                           active: live, compact: true, showTitle: false,
+                           showChrome: false) { force.setClearanceSlab(group: gid, face: f, mm: $0) }
         }
     }
 
@@ -1573,32 +1627,55 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// One primitive's line: a kind label (Bore / Plane) leading its own compact value
-    /// chips (Margin + Axial for a bore, Depth for a plane), reading+writing THIS
-    /// primitive's effective override (per-bore when unsynced). Right-aligned.
+    /// One primitive's lines: a kind label (Bore / Plane) heading its value metrics, each on
+    /// its OWN labeled row — "Margin:" + a number-only chip, "Axial:" + a number-only chip for
+    /// a bore, "Depth:" for a plane — reading+writing THIS primitive's effective override
+    /// (per-bore when unsynced). Right-aligned.
+    ///
+    /// Round-6 item 2: the caption ("Margin:" / "Axial:" / "Depth:") is TEXT OUTSIDE a
+    /// number-only chip (`showTitle: false`), and each metric gets its own row. The old layout
+    /// packed a captioned Margin pill + a captioned Axial pill into one HStack, which — under the
+    /// 300 pt panel, right-aligned below the trash icon — wrapped mid-word into a two-row smoosh.
+    /// One metric per row can't wrap; the HARD RULE (a chip is never two rows high) holds.
     @ViewBuilder private func clearancePrimitiveLine(_ g: SelectionGroup, _ p: ClearancePrimitive,
                                                      showKind: Bool) -> some View {
         let f = p.id
         let ov = force.clearanceOverride(forGroup: g.id, face: f)
-        HStack(spacing: DS.Space.xs) {
+        VStack(alignment: .trailing, spacing: 4) {
             if showKind {
                 Text(ClearanceChipLayout.kindLabel(p.kind))
                     .dsStyle(DS.TypeScale.caption)
                     .foregroundStyle(DS.Color.textQuaternary.color)
             }
             if p.isBore {
-                GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
-                               autoMM: p.radiusMM.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                               compact: true) { force.setClearanceMargin(group: g.id, face: f, mm: $0) }
-                GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
-                               autoMM: p.radiusMM.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                               compact: true) { force.setClearanceAxial(group: g.id, face: f, mm: $0) }
+                clearanceMetricRow("Margin",
+                    GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
+                                   autoMM: p.radiusMM.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
+                                   compact: true, showTitle: false) { force.setClearanceMargin(group: g.id, face: f, mm: $0) })
+                clearanceMetricRow("Axial",
+                    GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
+                                   autoMM: p.radiusMM.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
+                                   compact: true, showTitle: false) { force.setClearanceAxial(group: g.id, face: f, mm: $0) })
             } else {
-                GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
-                               autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                               compact: true) { force.setClearanceSlab(group: g.id, face: f, mm: $0) }
+                clearanceMetricRow("Depth",
+                    GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
+                                   autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                                   compact: true, showTitle: false) { force.setClearanceSlab(group: g.id, face: f, mm: $0) })
             }
         }
+    }
+
+    /// One Selections-panel clearance metric: the caption as text OUTSIDE the chip ("Margin:")
+    /// beside a number-only pill (round-6 item 2). The whole row is right-aligned by the enclosing
+    /// stack; `.fixedSize` keeps the caption + pill on one line so nothing wraps.
+    private func clearanceMetricRow(_ label: String, _ pill: GlassValuePill) -> some View {
+        HStack(spacing: DS.Space.xs) {
+            Text("\(label):")
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textTertiary.color)
+            pill
+        }
+        .fixedSize()
     }
 
     /// The ONE shared chip set a synced group shows (Task A6 item 2): Margin + Axial
@@ -1606,7 +1683,10 @@ public struct WorkspacePlaceholder: View {
     /// primitive reads the group's shared override when synced, so editing here moves
     /// them all together.
     @ViewBuilder private func sharedClearanceChips(_ g: SelectionGroup, prims: [ClearancePrimitive]) -> some View {
-        HStack(spacing: DS.Space.xs) {
+        // Round-6 item 2: stack the representative bore + plane VERTICALLY (each already lays its
+        // metrics out as its own labeled rows), so a group with both never packs four chips across
+        // one 300 pt line and wraps.
+        VStack(alignment: .trailing, spacing: 4) {
             if let bore = prims.first(where: { $0.isBore }) {
                 clearancePrimitiveLine(g, bore, showKind: false)
             }

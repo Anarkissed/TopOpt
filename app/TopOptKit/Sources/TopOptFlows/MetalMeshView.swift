@@ -2046,6 +2046,11 @@ struct MeshViewInputs {
     var onMiss: (() -> Void)?
     /// Published each time the camera changes, so overlays can project 3D points.
     var onProjection: ((CameraProjection) -> Void)?
+    /// Round-6 item 4: a two-finger DOUBLE-tap on the viewport undoes; a two-finger TRIPLE-tap
+    /// redoes. nil disables the gesture (previews / thumbnails). iOS only — a Mac trackpad
+    /// two-finger tap is not a `UITapGestureRecognizer` event, so the header buttons stand in there.
+    var onUndo: (() -> Void)?
+    var onRedo: (() -> Void)?
     /// M7.8 results stress overlay: per-flat-vertex colors (one per `mesh.flat`
     /// vertex). When set, they replace the face-highlight tints. nil = no overlay.
     var stressTints: [SIMD4<Float>]?
@@ -2115,6 +2120,7 @@ public struct MetalMeshView: UIViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
+                onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
@@ -2126,7 +2132,8 @@ public struct MetalMeshView: UIViewRepresentable {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
+            onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
+            stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
             designBox: designBox, keepOutBoxes: keepOutBoxes,
@@ -2146,14 +2153,30 @@ public struct MetalMeshView: UIViewRepresentable {
                                              action: #selector(Coordinator.handlePinch(_:)))
         let tap = UITapGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handleTap(_:)))
+        // Round-6 item 4: two-finger DOUBLE-tap = undo, two-finger TRIPLE-tap = redo. The triple
+        // must win when three taps land, so the double `require(toFail:)` the triple; both need two
+        // touches so neither collides with the one-finger pick tap.
+        let undoTap = UITapGestureRecognizer(target: context.coordinator,
+                                             action: #selector(Coordinator.handleUndoTap(_:)))
+        undoTap.numberOfTouchesRequired = 2
+        undoTap.numberOfTapsRequired = 2
+        let redoTap = UITapGestureRecognizer(target: context.coordinator,
+                                             action: #selector(Coordinator.handleRedoTap(_:)))
+        redoTap.numberOfTouchesRequired = 2
+        redoTap.numberOfTapsRequired = 3
+        undoTap.require(toFail: redoTap)
         // Two-finger pan (item 2) and pinch-zoom must coexist on the same two touches, so let the
         // pan + pinch recognizers fire simultaneously (a two-finger drag pans; any pinch delta on
         // the same gesture still zooms). The tap is left exclusive.
         pan.delegate = context.coordinator
         pinch.delegate = context.coordinator
+        undoTap.delegate = context.coordinator
+        redoTap.delegate = context.coordinator
         view.addGestureRecognizer(pan)
         view.addGestureRecognizer(pinch)
         view.addGestureRecognizer(tap)
+        view.addGestureRecognizer(undoTap)
+        view.addGestureRecognizer(redoTap)
         return view
     }
 
@@ -2171,6 +2194,7 @@ public struct MetalMeshView: NSViewRepresentable {
                 showGround: Bool = false, faceToolActive: Bool = false,
                 onPickFace: ((FaceID) -> Void)? = nil, onMiss: (() -> Void)? = nil,
                 onProjection: ((CameraProjection) -> Void)? = nil,
+                onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,
@@ -2182,7 +2206,8 @@ public struct MetalMeshView: NSViewRepresentable {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
-            onProjection: onProjection, stressTints: stressTints, stressMultiplier: stressMultiplier,
+            onProjection: onProjection, onUndo: onUndo, onRedo: onRedo,
+            stressTints: stressTints, stressMultiplier: stressMultiplier,
             reveal: reveal, flexDisplacements: flexDisplacements, flexScale: flexScale,
             loadPathSegments: loadPathSegments, loadPathFlow: loadPathFlow,
             designBox: designBox, keepOutBoxes: keepOutBoxes,
@@ -2281,6 +2306,8 @@ extension MetalMeshView {
         private var onPickFace: ((FaceID) -> Void)?
         private var onMiss: (() -> Void)?
         private var onProjection: ((CameraProjection) -> Void)?
+        private var onUndo: (() -> Void)?
+        private var onRedo: (() -> Void)?
 
         /// Upload a new mesh / refresh the highlight / drive the settle / publish the
         /// camera projection — each only when it actually changes.
@@ -2292,6 +2319,8 @@ extension MetalMeshView {
             onPickFace = inputs.onPickFace
             onMiss = inputs.onMiss
             onProjection = inputs.onProjection
+            onUndo = inputs.onUndo
+            onRedo = inputs.onRedo
 
             var dirty = false
             let sig = inputs.mesh.map(meshSignature)
@@ -2607,6 +2636,17 @@ extension MetalMeshView {
             guard let view = g.view as? MTKView else { return }
             pick(at: g.location(in: view), in: view)
         }
+
+        // Round-6 item 4: two-finger double-tap → undo, two-finger triple-tap → redo.
+        @objc func handleUndoTap(_ g: UITapGestureRecognizer) {
+            guard g.state == .ended else { return }
+            onUndo?()
+        }
+
+        @objc func handleRedoTap(_ g: UITapGestureRecognizer) {
+            guard g.state == .ended else { return }
+            onRedo?()
+        }
         #elseif os(macOS)
         @objc func handlePan(_ g: NSPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
@@ -2672,6 +2712,7 @@ public struct MetalMeshView: View {
                 settleAnimated: Bool = false, showGround: Bool = false,
                 faceToolActive: Bool = false, onPickFace: ((FaceID) -> Void)? = nil,
                 onMiss: (() -> Void)? = nil, onProjection: ((CameraProjection) -> Void)? = nil,
+                onUndo: (() -> Void)? = nil, onRedo: (() -> Void)? = nil,
                 stressTints: [SIMD4<Float>]? = nil, stressMultiplier: Float = 1, reveal: Float = 1,
                 flexDisplacements: [Float]? = nil, flexScale: Float = 0,
                 loadPathSegments: [Float]? = nil, loadPathFlow: Float = 0,

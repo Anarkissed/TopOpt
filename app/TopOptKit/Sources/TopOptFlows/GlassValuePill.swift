@@ -32,6 +32,16 @@ struct GlassValuePill: View {
     var active: Bool = false
     /// Compact row variant (Selections panel) vs the larger floating variant.
     var compact: Bool = false
+    /// Round-6 item 2: draw the internal "MARGIN"/"AXIAL"/"DEPTH" caption inside the pill.
+    /// OFF makes the pill NUMBER-ONLY (like the load-weight chip) — the 3D-viewport chips
+    /// carry no caption (the handle glyph names them) and the Selections-panel chips wear
+    /// the caption as text OUTSIDE the pill, so a chip is never two rows high anywhere.
+    var showTitle: Bool = true
+    /// Round-6 item 2: draw the trailing "Auto" badge / ↺ reset control. OFF strips the pill
+    /// to the bare scrubbable number — the narrowest form, used in the 3D viewport so the pill
+    /// clears its drag knob's hit target (item 1). The Selections panel keeps the chrome (its
+    /// external label leaves room), so reset-to-Auto still lives there.
+    var showChrome: Bool = true
     /// Set an explicit value (mm), or nil to reset to the Auto suggestion.
     let onSet: (Double?) -> Void
 
@@ -58,12 +68,16 @@ struct GlassValuePill: View {
         // MARGIN/AXIAL kept as a small text title only. One inline row, so its height matches the
         // weight pill. (This overrides the blue liquid-glass look handoff 109 gave the value chips.)
         HStack(spacing: compact ? DS.Space.xs : DS.Space.s) {
-            Text(title.uppercased())
-                .font(.system(size: compact ? 9 : 9.5, weight: .bold))
-                .tracking(0.6)
-                .foregroundStyle(DS.Color.textTertiary.color)
+            if showTitle {
+                Text(title.uppercased())
+                    .font(.system(size: compact ? 9 : 9.5, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+            }
             numberRow
-            if isAuto { autoChip } else { resetButton }
+            if showChrome {
+                if isAuto { autoChip } else { resetButton }
+            }
         }
         .padding(.vertical, 8)
         .padding(.horizontal, compact ? DS.Space.m : DS.Space.l)
