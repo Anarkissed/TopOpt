@@ -781,13 +781,39 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
     const std::vector<double>& rho = variant.optimization.physical_density;
 
+    // --- The CONNECTIVITY BELT ------------------------------------------------
+    // (handoff 2026-07-23-gate-honesty-connectivity-rejection). Ask the converged
+    // geometry the one question the margin cannot answer: is there any path of
+    // PRINTED material from the anchor to the load? A severed design carries
+    // nothing, so it measures NO stress, and no stress reads as an ENORMOUS margin
+    // — the motivating run's severed rung measured 680.9 and was accepted and
+    // exported on that basis (handoff 131 §evidence). The rung-infeasibility
+    // fast-fail catches the SUSTAINED case mid-rung; this belt covers the window it
+    // cannot see: a design that breaks LATE and then converges, whose compliance
+    // never sits frozen at 100x its start for 5 iterations.
+    //
+    // Measured HERE (read-only on `rho`, before anything consumes this rung) so the
+    // verdict governs BOTH the warm seed below and the acceptance gate further down;
+    // it is the gate that acts on it, so no variant is ever certified without it.
+    // Vacuously true when the run has no Load or no Fixture voxels (a self-weight
+    // run tags no load faces), so a CONNECTED variant — every existing fixture —
+    // takes exactly the pre-belt path to exactly the pre-belt verdict.
+    const bool load_path_ok = load_path_connected(G, rho, kIso);
+
     // Handoff 110 (Part A) — carry this rung's CONVERGED density forward to seed
     // the next (lighter) rung when inheritance is on; otherwise clear the seed so
     // the next rung starts uniform (Part B only warm-starts rung 0). Copied HERE,
     // before `variant` is moved into result.evaluated below, since `rho` aliases
     // its density. With warm_start_inherit off this always clears to empty, so the
     // next rung's opt.initial_design is empty — the uniform, byte-identical path.
-    warm_seed = options.warm_start_inherit ? rho : std::vector<double>();
+    //
+    // A DISCONNECTED rung never seeds anything — handoff 131's rule (2) for the
+    // same reason: seeding the next rung from a severed field propagates the
+    // severance and buries the evidence of where it started. `warm_seed` is left
+    // UNTOUCHED, so it still holds the last CONNECTED rung's density (or is empty).
+    // With inheritance off it is empty either way, so this guard is inert there.
+    if (load_path_ok)
+      warm_seed = options.warm_start_inherit ? rho : std::vector<double>();
 
     // Handoff 114 — rung-BOUNDARY density snapshot: the converged physical field
     // of this (non-cancelled) rung. `rho` already carries the mask pins (it is
@@ -967,12 +993,24 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // solid/unset infill, so `margin.worst_case * 1.0 >= margin_stop` is
     // bit-for-bit the pre-M7.infill gate `margin.worst_case >= margin_stop`.
     const double margin_effective = margin.worst_case * infill_knockdown;
-    variant.accepted = margin_effective >= options.margin_stop;
+    const bool margin_ok = margin_effective >= options.margin_stop;
+    // THE BELT ACTS HERE: a disconnected rung is REJECTED however good its margin
+    // looks (the verdict was measured above, on the converged density). The margin
+    // test is UNCHANGED and still evaluated in its own right — it is what decides
+    // whether the LADDER stops, below.
+    variant.accepted = load_path_ok && margin_ok;
     // The acceptance verdict and the numbers behind it, carried on the report line
     // so a REJECTED rung reports its own margin-vs-required (not a silent omission).
     vr.accepted = variant.accepted;
     vr.margin_required = options.margin_stop;
     vr.margin_effective = margin_effective;
+    // REJECTION SPEAKS: a rejected line always names its cause. When BOTH tests
+    // fail the CONNECTIVITY reason wins, because it is the more fundamental fact
+    // and it tells the reader what the margin on that line is worth: a number
+    // measured on a severed structure, whichever side of the threshold it landed.
+    if (!variant.accepted)
+      vr.rejection_reason =
+          load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
     result.evaluated.push_back(std::move(variant));
     result.rung_infeasible.push_back(0);  // handoff 131 (aligned with `evaluated`)
     // Storage never reallocates (reserved to ladder.size() above), so the
@@ -1007,13 +1045,33 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         break;
       }
     } else {
-      // First too-weak rung: stop the ladder here (do not run lighter rungs). The
-      // rejected rung is NOT dropped from the report — record it in report.rejected
-      // (accepted=false, with its margin_effective vs margin_required) so the
-      // gate rejection is reported, not a silent lie of absence.
+      // A rejected rung is NOT dropped from the report — record it in
+      // report.rejected (accepted=false, with its margin_effective vs
+      // margin_required AND its rejection_reason) so the gate rejection is
+      // reported, not a silent lie of absence.
       result.report.rejected.push_back(result.evaluated.back().report);
-      result.stopped_on_margin = true;
-      break;
+      // WHETHER THE LADDER STOPS is decided by the MARGIN TEST ALONE — exactly the
+      // pre-belt condition, on exactly the pre-belt numbers. Strength is monotone in
+      // the ladder direction, so once a rung falls under margin_stop no lighter rung
+      // can pass and the walk ends; that is true whether or not the rung was also
+      // severed, so the belt never suppresses a margin stop (a rung failing both
+      // tests still ends the ladder, and its report line names the connectivity
+      // failure as the reason it cannot be built).
+      //
+      // A rung rejected ONLY by the belt does NOT stop the walk. Severance is not a
+      // strength verdict and is NOT monotone: each rung is optimized independently,
+      // so it is a failure of THIS carve, and a lighter rung can perfectly well
+      // converge to a connected topology. Measured on the 8x3x8 L-bracket
+      // (test_warm_start_integration's fixture): rung 0 at vf 0.68 comes out SEVERED
+      // while rungs 1 and 2 at 0.52 and 0.38 are connected and accepted. Stopping at
+      // rung 0 there would return the user NOTHING while two good variants existed.
+      // This mirrors an INFEASIBLE rung (handoff 131 rule (3)); like it, the walk
+      // continues from the last CONNECTED design (the warm-seed guard above).
+      if (!margin_ok) {
+        result.stopped_on_margin = true;
+        break;
+      }
+      continue;
     }
   }
 

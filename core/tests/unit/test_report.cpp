@@ -11,6 +11,7 @@
 //     (missing/wrong-typed fields, non-integer counts, inconsistent volume
 //     saved, out-of-range values, malformed JSON) — the schema has teeth.
 
+#include "topopt/pipeline.hpp"  // the published rejection_reason strings
 #include "topopt/report.hpp"
 
 #include <cmath>
@@ -568,6 +569,76 @@ void test_printed_fraction_validator() {
         "pre-104 document without printed_fraction accepted (legacy basis)");
 }
 
+// --- REJECTION SPEAKS: a rejected variant must say why ----------------------
+// Handoff 2026-07-23-gate-honesty-connectivity-rejection. An entry of
+// "rejected_variants" that carries a rejection_reason must not carry an EMPTY one:
+// a rejection with no stated cause forces the reader to infer it from numbers that,
+// in the connectivity case, look excellent precisely because the design is severed.
+// The field stays OPTIONAL so pre-131 documents (which omit it entirely) still
+// validate; every document this module emits carries it.
+
+void test_rejection_reason_validator() {
+  auto rejects = [](const std::string& doc) {
+    return throws_report_error([&] { validate_job_report_json(doc); });
+  };
+  // One rejected line, parameterised by the rejection_reason field text.
+  auto doc_with = [](const std::string& reason_field) {
+    return R"({ "material": "PLA", "variants": [], "rejected_variants": [ {
+        "volume_fraction": 0.3, "volume_saved_fraction": 0.7,
+        "max_stress_mpa": 20.0, "max_interlayer_tension_mpa": 5.0,
+        "margin": { "in_plane": 2.0, "interlayer": 3.0, "worst_case": 2.0 },
+        "orientation": { "x": 0.0, "y": 0.0, "z": 1.0 },
+        "accepted": false)" + reason_field +
+           R"(,
+        "settings": { "family": "fdm", "walls": 5, "top_layers": 6, "bottom_layers": 5, "infill_percent": 50, "infill_pattern": "gyroid", "print_mode": "", "warning": "" } } ] })";
+  };
+
+  auto reason_field = [](const std::string& text) {
+    return std::string(R"J(, "rejection_reason": ")J") + text + "\"";
+  };
+  CHECK(rejects(doc_with(reason_field(""))),
+        "a rejected variant with an EMPTY rejection_reason is rejected");
+  CHECK(!rejects(doc_with(reason_field(topopt::kLoadPathNotConnectedReason))),
+        "the connectivity reason validates");
+  CHECK(!rejects(doc_with(reason_field(topopt::kMarginBelowRequiredReason))),
+        "the too-weak reason validates");
+  CHECK(!rejects(doc_with(reason_field(topopt::kRungInfeasibleReason))),
+        "the infeasibility reason validates");
+  // Backward compatible: a pre-131 rejected line omits the field entirely.
+  CHECK(!rejects(doc_with("")),
+        "a rejected variant with NO rejection_reason field still validates "
+        "(pre-131 documents)");
+
+  // The driver's three reason strings are the ones the header publishes — one
+  // definition, so report.json and any consumer cannot drift apart.
+  CHECK(std::string(topopt::kLoadPathNotConnectedReason) ==
+            "load path not connected",
+        "kLoadPathNotConnectedReason is the published string");
+  CHECK(std::string(topopt::kMarginBelowRequiredReason) == "margin below required",
+        "kMarginBelowRequiredReason is the published string");
+
+  // ROUND TRIP: a JobReport carrying a rejected line serializes to a document that
+  // validates, and the reason survives the trip.
+  {
+    topopt::JobReport rep;
+    rep.material = "PLA";
+    topopt::VariantReport v;
+    v.volume_fraction = 0.3;
+    v.printed_fraction = 0.3;
+    v.accepted = false;
+    v.margin_required = 1.5;
+    v.margin_effective = 111.7;  // a severed structure's flattering margin
+    v.rejection_reason = topopt::kLoadPathNotConnectedReason;
+    v.settings.family = "fdm";
+    rep.rejected.push_back(v);
+    const std::string json = job_report_json(rep);
+    CHECK(!throws_report_error([&] { validate_job_report_json(json); }),
+          "a report with a disconnected rejected line validates");
+    CHECK(json.find(topopt::kLoadPathNotConnectedReason) != std::string::npos,
+          "...and the reason survives into report.json");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -585,6 +656,7 @@ int main() {
   test_min_feature_emitted();
   test_min_feature_validator();
   test_printed_fraction_validator();
+  test_rejection_reason_validator();
 
   if (g_failures == 0) {
     std::printf("job report (M5.2): all %d checks passed\n", g_checks);

@@ -8,8 +8,10 @@
 //       rung 0: rungs >= 1 stay byte-for-byte identical to the cold run, proving
 //       the feature is a clean structural addition (and coarse_iterations > 0).
 //   (3) ITERATION REDUCTION — warm_start_inherit and warmAB both cut total
-//       iterations vs cold while the ACCEPT GATE still passes on every rung
-//       (margin >= margin_stop): safety is initialization-independent.
+//       iterations vs cold while the ACCEPT GATE's verdicts stay sound on every
+//       rung (accepted => margin >= margin_stop; not accepted => a stated reason):
+//       safety is initialization-independent. See gate_verdicts_sound below for
+//       why this is stated as soundness rather than "every rung is accepted".
 //   (4) DETERMINISM — warmAB run twice is byte-for-byte identical.
 //
 // Drives minimize_plastic (simp_optimize / Eigen), so it is Eigen-gated like the
@@ -127,10 +129,39 @@ bool rung_identical(const MinimizePlasticVariant& a,
          a.report.margin.worst_case == b.report.margin.worst_case;
 }
 
-bool all_accepted_above_stop(const MinimizePlasticResult& r, double stop) {
-  for (const auto& v : r.evaluated)
-    if (!(v.accepted && v.report.margin.worst_case >= stop)) return false;
+// "Safety is initialization-independent", stated as what the GATE must satisfy
+// however the run was seeded: every rung it ACCEPTED clears the strength
+// threshold, and every rung it did not accept says why (REJECTION SPEAKS). The
+// second clause is not slack — it is what stops this check from being satisfied
+// by a run that quietly dropped a rung.
+//
+// It replaces a blanket "every evaluated rung is accepted", which stopped being
+// true when the CONNECTIVITY BELT landed (handoff
+// 2026-07-23-gate-honesty-connectivity-rejection): on THIS fixture — the thin
+// 8x3x8 L-bracket with NO anchor pad — the optimizer carves the column feeding the
+// frozen Load face down to sub-threshold grey, so 2 of the 4 cold rungs come out
+// with the load face floating free of the arm and are now rejected. They were
+// ACCEPTED and exported before the belt, at margins around 9.8. The fixture is
+// left exactly as it was: it is the warm-start baseline the handoff's iteration
+// numbers were measured on, and a severed rung is a perfectly good thing for a
+// warm-start test to carry as long as the gate's verdict on it is honest.
+bool gate_verdicts_sound(const MinimizePlasticResult& r, double stop) {
+  for (const auto& v : r.evaluated) {
+    if (v.accepted) {
+      if (!(v.report.margin.worst_case >= stop)) return false;
+      if (!v.report.rejection_reason.empty()) return false;
+    } else if (v.report.rejection_reason.empty()) {
+      return false;
+    }
+  }
   return true;
+}
+
+std::size_t accepted_count(const MinimizePlasticResult& r) {
+  std::size_t n = 0;
+  for (const auto& v : r.evaluated)
+    if (v.accepted) ++n;
+  return n;
 }
 
 }  // namespace
@@ -161,8 +192,9 @@ int main() {
   const MinimizePlasticResult cold = run(cold_opts);
   const int cold_iters = total_fine_iters(cold);
   CHECK(cold.evaluated.size() >= 3, "cold: multi-rung ladder");
-  CHECK(all_accepted_above_stop(cold, cold_opts.margin_stop),
-        "cold: every rung passes the accept gate");
+  CHECK(gate_verdicts_sound(cold, cold_opts.margin_stop),
+        "cold: every accepted rung clears the gate, every rejected one says why");
+  CHECK(accepted_count(cold) > 0, "cold: the run accepts at least one rung");
   CHECK(cold.warm_start_coarse_iterations == 0,
         "cold: no coarse pre-solve (feature off)");
 
@@ -209,8 +241,9 @@ int main() {
       tail_identical = false;
   CHECK(tail_identical,
         "STRUCTURAL SKIP: warmB rungs >= 1 byte-identical to cold (only rung 0 seeded)");
-  CHECK(all_accepted_above_stop(warmB, b_opts.margin_stop),
-        "warmB: accept gate still passes on every rung");
+  CHECK(gate_verdicts_sound(warmB, b_opts.margin_stop),
+        "warmB: gate verdicts still sound on every rung");
+  CHECK(accepted_count(warmB) > 0, "warmB: the run accepts at least one rung");
 
   // (3) ITERATION REDUCTION with the gate intact — inheritance alone.
   MinimizePlasticOptions a_opts = prod_options(tip);
@@ -220,8 +253,9 @@ int main() {
         "warmA: same rung count as cold");
   CHECK(total_fine_iters(warmA) < cold_iters,
         "ITERATION REDUCTION: warmA total fine iters < cold");
-  CHECK(all_accepted_above_stop(warmA, a_opts.margin_stop),
-        "warmA: accept gate still passes on every rung (safety init-independent)");
+  CHECK(gate_verdicts_sound(warmA, a_opts.margin_stop),
+        "warmA: gate verdicts still sound on every rung (safety init-independent)");
+  CHECK(accepted_count(warmA) > 0, "warmA: the run accepts at least one rung");
 
   // (4) warmAB — the compounded win — and its determinism.
   MinimizePlasticOptions ab_opts = prod_options(tip);
@@ -231,8 +265,9 @@ int main() {
   const int ab_total = total_fine_iters(warmAB) + warmAB.warm_start_coarse_iterations;
   CHECK(ab_total < cold_iters,
         "ITERATION REDUCTION: warmAB total (fine+coarse) iters < cold");
-  CHECK(all_accepted_above_stop(warmAB, ab_opts.margin_stop),
-        "warmAB: accept gate still passes on every rung");
+  CHECK(gate_verdicts_sound(warmAB, ab_opts.margin_stop),
+        "warmAB: gate verdicts still sound on every rung");
+  CHECK(accepted_count(warmAB) > 0, "warmAB: the run accepts at least one rung");
   const MinimizePlasticResult warmAB2 = run(ab_opts);
   CHECK(identical(warmAB, warmAB2), "DETERMINISM: warmAB run twice is identical");
 
@@ -241,6 +276,13 @@ int main() {
       cold_iters, total_fine_iters(warmA), total_fine_iters(warmB),
       warmB.warm_start_coarse_iterations, total_fine_iters(warmAB),
       warmAB.warm_start_coarse_iterations);
+  // Accepted counts alongside the iteration counts: on this un-padded bracket the
+  // belt rejects the severed rungs, and a warm start (which reaches a different
+  // local optimum) severs FEWER of them — reported, not asserted, because which
+  // rungs sever is a property of the optimizer's basin, not a law.
+  std::printf("accepted: cold=%zu  warmA=%zu  warmB=%zu  warmAB=%zu (of %zu rungs)\n",
+              accepted_count(cold), accepted_count(warmA), accepted_count(warmB),
+              accepted_count(warmAB), cold.evaluated.size());
 
   if (g_failures == 0)
     std::printf("PASS: warm_start_integration (%d checks)\n", g_checks);

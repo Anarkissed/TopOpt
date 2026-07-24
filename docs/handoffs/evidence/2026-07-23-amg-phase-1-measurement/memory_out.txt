@@ -1,0 +1,16 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=memory
+
+===== [MEMORY] B1: peak AMG memory <= 2.0x the matfree baseline =====
+  Baseline = what the PRODUCTION geometric matrix-free hierarchy stores
+  (fea_matfree_mgcg_assembled_operator_nonzeros x 12 bytes — the same
+  estimator 131 §6c used for its 88.9 MB figure). Stated BEFORE any AMG
+  number, as the bar requires.
+
+  fixture                     red.DOF   matfree base AMG unsmoothed   AMG smoothed    ratio B1
+  stagnation192x112x128        804864        88.9 MB       210.7 MB       676.9 MB    2.37x FAIL
+  stagnation100x96x96          142848        11.2 MB        35.7 MB        88.6 MB    3.18x FAIL
+  healthy48                    345744        43.8 MB       104.4 MB       316.7 MB    2.38x FAIL
+
+  (ratio and B1 verdict are for the UNSMOOTHED variant — the default
+   here, and the one 131 §6d identified as the matrix-free-native shape.)

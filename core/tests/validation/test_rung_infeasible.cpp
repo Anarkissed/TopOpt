@@ -421,8 +421,18 @@ int main() {
       CHECK(f == 0, "ONE RULE: rung_infeasible reads all-zero on a healthy run");
     CHECK(ra.rung_infeasible.size() == ra.evaluated.size(),
           "rung_infeasible has exactly one entry per evaluated rung");
-    CHECK(ra.report.rejected.empty(),
-          "ONE RULE: nothing is rejected on the healthy run");
+    // Nothing is rejected AS INFEASIBLE — which is what this guard is about. The
+    // ladder's second rung here is vf 0.03, a target so light that the printed
+    // (rho > 0.5) design has no material left between the anchor and the load, so
+    // the CONNECTIVITY BELT (handoff 2026-07-23-gate-honesty-connectivity-rejection)
+    // rejects it at the gate. That is a different verdict from a different check,
+    // and it is a correct one: before the belt this run CERTIFIED that rung.
+    for (const topopt::VariantReport& vr : ra.report.rejected)
+      CHECK(vr.rejection_reason != std::string(topopt::kRungInfeasibleReason),
+            "ONE RULE: no rung of the healthy/transient run is rejected as INFEASIBLE");
+    for (const topopt::VariantReport& vr : ra.report.rejected)
+      std::printf("[one rule] healthy run rejected a rung for: \"%s\"\n",
+                  vr.rejection_reason.c_str());
 
     // BYTE-IDENTITY: armed vs disarmed, same rungs, same iteration counts, and the
     // same designs bit-for-bit.
@@ -537,13 +547,38 @@ int main() {
                 "dead level, so no ratio to its own start can fire\n",
                 rung_start_c[0], rung_start_c[1], rung_start_c[2]);
 
-    // It is REPORTED, not silently dropped — and the report still validates.
-    CHECK(r3.report.rejected.size() == 1,
-          "report: the infeasible rung appears in rejected_variants");
+    // ...AND IT IS NO LONGER CERTIFIED. The detector's blind spot above is real and
+    // unchanged — rung 2 is still not FLAGGED infeasible — but the belt is a check
+    // on the converged GEOMETRY, not on the compliance trajectory, so it does not
+    // care that the rung was born dead rather than dying partway. A design with no
+    // printed material between anchor and load is rejected whatever route it took
+    // there. Before the belt this run ACCEPTED rung 2 and exported it: exactly the
+    // "no stress = safe" certification handoff 131 §evidence describes, arriving by
+    // the one door 131's own detector cannot watch.
+    CHECK(!r3.evaluated[2].accepted,
+          "belt: the born-dead rung is REJECTED even though it is not detected");
+    CHECK(r3.evaluated[2].report.rejection_reason ==
+              std::string(topopt::kLoadPathNotConnectedReason),
+          "belt: ...with the connectivity reason, not the infeasibility one");
+    std::printf("[belt] the undetectable rung 2 is rejected anyway: \"%s\"\n",
+                r3.evaluated[2].report.rejection_reason.c_str());
+
+    // Both are REPORTED, not silently dropped — and the report still validates.
+    CHECK(r3.report.rejected.size() == 2,
+          "report: the infeasible AND the disconnected rung appear in "
+          "rejected_variants");
     for (const topopt::VariantReport& vr : r3.report.rejected) {
       CHECK(!vr.accepted, "report: a rejected line declares accepted=false");
-      CHECK(vr.rejection_reason == std::string(topopt::kRungInfeasibleReason),
-            "report: with the infeasibility reason");
+      CHECK(!vr.rejection_reason.empty(),
+            "report: REJECTION SPEAKS — no rejected line has an empty reason");
+    }
+    if (r3.report.rejected.size() == 2) {
+      CHECK(r3.report.rejected[0].rejection_reason ==
+                std::string(topopt::kRungInfeasibleReason),
+            "report: rung 1 carries the infeasibility reason");
+      CHECK(r3.report.rejected[1].rejection_reason ==
+                std::string(topopt::kLoadPathNotConnectedReason),
+            "report: rung 2 carries the connectivity reason");
     }
     {
       bool valid = true;

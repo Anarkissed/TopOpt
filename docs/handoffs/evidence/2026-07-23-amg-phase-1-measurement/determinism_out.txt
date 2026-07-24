@@ -1,0 +1,11 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=determinism
+
+===== [DETERMINISM] B4: bit-identical twice-run =====
+   solid32                          P=unsmoothed : IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL
+   solid32                          P=smoothed   : IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL
+   occ0.40+bore0.40 100x96x96       P=unsmoothed : IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL
+   occ0.40+bore0.40 100x96x96       P=smoothed   : IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL
+   LATTICE solid_box_48             P=unsmoothed : IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL
+   LATTICE solid_box_48             P=smoothed   : IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL
+   B4 VERDICT: PASS

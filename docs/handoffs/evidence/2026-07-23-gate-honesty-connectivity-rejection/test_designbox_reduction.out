@@ -1,0 +1,3 @@
+[080] part_mass=0.83328 g  no_box_rungs=2  box_rungs=2
+[080] box rung0: achieved(part-rel)=0.6429  mass=0.53568 g  implied_baseline=0.83328 g  savings=35.7%
+designbox_reduction (080): all 6 checks passed

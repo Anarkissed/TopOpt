@@ -284,4 +284,42 @@ int min_feature_violations(const VoxelGrid& grid,
 V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
                   double iso = 0.5);
 
+// ---------------------------------------------------------------------------
+// The CONNECTIVITY BELT (handoff 2026-07-23-gate-honesty-connectivity-rejection).
+//
+// True iff EVERY Load-tagged voxel of `grid` is reachable from SOME Fixture-tagged
+// voxel by a walk over PRINTED voxels of `density` (non-Empty tag AND density >
+// iso). False means the design carries no path from the anchor to the load — the
+// force has nowhere to go.
+//
+// WHY THIS EXISTS. A severed design has NO STRESS, and no stress reads as an
+// INFINITE margin: the motivating 96³ run measured margin 680.9 on a rung whose
+// structure carried nothing, and the acceptance gate certified and exported it as
+// variant_038.stl (handoff 131 §evidence). The rung-infeasibility fast-fail
+// (simp.hpp rung_infeasible) wins that race whenever the severance is SUSTAINED —
+// it needs 5 frozen iterations at >= 100x the starting compliance to fire — but a
+// design that breaks LATE and then converges never shows that signature. This is
+// the belt for that window: a direct, read-only statement about the geometry, so
+// "no stress" can never again be read as "safe".
+//
+// ADJACENCY is 26-connectivity (any two voxels differing by at most 1 on each
+// axis), which is exactly the FE model's own load transmission: two hex8 elements
+// that touch at a single CORNER still share that node and still pass force through
+// it. Restricting to face adjacency would reject designs the very FEA that
+// produced the margin considers connected — a false alarm against our own physics.
+// The belt's job is to catch TOTAL severance, not to grade how good a connection
+// is (min-feature and the V3 suite already speak to thinness).
+//
+// VACUOUSLY TRUE when the grid has no Load voxels or no Fixture voxels: there is
+// no load path to certify (a self-weight run tags no Load faces at all), and this
+// function reports connectivity — it never invents a verdict it cannot measure.
+// A Load voxel that is not itself printed is unreachable by construction, hence
+// false: the load face has been carved away.
+//
+// Deterministic (a reachable-set membership test — no traversal order affects the
+// answer) and READ-ONLY on `density`. O(voxel_count) — free next to a stress solve.
+// Throws std::invalid_argument if density.size() != grid.voxel_count().
+bool load_path_connected(const VoxelGrid& grid,
+                         const std::vector<double>& density, double iso = 0.5);
+
 }  // namespace topopt
