@@ -954,4 +954,29 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     tests/validation/test_loadcase_small_face.cpp)
   target_link_libraries(test_loadcase_small_face PRIVATE topopt)
   add_test(NAME loadcase_small_face COMMAND test_loadcase_small_face)
+
+  # Mesh-optimize path (handoff 2026-07-24-mesh-optimize-path): a MESH part
+  # (STL/3MF) runs the SAME §5 pipeline run_job drives for a STEP part. Three
+  # claims, all needing OCCT for the B-rep ground truth:
+  #   A. import_part_file(<step>) is byte-identical to import_step_file(<step>)
+  #      — dispatching by format did not perturb the STEP front door.
+  #   B. STEP-vs-mesh equivalence THROUGH voxelization + tagging: the demo
+  #      L-bracket exported to STL and re-imported via the mesh path yields the
+  #      identical voxel grid + solid set + fixture-tag set as its own B-rep,
+  #      across resolutions (extends segment_vs_step past face structure).
+  #   C. run_job() end-to-end on the committed small STL fixture
+  #      (tests/fixtures/mesh/plate_bore.stl) → finalized report + accepted
+  #      variants + fields, deterministic twice-run.
+  # Drives run_job (OCCT+Eigen) + the STL fixture; the demo/materials/rules and
+  # the build dir (for run outputs + the temporary STL export) are injected.
+  add_executable(test_mesh_job tests/validation/test_mesh_job.cpp)
+  target_link_libraries(test_mesh_job PRIVATE topopt)
+  target_compile_definitions(test_mesh_job PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    SEGMENT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME mesh_job COMMAND test_mesh_job)
 endif()

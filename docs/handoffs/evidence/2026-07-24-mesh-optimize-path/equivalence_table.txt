@@ -1,0 +1,8 @@
+MESH-VS-STEP l-bracket equivalence (STEP export -> STL -> mesh path):
+   res | grid           |    solid | solid-diff | tag(step) tag(mesh)   jacc
+    16 | 16x11x16      |      656 |          0 |       12       12  1.000
+    24 | 24x16x24      |     2142 |          0 |       18       18  1.000
+    32 | 32x22x32      |     4992 |          0 |       32       32  1.000
+    48 | 48x32x48      |    17112 |          0 |       48       48  1.000
+    64 | 64x43x64      |    45648 |          0 |      153      153  1.000
+mesh job: all 48 checks passed

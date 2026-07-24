@@ -1,0 +1,11 @@
+STEP byte-identity: demo l-bracket run BEFORE vs AFTER the format dispatch.
+(baseline captured from the pre-change topopt-cli; after from the new binary.)
+
+report.json: IDENTICAL
+variant_070.stl: IDENTICAL
+variant_050.stl: IDENTICAL
+variant_030.stl: IDENTICAL
+fields.bin: IDENTICAL
+
+End-to-end STEP byte-identity is additionally locked in-tree by the
+cli_demo + production_parity ctests (both green, unchanged).
