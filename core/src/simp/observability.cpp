@@ -92,7 +92,7 @@ long long wall_clock_ms() {
 
 const char kIterationCsvHeader[] =
     "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta,"
-    "hier_built,mg_cycles_attempted,infeasible,recycle_dim";
+    "hier_built,mg_cycles_attempted,infeasible,recycle_dim,active_fraction";
 
 IterationCsvWriter::IterationCsvWriter(const std::string& path) : path_(path) {
   out_.open(path, std::ios::binary | std::ios::trunc);
@@ -123,14 +123,18 @@ void IterationCsvWriter::append_at(std::size_t rung,
   // `infeasible` (handoff 131) is the rung-infeasibility verdict at this iteration:
   // it reads 1 on AT MOST the rung's LAST row, and that row is where the rung was
   // ended as "load path lost" (0 on every row of every healthy rung).
-  char buf[260];
+  // `active_fraction` (active-domain phase 1) is the fraction of the analysis
+  // grid's solid elements this iteration's trajectory solve actually assembled:
+  // exactly 1.000000 when the active domain is off, has latched off, or the solve
+  // fell back to the full domain — so the column is comparable across every run.
+  char buf[280];
   std::snprintf(buf, sizeof(buf),
-                "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d,%d\n",
+                "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d,%d,%.6f\n",
                 rung, obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
                 obs.plateau ? 1 : 0, obs.cg_iterations,
                 obs.cg_used_multigrid ? 1 : 0, obs.beta,
                 obs.cg_hier_built ? 1 : 0, obs.cg_mg_cycles_attempted,
-                obs.infeasible ? 1 : 0, obs.cg_recycle_dim);
+                obs.infeasible ? 1 : 0, obs.cg_recycle_dim, obs.active_fraction);
   out_ << buf;
   out_.flush();
   if (!out_)
@@ -371,6 +375,32 @@ std::string run_info_json(const RunInfo& info) {
     }
     ri += "]";
     num("rung_infeasible", ri);
+  }
+  // active-domain phase 1 — the requested band (config, up-front) and the
+  // per-rung latch outcome (empty until the post-run finalize).
+  num("active_domain_band", fmt_i(info.active_domain_band));
+  {
+    std::string al = "[";
+    for (std::size_t i = 0; i < info.active_domain_latched.size(); ++i) {
+      if (i) al += ", ";
+      al += info.active_domain_latched[i] ? "true" : "false";
+    }
+    al += "]";
+    num("active_domain_latched", al);
+    std::string ar = "[";
+    for (std::size_t i = 0; i < info.active_domain_latch_reason.size(); ++i) {
+      if (i) ar += ", ";
+      ar += "\"" + json_escape(info.active_domain_latch_reason[i]) + "\"";
+    }
+    ar += "]";
+    num("active_domain_latch_reason", ar);
+    std::string af = "[";
+    for (std::size_t i = 0; i < info.active_domain_fraction_mean.size(); ++i) {
+      if (i) af += ", ";
+      af += fmt(info.active_domain_fraction_mean[i]);
+    }
+    af += "]";
+    num("active_domain_fraction_mean", af);
   }
   num("min_feature_mm", fmt(info.min_feature_mm));
   num("margin_stop", fmt(info.margin_stop));

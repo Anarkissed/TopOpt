@@ -101,6 +101,9 @@ int main() {
       b.beta = 8.0;  // handoff 123: a projecting iteration carries its stage β
       b.infeasible = true;  // handoff 131: the rung ends on this row
       b.cg_recycle_dim = 16;  // handoff 133: a recycled Jacobi solve, k=16
+      // active-domain phase 1: row a leaves active_fraction at its default 1.0
+      // (the full domain ran); row b is a restricted solve at 18.8% active.
+      b.active_fraction = 0.188;
       w.append_at(0, b, 1050);
       check(w.rows() == 2, "CSV writer counted 2 rows");
     }
@@ -114,14 +117,15 @@ int main() {
     // where the armed Jacobi-only posture means recycle_dim is 0 BY DESIGN.
     const std::string expected =
         "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,"
-        "beta,hier_built,mg_cycles_attempted,infeasible,recycle_dim\n"
-        "0,1,1000,12.5,0.680000,0,14,1,0,1,14,0,0\n"
-        "0,2,1050,9.25,0.680100,1,4390,0,8,1,300,1,16\n";
+        "beta,hier_built,mg_cycles_attempted,infeasible,recycle_dim,active_fraction\n"
+        "0,1,1000,12.5,0.680000,0,14,1,0,1,14,0,0,1.000000\n"
+        "0,2,1050,9.25,0.680100,1,4390,0,8,1,300,1,16,0.188000\n";
     check(body == expected, "CSV golden: header + rows are byte-exact");
     // Schema string is the documented one.
     check(std::string(kIterationCsvHeader) ==
               "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
-              "cg_multigrid,beta,hier_built,mg_cycles_attempted,infeasible,recycle_dim",
+              "cg_multigrid,beta,hier_built,mg_cycles_attempted,infeasible,"
+              "recycle_dim,active_fraction",
           "CSV header constant matches documented schema");
   }
 

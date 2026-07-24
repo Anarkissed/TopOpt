@@ -357,10 +357,14 @@ int mf_thread_count() {
 std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
                                    const std::vector<double>* elem_youngs,
                                    const char* who,
-                                   std::vector<int>* color_offsets) {
+                                   std::vector<int>* color_offsets,
+                                   const std::vector<char>* active_mask) {
   if (elem_youngs != nullptr && elem_youngs->size() != grid.voxel_count())
     throw std::invalid_argument(
         std::string(who) + ": per-voxel modulus vector size != voxel_count");
+  if (active_mask != nullptr && active_mask->size() != grid.voxel_count())
+    throw std::invalid_argument(
+        std::string(who) + ": active-domain mask size != voxel_count");
 
   // Bucket by colour in grid-scan order (validating graded moduli as we go), then
   // concatenate colour 0..7. Two passes would re-scan; one pass into 8 buckets
@@ -370,6 +374,12 @@ std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         if (!grid.solid(i, j, k)) continue;
+        // ACTIVE DOMAIN: an out-of-band solid voxel contributes no element. The
+        // skip happens BEFORE the modulus validation, so a masked-out voxel's
+        // modulus is never read — the mask, not the field, decides what exists.
+        if (active_mask != nullptr &&
+            (*active_mask)[grid.index(i, j, k)] == 0)
+          continue;
         MfElem el;
         if (elem_youngs != nullptr) {
           el.factor = (*elem_youngs)[grid.index(i, j, k)];
@@ -492,7 +502,8 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
                                 const std::vector<DirichletBC>& bcs,
                                 const std::vector<NodalLoad>& loads,
                                 const std::vector<double>* elem_youngs,
-                                const char* who, CgInfo* info) {
+                                const char* who, CgInfo* info,
+                                const std::vector<char>* active_mask) {
   const int num_nodes = fea_node_count(grid);
   const int ndof = 3 * num_nodes;
 
@@ -500,7 +511,7 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
   m.ndof = ndof;
   m.Ke = hex8_stiffness(elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson,
                         grid.spacing);
-  m.elems = mf_build_elems(grid, elem_youngs, who, &m.color_offsets);
+  m.elems = mf_build_elems(grid, elem_youngs, who, &m.color_offsets, active_mask);
   m.xfull.assign(static_cast<std::size_t>(ndof), 0.0);
   m.yfull.assign(static_cast<std::size_t>(ndof), 0.0);
 
@@ -747,10 +758,11 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
                                   double tolerance, int max_iterations,
                                   CgInfo* info,
                                   const std::vector<double>* elem_youngs,
-                                  const FeaSolution* initial_guess) {
+                                  const FeaSolution* initial_guess,
+                                  const std::vector<char>* active_mask) {
   MatfreeReduced m = fea_detail::mf_build_reduced(
       grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
-      "fea_solve_cg_matfree", info);
+      "fea_solve_cg_matfree", info, active_mask);
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
@@ -852,7 +864,8 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                  double tolerance, int max_iterations,
                                  CgInfo* info) {
   return solve_cg_matfree_impl(grid, youngs_modulus, poisson, bcs, loads,
-                               tolerance, max_iterations, info, nullptr, nullptr);
+                               tolerance, max_iterations, info, nullptr, nullptr,
+                               nullptr);
 }
 
 FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
@@ -861,10 +874,11 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
                                  const std::vector<DirichletBC>& bcs,
                                  const std::vector<NodalLoad>& loads,
                                  double tolerance, int max_iterations,
-                                 CgInfo* info, const FeaSolution* initial_guess) {
+                                 CgInfo* info, const FeaSolution* initial_guess,
+                                 const std::vector<char>* active_mask) {
   return solve_cg_matfree_impl(grid, 1.0, poisson, bcs, loads, tolerance,
                                max_iterations, info, &youngs_per_voxel,
-                               initial_guess);
+                               initial_guess, active_mask);
 }
 
 }  // namespace topopt

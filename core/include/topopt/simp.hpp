@@ -3,6 +3,7 @@
 #include <atomic>
 #include <functional>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include "topopt/fea.hpp"
@@ -131,7 +132,92 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                double tolerance = 1e-8, int max_iterations = 0,
                                const FeaSolution* initial_guess = nullptr,
                                PenalizedSolver* solver = nullptr,
-                               SolverKind solver_kind = SolverKind::JacobiCG);
+                               SolverKind solver_kind = SolverKind::JacobiCG,
+                               const std::vector<char>* active_mask = nullptr);
+
+// ---------------------------------------------------------------------------
+// ACTIVE DOMAIN (active-domain phase 1) — the restricted-analysis mask.
+//
+// WHAT IT IS. On a design-box run the analysis grid is 10-60x larger than the
+// part, and the converged design is a thin skeleton inside it: most elements
+// carry only the rho_min floor and contribute nothing but cost. This derives a
+// per-voxel ACTIVE set — the material, plus a growth band around it — that the
+// FEA solve is restricted to (fea_solve_mgcg_matfree's `active_mask`). Handoff
+// 134 (active-domain phase 0) measured the ceiling, the error and the mechanics;
+// this is the shipped rule, unchanged from its §3a:
+//
+//   active(e) = solid(e) AND [ rho_e > 1.5 * density_min          (core)
+//                              OR e is tagged Load or Fixture     (BC pin)
+//                              OR cheb_dist(e, core) <= band ]    (growth band)
+//
+// PURE FUNCTION, FIXED TRAVERSAL. It depends only on (grid tags, density, band):
+// no iteration counter, no history, no RNG, no floating-point reduction. The
+// dilation is a separable Chebyshev max-filter run x -> y -> z in fixed order
+// over three integer passes, so re-derivation from the same field is
+// BIT-IDENTICAL (test_active_domain pins this). Chebyshev is the CONSERVATIVE
+// choice: a cube of half-width k contains the Euclidean ball of radius k, so the
+// band is never narrower than a distance-k band would be.
+//
+// THE BC PIN. Load/Fixture voxels are unconditionally active so the M3.1
+// void-load gate can never be handed a load on a stiffness-free DOF. In practice
+// they are part material at rho = 1 and already in the core set; the pin is a
+// guard, not a workaround.
+//
+// THE GROWTH INVARIANT — "the band must grow before the design can". Out-of-band
+// elements get dc/drho = 0, so the updater drives them to the density floor and
+// they can never grow. The mask is sound only if the band derived at iteration i
+// is a SUPERSET of every voxel that iteration's step would raise above the active
+// threshold. It holds because the density filter has radius rmin, so the physical
+// field can only become non-floor within ~rmin of existing non-floor material —
+// which is why the sizing rule is `band >= ceil(rmin) + 1` (active_domain_auto_band
+// below) and why the band must be re-derived EVERY iteration (cadence 1: the
+// invariant is stated per iteration). Handoff 134 §3b measured ZERO escapes over
+// 400 iterations of ten configurations; test_active_domain asserts it directly.
+//
+// `band <= 0` returns an all-active mask over the solid voxels (the OFF path).
+// Throws std::invalid_argument if `density.size() != grid.voxel_count()`.
+std::vector<char> active_domain_mask(const VoxelGrid& grid,
+                                     const std::vector<double>& density,
+                                     double density_min, int band);
+
+// The AUTO band width for a filter radius in VOXELS (SimpOptions::filter_radius,
+// which the production driver derives from min_feature_mm / spacing via
+// physical_filter_radius): `ceil(filter_radius) + 1`, floored at 1.
+//
+// This is the width the growth invariant's ARGUMENT licenses, not merely the
+// narrowest width handoff 134's measurement survived (k=2 also measured clean on
+// its fixtures, but has no argument behind it and is 3x worse on every error
+// metric at production dilution — 134 §2e). Resolution-independent by
+// construction: the filter radius in voxels is already the resolution-independent
+// length scale (diagnosis 060 / physical_filter_radius). Under the production
+// config (min_feature_mm = 2.5) it is 4 on a 1.0 mm grid and 3 on a 2.5 mm grid,
+// where the voxel radius floors at 1.5.
+int active_domain_auto_band(double filter_radius);
+
+// The per-run active-domain LATCH (handoff 134 §6.5, mirroring 128's mg_mode
+// latch). If the measured active element fraction stays AT OR ABOVE
+// kActiveDomainLatchFraction for kActiveDomainLatchWindow CONSECUTIVE
+// iterations, the mask is switched off for the rest of the run and the reason is
+// recorded in SimpOptimizeResult.
+//
+// WHY 0.85 AND NOT BREAK-EVEN. Handoff 134 §4a measured the realised per-solve
+// speedup at ~0.65 / f, so a band covering f > 0.65 of the domain is already a
+// net LOSS. The latch is deliberately set ABOVE that: it is a DEGENERACY
+// detector ("this band covers the domain and buys nothing" — the snug-part and
+// gray-cloud cases of 134 §1a/§1c), not a performance tuner. Latching at
+// break-even would flip the posture mid-run on ordinary trajectory noise, and a
+// run whose solver configuration changes under it is far harder to read than a
+// run that is merely slower than hoped. The window (5) matches 131's
+// infeasibility window: long enough that the spread-out early iterations of a
+// healthy dilute run (134 §1b measures 40-70% active for the first ~25
+// iterations) cannot trip it, short enough that a genuinely degenerate run pays
+// the useless mask for only a handful of solves.
+//
+// The latch is ONE-WAY within a run: once off it stays off, so a run reports one
+// posture change at most and the CSV's active_fraction column reads exactly 1.0
+// from that iteration on.
+constexpr double kActiveDomainLatchFraction = 0.85;
+constexpr int kActiveDomainLatchWindow = 5;
 
 // ---------------------------------------------------------------------------
 // Density filter + Optimality-Criteria update (ROADMAP M3.3).
@@ -522,6 +608,15 @@ struct SimpIterationObservation {
   // the detector has enough samples. The iteration where this first turns true is
   // the iteration the run terminates on (plateau stop).
   bool plateau = false;
+  // ACTIVE DOMAIN (active-domain phase 1) — the fraction of the analysis grid's
+  // SOLID elements this iteration's trajectory solve actually assembled. 1.0
+  // when the feature is off, when it has latched off, and on the final solve —
+  // so the column is meaningful on EVERY run and "why was this run slow?" is a
+  // read rather than a forensic exercise (117's whole point). With the band on
+  // it is the number the win is proportional to: handoff 134 measured the
+  // realised per-solve speedup at ~0.65 / active_fraction, the 0.65 being the
+  // 1.4-2.0x CG-iteration penalty the restricted system pays.
+  double active_fraction = 1.0;
   // Handoff 123 (117 follow-up) — the Heaviside-projection continuation sharpness
   // β ACTIVE at this iteration, or 0 when this iteration is NOT projecting. It is
   // the `cur_beta` the projected updater used this step: the OC `projection`
@@ -582,6 +677,50 @@ struct SimpOptions {
   // an expensive cold Jacobi-CG grind. Must be > cg_tolerance to have any effect;
   // a value <= cg_tolerance (or 0) leaves the tight tolerance everywhere.
   double cg_tolerance_loose = 0.0;
+
+  // --- ACTIVE DOMAIN (active-domain phase 1) -------------------------------
+  // Restrict every TRAJECTORY penalized solve to the active set (the material
+  // plus a `band`-voxel growth band — see active_domain_mask above).
+  //
+  //   0  (the DEFAULT) = OFF. Not one element is skipped, no mask is derived,
+  //      and the run is BYTE-FOR-BYTE what it was before this feature — THE ONE
+  //      RULE, the same opt-in discipline as min_feature_mm == 0,
+  //      cg_tolerance_loose == 0 and warm_start_inherit == false.
+  //   > 0 = the band half-width k in voxels.
+  //   < 0 = AUTO: resolved once per run to active_domain_auto_band(filter_radius)
+  //      — `ceil(rmin) + 1`, the width the growth invariant's argument licenses.
+  //      Resolving it here (not in the driver) means BOTH overloads and BOTH
+  //      front-ends get the same rule from the same line, keyed to the filter
+  //      radius the rung actually runs with.
+  //
+  // IT IS AN APPROXIMATION, NOT AN EXACT ACCELERATOR, and is documented as one:
+  // the eliminated elements carry a real rho_min^p ~ 1e-9 * E0 stiffness, so the
+  // restricted solve answers a slightly different question. Handoff 134 measured
+  // the resulting design motion at 3-4 orders of magnitude INSIDE the calibrated
+  // mean|drho| <= 0.03 bar that blocked handoff 130's flip; this handoff's gate
+  // re-measures it under MMA at production dilution and full rung length.
+  //
+  // TRAJECTORY-ONLY, by the same discipline as cg_tolerance_loose (128) and warm
+  // starts (110): the FINAL / certified compliance solve always runs on the FULL
+  // domain, so the certificate a run ships is never computed on a restricted
+  // system. The mask changes the path, not the certificate.
+  //
+  // MATRIX-FREE ONLY (handoff 134 §6 scope): a non-zero band with any solver
+  // other than MultigridCG_Matfree is REJECTED (simp_optimize throws) rather than
+  // silently ignored — a feature that quietly does nothing is the failure mode
+  // this codebase keeps re-learning (125 §0). The STRESS path
+  // (simp_optimize_stress) rejects it for the same reason: it is out of scope,
+  // and out of scope must mean "refused", not "quietly ignored".
+  //
+  // THE LATCH. Per RUN, if the measured active fraction stays above
+  // kActiveDomainLatchFraction for kActiveDomainLatchWindow consecutive
+  // iterations, the mask is DISABLED for the rest of the run and the reason is
+  // recorded (SimpOptimizeResult::active_domain_latched). At low dilution the
+  // band covers the domain and buys nothing; it must SAY so rather than silently
+  // cost. A restricted solve that throws (a band that severs the load path)
+  // latches the same way and re-solves full-domain — the throw is never
+  // propagated.
+  int active_domain_band = 0;
 
   // Objective-plateau termination for the MMA path (handoff 086-mma-plateau).
   //
@@ -830,6 +969,26 @@ struct SimpOptimizeResult {
   // `infeasible_iteration` is that 1-based iteration (0 when not infeasible).
   bool infeasible = false;
   int infeasible_iteration = 0;
+  // --- ACTIVE DOMAIN outcome (active-domain phase 1) -----------------------
+  // `active_domain_band` is the band width this run ACTUALLY ran with (0 = the
+  // feature was off; a negative request has already been resolved to its auto
+  // value here, so this is what happened, not what was asked for).
+  // `active_domain_latched` is true iff the mask was disabled part-way through
+  // the run, in which case `active_domain_latch_reason` says why and
+  // `active_domain_latch_iteration` is the 1-based iteration it happened at. The
+  // reason is one of:
+  //   "active fraction >= <f> for <n> consecutive iterations (band buys nothing)"
+  //   "restricted solve failed: <the exception's message>"
+  // A latched run is CORRECT — every solve after the latch is the full domain —
+  // it is simply not accelerated, and it says so instead of silently costing.
+  // `active_fraction_mean` is the iteration mean of the per-iteration active
+  // fraction (1.0 on an off/latched run): the f_bar handoff 134 §4b projects the
+  // end-to-end win with, and the honest cost input for the next reader.
+  int active_domain_band = 0;
+  bool active_domain_latched = false;
+  int active_domain_latch_iteration = 0;
+  std::string active_domain_latch_reason;
+  double active_fraction_mean = 1.0;
   std::vector<SimpIteration> history;    // per-iteration trajectory (size iterations)
 };
 

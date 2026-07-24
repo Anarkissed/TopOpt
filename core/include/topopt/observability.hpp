@@ -252,6 +252,23 @@ struct RunInfo {
   double infeasible_flat_tol = 0.0;
   int infeasible_window = 0;
   std::vector<int> rung_infeasible;
+  // ACTIVE DOMAIN (active-domain phase 1). `active_domain_band` is the REQUESTED
+  // band (config, written up-front): 0 = off, > 0 = the explicit half-width in
+  // voxels, < 0 = auto (resolved per rung from the filter radius). The two
+  // vectors are the OUTCOME, filled AFTER the run from MinimizePlasticResult —
+  // same finalize-only discipline as cg_multigrid and rung_infeasible, so an
+  // unfinished run asserts NOTHING about what the band did. One entry per
+  // EVALUATED rung, in ladder order: `active_domain_latched[i]` is 1 iff rung i
+  // switched the mask off part-way (the band covered the domain, or a restricted
+  // solve failed and the rung fell back to the full domain), and
+  // `active_domain_latch_reason[i]` says which — empty string when that rung ran
+  // its whole length under the band. `active_domain_fraction_mean[i]` is that
+  // rung's iteration-mean active fraction (1.0 when off or latched at iteration
+  // 1), i.e. the f_bar the realised speedup ~ 0.65 / f_bar is read off.
+  int active_domain_band = 0;
+  std::vector<int> active_domain_latched;
+  std::vector<std::string> active_domain_latch_reason;
+  std::vector<double> active_domain_fraction_mean;
   double min_feature_mm = 0.0;
   double margin_stop = 0.0;
   double infill_percent = 100.0;

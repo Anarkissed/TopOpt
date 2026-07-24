@@ -365,13 +365,28 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                    const std::vector<NodalLoad>& loads,
                                    double tolerance = 1e-8,
                                    int max_iterations = 0, CgInfo* info = nullptr);
+//
+// ACTIVE DOMAIN (active-domain phase 1) — the graded overload takes an OPTIONAL
+// `active_mask`: a grid-indexed per-voxel flag (size grid.voxel_count()) where a
+// 0 on a solid voxel REMOVES that element from the system entirely. nullptr (the
+// default) is the pre-feature path, byte-for-byte. The mask is not a boundary
+// condition and needs none: the existing M3.1 void-DOF gate drops every DOF no
+// surviving element touches, so the band boundary is a traction-free free
+// surface and the solve is EXACT on the system that survives. It is, however, a
+// DIFFERENT system from the full domain — the eliminated elements carry a real
+// (if tiny) rho_min^p stiffness — so this is an APPROXIMATION of the full-domain
+// answer with a measured design-motion budget, not a byte-identical accelerator.
+// See docs/handoffs/2026-07-23-active-domain-phase-1.md; the mask itself is
+// derived by the SIMP layer (active_domain_mask, simp.hpp), which owns the
+// density field it is a pure function of.
 FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    const std::vector<double>& youngs_per_voxel,
                                    double poisson,
                                    const std::vector<DirichletBC>& bcs,
                                    const std::vector<NodalLoad>& loads,
                                    double tolerance = 1e-8,
-                                   int max_iterations = 0, CgInfo* info = nullptr);
+                                   int max_iterations = 0, CgInfo* info = nullptr,
+                                   const std::vector<char>* active_mask = nullptr);
 
 // Memory evidence (diagnostic): total nonzeros stored across the ASSEMBLED
 // operators of the multigrid hierarchy each solver builds for (grid, E, nu, bcs,
@@ -462,6 +477,8 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                  const std::vector<NodalLoad>& loads,
                                  double tolerance = 1e-8, int max_iterations = 0,
                                  CgInfo* info = nullptr);
+// The graded overload also takes the optional active-domain `active_mask` (same
+// contract as fea_solve_mgcg_matfree above; nullptr = the pre-feature path).
 FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
                                  const std::vector<double>& youngs_per_voxel,
                                  double poisson,
@@ -469,7 +486,8 @@ FeaSolution fea_solve_cg_matfree(const VoxelGrid& grid,
                                  const std::vector<NodalLoad>& loads,
                                  double tolerance = 1e-8, int max_iterations = 0,
                                  CgInfo* info = nullptr,
-                                 const FeaSolution* initial_guess = nullptr);
+                                 const FeaSolution* initial_guess = nullptr,
+                                 const std::vector<char>* active_mask = nullptr);
 
 // Number of scalar (double) values the matrix-free operator stores to represent
 // the global stiffness K: exactly the single 24x24 reference element stiffness
