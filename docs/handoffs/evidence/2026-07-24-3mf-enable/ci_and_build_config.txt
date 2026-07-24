@@ -1,0 +1,135 @@
+==================================================================
+BUILD / CI CONFIG — lib3mf is a locked, REQUIRED dependency
+==================================================================
+
+--- core/vcpkg.json (lib3mf is in the manifest that CI installs) ---
+{
+  "name": "topopt-core",
+  "version": "0.1.0",
+  "dependencies": [
+    "eigen3",
+    "lib3mf",
+    "opencascade"
+  ],
+  "builtin-baseline": "cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3"
+}
+
+--- .github/workflows/ci.yml : the Configure step names lib3mf and
+    fails the build unless it is found (-DTOPOPT_REQUIRE_DEPS=ON) ---
+      # Pinned to release 2026.06.24 (commit matches builtin-baseline in
+      # core/vcpkg.json). OCCT >= 7.8 is not available from apt on
+      # ubuntu-latest and lib3mf is not packaged at all, hence vcpkg.
+      - name: Check out vcpkg (2026.06.24)
+        run: |
+          git clone --depth 1 --branch 2026.06.24 https://github.com/microsoft/vcpkg.git "$VCPKG_ROOT"
+          "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-x64-linux-dynamic-${{ hashFiles('core/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-x64-linux-dynamic-
+
+      # x64-linux-dynamic: OCCT is LGPL 2.1 and must stay dynamically
+      # linked (ARCHITECTURE.md §4/§10).
+      - name: Configure (vcpkg installs OCCT, Eigen, lib3mf)
+        run: >
+          cmake -S core -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-linux-dynamic
+          -DTOPOPT_REQUIRE_DEPS=ON
+
+--- core/CMakeLists.txt : REQUIRE_DEPS makes lib3mf REQUIRED, and the
+    3MF translation unit + TOPOPT_HAVE_3MF are compiled when it is found ---
+option(TOPOPT_REQUIRE_DEPS "Fail configure unless OCCT, Eigen and lib3mf are found" OFF)
+if(TOPOPT_REQUIRE_DEPS)
+  find_package(OpenCASCADE CONFIG REQUIRED)
+  find_package(Eigen3 CONFIG REQUIRED)
+  find_package(lib3mf CONFIG REQUIRED)
+else()
+    ...
+# 3MF export/import (M6.1) requires lib3mf. Compile it into the library and link
+# lib3mf only when it is present. lib3mf is BSD (ARCHITECTURE §10) and its
+# imported target is SHARED (dynamic). CI has lib3mf (DEPS=ON), so the 3MF
+# translation unit and its round-trip test always build in the pipeline. STL
+# export is pure C++/std and already lives in the always-built src/io/stl.cpp.
+if(lib3mf_FOUND)
+  target_sources(topopt PRIVATE src/io/threemf.cpp)
+  target_link_libraries(topopt PRIVATE lib3mf::lib3mf)
+  # Lets the M6.2 job runner (src/cli/run_job.cpp) call the 3MF writer; without
+  # lib3mf it rejects mesh_format "3mf" with a diagnostic instead.
+  target_compile_definitions(topopt PRIVATE TOPOPT_HAVE_3MF)
+endif()
+
+==================================================================
+THIS CHANGE — git diff of the build config (CMakeLists) vs main
+==================================================================
+diff --git a/core/CMakeLists.txt b/core/CMakeLists.txt
+index 2edcf23..e9fc16e 100644
+--- a/core/CMakeLists.txt
++++ b/core/CMakeLists.txt
+@@ -979,4 +979,26 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
+     SEGMENT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+   add_test(NAME mesh_job COMMAND test_mesh_job)
++
++  # 3MF IMPORT enabled and proven end to end (handoff 2026-07-24-3mf-enable).
++  # The 3MF writer/reader round-trip (export_3mf) and 3MF *output* from a STEP
++  # part (cli_demo) were exercised; the IMPORT half — a real .3mf part read,
++  # segmented, and optimized — never was, and nothing proved an STL and a 3MF of
++  # the same part agree. This test does both on the committed 3MF encoding of the
++  # plate_bore part (tests/fixtures/mesh/plate_bore.3mf): STL-vs-3MF import
++  # equivalence (identical segmentation + identical solid/tag voxel sets at every
++  # solve resolution; coordinates within the 3MF text precision) and a 3MF run_job
++  # that is byte-identical to the STL run (identical grid -> identical everything
++  # downstream). It reads a real 3MF package, so it is additionally lib3mf-gated
++  # inside this OCCT+Eigen block; CI has all three (DEPS=ON), so it always runs.
++  if(lib3mf_FOUND)
++    add_executable(test_3mf_import tests/validation/test_3mf_import.cpp)
++    target_link_libraries(test_3mf_import PRIVATE topopt)
++    target_compile_definitions(test_3mf_import PRIVATE
++      MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
++      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
++      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
++      CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
++    add_test(NAME threemf_import COMMAND test_3mf_import)
++  endif()
+ endif()
+
+==================================================================
+New committed files vs main
+==================================================================
+ M core/CMakeLists.txt
+?? core/tests/fixtures/mesh/plate_bore.3mf
+?? core/tests/validation/test_3mf_import.cpp
+?? docs/handoffs/evidence/2026-07-24-3mf-enable/
+
+==================================================================
+Header contract corrected by executing the code (threemf.hpp)
+==================================================================
+diff --git a/core/include/topopt/threemf.hpp b/core/include/topopt/threemf.hpp
+index dd49f15..7bd17e5 100644
+--- a/core/include/topopt/threemf.hpp
++++ b/core/include/topopt/threemf.hpp
+@@ -17,11 +17,14 @@ class ThreeMfError : public std::runtime_error {
+ 
+ // Write `mesh` to a 3MF file via lib3mf (ROADMAP M6.1, primary export format;
+ // ARCHITECTURE §4 "3MF primary (lib3mf)"). The mesh becomes a single mesh
+-// object referenced by one build item with the identity transform. 3MF stores
+-// coordinates as 32-bit floats, so a re-import (read_3mf_file) reproduces the
+-// geometry to float precision; vertex order and triangle winding are preserved,
+-// so a watertight mesh round-trips watertight. Throws ThreeMfError on any lib3mf
+-// failure (e.g. the output path cannot be written).
++// object referenced by one build item with the identity transform. lib3mf
++// serializes vertex coordinates as decimal *text* in the package XML at ~6
++// significant digits (measured, handoff 2026-07-24-3mf-enable), so a re-import
++// (read_3mf_file) reproduces the geometry to that precision — for parts sized in
++// mm this is <=1e-6 mm, a hair coarser than the 32-bit floats 3MF nominally
++// stores, and far below one voxel. Vertex order and triangle winding are
++// preserved, so a watertight mesh round-trips watertight. Throws ThreeMfError on
++// any lib3mf failure (e.g. the output path cannot be written).
+ void write_3mf_file(const std::string& path, const TriangleMesh& mesh);
+ 
+ // Read the first mesh object of a 3MF file via lib3mf into a TriangleMesh

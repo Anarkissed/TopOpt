@@ -1,0 +1,23 @@
+$ ./core/build/test_3mf_import      # lib3mf 2.3.2, OCCT + Eigen present
+
+STL-vs-3MF plate_bore equivalence (max vertex diff 9.537e-07 mm, vol rel diff 1.955e-08):
+   res | grid         |    solid | solid-diff | per-face tags identical
+    16 | 16x11x 3    |      486 |          0 | yes
+    24 | 24x16x 4    |     1408 |          0 | yes
+    32 | 32x22x 6    |     3110 |          0 | yes
+    48 | 48x32x 8    |    11392 |          0 | yes
+    64 | 64x43x11    |    28072 |          0 | yes
+3MF end-to-end: 7 pseudo-faces, 2/2 variants accepted, report 2197 bytes byte-identical to the STL run
+3MF import (enable): all 47 checks passed
+
+Reading of the table:
+  - The 3MF file stores vertices as ~6-significant-digit decimal text, so its
+    coordinates differ from the STL's float32 by at most 9.537e-7 mm and the
+    enclosed volume by 1.955e-8 (relative). Both are far below one voxel.
+  - solid-diff = 0 at every resolution: the exact set of occupied voxels is
+    IDENTICAL STL vs 3MF -- the optimizer solves on the same grid.
+  - "per-face tags identical" = every one of the 7 manufactured pseudo-faces
+    tags the identical voxel set from either file.
+  - The triangle connectivity and the per-triangle pseudo-face id are bit-for-bit
+    identical (asserted in section A), because the two files carry the same mesh
+    topology; only the vertex coordinates carry the 3MF text rounding.
