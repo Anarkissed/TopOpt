@@ -1,0 +1,24 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=ultradilute
+
+===== [ULTRA-DILUTE] the shared ACTIVE-DOMAIN fixture (handoff 134 §1a/§2) =====
+  box 48x32x48 = 73728 elements, part 1512 voxels (2.05% fill, 48.8x dilution) — matches evidence/134/ultradilute_stdout.txt
+  developing the field: 40 OC iterations at part-relative rung vf 0.26, 2.5 mm filter, MultigridCG_Matfree, tol 1e-8 ...
+  ... developed in 52.0s (last solve CG iters = 32)
+  developed field: 0.55% of the domain above rho 0.3, 1.75% gray (1.5*rho_min < rho < 0.3)
+
+== ULTRA-DILUTE developed (OC 40)  48x32x48 | solid=73728 bore=0 empty=0
+   GEOMETRIC: hier_built=1 used_mg=1 levels=3 mg_cycles=26 cg_iters=26 resid=9.23e-07  1.18s
+   JACOBI-CG baseline: iters=1273  3.59s
+   reduced DOF = 237552 | production matfree hierarchy = 30.3 MB (B1 baseline)
+    level      n        nnz    nnz/row   ratio   note
+        0   237552          -     77.2       -   MATRIX-FREE (no A stored)
+        1    20442    2201884    107.7   11.62
+        2     2865     258564     90.2    7.14
+        3     1067      82165     77.0    2.69
+    coarsest n=1067 dense-LDL^T=yes | P0 18.1 MB + coarse ops 41.9 MB + bookkeeping 13.3 MB = AMG ADDS 73.3 MB
+   LEAN stationary V-cycle: cycles=60 converged=NO | overall=0.959 sustained=0.969 worst=0.985
+   LEAN-PCG: cycles=55 converged=yes resid=8.19e-07 rho_eff=0.778 | setup 1.00s (strength 0.07 agg 0.00 prolong 0.02 galerkin 0.64 coarse 0.27), solve 1.60s, 0.029s/cycle
+   MEMORY: AMG adds 73.3 MB vs matfree baseline 30.3 MB = 2.42x  [B1 bar <= 2.00x: FAIL] | RSS delta over setup -138.6 MB, process peak 387.4 MB
+   END-TO-END: geometric 1.18s vs lean AMG 2.60s = 0.46x  [B3 bar >= 1.00x: FAIL]
+   DETERMINISM (B4): IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL

@@ -1,0 +1,30 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=memsweep
+
+===== [MEMSWEEP] can coarsening control reach the B1 bar (<= 2.0x)? =====
+  Unsmoothed P throughout (the matrix-free-native variant). Memory is the
+  hierarchy AMG ADDS; the baseline is the production matfree hierarchy.
+
+  stagnation192x112x128 | reduced DOF 804864 | matfree baseline 88.9 MB
+     theta   levels      P0 MB  coarse MB    book MB    AMG MB  vs base   cycles setup s
+      0.02        4       61.4      112.4       44.5     218.3    2.46x       79      2.3
+      0.04        4       61.4      121.8       44.5     227.7    2.56x       70      2.4
+      0.08        4       61.4      104.8       44.5     210.7    2.37x       66      2.6
+
+  stagnation100x96x96 | reduced DOF 142848 | matfree baseline 11.2 MB
+     theta   levels      P0 MB  coarse MB    book MB    AMG MB  vs base   cycles setup s
+      0.02        3       10.9       24.2        7.4      42.4    3.78x       60      0.5
+      0.04        4       10.9       16.8        7.4      35.0    3.12x      140      0.3
+      0.08        4       10.9       17.4        7.4      35.7    3.18x      142      0.3
+
+  LATTICE192x112x128 (developed) | reduced DOF 804864 | matfree baseline 88.9 MB
+     theta   levels      P0 MB  coarse MB    book MB    AMG MB  vs base   cycles setup s
+      0.02        5       61.4      117.1       44.5     223.0    2.51x      400*     2.4
+      0.04        5       61.4      117.8       44.5     223.6    2.52x      362      2.4
+      0.08        5       61.4      126.6       44.5     232.5    2.62x      362      2.5
+
+  (* = did not converge within 400 cycles)
+  'book MB' is the AMG-side bookkeeping (node->element incidence, the
+  reduced<->node maps and three ng-length work vectors). The production
+  solver pays its own equivalents; this column is charged to AMG anyway,
+  which is the conservative choice.

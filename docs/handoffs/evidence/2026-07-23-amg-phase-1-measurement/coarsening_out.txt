@@ -1,0 +1,29 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=coarsening
+
+===== [COARSENING CONTROL] the 131 §2d disease: cured or incurable? =====
+  Rule under test (amg_lean.hpp:admit_level): a candidate coarse level is
+  ADMITTED iff  (1) ratio >= min_ratio  (2) nnz/n^2 <= max_density
+  (3) (nnz/n)/(parent nnz/n) <= max_growth. Rejected => parent becomes the
+  bottom. Phase 0 had only (1), at 1.15.
+
+  fixture: LATTICE solid_box_48 | reduced DOF 345744 | matfree baseline 43.8 MB | geometric hier=1 used_mg=0 cycles=300 cg_iters=3565 29.74s
+
+  configuration                              levels worst nz/row  cycles   setup s   solve s    AMG MB  vs base
+  PHASE-0 SETTINGS (ratio 1.15, no caps)          5     2256      89      67.71     18.90     972.6   22.20x
+      NOTE: level 5 REJECTED by coarsening control: coarsening ratio 1.024648 < 1.150000
+  phase-0 knobs, unsmoothed P                     4      113     160       1.20      8.52     102.3    2.34x
+  control ON  (ratio 2.0, 400 nz/row, 0.10)       4      113     160       1.22      7.67     102.3    2.34x
+  control ON  + theta 0.02 (bigger aggs)          4      113     183       1.08      8.63      95.8    2.19x
+  control ON  + theta 0.04                        4      113     182       1.08      8.42      97.3    2.22x
+  control ON  + theta 0.16                        2      129     310       1.66     75.22     171.3    3.91x
+      NOTE: level 2 REJECTED by coarsening control: coarsening ratio 1.882007 < 2.000000
+      NOTE: bottom level n=84408 > dense cap: smoothed, not solved exactly
+  control TIGHT (ratio 4.0, 200 nz/row, 0.02)      2      113     245       1.17     22.93      85.4    1.95x
+      NOTE: level 2 REJECTED by coarsening control: operator density 0.022356 > 0.020000
+      NOTE: bottom level n=30450 > dense cap: smoothed, not solved exactly
+  control ON, smoothed P                          2      353     178      18.11     54.17     337.3    7.70x
+      NOTE: level 2 REJECTED by coarsening control: stencil 1496.010672 nnz/row > 400.000000
+      NOTE: bottom level n=30450 > dense cap: smoothed, not solved exactly
+  control LOOSE (ratio 1.5, 1200 nz/row)          4      113     160       1.24      7.80     102.3    2.34x
+  (* = did not converge within 400 cycles)
