@@ -135,9 +135,13 @@ MinimizePlasticOptions base_options() {
   return o;
 }
 
-// The core stop invariant, independent of the physics scale: the accepted
-// prefix all clear the threshold, the terminal rejected rung (if any) is below
-// it, and nothing was evaluated past the stop.
+// The core stop invariant, independent of the physics scale: every accepted rung
+// clears the threshold, and a rejected rung is rejected for a stated reason —
+// either the TOO-WEAK verdict (which must be the terminal rung, since it stops the
+// ladder) or the CONNECTIVITY BELT (handoff
+// 2026-07-23-gate-honesty-connectivity-rejection), which does NOT stop the ladder
+// and so may appear anywhere in the walk. Either way the reason is never empty:
+// REJECTION SPEAKS.
 void check_stop_invariant(const MinimizePlasticResult& r, double stop,
                           const char* ctx) {
   for (std::size_t v = 0; v < r.evaluated.size(); ++v) {
@@ -146,11 +150,21 @@ void check_stop_invariant(const MinimizePlasticResult& r, double stop,
     const double m = ev.report.margin.worst_case;
     if (ev.accepted) {
       CHECK(m >= stop, "invariant: accepted rung has margin >= margin_stop");
+      CHECK(ev.report.rejection_reason.empty(),
+            "invariant: an accepted rung carries no rejection reason");
+    } else if (ev.report.rejection_reason ==
+               std::string(topopt::kLoadPathNotConnectedReason)) {
+      // A severed carve. Its margin is a measurement of a structure that carries
+      // nothing, so NO bound on it is asserted here — that is the whole point.
+      CHECK(!ev.accepted, "invariant: a disconnected rung is never accepted");
     } else {
-      CHECK(is_last, "invariant: only the terminal rung may be rejected");
+      CHECK(is_last, "invariant: only the terminal rung may be rejected as weak");
       CHECK(r.stopped_on_margin,
-            "invariant: a rejected rung sets stopped_on_margin");
+            "invariant: a too-weak rung sets stopped_on_margin");
       CHECK(m < stop, "invariant: the terminal rung has margin < margin_stop");
+      CHECK(ev.report.rejection_reason ==
+                std::string(topopt::kMarginBelowRequiredReason),
+            "invariant: REJECTION SPEAKS — the too-weak rung names its reason");
     }
     (void)ctx;
   }
@@ -927,9 +941,8 @@ int main() {
     const MinimizePlasticResult r =
         topopt::minimize_plastic(g, material, "PLA_test", bcs, rules, o);
 
-    CHECK(!r.evaluated.empty() &&
-              r.report.variants.size() == o.volume_fraction_ladder.size(),
-          "J: external-load run evaluates + accepts the ladder");
+    CHECK(r.evaluated.size() == o.volume_fraction_ladder.size(),
+          "J: external-load run evaluates the whole ladder");
     check_stop_invariant(r, o.margin_stop, "J");
     check_v3_on_accepted(r);
     for (const MinimizePlasticVariant& ev : r.evaluated) {
@@ -940,6 +953,42 @@ int main() {
                 ev.report.margin.worst_case > 0.0,
             "J: a finite positive margin under the external load");
     }
+
+    // J.belt — THE CONNECTIVITY BELT ON A REAL OPTIMIZER OUTPUT (handoff
+    // 2026-07-23-gate-honesty-connectivity-rejection). margin_stop is 0 here, so
+    // the strength gate accepts ANYTHING and this run is exactly the regime where
+    // "no stress = safe" cannot be caught by a margin. It is not hypothetical: at
+    // the lightest rung (vf 0.3) the optimizer empties the three voxel columns in
+    // front of the tip (i = 16, 17, 18 all fall to max rho ~0.46), leaving the
+    // frozen Load face at i = 19 floating free of the arm. The printed part is in
+    // two pieces; the reported margin is ~112, because a structure that carries
+    // nothing has no stress. Before the belt that rung was ACCEPTED and its mesh
+    // exported. The ladder still WALKS past it (a severed carve is not a strength
+    // verdict about lighter targets — handoff 131 rule (3)), so all three rungs are
+    // evaluated; the severed one is simply never certified.
+    std::size_t j_disconnected = 0;
+    for (const MinimizePlasticVariant& ev : r.evaluated)
+      if (ev.report.rejection_reason ==
+          std::string(topopt::kLoadPathNotConnectedReason)) {
+        ++j_disconnected;
+        CHECK(!ev.accepted, "J.belt: a severed rung is never accepted");
+        CHECK(!topopt::load_path_connected(g, ev.optimization.physical_density),
+              "J.belt: ...and the primitive agrees on that rung's density");
+        std::printf("[J.belt] rung vf=%.2f REJECTED: \"%s\" — reported margin "
+                    "%.4g (a severed structure has no stress)\n",
+                    ev.requested_volume_fraction,
+                    ev.report.rejection_reason.c_str(),
+                    ev.report.margin.worst_case);
+      }
+    CHECK(j_disconnected == 1,
+          "J.belt: exactly the lightest rung of this ladder is severed");
+    CHECK(r.report.variants.size() == r.evaluated.size() - j_disconnected,
+          "J.belt: every OTHER rung is accepted (the belt rejects only the severed "
+          "one)");
+    CHECK(r.report.rejected.size() == j_disconnected,
+          "J.belt: the severed rung is REPORTED in rejected_variants");
+    CHECK(!r.stopped_on_margin,
+          "J.belt: a connectivity rejection is not a margin stop");
 
     // The load case actually MATTERS: the same part under self-weight gives a
     // different peak stress than under the tip load (proves the load drives it).

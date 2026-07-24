@@ -105,21 +105,33 @@ struct VariantReport {
   bool accepted = true;
   double margin_required = 0.0;
   double margin_effective = 0.0;
-  // Handoff 131 — WHY this rung was rejected, when the reason is not the margin
-  // gate. "" (the default) on every accepted rung AND on a rung rejected the
-  // ordinary way (too weak): there the margin numbers above already say it.
-  // Non-empty means the rung never reached the gate at all — currently the one
-  // value "rung infeasible (load path lost)": the optimizer severed the structure
-  // and the run was ended on the rung-infeasibility signature (simp.hpp
-  // rung_infeasible).
+  // WHY this rung was rejected (handoff 131, extended by
+  // 2026-07-23-gate-honesty-connectivity-rejection). "" on every ACCEPTED rung and
+  // ONLY there: a rejected rung always says why — REJECTION SPEAKS — so a reader
+  // never has to infer the cause from the numbers. Exactly three values, all
+  // defined once in pipeline.hpp:
+  //   * "margin below required" (kMarginBelowRequiredReason) — the ordinary
+  //     strength verdict. The rung WAS fully analysed; margin_effective vs
+  //     margin_required below are real measurements and are the detail.
+  //   * "load path not connected" (kLoadPathNotConnectedReason) — the CONNECTIVITY
+  //     BELT (voxel.hpp load_path_connected) found no path of printed material
+  //     from the anchor (Fixture) voxels to the load (Load) voxels. The rung WAS
+  //     analysed, so the numbers on the line are measurements — of a SEVERED
+  //     structure. That is precisely why they look excellent: a design that
+  //     carries nothing has no stress, hence an enormous margin.
+  //   * "rung infeasible (load path lost)" (kRungInfeasibleReason) — the rung never
+  //     reached the gate at all: the optimizer severed the structure and the run
+  //     was ended on the rung-infeasibility signature (simp.hpp rung_infeasible).
   //
-  // READ THE REASON BEFORE THE NUMBERS on such a line. An infeasible rung's
-  // per-rung ANALYSIS IS NEVER RUN — no stress solve, no V3 suite, no settings
-  // engine — because analysing a corpse produces confident nonsense (the motivating
-  // run's severed rung measured margin 680.9, since a structure that carries
-  // nothing has no stress, and was ACCEPTED and shipped on that basis). So on a
-  // line with a non-empty rejection_reason the stress, margin, orientation and
+  // READ THE REASON BEFORE THE NUMBERS on any rejected line, and note what the
+  // reason says about their STATUS. An infeasible rung's per-rung ANALYSIS IS NEVER
+  // RUN — no stress solve, no V3 suite, no settings engine — because analysing a
+  // corpse produces confident nonsense, so its stress, margin, orientation and
   // settings fields are ZERO PLACEHOLDERS meaning "not measured", not measurements.
+  // A disconnected rung's fields ARE measurements, of a structure that cannot be
+  // built. Either way the margin on such a line is not a strength result. (The
+  // motivating run's severed rung measured margin 680.9 and was ACCEPTED and
+  // shipped on that basis — handoff 131 §evidence.)
   std::string rejection_reason;
 };
 
@@ -133,10 +145,11 @@ struct JobReport {
   // accepted). Each carries accepted=false and its margin_effective vs
   // margin_required. Emitted as report.json "rejected_variants" so a rejection is
   // REPORTED, not silently omitted — the honesty fix for the vanished-rung-3 lie of
-  // absence. Two kinds now live here (handoff 131): the terminal TOO-WEAK rung the
-  // ladder stopped on (rejection_reason ""), and any rung the optimizer ended as
-  // INFEASIBLE (rejection_reason "rung infeasible (load path lost)"), which does
-  // NOT stop the ladder — so this array can hold more than one entry.
+  // absence. Every entry carries a NON-EMPTY rejection_reason (see above); three
+  // kinds live here: the terminal TOO-WEAK rung the ladder stopped on, the terminal
+  // DISCONNECTED rung the connectivity belt stopped it on, and any rung the
+  // optimizer ended as INFEASIBLE — which does NOT stop the ladder, so this array
+  // can hold more than one entry.
   std::vector<VariantReport> rejected;
 };
 

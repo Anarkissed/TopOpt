@@ -1,0 +1,2 @@
+[ladder] production: no_box_rungs=4  box_rungs=4  |  floor-on: no_box=2  box=1
+ladder_rung_count: all 4 checks passed

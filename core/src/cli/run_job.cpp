@@ -502,6 +502,27 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     std::fflush(stderr);
   }
 
+  // Handoff 2026-07-23-gate-honesty-connectivity-rejection — LOUD DISCONNECTION,
+  // the same discipline for the connectivity belt's verdict, once per rung. A rung
+  // the belt rejected has, almost always, an EXCELLENT-looking margin (no load path
+  // => no stress), so the one thing that must not happen is for it to be dropped
+  // quietly and leave those numbers to speak for themselves.
+  for (std::size_t i = 0; i < result.pipeline.evaluated.size(); ++i) {
+    const MinimizePlasticVariant& v = result.pipeline.evaluated[i];
+    if (v.report.rejection_reason != kLoadPathNotConnectedReason) continue;
+    std::fprintf(stderr,
+                 "WARNING: rung %zu (vf %.2f) was REJECTED — %s. No printed "
+                 "material connects the anchor (Fixture) voxels to the load "
+                 "(Load) voxels, so this design carries nothing: its measured "
+                 "margin %.4g describes a SEVERED structure and is not a strength "
+                 "result. No mesh is exported for it and no later rung inherits "
+                 "its design; the ladder continues. See report.json "
+                 "rejected_variants.\n",
+                 i, v.requested_volume_fraction, kLoadPathNotConnectedReason,
+                 v.report.margin_effective);
+    std::fflush(stderr);
+  }
+
   // Handoff 114 — record how many density snapshots were written (0 unless
   // opt-in snapshots ran). The CSV/run_info paths are already set above.
   if (snaps) result.snapshot_count = snaps->written();

@@ -465,6 +465,28 @@ struct MinimizePlasticOptions {
 inline constexpr const char* kRungInfeasibleReason =
     "rung infeasible (load path lost)";
 
+// Handoff 2026-07-23-gate-honesty-connectivity-rejection — the other two
+// VariantReport::rejection_reason values, defined here for the same reason: one
+// definition shared by the driver, the CLI console line and the tests, so the
+// string in report.json cannot drift from the string anything checks for.
+// TOGETHER WITH kRungInfeasibleReason these are exhaustive: every entry of
+// JobReport::rejected carries exactly one of the three, and never "" (the
+// rejection-speaks rule — a rejection that does not say why is a rejection the
+// reader has to guess at).
+//   * kMarginBelowRequiredReason — the ordinary strength verdict: the rung was
+//     analysed and its infill-adjusted margin came in under margin_stop. The
+//     margin_effective / margin_required numbers on the line are the detail.
+//   * kLoadPathNotConnectedReason — the CONNECTIVITY BELT (voxel.hpp
+//     load_path_connected) found no path of printed material from the anchor
+//     (Fixture) voxels to the load (Load) voxels. Read this BEFORE the margin
+//     numbers on such a line: they are real measurements of a severed structure,
+//     which is exactly why they look excellent (no load path => no stress => a
+//     huge margin). They describe nothing that can be built.
+inline constexpr const char* kMarginBelowRequiredReason =
+    "margin below required";
+inline constexpr const char* kLoadPathNotConnectedReason =
+    "load path not connected";
+
 // One ladder rung actually evaluated by the driver.
 struct MinimizePlasticVariant {
   // The ladder rung this variant targeted (options.volume_fraction_ladder[i]).
@@ -557,15 +579,28 @@ struct MinimizePlasticVariant {
 // The result of a minimize_plastic run.
 struct MinimizePlasticResult {
   // Every rung the driver actually ran, in ladder order: accepted rungs (each
-  // margin >= margin_stop) — optionally interleaved with INFEASIBLE rungs, which
-  // do not stop the walk (handoff 131) — followed by AT MOST ONE rejected terminal
-  // rung (margin < margin_stop, or cancelled — see `cancelled` below) at which the
-  // driver stopped. No rung after the terminal one is evaluated.
+  // margin >= margin_stop) — optionally interleaved with rungs that do NOT stop
+  // the walk, namely INFEASIBLE ones (handoff 131) and DISCONNECTED ones (handoff
+  // 2026-07-23-gate-honesty-connectivity-rejection) — followed by AT MOST ONE
+  // rejected terminal rung (margin < margin_stop, or cancelled — see `cancelled`
+  // below) at which the driver stopped. No rung after the terminal one is
+  // evaluated. Only the TOO-WEAK verdict is monotone in the ladder direction, so
+  // only it ends the walk; the other two are failures of one carve, and the next
+  // (lighter) rung gets a fresh attempt from the last good design.
   std::vector<MinimizePlasticVariant> evaluated;
   // True iff a rung fell below margin_stop and the driver stopped early (so the
   // last `evaluated` entry is the rejected terminal rung). False iff the whole
   // ladder was accepted (every rung margin >= margin_stop) or the run was
   // cancelled (a cancel is not a margin stop).
+  // Handoff 2026-07-23-gate-honesty-connectivity-rejection: this stays EXACTLY the
+  // margin test — `margin_effective < margin_stop` — and it alone ends the walk, so
+  // the ladder stops on precisely the rungs it stopped on before the belt existed.
+  // A rung rejected ONLY by the CONNECTIVITY BELT does not set it and does not stop
+  // the ladder (see `evaluated` above); a rung that fails BOTH tests still sets it
+  // and still stops the walk, while its report line names the connectivity failure
+  // as the reason. What the flag never means is "the belt fired": a severed rung's
+  // margin is usually HUGE, so calling that a margin stop would misname it exactly
+  // where the misnaming is most misleading.
   bool stopped_on_margin = false;
   // M7.anchor-integrity (FIX 2): true iff the ladder stopped EARLY because an
   // accepted rung already met the comfort floor (margin >= margin_floor_multiple

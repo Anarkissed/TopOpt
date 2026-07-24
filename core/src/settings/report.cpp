@@ -597,6 +597,17 @@ void validate_job_report_json(const std::string& json_text) {
       const JsonValue* acc = find_field(rejected->arr[i], "accepted");
       if (acc != nullptr && !(acc->type == JsonValue::Type::Bool && !acc->boolean))
         throw ReportError(ctx + ": a rejected variant must have accepted=false");
+      // REJECTION SPEAKS (handoff 2026-07-23-gate-honesty-connectivity-rejection):
+      // a rejected rung must say WHY. The field stays OPTIONAL — pre-131 documents
+      // omit it entirely and still validate — but a rejection line that CARRIES the
+      // field and leaves it "" is the silence this rule exists to forbid, and every
+      // document this module emits carries it. `validate_variant_object` above has
+      // already checked the type.
+      const JsonValue* rr = find_field(rejected->arr[i], "rejection_reason");
+      if (rr != nullptr && rr->str.empty())
+        throw ReportError(ctx +
+                          ": a rejected variant must carry a non-empty "
+                          "rejection_reason");
     }
   }
 }

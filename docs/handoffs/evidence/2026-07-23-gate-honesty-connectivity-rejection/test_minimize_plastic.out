@@ -1,0 +1,19 @@
+[A accept-all] evaluated=3 accepted=3 stopped=0
+   [A rung req=0.70 achieved=0.6992 margin=50.3629]
+   [A rung req=0.50 achieved=0.4999 margin=42.4777]
+   [A rung req=0.30 achieved=0.3000 margin=16.0941]
+[B immediate-stop] evaluated=1 accepted=0 stopped=1 margin0=5.036e-11
+[C rung vf_req=0.70 vf=0.6992] max_vm=0.006922 interlayer=0.002033 margin=2.889 accepted=1 walls=3 infill=30% warn='86 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.'
+[C rung vf_req=0.50 vf=0.4999] max_vm=0.008207 interlayer=0.001955 margin=2.437 accepted=1 walls=3 infill=30% warn='136 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.'
+[C rung vf_req=0.30 vf=0.3000] max_vm=0.02166 interlayer=0.006117 margin=0.9233 accepted=0 walls=6 infill=60% warn='110 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.'
+[I known-cube] printed=216 mass=2.14272 g support=0 mesh_tris=428
+[J.belt] rung vf=0.30 REJECTED: "load path not connected" — reported margin 111.7 (a severed structure has no stress)
+[J external-load] variants=2 maxsigma=4.78443e-05 (self-weight 397.182)
+[K progressive] streamed 3 variants
+[L keyframes] variant0 frames=8
+[M infill-margin] solid_accepted=3 low(30%)_accepted=2 stopped=1
+[N realloc-stream] streamed 16 variants across a 16-rung ladder
+[O switchover] rung 0 vf=0.700  OC c=2.496329e-08 it=40 | MMA c=2.511461e-08 it=40 | rel=+0.606%
+[O switchover] rung 1 vf=0.500  OC c=3.790683e-08 it=40 | MMA c=3.812421e-08 it=40 | rel=+0.573%
+[O switchover] rung 2 vf=0.300  OC c=1.098395e-07 it=40 | MMA c=1.032339e-07 it=40 | rel=+6.014%
+minimize_plastic (M5.3): all 565 checks passed
