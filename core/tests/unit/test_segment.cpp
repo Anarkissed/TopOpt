@@ -358,7 +358,10 @@ int main() {
   // ------------------------------------------------------------------
   // REFUSALS. Each must be a structured diagnosis, never a crash.
 
-  // Open mesh: drop a side off the cube.
+  // Open mesh: drop a side off the cube. A whole missing cube face is a
+  // WALL-SIZED hole (its diagonal is ~0.82 of the part's), so Phase-2 hole
+  // filling is ATTEMPTED but the conservative fraction bound refuses it — a
+  // missing wall is not a defect to guess at.
   {
     TriangleMesh open = make_box(10, 10, 10);
     open.triangles.resize(10);  // remove the x=10 side
@@ -370,16 +373,20 @@ int main() {
     } catch (const PartError&) {
       threw = true;
     }
-    CHECK(threw, "an open mesh is refused");
+    CHECK(threw, "an open mesh with a wall-sized hole is refused");
     const PartInspection insp = topopt::inspect_part_file(path);
     CHECK(!insp.acceptable, "and inspect_part_file agrees it is unacceptable");
     CHECK(insp.defects.size() == 1 && insp.defects[0] == PartDefect::OpenBoundary,
           "the diagnosis names the open boundary");
     CHECK(insp.boundary_edges == 4, "and counts the 4 boundary edges");
+    CHECK(insp.filled_holes == 0,
+          "the wall-sized hole is NOT force-filled (conservative bound holds)");
     std::remove(path.c_str());
   }
 
-  // Non-manifold: a fin sharing one edge with three triangles.
+  // Non-manifold: a fin sharing one edge with three triangles. The fin is NOT a
+  // redundant duplicate facet (it is a distinct triangle to a new vertex), so
+  // duplicate removal cannot fix it — it is an AMBIGUOUS junction and is refused.
   {
     TriangleMesh nm = make_box(10, 10, 10);
     // An extra triangle on the 0-1 edge makes that edge 3-used.
@@ -388,8 +395,10 @@ int main() {
     const std::string path = temp_path("seg_nonmanifold.stl");
     topopt::write_stl_file(path, nm, topopt::StlFormat::Binary);
     const PartInspection insp = topopt::inspect_part_file(path);
-    CHECK(!insp.acceptable, "a non-manifold mesh is refused");
+    CHECK(!insp.acceptable, "an ambiguous non-manifold junction is refused");
     CHECK(insp.non_manifold_edges > 0, "the non-manifold edge is counted");
+    CHECK(insp.removed_duplicate_triangles == 0,
+          "the fin is not a duplicate, so nothing was removed to try to fix it");
     bool named = false;
     for (const auto d : insp.defects)
       if (d == PartDefect::NonManifoldEdges) named = true;
@@ -411,6 +420,186 @@ int main() {
     for (const auto d : insp.defects)
       if (d == PartDefect::ZeroThickness) named = true;
     CHECK(named, "the diagnosis names the zero thickness");
+    std::remove(path.c_str());
+  }
+
+  // ==================================================================
+  // PHASE 2 REPAIRS (handoff mesh-repair-phase-2). Repair the common,
+  // safely-fixable defects BEFORE refusing; re-inspect; proceed if clean;
+  // report exactly what changed. Refuse only what cannot be safely fixed.
+
+  // ------------------------------------------------------------------
+  // remove_duplicate_triangles as a unit: the FIRST occurrence survives, every
+  // later exact-oriented copy is dropped, and an opposite-wound copy is kept.
+  {
+    TriangleMesh m = make_box(10, 10, 10);
+    const int base = static_cast<int>(m.triangles.size());
+    m.triangles.push_back(m.triangles[0]);            // exact duplicate
+    m.triangles.push_back(m.triangles[4]);            // exact duplicate
+    auto rev = m.triangles[2];
+    std::swap(rev[1], rev[2]);
+    m.triangles.push_back(rev);                       // opposite winding: NOT a dup
+    const int removed = topopt::remove_duplicate_triangles(m);
+    CHECK(removed == 2, "exactly the two exact-oriented duplicates are removed");
+    CHECK(static_cast<int>(m.triangles.size()) == base + 1,
+          "the opposite-wound copy is kept (it is a membrane, not a duplicate)");
+  }
+
+  // ------------------------------------------------------------------
+  // REPAIR: non-manifold from duplicate facets (the bracket class). Stacked
+  // coincident triangles are the #1 cause of "N edges shared by three or more
+  // triangles" in CAD-exported STLs. Removing the redundant copies restores a
+  // 2-manifold solid, so the mesh is ACCEPTED and the repair is REPORTED.
+  {
+    TriangleMesh dup = make_box(10, 10, 10);
+    // Duplicate three facets: each duplicated facet pushes its edges past two
+    // uses, so this is genuinely non-manifold before repair.
+    dup.triangles.push_back(dup.triangles[0]);
+    dup.triangles.push_back(dup.triangles[3]);
+    dup.triangles.push_back(dup.triangles[7]);
+    CHECK(topopt::check_watertight(dup).non_manifold_edges > 0,
+          "the duplicated-facet box IS non-manifold before repair");
+    const std::string path = temp_path("seg_dupfacets.stl");
+    topopt::write_stl_file(path, dup, topopt::StlFormat::Binary);
+    const PartModel p = topopt::import_part(path);
+    CHECK(p.inspection.acceptable,
+          "duplicate-facet non-manifoldness is repaired, not refused");
+    CHECK(p.inspection.removed_duplicate_triangles == 3,
+          "the repair reports all three redundant facets removed");
+    CHECK(p.inspection.non_manifold_edges == 0,
+          "the repaired mesh has no non-manifold edges left");
+    CHECK(topopt::check_watertight(p.model.mesh).watertight,
+          "and it is watertight");
+    CHECK(p.model.face_count == 6, "the repaired box still segments into 6 faces");
+    CHECK(std::fabs(p.model.brep_volume - 1000.0) < 1e-6,
+          "and encloses the original 1000 mm^3 (the solid was not changed)");
+    std::remove(path.c_str());
+  }
+
+  // ------------------------------------------------------------------
+  // REPAIR: a small hole is capped. A finely-tessellated sphere with a single
+  // triangle removed has a small 3-edge hole; that is well within the
+  // conservative bound, so it is filled and the sphere is ACCEPTED watertight.
+  {
+    TriangleMesh sph = make_sphere(10.0, 16, 24);
+    const double full_volume = topopt::signed_volume(sph);
+    // Remove one non-pole triangle (a clean 3-edge hole). Triangle 0 touches the
+    // top pole; pick one from the equatorial band instead.
+    const std::size_t hole_tri = sph.triangles.size() / 2;
+    sph.triangles.erase(sph.triangles.begin() +
+                        static_cast<std::ptrdiff_t>(hole_tri));
+    CHECK(topopt::check_watertight(sph).boundary_edges == 3,
+          "removing one triangle leaves a single 3-edge hole");
+    const std::string path = temp_path("seg_hole.stl");
+    topopt::write_stl_file(path, sph, topopt::StlFormat::Binary);
+    const PartModel p = topopt::import_part(path);
+    CHECK(p.inspection.acceptable, "a small hole is filled, not refused");
+    CHECK(p.inspection.filled_holes == 1, "the repair reports one hole filled");
+    CHECK(p.inspection.filled_hole_triangles == 3,
+          "a 3-edge hole is capped by a 3-triangle centroid fan");
+    CHECK(p.inspection.boundary_edges == 0,
+          "the repaired mesh has no boundary edges left");
+    CHECK(topopt::check_watertight(p.model.mesh).watertight,
+          "and it is watertight");
+    // The cap tents to the loop centroid, so the volume changes by at most the
+    // tiny facet-sized sliver — a small hole fill does not change the solid.
+    CHECK(std::fabs(p.model.brep_volume - full_volume) < 0.05 * full_volume,
+          "the filled volume is within a hair of the original sphere");
+    std::remove(path.c_str());
+  }
+
+  // ------------------------------------------------------------------
+  // DETERMINISM of repair: the SAME broken file re-imported yields the SAME
+  // repaired geometry and the SAME pseudo-face ids (repairs are persisted).
+  {
+    TriangleMesh dup = make_box(8, 6, 4);
+    dup.triangles.push_back(dup.triangles[1]);
+    dup.triangles.push_back(dup.triangles[9]);
+    const std::string path = temp_path("seg_repair_det.stl");
+    topopt::write_stl_file(path, dup, topopt::StlFormat::Binary);
+    const PartModel a = topopt::import_part(path);
+    const PartModel b = topopt::import_part(path);
+    CHECK(a.model.mesh.vertices.size() == b.model.mesh.vertices.size() &&
+              a.model.mesh.triangles.size() == b.model.mesh.triangles.size(),
+          "re-importing a broken file yields identical repaired geometry");
+    CHECK(a.model.triangle_face == b.model.triangle_face,
+          "and identical pseudo-face ids");
+    CHECK(a.inspection.removed_duplicate_triangles ==
+              b.inspection.removed_duplicate_triangles,
+          "and the same repair report");
+    std::remove(path.c_str());
+  }
+
+  // ------------------------------------------------------------------
+  // THE CONSERVATIVE BOUND IS A REAL GATE, tested at the boundary. The same
+  // small-hole sphere that fills under the default bound is REFUSED when the
+  // fraction bound is tightened below the hole's span: the repair never forces
+  // a fill it was told is too big.
+  {
+    TriangleMesh sph = make_sphere(10.0, 16, 24);
+    const std::size_t hole_tri = sph.triangles.size() / 2;
+    sph.triangles.erase(sph.triangles.begin() +
+                        static_cast<std::ptrdiff_t>(hole_tri));
+
+    // Directly exercise fill_small_holes at the bound.
+    topopt::MeshRepairOptions tight;
+    tight.max_hole_fraction = 1e-6;  // below any real hole's span
+    TriangleMesh a = sph;
+    int loops = -1, tris = -1;
+    topopt::fill_small_holes(a, tight, loops, tris);
+    CHECK(loops == 0 && tris == 0,
+          "a hole above the fraction bound is left OPEN, not force-filled");
+    CHECK(topopt::check_watertight(a).boundary_edges == 3,
+          "and the mesh is unchanged (still open) so it will be refused");
+
+    topopt::MeshRepairOptions loose;  // defaults fill it
+    TriangleMesh b = sph;
+    int loops2 = -1, tris2 = -1;
+    topopt::fill_small_holes(b, loose, loops2, tris2);
+    CHECK(loops2 == 1 && tris2 == 3,
+          "the very same hole IS filled under the default bound");
+
+    // Edge-count bound: a hole with more edges than the cap is refused too.
+    topopt::MeshRepairOptions few;
+    few.max_hole_edges = 2;  // below the 3-edge hole
+    TriangleMesh c = sph;
+    int loops3 = -1, tris3 = -1;
+    topopt::fill_small_holes(c, few, loops3, tris3);
+    CHECK(loops3 == 0, "a hole with more edges than max_hole_edges is refused");
+  }
+
+  // ------------------------------------------------------------------
+  // BEYOND REPAIR still refuses cleanly: a genuine non-manifold junction of two
+  // solids sharing a single edge. Duplicate removal cannot separate them (the
+  // four incident facets are all distinct), so it is refused — no crash, no
+  // silent bad repair.
+  {
+    // Two unit boxes meeting along the shared edge x=10,y=10 (the +x/+y column):
+    // build one box [0,10]^3 and a second box [10,20]x[10,20]x[0,10]; they touch
+    // only along the vertical edge (10,10,0)-(10,10,10). Rather than model the
+    // full solids, reproduce the ambiguous edge directly: four triangles fanning
+    // a single shared edge, which is exactly the undecidable inside/outside case.
+    TriangleMesh j = make_box(10, 10, 10);
+    // Weld a second box's worth of facets onto the (2,6) edge so it is 4-used by
+    // geometrically distinct triangles (not duplicates).
+    const int a = 2, b = 6;  // an existing cube edge, used by 2 facets already
+    j.vertices.push_back(Vec3{15, 15, 0});
+    j.vertices.push_back(Vec3{15, 15, 10});
+    const int p = static_cast<int>(j.vertices.size()) - 2;
+    const int q = static_cast<int>(j.vertices.size()) - 1;
+    j.triangles.push_back({a, b, p});
+    j.triangles.push_back({b, q, p});
+    const std::string path = temp_path("seg_junction.stl");
+    topopt::write_stl_file(path, j, topopt::StlFormat::Binary);
+    const PartInspection insp = topopt::inspect_part_file(path);
+    CHECK(!insp.acceptable, "an ambiguous junction of distinct facets is refused");
+    CHECK(insp.non_manifold_edges > 0, "and the surviving junction is counted");
+    CHECK(insp.removed_duplicate_triangles == 0,
+          "duplicate removal did not touch it (the facets are all distinct)");
+    bool named = false;
+    for (const auto d : insp.defects)
+      if (d == PartDefect::NonManifoldEdges) named = true;
+    CHECK(named, "the diagnosis names the non-manifold junction");
     std::remove(path.c_str());
   }
 

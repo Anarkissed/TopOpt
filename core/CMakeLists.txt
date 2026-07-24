@@ -806,6 +806,10 @@ if(OpenCASCADE_FOUND)
   add_executable(segment_evidence EXCLUDE_FROM_ALL tests/tools/segment_evidence.cpp)
   target_link_libraries(segment_evidence PRIVATE topopt)
 
+  # Phase 2 mesh-repair evidence: before/after reports on real broken brackets.
+  add_executable(repair_evidence EXCLUDE_FROM_ALL tests/tools/repair_evidence.cpp)
+  target_link_libraries(repair_evidence PRIVATE topopt)
+
   # STEP face -> voxel tagging test (M1.6). Drives the STEP cube fixture, so it
   # needs OCCT to import the solid and read its per-face triangulation.
   add_executable(test_tag tests/unit/test_tag.cpp)

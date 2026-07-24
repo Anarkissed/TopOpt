@@ -60,7 +60,8 @@ TriangleMesh read_mesh_any(const std::string& path, PartFormat format) {
 // verdict. This is the SINGLE definition of "is this mesh usable" — both
 // `import_part` (which refuses by throwing) and `inspect_part_file` (which
 // reports) run exactly this, so the sheet can never disagree with the refusal.
-static PartInspection inspect_and_repair(TriangleMesh& mesh) {
+static PartInspection inspect_and_repair(TriangleMesh& mesh,
+                                         const MeshRepairOptions& repair) {
   PartInspection insp;
   insp.checked = true;
 
@@ -68,6 +69,13 @@ static PartInspection inspect_and_repair(TriangleMesh& mesh) {
   // reader has already welded; 3MF has not, and a weld is required before the
   // shared-edge topology below means anything.
   mesh = weld_and_clean(mesh, insp.welded_vertices, insp.degenerate_triangles);
+
+  // Repair 2 (Phase 2): drop redundant exact-duplicate facets. Must run AFTER
+  // the weld (so identical facets share indices) and BEFORE the topology
+  // verdict (a stacked facet is the usual cause of a non-manifold edge, and
+  // this is the unambiguous half of that fix).
+  insp.removed_duplicate_triangles = remove_duplicate_triangles(mesh);
+
   bounding_box(mesh, insp.bbox_min, insp.bbox_max);
 
   if (mesh.triangles.empty()) {
@@ -75,17 +83,42 @@ static PartInspection inspect_and_repair(TriangleMesh& mesh) {
     return insp;
   }
 
-  // Structural verdict. Phase 1 handles clean manifold meshes only; both of
-  // these are refusals, not repairs.
-  const WatertightReport wt = check_watertight(mesh);
+  // Structural verdict, measured on the de-duplicated mesh.
+  WatertightReport wt = check_watertight(mesh);
+
+  // A non-manifold edge that SURVIVES duplicate removal is a genuine junction:
+  // three or more distinct facets meeting at one edge, where inside/outside is
+  // undefined. That is ambiguous and is refused, not repaired. Hole filling is
+  // not even attempted on such a mesh — an open surface with an ambiguous
+  // interior has no well-defined loop to cap.
+  if (wt.non_manifold_edges > 0) {
+    insp.non_manifold_edges = wt.non_manifold_edges;
+    insp.boundary_edges = wt.boundary_edges;
+    insp.defects.push_back(PartDefect::NonManifoldEdges);
+    if (wt.boundary_edges > 0) insp.defects.push_back(PartDefect::OpenBoundary);
+    insp.acceptable = false;
+    return insp;
+  }
+
+  // Repair 3 (Phase 2): cap small holes. Only on a manifold surface, and only
+  // loops within the conservative bounds; anything left open re-surfaces as an
+  // OpenBoundary refusal below. The fan cannot introduce a non-manifold edge
+  // (it joins a fresh centroid vertex to a simple loop), so a re-check that
+  // still finds one would mean the input was pathological — handled honestly
+  // rather than asserted away.
+  if (wt.boundary_edges > 0) {
+    fill_small_holes(mesh, repair, insp.filled_holes,
+                     insp.filled_hole_triangles);
+    if (insp.filled_holes > 0) wt = check_watertight(mesh);
+  }
   insp.boundary_edges = wt.boundary_edges;
   insp.non_manifold_edges = wt.non_manifold_edges;
   if (wt.non_manifold_edges > 0)
     insp.defects.push_back(PartDefect::NonManifoldEdges);
   if (wt.boundary_edges > 0) insp.defects.push_back(PartDefect::OpenBoundary);
 
-  // Repair 2: normal unification. Only meaningful on a manifold surface, so it
-  // runs after the topology verdict; its failure is its own defect.
+  // Repair 4: normal unification. Only meaningful on a closed manifold surface,
+  // so it runs after the topology verdict; its failure is its own defect.
   if (insp.defects.empty() && !unify_normals(mesh, insp.flipped_triangles))
     insp.defects.push_back(PartDefect::NonOrientable);
 
@@ -119,11 +152,12 @@ std::string describe_defect(PartDefect defect) {
     case PartDefect::EmptyMesh:
       return "the file contains no triangles";
     case PartDefect::NonManifoldEdges:
-      return "the mesh has non-manifold edges (an edge shared by more than two "
-             "triangles)";
+      return "the mesh has non-manifold edges that could not be resolved "
+             "automatically (an edge shared by more than two triangles remains "
+             "after removing redundant facets — the junction is ambiguous)";
     case PartDefect::OpenBoundary:
-      return "the mesh is open (it has boundary edges, so it is not a closed "
-             "solid)";
+      return "the mesh has holes too large or complex to fill safely (open "
+             "boundary edges remain after small holes were capped)";
     case PartDefect::NonOrientable:
       return "the mesh cannot be consistently oriented (its normals contradict "
              "each other)";
@@ -196,6 +230,155 @@ TriangleMesh weld_and_clean(const TriangleMesh& mesh, int& out_welded,
   // voxelizer and the segmenter both iterate triangles), so they are kept
   // rather than re-indexed — re-indexing would change vertex ids for no gain.
   return out;
+}
+
+namespace {
+
+// Canonical key for an ORIENTED triangle: rotate the three welded indices so
+// the smallest is first, preserving cyclic order. Two triangles share this key
+// iff they describe the same facet with the same winding (hence the same
+// outward normal). The reverse winding rotates to a different key, so an
+// opposite-wound coincident pair is intentionally NOT collapsed here.
+std::array<int, 3> oriented_key(const std::array<int, 3>& t) {
+  int m = 0;
+  if (t[1] < t[m]) m = 1;
+  if (t[2] < t[m]) m = 2;
+  return {t[m], t[(m + 1) % 3], t[(m + 2) % 3]};
+}
+
+}  // namespace
+
+int remove_duplicate_triangles(TriangleMesh& mesh) {
+  std::map<std::array<int, 3>, int> seen;  // ordered -> deterministic
+  std::vector<std::array<int, 3>> kept;
+  kept.reserve(mesh.triangles.size());
+  int removed = 0;
+  for (const auto& tri : mesh.triangles) {
+    const auto key = oriented_key(tri);
+    if (seen.find(key) != seen.end()) {
+      ++removed;
+      continue;
+    }
+    seen.emplace(key, 1);
+    kept.push_back(tri);
+  }
+  mesh.triangles = std::move(kept);
+  return removed;
+}
+
+void fill_small_holes(TriangleMesh& mesh, const MeshRepairOptions& opts,
+                      int& out_filled_loops, int& out_filled_triangles) {
+  out_filled_loops = 0;
+  out_filled_triangles = 0;
+  if (mesh.triangles.empty()) return;
+
+  // How many triangles use each undirected edge, and the DIRECTED boundary
+  // edges (a directed edge a->b whose undirected {a,b} is used exactly once).
+  std::map<std::pair<int, int>, int> use;
+  for (const auto& t : mesh.triangles)
+    for (int e = 0; e < 3; ++e) {
+      int a = t[e], b = t[(e + 1) % 3];
+      if (a > b) std::swap(a, b);
+      ++use[std::make_pair(a, b)];
+    }
+
+  // next[a] = b for the single boundary edge leaving a; a vertex is "branching"
+  // if it has more than one outgoing or incoming boundary edge, which makes its
+  // loop non-simple and therefore ambiguous to fill.
+  std::map<int, int> next;
+  std::map<int, int> outdeg, indeg;
+  for (const auto& t : mesh.triangles)
+    for (int e = 0; e < 3; ++e) {
+      const int a = t[e], b = t[(e + 1) % 3];
+      int lo = a, hi = b;
+      if (lo > hi) std::swap(lo, hi);
+      if (use[std::make_pair(lo, hi)] != 1) continue;  // interior edge
+      next[a] = b;  // last writer wins; branching is caught by the degree check
+      ++outdeg[a];
+      ++indeg[b];
+    }
+  if (next.empty()) return;  // nothing open
+
+  const double mesh_diag = [&] {
+    Vec3 lo, hi;
+    bounding_box(mesh, lo, hi);
+    const double dx = hi.x - lo.x, dy = hi.y - lo.y, dz = hi.z - lo.z;
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+  }();
+
+  // Trace loops starting from the lowest vertex index (determinism). A loop is
+  // only followed while every vertex on it is non-branching; the first branching
+  // vertex abandons the loop (left open -> the mesh is later refused).
+  std::vector<char> visited(mesh.vertices.size(), 0);
+  std::vector<std::vector<int>> loops;
+  for (const auto& kv : next) {
+    const int start = kv.first;
+    if (visited[static_cast<std::size_t>(start)]) continue;
+    std::vector<int> loop;
+    int cur = start;
+    bool simple = true;
+    while (true) {
+      if (visited[static_cast<std::size_t>(cur)]) {
+        // Returned to a vertex already on THIS loop only if it is `start`.
+        simple = (cur == start);
+        break;
+      }
+      if (outdeg[cur] != 1 || indeg[cur] != 1) {  // branching / pinched
+        simple = false;
+        break;
+      }
+      visited[static_cast<std::size_t>(cur)] = 1;
+      loop.push_back(cur);
+      const auto it = next.find(cur);
+      if (it == next.end()) {  // open chain, not a closed loop
+        simple = false;
+        break;
+      }
+      cur = it->second;
+    }
+    if (simple && loop.size() >= 3) loops.push_back(std::move(loop));
+  }
+
+  // Cap each qualifying loop with a centroid fan. Rotating the loop so its
+  // lowest-index vertex is first keeps the added geometry a pure function of the
+  // input. Winding each cap triangle (c, b, a) OPPOSITE the boundary directed
+  // edge a->b makes the patch immediately orientation-consistent with the body.
+  for (auto& loop : loops) {
+    const int n = static_cast<int>(loop.size());
+    if (n > opts.max_hole_edges) continue;  // too many edges: not a small hole
+
+    Vec3 lo = mesh.vertices[static_cast<std::size_t>(loop[0])];
+    Vec3 hi = lo, centroid{0, 0, 0};
+    for (const int v : loop) {
+      const Vec3& p = mesh.vertices[static_cast<std::size_t>(v)];
+      lo.x = std::min(lo.x, p.x); lo.y = std::min(lo.y, p.y); lo.z = std::min(lo.z, p.z);
+      hi.x = std::max(hi.x, p.x); hi.y = std::max(hi.y, p.y); hi.z = std::max(hi.z, p.z);
+      centroid.x += p.x; centroid.y += p.y; centroid.z += p.z;
+    }
+    const double dx = hi.x - lo.x, dy = hi.y - lo.y, dz = hi.z - lo.z;
+    const double loop_diag = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (mesh_diag > 0.0 && loop_diag > opts.max_hole_fraction * mesh_diag)
+      continue;  // wall-sized opening, not a defect
+
+    // Rotate so the minimum vertex index leads.
+    int mi = 0;
+    for (int i = 1; i < n; ++i)
+      if (loop[static_cast<std::size_t>(i)] < loop[static_cast<std::size_t>(mi)]) mi = i;
+    std::vector<int> rot(static_cast<std::size_t>(n));
+    for (int i = 0; i < n; ++i)
+      rot[static_cast<std::size_t>(i)] = loop[static_cast<std::size_t>((mi + i) % n)];
+
+    centroid.x /= n; centroid.y /= n; centroid.z /= n;
+    const int c = static_cast<int>(mesh.vertices.size());
+    mesh.vertices.push_back(centroid);
+    for (int i = 0; i < n; ++i) {
+      const int a = rot[static_cast<std::size_t>(i)];
+      const int b = rot[static_cast<std::size_t>((i + 1) % n)];
+      mesh.triangles.push_back({c, b, a});
+      ++out_filled_triangles;
+    }
+    ++out_filled_loops;
+  }
 }
 
 bool unify_normals(TriangleMesh& mesh, int& out_flipped) {
@@ -320,7 +503,7 @@ PartModel import_part(const std::string& path, const PartOptions& opts) {
 
   // --- mesh formats ---------------------------------------------------------
   TriangleMesh mesh = read_mesh_any(path, out.format);
-  out.inspection = inspect_and_repair(mesh);
+  out.inspection = inspect_and_repair(mesh, opts.repair);
   const PartInspection& insp = out.inspection;
 
   if (!insp.acceptable) {
@@ -364,7 +547,7 @@ PartInspection inspect_part_file(const std::string& path) {
   // Reads and repairs, but reports the verdict instead of throwing on it. A
   // file that cannot be READ still throws — there is nothing to inspect.
   TriangleMesh mesh = read_mesh_any(path, fmt);
-  return inspect_and_repair(mesh);
+  return inspect_and_repair(mesh, MeshRepairOptions{});
 }
 
 void rescale_part_file(const std::string& in_path, const std::string& out_path,
