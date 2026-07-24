@@ -9,7 +9,11 @@
 // includes the dependency-free iOS slices where OCCT cannot be linked. So the
 // OCCT-free half moved here, into an always-built translation unit.
 //
-// The code below is UNCHANGED from step.cpp; only its home moved.
+// The scan logic is UNCHANGED from step.cpp; its home moved (handoff 134). The
+// mesh-optimize handoff then extracted tag_step_face's body into the shared
+// `tag_face_impl` so a mesh pseudo-face can be tagged through the honestly-named
+// `tag_mesh_face` without duplicating a single line — both names run the exact
+// same scan, because `triangle_face` already makes the face SOURCE invisible.
 
 #include "topopt/step.hpp"
 
@@ -75,17 +79,21 @@ double point_tri_dist2(const Vec3& p, const Vec3& a, const Vec3& b,
   return dot(d, d);
 }
 
-}  // namespace
-
-std::size_t tag_step_face(VoxelGrid& grid, const StepModel& model, int face_id,
-                          VoxelTag tag) {
+// Shared body of tag_step_face / tag_mesh_face. A B-rep face and a mesh
+// pseudo-face tag IDENTICALLY — both read only `model.triangle_face` and the
+// voxel grid — so the two public names forward here rather than duplicating the
+// scan. `what` names the caller in the diagnostics so the message a user sees
+// still matches the entry point they used.
+std::size_t tag_face_impl(VoxelGrid& grid, const StepModel& model, int face_id,
+                          VoxelTag tag, const char* what) {
   if (tag != VoxelTag::Load && tag != VoxelTag::Fixture)
-    throw std::invalid_argument("tag_step_face: tag must be Load or Fixture");
+    throw std::invalid_argument(std::string(what) +
+                                ": tag must be Load or Fixture");
   if (face_id < 0 || face_id >= model.face_count)
-    throw std::invalid_argument("tag_step_face: face_id out of range");
+    throw std::invalid_argument(std::string(what) + ": face_id out of range");
   if (model.triangle_face.size() != model.mesh.triangles.size())
     throw std::invalid_argument(
-        "tag_step_face: triangle_face is not parallel to mesh.triangles");
+        std::string(what) + ": triangle_face is not parallel to mesh.triangles");
 
   // A voxel is against the face when its centre is within half a voxel edge of
   // the face surface. Compare squared distances (no sqrt); the epsilon absorbs
@@ -118,6 +126,18 @@ std::size_t tag_step_face(VoxelGrid& grid, const StepModel& model, int face_id,
     }
   }
   return tagged;
+}
+
+}  // namespace
+
+std::size_t tag_step_face(VoxelGrid& grid, const StepModel& model, int face_id,
+                          VoxelTag tag) {
+  return tag_face_impl(grid, model, face_id, tag, "tag_step_face");
+}
+
+std::size_t tag_mesh_face(VoxelGrid& grid, const StepModel& model, int face_id,
+                          VoxelTag tag) {
+  return tag_face_impl(grid, model, face_id, tag, "tag_mesh_face");
 }
 
 std::size_t mask_step_face(const VoxelGrid& grid, const StepModel& model,

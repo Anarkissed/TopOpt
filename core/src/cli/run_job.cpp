@@ -17,6 +17,7 @@
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/observability.hpp"
+#include "topopt/part.hpp"
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
 #include "topopt/step.hpp"
@@ -62,11 +63,25 @@ void write_text_file(const std::string& path, const std::string& text) {
 }
 
 // Resolve a list of GEOMETRIC face selectors against an imported model to the
-// B-rep face ids they match (the same locked rule fixture_faces uses: match by
+// face ids they match (the same locked rule fixture_faces uses: match by
 // surface property, never raw index). Every selector must match >= 1 face — a
 // selector that finds nothing is a user error, not an empty no-op. `what` names
 // the block in the diagnostic. Shared by fixture_faces, loadcase anchors and
 // load-group faces so all three resolve identically.
+//
+// MESH SOURCES (STL/3MF): this is UNCHANGED and it needs no branch. A cylinder
+// selector matches on `StepFaceInfo::kind == Cylinder` and the FITTED radius the
+// segmenter produced — a mesh has no B-rep, so the fitted radius IS the exact
+// radius for the geometry the user supplied. It is compared under the same
+// kJobFaceRadiusToleranceMm as a B-rep radius. The honest consequence: a
+// cylinder whose tessellation is too coarse for a tight circle fit (or a fit
+// that lands just outside the 1e-6 mm window) matches NOTHING and the selector
+// REFUSES with the plain "matched no face of the model" message below — it never
+// silently falls back to a raw index or a fuzzy match. A hand-authored mesh job
+// that wants a specific bore should therefore give a radius the fit actually
+// achieves (asserted for the demo L-bracket STL in test_mesh_job), or select by
+// raw face id via the loads block's `anchor_face_ids` / `face_ids`, the form the
+// app's interactive tap already produces for both sources.
 std::vector<int> resolve_selectors(const StepModel& model,
                                    const std::vector<JobFaceSelector>& selectors,
                                    const std::string& what) {
@@ -224,10 +239,38 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
 
   RunJobResult result;
 
-  // §5 pipeline: STEP ──OCCT──▶ tessellated surface.
-  result.model = import_step_file(join_path(job_dir, job.model));
+  // §5 pipeline: import the part into the face-carrying StepModel every
+  // downstream stage consumes. The FRONT DOOR is the ONLY format-aware line —
+  // import_part_file dispatches on the extension (handoff 134):
+  //   .step/.stp  ──OCCT B-rep──▶ StepModel  (REAL faces; the identical code
+  //                                            path it always took, byte for byte)
+  //   .stl / .3mf ──read+repair+segment──▶ StepModel  (PSEUDO-faces)
+  // Everything after this point — the watertight check, voxelize, tag,
+  // build_production_loadcase, the ladder, the report, the export — is written
+  // against `StepModel` + `face_id` and does not know or care which door the
+  // model came through. `model_is_mesh` is used ONLY to name the tagging call
+  // honestly (tag_mesh_face vs tag_step_face); the two are identical.
+  const std::string model_path = join_path(job_dir, job.model);
+  const bool model_is_mesh =
+      part_format_for_path(job.model) != PartFormat::Step;
+  // import_part_file throws PartError on a read/parse failure, an unavailable
+  // format (STEP without OCCT, 3MF without lib3mf), or a mesh REFUSED by the
+  // Phase-1 inspection (non-manifold, open, non-orientable, zero-thickness). Any
+  // of those is a job-level failure, so surface it as a JobError with the core's
+  // own plain-language reason rather than letting PartError escape run_job's
+  // documented JobError contract.
+  try {
+    result.model = import_part_file(model_path);
+  } catch (const PartError& e) {
+    throw JobError(std::string("cannot import model \"") + job.model +
+                   "\": " + e.what());
+  }
 
-  // ──▶ watertight check (both modes).
+  // ──▶ watertight check (both modes AND both sources). For a STEP part this is
+  // the unchanged tessellation check. For a mesh part the Phase-1 importer has
+  // already REFUSED an open surface (OpenBoundary), so a mesh that reaches here
+  // is watertight; the check is kept as a belt-and-suspenders guard that also
+  // covers the (rare) tessellation that welds to a hole no defect scan caught.
   if (!check_watertight(result.model.mesh).watertight)
     throw JobError("model tessellation is not watertight: " + job.model);
 
@@ -311,11 +354,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     result.fixture_face_ids =
         resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
 
-    // ──▶ voxelize + tag the fixture voxels of every matched face.
+    // ──▶ voxelize + tag the fixture voxels of every matched face. The tag call
+    // is source-appropriate in NAME only (tag_mesh_face and tag_step_face run
+    // the identical scan over `triangle_face`); a mesh pseudo-face tags exactly
+    // as a B-rep face does.
     grid = voxelize(result.model.mesh, job.resolution);
     std::size_t tagged = 0;
     for (const int f : result.fixture_face_ids)
-      tagged += tag_step_face(grid, result.model, f, VoxelTag::Fixture);
+      tagged += model_is_mesh
+                    ? tag_mesh_face(grid, result.model, f, VoxelTag::Fixture)
+                    : tag_step_face(grid, result.model, f, VoxelTag::Fixture);
     if (tagged == 0)
       throw JobError("fixture faces tagged no voxels (resolution too coarse "
                      "for the selected faces?)");

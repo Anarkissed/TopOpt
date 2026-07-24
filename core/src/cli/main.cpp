@@ -19,6 +19,7 @@
 
 #include "topopt/job.hpp"
 #include "topopt/materials.hpp"
+#include "topopt/part.hpp"
 #include "topopt/settings.hpp"
 #include "topopt/version.hpp"
 
@@ -120,9 +121,13 @@ int main(int argc, char** argv) {
         topopt::run_job(job, dirname_of(job_path), out_dir, materials, rules,
                         /*emit_progress=*/true, obs);
 
-    std::printf("model: %s (%d B-rep faces, %zu fixture faces matched)\n",
+    // "B-rep faces" only for a STEP part; an STL/3MF part carries manufactured
+    // PSEUDO-faces (handoff 2026-07-24-mesh-optimize-path), so name them honestly.
+    const bool is_mesh =
+        topopt::part_format_for_path(job.model) != topopt::PartFormat::Step;
+    std::printf("model: %s (%d %s faces, %zu fixture faces matched)\n",
                 job.model.c_str(), result.model.face_count,
-                result.fixture_face_ids.size());
+                is_mesh ? "pseudo" : "B-rep", result.fixture_face_ids.size());
     std::printf("variants: %zu evaluated, %zu accepted%s\n",
                 result.pipeline.evaluated.size(), result.mesh_paths.size(),
                 result.pipeline.stopped_on_margin

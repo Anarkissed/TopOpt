@@ -113,6 +113,22 @@ StepModel import_step_file(const std::string& path,
 std::size_t tag_step_face(VoxelGrid& grid, const StepModel& model, int face_id,
                           VoxelTag tag);
 
+// Tag every solid voxel of `grid` against PSEUDO-face `face_id` of a mesh-import
+// `model` (an STL/3MF part segmented into pseudo-faces by src/io/part.cpp).
+//
+// This is IDENTICAL to tag_step_face in every respect — same geometry, same
+// half-voxel threshold, same result — and forwards to the same implementation.
+// It exists only so a mesh-source call site reads honestly: tag_step_face and
+// tag_mesh_face already select "the voxels against the triangles carrying this
+// face id", and `StepModel::triangle_face` is the pluggable contract that makes
+// the SOURCE of those ids (a B-rep tessellation or a dihedral segmentation)
+// invisible here (handoff 134 moved this logic out of the OCCT-gated step.cpp
+// for exactly that reason). A mesh pseudo-face id is a face id like any other.
+//
+// Throws the same std::invalid_argument conditions as tag_step_face.
+std::size_t tag_mesh_face(VoxelGrid& grid, const StepModel& model, int face_id,
+                          VoxelTag tag);
+
 // Set the design mask (ROADMAP M3.7) of the solid voxels lying against B-rep
 // face `face_id` of `model`, to a depth of `depth_voxels` layers, to
 // `mask_value`. This is the M1.6 slab selection generalized with a voxel depth:
