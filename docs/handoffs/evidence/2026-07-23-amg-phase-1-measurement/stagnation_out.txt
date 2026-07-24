@@ -1,0 +1,38 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=stagnation
+
+===== [STAGNATION] B2 on the 131 R1 fixtures, ITERATION-0 field =====
+
+== occ0.40+bore0.40 192x112x128  192x112x128 | solid=242816 bore=200704 empty=2308992
+   GEOMETRIC: hier_built=1 used_mg=0 levels=0 mg_cycles=300 cg_iters=3602 resid=9.97e-07  56.82s
+      -> geometric FELL BACK (STAGNATION: hierarchy built)
+   JACOBI-CG baseline: iters=3602  40.02s
+   reduced DOF = 804864 | production matfree hierarchy = 88.9 MB (B1 baseline)
+    level      n        nnz    nnz/row   ratio   note
+        0   804864          -     75.5       -   MATRIX-FREE (no A stored)
+        1    67260    6697512     99.6   11.97
+        2     6522     530731     81.4   10.31
+        3      732      43344     59.2    8.91
+    coarsest n=732 dense-LDL^T=yes | P0 61.4 MB + coarse ops 104.8 MB + bookkeeping 44.5 MB = AMG ADDS 210.7 MB
+   LEAN stationary V-cycle: cycles=60 converged=NO | overall=0.976 sustained=0.969 worst=0.970
+   LEAN-PCG: cycles=66 converged=yes resid=9.30e-07 rho_eff=0.811 | setup 2.70s (strength 0.25 agg 0.00 prolong 0.08 galerkin 2.12 coarse 0.23), solve 7.20s, 0.109s/cycle
+   MEMORY: AMG adds 210.7 MB vs matfree baseline 88.9 MB = 2.37x  [B1 bar <= 2.00x: FAIL] | RSS delta over setup 88.3 MB, process peak 906.2 MB
+   END-TO-END: geometric 56.82s vs lean AMG 9.90s = 5.74x  [B3 bar >= 1.00x: PASS]
+   DETERMINISM (B4): IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL
+
+== occ0.40+bore0.40 100x96x96  100x96x96 | solid=34560 bore=111360 empty=775680
+   GEOMETRIC: hier_built=1 used_mg=0 levels=0 mg_cycles=300 cg_iters=1607 resid=9.79e-07  7.61s
+      -> geometric FELL BACK (STAGNATION: hierarchy built)
+   JACOBI-CG baseline: iters=1607  3.61s
+   reduced DOF = 142848 | production matfree hierarchy = 11.2 MB (B1 baseline)
+    level      n        nnz    nnz/row   ratio   note
+        0   142848          -     65.7       -   MATRIX-FREE (no A stored)
+        1    13902    1122372     80.7   10.28
+        2     1698      86428     50.9    8.19
+        3      252       8208     32.6    6.74
+    coarsest n=252 dense-LDL^T=yes | P0 10.9 MB + coarse ops 17.4 MB + bookkeeping 7.4 MB = AMG ADDS 35.7 MB
+   LEAN stationary V-cycle: cycles=60 converged=NO | overall=0.993 sustained=0.975 worst=0.976
+   LEAN-PCG: cycles=142 converged=yes resid=9.24e-07 rho_eff=0.907 | setup 0.33s (strength 0.03 agg 0.00 prolong 0.01 galerkin 0.27 coarse 0.02), solve 3.31s, 0.023s/cycle
+   MEMORY: AMG adds 35.7 MB vs matfree baseline 11.2 MB = 3.18x  [B1 bar <= 2.00x: FAIL] | RSS delta over setup 14.8 MB, process peak 1108.6 MB
+   END-TO-END: geometric 7.61s vs lean AMG 3.65s = 2.09x  [B3 bar >= 1.00x: PASS]
+   DETERMINISM (B4): IDENTICAL — operators IDENTICAL, residual history + solution IDENTICAL

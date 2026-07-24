@@ -1,0 +1,7 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=correctness
+
+===== [CORRECTNESS] lean AMG solves the RIGHT system =====
+   reference matrix-free Jacobi-CG: iters=172 resid=7.79e-11 converged=yes
+   P=unsmoothed LEAN-PCG cycles=31 resid=6.79e-11 | max|u_ref|=1.062339e-01 max|u_lean-u_ref|=5.721e-13 relative=5.385e-12  VERDICT: PASS (bar <= 1e-8)
+   P=smoothed   LEAN-PCG cycles=62 resid=9.23e-11 | max|u_ref|=1.062339e-01 max|u_lean-u_ref|=1.808e-13 relative=1.702e-12  VERDICT: PASS (bar <= 1e-8)

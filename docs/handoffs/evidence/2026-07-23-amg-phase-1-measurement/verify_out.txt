@@ -1,0 +1,12 @@
+AMG Phase 1 — memory-lean rebuild (fine level MATRIX-FREE).
+threads: mf_thread_count=10 | mode=verify
+
+===== [VERIFY] element-local kernels vs an assembled reference =====
+   fixture 10x10x10, reduced DOF = 3630
+   reference A built from 3630 matrix-free applies: nnz=242172 (66.7/row)
+   [1] strength graph      : IDENTICAL (19042 strong edges; nnz/row lean=66.7 ref=66.7)
+   [2] Gershgorin lambda   : lean=5.930693069 ref=5.930693069 rel=0.00e+00 PASS
+       aggregates=64 coarse DOF=384
+   [3] A*T (smoothing)     : pattern IDENTICAL, max|diff|=0.000e+00 relative=0.000e+00 PASS
+   [4] Galerkin P=unsmoothed: lean nnz=35640 ref nnz=35245 | max|diff|=1.251e-12 relative=1.870e-15 PASS
+   [4] Galerkin P=smoothed  : lean nnz=62352 ref nnz=62323 | max|diff|=1.705e-12 relative=4.406e-15 PASS
