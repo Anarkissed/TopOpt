@@ -1,0 +1,25 @@
+===== FIXTURE =====
+  part 14x4x14 (528 solid voxels) -> analysis grid 32x24x32 (24576 elements)
+  fill=2.148%  dilution=46.5x  spacing=1.00 mm  min_feature=2.50 mm -> rmin=2.500 voxels  auto band=4
+  ladder: 0.68 0.52 0.38 0.26   matfree threads=6
+
+===== LENGTH — |drho| accumulation over 250 MMA iterations at production dilution (134 §2d) =====
+  [length/off] 250 captured iterations, 87.9 s, 8049 CG iterations
+  [length/on k=4] 250 captured iterations, 44.4 s, 10428 CG iterations
+
+  iter    mean|drho|    max|drho|
+     1    0.0000e+00   0.0000e+00
+    25    1.4516e-05   4.9546e-03
+    50    3.3518e-07   7.6065e-05
+    75    6.2562e-08   2.4896e-05
+   100    6.0891e-08   2.7472e-05
+   125    3.8672e-07   1.1410e-04
+   150    1.0647e-05   2.9151e-03
+   175    4.6168e-06   2.9737e-03
+   200    1.2512e-07   6.6604e-05
+   225    2.3692e-08   1.2908e-05
+   250    4.2999e-09   2.4100e-06
+
+  GROWTH INVARIANT over 250 full-domain MMA steps at k=4: 0 escapes (worst out-of-band density 0.000000)
+  cost: wall 87.9 -> 44.4 s (0.505x), CG 8049 -> 10428 (1.296x)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-phase-1-580ef7/docs/handoffs/evidence/2026-07-23-active-domain-phase-1/length/drho_vs_iteration.csv

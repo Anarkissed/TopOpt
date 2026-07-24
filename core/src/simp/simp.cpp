@@ -12,8 +12,10 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -204,6 +206,101 @@ std::vector<ProjectionStage> heaviside_continuation_schedule() {
           {8.0, 0.2, 50},  {16.0, 0.1, 50}, {32.0, 0.05, 50}};
 }
 
+// ---------------------------------------------------------------------------
+// ACTIVE DOMAIN (active-domain phase 1) — the restricted-analysis mask.
+// Contract, rule and rationale: topopt/simp.hpp (active_domain_mask). This is a
+// PURE function of (grid tags, density, band) with a FIXED traversal.
+
+int active_domain_auto_band(double filter_radius) {
+  // ceil(rmin) + 1 — the width the growth invariant's argument licenses. Floored
+  // at 1 so a degenerate (non-positive / non-finite) radius can never produce a
+  // zero band, which would silently mean "OFF" instead of "narrowest".
+  if (!std::isfinite(filter_radius) || filter_radius <= 0.0) return 1;
+  const int k = static_cast<int>(std::ceil(filter_radius)) + 1;
+  return k < 1 ? 1 : k;
+}
+
+std::vector<char> active_domain_mask(const VoxelGrid& grid,
+                                     const std::vector<double>& density,
+                                     double density_min, int band) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "active_domain_mask: density vector size != voxel_count");
+  std::vector<char> m(grid.voxel_count(), 0);
+  if (band <= 0) {
+    // OFF: every solid voxel is active. Returned (rather than refusing) so a
+    // caller can hold one code path and so the "band covers everything" case is
+    // representable.
+    for (std::size_t e = 0; e < m.size(); ++e)
+      if (grid.tags[e] != VoxelTag::Empty) m[e] = 1;
+    return m;
+  }
+
+  // CORE + BC PIN. The core rule is the SAFE threshold (handoff 134 §1d):
+  // everything it drops has modulus <= (1.5 * rho_min)^p, i.e. ~3.4e-9 * E0 at
+  // the production floor. A higher threshold would eliminate far more (134
+  // measured 62% -> 2% on a gray CLI capture) but at up to ~1e5x more stiffness,
+  // and that error was NEVER MEASURED — quoting it would be exactly the
+  // unmeasured claim handoff 130 blocked. So the rule stays here.
+  const double thresh = 1.5 * density_min;
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (grid.tags[e] == VoxelTag::Empty) continue;
+        if (density[e] > thresh || grid.tags[e] == VoxelTag::Load ||
+            grid.tags[e] == VoxelTag::Fixture)
+          m[e] = 1;
+      }
+
+  // GROWTH BAND — separable Chebyshev max-filter, three integer passes in the
+  // FIXED order x -> y -> z. Separability is exact for the Chebyshev (L-infinity)
+  // metric: dilating by a cube of half-width `band` equals dilating by a segment
+  // of half-width `band` on each axis in turn. Nothing here can reorder and no
+  // floating-point value is touched, so the result is bit-identical on every
+  // re-derivation and on every machine.
+  std::vector<char> tmp(m.size(), 0);
+  auto sweep_x = [&]() {
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          char v = 0;
+          const int lo = std::max(0, i - band), hi = std::min(grid.nx - 1, i + band);
+          for (int a = lo; a <= hi && !v; ++a) v = m[grid.index(a, j, k)];
+          tmp[grid.index(i, j, k)] = v;
+        }
+  };
+  auto sweep_y = [&]() {
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          char v = 0;
+          const int lo = std::max(0, j - band), hi = std::min(grid.ny - 1, j + band);
+          for (int b = lo; b <= hi && !v; ++b) v = tmp[grid.index(i, b, k)];
+          m[grid.index(i, j, k)] = v;
+        }
+  };
+  auto sweep_z = [&]() {
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          char v = 0;
+          const int lo = std::max(0, k - band), hi = std::min(grid.nz - 1, k + band);
+          for (int c = lo; c <= hi && !v; ++c) v = m[grid.index(i, j, c)];
+          tmp[grid.index(i, j, k)] = v;
+        }
+  };
+  sweep_x();  // m -> tmp
+  sweep_y();  // tmp -> m
+  sweep_z();  // m -> tmp
+
+  // The band may have spilled into Empty voxels (they carry no element anyway);
+  // AND with the solid set so the mask means exactly "elements that exist".
+  for (std::size_t e = 0; e < m.size(); ++e)
+    m[e] = (tmp[e] && grid.tags[e] != VoxelTag::Empty) ? 1 : 0;
+  return m;
+}
+
 SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<double>& density,
                                const std::vector<DirichletBC>& bcs,
@@ -211,11 +308,21 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                double tolerance, int max_iterations,
                                const FeaSolution* initial_guess,
                                PenalizedSolver* solver,
-                               SolverKind solver_kind) {
+                               SolverKind solver_kind,
+                               const std::vector<char>* active_mask) {
   validate_params(params);
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
         "simp_compliance: density vector size != voxel_count");
+  if (active_mask != nullptr) {
+    if (active_mask->size() != grid.voxel_count())
+      throw std::invalid_argument(
+          "simp_compliance: active_mask size != voxel_count");
+    if (solver_kind != SolverKind::MultigridCG_Matfree)
+      throw std::invalid_argument(
+          "simp_compliance: active_mask requires SolverKind::MultigridCG_Matfree "
+          "(the active domain is a matrix-free-operator feature)");
+  }
 
   // Per-voxel penalized Young's modulus E(rho_e) for the graded FEA solve. Empty
   // voxels contribute no element, so their entry is ignored by fea_solve_cg; we
@@ -238,9 +345,13 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
     // never built. Solves the identical system to the same tolerance; stateless,
     // so the cached PenalizedSolver / warm start are bypassed. out.cg.used_multigrid
     // reports whether MG ran or it fell back to the matrix-free Jacobi-CG.
+    // ACTIVE DOMAIN: `active_mask` (may be null) restricts which solid voxels
+    // contribute an element. Everything downstream of mf_build_elems — void
+    // gate, kept-DOF numbering, Jacobi diagonal, hierarchy, V-cycle — is
+    // unchanged code running exactly on the surviving system.
     out.solution = fea_solve_mgcg_matfree(grid, elem_youngs, params.poisson, bcs,
                                           loads, tolerance, max_iterations,
-                                          &out.cg);
+                                          &out.cg, active_mask);
   } else if (solver_kind == SolverKind::MultigridCG) {
     // Opt-in accelerator (handoff 073): the geometric-multigrid-preconditioned
     // CG solves the identical system to the same tolerance. It is stateless, so
@@ -271,6 +382,16 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
       for (int i = 0; i < grid.nx; ++i) {
         if (!grid.solid(i, j, k)) continue;
         const std::size_t e = grid.index(i, j, k);
+        // ACTIVE DOMAIN: an element the solve did not assemble is not part of
+        // the system that was solved, so it contributes NO energy and NO
+        // sensitivity. The compliance stays exactly f^T u = u^T K u for the K
+        // that ran — including a fringe out-of-band element (whose nodes DO
+        // carry displacement, being shared with in-band elements) would add
+        // energy from a stiffness the solve never had. Zeroing the sensitivity
+        // is also what makes the growth invariant true: an out-of-band voxel
+        // sees dc/drho = 0 and the updater drives it to the density floor, so
+        // it cannot grow before the band grows to admit it.
+        if (active_mask != nullptr && (*active_mask)[e] == 0) continue;
         const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
         std::array<double, 24> ue;
         for (int a = 0; a < 8; ++a)
@@ -1179,6 +1300,131 @@ std::vector<double> oc_update_projected(
   return candidate(0.5 * (l1 + l2));
 }
 
+// ---------------------------------------------------------------------------
+// ACTIVE DOMAIN (active-domain phase 1) — the per-run state both simp_optimize
+// overloads share, so the band, the latch and the accounting cannot drift
+// between the plain and the mask-aware loop.
+//
+// Cadence 1 BY CONSTRUCTION: `solve` re-derives the mask from the field it is
+// about to solve, every iteration. That is not a tunable — the growth invariant
+// is stated per iteration and only covers cadence 1 (handoff 134 §3b/§3c), and
+// the rebuild is three integer passes against a solve that is dozens of V-cycles
+// of 24-DOF element applies. 134 §3c also MEASURED a larger cadence to cost
+// speed (iteration-mean active fraction +47% from cadence 1 to 10) in exchange
+// for accuracy nothing needs.
+struct ActiveDomainRun {
+  int band = 0;  // resolved width (0 = feature off for this run)
+  bool latched = false;
+  int latch_iteration = 0;
+  std::string latch_reason;
+  int hot_streak = 0;      // consecutive iterations at/above the latch fraction
+  double fraction_sum = 0.0;
+  long long fraction_count = 0;
+
+  bool armed() const { return band > 0 && !latched; }
+
+  void record(double fraction) {
+    fraction_sum += fraction;
+    ++fraction_count;
+  }
+  double mean_fraction() const {
+    return fraction_count > 0 ? fraction_sum / static_cast<double>(fraction_count)
+                              : 1.0;
+  }
+};
+
+// Resolve SimpOptions::active_domain_band for a run: < 0 means AUTO (derived
+// from the filter radius this run actually uses), 0 means off, > 0 is verbatim.
+// Rejects a non-zero band on any solver but the matrix-free multigrid — the
+// active domain is a property of that operator, and a silent no-op is the
+// failure mode 125 §0 keeps re-teaching.
+int resolve_active_domain_band(const SimpOptions& options, const char* who) {
+  int band = options.active_domain_band;
+  if (band < 0) band = active_domain_auto_band(options.filter_radius);
+  if (band > 0 && options.solver != SolverKind::MultigridCG_Matfree)
+    throw std::invalid_argument(
+        std::string(who) +
+        ": active_domain_band requires solver == SolverKind::MultigridCG_Matfree");
+  return band;
+}
+
+// One TRAJECTORY penalized solve under the active domain. Returns the solve and
+// writes the active element fraction actually assembled (1.0 whenever the full
+// domain ran, so the observability column means the same thing on every run).
+//
+// FALLBACK DISCIPLINE (handoff 134 §3e): a restricted solve that throws — the
+// band severed the load path, or the void gate rejected the reduced system — is
+// NOT propagated. The run latches the mask off, re-solves the SAME field on the
+// full domain, and records why. The retry's own throw IS propagated: at that
+// point the failure is the problem, not the band.
+SimpCompliance active_domain_solve(ActiveDomainRun& ad, const VoxelGrid& grid,
+                                   const SimpParams& params,
+                                   const std::vector<double>& xphys,
+                                   const std::vector<DirichletBC>& bcs,
+                                   const std::vector<NodalLoad>& loads,
+                                   double tolerance, int cg_max_iterations,
+                                   const FeaSolution* guess,
+                                   PenalizedSolver* solver, SolverKind kind,
+                                   int iteration, double& active_fraction_out) {
+  active_fraction_out = 1.0;
+  if (!ad.armed()) {
+    if (ad.band > 0) ad.record(1.0);  // latched: still counted, honestly, as 1.0
+    return simp_compliance(grid, params, xphys, bcs, loads, tolerance,
+                           cg_max_iterations, guess, solver, kind);
+  }
+
+  const std::vector<char> mask =
+      active_domain_mask(grid, xphys, params.density_min, ad.band);
+  const double solid = static_cast<double>(grid.solid_count());
+  long long active = 0;
+  for (std::size_t e = 0; e < mask.size(); ++e) active += mask[e] ? 1 : 0;
+  const double fraction =
+      solid > 0.0 ? static_cast<double>(active) / solid : 1.0;
+
+  try {
+    SimpCompliance c =
+        simp_compliance(grid, params, xphys, bcs, loads, tolerance,
+                        cg_max_iterations, guess, solver, kind, &mask);
+    active_fraction_out = fraction;
+    ad.record(fraction);
+    // Latch AFTER the solve, on the measurement this iteration produced: the
+    // band that covered the domain still ran, and the mask is off from the next
+    // iteration on. One-way — a latched run never re-arms.
+    if (fraction >= kActiveDomainLatchFraction) {
+      if (++ad.hot_streak >= kActiveDomainLatchWindow) {
+        ad.latched = true;
+        ad.latch_iteration = iteration;
+        char buf[192];
+        std::snprintf(buf, sizeof(buf),
+                      "active fraction >= %.2f for %d consecutive iterations "
+                      "(band covers the domain and buys nothing)",
+                      kActiveDomainLatchFraction, kActiveDomainLatchWindow);
+        ad.latch_reason = buf;
+      }
+    } else {
+      ad.hot_streak = 0;
+    }
+    return c;
+  } catch (const std::exception& ex) {
+    ad.latched = true;
+    ad.latch_iteration = iteration;
+    ad.latch_reason = std::string("restricted solve failed: ") + ex.what();
+    ad.record(1.0);
+    return simp_compliance(grid, params, xphys, bcs, loads, tolerance,
+                           cg_max_iterations, guess, solver, kind);
+  }
+}
+
+// Copy the run's active-domain outcome into the result (called once, at the end
+// of each overload — finalize-only, never streamed).
+void finalize_active_domain(const ActiveDomainRun& ad, SimpOptimizeResult& r) {
+  r.active_domain_band = ad.band;
+  r.active_domain_latched = ad.latched;
+  r.active_domain_latch_iteration = ad.latch_iteration;
+  r.active_domain_latch_reason = ad.latch_reason;
+  r.active_fraction_mean = ad.mean_fraction();
+}
+
 }  // namespace
 
 SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
@@ -1197,6 +1443,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   validate_projection_options(options);
   validate_updater_options(options);  // MMA + projection rejected (M7.mma.1)
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
+
+  // ACTIVE DOMAIN (active-domain phase 1): resolve the band ONCE per run (an
+  // AUTO request reads the filter radius this run uses) and reject a non-zero
+  // band on a non-matrix-free solver. 0 => not one line below behaves
+  // differently and the run is byte-identical.
+  ActiveDomainRun active_domain;
+  active_domain.band = resolve_active_domain_band(options, "simp_optimize");
 
   // make_density_filter validates filter_radius > 0.
   const DensityFilter filter = make_density_filter(grid, options.filter_radius);
@@ -1298,10 +1551,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
       // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
       const double traj_tol = adaptive_traj_cg_tol(options, last_change);
-      const SimpCompliance c = simp_compliance(
-          grid, params, xphys, bcs, loads, traj_tol,
+      // ACTIVE DOMAIN: the mask is applied to the TRAJECTORY solve only (the
+      // final/certified solve below is always full-domain). `af` is 1.0 whenever
+      // the full domain ran.
+      double af = 1.0;
+      const SimpCompliance c = active_domain_solve(
+          active_domain, grid, params, xphys, bcs, loads, traj_tol,
           options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
-          use_solver ? solver.get() : nullptr, options.solver);
+          use_solver ? solver.get() : nullptr, options.solver,
+          result.iterations + 1, af);
       if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
@@ -1370,6 +1628,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_recycle_dim = c.cg.recycle_dim;
         obs.cg_recycle_setup_matvecs = c.cg.recycle_setup_matvecs;
         obs.plateau = observe_plateau(options, result.history);
+        obs.active_fraction = af;  // active-domain phase 1 (1.0 when full-domain)
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
@@ -1472,6 +1731,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     result.compliance = fc.compliance;
   }
   result.volume_fraction = phys_volfrac(result.physical_density);
+  // ACTIVE DOMAIN: FINALIZE-ONLY. The band, the latch and the mean active
+  // fraction are written once, here, after the final FULL-DOMAIN solve above —
+  // never streamed mid-run, so a partially-written record can never assert a
+  // posture the run did not end in (the walk-back discipline of RunInfo's
+  // cg_multigrid_observed).
+  finalize_active_domain(active_domain, result);
   // Final playback keyframe: the converged shape.
   if (options.keyframe && options.keyframe_stride > 0)
     options.keyframe(result.physical_density);
@@ -1965,6 +2230,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   validate_updater_options(options);
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
 
+  // ACTIVE DOMAIN (active-domain phase 1): resolved once per run, exactly as in
+  // the unconstrained overload. This is the overload the production design-box
+  // ladder runs, so this is the one the dilution — and the whole feature — is
+  // about.
+  ActiveDomainRun active_domain;
+  active_domain.band = resolve_active_domain_band(options, "simp_optimize");
+
   // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
   // analysis grid (FrozenVoid removed), and the Active-voxel budget.
   const DesignMask eff = effective_mask(grid, mask);
@@ -2074,11 +2346,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
       // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
       const double traj_tol = adaptive_traj_cg_tol(options, last_change);
-      const SimpCompliance c =
-          simp_compliance(analysis, params, xphys, bcs, loads,
-                          traj_tol, options.cg_max_iterations,
-                          warm.u.empty() ? nullptr : &warm,
-                          use_solver ? solver.get() : nullptr, options.solver);
+      // ACTIVE DOMAIN: trajectory-only, on the ANALYSIS grid (the design box) —
+      // the grid the dilution lives on and the one this feature exists for.
+      double af = 1.0;
+      const SimpCompliance c = active_domain_solve(
+          active_domain, analysis, params, xphys, bcs, loads, traj_tol,
+          options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
+          use_solver ? solver.get() : nullptr, options.solver,
+          result.iterations + 1, af);
       if (!use_solver) warm = c.solution;
       if (!c.cg.converged)
         throw std::runtime_error(
@@ -2148,6 +2423,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_recycle_dim = c.cg.recycle_dim;
         obs.cg_recycle_setup_matvecs = c.cg.recycle_setup_matvecs;
         obs.plateau = observe_plateau(options, result.history);
+        obs.active_fraction = af;  // active-domain phase 1 (1.0 when full-domain)
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
@@ -2244,6 +2520,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     result.compliance = fc.compliance;
   }
   result.volume_fraction = active_volfrac(xfinal_unpinned);
+  finalize_active_domain(active_domain, result);  // active domain: finalize-only
   // Final playback keyframe: the converged printed shape.
   if (options.keyframe && options.keyframe_stride > 0)
     options.keyframe(result.physical_density);
@@ -2722,6 +2999,10 @@ SimpOptimizeResult simp_optimize_stress(const VoxelGrid& grid,
     throw std::invalid_argument(
         "simp_optimize_stress: mma_projection is not supported on the "
         "stress-constrained MMA path (handoff 114)");
+  if (options.active_domain_band != 0)
+    throw std::invalid_argument(
+        "simp_optimize_stress: active_domain_band is not supported on the "
+        "stress path");
   if (!(stress.stress_cap > 0.0))
     throw std::invalid_argument("simp_optimize_stress: stress_cap must be > 0");
   if (!(stress.p_norm > 1.0))

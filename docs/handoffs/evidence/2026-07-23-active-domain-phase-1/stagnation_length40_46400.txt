@@ -1,0 +1,17 @@
+===== FIXTURE =====
+  part 18x5x18 (900 solid voxels) -> analysis grid 40x32x40 (46400 elements)
+  fill=1.940%  dilution=51.6x  spacing=1.00 mm  min_feature=2.50 mm -> rmin=2.500 voxels  auto band=4
+  ladder: 0.68 0.52 0.38 0.26   matfree threads=6
+
+===== LENGTH — |drho| accumulation over 40 MMA iterations at production dilution (134 §2d) =====
+  [length/off] 40 captured iterations, 89.7 s, 20982 CG iterations
+  [length/on k=4] 40 captured iterations, 69.2 s, 43113 CG iterations
+
+  iter    mean|drho|    max|drho|
+     1    0.0000e+00   0.0000e+00
+    25    4.4699e-03   4.9320e-01
+    40    9.3390e-04   2.2487e-01
+
+  GROWTH INVARIANT over 40 full-domain MMA steps at k=4: 6979 escapes (worst out-of-band density 0.172965)
+  cost: wall 89.7 -> 69.2 s (0.771x), CG 20982 -> 43113 (2.055x)
+  wrote /tmp/adg/stag/length/drho_vs_iteration.csv

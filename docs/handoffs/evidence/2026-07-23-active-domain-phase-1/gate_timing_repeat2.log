@@ -1,0 +1,39 @@
+===== FIXTURE =====
+  part 14x4x14 (528 solid voxels) -> analysis grid 32x24x32 (24576 elements)
+  fill=2.148%  dilution=46.5x  spacing=1.00 mm  min_feature=2.50 mm -> rmin=2.500 voxels  auto band=4
+  ladder: 0.68 0.52 0.38 0.26   matfree threads=6
+
+===== STEP 2 — THE GATE (full ladder; k = 4 ON vs OFF, each twice) =====
+  [gate/off#1] 56.9 s wall, 97 iterations, 3454 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759 printed=0.5152 compliance=4.63900268  f_bar=1.0000
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423 printed=0.3712 compliance=8.718326213  f_bar=1.0000
+  [gate/off#2] 50.5 s wall, 97 iterations, 3454 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759 printed=0.5152 compliance=4.63900268  f_bar=1.0000
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423 printed=0.3712 compliance=8.718326213  f_bar=1.0000
+  [gate/on#1  k=4] 20.7 s wall, 97 iterations, 4577 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 39 accept margin=1.759 printed=0.5152 compliance=4.638960555  f_bar=0.4170
+    rung 1 vf=0.52 iters= 58 REJECT margin=0.8417 printed=0.3712 compliance=8.726641025  f_bar=0.3944
+  [gate/on#2  k=4] 20.8 s wall, 97 iterations, 4577 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 39 accept margin=1.759 printed=0.5152 compliance=4.638960555  f_bar=0.4170
+    rung 1 vf=0.52 iters= 58 REJECT margin=0.8417 printed=0.3712 compliance=8.726641025  f_bar=0.3944
+
+===== GATE VERDICT =====
+  twice-run bit-identical: OFF YES   ON YES
+  gate verdicts identical: YES (2 vs 2 rungs evaluated)
+  terminal recommendation: OFF "fdm walls=4 top=5 bottom=4 infill=45%gyroid"  ON "fdm walls=4 top=5 bottom=4 infill=45%gyroid"
+
+  rung   vf   f_bar  |  mean|drho|   max|drho| | dC/C       margin OFF -> ON            dM/M
+   0    0.68  0.4170 |  3.9406e-06  1.1885e-03 | 9.081e-06         1.75947 -> 1.75938        5.5374e-05
+   1    0.52  0.3944 |  2.9522e-04  1.2656e-01 | 9.537e-04        0.842343 -> 0.841741       7.1454e-04
+
+  WORST mean|drho| 2.9522e-04   (bar: 1e-4)
+  WORST max|drho|  1.2656e-01
+  WORST margin relative delta 7.1454e-04   (bar: 1e-3 = 0.1%)
+
+  COST: wall  OFF 56.9 s -> ON 20.7 s  (0.363x)
+        CG iterations  OFF 3454 -> ON 4577  (1.325x)
+        optimizer iterations  OFF 97 -> ON 97
+        Jacobi-fallback solves  OFF 0  ON 0
+        mean f_bar 0.4057  =>  134's 0.65/f law projects 1.60x per-solve
+
+  wrote /tmp/adg/rep2/gate/gate.csv

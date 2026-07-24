@@ -142,6 +142,9 @@ RunInfo build_run_info(const JobDescription& job,
   info.infeasible_cg_blowup = options.simp.infeasible_cg_blowup;
   info.infeasible_flat_tol = options.simp.infeasible_flat_tol;
   info.infeasible_window = options.simp.infeasible_window;
+  // active-domain phase 1 — the REQUESTED band (config echo). The per-rung
+  // latch outcome is filled post-run (finalize below), like cg_multigrid.
+  info.active_domain_band = options.simp.active_domain_band;
   info.min_feature_mm = options.min_feature_mm;
   info.margin_stop = options.margin_stop;
   info.infill_percent = options.infill_percent;
@@ -458,6 +461,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // nothing either way.
     run_info.rung_infeasible.assign(result.pipeline.rung_infeasible.begin(),
                                     result.pipeline.rung_infeasible.end());
+    // active-domain phase 1 — finalize the per-rung latch outcome. All-false
+    // (with a band > 0) is the positive statement "the band held for every
+    // rung"; a true entry names the rung that fell back to the full domain and
+    // why, so a run that bought nothing SAYS so instead of silently costing.
+    for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
+      run_info.active_domain_latched.push_back(
+          v.optimization.active_domain_latched ? 1 : 0);
+      run_info.active_domain_latch_reason.push_back(
+          v.optimization.active_domain_latch_reason);
+      run_info.active_domain_fraction_mean.push_back(
+          v.optimization.active_fraction_mean);
+    }
     write_run_info(result.run_info_path, run_info);
   }
   // A recovery solve (which sets used_multigrid) runs only for a non-cancelled
@@ -500,6 +515,28 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  options.simp.infeasible_window,
                  v.optimization.infeasible_iteration);
     std::fflush(stderr);
+  }
+
+  // active-domain phase 1 — LOUD LATCH. A band that switched itself off cost the
+  // derivation and bought nothing; say so, in the same spirit as the multigrid
+  // loud fallback above. Unreachable from a plain `topopt-cli run` today (the
+  // band is deliberately NOT a job.json key — it is a solver-internal
+  // accelerator, not a user knob), and deliberately written anyway so it is live
+  // the moment any front-end arms it.
+  if (options.simp.active_domain_band != 0) {
+    for (std::size_t i = 0; i < result.pipeline.evaluated.size(); ++i) {
+      const MinimizePlasticVariant& v = result.pipeline.evaluated[i];
+      if (!v.optimization.active_domain_latched) continue;
+      std::fprintf(stderr,
+                   "WARNING: rung %zu (vf %.2f) LATCHED the active domain off at "
+                   "iteration %d — %s. Every solve from there ran the FULL "
+                   "domain: the design is unaffected, the run is simply not "
+                   "accelerated. run_info.json records active_domain_latched.\n",
+                   i, v.requested_volume_fraction,
+                   v.optimization.active_domain_latch_iteration,
+                   v.optimization.active_domain_latch_reason.c_str());
+      std::fflush(stderr);
+    }
   }
 
   // Handoff 2026-07-23-gate-honesty-connectivity-rejection — LOUD DISCONNECTION,

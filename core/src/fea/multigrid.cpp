@@ -1191,12 +1191,17 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                const std::vector<DirichletBC>& bcs,
                                const std::vector<NodalLoad>& loads,
                                double tolerance, int max_iterations, CgInfo* info,
-                               const std::vector<double>* elem_youngs) {
+                               const std::vector<double>* elem_youngs,
+                               const std::vector<char>* active_mask) {
   // Build the reduced, void-gated matrix-free system (throws + sets *info on a
-  // void-gate rejection, exactly like solve_reduced_mgcg's gate).
+  // void-gate rejection, exactly like solve_reduced_mgcg's gate). `active_mask`
+  // (active-domain phase 1) restricts WHICH solid voxels contribute an element;
+  // everything below — the void gate, the kept-DOF numbering, the Jacobi
+  // diagonal, this hierarchy build and every V-cycle — then operates on the
+  // surviving system unchanged and exactly. Null = the pre-feature path.
   MatfreeReduced m = fea_detail::mf_build_reduced(
       grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
-      "fea_solve_mgcg_matfree", info);
+      "fea_solve_mgcg_matfree", info, active_mask);
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
@@ -1415,7 +1420,7 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                    double tolerance, int max_iterations,
                                    CgInfo* info) {
   return solve_mgcg_matfree(grid, youngs_modulus, poisson, bcs, loads, tolerance,
-                            max_iterations, info, nullptr);
+                            max_iterations, info, nullptr, nullptr);
 }
 
 FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
@@ -1424,9 +1429,10 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    const std::vector<DirichletBC>& bcs,
                                    const std::vector<NodalLoad>& loads,
                                    double tolerance, int max_iterations,
-                                   CgInfo* info) {
+                                   CgInfo* info,
+                                   const std::vector<char>* active_mask) {
   return solve_mgcg_matfree(grid, 1.0, poisson, bcs, loads, tolerance,
-                            max_iterations, info, &youngs_per_voxel);
+                            max_iterations, info, &youngs_per_voxel, active_mask);
 }
 
 std::size_t fea_mgcg_assembled_operator_nonzeros(

@@ -50,10 +50,23 @@ struct MfElem {
 // non-null; otherwise the uniform path (factor = 1, the modulus already baked into
 // Ke). If `color_offsets` is non-null it is filled with the kNumColors+1 range
 // delimiters. `who` names the caller in thrown messages.
+//
+// ACTIVE DOMAIN (active-domain phase 1). `active_mask`, when non-null, is a
+// grid-indexed per-voxel flag (size == grid.voxel_count()): a solid voxel whose
+// entry is 0 contributes NO ELEMENT. This is the ENTIRE mechanism of the active
+// domain feature — everything downstream follows from it for free and stays
+// EXACT on the surviving system: the M3.1 void-DOF gate drops every DOF no
+// surviving element touches, the reduced numbering, the Jacobi diagonal, the
+// multigrid hierarchy (built from the element table and the kept DOFs) and
+// apply_kgg are all unchanged code operating on the smaller system. The band
+// boundary is therefore the EXISTING traction-free free surface — no new solver
+// and no new boundary-condition code. A null mask is the pre-feature path,
+// byte-for-byte. Throws std::invalid_argument on a size mismatch.
 std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
                                    const std::vector<double>* elem_youngs,
                                    const char* who,
-                                   std::vector<int>* color_offsets = nullptr);
+                                   std::vector<int>* color_offsets = nullptr,
+                                   const std::vector<char>* active_mask = nullptr);
 
 // Set the worker-thread count for the matrix-free element apply. n<=0 selects an
 // automatic count (hardware concurrency). Threading is deterministic (see
@@ -149,12 +162,15 @@ struct MatfreeReduced {
 // (void_dof_survivors) but WITHOUT assembling a sparse matrix. On a void-gate
 // rejection it sets `*info` (converged=false, 0 iterations) and throws, matching
 // solve_reduced_cg. `who` names the caller in thrown messages.
+// `active_mask` (active-domain phase 1) is forwarded verbatim to mf_build_elems;
+// null keeps the pre-feature build byte-for-byte.
 MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
                                 double poisson,
                                 const std::vector<DirichletBC>& bcs,
                                 const std::vector<NodalLoad>& loads,
                                 const std::vector<double>* elem_youngs,
-                                const char* who, CgInfo* info);
+                                const char* who, CgInfo* info,
+                                const std::vector<char>* active_mask = nullptr);
 
 // What Krylov recycling (handoff 133) did to ONE solve: the number of recycle
 // columns that actually preconditioned it, and the operator applies charged to

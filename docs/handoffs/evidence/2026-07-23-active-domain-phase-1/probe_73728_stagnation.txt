@@ -1,0 +1,11 @@
+===== FIXTURE =====
+  part 24x6x24 (1512 solid voxels) -> analysis grid 48x32x48 (73728 elements)
+  fill=2.051%  dilution=48.8x  spacing=1.00 mm  min_feature=2.50 mm -> rmin=2.500 voxels  auto band=4
+  ladder: 0.68 0.52 0.38 0.26   matfree threads=6
+    iter  1  cg=   54  mg=1  hier=1  cycles=54  active=1.0000  compliance=251054
+    iter  2  cg=   51  mg=1  hier=1  cycles=51  active=1.0000  compliance=1.52745e+07
+    iter  3  cg= 5056  mg=0  hier=1  cycles=300  active=1.0000  compliance=1.17566e+07
+    iter  4  cg=12746  mg=0  hier=1  cycles=300  active=1.0000  compliance=4.15936e+08
+    iter  5  cg=   99  mg=1  hier=1  cycles=99  active=1.0000  compliance=2.17651e+07
+    iter  6  cg=17151  mg=0  hier=1  cycles=300  active=1.0000  compliance=4.48606e+08
+  probe: 157.7 s for 6 iterations (26.29 s/iter), 35157 CG, 3 Jacobi fallbacks
