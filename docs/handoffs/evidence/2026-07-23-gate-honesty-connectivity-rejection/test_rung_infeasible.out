@@ -1,0 +1,12 @@
+[real] rung 0: 146 iters, c 10.6361 -> 0.00167184, cg 4551..11977 — fire=-1
+[real] rung 1: 45 iters, c 0.013704 -> 0.00370307, cg 5264..5821 — fire=-1
+[real] rung 2 (severed): c[0]=0.656802 -> 167427 (2.549e+05x), cg 8371 -> 43532 — fire=6 of 31 iterations run
+[real] rung 3 (corpse-seeded): starts at 167427 — undetectable, 27 iterations wasted
+[transient] rung 1 peaked at 3.616e+04x its start compliance with a 14.2x CG blow-up — and was NOT killed
+[one rule] healthy run rejected a rung for: "load path not connected"
+[one rule] 2 rungs, armed == disarmed bit-for-bit: yes
+[driver] rung 1: infeasible at iteration 6, reason "rung infeasible (load path lost)"
+[blind spot] rung starts: 7.02e+04, 4.795e+12, 1.464e+13 — rung 2 begins at the dead level, so no ratio to its own start can fire
+[belt] the undetectable rung 2 is rejected anyway: "load path not connected"
+[inheritance] rung-after-corpse == rung-after-last-feasible: yes
+rung_infeasible: all 61 checks passed
