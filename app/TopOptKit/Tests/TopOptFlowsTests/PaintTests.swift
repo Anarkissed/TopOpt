@@ -134,6 +134,33 @@ final class PaintTests: XCTestCase {
         return cam
     }
 
+    func testBrushFollowsTheSettledModel() {
+        // Two separated triangles: #0 on the left (x≈-2), #1 on the right (x≈+2), both in z=0.
+        // The viewer may SETTLE-rotate the model (gravity → floor); the brush must project the
+        // settled positions the user sees. A 180° spin about the view axis swaps the two on screen,
+        // so a brush fixed at the RIGHT triangle's screen point must switch from #1 (un-settled) to
+        // #0 (settled) — the fix for "painting the other wall".
+        let verts: [Float] = [-2.2, -0.2, 0,  -1.8, -0.2, 0,  -2, 0.2, 0,
+                               1.8, -0.2, 0,   2.2, -0.2, 0,   2, 0.2, 0]
+        let mesh = ViewerMesh(vertices: verts, indices: [0, 1, 2, 3, 4, 5], faceIDs: [0, 1])
+        let cam = topDownCamera(mesh)
+        let size = CGSize(width: 100, height: 100)
+        let proj = CameraProjection(camera: cam, viewportSize: size)
+        let spin = simd_quatf(angle: .pi, axis: SIMD3<Float>(0, 0, 1))   // 180° about the view axis
+
+        // The right triangle's screen point when un-settled.
+        let rightPoint = proj.project(SIMD3<Float>(2, -0.067, 0))!
+        let unsettled = BrushHitTest.triangles(under: rightPoint, radiusPoints: 12,
+                                               mesh: mesh, projection: proj)
+        XCTAssertEqual(unsettled, [1], "un-settled, the right screen point hits the right triangle")
+
+        let settled = BrushHitTest.triangles(under: rightPoint, radiusPoints: 12,
+                                             mesh: mesh, projection: proj,
+                                             modelRotation: spin, modelCenter: mesh.bounds.center)
+        XCTAssertEqual(settled, [0],
+                       "settled, the SAME screen point hits the triangle that rotated under it")
+    }
+
     func testBrushCoversTrianglesUnderIt() {
         let mesh = quad()
         let cam = topDownCamera(mesh)

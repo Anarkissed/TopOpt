@@ -43,6 +43,15 @@ public final class ProjectModel: ObservableObject {
     @Published public var force = ForceModel()
     @Published public var viewerMesh: ViewerMesh?
 
+    /// Paint-mode overlay (handoff 2026-07-25): the triangle→painted-face map for the imported
+    /// part, the escape when tap-selection over-selects. Nil for a project with no paintable mesh.
+    /// `@Published` value type: a brush stroke mutates it in place (via `paintStroke`), which
+    /// republishes AND arms the undo debounce — so a settled stroke folds into ONE round-6 undo
+    /// step alongside the selection change it makes (see `EditSnapshot.paint`). A painted region
+    /// becomes a pseudo-face with id ≥ `baseFaceCount`; downstream (highlight, picker, tagging,
+    /// clearance, the run) sees it exactly as a segmenter-produced face — "painted == tapped".
+    @Published public var paint: PaintModel?
+
     /// The M7.dom-app design-domain state: an optional design box (empty grow-room the
     /// optimizer may ADD material into, beyond the import) plus keep-out boxes. Default
     /// OFF (`box == nil`) → the run passes no box and behaves exactly as before.
@@ -120,6 +129,12 @@ public final class ProjectModel: ObservableObject {
             self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices,
                                          faceIDs: m.faceIDs, faceGeometry: m.faceGeometry,
                                          pseudoFaces: m.pseudoFaces)
+            // Seed the paint overlay with the part's native face count so minted painted ids never
+            // collide with a segmentation face. `faceCount` is the native (segmenter/STL-pseudo)
+            // face count; fall back to the mesh's own max id + 1 if it is unset.
+            let base = m.faceCount > 0 ? Int32(m.faceCount)
+                : ((m.faceIDs.max()).map { $0 + 1 } ?? 0)
+            self.paint = PaintModel(baseFaceCount: base)
         }
         self.run = run ?? ProjectModel.makeRun()
         // The two initial value-replays fire here during init, before any view
@@ -161,7 +176,7 @@ public final class ProjectModel: ObservableObject {
 
     /// The current undoable slice — the value copy the history snapshots and restores.
     public var editSnapshot: EditSnapshot {
-        EditSnapshot(selection: selection, force: force, designBox: designBox)
+        EditSnapshot(selection: selection, force: force, designBox: designBox, paint: paint)
     }
 
     /// Whether an undo is available RIGHT NOW — a committed step, OR an in-flight edit the debounce
@@ -219,6 +234,59 @@ public final class ProjectModel: ObservableObject {
         selection = s.selection
         force = s.force
         designBox = s.designBox
+        // Restore the paint overlay too, so undoing/redoing a brush stroke reverts the exact
+        // painted triangles (not just the group membership). Only when the project actually has a
+        // paint overlay — a nil snapshot on a paintable project would wrongly erase all paint.
+        if let restored = s.paint { paint = restored }
+        // The persisted sidecar must track the restored paint so a subsequent run / live tagging
+        // reproduces what is now on screen. Best-effort: an undo that can't write the sidecar still
+        // updates the in-memory overlay (the run rewrites it before it launches anyway).
+        persistPaint()
+    }
+
+    // MARK: - paint mode (handoff 2026-07-25)
+
+    /// Apply a brush stroke to the active group's painted pseudo-face — the paint-mode escape from
+    /// tap over-selection. Routes through `WorkspacePaint.stroke` (the tested pure router), which
+    /// mints one painted face per group, paints/erases the triangles, and adds/removes the painted
+    /// id on the active group. Mutating `paint` + `selection` republishes and arms the round-6 undo
+    /// debounce, so a settled stroke becomes ONE undo step. No-op with no paint overlay (no mesh).
+    /// The caller persists the sidecar on stroke-END via `persistPaint`.
+    public func paintStroke(_ mode: PaintMode, triangles: [Int]) {
+        guard var overlay = paint, !triangles.isEmpty else { return }
+        // The round-6 UndoHistory is the SINGLE undo authority (see `EditSnapshot.paint`); the
+        // router still records onto a `PaintHistory`, so hand it a throwaway we discard — we do not
+        // fork a second undo stack.
+        var ignoredHistory = PaintHistory()
+        WorkspacePaint.stroke(mode, triangles: triangles, paint: &overlay,
+                              selection: &selection, history: &ignoredHistory)
+        paint = overlay
+    }
+
+    /// The per-triangle EFFECTIVE face ids (native ids with painted overrides applied) the viewer
+    /// highlights/picks against, so a painted region behaves like any other face — the live paint
+    /// highlight. Nil when there is no mesh or nothing is painted (the viewer uses native ids).
+    public func effectivePaintFaceIDs() -> [Int32]? {
+        guard let mesh = viewerMesh, let overlay = paint, !overlay.assignments.isEmpty else { return nil }
+        return overlay.effectiveFaceIDs(base: mesh.faceIDs)
+    }
+
+    /// Persist the paint overlay to the core face-overrides sidecar next to the imported model, so
+    /// the run and live tagging re-import EXACTLY what was painted ("painted == tapped" to the voxel
+    /// grid). A cleared overlay deletes the sidecar. Best-effort — a write failure is swallowed (the
+    /// run rewrites it before launch); no mesh / no file → nothing to persist.
+    public func persistPaint() {
+        guard let overlay = paint, let path = importedFile?.path else { return }
+        try? TopOptKit.writeFaceOverrides(modelPath: path, dihedralDeg: 0, coneDeg: -1,
+                                          paintFaces: overlay.paintFaceSets())
+    }
+
+    /// Translate a (possibly painted) selection face id to the id a resolved re-import assigns it:
+    /// painted ids (`≥ baseFaceCount`) pack densely from `baseFaceCount` in the sidecar, native ids
+    /// are unchanged. The run + tagging operate on the RE-IMPORTED model, so they must target this
+    /// id, not the live overlay id. Identity when there is no paint (`resolvedFaceID` handles both).
+    private func resolvedRunFaceID(_ id: FaceID) -> FaceID {
+        paint?.resolvedFaceID(id) ?? id
     }
 
     /// Assemble the run's load case from the current selection + force state, in the
@@ -233,11 +301,12 @@ public final class ProjectModel: ObservableObject {
         for g in selection.groups {
             let kind = force.kind(for: g.id)
             if kind.isAnchor {
-                anchors.append(contentsOf: g.faces.map { Int($0) })
+                // Painted faces carry a live overlay id; the run sees the dense re-import id.
+                anchors.append(contentsOf: g.faces.map { Int(resolvedRunFaceID($0)) })
             } else if kind.isLoad {
                 let n = groupNormalModel(g) ?? SIMD3<Float>(0, 0, 1)
                 if let f = force.loadForceVectorModel(g.id, groupNormal: n) {
-                    loads.append(.init(faceIDs: g.faces.map { Int($0) },
+                    loads.append(.init(faceIDs: g.faces.map { Int(resolvedRunFaceID($0)) },
                                        force: SIMD3<Double>(f)))
                 }
             }
@@ -274,11 +343,11 @@ public final class ProjectModel: ObservableObject {
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
                 let ov = force.clearanceOverride(forGroup: g.id, face: f)
                 if bore {
-                    specs.append(.init(faceID: Int(f), kind: .bolt,
+                    specs.append(.init(faceID: Int(resolvedRunFaceID(f)), kind: .bolt,
                                        concentricMarginMM: ov.concentricMarginMM ?? 0,
                                        axialClearanceMM: ov.axialClearanceMM ?? 0))
                 } else {
-                    specs.append(.init(faceID: Int(f), kind: .face,
+                    specs.append(.init(faceID: Int(resolvedRunFaceID(f)), kind: .face,
                                        slabDepthMM: ov.slabDepthMM ?? 0))
                 }
             }
@@ -298,7 +367,7 @@ public final class ProjectModel: ObservableObject {
         for g in selection.groups where force.isProtected(g.id) {
             for f in g.faces where !seen.contains(f) {
                 seen.insert(f)
-                ids.append(Int(f))
+                ids.append(Int(resolvedRunFaceID(f)))
             }
         }
         return (ids, force.faceProtectDepthMM)

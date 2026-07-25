@@ -10,11 +10,15 @@
 // so its push / coalesce / undo / redo / branch transitions are unit-tested headlessly (the
 // /app/ verification standard).
 //
-// PAINT COORDINATION: because the slice is captured by VALUE, anything that mutates
-// `selection` (or `force`/`designBox`) is undone automatically — including the paint-mode
-// task's painted-stroke selection edits, which land in `SelectionModel`. No paint-specific
-// hook is needed; a settled stroke is just another `SelectionModel` delta the debounce folds
-// into one step.
+// PAINT COORDINATION (paint-mode UI, handoff 2026-07-25): a painted stroke changes TWO things —
+// the active group's membership (a `SelectionModel` delta, captured for free by the slice) AND
+// the triangle→painted-face map (`PaintModel.assignments`), which is NOT in `SelectionModel`.
+// The membership delta alone is insufficient: extending an already-painted group's face leaves
+// `selection` UNCHANGED (the painted id is already in the group), so a selection-only snapshot
+// would silently drop that stroke from history. The paint overlay is therefore folded into the
+// slice as its own field, so a settled stroke — first or Nth — is one undo step that restores the
+// exact painted triangles. This is the "register on the round-6 UndoHistory, don't fork" contract:
+// ONE snapshot stack owns paint undo, not a second `PaintHistory`.
 
 import Foundation
 
@@ -24,11 +28,17 @@ public struct EditSnapshot: Equatable, Sendable {
     public var selection: SelectionModel
     public var force: ForceModel
     public var designBox: DesignBoxModel
+    /// The paint overlay (triangle → painted pseudo-face) for the imported part, or nil for a
+    /// project with no paintable mesh. Part of the slice so a painted stroke is undoable through
+    /// the SAME history as every other edit (see PAINT COORDINATION above).
+    public var paint: PaintModel?
 
-    public init(selection: SelectionModel, force: ForceModel, designBox: DesignBoxModel) {
+    public init(selection: SelectionModel, force: ForceModel, designBox: DesignBoxModel,
+                paint: PaintModel? = nil) {
         self.selection = selection
         self.force = force
         self.designBox = designBox
+        self.paint = paint
     }
 }
 

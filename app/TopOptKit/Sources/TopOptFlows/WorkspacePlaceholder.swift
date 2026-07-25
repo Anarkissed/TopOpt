@@ -102,6 +102,14 @@ public struct WorkspacePlaceholder: View {
     @State private var draggingHandleID: String?
     /// The last mm value written this drag, to fire a haptic tick when it crosses Auto.
     @State private var lastHandleValue: Float?
+    /// Paint mode (handoff 2026-07-25): ON → a one-finger drag brushes triangles into the active
+    /// group (the escape when tap-selection over-selects); OFF → tap-select is unchanged. The
+    /// painted region becomes a pseudo-face routed through the SAME face-id contract as a tap.
+    @State private var paintActive = false
+    /// Paint mode: the erase MODIFIER — when on, the brush reverts triangles to their native face.
+    @State private var paintErasing = false
+    /// Paint mode: brush radius in view points; a small stepper in the paint drawer changes it.
+    @State private var brushRadiusPoints: CGFloat = 26
 
     // Forwarders onto the project's persistent state. The `nonmutating set`
     // mutates the ProjectModel (a reference), so `selection.mutate()` /
@@ -188,7 +196,8 @@ public struct WorkspacePlaceholder: View {
                           faceToolActive: true,                 // D1: tap always selects (routed by phase)
                           onPickFace: handlePick,
                           onProjection: { projection = $0 },
-                          // Round-6 item 4: two-finger double-tap undoes, triple-tap redoes.
+                          // Round-6 item 4 (redo gesture updated 2026-07-25): two-finger
+                          // double-tap undoes, THREE-finger double-tap redoes.
                           onUndo: { project.performUndo() },
                           onRedo: { project.performRedo() },
                           // M7.dom-app: the translucent design box + keep-outs (model
@@ -200,7 +209,15 @@ public struct WorkspacePlaceholder: View {
                           // reason about every keep-out; the selected group's volume brightens.
                           clearanceVolumes: force.phase == .edit ? clearanceRenderItems : [],
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
-                          detentPulse: detentPulse)
+                          detentPulse: detentPulse,
+                          // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
+                          // triangles into the active group; `paintFaceIDs` re-labels painted
+                          // triangles so the highlight + picker treat them as one face (live paint
+                          // highlight). `onBrush` resolves the covered triangles and applies the
+                          // stroke; two-finger drag still orbits.
+                          paintActive: paintActive,
+                          paintFaceIDs: project.effectivePaintFaceIDs(),
+                          onBrush: handleBrush)
                 .ignoresSafeArea()
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
@@ -414,6 +431,31 @@ public struct WorkspacePlaceholder: View {
         force.sync(groups: selection.groups)
     }
 
+    /// Brush callback from the viewer (paint mode, handoff 2026-07-25). Each sample resolves the
+    /// triangles under the brush disc (`BrushHitTest`, front-facing only) and paints/erases them
+    /// into the active group's pseudo-face via `ProjectModel.paintStroke` — the SAME face-id
+    /// contract a tap produces. Only in the edit phase (gravity set); no-op during gravity setup.
+    /// On stroke END the sidecar is persisted so the run + live tagging reproduce the paint. The
+    /// `.add`/`.erase` mode follows the erase modifier; `force.sync` keeps the load case aligned
+    /// with the group the stroke may have created.
+    private func handleBrush(_ center: CGPoint, _ phase: BrushPhase) {
+        guard force.phase == .edit, let mesh = viewerMesh, let proj = projection else { return }
+        switch phase {
+        case .began, .moved:
+            // Project the SETTLED positions the viewer shows (gravity rotates the model about its
+            // centre); without this the brush paints the un-rotated mesh and lands on the wrong
+            // face — the "colouring the other wall" bug.
+            let tris = BrushHitTest.triangles(under: center, radiusPoints: brushRadiusPoints,
+                                              mesh: mesh, projection: proj,
+                                              modelRotation: settleQuat, modelCenter: meshCenter)
+            guard !tris.isEmpty else { return }
+            project.paintStroke(paintErasing ? .erase : .add, triangles: tris)
+            force.sync(groups: selection.groups)
+        case .ended:
+            project.persistPaint()
+        }
+    }
+
     private var activeGroup: SelectionGroup? { selection.activeGroup }
 
     // MARK: model → world → screen (via the published camera projection)
@@ -609,6 +651,7 @@ public struct WorkspacePlaceholder: View {
         .padding(.bottom, DS.Space.xl4 + 50 + DS.Space.m)   // clear the bottom bar buttons (Optimize)
         .onPreferenceChange(SettingsChipWidthKey.self) { settingsChipWidths = $0 }
         .animation(DS.Motion.emphasized, value: showDesignGizmo)   // drawer open/close + reflow
+        .animation(DS.Motion.emphasized, value: paintActive)       // paint drawer open/close
     }
 
     /// One chip in the ordered cluster. Each chip measures its OWN width (`chipWidthReader`) so
@@ -633,6 +676,14 @@ public struct WorkspacePlaceholder: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+        case .paint:
+            VStack(alignment: .trailing, spacing: DS.Space.s) {
+                paintChip.background(chipWidthReader(id))
+                if paintActive {
+                    paintDrawer
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
         }
     }
 
@@ -641,8 +692,13 @@ public struct WorkspacePlaceholder: View {
     /// chip appears when ≥ 1 Face protection exists"); the rest are always present.
     private var visibleSettingsChips: [SettingsChipID] {
         SettingsChipID.allCases.filter { id in
-            id != .faceProtectDepth ||
-                force.explicitProtectCount(in: selection.groups) > 0
+            switch id {
+            // The Face-protection depth chip appears only once ≥ 1 face is protected (124).
+            case .faceProtectDepth: return force.explicitProtectCount(in: selection.groups) > 0
+            // The Paint toggle needs a mesh to brush on.
+            case .paint: return viewerMesh != nil
+            default: return true
+            }
         }
     }
 
@@ -671,6 +727,85 @@ public struct WorkspacePlaceholder: View {
         .buttonStyle(.plain)
         .dsShadow(DS.Shadow.panel)
         .help("The one preserve-depth every Face protection uses. Tap to change.")
+    }
+
+    // MARK: paint mode (handoff 2026-07-25)
+
+    /// Paint-mode tint — a distinct violet so the brush toggle + drawer read as their own tool,
+    /// apart from anchor-green / clearance-red / protect-teal.
+    static let paintTint = Color(red: 0.64, green: 0.44, blue: 0.98)
+
+    /// The Paint-mode toggle chip. OFF → tap to enter paint mode (a one-finger drag then brushes
+    /// faces into the active group — the escape when tap-selection over-selects); ON → tap to leave.
+    /// Styled like the other settings chips; brightens when active.
+    private var paintChip: some View {
+        Button {
+            paintActive.toggle()
+            if paintActive {
+                paintErasing = false
+                model.toast = "Paint mode — drag one finger to brush faces into the selection; two fingers orbit"
+            }
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: paintActive ? "paintbrush.pointed.fill" : "paintbrush.pointed")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(paintActive ? DS.Color.textPrimary.color : Self.paintTint)
+                Text("Paint").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+            }
+            .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(paintActive ? Self.paintTint : DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(paintActive ? Color.clear : DS.Color.textPrimary.opacity(0.12).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .dsShadow(DS.Shadow.panel)
+        .help("Brush faces into the active group when a tap over-selects. One finger paints; two fingers orbit.")
+    }
+
+    /// The paint controls that unfurl beneath the chip when paint mode is on: the ERASE modifier
+    /// (revert triangles to their native face) and a brush-size stepper, plus a one-line reminder
+    /// of the gesture. Kept small and right-aligned like the design-box drawer.
+    private var paintDrawer: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            Button { paintErasing.toggle() } label: {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: paintErasing ? "eraser.fill" : "eraser")
+                        .font(.system(size: 12, weight: .bold))
+                    Text(paintErasing ? "Erasing" : "Erase")
+                        .dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                    Spacer(minLength: 0)
+                }
+                .foregroundStyle(paintErasing ? DS.Color.textPrimary.color : DS.Color.textSecondary.color)
+                .padding(.vertical, 8).padding(.horizontal, DS.Space.m)
+                .background(Capsule().fill(paintErasing ? Self.paintTint.opacity(0.9)
+                                                        : DS.Color.fillSubtle.color))
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: DS.Space.s) {
+                Text("Brush").dsStyle(DS.TypeScale.footnote).foregroundStyle(DS.Color.textSecondary.color)
+                Button { brushRadiusPoints = Swift.max(12, brushRadiusPoints - 6) } label: {
+                    Image(systemName: "minus.circle.fill").font(.system(size: 16))
+                }.buttonStyle(.plain)
+                Text("\(Int(brushRadiusPoints))").dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.textPrimary.color).frame(minWidth: 22)
+                Button { brushRadiusPoints = Swift.min(64, brushRadiusPoints + 6) } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 16))
+                }.buttonStyle(.plain)
+            }
+            .foregroundStyle(Self.paintTint)
+
+            Text("Drag one finger to paint into the selection; two fingers orbit. Then pick Anchor or Load.")
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(DS.Color.textTertiary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(DS.Space.m)
+        .frame(width: 210, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panel).fill(DS.Surface.panel.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
+                .strokeBorder(Self.paintTint.opacity(0.5), lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
     }
 
     /// Reads a chip's rendered width into `SettingsChipWidthKey` (item 12: MEASURED width).

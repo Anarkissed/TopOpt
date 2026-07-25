@@ -30,19 +30,29 @@ public enum BrushHitTest {
     ///   - radiusPoints: brush radius in view points.
     ///   - frontFacing: when true (default), skip triangles facing away from the
     ///     camera, so a stroke never paints through the part onto its back wall.
+    ///   - modelRotation: the SETTLE rotation the viewer applies to the model (gravity →
+    ///     floor). The mesh positions are model-space, but the RENDERED part is rotated by
+    ///     this about `modelCenter`; the brush must project the SAME settled positions the
+    ///     user sees, or it paints the wrong face (e.g. the opposite wall). Default identity
+    ///     (un-settled) keeps the pure-geometry tests unchanged.
+    ///   - modelCenter: the centre the settle rotates about (the mesh bounds centre).
     /// - Returns: covered triangle indices, ascending (deterministic).
     public static func triangles(under centerPoint: CGPoint, radiusPoints: CGFloat,
                                  mesh: ViewerMesh, projection: CameraProjection,
-                                 frontFacing: Bool = true) -> [Int] {
+                                 frontFacing: Bool = true,
+                                 modelRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)),
+                                 modelCenter: SIMD3<Float> = .zero) -> [Int] {
         guard projection.isUsable, !mesh.isEmpty, radiusPoints > 0 else { return [] }
         // View direction through the brush centre, for front-face culling. If the
         // ray is unavailable (degenerate transform) we simply keep every triangle.
         let viewDir = projection.ray(throughViewPoint: centerPoint)?.dir
         let r2 = Float(radiusPoints * radiusPoints)
 
+        // Positions in the SETTLED world the viewer draws (identity when un-settled).
         func pos(_ i: Int) -> SIMD3<Float> {
-            SIMD3<Float>(mesh.positions[i * 3], mesh.positions[i * 3 + 1],
-                         mesh.positions[i * 3 + 2])
+            let raw = SIMD3<Float>(mesh.positions[i * 3], mesh.positions[i * 3 + 1],
+                                   mesh.positions[i * 3 + 2])
+            return modelCenter + modelRotation.act(raw - modelCenter)
         }
 
         var out: [Int] = []
