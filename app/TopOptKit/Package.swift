@@ -84,6 +84,22 @@ let iosBinaryTargets: [Target] =
 // a clear "not available on this platform" error.
 let occtPlatforms: [Platform] = hasIOSOCCT ? [.macOS, .iOS] : [.macOS]
 
+// lib3mf on the macOS core slice (3MF import/export). DISK PRESENCE IS THE GATE,
+// exactly like the OCCT frameworks above: build_core.sh vendors vendor/lib3mf-lib
+// (a symlink to the vcpkg lib dir) and builds the macOS slice WITH lib3mf ONLY when
+// the dev has provisioned it via build_lib3mf_macos.sh. So a checkout WITHOUT lib3mf
+// has no vendor/lib3mf-lib -> no macOS 3MF link flags -> the macOS slice is
+// lib3mf-free and the build/CI stay green, unchanged. The dylib's install name is
+// @rpath/lib3mf.N.dylib, so an -rpath to the vendored dir is required to load it.
+// macOS only; iOS 3MF (when present) comes through the lib3mf-ios frameworks above.
+let macOSLib3mfDir = packageDir + "/vendor/lib3mf-lib"
+let macOSLib3mfLinkerFlags: [LinkerSetting] =
+    FileManager.default.fileExists(atPath: macOSLib3mfDir)
+    ? [.unsafeFlags(["-L\(macOSLib3mfDir)", "-l3mf",
+                     "-Xlinker", "-rpath", "-Xlinker", macOSLib3mfDir],
+                    .when(platforms: [.macOS]))]
+    : []
+
 var packageTargets: [Target] = [
     // The CMake-built core, per-platform, selected automatically by Xcode.
     .binaryTarget(name: "TopOptCore", path: "vendor/TopOptCore.xcframework"),
@@ -119,7 +135,7 @@ var packageTargets: [Target] = [
                 "-lTKTopAlgo", "-lTKGeomAlgo", "-lTKPrim", "-lTKBRep",
                 "-lTKGeomBase", "-lTKG3d", "-lTKG2d", "-lTKMath", "-lTKernel",
             ], .when(platforms: [.macOS])),
-        ]
+        ] + macOSLib3mfLinkerFlags
     ),
     .testTarget(
         name: "TopOptKitTests",

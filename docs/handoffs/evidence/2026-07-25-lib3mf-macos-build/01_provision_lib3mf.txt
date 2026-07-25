@@ -1,0 +1,8 @@
+# vcpkg lib3mf provision — app/scripts/build_lib3mf_macos.sh
+# (clean tree: git clone vcpkg @2026.06.24 + bootstrap + vcpkg install lib3mf)
+
+==> vcpkg install lib3mf:arm64-osx-dynamic (this may take a few minutes)
+Installing 7/7 lib3mf:arm64-osx-dynamic@2.5.0#1...
+All requested installations completed successfully in: 2.5 min
+==> installed lib3mf 2.5.0#1 → /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/.vcpkg/installed/arm64-osx-dynamic
+    (CI pins lib3mf 2.5.0#1 via vcpkg 2026.06.24 — versions match)

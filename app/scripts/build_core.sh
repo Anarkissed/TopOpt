@@ -49,6 +49,26 @@ fi
 echo "==> OCCT:  $OCCT_PREFIX"
 echo "==> Eigen: $EIGEN_PREFIX"
 
+# lib3mf (3MF import/export) for the macOS slice. brew has no lib3mf formula, so it
+# comes from vcpkg via app/scripts/build_lib3mf_macos.sh at CI's exact version.
+# DETECT it here (do NOT trigger the vcpkg build from this script): if the provisioned
+# install is present the macOS core slice is built WITH lib3mf (TOPOPT_HAVE_3MF), so a
+# macOS package build/test gets 3MF import too; if absent, the macOS slice is built
+# lib3mf-free exactly as before and 3MF import shows the "not in this build" sheet.
+# Either way the iOS slices are untouched (they get lib3mf only via build_occt_ios.sh).
+case "$(uname -m)" in
+  arm64) LIB3MF_TRIPLET="arm64-osx-dynamic" ;;
+  x86_64) LIB3MF_TRIPLET="x64-osx-dynamic" ;;
+  *) LIB3MF_TRIPLET="" ;;
+esac
+LIB3MF_PREFIX="${LIB3MF_PREFIX:-$REPO_ROOT/.vcpkg/installed/$LIB3MF_TRIPLET}"
+if [[ -n "$LIB3MF_TRIPLET" && ( -f "$LIB3MF_PREFIX/share/lib3mf/lib3mfConfig.cmake" || -f "$LIB3MF_PREFIX/share/lib3mf/lib3mf-config.cmake" ) ]]; then
+  echo "==> lib3mf: $LIB3MF_PREFIX (macOS slice built WITH 3MF import)"
+else
+  LIB3MF_PREFIX=""
+  echo "==> lib3mf: (none) — macOS slice is 3MF-free; run app/scripts/build_lib3mf_macos.sh to enable"
+fi
+
 # build_slice <name> <archs> <extra-cmake-args...> -> echoes the produced libtopopt.a
 build_slice() {
   local name="$1"; local archs="$2"; shift 2
@@ -68,8 +88,12 @@ build_slice() {
 # so the OCCT-linked macOS slice must match. The OCCT-free iOS simulator slice is
 # universal (arm64 for Apple-Silicon simulators, x86_64 for Intel hosts /
 # universal builds); iOS devices are all arm64.
-echo "==> building macOS slice (Eigen + OCCT, arm64)"
-LIB_MACOS=$(build_slice macos arm64 -DCMAKE_PREFIX_PATH="$OCCT_PREFIX;$EIGEN_PREFIX")
+# Compose the macOS slice prefix: OCCT + Eigen always; lib3mf when provisioned.
+MACOS_PREFIX="$OCCT_PREFIX;$EIGEN_PREFIX"
+MACOS_KIND="Eigen + OCCT"
+if [[ -n "$LIB3MF_PREFIX" ]]; then MACOS_PREFIX="$MACOS_PREFIX;$LIB3MF_PREFIX"; MACOS_KIND="$MACOS_KIND + lib3mf"; fi
+echo "==> building macOS slice ($MACOS_KIND, arm64)"
+LIB_MACOS=$(build_slice macos arm64 -DCMAKE_PREFIX_PATH="$MACOS_PREFIX")
 
 # --- iOS slices --------------------------------------------------------------
 IOS_DEPLOYMENT_TARGET="${IOS_DEPLOYMENT_TARGET:-16.0}"   # match Package.swift .iOS(.v16)
@@ -159,6 +183,15 @@ echo "==> wrote $FP_FILE (fingerprint=$FINGERPRINT)"
 # --- vendor headers + OCCT libs (package-relative paths only) -----------------
 ln -sfn "$CORE_DIR/include" "$VENDOR/include"
 ln -sfn "$OCCT_PREFIX/lib" "$VENDOR/occt-lib"
+# lib3mf dylib for the macOS link (mirrors occt-lib). The symlink's PRESENCE is the
+# switch Package.swift reads: it adds the macOS -llib3mf/-rpath flags only when this
+# exists, so a checkout without lib3mf provisioned links exactly as before. Manage it
+# in lockstep with whether the macOS slice was built WITH lib3mf.
+if [[ -n "$LIB3MF_PREFIX" ]]; then
+  ln -sfn "$LIB3MF_PREFIX/lib" "$VENDOR/lib3mf-lib"
+else
+  rm -f "$VENDOR/lib3mf-lib"
+fi
 # Remove any stale single-slice artifacts from earlier revisions of this script.
 rm -rf "$VENDOR/lib" "$VENDOR/occt-include"
 
@@ -166,6 +199,9 @@ echo "==> vendored:"
 echo "    $XCF (macos-arm64, ios-arm64-simulator, ios-arm64)"
 echo "    $VENDOR/include   -> $CORE_DIR/include"
 echo "    $VENDOR/occt-lib  -> $OCCT_PREFIX/lib   (macOS link only)"
+if [[ -n "$LIB3MF_PREFIX" ]]; then
+  echo "    $VENDOR/lib3mf-lib -> $LIB3MF_PREFIX/lib   (macOS 3MF import link)"
+fi
 if [[ -d "$VENDOR/occt-ios" ]]; then
   echo "    $VENDOR/occt-ios  ($(ls "$VENDOR/occt-ios" 2>/dev/null | wc -l | tr -d ' ') OCCT xcframeworks, iOS device+sim — linked+embedded on iOS)"
   echo "    iOS slices built WITH OCCT: STEP import is available on iPad/simulator."

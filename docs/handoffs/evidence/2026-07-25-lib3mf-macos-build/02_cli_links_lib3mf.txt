@@ -1,0 +1,9 @@
+$ topopt-cli --version
+topopt-cli version=0.1.0 fingerprint=0892f4b6cbe0
+
+$ otool -L topopt-cli | grep 3mf
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/core/build/topopt-cli:
+	@rpath/lib3mf.2.5.0.0.dylib (compatibility version 2.0.0, current version 2.5.0)
+
+$ vcpkg list | grep lib3mf   (== CI baseline)
+lib3mf:arm64-osx-dynamic                          2.5.0#1             lib3mf is an implementation of the 3D Manufactur...

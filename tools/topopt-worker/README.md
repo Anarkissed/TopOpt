@@ -15,7 +15,27 @@ computed locally.
 ## Requirements
 
 - Python 3.8+ (standard library only — no `pip install`).
-- A built `topopt-cli` binary (from `core/`, with OCCT + Eigen).
+- A built `topopt-cli` binary (from `core/`, with OCCT + Eigen + **lib3mf**).
+
+## Building `topopt-cli` on macOS (with 3MF import)
+
+If you don't already have a `topopt-cli`, build one — **one command**, from a clean
+checkout:
+
+```sh
+./app/scripts/build_cli_macos.sh
+```
+
+It provisions **lib3mf** the same way CI does (via vcpkg at the pinned baseline —
+version-identical, so 3MF behaves exactly like CI), uses Homebrew **OpenCASCADE** +
+**Eigen**, configures `core/` with `-DTOPOPT_REQUIRE_DEPS=ON`, builds
+`core/build/topopt-cli`, and prints the exact `TOPOPT_CLI=… python3 …` line to run
+this worker. Prereqs (once): `brew install opencascade eigen pkg-config`. lib3mf is
+**not** a brew formula — that is exactly why the script uses vcpkg; see
+`app/scripts/build_lib3mf_macos.sh` for the route rationale.
+
+Without lib3mf, `topopt-cli` still builds and runs, but a job that imports a `.3mf`
+(or writes `output.mesh_format: "3mf"`) fails with *"this build has no 3MF support"*.
 
 ## Run
 
