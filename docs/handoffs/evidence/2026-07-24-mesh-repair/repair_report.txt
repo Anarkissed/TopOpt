@@ -1,0 +1,45 @@
+
+[0] CONTROL: the clean bracket (repair is a no-op)
+  file: docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_clean.stl
+  BEFORE (raw file): triangles=416  boundary_edges=0  non_manifold_edges=0  watertight=yes
+  AFTER  (repair+inspect): acceptable=YES
+    repaired: welded=0 degenerate=0 duplicates_removed=0 holes_filled=0 (+0 tris) flipped=0
+    residual: boundary_edges=0 non_manifold_edges=0
+    volume=13930.022 mm^3  bbox=[60.0 40.0 6.0]
+
+[1] DEFECT: non-manifold edges from stacked duplicate facets
+  file: docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_duplicate_facets.stl
+  BEFORE (raw file): triangles=422  boundary_edges=0  non_manifold_edges=17  watertight=no
+  AFTER  (repair+inspect): acceptable=YES
+    repaired: welded=0 degenerate=0 duplicates_removed=6 holes_filled=0 (+0 tris) flipped=0
+    residual: boundary_edges=0 non_manifold_edges=0
+    volume=13930.022 mm^3  bbox=[60.0 40.0 6.0]
+
+[2] DEFECT: a small hole (two dropped facets)
+  file: docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_small_hole.stl
+  BEFORE (raw file): triangles=414  boundary_edges=4  non_manifold_edges=0  watertight=no
+  AFTER  (repair+inspect): acceptable=YES
+    repaired: welded=0 degenerate=0 duplicates_removed=0 holes_filled=1 (+4 tris) flipped=0
+    residual: boundary_edges=0 non_manifold_edges=0
+    volume=13930.022 mm^3  bbox=[60.0 40.0 6.0]
+
+[3a] BEYOND REPAIR: a wall-sized hole (whole top face removed)
+  file: docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_wall_hole.stl
+  BEFORE (raw file): triangles=312  boundary_edges=104  non_manifold_edges=0  watertight=no
+  AFTER  (repair+inspect): acceptable=no
+    repaired: welded=0 degenerate=0 duplicates_removed=0 holes_filled=1 (+52 tris) flipped=0
+    residual: boundary_edges=52 non_manifold_edges=0
+    REFUSED:
+      - the mesh has holes too large or complex to fill safely (open boundary edges remain after small holes were capped)
+
+[3b] BEYOND REPAIR: an ambiguous non-manifold junction (a fin)
+  file: docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_ambiguous_junction.stl
+  BEFORE (raw file): triangles=417  boundary_edges=2  non_manifold_edges=1  watertight=no
+  AFTER  (repair+inspect): acceptable=no
+    repaired: welded=0 degenerate=0 duplicates_removed=0 holes_filled=0 (+0 tris) flipped=0
+    residual: boundary_edges=2 non_manifold_edges=1
+    REFUSED:
+      - the mesh has non-manifold edges that could not be resolved automatically (an edge shared by more than two triangles remains after removing redundant facets — the junction is ambiguous)
+      - the mesh has holes too large or complex to fill safely (open boundary edges remain after small holes were capped)
+
+done.

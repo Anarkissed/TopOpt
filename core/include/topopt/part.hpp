@@ -25,14 +25,35 @@ namespace topopt {
 // accommodate meshes. `PartModel::pseudo_faces` records which source was used
 // so the UI can be honest about it, not so behaviour can branch on it.
 //
-// SCOPE (Phase 1): clean, manifold, closed meshes. A mesh that is non-manifold,
-// open, non-orientable or zero-thickness is REFUSED with a structured
-// diagnosis (`PartInspection`) the app renders as a plain-language sheet — it
-// is never a crash and never a silent half-import. Two repairs are performed
-// automatically because they are unambiguous: duplicate-vertex welding and
-// normal unification (consistent winding + outward orientation). Anything
-// deeper — hole filling, self-intersection resolution, shell thickening,
-// remeshing — is explicitly Phase 2 and is NOT attempted.
+// SCOPE (Phase 2): before refusing, the importer ATTEMPTS a deterministic,
+// conservative repair of the common, safely-fixable defects, then re-inspects
+// and proceeds if the result is clean. What it repairs and refuses:
+//
+//   REPAIRED (unambiguous, and REPORTED — the user's geometry was changed):
+//     * duplicate-vertex welding                        (Phase 1)
+//     * normal unification (consistent + outward wind)  (Phase 1)
+//     * redundant exact-duplicate triangles removed      (Phase 2) — the #1
+//       cause of non-manifold edges in CAD-exported STLs is a stacked, coincident
+//       facet; dropping the redundant copy restores 2-manifoldness where the fix
+//       is unambiguous (same-oriented facet, so nothing about the solid changes).
+//     * small holes capped                               (Phase 2) — a simple
+//       boundary loop below a CONSERVATIVE size bound is closed by a centroid fan
+//       (topologically guaranteed 2-manifold). Bounds are on loop edge-count and
+//       on the loop's geometric span as a fraction of the part.
+//
+//   REFUSED (structured `PartInspection` -> plain-language sheet, never a crash,
+//   never a silent half-import):
+//     * holes too large or too complex to fill safely   (OpenBoundary)
+//     * ambiguous non-manifold junctions that survive duplicate removal
+//       (NonManifoldEdges) — inside/outside is genuinely undefined there
+//     * a non-orientable surface (NonOrientable)
+//     * a zero-thickness shell (ZeroThickness)
+//     * an empty mesh (EmptyMesh)
+//
+// Repair NEVER silently changes the intended solid: the bounds are conservative,
+// every repair is reported, and the result is only accepted after a clean
+// re-inspection. Deeper repair — self-intersection resolution, shell
+// thickening, remeshing, non-manifold junction cutting — is still NOT attempted.
 
 // Thrown when a part cannot be imported. `inspection` carries the structured
 // reason when the failure was a mesh-quality refusal (defects non-empty); for a
@@ -84,6 +105,9 @@ struct PartInspection {
   // memory, and the sheet says so).
   int welded_vertices = 0;   // duplicate vertices merged (3MF does not weld)
   int flipped_triangles = 0; // triangles re-wound during normal unification
+  int removed_duplicate_triangles = 0;  // redundant coincident facets dropped
+  int filled_holes = 0;        // simple boundary loops closed by a cap (Phase 2)
+  int filled_hole_triangles = 0;  // triangles added by hole caps
 
   // Measured geometry, in FILE units. The app needs these for the STL unit
   // prompt's size sanity hint (STL carries no unit).
@@ -92,11 +116,29 @@ struct PartInspection {
   Vec3 bbox_max{0.0, 0.0, 0.0};
 };
 
+// Bounds on the automatic mesh repair (Phase 2). Deliberately CONSERVATIVE: a
+// hole is only capped when it is unambiguously a small defect, never when it
+// could be an intended opening or a whole missing wall. Every bound is a hard
+// ceiling — a loop that exceeds ANY of them is left open (and the mesh is then
+// refused), never force-filled.
+struct MeshRepairOptions {
+  // A boundary loop with more than this many edges is not a "small hole"; it is
+  // a large opening whose fill would be a guess. 64 comfortably covers a dropped
+  // facet or a small crack while refusing a torn-off face of a tessellated part.
+  int max_hole_edges = 64;
+  // A boundary loop whose bounding-box diagonal exceeds this fraction of the
+  // whole mesh's bounding-box diagonal is a wall-sized opening, not a defect.
+  // 0.5 refuses e.g. a missing cube face (~0.82 of the diagonal) while filling
+  // any genuinely small hole.
+  double max_hole_fraction = 0.5;
+};
+
 // Import options. `tessellation` applies to STEP only; `segmentation` applies
-// to mesh formats only.
+// to mesh formats only; `repair` applies to mesh formats only.
 struct PartOptions {
   StepTessellation tessellation;
   SegmentOptions segmentation;
+  MeshRepairOptions repair;
 };
 
 // The imported part: a StepModel every downstream consumer already accepts,
@@ -150,6 +192,31 @@ std::string describe_defect(PartDefect defect);
 // dropped.
 TriangleMesh weld_and_clean(const TriangleMesh& mesh, int& out_welded,
                             int& out_degenerate);
+
+// Drop redundant EXACT-DUPLICATE triangles: two triangles that describe the
+// same oriented facet (the same three welded vertices in the same cyclic order,
+// so the same outward normal). A stacked coincident facet is the most common
+// cause of non-manifold edges in a CAD-exported STL, and removing the copy is
+// unambiguous — the surface it describes is unchanged. The FIRST occurrence in
+// triangle order is kept; every later copy is dropped (deterministic). An
+// OPPOSITE-wound coincident pair is NOT a duplicate (it is a doubled-over
+// membrane, handled by the zero-thickness verdict) and is left untouched.
+// Returns the number of triangles removed; the mesh must already be welded.
+int remove_duplicate_triangles(TriangleMesh& mesh);
+
+// Cap small holes: find the mesh's boundary loops (chains of edges used by a
+// single triangle) and close each SIMPLE loop that falls within `opts`. "Simple"
+// means every vertex on the loop has exactly one incoming and one outgoing
+// boundary edge — a pinched or branching boundary is ambiguous and is left open.
+// A qualifying loop is filled with a centroid fan (a new centre vertex joined to
+// every loop edge), which is topologically guaranteed to close the loop into a
+// 2-manifold patch without introducing any new non-manifold edge. Loops that
+// exceed a bound, or are not simple, are left OPEN so the mesh is subsequently
+// refused rather than force-filled. `out_filled_loops` receives the number of
+// loops closed and `out_filled_triangles` the number of triangles added. The
+// mesh must already be welded; determinism is by ascending vertex order.
+void fill_small_holes(TriangleMesh& mesh, const MeshRepairOptions& opts,
+                      int& out_filled_loops, int& out_filled_triangles);
 
 // Unify triangle winding: propagate a consistent orientation across shared
 // edges, then flip the whole mesh if its signed volume came out negative, so

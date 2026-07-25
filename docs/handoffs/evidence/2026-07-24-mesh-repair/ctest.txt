@@ -1,0 +1,37 @@
+      Start 54: rung_infeasible
+54/66 Test #54: rung_infeasible ..................   Passed   46.99 sec
+      Start 55: active_domain
+55/66 Test #55: active_domain ....................   Passed    8.21 sec
+      Start 56: stress
+56/66 Test #56: stress ...........................   Passed   20.63 sec
+      Start 57: step_import
+57/66 Test #57: step_import ......................   Passed    0.31 sec
+      Start 58: segment_vs_step
+58/66 Test #58: segment_vs_step ..................   Passed    0.36 sec
+      Start 59: face_tag
+59/66 Test #59: face_tag .........................   Passed    0.54 sec
+      Start 60: mask_face
+60/66 Test #60: mask_face ........................   Passed    0.43 sec
+      Start 61: cli_demo
+61/66 Test #61: cli_demo .........................   Passed  240.10 sec
+      Start 62: production_parity
+62/66 Test #62: production_parity ................   Passed   20.12 sec
+      Start 63: clearance_parity
+63/66 Test #63: clearance_parity .................   Passed   20.88 sec
+      Start 64: face_protection_parity
+64/66 Test #64: face_protection_parity ...........   Passed    4.54 sec
+      Start 65: loadcase_small_face
+65/66 Test #65: loadcase_small_face ..............   Passed    0.28 sec
+      Start 66: mesh_job
+66/66 Test #66: mesh_job .........................   Passed    8.63 sec
+
+100% tests passed out of 66
+
+Total Test time (real) = 1008.54 sec
+2/4 Test #58: segment_vs_step ..................   Passed    0.07 sec
+
+=== clean re-run of the mesh tests (mesh_segmentation = 84 checks) ===
+Test #3: mesh_segmentation ... Passed (84 checks)
+Test #58: segment_vs_step ... Passed
+Test #66: mesh_job ... Passed
+Full suite: 100% tests passed out of 66
