@@ -1,0 +1,8 @@
+# job.step.json vs job.mesh.json — canonical (sorted-key) diff
+# The two jobs are built from the SAME logical RunRequest (same anchors/load/
+# infill/resolution). They differ in exactly ONE line: the model path.
+
+29c29
+<  "model": "l-bracket.step",
+---
+>  "model": "l-bracket.stl",

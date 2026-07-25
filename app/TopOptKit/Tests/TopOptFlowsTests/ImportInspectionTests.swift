@@ -75,12 +75,18 @@ final class ImportInspectionTests: XCTestCase {
                              boundaryEdges: Int = 0,
                              nonManifoldEdges: Int = 0,
                              welded: Int = 0, flipped: Int = 0,
-                             degenerate: Int = 0) -> PartDiagnostics {
+                             degenerate: Int = 0,
+                             removedDuplicates: Int = 0,
+                             filledHoles: Int = 0) -> PartDiagnostics {
         PartDiagnostics(checked: true, acceptable: defects.isEmpty, defects: defects,
                         defectText: defects.map { _ in "core text" },
                         boundaryEdges: boundaryEdges, nonManifoldEdges: nonManifoldEdges,
                         degenerateTriangles: degenerate, weldedVertices: welded,
-                        flippedTriangles: flipped, volume: 1,
+                        flippedTriangles: flipped,
+                        removedDuplicateTriangles: removedDuplicates,
+                        filledHoles: filledHoles,
+                        filledHoleTriangles: filledHoles * 4,
+                        volume: 1,
                         bboxMin: .zero, bboxMax: SIMD3<Double>(10, 20, 5))
     }
 
@@ -148,6 +154,27 @@ final class ImportInspectionTests: XCTestCase {
         XCTAssertTrue(note?.contains("12 duplicate points") == true)
         XCTAssertTrue(note?.contains("3 triangles") == true)
         XCTAssertTrue(note?.contains("1 empty triangle") == true)
+    }
+
+    // The Phase-2 repairs (duplicate-facet removal, small-hole capping) change
+    // the user's geometry just as much as a weld. A mesh accepted ONLY because
+    // one of them ran must still report it — dropping these on the way to the app
+    // is exactly the plumbing gap that made a repaired file look untouched.
+    func testRepairNoteReportsPhase2Repairs() {
+        let dedup = diagnostics([], removedDuplicates: 6)
+        XCTAssertTrue(dedup.didRepair)
+        XCTAssertTrue(ImportRepairNote.text(for: dedup)?.contains("6 duplicate facets") == true)
+
+        let holes = diagnostics([], filledHoles: 1)
+        XCTAssertTrue(holes.didRepair)
+        XCTAssertTrue(ImportRepairNote.text(for: holes)?.contains("1 small hole") == true)
+
+        // Singular vs plural, and both at once.
+        let both = diagnostics([], removedDuplicates: 1, filledHoles: 2)
+        let note = ImportRepairNote.text(for: both)
+        XCTAssertTrue(note?.contains("1 duplicate facet") == true)
+        XCTAssertFalse(note?.contains("1 duplicate facets") == true)
+        XCTAssertTrue(note?.contains("2 small holes") == true)
     }
 
     func testSTEPPartsAreNeverAnnotatedWithARepairNote() {

@@ -194,8 +194,19 @@ public enum FaceTopology {
     ///
     /// For a single-face hole (e.g. every l-bracket hole) this returns just the
     /// tapped cylinder face — that face alone *is* the whole hole.
+    ///
+    /// The curved-face walk is a B-rep concept: OCCT can split one physical hole into
+    /// several faces (a counterbore's cylinder + cone), which this reunites. It must
+    /// NOT run on a mesh's PSEUDO-faces. The core dihedral segmenter never splits a
+    /// hole across pseudo-faces — each segmented region already *is* the selection
+    /// unit — so on a mesh the walk only unions the whole connected run of regions the
+    /// app's own 5° `isCurved` happens to call "curved" (a bracket's strut, fillets and
+    /// load region), which is the "one tap selects half the model" over-selection
+    /// (handoff 2026-07-25-tap-overselect). For a pseudo-face mesh, a tap selects
+    /// exactly the tapped face.
     public static func loop(fromFace face: FaceID, in mesh: ViewerMesh,
                             thresholdDeg: Float = curveThresholdDeg) -> [FaceID] {
+        if mesh.pseudoFaces { return [face] }
         guard isCurved(face, in: mesh, thresholdDeg: thresholdDeg) else { return [face] }
         let adj = adjacency(in: mesh)
         var visited: Set<FaceID> = [face]

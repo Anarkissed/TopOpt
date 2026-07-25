@@ -1,0 +1,20 @@
+# build_core.sh — macOS slice built WITH lib3mf; iOS slices untouched
+==> OCCT:  /opt/homebrew/opt/opencascade
+==> Eigen: /opt/homebrew/opt/eigen
+==> lib3mf: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/.vcpkg/installed/arm64-osx-dynamic (macOS slice built WITH 3MF import)
+==> building macOS slice (Eigen + OCCT + lib3mf, arm64)
+==> building iOS simulator slice (Eigen, OCCT-free, arm64;x86_64)
+==> building iOS device slice (Eigen, OCCT-free, arm64)
+==> created /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/app/TopOptKit/vendor/TopOptCore.xcframework
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/app/TopOptKit/vendor/lib3mf-lib -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/.vcpkg/installed/arm64-osx-dynamic/lib   (macOS 3MF import link)
+    (no vendor/occt-ios — iOS slices are OCCT-free; run build_occt_ios.sh for STEP on iOS)
+==> done. Test: (cd /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/app/TopOptKit && xcodebuild test -scheme TopOptKit -destination 'platform=macOS')
+
+# Package.swift gated macOS link — the app test bundle links + rpaths lib3mf:
+$ otool -L TopOptKitPackageTests | grep 3mf
+	@rpath/lib3mf.2.5.0.0.dylib (compatibility version 2.0.0, current version 2.5.0)
+$ otool -l … | LC_RPATH:
+         path /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/app/TopOptKit/vendor/lib3mf-lib (offset 12)
+
+# dyld resolves it at runtime — a pure-logic test class loads+runs the bundle:
+Executed 8 tests, with 0 failures  (WorkspaceInteractionTests)

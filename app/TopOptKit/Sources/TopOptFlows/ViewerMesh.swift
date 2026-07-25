@@ -250,6 +250,14 @@ public struct ViewerMesh {
     /// and crisp edges. The smooth `normals` above stay available for a future
     /// organic/optimized mesh that wants smoothing, but are unused by default.
     public let flat: FlatMesh
+    /// True when `faceIDs` are pseudo-faces from the core dihedral segmenter (an
+    /// STL/3MF import) rather than a B-rep's real faces (a STEP import). A pseudo-
+    /// face IS the intended selection unit, so the tap layer must NOT run the B-rep
+    /// curved-face loop walk on it (that walk reunites a hole OCCT split into
+    /// cylinder+cone; the mesh segmenter never splits a hole like that, and running
+    /// the walk anyway unions the whole connected curved run — the over-selection
+    /// fixed in handoff 2026-07-25-tap-overselect).
+    public let pseudoFaces: Bool
 
     public var vertexCount: Int { positions.count / 3 }
     public var triangleCount: Int { indices.count / 3 }
@@ -269,12 +277,14 @@ public struct ViewerMesh {
     /// exported STL/3MF are unchanged.
     public init(vertices: [Float], indices: [Int32], faceIDs: [Int32],
                 faceGeometry: [StepFaceGeometry] = [],
+                pseudoFaces: Bool = false,
                 smoothShaded: Bool = false) {
         self.positions = vertices
         self.normals = MeshGeometry.vertexNormals(vertices: vertices, indices: indices)
         self.indices = indices.map { UInt32(bitPattern: $0) }
         self.faceIDs = faceIDs
         self.faceGeometry = faceGeometry
+        self.pseudoFaces = pseudoFaces
         self.bounds = MeshGeometry.bounds(vertices: vertices)
         self.flat = smoothShaded
             ? MeshGeometry.flatShadedSmooth(vertices: vertices, indices: indices)

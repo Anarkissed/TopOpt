@@ -121,9 +121,15 @@ struct PartDiagnostics {
   int32_t boundary_edges = 0;
   int32_t non_manifold_edges = 0;
   int32_t degenerate_triangles = 0;
-  // Repairs the importer applied. Reported so the sheet can say what changed.
+  // Repairs the importer applied. Reported so the sheet can say what changed —
+  // ALL of them, including the Phase-2 repairs (duplicate-facet removal and
+  // small-hole capping), which change the user's geometry just as much as a weld
+  // and must not be dropped on the way to the app.
   int32_t welded_vertices = 0;
   int32_t flipped_triangles = 0;
+  int32_t removed_duplicate_triangles = 0;  // redundant coincident facets dropped
+  int32_t filled_holes = 0;                 // small boundary loops capped
+  int32_t filled_hole_triangles = 0;        // triangles added by hole caps
 
   // Measured in FILE units — STL carries no unit, so the app uses the bounding
   // box to sanity-check the user's mm/inch answer.

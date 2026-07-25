@@ -476,6 +476,10 @@ PartDiagnostics inspect_part(const std::string& path, BridgeError& err) {
     d.degenerate_triangles = static_cast<int32_t>(insp.degenerate_triangles);
     d.welded_vertices = static_cast<int32_t>(insp.welded_vertices);
     d.flipped_triangles = static_cast<int32_t>(insp.flipped_triangles);
+    d.removed_duplicate_triangles =
+        static_cast<int32_t>(insp.removed_duplicate_triangles);
+    d.filled_holes = static_cast<int32_t>(insp.filled_holes);
+    d.filled_hole_triangles = static_cast<int32_t>(insp.filled_hole_triangles);
     d.volume = insp.volume;
     d.bbox_min[0] = insp.bbox_min.x;
     d.bbox_min[1] = insp.bbox_min.y;

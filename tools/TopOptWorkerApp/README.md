@@ -42,11 +42,16 @@ after a reboot.
 
 The app runs the optimizer via `topopt-cli`. If you don't bundle one into the app,
 open the menu → **Settings…** and point it at your built binary (e.g.
-`core/build/topopt-cli`), or build it once:
+`core/build/topopt-cli`), or build it once — this provisions lib3mf (3MF import) via
+vcpkg at CI's version and builds the CLI with OCCT + Eigen + lib3mf:
 
 ```sh
-cmake --build core/build --target topopt_cli
+./app/scripts/build_cli_macos.sh
 ```
+
+(If `core/build` is already configured with all three deps, `cmake --build
+core/build --target topopt_cli` also works; the script above is the from-scratch
+one-command path and the only way to get 3MF import on a Mac.)
 
 The iPad refuses a worker whose core fingerprint differs from the app's build. To
 update this Mac's core, the menu's **Update core…** shows the rebuild command

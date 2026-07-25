@@ -127,7 +127,8 @@ public final class ProjectModel: ObservableObject {
         self.paramsLocked = paramsLocked
         if let m = importedMesh {
             self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices,
-                                         faceIDs: m.faceIDs, faceGeometry: m.faceGeometry)
+                                         faceIDs: m.faceIDs, faceGeometry: m.faceGeometry,
+                                         pseudoFaces: m.pseudoFaces)
             // Seed the paint overlay with the part's native face count so minted painted ids never
             // collide with a segmentation face. `faceCount` is the native (segmenter/STL-pseudo)
             // face count; fall back to the mesh's own max id + 1 if it is unset.

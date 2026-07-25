@@ -581,7 +581,10 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// constexpr); if the bridge factor changes, change this with it.
     static let smoothExportFactor = 2
 
-    private func buildJobJSON() throws -> Data {
+    // `internal` (not `private`) so `@testable` unit tests can diff the emitted
+    // job.json across model sources without standing up a worker — the mesh-job-params
+    // field-equivalence gate lives in JobJSONEquivalenceTests.
+    func buildJobJSON() throws -> Data {
         var job: [String: Any] = [
             "model": (request.modelPath as NSString).lastPathComponent,
             "material": request.material,
@@ -607,50 +610,58 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 }
             }
         }
-        if request.isStepModel {
-            var loads: [String: Any] = [
-                "minimize_plastic": request.minimizePlastic,
-                "build_dir": [request.buildDirection.x, request.buildDirection.y,
-                              request.buildDirection.z],
-            ]
-            if !request.anchorFaceIDs.isEmpty {
-                loads["anchor_face_ids"] = request.anchorFaceIDs
-            }
-            if !request.loadGroups.isEmpty {
-                loads["groups"] = request.loadGroups.map { g -> [String: Any] in
-                    ["face_ids": g.faceIDs,
-                     "force": [g.force.x, g.force.y, g.force.z]]
-                }
-            }
-            if request.infillPercent >= 0 {
-                loads["infill_percent"] = request.infillPercent
-            }
-            if !request.clearances.isEmpty {
-                loads["clearances"] = request.clearances.map { c -> [String: Any] in
-                    var entry: [String: Any] = [
-                        "face_id": c.faceID,
-                        "kind": c.kind == .face ? "face" : "bolt",
-                    ]
-                    if c.concentricMarginMM > 0 { entry["concentric_margin_mm"] = c.concentricMarginMM }
-                    if c.axialClearanceMM > 0 { entry["axial_clearance_mm"] = c.axialClearanceMM }
-                    if c.slabDepthMM > 0 { entry["slab_depth_mm"] = c.slabDepthMM }
-                    return entry
-                }
-            }
-            // Handoff 124 — Face protections (preserve-skin): the raw face ids + the
-            // ONE global depth. The worker's build_production_loadcase freezes each
-            // face's part-solid skin FrozenSolid, identically to the local bridge
-            // path. Empty list → omitted → byte-identical to a pre-124 job.
-            if !request.faceProtections.isEmpty {
-                loads["face_protections"] = request.faceProtections
-                if request.faceProtectionDepthMM > 0 {
-                    loads["face_protection_depth_mm"] = request.faceProtectionDepthMM
-                }
-            }
-            job["loads"] = loads
-        } else {
-            job["loads"] = ["build_dir": [0, 0, 1]]
+        // The declared load case is emitted for EVERY model source — STEP B-rep
+        // faces AND STL/3MF pseudo-faces (handoff 134 made the segmenter's pseudo-face
+        // ids share the exact face-id contract, and the mesh-optimize work made the
+        // core's run_job / build_production_loadcase honor a `loads` block for a mesh
+        // part identically to a STEP part). Gating this on `isStepModel` was the
+        // mesh-job-params bug: a mesh job.json shipped a skeleton (`build_dir` only),
+        // so the CLI dropped the anchors/loads/infill/resolution and silently fell
+        // back to the worst-case self-weight / 100%-infill / cold run that OOM-killed.
+        // A mesh RunRequest already carries anchor_face_ids / groups / clearances /
+        // protections as pseudo-face ids, so the SAME serializer produces a job.json
+        // field-equivalent to the STEP one (only `model` and the face-id provenance
+        // differ). No `else` skeleton.
+        var loads: [String: Any] = [
+            "minimize_plastic": request.minimizePlastic,
+            "build_dir": [request.buildDirection.x, request.buildDirection.y,
+                          request.buildDirection.z],
+        ]
+        if !request.anchorFaceIDs.isEmpty {
+            loads["anchor_face_ids"] = request.anchorFaceIDs
         }
+        if !request.loadGroups.isEmpty {
+            loads["groups"] = request.loadGroups.map { g -> [String: Any] in
+                ["face_ids": g.faceIDs,
+                 "force": [g.force.x, g.force.y, g.force.z]]
+            }
+        }
+        if request.infillPercent >= 0 {
+            loads["infill_percent"] = request.infillPercent
+        }
+        if !request.clearances.isEmpty {
+            loads["clearances"] = request.clearances.map { c -> [String: Any] in
+                var entry: [String: Any] = [
+                    "face_id": c.faceID,
+                    "kind": c.kind == .face ? "face" : "bolt",
+                ]
+                if c.concentricMarginMM > 0 { entry["concentric_margin_mm"] = c.concentricMarginMM }
+                if c.axialClearanceMM > 0 { entry["axial_clearance_mm"] = c.axialClearanceMM }
+                if c.slabDepthMM > 0 { entry["slab_depth_mm"] = c.slabDepthMM }
+                return entry
+            }
+        }
+        // Handoff 124 — Face protections (preserve-skin): the raw face ids + the
+        // ONE global depth. The worker's build_production_loadcase freezes each
+        // face's part-solid skin FrozenSolid, identically to the local bridge
+        // path. Empty list → omitted → byte-identical to a pre-124 job.
+        if !request.faceProtections.isEmpty {
+            loads["face_protections"] = request.faceProtections
+            if request.faceProtectionDepthMM > 0 {
+                loads["face_protection_depth_mm"] = request.faceProtectionDepthMM
+            }
+        }
+        job["loads"] = loads
         return try JSONSerialization.data(withJSONObject: job)
     }
 
