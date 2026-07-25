@@ -143,6 +143,156 @@ void symmetric_eigen3(const double a_in[9], double values[3], double vectors[9])
   }
 }
 
+StepFaceInfo fit_pseudo_face(const TriangleMesh& mesh, const std::vector<int>& tris,
+                             const SegmentOptions& opts, double bb_diag) {
+  StepFaceInfo info;
+  const std::size_t k = tris.size();
+  if (k == 0) return info;  // Other
+
+  const double plane_cos = std::cos(opts.plane_tolerance_deg * M_PI / 180.0);
+  const double cyl_sin = std::sin(opts.cylinder_tolerance_deg * M_PI / 180.0);
+  const double max_radius = opts.max_cylinder_radius_span * bb_diag;
+
+  // Per-triangle unit normal + area, in `tris` order (a fixed accumulation
+  // order => deterministic sums).
+  std::vector<V3> un(k);
+  std::vector<double> ar(k);
+  V3 mean{0, 0, 0};
+  double total_area = 0.0;
+  for (std::size_t i = 0; i < k; ++i) {
+    const std::size_t u = static_cast<std::size_t>(tris[i]);
+    const V3 n2 = face_normal_2a(mesh, u);
+    const double len = norm(n2);
+    ar[i] = 0.5 * len;
+    if (len > 0.0) un[i] = V3{n2.x / len, n2.y / len, n2.z / len};
+    mean.x += un[i].x * ar[i];
+    mean.y += un[i].y * ar[i];
+    mean.z += un[i].z * ar[i];
+    total_area += ar[i];
+  }
+  const double mean_len = norm(mean);
+  if (mean_len > 0.0) { mean.x /= mean_len; mean.y /= mean_len; mean.z /= mean_len; }
+
+  // Plane test: every facet normal parallel to the area-weighted mean.
+  bool planar = mean_len > 0.0 && total_area > 0.0;
+  if (planar)
+    for (std::size_t i = 0; i < k; ++i) {
+      if (ar[i] <= 0.0) continue;  // degenerate: no opinion
+      if (dot(un[i], mean) < plane_cos) { planar = false; break; }
+    }
+
+  if (planar) {
+    info.kind = StepSurfaceKind::Plane;
+    info.plane_normal = Vec3{mean.x, mean.y, mean.z};
+    V3 c{0, 0, 0};  // area-weighted centroid: a point ON the plane
+    for (std::size_t i = 0; i < k; ++i) {
+      const auto& tri = mesh.triangles[static_cast<std::size_t>(tris[i])];
+      for (int j = 0; j < 3; ++j) {
+        const Vec3& p = mesh.vertices[static_cast<std::size_t>(tri[j])];
+        c.x += p.x * ar[i] / 3.0;
+        c.y += p.y * ar[i] / 3.0;
+        c.z += p.z * ar[i] / 3.0;
+      }
+    }
+    if (total_area > 0.0) { c.x /= total_area; c.y /= total_area; c.z /= total_area; }
+    info.plane_origin = Vec3{c.x, c.y, c.z};
+    return info;
+  }
+
+  // Cylinder test. On a cylinder every facet normal is perpendicular to the
+  // axis, so the area-weighted normal covariance sum(area * n n^T) is (nearly)
+  // singular along the axis: take its smallest eigenvector.
+  double cov[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+  for (std::size_t i = 0; i < k; ++i) {
+    if (ar[i] <= 0.0) continue;
+    const double n[3] = {un[i].x, un[i].y, un[i].z};
+    for (int r = 0; r < 3; ++r)
+      for (int c2 = 0; c2 < 3; ++c2) cov[r * 3 + c2] += ar[i] * n[r] * n[c2];
+  }
+  double ev[3], evec[9];
+  symmetric_eigen3(cov, ev, evec);
+  V3 axis = canonical_sign(V3{evec[0], evec[1], evec[2]});
+  const double axis_len = norm(axis);
+  bool cylindrical = k >= 3 && axis_len > 0.0 && total_area > 0.0;
+  if (cylindrical) {
+    axis.x /= axis_len; axis.y /= axis_len; axis.z /= axis_len;
+    for (std::size_t i = 0; i < k; ++i) {
+      if (ar[i] <= 0.0) continue;
+      if (std::fabs(dot(un[i], axis)) > cyl_sin) { cylindrical = false; break; }
+    }
+  }
+
+  if (cylindrical) {
+    V3 helper = std::fabs(axis.x) < 0.9 ? V3{1, 0, 0} : V3{0, 1, 0};
+    V3 uu = cross(axis, helper);
+    const double ul = norm(uu);
+    uu = V3{uu.x / ul, uu.y / ul, uu.z / ul};
+    const V3 vv = cross(axis, uu);
+
+    std::vector<int> verts;  // distinct region vertices, ascending index
+    for (const int t : tris) {
+      const auto& tri = mesh.triangles[static_cast<std::size_t>(t)];
+      for (int j = 0; j < 3; ++j) verts.push_back(tri[j]);
+    }
+    std::sort(verts.begin(), verts.end());
+    verts.erase(std::unique(verts.begin(), verts.end()), verts.end());
+
+    // Algebraic (Kasa) circle fit in the (u, v) plane.
+    double m[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    double rhs[3] = {0, 0, 0};
+    double along_sum = 0.0;
+    std::vector<double> xs(verts.size()), ys(verts.size());
+    for (std::size_t i = 0; i < verts.size(); ++i) {
+      const Vec3& p = mesh.vertices[static_cast<std::size_t>(verts[i])];
+      const V3 pv{p.x, p.y, p.z};
+      const double x = dot(pv, uu), y = dot(pv, vv);
+      xs[i] = x; ys[i] = y;
+      along_sum += dot(pv, axis);
+      const double z = x * x + y * y;
+      m[0] += x * x; m[1] += x * y; m[2] += x;
+      m[3] += x * y; m[4] += y * y; m[5] += y;
+      m[6] += x;     m[7] += y;     m[8] += 1.0;
+      rhs[0] -= z * x; rhs[1] -= z * y; rhs[2] -= z;
+    }
+    double sol[3] = {0, 0, 0};
+    bool fit_ok = !verts.empty() && solve3(m, rhs, sol);
+    double cx = 0.0, cy = 0.0, radius = 0.0;
+    if (fit_ok) {
+      cx = -0.5 * sol[0];
+      cy = -0.5 * sol[1];
+      const double r2 = cx * cx + cy * cy - sol[2];
+      fit_ok = r2 > 0.0;
+      if (fit_ok) radius = std::sqrt(r2);
+    }
+    if (fit_ok) {
+      double resid = 0.0;
+      for (std::size_t i = 0; i < verts.size(); ++i) {
+        const double dx = xs[i] - cx, dy = ys[i] - cy;
+        const double d = std::sqrt(dx * dx + dy * dy) - radius;
+        resid += d * d;
+      }
+      resid = std::sqrt(resid / static_cast<double>(verts.size()));
+      fit_ok = radius > 0.0 && resid / radius <= opts.cylinder_radius_tolerance;
+      if (fit_ok && max_radius > 0.0 && radius > max_radius) fit_ok = false;
+    }
+    if (fit_ok) {
+      const double along = along_sum / static_cast<double>(verts.size());
+      info.kind = StepSurfaceKind::Cylinder;
+      info.cylinder_radius_mm = radius;
+      info.axis_dir = Vec3{axis.x, axis.y, axis.z};
+      info.axis_point = Vec3{cx * uu.x + cy * vv.x + along * axis.x,
+                             cx * uu.y + cy * vv.y + along * axis.y,
+                             cx * uu.z + cy * vv.z + along * axis.z};
+      return info;
+    }
+  }
+
+  // Neither a plane nor a cylinder: Other. Selection, tagging and the design box
+  // all work on an Other face (they only need triangle_face); only the
+  // shape-aware clearance derivations need the fitted geometry.
+  return info;
+}
+
 MeshSegmentation segment_mesh_faces(const TriangleMesh& mesh,
                                     const SegmentOptions& opts) {
   if (!(opts.dihedral_threshold_deg > 0.0) || !(opts.dihedral_threshold_deg < 180.0))
@@ -179,42 +329,112 @@ MeshSegmentation segment_mesh_faces(const TriangleMesh& mesh,
 
   // --- region growing -------------------------------------------------------
   const double cos_thr = std::cos(opts.dihedral_threshold_deg * M_PI / 180.0);
+  // Planar-cone guard (see SegmentOptions::planar_region_cone_deg). It grows in
+  // two phases per region: first the maximal COPLANAR patch around the seed
+  // (dihedral <= plane_tolerance), which tells us whether the region is a flat
+  // face and, if so, its plane normal; then the ordinary dihedral growth, but
+  // for an armed (flat) region every further triangle must also lie within the
+  // cone of that plane normal, so a fillet cannot carry the flat face across the
+  // crease. Deciding from the coplanar PATCH — not the seed triangle — makes
+  // arming independent of which triangle happens to seed the region (the seed is
+  // just the region's lowest index, which may sit on the face's edge).
+  const bool cone_on = opts.planar_region_cone_deg > 0.0;
+  const double cos_cone =
+      cone_on ? std::cos(opts.planar_region_cone_deg * M_PI / 180.0) : -1.0;
+  const double cos_flat = std::cos(opts.plane_tolerance_deg * M_PI / 180.0);
+  // A patch is treated as a flat FACE (and arms the cone) only if it is more than
+  // a stray coplanar pair AND is walled by at least one genuine crease — not
+  // merely the shallow facet steps of a smoothly curved surface. Without the
+  // crease test a locally flat spot on a blob would arm and then be fragmented by
+  // the cone; without the size test a single cylinder facet would. Both are
+  // internal constants: the ONE tunable is the cone angle (disables at <= 0).
+  const std::size_t kPlanarMinTris = 3;
+  const double cos_crease = std::cos(8.0 * M_PI / 180.0);
   seg.triangle_face.assign(nt, -1);
   int next_id = 0;
   std::deque<int> frontier;
+  std::vector<int> patch;
+
+  auto grow_edges = [&](int cur, auto&& visit) {
+    const auto& tri = mesh.triangles[static_cast<std::size_t>(cur)];
+    for (int e = 0; e < 3; ++e) {  // fixed edge order (v0v1, v1v2, v2v0)
+      int a = tri[e], b = tri[(e + 1) % 3];
+      if (a > b) std::swap(a, b);
+      const auto it = edge_tris.find(std::make_pair(a, b));
+      if (it == edge_tris.end()) continue;
+      for (const int nb : it->second)  // ascending triangle index
+        if (nb != cur) visit(nb);
+    }
+  };
 
   for (std::size_t seed = 0; seed < nt; ++seed) {
     if (seg.triangle_face[seed] != -1) continue;
     const int id = next_id++;
     seg.triangle_face[seed] = id;
+
+    // --- phase A: maximal coplanar patch, and whether it is walled by a crease.
+    patch.clear();
+    patch.push_back(static_cast<int>(seed));
     frontier.clear();
     frontier.push_back(static_cast<int>(seed));
-
+    bool has_crease_wall = false;
+    const bool seed_ok = area[seed] > 0.0;
     while (!frontier.empty()) {
       const int cur = frontier.front();
       frontier.pop_front();
-      const auto& tri = mesh.triangles[static_cast<std::size_t>(cur)];
-      for (int e = 0; e < 3; ++e) {  // fixed edge order (v0v1, v1v2, v2v0)
-        int a = tri[e], b = tri[(e + 1) % 3];
-        if (a > b) std::swap(a, b);
-        const auto it = edge_tris.find(std::make_pair(a, b));
-        if (it == edge_tris.end()) continue;
-        for (const int nb : it->second) {  // ascending triangle index
-          if (nb == cur) continue;
-          const std::size_t n = static_cast<std::size_t>(nb);
-          if (seg.triangle_face[n] != -1) continue;
-          // A degenerate triangle has no normal; let it join whatever reaches
-          // it first so `triangle_face` stays total over the triangle list.
-          const bool cur_ok = area[static_cast<std::size_t>(cur)] > 0.0;
-          const bool nb_ok = area[n] > 0.0;
-          const bool join =
-              (!cur_ok || !nb_ok) ||
-              dot(unit_n[static_cast<std::size_t>(cur)], unit_n[n]) >= cos_thr;
-          if (!join) continue;
+      const bool cur_ok = area[static_cast<std::size_t>(cur)] > 0.0;
+      grow_edges(cur, [&](int nb) {
+        const std::size_t n = static_cast<std::size_t>(nb);
+        if (seg.triangle_face[n] != -1) return;
+        const bool nb_ok = area[n] > 0.0;
+        const double c = (cur_ok && nb_ok)
+                             ? dot(unit_n[static_cast<std::size_t>(cur)], unit_n[n])
+                             : 1.0;  // degenerate: treat as coplanar
+        if (c >= cos_flat) {
           seg.triangle_face[n] = id;
+          patch.push_back(nb);
           frontier.push_back(nb);
+        } else if (nb_ok && c <= cos_crease) {
+          has_crease_wall = true;  // a real edge bounds this flat patch
         }
+      });
+    }
+
+    bool armed = cone_on && seed_ok && patch.size() >= kPlanarMinTris &&
+                 has_crease_wall;
+    V3 plane_n{0, 0, 0};
+    if (armed) {  // area-weighted mean normal of the flat patch
+      for (const int t : patch) {
+        const std::size_t u = static_cast<std::size_t>(t);
+        plane_n.x += unit_n[u].x * area[u];
+        plane_n.y += unit_n[u].y * area[u];
+        plane_n.z += unit_n[u].z * area[u];
       }
+      const double l = norm(plane_n);
+      if (l > 0.0) { plane_n.x /= l; plane_n.y /= l; plane_n.z /= l; }
+      else armed = false;
+    }
+
+    // --- phase B: ordinary dihedral growth from the patch, cone-capped if armed.
+    frontier.assign(patch.begin(), patch.end());
+    while (!frontier.empty()) {
+      const int cur = frontier.front();
+      frontier.pop_front();
+      const bool cur_ok = area[static_cast<std::size_t>(cur)] > 0.0;
+      grow_edges(cur, [&](int nb) {
+        const std::size_t n = static_cast<std::size_t>(nb);
+        if (seg.triangle_face[n] != -1) return;
+        const bool nb_ok = area[n] > 0.0;
+        // A degenerate triangle has no normal; let it join whatever reaches it
+        // first so `triangle_face` stays total over the triangle list.
+        bool join = (!cur_ok || !nb_ok) ||
+                    dot(unit_n[static_cast<std::size_t>(cur)], unit_n[n]) >= cos_thr;
+        if (join && armed && nb_ok && dot(plane_n, unit_n[n]) < cos_cone)
+          join = false;  // tilted past the cone from the plane: stop at the fillet
+        if (!join) return;
+        seg.triangle_face[n] = id;
+        frontier.push_back(nb);
+      });
     }
   }
   seg.face_count = next_id;
@@ -226,189 +446,14 @@ MeshSegmentation segment_mesh_faces(const TriangleMesh& mesh,
     region_tris[static_cast<std::size_t>(seg.triangle_face[t])].push_back(
         static_cast<int>(t));
 
-  const double plane_cos = std::cos(opts.plane_tolerance_deg * M_PI / 180.0);
-  const double cyl_sin = std::sin(opts.cylinder_tolerance_deg * M_PI / 180.0);
-
   // The part's own size, for the physical bound on a fitted cylinder radius.
   Vec3 bb_lo, bb_hi;
   bounding_box(mesh, bb_lo, bb_hi);
   const double bb_diag = std::sqrt((bb_hi.x - bb_lo.x) * (bb_hi.x - bb_lo.x) +
                                    (bb_hi.y - bb_lo.y) * (bb_hi.y - bb_lo.y) +
                                    (bb_hi.z - bb_lo.z) * (bb_hi.z - bb_lo.z));
-  const double max_radius = opts.max_cylinder_radius_span * bb_diag;
-
-  for (std::size_t f = 0; f < region_tris.size(); ++f) {
-    const std::vector<int>& tris = region_tris[f];
-    StepFaceInfo info;
-
-    // Area-weighted mean normal. For the outward-wound mesh the importer
-    // guarantees, this is the OUTWARD direction — what a face clearance
-    // extrudes along.
-    V3 mean{0, 0, 0};
-    double total_area = 0.0;
-    for (const int t : tris) {
-      const std::size_t u = static_cast<std::size_t>(t);
-      mean.x += unit_n[u].x * area[u];
-      mean.y += unit_n[u].y * area[u];
-      mean.z += unit_n[u].z * area[u];
-      total_area += area[u];
-    }
-    const double mean_len = norm(mean);
-    if (mean_len > 0.0) {
-      mean.x /= mean_len;
-      mean.y /= mean_len;
-      mean.z /= mean_len;
-    }
-
-    // Plane test: every facet normal parallel to the mean, within tolerance.
-    bool planar = mean_len > 0.0 && total_area > 0.0;
-    if (planar) {
-      for (const int t : tris) {
-        const std::size_t u = static_cast<std::size_t>(t);
-        if (area[u] <= 0.0) continue;  // degenerate: no opinion
-        if (dot(unit_n[u], mean) < plane_cos) {
-          planar = false;
-          break;
-        }
-      }
-    }
-
-    if (planar) {
-      info.kind = StepSurfaceKind::Plane;
-      info.plane_normal = Vec3{mean.x, mean.y, mean.z};
-      // Area-weighted centroid of the region: a point ON the plane.
-      V3 c{0, 0, 0};
-      for (const int t : tris) {
-        const std::size_t u = static_cast<std::size_t>(t);
-        const auto& tri = mesh.triangles[u];
-        for (int k = 0; k < 3; ++k) {
-          const Vec3& p = mesh.vertices[static_cast<std::size_t>(tri[k])];
-          c.x += p.x * area[u] / 3.0;
-          c.y += p.y * area[u] / 3.0;
-          c.z += p.z * area[u] / 3.0;
-        }
-      }
-      if (total_area > 0.0) {
-        c.x /= total_area;
-        c.y /= total_area;
-        c.z /= total_area;
-      }
-      info.plane_origin = Vec3{c.x, c.y, c.z};
-      seg.faces[f] = info;
-      continue;
-    }
-
-    // Cylinder test. On a cylinder every facet normal is perpendicular to the
-    // axis, so the area-weighted normal covariance sum(area * n n^T) is
-    // (nearly) singular along the axis: take its smallest eigenvector.
-    double cov[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-    for (const int t : tris) {
-      const std::size_t u = static_cast<std::size_t>(t);
-      if (area[u] <= 0.0) continue;
-      const double n[3] = {unit_n[u].x, unit_n[u].y, unit_n[u].z};
-      for (int r = 0; r < 3; ++r)
-        for (int c2 = 0; c2 < 3; ++c2) cov[r * 3 + c2] += area[u] * n[r] * n[c2];
-    }
-    double ev[3];
-    double evec[9];
-    symmetric_eigen3(cov, ev, evec);
-    V3 axis = canonical_sign(V3{evec[0], evec[1], evec[2]});
-    const double axis_len = norm(axis);
-    bool cylindrical = tris.size() >= 3 && axis_len > 0.0 && total_area > 0.0;
-    if (cylindrical) {
-      axis.x /= axis_len;
-      axis.y /= axis_len;
-      axis.z /= axis_len;
-      for (const int t : tris) {
-        const std::size_t u = static_cast<std::size_t>(t);
-        if (area[u] <= 0.0) continue;
-        if (std::fabs(dot(unit_n[u], axis)) > cyl_sin) {
-          cylindrical = false;
-          break;
-        }
-      }
-    }
-
-    if (cylindrical) {
-      // Build an orthonormal (u, v) basis of the plane perpendicular to axis.
-      V3 helper = std::fabs(axis.x) < 0.9 ? V3{1, 0, 0} : V3{0, 1, 0};
-      V3 uu = cross(axis, helper);
-      const double ul = norm(uu);
-      uu = V3{uu.x / ul, uu.y / ul, uu.z / ul};
-      const V3 vv = cross(axis, uu);
-
-      // Collect the region's distinct vertices (ascending index => the sums are
-      // accumulated in a fixed order).
-      std::vector<int> verts;
-      for (const int t : tris) {
-        const auto& tri = mesh.triangles[static_cast<std::size_t>(t)];
-        for (int k = 0; k < 3; ++k) verts.push_back(tri[k]);
-      }
-      std::sort(verts.begin(), verts.end());
-      verts.erase(std::unique(verts.begin(), verts.end()), verts.end());
-
-      // Algebraic (Kasa) circle fit in the (u, v) plane: minimise
-      // sum (x^2 + y^2 + D x + E y + F)^2 over D, E, F.
-      double m[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
-      double rhs[3] = {0, 0, 0};
-      double along_sum = 0.0;
-      std::vector<double> xs(verts.size()), ys(verts.size());
-      for (std::size_t i = 0; i < verts.size(); ++i) {
-        const Vec3& p = mesh.vertices[static_cast<std::size_t>(verts[i])];
-        const V3 pv{p.x, p.y, p.z};
-        const double x = dot(pv, uu), y = dot(pv, vv);
-        xs[i] = x;
-        ys[i] = y;
-        along_sum += dot(pv, axis);
-        const double z = x * x + y * y;
-        m[0] += x * x; m[1] += x * y; m[2] += x;
-        m[3] += x * y; m[4] += y * y; m[5] += y;
-        m[6] += x;     m[7] += y;     m[8] += 1.0;
-        rhs[0] -= z * x;
-        rhs[1] -= z * y;
-        rhs[2] -= z;
-      }
-      double sol[3] = {0, 0, 0};
-      bool fit_ok = !verts.empty() && solve3(m, rhs, sol);
-      double cx = 0.0, cy = 0.0, radius = 0.0;
-      if (fit_ok) {
-        cx = -0.5 * sol[0];
-        cy = -0.5 * sol[1];
-        const double r2 = cx * cx + cy * cy - sol[2];
-        fit_ok = r2 > 0.0;
-        if (fit_ok) radius = std::sqrt(r2);
-      }
-      if (fit_ok) {
-        double resid = 0.0;
-        for (std::size_t i = 0; i < verts.size(); ++i) {
-          const double dx = xs[i] - cx, dy = ys[i] - cy;
-          const double d = std::sqrt(dx * dx + dy * dy) - radius;
-          resid += d * d;
-        }
-        resid = std::sqrt(resid / static_cast<double>(verts.size()));
-        fit_ok = radius > 0.0 && resid / radius <= opts.cylinder_radius_tolerance;
-        // Physical bound: a cylinder bigger than the part is not a feature of
-        // the part, it is a flat region fitted by an enormous circle.
-        if (fit_ok && max_radius > 0.0 && radius > max_radius) fit_ok = false;
-      }
-      if (fit_ok) {
-        const double along = along_sum / static_cast<double>(verts.size());
-        info.kind = StepSurfaceKind::Cylinder;
-        info.cylinder_radius_mm = radius;
-        info.axis_dir = Vec3{axis.x, axis.y, axis.z};
-        info.axis_point = Vec3{cx * uu.x + cy * vv.x + along * axis.x,
-                               cx * uu.y + cy * vv.y + along * axis.y,
-                               cx * uu.z + cy * vv.z + along * axis.z};
-        seg.faces[f] = info;
-        continue;
-      }
-    }
-
-    // Neither a plane nor a cylinder: Other. Selection, tagging and the design
-    // box all work on an Other face (they only need triangle_face); only the
-    // shape-aware clearance derivations need the fitted geometry.
-    seg.faces[f] = info;
-  }
+  for (std::size_t f = 0; f < region_tris.size(); ++f)
+    seg.faces[f] = fit_pseudo_face(mesh, region_tris[f], opts, bb_diag);
 
   return seg;
 }

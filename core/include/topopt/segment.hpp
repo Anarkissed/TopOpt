@@ -71,6 +71,36 @@ struct SegmentOptions {
   // fragmentation and the caveat instead.
   double dihedral_threshold_deg = 35.0;
 
+  // Second-stage guard against the ONE failure the pure local-dihedral rule
+  // cannot see: a flat face LEAKING through a smoothly-tessellated fillet or
+  // chamfer into a face a human reads as distinct. The shelf-bracket failure
+  // that motivated paint mode (handoff 2026-07-24) was exactly this — a chamfered
+  // bolt-hole rim gives a chain of sub-threshold facet steps from the flat top
+  // face down into the bore, so region growing walks straight across the crease
+  // a human sees, and one tap on the hole selects the top (Load) face too.
+  //
+  // The rule is SELECTIVE, and that is the whole point. When a region is SEEDED
+  // on a locally flat triangle (all its edge-neighbours within
+  // `plane_tolerance_deg`, i.e. it sits on a planar plateau), the region may only
+  // absorb a triangle whose normal is within this cone of the SEED normal. A flat
+  // face grows to its own crease and stops; the fillet's normal tilts away from
+  // the seed and, once past this cap, is refused — so the leak is cut at the
+  // fillet instead of running through it. A region seeded on a CURVED triangle
+  // (a barrel, a blob) does not arm the cone at all and grows by pure dihedral
+  // exactly as before, so genuinely curved surfaces are never fragmented by it.
+  //
+  // MEASURED (evidence/2026-07-24-mesh-selection-paint/): at the shipped 40 deg
+  // this is a NO-OP on all three handoff-134 reference meshes (their flats meet
+  // at sharp >cap creases, their curved faces have curved seeds) and on the demo
+  // L-bracket — region counts are byte-identical — and it splits the committed
+  // chamfered-hole fixture's top face away from its bore. Because it changes no
+  // reference id, existing sharp-edged mesh projects keep their persisted
+  // pseudo-face ids; only a part that WAS leaking (already unusable) re-segments.
+  //
+  // <= 0 disables the cone entirely (pure local-dihedral growth, the exact
+  // handoff-134 behaviour). The admissible values are (0, 180).
+  double planar_region_cone_deg = 40.0;
+
   // A region is classified Plane iff every triangle normal in it is within this
   // of the region's area-weighted mean normal. Tight: a planar face's facets
   // are exactly parallel up to the file's float precision.
@@ -132,6 +162,17 @@ MeshSegmentation segment_mesh_faces(const TriangleMesh& mesh,
 // (and because the core's Eigen dependency is optional — segment.cpp is built
 // on every platform, including the OCCT/Eigen-free iOS slice, so it cannot use
 // Eigen).
+
+// Fit ONE pseudo-face's surface geometry from its triangle set — the same
+// area-weighted plane test and Kasa cylinder fit `segment_mesh_faces` runs per
+// region, factored out so a PAINTED face (an arbitrary triangle set, handoff
+// 2026-07-24) is classified and measured identically. `tris` are indices into
+// `mesh.triangles`; `bb_diag` is the mesh bounding-box diagonal, the physical
+// bound on a fitted cylinder radius. An empty `tris` yields a default (Other)
+// StepFaceInfo. Deterministic: the accumulation order is `tris`' own order, and
+// the circle fit sorts its vertex set.
+StepFaceInfo fit_pseudo_face(const TriangleMesh& mesh, const std::vector<int>& tris,
+                             const SegmentOptions& opts, double bb_diag);
 
 // Eigen-decomposition of a symmetric 3x3 matrix by cyclic Jacobi rotations.
 // `a` is row-major [9]. On return `values[i]` are the eigenvalues in ASCENDING

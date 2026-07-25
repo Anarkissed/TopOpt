@@ -56,3 +56,59 @@ public enum WorkspaceTap {
         selection.pickFaces(fresh)
     }
 }
+
+/// Route a paint stroke into the active group's painted pseudo-face — the paint-
+/// mode counterpart of `WorkspaceTap.route` (handoff 2026-07-24). Pure decision
+/// layer over `PaintModel` + `SelectionModel`, so the whole "brush adds to /
+/// erases from the current group, one painted face per group" behaviour is
+/// unit-tested headlessly; the SwiftUI viewer computes the covered `triangles`
+/// with `BrushHitTest` and calls this, then persists via `PaintController`.
+public enum WorkspacePaint {
+
+    /// The painted face id owned by `group`, if it has one (a group owns at most
+    /// one painted face by construction).
+    public static func paintedFace(of group: SelectionGroup, in paint: PaintModel) -> FaceID? {
+        group.faces.first { paint.isPainted($0) }
+    }
+
+    /// Apply a brush stroke to the active group.
+    ///
+    /// - `.add`  : ensures an active group (creating one if needed), mints that
+    ///   group's painted face on first use, paints the triangles into it, and adds
+    ///   the painted id to the group.
+    /// - `.erase`: reverts the triangles to their native faces; if the group's
+    ///   painted face is left empty it is removed from the group.
+    ///
+    /// Records the edit on `history` for undo. A stroke that changes nothing is a
+    /// no-op (no group churn, no dead undo step).
+    public static func stroke(_ mode: PaintMode, triangles: [Int],
+                              paint: inout PaintModel, selection: inout SelectionModel,
+                              history: inout PaintHistory) {
+        guard !triangles.isEmpty else { return }
+
+        switch mode {
+        case .add:
+            if selection.activeGroup == nil { selection.addGroup() }
+            guard let active = selection.activeGroup else { return }
+            let target = paintedFace(of: active, in: paint) ?? paint.mintFace()
+            let edit = paint.apply(.add, target: target, triangles: triangles.map(Int32.init))
+            history.record(edit)
+            // Add the painted id to the active group (skip if already present —
+            // pickFaces would TOGGLE an already-owned face off).
+            if !(selection.activeGroup?.faces.contains(target) ?? false) {
+                selection.pickFaces([target])
+            }
+
+        case .erase:
+            guard let active = selection.activeGroup,
+                  let target = paintedFace(of: active, in: paint) else { return }
+            let edit = paint.apply(.erase, target: target, triangles: triangles.map(Int32.init))
+            history.record(edit)
+            // If the group's painted face is now empty, drop it from the group.
+            if paint.triangles(ofPaintedFace: target).isEmpty,
+               selection.activeGroup?.faces.contains(target) == true {
+                selection.pickFaces([target])  // all-in-active → removes it
+            }
+        }
+    }
+}

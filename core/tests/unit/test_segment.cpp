@@ -144,6 +144,50 @@ static std::string temp_path(const char* name) {
   return std::string(SEGMENT_TMP_DIR) + "/" + name;
 }
 
+// Triangle geometry helpers for the filleted-bore fixture below (which face a
+// region contains is asserted by geometry, not by a golden triangle index).
+static Vec3 tri_normal(const TriangleMesh& m, std::size_t t) {
+  const auto& tr = m.triangles[t];
+  const Vec3& a = m.vertices[static_cast<std::size_t>(tr[0])];
+  const Vec3& b = m.vertices[static_cast<std::size_t>(tr[1])];
+  const Vec3& c = m.vertices[static_cast<std::size_t>(tr[2])];
+  Vec3 n{(b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y),
+         (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z),
+         (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)};
+  const double l = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+  if (l > 0) { n.x /= l; n.y /= l; n.z /= l; }
+  return n;
+}
+static Vec3 tri_centroid(const TriangleMesh& m, std::size_t t) {
+  const auto& tr = m.triangles[t];
+  const Vec3& a = m.vertices[static_cast<std::size_t>(tr[0])];
+  const Vec3& b = m.vertices[static_cast<std::size_t>(tr[1])];
+  const Vec3& c = m.vertices[static_cast<std::size_t>(tr[2])];
+  return Vec3{(a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3};
+}
+// The flat top (Load) face: horizontal normal, topmost, outermost radius.
+static int top_face_rep(const TriangleMesh& m) {
+  int best = -1; double bs = -1e30;
+  for (std::size_t t = 0; t < m.triangles.size(); ++t) {
+    if (std::fabs(tri_normal(m, t).z) < 0.98) continue;
+    const Vec3 c = tri_centroid(m, t);
+    const double s = c.z * 1000 + std::sqrt(c.x * c.x + c.y * c.y);
+    if (s > bs) { bs = s; best = static_cast<int>(t); }
+  }
+  return best;
+}
+// A bore-wall triangle: near-vertical normal, centroid radius closest to `r`.
+static int bore_rep(const TriangleMesh& m, double r) {
+  int best = -1; double be = 1e30;
+  for (std::size_t t = 0; t < m.triangles.size(); ++t) {
+    if (std::fabs(tri_normal(m, t).z) > 0.2) continue;
+    const Vec3 c = tri_centroid(m, t);
+    const double e = std::fabs(std::sqrt(c.x * c.x + c.y * c.y) - r);
+    if (e < be) { be = e; best = static_cast<int>(t); }
+  }
+  return best;
+}
+
 int main() {
   // ------------------------------------------------------------------
   // Cube: 6 planar pseudo-faces, one per side.
@@ -211,6 +255,66 @@ int main() {
     CHECK(region_count(s) == 1, "a fine sphere is a single pseudo-face");
     CHECK(s.faces[0].kind == StepSurfaceKind::Other,
           "the sphere is classified Other (neither plane nor cylinder)");
+  }
+
+  // ------------------------------------------------------------------
+  // PLANAR-CONE GUARD (handoff 2026-07-24). The shipped default arms a per-plane
+  // cone that stops a flat face leaking through a fillet — but ONLY on a face
+  // that a real crease bounds. On every reference shape (sharp-edged flats,
+  // curved barrels/spheres) the guard must change NOTHING, or it would fragment
+  // real geometry and shift persisted pseudo-face ids. Assert byte-identity of
+  // the partition with the guard on (default) vs off.
+  {
+    SegmentOptions off;
+    off.planar_region_cone_deg = 0.0;  // pure local dihedral (handoff-134 rule)
+    const TriangleMesh shapes[] = {make_box(10, 10, 10), make_prism(24, 5.0, 20.0),
+                                   make_prism(8, 5.0, 20.0), make_sphere(10.0, 24, 32)};
+    for (const TriangleMesh& m : shapes) {
+      const MeshSegmentation on = topopt::segment_mesh_faces(m);       // default
+      const MeshSegmentation of = topopt::segment_mesh_faces(m, off);  // guard off
+      CHECK(on.face_count == of.face_count && on.triangle_face == of.triangle_face,
+            "planar cone is a no-op on sharp-edged / curved reference meshes");
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // THE FILLETED-BORE FIXTURE (committed as tests/fixtures/mesh/, the repeatable
+  // stand-in for the shelf bracket that over-selected). A flat top face joined to
+  // a vertical bore by a ROUNDED rim: each fillet facet turns under the 35 deg
+  // threshold, so pure dihedral growth merges top+fillet+bore into one region and
+  // one tap on the hole also grabs the Load face. The planar-cone guard cuts the
+  // leak at the fillet. This asserts BOTH: the failure (guard off) and the fix
+  // (default), so the fixture can never silently stop reproducing the bug.
+  {
+    const std::string path =
+        std::string(MESH_FIXTURE_DIR) + "/filleted_bore_plate.stl";
+    const PartModel p = topopt::import_part(path);  // welds + unifies winding
+    const TriangleMesh& m = p.model.mesh;
+    const double r_bore = 4.0;  // must match the committed fixture's bore radius
+    const int top = top_face_rep(m);
+    const int bore = bore_rep(m, r_bore);
+    CHECK(top >= 0 && bore >= 0, "fixture exposes a flat top face and a bore wall");
+
+    SegmentOptions off;
+    off.planar_region_cone_deg = 0.0;
+    const MeshSegmentation leaked = topopt::segment_mesh_faces(m, off);
+    CHECK(leaked.triangle_face[static_cast<std::size_t>(top)] ==
+              leaked.triangle_face[static_cast<std::size_t>(bore)],
+          "WITHOUT the guard the fillet leaks: top face and bore are one region");
+
+    const MeshSegmentation fixed = topopt::segment_mesh_faces(m);  // default guard
+    CHECK(fixed.triangle_face[static_cast<std::size_t>(top)] !=
+              fixed.triangle_face[static_cast<std::size_t>(bore)],
+          "WITH the default guard the Load face and the bore are separate regions");
+    CHECK(fixed.face_count > leaked.face_count,
+          "the guard splits the leaked region rather than merging others");
+
+    // The tunable threshold is the user's other escape: dropping it below the
+    // fillet's per-facet turn also separates them (paint mode is the guarantee,
+    // this is a second knob). Determinism holds for the guarded partition too.
+    const MeshSegmentation again = topopt::segment_mesh_faces(m);
+    CHECK(again.triangle_face == fixed.triangle_face,
+          "the guarded segmentation is deterministic (same mesh => same ids)");
   }
 
   // ------------------------------------------------------------------

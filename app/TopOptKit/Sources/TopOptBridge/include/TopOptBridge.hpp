@@ -142,6 +142,26 @@ ImportedMesh import_part(const std::string& path, double linear_deflection,
 // refusal sheet. A file that cannot be read at all still sets `err`.
 PartDiagnostics inspect_part(const std::string& path, BridgeError& err);
 
+// The paint-mode / segmentation-tuning sidecar (handoff 2026-07-24). The app
+// fills this and calls `write_face_overrides` to persist it next to its
+// working-copy STL; every later import (the display import, live tagging, the
+// run) then reproduces the SAME faces. `paint_indices` is the flattened triangle
+// indices of the painted pseudo-faces, `paint_sizes` the per-face counts (face i
+// takes the next `paint_sizes[i]` entries). `dihedral_deg <= 0` and
+// `cone_deg < 0` mean "leave the core default".
+struct FaceOverridesInput {
+  double dihedral_deg = 0.0;
+  double cone_deg = -1.0;
+  std::vector<int32_t> paint_indices;
+  std::vector<int32_t> paint_sizes;
+};
+
+// Write (or, with an empty/default input, DELETE) the face-overrides sidecar for
+// `model_path`. Deleting on empty keeps a cleared paint state from leaving a
+// stale sidecar that a re-import would resurrect. On failure sets `err`.
+void write_face_overrides(const std::string& model_path,
+                          const FaceOverridesInput& input, BridgeError& err);
+
 // Apply a unit choice by writing a rescaled binary-STL working copy. STL has no
 // unit, so the app asks; the answer is baked into the app-owned copy ONCE and
 // every later stateless call re-reads a file already in millimetres. Rejects a
