@@ -1,0 +1,34 @@
+# topopt-cli run job_3mf.json  (the worker's exact subprocess)
+$ topopt-cli run job_3mf.json --out out_3mf
+VARIANT vf=0.600000 achieved=0.599977 printed=0.588424 margin=29636.1 accepted=1 mesh=/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/variant_060.stl
+VARIANT vf=0.400000 achieved=0.399969 printed=0.334405 margin=22140.5 accepted=1 mesh=/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/variant_040.stl
+model: plate_bore.3mf (7 pseudo faces, 1 fixture faces matched)
+variants: 2 evaluated, 2 accepted
+  vf 0.60: margin 2.96e+04, accepted
+  vf 0.40: margin 2.21e+04, accepted
+report: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/report.json
+mesh: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/variant_060.stl
+mesh: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/variant_040.stl
+run_info: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/run_info.json
+iterations: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/iterations.csv
+
+$ topopt-cli run job_stl.json --out out_stl
+VARIANT vf=0.600000 achieved=0.599977 printed=0.588424 margin=29636.1 accepted=1 mesh=/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/variant_060.stl
+VARIANT vf=0.400000 achieved=0.399969 printed=0.334405 margin=22140.5 accepted=1 mesh=/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/variant_040.stl
+model: plate_bore.stl (7 pseudo faces, 1 fixture faces matched)
+variants: 2 evaluated, 2 accepted
+  vf 0.60: margin 2.96e+04, accepted
+  vf 0.40: margin 2.21e+04, accepted
+report: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/report.json
+mesh: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/variant_060.stl
+mesh: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/variant_040.stl
+run_info: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/run_info.json
+iterations: /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/iterations.csv
+
+# byte-identity 3MF vs STL (same part, two formats):
+report.json:   IDENTICAL
+variant_060:   IDENTICAL
+variant_040:   IDENTICAL
+
+dab924fb4abd23485448c096b21e3bca04fe70b96731f7fa058f8f1dd78ef4fc  /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_3mf/report.json
+dab924fb4abd23485448c096b21e3bca04fe70b96731f7fa058f8f1dd78ef4fc  /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/e2e3mf/out_stl/report.json

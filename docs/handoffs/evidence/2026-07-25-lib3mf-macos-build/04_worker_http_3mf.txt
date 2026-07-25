@@ -1,0 +1,23 @@
+# LAN worker HTTP round-trip: POST plate_bore.3mf, stream to done
+$ curl /health
+{"ok": true, "cli_version":"0.1.0", "fingerprint":"0892f4b6cbe0", ...}
+
+$ curl -F step=@plate_bore.3mf -F job=@job_3mf.json /jobs  ->  job_id=a1f3157d5d7244cb
+
+$ curl /jobs/a1f3157d5d7244cb   (terminal):
+{"id":"a1f3157d5d7244cb","project":"PlateBore-3MF","state":"done","rungs":2,"iter":60,"variants":2,...}
+
+# worker.log — the CLI import line proving the .3mf was read:
+2026-07-25T00:58:28.751 meta   launch /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lib3mf-macos-build-66e622/core/build/topopt-cli run /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/worker-wd/a1f3157d5d7244cb/job.json --out /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lib3mf-macos-build-66e622/a2e7dd49-ad8f-4bcd-8b80-774129acb702/scratchpad/worker-wd/a1f3157d5d7244cb/out
+2026-07-25T00:58:37.000 stdout model: plate_bore.3mf (7 pseudo faces, 1 fixture faces matched)
+2026-07-25T00:58:37.000 stdout variants: 2 evaluated, 2 accepted
+
+# out/run_info.json (excerpt):
+{
+  "cli_version": "0.1.0",
+  "fingerprint": "0892f4b6cbe0",
+  "mode": "minimize_plastic",
+  "material": "PLA",
+  "resolution": 32,
+  "solver": "MultigridCG_Matfree"
+}
