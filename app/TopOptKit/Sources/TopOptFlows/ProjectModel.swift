@@ -118,7 +118,8 @@ public final class ProjectModel: ObservableObject {
         self.paramsLocked = paramsLocked
         if let m = importedMesh {
             self.viewerMesh = ViewerMesh(vertices: m.vertices, indices: m.indices,
-                                         faceIDs: m.faceIDs, faceGeometry: m.faceGeometry)
+                                         faceIDs: m.faceIDs, faceGeometry: m.faceGeometry,
+                                         pseudoFaces: m.pseudoFaces)
         }
         self.run = run ?? ProjectModel.makeRun()
         // The two initial value-replays fire here during init, before any view
