@@ -49,6 +49,18 @@ public final class ProjectModel: ObservableObject {
     /// Persisted on the project; threaded to the core via `AppModel.makeRunRequest`.
     @Published public var designBox = DesignBoxModel()
 
+    /// Round-6 item 4: the workspace undo/redo history over the edit slice (selection + force +
+    /// design-box). Published so the header's Undo/Redo buttons enable/disable with `canUndo`/
+    /// `canRedo`. Fed by a debounced auto-commit (`installUndoAutoCommit`) so a settled edit — a
+    /// tap, a scrub, a handle drag, a painted stroke — folds into ONE step; driven by
+    /// `performUndo`/`performRedo`. Depth 50 (see the handoff for the covered/uncovered scope).
+    @Published public private(set) var undo = UndoHistory(depth: 50)
+    /// The debounce that turns bursts of `objectWillChange` into one settled `commit`.
+    private var undoAutoCommit: AnyCancellable?
+    /// How long the edit slice must be quiet before it commits as an undo step. Long enough that a
+    /// drag/scrub coalesces into one entry, short enough to feel immediate on a discrete tap.
+    private static let undoSettleInterval: RunLoop.SchedulerTimeType.Stride = .milliseconds(400)
+
     /// "Minimize plastic": pursue material reduction (the variant ladder). On with
     /// no forces → self-weight removal; on with forces → removal under the forces;
     /// off with forces → one conservative force-adequate variant. Default on.
@@ -116,6 +128,11 @@ public final class ProjectModel: ObservableObject {
             self.run.$phase.map { _ in () }
         )
         .sink { [weak self] in self?.objectWillChange.send() }
+        // Round-6 item 4: seed the undo baseline with the just-built state (so undo can never go
+        // "before load") and start the debounced auto-commit. A `restoring` init re-seeds AFTER it
+        // installs the persisted slice, so the restored state — not this empty one — is the floor.
+        seedUndoBaseline()
+        installUndoAutoCommit()
     }
 
     /// Rebuild a project from a persisted snapshot + its re-imported model
@@ -134,6 +151,73 @@ public final class ProjectModel: ObservableObject {
         self.quality = snapshot.quality ?? .fast
         self.printParams = snapshot.printParams ?? .fdmDefault
         self.designBox = snapshot.designBox ?? DesignBoxModel()
+        // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
+        // state the designated init seeded. Runs synchronously before any debounce could fire.
+        seedUndoBaseline()
+    }
+
+    // MARK: - Undo / redo (round-6 item 4)
+
+    /// The current undoable slice — the value copy the history snapshots and restores.
+    public var editSnapshot: EditSnapshot {
+        EditSnapshot(selection: selection, force: force, designBox: designBox)
+    }
+
+    /// Whether an undo is available RIGHT NOW — a committed step, OR an in-flight edit the debounce
+    /// hasn't folded in yet. The header button reads this (not `undo.canUndo`) so it enables the
+    /// instant the user edits, matching the two-finger gesture, which commits-then-undoes. Reactive:
+    /// it reads `@Published` state on this object, so the view re-evaluates it on every edit.
+    public var canUndoNow: Bool { undo.canUndo || undo.baseline != editSnapshot }
+    /// Whether a redo is available — only ever after an undo with no fresh edit since (which clears
+    /// the redo stack), so there is no "pending" case to fold in here.
+    public var canRedoNow: Bool { undo.canRedo }
+
+    /// Seed the undo baseline with the current state, clearing history. Called after init and
+    /// after a restore so undo can never reach a state that predates the loaded project.
+    public func seedUndoBaseline() {
+        undo.reset(to: editSnapshot)
+    }
+
+    /// Debounced auto-commit: after the edit slice has been quiet for `undoSettleInterval`, fold
+    /// the settled state into history. `objectWillChange` fires on ANY published change, so the
+    /// guard below (commit only when the slice truly differs) is what stops an unrelated republish
+    /// — or the `undo` mutation this very method makes — from looping or manufacturing steps.
+    private func installUndoAutoCommit() {
+        undoAutoCommit = objectWillChange
+            .debounce(for: Self.undoSettleInterval, scheduler: RunLoop.main)
+            .sink { [weak self] in self?.commitUndoSnapshot() }
+    }
+
+    /// Fold the current settled slice into the history as one undo step, if it differs from the
+    /// baseline. Idempotent and cheap on a no-op (it never touches the `@Published undo` unless a
+    /// real step is recorded, so it can't re-arm its own debounce forever).
+    private func commitUndoSnapshot() {
+        let snap = editSnapshot
+        guard undo.baseline != snap else { return }
+        undo.commit(snap)
+    }
+
+    /// Undo one settled edit. Any in-flight (not-yet-debounced) edit is committed first, so undo
+    /// always starts from the state actually on screen. No-op when nothing is undoable.
+    public func performUndo() {
+        commitUndoSnapshot()
+        guard let restored = undo.undo() else { return }
+        applyEditSnapshot(restored)
+    }
+
+    /// Redo one undone edit. No-op when the redo stack is empty (a fresh edit clears it).
+    public func performRedo() {
+        guard let restored = undo.redo() else { return }
+        applyEditSnapshot(restored)
+    }
+
+    /// Restore a slice into the live model. The resulting republish re-arms the debounce, but the
+    /// history's baseline already equals `s` (set by `undo()`/`redo()`), so the follow-up commit is
+    /// a guarded no-op that leaves the redo stack intact.
+    private func applyEditSnapshot(_ s: EditSnapshot) {
+        selection = s.selection
+        force = s.force
+        designBox = s.designBox
     }
 
     /// Assemble the run's load case from the current selection + force state, in the
