@@ -983,4 +983,26 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SEGMENT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME mesh_job COMMAND test_mesh_job)
+
+  # 3MF IMPORT enabled and proven end to end (handoff 2026-07-24-3mf-enable).
+  # The 3MF writer/reader round-trip (export_3mf) and 3MF *output* from a STEP
+  # part (cli_demo) were exercised; the IMPORT half — a real .3mf part read,
+  # segmented, and optimized — never was, and nothing proved an STL and a 3MF of
+  # the same part agree. This test does both on the committed 3MF encoding of the
+  # plate_bore part (tests/fixtures/mesh/plate_bore.3mf): STL-vs-3MF import
+  # equivalence (identical segmentation + identical solid/tag voxel sets at every
+  # solve resolution; coordinates within the 3MF text precision) and a 3MF run_job
+  # that is byte-identical to the STL run (identical grid -> identical everything
+  # downstream). It reads a real 3MF package, so it is additionally lib3mf-gated
+  # inside this OCCT+Eigen block; CI has all three (DEPS=ON), so it always runs.
+  if(lib3mf_FOUND)
+    add_executable(test_3mf_import tests/validation/test_3mf_import.cpp)
+    target_link_libraries(test_3mf_import PRIVATE topopt)
+    target_compile_definitions(test_3mf_import PRIVATE
+      MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+      MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+      SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+      CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+    add_test(NAME threemf_import COMMAND test_3mf_import)
+  endif()
 endif()

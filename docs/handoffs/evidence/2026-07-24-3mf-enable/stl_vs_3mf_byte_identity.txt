@@ -1,0 +1,18 @@
+The STL and the 3MF of the same part run_job() to a BYTE-IDENTICAL result.
+Because the voxel grid + tags are identical (see stl_vs_3mf_equivalence.txt),
+every stage downstream -- the SIMP solve, the gate, the exported marching-cubes
+meshes -- consumes identical input and produces identical output.
+
+$ probe: run_job(plate_bore.stl) vs run_job(plate_bore.3mf), res 32, ladder {0.6,0.4}
+
+stl: faces=7 fixmatch=1 evaluated=2 accepted=2
+3mf: faces=7 fixmatch=1 evaluated=2 accepted=2
+report byte-identical: 1
+triangle_face identical: 1
+stl report bytes=2197 3mf report bytes=2197
+  rung 0 vf=0.600/0.600 acc=1/1 margin=28720.459447/28720.459447
+  rung 1 vf=0.400/0.400 acc=1/1 margin=21305.637827/21305.637827
+
+This is asserted in test_3mf_import section B:
+  CHECK(rstl.report_json == r3mf.report_json, "... BYTE-IDENTICAL report");
+  CHECK(read_file(rstl.mesh_paths[i]) == read_file(r3mf.mesh_paths[i]), "... byte-identical variant meshes");

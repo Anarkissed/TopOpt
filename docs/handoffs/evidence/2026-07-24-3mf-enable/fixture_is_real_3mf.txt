@@ -1,0 +1,17 @@
+$ file core/tests/fixtures/mesh/plate_bore.3mf
+core/tests/fixtures/mesh/plate_bore.3mf: Zip archive data, at least v4.5 to extract, compression method=deflate
+
+$ unzip -l core/tests/fixtures/mesh/plate_bore.3mf   # a real OPC/3MF zip package
+Archive:  core/tests/fixtures/mesh/plate_bore.3mf
+  Length      Date    Time    Name
+---------  ---------- -----   ----
+    29772  00-00-1980 00:00   3D/3dmodel.model
+      587  00-00-1980 00:00   [Content_Types].xml
+      263  00-00-1980 00:00   _rels/.rels
+---------                     -------
+    30622                     3 files
+
+First vertices as stored (6-decimal XML text -> the source of the <=1e-6 mm delta):
+<vertex x="3.000000" y="0" z="0" />
+<vertex x="2.974334" y="0.391578" z="0" />
+<vertex x="12.000000" y="1.579829" z="0" />

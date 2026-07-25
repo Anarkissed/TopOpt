@@ -17,11 +17,14 @@ class ThreeMfError : public std::runtime_error {
 
 // Write `mesh` to a 3MF file via lib3mf (ROADMAP M6.1, primary export format;
 // ARCHITECTURE §4 "3MF primary (lib3mf)"). The mesh becomes a single mesh
-// object referenced by one build item with the identity transform. 3MF stores
-// coordinates as 32-bit floats, so a re-import (read_3mf_file) reproduces the
-// geometry to float precision; vertex order and triangle winding are preserved,
-// so a watertight mesh round-trips watertight. Throws ThreeMfError on any lib3mf
-// failure (e.g. the output path cannot be written).
+// object referenced by one build item with the identity transform. lib3mf
+// serializes vertex coordinates as decimal *text* in the package XML at ~6
+// significant digits (measured, handoff 2026-07-24-3mf-enable), so a re-import
+// (read_3mf_file) reproduces the geometry to that precision — for parts sized in
+// mm this is <=1e-6 mm, a hair coarser than the 32-bit floats 3MF nominally
+// stores, and far below one voxel. Vertex order and triangle winding are
+// preserved, so a watertight mesh round-trips watertight. Throws ThreeMfError on
+// any lib3mf failure (e.g. the output path cannot be written).
 void write_3mf_file(const std::string& path, const TriangleMesh& mesh);
 
 // Read the first mesh object of a 3MF file via lib3mf into a TriangleMesh
