@@ -31,9 +31,11 @@ public struct RunRequest: Equatable, Sendable {
     public let resolution: Int
     /// The project title, used in the completion-notification copy.
     public let projectName: String
-    /// The user's declared load case (empty for a self-weight / STL run): anchor
-    /// B-rep faces + load groups (faces + model-frame force). Consumed only on the
-    /// STEP path (`minimizePlasticLoadCase`).
+    /// The user's declared load case (empty for a self-weight run): anchor faces +
+    /// load groups (faces + model-frame force). Consumed on the load-case path
+    /// (`minimizePlasticLoadCase` / the worker `loads` block) for BOTH a STEP part
+    /// (B-rep face ids) and an STL/3MF part (segmentation pseudo-face ids — the
+    /// face-id contract is shared, handoff 134 + the mesh-optimize work).
     public let anchorFaceIDs: [Int]
     public let loadGroups: [TopOptKit.LoadGroupSpec]
     /// "Minimize plastic": on → the material-reduction ladder; off → one
@@ -49,21 +51,21 @@ public struct RunRequest: Equatable, Sendable {
     public let infillPercent: Int
     /// The M7.dom-app design box (model space, mm) the optimizer may GROW material
     /// into beyond the import, or nil for the default no-box run (byte-identical to
-    /// before). Consumed only on the STEP load-case path. Part of the request
-    /// identity, so editing the box re-enables Optimize.
+    /// before). Consumed on the load-case path for STEP and mesh parts alike. Part of
+    /// the request identity, so editing the box re-enables Optimize.
     public let designBox: TopOptKit.DesignBoxSpec?
     /// The M7.dom-app keep-out boxes (regions the optimizer must leave empty). Only
     /// meaningful alongside a `designBox`.
     public let keepOutBoxes: [TopOptKit.DesignBoxSpec]
     /// The "Keep clear" clearances (handoff 100): swept-cylinder bolt keep-outs for
-    /// anchored bores + bounded-slab face clearances. Consumed only on the STEP
-    /// load-case path. Part of the request identity, so editing a clearance
-    /// re-enables Optimize (it forbids growth, changing the design).
+    /// anchored bores + bounded-slab face clearances. Consumed on the load-case path
+    /// for STEP and mesh parts alike. Part of the request identity, so editing a
+    /// clearance re-enables Optimize (it forbids growth, changing the design).
     public let clearances: [TopOptKit.ClearanceSpec]
-    /// The Face protections (handoff 124): B-rep faces whose OWN material the
-    /// optimizer may not touch — the core freezes each face's part-solid skin
-    /// FrozenSolid to `faceProtectionDepthMM`. Consumed only on the STEP load-case
-    /// path. Part of the request identity, so protecting/un-protecting a face (or
+    /// The Face protections (handoff 124): faces whose OWN material the optimizer may
+    /// not touch — the core freezes each face's part-solid skin FrozenSolid to
+    /// `faceProtectionDepthMM`. Consumed on the load-case path for STEP and mesh parts
+    /// alike. Part of the request identity, so protecting/un-protecting a face (or
     /// editing the global depth) re-enables Optimize (it changes what is preserved).
     public let faceProtections: [Int]
     /// The ONE global preserve-depth (mm) governing every Face protection; <= 0
@@ -76,8 +78,11 @@ public struct RunRequest: Equatable, Sendable {
     /// optimization) and unused by the local bridge path; nil for an ad-hoc run.
     public let projectID: UUID?
 
-    /// STEP parts carry a B-rep face selection, so the run uses the load-case path;
-    /// STL parts have no faces and fall back to the self-weight path.
+    /// True for a STEP/STP part (B-rep source). NOT a proxy for "has a load case":
+    /// an STL/3MF part also carries selectable faces (segmentation pseudo-faces,
+    /// handoff 134) and runs the load-case path when one is declared. Kept only to
+    /// preserve the STEP-always-load-case routing; the mesh path keys off the actual
+    /// presence of anchors/loads instead (see `bridgeRunner`, `buildJobJSON`).
     public var isStepModel: Bool {
         let p = modelPath.lowercased()
         return p.hasSuffix(".step") || p.hasSuffix(".stp")
@@ -746,10 +751,18 @@ public final class RunModel: ObservableObject {
     public static func bridgeRunner(_ request: RunRequest,
                                     _ progress: @escaping (Int, Int, Int) -> Bool,
                                     _ onVariant: @escaping (OptimizeOutcome) -> Void) throws -> OptimizeOutcome {
-        // STEP: optimize under the user's declared load case (anchors/loads →
-        // clamps + tractions), or self-weight when no loads were set. STL: no
-        // faces, so the self-weight ladder (ARCHITECTURE §5) is the only option.
-        if request.isStepModel {
+        // Optimize under the user's declared load case (anchors/loads → clamps +
+        // tractions) whenever the request carries one. This is a STEP part OR an
+        // STL/3MF part with a selected load case: handoff 134 made the bridge's
+        // load-case pipeline OCCT-free and mesh-capable (`import_part_file_resolved`
+        // + tag/mask on pseudo-faces), so a mesh's pseudo-face anchors/loads drive
+        // the SAME builder a STEP part's B-rep faces do. Gating this on `isStepModel`
+        // alone silently dropped a mesh's load case to self-weight (the local twin of
+        // the mesh-job-params job.json bug). A part with NO declared load case (no
+        // anchors, no load groups) still takes the self-weight ladder (§5) — the only
+        // option for a bare STL with no face selection.
+        let hasLoadCase = !request.anchorFaceIDs.isEmpty || !request.loadGroups.isEmpty
+        if request.isStepModel || hasLoadCase {
             return try TopOptKit.minimizePlasticLoadCase(
                 stepPath: request.modelPath, material: request.material,
                 materialsPath: request.materialsPath, rulesPath: request.rulesPath,

@@ -1,0 +1,18 @@
+END-TO-END EQUIVALENCE — l-bracket as STL vs STEP, 96 res, 40% infill, anchors [8,9], -250N on face 2
+
+## console provenance line (the ONLY intended run-output difference):
+model: l-bracket.stl (10 pseudo faces, 2 fixture faces matched)
+model: l-bracket.step (10 B-rep faces, 2 fixture faces matched)
+
+## report.json  — mesh vs step:
+  BYTE-IDENTICAL
+
+## run_info.json — mesh vs step (excluding created_wall_ms timestamp):
+  IDENTICAL (only created_wall_ms differs)
+
+## run_info key fields (both):
+  {'mode': 'minimize_plastic', 'load_source': 'loadcase', 'resolution': 96, 'infill_percent': 40}
+
+## peak memory (no OOM):
+  mesh: 1282033296  peak memory footprint
+  step: 1256900192  peak memory footprint

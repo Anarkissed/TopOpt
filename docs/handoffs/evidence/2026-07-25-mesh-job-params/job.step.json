@@ -1,0 +1,21 @@
+{
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 96,
+  "output": {
+    "report": "report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant",
+    "smooth_factor": 2
+  },
+  "loads": {
+    "minimize_plastic": true,
+    "build_dir": [0, 0, 1],
+    "anchor_face_ids": [8, 9],
+    "groups": [
+      { "face_ids": [2], "force": [0, 0, -250] }
+    ],
+    "infill_percent": 40
+  }
+}
