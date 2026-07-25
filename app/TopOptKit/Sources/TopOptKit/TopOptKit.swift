@@ -642,6 +642,29 @@ public enum TopOptKit {
         return Int(n)
     }
 
+    /// Persist the face-overrides sidecar next to `modelPath` (handoff
+    /// 2026-07-24). `dihedralDeg <= 0` and `coneDeg < 0` mean "leave the core
+    /// default"; `paintFaces` is one triangle-index set per painted pseudo-face.
+    /// An all-default/empty call DELETES the sidecar (a cleared paint state must
+    /// not leave a stale file a re-import would resurrect). After this, every
+    /// import of `modelPath` — the viewer, live tagging, the run — reproduces the
+    /// tuned threshold and the painted faces.
+    public static func writeFaceOverrides(modelPath: String,
+                                          dihedralDeg: Double = 0,
+                                          coneDeg: Double = -1,
+                                          paintFaces: [[Int32]] = []) throws {
+        var input = topoptbridge.FaceOverridesInput()
+        input.dihedral_deg = dihedralDeg
+        input.cone_deg = coneDeg
+        for face in paintFaces {
+            input.paint_sizes.push_back(Int32(face.count))
+            for t in face { input.paint_indices.push_back(t) }
+        }
+        var err = topoptbridge.BridgeError()
+        topoptbridge.write_face_overrides(std.string(modelPath), input, &err)
+        try throwIfFailed(err)
+    }
+
     // Non-capturing C trampolines reaching the boxed Swift closures via ctx.
     private static let progressTrampoline: topoptbridge.ProgressFn = { ctxPtr, rung, count, iter in
         guard let ctxPtr else { return }

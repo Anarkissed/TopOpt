@@ -37,6 +37,7 @@ add_library(topopt
   src/io/segment.cpp
   src/io/part.cpp
   src/io/face_tag.cpp
+  src/io/face_overrides.cpp
   src/io/fields.cpp
   src/mesh/mesh.cpp
   src/voxel/voxelize.cpp
@@ -159,8 +160,17 @@ add_test(NAME stl_import COMMAND test_stl)
 add_executable(test_segment tests/unit/test_segment.cpp)
 target_link_libraries(test_segment PRIVATE topopt)
 target_compile_definitions(test_segment PRIVATE
-  SEGMENT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  SEGMENT_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+  MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
 add_test(NAME mesh_segmentation COMMAND test_segment)
+
+# Face overrides: the paint-mode sidecar + painted pseudo-face primitive
+# (handoff 2026-07-24). Always built (mesh-only: STL import, voxelize, face_tag).
+add_executable(test_face_overrides tests/unit/test_face_overrides.cpp)
+target_link_libraries(test_face_overrides PRIVATE topopt)
+target_compile_definitions(test_face_overrides PRIVATE
+  OVERRIDES_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME face_overrides COMMAND test_face_overrides)
 
 add_executable(test_voxel tests/unit/test_voxel.cpp)
 target_link_libraries(test_voxel PRIVATE topopt)

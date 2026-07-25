@@ -183,6 +183,135 @@ static TriangleMesh make_blob(int stacks, int slices) {
 }
 
 // ---------------------------------------------------------------------------
+// THE FAILURE MESH (handoff 2026-07-24, paint mode). A flat mounting plate with
+// a bolt hole whose rim is ROUNDED — a quarter-round fillet from the flat top
+// face down into the vertical bore, the way a real printed/CAD bracket hole
+// looks. The fillet is what breaks pure dihedral segmentation: over its 90 deg
+// turn, each of `nphi` facet steps is 90/nphi deg, well under the 35 deg
+// threshold, so region growing walks the whole chain top-face -> fillet -> bore
+// as ONE region. A single tap on the hole then also grabs the flat top face a
+// user meant to make the Load. This is the committed, repeatable stand-in for
+// "the shelf bracket that failed": a plate whose hole rim meets the flat face at
+// an overall ~90 deg, but through a fillet rather than a knife edge.
+//
+// Built closed and manifold so it doubles as an import_part / run_job fixture;
+// winding is left to the importer's unify_normals (belt-and-suspenders).
+//
+// An annular disc: outer radius `Rp`, central bore `r`, thickness z0..z1. The
+// flat top is subdivided into `nflat` concentric rings so its INTERIOR triangles
+// are flat in every direction (bordered only by other flat triangles) — that is
+// what a real wide mounting face looks like, and it is what lets the planar-cone
+// guard recognise the flat face and refuse to follow the fillet across the
+// crease. A one-ring-wide flat face (every triangle touching the fillet) is NOT
+// representative and would defeat the guard for the wrong reason.
+static TriangleMesh make_filleted_bore_plate(double Rp, double z0, double z1,
+                                             double r, double fr, int nseg,
+                                             int nphi, int nflat) {
+  TriangleMesh m;
+  const double R_out = r + fr;  // where the flat top ends and the fillet begins
+
+  auto ring_xy = [&](double rad, double z, int base) {
+    for (int i = 0; i < nseg; ++i) {
+      const double a = 2.0 * kPi * i / nseg;
+      m.vertices.push_back(Vec3{rad * std::cos(a), rad * std::sin(a), z});
+    }
+    return base;
+  };
+
+  // Vertex bands, each nseg wide. Top rings run OUTER->inner: Rp .. R_out over
+  // nflat bands, then the fillet ring 0 (== R_out/z1) .. nphi (== r / z1-fr),
+  // then bore-bottom (r/z0) and outer-bottom (Rp/z0).
+  std::vector<int> topRing(nflat + 1);
+  for (int k = 0; k <= nflat; ++k) {
+    const double rad = Rp + (R_out - Rp) * (static_cast<double>(k) / nflat);
+    topRing[k] = static_cast<int>(m.vertices.size());
+    ring_xy(rad, z1, topRing[k]);
+  }
+  std::vector<int> filletRing(nphi + 1);
+  for (int mm = 0; mm <= nphi; ++mm) {
+    const double phi = 0.5 * kPi * mm / nphi;  // 0 at top, 90 deg at bore wall
+    const double rad = R_out - fr * std::sin(phi);
+    const double zz = (z1 - fr) + fr * std::cos(phi);
+    filletRing[mm] = static_cast<int>(m.vertices.size());
+    ring_xy(rad, zz, filletRing[mm]);
+  }
+  const int boreB = static_cast<int>(m.vertices.size());
+  ring_xy(r, z0, boreB);
+  const int outB = static_cast<int>(m.vertices.size());
+  ring_xy(Rp, z0, outB);
+
+  auto A = [&](int base, int i) { return base + (i % nseg); };
+  for (int i = 0; i < nseg; ++i) {
+    for (int k = 0; k < nflat; ++k)  // flat top annulus (nflat concentric bands)
+      add_quad(m, A(topRing[k], i), A(topRing[k], i + 1),
+               A(topRing[k + 1], i + 1), A(topRing[k + 1], i));
+    // fillet ring 0 == topRing[nflat] (both R_out/z1): stitch fillet from there
+    add_quad(m, A(topRing[nflat], i), A(topRing[nflat], i + 1),
+             A(filletRing[1], i + 1), A(filletRing[1], i));
+    for (int mm = 1; mm < nphi; ++mm)  // remaining rounded fillet rings
+      add_quad(m, A(filletRing[mm], i), A(filletRing[mm], i + 1),
+               A(filletRing[mm + 1], i + 1), A(filletRing[mm + 1], i));
+    add_quad(m, A(filletRing[nphi], i), A(boreB, i), A(boreB, i + 1),
+             A(filletRing[nphi], i + 1));                          // bore wall
+    add_quad(m, A(boreB, i), A(boreB, i + 1), A(outB, i + 1), A(outB, i)); // bottom
+    add_quad(m, A(outB, i), A(outB, i + 1), A(topRing[0], i + 1),
+             A(topRing[0], i));                                    // outer wall
+  }
+  return m;
+}
+
+// Pick a representative triangle for the flat TOP (Load) face: outward +z
+// normal, highest, and at large radius so it is unambiguously the flat plateau
+// and not a fillet facet. Returns -1 if none.
+static int top_face_rep(const TriangleMesh& m) {
+  int best = -1;
+  double best_score = -1e30;
+  for (std::size_t t = 0; t < m.triangles.size(); ++t) {
+    const auto& tri = m.triangles[t];
+    const Vec3& a = m.vertices[static_cast<std::size_t>(tri[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(tri[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(tri[2])];
+    Vec3 n{(b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y),
+           (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z),
+           (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)};
+    const double nl = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    if (nl <= 0) continue;
+    const double nz = std::fabs(n.z) / nl;  // |cos| to +z (winding-agnostic)
+    if (nz < 0.98) continue;
+    const double cx = (a.x + b.x + c.x) / 3, cy = (a.y + b.y + c.y) / 3;
+    const double cz = (a.z + b.z + c.z) / 3;
+    const double rad = std::sqrt(cx * cx + cy * cy);
+    const double score = cz * 1000 + rad;  // topmost, then outermost
+    if (score > best_score) { best_score = score; best = static_cast<int>(t); }
+  }
+  return best;
+}
+
+// Pick a representative BORE-WALL triangle: near-radial normal, centroid radius
+// close to `r`, around mid-height. Returns -1 if none.
+static int bore_rep(const TriangleMesh& m, double r) {
+  int best = -1;
+  double best_err = 1e30;
+  for (std::size_t t = 0; t < m.triangles.size(); ++t) {
+    const auto& tri = m.triangles[t];
+    const Vec3& a = m.vertices[static_cast<std::size_t>(tri[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(tri[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(tri[2])];
+    Vec3 n{(b.y - a.y) * (c.z - a.z) - (b.z - a.z) * (c.y - a.y),
+           (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z),
+           (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)};
+    const double nl = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    if (nl <= 0) continue;
+    if (std::fabs(n.z) / nl > 0.2) continue;  // wall normal is ~horizontal
+    const double cx = (a.x + b.x + c.x) / 3, cy = (a.y + b.y + c.y) / 3;
+    const double rad = std::sqrt(cx * cx + cy * cy);
+    const double err = std::fabs(rad - r);
+    if (err < best_err) { best_err = err; best = static_cast<int>(t); }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
 // Renderer: z-buffered flat shading, colour keyed by pseudo-face id, with the
 // region boundaries drawn from the face-id buffer.
 
@@ -410,5 +539,45 @@ int main(int argc, char** argv) {
     std::printf("wrote %s (%d pseudo-faces)\n", ppm.c_str(), s.face_count);
     ++i;
   }
+
+  // -------------------------------------------------------------------------
+  // THE FILLETED-BORE FAILURE + FIX (handoff 2026-07-24). Build the plate, write
+  // it as a committed fixture, and show the leak vanish under the planar cone.
+  std::printf("\n================ FILLETED-BORE FAILURE + FIX ================\n");
+  const double r_bore = 4.0, fillet = 2.0;
+  // Rp=22 disc, 6 mm thick, 4 mm bore, 2 mm rounded rim, 48 facets around, 8
+  // fillet rings (11.25 deg/step, well under 35), flat top 4 rings wide.
+  const TriangleMesh plate =
+      make_filleted_bore_plate(22, 0, 6, r_bore, fillet, 48, 8, 4);
+  // Commit the fixture into the repo (argv[2] = fixtures dir) AND drop a copy in
+  // the evidence outdir. Round-trip through import_part so the committed bytes
+  // are exactly what a downstream test re-reads (welded, unified winding).
+  const std::string fixture = fixtures + "/mesh/filleted_bore_plate.stl";
+  write_stl_file(fixture, plate, StlFormat::Binary);
+  write_stl_file(outdir + "/filleted_bore_plate.stl", plate, StlFormat::Binary);
+  const TriangleMesh mesh = import_part(fixture).model.mesh;  // welded + unified
+  std::printf("wrote %s (%zu triangles, watertight=%d)\n", fixture.c_str(),
+              mesh.triangles.size(),
+              static_cast<int>(check_watertight(mesh).watertight));
+
+  const int top = top_face_rep(mesh);
+  const int bore = bore_rep(mesh, r_bore);
+  auto report = [&](const char* label, const SegmentOptions& o,
+                    const std::string& ppm) {
+    const MeshSegmentation s = segment_mesh_faces(mesh, o);
+    const bool leak = top >= 0 && bore >= 0 &&
+                      s.triangle_face[static_cast<std::size_t>(top)] ==
+                          s.triangle_face[static_cast<std::size_t>(bore)];
+    std::printf("  %-28s regions=%3d  top#%d/bore#%d -> %s\n", label,
+                s.face_count, top, bore,
+                leak ? "SAME REGION (leak: tap on hole grabs Load face)"
+                     : "separate regions (Load face selectable alone)");
+    render(mesh, s.triangle_face, s.face_count, ppm);
+  };
+  SegmentOptions off;
+  off.planar_region_cone_deg = 0.0;  // pure local dihedral = handoff-134 default
+  report("BEFORE (cone off, 35 deg)", off, outdir + "/filleted_bore_before.ppm");
+  SegmentOptions on;  // shipped default (planar cone 40 deg)
+  report("AFTER  (shipped default)", on, outdir + "/filleted_bore_after.ppm");
   return 0;
 }

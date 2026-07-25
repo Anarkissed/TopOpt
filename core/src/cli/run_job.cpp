@@ -17,6 +17,7 @@
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/observability.hpp"
+#include "topopt/face_overrides.hpp"
 #include "topopt/part.hpp"
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
@@ -253,14 +254,22 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   const std::string model_path = join_path(job_dir, job.model);
   const bool model_is_mesh =
       part_format_for_path(job.model) != PartFormat::Step;
-  // import_part_file throws PartError on a read/parse failure, an unavailable
-  // format (STEP without OCCT, 3MF without lib3mf), or a mesh REFUSED by the
-  // Phase-1 inspection (non-manifold, open, non-orientable, zero-thickness). Any
-  // of those is a job-level failure, so surface it as a JobError with the core's
-  // own plain-language reason rather than letting PartError escape run_job's
-  // documented JobError contract.
+  // import_part_file_resolved throws PartError on a read/parse failure, an
+  // unavailable format (STEP without OCCT, 3MF without lib3mf), or a mesh REFUSED
+  // by the Phase-1 inspection (non-manifold, open, non-orientable, zero-thickness).
+  // Any of those is a job-level failure, so surface it as a JobError with the
+  // core's own plain-language reason rather than letting PartError escape
+  // run_job's documented JobError contract.
+  //
+  // `_resolved` (vs the bare `import_part_file`) applies a face-overrides sidecar
+  // sitting next to the model if the app wrote one: the tuned segmentation
+  // threshold and any PAINTED pseudo-faces (handoff 2026-07-24). With no sidecar
+  // it is byte-for-byte the old import, so STEP jobs and un-painted mesh jobs are
+  // unchanged. This is why the run reproduces exactly the faces the user saw and
+  // painted — the load/anchor/clearance/protect face ids below resolve against
+  // the SAME partition.
   try {
-    result.model = import_part_file(model_path);
+    result.model = import_part_file_resolved(model_path);
   } catch (const PartError& e) {
     throw JobError(std::string("cannot import model \"") + job.model +
                    "\": " + e.what());

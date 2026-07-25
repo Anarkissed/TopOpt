@@ -20,6 +20,7 @@
 #include <os/log.h>
 #endif
 
+#include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -430,9 +431,17 @@ ImportedMesh import_step(const std::string& path, double linear_deflection,
 ImportedMesh import_part(const std::string& path, double linear_deflection,
                          BridgeError& err) {
   try {
+    // Resolve the face-overrides sidecar (handoff 2026-07-24): segment at the
+    // user's tuned threshold and append their painted pseudo-faces, so the faces
+    // the app draws and picks are EXACTLY the ones a re-import (live tagging, the
+    // run) will resolve. With no sidecar this is byte-for-byte the plain import.
+    const topopt::FaceOverrides ov =
+        topopt::load_face_overrides(topopt::face_overrides_sidecar_path(path));
     topopt::PartOptions opts;
+    opts.segmentation = topopt::segment_options_from(ov);
     if (linear_deflection > 0.0) opts.tessellation.linear_deflection = linear_deflection;
-    const topopt::PartModel p = topopt::import_part(path, opts);
+    topopt::PartModel p = topopt::import_part(path, opts);
+    topopt::apply_face_overrides(p.model, ov);
     ImportedMesh out = to_imported(p.model.mesh, &p.model.triangle_face,
                                    p.model.face_count, &p.model.faces);
     out.pseudo_faces = p.pseudo_faces;
@@ -479,6 +488,37 @@ PartDiagnostics inspect_part(const std::string& path, BridgeError& err) {
     err.ok = false;
     err.message = e.what();
     return PartDiagnostics{};
+  }
+}
+
+void write_face_overrides(const std::string& model_path,
+                          const FaceOverridesInput& input, BridgeError& err) {
+  try {
+    topopt::FaceOverrides ov;
+    ov.dihedral_threshold_deg = input.dihedral_deg;
+    ov.planar_region_cone_deg = input.cone_deg;
+    // Unflatten paint_indices by paint_sizes into one triangle set per face.
+    std::size_t cursor = 0;
+    for (const int32_t sz : input.paint_sizes) {
+      if (sz <= 0) throw std::invalid_argument("write_face_overrides: bad paint size");
+      std::vector<int> set;
+      set.reserve(static_cast<std::size_t>(sz));
+      for (int32_t k = 0; k < sz; ++k) {
+        if (cursor >= input.paint_indices.size())
+          throw std::invalid_argument(
+              "write_face_overrides: paint_indices shorter than paint_sizes");
+        set.push_back(static_cast<int>(input.paint_indices[cursor++]));
+      }
+      ov.paint_faces.push_back(std::move(set));
+    }
+    const std::string path = topopt::face_overrides_sidecar_path(model_path);
+    if (ov.empty())
+      std::remove(path.c_str());  // cleared paint: don't leave a stale sidecar
+    else
+      topopt::save_face_overrides(path, ov);
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
   }
 }
 
@@ -529,7 +569,7 @@ VoxelSummary voxelize_mesh(const std::string& path, int resolution,
 int64_t tag_step_face(const std::string& step_path, int face_id,
                       bool as_fixture, int resolution, BridgeError& err) {
   try {
-    topopt::StepModel model = topopt::import_part_file(step_path);
+    topopt::StepModel model = topopt::import_part_file_resolved(step_path);
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
     const topopt::VoxelTag tag =
         as_fixture ? topopt::VoxelTag::Fixture : topopt::VoxelTag::Load;
@@ -549,7 +589,7 @@ int64_t mask_step_face(const std::string& step_path, int face_id,
     if (mask_value < 0 || mask_value > 2)
       throw std::invalid_argument(
           "mask_value must be 0 (Active), 1 (FrozenSolid), or 2 (FrozenVoid)");
-    topopt::StepModel model = topopt::import_part_file(step_path);
+    topopt::StepModel model = topopt::import_part_file_resolved(step_path);
     topopt::VoxelGrid g = topopt::voxelize(model.mesh, resolution);
     topopt::DesignMask mask = topopt::make_active_mask(g);
     const auto mv = static_cast<topopt::MaskValue>(mask_value);
@@ -680,7 +720,7 @@ OptimizeResult run_minimize_plastic_loadcase(
                " minimize_plastic=" + std::to_string(load_case.minimize_plastic ? 1 : 0) +
                " design_box=" + std::to_string(load_case.has_design_box ? 1 : 0));
     bridge_log("loadcase: importing part '" + step_path + "'");
-    topopt::StepModel model = topopt::import_part_file(step_path);
+    topopt::StepModel model = topopt::import_part_file_resolved(step_path);
     bridge_log("loadcase: part imported (faces=" +
                std::to_string(model.face_count) +
                "); building shared production setup");
