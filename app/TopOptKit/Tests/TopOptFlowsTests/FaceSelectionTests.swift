@@ -23,6 +23,9 @@ final class FaceSelectionTests: XCTestCase {
     private static var lbracketStep: String {
         repoRoot.appendingPathComponent("core/tests/fixtures/demo/l-bracket.step").path
     }
+    private static var shelfBracketStl: String {
+        repoRoot.appendingPathComponent("core/tests/fixtures/mesh/WallMount_ShelfBracket.stl").path
+    }
 
     // MARK: - FacePicker (id-buffer readback reference)
 
@@ -192,6 +195,50 @@ final class FaceSelectionTests: XCTestCase {
         // plate material, so tapping inside it selects exactly that hole's face loop.
         for h in holes {
             XCTAssertEqual(FaceTopology.loop(fromFace: h, in: mesh), [h])
+        }
+    }
+
+    // MARK: - mesh pseudo-faces must NOT trigger the curved-face loop walk
+    //
+    // Regression for the "one tap selects half the model" over-selection on a clean
+    // STL (handoff 2026-07-25-tap-overselect). The core dihedral segmenter already
+    // partitions a mesh into pseudo-faces — each one IS the intended selection unit,
+    // and region-grow from any single face reaches only ~12–13% of this bracket.
+    // The B-rep loop walk (grow across edge-adjacent CURVED faces, meant to reunite a
+    // hole OCCT split into cylinder+cone) must NOT run on pseudo-faces: on a mesh the
+    // app's own 5° isCurved marks most segmenter regions "curved", so the walk unions
+    // the whole connected curved run — the diagonal strut + load region, "half the
+    // model". A single tap must select exactly the one pseudo-face tapped.
+
+    func testShelfBracketTapSelectsSinglePseudoFace() throws {
+        let imported: ImportedMesh
+        do {
+            imported = try TopOptKit.importMesh(path: Self.shelfBracketStl)
+        } catch {
+            throw XCTSkip("STL import unavailable in this environment: \(error)")
+        }
+        XCTAssertTrue(imported.pseudoFaces, "an STL import is segmented into pseudo-faces")
+        XCTAssertFalse(imported.faceIDs.isEmpty, "the segmenter must tag every triangle")
+        let mesh = ViewerMesh(vertices: imported.vertices, indices: imported.indices,
+                              faceIDs: imported.faceIDs, pseudoFaces: imported.pseudoFaces)
+
+        let triCount = mesh.triangleCount
+        XCTAssertGreaterThan(triCount, 0)
+
+        // Every pseudo-face, tapped, must resolve to a loop of exactly itself — never
+        // a multi-face union, and never a triangle-set larger than that one region.
+        let faces = FaceTopology.faceIDs(in: mesh)
+        XCTAssertGreaterThan(faces.count, 1, "the bracket segments into several pseudo-faces")
+        for f in faces {
+            let loop = FaceTopology.loop(fromFace: f, in: mesh)
+            XCTAssertEqual(loop, [f],
+                "tapping pseudo-face \(f) must select only that face, not a curved-face union")
+            let tris = loop.reduce(0) { $0 + FaceTopology.triangles(ofFace: $1, in: mesh).count }
+            // The tapped region stays a small fraction of the model — nowhere near the
+            // "half the model" the loop walk used to grab. 25% is a generous ceiling
+            // (region-grow reaches ~12–13%); the real point is it is bounded per-face.
+            XCTAssertLessThanOrEqual(Double(tris), 0.25 * Double(triCount),
+                "pseudo-face \(f) covers \(tris)/\(triCount) tris — over-selection")
         }
     }
 }
