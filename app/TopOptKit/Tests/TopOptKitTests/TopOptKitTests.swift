@@ -25,6 +25,13 @@ final class TopOptKitTests: XCTestCase {
     private static var cubeSTL: String { core("tests/fixtures/stl/cube_10mm.stl") }
     private static var brokenSTL: String { core("tests/fixtures/stl/broken_open_cube.stl") }
     private static var lbracketSTEP: String { core("tests/fixtures/demo/l-bracket.step") }
+    // The mesh-repair evidence fixtures (handoff 2026-07-24-mesh-repair): each
+    // one is a deliberately-defective bracket that exercises one branch of the
+    // importer's repair-or-refuse decision through the REAL bridge.
+    private static func repairFixture(_ name: String) -> String {
+        repoRoot.appendingPathComponent(
+            "docs/handoffs/evidence/2026-07-24-mesh-repair/\(name)").path
+    }
 
     // MARK: liveness
 
@@ -89,6 +96,64 @@ final class TopOptKitTests: XCTestCase {
         XCTAssertTrue(d.checked)
         XCTAssertFalse(d.acceptable)
         XCTAssertEqual(d.defects, [.openBoundary])
+        XCTAssertGreaterThan(d.boundaryEdges, 0)
+    }
+
+    // MARK: mesh repair through the real bridge (the app's actual import path)
+
+    // A mesh whose only defect is stacked coincident facets (the #1 cause of a
+    // "N edges shared by 3+" refusal on a CAD-exported STL) must REPAIR and
+    // import, not refuse. This is the exact bridge call `AppModel.pickedFile`
+    // makes, run against the committed fixture and the fresh vendored core.
+    func testDuplicateFacetMeshRepairsAndImports() throws {
+        let path = Self.repairFixture("bracket_duplicate_facets.stl")
+        let d = try TopOptKit.inspectPart(path: path)
+        XCTAssertTrue(d.checked)
+        XCTAssertTrue(d.acceptable, "duplicate facets are unambiguously removable")
+        XCTAssertTrue(d.defects.isEmpty)
+        XCTAssertGreaterThan(d.removedDuplicateTriangles, 0,
+                             "the redundant facets must be reported, not hidden")
+        XCTAssertTrue(d.didRepair)
+        // ...and it actually imports (importMesh throws on refusal).
+        let mesh = try TopOptKit.importMesh(path: path)
+        XCTAssertTrue(mesh.watertight)
+        XCTAssertGreaterThan(mesh.faceCount, 0)
+    }
+
+    // A mesh with a genuinely small hole must be capped and imported, and the
+    // fill must be reported (the user's geometry was changed).
+    func testSmallHoleMeshRepairsAndImports() throws {
+        let path = Self.repairFixture("bracket_small_hole.stl")
+        let d = try TopOptKit.inspectPart(path: path)
+        XCTAssertTrue(d.acceptable, "a small hole is within the conservative fill bound")
+        XCTAssertGreaterThan(d.filledHoles, 0, "the cap must be reported to the app")
+        XCTAssertTrue(d.didRepair)
+        let mesh = try TopOptKit.importMesh(path: path)
+        XCTAssertTrue(mesh.watertight)
+    }
+
+    // The RR2Bracket case: an edge where three or more surfaces genuinely meet,
+    // surviving duplicate removal. This one is CORRECTLY refused, and the reason
+    // must name the real defect — non-manifold edges — not a stale generic note.
+    func testAmbiguousJunctionIsRefusedWithTheRealReason() throws {
+        let path = Self.repairFixture("bracket_ambiguous_junction.stl")
+        let d = try TopOptKit.inspectPart(path: path)
+        XCTAssertFalse(d.acceptable)
+        XCTAssertTrue(d.defects.contains(.nonManifoldEdges),
+                      "the refusal must name the ambiguous junction, not a generic hole")
+        XCTAssertGreaterThan(d.nonManifoldEdges, 0)
+        XCTAssertThrowsError(try TopOptKit.importMesh(path: path)) { err in
+            XCTAssertTrue("\(err)".contains("non-manifold"))
+        }
+    }
+
+    // A wall-sized opening is beyond the safe fill bound: the importer caps what
+    // it safely can and still refuses, naming the open boundary honestly.
+    func testWallSizedHoleIsRefusedAfterSafeCapping() throws {
+        let path = Self.repairFixture("bracket_wall_hole.stl")
+        let d = try TopOptKit.inspectPart(path: path)
+        XCTAssertFalse(d.acceptable)
+        XCTAssertTrue(d.defects.contains(.openBoundary))
         XCTAssertGreaterThan(d.boundaryEdges, 0)
     }
 
