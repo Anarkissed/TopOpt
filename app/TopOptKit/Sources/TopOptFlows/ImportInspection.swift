@@ -9,10 +9,14 @@
 //      `ImportUnitPrompt` builds the question — including the size sanity hint
 //      that usually makes the answer obvious — from the measured bounding box.
 //
-//   2. REFUSAL. Phase 1 imports clean, closed, manifold meshes. Anything else
-//      is refused with a plain-language explanation, never a crash and never a
-//      silent half-import. `ImportRefusal` turns the core's structured
-//      `PartDiagnostics` into that sheet's copy.
+//   2. REFUSAL. The importer first REPAIRS what it safely can (Phase 2: welds,
+//      re-orients, drops duplicate facets, caps small holes) and imports the
+//      result; only a defect with no single safe answer — a large/complex hole,
+//      an ambiguous 3+-surface junction, a non-orientable or zero-thickness
+//      surface — is refused, with a plain-language explanation, never a crash and
+//      never a silent half-import. `ImportRefusal` turns the core's structured
+//      `PartDiagnostics` into that sheet's copy, and `ImportRepairNote` reports
+//      what was changed on the ACCEPTED path (all repairs, Phase 1 AND Phase 2).
 //
 // Both are value types over plain inputs, so the M7 headless test standard
 // applies: they are unit-tested without a GPU, a device or a file picker.
@@ -164,10 +168,13 @@ public struct ImportRefusal: Equatable, Sendable, Identifiable {
                               detail: "It parsed, but contains no triangles.")
             case .openBoundary:
                 return Reason(
-                    headline: "The surface has holes in it.",
+                    headline: "The surface still has holes too big to close safely.",
                     detail: "\(d.boundaryEdges) edge\(d.boundaryEdges == 1 ? "" : "s") "
-                          + "border nothing, so the model isn’t a closed solid. "
-                          + "TopOpt needs a closed shape to know what counts as inside.")
+                          + "still border nothing after small holes were capped, so "
+                          + "the model isn’t a closed solid. TopOpt only fills holes "
+                          + "small enough to close without inventing geometry, and "
+                          + "what remains here is a large or complex opening it won’t "
+                          + "guess at. A closed shape is what tells it inside from out.")
             case .nonManifoldEdges:
                 return Reason(
                     headline: "Some edges have more than two surfaces meeting at them.",
@@ -209,11 +216,16 @@ public struct ImportRefusal: Equatable, Sendable, Identifiable {
     }
 
     /// The scope statement. Stated up front rather than implied, so a refusal
-    /// reads as a known limit and not as a bug.
+    /// reads as a known limit and not as a bug. It must describe what this build
+    /// ACTUALLY does — the importer repairs more than a weld now, and a refusal
+    /// that undersells that reads as a lie the moment the user fixes one hole and
+    /// the same file sails through.
     public var scopeNote: String {
-        "TopOpt currently imports clean, closed meshes. It welds duplicate points "
-      + "and fixes flipped triangles on its own, but it doesn’t repair holes or "
-      + "self-intersections yet."
+        "TopOpt repaired what it safely could — it welds duplicate points, "
+      + "re-orients flipped triangles, drops redundant duplicate facets and caps "
+      + "small holes automatically. It stops at defects with no single safe "
+      + "answer: large or complex holes, edges where three or more surfaces meet, "
+      + "surfaces that can’t be oriented, and self-intersections."
     }
 
     public struct Reason: Equatable, Sendable {
@@ -244,6 +256,14 @@ public enum ImportRepairNote {
         if d.degenerateTriangles > 0 {
             parts.append("dropped \(d.degenerateTriangles) empty triangle"
                        + (d.degenerateTriangles == 1 ? "" : "s"))
+        }
+        if d.removedDuplicateTriangles > 0 {
+            parts.append("removed \(d.removedDuplicateTriangles) duplicate facet"
+                       + (d.removedDuplicateTriangles == 1 ? "" : "s"))
+        }
+        if d.filledHoles > 0 {
+            parts.append("closed \(d.filledHoles) small hole"
+                       + (d.filledHoles == 1 ? "" : "s"))
         }
         guard !parts.isEmpty else { return nil }
         return "Repaired on import: " + parts.joined(separator: ", ") + "."

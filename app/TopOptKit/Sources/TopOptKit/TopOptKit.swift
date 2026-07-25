@@ -106,9 +106,10 @@ public struct ImportedMesh {
 /// never a crash and never a silent half-import.
 public struct PartDiagnostics: Equatable, Sendable {
 
-    /// A structural problem that makes a mesh unusable for Phase 1. Deeper
-    /// repairs (hole filling, self-intersection resolution, shell thickening)
-    /// are explicitly Phase 2 and are not attempted.
+    /// A structural problem that makes a mesh unusable that the importer could
+    /// not safely repair. Small holes ARE capped and duplicate facets ARE
+    /// removed (Phase 2); what remains here is a defect with no single safe fix —
+    /// self-intersection resolution and shell thickening are still not attempted.
     public enum Defect: Int, Equatable, Sendable, CaseIterable {
         case emptyMesh = 0
         case nonManifoldEdges = 1
@@ -127,9 +128,15 @@ public struct PartDiagnostics: Equatable, Sendable {
     public let boundaryEdges: Int
     public let nonManifoldEdges: Int
     public let degenerateTriangles: Int
-    /// Repairs applied automatically (reported, not hidden).
+    /// Repairs applied automatically (reported, not hidden). The Phase-2 repairs
+    /// (duplicate-facet removal and small-hole capping) change the user's
+    /// geometry just as much as a weld, so they are carried through here too —
+    /// a mesh accepted only because a hole was filled must still say so.
     public let weldedVertices: Int
     public let flippedTriangles: Int
+    public let removedDuplicateTriangles: Int
+    public let filledHoles: Int
+    public let filledHoleTriangles: Int
 
     /// Measured in FILE units — an STL carries no unit, so the size hint on the
     /// unit prompt is built from this.
@@ -140,7 +147,9 @@ public struct PartDiagnostics: Equatable, Sendable {
     public init(checked: Bool, acceptable: Bool, defects: [Defect],
                 defectText: [String], boundaryEdges: Int, nonManifoldEdges: Int,
                 degenerateTriangles: Int, weldedVertices: Int,
-                flippedTriangles: Int, volume: Double,
+                flippedTriangles: Int, removedDuplicateTriangles: Int = 0,
+                filledHoles: Int = 0, filledHoleTriangles: Int = 0,
+                volume: Double,
                 bboxMin: SIMD3<Double>, bboxMax: SIMD3<Double>) {
         self.checked = checked
         self.acceptable = acceptable
@@ -151,6 +160,9 @@ public struct PartDiagnostics: Equatable, Sendable {
         self.degenerateTriangles = degenerateTriangles
         self.weldedVertices = weldedVertices
         self.flippedTriangles = flippedTriangles
+        self.removedDuplicateTriangles = removedDuplicateTriangles
+        self.filledHoles = filledHoles
+        self.filledHoleTriangles = filledHoleTriangles
         self.volume = volume
         self.bboxMin = bboxMin
         self.bboxMax = bboxMax
@@ -162,9 +174,13 @@ public struct PartDiagnostics: Equatable, Sendable {
         max(bboxMax.x - bboxMin.x, max(bboxMax.y - bboxMin.y, bboxMax.z - bboxMin.z))
     }
 
-    /// True iff the importer changed the geometry to make it usable.
+    /// True iff the importer changed the geometry to make it usable. Includes
+    /// the Phase-2 repairs: a mesh imported only because a duplicate facet was
+    /// dropped or a small hole was capped was still changed, and saying so is
+    /// the whole point of the repair note.
     public var didRepair: Bool {
         weldedVertices > 0 || flippedTriangles > 0 || degenerateTriangles > 0
+            || removedDuplicateTriangles > 0 || filledHoles > 0
     }
 }
 
@@ -568,6 +584,9 @@ public enum TopOptKit {
             degenerateTriangles: Int(raw.degenerate_triangles),
             weldedVertices: Int(raw.welded_vertices),
             flippedTriangles: Int(raw.flipped_triangles),
+            removedDuplicateTriangles: Int(raw.removed_duplicate_triangles),
+            filledHoles: Int(raw.filled_holes),
+            filledHoleTriangles: Int(raw.filled_hole_triangles),
             volume: raw.volume,
             bboxMin: SIMD3<Double>(raw.bbox_min.0, raw.bbox_min.1, raw.bbox_min.2),
             bboxMax: SIMD3<Double>(raw.bbox_max.0, raw.bbox_max.1, raw.bbox_max.2))
