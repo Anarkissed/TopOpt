@@ -1509,6 +1509,20 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// Paint mode (handoff 2026-07-25): replace the per-triangle face ids the id-pass PICK and the
+    /// highlight TINT read with `perTriangle` (native ids + painted overrides), so a painted region
+    /// behaves as ONE face — the live paint highlight, and picking a painted triangle returns its
+    /// painted id. `perTriangle` must match `mesh.faceIDs` in length; empty / mismatched is ignored
+    /// (native ids stand). Passing the native `mesh.faceIDs` back restores them (paint erased away).
+    func setEffectiveFaceIDs(_ perTriangle: [Int32]) {
+        guard let mesh, !perTriangle.isEmpty, perTriangle.count == mesh.faceIDs.count else { return }
+        flatFaceIDs = perTriangle.flatMap { id -> [UInt32] in
+            let u = UInt32(bitPattern: id); return [u, u, u]
+        }
+        buildIDBuffer()
+        buildTintBuffer(faceTint: lastFaceTint, activeFaces: lastActiveFaces, pulse: currentPulse())
+    }
+
     private func buildTintBuffer(faceTint: [FaceID: SIMD4<Float>], activeFaces: Set<FaceID>,
                                  pulse: (face: FaceID, color: SIMD4<Float>)? = nil) {
         guard vertexDrawCount > 0 else { tintBuffer = nil; return }
@@ -2097,7 +2111,22 @@ struct MeshViewInputs {
     /// snapped to + a monotonic token. The coordinator fires a fresh viewer flash whenever the
     /// token advances (so re-snapping the SAME face re-pulses). nil = no pulse pending.
     var detentPulse: DetentPulse? = nil
+    /// Paint mode (handoff 2026-07-25): when true, a ONE-finger drag paints instead of orbiting
+    /// (two fingers still orbit the camera). Gated so tap-select and orbit are untouched when off.
+    var paintActive: Bool = false
+    /// Paint mode: the per-triangle EFFECTIVE face ids (native ids with painted overrides applied),
+    /// so the id-pass PICK and the highlight TINT treat a painted region as one face — the live
+    /// paint highlight. nil = use the mesh's native ids (no paint).
+    var paintFaceIDs: [Int32]? = nil
+    /// Paint mode: a brush sample at `centerPoint` (view points, top-left, y-down) with its phase.
+    /// The workspace resolves the covered triangles (`BrushHitTest`) and applies the stroke; on
+    /// `.ended` it persists the sidecar. nil disables painting.
+    var onBrush: ((CGPoint, BrushPhase) -> Void)? = nil
 }
+
+/// The phase of a paint brush sample (handoff 2026-07-25): a stroke runs `.began` → `.moved`* →
+/// `.ended`; a single tap in paint mode is a `.began` immediately followed by `.ended`.
+public enum BrushPhase: Sendable { case began, moved, ended }
 
 /// A pending detent face-highlight pulse (item 2): which part face to flash, and a token that
 /// advances on every fresh snap so the coordinator can tell a NEW snap from an unchanged input.
@@ -2128,7 +2157,9 @@ public struct MetalMeshView: UIViewRepresentable {
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
-                detentPulse: DetentPulse? = nil) {
+                detentPulse: DetentPulse? = nil,
+                paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
+                onBrush: ((CGPoint, BrushPhase) -> Void)? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
@@ -2139,7 +2170,8 @@ public struct MetalMeshView: UIViewRepresentable {
             designBox: designBox, keepOutBoxes: keepOutBoxes,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
-            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse)
+            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
+            paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -2153,18 +2185,18 @@ public struct MetalMeshView: UIViewRepresentable {
                                              action: #selector(Coordinator.handlePinch(_:)))
         let tap = UITapGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handleTap(_:)))
-        // Round-6 item 4: two-finger DOUBLE-tap = undo, two-finger TRIPLE-tap = redo. The triple
-        // must win when three taps land, so the double `require(toFail:)` the triple; both need two
-        // touches so neither collides with the one-finger pick tap.
+        // Undo/redo taps (round-6 item 4; redo gesture updated for paint mode, handoff 2026-07-25):
+        // TWO-finger double-tap = undo, THREE-finger double-tap = redo. Distinct touch counts, so
+        // neither can satisfy the other's recognizer — no `require(toFail:)` is needed — and both
+        // need ≥ 2 touches so neither collides with the one-finger pick/paint tap.
         let undoTap = UITapGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handleUndoTap(_:)))
         undoTap.numberOfTouchesRequired = 2
         undoTap.numberOfTapsRequired = 2
         let redoTap = UITapGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handleRedoTap(_:)))
-        redoTap.numberOfTouchesRequired = 2
-        redoTap.numberOfTapsRequired = 3
-        undoTap.require(toFail: redoTap)
+        redoTap.numberOfTouchesRequired = 3
+        redoTap.numberOfTapsRequired = 2
         // Two-finger pan (item 2) and pinch-zoom must coexist on the same two touches, so let the
         // pan + pinch recognizers fire simultaneously (a two-finger drag pans; any pinch delta on
         // the same gesture still zooms). The tap is left exclusive.
@@ -2202,7 +2234,9 @@ public struct MetalMeshView: NSViewRepresentable {
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
-                detentPulse: DetentPulse? = nil) {
+                detentPulse: DetentPulse? = nil,
+                paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
+                onBrush: ((CGPoint, BrushPhase) -> Void)? = nil) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
@@ -2213,7 +2247,8 @@ public struct MetalMeshView: NSViewRepresentable {
             designBox: designBox, keepOutBoxes: keepOutBoxes,
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
-            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse)
+            loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
+            paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -2308,6 +2343,12 @@ extension MetalMeshView {
         private var onProjection: ((CameraProjection) -> Void)?
         private var onUndo: (() -> Void)?
         private var onRedo: (() -> Void)?
+        /// Paint mode (handoff 2026-07-25): when on, a one-finger drag paints; two fingers orbit.
+        private var paintActive = false
+        private var onBrush: ((CGPoint, BrushPhase) -> Void)?
+        /// The effective face ids last uploaded (native + painted overrides), so the id/tint buffers
+        /// rebuild only when the paint overlay actually changes.
+        private var appliedPaintFaceIDs: [Int32]?
 
         /// Upload a new mesh / refresh the highlight / drive the settle / publish the
         /// camera projection — each only when it actually changes.
@@ -2321,6 +2362,8 @@ extension MetalMeshView {
             onProjection = inputs.onProjection
             onUndo = inputs.onUndo
             onRedo = inputs.onRedo
+            paintActive = inputs.paintActive
+            onBrush = inputs.onBrush
 
             var dirty = false
             let sig = inputs.mesh.map(meshSignature)
@@ -2381,6 +2424,18 @@ extension MetalMeshView {
 
             if renderer.showGround != inputs.showGround {
                 renderer.showGround = inputs.showGround
+                dirty = true
+            }
+
+            // Paint mode (handoff 2026-07-25): override the per-triangle face ids the id-pass PICK
+            // and highlight TINT read, so a painted region is one face. A mesh swap rebuilt
+            // `flatFaceIDs` from the NATIVE ids, so re-apply the overlay when the mesh changed too;
+            // clearing to nil restores the native ids (paint erased away). Runs BEFORE the tint
+            // block so the re-tint below reads the updated ids.
+            if dirty || inputs.paintFaceIDs != appliedPaintFaceIDs {
+                appliedPaintFaceIDs = inputs.paintFaceIDs
+                renderer.setEffectiveFaceIDs(inputs.paintFaceIDs ?? inputs.mesh?.faceIDs ?? [])
+                appliedTint = nil          // painted ids changed which triangles a face covers → re-tint
                 dirty = true
             }
 
@@ -2585,7 +2640,7 @@ extension MetalMeshView {
         /// id — id pass first, CPU `FacePicker` as fallback. Reports the hit, or
         /// `onMiss` when the tap hit empty space (M7.6: drop the pending group).
         private func pick(at location: CGPoint, in view: MTKView) {
-            guard faceToolActive, let renderer else { return }
+            guard faceToolActive, !paintActive, let renderer else { return }
             let size = view.bounds.size
             guard size.width > 0, size.height > 0 else { return }
             let normalized = CGPoint(x: location.x / size.width, y: location.y / size.height)
@@ -2601,6 +2656,31 @@ extension MetalMeshView {
         #if os(iOS)
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
+
+            // Paint mode (handoff 2026-07-25): a ONE-finger drag PAINTS (the brush follows the
+            // finger); TWO fingers ORBIT so the camera stays drivable mid-paint. Outside paint mode
+            // the gestures are unchanged (one finger orbits, two fingers pan).
+            if paintActive {
+                if g.numberOfTouches <= 1 {
+                    let loc = g.location(in: view)
+                    switch g.state {
+                    case .began: onBrush?(loc, .began)
+                    case .changed: onBrush?(loc, .moved)
+                    default: onBrush?(loc, .ended)   // ended / cancelled / failed close the stroke
+                    }
+                    return
+                }
+                let t = g.translation(in: view)
+                if let model = cameraModel {
+                    model.orbit(dx: Float(t.x), dy: Float(t.y))
+                } else {
+                    renderer?.camera.orbit(dx: Float(t.x), dy: Float(t.y))
+                    redraw(view); publishProjection(from: view)
+                }
+                g.setTranslation(.zero, in: view)
+                return
+            }
+
             let t = g.translation(in: view)
             // Two fingers → CAD pan; one finger → orbit (item 2). A two-finger drag with little
             // pinch delta reads as a pure pan (the pinch recognizer contributes ~no zoom).
@@ -2634,10 +2714,18 @@ extension MetalMeshView {
 
         @objc func handleTap(_ g: UITapGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
-            pick(at: g.location(in: view), in: view)
+            let loc = g.location(in: view)
+            // Paint mode: a single tap paints a dab (a began→ended stroke at one point). Outside
+            // paint mode a tap picks a face (tap-select is unchanged).
+            if paintActive {
+                onBrush?(loc, .began)
+                onBrush?(loc, .ended)
+                return
+            }
+            pick(at: loc, in: view)
         }
 
-        // Round-6 item 4: two-finger double-tap → undo, two-finger triple-tap → redo.
+        // Undo/redo taps: two-finger double-tap → undo, three-finger double-tap → redo (2026-07-25).
         @objc func handleUndoTap(_ g: UITapGestureRecognizer) {
             guard g.state == .ended else { return }
             onUndo?()
@@ -2720,9 +2808,14 @@ public struct MetalMeshView: View {
                 clearanceVolumes: [ClearanceRenderItem] = [],
                 loadFlowVertices: [Float]? = nil, loadFlowKey: Double = 0,
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
-                detentPulse: DetentPulse? = nil) {}
+                detentPulse: DetentPulse? = nil,
+                paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
+                onBrush: ((CGPoint, BrushPhase) -> Void)? = nil) {}
     public var body: some View { DS.Color.background.color }
 }
+
+/// The paint brush phase — the non-Metal stub mirror so call sites compile on every platform.
+public enum BrushPhase: Sendable { case began, moved, ended }
 
 /// A pending detent face-highlight pulse (item 2) — the non-Metal stub mirror of the MetalKit
 /// declaration so call sites compile on every platform.

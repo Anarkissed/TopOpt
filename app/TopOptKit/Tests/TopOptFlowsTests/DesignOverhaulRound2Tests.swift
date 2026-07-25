@@ -75,11 +75,12 @@ final class DesignOverhaulRound2Tests: XCTestCase {
     func testChipsOrderAscendingByWidth() {
         // handoff 124 added the conditional `.faceProtectDepth` chip; measure it too so
         // this exercises the pure width ramp (its visibility gating is tested elsewhere).
+        // handoff 2026-07-25 added the `.paint` toggle chip; measure it too so the ramp is pure.
         let widths: [SettingsChipID: CGFloat] = [
             .gravity: 140, .minimizePlastic: 175, .quality: 120, .designBox: 200,
-            .faceProtectDepth: 160]
+            .faceProtectDepth: 160, .paint: 190]
         let order = BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths)
-        XCTAssertEqual(order, [.quality, .gravity, .faceProtectDepth, .minimizePlastic, .designBox])
+        XCTAssertEqual(order, [.quality, .gravity, .faceProtectDepth, .minimizePlastic, .paint, .designBox])
     }
 
     /// Equal widths keep their default (declaration) order — a stable tie-break.
@@ -104,7 +105,7 @@ final class DesignOverhaulRound2Tests: XCTestCase {
         // maximally wide). handoff 124's `.faceProtectDepth` is measured here so `.designBox`
         // is the lone unmeasured one and the intent (unmeasured → last) still reads cleanly.
         let widths: [SettingsChipID: CGFloat] = [
-            .quality: 120, .gravity: 130, .minimizePlastic: 150, .faceProtectDepth: 160]
+            .quality: 120, .gravity: 130, .minimizePlastic: 150, .faceProtectDepth: 160, .paint: 170]
         // .designBox unmeasured → last.
         XCTAssertEqual(BottomChipOrder.sorted(SettingsChipID.allCases, widths: widths).last, .designBox)
     }

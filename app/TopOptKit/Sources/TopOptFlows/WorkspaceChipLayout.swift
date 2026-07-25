@@ -27,6 +27,9 @@ public enum SettingsChipID: Int, CaseIterable, Hashable, Sendable {
     /// The ONE global Face-protection depth (handoff 124). Only shown when ≥ 1 face
     /// is protected — the workspace filters it out of the cluster otherwise.
     case faceProtectDepth
+    /// Paint mode toggle (handoff 2026-07-25): brush faces into the active group when
+    /// tap-selection over-selects. Always present in the edit phase.
+    case paint
 }
 
 public enum BottomChipOrder {
