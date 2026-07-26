@@ -272,7 +272,16 @@ struct RunInfo {
   // `active_domain_fraction_mean[i]` is that rung's iteration-mean active
   // fraction (1.0 when off or latched at iteration 1), i.e. the f_bar the
   // realised speedup ~ 0.65 / f_bar is read off.
+  // `active_domain_band_resolved[i]` is the band width rung i ACTUALLY ran with,
+  // the DERIVED k — an OUTCOME, filled post-run like the vectors above. It is the
+  // number the AUTO sentinel (`active_domain_band == -1`) resolves to
+  // (active_domain_auto_band(filter_radius) = ceil(rmin) + 1), so a run armed in
+  // AUTO records BOTH the request (-1) and what k that job derived; 0 on a rung
+  // that ran with the band off. Without it the requested -1 could not be read back
+  // as a concrete width — the same reason 133 had to echo the resolved recycle_dim
+  // beside the requested flag.
   int active_domain_band = 0;
+  std::vector<int> active_domain_band_resolved;
   std::vector<int> active_domain_latched;
   std::vector<int> active_domain_latch_iteration;
   std::vector<long long> active_domain_escape_count;

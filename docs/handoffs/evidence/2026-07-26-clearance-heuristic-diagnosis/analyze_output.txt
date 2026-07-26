@@ -1,0 +1,22 @@
+WallMount_ShelfBracket: 2224 tris, 31 faces, bbox diag 289.62 mm
+bbox = [-99.9 -196.8 0.0] .. [101.3 10.6 20.0]
+
+face   radius r/bbox%   wrap     tris shape      classification
+0      221.58    76.5     53       32 convex     misfit / not-a-hole
+1       16.71     5.8     32       17 convex     misfit / not-a-hole
+3       18.34     6.3     45       28 convex     misfit / not-a-hole
+4        3.00     1.0     13        8 convex     misfit / not-a-hole
+5       23.33     8.1     56       43 concave    misfit / not-a-hole
+9        7.37     2.5     37       15 concave    misfit / not-a-hole
+14       2.00     0.7    353       72 concave    REAL through-hole
+15       4.50     1.6    354       80 concave    REAL through-hole
+16       2.31     0.8     20        8 concave    misfit / not-a-hole
+17     199.25    68.8     31       92 concave    misfit / not-a-hole
+19       4.50     1.6     80       48 concave    misfit / not-a-hole
+20       4.50     1.6    274      160 concave    misfit / not-a-hole
+21      55.79    19.3    198      162 concave    misfit / not-a-hole
+26      57.98    20.0     47       32 concave    misfit / not-a-hole
+28      17.10     5.9     73       36 convex     misfit / not-a-hole
+29       3.00     1.0     13        8 convex     misfit / not-a-hole
+
+GROUND TRUTH: 2 real fastener holes (full 360 wrap, small radius, concave)

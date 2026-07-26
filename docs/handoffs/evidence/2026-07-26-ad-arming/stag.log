@@ -1,0 +1,14 @@
+===== FIXTURE =====
+  part 14x4x14 (528 solid voxels) -> analysis grid 32x24x32 (24576 elements)
+  fill=2.148%  dilution=46.5x  spacing=1.00 mm  min_feature=2.50 mm -> rmin=2.500 voxels  auto band=4
+  ladder: 0.68 0.52 0.38 0.26   matfree threads=6
+
+===== ★ STAGNATION REGIME (fixture) — armed vs unarmed, 20 iters, single rung =====
+  part 1512 solid voxels -> grid 48x32x48 (73728 elements), dilution=48.8x, spacing=1.00 mm, derived k=4
+  [stag/off ] 189.3 s, 36034 CG, 3 Jacobi-fallback solves; band=0 latched=0@0 escapes=0 f_bar=1.0000
+        recycle: 2/3 Jacobi solves applied a basis (rc_frac=0.667), setup_mv=28
+  [stag/auto] 162.2 s, 34670 CG, 3 Jacobi-fallback solves; band=4 latched=1@3 escapes=1378 f_bar=0.9688
+        recycle: 2/3 Jacobi solves applied a basis (rc_frac=0.667), setup_mv=31
+
+  armed vs unarmed at iter 20: mean|drho|=3.1480e-03 max|drho|=7.5605e-02
+  CG iterations OFF 36034 -> AUTO 34670 (0.962x)

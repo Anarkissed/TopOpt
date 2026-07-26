@@ -1,0 +1,15 @@
+== build_core.sh USED to print: xcodebuild test -scheme TopOptKit -destination 'platform=macOS' ==
+== running that exact printed command: ==
+2026-07-26 02:38:39.239 xcodebuild[18278:70284950] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+xcodebuild: error: Scheme TopOptKit is not currently configured for the test action.
+
+== corrected command: xcodebuild test -scheme TopOptKit-Package -destination 'platform=macOS' -> ** TEST SUCCEEDED ** (see paintmode-tests-pass.txt / full-suite.txt) ==
+
+== available schemes (TopOptKit is a library product scheme; TopOptKit-Package carries the test action) ==
+    Schemes:
+        TopOptDesign
+        TopOptFlows
+        TopOptKit
+        TopOptKit-Package
+        TopOptOCCT
+

@@ -1,0 +1,19 @@
+===== FIXTURE =====
+  part 14x4x14 (528 solid voxels) -> analysis grid 32x24x32 (24576 elements)
+  fill=2.148%  dilution=46.5x  spacing=1.00 mm  min_feature=2.50 mm -> rmin=2.500 voxels  auto band=4
+  ladder: 0.68 0.52 0.38 0.26   matfree threads=6
+
+===== A2 — DERIVED BAND k = ceil(rmin)+1 ACROSS RESOLUTIONS =====
+  min_feature = 2.5 mm (production); rmin = physical_filter_radius(2.5, spacing) (1.5-voxel floor)
+  spacing(mm)  rmin(voxels)  derived k   [formula]
+     0.50        5.000          6
+     1.00        2.500          4
+     2.00        1.500          3
+     2.50        1.500          3
+
+  Proven on real runs (band=-1 AUTO, resolved band read back):
+    spacing=0.500 mm  expected k=6  resolved k=6   MATCH
+    spacing=1.000 mm  expected k=4  resolved k=4   MATCH
+    spacing=2.000 mm  expected k=3  resolved k=3   MATCH
+
+  A2 PASS: k derived per job, never the -1 sentinel, never 0, matches ceil(rmin)+1 on every real run
