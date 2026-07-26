@@ -1,0 +1,25 @@
+matfree threads = 10
+
+===== FIXTURE healthy_24576 (250 iterations, rung 0) =====
+  analysis grid 32x24x32 (24576 elements), dilution 46.5x, rmin=2.500, auto band=4
+  running FULL-domain (band=0) reference trajectory ...
+    250 iterations captured, 98.2 s, 8049 CG
+  running PRODUCTION (band=4, escape latch ON) trajectory ...
+    250 iterations captured, 52.9 s, 10428 CG
+
+  --- [FULL] counterfactual escapes (168 growth invariant) ---
+    0 escapes, first at iter 0, worst out-of-band rho 0.000000
+
+  --- [B2/B3] PRODUCTION escape latch (live detection) ---
+    never latched over 250 iterations (escape_count=0) — the band held; run stays byte-identical to 168's armed mask
+
+  --- [B5] damage before detection (drho vs full domain at the latch iteration) ---
+    (no escape latch fired on this fixture — no damage to charge)
+
+  --- [B6] DETECTION COST (the live O(N) scan, 2000 reps) ---
+    detector 3.032e-05 s/iter, solve 3.929e-01 s/iter -> 0.0077% of one solve
+
+  --- FULL-domain escape DISTANCE beyond band edge (shells) ---
+    (no full-domain escapes to bin)
+
+wrote /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-amg-phase-1-measurement-7f3f3b/4e8a2f31-420c-4484-ba6c-d7a2f2d15eb7/scratchpad/prod_healthy250/escape_summary.csv

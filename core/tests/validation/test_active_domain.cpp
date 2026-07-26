@@ -41,6 +41,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 using topopt::DirichletBC;
@@ -496,6 +497,206 @@ int main() {
                   r.active_domain_latch_iteration,
                   r.active_domain_latch_reason.c_str());
     }
+  }
+
+  // =========================================================================
+  // (e) THE ESCAPE LATCH (escape-latch amendment, 2026-07-25). The growth
+  // invariant (c) is EMPIRICAL, not a theorem — handoff 168 §7 measured thousands
+  // of escapes on a stagnating trajectory. The escape latch detects the FIRST
+  // escape on the LIVE restricted path, with no full-domain solve, and reverts to
+  // the full domain for the rest of the run.
+  // =========================================================================
+
+  // (e1) THE DETECTOR is a pure O(N) function of (grid, field, prev_mask): it
+  // counts solid elements above the active threshold that the PREVIOUS band did
+  // not cover. No solve. Constructed by hand so the count is exact.
+  {
+    const Cantilever c = cantilever(12, 4, 8);
+    const std::size_t n = c.grid.voxel_count();
+    // A previous band that covers only the first 4 columns (i < 4).
+    std::vector<char> prev(n, 0);
+    for (int k = 0; k < c.grid.nz; ++k)
+      for (int j = 0; j < c.grid.ny; ++j)
+        for (int i = 0; i < 4; ++i) prev[c.grid.index(i, j, k)] = 1;
+    // A field at the floor everywhere EXCEPT three cells outside that band that
+    // have grown above the threshold — exactly three escapes.
+    std::vector<double> rho(n, params.density_min);
+    rho[c.grid.index(6, 1, 2)] = 0.5;   // outside -> escape
+    rho[c.grid.index(9, 2, 5)] = 0.9;   // outside -> escape
+    rho[c.grid.index(7, 0, 0)] = thresh * 1.01;  // just over -> escape
+    rho[c.grid.index(2, 1, 1)] = 0.8;   // INSIDE prev band -> NOT an escape
+    rho[c.grid.index(6, 3, 6)] = thresh;         // AT threshold, not over -> not counted
+    CHECK(topopt::active_domain_escape_count(c.grid, rho, prev,
+                                             params.density_min) == 3,
+          "escape detector counts exactly the above-threshold cells outside the "
+          "previous band");
+    // An empty prev_mask (the first armed iteration) is defined as zero escapes.
+    CHECK(topopt::active_domain_escape_count(c.grid, rho, std::vector<char>{},
+                                             params.density_min) == 0,
+          "escape detector: an empty prev_mask reports 0 (no band to overrun yet)");
+    // A prev_mask that covers everything can never be escaped.
+    CHECK(topopt::active_domain_escape_count(c.grid, rho,
+                                             std::vector<char>(n, 1),
+                                             params.density_min) == 0,
+          "escape detector: an all-covering prev_mask reports 0 escapes");
+    bool threw = false;
+    try {
+      topopt::active_domain_escape_count(c.grid, rho, std::vector<char>(n + 1, 0),
+                                         params.density_min);
+    } catch (const std::invalid_argument&) { threw = true; }
+    CHECK(threw, "escape detector: a prev_mask size mismatch is REJECTED");
+  }
+
+  // A small fixture whose LIVE restricted path escapes early: material seeded
+  // against the clamp, an UNDERSIZED band (k = 2 < the auto k = 4 the invariant
+  // needs), so the OC step grows the design past the band's margin in one step —
+  // the same failure the stagnating production trajectory hits, made fast and
+  // deterministic. `run` returns the whole outcome for the checks below.
+  auto escaping_run = [&](int band, int max_it) {
+    const Cantilever c = cantilever(32, 8, 12, 10.0, /*load_i=*/6);
+    std::vector<double> seed(c.grid.voxel_count(), 0.0);
+    for (int k = 0; k < c.grid.nz; ++k)
+      for (int j = 0; j < c.grid.ny; ++j)
+        for (int i = 0; i < 3; ++i) seed[c.grid.index(i, j, k)] = 1.0;
+    SimpOptions o;
+    o.volume_fraction = 0.05;
+    o.filter_radius = 2.5;
+    o.move = 0.4;
+    o.max_iterations = max_it;
+    o.change_tol = 0.0;
+    o.solver = SolverKind::MultigridCG_Matfree;  // OC updater (memoryless)
+    o.active_domain_band = band;
+    o.initial_design = seed;
+    return std::make_pair(c, o);
+  };
+
+  // (e2) THE LATCH FIRES ON THE FIRST ESCAPE, records the iteration and the
+  // escape count, and the run COMPLETES on the full domain rather than throwing.
+  int latch_iter = 0;
+  {
+    auto [c, o] = escaping_run(/*band=*/2, /*max_it=*/15);
+    // Per-iteration active fraction, to prove the mask is OFF after the latch.
+    std::vector<double> af_by_iter;
+    o.observe = [&](const topopt::SimpIterationObservation& obs) {
+      af_by_iter.push_back(obs.active_fraction);
+    };
+    bool completed = true;
+    SimpOptimizeResult r;
+    try { r = topopt::simp_optimize(c.grid, params, c.bcs, c.loads, o); }
+    catch (const std::exception& ex) {
+      completed = false;
+      std::fprintf(stderr, "  (escape run propagated: %s)\n", ex.what());
+    }
+    CHECK(completed, "an escaping run COMPLETES — the latch reverts, never throws");
+    CHECK(r.active_domain_latched, "the escape latch fired");
+    CHECK(r.active_domain_latch_iteration >= 2,
+          "the escape latch fires no earlier than iteration 2 (the first "
+          "iteration with a previous band to overrun)");
+    CHECK(r.active_domain_escape_count > 0,
+          "the escape latch records how many elements had grown out-of-band");
+    CHECK(r.active_domain_latch_reason.find("escape detected") != std::string::npos,
+          "the escape latch records WHY it fired");
+    CHECK(std::isfinite(r.compliance) && r.compliance > 0.0,
+          "the escaping run produces a real, full-domain result");
+    latch_iter = r.active_domain_latch_iteration;
+    // The mask is provably OFF from the latch iteration on: active fraction is
+    // exactly 1.0 for every iteration at or after it, and genuinely restricting
+    // (< 1.0) at least once before it.
+    bool off_after = true, restricted_before = false;
+    for (std::size_t i = 0; i < af_by_iter.size(); ++i) {
+      const int iter1 = static_cast<int>(i) + 1;
+      if (iter1 >= latch_iter) { if (af_by_iter[i] != 1.0) off_after = false; }
+      else if (af_by_iter[i] < 1.0) restricted_before = true;
+    }
+    CHECK(restricted_before,
+          "the band genuinely restricted before it latched (< 1.0 active)");
+    CHECK(off_after,
+          "after the escape latch every iteration runs the FULL domain "
+          "(active fraction exactly 1.0)");
+    std::printf("[escape] latched at iteration %d, %lld escapes: %s\n",
+                r.active_domain_latch_iteration, r.active_domain_escape_count,
+                r.active_domain_latch_reason.c_str());
+  }
+
+  // (e3) B4 — POST-LATCH IS THE REAL FULL-DOMAIN PATH, BIT-FOR-BIT. From the
+  // latch iteration onward, the escaping run must be bit-identical to a band == 0
+  // solve handed the SAME design state at that iteration. Constructed exactly:
+  //   * the latched run's state ENTERING the latch iteration is deterministic, so
+  //     re-running the same band for (latch_iter - 1) iterations reproduces it
+  //     (result.design is the RAW design vector);
+  //   * from there a MANUAL full-domain OC loop (simp_compliance with no mask +
+  //     oc_update, the exact primitives simp_optimize's non-projection OC branch
+  //     uses) is "the band == 0 solve handed that state";
+  //   * the penalized MGCG solve is initial-guess-independent to the bit (checked
+  //     in warmcheck), so the latched run's warm-started tail and this cold manual
+  //     tail must coincide EXACTLY. Any difference means the latch left a residue.
+  {
+    auto [cf, of] = escaping_run(/*band=*/2, /*max_it=*/15);
+    // The full escaping run, capturing every iteration's physical density.
+    std::vector<std::vector<double>> fA;
+    of.density_observer = [&](int, const std::vector<double>& d) { fA.push_back(d); };
+    const SimpOptimizeResult rA =
+        topopt::simp_optimize(cf.grid, params, cf.bcs, cf.loads, of);
+    const int Lit = rA.active_domain_latch_iteration;
+    CHECK(Lit >= 2 && Lit < static_cast<int>(fA.size()),
+          "B4 setup: the latch fired mid-run with a tail to compare");
+
+    // The RAW design state entering iteration Lit = the result of running the
+    // SAME band for exactly Lit - 1 iterations (deterministic prefix).
+    auto [cp, op] = escaping_run(/*band=*/2, /*max_it=*/Lit - 1);
+    const SimpOptimizeResult rPre =
+        topopt::simp_optimize(cp.grid, params, cp.bcs, cp.loads, op);
+    std::vector<double> x = rPre.design;  // raw design entering iteration Lit
+
+    // The manual FULL-DOMAIN OC continuation from that exact state.
+    const topopt::DensityFilter filter =
+        topopt::make_density_filter(cf.grid, of.filter_radius);
+    bool tail_identical = true;
+    long long compared = 0;
+    for (int it = Lit; it <= static_cast<int>(of.max_iterations); ++it) {
+      const std::vector<double> xphys = filter.filter_density(x);
+      const topopt::SimpCompliance c = topopt::simp_compliance(
+          cf.grid, params, xphys, cf.bcs, cf.loads, of.cg_tolerance,
+          of.cg_max_iterations, nullptr, nullptr, SolverKind::MultigridCG_Matfree);
+      x = topopt::oc_update(cf.grid, filter, x, c.dcompliance, of.volume_fraction,
+                            of.move, params.density_min);
+      const std::vector<double> fM = filter.filter_density(x);
+      // fA is 0-indexed by iteration: fA[it-1] is iteration `it`'s physical field.
+      const std::vector<double>& fAit = fA[static_cast<std::size_t>(it) - 1];
+      if (fM.size() != fAit.size()) { tail_identical = false; break; }
+      for (std::size_t e = 0; e < fM.size(); ++e)
+        if (fM[e] != fAit[e]) { tail_identical = false; break; }
+      ++compared;
+    }
+    CHECK(tail_identical,
+          "B4: from the latch iteration on, the run is BIT-IDENTICAL to a "
+          "full-domain OC continuation from the same state");
+    std::printf("[B4] latch at %d; %lld post-latch iterations bit-identical to "
+                "the full-domain path\n", Lit, compared);
+  }
+
+  // (e4) THE COUNT IS HONEST ABOUT NON-ESCAPE OUTCOMES. A run that never latches
+  // reports 0 escapes; the degeneracy latch (band covers the domain) also reports
+  // 0 escapes — the count flags the ESCAPE latch specifically. The dilute-band
+  // and all-covering-band runs above are re-used in spirit here with a fresh,
+  // correctly-sized band that does NOT escape.
+  {
+    // The SAME escaping fixture but with the CORRECTLY sized auto band (k = 4):
+    // the growth margin now contains the step, so it does not escape.
+    auto [c, o] = escaping_run(/*band=*/-1, /*max_it=*/15);  // AUTO -> 4
+    const SimpOptimizeResult r =
+        topopt::simp_optimize(c.grid, params, c.bcs, c.loads, o);
+    CHECK(r.active_domain_band == 4, "AUTO sized the band to k = 4 here");
+    CHECK(r.active_domain_escape_count == 0,
+          "a correctly-sized band does not escape: the count stays 0");
+    // Whether it latches for DEGENERACY depends on the fixture; either way an
+    // escape count of 0 means the escape latch did not fire.
+    if (r.active_domain_latched)
+      CHECK(r.active_domain_latch_reason.find("escape") == std::string::npos,
+            "a non-escape latch is not misreported as an escape");
+    std::printf("[correct band k=4] latched=%d escapes=%lld active_mean=%.4f\n",
+                r.active_domain_latched, r.active_domain_escape_count,
+                r.active_fraction_mean);
   }
 
   if (g_failures == 0) {

@@ -1,0 +1,28 @@
+matfree threads = 10
+
+===== FIXTURE stagnation (30 iterations, rung 0) =====
+  analysis grid 40x32x40 (46400 elements), dilution 51.6x, rmin=2.500, auto band=4
+  running FULL-domain (band=0) trajectory ...
+    30 iterations captured, 115.9 s, 20480 CG
+  running RESTRICTED (band=4, the LIVE path) trajectory ...
+    30 iterations captured, 87.2 s, 38573 CG
+
+  --- ESCAPES (168 growth-invariant definition, band=4) ---
+  [FULL   ] counterfactual : 6979 escapes, first at iter 2, worst out-of-band rho 0.172965
+  [RESTRICT] LIVE path      : 8114 escapes, first at iter 2, worst out-of-band rho 0.127123
+  >>> A live detector can only ever see the [RESTRICT] row.
+
+  --- FULL-domain escape DISTANCE beyond band edge (shells) ---
+    shell  1  : 4096 (58.7%)
+    shell  2  : 1913 (27.4%)
+    shell  3  : 745 (10.7%)
+    shell  4  : 205 (2.9%)
+    shell  5  : 20 (0.3%)
+    first shell (a boundary-shell detector's reach): 4096 / 6979 = 58.7%; BEYOND it: 41.3%
+
+  --- DETECTOR COST (a cadence-1 full audit = one FULL solve/iter) ---
+    restricted solve : 2.908 s/iter, 1285.8 CG/iter (the feature)
+    full solve       : 3.864 s/iter, 682.7 CG/iter (the detector)
+    feature+detector : 6.772 s/iter (= restricted + full), vs 3.864 s/iter for NO feature -> 1.75x SLOWER
+
+wrote /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-amg-phase-1-measurement-7f3f3b/4e8a2f31-420c-4484-ba6c-d7a2f2d15eb7/scratchpad/stag/escape_summary.csv

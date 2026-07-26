@@ -387,6 +387,20 @@ std::string run_info_json(const RunInfo& info) {
     }
     al += "]";
     num("active_domain_latched", al);
+    std::string li = "[";
+    for (std::size_t i = 0; i < info.active_domain_latch_iteration.size(); ++i) {
+      if (i) li += ", ";
+      li += fmt_i(info.active_domain_latch_iteration[i]);
+    }
+    li += "]";
+    num("active_domain_latch_iteration", li);
+    std::string ec = "[";
+    for (std::size_t i = 0; i < info.active_domain_escape_count.size(); ++i) {
+      if (i) ec += ", ";
+      ec += std::to_string(info.active_domain_escape_count[i]);
+    }
+    ec += "]";
+    num("active_domain_escape_count", ec);
     std::string ar = "[";
     for (std::size_t i = 0; i < info.active_domain_latch_reason.size(); ++i) {
       if (i) ar += ", ";

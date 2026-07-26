@@ -301,6 +301,31 @@ std::vector<char> active_domain_mask(const VoxelGrid& grid,
   return m;
 }
 
+long long active_domain_escape_count(const VoxelGrid& grid,
+                                     const std::vector<double>& density,
+                                     const std::vector<char>& prev_mask,
+                                     double density_min) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "active_domain_escape_count: density vector size != voxel_count");
+  // The first armed iteration has no previous band to overrun; nothing to count.
+  if (prev_mask.empty()) return 0;
+  if (prev_mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "active_domain_escape_count: prev_mask size != voxel_count");
+  // An escape is a SOLID element the PREVIOUS band did not cover (prev_mask == 0)
+  // whose physical density has risen above the mask's own core threshold — the
+  // exact complement of active_domain_mask's core rule, on the field the previous
+  // step produced. No solve, no floating-point reduction: a fixed O(N) scan.
+  const double thresh = 1.5 * density_min;
+  long long escapes = 0;
+  for (std::size_t e = 0; e < density.size(); ++e)
+    if (grid.tags[e] != VoxelTag::Empty && prev_mask[e] == 0 &&
+        density[e] > thresh)
+      ++escapes;
+  return escapes;
+}
+
 SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<double>& density,
                                const std::vector<DirichletBC>& bcs,
@@ -1316,10 +1341,12 @@ struct ActiveDomainRun {
   int band = 0;  // resolved width (0 = feature off for this run)
   bool latched = false;
   int latch_iteration = 0;
+  long long escape_count = 0;   // escapes seen at the moment the ESCAPE latch fired
   std::string latch_reason;
   int hot_streak = 0;      // consecutive iterations at/above the latch fraction
   double fraction_sum = 0.0;
   long long fraction_count = 0;
+  std::vector<char> prev_mask;  // the band the previous armed iteration solved under
 
   bool armed() const { return band > 0 && !latched; }
 
@@ -1373,6 +1400,34 @@ SimpCompliance active_domain_solve(ActiveDomainRun& ad, const VoxelGrid& grid,
                            cg_max_iterations, guess, solver, kind);
   }
 
+  // ESCAPE LATCH (escape-latch amendment, 2026-07-25). Before restricting this
+  // solve, check whether the PREVIOUS iteration's step raised material outside
+  // the band it solved under — the growth invariant failing on the LIVE path.
+  // This reads only the field the optimizer already produced and the stored
+  // prev_mask: no full-domain solve. On the FIRST escape the mask is disabled for
+  // the rest of the run (one-way; ad.armed() is false hereafter), this iteration
+  // falls through to the full domain, and the count is recorded as the damage
+  // that had already grown out-of-band when it tripped. The growth invariant
+  // holds on healthy runs (168: 0 escapes over 250 steps), so this never fires
+  // there and the run stays byte-identical to the un-amended armed mask.
+  const long long escapes =
+      active_domain_escape_count(grid, xphys, ad.prev_mask, params.density_min);
+  if (escapes > 0) {
+    ad.latched = true;
+    ad.latch_iteration = iteration;
+    ad.escape_count = escapes;
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+                  "escape detected: %lld element(s) took material outside the "
+                  "active band (growth invariant failed); mask disabled, full "
+                  "domain restored",
+                  escapes);
+    ad.latch_reason = buf;
+    ad.record(1.0);
+    return simp_compliance(grid, params, xphys, bcs, loads, tolerance,
+                           cg_max_iterations, guess, solver, kind);
+  }
+
   const std::vector<char> mask =
       active_domain_mask(grid, xphys, params.density_min, ad.band);
   const double solid = static_cast<double>(grid.solid_count());
@@ -1404,6 +1459,10 @@ SimpCompliance active_domain_solve(ActiveDomainRun& ad, const VoxelGrid& grid,
     } else {
       ad.hot_streak = 0;
     }
+    // Remember this iteration's band so the NEXT iteration's escape check can see
+    // what the current step is allowed to grow into. Only updated on a successful
+    // restricted solve; a throw latches below and prev_mask is never read again.
+    ad.prev_mask = mask;
     return c;
   } catch (const std::exception& ex) {
     ad.latched = true;
@@ -1421,6 +1480,7 @@ void finalize_active_domain(const ActiveDomainRun& ad, SimpOptimizeResult& r) {
   r.active_domain_band = ad.band;
   r.active_domain_latched = ad.latched;
   r.active_domain_latch_iteration = ad.latch_iteration;
+  r.active_domain_escape_count = ad.escape_count;
   r.active_domain_latch_reason = ad.latch_reason;
   r.active_fraction_mean = ad.mean_fraction();
 }

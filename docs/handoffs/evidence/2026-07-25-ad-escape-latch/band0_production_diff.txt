@@ -1,0 +1,36 @@
+=== B1: band==0 byte-identity to origin/main ===
+
+The escape latch is reached ONLY on the armed path (band>0 && !latched).
+active_domain_solve's band==0 early return is UNCHANGED: it does not appear
+in the diff below, and the new escape block is added strictly AFTER it.
+
+--- the ADDED escape block in active_domain_solve (all '+' lines) ---
++long long active_domain_escape_count(const VoxelGrid& grid,
++                                     const std::vector<char>& prev_mask,
++        "active_domain_escape_count: density vector size != voxel_count");
++  // The first armed iteration has no previous band to overrun; nothing to count.
++  if (prev_mask.empty()) return 0;
++  if (prev_mask.size() != grid.voxel_count())
++        "active_domain_escape_count: prev_mask size != voxel_count");
++  // An escape is a SOLID element the PREVIOUS band did not cover (prev_mask == 0)
++  long long escapes = 0;
++    if (grid.tags[e] != VoxelTag::Empty && prev_mask[e] == 0 &&
++      ++escapes;
++  return escapes;
+
+--- production deletions vs origin/main (should be comment context only) ---
+-  // its whole length under the band. `active_domain_fraction_mean[i]` is that
+-  // rung's iteration-mean active fraction (1.0 when off or latched at iteration
+-  // 1), i.e. the f_bar the realised speedup ~ 0.65 / f_bar is read off.
+
+--- production diff stat vs origin/main ---
+ core/include/topopt/observability.hpp | 15 +++++++--
+ core/include/topopt/simp.hpp          | 33 +++++++++++++++++++
+ core/src/cli/run_job.cpp              |  4 +++
+ core/src/simp/observability.cpp       | 14 ++++++++
+ core/src/simp/simp.cpp                | 60 +++++++++++++++++++++++++++++++++++
+ 5 files changed, 123 insertions(+), 3 deletions(-)
+
+Pinned additionally by test_active_domain seam (a): band==0 and an
+all-covering band give a BIT-IDENTICAL design, physical density, compliance
+and iteration count (see ctest_full.log, test 'active_domain').

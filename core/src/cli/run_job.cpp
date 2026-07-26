@@ -525,6 +525,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
       run_info.active_domain_latched.push_back(
           v.optimization.active_domain_latched ? 1 : 0);
+      run_info.active_domain_latch_iteration.push_back(
+          v.optimization.active_domain_latch_iteration);
+      run_info.active_domain_escape_count.push_back(
+          v.optimization.active_domain_escape_count);
       run_info.active_domain_latch_reason.push_back(
           v.optimization.active_domain_latch_reason);
       run_info.active_domain_fraction_mean.push_back(

@@ -262,11 +262,20 @@ struct RunInfo {
   // switched the mask off part-way (the band covered the domain, or a restricted
   // solve failed and the rung fell back to the full domain), and
   // `active_domain_latch_reason[i]` says which — empty string when that rung ran
-  // its whole length under the band. `active_domain_fraction_mean[i]` is that
-  // rung's iteration-mean active fraction (1.0 when off or latched at iteration
-  // 1), i.e. the f_bar the realised speedup ~ 0.65 / f_bar is read off.
+  // its whole length under the band. `active_domain_latch_iteration[i]` is the
+  // 1-based iteration rung i latched at (0 when it never did), and
+  // `active_domain_escape_count[i]` is the number of elements that had grown
+  // outside the band when the ESCAPE latch tripped (escape-latch amendment;
+  // 0 when rung i never latched or latched for a non-escape reason) — the two
+  // fields the escape latch adds so a run that suppressed material the optimizer
+  // wanted SAYS how much, and when, rather than silently diverging.
+  // `active_domain_fraction_mean[i]` is that rung's iteration-mean active
+  // fraction (1.0 when off or latched at iteration 1), i.e. the f_bar the
+  // realised speedup ~ 0.65 / f_bar is read off.
   int active_domain_band = 0;
   std::vector<int> active_domain_latched;
+  std::vector<int> active_domain_latch_iteration;
+  std::vector<long long> active_domain_escape_count;
   std::vector<std::string> active_domain_latch_reason;
   std::vector<double> active_domain_fraction_mean;
   double min_feature_mm = 0.0;

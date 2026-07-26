@@ -761,8 +761,12 @@ if(Eigen3_FOUND)
   # trajectory at the production band k = 4 (zero escapes); and the latch fires,
   # is recorded, and a restricted solve that FAILS falls back to the full domain
   # instead of propagating. Also pins the auto sizing rule's exact values and the
-  # refusal to arm on a non-matrix-free solver. Drives simp_optimize +
-  # simp_compliance, so Eigen-gated like the other optimizer tests.
+  # refusal to arm on a non-matrix-free solver. The escape-latch amendment
+  # (2026-07-25) adds seam (e): the pure escape detector's count, the escape latch
+  # firing on the FIRST live escape (recording iteration + count), post-latch
+  # bit-identity to the full-domain path (B4), and a correctly-sized band staying
+  # escape-free. Drives simp_optimize + simp_compliance, so Eigen-gated like the
+  # other optimizer tests.
   add_executable(test_active_domain tests/validation/test_active_domain.cpp)
   target_link_libraries(test_active_domain PRIVATE topopt)
   add_test(NAME active_domain COMMAND test_active_domain)

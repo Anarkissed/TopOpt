@@ -1,0 +1,23 @@
+matfree threads = 10
+
+===== FIXTURE healthy_24576 (60 iterations, rung 0) =====
+  analysis grid 32x24x32 (24576 elements), dilution 46.5x, rmin=2.500, auto band=4
+  running FULL-domain (band=0) trajectory ...
+    60 iterations captured, 23.4 s, 1958 CG
+  running RESTRICTED (band=4, the LIVE path) trajectory ...
+    60 iterations captured, 12.5 s, 2490 CG
+
+  --- ESCAPES (168 growth-invariant definition, band=4) ---
+  [FULL   ] counterfactual : 0 escapes, first at iter 0, worst out-of-band rho 0.000000
+  [RESTRICT] LIVE path      : 0 escapes, first at iter 0, worst out-of-band rho 0.000000
+  >>> A live detector can only ever see the [RESTRICT] row.
+
+  --- FULL-domain escape DISTANCE beyond band edge (shells) ---
+    (no full-domain escapes to bin)
+
+  --- DETECTOR COST (a cadence-1 full audit = one FULL solve/iter) ---
+    restricted solve : 0.208 s/iter, 41.5 CG/iter (the feature)
+    full solve       : 0.390 s/iter, 32.6 CG/iter (the detector)
+    feature+detector : 0.599 s/iter (= restricted + full), vs 0.390 s/iter for NO feature -> 1.53x SLOWER
+
+wrote /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-amg-phase-1-measurement-7f3f3b/4e8a2f31-420c-4484-ba6c-d7a2f2d15eb7/scratchpad/healthy/escape_summary.csv
