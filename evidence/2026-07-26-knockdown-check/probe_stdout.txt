@@ -1,0 +1,101 @@
+KNOCKDOWN PROBE — real printed part (walls+core) vs f^1.5 gate
+  E_solid=3500 MPa  nu=0.33  strain=1e-03  cell L=5.0 mm
+
+===== SELF-CHECK (K1): solid block must recover E_solid =====
+  axis 0: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+  axis 1: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+  axis 2: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+
+===== CORE RESOLUTION / SIZE CHECK — bare gyroid, infill=0.30 =====
+  184 anchors: single-cell vpc32 ~0.082, K=5 bulk ~0.091 (E/Es)
+  K    vpc   N        vf       E_core/Es  cg      mg   
+  [writing /tmp/kd_evidence/A0_core_resolution.csv]
+  1    16    16       0.258    0.06713    715     N    
+  1    24    24       0.294    0.07575    697     N    
+  1    32    32       0.306    0.08163    918     N    
+  2    16    32       0.258    0.08236    1206    N    
+  2    24    48       0.294    0.09036    1104    N    
+  2    32    64       0.306    0.09867    1429    N    
+  3    16    48       0.258    0.08729    1683    N    
+
+===== A: CORE LAW — bare gyroid, K=2 cells, vpc=16 (h=0.312 mm) =====
+  bar: f^1.5 is the gate's law; SIGN = conservative if measured>=assumed
+  f      vf       E_core/Es  f^1.5      gap%%     sign     fit_p 
+  [writing /tmp/kd_evidence/A_core_law.csv]
+  0.15   0.188    0.04595    0.05809    +26.4     NON-CONS 1.62  
+  0.20   0.188    0.04595    0.08944    +94.6     NON-CONS 1.91  
+  0.25   0.234    0.07181    0.12500    +74.1     NON-CONS 1.90  
+  0.30   0.258    0.08236    0.16432    +99.5     NON-CONS 2.07  
+  0.40   0.406    0.15437    0.25298    +63.9     NON-CONS 2.04  
+  0.50   0.500    0.22100    0.35355    +60.0     NON-CONS 2.18  
+  0.60   0.617    0.32455    0.46476    +43.2     NON-CONS 2.20  
+
+===== B: COMPOSITE — wall+core specimens, DIRECT resolution, vpc=16 (h=0.312 mm) =====
+  walls=loops*0.45mm, caps=5*0.20mm; load axis z; side walls are full-height parallel columns
+  Voigt: E/Es = phi_wall + (1-phi_wall)*E_core/Es, E_core from the MATCHED bare-core solve (same K,vpc)
+  modelΔ = Voigt vs measured (validates composition); asm/meas = f^1.5 / E_meas is the GATE error, with SIGN
+  K   W_mm  loops  infill  phi_wall E_core/Es E_meas/Es E_Voigt   modelD%  f^1.5    asm/meas sign  
+  [writing /tmp/kd_evidence/B_composite.csv]
+  2   10    0      0.15    0.0000   0.06220   0.06220   0.06220   +0.0     0.05809  0.934    CONS
+  2   10    5      0.15    0.6836   0.06220   0.71821   0.70328   -2.1     0.05809  0.081    CONS
+  2   10    0      0.30    0.0000   0.10849   0.10849   0.10849   +0.0     0.16432  1.515    NON-CONS
+  2   10    5      0.30    0.6836   0.10849   0.73210   0.71792   -1.9     0.16432  0.224    CONS
+  2   10    0      0.60    0.0000   0.37160   0.37160   0.37160   +0.0     0.46476  1.251    NON-CONS
+  2   10    5      0.60    0.6836   0.37160   0.82249   0.80117   -2.6     0.46476  0.565    CONS
+  3   15    0      0.15    0.0000   0.06013   0.06013   0.06013   +0.0     0.05809  0.966    CONS
+  3   15    5      0.15    0.4983   0.06013   0.54112   0.52843   -2.3     0.05809  0.107    CONS
+  3   15    0      0.30    0.0000   0.10465   0.10465   0.10465   +0.0     0.16432  1.570    NON-CONS
+  3   15    5      0.30    0.4983   0.10465   0.56332   0.55077   -2.2     0.16432  0.292    CONS
+  3   15    0      0.60    0.0000   0.36370   0.36370   0.36370   +0.0     0.46476  1.278    NON-CONS
+  3   15    5      0.60    0.4983   0.36370   0.70154   0.68075   -3.0     0.46476  0.662    CONS
+
+===== C: SIZE / CROSSOVER (K4) — validated Voigt extrapolation =====
+  E_part/Es(W) = phi_wall(W) + (1-phi_wall)*E_core/Es ; phi_wall = 4 t(W-t)/W^2
+  crossover W* = part width where E_part/Es == f^1.5 (below: CONS, above: NON-CONS)
+  [writing /tmp/kd_evidence/C_size_crossover.csv]
+
+  --- 3 wall loops (t_wall=1.35 mm) ---
+  infill E_core/Es   W=10     W=20     W=40     W=60     W=80     W=100    W=150    W=200     f^1.5     W*_mm
+  0.15   0.04595     0.4916   0.2862   0.1704   0.1299   0.1093   0.0968   0.0800   0.0715    0.05809   423
+  0.20   0.04595     0.4916   0.2862   0.1704   0.1299   0.1093   0.0968   0.0800   0.0715    0.08944   117
+  0.25   0.07181     0.5054   0.3055   0.1929   0.1535   0.1334   0.1213   0.1049   0.0967    0.12500   93
+  0.30   0.08236     0.5110   0.3134   0.2021   0.1631   0.1433   0.1312   0.1151   0.1070    0.16432   59
+  0.40   0.15437     0.5494   0.3673   0.2647   0.2288   0.2105   0.1994   0.1845   0.1770    0.25298   45
+  0.50   0.22100     0.5849   0.4171   0.3226   0.2895   0.2727   0.2625   0.2488   0.2419    0.35355   30
+  0.60   0.32455     0.6401   0.4946   0.4127   0.3840   0.3694   0.3605   0.3487   0.3427    0.46476   25
+
+  --- 5 wall loops (t_wall=2.25 mm) ---
+  infill E_core/Es   W=10     W=20     W=40     W=60     W=80     W=100    W=150    W=200     f^1.5     W*_mm
+  0.15   0.04595     0.7114   0.4270   0.2485   0.1837   0.1503   0.1299   0.1023   0.0884    0.05809   705
+  0.20   0.04595     0.7114   0.4270   0.2485   0.1837   0.1503   0.1299   0.1023   0.0884    0.08944   195
+  0.25   0.07181     0.7192   0.4425   0.2689   0.2058   0.1733   0.1535   0.1267   0.1131    0.12500   155
+  0.30   0.08236     0.7224   0.4488   0.2772   0.2148   0.1827   0.1631   0.1366   0.1232    0.16432   98
+  0.40   0.15437     0.7442   0.4921   0.3339   0.2765   0.2468   0.2288   0.2043   0.1920    0.25298   75
+  0.50   0.22100     0.7644   0.5321   0.3864   0.3335   0.3062   0.2895   0.2670   0.2557    0.35355   51
+  0.60   0.32455     0.7957   0.5943   0.4680   0.4221   0.3984   0.3840   0.3645   0.3546    0.46476   41
+
+===== D: GATE MARGIN (K3) — true margin for a part certified at 1.5 =====
+  true_margin = 1.5 * (E_part/Es) / f^1.5, at the LARGE-part limit (200 mm) where shells are thinnest
+  [writing /tmp/kd_evidence/D_gate_margin.csv]
+
+  --- 3 wall loops (t_wall=1.35 mm) ---
+  infill   margin@W=40     margin@W=100    margin@W=200 
+  0.15     4.400           2.499           1.847        
+  0.20     2.858           1.623           1.200        
+  0.25     2.315           1.455           1.160        
+  0.30     1.845           1.198           0.976        
+  0.40     1.569           1.182           1.050        
+  0.50     1.369           1.114           1.026        
+  0.60     1.332           1.164           1.106        
+
+  --- 5 wall loops (t_wall=2.25 mm) ---
+  infill   margin@W=40     margin@W=100    margin@W=200 
+  0.15     6.417           3.354           2.283        
+  0.20     4.168           2.178           1.483        
+  0.25     3.227           1.842           1.357        
+  0.30     2.531           1.489           1.125        
+  0.40     1.980           1.356           1.138        
+  0.50     1.639           1.228           1.085        
+  0.60     1.510           1.239           1.144        
+
+DONE.
