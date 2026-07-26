@@ -464,20 +464,75 @@ JobDescription parse_job(const std::string& json_text) {
       for (const JsonValue& cv : cs->arr) {
         require_object(cv, "a clearance");
         reject_unknown_keys(cv,
-                            {"face_id", "kind", "concentric_margin_mm",
-                             "axial_clearance_mm", "slab_depth_mm"},
+                            {"face_id", "geometry", "kind",
+                             "concentric_margin_mm", "axial_clearance_mm",
+                             "slab_depth_mm"},
                             "a clearance");
         JobClearance cl;
-        const double fid = require_number(
-            require_key(cv, "face_id", "a clearance"), "clearance face_id");
-        if (fid < 0.0 || fid != std::floor(fid))
-          schema_fail("a clearance \"face_id\" must be a non-negative integer");
-        cl.face_id = static_cast<int>(fid);
         cl.kind = require_nonempty_string(
             require_key(cv, "kind", "a clearance"), "clearance kind");
         if (cl.kind != "bolt" && cl.kind != "face")
           schema_fail("a clearance \"kind\" must be \"bolt\" or \"face\" (got \"" +
                       cl.kind + "\")");
+        // A clearance is EITHER an auto face (a "face_id") OR a manual primitive
+        // (a "geometry" object) — exactly one (handoff group-editing). The manual
+        // primitive supplies the axis/radius/normal/extent the auto path would
+        // otherwise derive from the B-rep, so a hand-placed keep-out survives the
+        // bridge and job schema intact.
+        const JsonValue* fid_v = find_key(cv, "face_id");
+        const JsonValue* geom_v = find_key(cv, "geometry");
+        if ((fid_v == nullptr) == (geom_v == nullptr))
+          schema_fail(
+              "a clearance must have exactly one of \"face_id\" or \"geometry\"");
+        if (fid_v != nullptr) {
+          const double fid = require_number(*fid_v, "clearance face_id");
+          if (fid < 0.0 || fid != std::floor(fid))
+            schema_fail("a clearance \"face_id\" must be a non-negative integer");
+          cl.face_id = static_cast<int>(fid);
+        } else {
+          cl.manual = true;
+          const JsonValue& gv = require_object(*geom_v, "clearance geometry");
+          if (cl.kind == "bolt") {
+            reject_unknown_keys(
+                gv, {"axis_point", "axis_dir", "radius_mm", "half_length_mm"},
+                "a bolt clearance geometry");
+            cl.axis_point = parse_vec3(
+                require_key(gv, "axis_point", "a bolt clearance geometry"),
+                "clearance axis_point");
+            cl.axis_dir = parse_vec3(
+                require_key(gv, "axis_dir", "a bolt clearance geometry"),
+                "clearance axis_dir");
+            cl.radius_mm = require_number(
+                require_key(gv, "radius_mm", "a bolt clearance geometry"),
+                "clearance radius_mm");
+            cl.half_length_mm = require_number(
+                require_key(gv, "half_length_mm", "a bolt clearance geometry"),
+                "clearance half_length_mm");
+            if (cl.radius_mm < 0.0 || cl.half_length_mm < 0.0)
+              schema_fail(
+                  "a bolt clearance geometry radius_mm/half_length_mm must be "
+                  ">= 0");
+          } else {  // face
+            reject_unknown_keys(
+                gv, {"origin", "normal", "half_u_mm", "half_w_mm"},
+                "a face clearance geometry");
+            cl.origin =
+                parse_vec3(require_key(gv, "origin", "a face clearance geometry"),
+                           "clearance origin");
+            cl.normal =
+                parse_vec3(require_key(gv, "normal", "a face clearance geometry"),
+                           "clearance normal");
+            cl.half_u_mm = require_number(
+                require_key(gv, "half_u_mm", "a face clearance geometry"),
+                "clearance half_u_mm");
+            cl.half_w_mm = require_number(
+                require_key(gv, "half_w_mm", "a face clearance geometry"),
+                "clearance half_w_mm");
+            if (cl.half_u_mm < 0.0 || cl.half_w_mm < 0.0)
+              schema_fail(
+                  "a face clearance geometry half_u_mm/half_w_mm must be >= 0");
+          }
+        }
         if (const JsonValue* m = find_key(cv, "concentric_margin_mm")) {
           cl.concentric_margin_mm = require_number(*m, "concentric_margin_mm");
           if (cl.concentric_margin_mm < 0.0)

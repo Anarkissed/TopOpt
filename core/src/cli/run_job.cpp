@@ -324,11 +324,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     for (const JobClearance& jc : job.loads.clearances) {
       ProductionLoadCase::Clearance c;
       c.face_id = jc.face_id;
+      c.manual = jc.manual;
       const bool bolt = jc.kind == "bolt";
+      // Default suggestions depend on the bore radius: an auto bolt reads it from
+      // the imported face geometry; a manual bolt carries its own radius_mm. A
+      // hand-authored job need only give face_id/geometry + kind and the same
+      // spec-suggestion defaults fill the rest.
       double bore_r = 0.0;
-      if (bolt && jc.face_id >= 0 && jc.face_id < result.model.face_count)
-        bore_r = result.model.faces[static_cast<std::size_t>(jc.face_id)]
-                     .cylinder_radius_mm;
+      if (bolt) {
+        if (jc.manual)
+          bore_r = jc.radius_mm;
+        else if (jc.face_id >= 0 && jc.face_id < result.model.face_count)
+          bore_r = result.model.faces[static_cast<std::size_t>(jc.face_id)]
+                       .cylinder_radius_mm;
+      }
       c.params = bolt ? topopt::default_bolt_clearance(bore_r)
                       : topopt::default_face_clearance();
       if (jc.concentric_margin_mm > 0.0)
@@ -336,6 +345,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       if (jc.axial_clearance_mm > 0.0)
         c.params.axial_clearance_mm = jc.axial_clearance_mm;
       if (jc.slab_depth_mm > 0.0) c.params.slab_depth_mm = jc.slab_depth_mm;
+      if (jc.manual) {
+        c.manual_geom.kind =
+            bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
+        c.manual_geom.axis_point = jc.axis_point;
+        c.manual_geom.axis_dir = jc.axis_dir;
+        c.manual_geom.radius_mm = jc.radius_mm;
+        c.manual_geom.half_length_mm = jc.half_length_mm;
+        c.manual_geom.origin = jc.origin;
+        c.manual_geom.normal = jc.normal;
+        c.manual_geom.half_u_mm = jc.half_u_mm;
+        c.manual_geom.half_w_mm = jc.half_w_mm;
+      }
       lc.clearances.push_back(c);
     }
     // Face protections (handoff 124): the raw face ids + the ONE global depth.

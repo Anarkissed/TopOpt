@@ -1,0 +1,186 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -scheme TopOptKit-Package -destination platform=macOS
+
+Resolve Package Graph
+2026-07-26 03:33:54.209 xcodebuild[30380:70451793] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+
+
+Resolved source packages:
+  TopOptKit: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit
+
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:macOS, arch:arm64, id:00006020-0001710914F3C01E, name:My Mac }
+{ platform:macOS, arch:x86_64, id:00006020-0001710914F3C01E, name:My Mac }
+{ platform:macOS, arch:arm64, variant:Mac Catalyst, id:00006020-0001710914F3C01E, name:My Mac }
+{ platform:macOS, arch:x86_64, variant:Mac Catalyst, id:00006020-0001710914F3C01E, name:My Mac }
+{ platform:macOS, arch:arm64, variant:DriverKit, id:00006020-0001710914F3C01E, name:My Mac }
+{ platform:macOS, arch:arm64, variant:Designed for [iPad,iPhone], id:00006020-0001710914F3C01E, name:My Mac }
+{ platform:macOS, arch:arm64_32, variant:Designed for [iPad,iPhone], id:00006020-0001710914F3C01E, name:My Mac }
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (12 targets)
+    Target 'TopOptOCCT' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptOCCTShim' in project 'TopOptKit'
+    Target 'TopOptOCCTShim' in project 'TopOptKit' (no dependencies)
+    Target 'TopOptKit' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptKit' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptBridge' in project 'TopOptKit'
+    Target 'TopOptFlows' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptFlows' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptBridge' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptKit' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptDesign' in project 'TopOptKit'
+    Target 'TopOptDesign' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptDesign' in project 'TopOptKit'
+    Target 'TopOptKitTests' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptBridge' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptKit' in project 'TopOptKit'
+    Target 'TopOptFlowsTests' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptBridge' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptKit' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptDesign' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptFlows' in project 'TopOptKit'
+    Target 'TopOptFlows' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptBridge' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptKit' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptDesign' in project 'TopOptKit'
+    Target 'TopOptKit' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptBridge' in project 'TopOptKit'
+    Target 'TopOptBridge' in project 'TopOptKit' (no dependencies)
+    Target 'TopOptDesignTests' in project 'TopOptKit'
+        ➜ Explicit dependency on target 'TopOptDesign' in project 'TopOptKit'
+    Target 'TopOptDesign' in project 'TopOptKit' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -x c++ -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: cdb4f8867a7e4e292d1f11ab3b7a43b6
+Build description path: /Users/nadim/Library/Developer/Xcode/DerivedData/TopOptKit-amfsfggyloehsxbuhdwylaherqen/Build/Intermediates.noindex/XCBuildData/cdb4f8867a7e4e292d1f11ab3b7a43b6.xcbuilddata
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBO.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBO.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBRep.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBRep.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBin.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBin.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinL.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinL.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinTObj.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinTObj.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinXCAF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinXCAF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBool.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBool.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKCAF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKCAF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKCDF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKCDF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDE.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDE.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDECascade.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDECascade.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEGLTF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEGLTF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEIGES.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEIGES.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEOBJ.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEOBJ.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEPLY.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEPLY.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDESTEP.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDESTEP.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDESTL.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDESTL.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEVRML.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEVRML.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKFeat.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKFeat.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKFillet.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKFillet.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKG2d.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKG2d.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKG3d.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKG3d.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKGeomAlgo.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKGeomAlgo.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKGeomBase.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKGeomBase.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKHLR.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKHLR.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKLCAF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKLCAF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKMath.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKMath.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKMesh.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKMesh.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKOffset.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKOffset.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKPrim.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKPrim.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKRWMesh.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKRWMesh.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKService.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKService.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKShHealing.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKShHealing.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKStd.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKStd.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKStdL.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKStdL.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKTObj.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKTObj.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKTopAlgo.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKTopAlgo.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKV3d.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKV3d.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKVCAF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKVCAF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXCAF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXCAF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXMesh.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXMesh.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXSBase.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXSBase.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXml.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXml.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlL.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlL.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlTObj.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlTObj.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlXCAF.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlXCAF.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKernel.xcframework:1:1: error: While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKernel.xcframework'. (in target 'TopOptOCCT' from project 'TopOptKit')
+
+Test session results, code coverage, and logs:
+	/Users/nadim/Library/Developer/Xcode/DerivedData/TopOptKit-amfsfggyloehsxbuhdwylaherqen/Logs/Test/Test-TopOptKit-Package-2026.07.26_03-33-54--0400.xcresult
+
+Testing failed:
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBO.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBRep.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBin.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinL.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinTObj.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBinXCAF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKBool.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKCAF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKCDF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDE.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDECascade.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEGLTF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEIGES.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEOBJ.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEPLY.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDESTEP.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDESTL.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKDEVRML.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKFeat.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKFillet.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKG2d.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKG3d.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKGeomAlgo.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKGeomBase.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKHLR.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKLCAF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKMath.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKMesh.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKOffset.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKPrim.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKRWMesh.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKService.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKShHealing.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKStd.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKStdL.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKTObj.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKTopAlgo.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKV3d.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKVCAF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXCAF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXMesh.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXSBase.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXml.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlL.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlTObj.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKXmlXCAF.xcframework'.
+	While building for macOS, no library for this platform was found in '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/swiftpm-macos-ios-occt-0c60c5/app/TopOptKit/vendor/occt-ios/TKernel.xcframework'.
+	Testing cancelled because the build failed.
+
+** TEST FAILED **
+
+
+The following build commands failed:
+	Testing workspace TopOptKit with scheme TopOptKit-Package
+(1 failure)

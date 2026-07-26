@@ -211,5 +211,9 @@ fi
 # NOTE: use the -Package scheme, not -scheme TopOptKit. `TopOptKit` is the library
 # product's scheme and has no test action ("Scheme TopOptKit is not currently
 # configured for the test action."). The auto-generated `TopOptKit-Package` scheme
-# is the one that runs the package's test targets.
+# is the one that runs the package's test targets. It builds ALL products —
+# including `TopOptOCCT` — so it is macOS-safe ONLY because that product lists just
+# the OCCT-free shim; the iOS-only OCCT xcframeworks reach the app through the
+# shim's iOS-gated target dependencies (see Package.swift), never as macOS product
+# members. So this exact command works whether or not vendor/occt-ios is populated.
 echo "==> done. Test: (cd $PKG_DIR && xcodebuild test -scheme TopOptKit-Package -destination 'platform=macOS')"

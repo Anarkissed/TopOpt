@@ -89,6 +89,12 @@ struct ProductionLoadCase {
   struct Clearance {
     int face_id = -1;
     ClearanceParams params;  // kind (Bolt/Face) + the editable mm distances
+    // Manual (user-placed) primitives carry their own geometry because they have
+    // no B-rep face (handoff group-editing). When `manual` is true the rasterizer
+    // resolves `manual_geom` + `params` directly (face_id is ignored / -1);
+    // otherwise the geometry is derived from `model.faces[face_id]` as before.
+    bool manual = false;
+    ManualClearanceGeometry manual_geom;
   };
   std::vector<Clearance> clearances;
 

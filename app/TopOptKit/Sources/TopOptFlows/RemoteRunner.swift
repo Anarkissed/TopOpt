@@ -641,10 +641,29 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         }
         if !request.clearances.isEmpty {
             loads["clearances"] = request.clearances.map { c -> [String: Any] in
-                var entry: [String: Any] = [
-                    "face_id": c.faceID,
-                    "kind": c.kind == .face ? "face" : "bolt",
-                ]
+                // The kind + distance fields are IDENTICAL for auto and manual (BAR
+                // B1); the only structural difference is the geometry SOURCE — a
+                // "face_id" for an auto face, or a "geometry" object for a manual
+                // primitive that has no B-rep face. Exactly one, matching the core
+                // schema's XOR rule (handoff group-editing).
+                var entry: [String: Any] = ["kind": c.kind == .face ? "face" : "bolt"]
+                if let m = c.manual {
+                    entry["geometry"] = c.kind == .face
+                        ? [
+                            "origin": [m.origin.x, m.origin.y, m.origin.z],
+                            "normal": [m.normal.x, m.normal.y, m.normal.z],
+                            "half_u_mm": m.halfUMM,
+                            "half_w_mm": m.halfWMM,
+                        ]
+                        : [
+                            "axis_point": [m.axisPoint.x, m.axisPoint.y, m.axisPoint.z],
+                            "axis_dir": [m.axisDir.x, m.axisDir.y, m.axisDir.z],
+                            "radius_mm": m.radiusMM,
+                            "half_length_mm": m.halfLengthMM,
+                        ]
+                } else {
+                    entry["face_id"] = c.faceID
+                }
                 if c.concentricMarginMM > 0 { entry["concentric_margin_mm"] = c.concentricMarginMM }
                 if c.axialClearanceMM > 0 { entry["axial_clearance_mm"] = c.axialClearanceMM }
                 if c.slabDepthMM > 0 { entry["slab_depth_mm"] = c.slabDepthMM }

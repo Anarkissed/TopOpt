@@ -53,6 +53,41 @@ struct ClearanceParams {
   double slab_depth_mm = 0.0;
 };
 
+// ── Manual (user-placed) primitive geometry (handoff group-editing). ───────
+// The hole finder OVER-finds and MISSES; the user needs to hand-place a keep-out
+// primitive and hand-delete a phantom one. A hand-placed primitive has NO B-rep
+// face, so the axis/radius/normal/outline the rasterizer needs cannot be
+// "derived exactly from the B-rep" (this header's original contract). Instead
+// the user supplies the BASE geometry here, in the SAME model/voxel frame and mm
+// units as StepFaceInfo. `ClearanceParams` (the concentric margin / axial
+// clearance / slab depth) is then applied to these values EXACTLY as it is to a
+// face-derived primitive — so a manual and an auto primitive of identical base
+// geometry resolve to the identical predicate and produce the identical mask
+// (BAR B2). This is the ONLY place clearance geometry originates off the B-rep.
+struct ManualClearanceGeometry {
+  ClearanceKind kind = ClearanceKind::Bolt;
+
+  // Bolt (swept cylinder): a point on the axis + a (not necessarily unit) axis
+  // direction, the bore radius, and the HALF-length of the cylinder's own axial
+  // extent about `axis_point` (t ∈ [−half_length_mm, +half_length_mm] BEFORE the
+  // axial-clearance growth). This mirrors what the auto path reads from the
+  // face's tessellation span, only supplied instead of measured.
+  Vec3 axis_point{0.0, 0.0, 0.0};
+  Vec3 axis_dir{0.0, 0.0, 0.0};
+  double radius_mm = 0.0;
+  double half_length_mm = 0.0;
+
+  // Face (bounded slab): a point on the plane + the OUTWARD (not necessarily
+  // unit) normal, and the centred in-plane half-extents. The rasterizer derives
+  // the in-plane (u,w) basis from the normal exactly as the auto path does, so
+  // the slab is a `2·half_u_mm × 2·half_w_mm` rectangle centred on `origin`,
+  // extruded outward by `slab_depth_mm`.
+  Vec3 origin{0.0, 0.0, 0.0};
+  Vec3 normal{0.0, 0.0, 0.0};
+  double half_u_mm = 0.0;
+  double half_w_mm = 0.0;
+};
+
 // ── Suggested default distances (design 095 STEP 1/2). ────────────────────
 // The GEOMETRY is exact; these are the judgement-call distances the UI prefills
 // and labels as suggestions. Validated against ISO 4762 (socket-head cap screw
@@ -96,6 +131,79 @@ struct ClearanceRasterResult {
                                   // solved grid at all (false => a silent no-op the
                                   // caller should SURFACE, not hide)
 };
+
+// ── The resolved rasterization predicate (handoff group-editing). ──────────
+// The geometry a clearance keep-out reduces to once its SOURCE — a B-rep face OR
+// user-supplied manual values — plus the editable `ClearanceParams` distances
+// have been folded in. It carries NO StepModel and NO triangles: it is the pure
+// swept-cylinder / bounded-slab predicate the voxel loop tests. Splitting
+// resolve (source → this) from rasterize (this → mask) is what lets an auto and
+// a manual primitive of identical geometry take the IDENTICAL rasterizer and so
+// produce the IDENTICAL mask (BAR B2). `valid == false` => an empty region
+// (nothing to mark) — the same safe no-op the pre-split code produced for a
+// mismatched/untessellated face.
+struct ClearanceGeometry {
+  ClearanceKind kind = ClearanceKind::Bolt;
+  bool valid = false;
+
+  // Bolt: swept cylinder about `axis_point + t·axis_dir` (axis_dir is UNIT),
+  // radius `radius`, axial band t ∈ [t_lo, t_hi] (already grown by the axial
+  // clearance).
+  Vec3 axis_point{0.0, 0.0, 0.0};
+  Vec3 axis_dir{0.0, 0.0, 0.0};
+  double radius = 0.0;
+  double t_lo = 0.0;
+  double t_hi = 0.0;
+
+  // Face: bounded slab. `origin + s·normal` for s ∈ [0, depth] (normal is UNIT,
+  // outward), clipped to the in-plane rectangle [u_lo,u_hi] × [w_lo,w_hi] in the
+  // orthonormal in-plane basis (u, w).
+  Vec3 origin{0.0, 0.0, 0.0};
+  Vec3 normal{0.0, 0.0, 0.0};
+  Vec3 u{0.0, 0.0, 0.0};
+  Vec3 w{0.0, 0.0, 0.0};
+  double u_lo = 0.0;
+  double u_hi = 0.0;
+  double w_lo = 0.0;
+  double w_hi = 0.0;
+  double depth = 0.0;
+};
+
+// Resolve the predicate from B-rep face `face_id` of `model` (the AUTO path): the
+// axis/radius/normal come from `model.faces[face_id]` and the axial span /
+// in-plane rectangle from that face's tessellation triangles, grown by `params`.
+// Returns `{valid=false}` when the face's surface kind does not match the
+// clearance kind, the geometry is degenerate, or the face owns no triangles.
+// Throws std::invalid_argument if `face_id` is out of range or `triangle_face`
+// is not parallel to the mesh.
+ClearanceGeometry resolve_clearance_from_face(const StepModel& model, int face_id,
+                                              const ClearanceParams& params);
+
+// Resolve the predicate from user-supplied MANUAL geometry (no B-rep): `geom`
+// carries the base axis/radius/half-length or origin/normal/half-extents, and
+// `params` grows them by the same margins the auto path applies. Returns
+// `{valid=false}` for a degenerate direction or non-positive extent — the same
+// safe no-op the auto path yields.
+ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
+                                           const ClearanceParams& params);
+
+// Rasterize an already-resolved predicate onto `solved_grid`, writing
+// MaskValue::FrozenVoid into `out`. This is the shared rasterizer both the auto
+// and manual paths (and the mask_clearance_region wrapper) funnel through.
+//
+// PRECEDENCE — FrozenSolid (part material) WINS over FrozenVoid: a solved voxel
+// mapping to a SOLID voxel of `part` (at integer offset (offset_i, offset_j,
+// offset_k) — solved voxel (i,j,k) is part voxel (i-oi, j-oj, k-ok)) is never
+// voided. On the no-box path the solved grid IS the part grid and the offsets
+// are 0. `out` is written in place (OR-semantics). A `{valid=false}` predicate
+// marks nothing. Cost is O(solved_grid voxels).
+//
+// Throws std::invalid_argument if out.size() != solved_grid.voxel_count().
+ClearanceRasterResult rasterize_clearance(const VoxelGrid& solved_grid,
+                                          const VoxelGrid& part, int offset_i,
+                                          int offset_j, int offset_k,
+                                          const ClearanceGeometry& geom,
+                                          DesignMask& out);
 
 // Rasterize the clearance keep-out derived from B-rep face `face_id` of `model`
 // onto `solved_grid`, writing MaskValue::FrozenVoid into `out` (which MUST be
