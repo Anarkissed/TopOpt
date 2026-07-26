@@ -1,0 +1,266 @@
+// ManualPrimitiveTests — the group-editing bars at the model layer (handoff
+// group-editing). Covers manual-primitive add / move / delete, the auto-primitive
+// deletion escape hatch (BAR B3), undo/redo through the EXISTING UndoHistory (B5),
+// the group-lock + name-only-rename invariants (B6), the magnetic-detent math, and
+// the deletion/manual sidecar round-trip (B3 persistence). Pure, headless — the /app/
+// verification standard; the SwiftUI gesture + Metal draw are the device-QA'd layers.
+
+import XCTest
+import simd
+import TopOptKit
+@testable import TopOptFlows
+
+@MainActor
+final class ManualPrimitiveTests: XCTestCase {
+
+    /// A bore+plane mesh carrying `faceGeometry` (a cylinder on faces 1&2, a plane on 3).
+    private func borePlusPlaneMesh() -> ViewerMesh {
+        let n = 8
+        var verts: [Float] = []
+        let r: Float = 2.5
+        for k in 0..<n { let a = Float(k) * (2 * .pi / Float(n)); verts += [r*cos(a), r*sin(a), 0] }
+        for k in 0..<n { let a = Float(k) * (2 * .pi / Float(n)); verts += [r*cos(a), r*sin(a), 10] }
+        verts += [0, 0, 10]
+        let topCentre: Int32 = 16
+        var indices: [Int32] = []
+        var faceIDs: [Int32] = []
+        func B(_ k: Int) -> Int32 { Int32(k % n) }
+        func T(_ k: Int) -> Int32 { Int32(n + (k % n)) }
+        for k in 0..<n {
+            indices += [B(k), B(k + 1), T(k + 1), B(k), T(k + 1), T(k)]
+            let id: Int32 = k < 4 ? 1 : 2
+            faceIDs += [id, id]
+        }
+        for k in 0..<n { indices += [topCentre, T(k), T(k + 1)]; faceIDs += [3] }
+        let cyl = StepFaceGeometry(kind: .cylinder, cylinderRadiusMM: 2.5,
+                                   axisPoint: SIMD3(0, 0, 0), axisDir: SIMD3(0, 0, 1))
+        let plane = StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 0, 1),
+                                     planeOrigin: SIMD3(0, 0, 10))
+        let geo: [StepFaceGeometry] = [StepFaceGeometry(kind: .other), cyl, cyl, plane]
+        return ViewerMesh(vertices: verts, indices: indices, faceIDs: faceIDs, faceGeometry: geo)
+    }
+
+    /// A project with the bore+plane mesh, an anchor group on the bore (face 1) and a
+    /// bare group on the plane (face 3). Returns the project + the two group ids.
+    private func project() -> (ProjectModel, boreID: UUID, planeID: UUID) {
+        let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                             importedFile: nil, importedMesh: nil)
+        p.viewerMesh = borePlusPlaneMesh()
+        var sel = SelectionModel()
+        sel.addGroup(); sel.pickFaces([1])
+        sel.addGroup(); sel.pickFaces([3])
+        p.selection = sel
+        let ids = sel.groups.map { $0.id }
+        p.force.makeAnchor(ids[0])
+        p.seedUndoBaseline()
+        return (p, ids[0], ids[1])
+    }
+
+    // MARK: - ADD: a manual primitive becomes a run clearance
+
+    func testAddManualBoltEmitsAManualClearanceSpec() {
+        let (p, _, planeID) = project()
+        let before = p.clearanceSpecs().count
+        p.addManualPrimitive(.bolt, to: planeID)
+        let specs = p.clearanceSpecs()
+        XCTAssertEqual(specs.count, before + 1, "the manual bolt adds exactly one clearance")
+        let manual = specs.first { $0.manual != nil }
+        XCTAssertNotNil(manual, "the added spec carries inline manual geometry")
+        XCTAssertEqual(manual?.kind, .bolt)
+        XCTAssertEqual(manual?.faceID, -1, "a manual spec uses the -1 face sentinel")
+        XCTAssertTrue((manual?.manual?.radiusMM ?? 0) > 0, "the placed bolt has a real radius")
+    }
+
+    func testAddManualFaceEmitsASlabSpec() {
+        let (p, boreID, _) = project()
+        p.addManualPrimitive(.face, to: boreID)
+        let manual = p.clearanceSpecs().first { $0.manual != nil && $0.kind == .face }
+        XCTAssertNotNil(manual, "a manual plane emits a face (slab) clearance")
+    }
+
+    // MARK: - DELETE an AUTO primitive (BAR B3) — the over-find escape hatch
+
+    func testDeleteAutoClearanceDropsItFromTheRun() {
+        let (p, boreID, _) = project()
+        XCTAssertEqual(p.clearanceSpecs().count, 1, "the anchored bore auto-clears")
+        p.deleteAutoClearance(face: 1)          // the "−" on the auto bore's row
+        XCTAssertTrue(p.clearanceSpecs().isEmpty, "a deleted auto clearance leaves the run")
+        XCTAssertTrue(p.force.isClearanceFaceSuppressed(1))
+        // The face STAYS in the group (it may still anchor) — only its clearance is gone.
+        XCTAssertTrue(p.selection.groups.first { $0.id == boreID }!.faces.contains(1),
+                      "delete suppresses the CLEARANCE, it does not remove the anchor face")
+    }
+
+    func testDeletionSurvivesAReDeriveAndAResolutionChange() {
+        // B3: the decision persists in the model (ForceModel), so re-deriving specs
+        // — which is exactly what a re-detect / resolution change does — never
+        // resurrects it. clearanceSpecs is resolution-independent by construction.
+        let (p, _, _) = project()
+        p.deleteAutoClearance(face: 1)
+        for _ in 0..<3 { XCTAssertTrue(p.clearanceSpecs().isEmpty, "stays deleted across re-derive") }
+    }
+
+    func testRestoreAutoClearanceUndeletesIt() {
+        let (p, _, _) = project()
+        p.deleteAutoClearance(face: 1)
+        p.restoreAutoClearance(face: 1)
+        XCTAssertEqual(p.clearanceSpecs().count, 1, "restoring the auto clearance brings it back")
+    }
+
+    // MARK: - UNDO / REDO through the EXISTING UndoHistory (BAR B5)
+
+    func testUndoRedoCoversAdd() {
+        let (p, _, planeID) = project()
+        p.addManualPrimitive(.bolt, to: planeID)
+        XCTAssertEqual(p.force.manualPrimitives(for: planeID).count, 1)
+
+        p.performUndo()
+        XCTAssertTrue(p.force.manualPrimitives(for: planeID).isEmpty, "undo removes the added primitive")
+        p.performRedo()
+        XCTAssertEqual(p.force.manualPrimitives(for: planeID).count, 1, "redo restores it")
+    }
+
+    func testUndoRedoCoversMove() {
+        let (p, _, planeID) = project()
+        let id = p.addManualPrimitive(.bolt, to: planeID)!
+        // Commit the ADD as its own step, then move it well away from any detent target.
+        p.performUndo(); p.performRedo()
+        let original = p.force.manualPrimitives(for: planeID).first { $0.id == id }!.center
+        p.moveManualPrimitive(id: id, in: planeID, to: SIMD3(100, 100, 100))
+        let moved = p.force.manualPrimitives(for: planeID).first { $0.id == id }!.center
+        XCTAssertNotEqual(moved, original, "the move changed the centre")
+
+        p.performUndo()
+        XCTAssertEqual(p.force.manualPrimitives(for: planeID).first { $0.id == id }!.center, original,
+                       "undo reverts the move")
+        p.performRedo()
+        XCTAssertEqual(p.force.manualPrimitives(for: planeID).first { $0.id == id }!.center, moved,
+                       "redo re-applies the move")
+    }
+
+    func testUndoRedoCoversDelete() {
+        let (p, _, planeID) = project()
+        let id = p.addManualPrimitive(.bolt, to: planeID)!
+        p.performUndo(); p.performRedo()             // settle the add as a step
+        p.removeManualPrimitive(id: id, from: planeID)
+        XCTAssertTrue(p.force.manualPrimitives(for: planeID).isEmpty)
+
+        p.performUndo()
+        XCTAssertEqual(p.force.manualPrimitives(for: planeID).count, 1, "undo restores the deleted primitive")
+        p.performRedo()
+        XCTAssertTrue(p.force.manualPrimitives(for: planeID).isEmpty, "redo re-deletes it")
+    }
+
+    func testUndoCoversAutoDeletion() {
+        let (p, _, _) = project()
+        p.deleteAutoClearance(face: 1)
+        XCTAssertTrue(p.clearanceSpecs().isEmpty)
+        p.performUndo()
+        XCTAssertEqual(p.clearanceSpecs().count, 1, "undo un-deletes an auto primitive too")
+    }
+
+    // MARK: - GROUP LOCK + name-only rename invariants (BAR B6)
+
+    func testTappingGroupLocksInWithoutRenaming() {
+        let (p, boreID, planeID) = project()
+        let name = p.selection.groups.first { $0.id == boreID }!.name
+        p.selection.setActive(boreID)                // "tap the group body"
+        XCTAssertEqual(p.selection.activeGroupID, boreID, "tapping the group LOCKS INTO it")
+        XCTAssertEqual(p.selection.groups.first { $0.id == boreID }!.name, name,
+                       "tapping the group body does NOT rename (B6)")
+        // Locking a different group moves the lock; nothing renames.
+        p.selection.setActive(planeID)
+        XCTAssertEqual(p.selection.activeGroupID, planeID)
+    }
+
+    func testRenameChangesOnlyTheName() {
+        let (p, boreID, _) = project()
+        p.selection.setActive(boreID)
+        p.selection.rename(boreID, to: "Bolt holes")   // "tap the NAME"
+        XCTAssertEqual(p.selection.groups.first { $0.id == boreID }!.name, "Bolt holes")
+        XCTAssertEqual(p.selection.activeGroupID, boreID, "renaming keeps the group locked")
+    }
+
+    func testLeavingClearsTheActiveGroup() {
+        let (p, boreID, _) = project()
+        p.selection.setActive(boreID)
+        p.selection.clearActive()                      // "tap elsewhere / into the ether"
+        XCTAssertNil(p.selection.activeGroupID, "leaving unlocks the group")
+    }
+
+    // MARK: - magnetic detents (pure math)
+
+    func testDetentSnapsAxisToWorldZAndCentreToBoreAxis() {
+        // A bolt placed slightly askew + off the bore axis snaps back: axis → world Z,
+        // centre → onto the bore axis point (reported so the UI can say WHY).
+        let bore = PrimitiveSnapTarget(kind: .primitiveAxis, point: SIMD3(0, 0, 0),
+                                       direction: SIMD3(0, 0, 1), label: "bore axis")
+        var targets = ManualPrimitiveDetent.worldAxisTargets()
+        targets.append(bore)
+        let result = ManualPrimitiveDetent.apply(
+            freeCenter: SIMD3(0.5, 0.5, 4),              // within 3 mm of the axis line
+            axis: SIMD3(0.05, 0.0, 0.99),                // ~3° off Z
+            targets: targets)
+        XCTAssertTrue(result.didSnap, "a near-aligned placement snaps")
+        XCTAssertLessThan(simd_distance(simd_normalize(result.axis), SIMD3(0, 0, 1)), 1e-5,
+                          "the axis snaps to world Z")
+        // Centre drops onto the bore axis line (x=y=0), keeping its z.
+        XCTAssertEqual(result.center.x, 0, accuracy: 1e-4)
+        XCTAssertEqual(result.center.y, 0, accuracy: 1e-4)
+        XCTAssertTrue(result.labels.contains("bore axis"), "the UI is told it snapped to the bore axis")
+    }
+
+    func testDetentLeavesAFarPlacementFree() {
+        let result = ManualPrimitiveDetent.apply(
+            freeCenter: SIMD3(50, 50, 50),
+            axis: SIMD3(1, 1, 0),                        // 45° off every world axis
+            targets: ManualPrimitiveDetent.worldAxisTargets())
+        XCTAssertFalse(result.didSnap, "a far, skew placement moves freely (no forced snap)")
+        XCTAssertEqual(result.center, SIMD3(50, 50, 50))
+    }
+
+    // MARK: - sidecar round-trip (BAR B3 persistence across re-import)
+
+    func testSidecarRoundTripsSuppressionsAndManualPrimitives() throws {
+        let dir = NSTemporaryDirectory() + "clr-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let model = dir + "/part.stl"
+        FileManager.default.createFile(atPath: model, contents: Data("solid".utf8))
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let g = UUID()
+        let mp = ManualPrimitive.defaultBolt(at: SIMD3(1, 2, 3), radiusMM: 2, halfLengthMM: 5)
+        let sidecar = ClearanceSidecar(
+            suppressedAutoFaces: [1, 4, 9],
+            manual: [.init(group: g, primitives: [mp])])
+        XCTAssertTrue(sidecar.write(forModelPath: model))
+
+        let read = try XCTUnwrap(ClearanceSidecar.read(forModelPath: model))
+        XCTAssertEqual(read.suppressedAutoFaces, [1, 4, 9], "deletions survive the sidecar (B3)")
+        XCTAssertEqual(read.manual.first?.group, g)
+        XCTAssertEqual(read.manual.first?.primitives.first?.id, mp.id)
+        XCTAssertEqual(read.manual.first?.primitives.first?.radiusMM, 2)
+    }
+
+    func testEmptySidecarIsDeletedNotWritten() throws {
+        let dir = NSTemporaryDirectory() + "clr-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let model = dir + "/part.stl"
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        // Pre-seed a stale sidecar, then write an empty one → it should be removed.
+        _ = ClearanceSidecar(suppressedAutoFaces: [5]).write(forModelPath: model)
+        XCTAssertNotNil(ClearanceSidecar.read(forModelPath: model))
+        _ = ClearanceSidecar().write(forModelPath: model)
+        XCTAssertNil(ClearanceSidecar.read(forModelPath: model), "an empty state deletes the sidecar")
+    }
+
+    /// The "auto-apply on import" effect: loading the sidecar's deletions into the
+    /// force model drops those clearances — a phantom bore stays deleted after a
+    /// re-import of the same file, without the finder resurrecting it.
+    func testLoadingSuppressionsReappliesDeletions() {
+        let (p, _, _) = project()
+        XCTAssertEqual(p.clearanceSpecs().count, 1)
+        p.force.loadSuppressedClearanceFaces([1])       // what applyClearanceSidecar does
+        XCTAssertTrue(p.clearanceSpecs().isEmpty, "a re-imported deletion stays deleted (B3)")
+    }
+}

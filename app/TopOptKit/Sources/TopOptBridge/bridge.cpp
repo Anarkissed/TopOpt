@@ -792,10 +792,19 @@ OptimizeResult run_minimize_plastic_loadcase(
         cl.face_id = load_case.clearance_face_ids[c];
         const bool bolt =
             c < load_case.clearance_kinds.size() && load_case.clearance_kinds[c] == 0;
+        const bool manual =
+            c < load_case.clearance_manual.size() && load_case.clearance_manual[c];
+        cl.manual = manual;
+        // Default suggestions depend on the bore radius: an auto bolt reads it from
+        // the STEP face, a manual bolt carries its own radius here.
         double bore_r = 0.0;
-        if (bolt && cl.face_id >= 0 && cl.face_id < model.face_count)
-          bore_r = model.faces[static_cast<std::size_t>(cl.face_id)]
-                       .cylinder_radius_mm;
+        if (bolt) {
+          if (manual && c < load_case.clearance_radius_mm.size())
+            bore_r = load_case.clearance_radius_mm[c];
+          else if (!manual && cl.face_id >= 0 && cl.face_id < model.face_count)
+            bore_r = model.faces[static_cast<std::size_t>(cl.face_id)]
+                         .cylinder_radius_mm;
+        }
         cl.params = bolt ? topopt::default_bolt_clearance(bore_r)
                          : topopt::default_face_clearance();
         if (c < load_case.clearance_margin_mm.size() &&
@@ -807,6 +816,26 @@ OptimizeResult run_minimize_plastic_loadcase(
         if (c < load_case.clearance_slab_mm.size() &&
             load_case.clearance_slab_mm[c] > 0.0)
           cl.params.slab_depth_mm = load_case.clearance_slab_mm[c];
+        if (manual) {
+          auto xyz = [&](const std::vector<double>& v) {
+            return (3 * c + 2 < v.size())
+                       ? topopt::Vec3{v[3 * c + 0], v[3 * c + 1], v[3 * c + 2]}
+                       : topopt::Vec3{0.0, 0.0, 0.0};
+          };
+          auto scalar = [&](const std::vector<double>& v) {
+            return c < v.size() ? v[c] : 0.0;
+          };
+          cl.manual_geom.kind =
+              bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
+          cl.manual_geom.axis_point = xyz(load_case.clearance_axis_point_xyz);
+          cl.manual_geom.axis_dir = xyz(load_case.clearance_axis_dir_xyz);
+          cl.manual_geom.radius_mm = scalar(load_case.clearance_radius_mm);
+          cl.manual_geom.half_length_mm = scalar(load_case.clearance_half_len_mm);
+          cl.manual_geom.origin = xyz(load_case.clearance_origin_xyz);
+          cl.manual_geom.normal = xyz(load_case.clearance_normal_xyz);
+          cl.manual_geom.half_u_mm = scalar(load_case.clearance_half_u_mm);
+          cl.manual_geom.half_w_mm = scalar(load_case.clearance_half_w_mm);
+        }
         lc.clearances.push_back(cl);
       }
     }

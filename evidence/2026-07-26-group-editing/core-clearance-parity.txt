@@ -1,0 +1,8 @@
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] clearance face=8 kind=bolt voxels_frozen=54 status=ok
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+clearance parity (handoff 100): all checks passed

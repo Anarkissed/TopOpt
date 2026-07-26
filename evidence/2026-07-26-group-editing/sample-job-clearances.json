@@ -1,0 +1,30 @@
+{
+  "_comment": "B1 field equivalence — the three clearance shapes the extended schema now accepts. Entry 0 (auto) and entry 2 (manual) are the SAME kind + distances; the ONLY structural difference is the geometry SOURCE (face_id vs geometry). This is the exact shape ManualPrimitiveJobTests asserts the app emits and core/tests/unit/test_job.cpp::test_clearances_manual asserts the core parses.",
+  "model": "part.stl",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 96,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "loads": {
+    "anchor_face_ids": [8],
+    "groups": [ { "face_ids": [0], "force": [0, 0, -50] } ],
+    "clearances": [
+      {
+        "_": "AUTO bolt — geometry re-read from the B-rep via face_id (unchanged, pre-handoff shape)",
+        "face_id": 8, "kind": "bolt",
+        "concentric_margin_mm": 2.5, "axial_clearance_mm": 5.0
+      },
+      {
+        "_": "MANUAL face — a hand-placed slab the finder missed; inline geometry, no B-rep face",
+        "kind": "face", "slab_depth_mm": 3.0,
+        "geometry": { "origin": [12, 6, 6], "normal": [1, 0, 0], "half_u_mm": 2.0, "half_w_mm": 2.0 }
+      },
+      {
+        "_": "MANUAL bolt — same kind + distances as entry 0; differs ONLY in geometry vs face_id",
+        "kind": "bolt",
+        "concentric_margin_mm": 2.5, "axial_clearance_mm": 5.0,
+        "geometry": { "axis_point": [8, 8, 8], "axis_dir": [0, 0, 1], "radius_mm": 2.0, "half_length_mm": 4.0 }
+      }
+    ]
+  }
+}

@@ -18,6 +18,20 @@ Vec3 cross(const Vec3& a, const Vec3& b) {
 }
 double norm(const Vec3& a) { return std::sqrt(dot(a, a)); }
 
+// The in-plane orthonormal basis (u, w) spanning the plane whose UNIT normal is
+// `normal`, chosen deterministically so the auto and manual paths agree exactly.
+// Returns false only for a degenerate normal (the picked reference is parallel).
+bool plane_basis(const Vec3& normal, Vec3& u, Vec3& w) {
+  const Vec3 ref = std::fabs(normal.x) < 0.9 ? Vec3{1.0, 0.0, 0.0}
+                                             : Vec3{0.0, 1.0, 0.0};
+  Vec3 uu = cross(ref, normal);
+  const double ul = norm(uu);
+  if (ul <= 1e-12) return false;
+  u = Vec3{uu.x / ul, uu.y / ul, uu.z / ul};
+  w = cross(normal, u);  // already unit (normal ⟂ u, both unit)
+  return true;
+}
+
 // The axial span [t_lo, t_hi] of a face's tessellation projected onto a unit
 // axis through `axis_point`: t = (v - axis_point)·axis_dir over every vertex of
 // every triangle belonging to `face_id`. Returns false if the face owns no
@@ -74,97 +88,126 @@ bool face_plane_extent(const StepModel& model, int face_id, const Vec3& origin,
 
 }  // namespace
 
-ClearanceRasterResult mask_clearance_region(const VoxelGrid& solved_grid,
-                                            const VoxelGrid& part, int offset_i,
-                                            int offset_j, int offset_k,
-                                            const StepModel& model, int face_id,
-                                            const ClearanceParams& params,
-                                            DesignMask& out) {
+// ── AUTO path: resolve the predicate from a B-rep / pseudo face. ────────────
+// This is the geometry-derivation block that used to live inline in
+// mask_clearance_region; its output is now the explicit ClearanceGeometry the
+// shared rasterizer consumes. Behaviour is unchanged, so the wrapper below (and
+// every existing caller/test) is byte-identical (BAR B4).
+ClearanceGeometry resolve_clearance_from_face(const StepModel& model, int face_id,
+                                              const ClearanceParams& params) {
   if (face_id < 0 || face_id >= model.face_count)
-    throw std::invalid_argument("mask_clearance_region: face_id out of range");
-  if (out.size() != solved_grid.voxel_count())
     throw std::invalid_argument(
-        "mask_clearance_region: out size != solved_grid.voxel_count()");
+        "resolve_clearance_from_face: face_id out of range");
   if (model.triangle_face.size() != model.mesh.triangles.size())
     throw std::invalid_argument(
-        "mask_clearance_region: triangle_face is not parallel to mesh.triangles");
+        "resolve_clearance_from_face: triangle_face is not parallel to "
+        "mesh.triangles");
 
-  ClearanceRasterResult result;
-  const StepFaceInfo& face =
-      model.faces[static_cast<std::size_t>(face_id)];
-  const double eps = 1e-9 * solved_grid.spacing;
-
-  // ── Precompute the region's geometric predicate parameters. ──────────────
-  // Bolt: swept cylinder (axis, radius, axial band). Face: bounded slab (plane
-  // origin/normal, in-plane rectangle, outward depth). A kind whose geometry is
-  // missing (Bolt on a non-cylinder, Face on a non-plane, or an untessellated
-  // face) yields an empty region — nothing is marked.
-  bool valid = false;
-  // Bolt params.
-  Vec3 axis_point{}, axis_dir{};
-  double radius = 0.0, t_lo = 0.0, t_hi = 0.0;
-  // Face params.
-  Vec3 origin{}, normal{}, u{}, w{};
-  double u_lo = 0.0, u_hi = 0.0, w_lo = 0.0, w_hi = 0.0, depth = 0.0;
+  ClearanceGeometry g;
+  g.kind = params.kind;
+  const StepFaceInfo& face = model.faces[static_cast<std::size_t>(face_id)];
 
   if (params.kind == ClearanceKind::Bolt &&
       face.kind == StepSurfaceKind::Cylinder && norm(face.axis_dir) > 0.5) {
-    axis_point = face.axis_point;
+    g.axis_point = face.axis_point;
     const double dl = norm(face.axis_dir);
-    axis_dir = Vec3{face.axis_dir.x / dl, face.axis_dir.y / dl,
-                    face.axis_dir.z / dl};
-    radius = face.cylinder_radius_mm + params.concentric_margin_mm;
-    if (radius > 0.0 &&
-        face_axial_span(model, face_id, axis_point, axis_dir, t_lo, t_hi)) {
-      t_lo -= params.axial_clearance_mm;
-      t_hi += params.axial_clearance_mm;
-      valid = true;
+    g.axis_dir = Vec3{face.axis_dir.x / dl, face.axis_dir.y / dl,
+                      face.axis_dir.z / dl};
+    g.radius = face.cylinder_radius_mm + params.concentric_margin_mm;
+    if (g.radius > 0.0 &&
+        face_axial_span(model, face_id, g.axis_point, g.axis_dir, g.t_lo,
+                        g.t_hi)) {
+      g.t_lo -= params.axial_clearance_mm;
+      g.t_hi += params.axial_clearance_mm;
+      g.valid = true;
     }
   } else if (params.kind == ClearanceKind::Face &&
              face.kind == StepSurfaceKind::Plane &&
              norm(face.plane_normal) > 0.5 && params.slab_depth_mm > 0.0) {
-    origin = face.plane_origin;
+    g.origin = face.plane_origin;
     const double nl = norm(face.plane_normal);
-    normal = Vec3{face.plane_normal.x / nl, face.plane_normal.y / nl,
-                  face.plane_normal.z / nl};
-    depth = params.slab_depth_mm;
-    // An in-plane orthonormal basis (u, w) perpendicular to the normal.
-    const Vec3 ref = std::fabs(normal.x) < 0.9 ? Vec3{1.0, 0.0, 0.0}
-                                               : Vec3{0.0, 1.0, 0.0};
-    Vec3 uu = cross(ref, normal);
-    const double ul = norm(uu);
-    if (ul > 1e-12) {
-      u = Vec3{uu.x / ul, uu.y / ul, uu.z / ul};
-      w = cross(normal, u);  // already unit (normal ⟂ u, both unit)
-      if (face_plane_extent(model, face_id, origin, u, w, u_lo, u_hi, w_lo,
-                            w_hi))
-        valid = true;
-    }
+    g.normal = Vec3{face.plane_normal.x / nl, face.plane_normal.y / nl,
+                    face.plane_normal.z / nl};
+    g.depth = params.slab_depth_mm;
+    if (plane_basis(g.normal, g.u, g.w) &&
+        face_plane_extent(model, face_id, g.origin, g.u, g.w, g.u_lo, g.u_hi,
+                          g.w_lo, g.w_hi))
+      g.valid = true;
   }
-  if (!valid) return result;
+  return g;
+}
 
-  // ── Rasterize over the solved grid. ──────────────────────────────────────
+// ── MANUAL path: resolve the predicate from user-supplied geometry. ─────────
+// No B-rep, no triangles: the base axis/radius/half-length (or
+// origin/normal/half-extents) come from `geom`, and `params` grows them by the
+// SAME margins the auto path applies. A manual and an auto primitive whose base
+// geometry matches therefore resolve to the same predicate (BAR B2).
+ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
+                                           const ClearanceParams& params) {
+  ClearanceGeometry g;
+  g.kind = geom.kind;
+
+  if (geom.kind == ClearanceKind::Bolt) {
+    const double dl = norm(geom.axis_dir);
+    if (dl <= 1e-12) return g;  // degenerate axis → empty region
+    g.axis_point = geom.axis_point;
+    g.axis_dir = Vec3{geom.axis_dir.x / dl, geom.axis_dir.y / dl,
+                      geom.axis_dir.z / dl};
+    g.radius = geom.radius_mm + params.concentric_margin_mm;
+    g.t_lo = -geom.half_length_mm - params.axial_clearance_mm;
+    g.t_hi = geom.half_length_mm + params.axial_clearance_mm;
+    if (g.radius > 0.0 && g.t_hi > g.t_lo) g.valid = true;
+  } else {  // Face
+    const double nl = norm(geom.normal);
+    if (nl <= 1e-12 || params.slab_depth_mm <= 0.0) return g;
+    g.origin = geom.origin;
+    g.normal = Vec3{geom.normal.x / nl, geom.normal.y / nl, geom.normal.z / nl};
+    g.depth = params.slab_depth_mm;
+    if (!plane_basis(g.normal, g.u, g.w)) return g;
+    g.u_lo = -geom.half_u_mm;
+    g.u_hi = geom.half_u_mm;
+    g.w_lo = -geom.half_w_mm;
+    g.w_hi = geom.half_w_mm;
+    if (g.u_hi > g.u_lo && g.w_hi > g.w_lo) g.valid = true;
+  }
+  return g;
+}
+
+// ── Shared rasterizer: a resolved predicate → FrozenVoid voxels. ────────────
+ClearanceRasterResult rasterize_clearance(const VoxelGrid& solved_grid,
+                                          const VoxelGrid& part, int offset_i,
+                                          int offset_j, int offset_k,
+                                          const ClearanceGeometry& geom,
+                                          DesignMask& out) {
+  if (out.size() != solved_grid.voxel_count())
+    throw std::invalid_argument(
+        "rasterize_clearance: out size != solved_grid.voxel_count()");
+
+  ClearanceRasterResult result;
+  if (!geom.valid) return result;
+  const double eps = 1e-9 * solved_grid.spacing;
+
   for (int k = 0; k < solved_grid.nz; ++k)
     for (int j = 0; j < solved_grid.ny; ++j)
       for (int i = 0; i < solved_grid.nx; ++i) {
         const Vec3 p = solved_grid.voxel_center(i, j, k);
         bool inside = false;
-        if (params.kind == ClearanceKind::Bolt) {
-          const Vec3 rel = sub(p, axis_point);
-          const double t = dot(rel, axis_dir);
-          if (t >= t_lo - eps && t <= t_hi + eps) {
-            const Vec3 radial = Vec3{rel.x - t * axis_dir.x,
-                                     rel.y - t * axis_dir.y,
-                                     rel.z - t * axis_dir.z};
-            if (norm(radial) <= radius + eps) inside = true;
+        if (geom.kind == ClearanceKind::Bolt) {
+          const Vec3 rel = sub(p, geom.axis_point);
+          const double t = dot(rel, geom.axis_dir);
+          if (t >= geom.t_lo - eps && t <= geom.t_hi + eps) {
+            const Vec3 radial = Vec3{rel.x - t * geom.axis_dir.x,
+                                     rel.y - t * geom.axis_dir.y,
+                                     rel.z - t * geom.axis_dir.z};
+            if (norm(radial) <= geom.radius + eps) inside = true;
           }
         } else {  // Face slab
-          const Vec3 rel = sub(p, origin);
-          const double s = dot(rel, normal);
-          if (s >= -eps && s <= depth + eps) {
-            const double du = dot(rel, u), dw = dot(rel, w);
-            if (du >= u_lo - eps && du <= u_hi + eps && dw >= w_lo - eps &&
-                dw <= w_hi + eps)
+          const Vec3 rel = sub(p, geom.origin);
+          const double s = dot(rel, geom.normal);
+          if (s >= -eps && s <= geom.depth + eps) {
+            const double du = dot(rel, geom.u), dw = dot(rel, geom.w);
+            if (du >= geom.u_lo - eps && du <= geom.u_hi + eps &&
+                dw >= geom.w_lo - eps && dw <= geom.w_hi + eps)
               inside = true;
           }
         }
@@ -187,6 +230,19 @@ ClearanceRasterResult mask_clearance_region(const VoxelGrid& solved_grid,
 
   result.region_in_grid = result.region_voxels > 0;
   return result;
+}
+
+// ── Wrapper: the original face-derived entry point, unchanged behaviour. ────
+ClearanceRasterResult mask_clearance_region(const VoxelGrid& solved_grid,
+                                            const VoxelGrid& part, int offset_i,
+                                            int offset_j, int offset_k,
+                                            const StepModel& model, int face_id,
+                                            const ClearanceParams& params,
+                                            DesignMask& out) {
+  const ClearanceGeometry geom =
+      resolve_clearance_from_face(model, face_id, params);
+  return rasterize_clearance(solved_grid, part, offset_i, offset_j, offset_k,
+                             geom, out);
 }
 
 }  // namespace topopt

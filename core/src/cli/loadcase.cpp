@@ -335,9 +335,20 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     DesignMask clearance(solved.voxel_count(), MaskValue::Active);
     setup.clearance_reports.reserve(lc.clearances.size());
     for (const ProductionLoadCase::Clearance& c : lc.clearances) {
-      if (c.face_id < 0 || c.face_id >= model.face_count) continue;
-      const ClearanceRasterResult rr = mask_clearance_region(
-          solved, grid, oi, oj, ok, model, c.face_id, c.params, clearance);
+      // An AUTO primitive is derived from model.faces[face_id] (skipped, exactly
+      // as before, when the id is out of range). A MANUAL primitive carries its
+      // own geometry (no B-rep face). Both resolve to the SAME predicate and take
+      // the SAME rasterizer, so the mask is identical for identical geometry
+      // (handoff group-editing, BAR B2).
+      ClearanceGeometry geom;
+      if (c.manual) {
+        geom = resolve_clearance_manual(c.manual_geom, c.params);
+      } else {
+        if (c.face_id < 0 || c.face_id >= model.face_count) continue;
+        geom = resolve_clearance_from_face(model, c.face_id, c.params);
+      }
+      const ClearanceRasterResult rr =
+          rasterize_clearance(solved, grid, oi, oj, ok, geom, clearance);
       setup.clearance_reports.push_back(
           {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
       log_clearance(c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid);

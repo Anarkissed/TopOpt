@@ -779,13 +779,75 @@ public enum TopOptKit {
         public let concentricMarginMM: Double
         public let axialClearanceMM: Double
         public let slabDepthMM: Double
+        /// MANUAL (user-placed) primitive geometry (handoff group-editing). `nil`
+        /// for an auto face (geometry re-read from the STEP via `faceID`);
+        /// populated for a hand-placed primitive that has no B-rep face, so its
+        /// axis/radius/normal/extent must travel to the core. When set, `faceID`
+        /// is a sentinel (`-1`) and the same distance fields above still apply.
+        public let manual: ManualGeometry?
         public init(faceID: Int, kind: ClearanceKind, concentricMarginMM: Double = 0,
-                    axialClearanceMM: Double = 0, slabDepthMM: Double = 0) {
+                    axialClearanceMM: Double = 0, slabDepthMM: Double = 0,
+                    manual: ManualGeometry? = nil) {
             self.faceID = faceID
             self.kind = kind
             self.concentricMarginMM = concentricMarginMM
             self.axialClearanceMM = axialClearanceMM
             self.slabDepthMM = slabDepthMM
+            self.manual = manual
+        }
+
+        /// A hand-placed swept-cylinder (bolt) keep-out, geometry supplied inline.
+        public static func manualBolt(
+            axisPoint: SIMD3<Double>, axisDir: SIMD3<Double>, radiusMM: Double,
+            halfLengthMM: Double, concentricMarginMM: Double = 0,
+            axialClearanceMM: Double = 0
+        ) -> ClearanceSpec {
+            ClearanceSpec(faceID: -1, kind: .bolt,
+                          concentricMarginMM: concentricMarginMM,
+                          axialClearanceMM: axialClearanceMM,
+                          manual: ManualGeometry(axisPoint: axisPoint, axisDir: axisDir,
+                                                 radiusMM: radiusMM, halfLengthMM: halfLengthMM))
+        }
+
+        /// A hand-placed bounded-slab (face) keep-out, geometry supplied inline.
+        public static func manualFace(
+            origin: SIMD3<Double>, normal: SIMD3<Double>, halfUMM: Double,
+            halfWMM: Double, slabDepthMM: Double = 0
+        ) -> ClearanceSpec {
+            ClearanceSpec(faceID: -1, kind: .face, slabDepthMM: slabDepthMM,
+                          manual: ManualGeometry(origin: origin, normal: normal,
+                                                 halfUMM: halfUMM, halfWMM: halfWMM))
+        }
+    }
+
+    /// Manual (user-placed) primitive geometry — the values the user supplies
+    /// because a hand-placed keep-out has no B-rep face to derive them from
+    /// (handoff group-editing). The kind-appropriate half is read: bolt reads
+    /// axisPoint/axisDir/radiusMM/halfLengthMM; face reads origin/normal/halfU/halfW.
+    /// Same model/voxel frame + mm units as the geometry the core re-reads from the
+    /// STEP, so a manual and an auto primitive of identical geometry produce an
+    /// identical mask (BAR B2).
+    public struct ManualGeometry: Equatable, Sendable {
+        public var axisPoint: SIMD3<Double> = .zero
+        public var axisDir: SIMD3<Double> = .zero
+        public var radiusMM: Double = 0
+        public var halfLengthMM: Double = 0
+        public var origin: SIMD3<Double> = .zero
+        public var normal: SIMD3<Double> = .zero
+        public var halfUMM: Double = 0
+        public var halfWMM: Double = 0
+        public init(axisPoint: SIMD3<Double> = .zero, axisDir: SIMD3<Double> = .zero,
+                    radiusMM: Double = 0, halfLengthMM: Double = 0,
+                    origin: SIMD3<Double> = .zero, normal: SIMD3<Double> = .zero,
+                    halfUMM: Double = 0, halfWMM: Double = 0) {
+            self.axisPoint = axisPoint
+            self.axisDir = axisDir
+            self.radiusMM = radiusMM
+            self.halfLengthMM = halfLengthMM
+            self.origin = origin
+            self.normal = normal
+            self.halfUMM = halfUMM
+            self.halfWMM = halfWMM
         }
     }
 
@@ -822,12 +884,27 @@ public enum TopOptKit {
             lc.load_forces.push_back(g.force.z)
         }
         // Handoff 100 — flatten the "Keep clear" clearances into the POD load case.
+        // Handoff group-editing — a MANUAL primitive additionally ships its inline
+        // geometry (stride-3 point arrays); an auto primitive leaves the manual
+        // flag 0 and the geometry slots default (ignored core-side). All-auto =>
+        // byte-identical POD to before (BAR B4).
         for c in clearances {
             lc.clearance_face_ids.push_back(Int32(c.faceID))
             lc.clearance_kinds.push_back(Int32(c.kind.rawValue))
             lc.clearance_margin_mm.push_back(c.concentricMarginMM)
             lc.clearance_axial_mm.push_back(c.axialClearanceMM)
             lc.clearance_slab_mm.push_back(c.slabDepthMM)
+            let m = c.manual
+            lc.clearance_manual.push_back(m == nil ? 0 : 1)
+            let g = m ?? ManualGeometry()
+            for v in [g.axisPoint.x, g.axisPoint.y, g.axisPoint.z] { lc.clearance_axis_point_xyz.push_back(v) }
+            for v in [g.axisDir.x, g.axisDir.y, g.axisDir.z] { lc.clearance_axis_dir_xyz.push_back(v) }
+            lc.clearance_radius_mm.push_back(g.radiusMM)
+            lc.clearance_half_len_mm.push_back(g.halfLengthMM)
+            for v in [g.origin.x, g.origin.y, g.origin.z] { lc.clearance_origin_xyz.push_back(v) }
+            for v in [g.normal.x, g.normal.y, g.normal.z] { lc.clearance_normal_xyz.push_back(v) }
+            lc.clearance_half_u_mm.push_back(g.halfUMM)
+            lc.clearance_half_w_mm.push_back(g.halfWMM)
         }
         // Handoff 124 — flatten the Face protections (preserve-skin) into the POD
         // load case: the raw face ids + the ONE global depth (mm). A depth <= 0

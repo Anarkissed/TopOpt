@@ -105,6 +105,21 @@ struct JobClearance {
   double concentric_margin_mm = 0.0;  // bolt: keep-out radius = bore_r + this
   double axial_clearance_mm = 0.0;    // bolt: sweep this far past each face
   double slab_depth_mm = 0.0;         // face: extrude the outline outward this far
+
+  // MANUAL (user-placed) geometry (handoff group-editing). A clearance entry is
+  // EITHER an auto face (`face_id >= 0`, `manual == false`, geometry derived from
+  // the B-rep) OR a manual primitive (`manual == true`, `face_id == -1`, geometry
+  // supplied here). The job schema requires exactly one of the two: a `geometry`
+  // object OR a `face_id`. The kind-appropriate half of these fields is read.
+  bool manual = false;
+  Vec3 axis_point{0.0, 0.0, 0.0};  // bolt
+  Vec3 axis_dir{0.0, 0.0, 0.0};    // bolt (unit not required)
+  double radius_mm = 0.0;          // bolt: bore radius
+  double half_length_mm = 0.0;     // bolt: half the cylinder's own axial extent
+  Vec3 origin{0.0, 0.0, 0.0};      // face
+  Vec3 normal{0.0, 0.0, 0.0};      // face (outward; unit not required)
+  double half_u_mm = 0.0;          // face: in-plane half-extent (u)
+  double half_w_mm = 0.0;          // face: in-plane half-extent (w)
 };
 
 // A declared load case (ARCHITECTURE §1 mode (a)) — the CLI counterpart of the
