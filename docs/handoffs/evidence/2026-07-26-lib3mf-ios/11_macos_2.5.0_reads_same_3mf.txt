@@ -1,0 +1,9 @@
+# L4 + version-parity: NATIVE macOS lib3mf 2.5.0#1 reads the SAME real .3mf
+# (compare mesh counts to iOS 2.3.2 in 03_ios_sim_reads_real_3mf.txt)
+# dylib: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/.vcpkg/installed/arm64-osx-dynamic/lib/lib3mf.2.5.0.0.dylib
+-----
+lib3mf runtime version: 2.5.0
+READ OK: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/core/tests/fixtures/mesh/plate_bore.3mf
+vertices=208 triangles=416
+v0=(3.000, 0.000, 0.000)
+PROBE_EXIT=0

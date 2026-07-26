@@ -1,0 +1,25 @@
+==> OCCT:  /opt/homebrew/opt/opencascade
+==> Eigen: /opt/homebrew/opt/eigen
+==> lib3mf: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/.vcpkg/installed/arm64-osx-dynamic (macOS slice built WITH 3MF import)
+==> building macOS slice (Eigen + OCCT + lib3mf, arm64)
+==> building iOS simulator slice (Eigen, OCCT-free + lib3mf, arm64)
+Lib3MF - General CMake Tool Chain
+***********************************
+LIB3MF Chosen Variant : Cpp
+***********************************
+==> building iOS device slice (Eigen, OCCT-free + lib3mf, arm64)
+Lib3MF - General CMake Tool Chain
+***********************************
+LIB3MF Chosen Variant : Cpp
+***********************************
+==> created /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit/vendor/TopOptCore.xcframework
+==> wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit/Sources/TopOptFlows/CoreFingerprint.generated.swift (fingerprint=09d4988092a5)
+==> vendored:
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit/vendor/TopOptCore.xcframework (macos-arm64, ios-arm64-simulator, ios-arm64)
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit/vendor/include   -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/core/include
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit/vendor/occt-lib  -> /opt/homebrew/opt/opencascade/lib   (macOS link only)
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit/vendor/lib3mf-lib -> /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/.vcpkg/installed/arm64-osx-dynamic/lib   (macOS 3MF import link)
+    (no vendor/occt-ios — iOS slices are OCCT-free; run build_occt_ios.sh for STEP on iOS)
+    /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit/vendor/lib3mf-ios/lib3mf.xcframework  (lib3mf, iOS device+sim — linked+embedded on iOS)
+    iOS slices built WITH lib3mf: 3MF import is available on iPad/simulator.
+==> done. Test: (cd /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/TopOptKit && xcodebuild test -scheme TopOptKit-Package -destination 'platform=macOS')

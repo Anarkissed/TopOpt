@@ -1,0 +1,43 @@
+# Does lib3mf v2.5.0 cross-CONFIGURE for iOS? (its cmake_minimum is 3.10, needs no policy shim)
+# NOTE: configure-only smoke test, NOT a full build. Recommendation follow-up, not applied.
+1:cmake_minimum_required (VERSION 3.10)
+-----
+CMake Warning (author) at /opt/homebrew/share/cmake/Modules/GNUInstallDirs.cmake:455 (message):
+  Unable to determine default CMAKE_INSTALL_LIBDIR directory because no
+  target architecture is known.  Please enable at least one language before
+  including GNUInstallDirs.
+Call Stack (most recent call first):
+  /opt/homebrew/share/cmake/Modules/GNUInstallDirs.cmake:298 (_GNUInstallDirs_LIBDIR_get_default)
+  /opt/homebrew/share/cmake/Modules/GNUInstallDirs.cmake:298 (cmake_language)
+  /opt/homebrew/share/cmake/Modules/GNUInstallDirs.cmake:547 (_GNUInstallDirs_cache_path)
+  CMakeLists.txt:9 (include)
+This warning is for project developers.  Use -Wno-author to suppress it.
+
+-- The C compiler identification is AppleClang 21.0.0.21000101
+-- The CXX compiler identification is AppleClang 21.0.0.21000101
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+CMake Warning (deprecated) at CMakeLists.txt:1 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+This warning is for project developers.  Use -Wno-author or -Wno-deprecated
+to suppress it.
+
+-- CMD_ERROR:0
+LIB3MF_TESTS ... OFF
+-- Configuring done (55.9s)
+-- Generating done (0.2s)
+-- Build files have been written to: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/app/.build-occt-ios/build/lib3mf25-sim-cfgtest
+CONFIGURE_EXIT=0

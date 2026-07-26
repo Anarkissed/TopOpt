@@ -127,14 +127,20 @@ build_ios_slice() {
   build_slice "$name" "$archs" "${extra[@]}"
 }
 
-# When OCCT is present the simulator slice must be arm64-only: the cross-built
-# OCCT ships arm64 only (Apple-Silicon simulator), so a fat arm64+x86_64 sim
-# slice would carry STEP object code with no x86_64 OCCT to link against. The
-# OCCT-free sim slice stays universal (arm64+x86_64) as before.
-if [[ -d "$OCCT_IOS_SIM" ]]; then SIM_ARCHS="arm64"; else SIM_ARCHS="arm64;x86_64"; fi
+# When OCCT *or* lib3mf is present the simulator slice must be arm64-only: BOTH
+# cross-built dependencies ship arm64 only (Apple-Silicon simulator), so a fat
+# arm64+x86_64 sim slice would carry STEP/3MF object code with no x86_64 OCCT /
+# lib3mf to link against at app-link time. The dependency-free sim slice stays
+# universal (arm64+x86_64) as before. (lib3mf added here for the same reason OCCT
+# was — see build_occt_ios.sh, which builds the lib3mf iOS slice arm64-only.)
+if [[ -d "$OCCT_IOS_SIM" || -d "$LIB3MF_IOS_SIM" ]]; then SIM_ARCHS="arm64"; else SIM_ARCHS="arm64;x86_64"; fi
 
 [[ -d "$OCCT_IOS_SIM" ]] && SIM_KIND="Eigen + OCCT" || SIM_KIND="Eigen, OCCT-free"
 [[ -d "$OCCT_IOS_DEV" ]] && DEV_KIND="Eigen + OCCT" || DEV_KIND="Eigen, OCCT-free"
+# Reflect lib3mf in the build-log kind too, so the line that scrolls past during
+# the build is already honest about whether 3MF compiled into this slice.
+[[ -d "$LIB3MF_IOS_SIM" ]] && SIM_KIND="$SIM_KIND + lib3mf"
+[[ -d "$LIB3MF_IOS_DEV" ]] && DEV_KIND="$DEV_KIND + lib3mf"
 echo "==> building iOS simulator slice ($SIM_KIND, $SIM_ARCHS)"
 LIB_IOSSIM=$(build_ios_slice iossimulator iphonesimulator "$SIM_ARCHS" "$OCCT_IOS_SIM" "$LIB3MF_IOS_SIM")
 
@@ -207,6 +213,31 @@ if [[ -d "$VENDOR/occt-ios" ]]; then
   echo "    iOS slices built WITH OCCT: STEP import is available on iPad/simulator."
 else
   echo "    (no vendor/occt-ios — iOS slices are OCCT-free; run build_occt_ios.sh for STEP on iOS)"
+fi
+# iOS lib3mf (3MF import on iPad/simulator). Reported in the SAME voice as the
+# OCCT line above — presence OR absence, never silence (handoff 2026-07-26). Two
+# things must both be true for .3mf import to work on iPad:
+#   (a) the iOS core slices compiled WITH lib3mf  -> install/lib3mf-<sdk>/ present
+#       at build_core time (that is what defines TOPOPT_HAVE_3MF for the slice);
+#   (b) the app embeds the lib3mf dylib           -> vendor/lib3mf-ios/lib3mf.xcframework.
+# Both come from BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh. If only one is
+# present the state is INCONSISTENT (a half-built iOS lib3mf) and we say so loudly,
+# because that is exactly the kind of silent gap this report exists to kill.
+XCF3MF="$VENDOR/lib3mf-ios/lib3mf.xcframework"
+have_3mf_core=0; [[ -d "$LIB3MF_IOS_SIM" && -d "$LIB3MF_IOS_DEV" ]] && have_3mf_core=1
+have_3mf_xcf=0;  [[ -d "$XCF3MF" ]] && have_3mf_xcf=1
+if [[ "$have_3mf_core" == 1 && "$have_3mf_xcf" == 1 ]]; then
+  echo "    $XCF3MF  (lib3mf, iOS device+sim — linked+embedded on iOS)"
+  echo "    iOS slices built WITH lib3mf: 3MF import is available on iPad/simulator."
+elif [[ "$have_3mf_core" == 0 && "$have_3mf_xcf" == 0 ]]; then
+  echo "    (no vendor/lib3mf-ios — iOS slices are 3MF-free; .3mf import will be UNAVAILABLE on iPad."
+  echo "     run 'BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh' then re-run this script to enable 3MF on iOS)"
+else
+  echo "    WARNING: iOS lib3mf is INCOMPLETE — 3MF import on iPad will likely be broken:"
+  echo "       install/lib3mf-iphoneos        : $([[ -d "$LIB3MF_IOS_DEV" ]] && echo present || echo MISSING)"
+  echo "       install/lib3mf-iphonesimulator : $([[ -d "$LIB3MF_IOS_SIM" ]] && echo present || echo MISSING)"
+  echo "       vendor/lib3mf-ios (xcframework) : $([[ "$have_3mf_xcf" == 1 ]] && echo present || echo MISSING)"
+  echo "     rebuild the iOS lib3mf stage cleanly: BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh"
 fi
 # NOTE: use the -Package scheme, not -scheme TopOptKit. `TopOptKit` is the library
 # product's scheme and has no test action ("Scheme TopOptKit is not currently

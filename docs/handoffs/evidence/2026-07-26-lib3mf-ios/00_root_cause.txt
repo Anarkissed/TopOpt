@@ -1,0 +1,9 @@
+# Root cause of the SILENT iOS lib3mf failure
+# Host CMake:
+cmake version 4.4.0
+
+# lib3mf v2.3.2 top-level CMakeLists declares:
+1:cmake_minimum_required (VERSION 3.0)
+
+# Configure FAILS on CMake 4.x WITHOUT the compat flag (captured pre-fix):
+#   (this is the failure the OLD build_occt_ios.sh swallowed via 'return 0')

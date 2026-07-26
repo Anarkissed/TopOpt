@@ -204,37 +204,73 @@ package_occt_xcframeworks() {
 }
 
 # =============================================================================
-# lib3mf (BSD, M7.9). Best-effort: a failure here does NOT fail the OCCT goal.
+# lib3mf (BSD, M7.9). Best-effort for the OCCT/STEP GOAL: a failure here does NOT
+# fail the OCCT build. But best-effort is NOT the same as silent — every failure
+# path below records LIB3MF_DETAIL and returns non-zero, so the caller flips
+# LIB3MF_STATUS to "failed" and the END-OF-RUN summary states plainly that 3MF
+# import will be unavailable on iPad. (Handoff 2026-07-26: the old code hid a
+# failed cross-build behind a mid-build `return 0`, so a user saw a clean,
+# confident build and only discovered 3MF was missing when the iPad refused a
+# .3mf. Instruments without alarms — see handoff 169.)
+#
 # lib3mf vendors its third-party in git submodules, so a shallow clone WITH
 # submodules is required (a release tarball omits them).
-# =============================================================================
+#
+# NOTE: this runs under `set -e`, but the caller invokes it as `if build_lib3mf`,
+# which DISABLES `set -e` for the whole function body. A bare `cmake ... failed`
+# would therefore NOT abort — it would fall through and later "succeed" with no
+# dylib. So every fallible step is checked EXPLICITLY here; do not rely on `set -e`.
 build_lib3mf() {
+  LIB3MF_DETAIL=""
   local src="$WORK/src/lib3mf"
   if [[ ! -d "$src/.git" ]]; then
     echo "==> cloning lib3mf $LIB3MF_TAG (shallow, +submodules)"
-    git clone --depth 1 --branch "$LIB3MF_TAG" --recurse-submodules \
-      https://github.com/3MFConsortium/lib3mf.git "$src"
+    if ! git clone --depth 1 --branch "$LIB3MF_TAG" --recurse-submodules \
+        https://github.com/3MFConsortium/lib3mf.git "$src"; then
+      LIB3MF_DETAIL="git clone of lib3mf $LIB3MF_TAG failed (network, tag, or submodules)"
+      return 1
+    fi
   fi
   local sdk
   for sdk in "${SLICES[@]}"; do
     local build="$WORK/build/lib3mf-$sdk" install="$WORK/install/lib3mf-$sdk"
     echo "==> [lib3mf/$sdk] configure + build"
     rm -rf "$build"
-    cmake -S "$src" -B "$build" \
-      -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
-      -DIOS_SDK="$sdk" -DIOS_ARCHS="arm64" \
-      -DIOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
-      -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$install" \
-      -DLIB3MF_TESTS=OFF -DBUILD_SHARED_LIBS=ON
-    cmake --build "$build" --config Release --parallel "$JOBS"
-    rm -rf "$install"; cmake --install "$build" --config Release
+    # CMAKE_POLICY_VERSION_MINIMUM=3.5: lib3mf $LIB3MF_TAG's top-level CMakeLists
+    # declares `cmake_minimum_required(VERSION 3.0)`. CMake 4.x REMOVED pre-3.5
+    # compatibility, so on a modern CMake the configure aborts with "Compatibility
+    # with CMake < 3.5 has been removed" and (under the old code) the stage failed
+    # silently — the app shipped without 3MF and only the iPad's refusal revealed
+    # it (handoff 2026-07-26). This flag lets the PINNED lib3mf configure under
+    # CMake 4.x without editing lib3mf sources or changing its version. Harmless on
+    # CMake 3.x. (If lib3mf is ever bumped to a tag whose min is ≥3.5, it becomes a
+    # no-op and can be dropped.)
+    if ! cmake -S "$src" -B "$build" \
+        -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" \
+        -DIOS_SDK="$sdk" -DIOS_ARCHS="arm64" \
+        -DIOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
+        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$install" \
+        -DLIB3MF_TESTS=OFF -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5; then
+      LIB3MF_DETAIL="cmake configure failed for $sdk (see log above)"
+      return 1
+    fi
+    if ! cmake --build "$build" --config Release --parallel "$JOBS"; then
+      LIB3MF_DETAIL="cmake build failed for $sdk (see log above)"
+      return 1
+    fi
+    rm -rf "$install"
+    if ! cmake --install "$build" --config Release; then
+      LIB3MF_DETAIL="cmake install failed for $sdk (see log above)"
+      return 1
+    fi
   done
   # Wrap the single lib3mf dylib as a framework per slice, then xcframework.
   local sdk2 platform
   for sdk2 in "${SLICES[@]}"; do
     local libdir="$WORK/install/lib3mf-$sdk2/lib"
     local dylib; dylib="$(ls "$libdir"/lib3mf*.dylib 2>/dev/null | head -1 || true)"
-    [[ -n "$dylib" ]] || { echo "warn: no lib3mf dylib for $sdk2; skipping lib3mf"; return 0; }
+    [[ -n "$dylib" ]] || { LIB3MF_DETAIL="no lib3mf dylib produced for $sdk2 (build/install incomplete)"; return 1; }
     local fw="$WORK/frameworks/$sdk2/lib3mf.framework"; rm -rf "$fw"; mkdir -p "$fw"
     cp -L "$dylib" "$fw/lib3mf"; chmod u+w "$fw/lib3mf"
     install_name_tool -id "@rpath/lib3mf.framework/lib3mf" "$fw/lib3mf"
@@ -258,8 +294,14 @@ PLIST
   for sdk3 in "${SLICES[@]}"; do
     [[ -d "$WORK/frameworks/$sdk3/lib3mf.framework" ]] && args+=(-framework "$WORK/frameworks/$sdk3/lib3mf.framework")
   done
-  xcodebuild -create-xcframework "${args[@]}" -output "$outdir/lib3mf.xcframework" >/dev/null
+  if ! xcodebuild -create-xcframework "${args[@]}" -output "$outdir/lib3mf.xcframework" >/dev/null; then
+    LIB3MF_DETAIL="xcodebuild -create-xcframework failed (see log above)"
+    return 1
+  fi
+  [[ -d "$outdir/lib3mf.xcframework" ]] || { LIB3MF_DETAIL="lib3mf.xcframework missing after packaging"; return 1; }
+  LIB3MF_DETAIL="$outdir/lib3mf.xcframework"
   echo "==> packaged lib3mf.xcframework -> $outdir"
+  return 0
 }
 
 # =============================================================================
@@ -337,12 +379,26 @@ done
 
 package_occt_xcframeworks
 
+# lib3mf iOS stage. Best-effort for the STEP goal, but its outcome is TRACKED and
+# surfaced in the end-of-run summary below — never swallowed. LIB3MF_STATUS is one
+# of: ok | failed | skipped. LIB3MF_DETAIL carries the reason / the built path.
+LIB3MF_STATUS="skipped"
+LIB3MF_DETAIL="BUILD_LIB3MF=0 (lib3mf stage was not requested)"
 if [[ "$BUILD_LIB3MF" == "1" ]]; then
-  build_lib3mf || echo "warn: lib3mf stage failed (non-fatal for M7.1b STEP goal); see log above"
+  if build_lib3mf; then
+    LIB3MF_STATUS="ok"
+  else
+    LIB3MF_STATUS="failed"
+    echo "warn: lib3mf iOS stage FAILED: ${LIB3MF_DETAIL:-unknown} — non-fatal for the OCCT/STEP goal," >&2
+    echo "      but 3MF import will be UNAVAILABLE on iPad. This is reported again at the end of the run." >&2
+  fi
 fi
 
 write_manifest_list
 
+# --- end-of-run summary -------------------------------------------------------
+# The lib3mf line is printed at the VERY END (not only where it happened) so a
+# failure that scrolled past hundreds of lines of OCCT output cannot be missed.
 cat <<DONE
 
 ==> OCCT iOS slices ready.
@@ -351,14 +407,57 @@ cat <<DONE
     framework list: $PKG_DIR/occt-frameworks.generated.json
                     (git-ignored; Package.swift stays committed-empty and shows
                     UNMODIFIED in git status — verify with: git status --short)
+DONE
+
+case "$LIB3MF_STATUS" in
+  ok)
+    cat <<DONE
+==> iOS lib3mf (3MF import on iPad/simulator): BUILT  ✅
+    xcframework  : $VENDOR/lib3mf-ios/lib3mf.xcframework  (lib3mf $LIB3MF_TAG)
+    install trees: $WORK/install/lib3mf-<sdk>/  (headers + lib3mfConfig.cmake)
+    build_core.sh will detect these and compile the iOS core slices WITH lib3mf
+    (TOPOPT_HAVE_3MF); the app links + embeds lib3mf.xcframework, so .3mf import
+    works on iPad/simulator.
+DONE
+    ;;
+  failed)
+    cat <<DONE
+==> iOS lib3mf (3MF import on iPad/simulator): FAILED  ❌  — 3MF import will be UNAVAILABLE on iPad.
+    reason: $LIB3MF_DETAIL
+    OCCT/STEP above is unaffected. The app will still build and run; importing a
+    .3mf on iPad will show the correct "3MF import requires lib3mf, which is not
+    available in this build" refusal (export STL and import that instead).
+    To fix, address the reason above and re-run:
+        BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh
+    If lib3mf simply cannot cross-compile for iOS on this toolchain, 3MF stays
+    macOS/worker-only — see docs/handoffs/2026-07-26-lib3mf-ios.md.
+DONE
+    ;;
+  skipped)
+    cat <<DONE
+==> iOS lib3mf (3MF import on iPad/simulator): SKIPPED  — 3MF import will be UNAVAILABLE on iPad.
+    reason: $LIB3MF_DETAIL
+    Re-run with the lib3mf stage enabled to get 3MF on iOS:
+        BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh
+DONE
+    ;;
+esac
+
+cat <<DONE
 
 Next:
   1. ./app/scripts/build_core.sh        # builds the iOS core slices WITH OCCT
                                         # (STEP compiled in) — it detects
-                                        # $WORK/install/occt-<sdk>/
-  2. Build/run the TopOpt app on an iPad simulator/device and import a .step file.
-     Package.swift's TopOptOCCT product now carries vendor/occt-ios/*.xcframework;
-     the app links + embeds them and TOPOPT_BRIDGE_HAS_OCCT is defined on iOS.
+                                        # $WORK/install/occt-<sdk>/  and, when the
+                                        # lib3mf stage above succeeded, the
+                                        # $WORK/install/lib3mf-<sdk>/ trees too, so
+                                        # 3MF import compiles into the iOS slices.
+                                        # Its "==> vendored:" report states iOS
+                                        # lib3mf presence/absence explicitly.
+  2. Build/run the TopOpt app on an iPad simulator/device and import a .step /.3mf.
+     Package.swift's TopOptOCCT product now carries vendor/occt-ios/*.xcframework
+     (+ vendor/lib3mf-ios/lib3mf.xcframework when built); the app links + embeds
+     them and TOPOPT_BRIDGE_HAS_OCCT is defined on iOS.
      The manifest cache was invalidated above; if Xcode was already open, run
      File > Packages > Reset Package Caches once so it re-reads the framework list.
 DONE
