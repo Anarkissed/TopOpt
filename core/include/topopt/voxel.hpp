@@ -105,6 +105,21 @@ struct VoxelGrid {
 // empty / degenerate (zero-volume bounding box).
 VoxelGrid voxelize(const TriangleMesh& mesh, int resolution);
 
+// Voxelize `mesh` onto the SAME grid geometry as `reference` (origin, cubic
+// spacing and nx*ny*nz dimensions) rather than a bbox-derived grid. Marks a voxel
+// solid iff the mesh encloses that voxel's centre, by the identical +Z winding
+// rule voxelize uses — so for identical geometry the two agree voxel-for-voxel.
+//
+// This is the re-voxelization the standalone re-certification path needs (handoff
+// 2026-07-26-constrained-smooth): an EDITED / smoothed variant mesh, re-analysed on
+// the exact grid the original run solved on, keeps the run's node-indexed BCs and
+// loads valid (same voxel centres). The re-analysis therefore runs on the mesh's
+// VOXELIZATION at this resolution, which differs from the printed surface by up to
+// ~half a voxel — the quantization gap the "smoothed / re-analyzed" provenance
+// discloses. Throws std::invalid_argument if the mesh is empty or `reference` is
+// degenerate (non-positive spacing or a zero dimension).
+VoxelGrid voxelize_onto_grid(const TriangleMesh& mesh, const VoxelGrid& reference);
+
 // An all-Active design mask sized to `grid` (size grid.voxel_count()): every
 // voxel is a free design variable, so the mask-aware SIMP path reproduces the
 // unconstrained optimizer. This is the neutral base a caller fills in with

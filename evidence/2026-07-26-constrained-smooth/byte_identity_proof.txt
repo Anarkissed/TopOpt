@@ -1,0 +1,32 @@
+# Byte-identity proof — analyze_fixed_design vs the run it was extracted from
+
+## (1) Integration: minimize_plastic output unchanged by the refactor
+Re-ran the res-48 self-weight demo (job48_sf1) after routing minimize_plastic's
+recovery block through analyze_fixed_design, diffed against the pre-refactor baseline:
+
+  report.json  baseline sha256: 47dcec31751e55eab28c93d274603d556cfbb921bdaf00f41ef55dd723630005
+  report.json  post     sha256: 47dcec31751e55eab28c93d274603d556cfbb921bdaf00f41ef55dd723630005
+  fields.bin   baseline sha256: 9c28a20d6404303bc059c7f1ba3a5eee89ca1611d2ed8468a51def151570b224
+  fields.bin   post     sha256: 9c28a20d6404303bc059c7f1ba3a5eee89ca1611d2ed8468a51def151570b224
+
+  report.json: BYTE-IDENTICAL
+  fields.bin : BYTE-IDENTICAL
+
+## (2) Unit: analyze_fixed_design reproduces a variant's own numbers bit-for-bit
+test_analyze_fixed_design (core/tests/unit/): runs one minimize_plastic rung on a
+loaded cantilever, then calls analyze_fixed_design on that variant's OWN converged
+density and asserts von Mises / stress tensor / displacement / mass / support /
+every margin term / min-feature count / printed fraction / verdict are '==' (not
+within tol). Also: deterministic re-run, and the gate REJECTS when margin_stop
+exceeds the measured margin.
+
+22 checks, 0 failures
+
+## (3) Regression: the demo golden still matches expected_values.json
+test_cli (validation/cli_demo): runs the full l-bracket demo job (res 48, ladder
+0.7/0.5/0.3) through run_job after the refactor and asserts report.json against
+tests/fixtures/demo/expected_values.json.
+  RESULT: all 84 checks passed
+
+Other affected tests (all pass): voxelize, report, fields, traction_loads, simp,
+rmin, variants, galerkin_cache, analyze_fixed_design, orientation, export_stl.

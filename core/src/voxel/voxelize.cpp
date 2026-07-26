@@ -225,6 +225,14 @@ struct Crossing {
 
 }  // namespace
 
+// Shared winding-fill core, defined below: mark every voxel of the grid (origin
+// `lo`, cubic spacing `h`, nx*ny*nz) whose centre the mesh encloses by the +Z
+// winding rule, then classify Surface/Interior. Both voxelize (grid derived from
+// the mesh bbox) and voxelize_onto_grid (grid supplied) delegate here, so the two
+// paths mark IDENTICAL occupancy for identical geometry.
+static VoxelGrid voxelize_fill(const TriangleMesh& mesh, const Vec3& lo, double h,
+                               int nx, int ny, int nz);
+
 VoxelGrid voxelize(const TriangleMesh& mesh, int resolution) {
   if (resolution < 1) {
     throw std::invalid_argument("voxelize: resolution must be >= 1");
@@ -253,20 +261,39 @@ VoxelGrid voxelize(const TriangleMesh& mesh, int resolution) {
     return n < 1 ? 1 : n;
   };
 
+  return voxelize_fill(mesh, lo, h, axis_count(ext_x), axis_count(ext_y),
+                       axis_count(ext_z));
+}
+
+// Voxelize `mesh` onto the SAME grid geometry as `reference` (origin, spacing and
+// nx*ny*nz) instead of a bbox-derived grid, so an EDITED / smoothed variant mesh
+// can be re-analysed on the exact grid the original run solved on — same voxel
+// centres, so the run's node-indexed BCs and loads apply unchanged. This is the
+// re-voxelization the standalone re-certification path (analyze_fixed_design) needs
+// (handoff 2026-07-26-constrained-smooth). The quantization gap it introduces (the
+// mesh surface vs its voxelization at this resolution) is the footnote the
+// re-analysis provenance discloses. Throws if the mesh is empty.
+VoxelGrid voxelize_onto_grid(const TriangleMesh& mesh, const VoxelGrid& reference) {
+  if (mesh.empty() || mesh.vertices.empty())
+    throw std::invalid_argument("voxelize_onto_grid: mesh is empty");
+  if (!(reference.spacing > 0.0) || reference.nx < 1 || reference.ny < 1 ||
+      reference.nz < 1)
+    throw std::invalid_argument("voxelize_onto_grid: reference grid is degenerate");
+  return voxelize_fill(mesh, reference.origin, reference.spacing, reference.nx,
+                       reference.ny, reference.nz);
+}
+
+static VoxelGrid voxelize_fill(const TriangleMesh& mesh, const Vec3& lo, double h,
+                               int nx, int ny, int nz) {
   VoxelGrid grid;
-  grid.nx = axis_count(ext_x);
-  grid.ny = axis_count(ext_y);
-  grid.nz = axis_count(ext_z);
+  grid.nx = nx;
+  grid.ny = ny;
+  grid.nz = nz;
   grid.spacing = h;
   grid.origin = lo;
-  grid.tags.assign(static_cast<std::size_t>(grid.nx) *
-                       static_cast<std::size_t>(grid.ny) *
-                       static_cast<std::size_t>(grid.nz),
+  grid.tags.assign(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+                       static_cast<std::size_t>(nz),
                    VoxelTag::Empty);
-
-  const int nx = grid.nx;
-  const int ny = grid.ny;
-  const int nz = grid.nz;
 
   // Per-column list of crossings (x-fastest indexing over the nx*ny columns).
   std::vector<std::vector<Crossing>> columns(static_cast<std::size_t>(nx) *

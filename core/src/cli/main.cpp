@@ -40,16 +40,86 @@ int usage(const char* argv0) {
                "[--rules PATH]\n"
                "              [--no-iteration-csv] [--snapshots] "
                "[--snapshot-every N] [--snapshot-cap N]\n"
+               "       %s analyze <job.json> [--mesh PATH] [--out DIR] "
+               "[--materials PATH] [--rules PATH]\n"
                "       %s --version\n"
                "\n"
-               "Observability (handoff 114), written to --out:\n"
+               "run      optimize the job's ladder and export accepted variants.\n"
+               "analyze  ONE FEA analysis solve on a FIXED design, no optimization\n"
+               "         (the re-certification 'receipt'). Without --mesh it certifies\n"
+               "         the job's model as a solid part; with --mesh PATH it re-voxelizes\n"
+               "         that mesh (e.g. a smoothed variant) onto the run's grid and\n"
+               "         re-analyzes it. Writes analysis_report.json + analysis.json\n"
+               "         (provenance + both mass figures) + fields.bin to --out.\n"
+               "\n"
+               "Observability (handoff 114), written to --out by `run`:\n"
                "  run_info.json      version + config record (always)\n"
                "  iterations.csv     per-iteration trace (default ON; "
                "--no-iteration-csv disables)\n"
                "  snapshots/*.f16    float16 density snapshots (opt-in "
                "--snapshots; ~10.8 MB each at 5.4M voxels)\n",
-               argv0, argv0);
+               argv0, argv0, argv0);
   return 2;
+}
+
+std::string dirname_of(const std::string& path);  // defined below
+
+// `analyze` subcommand — parse its flags and run analyze_job. Returns the process
+// exit code.
+int run_analyze(int argc, char** argv, const std::string& materials_default,
+                const std::string& rules_default) {
+  if (argc < 3) return usage(argv[0]);
+  const std::string job_path = argv[2];
+  std::string out_dir = ".";
+  std::string materials_path = materials_default;
+  std::string rules_path = rules_default;
+  std::string mesh_path;
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    if (arg == "--out") {
+      out_dir = argv[++i];
+    } else if (arg == "--materials") {
+      materials_path = argv[++i];
+    } else if (arg == "--rules") {
+      rules_path = argv[++i];
+    } else if (arg == "--mesh") {
+      mesh_path = argv[++i];
+    } else {
+      return usage(argv[0]);
+    }
+  }
+
+  try {
+    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    const topopt::MaterialLibrary materials =
+        topopt::load_materials_file(materials_path);
+    const topopt::SettingsRules rules =
+        topopt::load_settings_rules_file(rules_path);
+
+    const topopt::AnalyzeJobResult r = topopt::analyze_job(
+        job, dirname_of(job_path), out_dir, materials, rules, mesh_path);
+    const topopt::FixedDesignAnalysis& a = r.analysis;
+
+    std::printf("analyze: %s (fixed design, ONE analysis solve, no optimization)\n",
+                r.analyzed_mesh ? ("mesh " + r.analyzed_mesh_path).c_str()
+                                : (job.model + " as solid part").c_str());
+    std::printf("  peak stress: %.4g MPa   worst-case margin: %.4g "
+                "(required %.4g)\n",
+                a.max_von_mises, a.margin.worst_case, job.margin_stop);
+    std::printf("  verdict: %s\n", a.accepted ? "ACCEPTED" : "REJECTED");
+    std::printf("  voxel mass: %.4g g", r.voxel_mass_grams);
+    if (r.analyzed_mesh)
+      std::printf("   mesh mass: %.4g g", r.mesh_mass_grams);
+    std::printf("\n  min-feature violations: %d\n", a.v3.min_feature_violations);
+    std::printf("report: %s\n", r.report_path.c_str());
+    std::printf("provenance: %s\n", r.provenance_path.c_str());
+    std::printf("fields: %s\n", r.fields_path.c_str());
+    return 0;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "topopt-cli: %s\n", e.what());
+    return 1;
+  }
 }
 
 std::string dirname_of(const std::string& path) {
@@ -69,6 +139,10 @@ int main(int argc, char** argv) {
                 TOPOPT_BUILD_FINGERPRINT);
     return 0;
   }
+  // `analyze` — ONE analysis solve on a fixed design, no optimization.
+  if (argc >= 2 && std::string(argv[1]) == "analyze")
+    return run_analyze(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS,
+                       TOPOPT_CLI_DEFAULT_RULES);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";

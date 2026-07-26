@@ -1,0 +1,4 @@
+scratchpad/variant_050.stl   tris= 13888 edges= 20824 | dihedral(deg) mean= 12.1 med=  4.3 p90= 34.1 p99=106.9 max=176.2 | frac>30=11.4% >45= 6.8%
+scratchpad/variant_050.stl   tris= 55040 edges= 82560 | dihedral(deg) mean=  6.6 med=  2.2 p90= 17.6 p99= 61.1 max=169.1 | frac>30= 4.6% >45= 1.7%
+scratchpad/variant_030.stl   tris=  8948 edges= 13422 | dihedral(deg) mean= 15.1 med=  6.4 p90= 38.5 p99=123.1 max=164.8 | frac>30=13.3% >45= 8.7%
+scratchpad/variant_030.stl   tris= 35084 edges= 52626 | dihedral(deg) mean=  8.2 med=  3.3 p90= 20.4 p99= 81.9 max=145.3 | frac>30= 6.2% >45= 2.9%

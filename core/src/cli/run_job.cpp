@@ -1,5 +1,6 @@
 #include "topopt/job.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -11,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "topopt/analyze.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/fields.hpp"
 #include "topopt/loadcase.hpp"
@@ -21,6 +23,7 @@
 #include "topopt/part.hpp"
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
+#include "topopt/settings.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/version.hpp"
@@ -220,7 +223,258 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
   return path;
 }
 
+// --- analyze_job helpers (handoff 2026-07-26-constrained-smooth) -------------
+
+Vec3 normalized(const Vec3& v) {
+  const double n = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  return Vec3{v.x / n, v.y / n, v.z / n};
+}
+
+// Enclosed volume (mm^3) of a closed triangle mesh via the divergence theorem:
+// V = |sum over triangles a · (b × c)| / 6. The analysed mesh's TRUE (surface-
+// enclosed) mass is this * density — the honest counterpart to the voxel-count
+// mass, and the pair the re-analysis discloses.
+double mesh_enclosed_volume_mm3(const TriangleMesh& m) {
+  double v6 = 0.0;
+  for (const auto& tri : m.triangles) {
+    const Vec3& a = m.vertices[static_cast<std::size_t>(tri[0])];
+    const Vec3& b = m.vertices[static_cast<std::size_t>(tri[1])];
+    const Vec3& c = m.vertices[static_cast<std::size_t>(tri[2])];
+    v6 += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) +
+          a.z * (b.x * c.y - b.y * c.x);
+  }
+  return std::fabs(v6) / 6.0;
+}
+
+// A finite double as a JSON number, non-finite as JSON null (matching
+// job_report_json's convention for unbounded margins).
+std::string json_num(double v) {
+  if (!std::isfinite(v)) return "null";
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.10g", v);
+  return std::string(buf);
+}
+
+std::string json_str(const std::string& s) {
+  std::string out = "\"";
+  for (const char ch : s) {
+    if (ch == '"' || ch == '\\') out += '\\';
+    out += ch;
+  }
+  out += '"';
+  return out;
+}
+
 }  // namespace
+
+AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_dir,
+                             const std::string& out_dir,
+                             const MaterialLibrary& materials,
+                             const SettingsRules& rules,
+                             const std::string& analyze_mesh_path) {
+  // Self-weight only for now — a declared "loads" block needs the loadcase
+  // grid/BC construction (build_production_loadcase), not yet wired here.
+  if (job.loads.present)
+    throw JobError(
+        "analyze: jobs with a \"loads\" block are not yet supported "
+        "(self-weight jobs only)");
+
+  const auto mat_it = materials.find(job.material);
+  if (mat_it == materials.end())
+    throw JobError("material \"" + job.material +
+                   "\" is not in the material library");
+  const Material& material = mat_it->second;
+
+  AnalyzeJobResult result;
+
+  // ── import the ORIGINAL model (the BCs are keyed on ITS fixture faces) ───────
+  const std::string model_path = join_path(job_dir, job.model);
+  const bool model_is_mesh =
+      part_format_for_path(job.model) != PartFormat::Step;
+  try {
+    result.model = import_part_file_resolved(model_path);
+  } catch (const std::exception& e) {
+    throw JobError(std::string("analyze: cannot import model: ") + e.what());
+  }
+  if (!check_watertight(result.model.mesh).watertight)
+    throw JobError("analyze: model tessellation is not watertight: " + job.model);
+
+  // ── the model grid: the fixture BCs and the printed-fraction BASELINE ────────
+  // Voxelize the model and tag its fixture faces. The fixture NODE indices and the
+  // part-solid count are geometry (independent of which design we analyse), so we
+  // take them from the model grid and reuse them for any same-geometry design.
+  VoxelGrid model_grid = voxelize(result.model.mesh, job.resolution);
+  result.fixture_face_ids =
+      resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
+  std::size_t tagged = 0;
+  for (const int f : result.fixture_face_ids)
+    tagged += model_is_mesh
+                  ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
+                  : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
+  if (tagged == 0)
+    throw JobError(
+        "analyze: fixture faces tagged no voxels (resolution too coarse "
+        "for the selected faces?)");
+  std::vector<DirichletBC> bcs;
+  for (const int n : fea_tagged_nodes(model_grid, VoxelTag::Fixture))
+    for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+  const double part_solid = static_cast<double>(model_grid.solid_count());
+
+  // ── the FIXED design to analyse (its OWN occupancy grid) ─────────────────────
+  // `design_grid` carries the solid tags of the geometry being certified (so the
+  // stress solve's printed-voxel gate matches it and self-weight is the design's
+  // own weight); `density` is that occupancy as a binary field. Same voxel geometry
+  // as `model_grid`, so the fixture node indices above stay valid.
+  VoxelGrid design_grid = model_grid;
+  if (!analyze_mesh_path.empty()) {
+    StepModel edited;
+    try {
+      edited = import_part_file_resolved(join_path(job_dir, analyze_mesh_path));
+    } catch (const std::exception& e) {
+      throw JobError(std::string("analyze: cannot import analyze mesh: ") +
+                     e.what());
+    }
+    // Re-voxelize the edited mesh onto the MODEL's grid geometry, then carry the
+    // model's fixture tags over so the same clamp applies. The occupancy is the
+    // design; the quantization gap (mesh surface vs this voxelization) is disclosed
+    // in the provenance record below.
+    design_grid = voxelize_onto_grid(edited.mesh, model_grid);
+    for (std::size_t i = 0; i < design_grid.tags.size(); ++i)
+      if (model_grid.tags[i] == VoxelTag::Fixture &&
+          design_grid.tags[i] != VoxelTag::Empty)
+        design_grid.tags[i] = VoxelTag::Fixture;
+    result.analyzed_mesh = true;
+    result.analyzed_mesh_path = analyze_mesh_path;
+    result.mesh_mass_grams =
+        material.density_g_cm3 * mesh_enclosed_volume_mm3(edited.mesh) / 1000.0;
+  }
+  std::vector<double> density(design_grid.voxel_count(), 0.0);
+  for (std::size_t i = 0; i < density.size(); ++i)
+    if (design_grid.tags[i] != VoxelTag::Empty) density[i] = 1.0;
+
+  // ── production solver config + self-weight load case (as run_job applies) ────
+  MinimizePlasticOptions options;
+  configure_production_options(options);
+  options.margin_stop = job.margin_stop;
+  options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
+  options.gravity_direction = job.gravity.direction;
+
+  SimpParams params;
+  params.youngs_modulus = material.youngs_modulus_mpa;
+  params.poisson = material.poisson;
+  params.penalty = 3.0;  // ARCHITECTURE §4 (density_min stays the 1e-3 default)
+
+  const Vec3 build_dir = normalized(Vec3{-options.gravity_direction.x,
+                                         -options.gravity_direction.y,
+                                         -options.gravity_direction.z});
+  const std::vector<NodalLoad> loads =
+      self_weight_loads(design_grid, material.density_g_cm3, options.gravity,
+                        options.gravity_direction);
+  const bool load_path_ok = load_path_connected(design_grid, density, 0.5);
+  const double infill_knockdown = infill_margin_knockdown(options.infill_percent);
+
+  // ── THE single analysis solve — no optimization ─────────────────────────────
+  result.analysis = analyze_fixed_design(
+      design_grid, params, density, bcs, loads, material, build_dir,
+      options.simp.cg_tolerance, options.simp.cg_max_iterations,
+      options.simp.solver, options.margin_stop, infill_knockdown, load_path_ok,
+      part_solid);
+  const FixedDesignAnalysis& a = result.analysis;
+  result.voxel_mass_grams = a.mass_grams;
+
+  {
+    std::error_code ec;
+    std::filesystem::create_directories(out_dir, ec);
+    if (ec)
+      throw JobError("analyze: cannot create output directory " + out_dir + ": " +
+                     ec.message());
+  }
+
+  // ── report.json (VariantReport schema — the NEW, re-analysed numbers) ────────
+  const double part_dim_mm =
+      std::max({static_cast<double>(design_grid.nx),
+                static_cast<double>(design_grid.ny),
+                static_cast<double>(design_grid.nz)}) *
+      design_grid.spacing;
+  VariantReport vr;
+  vr.volume_fraction = a.printed_fraction;
+  vr.printed_fraction = a.printed_fraction;
+  vr.max_stress_mpa = a.max_von_mises;
+  vr.max_interlayer_tension_mpa = a.max_interlayer_tension;
+  vr.margin = a.margin;
+  vr.orientation = build_dir;
+  vr.settings =
+      recommend_settings(rules, material.family, a.margin.worst_case, part_dim_mm);
+  vr.min_feature_violations = a.v3.min_feature_violations;
+  vr.min_feature_warning =
+      min_feature_warning_text(rules, a.v3.min_feature_violations);
+  vr.accepted = a.accepted;
+  vr.margin_required = job.margin_stop;
+  vr.margin_effective = a.margin_effective;
+  if (!a.accepted)
+    vr.rejection_reason =
+        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+  JobReport report;
+  report.material = job.material;
+  (a.accepted ? report.variants : report.rejected).push_back(vr);
+  result.report_json = job_report_json(report);
+  result.report_path = join_path(out_dir, "analysis_report.json");
+  write_text_file(result.report_path, result.report_json);
+
+  // ── fields.bin (one analysed "variant", so app overlays light up) ────────────
+  MinimizePlasticResult fields_result;
+  fields_result.report.material = job.material;
+  MinimizePlasticVariant fv;
+  fv.requested_volume_fraction = a.printed_fraction;
+  fv.accepted = a.accepted;
+  fv.von_mises_field = a.von_mises_field;
+  fv.stress_tensor_field = a.stress_tensor_field;
+  fv.displacement_field = a.displacement_field;
+  fv.mass_grams = a.mass_grams;
+  fv.support_volume_voxels = a.support_volume_voxels;
+  fv.report = vr;
+  fields_result.evaluated.push_back(std::move(fv));
+  result.fields_path = join_path(out_dir, "fields.bin");
+  write_fields_file(result.fields_path, fields_result, design_grid);
+
+  // ── analysis.json — the PROVENANCE record (task items 3–5) ───────────────────
+  // "smoothed / re-analyzed": analyzed=true, the source, the resolution, BOTH mass
+  // figures, and the quantization footnote. The pre-analysis numbers NEVER appear.
+  std::string prov;
+  prov += "{\n";
+  prov += "  \"provenance\": \"smoothed / re-analyzed\",\n";
+  prov += "  \"analyzed\": true,\n";
+  prov += "  \"optimization\": false,\n";
+  prov += "  \"source\": " +
+          json_str(result.analyzed_mesh ? ("mesh:" + analyze_mesh_path)
+                                        : "model_solid") +
+          ",\n";
+  prov += "  \"model\": " + json_str(job.model) + ",\n";
+  prov += "  \"resolution\": " + std::to_string(job.resolution) + ",\n";
+  prov += "  \"voxel_mass_grams\": " + json_num(result.voxel_mass_grams) + ",\n";
+  prov += "  \"mesh_mass_grams\": " +
+          (result.analyzed_mesh ? json_num(result.mesh_mass_grams)
+                                : std::string("null")) +
+          ",\n";
+  prov += "  \"max_stress_mpa\": " + json_num(a.max_von_mises) + ",\n";
+  prov += "  \"margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
+  prov += "  \"margin_required\": " + json_num(job.margin_stop) + ",\n";
+  prov += "  \"margin_effective\": " + json_num(a.margin_effective) + ",\n";
+  prov += "  \"accepted\": " + std::string(a.accepted ? "true" : "false") + ",\n";
+  prov += "  \"min_feature_violations\": " +
+          std::to_string(a.v3.min_feature_violations) + ",\n";
+  prov +=
+      "  \"quantization_note\": \"Re-analysis runs on the "
+      "voxelization of the analyzed mesh at the grid resolution, so the analyzed "
+      "and printed geometry differ by up to ~half a voxel. The stress margin and "
+      "voxel mass describe the voxel proxy; the mesh mass is the surface-enclosed "
+      "volume.\"\n";
+  prov += "}\n";
+  result.provenance_path = join_path(out_dir, "analysis.json");
+  write_text_file(result.provenance_path, prov);
+
+  return result;
+}
 
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
