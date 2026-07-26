@@ -1,0 +1,21 @@
+# iOS lib3mf dylibs produced by the cross-build (lib3mf v2.3.2, CMake 4.4.0 + policy shim)
+
+== iphonesimulator ==
+path : app/.build-occt-ios/install/lib3mf-iphonesimulator/lib/lib3mf.2.3.2.0.dylib
+file : Mach-O 64-bit dynamically linked shared library arm64
+archs: arm64
+platform:
+ platform IOSSIMULATOR
+    minos 16.0
+      sdk 26.5
+install-name: @rpath/lib3mf.2.dylib
+
+== iphoneos ==
+path : app/.build-occt-ios/install/lib3mf-iphoneos/lib/lib3mf.2.3.2.0.dylib
+file : Mach-O 64-bit dynamically linked shared library arm64
+archs: arm64
+platform:
+ platform IOS
+    minos 16.0
+      sdk 26.5
+install-name: @rpath/lib3mf.2.dylib

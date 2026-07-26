@@ -1,0 +1,88 @@
+==> bootstrapping vcpkg (2026.06.24) at /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/.vcpkg (matches CI)
+Cloning into '/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/.vcpkg'...
+Note: switching to 'cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3'.
+
+You are in 'detached HEAD' state. You can look around, make experimental
+changes and commit them, and you can discard any commits you make in this
+state without impacting any branches by switching back to a branch.
+
+If you want to create a new branch to retain commits you create, you may
+do so (now or later) by using -c with the switch command. Example:
+
+  git switch -c <new-branch-name>
+
+Or undo this operation with:
+
+  git switch -
+
+Turn off this advice by setting config variable advice.detachedHead to false
+
+Updating files:  24% (3516/14075)Updating files:  25% (3519/14075)Updating files:  26% (3660/14075)Updating files:  27% (3801/14075)Updating files:  28% (3941/14075)Updating files:  29% (4082/14075)Updating files:  30% (4223/14075)Updating files:  31% (4364/14075)Updating files:  32% (4504/14075)Updating files:  33% (4645/14075)Updating files:  34% (4786/14075)Updating files:  35% (4927/14075)Updating files:  36% (5067/14075)Updating files:  37% (5208/14075)Updating files:  38% (5349/14075)Updating files:  39% (5490/14075)Updating files:  40% (5630/14075)Updating files:  41% (5771/14075)Updating files:  42% (5912/14075)Updating files:  43% (6053/14075)Updating files:  44% (6193/14075)Updating files:  45% (6334/14075)Updating files:  45% (6402/14075)Updating files:  46% (6475/14075)Updating files:  47% (6616/14075)Updating files:  48% (6756/14075)Updating files:  49% (6897/14075)Updating files:  50% (7038/14075)Updating files:  51% (7179/14075)Updating files:  52% (7319/14075)Updating files:  53% (7460/14075)Updating files:  54% (7601/14075)Updating files:  55% (7742/14075)Updating files:  56% (7882/14075)Updating files:  57% (8023/14075)Updating files:  58% (8164/14075)Updating files:  59% (8305/14075)Updating files:  60% (8445/14075)Updating files:  61% (8586/14075)Updating files:  62% (8727/14075)Updating files:  63% (8868/14075)Updating files:  64% (9008/14075)Updating files:  64% (9139/14075)Updating files:  65% (9149/14075)Updating files:  66% (9290/14075)Updating files:  67% (9431/14075)Updating files:  68% (9571/14075)Updating files:  69% (9712/14075)Updating files:  70% (9853/14075)Updating files:  71% (9994/14075)Updating files:  72% (10134/14075)Updating files:  73% (10275/14075)Updating files:  74% (10416/14075)Updating files:  75% (10557/14075)Updating files:  76% (10697/14075)Updating files:  77% (10838/14075)Updating files:  78% (10979/14075)Updating files:  79% (11120/14075)Updating files:  80% (11260/14075)Updating files:  80% (11385/14075)Updating files:  81% (11401/14075)Updating files:  82% (11542/14075)Updating files:  83% (11683/14075)Updating files:  84% (11823/14075)Updating files:  85% (11964/14075)Updating files:  86% (12105/14075)Updating files:  87% (12246/14075)Updating files:  88% (12386/14075)Updating files:  89% (12527/14075)Updating files:  90% (12668/14075)Updating files:  91% (12809/14075)Updating files:  92% (12949/14075)Updating files:  93% (13090/14075)Updating files:  94% (13231/14075)Updating files:  95% (13372/14075)Updating files:  96% (13512/14075)Updating files:  97% (13653/14075)Updating files:  98% (13794/14075)Updating files:  99% (13935/14075)Updating files: 100% (14075/14075)Updating files: 100% (14075/14075), done.
+Downloading vcpkg-macos...
+vcpkg package management program version 2026-05-27-d5b6777d666efc1a7f491babfcdab37794c1ae3e
+
+See LICENSE.txt for license information.
+==> vcpkg install lib3mf:arm64-osx-dynamic (this may take a few minutes)
+Computing installation plan...
+The following packages will be built and installed:
+  * bzip2[core,tool]:arm64-osx-dynamic@1.0.8#6
+  * cpp-base64:arm64-osx-dynamic@V2.rc.08
+  * fast-float:arm64-osx-dynamic@8.2.10
+    lib3mf:arm64-osx-dynamic@2.5.0#1
+  * libzip[bzip2,core,default-aes]:arm64-osx-dynamic@1.11.4
+  * vcpkg-cmake:arm64-osx@2024-04-23
+  * vcpkg-cmake-config:arm64-osx@2024-05-23
+  * zlib:arm64-osx-dynamic@1.3.2#1
+Additional packages (*) will be modified to complete this operation.
+Detecting compiler hash for triplet arm64-osx...
+Compiler found: /usr/bin/c++
+Detecting compiler hash for triplet arm64-osx-dynamic...
+Compiler found: /usr/bin/c++
+Restored 8 package(s) from /Users/nadim/.cache/vcpkg/archives in 689 ms. Use --debug to see more details.
+Installing 1/8 vcpkg-cmake:arm64-osx@2024-04-23...
+vcpkg-cmake:arm64-osx@2024-04-23 package ABI: 90c187177bc14263f5a9dca496c13a9526b780ab6c728bc33d56f92d872c9579
+Elapsed time to handle vcpkg-cmake:arm64-osx: 8.23 ms
+Installing 2/8 bzip2[core,tool]:arm64-osx-dynamic@1.0.8#6...
+bzip2[core,tool]:arm64-osx-dynamic@1.0.8#6 package ABI: 70dc09c4d2e70fea0f64664587b05a704074e515069b3ab9ed0dd025e962c70c
+Elapsed time to handle bzip2:arm64-osx-dynamic: 26.8 ms
+Installing 3/8 cpp-base64:arm64-osx-dynamic@V2.rc.08...
+cpp-base64:arm64-osx-dynamic@V2.rc.08 package ABI: 12c36fb91c5cf6b30f93d020336a693f97f9a8f7041611f15a1bb651162850b8
+Elapsed time to handle cpp-base64:arm64-osx-dynamic: 18.9 ms
+Installing 4/8 vcpkg-cmake-config:arm64-osx@2024-05-23...
+vcpkg-cmake-config:arm64-osx@2024-05-23 package ABI: 363da7008a03a449a5ef4a4ea5a59339aa4f17eb799b3bfd10686dfadb027c6f
+Elapsed time to handle vcpkg-cmake-config:arm64-osx: 5.96 ms
+Installing 5/8 fast-float:arm64-osx-dynamic@8.2.10...
+fast-float:arm64-osx-dynamic@8.2.10 package ABI: ae329872bd37e66c85b471912f13157fc5b240d9ddcf689a1472707472f5aed5
+Elapsed time to handle fast-float:arm64-osx-dynamic: 8.93 ms
+Installing 6/8 zlib:arm64-osx-dynamic@1.3.2#1...
+zlib:arm64-osx-dynamic@1.3.2#1 package ABI: 078c58f6b9305c15a6a902ae2db599e7da8f212df35298d899cd356940260183
+Elapsed time to handle zlib:arm64-osx-dynamic: 16 ms
+Installing 7/8 libzip[bzip2,core,default-aes]:arm64-osx-dynamic@1.11.4...
+libzip[bzip2,core,default-aes]:arm64-osx-dynamic@1.11.4 package ABI: 39b7cb1c1b14519511df3e189cbc17b9e57025db52d826b02b8bed9c487347d8
+Elapsed time to handle libzip:arm64-osx-dynamic: 48.9 ms
+Installing 8/8 lib3mf:arm64-osx-dynamic@2.5.0#1...
+lib3mf:arm64-osx-dynamic@2.5.0#1 package ABI: 91a2187e200fd0a9daa5f28ad51f25fe988f64ad09aec97e871b9bf4dfe124b8
+Elapsed time to handle lib3mf:arm64-osx-dynamic: 161 ms
+Total install time: 300 ms
+Installed contents are licensed to you by owners. Microsoft is not responsible for, nor does it grant any licenses to, third-party packages.
+Some packages did not declare an SPDX license. Check the `copyright` file for each package for more information about their licensing.
+Packages installed in this vcpkg installation declare the following licenses:
+(Apache-2.0 OR BSL-1.0 OR MIT)
+BSD-2-Clause
+BSD-3-Clause
+MIT
+Zlib
+bzip2-1.0.6
+lib3mf provides CMake targets:
+
+  find_package(lib3mf CONFIG REQUIRED)
+  target_link_libraries(target_name PRIVATE lib3mf::lib3mf) 
+
+lib3mf provides pkg-config modules:
+
+  lib3mf
+
+All requested installations completed successfully in: 300 ms
+==> installed lib3mf 2.5.0#1 → /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/.vcpkg/installed/arm64-osx-dynamic
+    lib3mf_DIR=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/.vcpkg/installed/arm64-osx-dynamic/share/lib3mf
+    (CI pins lib3mf 2.5.0#1 via vcpkg 2026.06.24 — versions match)

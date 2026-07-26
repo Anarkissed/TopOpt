@@ -1,0 +1,27 @@
+# L4 worker-real: topopt-cli (DEPS=ON, lib3mf 2.5.0#1) imports .3mf, and .3mf==.stl byte-identical
+# cli: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tap-overselect-bracket-e0f7b9/core/build/topopt-cli ; fingerprint 09d4988092a5
+===== 3MF =====
+VARIANT vf=0.600000 achieved=0.599750 printed=0.571061 margin=28720.5 accepted=1 mesh=out_3mf/variant_060.stl
+VARIANT vf=0.400000 achieved=0.399729 printed=0.335691 margin=21305.6 accepted=1 mesh=out_3mf/variant_040.stl
+WARNING: rung 0 (vf 0.60) LATCHED the active domain off at iteration 5 — active fraction >= 0.85 for 5 consecutive iterations (band covers the domain and buys nothing). Every solve from there ran the FULL domain: the design is unaffected, the run is simply not accelerated. run_info.json records active_domain_latched.
+WARNING: rung 1 (vf 0.40) LATCHED the active domain off at iteration 5 — active fraction >= 0.85 for 5 consecutive iterations (band covers the domain and buys nothing). Every solve from there ran the FULL domain: the design is unaffected, the run is simply not accelerated. run_info.json records active_domain_latched.
+model: plate_bore.3mf (7 pseudo faces, 1 fixture faces matched)
+variants: 2 evaluated, 2 accepted
+  vf 0.60: margin 2.87e+04, accepted
+  vf 0.40: margin 2.13e+04, accepted
+report: out_3mf/report.json
+===== STL =====
+VARIANT vf=0.600000 achieved=0.599750 printed=0.571061 margin=28720.5 accepted=1 mesh=out_stl/variant_060.stl
+VARIANT vf=0.400000 achieved=0.399729 printed=0.335691 margin=21305.6 accepted=1 mesh=out_stl/variant_040.stl
+WARNING: rung 0 (vf 0.60) LATCHED the active domain off at iteration 5 — active fraction >= 0.85 for 5 consecutive iterations (band covers the domain and buys nothing). Every solve from there ran the FULL domain: the design is unaffected, the run is simply not accelerated. run_info.json records active_domain_latched.
+WARNING: rung 1 (vf 0.40) LATCHED the active domain off at iteration 5 — active fraction >= 0.85 for 5 consecutive iterations (band covers the domain and buys nothing). Every solve from there ran the FULL domain: the design is unaffected, the run is simply not accelerated. run_info.json records active_domain_latched.
+model: plate_bore.stl (7 pseudo faces, 1 fixture faces matched)
+variants: 2 evaluated, 2 accepted
+  vf 0.60: margin 2.87e+04, accepted
+  vf 0.40: margin 2.13e+04, accepted
+report: out_stl/report.json
+===== byte-identity of report.json (3mf vs stl) =====
+IDENTICAL report.json
+sha256:
+864ae9cd339dcecb42795ae126c72bb8e1a9509e7ced9d2c7ad334bf51e13d5d  out_3mf/report.json
+864ae9cd339dcecb42795ae126c72bb8e1a9509e7ced9d2c7ad334bf51e13d5d  out_stl/report.json

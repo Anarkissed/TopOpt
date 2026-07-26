@@ -1,0 +1,24 @@
+### Demonstration of build_occt_ios.sh's NEW end-of-run summary (verbatim block, driven per status)
+
+----- STATUS=failed (the CMake-4.x case the OLD code swallowed) -----
+==> iOS lib3mf (3MF import on iPad/simulator): FAILED  ❌  — 3MF import will be UNAVAILABLE on iPad.
+    reason: cmake configure failed for iphonesimulator (see log above)
+    OCCT/STEP above is unaffected. The app will still build and run; importing a
+    .3mf on iPad will show the correct "3MF import requires lib3mf, which is not
+    available in this build" refusal (export STL and import that instead).
+    To fix, address the reason above and re-run:
+        BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh
+    If lib3mf simply cannot cross-compile for iOS on this toolchain, 3MF stays
+    macOS/worker-only — see docs/handoffs/2026-07-26-lib3mf-ios.md.
+----- STATUS=skipped (BUILD_LIB3MF=0) -----
+==> iOS lib3mf (3MF import on iPad/simulator): SKIPPED  — 3MF import will be UNAVAILABLE on iPad.
+    reason: BUILD_LIB3MF=0 (lib3mf stage was not requested)
+    Re-run with the lib3mf stage enabled to get 3MF on iOS:
+        BUILD_LIB3MF=1 ./app/scripts/build_occt_ios.sh
+----- STATUS=ok -----
+==> iOS lib3mf (3MF import on iPad/simulator): BUILT  ✅
+    xcframework  : app/TopOptKit/vendor/lib3mf-ios/lib3mf.xcframework  (lib3mf v2.3.2)
+    install trees: app/.build-occt-ios/install/lib3mf-<sdk>/  (headers + lib3mfConfig.cmake)
+    build_core.sh will detect these and compile the iOS core slices WITH lib3mf
+    (TOPOPT_HAVE_3MF); the app links + embeds lib3mf.xcframework, so .3mf import
+    works on iPad/simulator.
