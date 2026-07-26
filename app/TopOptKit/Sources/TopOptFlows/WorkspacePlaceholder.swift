@@ -75,6 +75,20 @@ public struct WorkspacePlaceholder: View {
     @State private var renamingGroup: UUID?
     @State private var addingPrimitiveGroup: UUID?
     @FocusState private var renameFieldFocused: Bool
+
+    // DEFECT 2 — the manual-primitive TRANSFORM GIZMO. `gizmoTarget` is the primitive the
+    // gizmo is attached to (nil = no gizmo shown). `gizmoDrag` captures the grab context of
+    // the handle currently being dragged (a value type on @State so it survives the
+    // body-update churn a live drag causes). `gizmoSnap` is the magnet (detents) OVERRIDE
+    // toggle; `gizmoSnapLabels` surfaces what the last drag frame snapped to.
+    @State private var gizmoTarget: GizmoTarget?
+    @State private var gizmoDrag: PrimitiveGizmo.Drag?
+    @State private var draggingGizmoHandle: String?
+    @State private var gizmoSnap = true
+    @State private var gizmoSnapLabels: [String] = []
+
+    /// The primitive a transform gizmo is bound to (group + primitive id).
+    struct GizmoTarget: Equatable { let group: UUID; let id: UUID }
     /// M7.dom-app / design-overhaul 109: the SINGLE-OWNER design-box drag session. Captures the
     /// box (or keep-out) at the start of the owning handle's drag so each frame applies an
     /// absolute delta from the drag-start snapshot, and REJECTS any concurrent second handle so
@@ -235,6 +249,9 @@ public struct WorkspacePlaceholder: View {
             // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
             // axial, face → depth) and the floating glass value pill near the selection.
             if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
+            // DEFECT 2: the manual-primitive transform gizmo (translate / plane / free /
+            // rotate / copy) — drawn on the active group's primitives so they can be grabbed.
+            if force.phase == .edit { primitiveGizmoOverlay.ignoresSafeArea() }
 
             chrome
             if force.phase == .setup {
@@ -1380,34 +1397,36 @@ public struct WorkspacePlaceholder: View {
     /// reading and writing that bore's effective override (per-bore when unsynced, shared when
     /// synced — item 3). Highlights while its own handle owns the drag.
     @ViewBuilder private func clearanceHandleChip(_ item: ClearanceHandleItem) -> some View {
-        let gid = item.groupID, f = item.faceID
-        let ov = force.clearanceOverride(forGroup: gid, face: f)
-        let r = faceBoreRadius(f)
+        let gid = item.groupID
+        let fid = Int(item.faceID)
+        let role = item.handle.role.metricRole
         let live = draggingHandleID == item.id
+        // DEFECT 1: read the ONE resolved value `ProjectModel.clearanceMetric` returns — the
+        // SAME call the Selections-panel chip makes (`manualPrimitiveLine`/`clearancePrimitiveLine`)
+        // and the SAME value the rendered volume is built from. The old path derived a manual
+        // primitive's Auto from a B-rep face lookup that has no entry for it (→ nil → 0 mm) while
+        // the panel derived it from the primitive's own radius — two numbers for one value.
+        //
         // Round-6 item 2: the 3D-viewport chips are NUMBER-ONLY (like the load-weight chip) —
         // `showTitle`/`showChrome` off. The handle's own glyph (↔ margin, ↕ axial, ⊤ depth) names
-        // the value, so the caption is redundant here, and dropping it + the Auto/reset chrome makes
-        // the chip narrow enough to clear its knob (item 1). Reset-to-Auto lives in the panel.
-        switch item.handle.role {
-        case .margin:
-            GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
-                           autoMM: r.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                           active: live, compact: true, showTitle: false,
-                           showChrome: false) { force.setClearanceMargin(group: gid, face: f, mm: $0) }
-        case .axialHi, .axialLo:
-            GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
-                           autoMM: r.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                           active: live, compact: true, showTitle: false,
-                           showChrome: false) { force.setClearanceAxial(group: gid, face: f, mm: $0) }
-        case .slabDepth:
-            GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
-                           autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                           active: live, compact: true, showTitle: false,
-                           showChrome: false) { force.setClearanceSlab(group: gid, face: f, mm: $0) }
+        // the value, so the caption is redundant here. Reset-to-Auto lives in the panel.
+        let m = project.clearanceMetric(groupID: gid, faceID: fid, role: role)
+        GlassValuePill(title: Self.metricTitle(role), valueMM: m?.override, autoMM: m?.auto,
+                       active: live, compact: true, showTitle: false, showChrome: false) {
+            project.writeClearanceMetric(groupID: gid, faceID: fid, role: role, mm: $0)
         }
     }
 
-    /// One bore face's exact cylinder radius (mm) for its "Auto · N mm" chip labels; nil for a
+    /// The chip caption for a clearance role (used for accessibility even when `showTitle` is off).
+    private static func metricTitle(_ role: ClearanceMetric.Role) -> String {
+        switch role {
+        case .margin: return "Margin"
+        case .axial: return "Axial"
+        case .slabDepth: return "Depth"
+        }
+    }
+
+    /// One bore face's exact cylinder radius (mm) for building a `ClearancePrimitive`; nil for a
     /// non-cylindrical / STL face.
     private func faceBoreRadius(_ f: FaceID) -> Double? {
         guard let mesh = viewerMesh, let geo = mesh.faceGeometry(f), geo.isCylinder else { return nil }
@@ -1476,12 +1495,11 @@ public struct WorkspacePlaceholder: View {
     /// when synced — round-4 item 3), quantized to the 0.25 mm grid live (item 12) so a handle-drag
     /// ticks in whole steps just like the scrub pill.
     private func writeClearance(_ gid: UUID, face: FaceID, role: ClearanceHandle.Role, mm: Double) {
-        let q = ClearanceQuantize.snap(mm)
-        switch role {
-        case .margin: force.setClearanceMargin(group: gid, face: face, mm: q)
-        case .axialLo, .axialHi: force.setClearanceAxial(group: gid, face: face, mm: q)
-        case .slabDepth: force.setClearanceSlab(group: gid, face: face, mm: q)
-        }
+        // DEFECT 1: route through the ONE writer so a viewport handle drag on a MANUAL
+        // primitive lands on the primitive's own override (not a phantom group/bore slot the
+        // run ignores). `writeClearanceMetric` dispatches manual vs auto by the sign of faceID.
+        project.writeClearanceMetric(groupID: gid, faceID: Int(face), role: role.metricRole,
+                                     mm: ClearanceQuantize.snap(mm))
     }
 
     /// The Auto suggestion (mm) for a group's role — the reference the crossing haptic
@@ -1501,6 +1519,228 @@ public struct WorkspacePlaceholder: View {
     /// Keep a floated overlay on-screen horizontally (mirror of `clamp` for y).
     private func clampX(_ x: CGFloat, _ width: CGFloat) -> CGFloat {
         Swift.min(Swift.max(x, 90), Swift.max(100, width - 90))
+    }
+
+    // MARK: DEFECT 2 — manual-primitive TRANSFORM GIZMO (device-QA'd interaction layer)
+
+    /// The named coordinate space the gizmo drags read their touch LOCATION in — the same
+    /// rationale as `clearanceStageSpace`: `projection.ray` needs the absolute stage point.
+    private static let gizmoStageSpace = "primitiveGizmoStage"
+
+    /// The transform-gizmo overlay. For the active group, each manual primitive shows a
+    /// SELECT knob; the selected one (`gizmoTarget`) shows the full gizmo — single-axis
+    /// arrows, plane quads, a free-move centre, rotate rings, plus COPY / snap / dismiss.
+    ///
+    /// Camera non-fighting (G5): every knob binds its gesture to the SIZED knob BEFORE
+    /// `.position` (the clearance-handle rule), so a touch on a knob owns the drag and empty
+    /// space falls through to orbit — and, symmetrically, an orbit touch never lands on a
+    /// knob so it can't nudge a primitive. The transform math is the pure, tested
+    /// `PrimitiveGizmo`; THIS gesture + knob draw are the device-QA'd layers (G8).
+    @ViewBuilder private var primitiveGizmoOverlay: some View {
+        if let proj = projection, let gid = selection.activeGroupID {
+            ZStack(alignment: .topLeading) {
+                ForEach(project.manualPrimitives(in: gid)) { mp in
+                    if gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
+                        gizmoHandles(proj, group: gid, mp: mp)
+                    } else if let pt = proj.project(settledWorld(SIMD3<Float>(mp.center))) {
+                        gizmoCircleKnob(active: false, size: 26) {
+                            Image(systemName: "move.3d").font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .onTapGesture { gizmoTarget = GizmoTarget(group: gid, id: mp.id) }
+                        .position(pt)
+                        .accessibilityLabel("Select primitive to transform")
+                    }
+                }
+            }
+            .coordinateSpace(name: Self.gizmoStageSpace)
+        }
+    }
+
+    /// Every handle for the SELECTED primitive: the full Shapr3D affordance set in TopOpt's
+    /// blue liquid-glass gizmo language (matching the design-box move handle + the 109 gizmo
+    /// frost). Axis knobs carry their letter; plane knobs are squares; rotate knobs a ring
+    /// glyph; the centre is the free-move `move.3d`.
+    @ViewBuilder private func gizmoHandles(_ proj: CameraProjection, group gid: UUID,
+                                           mp: ManualPrimitive) -> some View {
+        let a = PrimitiveGizmo.anchors(center: mp.center, length: gizmoLength(mp))
+        let letters = ["X", "Y", "Z"]
+        // Single-axis translate (arrow shafts) — a lettered knob at each axis tip.
+        ForEach(Array(a.axisTips.enumerated()), id: \.offset) { i, t in
+            gizmoAt(proj, t.at) {
+                gizmoCircleKnob(active: draggingGizmoHandle == "axis\(i)", size: 24) {
+                    Text(letters[i]).font(.system(size: 11, weight: .heavy)).foregroundStyle(.white)
+                }
+                .gesture(gizmoDragGesture(.axis(t.axis), id: "axis\(i)", group: gid, mp: mp))
+            }
+        }
+        // Plane translate (two axes at once) — a square knob per principal plane.
+        ForEach(Array(a.planeHandles.enumerated()), id: \.offset) { i, h in
+            gizmoAt(proj, h.at) {
+                gizmoSquareKnob(active: draggingGizmoHandle == "plane\(i)", size: 20) { EmptyView() }
+                    .gesture(gizmoDragGesture(.plane(h.normal), id: "plane\(i)", group: gid, mp: mp))
+            }
+        }
+        // Rotate about an axis (rings) — a rotate knob per axis.
+        ForEach(Array(a.rotateHandles.enumerated()), id: \.offset) { i, h in
+            gizmoAt(proj, h.at) {
+                gizmoCircleKnob(active: draggingGizmoHandle == "rot\(i)", size: 22) {
+                    Image(systemName: "rotate.3d").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                }
+                .gesture(gizmoDragGesture(.rotate(h.axis), id: "rot\(i)", group: gid, mp: mp))
+            }
+        }
+        // Free translate (all three) — the centre knob (the design-box `move.3d` glyph).
+        gizmoAt(proj, a.center) {
+            gizmoCircleKnob(active: draggingGizmoHandle == "free", size: 30) {
+                Image(systemName: "move.3d").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+            }
+            .gesture(gizmoDragGesture(.free, id: "free", group: gid, mp: mp))
+        }
+        // COPY / snap-override / dismiss cluster, above the centre; snap-feedback below it.
+        if let cpt = proj.project(settledWorld(SIMD3<Float>(a.center))) {
+            gizmoActionCluster(group: gid, mp: mp).position(x: cpt.x, y: cpt.y - 56)
+            if !gizmoSnapLabels.isEmpty {
+                gizmoSnapBadge.position(x: cpt.x, y: cpt.y + 56)
+            }
+        }
+    }
+
+    /// Project a model-space anchor and position a knob there (knob keeps its own gesture,
+    /// applied BEFORE `.position` — the camera-non-fighting rule).
+    @ViewBuilder private func gizmoAt(_ proj: CameraProjection, _ p: SIMD3<Double>,
+                                      @ViewBuilder _ knob: () -> some View) -> some View {
+        if let pt = proj.project(settledWorld(SIMD3<Float>(p))) { knob().position(pt) }
+    }
+
+    /// COPY (duplicate, G6), the snap OVERRIDE toggle (the magnet), and dismiss.
+    @ViewBuilder private func gizmoActionCluster(group gid: UUID, mp: ManualPrimitive) -> some View {
+        HStack(spacing: DS.Space.s) {
+            Button {
+                if let new = project.copyManualPrimitive(id: mp.id, in: gid) {
+                    gizmoTarget = GizmoTarget(group: gid, id: new)   // edit the fresh copy
+                }
+            } label: {
+                gizmoCircleKnob(active: false, size: 26) {
+                    Image(systemName: "plus.square.on.square").font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }.buttonStyle(.plain).accessibilityLabel("Copy primitive")
+
+            Button { gizmoSnap.toggle() } label: {
+                gizmoCircleKnob(active: gizmoSnap, size: 26) {
+                    Image(systemName: "scope").font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(gizmoSnap ? 1 : 0.4))
+                }
+            }.buttonStyle(.plain)
+                .accessibilityLabel(gizmoSnap ? "Magnetic snapping on" : "Magnetic snapping off")
+
+            Button { gizmoTarget = nil } label: {
+                gizmoCircleKnob(active: false, size: 26) {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                }
+            }.buttonStyle(.plain).accessibilityLabel("Done transforming")
+        }
+    }
+
+    /// What the last drag frame snapped to ("Snapped to: bore axis, world Z") — the handoff
+    /// requires the UI to STATE what it snapped to and why.
+    private var gizmoSnapBadge: some View {
+        Text("Snapped to: " + gizmoSnapLabels.joined(separator: ", "))
+            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
+            .padding(.vertical, 4).padding(.horizontal, 8)
+            .background(Capsule().fill(DS.Color.accent.color.opacity(0.9)))
+            .fixedSize()
+            .accessibilityLabel("Snapped to \(gizmoSnapLabels.joined(separator: ", "))")
+    }
+
+    /// Bind the transform gizmo to a just-created primitive (from "+ primitive" or an
+    /// auto→manual conversion) and dismiss the add dialog, so the user can grab it at once.
+    private func selectNewPrimitive(_ id: UUID?, in gid: UUID) {
+        addingPrimitiveGroup = nil
+        guard let id else { return }
+        gizmoTarget = GizmoTarget(group: gid, id: id)
+    }
+
+    /// The gizmo's model-space size — scaled off the primitive AND the model so the handles
+    /// sit clear of a small bolt yet don't dwarf a large part.
+    private func gizmoLength(_ mp: ManualPrimitive) -> Double {
+        let base = mp.kind == .bolt ? Swift.max(mp.radiusMM, mp.halfLengthMM)
+                                    : Swift.max(mp.halfUMM, mp.halfWMM)
+        let modelR = Double(viewerMesh?.bounds.radius ?? 1)
+        return Swift.max(base * 1.8, modelR * 0.18)
+    }
+
+    /// Turn a stage touch into a MODEL-space ray: the camera ray (settled world) inverse-settled
+    /// back into the frame the primitive is stored in, so `PrimitiveGizmo` runs in one frame and
+    /// the result is stored directly (no post-hoc transform).
+    private func modelRay(_ proj: CameraProjection, at loc: CGPoint) -> PrimitiveGizmo.Ray? {
+        guard let w = proj.ray(throughViewPoint: loc) else { return nil }
+        let c = meshCenter
+        let inv = settleQuat.inverse
+        let o = c + inv.act(w.origin - c)
+        let d = inv.act(w.dir)
+        return PrimitiveGizmo.Ray(origin: SIMD3<Double>(o), dir: SIMD3<Double>(d))
+    }
+
+    /// One gizmo handle's drag: build the grab context on the first frame (captured into
+    /// `@State` so it survives the drag's body churn), resolve each frame through the pure
+    /// math, and COMMIT through the existing `moveManualPrimitive` / `rotateManualPrimitive`
+    /// (which arm the SAME UndoHistory + refresh the sidecar — G3/G4). Haptics on grab /
+    /// release / detent; the snap labels drive the "Snapped to" badge.
+    private func gizmoDragGesture(_ handle: PrimitiveGizmo.Handle, id: String,
+                                  group gid: UUID, mp: ManualPrimitive) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
+            .onChanged { v in
+                guard let proj = projection, let ray = modelRay(proj, at: v.location) else { return }
+                if draggingGizmoHandle != id {
+                    draggingGizmoHandle = id
+                    gizmoDrag = PrimitiveGizmo.Drag(handle: handle, startCenter: mp.center,
+                                                    startAxis: mp.axis, grab: ray, viewDir: ray.dir)
+                    ClearanceHaptics.grab()
+                }
+                guard let drag = gizmoDrag else { return }
+                let out = drag.resolve(currentRay: ray)
+                let labels: [String]
+                if case .rotate = handle {
+                    labels = project.rotateManualPrimitive(id: mp.id, in: gid, to: out.axis, snap: gizmoSnap)
+                } else {
+                    labels = project.moveManualPrimitive(id: mp.id, in: gid, to: out.center, snap: gizmoSnap)
+                }
+                if labels != gizmoSnapLabels {
+                    if !labels.isEmpty { ClearanceHaptics.detent() }
+                    gizmoSnapLabels = labels
+                }
+            }
+            .onEnded { _ in
+                draggingGizmoHandle = nil
+                gizmoDrag = nil
+                gizmoSnapLabels = []
+                ClearanceHaptics.release()
+            }
+    }
+
+    /// A round blue liquid-glass gizmo knob (the app's gizmo material — 109's blue frost),
+    /// with a generous ~48 pt hit target so a fingertip owns it over the orbit camera.
+    @ViewBuilder private func gizmoCircleKnob(active: Bool, size: CGFloat,
+                                              @ViewBuilder glyph: () -> some View) -> some View {
+        glyph()
+            .frame(width: size, height: size)
+            .liquidGlass(LiquidGlass.Tint.frost(DS.Color.accent, intensity: active ? 0.85 : 0.55),
+                         in: Circle(), specular: active ? 1.3 : 1)
+            .shadow(color: DS.Color.accent.color.opacity(0.5), radius: 4)
+            .contentShape(Circle().inset(by: -12))
+    }
+
+    /// A square gizmo knob (the plane-translate handle), same material as the round one.
+    @ViewBuilder private func gizmoSquareKnob(active: Bool, size: CGFloat,
+                                              @ViewBuilder glyph: () -> some View) -> some View {
+        glyph()
+            .frame(width: size, height: size)
+            .liquidGlass(LiquidGlass.Tint.frost(DS.Color.accent, intensity: active ? 0.85 : 0.55),
+                         in: RoundedRectangle(cornerRadius: 6), specular: active ? 1.3 : 1)
+            .shadow(color: DS.Color.accent.color.opacity(0.5), radius: 4)
+            .contentShape(RoundedRectangle(cornerRadius: 6).inset(by: -12))
     }
 
     // MARK: left Selections panel (design) with the kg/lbs toggle
@@ -1702,8 +1942,10 @@ public struct WorkspacePlaceholder: View {
         .confirmationDialog("Add a primitive", isPresented: Binding(
             get: { addingPrimitiveGroup == g.id },
             set: { if !$0 { addingPrimitiveGroup = nil } })) {
-            Button("Cylinder") { project.addManualPrimitive(.bolt, to: g.id); addingPrimitiveGroup = nil }
-            Button("Plane") { project.addManualPrimitive(.face, to: g.id); addingPrimitiveGroup = nil }
+            // A freshly-placed primitive becomes the gizmo target so the user can move it
+            // straight away (DEFECT 2: PR 190 had no handles to grab it by).
+            Button("Cylinder") { selectNewPrimitive(project.addManualPrimitive(.bolt, to: g.id), in: g.id) }
+            Button("Plane") { selectNewPrimitive(project.addManualPrimitive(.face, to: g.id), in: g.id) }
             Button("Cancel", role: .cancel) { addingPrimitiveGroup = nil }
         } message: {
             Text("A keep-out the finder missed. Place it, then move it onto the part with magnetic detents.")
@@ -1856,6 +2098,19 @@ public struct WorkspacePlaceholder: View {
             ForEach(autoPrims) { p in
                 HStack(alignment: .top, spacing: DS.Space.xs) {
                     primitiveDeleteButton("delete-auto-\(p.id)") { project.deleteAutoClearance(face: p.id) }
+                    // G2: grab an AUTO-found clearance's gizmo → convert it to an explicit
+                    // MANUAL primitive (its geometry becomes user-supplied) and select it.
+                    if selection.activeGroupID == g.id {
+                        Button {
+                            selectNewPrimitive(project.convertAutoClearanceToManual(face: p.id, in: g.id), in: g.id)
+                        } label: {
+                            Image(systemName: "move.3d").font(.system(size: 12))
+                                .foregroundStyle(DS.Color.accent.color.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("grab-auto-\(p.id)")
+                        .accessibilityLabel("Convert to a movable primitive")
+                    }
                     clearancePrimitiveLine(g, p, showKind: true)
                 }
             }
@@ -1895,25 +2150,32 @@ public struct WorkspacePlaceholder: View {
     /// primitive is never part of the group's shared-sync set). Tinted the clearance
     /// red + tagged "(manual)" so it reads distinctly from a found bore.
     @ViewBuilder private func manualPrimitiveLine(_ g: SelectionGroup, _ mp: ManualPrimitive) -> some View {
+        // DEFECT 1: the panel reads the SAME `clearanceMetric(groupID:faceID:role:)` the
+        // 3D-viewport chip reads (keyed by the primitive's sentinel faceID), so the two chips
+        // for one value can never diverge again — they are literally the same call.
+        let key = ProjectModel.manualFaceKey(mp.id)
         VStack(alignment: .trailing, spacing: 4) {
             Text(mp.kind == .bolt ? "Cylinder · manual" : "Plane · manual")
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(Self.clearanceTint)
             if mp.kind == .bolt {
-                clearanceMetricRow("Margin",
-                    GlassValuePill(title: "Margin", valueMM: mp.override.concentricMarginMM,
-                                   autoMM: ClearanceSuggestion.boltMarginMM(boreRadiusMM: mp.radiusMM),
-                                   compact: true, showTitle: false) { project.setManualMargin(id: mp.id, in: g.id, mm: $0) })
-                clearanceMetricRow("Axial",
-                    GlassValuePill(title: "Axial", valueMM: mp.override.axialClearanceMM,
-                                   autoMM: ClearanceSuggestion.boltAxialMM(boreRadiusMM: mp.radiusMM),
-                                   compact: true, showTitle: false) { project.setManualAxial(id: mp.id, in: g.id, mm: $0) })
+                clearanceMetricRow("Margin", metricPill("Margin", g.id, key, .margin))
+                clearanceMetricRow("Axial", metricPill("Axial", g.id, key, .axial))
             } else {
-                clearanceMetricRow("Depth",
-                    GlassValuePill(title: "Depth", valueMM: mp.override.slabDepthMM,
-                                   autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                                   compact: true, showTitle: false) { project.setManualSlab(id: mp.id, in: g.id, mm: $0) })
+                clearanceMetricRow("Depth", metricPill("Depth", g.id, key, .slabDepth))
             }
+        }
+    }
+
+    /// A Selections-panel value pill bound to the ONE clearance-value source (DEFECT 1) —
+    /// keyed by `(group, faceID)` so a manual primitive (sentinel faceID) and an auto bore
+    /// go through the identical read/write the viewport chip uses.
+    private func metricPill(_ title: String, _ gid: UUID, _ faceID: Int,
+                            _ role: ClearanceMetric.Role) -> GlassValuePill {
+        let m = project.clearanceMetric(groupID: gid, faceID: faceID, role: role)
+        return GlassValuePill(title: title, valueMM: m?.override, autoMM: m?.auto,
+                              compact: true, showTitle: false) {
+            project.writeClearanceMetric(groupID: gid, faceID: faceID, role: role, mm: $0)
         }
     }
 
@@ -1929,8 +2191,9 @@ public struct WorkspacePlaceholder: View {
     /// One metric per row can't wrap; the HARD RULE (a chip is never two rows high) holds.
     @ViewBuilder private func clearancePrimitiveLine(_ g: SelectionGroup, _ p: ClearancePrimitive,
                                                      showKind: Bool) -> some View {
-        let f = p.id
-        let ov = force.clearanceOverride(forGroup: g.id, face: f)
+        // DEFECT 1: same single source (`clearanceMetric`) as the viewport chip — keyed by the
+        // real B-rep faceID here.
+        let faceID = Int(p.id)
         VStack(alignment: .trailing, spacing: 4) {
             if showKind {
                 Text(ClearanceChipLayout.kindLabel(p.kind))
@@ -1938,19 +2201,10 @@ public struct WorkspacePlaceholder: View {
                     .foregroundStyle(DS.Color.textQuaternary.color)
             }
             if p.isBore {
-                clearanceMetricRow("Margin",
-                    GlassValuePill(title: "Margin", valueMM: ov.concentricMarginMM,
-                                   autoMM: p.radiusMM.map { ClearanceSuggestion.boltMarginMM(boreRadiusMM: $0) },
-                                   compact: true, showTitle: false) { force.setClearanceMargin(group: g.id, face: f, mm: $0) })
-                clearanceMetricRow("Axial",
-                    GlassValuePill(title: "Axial", valueMM: ov.axialClearanceMM,
-                                   autoMM: p.radiusMM.map { ClearanceSuggestion.boltAxialMM(boreRadiusMM: $0) },
-                                   compact: true, showTitle: false) { force.setClearanceAxial(group: g.id, face: f, mm: $0) })
+                clearanceMetricRow("Margin", metricPill("Margin", g.id, faceID, .margin))
+                clearanceMetricRow("Axial", metricPill("Axial", g.id, faceID, .axial))
             } else {
-                clearanceMetricRow("Depth",
-                    GlassValuePill(title: "Depth", valueMM: ov.slabDepthMM,
-                                   autoMM: ClearanceSuggestion.faceSlabDepthMM,
-                                   compact: true, showTitle: false) { force.setClearanceSlab(group: g.id, face: f, mm: $0) })
+                clearanceMetricRow("Depth", metricPill("Depth", g.id, faceID, .slabDepth))
             }
         }
     }

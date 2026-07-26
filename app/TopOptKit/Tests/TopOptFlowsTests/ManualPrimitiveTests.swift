@@ -263,4 +263,186 @@ final class ManualPrimitiveTests: XCTestCase {
         p.force.loadSuppressedClearanceFaces([1])       // what applyClearanceSidecar does
         XCTAssertTrue(p.clearanceSpecs().isEmpty, "a re-imported deletion stays deleted (B3)")
     }
+
+    // MARK: - DEFECT 1: the panel and the viewport chip read ONE value
+
+    /// The regression guard for DEFECT 1. A manual CYLINDER's margin/axial as the
+    /// 3D-viewport chip resolves it (`clearanceMetric`) MUST equal what the Selections
+    /// panel resolves (the identical call) AND the number the rendered volume is built
+    /// from. The bug: the viewport chip derived Auto from a B-rep face lookup a MANUAL
+    /// primitive has NO entry in (→ nil → 0 mm) while the panel used the primitive's own
+    /// radius (→ 9.14 mm). This test fails the instant the two paths can диverge again —
+    /// e.g. if `clearanceMetric` stops handling the negative (manual) faceID.
+    func testManualBoltMetricIsOneValueAcrossSurfaces() {
+        let (p, _, planeID) = project()
+        let id = p.addManualPrimitive(.bolt, to: planeID)!
+        let key = ProjectModel.manualFaceKey(id)
+        let mp = p.force.manualPrimitives(for: planeID).first { $0.id == id }!
+
+        let margin = try! XCTUnwrap(p.clearanceMetric(groupID: planeID, faceID: key, role: .margin))
+        let axial = try! XCTUnwrap(p.clearanceMetric(groupID: planeID, faceID: key, role: .axial))
+        XCTAssertNil(margin.override); XCTAssertNil(axial.override)
+        XCTAssertEqual(margin.resolved, mp.radiusMM, accuracy: 1e-9, "Auto margin = bore radius")
+        XCTAssertEqual(axial.resolved, 2 * mp.radiusMM, accuracy: 1e-9, "Auto axial = 2·radius")
+        XCTAssertGreaterThan(margin.resolved, 0, "the manual bolt's margin is NOT 0 (the DEFECT 1 symptom)")
+
+        // The rendered VOLUME is built from the SAME number: cylinder radius = boreR + margin,
+        // axial span end = halfLength + axial. Picture == chip == run.
+        let vol = try! XCTUnwrap(p.clearanceVolumes().first { $0.volume.faceID == key }).volume
+        guard case let .cylinder(_, _, radiusMM, _, tHi) = vol.shape else { return XCTFail("bolt → cylinder") }
+        XCTAssertEqual(Double(radiusMM) - mp.radiusMM, margin.resolved, accuracy: 1e-3,
+                       "the picture is drawn with the value the chips show (margin)")
+        XCTAssertEqual(Double(tHi) - mp.halfLengthMM, axial.resolved, accuracy: 1e-3,
+                       "the picture is drawn with the value the chips show (axial)")
+    }
+
+    /// The manual PLANE case (which the on-device report said AGREED) still agrees: its
+    /// Auto is the 3 mm constant, needing no radius lookup — so both surfaces read 3 mm.
+    func testManualPlaneMetricIsOneValue() {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.face, to: boreID)!
+        let key = ProjectModel.manualFaceKey(id)
+        let depth = try! XCTUnwrap(p.clearanceMetric(groupID: boreID, faceID: key, role: .slabDepth))
+        XCTAssertEqual(depth.resolved, ClearanceSuggestion.faceSlabDepthMM)
+    }
+
+    /// G2 — the SAME single source serves an AUTO-found bore (the other origin). Its
+    /// margin resolves to the exact bore radius and matches the rendered volume.
+    func testAutoBoreMetricMatchesRenderedVolume() {
+        let (p, boreID, _) = project()            // face 1 is a cylinder r=2.5, anchored → auto-clears
+        let m = try! XCTUnwrap(p.clearanceMetric(groupID: boreID, faceID: 1, role: .margin))
+        XCTAssertEqual(m.resolved, 2.5, accuracy: 1e-6, "auto Auto margin = bore radius")
+        let vol = try! XCTUnwrap(p.clearanceVolumes().first { $0.volume.faceID == 1 }).volume
+        guard case let .cylinder(_, _, radiusMM, _, _) = vol.shape else { return XCTFail("bore → cylinder") }
+        XCTAssertEqual(Double(radiusMM) - 2.5, m.resolved, accuracy: 1e-3)
+    }
+
+    /// The other half of DEFECT 1's viewport breakage: a viewport-handle DRAG write must
+    /// land on the MANUAL primitive's OWN override — not a phantom group/bore slot the run
+    /// ignores. `writeClearanceMetric` dispatches by the sign of faceID; the written value
+    /// reaches both the metric and the serialized run spec (B2 discipline).
+    func testWriteClearanceMetricReachesManualPrimitiveAndRun() {
+        let (p, _, planeID) = project()
+        let id = p.addManualPrimitive(.bolt, to: planeID)!
+        let key = ProjectModel.manualFaceKey(id)
+        p.writeClearanceMetric(groupID: planeID, faceID: key, role: .margin, mm: 7.0)
+        XCTAssertEqual(p.clearanceMetric(groupID: planeID, faceID: key, role: .margin)?.override, 7.0)
+        XCTAssertEqual(p.force.manualPrimitives(for: planeID).first { $0.id == id }?.override.concentricMarginMM, 7.0)
+        let spec = try! XCTUnwrap(p.clearanceSpecs().first { $0.manual != nil })
+        XCTAssertEqual(spec.concentricMarginMM, 7.0, accuracy: 1e-9, "the drag write reaches the run")
+    }
+
+    // MARK: - DEFECT 2: transform-gizmo model ops (rotate / copy / convert / move→job)
+
+    /// ROTATE turns the primitive's axis and keeps its centre, through the SAME undo
+    /// history (G3). Snap off so the assertion is exact.
+    func testRotateManualPrimitiveTurnsAxisKeepsCentreUndoable() {
+        let (p, _, planeID) = project()
+        let id = p.addManualPrimitive(.bolt, to: planeID)!
+        p.performUndo(); p.performRedo()                 // settle the ADD as its own step
+        let before = p.force.manualPrimitives(for: planeID).first { $0.id == id }!
+        p.rotateManualPrimitive(id: id, in: planeID, to: SIMD3(1, 0, 0), snap: false)
+        let after = p.force.manualPrimitives(for: planeID).first { $0.id == id }!
+        XCTAssertEqual(after.center, before.center, "rotation is in place — centre unchanged")
+        XCTAssertEqual(simd_normalize(after.axis), SIMD3(1, 0, 0), "axis turned to +X")
+
+        p.performUndo()
+        XCTAssertEqual(simd_normalize(p.force.manualPrimitives(for: planeID).first { $0.id == id }!.axis),
+                       simd_normalize(before.axis), "undo reverts the rotation")
+    }
+
+    /// The rotated axis reaches the RUN through the spec's `axisDir` — no schema change
+    /// (BLOCKED-STOP: rotation is expressed by the direction vector).
+    func testRotatedAxisReachesTheRun() {
+        let (p, _, planeID) = project()
+        let id = p.addManualPrimitive(.bolt, to: planeID)!
+        p.rotateManualPrimitive(id: id, in: planeID, to: SIMD3(1, 0, 0), snap: false)
+        let spec = try! XCTUnwrap(p.clearanceSpecs().first { $0.manual != nil })
+        let dir = simd_normalize(try! XCTUnwrap(spec.manual).axisDir)
+        XCTAssertEqual(dir, SIMD3(1, 0, 0), "the run gets the rotated axis_dir")
+    }
+
+    /// COPY produces an INDEPENDENT primitive (G6): editing the copy leaves the original
+    /// untouched, and the two have distinct ids + centres.
+    func testCopyProducesIndependentPrimitive() {
+        let (p, _, planeID) = project()
+        let orig = p.addManualPrimitive(.bolt, to: planeID)!
+        let copy = try! XCTUnwrap(p.copyManualPrimitive(id: orig, in: planeID))
+        XCTAssertNotEqual(copy, orig, "the copy has a fresh id")
+        XCTAssertEqual(p.force.manualPrimitives(for: planeID).count, 2)
+
+        // Edit ONLY the copy.
+        p.setManualMargin(id: copy, in: planeID, mm: 9.0)
+        let o = p.force.manualPrimitives(for: planeID).first { $0.id == orig }!
+        let c = p.force.manualPrimitives(for: planeID).first { $0.id == copy }!
+        XCTAssertNil(o.override.concentricMarginMM, "the original is untouched by editing the copy")
+        XCTAssertEqual(c.override.concentricMarginMM, 9.0, "the copy took the edit")
+        XCTAssertNotEqual(o.center, c.center, "the copy is nudged clear of the original")
+    }
+
+    func testCopyAddsASecondRunClearance() {
+        let (p, _, planeID) = project()
+        let orig = p.addManualPrimitive(.bolt, to: planeID)!
+        let before = p.clearanceSpecs().count
+        p.copyManualPrimitive(id: orig, in: planeID)
+        XCTAssertEqual(p.clearanceSpecs().count, before + 1, "the copy is its own run clearance")
+    }
+
+    /// G2 — grabbing an AUTO-found clearance's gizmo converts it to an explicit MANUAL
+    /// primitive: the auto face is suppressed, a manual primitive of the SAME geometry is
+    /// added (so the run's clearance count and its resolved value are unchanged), and the
+    /// conversion is explicit in the model (a real ManualPrimitive + a suppressed face).
+    func testConvertAutoBoreToManualPreservesTheClearance() {
+        let (p, boreID, _) = project()                   // face 1: cylinder r=2.5, anchored → auto-clears
+        XCTAssertEqual(p.clearanceSpecs().count, 1)
+        let autoMargin = p.clearanceMetric(groupID: boreID, faceID: 1, role: .margin)!.resolved
+
+        let id = try! XCTUnwrap(p.convertAutoClearanceToManual(face: 1, in: boreID))
+        XCTAssertTrue(p.force.isClearanceFaceSuppressed(1), "the auto face no longer clears")
+        XCTAssertEqual(p.clearanceSpecs().count, 1, "still exactly one clearance — now manual")
+        let mp = p.force.manualPrimitives(for: boreID).first { $0.id == id }!
+        XCTAssertEqual(mp.kind, .bolt)
+        XCTAssertEqual(mp.radiusMM, 2.5, accuracy: 1e-6, "the manual bolt matches the bore radius")
+        let key = ProjectModel.manualFaceKey(id)
+        XCTAssertEqual(p.clearanceMetric(groupID: boreID, faceID: key, role: .margin)!.resolved,
+                       autoMargin, accuracy: 1e-6, "the resolved value does not jump on conversion")
+    }
+
+    /// G4 — a MOVED primitive reaches the job: the serialized manual geometry's axisPoint
+    /// equals the dragged centre. `snap: false` (the magnet override) makes the move exact.
+    func testGizmoMoveReachesTheJob() {
+        let (p, _, planeID) = project()
+        let id = p.addManualPrimitive(.bolt, to: planeID)!
+        // Resolve a translate through the SAME pure math the gesture uses, then commit it.
+        let drag = PrimitiveGizmo.Drag(
+            handle: .free, startCenter: p.force.manualPrimitives(for: planeID).first { $0.id == id }!.center,
+            startAxis: SIMD3(0, 0, 1),
+            grab: .init(origin: SIMD3(0, 0, 100), dir: SIMD3(0, 0, -1)), viewDir: SIMD3(0, 0, -1))
+        let moved = drag.resolve(currentRay: .init(origin: SIMD3(20, 30, 100), dir: SIMD3(0, 0, -1))).center
+        p.moveManualPrimitive(id: id, in: planeID, to: moved, snap: false)
+
+        let spec = try! XCTUnwrap(p.clearanceSpecs().first { $0.manual != nil })
+        let g = try! XCTUnwrap(spec.manual)
+        XCTAssertEqual(g.axisPoint.x, moved.x, accuracy: 1e-6)
+        XCTAssertEqual(g.axisPoint.y, moved.y, accuracy: 1e-6)
+        XCTAssertEqual(g.axisPoint.z, moved.z, accuracy: 1e-6)
+        // …and the rendered volume centres there too (picture == run — B2 for a dragged primitive).
+        let key = ProjectModel.manualFaceKey(id)
+        XCTAssertNotNil(p.clearanceVolumes().first { $0.volume.faceID == key })
+    }
+
+    /// The snap OVERRIDE: with `snap: false` a placement near a strong detent target is NOT
+    /// pulled onto it — the finger wins (the explicit override the handoff requires).
+    func testSnapOverrideKeepsAFreePlacement() {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.bolt, to: boreID)!
+        // A centre 0.5 mm off the bore axis (well within the 3 mm snap) — snap ON pulls it on.
+        p.moveManualPrimitive(id: id, in: boreID, to: SIMD3(0.5, 0.5, 4), snap: true)
+        let snapped = p.force.manualPrimitives(for: boreID).first { $0.id == id }!.center
+        XCTAssertEqual(snapped.x, 0, accuracy: 1e-4, "snap ON drops it onto the bore axis")
+        // Same placement with snap OFF stays exactly where the finger put it.
+        p.moveManualPrimitive(id: id, in: boreID, to: SIMD3(0.5, 0.5, 4), snap: false)
+        let free = p.force.manualPrimitives(for: boreID).first { $0.id == id }!.center
+        XCTAssertEqual(free, SIMD3(0.5, 0.5, 4), "snap OFF keeps the free placement")
+    }
 }

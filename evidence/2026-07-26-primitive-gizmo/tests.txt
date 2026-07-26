@@ -1,0 +1,102 @@
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testAnchoredBoreAutoClearanceIsDerived]' passed (0.010 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testAutoSuppressionOverrideDropsTheClearance]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testBoreHandlesMatchTheRenderedVolume]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testBoreVolumeUsesExactRadiusAndAutoSuggestion]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testExplicitAffixOnPlaneAddsSlab]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testExplicitPlaneAffixAddsDepthHandle]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testNoKeepClearMeansEmptySpecs]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testOverrideThreadsThroughToSpec]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testSuppressedBoreDrawsNoVolume]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceDerivationTests testSuppressedBoreHasNoHandles]' passed (0.000 seconds).
+Test Suite 'ClearanceDerivationTests' passed at 2026-07-26 18:43:56.183.
+	 Executed 10 tests, with 0 failures (0 unexpected) in 0.016 (0.016) seconds
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testAxialAndSlabValueWritePath]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testAxialClearanceFromCapDrag]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testAxialClearanceLowCapSignAndClamp]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testBoltVolumeDegenerateOnNonCylinder]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testBoltVolumeDegenerateWhenSpanMissing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testBoltVolumeUsesExactRadiusAndTessellationSpan]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testCylinderHandlesAnchorsAndGeometry]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testDegenerateVolumeHasNoHandles]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testDragMathNilOnZeroDirection]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testMarginValueWritePathFromRaySequence]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testPlaneOutlineFitsBoundingRectangle]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testQuantizeNeverNegativeAndFloatMatchesDouble]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testQuantizeSnapsToQuarterMillimetreGrid]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testRadialMarginClampsAtZeroInsideBore]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testRadialMarginFromWallDrag]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testScrubDirectionAndClampAtZero]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testScrubStepIsFinerWhenSlow]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testSettledHandlePreservesValueUnderRigidTransform]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testSlabDepthClampsBehindPlane]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testSlabDepthFromNormalDrag]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testSlabHandleAnchorAndGeometry]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testSlabVolumeDegenerateOnNonPlane]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testSlabVolumeExtrudesOutlineAlongNormal]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceGeometryTests testSuggestionsMirrorCoreDefaults]' passed (0.000 seconds).
+Test Suite 'ClearanceGeometryTests' passed at 2026-07-26 18:43:56.187.
+	 Executed 24 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshAndStepJobsAreFieldEquivalentExceptModel]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshJobCarriesTheFullLoadCaseNotASkeleton]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshNoLoadCaseMatchesStepNoLoadCase]' passed (0.000 seconds).
+Test Suite 'JobJSONEquivalenceTests' passed at 2026-07-26 18:43:56.189.
+	 Executed 3 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+Test Case '-[TopOptFlowsTests.ManualPrimitiveJobTests testAutoOnlyJobHasNoGeometryOrManualKeys]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveJobTests testManualAndAutoBoltAreFieldEquivalentExceptSource]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveJobTests testManualBoltSerializesGeometryNotFaceID]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveJobTests testManualFaceSerializesGeometryNotFaceID]' passed (0.000 seconds).
+Test Suite 'ManualPrimitiveJobTests' passed at 2026-07-26 18:43:56.190.
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testAddManualBoltEmitsAManualClearanceSpec]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testAddManualFaceEmitsASlabSpec]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testAutoBoreMetricMatchesRenderedVolume]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testConvertAutoBoreToManualPreservesTheClearance]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testCopyAddsASecondRunClearance]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testCopyProducesIndependentPrimitive]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testDeleteAutoClearanceDropsItFromTheRun]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testDeletionSurvivesAReDeriveAndAResolutionChange]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testDetentLeavesAFarPlacementFree]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testDetentSnapsAxisToWorldZAndCentreToBoreAxis]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testEmptySidecarIsDeletedNotWritten]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testGizmoMoveReachesTheJob]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testLeavingClearsTheActiveGroup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testLoadingSuppressionsReappliesDeletions]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testManualBoltMetricIsOneValueAcrossSurfaces]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testManualPlaneMetricIsOneValue]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testRenameChangesOnlyTheName]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testRestoreAutoClearanceUndeletesIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testRotatedAxisReachesTheRun]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testRotateManualPrimitiveTurnsAxisKeepsCentreUndoable]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testSidecarRoundTripsSuppressionsAndManualPrimitives]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testSnapOverrideKeepsAFreePlacement]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testTappingGroupLocksInWithoutRenaming]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testUndoCoversAutoDeletion]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testUndoRedoCoversAdd]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testUndoRedoCoversDelete]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testUndoRedoCoversMove]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ManualPrimitiveTests testWriteClearanceMetricReachesManualPrimitiveAndRun]' passed (0.000 seconds).
+Test Suite 'ManualPrimitiveTests' passed at 2026-07-26 18:43:56.209.
+	 Executed 28 tests, with 0 failures (0 unexpected) in 0.018 (0.019) seconds
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testFreeTranslateUsesTheViewFacingPlane]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testGrabRayIsIdentity]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testParallelRayLeavesThePrimitivePut]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testRingAngleIsSignedRightHanded]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testRotateHandleTurnsAxisAboutTheRing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testRotateVectorAboutAxis]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testTranslateAlongAxisMovesOnlyOnThatAxis]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.PrimitiveGizmoTests testTranslateInPlaneIgnoresTheNormalComponent]' passed (0.000 seconds).
+Test Suite 'PrimitiveGizmoTests' passed at 2026-07-26 18:43:56.211.
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.001 (0.001) seconds
+Test Case '-[TopOptFlowsTests.ProjectModelTests testLegacyRecentWithoutLiveProjectOpensEmpty]' passed (0.004 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testLoadCaseAssemblesAnchorsAndLoads]' passed (0.075 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testMakeRunRequestCarriesLoadCaseAndFlag]' passed (0.007 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testMakeRunRequestReadsFromProject]' passed (0.007 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testMinimizePlasticPersistsAcrossReload]' passed (0.014 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testNewImportStartsAFreshEmptyProject]' passed (0.012 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testProjectBuildsViewerMeshFromImport]' passed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testRenameAndMaterialChangeUpdateProjectAndRecents]' passed (0.016 seconds).
+Test Case '-[TopOptFlowsTests.ProjectModelTests testWorkspaceStateSurvivesHomeAndBack]' passed (0.016 seconds).
+Test Suite 'ProjectModelTests' passed at 2026-07-26 18:43:56.370.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.158 (0.159) seconds
+	 Executed 86 tests, with 0 failures (0 unexpected) in 0.198 (0.204) seconds
+	 Executed 86 tests, with 0 failures (0 unexpected) in 0.198 (0.208) seconds

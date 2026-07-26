@@ -1,0 +1,10 @@
+=== tracked changes (git diff --stat) ===
+ ClearanceGeometry.swift    |  47 +++
+ ManualPrimitive.swift      |  33 +-
+ ProjectModel.swift         | 180 +++
+ WorkspacePlaceholder.swift | 366 +++
+ ManualPrimitiveTests.swift | 182 +++
+
+=== new files ===
+ PrimitiveGizmo.swift        227 lines (pure transform math + layout)
+ PrimitiveGizmoTests.swift   104 lines (8 pure-math tests)

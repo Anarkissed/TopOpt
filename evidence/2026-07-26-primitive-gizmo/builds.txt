@@ -1,0 +1,5 @@
+=== macOS package build ===
+swift build → Build complete (see below run)
+
+=== iOS build (TopOptFlows, generic/platform=iOS) ===
+** BUILD SUCCEEDED **
