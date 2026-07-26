@@ -29,6 +29,17 @@ public struct PrintParamsSheet: View {
     @State private var savingPreset = false
     @State private var presetName = ""
 
+    /// Which grid field has the compact number pad open (numeric-input handoff); nil =
+    /// none. A tap on the value opens the pad beside it — never the system keyboard.
+    @State private var editingField: ParamField?
+
+    /// The editable numeric fields, so one `editingField` drives every field's pad.
+    private enum ParamField: Hashable { case layerHeight, wallLoops, topLayers, bottomLayers, infill }
+
+    private func padBinding(_ field: ParamField) -> Binding<Bool> {
+        Binding(get: { editingField == field }, set: { if !$0 { editingField = nil } })
+    }
+
     public init(model: AppModel, project: ProjectModel) {
         self.model = model
         self.project = project
@@ -100,8 +111,11 @@ public struct PrintParamsSheet: View {
                 }
             } label: {
                 HStack(spacing: DS.Space.xs) {
-                    Text("Presets")
+                    // Names the selected preset (with a "· Edited" marker once values
+                    // diverge), or "Presets" when none is chosen — see AppModel.
+                    Text(model.presetButtonLabel())
                         .dsStyle(DS.TypeScale.subhead).fontWeight(.semibold)
+                        .lineLimit(1)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.system(size: 10, weight: .semibold))
                 }
@@ -146,11 +160,11 @@ public struct PrintParamsSheet: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: DS.Space.m),
                                 GridItem(.flexible(), spacing: DS.Space.m)],
                       alignment: .leading, spacing: DS.Space.ml) {
-                decimalField("Layer height", suffix: "mm", value: binding(\.layerHeightMM),
-                             onStep: stepLayerHeight)
-                intField("Wall loops", value: binding(\.wallLoops), onStep: stepWallLoops)
-                intField("Top shell layers", value: binding(\.topLayers), onStep: stepTopLayers)
-                intField("Bottom shell layers", value: binding(\.bottomLayers), onStep: stepBottomLayers)
+                decimalField("Layer height", field: .layerHeight, suffix: "mm",
+                             value: binding(\.layerHeightMM), onStep: stepLayerHeight)
+                intField("Wall loops", field: .wallLoops, value: binding(\.wallLoops), onStep: stepWallLoops)
+                intField("Top shell layers", field: .topLayers, value: binding(\.topLayers), onStep: stepTopLayers)
+                intField("Bottom shell layers", field: .bottomLayers, value: binding(\.bottomLayers), onStep: stepBottomLayers)
             }
             .padding(.top, DS.Space.xl3)
 
@@ -230,20 +244,24 @@ public struct PrintParamsSheet: View {
     private var infillStepper: some View {
         HStack(spacing: DS.Space.xs) {
             stepButton("minus") { stepInfill(-1) }
-            HStack(spacing: 1) {
-                TextField("", value: binding(\.infillPercent), format: .number)
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 34)
-                    .font(DS.TypeScale.caption.font).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.accent.color)
-                Text("%").dsStyle(DS.TypeScale.caption).fontWeight(.bold)
-                    .foregroundStyle(DS.Color.accent.color)
+            Button { editingField = .infill } label: {
+                HStack(spacing: 1) {
+                    Text("\(project.printParams.infillPercent)")
+                        .font(DS.TypeScale.caption.font).fontWeight(.bold)
+                        .foregroundStyle(DS.Color.accent.color)
+                    Text("%").dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                        .foregroundStyle(DS.Color.accent.color)
+                }
+                .frame(minWidth: 34)
+                .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
+                .background(fieldBackground)
             }
-            .padding(.vertical, 6).padding(.horizontal, DS.Space.s)
-            .background(fieldBackground)
+            .buttonStyle(.plain)
+            .numberPad(padBinding(.infill),
+                       config: .init(title: "Infill density", unit: "%", allowsDecimal: false),
+                       seed: Double(project.printParams.infillPercent)) { v in
+                if let v { project.printParams.infillPercent = Int(v.rounded()) }
+            }
             stepButton("plus") { stepInfill(1) }
         }
     }
@@ -317,54 +335,63 @@ public struct PrintParamsSheet: View {
     // MARK: field builders
 
     /// A labelled integer field: a tap-to-type number bracketed by − / + steppers
-    /// (design: numeric input in the grid, now with the same stepper treatment as
-    /// infill). Typing is authoritative; `onStep(±1)` nudges + clamps via `PrintParams`.
-    private func intField(_ label: String, value: Binding<Int>,
+    /// (design: numeric input in the grid). A tap on the value opens the shared compact
+    /// number pad (numeric-input handoff) — no system keyboard; `onStep(±1)` nudges +
+    /// clamps via `PrintParams`.
+    private func intField(_ label: String, field: ParamField, value: Binding<Int>,
                           onStep: @escaping (Int) -> Void) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             Text(label).dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.xs) {
                 stepButton("minus") { onStep(-1) }
-                TextField("", value: value, format: .number)
-                    #if os(iOS)
-                    .keyboardType(.numberPad)
-                    #endif
-                    .multilineTextAlignment(.center)
-                    .font(DS.TypeScale.bodyStrong.font)
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11).padding(.horizontal, DS.Space.s)
-                    .background(fieldBackground)
+                Button { editingField = field } label: {
+                    Text("\(value.wrappedValue)")
+                        .font(DS.TypeScale.bodyStrong.font)
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 11).padding(.horizontal, DS.Space.s)
+                        .background(fieldBackground)
+                }
+                .buttonStyle(.plain)
+                .numberPad(padBinding(field),
+                           config: .init(title: label, allowsDecimal: false),
+                           seed: Double(value.wrappedValue)) { v in
+                    if let v { value.wrappedValue = Int(v.rounded()) }
+                }
                 stepButton("plus") { onStep(1) }
             }
         }
     }
 
     /// A labelled decimal field with a trailing unit and − / + steppers (design:
-    /// layer height in mm). Typing is authoritative; `onStep(±1)` nudges by the
-    /// field's increment (0.02 mm) and clamps, via `PrintParams`.
-    private func decimalField(_ label: String, suffix: String, value: Binding<Double>,
-                              onStep: @escaping (Int) -> Void) -> some View {
+    /// layer height in mm). A tap on the value opens the shared number pad; `onStep(±1)`
+    /// nudges by the field's increment (0.02 mm) and clamps, via `PrintParams`.
+    private func decimalField(_ label: String, field: ParamField, suffix: String,
+                              value: Binding<Double>, onStep: @escaping (Int) -> Void) -> some View {
         VStack(alignment: .leading, spacing: DS.Space.xs) {
             Text(label).dsStyle(DS.TypeScale.caption2)
                 .foregroundStyle(DS.Color.textTertiary.color)
             HStack(spacing: DS.Space.xs) {
                 stepButton("minus") { onStep(-1) }
-                HStack(spacing: DS.Space.xs) {
-                    TextField("", value: value, format: .number.precision(.fractionLength(0...2)))
-                        #if os(iOS)
-                        .keyboardType(.decimalPad)
-                        #endif
-                        .multilineTextAlignment(.center)
-                        .font(DS.TypeScale.bodyStrong.font)
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                    Text(suffix).dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+                Button { editingField = field } label: {
+                    HStack(spacing: DS.Space.xs) {
+                        Text(value.wrappedValue.formatted(.number.precision(.fractionLength(0...2))))
+                            .font(DS.TypeScale.bodyStrong.font)
+                            .foregroundStyle(DS.Color.textPrimary.color)
+                        Text(suffix).dsStyle(DS.TypeScale.caption2)
+                            .foregroundStyle(DS.Color.textQuaternary.color)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11).padding(.horizontal, DS.Space.s)
+                    .background(fieldBackground)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11).padding(.horizontal, DS.Space.s)
-                .background(fieldBackground)
+                .buttonStyle(.plain)
+                .numberPad(padBinding(field),
+                           config: .init(title: label, unit: suffix, allowsDecimal: true),
+                           seed: value.wrappedValue) { v in
+                    if let v { value.wrappedValue = v }
+                }
                 stepButton("plus") { onStep(1) }
             }
         }

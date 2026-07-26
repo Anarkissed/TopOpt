@@ -127,6 +127,26 @@ public final class AppModel: ObservableObject {
         [.builtInDefault] + savedPresets
     }
 
+    /// The preset the open project's print parameters were last loaded from (or saved
+    /// as), so the picker button can name it instead of the generic "Presets". nil until
+    /// a preset is chosen this project; cleared when a project opens. The sheet compares
+    /// the live `printParams` against this preset to decide whether to show an "Edited"
+    /// marker — that dirtiness is DERIVED, never stored, so it self-corrects when the
+    /// user edits the values back to match.
+    @Published public private(set) var selectedPresetID: UUID?
+
+    /// The label the sheet's preset button should show: the selected preset's name (with
+    /// a "· Edited" marker once the live values diverge from it), or "Presets" when no
+    /// preset has been chosen for this project. Justification for the dirty-marker choice
+    /// (vs reverting to "Presets") is in the numeric-input handoff.
+    public func presetButtonLabel() -> String {
+        guard let id = selectedPresetID,
+              let preset = allPresets.first(where: { $0.id == id }),
+              let params = project?.printParams
+        else { return "Presets" }
+        return params == preset.params ? preset.name : "\(preset.name) · Edited"
+    }
+
     // MARK: Dependencies (injected for tests; default to the real bridge)
 
     private let materialsPath: String?
@@ -364,6 +384,8 @@ public final class AppModel: ObservableObject {
         guard !trimmed.isEmpty else { return nil }
         let preset = PrintParamsPreset(name: trimmed, params: params.clamped())
         savedPresets.append(preset)
+        // Freshly saved values ARE this preset, so name the button after it.
+        selectedPresetID = preset.id
         do {
             try presetStore.save(savedPresets)
         } catch {
@@ -378,6 +400,7 @@ public final class AppModel: ObservableObject {
     public func applyPreset(_ preset: PrintParamsPreset) {
         guard let project, !project.paramsLocked else { return }
         project.printParams = preset.params
+        selectedPresetID = preset.id
     }
 
     /// Flag a project as optimized (called when its run produces accepted variants):
@@ -657,6 +680,9 @@ public final class AppModel: ObservableObject {
     public func open(_ recent: RecentProject) {
         projectName = recent.name
         process = recent.process
+        // A preset selection belongs to the sheet session of the project it was chosen
+        // in; a different project starts at the generic "Presets" label.
+        selectedPresetID = nil
         selectMaterial(recent.materialName)
         if let pm = projectsById[recent.id] {
             project = pm
