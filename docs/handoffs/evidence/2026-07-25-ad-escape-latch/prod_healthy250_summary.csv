@@ -1,0 +1,2 @@
+fixture,band,elements,full_counterfactual_escapes,full_first_iter,prod_latched,prod_latch_iter,prod_escape_count,b5_mean_drho,b5_max_drho,detector_s_per_iter,solve_s_per_iter
+healthy_24576,4,24576,0,0,0,0,0,0.000000e+00,0.000000e+00,3.0317e-05,3.9289e-01

@@ -1,0 +1,139 @@
+Test project /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/amg-phase-1-measurement-7f3f3b/build
+      Start  1: materials_loader
+ 1/67 Test  #1: materials_loader .................   Passed    0.63 sec
+      Start  2: stl_import
+ 2/67 Test  #2: stl_import .......................   Passed    0.39 sec
+      Start  3: mesh_segmentation
+ 3/67 Test  #3: mesh_segmentation ................   Passed    0.53 sec
+      Start  4: face_overrides
+ 4/67 Test  #4: face_overrides ...................   Passed    0.45 sec
+      Start  5: voxelize
+ 5/67 Test  #5: voxelize .........................   Passed    0.53 sec
+      Start  6: hex_element
+ 6/67 Test  #6: hex_element ......................   Passed    0.24 sec
+      Start  7: orientation
+ 7/67 Test  #7: orientation ......................   Passed    0.35 sec
+      Start  8: settings
+ 8/67 Test  #8: settings .........................   Passed    0.52 sec
+      Start  9: report
+ 9/67 Test  #9: report ...........................   Passed    0.45 sec
+      Start 10: export_stl
+10/67 Test #10: export_stl .......................   Passed    0.53 sec
+      Start 11: fields
+11/67 Test #11: fields ...........................   Passed    0.24 sec
+      Start 12: job_schema
+12/67 Test #12: job_schema .......................   Passed    0.35 sec
+      Start 13: resample
+13/67 Test #13: resample .........................   Passed    0.62 sec
+      Start 14: warm_start
+14/67 Test #14: warm_start .......................   Passed    0.43 sec
+      Start 15: clearance
+15/67 Test #15: clearance ........................   Passed    0.53 sec
+      Start 16: observability
+16/67 Test #16: observability ....................   Passed    0.06 sec
+      Start 17: fea_assembly
+17/67 Test #17: fea_assembly .....................   Passed    0.46 sec
+      Start 18: traction_loads
+18/67 Test #18: traction_loads ...................   Passed    0.53 sec
+      Start 19: fea_cg
+19/67 Test #19: fea_cg ...........................   Passed   26.25 sec
+      Start 20: fea_mgcg
+20/67 Test #20: fea_mgcg .........................   Passed   14.01 sec
+      Start 21: fea_matfree
+21/67 Test #21: fea_matfree ......................   Passed    0.85 sec
+      Start 22: fea_mgcg_matfree
+22/67 Test #22: fea_mgcg_matfree .................   Passed   22.24 sec
+      Start 23: fea_matfree_threads
+23/67 Test #23: fea_matfree_threads ..............   Passed    9.58 sec
+      Start 24: fea_mixed_precision
+24/67 Test #24: fea_mixed_precision ..............   Passed    8.72 sec
+      Start 25: krylov_recycling
+25/67 Test #25: krylov_recycling .................   Passed    8.91 sec
+      Start 26: beam_validation
+26/67 Test #26: beam_validation ..................   Passed   69.04 sec
+      Start 27: gate_v4
+27/67 Test #27: gate_v4 ..........................   Passed    0.39 sec
+      Start 28: gate_v5
+28/67 Test #28: gate_v5 ..........................   Passed    0.48 sec
+      Start 29: simp
+29/67 Test #29: simp .............................   Passed   53.10 sec
+      Start 30: rmin
+30/67 Test #30: rmin .............................   Passed    0.45 sec
+      Start 31: mbb_validation
+31/67 Test #31: mbb_validation ...................   Passed    4.32 sec
+      Start 32: gate_v2
+32/67 Test #32: gate_v2 ..........................   Passed   53.43 sec
+      Start 33: property_v3
+33/67 Test #33: property_v3 ......................   Passed    2.83 sec
+      Start 34: variants
+34/67 Test #34: variants .........................   Passed    4.64 sec
+      Start 35: passive_regions
+35/67 Test #35: passive_regions ..................   Passed    6.19 sec
+      Start 36: minimize_plastic
+36/67 Test #36: minimize_plastic .................   Passed   17.45 sec
+      Start 37: observability_capture
+37/67 Test #37: observability_capture ............   Passed    0.29 sec
+      Start 38: anchor_integrity
+38/67 Test #38: anchor_integrity .................   Passed    3.20 sec
+      Start 39: load_retention_connectivity
+39/67 Test #39: load_retention_connectivity ......   Passed    9.66 sec
+      Start 40: design_domain
+40/67 Test #40: design_domain ....................   Passed    1.59 sec
+      Start 41: galerkin_cache
+41/67 Test #41: galerkin_cache ...................   Passed    3.44 sec
+      Start 42: designbox_reduction
+42/67 Test #42: designbox_reduction ..............   Passed    1.78 sec
+      Start 43: savings_part_relative
+43/67 Test #43: savings_part_relative ............   Passed    1.11 sec
+      Start 44: ladder_rung_count
+44/67 Test #44: ladder_rung_count ................   Passed    7.47 sec
+      Start 45: warm_start_integration
+45/67 Test #45: warm_start_integration ...........   Passed    3.88 sec
+      Start 46: designbox_anchor_pad
+46/67 Test #46: designbox_anchor_pad .............   Passed    3.41 sec
+      Start 47: face_protection
+47/67 Test #47: face_protection ..................   Passed    5.19 sec
+      Start 48: designbox_padding
+48/67 Test #48: designbox_padding ................   Passed    0.64 sec
+      Start 49: coarsen_rule
+49/67 Test #49: coarsen_rule .....................   Passed   36.48 sec
+      Start 50: designbox_grid_report
+50/67 Test #50: designbox_grid_report ............   Passed    0.62 sec
+      Start 51: mma
+51/67 Test #51: mma ..............................   Passed   82.18 sec
+      Start 52: mma_projection_gate
+52/67 Test #52: mma_projection_gate ..............   Passed    1.54 sec
+      Start 53: mma_projection
+53/67 Test #53: mma_projection ...................   Passed   45.61 sec
+      Start 54: conditional_projection
+54/67 Test #54: conditional_projection ...........   Passed   41.46 sec
+      Start 55: rung_infeasible
+55/67 Test #55: rung_infeasible ..................   Passed   40.80 sec
+      Start 56: active_domain
+56/67 Test #56: active_domain ....................   Passed    8.01 sec
+      Start 57: stress
+57/67 Test #57: stress ...........................   Passed   20.08 sec
+      Start 58: step_import
+58/67 Test #58: step_import ......................   Passed    0.53 sec
+      Start 59: segment_vs_step
+59/67 Test #59: segment_vs_step ..................   Passed    0.51 sec
+      Start 60: face_tag
+60/67 Test #60: face_tag .........................   Passed    0.49 sec
+      Start 61: mask_face
+61/67 Test #61: mask_face ........................   Passed    0.53 sec
+      Start 62: cli_demo
+62/67 Test #62: cli_demo .........................   Passed  183.81 sec
+      Start 63: production_parity
+63/67 Test #63: production_parity ................   Passed   18.27 sec
+      Start 64: clearance_parity
+64/67 Test #64: clearance_parity .................   Passed   18.09 sec
+      Start 65: face_protection_parity
+65/67 Test #65: face_protection_parity ...........   Passed    3.72 sec
+      Start 66: loadcase_small_face
+66/67 Test #66: loadcase_small_face ..............   Passed    0.05 sec
+      Start 67: mesh_job
+67/67 Test #67: mesh_job .........................   Passed    7.52 sec
+
+100% tests passed out of 67
+
+Total Test time (real) = 862.72 sec

@@ -1,0 +1,31 @@
+matfree threads = 10
+
+===== FIXTURE stagnation (40 iterations, rung 0) =====
+  analysis grid 40x32x40 (46400 elements), dilution 51.6x, rmin=2.500, auto band=4
+  running FULL-domain (band=0) reference trajectory ...
+    40 iterations captured, 97.1 s, 20982 CG
+  running PRODUCTION (band=4, escape latch ON) trajectory ...
+    40 iterations captured, 173.1 s, 54204 CG
+
+  --- [FULL] counterfactual escapes (168 growth invariant) ---
+    6979 escapes, first at iter 2, worst out-of-band rho 0.172965
+
+  --- [B2/B3] PRODUCTION escape latch (live detection) ---
+    LATCHED at iteration 3, escape_count=705
+    reason: escape detected: 705 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored
+
+  --- [B5] damage before detection (drho vs full domain at the latch iteration) ---
+    at iteration 3: mean|drho|=3.213123e-03, max|drho|=1.202868e-01  (134's OC-based estimate was mean|drho| ~3.6e-6)
+
+  --- [B6] DETECTION COST (the live O(N) scan, 2000 reps) ---
+    detector 3.216e-05 s/iter, solve 2.428e+00 s/iter -> 0.0013% of one solve
+
+  --- FULL-domain escape DISTANCE beyond band edge (shells) ---
+    shell  1  : 4096 (58.7%)
+    shell  2  : 1913 (27.4%)
+    shell  3  : 745 (10.7%)
+    shell  4  : 205 (2.9%)
+    shell  5  : 20 (0.3%)
+    beyond the first shell: 41.3% — a boundary-shell detector would miss them; the O(N) whole-field scan does not
+
+wrote /tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-amg-phase-1-measurement-7f3f3b/4e8a2f31-420c-4484-ba6c-d7a2f2d15eb7/scratchpad/prod_stag/escape_summary.csv

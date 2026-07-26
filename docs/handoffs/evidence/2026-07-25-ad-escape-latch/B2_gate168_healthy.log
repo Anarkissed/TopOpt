@@ -1,0 +1,8 @@
+matfree threads = 10
+
+===== [B2] 168 ARMED gate reproduction (band=4, full ladder) on healthy_24576 =====
+  rung | compliance          | fraction_mean | latched | escape_count
+    0  | 4.6389605554134183 | 0.4169650608  |   0     | 0
+    1  | 8.7181934196748472 | 0.9914109397  |   1     | 50
+  168 committed: rung0 compliance 4.63896055541 fraction 0.4169650608; rung1 8.72664102474 fraction 0.3943853269 (both latched=0)
+  >>> BIT-IDENTICAL to those = the escape latch left the healthy armed run untouched (B2).

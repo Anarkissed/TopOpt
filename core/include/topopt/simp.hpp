@@ -194,6 +194,31 @@ std::vector<char> active_domain_mask(const VoxelGrid& grid,
 // where the voxel radius floors at 1.5.
 int active_domain_auto_band(double filter_radius);
 
+// ESCAPE DETECTION (escape-latch amendment, 2026-07-25). The growth invariant
+// above is EMPIRICAL, not a theorem: handoff 168 §7 measured 6 979 band escapes
+// on a stagnating, divergent MMA trajectory, where the sensitivity field is
+// garbage and the additive update raises floored variables far from material.
+// When it fails, the mask silently suppresses material the optimizer wanted and
+// the design diverges from the full-domain answer with nothing saying so.
+//
+// This counts the escapes DIRECTLY on the live restricted path — no full-domain
+// solve. `prev_mask` is the active mask the PREVIOUS iteration solved under;
+// `density` is the physical field about to be solved THIS iteration (the one the
+// previous iteration's update produced). The return value is the number of solid
+// elements above the active threshold (1.5 * density_min) that lie OUTSIDE
+// prev_mask — material that grew beyond the band's growth margin in one step,
+// i.e. exactly 168's growth-invariant escape count, evaluated on the trajectory
+// the restricted solver actually walks. 0 => the band contained the step.
+// Measured to be non-zero on the LIVE restricted path (not only the full-domain
+// counterfactual), which is why a live latch is possible at all.
+//
+// Throws std::invalid_argument on a size mismatch. An empty prev_mask (the first
+// armed iteration, before any band has been solved) returns 0.
+long long active_domain_escape_count(const VoxelGrid& grid,
+                                     const std::vector<double>& density,
+                                     const std::vector<char>& prev_mask,
+                                     double density_min);
+
 // The per-run active-domain LATCH (handoff 134 §6.5, mirroring 128's mg_mode
 // latch). If the measured active element fraction stays AT OR ABOVE
 // kActiveDomainLatchFraction for kActiveDomainLatchWindow CONSECUTIVE
@@ -979,14 +1004,22 @@ struct SimpOptimizeResult {
   // reason is one of:
   //   "active fraction >= <f> for <n> consecutive iterations (band buys nothing)"
   //   "restricted solve failed: <the exception's message>"
+  //   "escape detected: <n> element(s) ... took material outside the active band"
   // A latched run is CORRECT — every solve after the latch is the full domain —
   // it is simply not accelerated, and it says so instead of silently costing.
+  // `active_domain_escape_count` is the number of escaping elements observed at
+  // the iteration the ESCAPE latch fired (escape-latch amendment); it is 0 on a
+  // run that never latched OR latched for a non-escape reason (degeneracy /
+  // restricted-solve failure). A non-zero value therefore both flags the escape
+  // latch and charges how much material had already grown out-of-band when it
+  // tripped — the damage done before detection.
   // `active_fraction_mean` is the iteration mean of the per-iteration active
   // fraction (1.0 on an off/latched run): the f_bar handoff 134 §4b projects the
   // end-to-end win with, and the honest cost input for the next reader.
   int active_domain_band = 0;
   bool active_domain_latched = false;
   int active_domain_latch_iteration = 0;
+  long long active_domain_escape_count = 0;
   std::string active_domain_latch_reason;
   double active_fraction_mean = 1.0;
   std::vector<SimpIteration> history;    // per-iteration trajectory (size iterations)
