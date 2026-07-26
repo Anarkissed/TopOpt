@@ -1,0 +1,120 @@
+
+============================================================
+FIXTURE: WallMount_ShelfBracket (the reported part)
+  path: ./core/tests/fixtures/mesh/WallMount_ShelfBracket.stl
+  2224 triangles, 31 pseudo-faces, bbox diag 289.62 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  0    Cyl    32     221.582    70.00  221.582  443.165  BORE primitive (radius ok)
+  1    Cyl    17      16.708    35.00   16.708   33.416  BORE primitive (radius ok)
+  3    Cyl    28      18.341    60.00   18.341   36.682  BORE primitive (radius ok)
+  4    Cyl    8        3.000    10.00    3.000    6.000  BORE primitive (radius ok)
+  5    Cyl    43      23.334    40.51   23.334   46.669  BORE primitive (radius ok)
+  6    Other  80           -    36.44    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  9    Cyl    15       7.375    38.15    7.375   14.749  BORE primitive (radius ok)
+  10   Other  27           -    73.30    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  12   Other  115          -   179.98    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  13   Other  76           -    90.32    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  14   Cyl    72       2.000   180.00    2.000    4.000  BORE primitive (radius ok)
+  15   Cyl    80       4.500   180.00    4.500    9.000  BORE primitive (radius ok)
+  16   Cyl    8        2.314    14.04    2.314    4.629  BORE primitive (radius ok)
+  17   Cyl    92     199.249    77.70  199.249  398.499  BORE primitive (radius ok)
+  18   Other  40           -   180.00    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  19   Cyl    48       4.500    78.70    4.500    9.000  BORE primitive (radius ok)
+  20   Cyl    160      4.500   180.00    4.500    9.000  BORE primitive (radius ok)
+  21   Cyl    162     55.795   179.91   55.795  111.590  BORE primitive (radius ok)
+  22   Other  126          -   179.98    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  25   Other  64           -   146.93    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  26   Cyl    32      57.979    72.15   57.979  115.958  BORE primitive (radius ok)
+  27   Other  92           -   180.00    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  28   Cyl    36      17.100    85.00   17.100   34.200  BORE primitive (radius ok)
+  29   Cyl    8        3.000    10.00    3.000    6.000  BORE primitive (radius ok)
+  SUMMARY: 31 pseudo-faces (6 plane, 16 cyl, 9 other)
+  HEURISTIC: 24 bore primitives proposed | 16 with a real radius | 8 BLANK-Auto rows
+
+============================================================
+FIXTURE: plate_bore (authored bracket, clean bore)
+  path: ./core/tests/fixtures/mesh/plate_bore.stl
+  416 triangles, 7 pseudo-faces, bbox diag 29.12 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  2    Cyl    104      3.000   180.00    3.000    6.000  BORE primitive (radius ok)
+  SUMMARY: 7 pseudo-faces (6 plane, 1 cyl, 0 other)
+  HEURISTIC: 1 bore primitives proposed | 1 with a real radius | 0 BLANK-Auto rows
+
+============================================================
+FIXTURE: filleted_bore_plate (rounded-rim bore, PR-167/paint fixture)
+  path: ./core/tests/fixtures/mesh/filleted_bore_plate.stl
+  1440 triangles, 4 pseudo-faces, bbox diag 62.51 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  0    Other  768          -    78.87    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  1    Other  480          -   180.00    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  3    Cyl    96      22.000   180.00   22.000   44.000  BORE primitive (radius ok)
+  SUMMARY: 4 pseudo-faces (1 plane, 1 cyl, 2 other)
+  HEURISTIC: 3 bore primitives proposed | 1 with a real radius | 2 BLANK-Auto rows
+
+============================================================
+FIXTURE: l-bracket (CAD export, 2 through-holes)
+  path: ./docs/handoffs/evidence/2026-07-25-mesh-job-params/l-bracket.stl
+  236 triangles, 10 pseudo-faces, bbox diag 93.81 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  8    Cyl    52       2.500   180.00    2.500    5.000  BORE primitive (radius ok)
+  9    Cyl    52       2.500   180.00    2.500    5.000  BORE primitive (radius ok)
+  SUMMARY: 10 pseudo-faces (8 plane, 2 cyl, 0 other)
+  HEURISTIC: 2 bore primitives proposed | 2 with a real radius | 0 BLANK-Auto rows
+
+============================================================
+FIXTURE: hook
+  path: ./core/tests/fixtures/orient/hook.stl
+  212 triangles, 6 pseudo-faces, bbox diag 54.44 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  2    Other  52           -   180.00    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  4    Other  52           -   180.00    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  SUMMARY: 6 pseudo-faces (4 plane, 0 cyl, 2 other)
+  HEURISTIC: 2 bore primitives proposed | 0 with a real radius | 2 BLANK-Auto rows
+
+============================================================
+FIXTURE: sphere_r10mm (everywhere-curved)
+  path: ./core/tests/fixtures/stl/sphere_r10mm.stl
+  320 triangles, 1 pseudo-faces, bbox diag 34.64 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  0    Other  320          -   180.00    BLANK    BLANK  BORE primitive -> BLANK Auto (no radius)
+  SUMMARY: 1 pseudo-faces (0 plane, 0 cyl, 1 other)
+  HEURISTIC: 1 bore primitives proposed | 0 with a real radius | 1 BLANK-Auto rows
+
+============================================================
+FIXTURE: cube_10mm (no holes)
+  path: ./core/tests/fixtures/stl/cube_10mm.stl
+  12 triangles, 6 pseudo-faces, bbox diag 17.32 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  SUMMARY: 6 pseudo-faces (6 plane, 0 cyl, 0 other)
+  HEURISTIC: 0 bore primitives proposed | 0 with a real radius | 0 BLANK-Auto rows
+
+============================================================
+FIXTURE: sample_cube (app resource)
+  path: ./app/TopOpt/Resources/sample_cube.stl
+  12 triangles, 6 pseudo-faces, bbox diag 17.32 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  SUMMARY: 6 pseudo-faces (6 plane, 0 cyl, 0 other)
+  HEURISTIC: 0 bore primitives proposed | 0 with a real radius | 0 BLANK-Auto rows
+
+============================================================
+FIXTURE: bracket_clean (mesh-repair evidence)
+  path: ./docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_clean.stl
+  416 triangles, 7 pseudo-faces, bbox diag 72.36 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  2    Cyl    104      5.000   180.00    5.000   10.000  BORE primitive (radius ok)
+  SUMMARY: 7 pseudo-faces (6 plane, 1 cyl, 0 other)
+  HEURISTIC: 1 bore primitives proposed | 1 with a real radius | 0 BLANK-Auto rows
+
+============================================================
+FIXTURE: bracket_wall_hole
+  path: ./docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_wall_hole.stl
+  IMPORT FAILED: cannot import './docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_wall_hole.stl': the mesh has holes too large or complex to fill safely (open boundary edges remain after small holes were capped)
+
+============================================================
+FIXTURE: bracket_small_hole
+  path: ./docs/handoffs/evidence/2026-07-24-mesh-repair/bracket_small_hole.stl
+  418 triangles, 7 pseudo-faces, bbox diag 72.36 mm (pseudo_faces=1)
+  face kind   tris      fitR   fanDeg   margin    axial  -> heuristic verdict
+  1    Cyl    104      5.000   180.00    5.000   10.000  BORE primitive (radius ok)
+  SUMMARY: 7 pseudo-faces (6 plane, 1 cyl, 0 other)
+  HEURISTIC: 1 bore primitives proposed | 1 with a real radius | 0 BLANK-Auto rows
