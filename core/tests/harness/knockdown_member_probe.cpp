@@ -408,9 +408,15 @@ void member_axial(const std::vector<int>& Ks, const std::vector<int>& loops_opts
         Specimen s{K, K, K, level, t_wall, t_cap};
         double phi = loops == 0 ? 0.0 : measured_wall_fraction(s, vpc);
         VoxelGrid g = build_specimen(s, vpc);
+        std::fprintf(stderr, "  [axial K=%d W=%.0f f=%.2f loops=%d N=%d^3 ...]\n",
+                     K, W, f, loops, g.nx);
+        std::fflush(stderr);
         double t0 = now_ms();
         SolveOut r = apparent_E(g, 2);
         double ms = now_ms() - t0;
+        std::fprintf(stderr, "  [   -> E/Es=%.4f cg=%d mg=%d %.1fs]\n",
+                     r.value / kE, r.cg_iters, r.used_mg ? 1 : 0, ms / 1000.0);
+        std::fflush(stderr);
         double E = r.value / kE;
         double f15 = std::pow(f, 1.5);
         double asm_meas = f15 / E;
@@ -419,10 +425,13 @@ void member_axial(const std::vector<int>& Ks, const std::vector<int>& loops_opts
         std::printf("  %-4d %-6.0f %-6d %-7.2f %-8.4f %-10.5f %-8.5f %-9.3f "
                     "%-8s %-10.3f\n",
                     K, W, loops, f, phi, E, f15, asm_meas, sign, margin);
-        if (csv)
+        std::fflush(stdout);
+        if (csv) {
           std::fprintf(csv, "%d,%.1f,%d,%.2f,%.5f,%.6f,%.6f,%.4f,%s,%.4f,%d,%.0f\n",
                        K, W, loops, f, phi, E, f15, asm_meas, sign, margin,
                        r.cg_iters, ms);
+          std::fflush(csv);
+        }
       }
     }
   }
@@ -484,9 +493,15 @@ void bend_vs_axial(const std::vector<int>& Ks, const std::vector<int>& loops_opt
         // bending on the slender beam, same cross-section
         Specimen bm{K, K, beam_cells, level, t_wall, 0.0};
         VoxelGrid gb = build_specimen(bm, vpc);
+        std::fprintf(stderr, "  [bend K=%d W=%.0f f=%.2f loops=%d grid=%dx%dx%d "
+                             "...]\n", K, W, f, loops, gb.nx, gb.ny, gb.nz);
+        std::fflush(stderr);
         double t0 = now_ms();
         SolveOut rb = apparent_E_bending(gb);
         double ms = now_ms() - t0;
+        std::fprintf(stderr, "  [   -> r_bend=%.4f cg=%d %.1fs]\n",
+                     rb.value / E_solid_bend, rb.cg_iters, ms / 1000.0);
+        std::fflush(stderr);
         double r_bend = rb.value / E_solid_bend;
         double asm_ax = f15 / r_axial, asm_bn = f15 / r_bend;
         double mgn_ax = 1.5 * r_axial / f15, mgn_bn = 1.5 * r_bend / f15;
@@ -494,11 +509,14 @@ void bend_vs_axial(const std::vector<int>& Ks, const std::vector<int>& loops_opt
                     "%-9.3f %-9.3f %-9.3f\n",
                     K, W, loops, f, phi, r_axial, asm_ax, r_bend, asm_bn, mgn_ax,
                     mgn_bn);
-        if (csv)
+        std::fflush(stdout);
+        if (csv) {
           std::fprintf(csv, "%d,%.1f,%d,%.2f,%.5f,%.6f,%.6f,%.4f,%.4f,%.6f,%.4f,"
                             "%.4f,%d,%d,%.0f\n",
                        K, W, loops, f, phi, f15, r_axial, asm_ax, mgn_ax, r_bend,
                        asm_bn, mgn_bn, ra.cg_iters, rb.cg_iters, ms);
+          std::fflush(csv);
+        }
       }
     }
   }
@@ -524,8 +542,9 @@ int main() {
   if (sel == "selfcheck") { std::printf("\n(selfcheck-only)\n"); return 0; }
 
   if (sel.empty() || sel == "axial") {
-    // Member widths W in {5,10,15} mm (K=1,2,3), wall loops {0,3,5}, full band.
-    member_axial({1, 2, 3}, {0, 3, 5}, kInfills, vpc_axial);
+    // Member widths W in {5,10,15} mm (K=1,2,3), wall loops {0,3,5}, three
+    // infills spanning the band (edges + middle, matching 191's composite set).
+    member_axial({1, 2, 3}, {0, 3, 5}, {0.15, 0.30, 0.60}, vpc_axial);
   }
   if (sel == "axial") { std::printf("\n(axial-only)\n"); return 0; }
 
