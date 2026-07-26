@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <string>
 
+using topopt::JobClearance;
 using topopt::JobDescription;
 using topopt::JobError;
 using topopt::load_job_file;
@@ -327,7 +328,93 @@ static void test_clearances() {
   check_rejects(with_clearance(R"({ "face_id": 8, "kind": "bolt", "bogus": 1 })"),
                 "clearances: unknown key rejected");
   check_rejects(with_clearance(R"({ "kind": "bolt" })"),
-                "clearances: missing face_id rejected");
+                "clearances: missing face_id AND geometry rejected");
+}
+
+// --- MANUAL (user-placed) clearance geometry (handoff group-editing) --------
+// A hand-placed primitive has no B-rep face, so it carries its geometry inline
+// under "geometry" instead of a "face_id". Proves the manual geometry parses for
+// both kinds, that a clearance must carry EXACTLY ONE of face_id/geometry (the
+// XOR rule), and — BAR B1 — that a manual entry and an auto entry of the same
+// kind agree on the shared fields (kind + distances), differing ONLY in the
+// geometry SOURCE (face_id vs geometry).
+static void test_clearances_manual() {
+  const std::string base = R"({
+  "model": "part.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "loads": {
+    "anchor_face_ids": [8],
+    "groups": [ { "face_ids": [0], "force": [0, 0, -50] } ],
+    "clearances": [
+      { "kind": "bolt", "concentric_margin_mm": 2.5, "axial_clearance_mm": 5.0,
+        "geometry": { "axis_point": [8, 8, 8], "axis_dir": [0, 0, 1],
+                      "radius_mm": 2.0, "half_length_mm": 4.0 } },
+      { "kind": "face", "slab_depth_mm": 3.0,
+        "geometry": { "origin": [12, 6, 6], "normal": [1, 0, 0],
+                      "half_u_mm": 2.0, "half_w_mm": 2.0 } },
+      { "face_id": 8, "kind": "bolt", "concentric_margin_mm": 2.5, "axial_clearance_mm": 5.0 }
+    ]
+  }
+})";
+  const JobDescription j = parse_job(base);
+  CHECK(j.loads.clearances.size() == 3, "manual: 3 entries parsed");
+
+  const JobClearance& mb = j.loads.clearances[0];
+  CHECK(mb.manual && mb.face_id == -1, "manual bolt: manual=true, no face id");
+  CHECK(mb.kind == "bolt", "manual bolt: kind carried");
+  CHECK(mb.axis_point.x == 8.0 && mb.axis_point.z == 8.0 &&
+            mb.axis_dir.z == 1.0 && mb.radius_mm == 2.0 &&
+            mb.half_length_mm == 4.0,
+        "manual bolt: geometry fields round-trip");
+  CHECK(mb.concentric_margin_mm == 2.5 && mb.axial_clearance_mm == 5.0,
+        "manual bolt: distances carried the same as an auto bolt");
+
+  const JobClearance& mf = j.loads.clearances[1];
+  CHECK(mf.manual && mf.kind == "face", "manual face: manual=true, kind carried");
+  CHECK(mf.origin.x == 12.0 && mf.normal.x == 1.0 && mf.half_u_mm == 2.0 &&
+            mf.half_w_mm == 2.0,
+        "manual face: geometry fields round-trip");
+  CHECK(mf.slab_depth_mm == 3.0, "manual face: slab depth carried");
+
+  // BAR B1 — field equivalence: the manual bolt (entry 0) and the auto bolt
+  // (entry 2) live in the SAME clearances array and agree on EVERY shared field;
+  // the only difference is the geometry source.
+  const JobClearance& ab = j.loads.clearances[2];
+  CHECK(!ab.manual && ab.face_id == 8, "auto bolt: face-id sourced");
+  CHECK(ab.kind == mb.kind &&
+            ab.concentric_margin_mm == mb.concentric_margin_mm &&
+            ab.axial_clearance_mm == mb.axial_clearance_mm,
+        "B1: manual and auto bolt share kind + distances (only source differs)");
+
+  auto with_clearance = [&](const std::string& entry) {
+    std::string s = base;
+    const std::string needle = "\"clearances\": [";
+    const auto at = s.find(needle);
+    return s.replace(at + needle.size(), 0, entry + ",");
+  };
+  // XOR rule: both face_id AND geometry → rejected.
+  check_rejects(
+      with_clearance(
+          R"({ "kind": "bolt", "face_id": 8, "geometry": { "axis_point": [0,0,0], "axis_dir": [0,0,1], "radius_mm": 1, "half_length_mm": 1 } })"),
+      "manual: both face_id and geometry rejected (XOR)");
+  // A bolt geometry missing a required sub-key → rejected.
+  check_rejects(
+      with_clearance(
+          R"({ "kind": "bolt", "geometry": { "axis_point": [0,0,0], "axis_dir": [0,0,1], "radius_mm": 1 } })"),
+      "manual: bolt geometry missing half_length_mm rejected");
+  // A face geometry with a bolt sub-key → unknown key rejected (kind-scoped).
+  check_rejects(
+      with_clearance(
+          R"({ "kind": "face", "geometry": { "origin": [0,0,0], "normal": [1,0,0], "half_u_mm": 1, "half_w_mm": 1, "radius_mm": 2 } })"),
+      "manual: face geometry with a bolt key rejected");
+  // Negative manual radius → rejected.
+  check_rejects(
+      with_clearance(
+          R"({ "kind": "bolt", "geometry": { "axis_point": [0,0,0], "axis_dir": [0,0,1], "radius_mm": -1, "half_length_mm": 1 } })"),
+      "manual: negative radius_mm rejected");
 }
 
 int main() {
@@ -339,6 +426,7 @@ int main() {
   test_types_and_values();
   test_malformed();
   test_clearances();
+  test_clearances_manual();
 
   if (g_failures == 0) {
     std::printf("job schema (M6.2): all %d checks passed\n", g_checks);

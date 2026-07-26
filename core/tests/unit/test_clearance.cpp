@@ -14,12 +14,17 @@
 
 #include <cstdio>
 
+using topopt::ClearanceGeometry;
 using topopt::ClearanceKind;
 using topopt::ClearanceParams;
 using topopt::ClearanceRasterResult;
 using topopt::DesignMask;
+using topopt::ManualClearanceGeometry;
 using topopt::mask_clearance_region;
 using topopt::MaskValue;
+using topopt::rasterize_clearance;
+using topopt::resolve_clearance_from_face;
+using topopt::resolve_clearance_manual;
 using topopt::StepFaceInfo;
 using topopt::StepModel;
 using topopt::StepSurfaceKind;
@@ -205,6 +210,110 @@ int main() {
           "offset part voxel is protected at its solved location");
     CHECK(out[solved.index(8, 8, 6)] == MaskValue::FrozenVoid,
           "a void voxel over the bore is still cleared on the expanded grid");
+  }
+
+  // === BAR B2: a MANUAL cylinder == an AUTO cylinder of identical geometry ===
+  // The auto face 0 is a cylinder axis ∥ Z at (8,8), r=2, tessellation span
+  // z∈[4,12]. A manual primitive of the SAME swept volume is that cylinder
+  // parameterized as centre + half-length: axis_point at the span midpoint
+  // (8,8,8), half_length 4. With the same params the two resolve to predicates
+  // describing the same region and — funnelled through the SAME rasterizer —
+  // must produce a bit-for-bit identical mask. This is the whole point of the
+  // resolve/rasterize split: identical geometry ⇒ identical mask by construction.
+  {
+    VoxelGrid grid = make_grid(16);
+    VoxelGrid part = grid;
+    ClearanceParams p;
+    p.kind = ClearanceKind::Bolt;
+    p.concentric_margin_mm = 1.0;
+    p.axial_clearance_mm = 1.0;
+
+    DesignMask out_auto(grid.voxel_count(), MaskValue::Active);
+    const ClearanceRasterResult ra =
+        mask_clearance_region(grid, part, 0, 0, 0, model, 0, p, out_auto);
+
+    ManualClearanceGeometry mg;
+    mg.kind = ClearanceKind::Bolt;
+    mg.axis_point = Vec3{8.0, 8.0, 8.0};  // midpoint of the auto span z∈[4,12]
+    mg.axis_dir = Vec3{0.0, 0.0, 1.0};
+    mg.radius_mm = 2.0;        // == face.cylinder_radius_mm
+    mg.half_length_mm = 4.0;   // == (12 − 4) / 2
+    DesignMask out_manual(grid.voxel_count(), MaskValue::Active);
+    const ClearanceGeometry mgeom = resolve_clearance_manual(mg, p);
+    const ClearanceRasterResult rm =
+        rasterize_clearance(grid, part, 0, 0, 0, mgeom, out_manual);
+
+    CHECK(mgeom.valid, "manual bolt geometry resolves valid");
+    CHECK(ra.voxels_frozen == rm.voxels_frozen,
+          "manual and auto bolt freeze the same voxel COUNT");
+    CHECK(ra.voxels_frozen > 0, "the B2 fixture actually freezes voxels");
+    bool identical = true;
+    for (std::size_t idx = 0; idx < out_auto.size(); ++idx)
+      if (out_auto[idx] != out_manual[idx]) identical = false;
+    CHECK(identical, "manual and auto bolt masks are BIT-IDENTICAL (BAR B2)");
+
+    // A manual bolt honours the concentric margin the same way the auto one does:
+    // a non-zero margin grows the frozen set (radius 2→3 catches the ring).
+    ClearanceParams p0 = p;
+    p0.concentric_margin_mm = 0.0;
+    p0.axial_clearance_mm = 0.0;
+    DesignMask tight(grid.voxel_count(), MaskValue::Active);
+    const ClearanceRasterResult rt = rasterize_clearance(
+        grid, part, 0, 0, 0, resolve_clearance_manual(mg, p0), tight);
+    CHECK(rt.voxels_frozen < rm.voxels_frozen,
+          "a manual bolt's margin/axial params grow its keep-out (params apply)");
+  }
+
+  // === BAR B2 (Face): a MANUAL slab == an AUTO slab of identical geometry ====
+  // Auto face 1 is a plane, outward +X normal at x=12, outline y,z∈[4,8]. A
+  // manual slab of the same footprint centres on that rectangle: origin (12,6,6),
+  // normal +X, half-extents 2×2 in the plane. Same depth ⇒ identical mask.
+  {
+    VoxelGrid grid = make_grid(16);
+    VoxelGrid part = grid;
+    ClearanceParams p;
+    p.kind = ClearanceKind::Face;
+    p.slab_depth_mm = 2.0;
+
+    DesignMask out_auto(grid.voxel_count(), MaskValue::Active);
+    mask_clearance_region(grid, part, 0, 0, 0, model, 1, p, out_auto);
+
+    ManualClearanceGeometry mg;
+    mg.kind = ClearanceKind::Face;
+    mg.origin = Vec3{12.0, 6.0, 6.0};   // centre of the outline y,z∈[4,8]
+    mg.normal = Vec3{1.0, 0.0, 0.0};
+    mg.half_u_mm = 2.0;                  // outline half-extent
+    mg.half_w_mm = 2.0;
+    DesignMask out_manual(grid.voxel_count(), MaskValue::Active);
+    rasterize_clearance(grid, part, 0, 0, 0, resolve_clearance_manual(mg, p),
+                        out_manual);
+
+    bool identical = true;
+    std::size_t frozen = 0;
+    for (std::size_t idx = 0; idx < out_auto.size(); ++idx) {
+      if (out_auto[idx] != out_manual[idx]) identical = false;
+      if (out_manual[idx] == MaskValue::FrozenVoid) ++frozen;
+    }
+    CHECK(frozen > 0, "the B2 face fixture actually freezes voxels");
+    CHECK(identical, "manual and auto face-slab masks are BIT-IDENTICAL (BAR B2)");
+  }
+
+  // === Degenerate manual geometry is a safe no-op (mirrors the auto path) =====
+  {
+    VoxelGrid grid = make_grid(16);
+    VoxelGrid part = grid;
+    ClearanceParams p;
+    p.kind = ClearanceKind::Bolt;
+    ManualClearanceGeometry mg;  // zero axis_dir → degenerate
+    mg.kind = ClearanceKind::Bolt;
+    mg.radius_mm = 2.0;
+    mg.half_length_mm = 4.0;
+    const ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    CHECK(!g.valid, "manual bolt with zero axis direction is invalid");
+    DesignMask out(grid.voxel_count(), MaskValue::Active);
+    const ClearanceRasterResult r =
+        rasterize_clearance(grid, part, 0, 0, 0, g, out);
+    CHECK(r.voxels_frozen == 0, "an invalid predicate freezes nothing");
   }
 
   if (g_failures == 0) {

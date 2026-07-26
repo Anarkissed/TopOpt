@@ -232,6 +232,22 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// depth at 1. Persisted so it round-trips; harmless when no face is protected.
     public var faceProtectDepthMM: Double = FaceProtection.defaultDepthMM
 
+    /// User-placed (MANUAL) clearance primitives, keyed by `SelectionGroup.id`
+    /// (handoff group-editing). The finder MISSES; the user hand-places a keep-out
+    /// that has no B-rep face, so its geometry lives here and ships as a manual
+    /// `ClearanceSpec`. Optional + only-present-when-used, so a project with no
+    /// manual primitives (the default) carries none and the on-disk format + wire
+    /// are byte-identical to before this handoff (BAR B4).
+    private var manualPrimitives: [UUID: [ManualPrimitive]]? = nil
+
+    /// Auto-found clearance faces the user DELETED — the "−" beside an auto bore's
+    /// row (handoff group-editing). The finder OVER-finds; suppressing a face drops
+    /// its auto/explicit clearance from the run WITHOUT removing the face from its
+    /// group (it may still anchor). FILE-scoped, keyed by the run face id (geometry-
+    /// stable across a resolution change and a re-import), so a phantom bore stays
+    /// deleted (BAR B3). Optional + only-present-when-used → byte-identical default.
+    private var suppressedClearanceFaces: Set<Int32>? = nil
+
     public init() {}
 
     /// Whether a gravity direction has been chosen (stays true across re-entering
@@ -491,6 +507,7 @@ public struct ForceModel: Equatable, Sendable, Codable {
         if var map = keepClear { map[id] = nil; keepClear = map.isEmpty ? nil : map }
         if var map = faceProtect { map[id] = nil; faceProtect = map.isEmpty ? nil : map }
         if var set = syncExcluded { set.remove(id); syncExcluded = set.isEmpty ? nil : set }
+        if var map = manualPrimitives { map[id] = nil; manualPrimitives = map.isEmpty ? nil : map }
         pruneBoreOverrides { $0 != id }
     }
 
@@ -525,7 +542,91 @@ public struct ForceModel: Equatable, Sendable, Codable {
             let pruned = set.intersection(live)
             syncExcluded = pruned.isEmpty ? nil : pruned
         }
+        if let map = manualPrimitives {
+            let pruned = map.filter { live.contains($0.key) }
+            manualPrimitives = pruned.isEmpty ? nil : pruned
+        }
         pruneBoreOverrides { live.contains($0) }
+    }
+
+    // MARK: - manual (user-placed) primitives + deletion (handoff group-editing)
+
+    /// A group's user-placed clearance primitives (empty when none).
+    public func manualPrimitives(for group: UUID) -> [ManualPrimitive] {
+        manualPrimitives?[group] ?? []
+    }
+
+    /// Add a hand-placed primitive to a group. Returns its id so the caller can
+    /// immediately select/move it.
+    @discardableResult
+    public mutating func addManualPrimitive(_ p: ManualPrimitive, to group: UUID) -> UUID {
+        var map = manualPrimitives ?? [:]
+        map[group, default: []].append(p)
+        manualPrimitives = map
+        return p.id
+    }
+
+    /// Replace a group's primitive with matching id (a move / distance edit).
+    public mutating func updateManualPrimitive(_ p: ManualPrimitive, in group: UUID) {
+        guard var map = manualPrimitives, var list = map[group],
+              let i = list.firstIndex(where: { $0.id == p.id }) else { return }
+        list[i] = p
+        map[group] = list
+        manualPrimitives = map
+    }
+
+    /// Delete ONE hand-placed primitive from a group (the "−" on its row).
+    public mutating func removeManualPrimitive(id: UUID, from group: UUID) {
+        guard var map = manualPrimitives, var list = map[group] else { return }
+        list.removeAll { $0.id == id }
+        map[group] = list.isEmpty ? nil : list
+        manualPrimitives = map.isEmpty ? nil : map
+    }
+
+    /// Whether an AUTO clearance face was deleted (its keep-out is suppressed).
+    public func isClearanceFaceSuppressed(_ face: FaceID) -> Bool {
+        suppressedClearanceFaces?.contains(face) ?? false
+    }
+
+    /// DELETE an auto-found clearance primitive (the "−" on an auto bore/plane row):
+    /// suppress that face's keep-out. The face stays in its group (it may still be an
+    /// anchor); only its clearance is dropped. Persisted here AND in the working-copy
+    /// sidecar, so it stays deleted across re-detect / resolution / re-import (B3).
+    public mutating func suppressClearanceFace(_ face: FaceID) {
+        var set = suppressedClearanceFaces ?? []
+        set.insert(face)
+        suppressedClearanceFaces = set
+    }
+
+    /// Un-delete a previously suppressed auto face (undo of a delete).
+    public mutating func unsuppressClearanceFace(_ face: FaceID) {
+        guard var set = suppressedClearanceFaces else { return }
+        set.remove(face)
+        suppressedClearanceFaces = set.isEmpty ? nil : set
+    }
+
+    /// The full set of suppressed auto faces (for the sidecar writer).
+    public var suppressedClearanceFaceList: [FaceID] {
+        suppressedClearanceFaces.map { $0.sorted() } ?? []
+    }
+
+    /// Every group's manual primitives, flattened with the owning group (sidecar).
+    public var allManualPrimitives: [(group: UUID, primitives: [ManualPrimitive])] {
+        (manualPrimitives ?? [:]).map { ($0.key, $0.value) }
+    }
+
+    /// Bulk-load the deletion set (sidecar auto-apply on import).
+    public mutating func loadSuppressedClearanceFaces(_ faces: [FaceID]) {
+        let set = Set(faces)
+        suppressedClearanceFaces = set.isEmpty ? nil : set
+    }
+
+    /// Bulk-load a group's manual primitives (sidecar auto-apply on import).
+    public mutating func loadManualPrimitives(_ list: [ManualPrimitive], for group: UUID) {
+        guard !list.isEmpty else { return }
+        var map = manualPrimitives ?? [:]
+        map[group] = list
+        manualPrimitives = map
     }
 
     private func clampWeight(_ kg: Double) -> Double {
@@ -693,6 +794,8 @@ extension ForceModel {
         case clearanceBoreOverrides // per-bore overrides for unsynced groups (round 4, item 3)
         case faceProtect            // per-group Protect affix (handoff 124, optional)
         case faceProtectDepthMM     // ONE global preserve-depth in mm (handoff 124, optional)
+        case manualPrimitives       // user-placed primitives (handoff group-editing, optional)
+        case suppressedClearanceFaces  // deleted auto clearance faces (handoff group-editing, optional)
     }
 
     public init(from decoder: Decoder) throws {
@@ -728,6 +831,12 @@ extension ForceModel {
         faceProtect = try c.decodeIfPresent([UUID: Bool].self, forKey: .faceProtect)
         faceProtectDepthMM = try c.decodeIfPresent(Double.self, forKey: .faceProtectDepthMM)
             ?? FaceProtection.defaultDepthMM
+        // Handoff group-editing (optional keys). Absent in older snapshots → no
+        // manual primitives + no deletions, so old projects round-trip byte-identical.
+        manualPrimitives = try c.decodeIfPresent([UUID: [ManualPrimitive]].self,
+                                                 forKey: .manualPrimitives)
+        suppressedClearanceFaces = try c.decodeIfPresent(Set<Int32>.self,
+                                                         forKey: .suppressedClearanceFaces)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -747,5 +856,9 @@ extension ForceModel {
         if faceProtectDepthMM != FaceProtection.defaultDepthMM {
             try c.encode(faceProtectDepthMM, forKey: .faceProtectDepthMM)
         }
+        // Handoff group-editing — only emit when present, so a project with no
+        // manual primitives and no deletions is byte-identical to a pre-handoff one.
+        try c.encodeIfPresent(manualPrimitives, forKey: .manualPrimitives)
+        try c.encodeIfPresent(suppressedClearanceFaces, forKey: .suppressedClearanceFaces)
     }
 }

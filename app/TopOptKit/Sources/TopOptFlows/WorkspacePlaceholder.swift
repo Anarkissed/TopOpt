@@ -66,6 +66,15 @@ public struct WorkspacePlaceholder: View {
     @State private var lastRunRequest: RunRequest?
     /// The group whose colour-swatch popover is open (nil = none).
     @State private var recoloringGroup: UUID?
+
+    // Group editing (handoff group-editing). A group the user tapped is LOCKED IN
+    // (`selection.activeGroupID`); rename fires ONLY when the NAME is tapped (sets
+    // `renamingGroup`), never the group body. `addingPrimitiveGroup` drives the
+    // CYLINDER/PLANE picker for the "+" affordance; `lastSnapLabels` surfaces what a
+    // move detent snapped to.
+    @State private var renamingGroup: UUID?
+    @State private var addingPrimitiveGroup: UUID?
+    @FocusState private var renameFieldFocused: Bool
     /// M7.dom-app / design-overhaul 109: the SINGLE-OWNER design-box drag session. Captures the
     /// box (or keep-out) at the start of the owning handle's drag so each frame applies an
     /// absolute delta from the drag-start snapshot, and REJECTS any concurrent second handle so
@@ -1548,6 +1557,13 @@ public struct WorkspacePlaceholder: View {
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
                 .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
         .dsShadow(DS.Shadow.panel)
+        // Leave the locked group by tapping ELSEWHERE in the Selections area
+        // (handoff item 3). Rows + controls consume their own taps (child gestures
+        // win), so this only fires on empty panel space: it closes any open rename
+        // and unlocks the active group. Scoped to the 300-wide panel box — attached
+        // BEFORE the screen-filling frame below, so it never captures the whole view.
+        .contentShape(Rectangle())
+        .onTapGesture { leaveGroupEditing() }
         // Bottom-left, above the bottom bar. One animation keyed on the collapse
         // state so the header + body move together (not at different speeds).
         .animation(DS.Motion.emphasized, value: selectionsCollapsed)
@@ -1625,10 +1641,7 @@ public struct WorkspacePlaceholder: View {
                 .padding(DS.Space.ml)
             }
             VStack(alignment: .leading, spacing: 3) {
-                TextField("Group", text: binding(for: g))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: DS.TypeScale.callout.size, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
+                groupNameControl(g)
                 HStack(spacing: DS.Space.s) {
                     Text(force.panelKindLabel(for: g.id))
                         .dsStyle(DS.TypeScale.footnote)
@@ -1648,12 +1661,26 @@ public struct WorkspacePlaceholder: View {
                 }
             }
             Spacer(minLength: 0)
-            Button { removeGroup(g.id) } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(DS.Color.textPrimary.opacity(0.4).color)
+            VStack(alignment: .trailing, spacing: 6) {
+                Button { removeGroup(g.id) } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.4).color)
+                }
+                .buttonStyle(.plain)
+                // "+ a primitive" — under the trash icon, revealed once the group is
+                // LOCKED IN (active). Tapping asks CYLINDER or PLANE (handoff item 1).
+                if active {
+                    Button { addingPrimitiveGroup = g.id } label: {
+                        Label("primitive", systemImage: "plus")
+                            .labelStyle(.titleAndIcon)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Self.clearanceTint)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("add-primitive-\(g.id.uuidString)")
+                }
             }
-            .buttonStyle(.plain)
           }
           // Item 4: the clearance chips (+ per-row Sync box) sit right-aligned to the row's
           // trailing edge, directly below the trash icon — not left-aligned in the name column.
@@ -1665,8 +1692,49 @@ public struct WorkspacePlaceholder: View {
             Rectangle().fill(active ? tint.color : .clear).frame(width: 3)
         }
         .contentShape(Rectangle())
-        .onTapGesture { selection.setActive(g.id) }
+        // Tapping the group BODY LOCKS INTO it (handoff item 3) — it NEVER starts a
+        // rename (handoff item 4); rename fires only from `groupNameControl`. If a
+        // different group's rename was open, tapping away commits + closes it.
+        .onTapGesture {
+            if renamingGroup != nil, renamingGroup != g.id { renamingGroup = nil }
+            selection.setActive(g.id)
+        }
+        .confirmationDialog("Add a primitive", isPresented: Binding(
+            get: { addingPrimitiveGroup == g.id },
+            set: { if !$0 { addingPrimitiveGroup = nil } })) {
+            Button("Cylinder") { project.addManualPrimitive(.bolt, to: g.id); addingPrimitiveGroup = nil }
+            Button("Plane") { project.addManualPrimitive(.face, to: g.id); addingPrimitiveGroup = nil }
+            Button("Cancel", role: .cancel) { addingPrimitiveGroup = nil }
+        } message: {
+            Text("A keep-out the finder missed. Place it, then move it onto the part with magnetic detents.")
+        }
         .overlay(alignment: .bottom) { Divider().overlay(DS.Color.strokeSubtle.color) }
+    }
+
+    /// The group NAME control (handoff item 4): a plain label by default, so tapping
+    /// the group BODY only locks in — never edits. Tapping the NAME both locks the
+    /// group in AND opens an inline rename field; committing or tapping elsewhere
+    /// closes it. This is the ONLY path that starts a rename.
+    @ViewBuilder private func groupNameControl(_ g: SelectionGroup) -> some View {
+        let editing = renamingGroup == g.id
+        if editing {
+            TextField("Group", text: binding(for: g))
+                .textFieldStyle(.plain)
+                .font(.system(size: DS.TypeScale.callout.size, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .focused($renameFieldFocused)
+                .submitLabel(.done)
+                .onSubmit { renamingGroup = nil }
+                .onAppear { renameFieldFocused = true }
+                .accessibilityIdentifier("group-name-field-\(g.id.uuidString)")
+        } else {
+            Text(g.name.isEmpty ? "Group" : g.name)
+                .font(.system(size: DS.TypeScale.callout.size, weight: .semibold))
+                .foregroundStyle(DS.Color.textPrimary.color)
+                .contentShape(Rectangle())
+                .onTapGesture { selection.setActive(g.id); renamingGroup = g.id }
+                .accessibilityIdentifier("group-name-\(g.id.uuidString)")
+        }
     }
 
     private func binding(for g: SelectionGroup) -> Binding<String> {
@@ -1729,6 +1797,18 @@ public struct WorkspacePlaceholder: View {
     /// Sync ON the row collapses to the ONE shared chip set plus a "N primitives ·
     /// synced" count. A lone primitive keeps the old single-line look.
     @ViewBuilder private func clearanceEditor(_ g: SelectionGroup) -> some View {
+        // LOCKED IN (active): the full editor — every primitive on its own line with a
+        // "−" to delete it (auto OR manual), plus the manual primitives (handoff
+        // group-editing items 2 + 3). Unlocked: the existing compact summary.
+        if g.id == selection.activeGroupID {
+            lockedClearanceEditor(g)
+        } else {
+            compactClearanceEditor(g)
+        }
+    }
+
+    /// The compact (unlocked) clearance summary — the pre-handoff layout, unchanged.
+    @ViewBuilder private func compactClearanceEditor(_ g: SelectionGroup) -> some View {
         let prims = clearancePrimitives(g)
         let synced = force.isClearanceSynced(g.id)
         switch ClearanceChipLayout.rowMode(primitiveCount: prims.count, synced: synced) {
@@ -1760,6 +1840,80 @@ public struct WorkspacePlaceholder: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(.top, 2)
+        }
+    }
+
+    /// The LOCKED editor (handoff group-editing): the group's keep-out laid out one
+    /// primitive per line, each with a "−" to delete it. AUTO primitives delete by
+    /// suppressing their face (the over-find escape hatch, BAR B3); MANUAL primitives
+    /// delete from the store. When the group has more than one auto bore, the Sync box
+    /// still couples their values.
+    @ViewBuilder private func lockedClearanceEditor(_ g: SelectionGroup) -> some View {
+        let autoPrims = clearancePrimitives(g)
+        let manual = project.manualPrimitives(in: g.id)
+        VStack(alignment: .trailing, spacing: 6) {
+            if autoPrims.count > 1 { clearanceSyncRowCheckbox(g) }
+            ForEach(autoPrims) { p in
+                HStack(alignment: .top, spacing: DS.Space.xs) {
+                    primitiveDeleteButton("delete-auto-\(p.id)") { project.deleteAutoClearance(face: p.id) }
+                    clearancePrimitiveLine(g, p, showKind: true)
+                }
+            }
+            ForEach(manual) { mp in
+                HStack(alignment: .top, spacing: DS.Space.xs) {
+                    primitiveDeleteButton("delete-manual-\(mp.id.uuidString)") {
+                        project.removeManualPrimitive(id: mp.id, from: g.id)
+                    }
+                    manualPrimitiveLine(g, mp)
+                }
+            }
+            if autoPrims.isEmpty && manual.isEmpty {
+                Text("No keep-out yet — tap + to add one.")
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.top, 2)
+    }
+
+    /// The per-primitive "−" delete affordance (handoff item 2) — the counterpart to
+    /// "+", and the more-used half because the finder OVER-finds.
+    private func primitiveDeleteButton(_ id: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "minus.circle.fill")
+                .font(.system(size: 13))
+                .foregroundStyle(DS.Color.textPrimary.opacity(0.4).color)
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 2)
+        .accessibilityIdentifier(id)
+    }
+
+    /// One MANUAL primitive's editable lines — the same "Margin/Axial/Depth" chips an
+    /// auto primitive shows, but reading/writing the primitive's OWN override (a manual
+    /// primitive is never part of the group's shared-sync set). Tinted the clearance
+    /// red + tagged "(manual)" so it reads distinctly from a found bore.
+    @ViewBuilder private func manualPrimitiveLine(_ g: SelectionGroup, _ mp: ManualPrimitive) -> some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            Text(mp.kind == .bolt ? "Cylinder · manual" : "Plane · manual")
+                .dsStyle(DS.TypeScale.caption)
+                .foregroundStyle(Self.clearanceTint)
+            if mp.kind == .bolt {
+                clearanceMetricRow("Margin",
+                    GlassValuePill(title: "Margin", valueMM: mp.override.concentricMarginMM,
+                                   autoMM: ClearanceSuggestion.boltMarginMM(boreRadiusMM: mp.radiusMM),
+                                   compact: true, showTitle: false) { project.setManualMargin(id: mp.id, in: g.id, mm: $0) })
+                clearanceMetricRow("Axial",
+                    GlassValuePill(title: "Axial", valueMM: mp.override.axialClearanceMM,
+                                   autoMM: ClearanceSuggestion.boltAxialMM(boreRadiusMM: mp.radiusMM),
+                                   compact: true, showTitle: false) { project.setManualAxial(id: mp.id, in: g.id, mm: $0) })
+            } else {
+                clearanceMetricRow("Depth",
+                    GlassValuePill(title: "Depth", valueMM: mp.override.slabDepthMM,
+                                   autoMM: ClearanceSuggestion.faceSlabDepthMM,
+                                   compact: true, showTitle: false) { project.setManualSlab(id: mp.id, in: g.id, mm: $0) })
+            }
         }
     }
 
@@ -1902,6 +2056,14 @@ public struct WorkspacePlaceholder: View {
         selection.remove(id)
         force.clearKind(id)
         force.sync(groups: selection.groups)
+    }
+
+    /// Leave the locked group (handoff item 3): close any open rename and unlock the
+    /// active group. Fired by a tap on empty Selections-area space.
+    private func leaveGroupEditing() {
+        renamingGroup = nil
+        addingPrimitiveGroup = nil
+        selection.clearActive()
     }
 
     // MARK: in-scene force arrows (D6)

@@ -465,6 +465,26 @@ struct BridgeLoadCase {
   std::vector<double> clearance_axial_mm;
   std::vector<double> clearance_slab_mm;
 
+  // Handoff group-editing — MANUAL (user-placed) primitive geometry. The finder
+  // OVER-finds and MISSES; the user hand-places a keep-out primitive that has NO
+  // B-rep face, so its geometry can NOT be re-read from the STEP and must ship
+  // here. `clearance_manual[c] == 1` means region c is manual: for a bolt the
+  // axis_point/axis_dir (stride-3 into the *_xyz arrays), radius_mm and half_len_mm
+  // are read; for a face the origin/normal (stride-3), half_u_mm and half_w_mm.
+  // For an AUTO region (`clearance_manual[c] == 0`, or the arrays empty) these are
+  // ignored and the face-id path runs exactly as before. All-empty / all-zero =>
+  // byte-identical to today (BAR B4). Same model/voxel frame + mm as the geometry
+  // the core re-reads from the STEP.
+  std::vector<uint8_t> clearance_manual;         // N  (1 = manual, 0 = auto)
+  std::vector<double> clearance_axis_point_xyz;  // 3N (bolt)
+  std::vector<double> clearance_axis_dir_xyz;    // 3N (bolt)
+  std::vector<double> clearance_radius_mm;       // N  (bolt: bore radius)
+  std::vector<double> clearance_half_len_mm;     // N  (bolt: half axial extent)
+  std::vector<double> clearance_origin_xyz;      // 3N (face)
+  std::vector<double> clearance_normal_xyz;      // 3N (face)
+  std::vector<double> clearance_half_u_mm;       // N  (face)
+  std::vector<double> clearance_half_w_mm;       // N  (face)
+
   // Handoff 124 — Face protections (preserve-skin), flattened POD. Each id is a
   // B-rep face whose OWN material the optimizer may not touch: the core freezes the
   // part-solid skin behind it FrozenSolid (footprint-only, never frees void — the

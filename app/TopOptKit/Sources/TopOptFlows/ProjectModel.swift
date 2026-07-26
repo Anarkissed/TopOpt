@@ -242,6 +242,9 @@ public final class ProjectModel: ObservableObject {
         // reproduces what is now on screen. Best-effort: an undo that can't write the sidecar still
         // updates the in-memory overlay (the run rewrites it before it launches anyway).
         persistPaint()
+        // Likewise, the restored `force` carries the manual primitives + deletions; keep the
+        // clearance sidecar in step so undoing/redoing an add/move/delete round-trips to the file.
+        persistClearances()
     }
 
     // MARK: - paint mode (handoff 2026-07-25)
@@ -279,6 +282,36 @@ public final class ProjectModel: ObservableObject {
         guard let overlay = paint, let path = importedFile?.path else { return }
         try? TopOptKit.writeFaceOverrides(modelPath: path, dihedralDeg: 0, coneDeg: -1,
                                           paintFaces: overlay.paintFaceSets())
+    }
+
+    /// Persist the clearance edits — deleted auto faces + user-placed primitives — to
+    /// the sidecar beside the working-copy model, so they survive a re-import of the
+    /// same file (handoff group-editing, BAR B3). Best-effort; an empty state deletes
+    /// the sidecar. Call after any add / delete / move of a manual primitive or a
+    /// deletion of an auto one (the debounced undo auto-commit persists the project
+    /// separately; this is the file-travelling copy).
+    public func persistClearances() {
+        guard let path = importedFile?.path else { return }
+        let manual = force.allManualPrimitives.map {
+            ClearanceSidecar.GroupPrimitives(group: $0.group, primitives: $0.primitives)
+        }
+        let sidecar = ClearanceSidecar(suppressedAutoFaces: force.suppressedClearanceFaceList,
+                                       manual: manual)
+        sidecar.write(forModelPath: path)
+    }
+
+    /// Auto-apply the clearance sidecar on import: re-suppress the deletions (the B3
+    /// guarantee — a phantom bore stays deleted) and re-attach any manual primitives
+    /// whose owning group still exists. Call once after a fresh import of a file that
+    /// may carry a sidecar. No sidecar → no-op (byte-identical to a plain import).
+    public func applyClearanceSidecar() {
+        guard let path = importedFile?.path,
+              let sidecar = ClearanceSidecar.read(forModelPath: path) else { return }
+        force.loadSuppressedClearanceFaces(sidecar.suppressedAutoFaces)
+        let live = Set(selection.groups.map { $0.id })
+        for gp in sidecar.manual where live.contains(gp.group) {
+            force.loadManualPrimitives(gp.primitives, for: gp.group)
+        }
     }
 
     /// Translate a (possibly painted) selection face id to the id a resolved re-import assigns it:
@@ -326,6 +359,12 @@ public final class ProjectModel: ObservableObject {
         guard let mesh = viewerMesh else { return [] }
         var specs: [TopOptKit.ClearanceSpec] = []
         for g in selection.groups {
+            // MANUAL (user-placed) primitives are EXPLICIT keep-out the finder missed:
+            // emitted unconditionally (they are their own declaration, independent of
+            // the group's auto/affix state). Their inline geometry crosses the bridge
+            // as a manual `ClearanceSpec` (handoff group-editing).
+            for mp in force.manualPrimitives(for: g.id) { specs.append(mp.spec()) }
+
             // Keep-clear v2: the attribute, not a role. A group clears if its keep-clear
             // is EFFECTIVELY on — either the anchored-bore auto rule, or an explicit
             // affix. Suppressing an auto bore (affix `.suppressed`) drops it here — that
@@ -340,6 +379,10 @@ public final class ProjectModel: ObservableObject {
             for f in g.faces {
                 let bore = FaceTopology.isCurved(f, in: mesh)
                 if !explicit && !bore { continue }
+                // The "−" on an auto primitive's row DELETES it: a suppressed face's
+                // keep-out is dropped from the run (handoff group-editing, BAR B3). The
+                // face stays in the group (it may still anchor); only its clearance goes.
+                if force.isClearanceFaceSuppressed(f) { continue }
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
                 let ov = force.clearanceOverride(forGroup: g.id, face: f)
                 if bore {
@@ -425,12 +468,40 @@ public final class ProjectModel: ObservableObject {
         guard let mesh = viewerMesh else { return [] }
         var out: [ResolvedClearance] = []
         for g in selection.groups {
+            // MANUAL primitives render through the SAME volume path via a synthetic
+            // StepFaceGeometry, so the picture is built from the identical numbers the
+            // run freezes. They carry a NEGATIVE sentinel faceID so they never collide
+            // with a real face (handoff group-editing).
+            for mp in force.manualPrimitives(for: g.id) {
+                let key = Self.manualFaceKey(mp.id)
+                let geo = mp.syntheticGeometry
+                if mp.kind == .bolt {
+                    let span: (lo: Float, hi: Float) = (Float(-mp.halfLengthMM), Float(mp.halfLengthMM))
+                    out.append(ResolvedClearance(
+                        groupID: g.id, faceID: key,
+                        volume: .bolt(faceID: key, geometry: geo, axialSpan: span,
+                                      marginMM: mp.resolvedMarginMM, axialMM: mp.resolvedAxialMM),
+                        boreRadiusMM: Float(mp.radiusMM), axialSpan: span))
+                } else {
+                    let n = SIMD3<Float>(mp.axis)
+                    let (u, v) = planeBasis(normal: n)
+                    let outline = PlaneOutline(center: SIMD3<Float>(mp.center), uAxis: u, vAxis: v,
+                                               halfU: Float(mp.halfUMM), halfV: Float(mp.halfWMM))
+                    out.append(ResolvedClearance(
+                        groupID: g.id, faceID: key,
+                        volume: .slab(faceID: key, geometry: geo, outline: outline,
+                                      depthMM: mp.resolvedDepthMM),
+                        boreRadiusMM: 0, axialSpan: nil))
+                }
+            }
+
             let auto = autoClearanceApplies(g, in: mesh)
             guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
             let explicit = force.keepClearAffix(for: g.id) == .on
             for f in g.faces {
                 let bore = FaceTopology.isCurved(f, in: mesh)
                 if !explicit && !bore { continue }
+                if force.isClearanceFaceSuppressed(f) { continue }  // deleted (BAR B3)
                 guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
                 let ov = force.clearanceOverride(forGroup: g.id, face: f)
@@ -457,6 +528,124 @@ public final class ProjectModel: ObservableObject {
             }
         }
         return out
+    }
+
+    /// A stable NEGATIVE sentinel face key for a manual primitive, so it never
+    /// collides with a real (non-negative) B-rep/pseudo face id in the render +
+    /// handle maps. Session-stable (rebuilt per frame from the geometry anyway).
+    static func manualFaceKey(_ id: UUID) -> Int { -(abs(id.hashValue) % 1_000_000_000) - 1 }
+
+    // MARK: - manual primitive editing (handoff group-editing)
+
+    /// Add a hand-placed primitive to `group` (the group the user is locked into).
+    /// It is placed at the model centre and sized off the model radius so it is
+    /// visible without editing; the user then moves it (with detents) and tunes the
+    /// distances. Placing a keep-out implies keep-clear ON for the group, so the
+    /// picture + run include it. Returns the new primitive's id. Republishing arms
+    /// the undo debounce (BAR B5); the sidecar is refreshed (BAR B3).
+    @discardableResult
+    public func addManualPrimitive(_ kind: ManualPrimitive.Kind, to group: UUID) -> UUID? {
+        guard let mesh = viewerMesh,
+              selection.groups.contains(where: { $0.id == group }) else { return nil }
+        let c = SIMD3<Double>(mesh.bounds.center)
+        let r = max(1.0, Double(mesh.bounds.radius))
+        let p: ManualPrimitive = kind == .bolt
+            ? .defaultBolt(at: c, radiusMM: r * 0.08, halfLengthMM: r * 0.25)
+            : .defaultFace(at: c, halfMM: r * 0.2)
+        let id = force.addManualPrimitive(p, to: group)
+        // A manual primitive is its OWN explicit keep-out — `clearanceSpecs` emits it
+        // unconditionally, so we do NOT flip the group's keep-clear affix (which would
+        // also, wrongly, start clearing the group's other selected faces).
+        persistClearances()
+        return id
+    }
+
+    /// Move a manual primitive to `freeCenter` with MAGNETIC DETENTS, returning the
+    /// snap labels ("world Z axis", "co-axial", …) the UI surfaces. Snaps the axis to
+    /// the world principal axes and to nearby group primitives, and the centre onto
+    /// bore-axis points / other primitives — so a hand-placed keep-out lands parallel
+    /// to and concentric with the part's real holes instead of askew. Pure detent math
+    /// in `ManualPrimitiveDetent`; this supplies the targets and writes the result.
+    @discardableResult
+    public func moveManualPrimitive(id: UUID, in group: UUID,
+                                    to freeCenter: SIMD3<Double>) -> [String] {
+        guard var p = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return [] }
+        let targets = manualDetentTargets(excluding: id, in: group)
+        let result = ManualPrimitiveDetent.apply(freeCenter: freeCenter, axis: p.axis, targets: targets)
+        p.center = result.center
+        p.axis = result.axis
+        force.updateManualPrimitive(p, in: group)
+        persistClearances()
+        return result.labels
+    }
+
+    /// The detent targets for moving a primitive: the world principal axes, plus each
+    /// OTHER group primitive's axis (for co-axial / parallel snaps) and centre, plus
+    /// the group's bore faces' axis points (snap onto a real hole the finder found).
+    private func manualDetentTargets(excluding id: UUID, in group: UUID) -> [PrimitiveSnapTarget] {
+        var targets = ManualPrimitiveDetent.worldAxisTargets()
+        var i = 0
+        for other in force.manualPrimitives(for: group) where other.id != id {
+            i += 1
+            targets.append(.init(kind: .primitiveAxis, point: other.center, direction: other.axis,
+                                 label: "primitive \(i)"))
+            targets.append(.init(kind: .point, point: other.center, label: "primitive \(i) centre"))
+        }
+        if let mesh = viewerMesh, let g = selection.groups.first(where: { $0.id == group }) {
+            for f in g.faces where FaceTopology.isCurved(f, in: mesh) {
+                if let geo = mesh.faceGeometry(f), geo.isCylinder {
+                    targets.append(.init(kind: .primitiveAxis, point: geo.axisPoint,
+                                         direction: geo.axisDir, label: "bore axis"))
+                    targets.append(.init(kind: .point, point: geo.axisPoint, label: "bore centre"))
+                }
+            }
+        }
+        return targets
+    }
+
+    /// Edit a manual primitive's distance override (margin / axial / depth). `mm ==
+    /// nil` reverts that field to the Auto suggestion, matching the auto-primitive
+    /// chips. Republishes (undo) + refreshes the sidecar.
+    public func setManualMargin(id: UUID, in group: UUID, mm: Double?) {
+        mutateManual(id: id, in: group) { $0.override.concentricMarginMM = mm }
+    }
+    public func setManualAxial(id: UUID, in group: UUID, mm: Double?) {
+        mutateManual(id: id, in: group) { $0.override.axialClearanceMM = mm }
+    }
+    public func setManualSlab(id: UUID, in group: UUID, mm: Double?) {
+        mutateManual(id: id, in: group) { $0.override.slabDepthMM = mm }
+    }
+    private func mutateManual(id: UUID, in group: UUID, _ body: (inout ManualPrimitive) -> Void) {
+        guard var p = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return }
+        body(&p)
+        force.updateManualPrimitive(p, in: group)
+        persistClearances()
+    }
+
+    /// A group's manual primitives (for the locked editor).
+    public func manualPrimitives(in group: UUID) -> [ManualPrimitive] {
+        force.manualPrimitives(for: group)
+    }
+
+    /// Delete ONE manual primitive from a group (the "−" on its row).
+    public func removeManualPrimitive(id: UUID, from group: UUID) {
+        force.removeManualPrimitive(id: id, from: group)
+        persistClearances()
+    }
+
+    /// DELETE an auto-found clearance primitive (the "−" on an auto bore/plane row):
+    /// suppress that face's keep-out. Works on auto-found primitives, which is the
+    /// more frequently used half because the finder OVER-finds. Persisted to the
+    /// sidecar so it stays deleted across re-detect / resolution / re-import (B3).
+    public func deleteAutoClearance(face: FaceID) {
+        force.suppressClearanceFace(face)
+        persistClearances()
+    }
+
+    /// Restore a deleted auto clearance (undo affordance).
+    public func restoreAutoClearance(face: FaceID) {
+        force.unsuppressClearanceFace(face)
+        persistClearances()
     }
 
     /// The Phase B drag-handle anchors for every rendered clearance volume, grouped by
