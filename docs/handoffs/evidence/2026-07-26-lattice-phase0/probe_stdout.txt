@@ -1,0 +1,84 @@
+LATTICE PHASE-0 PROBE — E_solid=3500 MPa nu=0.33 strain=1e-03
+
+===== SELF-CHECK: solid block must recover E_solid =====
+  axis 0: E_app=3500.0 MPa  (E_solid=3500.0)  ratio=1.0000  cg=304
+  axis 1: E_app=3500.0 MPa  (E_solid=3500.0)  ratio=1.0000  cg=304
+  axis 2: E_app=3500.0 MPa  (E_solid=3500.0)  ratio=1.0000  cg=304
+
+===== M1 RESOLUTION — gyroid, cell L=5.0 mm, target vf=0.30 =====
+  [writing ../docs/handoffs/evidence/2026-07-26-lattice-phase0/m1_gyroid.csv]
+  vpc   h(mm)    voxels    vf     wall_vox  E/Es   d%%      
+  8     0.6250   512       0.375  2.0       0.12250   0.00
+  12    0.4167   1728      0.278  2.0       0.07047   42.48
+  16    0.3125   4096      0.258  2.0       0.06713   4.74
+  24    0.2083   13824     0.294  3.0       0.07575   12.85
+  32    0.1562   32768     0.291  4.0       0.07480   1.26
+  48    0.1042   110592    0.300  7.0       0.07897   5.58
+  64    0.0781   262144    0.298  9.0       0.07795   1.29
+
+===== M1 RESOLUTION — schwarzD, cell L=5.0 mm, target vf=0.30 =====
+  [writing ../docs/handoffs/evidence/2026-07-26-lattice-phase0/m1_schwarzD.csv]
+  vpc   h(mm)    voxels    vf     wall_vox  E/Es   d%%      
+  8     0.6250   512       0.375  1.0       0.20052   0.00
+  12    0.4167   1728      0.361  2.0       0.17237   14.04
+  16    0.3125   4096      0.281  2.0       0.12070   29.98
+  24    0.2083   13824     0.292  3.0       0.13036   8.00
+  32    0.1562   32768     0.301  4.0       0.12647   2.98
+  48    0.1042   110592    0.301  5.0       0.12938   2.30
+  64    0.0781   262144    0.301  7.0       0.12995   0.45
+
+===== M1 RESOLUTION — octet, cell L=5.0 mm, target vf=0.30 =====
+  [writing ../docs/handoffs/evidence/2026-07-26-lattice-phase0/m1_octet.csv]
+  vpc   h(mm)    voxels    vf     wall_vox  E/Es   d%%      
+  8     0.6250   512       0.391  1.0       0.18519   0.00
+  12    0.4167   1728      0.199  1.0       0.04912   73.48
+  16    0.3125   4096      0.285  2.0       0.07832   59.44
+  24    0.2083   13824     0.323  3.0       0.09712   24.01
+  32    0.1562   32768     0.313  4.0       0.09023   7.10
+  48    0.1042   110592    0.304  6.0       0.08390   7.02
+  64    0.0781   262144    0.303  8.0       0.08148   2.88
+
+===== M2 HOMOGENIZATION GAP + M6 ISOTROPY (single cell, vpc=32) =====
+  bar: M2 gap <=10% for f^1.5 to carry a margin; M6 aniso >15% needs a tensor
+  [writing ../docs/handoffs/evidence/2026-07-26-lattice-phase0/m2_m6.csv]
+  gyroid    vf=0.306  E/Es[x,y,z]=0.0816,0.0816,0.0816  aniso=0.0%  mean=0.0816  f^1.5=0.1690  gap=51.7%  fit_p=2.11
+  schwarzD  vf=0.301  E/Es[x,y,z]=0.1265,0.1265,0.1265  aniso=0.0%  mean=0.1265  f^1.5=0.1650  gap=23.3%  fit_p=1.72
+  octet     vf=0.313  E/Es[x,y,z]=0.0902,0.0902,0.0902  aniso=0.0%  mean=0.0902  f^1.5=0.1751  gap=48.5%  fit_p=2.07
+
+===== M3 SCALE SEPARATION — gyroid, cell L=5.0 mm, vpc=16 =====
+  [writing ../docs/handoffs/evidence/2026-07-26-lattice-phase0/m3_gyroid.csv]
+  K    voxels     vf     E/Es      cg      
+  1    4096       0.258  0.06713   775     
+  2    32768      0.258  0.08236   1267    
+  3    110592     0.258  0.08729   1784    
+  4    262144     0.258  0.08983   2324    
+  5    512000     0.258  0.09137   2885    
+  -> bulk(K=5) E/Es=0.0914 ; first K within 10% of bulk = 2
+
+===== M3 SCALE SEPARATION — schwarzD, cell L=5.0 mm, vpc=16 =====
+  [writing ../docs/handoffs/evidence/2026-07-26-lattice-phase0/m3_schwarzD.csv]
+  K    voxels     vf     E/Es      cg      
+  1    4096       0.281  0.12070   625     
+  2    32768      0.281  0.12254   1114    
+  3    110592     0.281  0.12294   1633    
+  4    262144     0.281  0.12311   2178    
+  5    512000     0.281  0.12319   2726    
+  -> bulk(K=5) E/Es=0.1232 ; first K within 10% of bulk = 1
+
+===== M4 GENERATION COST + TRIANGLE COUNT =====
+  viewer budget ~125k tris (089); shipped bracket variants 22k-37k tris (134)
+  gyroid    L=5.00 mm  cube=40mm(8^3 cells)  grid=96^3  vf=0.306  tris=1312580  65.63 MB  MC=815 ms  |  20509 tris/cm^3
+      -> 200x100x150mm @30% occ: ~18.5 M tris, ~923 MB STL
+  schwarzD  L=5.00 mm  cube=40mm(8^3 cells)  grid=96^3  vf=0.250  tris=1709892  85.49 MB  MC=279 ms  |  26717 tris/cm^3
+      -> 200x100x150mm @30% occ: ~24.0 M tris, ~1202 MB STL
+  octet     L=5.00 mm  cube=40mm(8^3 cells)  grid=96^3  vf=0.199  tris=755100  37.76 MB  MC=122 ms  |  11798 tris/cm^3
+      -> 200x100x150mm @30% occ: ~10.6 M tris, ~531 MB STL
+  --- finer cells (2.5mm — fits inside a 9.4mm member) ---
+  gyroid    L=2.50 mm  cube=40mm(16^3 cells)  grid=192^3  vf=0.306  tris=10428036  521.40 MB  MC=5204 ms  |  162938 tris/cm^3
+      -> 200x100x150mm @30% occ: ~146.6 M tris, ~7332 MB STL
+  schwarzD  L=2.50 mm  cube=40mm(16^3 cells)  grid=192^3  vf=0.250  tris=13655684  682.78 MB  MC=2706 ms  |  213370 tris/cm^3
+      -> 200x100x150mm @30% occ: ~192.0 M tris, ~9602 MB STL
+  octet     L=2.50 mm  cube=40mm(16^3 cells)  grid=192^3  vf=0.199  tris=5838652  291.93 MB  MC=1085 ms  |  91229 tris/cm^3
+      -> 200x100x150mm @30% occ: ~82.1 M tris, ~4105 MB STL
+
+DONE.
