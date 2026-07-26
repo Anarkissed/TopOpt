@@ -208,4 +208,12 @@ if [[ -d "$VENDOR/occt-ios" ]]; then
 else
   echo "    (no vendor/occt-ios — iOS slices are OCCT-free; run build_occt_ios.sh for STEP on iOS)"
 fi
-echo "==> done. Test: (cd $PKG_DIR && xcodebuild test -scheme TopOptKit -destination 'platform=macOS')"
+# NOTE: use the -Package scheme, not -scheme TopOptKit. `TopOptKit` is the library
+# product's scheme and has no test action ("Scheme TopOptKit is not currently
+# configured for the test action."). The auto-generated `TopOptKit-Package` scheme
+# is the one that runs the package's test targets. It builds ALL products —
+# including `TopOptOCCT` — so it is macOS-safe ONLY because that product lists just
+# the OCCT-free shim; the iOS-only OCCT xcframeworks reach the app through the
+# shim's iOS-gated target dependencies (see Package.swift), never as macOS product
+# members. So this exact command works whether or not vendor/occt-ios is populated.
+echo "==> done. Test: (cd $PKG_DIR && xcodebuild test -scheme TopOptKit-Package -destination 'platform=macOS')"
