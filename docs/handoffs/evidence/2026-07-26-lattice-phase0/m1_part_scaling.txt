@@ -1,0 +1,9 @@
+3 vox/wall  h=0.233mm  200^3 cube: 857x857x857 = 629.7M voxels  (117x the 5.4M LAN ceiling)  DOF~1889M
+3 vox/wall  h=0.233mm  200x100x150 (089 env): 857x429x643 = 236.2M voxels  (44x the 5.4M LAN ceiling)  DOF~708M
+
+4 vox/wall  h=0.175mm  200^3 cube: 1143x1143x1143 = 1492.7M voxels  (276x the 5.4M LAN ceiling)  DOF~4478M
+4 vox/wall  h=0.175mm  200x100x150 (089 env): 1143x571x857 = 559.8M voxels  (104x the 5.4M LAN ceiling)  DOF~1679M
+
+6 vox/wall  h=0.117mm  200^3 cube: 1714x1714x1714 = 5037.9M voxels  (933x the 5.4M LAN ceiling)  DOF~15114M
+6 vox/wall  h=0.117mm  200x100x150 (089 env): 1714x857x1286 = 1889.2M voxels  (350x the 5.4M LAN ceiling)  DOF~5668M
+
