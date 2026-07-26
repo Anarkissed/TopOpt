@@ -1,0 +1,178 @@
+diff --git a/core/include/topopt/observability.hpp b/core/include/topopt/observability.hpp
+index 5db6bfc..b0109d7 100644
+--- a/core/include/topopt/observability.hpp
++++ b/core/include/topopt/observability.hpp
+@@ -272,7 +272,16 @@ struct RunInfo {
+   // `active_domain_fraction_mean[i]` is that rung's iteration-mean active
+   // fraction (1.0 when off or latched at iteration 1), i.e. the f_bar the
+   // realised speedup ~ 0.65 / f_bar is read off.
++  // `active_domain_band_resolved[i]` is the band width rung i ACTUALLY ran with,
++  // the DERIVED k — an OUTCOME, filled post-run like the vectors above. It is the
++  // number the AUTO sentinel (`active_domain_band == -1`) resolves to
++  // (active_domain_auto_band(filter_radius) = ceil(rmin) + 1), so a run armed in
++  // AUTO records BOTH the request (-1) and what k that job derived; 0 on a rung
++  // that ran with the band off. Without it the requested -1 could not be read back
++  // as a concrete width — the same reason 133 had to echo the resolved recycle_dim
++  // beside the requested flag.
+   int active_domain_band = 0;
++  std::vector<int> active_domain_band_resolved;
+   std::vector<int> active_domain_latched;
+   std::vector<int> active_domain_latch_iteration;
+   std::vector<long long> active_domain_escape_count;
+diff --git a/core/include/topopt/production.hpp b/core/include/topopt/production.hpp
+index aeaaf84..9a4c7cd 100644
+--- a/core/include/topopt/production.hpp
++++ b/core/include/topopt/production.hpp
+@@ -43,6 +43,17 @@ namespace topopt {
+ //     that go gray — never the tax on already-crisp parts PR 146's evidence
+ //     surfaced. Library default 0 (gate off) keeps Gate-V2 / reference byte-
+ //     identical; the threshold is echoed into run_info.json (+ per-rung fired).
++//   * simp.active_domain_band = -1 (AUTO) — ACTIVE DOMAIN (handoff
++//     2026-07-26-ad-arming). Restricts every TRAJECTORY penalized solve to the
++//     material + a derived growth band, shrinking the solved system on the
++//     ultra-dilute design-box class that dominates production. k is DERIVED per job
++//     (ceil(rmin) + 1), never pinned. UNLIKE every other setting here this is NOT
++//     bit-identical — it is an approximation (measured mean|drho| ~ 3.9e-6 on the
++//     shipped rung, identical gate verdicts), made safe to arm by the escape latch
++//     (2026-07-25-ad-escape-latch) and the degeneracy latch. Library default 0
++//     (OFF) keeps Gate-V2 / reference byte-identical; echoed into run_info.json
++//     (requested band + resolved per-rung k + both latch outcomes). See
++//     production.cpp for the TRIPWIRE.
+ //   * the process-global matrix-free Galerkin block cache is ENABLED (see below).
+ //   * the process-global matrix-free THREAD COUNT is pinned to
+ //     production_matfree_thread_count() (handoff 132 (C)) — the performance-core
+@@ -127,6 +138,16 @@ int production_matfree_thread_count();
+ // than a literal, exactly as production_matfree_thread_count does for the P-core pin.
+ int production_krylov_recycle_dim();
+ 
++// Handoff 2026-07-26-ad-arming — the PRODUCTION active-domain band that
++// configure_production_options arms. -1 = AUTO: the actual band width k is DERIVED
++// per job downstream (resolve_active_domain_band -> active_domain_auto_band(filter_
++// radius) = ceil(rmin) + 1), never pinned. Exposed so the parity test asserts the
++// echo against this named sentinel rather than a bare -1, and so a front-end that
++// wants to name the production posture does not hard-code it. The library default
++// stays 0 (OFF), so the reference world is byte-identical (THE ONE RULE). See
++// production.cpp for the TRIPWIRE and the measured justification.
++int production_active_domain_band();
++
+ // The canonical recommendation-driven volume-fraction ladder for production runs
+ // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic
+ // walks the margin-SAFE prefix and stops at the first rung below margin_stop, so
+diff --git a/core/src/cli/run_job.cpp b/core/src/cli/run_job.cpp
+index 6ccbfb9..35b7e95 100644
+--- a/core/src/cli/run_job.cpp
++++ b/core/src/cli/run_job.cpp
+@@ -523,6 +523,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
+     // rung"; a true entry names the rung that fell back to the full domain and
+     // why, so a run that bought nothing SAYS so instead of silently costing.
+     for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
++      // The DERIVED k this rung ran with (what the AUTO sentinel resolved to), so
++      // a run armed with active_domain_band = -1 records the concrete width beside
++      // the request.
++      run_info.active_domain_band_resolved.push_back(
++          v.optimization.active_domain_band);
+       run_info.active_domain_latched.push_back(
+           v.optimization.active_domain_latched ? 1 : 0);
+       run_info.active_domain_latch_iteration.push_back(
+diff --git a/core/src/simp/observability.cpp b/core/src/simp/observability.cpp
+index 846a6ac..30381b7 100644
+--- a/core/src/simp/observability.cpp
++++ b/core/src/simp/observability.cpp
+@@ -380,6 +380,13 @@ std::string run_info_json(const RunInfo& info) {
+   // per-rung latch outcome (empty until the post-run finalize).
+   num("active_domain_band", fmt_i(info.active_domain_band));
+   {
++    std::string br = "[";
++    for (std::size_t i = 0; i < info.active_domain_band_resolved.size(); ++i) {
++      if (i) br += ", ";
++      br += fmt_i(info.active_domain_band_resolved[i]);
++    }
++    br += "]";
++    num("active_domain_band_resolved", br);
+     std::string al = "[";
+     for (std::size_t i = 0; i < info.active_domain_latched.size(); ++i) {
+       if (i) al += ", ";
+diff --git a/core/src/simp/production.cpp b/core/src/simp/production.cpp
+index 811b0d4..3e18884 100644
+--- a/core/src/simp/production.cpp
++++ b/core/src/simp/production.cpp
+@@ -45,6 +45,29 @@ constexpr double kConditionalProjectionGrayThreshold = 0.07;
+ // here so the parity test asserts the echo against the constant, not a literal.
+ constexpr int kProductionRecycleDim = 16;
+ 
++// ===========================================================================
++// TRIPWIRE — the ACTIVE DOMAIN production band (handoff 2026-07-26-ad-arming).
++// ===========================================================================
++// Do NOT change this value, and do NOT arm the band on the STRESS path or on any
++// solver but MultigridCG_Matfree, without re-running BOTH:
++//   * core/tests/harness/active_domain_gate.cpp  arm / stag / lowdil / recycle
++//   * core/tests/harness/active_domain_escape.cpp gate168 / healthy 250 / stag
++// and landing a new before/after gate table. The band CHANGES THE DESIGN (it is
++// an approximation, not an exact accelerator: measured mean|drho| ~ 3.9e-6 on the
++// shipped rung, ~2.95e-4 on a rejected one), so every rung's verdict and margin is
++// re-gated when it moves — unlike the recycling / Galerkin / thread-pin dials,
++// which are bit-identical. The escape latch (2026-07-25-ad-escape-latch) is what
++// makes it safe to arm: it detects the first live band escape and reverts to the
++// full domain for the rest of the run. arm without a current escape-latch build.
++//
++// -1 means AUTO: k is DERIVED PER JOB downstream in resolve_active_domain_band as
++// active_domain_auto_band(options.filter_radius) = ceil(rmin) + 1, where
++// options.filter_radius is physical_filter_radius(min_feature_mm, spacing). k is
++// therefore NEVER a literal here — it tracks the rung's real grid spacing (4 on a
++// 1.0 mm grid, 3 on a 2.5 mm grid), which is the whole point of AUTO. The parity
++// test asserts this resolution on a real production run.
++constexpr int kProductionActiveDomainBand = -1;  // AUTO
++
+ // Handoff 132 (C) — the PRODUCTION matrix-free worker-thread count.
+ //
+ // The library default (fea_set_matfree_threads(0)) resolves to
+@@ -91,6 +114,8 @@ int production_matfree_thread_count() {
+ 
+ int production_krylov_recycle_dim() { return kProductionRecycleDim; }
+ 
++int production_active_domain_band() { return kProductionActiveDomainBand; }
++
+ void configure_production_options(MinimizePlasticOptions& opts) {
+   // Matrix-free geometric-multigrid solver (handoff 079/091). Never assembles
+   // the fine stiffness K; solves the identical system to the same tolerance,
+@@ -205,6 +230,40 @@ void configure_production_options(MinimizePlasticOptions& opts) {
+   fea_set_krylov_recycle_wrap_multigrid(false);
+   opts.krylov_recycle_reset_per_rung = false;
+ 
++  // Handoff 2026-07-26-ad-arming — ACTIVE DOMAIN, armed in AUTO (maintainer
++  // decision, recorded verbatim in the handoff §"THE DECISION"). The band
++  // restricts every TRAJECTORY penalized solve to the material plus a derived
++  // growth band, shrinking the solved system on ultra-dilute design-box runs —
++  // the 46x-dilution / stagnating-multigrid class that dominates production. Phase
++  // 1 (168) measured 1.79x wall on the healthy-multigrid gate fixture at 46.5x
++  // dilution WITH the 1.33x CG-iteration penalty already charged; the design moved
++  // mean|drho| ~ 3.9e-6 on the shipped rung with identical gate verdicts.
++  //
++  // Unlike every other dial this function sets, THIS ONE IS NOT BIT-IDENTICAL: the
++  // eliminated elements carry a real rho_min^p ~ 1e-9 stiffness, so the restricted
++  // solve answers a slightly different question and the trajectory (never the
++  // certificate — the FINAL compliance solve is always full-domain) drifts. That
++  // is why arming waited on the ESCAPE LATCH (2026-07-25-ad-escape-latch): the
++  // growth invariant that makes the mask sound is EMPIRICAL, not a theorem (168
++  // measured 6 979 escapes on a stagnating trajectory), and the latch detects the
++  // first live escape at O(N) cost and reverts to the full domain for the rest of
++  // the run. The DEGENERACY LATCH (kActiveDomainLatchFraction/Window) covers the
++  // other end: at low dilution the band covers the domain and buys nothing, so it
++  // turns the feature off and SAYS so rather than silently costing.
++  //
++  //   -1 = AUTO. k is DERIVED PER JOB, never pinned here: resolve_active_domain_band
++  //     resolves it once per run to active_domain_auto_band(options.filter_radius) =
++  //     ceil(rmin) + 1, keyed to the rung's actual grid spacing. See the TRIPWIRE
++  //     above. The library default stays 0 (OFF) — Gate-V2 and every reference run
++  //     never call this function, so they are BYTE-FOR-BYTE unchanged (THE ONE RULE),
++  //     asserted in test_production_parity before AND after this call.
++  //
++  // Anyone changing this must re-run the harnesses named in the TRIPWIRE and land a
++  // new gate table; the parity test asserts the echo against production_active_
++  // domain_band() and asserts the DERIVED k on a real run. run_info.json echoes the
++  // requested band (-1), the resolved per-rung k, and both latch outcomes.
++  opts.simp.active_domain_band = kProductionActiveDomainBand;
++
+   // Handoff 132 (C) — pin the matrix-free apply to the performance cores. See
+   // production_matfree_thread_count() above for the measured justification (113's
+   // thread sweep: 6 ~= 10, E-cores +0-7% and regressing under thermal load) and for

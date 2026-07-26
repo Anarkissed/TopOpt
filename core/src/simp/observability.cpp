@@ -380,6 +380,13 @@ std::string run_info_json(const RunInfo& info) {
   // per-rung latch outcome (empty until the post-run finalize).
   num("active_domain_band", fmt_i(info.active_domain_band));
   {
+    std::string br = "[";
+    for (std::size_t i = 0; i < info.active_domain_band_resolved.size(); ++i) {
+      if (i) br += ", ";
+      br += fmt_i(info.active_domain_band_resolved[i]);
+    }
+    br += "]";
+    num("active_domain_band_resolved", br);
     std::string al = "[";
     for (std::size_t i = 0; i < info.active_domain_latched.size(); ++i) {
       if (i) al += ", ";

@@ -177,6 +177,14 @@ int main() {
           "library default leaves Krylov recycling OFF (reference untouched)");
     CHECK(!opts.krylov_recycle_reset_per_rung,
           "library default carries the recycle basis across rungs (133 §4 lifetime)");
+    // Handoff 2026-07-26-ad-arming — the ACTIVE DOMAIN band is a PRODUCTION
+    // setting, not a library default. The reference world (Gate-V2, the property
+    // suite, every core test) never calls configure_production_options, so it sees
+    // the band OFF and every trajectory solve on the FULL domain — byte-identical
+    // to the pre-arming tree. THE ONE RULE, checked before the call.
+    CHECK(opts.simp.active_domain_band == 0,
+          "library default leaves the active-domain band OFF (reference untouched, "
+          "byte-identical)");
     const int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
     const int auto_threads = hw_threads > 0 ? hw_threads : 1;
     CHECK(topopt::fea_matfree_thread_count() == auto_threads,
@@ -246,6 +254,17 @@ int main() {
     CHECK(!opts.krylov_recycle_reset_per_rung,
           "production config carries the recycle basis across rung boundaries "
           "(133 §4: measured mildly better in both regimes, worse in neither)");
+    // Handoff 2026-07-26-ad-arming — the ARMED active-domain band. AUTO (-1), NOT
+    // a pinned width: k is derived per job downstream (asserted concretely on the
+    // real run below). Asserted against the named sentinel, not a bare -1, so a
+    // drift fails here. This is the ONE production dial that is NOT bit-identical,
+    // so the tripwire is real: changing it requires re-running the gate harnesses
+    // named in production.cpp and landing a new before/after gate table.
+    CHECK(opts.simp.active_domain_band == topopt::production_active_domain_band(),
+          "production config arms the active-domain band to the named sentinel");
+    CHECK(topopt::production_active_domain_band() == -1,
+          "the production active-domain band is AUTO (-1): k is derived per job, "
+          "never pinned (2026-07-26-ad-arming bar A2)");
     // The pin is a DEFAULT, not a lock: an explicit fea_set_matfree_threads after
     // configure_production_options must win, and n <= 0 must restore automatic
     // hardware-concurrency resolution. (Restored to the production pin after, so
@@ -317,6 +336,30 @@ int main() {
   const MinimizePlasticResult r2 =
       topopt::minimize_plastic(s2.grid, material, "PLA", s2.bcs, rules, s2.options);
   check_designs_identical(r1, r2);
+
+  // Handoff 2026-07-26-ad-arming bar A2 — k IS DERIVED, NEVER HARDCODED. The
+  // production config armed the band to AUTO (-1); prove that the run RESOLVED it
+  // to a concrete positive width equal to active_domain_auto_band(filter_radius) =
+  // ceil(rmin) + 1 for the grid it actually solved on, and that it is NOT the -1
+  // sentinel and NOT 0. This is the CI half of the "derived per job" bar — the
+  // harness measures it across three resolutions, this pins it on the real
+  // production driver at the resolution the parity gate runs.
+  {
+    const double spacing = s1.solved_grid.spacing;
+    const double rmin =
+        topopt::physical_filter_radius(s1.options.min_feature_mm, spacing);
+    const int expected_k = topopt::active_domain_auto_band(rmin);
+    CHECK(expected_k > 0, "the derived auto band is a positive width");
+    CHECK(!r1.evaluated.empty(), "the production run evaluated at least one rung");
+    for (const auto& v : r1.evaluated) {
+      CHECK(v.optimization.active_domain_band == expected_k,
+            "each rung resolved the AUTO band to the DERIVED ceil(rmin)+1 width, "
+            "not the -1 sentinel and not a hardcoded literal");
+    }
+    std::printf("  [AD arming] AUTO band resolved to k=%d "
+                "(rmin=%.3f voxels, spacing=%.3f mm) on %d rung(s)\n",
+                expected_k, rmin, spacing, (int)r1.evaluated.size());
+  }
 
   // (f) Handoff 132 (C) — DETERMINISM AT BOTH THREAD COUNTS, end to end. r1/r2 above
   // ran at the production pin (the performance-core count). The matrix-free apply's

@@ -135,8 +135,38 @@ struct Fixture {
   DesignBox box;
 };
 
-Fixture make_fixture() {
+// The arming campaign needs three regimes, not one (handoff 2026-07-26-ad-arming):
+//   Healthy     — the Phase 1 gate fixture (24 576 elements, 46.5x, MG carries).
+//   Stagnation  — a larger ultra-dilute box whose multigrid stops contracting and
+//                 falls to Jacobi-CG (the 125/168 §7 disease): the regime AD is
+//                 armed FOR, and the ONLY regime where recycling (Jacobi-only) can
+//                 wrap, so it is where the A5 interaction is observable at all.
+//   LowDilution — the part nearly fills the box, so the band covers the domain and
+//                 the DEGENERACY latch must fire ("I bought you nothing" — bar A4).
+enum class Regime { Healthy, Stagnation, LowDilution };
+
+Fixture make_fixture(Regime regime = Regime::Healthy) {
   Fixture f;
+  if (regime == Regime::Stagnation) {
+    // 24x6x24 mm part inside a ~48x32x48 box: the 49x-class size handoff 168 §1a
+    // measured reproducing the 125 stagnation (multigrid falls to Jacobi-CG). Same
+    // spacing (1.0 mm) and production config as Healthy; only the scale differs.
+    f.part = l_bracket(f.bcs, /*arm*/ 24, /*span*/ 24, /*ny*/ 6, /*t*/ 6, /*h*/ 1.0);
+    f.loads = traction_loads(f.part, VoxelTag::Load, Vec3{0.0, 0.0, -30.0});
+    f.box.min = Vec3{-12.0, -13.0, -12.0};
+    f.box.max = Vec3{36.0, 19.0, 36.0};
+    return f;
+  }
+  if (regime == Regime::LowDilution) {
+    // The Healthy part in a box drawn tight around it: ~2-3x dilution, so the
+    // material + growth band covers essentially the whole domain. AD buys nothing
+    // here, and the degeneracy latch must SAY so rather than silently cost.
+    f.part = l_bracket(f.bcs, /*arm*/ 14, /*span*/ 14, /*ny*/ 4, /*t*/ 6, /*h*/ 1.0);
+    f.loads = traction_loads(f.part, VoxelTag::Load, Vec3{0.0, 0.0, -30.0});
+    f.box.min = Vec3{-1.0, -1.0, -1.0};
+    f.box.max = Vec3{15.0, 5.0, 15.0};
+    return f;
+  }
   f.part = l_bracket(f.bcs, /*arm*/ 14, /*span*/ 14, /*ny*/ 4, /*t*/ 6, /*h*/ 1.0);
   f.loads = traction_loads(f.part, VoxelTag::Load, Vec3{0.0, 0.0, -30.0});
   // Chosen so minimize_plastic's expansion lands on 32x24x32 = 24 576 elements
@@ -197,6 +227,17 @@ struct RunRecord {
   std::vector<double> rung_active_fraction_mean;
   std::vector<int> rung_latched;
   std::vector<std::string> rung_latch_reason;
+  std::vector<int> rung_band_resolved;      // the DERIVED k each rung ran with
+  std::vector<long long> rung_escape_count;  // escape-latch damage, per rung
+  std::vector<int> rung_latch_iter;          // 1-based iteration each rung latched
+  // Recycling interaction (A5): recycling wraps the Jacobi-preconditioned loop
+  // (wrap_multigrid=false), so it can only apply on a Jacobi solve. AD churns the
+  // reduced free-DOF count as the band moves, which drops the carried basis. These
+  // count how often a basis actually survived to precondition a solve.
+  long long solves_total = 0;
+  long long solves_jacobi = 0;    // !cg_used_multigrid — where recycling CAN wrap
+  long long solves_recycled = 0;  // cg_recycle_dim > 0 — a carried basis applied
+  long long recycle_setup_matvecs = 0;
   std::string terminal_recommendation;
 };
 
@@ -222,10 +263,16 @@ RunRecord run_ladder(const char* label, const Fixture& f, int band,
 
   long long cg_total = 0, iters_total = 0;
   int fallbacks = 0;
+  long long solves_total = 0, solves_jacobi = 0, solves_recycled = 0;
+  long long recycle_setup = 0;
   o.on_iteration = [&](std::size_t rung, std::size_t, const SimpIterationObservation& obs) {
     cg_total += obs.cg_iterations;
     ++iters_total;
     if (!obs.cg_used_multigrid) ++fallbacks;
+    ++solves_total;
+    if (!obs.cg_used_multigrid) ++solves_jacobi;
+    if (obs.cg_recycle_dim > 0) ++solves_recycled;
+    recycle_setup += obs.cg_recycle_setup_matvecs;
     if (csv) csv->append(rung, obs);
   };
   if (snaps)
@@ -242,6 +289,10 @@ RunRecord run_ladder(const char* label, const Fixture& f, int band,
   r.cg_total = cg_total;
   r.iters_total = iters_total;
   r.mg_fallback_solves = fallbacks;
+  r.solves_total = solves_total;
+  r.solves_jacobi = solves_jacobi;
+  r.solves_recycled = solves_recycled;
+  r.recycle_setup_matvecs = recycle_setup;
 
   for (const MinimizePlasticVariant& v : res.evaluated) {
     r.rung_vf.push_back(v.requested_volume_fraction);
@@ -255,6 +306,9 @@ RunRecord run_ladder(const char* label, const Fixture& f, int band,
     r.rung_active_fraction_mean.push_back(v.optimization.active_fraction_mean);
     r.rung_latched.push_back(v.optimization.active_domain_latched ? 1 : 0);
     r.rung_latch_reason.push_back(v.optimization.active_domain_latch_reason);
+    r.rung_band_resolved.push_back(v.optimization.active_domain_band);
+    r.rung_escape_count.push_back(v.optimization.active_domain_escape_count);
+    r.rung_latch_iter.push_back(v.optimization.active_domain_latch_iteration);
   }
   if (!res.report.variants.empty())
   {
@@ -305,8 +359,14 @@ RunRecord run_ladder(const char* label, const Fixture& f, int band,
                                 res.rung_infeasible.end());
     info.active_domain_band = band;
     for (const MinimizePlasticVariant& v : res.evaluated) {
+      info.active_domain_band_resolved.push_back(
+          v.optimization.active_domain_band);
       info.active_domain_latched.push_back(
           v.optimization.active_domain_latched ? 1 : 0);
+      info.active_domain_latch_iteration.push_back(
+          v.optimization.active_domain_latch_iteration);
+      info.active_domain_escape_count.push_back(
+          v.optimization.active_domain_escape_count);
       info.active_domain_latch_reason.push_back(
           v.optimization.active_domain_latch_reason);
       info.active_domain_fraction_mean.push_back(
@@ -447,6 +507,35 @@ LengthRun run_length(const char* label, const Fixture& f, int band, int iters,
   return r;
 }
 
+// Latch firing + recycling-interaction summary for one armed run (bars A5, A6).
+void print_latch_recycle(const RunRecord& r) {
+  int latched = 0;
+  long long escapes = 0;
+  for (std::size_t i = 0; i < r.rung_latched.size(); ++i) {
+    latched += r.rung_latched[i];
+    escapes += r.rung_escape_count[i];
+  }
+  std::printf("    derived k per rung:");
+  for (int b : r.rung_band_resolved) std::printf(" %d", b);
+  std::printf("\n    latch firing: %d/%zu rungs latched, %lld total escapes\n",
+              latched, r.rung_latched.size(), escapes);
+  for (std::size_t i = 0; i < r.rung_latched.size(); ++i)
+    if (r.rung_latched[i])
+      std::printf("      rung %zu LATCHED @iter %d (escapes=%lld): %s\n", i,
+                  r.rung_latch_iter[i], r.rung_escape_count[i],
+                  r.rung_latch_reason[i].c_str());
+  // A5 — recycling is Jacobi-only (wrap_multigrid=false), so it can apply a basis
+  // ONLY on a Jacobi solve. rc_frac is the share of Jacobi solves that actually
+  // applied a carried basis: if AD's DOF churn drops the basis every iteration this
+  // collapses toward 0.
+  std::printf("    recycle: %lld/%lld Jacobi solves applied a carried basis "
+              "(rc_frac=%.3f), %lld setup matvecs; %lld/%lld solves ran Jacobi\n",
+              r.solves_recycled, r.solves_jacobi,
+              r.solves_jacobi ? double(r.solves_recycled) / double(r.solves_jacobi)
+                              : 0.0,
+              r.recycle_setup_matvecs, r.solves_jacobi, r.solves_total);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -512,6 +601,187 @@ int main(int argc, char** argv) {
     return 0;
   }
 
+  // A2 — k IS DERIVED, NEVER HARDCODED. Show ceil(rmin)+1 across resolutions, then
+  // PROVE it on real minimize_plastic runs (the resolved band read back from the
+  // result) at three spacings, so the derivation is exercised through the actual
+  // pipeline, not just the formula.
+  if (mode == "kderive") {
+    std::printf("\n===== A2 — DERIVED BAND k = ceil(rmin)+1 ACROSS RESOLUTIONS "
+                "=====\n");
+    std::printf("  min_feature = 2.5 mm (production); rmin = "
+                "physical_filter_radius(2.5, spacing) (1.5-voxel floor)\n");
+    std::printf("  spacing(mm)  rmin(voxels)  derived k   [formula]\n");
+    for (double h : {0.5, 1.0, 2.0, 2.5}) {
+      const double rmin = physical_filter_radius(2.5, h);
+      std::printf("     %.2f        %.3f          %d\n", h, rmin,
+                  active_domain_auto_band(rmin));
+    }
+    std::printf("\n  Proven on real runs (band=-1 AUTO, resolved band read back):\n");
+    int failures = 0;
+    for (double h : {0.5, 1.0, 2.0}) {
+      Fixture kf;
+      kf.part = l_bracket(kf.bcs, 14, 14, 4, 6, h);
+      kf.loads = traction_loads(kf.part, VoxelTag::Load, Vec3{0.0, 0.0, -30.0});
+      kf.box.min = Vec3{-9.0 * h, -10.0 * h, -9.0 * h};
+      kf.box.max = Vec3{23.0 * h, 14.0 * h, 23.0 * h};
+      MinimizePlasticOptions o = base_options(kf, -1, /*single_rung=*/true);
+      o.simp.max_iterations = 2;  // just enough to resolve + record the band
+      const VoxelGrid solved = minimize_plastic_solved_grid(kf.part, o);
+      const int expect =
+          active_domain_auto_band(physical_filter_radius(2.5, solved.spacing));
+      const MinimizePlasticResult res =
+          minimize_plastic(kf.part, material, "fdm", kf.bcs, rules, o);
+      const int got =
+          res.evaluated.empty() ? -999 : res.evaluated[0].optimization.active_domain_band;
+      const bool ok = (got == expect) && (got > 0);
+      if (!ok) ++failures;
+      std::printf("    spacing=%.3f mm  expected k=%d  resolved k=%d   %s\n",
+                  solved.spacing, expect, got, ok ? "MATCH" : "MISMATCH");
+    }
+    std::printf("\n  %s\n", failures == 0
+                                ? "A2 PASS: k derived per job, never the -1 sentinel, "
+                                  "never 0, matches ceil(rmin)+1 on every real run"
+                                : "A2 FAIL: a resolved band did not match the rule");
+    return failures == 0 ? 0 : 1;
+  }
+
+  // A4 — LOW DILUTION MUST SAY "I BOUGHT YOU NOTHING". The part nearly fills the
+  // box, so the band covers the domain; the degeneracy latch must fire and the
+  // run_info must record it. Full ladder, band=-1 AUTO, run_info written.
+  if (mode == "lowdil") {
+    std::printf("\n===== A4 — LOW-DILUTION DEGENERACY LATCH (\"buys nothing\") "
+                "=====\n");
+    const Fixture lf = make_fixture(Regime::LowDilution);
+    MinimizePlasticOptions probe = base_options(lf, 0);
+    const VoxelGrid solved = minimize_plastic_solved_grid(lf.part, probe);
+    std::printf("  part %zu solid voxels -> grid %dx%dx%d (%zu elements), "
+                "dilution=%.2fx, spacing=%.2f mm, derived k=%d\n",
+                lf.part.solid_count(), solved.nx, solved.ny, solved.nz,
+                solved.solid_count(),
+                double(solved.solid_count()) / double(lf.part.solid_count()),
+                solved.spacing,
+                active_domain_auto_band(
+                    physical_filter_radius(probe.min_feature_mm, solved.spacing)));
+    const RunRecord armed =
+        run_ladder("lowdil/auto", lf, -1, rules, material,
+                   dir + "/lowdil/iterations.csv", "", 0, 0,
+                   dir + "/lowdil/run_info.json");
+    print_latch_recycle(armed);
+    int degeneracy_latches = 0;
+    for (std::size_t i = 0; i < armed.rung_latched.size(); ++i)
+      if (armed.rung_latched[i] && armed.rung_escape_count[i] == 0 &&
+          armed.rung_latch_reason[i].find("buys nothing") != std::string::npos)
+        ++degeneracy_latches;
+    std::printf("\n  %s (%d rung(s) latched with the \"buys nothing\" reason; "
+                "run_info.json records it)\n",
+                degeneracy_latches > 0
+                    ? "A4 PASS: the degeneracy latch fired and SAID it bought nothing"
+                    : "A4 note: no degeneracy latch fired — raise dilution",
+                degeneracy_latches);
+    return 0;
+  }
+
+  // The ★ honest gap + A5 — the STAGNATION regime. A larger ultra-dilute box whose
+  // multigrid falls to Jacobi-CG (the class the maintainer's real 128^3 job is in,
+  // measured here on a FIXTURE, not that job). This is the only regime where
+  // recycling (Jacobi-only) can wrap, so the AD/recycling interaction is
+  // observable. Single rung, capped iterations (the full ladder here is hours).
+  if (mode == "stag") {
+    const int iters = argc > 2 ? std::atoi(argv[2]) : 40;
+    std::printf("\n===== ★ STAGNATION REGIME (fixture) — armed vs unarmed, %d "
+                "iters, single rung =====\n", iters);
+    const Fixture sf = make_fixture(Regime::Stagnation);
+    MinimizePlasticOptions probe = base_options(sf, 0, true);
+    const VoxelGrid solved = minimize_plastic_solved_grid(sf.part, probe);
+    std::printf("  part %zu solid voxels -> grid %dx%dx%d (%zu elements), "
+                "dilution=%.1fx, spacing=%.2f mm, derived k=%d\n",
+                sf.part.solid_count(), solved.nx, solved.ny, solved.nz,
+                solved.solid_count(),
+                double(solved.solid_count()) / double(sf.part.solid_count()),
+                solved.spacing,
+                active_domain_auto_band(
+                    physical_filter_radius(probe.min_feature_mm, solved.spacing)));
+    auto capped = [&](const char* label, int band, const std::string& ri) {
+      MinimizePlasticOptions o = base_options(sf, band, /*single_rung=*/true);
+      o.simp.max_iterations = iters;
+      o.simp.mma_plateau_window = 0;  // run the full count both postures
+      o.simp.change_tol = 0.0;
+      RunRecord r;
+      r.label = label;
+      long long cg = 0, its = 0, sj = 0, sr = 0, mv = 0;
+      int fb = 0;
+      o.on_iteration = [&](std::size_t, std::size_t,
+                           const SimpIterationObservation& obs) {
+        cg += obs.cg_iterations;
+        ++its;
+        if (!obs.cg_used_multigrid) { ++fb; ++sj; }
+        if (obs.cg_recycle_dim > 0) ++sr;
+        mv += obs.cg_recycle_setup_matvecs;
+      };
+      const auto t0 = std::chrono::steady_clock::now();
+      const MinimizePlasticResult res =
+          minimize_plastic(sf.part, material, "fdm", sf.bcs, rules, o);
+      const double wall =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+              .count();
+      const auto& v = res.evaluated.front();
+      std::printf(
+          "  [%s] %.1f s, %lld CG, %d Jacobi-fallback solves; band=%d "
+          "latched=%d@%d escapes=%lld f_bar=%.4f\n"
+          "        recycle: %lld/%lld Jacobi solves applied a basis "
+          "(rc_frac=%.3f), setup_mv=%lld\n",
+          label, wall, cg, fb, v.optimization.active_domain_band,
+          v.optimization.active_domain_latched ? 1 : 0,
+          v.optimization.active_domain_latch_iteration,
+          v.optimization.active_domain_escape_count,
+          v.optimization.active_fraction_mean, sr, sj,
+          sj ? double(sr) / double(sj) : 0.0, mv);
+      if (!ri.empty()) {
+        RunInfo info;
+        info.cli_version = version();
+        info.fingerprint = "harness:active_domain_gate:stag";
+        info.mode = "minimize_plastic";
+        info.solver = "MultigridCG_Matfree";
+        info.cg_multigrid = res.used_multigrid;
+        info.cg_multigrid_observed = true;
+        info.mg_mode = res.used_multigrid
+                           ? "carried"
+                           : (res.mg_hierarchy_ever_built ? "stagnated-latched"
+                                                          : "build-rejected");
+        info.mg_mode_observed = true;
+        info.krylov_recycling = fea_krylov_recycling_enabled();
+        info.krylov_recycle_dim = fea_krylov_recycle_dim();
+        info.krylov_recycle_wrap_multigrid = fea_krylov_recycle_wrap_multigrid();
+        info.active_domain_band = band;
+        for (const MinimizePlasticVariant& vv : res.evaluated) {
+          info.active_domain_band_resolved.push_back(
+              vv.optimization.active_domain_band);
+          info.active_domain_latched.push_back(
+              vv.optimization.active_domain_latched ? 1 : 0);
+          info.active_domain_latch_iteration.push_back(
+              vv.optimization.active_domain_latch_iteration);
+          info.active_domain_escape_count.push_back(
+              vv.optimization.active_domain_escape_count);
+          info.active_domain_latch_reason.push_back(
+              vv.optimization.active_domain_latch_reason);
+          info.active_domain_fraction_mean.push_back(
+              vv.optimization.active_fraction_mean);
+        }
+        info.created_wall_ms = wall_clock_ms();
+        write_run_info(ri, info);
+      }
+      return std::make_pair(cg, res.evaluated.front().optimization.physical_density);
+    };
+    const auto off = capped("stag/off ", 0, dir + "/stag/off_run_info.json");
+    const auto on = capped("stag/auto", -1, dir + "/stag/auto_run_info.json");
+    const Delta d = compare(off.second, on.second);
+    std::printf("\n  armed vs unarmed at iter %d: mean|drho|=%.4e max|drho|=%.4e\n",
+                iters, d.mean_abs, d.max_abs);
+    std::printf("  CG iterations OFF %lld -> AUTO %lld (%.3fx)\n", off.first,
+                on.first, off.first ? double(on.first) / double(off.first) : 0.0);
+    return 0;
+  }
+
   if (mode == "length") {
     const int iters = argc > 2 ? std::atoi(argv[2]) : 250;
     std::printf("\n===== LENGTH — |drho| accumulation over %d MMA iterations at "
@@ -566,7 +836,15 @@ int main(int argc, char** argv) {
   }
 
   const bool want_capture = (mode == "all" || mode == "capture");
-  const bool want_gate = (mode == "all" || mode == "gate");
+  // "arm" (A3) is the gate run against the ACTUAL armed path: band = -1 (AUTO),
+  // which resolves to the derived k. "gate" keeps the explicit k=4 for continuity
+  // with 168's table; on this fixture AUTO resolves to 4, so they coincide, and
+  // "arm" additionally reports the derived k, the latch firing and the recycle
+  // interaction.
+  const bool want_gate = (mode == "all" || mode == "gate" || mode == "arm");
+  const bool armed_path = (mode == "arm");
+  const int on_band = armed_path ? -1 : 4;
+  const char* on_desc = armed_path ? "AUTO(-1)" : "k=4";
 
   if (want_capture) {
     std::printf("\n===== STEP 1 — THE SHARED CAPTURE (band OFF, snapshots on) "
@@ -583,8 +861,8 @@ int main(int argc, char** argv) {
   // GATE VERDICTS — accept / reject / where the walk stops — that condition 3
   // requires to be identical. At this fixture size the whole ladder is ~70 s, so
   // there is no reason to compare less than the thing that ships.
-  std::printf("\n===== STEP 2 — THE GATE (full ladder; k = 4 ON vs OFF, each "
-              "twice) =====\n");
+  std::printf("\n===== STEP 2 — THE GATE (full ladder; ON=%s vs OFF, each "
+              "twice) =====\n", on_desc);
   const RunRecord off1 =
       run_ladder("gate/off#1", f, 0, rules, material,
                  dir + "/gate/off1_iterations.csv", "", 0, 0,
@@ -593,12 +871,12 @@ int main(int argc, char** argv) {
       run_ladder("gate/off#2", f, 0, rules, material,
                  dir + "/gate/off2_iterations.csv", "", 0, 0, "");
   const RunRecord on1 =
-      run_ladder("gate/on#1  k=4", f, 4, rules, material,
-                 dir + "/gate/on1_iterations.csv", "", 0, 0,
+      run_ladder(armed_path ? "gate/on#1  AUTO" : "gate/on#1  k=4", f, on_band,
+                 rules, material, dir + "/gate/on1_iterations.csv", "", 0, 0,
                  dir + "/gate/on_run_info.json");
   const RunRecord on2 =
-      run_ladder("gate/on#2  k=4", f, 4, rules, material,
-                 dir + "/gate/on2_iterations.csv", "", 0, 0, "");
+      run_ladder(armed_path ? "gate/on#2  AUTO" : "gate/on#2  k=4", f, on_band,
+                 rules, material, dir + "/gate/on2_iterations.csv", "", 0, 0, "");
 
   std::printf("\n===== GATE VERDICT =====\n");
   const bool off_repeat = bit_identical(off1, off2);
@@ -666,6 +944,11 @@ int main(int argc, char** argv) {
   std::printf("        mean f_bar %.4f  =>  134's 0.65/f law projects %.2fx "
               "per-solve\n",
               fbar, fbar > 0.0 ? 0.65 / fbar : 0.0);
+
+  if (armed_path) {
+    std::printf("\n  ARMED-PATH (AUTO) latch + recycle summary (bars A5/A6):\n");
+    print_latch_recycle(on1);
+  }
 
   write_gate_csv(dir + "/gate/gate.csv", off1, on1);
   std::printf("\n  wrote %s/gate/gate.csv\n", dir.c_str());
