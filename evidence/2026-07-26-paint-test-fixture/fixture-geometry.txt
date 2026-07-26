@@ -1,0 +1,8 @@
+triangles: 2224
+bbox x: -99.92500305175781 101.2750015258789
+bbox y: -196.7901153564453 10.574999809265137
+bbox z: 0.0 20.0
+triangles with all 3 verts EXACTLY y==0 : 0   <-- what the old test hardcoded; ZERO => empty set => test failed
+min-y bound: -196.7901153564453
+triangles on min-y plane (|y-minY|<1e-2): [1645, 1646] normals [(-0.0, -1.0, -0.0), (0.0, -1.0, 0.0)]
+two lowest distinct y layers: [-196.7901, -186.388] -> gap from min-y: 10.4021 mm (>> planeTol 1e-2)

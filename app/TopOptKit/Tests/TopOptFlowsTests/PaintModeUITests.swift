@@ -54,6 +54,31 @@ final class PaintModeUITests: XCTestCase {
         mesh.faceIDs.enumerated().compactMap { $0.element == id ? $0.offset : nil }
     }
 
+    /// The back/wall face resolved the way the app does: through the mesh segmentation, not a
+    /// hardcoded coordinate. The wall face is the L extrusion's minimum-y end cap; find the
+    /// segmented pseudo-face a tap on that plane would hit, then return all its triangles.
+    ///
+    /// The plane is derived from the mesh's own minimum-y bound with an explicit tolerance —
+    /// never exact float equality. `planeTol = 1e-2 mm` is safe here because the extrusion spans
+    /// ~207 mm in y and the next distinct y layer is orders of magnitude farther than 1e-2 mm from
+    /// the min-y bound, while 1e-2 mm still comfortably absorbs binary-STL 32-bit float noise. The
+    /// tolerance only picks a *representative* triangle to read its face id; the actual selection is
+    /// the segmenter's face, so the returned set is exactly what a tap yields, not a coordinate band.
+    private func wallFaceTriangles(in mesh: ImportedMesh) throws -> (faceID: Int32, triangles: [Int]) {
+        let planeTol: Float = 1e-2
+        let ys = stride(from: 1, to: mesh.vertices.count, by: 3).map { mesh.vertices[$0] }
+        let minY = try XCTUnwrap(ys.min(), "the mesh has vertices")
+        let hit = try XCTUnwrap(
+            (0..<mesh.triangleCount).first { t in
+                (0..<3).allSatisfy { c in
+                    abs(mesh.vertices[Int(mesh.indices[t * 3 + c]) * 3 + 1] - minY) < planeTol
+                }
+            },
+            "a triangle sits on the wall (min-y) plane")
+        let faceID = mesh.faceIDs[hit]
+        return (faceID, triangles(ofFace: faceID, in: mesh))
+    }
+
     /// Spin the main run loop past the 400 ms undo settle window so the debounced auto-commit fires
     /// — the real on-device path that turns a settled stroke into a committed undo baseline.
     private func settleUndo() {
@@ -133,15 +158,18 @@ final class PaintModeUITests: XCTestCase {
                              importedFile: file, importedMesh: mesh)
         let base = mesh.faceCount
 
-        // The back/wall face is the plane y == 0: paint exactly its triangles (the two facets at
-        // the minimum-y bound of the L extrusion). Front-face culling is irrelevant here — we
-        // resolve the triangle set directly, the same set BrushHitTest would cover face-on.
-        let backTris = (0..<mesh.triangleCount).filter { t in
-            (0..<3).allSatisfy { c in
-                mesh.vertices[Int(mesh.indices[t * 3 + c]) * 3 + 1] == 0   // y == 0
-            }
-        }
+        // The back/wall face is the L extrusion's minimum-y end cap — "the two facets at the
+        // minimum-y bound" the original test named. Select it the way the APP does: through the
+        // mesh segmentation (`mesh.pseudoFaces`). A tap picks the pseudo-face under the hit
+        // triangle; `wallFaceTriangles` resolves that same segmented set here, so the test
+        // exercises the real dihedral-segmentation path — not a hardcoded coordinate.
+        XCTAssertTrue(mesh.pseudoFaces, "an STL import carries segmented pseudo-faces")
+        let (wallFaceID, backTris) = try wallFaceTriangles(in: mesh)
         XCTAssertFalse(backTris.isEmpty, "the wall face has triangles")
+        // The segmenter groups the whole coplanar end cap under one face id — exactly what a tap
+        // would select (pseudo-faces don't over-select: a tap returns just this face).
+        XCTAssertEqual(Set(triangles(ofFace: wallFaceID, in: mesh)), Set(backTris),
+                       "the wall face is one coherent segmented pseudo-face")
 
         p.paintStroke(.add, triangles: backTris)
         let group = try XCTUnwrap(p.selection.activeGroup)
@@ -153,6 +181,38 @@ final class PaintModeUITests: XCTestCase {
         XCTAssertEqual(reimported.faceCount, base + 1)
         XCTAssertEqual(Set(triangles(ofFace: Int32(base), in: reimported)), Set(backTris),
                        "painted == tapped: the anchor covers exactly the back-face triangles")
+    }
+
+    /// B2 — the "painted == tapped" assertion is a real test, not a tautology. Paint a DELIBERATELY
+    /// WRONG triangle set (the wall face minus one facet) and prove the same round-trip equality the
+    /// passing test relies on now FAILS. If this ever asserted equal, the check above would be inert.
+    func testShelfBracketWrongFaceFailsPaintedEqualsTap() throws {
+        let fixture = Self.repoRoot.appendingPathComponent(
+            "core/tests/fixtures/mesh/WallMount_ShelfBracket.stl")
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("bracket_stub_\(UUID().uuidString).stl")
+        try FileManager.default.copyItem(at: fixture, to: tmp)
+        defer { cleanup(tmp) }
+
+        let mesh = try TopOptKit.importMesh(path: tmp.path)
+        let file = ImportedFile(name: "WallMount_ShelfBracket.stl", path: tmp.path,
+                                triangleCount: mesh.triangleCount, faceCount: mesh.faceCount,
+                                watertight: mesh.watertight, pseudoFaces: mesh.pseudoFaces)
+        let p = ProjectModel(id: UUID(), name: "Bracket", material: "PLA", process: .fdm,
+                             importedFile: file, importedMesh: mesh)
+        let base = mesh.faceCount
+
+        // The correct tapped set is the whole wall face; the STUB drops one facet from it.
+        let (_, backTris) = try wallFaceTriangles(in: mesh)
+        XCTAssertGreaterThan(backTris.count, 1, "need >1 facet so a wrong subset exists")
+        let wrongTris = Array(backTris.dropLast())
+
+        p.paintStroke(.add, triangles: wrongTris)
+        p.persistPaint()
+        let reimported = try TopOptKit.importMesh(path: tmp.path)
+        // Same comparison the passing test makes — here it must NOT hold, proving the assertion bites.
+        XCTAssertNotEqual(Set(triangles(ofFace: Int32(base), in: reimported)), Set(backTris),
+                          "a wrong painted set does not match the tapped wall face")
     }
 
     // MARK: - undo/redo registers on the round-6 UndoHistory (no fork)
