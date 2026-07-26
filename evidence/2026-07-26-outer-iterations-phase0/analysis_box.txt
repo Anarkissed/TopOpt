@@ -1,0 +1,11 @@
+# evidence/2026-07-26-outer-iterations-phase0/box/periter_cg1e-8.csv   SOLID(solved-grid)=4056
+# material threshold from Q0 negative control = >=1 voxel flip (basin noise flips 0)
+
+rung stop gray_end | lastFlip:>=1vox >=0.1% >=0.5% >=1% | GAP(stop-1vox) tail_flat_and_frozen | movelimit_iters
+   0  194       79 |         185     97     80    80 |             9                     7 |            50
+   1  192       62 |         183     84     63    63 |             9                     6 |            38
+   2  199       97 |         195    191     99    99 |             4                     1 |            60
+   3  104      104 |          86     62     39     0 |            18                     1 |            19
+
+# TOTALS over 4 rungs: outer_iters=689  iters_after_last_1voxel_flip=40 (6%)  flat+frozen_dead_tail=15 (2%)
+# iters after topology settled (last >=0.5% flip) = 408 (59% of all outer iters)
