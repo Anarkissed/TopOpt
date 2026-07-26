@@ -1,0 +1,25 @@
+== OUTER-ITERATION PHASE 0 ==  L-bracket DESIGN-BOX (whole-domain, dilute) grid=16x6x16  solid=672 voxels  h=2.0mm  ladder={0.68,0.52,0.38,0.26}  MMA+matfreeMG (production)
+   design box max=(51,12,51)mm  (part=32x12x32mm)
+
+[Q0] running BASELINE cg_tol=1e-8 ...
+      done in 161.8s.  running NEGATIVE CONTROL cg_tol=1e-9 ...
+      done in 168.9s.
+  [wrote ../evidence/2026-07-26-outer-iterations-phase0/box/periter_cg1e-8.csv]
+  [wrote ../evidence/2026-07-26-outer-iterations-phase0/box/periter_cg1e-9.csv]
+
+[Q0] NEGATIVE-CONTROL BASIN FLOOR (1e-8 vs 1e-9 terminal design, per rung)
+     grid=32x8x32 solved-solid=4056
+     rung 0 vf=0.68 : class_change_frac=0.000e+00  mean|drho|=6.164e-12  max|drho|=1.358e-08   base_iters=194 ctrl_iters=194
+     rung 1 vf=0.52 : class_change_frac=0.000e+00  mean|drho|=1.174e-11  max|drho|=1.036e-08   base_iters=192 ctrl_iters=192
+     rung 2 vf=0.38 : class_change_frac=0.000e+00  mean|drho|=9.422e-06  max|drho|=9.773e-03   base_iters=199 ctrl_iters=199
+     rung 3 vf=0.25 : class_change_frac=0.000e+00  mean|drho|=4.642e-05  max|drho|=1.146e-02   base_iters=104 ctrl_iters=105
+     => BASIN FLOOR (max over rungs): class_change_frac=0.000e+00  mean|drho|=4.642e-05
+
+[Q1] STOPPING GAP — material-settle iteration vs actual stop, floor=0.000e+00
+     rung  vf   actual_stop  material_settle  GAP  iters_after_settle  last_class_frac
+     0    0.68    194          194                0       0                 0.000e+00  (still moving at last iter)
+     1    0.52    192          192                0       0                 0.000e+00  (still moving at last iter)
+     2    0.38    199          199                0       0                 0.000e+00  (still moving at last iter)
+     3    0.25    104          104                0       0                 0.000e+00  (still moving at last iter)
+
+[done] CSVs in ../evidence/2026-07-26-outer-iterations-phase0/box

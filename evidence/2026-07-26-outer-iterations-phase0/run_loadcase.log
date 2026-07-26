@@ -1,0 +1,24 @@
+== OUTER-ITERATION PHASE 0 ==  L-bracket loadcase grid=24x8x24  solid=2016 voxels  h=2.0mm  ladder={0.68,0.52,0.38,0.26}  MMA+matfreeMG (production)
+
+[Q0] running BASELINE cg_tol=1e-8 ...
+      done in 115.9s.  running NEGATIVE CONTROL cg_tol=1e-9 ...
+      done in 125.8s.
+  [wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/outer-iteration-phase-0-54f952/evidence/2026-07-26-outer-iterations-phase0/periter_cg1e-8.csv]
+  [wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/outer-iteration-phase-0-54f952/evidence/2026-07-26-outer-iterations-phase0/periter_cg1e-9.csv]
+
+[Q0] NEGATIVE-CONTROL BASIN FLOOR (1e-8 vs 1e-9 terminal design, per rung)
+     grid=24x8x24 solved-solid=2016
+     rung 0 vf=0.68 : class_change_frac=0.000e+00  mean|drho|=1.298e-12  max|drho|=1.294e-09   base_iters=112 ctrl_iters=112
+     rung 1 vf=0.52 : class_change_frac=0.000e+00  mean|drho|=9.963e-06  max|drho|=1.077e-02   base_iters=125 ctrl_iters=125
+     rung 2 vf=0.38 : class_change_frac=0.000e+00  mean|drho|=1.446e-04  max|drho|=1.162e-01   base_iters=250 ctrl_iters=250
+     rung 3 vf=0.26 : class_change_frac=0.000e+00  mean|drho|=1.465e-09  max|drho|=7.377e-07   base_iters=172 ctrl_iters=172
+     => BASIN FLOOR (max over rungs): class_change_frac=0.000e+00  mean|drho|=1.446e-04
+
+[Q1] STOPPING GAP — material-settle iteration vs actual stop, floor=0.000e+00
+     rung  vf   actual_stop  material_settle  GAP  iters_after_settle  last_class_frac
+     0    0.68    112          112                0       0                 0.000e+00  (still moving at last iter)
+     1    0.52    125          125                0       0                 0.000e+00  (still moving at last iter)
+     2    0.38    250          250                0       0                 0.000e+00  (still moving at last iter)
+     3    0.26    172          172                0       0                 0.000e+00  (still moving at last iter)
+
+[done] CSVs in /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/outer-iteration-phase-0-54f952/evidence/2026-07-26-outer-iterations-phase0
