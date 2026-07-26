@@ -166,6 +166,8 @@ RunInfo build_run_info(const JobDescription& job,
   info.draft_quality = options.draft_quality;
   info.draft_loose_tol = options.draft_loose_tol;
   info.draft_escalation_c_gap = options.draft_escalation_c_gap;
+  info.draft_use_design_trigger = options.draft_use_design_trigger;
+  info.draft_escalation_design_flip = options.draft_escalation_design_flip;
   info.min_feature_mm = options.min_feature_mm;
   info.margin_stop = options.margin_stop;
   info.infill_percent = options.infill_percent;
@@ -437,6 +439,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     options.draft_quality = job.draft_quality;
     options.draft_loose_tol = job.draft_loose_tol;
     options.draft_escalation_c_gap = job.draft_escalation_c_gap;
+    options.draft_use_design_trigger = job.draft_use_design_trigger;
+    options.draft_escalation_design_flip = job.draft_escalation_design_flip;
+    options.draft_probe_iters = job.draft_probe_iters;
   }
 
   // ──▶ output dir (created before the run so streamed artifacts can land in it).
@@ -585,6 +590,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.draft_rung_escalated.assign(
         result.pipeline.draft_rung_escalated.begin(),
         result.pipeline.draft_rung_escalated.end());
+    // Handoff 2026-07-26-draft-quality-phase2 — the design-space probe outcome.
+    run_info.draft_rung_probe_flip = result.pipeline.draft_rung_probe_flip;
+    run_info.draft_rung_probe_cg = result.pipeline.draft_rung_probe_cg;
     write_run_info(result.run_info_path, run_info);
   }
   // A recovery solve (which sets used_multigrid) runs only for a non-cancelled

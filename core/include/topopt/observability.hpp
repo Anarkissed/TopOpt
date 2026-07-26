@@ -303,12 +303,24 @@ struct RunInfo {
   // The serializer also emits a compact `draft_escalations` array of {rung, gap}
   // for exactly the escalated rungs — "every escalation with its rung index and
   // measured gap". All EMPTY when draft_quality is off.
+  // Handoff 2026-07-26-draft-quality-phase2 — the DESIGN-SPACE trigger echo.
+  // `draft_escalation_design_flip` (CONFIG, > 0 arms the design trigger and replaces
+  // the gap decision) plus two per-rung OUTCOME vectors:
+  //   draft_rung_probe_flip[i]  the fraction of rung i's loose-plateau solid voxels
+  //                             whose classification moved under the one-shot tight
+  //                             probe (the escalation signal); < 0 (`null`) when the
+  //                             probe did not run (disarmed / cancelled / infeasible).
+  //   draft_rung_probe_cg[i]    that probe's CG cost (0 when it did not run).
   bool draft_quality = false;
   double draft_loose_tol = 0.0;
   double draft_escalation_c_gap = 0.0;
+  bool draft_use_design_trigger = false;
+  double draft_escalation_design_flip = 0.0;
   std::vector<int> draft_rung_tail_k;
   std::vector<double> draft_rung_c_gap;
   std::vector<int> draft_rung_escalated;
+  std::vector<double> draft_rung_probe_flip;
+  std::vector<long long> draft_rung_probe_cg;
   double min_feature_mm = 0.0;
   double margin_stop = 0.0;
   double infill_percent = 100.0;

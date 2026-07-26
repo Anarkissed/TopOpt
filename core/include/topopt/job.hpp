@@ -178,6 +178,10 @@ struct JobDescription {
   bool draft_quality = false;
   double draft_loose_tol = 1e-3;
   double draft_escalation_c_gap = 0.02;
+  // Phase 2 (handoff 2026-07-26-draft-quality-phase2): the design-space trigger.
+  bool draft_use_design_trigger = false;       // arms it (replaces the gap decision)
+  double draft_escalation_design_flip = 0.0;   // threshold (0 = the noise floor)
+  int draft_probe_iters = 1;
 
   // Optional declared load case (the "loads" block). When present the run uses
   // build_production_loadcase (anchors + forces) instead of self-weight.

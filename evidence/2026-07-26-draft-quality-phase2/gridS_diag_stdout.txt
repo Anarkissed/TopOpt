@@ -1,0 +1,21 @@
+grid S 16x8x16, AD-off, warm ON, 2-rung ladder {0.50,0.35}, loose 5e-1
+
+(1) is the draft rung-1 plateau tight-STATIONARY? sweep the probe budget:
+    probe_iters | probe_flip(loose vs tight step) | tightmove(plateau vs tight step)
+        1       |          0.00000              |        0.23529
+        4       |          0.00000              |        0.05882
+       16       |          0.00000              |        0.00000
+       64       |          0.00000              |        0.00000
+    => tightmove stays ~0 across budgets => the plateau is a STABLE tight basin.
+
+(2) where the 0.15 divergence actually lives (path, not stationarity):
+    flip(draft[1] vs tight[1])       = 0.1500   (Phase-1 counterexample-1 = 0.15)
+    flip(escalated[1] vs tight[1])   = 0.0000   (escalation from ENTRY seed lands at tight)
+    flip(escalated[1] vs draft[1])   = 0.1765   (escalation MOVES the design ~0.15)
+    escalated rung-1? YES
+
+=> A full tight re-run from the ENTRY seed escapes the wrong basin (0.15 -> 0),
+   but the plateau is locally stable, so a probe seeded FROM the plateau reads 0.
+   The plateau design-space probe is STRUCTURALLY BLIND to basin/path divergence.
+
+########## DONE ##########

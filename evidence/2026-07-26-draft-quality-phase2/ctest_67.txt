@@ -1,0 +1,15 @@
+62/67 Test #62: cli_demo .........................   Passed  224.63 sec
+      Start 63: production_parity
+63/67 Test #63: production_parity ................   Passed   12.37 sec
+      Start 64: clearance_parity
+64/67 Test #64: clearance_parity .................   Passed   12.11 sec
+      Start 65: face_protection_parity
+65/67 Test #65: face_protection_parity ...........   Passed    4.25 sec
+      Start 66: loadcase_small_face
+66/67 Test #66: loadcase_small_face ..............   Passed    0.29 sec
+      Start 67: mesh_job
+67/67 Test #67: mesh_job .........................   Passed    8.15 sec
+
+100% tests passed out of 67
+
+Total Test time (real) = 903.74 sec

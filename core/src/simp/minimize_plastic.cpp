@@ -520,12 +520,24 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // (normal / infeasible / cancelled). No-op when draft is disarmed, so the vectors
   // stay empty on a non-draft run. A cancelled/infeasible rung records the sentinel
   // (k 0, gap -1 = not measured, not escalated).
-  auto record_draft_rung = [&](int k, double gap, int escalated) {
+  auto record_draft_rung = [&](int k, double gap, int escalated,
+                               double probe_flip, long long probe_cg,
+                               double probe_tightmove) {
     if (!draft_armed) return;
     result.draft_rung_tail_k.push_back(k);
     result.draft_rung_c_gap.push_back(gap);
     result.draft_rung_escalated.push_back(static_cast<char>(escalated));
+    result.draft_rung_probe_flip.push_back(probe_flip);
+    result.draft_rung_probe_cg.push_back(probe_cg);
+    result.draft_rung_probe_tightmove.push_back(probe_tightmove);
   };
+  // Phase 2 design-space trigger: ARMED only when draft is armed AND the maintainer
+  // opted in (draft_use_design_trigger). The threshold draft_escalation_design_flip
+  // (default 0 = the measured negative-control floor) is then how much classification
+  // disagreement is tolerated before escalating. When disarmed the Phase-1 compliance-
+  // gap decision runs and no probe is taken (byte-identical to pre-phase2).
+  const bool draft_design_trigger_armed =
+      draft_armed && options.draft_use_design_trigger;
 
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
@@ -576,6 +588,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     int draft_k = 0;               // this rung's measured k (captured pre-projection)
     double draft_gap = -1.0;       // this rung's escalation signal (-1 = not measured)
     int draft_escalated = 0;       // 1 iff this rung was re-run tight (part d)
+    double draft_probe_flip = -1.0;  // Phase 2 design-space signal (-1 = not probed)
+    long long draft_probe_cg = 0;    // Phase 2 probe cost (CG iters)
+    double draft_probe_tightmove = -1.0;  // diagnostic: flip(plateau, tight-step)
 
     // Handoff 110 — the warm-start seed for THIS rung (Part B coarse upsample for
     // rung 0, Part A carry-over from the previous rung otherwise). EMPTY (the
@@ -708,10 +723,97 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                                 ? c_cert
                                 : variant.optimization.history.back().compliance;
       draft_gap = c_cert > 0.0 ? std::fabs(c_cert - c_traj) / c_cert : 0.0;
-      // Escalate on a gap over the threshold; a threshold <= 0 escalates EVERY rung
-      // (the maximally-conservative posture — correctness over the win).
-      const bool escalate = options.draft_escalation_c_gap <= 0.0 ||
-                            draft_gap > options.draft_escalation_c_gap;
+
+      // --- Phase 2 (2026-07-26): the DESIGN-SPACE escalation decision -----------
+      // Phase 1 escalated on `draft_gap`, which was MEASURED not to separate. When
+      // the design trigger is armed the decision is made instead on a self-contained
+      // DESIGN-SPACE probe that asks, directly: at THIS rung's converged loose design,
+      // does a TIGHT solve want to move the design somewhere a LOOSE solve does not?
+      //
+      // The probe takes TWO one-step reseeds from the SAME plateau design
+      // (variant.optimization.physical_density), with the memoryless OC updater:
+      //   rho_loose = one OC step whose FEA is solved at the trajectory's LOOSE tol,
+      //   rho_tight = one OC step whose FEA is solved at the exact cert tol,
+      // and reports the fraction of solid voxels whose printed<->void classification
+      // DIFFERS between them. Both steps reseed identically (same warm_start_design
+      // inverse-filter of the same field) and take one OC step, so the reseed / filter
+      // / volume-bisection displacement is COMMON to both and cancels in the diff — a
+      // naive "plateau vs one tight step" comparison instead carried that displacement
+      // as a 0.36 spurious floor (measured). What survives is only the difference the
+      // FEA tolerance makes to the step direction: ~0 when the loose sensitivities
+      // already agree with tight (converged), and large when the loose trajectory
+      // settled on sensitivities a tight solve rejects (diverged). The negative-
+      // control floor (D2, tight-vs-tighter) is this same construction with the loose
+      // tol set barely above cert, so it needs no special path.
+      //
+      // Both probe results are DISCARDED (never assigned back into `variant`), so the
+      // probe is read-only with respect to the trajectory it measures — the
+      // BLOCKED-STOP condition (a probe that disturbs its own measurement) does not
+      // arise. When the trigger is disarmed the Phase-1 gap decision runs unchanged.
+      bool escalate;
+      if (draft_design_trigger_armed) {
+        const std::vector<double> plateau = variant.optimization.physical_density;
+        // One memoryless OC step from `plateau`, its FEA solved at `step_loose_tol`
+        // (0 => exact cert tol). max_iterations == draft_probe_iters. Tally-only
+        // observe (counts CG cost; never a second on_iteration/CSV row for this rung).
+        auto probe_step = [&](double step_loose_tol, long long& cg_out) {
+          SimpOptions op = opt;
+          op.updater = SimpUpdater::OC;   // memoryless: a KKT point maps to itself
+          op.cg_tolerance = kCertTol;     // the tight endpoint is always exact (D6)
+          op.cg_tolerance_loose = step_loose_tol;  // this step's FEA tolerance
+          op.max_iterations = std::max(1, options.draft_probe_iters);
+          op.mma_plateau_window = 0;      // run the fixed budget, no early plateau stop
+          op.projection.clear();
+          op.mma_projection = false;
+          op.initial_design = plateau;
+          op.progress = nullptr;
+          op.density_observer = nullptr;
+          op.keyframe = nullptr;
+          op.cancel = options.cancel;
+          op.observe = [&](const SimpIterationObservation& o) {
+            ++total_solve_count;
+            cg_out += o.cg_iterations;
+            if (o.cg_used_multigrid) {
+              ++mg_solve_count;
+              observed_mg_levels = o.cg_mg_levels;
+            }
+            if (o.cg_hier_built) mg_hierarchy_ever_built = true;
+          };
+          return simp_optimize(G, params, B, loads, op, mask).physical_density;
+        };
+        long long cg_loose = 0, cg_tight = 0;
+        const std::vector<double> rho_loose =
+            probe_step(options.draft_loose_tol, cg_loose);  // loose-FEA step
+        const std::vector<double> rho_tight = probe_step(0.0, cg_tight);  // tight step
+        assert(opt.cg_tolerance == kCertTol &&
+               "draft quality: the design-space probe's tight endpoint must equal the "
+               "certification tolerance — the gate never softens (D6)");
+        draft_probe_cg = cg_loose + cg_tight;
+        // Design-space divergence: fraction of the plateau design's SOLID voxels whose
+        // classification differs between the loose-FEA and tight-FEA one-step iterates.
+        // Also the DIAGNOSTIC `tightmove`: how far the tight step alone moves the
+        // plateau (flip(plateau, rho_tight)) — near 0 means the plateau is already
+        // tight-stationary, a locally stable basin the probe cannot escape.
+        long long ref_solid = 0, flips = 0, tmove = 0;
+        for (std::size_t v = 0; v < plateau.size(); ++v) {
+          const bool s = plateau[v] > kIso;   // count over the shipped design's solid
+          if (s) ++ref_solid;
+          if ((rho_loose[v] > kIso) != (rho_tight[v] > kIso)) ++flips;
+          if (s != (rho_tight[v] > kIso)) ++tmove;
+        }
+        draft_probe_flip =
+            ref_solid > 0 ? static_cast<double>(flips) / static_cast<double>(ref_solid)
+                          : 0.0;
+        draft_probe_tightmove =
+            ref_solid > 0 ? static_cast<double>(tmove) / static_cast<double>(ref_solid)
+                          : 0.0;
+        escalate = draft_probe_flip > options.draft_escalation_design_flip;
+      } else {
+        // Phase 1 fallback: the provisional compliance-gap trigger (superseded). A
+        // threshold <= 0 escalates EVERY rung (the maximally-conservative posture).
+        escalate = options.draft_escalation_c_gap <= 0.0 ||
+                   draft_gap > options.draft_escalation_c_gap;
+      }
       if (escalate) {
         // Re-run at the tight tolerance from the SAME seed. Disable the loose
         // schedule; leave cg_tolerance (certification) untouched. The re-run's
@@ -811,7 +913,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       variant.accepted = false;
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(0);
-      record_draft_rung(draft_k, draft_gap, draft_escalated);  // sentinel: cancelled
+      record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: cancelled
       result.cancelled = true;
       break;
     }
@@ -874,7 +976,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(1);
-      record_draft_rung(draft_k, draft_gap, draft_escalated);  // sentinel: infeasible
+      record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: infeasible
       result.report.rejected.push_back(result.evaluated.back().report);
       assert(result.evaluated.size() <= ladder.size() &&
              "minimize_plastic: result.evaluated grew past its reserved capacity");
@@ -1123,7 +1225,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
     result.evaluated.push_back(std::move(variant));
     result.rung_infeasible.push_back(0);  // handoff 131 (aligned with `evaluated`)
-    record_draft_rung(draft_k, draft_gap, draft_escalated);  // draft outcome (aligned)
+    record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // draft outcome (aligned)
     // Storage never reallocates (reserved to ladder.size() above), so the
     // references taken below stay valid for the whole run — see the reserve() note.
     assert(result.evaluated.size() <= ladder.size() &&
