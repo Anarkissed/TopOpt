@@ -45,6 +45,29 @@ constexpr double kConditionalProjectionGrayThreshold = 0.07;
 // here so the parity test asserts the echo against the constant, not a literal.
 constexpr int kProductionRecycleDim = 16;
 
+// ===========================================================================
+// TRIPWIRE — the ACTIVE DOMAIN production band (handoff 2026-07-26-ad-arming).
+// ===========================================================================
+// Do NOT change this value, and do NOT arm the band on the STRESS path or on any
+// solver but MultigridCG_Matfree, without re-running BOTH:
+//   * core/tests/harness/active_domain_gate.cpp  arm / stag / lowdil / recycle
+//   * core/tests/harness/active_domain_escape.cpp gate168 / healthy 250 / stag
+// and landing a new before/after gate table. The band CHANGES THE DESIGN (it is
+// an approximation, not an exact accelerator: measured mean|drho| ~ 3.9e-6 on the
+// shipped rung, ~2.95e-4 on a rejected one), so every rung's verdict and margin is
+// re-gated when it moves — unlike the recycling / Galerkin / thread-pin dials,
+// which are bit-identical. The escape latch (2026-07-25-ad-escape-latch) is what
+// makes it safe to arm: it detects the first live band escape and reverts to the
+// full domain for the rest of the run. arm without a current escape-latch build.
+//
+// -1 means AUTO: k is DERIVED PER JOB downstream in resolve_active_domain_band as
+// active_domain_auto_band(options.filter_radius) = ceil(rmin) + 1, where
+// options.filter_radius is physical_filter_radius(min_feature_mm, spacing). k is
+// therefore NEVER a literal here — it tracks the rung's real grid spacing (4 on a
+// 1.0 mm grid, 3 on a 2.5 mm grid), which is the whole point of AUTO. The parity
+// test asserts this resolution on a real production run.
+constexpr int kProductionActiveDomainBand = -1;  // AUTO
+
 // Handoff 132 (C) — the PRODUCTION matrix-free worker-thread count.
 //
 // The library default (fea_set_matfree_threads(0)) resolves to
@@ -90,6 +113,8 @@ int production_matfree_thread_count() {
 }
 
 int production_krylov_recycle_dim() { return kProductionRecycleDim; }
+
+int production_active_domain_band() { return kProductionActiveDomainBand; }
 
 void configure_production_options(MinimizePlasticOptions& opts) {
   // Matrix-free geometric-multigrid solver (handoff 079/091). Never assembles
@@ -204,6 +229,40 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   fea_set_krylov_recycle_dim(kProductionRecycleDim);
   fea_set_krylov_recycle_wrap_multigrid(false);
   opts.krylov_recycle_reset_per_rung = false;
+
+  // Handoff 2026-07-26-ad-arming — ACTIVE DOMAIN, armed in AUTO (maintainer
+  // decision, recorded verbatim in the handoff §"THE DECISION"). The band
+  // restricts every TRAJECTORY penalized solve to the material plus a derived
+  // growth band, shrinking the solved system on ultra-dilute design-box runs —
+  // the 46x-dilution / stagnating-multigrid class that dominates production. Phase
+  // 1 (168) measured 1.79x wall on the healthy-multigrid gate fixture at 46.5x
+  // dilution WITH the 1.33x CG-iteration penalty already charged; the design moved
+  // mean|drho| ~ 3.9e-6 on the shipped rung with identical gate verdicts.
+  //
+  // Unlike every other dial this function sets, THIS ONE IS NOT BIT-IDENTICAL: the
+  // eliminated elements carry a real rho_min^p ~ 1e-9 stiffness, so the restricted
+  // solve answers a slightly different question and the trajectory (never the
+  // certificate — the FINAL compliance solve is always full-domain) drifts. That
+  // is why arming waited on the ESCAPE LATCH (2026-07-25-ad-escape-latch): the
+  // growth invariant that makes the mask sound is EMPIRICAL, not a theorem (168
+  // measured 6 979 escapes on a stagnating trajectory), and the latch detects the
+  // first live escape at O(N) cost and reverts to the full domain for the rest of
+  // the run. The DEGENERACY LATCH (kActiveDomainLatchFraction/Window) covers the
+  // other end: at low dilution the band covers the domain and buys nothing, so it
+  // turns the feature off and SAYS so rather than silently costing.
+  //
+  //   -1 = AUTO. k is DERIVED PER JOB, never pinned here: resolve_active_domain_band
+  //     resolves it once per run to active_domain_auto_band(options.filter_radius) =
+  //     ceil(rmin) + 1, keyed to the rung's actual grid spacing. See the TRIPWIRE
+  //     above. The library default stays 0 (OFF) — Gate-V2 and every reference run
+  //     never call this function, so they are BYTE-FOR-BYTE unchanged (THE ONE RULE),
+  //     asserted in test_production_parity before AND after this call.
+  //
+  // Anyone changing this must re-run the harnesses named in the TRIPWIRE and land a
+  // new gate table; the parity test asserts the echo against production_active_
+  // domain_band() and asserts the DERIVED k on a real run. run_info.json echoes the
+  // requested band (-1), the resolved per-rung k, and both latch outcomes.
+  opts.simp.active_domain_band = kProductionActiveDomainBand;
 
   // Handoff 132 (C) — pin the matrix-free apply to the performance cores. See
   // production_matfree_thread_count() above for the measured justification (113's

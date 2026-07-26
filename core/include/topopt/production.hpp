@@ -43,6 +43,17 @@ namespace topopt {
 //     that go gray — never the tax on already-crisp parts PR 146's evidence
 //     surfaced. Library default 0 (gate off) keeps Gate-V2 / reference byte-
 //     identical; the threshold is echoed into run_info.json (+ per-rung fired).
+//   * simp.active_domain_band = -1 (AUTO) — ACTIVE DOMAIN (handoff
+//     2026-07-26-ad-arming). Restricts every TRAJECTORY penalized solve to the
+//     material + a derived growth band, shrinking the solved system on the
+//     ultra-dilute design-box class that dominates production. k is DERIVED per job
+//     (ceil(rmin) + 1), never pinned. UNLIKE every other setting here this is NOT
+//     bit-identical — it is an approximation (measured mean|drho| ~ 3.9e-6 on the
+//     shipped rung, identical gate verdicts), made safe to arm by the escape latch
+//     (2026-07-25-ad-escape-latch) and the degeneracy latch. Library default 0
+//     (OFF) keeps Gate-V2 / reference byte-identical; echoed into run_info.json
+//     (requested band + resolved per-rung k + both latch outcomes). See
+//     production.cpp for the TRIPWIRE.
 //   * the process-global matrix-free Galerkin block cache is ENABLED (see below).
 //   * the process-global matrix-free THREAD COUNT is pinned to
 //     production_matfree_thread_count() (handoff 132 (C)) — the performance-core
@@ -126,6 +137,16 @@ int production_matfree_thread_count();
 // Exposed so the parity test asserts the echo against the named constant rather
 // than a literal, exactly as production_matfree_thread_count does for the P-core pin.
 int production_krylov_recycle_dim();
+
+// Handoff 2026-07-26-ad-arming — the PRODUCTION active-domain band that
+// configure_production_options arms. -1 = AUTO: the actual band width k is DERIVED
+// per job downstream (resolve_active_domain_band -> active_domain_auto_band(filter_
+// radius) = ceil(rmin) + 1), never pinned. Exposed so the parity test asserts the
+// echo against this named sentinel rather than a bare -1, and so a front-end that
+// wants to name the production posture does not hard-code it. The library default
+// stays 0 (OFF), so the reference world is byte-identical (THE ONE RULE). See
+// production.cpp for the TRIPWIRE and the measured justification.
+int production_active_domain_band();
 
 // The canonical recommendation-driven volume-fraction ladder for production runs
 // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic

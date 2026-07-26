@@ -523,6 +523,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // rung"; a true entry names the rung that fell back to the full domain and
     // why, so a run that bought nothing SAYS so instead of silently costing.
     for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
+      // The DERIVED k this rung ran with (what the AUTO sentinel resolved to), so
+      // a run armed with active_domain_band = -1 records the concrete width beside
+      // the request.
+      run_info.active_domain_band_resolved.push_back(
+          v.optimization.active_domain_band);
       run_info.active_domain_latched.push_back(
           v.optimization.active_domain_latched ? 1 : 0);
       run_info.active_domain_latch_iteration.push_back(

@@ -1,0 +1,6 @@
+ core/include/topopt/observability.hpp |  9 ++++++
+ core/include/topopt/production.hpp    | 21 +++++++++++++
+ core/src/cli/run_job.cpp              |  5 +++
+ core/src/simp/observability.cpp       |  7 +++++
+ core/src/simp/production.cpp          | 59 +++++++++++++++++++++++++++++++++++
+ 5 files changed, 101 insertions(+)
