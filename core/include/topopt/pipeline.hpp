@@ -456,6 +456,87 @@ struct MinimizePlasticOptions {
   // pre-solve (byte-identical). COMPOSES with warm_start_inherit: the coarse solve
   // seeds rung 0, then inheritance carries the warm start down the rest of the ladder.
   bool warm_start_coarse = false;
+
+  // --- DRAFT QUALITY (handoff 2026-07-25-draft-quality) --------------------
+  // Approximate-trajectory / exact-certification posture: the fourth, load-bearing
+  // form of the inexact-optimization idea this project rejected in its (a)-without-(c)
+  // form (handoffs 129/130/160, PR 181). All four parts travel together here:
+  //   (a) LOOSE early trajectory solves, (b) PROGRESSIVE tightening over the last k,
+  //   (c) an EXACT solve + real certification at the end, (d) AUTO-ESCALATION when
+  //   the certified result leaves a safety envelope.
+  //
+  // OPT-IN, default OFF (draft_quality=false) => this whole block is inert and every
+  // run is BYTE-FOR-BYTE identical to the pre-draft driver (THE ONE RULE, same
+  // discipline as min_feature_mm==0 / warm_start_inherit==false / active_domain_band==0).
+  // Arming it is a MAINTAINER decision, NOT this handoff's — the default stays OFF.
+  //
+  // When ON, each ladder rung's TRAJECTORY penalized solves run on the adaptive
+  // loose→tight schedule (SimpOptions::cg_tolerance_loose = draft_loose_tol; the
+  // motion-keyed adaptive_traj_cg_tol tightens as max|Δρ| decays below the move
+  // limit). Parts (a)+(b): the loose tolerance is spent on the EARLY, fast-moving
+  // iterations whose sensitivities feed a step that is about to be overwritten, and
+  // the TRAILING k iterations — where the design has settled — are resolved back
+  // toward the tight cg_tolerance. k is not a magic number: it is the length of the
+  // convergence tail the schedule tightens over, DERIVED from the convergence
+  // criterion (the objective must be flat over mma_plateau_window iterations to
+  // terminate, so those trailing iterations are the ones that lock the terminal
+  // basin and must be resolved accurately) and MEASURED per rung into
+  // MinimizePlasticResult::draft_rung_tail_k.
+  //
+  // Part (c): the FINAL certification solve inside simp_optimize AND the driver's
+  // stress-recovery solve ALWAYS run at the tight cg_tolerance — draft mode writes
+  // ONLY cg_tolerance_loose, never cg_tolerance — so the certificate a run ships is
+  // never computed on a loosened solve. Asserted (B2), not commented: see the
+  // adaptive_traj_cg_tol floor asserts in simp.cpp and the recovery-solve assert in
+  // minimize_plastic.cpp.
+  //
+  // Part (d) — THE ESCALATION GATE. After a rung's draft optimize, the driver
+  // compares the rung's own final TRAJECTORY compliance (the last loose solve)
+  // against its EXACT CERTIFIED compliance (the tight final solve on the SAME
+  // design). This gap is SELF-CONTAINED — it needs no exact trajectory, which is the
+  // whole point — and PR 181's C_delta column already measured this exact quantity
+  // (it ranged 0.87–5.09%), so it is real and instrumented. If the relative gap
+  // exceeds draft_escalation_c_gap the draft basin has diverged: the driver RE-RUNS
+  // that rung at tight tolerance from the rung's OWN recoverable warm-start seed
+  // (opt.initial_design, still unmutated at that point) and records the escalation.
+  // Escalation adds cost — it is the price of the safety net — so the summed-CG win
+  // is reported NET of it.
+  bool draft_quality = false;
+
+  // The loose trajectory-tolerance endpoint the schedule interpolates FROM when the
+  // design is moving at the move limit. Must be > simp.cg_tolerance to have any
+  // effect (a value <= it leaves every trajectory solve tight, i.e. draft does
+  // nothing). Default 1e-3 is the 128 production value. Ignored unless draft_quality.
+  double draft_loose_tol = 1e-3;
+
+  // Escalation threshold on the relative compliance gap |C_cert - C_traj| / C_cert.
+  // A rung whose loose trajectory settled to within this of its own exact certified
+  // compliance is trusted; a larger gap triggers the tight re-run (part d).
+  //
+  // PROVISIONAL — the trigger is measured NOT to separate (handoff §gap-separation).
+  // On the harness stagnation grid a rung that genuinely diverged (0.15 of its solid
+  // voxels flipping printed<->void under a 5e-1 loose trajectory) carried gap≈0.000,
+  // while a fully-converged rung carried gap up to 0.006: the scalar compliance is a
+  // flat objective near the optimum, so a different design can share its compliance
+  // and a same design can differ in it. So this threshold must NOT be read as a
+  // reliable divergence detector, and no value is fitted to look good on one grid.
+  //
+  // What IS load-bearing is part (c): the certified compliance + stress margin are
+  // ALWAYS solved tight (B2, structural), so the SHIPPED part's numbers are exact
+  // whatever this does. And empirically the shipped (terminal, certified) design is
+  // tolerance-robust: 0 classification flips vs the tight design across a 500x loose
+  // sweep, WITH and WITHOUT warm-start inheritance (a transient mid-ladder divergence
+  // never reached the terminal rung). So the win is capturable on the strength of
+  // exact certification; escalation is defense-in-depth, not the safety guarantee.
+  //
+  // The default 0.02 rarely fires (a coarse guard, win-preserving). A value <= 0 is
+  // the maximally-CONSERVATIVE override: escalate EVERY rung so every shipped design
+  // had a tight trajectory — correctness over the win, and note it costs MORE than a
+  // plain tight run (the draft pass plus a tight re-run per rung), the honest price
+  // of a safety net without a reliable trigger ("when in doubt, be slow"). A reliable
+  // trigger would be a design-space signal (e.g. mid-ladder Δρ), left to Phase 2.
+  // Ignored unless draft_quality.
+  double draft_escalation_c_gap = 0.02;
 };
 
 // Handoff 131 — the VariantReport::rejection_reason a rung ended on the
@@ -684,6 +765,26 @@ struct MinimizePlasticResult {
   // the positive statement "no rung lost its load path". Echoed into run_info.json
   // as `rung_infeasible`.
   std::vector<char> rung_infeasible;
+
+  // Handoff 2026-07-25-draft-quality — DRAFT QUALITY outcome, one entry per
+  // EVALUATED rung (same order and length as `evaluated`), filled as each rung
+  // finishes. EMPTY across the whole run when draft_quality is off (nothing was
+  // measured), so a non-empty vector is itself the statement "this run ran draft".
+  //   * draft_rung_tail_k[i]   — the DERIVED k: the count of rung i's TRAILING
+  //     trajectory iterations whose adaptive CG tolerance had tightened to within
+  //     one decade of the tight cg_tolerance. The measured length of the tightening
+  //     tail (0 for a rung with no loose phase at all).
+  //   * draft_rung_c_gap[i]    — the escalation SIGNAL: rung i's relative compliance
+  //     gap |C_cert - C_traj| / C_cert between its final loose trajectory solve and
+  //     its exact certified solve, measured on the DRAFT run (before any escalation
+  //     replaced it).
+  //   * draft_rung_escalated[i] — 1 iff that gap exceeded draft_escalation_c_gap and
+  //     rung i was RE-RUN at tight tolerance from its own warm-start seed. When 1,
+  //     evaluated[i].optimization is the TIGHT re-run, and this rung's trajectory CG
+  //     cost includes BOTH passes (the honest, net-of-escalation accounting).
+  std::vector<int> draft_rung_tail_k;
+  std::vector<double> draft_rung_c_gap;
+  std::vector<char> draft_rung_escalated;
 };
 
 // Run the minimize_plastic pipeline over `grid` (an already-voxelized part with

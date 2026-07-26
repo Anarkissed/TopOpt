@@ -402,6 +402,53 @@ std::string run_info_json(const RunInfo& info) {
     af += "]";
     num("active_domain_fraction_mean", af);
   }
+  // Handoff 2026-07-25-draft-quality — the draft posture echo (config up-front) plus
+  // the per-rung outcome (empty until the post-run finalize) and the compact
+  // escalation list.
+  num("draft_quality", bool_json(info.draft_quality));
+  num("draft_loose_tol", fmt(info.draft_loose_tol));
+  num("draft_escalation_c_gap", fmt(info.draft_escalation_c_gap));
+  {
+    std::string tk = "[";
+    for (std::size_t i = 0; i < info.draft_rung_tail_k.size(); ++i) {
+      if (i) tk += ", ";
+      tk += fmt_i(info.draft_rung_tail_k[i]);
+    }
+    tk += "]";
+    num("draft_rung_tail_k", tk);
+    std::string gp = "[";
+    for (std::size_t i = 0; i < info.draft_rung_c_gap.size(); ++i) {
+      if (i) gp += ", ";
+      // A rung that measured no gap (cancelled/infeasible, recorded as -1) emits
+      // JSON `null` rather than a bogus negative gap.
+      const double v = info.draft_rung_c_gap[i];
+      gp += (std::isfinite(v) && v >= 0.0) ? fmt(v) : std::string("null");
+    }
+    gp += "]";
+    num("draft_rung_c_gap", gp);
+    std::string es = "[";
+    for (std::size_t i = 0; i < info.draft_rung_escalated.size(); ++i) {
+      if (i) es += ", ";
+      es += info.draft_rung_escalated[i] ? "true" : "false";
+    }
+    es += "]";
+    num("draft_rung_escalated", es);
+    // "Every escalation with its rung index and measured gap" — one object per
+    // escalated rung, in ladder order.
+    std::string ex = "[";
+    bool first = true;
+    for (std::size_t i = 0; i < info.draft_rung_escalated.size(); ++i) {
+      if (!info.draft_rung_escalated[i]) continue;
+      if (!first) ex += ", ";
+      first = false;
+      const double g = i < info.draft_rung_c_gap.size() ? info.draft_rung_c_gap[i]
+                                                        : -1.0;
+      ex += "{\"rung\": " + fmt_i(static_cast<int>(i)) + ", \"gap\": " +
+            ((std::isfinite(g) && g >= 0.0) ? fmt(g) : std::string("null")) + "}";
+    }
+    ex += "]";
+    num("draft_escalations", ex);
+  }
   num("min_feature_mm", fmt(info.min_feature_mm));
   num("margin_stop", fmt(info.margin_stop));
   num("infill_percent", fmt(info.infill_percent));

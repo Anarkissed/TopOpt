@@ -269,6 +269,28 @@ struct RunInfo {
   std::vector<int> active_domain_latched;
   std::vector<std::string> active_domain_latch_reason;
   std::vector<double> active_domain_fraction_mean;
+  // Handoff 2026-07-25-draft-quality — the DRAFT-QUALITY echo. `draft_quality` /
+  // `draft_loose_tol` / `draft_escalation_c_gap` are CONFIG (the armed posture,
+  // written up-front): off => the trajectory ran tight everywhere and the certified
+  // numbers are byte-identical. The three per-rung vectors are the OUTCOME, filled
+  // AFTER the run from MinimizePlasticResult (same finalize-only discipline as
+  // cg_multigrid / rung_infeasible, so an unfinished run asserts NOTHING about what
+  // draft did), one entry per EVALUATED rung in ladder order:
+  //   draft_rung_tail_k[i]   the derived/measured tightening tail k of rung i.
+  //   draft_rung_c_gap[i]    rung i's certified-vs-trajectory relative compliance
+  //                          gap (the escalation signal); < 0 (serialized `null`)
+  //                          for a cancelled/infeasible rung that measured none.
+  //   draft_rung_escalated[i] 1 iff rung i's gap tripped the threshold and it was
+  //                          re-run tight from its warm seed (part d).
+  // The serializer also emits a compact `draft_escalations` array of {rung, gap}
+  // for exactly the escalated rungs — "every escalation with its rung index and
+  // measured gap". All EMPTY when draft_quality is off.
+  bool draft_quality = false;
+  double draft_loose_tol = 0.0;
+  double draft_escalation_c_gap = 0.0;
+  std::vector<int> draft_rung_tail_k;
+  std::vector<double> draft_rung_c_gap;
+  std::vector<int> draft_rung_escalated;
   double min_feature_mm = 0.0;
   double margin_stop = 0.0;
   double infill_percent = 100.0;

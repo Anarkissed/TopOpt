@@ -1,0 +1,79 @@
+
+########## B3 NOISE FLOOR (grid S, tight 1e-8 vs 1e-9) ##########
+[tight 1e-8] rungs=4 total_iters=377 total_traj_cg=107905 wall=29.75s
+    vf=0.50 iters= 60 cg=   4878 stag=0/60 stagCG=0 achieved=0.3929 margin=0.933 C=20.6103 REJECT
+    vf=0.35 iters=185 cg=  47128 stag=7/185 stagCG=11125 achieved=0.2381 margin=0.472 C=78.5879 REJECT
+    vf=0.24 iters=101 cg=  43297 stag=0/101 stagCG=0 achieved=0.1429 margin=2.089 C=994.288 REJECT
+    vf=0.16 iters= 31 cg=  12602 stag=0/31 stagCG=0 achieved=0.1429 margin=3.910 C=5.0579e+08 REJECT
+[tight 1e-9] rungs=4 total_iters=377 total_traj_cg=124650 wall=34.11s
+    vf=0.50 iters= 60 cg=   5267 stag=0/60 stagCG=0 achieved=0.3929 margin=0.933 C=20.6103 REJECT
+    vf=0.35 iters=185 cg=  56314 stag=7/185 stagCG=12486 achieved=0.2381 margin=0.472 C=78.5879 REJECT
+    vf=0.24 iters=101 cg=  46196 stag=0/101 stagCG=0 achieved=0.1429 margin=2.089 C=994.294 REJECT
+    vf=0.16 iters= 31 cg=  16873 stag=0/31 stagCG=0 achieved=0.1429 margin=3.910 C=5.05791e+08 REJECT
+  per-rung basin noise (1e-8 vs 1e-9):
+    vf=0.50  flips=0 / 33 solid = 0.0000  (mean|drho|=0.00000)
+    vf=0.35  flips=0 / 20 solid = 0.0000  (mean|drho|=0.00000)
+    vf=0.24  flips=0 / 12 solid = 0.0000  (mean|drho|=0.00000)
+    vf=0.16  flips=0 / 12 solid = 0.0000  (mean|drho|=0.00000)
+  >> NOISE FLOOR = 0.0000 (classification-flip fraction), mean|drho| floor = 0.00000
+
+########## B5 THE WIN (grid S solved=16x8x16, 2048 vox) ##########
+[tight (draft off)] rungs=4 total_iters=377 total_traj_cg=107905 wall=29.75s
+    vf=0.50 iters= 60 cg=   4878 stag=0/60 stagCG=0 achieved=0.3929 margin=0.933 C=20.6103 REJECT
+    vf=0.35 iters=185 cg=  47128 stag=7/185 stagCG=11125 achieved=0.2381 margin=0.472 C=78.5879 REJECT
+    vf=0.24 iters=101 cg=  43297 stag=0/101 stagCG=0 achieved=0.1429 margin=2.089 C=994.288 REJECT
+    vf=0.16 iters= 31 cg=  12602 stag=0/31 stagCG=0 achieved=0.1429 margin=3.910 C=5.0579e+08 REJECT
+[draft loose=1e-3 (escalation OFF)] rungs=4 total_iters=377 total_traj_cg=66596 wall=25.22s
+    vf=0.50 iters= 60 cg=   3972 stag=0/60 stagCG=0 achieved=0.3929 margin=0.933 C=20.6103 REJECT
+    vf=0.35 iters=185 cg=  19066 stag=2/185 stagCG=2592 achieved=0.2381 margin=0.470 C=78.5905 REJECT
+    vf=0.24 iters=101 cg=  22944 stag=7/101 stagCG=5022 achieved=0.1429 margin=2.089 C=994.22 REJECT
+    vf=0.16 iters= 31 cg=  20614 stag=0/31 stagCG=0 achieved=0.1429 margin=3.910 C=5.05793e+08 REJECT
+  >> summed trajectory CG: tight=107905 draft=66596  RATIO=1.62x  (bar: >= 2.0x)
+  per-rung CG (tight -> draft), design diff vs tight, gap, tail_k:
+    vf=0.50  cg    4878 ->    3972 (1.23x)  flips=0.0000 (0.0x floor) mean|drho|=0.00000  gap=0.0000 tail_k=4
+    vf=0.35  cg   47128 ->   19066 (2.47x)  flips=0.0000 (0.0x floor) mean|drho|=0.00002  gap=0.0000 tail_k=4
+    vf=0.24  cg   43297 ->   22944 (1.89x)  flips=0.0000 (0.0x floor) mean|drho|=0.00000  gap=0.0056 tail_k=0
+    vf=0.16  cg   12602 ->   20614 (0.61x) RISES  flips=0.0000 (0.0x floor) mean|drho|=0.00000  gap=0.0000 tail_k=30
+  rungs whose CG ROSE under draft: 1 (B6-partner: name them above)
+
+########## B6 NO REGRESSION (healthy grid H) ##########
+[tight] rungs=4 total_iters=636 total_traj_cg=99328 wall=148.94s
+    vf=0.68 iters=146 cg=  10725 stag=0/146 stagCG=0 achieved=0.6799 margin=13.909 C=7.35731 accept
+    vf=0.52 iters=147 cg=  11105 stag=0/147 stagCG=0 achieved=0.5200 margin=13.033 C=8.47696 accept
+    vf=0.38 iters=160 cg=  16991 stag=0/160 stagCG=0 achieved=0.3800 margin=11.215 C=10.7833 accept
+    vf=0.26 iters=183 cg=  60507 stag=4/183 stagCG=7506 achieved=0.2600 margin=6.470 C=15.6488 accept
+[draft loose=1e-3 (esc off)] rungs=4 total_iters=636 total_traj_cg=67951 wall=116.50s
+    vf=0.68 iters=146 cg=   7853 stag=0/146 stagCG=0 achieved=0.6799 margin=13.909 C=7.35731 accept
+    vf=0.52 iters=147 cg=   8248 stag=0/147 stagCG=0 achieved=0.5200 margin=13.033 C=8.47696 accept
+    vf=0.38 iters=160 cg=  14028 stag=0/160 stagCG=0 achieved=0.3800 margin=11.215 C=10.7833 accept
+    vf=0.26 iters=183 cg=  37822 stag=3/183 stagCG=4640 achieved=0.2600 margin=6.470 C=15.6488 accept
+  per-rung CG (tight -> draft):
+    vf=0.68  cg   10725 ->    7853  stag=0/146
+    vf=0.52  cg   11105 ->    8248  stag=0/147
+    vf=0.38  cg   16991 ->   14028  stag=0/160
+    vf=0.26  cg   60507 ->   37822  stag=3/183
+  >> rungs that ROSE: 0 (bar: 0, and name any)
+
+########## B4 THE BELT (grid S, escalation ON) ##########
+  measured draft gaps: min=0.0000 max=0.0056 -> belt threshold=0.0028
+[draft loose=1e-3 (escalation ON)] rungs=4 total_iters=377 total_traj_cg=67383 wall=35.75s
+    vf=0.50 iters= 60 cg=   3972 stag=0/60 stagCG=0 achieved=0.3929 margin=0.933 C=20.6103 REJECT
+    vf=0.35 iters=185 cg=  19066 stag=2/185 stagCG=2592 achieved=0.2381 margin=0.470 C=78.5905 REJECT
+    vf=0.24 iters=101 cg=  22944 stag=7/101 stagCG=5022 achieved=0.1429 margin=2.089 C=994.3 REJECT [ESCALATED]
+    vf=0.16 iters= 31 cg=  21401 stag=0/31 stagCG=0 achieved=0.1429 margin=3.910 C=5.05791e+08 REJECT
+  per-rung: escalated?  design diff vs tight (draft-noesc -> draft-esc):
+    vf=0.50  gap=0.0000 trusted  flips-vs-tight: noesc=0.0000 (0.0x) -> esc=0.0000 (0.0x)
+    vf=0.35  gap=0.0000 trusted  flips-vs-tight: noesc=0.0000 (0.0x) -> esc=0.0000 (0.0x)
+    vf=0.24  gap=0.0056 ESCALATED  flips-vs-tight: noesc=0.0000 (0.0x) -> esc=0.0000 (0.0x)
+    vf=0.16  gap=0.0000 trusted  flips-vs-tight: noesc=0.0000 (0.0x) -> esc=0.0000 (0.0x)
+  >> NET-of-escalation win at belt threshold: tight=107905 net=86949 RATIO=1.24x
+  >> terminal design (draft-esc vs tight): flips=0.0000 (0.0x floor)  [recovered if ~1x]
+
+########## GAP SEPARATION (grid S, draft rungs) ##########
+  rung | gap (C_cert vs C_traj) | flip-frac vs tight | multiples of floor
+    0  |   0.0000   |   0.0000   |  0.0x
+    1  |   0.0000   |   0.0000   |  0.0x
+    2  |   0.0056   |   0.0000   |  0.0x
+    3  |   0.0000   |   0.0000   |  0.0x
+
+########## DONE ##########

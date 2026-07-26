@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -1632,6 +1633,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
+        obs.cg_trajectory_tol = traj_tol;  // draft-quality: this iter's loose→tight tol
         obs.infeasible = infeasible_now;  // handoff 131
         options.observe(obs);
       }
@@ -1724,6 +1726,19 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     result.compliance =
         result.history.empty() ? 0.0 : result.history.back().compliance;
   } else {
+    // B2 (draft quality, handoff 2026-07-25-draft-quality) — THE GATE NEVER
+    // SOFTENS, asserted not commented. The certified compliance is ALWAYS solved
+    // at the tight options.cg_tolerance; the adaptive loose schedule
+    // (adaptive_traj_cg_tol) is structurally confined to the trajectory solves in
+    // the loop above and is never consulted here. These asserts pin that: at rest
+    // (change 0) the schedule floor EQUALS the certification tolerance, and at full
+    // motion it is never tighter than it — so this final solve is at least as tight
+    // as every trajectory solve. Draft mode is therefore structurally incapable of
+    // certifying a design on a loosened solve.
+    assert(adaptive_traj_cg_tol(options, 0.0) == options.cg_tolerance &&
+           adaptive_traj_cg_tol(options, options.move) >= options.cg_tolerance &&
+           "draft quality: certification tolerance must be the tight floor of the "
+           "trajectory schedule");
     const SimpCompliance fc = simp_compliance(
         grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
         options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
@@ -2427,6 +2442,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         // Handoff 123 — the continuation β active this iteration (0 when not
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
+        obs.cg_trajectory_tol = traj_tol;  // draft-quality: this iter's loose→tight tol
         obs.infeasible = infeasible_now;  // handoff 131
         options.observe(obs);
       }
@@ -2513,6 +2529,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     result.compliance =
         result.history.empty() ? 0.0 : result.history.back().compliance;
   } else {
+    // B2 (draft quality) — THE GATE NEVER SOFTENS. See the unconstrained overload:
+    // the certified compliance is ALWAYS the tight options.cg_tolerance, and the
+    // loose schedule never runs tighter than it, so this masked-path certificate is
+    // likewise structurally immune to the draft trajectory tolerance.
+    assert(adaptive_traj_cg_tol(options, 0.0) == options.cg_tolerance &&
+           adaptive_traj_cg_tol(options, options.move) >= options.cg_tolerance &&
+           "draft quality: certification tolerance must be the tight floor of the "
+           "trajectory schedule");
     const SimpCompliance fc = simp_compliance(
         analysis, params, result.physical_density, bcs, loads,
         options.cg_tolerance, options.cg_max_iterations, nullptr,

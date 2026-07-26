@@ -627,6 +627,16 @@ struct SimpIterationObservation {
   // design is being optimized WITHOUT projection. Pure observation (never touches
   // the design).
   double beta = 0.0;
+  // Handoff 2026-07-25-draft-quality — the trajectory CG tolerance this iteration's
+  // penalized solve actually ran to (the adaptive_traj_cg_tol output). When the
+  // adaptive loose schedule is disabled (cg_tolerance_loose <= cg_tolerance, the
+  // default) this equals cg_tolerance on EVERY iteration, so the column reads the
+  // tight certification tolerance on the byte-identical default path. Under the
+  // draft_quality posture it is the per-iteration loose->tight value, and the count
+  // of a rung's TRAILING iterations whose value has tightened to within one decade
+  // of cg_tolerance is the measured tightening-tail k (see MinimizePlasticOptions::
+  // draft_quality). Pure observation — never touches the design.
+  double cg_trajectory_tol = 0.0;
   // Handoff 131 — the RUNG-INFEASIBILITY detector's verdict AT this iteration
   // (the exact predicate `rung_infeasible` the loop consults). The iteration it
   // first reads true is the iteration the rung was ENDED on as infeasible ("load

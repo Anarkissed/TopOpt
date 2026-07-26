@@ -161,6 +161,11 @@ RunInfo build_run_info(const JobDescription& job,
   // active-domain phase 1 — the REQUESTED band (config echo). The per-rung
   // latch outcome is filled post-run (finalize below), like cg_multigrid.
   info.active_domain_band = options.simp.active_domain_band;
+  // Handoff 2026-07-25-draft-quality — the armed draft posture (config echo). The
+  // per-rung tail-k / gap / escalated vectors are filled post-run (finalize below).
+  info.draft_quality = options.draft_quality;
+  info.draft_loose_tol = options.draft_loose_tol;
+  info.draft_escalation_c_gap = options.draft_escalation_c_gap;
   info.min_feature_mm = options.min_feature_mm;
   info.margin_stop = options.margin_stop;
   info.infill_percent = options.infill_percent;
@@ -403,6 +408,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // Handoff 2026-07-25-draft-quality — map the optional "draft" block onto the
+  // production options, for BOTH front-ends (loadcase options come from
+  // build_production_loadcase; self-weight from configure_production_options). Absent
+  // (has_draft == false) => the options keep their OFF defaults, byte-identical.
+  if (job.has_draft) {
+    options.draft_quality = job.draft_quality;
+    options.draft_loose_tol = job.draft_loose_tol;
+    options.draft_escalation_c_gap = job.draft_escalation_c_gap;
+  }
+
   // ──▶ output dir (created before the run so streamed artifacts can land in it).
   {
     std::error_code ec;
@@ -530,6 +545,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.active_domain_fraction_mean.push_back(
           v.optimization.active_fraction_mean);
     }
+    // Handoff 2026-07-25-draft-quality — finalize the per-rung draft outcome (empty
+    // when draft was off): the measured tightening tail k, the certified-vs-
+    // trajectory compliance gap, and which rungs escalated. Same finalize-only
+    // discipline as cg_multigrid, so an unfinished run asserts nothing about draft.
+    run_info.draft_rung_tail_k.assign(result.pipeline.draft_rung_tail_k.begin(),
+                                      result.pipeline.draft_rung_tail_k.end());
+    run_info.draft_rung_c_gap = result.pipeline.draft_rung_c_gap;
+    run_info.draft_rung_escalated.assign(
+        result.pipeline.draft_rung_escalated.begin(),
+        result.pipeline.draft_rung_escalated.end());
     write_run_info(result.run_info_path, run_info);
   }
   // A recovery solve (which sets used_multigrid) runs only for a non-cancelled
