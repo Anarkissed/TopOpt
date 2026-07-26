@@ -390,6 +390,53 @@ final class PrintParamsTests: XCTestCase {
         XCTAssertEqual(project.printParams, preset.params, "the preset loads into the sheet")
     }
 
+    /// The preset button names the selected preset, marks it "· Edited" once values
+    /// diverge, and reverts to "Presets" for a project that has chosen none.
+    func testPresetButtonLabelTracksSelectionAndDirtiness() throws {
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        let project = try XCTUnwrap(m.project)
+
+        XCTAssertEqual(m.presetButtonLabel(), "Presets", "no preset chosen yet")
+
+        // Save the current values as "Fine" → the button names it (values match exactly).
+        let fine = try XCTUnwrap(m.savePreset(named: "Fine", params: project.printParams))
+        XCTAssertEqual(m.selectedPresetID, fine.id)
+        XCTAssertEqual(m.presetButtonLabel(), "Fine")
+
+        // Editing a value away from the preset flips to the dirty marker (derived, so it
+        // needs no separate flag).
+        project.printParams.infillPercent += 5
+        XCTAssertEqual(m.presetButtonLabel(), "Fine · Edited")
+
+        // Re-applying the preset restores an exact match → the marker clears.
+        m.applyPreset(fine)
+        XCTAssertEqual(m.presetButtonLabel(), "Fine")
+
+        // Editing back to the exact preset values also clears it (self-correcting).
+        project.printParams.infillPercent += 5
+        XCTAssertEqual(m.presetButtonLabel(), "Fine · Edited")
+        project.printParams.infillPercent -= 5
+        XCTAssertEqual(m.presetButtonLabel(), "Fine", "matching values drop the marker")
+    }
+
+    /// Opening a different project clears the preset selection back to "Presets".
+    func testPresetSelectionResetsWhenAnotherProjectOpens() throws {
+        let m = appModel(store: ProjectStore(rootDir: tempDir))
+        m.loadMaterials(); m.newTopOpt(); m.selectMaterial("PLA")
+        XCTAssertTrue(m.importFile(atPath: Self.cubeSTL, displayName: "Cube.stl"))
+        m.continueToWorkspace()
+        let project = try XCTUnwrap(m.project)
+        _ = try XCTUnwrap(m.savePreset(named: "Fine", params: project.printParams))
+        XCTAssertNotNil(m.selectedPresetID)
+
+        m.open(RecentProject(name: "Other", materialName: "PLA", process: .fdm))
+        XCTAssertNil(m.selectedPresetID, "a different project starts with no preset selected")
+        XCTAssertEqual(m.presetButtonLabel(), "Presets")
+    }
+
     // MARK: - lock at creation (M7.params lock-at-creation)
 
     func testNewProjectStartsUnlockedThenLocksOnCreationSheetDone() throws {

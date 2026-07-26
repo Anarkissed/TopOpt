@@ -58,6 +58,9 @@ private struct ComputeLocationSheet: View {
     @State private var manualHost = ""
     @State private var manualPort = "8757"
     @State private var showManual = false
+    /// Whether the compact number pad is open for the port (numeric-input handoff) —
+    /// the port is a number, so it uses the pad, not the system number keyboard.
+    @State private var editingPort = false
 
     var body: some View {
         NavigationStack {
@@ -94,10 +97,23 @@ private struct ComputeLocationSheet: View {
                             .autocapitalization(.none)
                             .keyboardType(.URL)
                             #endif
-                        TextField("Port", text: $manualPort)
-                            #if os(iOS)
-                            .keyboardType(.numberPad)
-                            #endif
+                        HStack {
+                            Text("Port").foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                editingPort = true
+                            } label: {
+                                Text(manualPort.isEmpty ? "—" : manualPort)
+                                    .font(.body.monospacedDigit())
+                                    .foregroundStyle(DS.Color.accent.color)
+                            }
+                            .buttonStyle(.plain)
+                            .numberPad($editingPort,
+                                       config: .init(title: "Port", allowsDecimal: false),
+                                       seed: Double(manualPort)) { v in
+                                manualPort = v.map { String(Int($0.rounded())) } ?? ""
+                            }
+                        }
                         Button("Use this address") {
                             let host = manualHost.trimmingCharacters(in: .whitespaces)
                             guard !host.isEmpty, let port = Int(manualPort) else { return }

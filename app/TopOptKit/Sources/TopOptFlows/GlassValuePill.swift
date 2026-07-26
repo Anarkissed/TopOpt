@@ -45,13 +45,13 @@ struct GlassValuePill: View {
     /// Set an explicit value (mm), or nil to reset to the Auto suggestion.
     let onSet: (Double?) -> Void
 
-    @State private var typing = false
-    @State private var draft = ""
+    /// A single tap opens the shared compact number pad (numeric-input handoff) anchored
+    /// to the pill — never the system keyboard. Scrub is unchanged.
+    @State private var padPresented = false
     /// Running mm value during a scrub (nil = not scrubbing), and the last cumulative
     /// drag x, so each `onChanged` applies only the incremental delta.
     @State private var scrubValue: Float?
     @State private var scrubLastX: CGFloat = 0
-    @FocusState private var fieldFocused: Bool
 
     /// The number size scales with Dynamic Type. Round-4 item 4: 14 pt heavy to match the
     /// load-weight ("100 lbs") pill exactly, in both the floating and compact (row) variants.
@@ -87,9 +87,14 @@ struct GlassValuePill: View {
         .compositingGroup()
         .dsShadow(.panel)
         .animation(DS.Motion.emphasized, value: active)
-        // Commit on focus loss too: the iOS decimal pad has no return key, so `.onSubmit`
-        // alone would strand a typed value when the user dismisses the keyboard.
-        .onChange(of: fieldFocused) { focused in if !focused { commitTyped() } }
+        // A tap opens the compact number pad beside the pill (no system keyboard). Its
+        // live value flows through `onSet` — the same setter a scrub uses — so the entry
+        // is undoable and unit-safe. Empty (all digits deleted) reverts to Auto.
+        .numberPad($padPresented,
+                   config: .init(title: title, unit: "mm", allowsDecimal: true),
+                   seed: displayedMM) { v in
+            if let v { onSet(ClearanceQuantize.snap(v)) } else { onSet(nil) }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title) clearance")
         .accessibilityValue(isAuto ? "Auto \(Self.mm(displayedMM))" : Self.mm(valueMM))
@@ -98,36 +103,17 @@ struct GlassValuePill: View {
     // MARK: number + unit (scrub / type)
 
     @ViewBuilder private var numberRow: some View {
-        if typing {
-            HStack(spacing: 3) {
-                TextField("", text: $draft)
-                    .textFieldStyle(.plain)
-                    .frame(width: compact ? 44 : 64)
-                    .multilineTextAlignment(.leading)
-                    .font(.system(size: numberSize, weight: .heavy))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .focused($fieldFocused)
-                    #if os(iOS)
-                    .keyboardType(.decimalPad)
-                    #endif
-                    .onSubmit(commitTyped)
-                Text("mm").font(.system(size: compact ? 11 : 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-            }
-            .onAppear { fieldFocused = true }
-        } else {
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(Self.number(displayedMM))
-                    .font(.system(size: numberSize, weight: .heavy))
-                    .tracking(-0.5)
-                    .monospacedDigit()
-                    .foregroundStyle((isAuto ? tint : DS.Color.textPrimary.color))
-                Text("mm").font(.system(size: compact ? 11 : 13, weight: .semibold))
-                    .foregroundStyle(DS.Color.textTertiary.color)
-            }
-            .contentShape(Rectangle())
-            .gesture(scrubGesture)
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(Self.number(displayedMM))
+                .font(.system(size: numberSize, weight: .heavy))
+                .tracking(-0.5)
+                .monospacedDigit()
+                .foregroundStyle((isAuto ? tint : DS.Color.textPrimary.color))
+            Text("mm").font(.system(size: compact ? 11 : 13, weight: .semibold))
+                .foregroundStyle(DS.Color.textTertiary.color)
         }
+        .contentShape(Rectangle())
+        .gesture(scrubGesture)
     }
 
     /// How far the finger must travel before a scrub BEGINS. Below this a touch is a
@@ -157,19 +143,8 @@ struct GlassValuePill: View {
                 let didScrub = scrubValue != nil     // a scrub actually began → not a tap
                 scrubValue = nil
                 scrubLastX = 0
-                if !didScrub {                       // a tap → type
-                    draft = Self.number(displayedMM)
-                    typing = true
-                }
+                if !didScrub { padPresented = true } // a tap → open the number pad
             }
-    }
-
-    private func commitTyped() {
-        guard typing else { return }              // idempotent (onSubmit + focus-loss)
-        let t = draft.trimmingCharacters(in: .whitespaces)
-        // Typed values round to the nearest 0.25 mm step on commit (item 12); empty reverts to Auto.
-        if let v = Double(t), v > 0 { onSet(ClearanceQuantize.snap(v)) } else if t.isEmpty { onSet(nil) }
-        typing = false
     }
 
     // MARK: chrome

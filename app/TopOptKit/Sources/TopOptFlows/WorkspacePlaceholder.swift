@@ -37,8 +37,9 @@ public struct WorkspacePlaceholder: View {
     @ObservedObject var project: ProjectModel
 
     /// The load group whose weight is being typed (nil = none / scrub mode).
-    @State private var typingWeight: UUID?
-    @State private var weightText = ""
+    /// Which load's weight pill has the compact number pad open (numeric-input handoff);
+    /// nil = none. A tap opens the pad beside the pill — never the system keyboard.
+    @State private var weightPadGroup: UUID?
     @State private var scrubBase: Double?
     /// The latest camera→screen projection the viewer publishes, so the floating
     /// overlays + arrows track the 3D selection as the camera moves (M7.6 D3–D6).
@@ -2108,53 +2109,38 @@ public struct WorkspacePlaceholder: View {
 
     @ViewBuilder private func weightPill(_ g: SelectionGroup) -> some View {
         let kg = force.kind(for: g.id).weightKg ?? ForceModel.defaultWeightKg
-        if typingWeight == g.id {
-            HStack(spacing: 4) {
-                TextField("", text: $weightText)
-                    .textFieldStyle(.plain)
-                    .frame(width: 64)
-                    .multilineTextAlignment(.center)
-                    .font(.system(size: 14, weight: .heavy))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .onSubmit { commitTypedWeight(g.id) }
-                Text(force.unit.label).dsStyle(DS.TypeScale.caption).foregroundStyle(DS.Color.textSecondary.color)
-            }
+        // The value is shown/entered in the CURRENT unit (kg or lbs); the pad emits in
+        // that unit and we convert back to kg on the way into the model, so typing a
+        // number never silently changes the unit.
+        let shown = force.unit == .kg ? kg : kg * ForceModel.kgToLb
+        Text(force.formattedWeight(kg: kg))
+            .font(.system(size: 14, weight: .heavy)).tracking(-0.2)
+            .foregroundStyle(g.color.color)
             .padding(.vertical, 8).padding(.horizontal, DS.Space.l)
             .background(Capsule().fill(DS.Surface.dialog.color)
                 .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
-        } else {
-            Text(force.formattedWeight(kg: kg))
-                .font(.system(size: 14, weight: .heavy)).tracking(-0.2)
-                .foregroundStyle(g.color.color)
-                .padding(.vertical, 8).padding(.horizontal, DS.Space.l)
-                .background(Capsule().fill(DS.Surface.dialog.color)
-                    .overlay(Capsule().strokeBorder(DS.Color.strokeStrong.color, lineWidth: 1)))
-                .dsShadow(DS.Shadow.panel)
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { v in
-                            if scrubBase == nil { scrubBase = kg }
-                            force.setWeight(g.id, kg: force.scrub(kg: scrubBase ?? kg,
-                                                                  byPoints: Double(v.translation.width)))
-                        }
-                        .onEnded { v in
-                            let moved = abs(v.translation.width) > 4
-                            scrubBase = nil
-                            if !moved {   // a tap → type
-                                let shown = force.unit == .kg ? kg : kg * ForceModel.kgToLb
-                                weightText = String(format: "%.1f", shown)
-                                typingWeight = g.id
-                            }
-                        }
-                )
-        }
-    }
-
-    private func commitTypedWeight(_ id: UUID) {
-        if let v = Double(weightText), v > 0 {
-            force.setWeight(id, kg: force.unit == .kg ? v : v / ForceModel.kgToLb)
-        }
-        typingWeight = nil
+            .dsShadow(DS.Shadow.panel)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        if scrubBase == nil { scrubBase = kg }
+                        force.setWeight(g.id, kg: force.scrub(kg: scrubBase ?? kg,
+                                                              byPoints: Double(v.translation.width)))
+                    }
+                    .onEnded { v in
+                        let moved = abs(v.translation.width) > 4
+                        scrubBase = nil
+                        if !moved { weightPadGroup = g.id }   // a tap → open the number pad
+                    }
+            )
+            .numberPad(Binding(get: { weightPadGroup == g.id },
+                               set: { if !$0 { weightPadGroup = nil } }),
+                       config: .init(title: "Weight", unit: force.unit.label, allowsDecimal: true),
+                       seed: shown) { v in
+                if let v, v > 0 {
+                    force.setWeight(g.id, kg: force.unit == .kg ? v : v / ForceModel.kgToLb)
+                }
+            }
     }
 
     // MARK: bottom bar — hint + Optimize
