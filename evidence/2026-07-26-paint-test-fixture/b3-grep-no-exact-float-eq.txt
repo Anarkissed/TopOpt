@@ -1,0 +1,15 @@
+== B3: every == / != in PaintModeUITests.swift ==
+7://     up in the run's load case exactly like a tapped face ("painted == tapped", surfaced through
+54:        mesh.faceIDs.enumerated().compactMap { $0.element == id ? $0.offset : nil }
+90:    // MARK: - painted == tapped, through the project + the real bridge
+103:        // The stroke minted ONE painted pseudo-face (id == baseFaceCount) onto a fresh active group.
+131:        //    covers EXACTLY the triangles a TAP on native face 0 would have — painted == tapped.
+183:                       "painted == tapped: the anchor covers exactly the back-face triangles")
+186:    /// B2 — the "painted == tapped" assertion is a real test, not a tautology. Paint a DELIBERATELY
+
+== geometry comparisons (must all be abs<tol, none exact) ==
+62:    /// never exact float equality. `planeTol = 1e-2 mm` is safe here because the extrusion spans
+68:        let planeTol: Float = 1e-2
+69:        let ys = stride(from: 1, to: mesh.vertices.count, by: 3).map { mesh.vertices[$0] }
+70:        let minY = try XCTUnwrap(ys.min(), "the mesh has vertices")
+74:                    abs(mesh.vertices[Int(mesh.indices[t * 3 + c]) * 3 + 1] - minY) < planeTol
