@@ -178,9 +178,28 @@ var packageTargets: [Target] = [
     ),
     // Carrier for the iOS OCCT/lib3mf frameworks. The app's xcodeproj links the
     // `TopOptOCCT` product; the shim keeps that product valid on an OCCT-free
-    // checkout, and the binary xcframeworks (when present) are listed in the
-    // product so Xcode links + embeds them into the app. See TopOptOCCTShim.swift.
-    .target(name: "TopOptOCCTShim"),
+    // checkout, and it DEPENDS ON the binary xcframeworks (when present) — gated
+    // to iOS — so Xcode links + embeds them into the app on an iOS build while a
+    // macOS build never references an iOS-only binary target. See below and
+    // TopOptOCCTShim.swift.
+    //
+    // WHY the dependency lives HERE and not in the product's target list:
+    // SwiftPM PRODUCTS cannot carry a platform condition, so listing the iOS
+    // binary targets directly in the `TopOptOCCT` product (the old shape) forced
+    // a macOS build of the whole package (the `TopOptKit-Package` scheme) to try
+    // to build each iOS-only xcframework for macOS and fail with 47×
+    // "While building for macOS, no library for this platform was found". Moving
+    // them to an iOS-CONDITIONED target dependency keeps the product macOS-safe
+    // (the closure for macOS is just this pure-Swift shim) while preserving iOS
+    // embedding: on iOS the frameworks are in the product's dependency closure,
+    // exactly as the test targets already pull them in (lines above). Proven by
+    // the app's built .app/Frameworks listing on an iphonesimulator destination.
+    .target(
+        name: "TopOptOCCTShim",
+        dependencies: iosBinaryNames.map {
+            .target(name: $0, condition: .when(platforms: [.iOS]))
+        }
+    ),
 ]
 // The detected iOS OCCT/lib3mf binary targets (empty until build_occt_ios.sh).
 packageTargets += iosBinaryTargets
@@ -194,11 +213,16 @@ let package = Package(
         .library(name: "TopOptDesign", targets: ["TopOptDesign"]),
         // The M7.3 home + import flow (AppModel + Home/Import/Workspace screens).
         .library(name: "TopOptFlows", targets: ["TopOptFlows"]),
-        // The iOS OCCT/lib3mf frameworks, vended to the app. Listing the binary
-        // targets directly in the product is the SwiftPM binary-distribution
-        // pattern that makes Xcode link + embed them into an app that depends on
-        // the product. Always includes the shim so the product exists OCCT-free.
-        .library(name: "TopOptOCCT", targets: ["TopOptOCCTShim"] + iosBinaryNames),
+        // The iOS OCCT/lib3mf frameworks, vended to the app. The product lists
+        // ONLY the shim — products cannot carry a platform condition, so it must
+        // stay macOS-safe. The iOS binary xcframeworks reach the app through the
+        // shim's iOS-gated target dependencies (see TopOptOCCTShim above): on an
+        // iOS build they are in this product's dependency closure and Xcode links
+        // + embeds them; on a macOS build the closure is just the shim, so the
+        // whole-package (`TopOptKit-Package`) scheme builds clean on macOS even
+        // with vendor/occt-ios populated. Always present so the product exists on
+        // an OCCT-free checkout too.
+        .library(name: "TopOptOCCT", targets: ["TopOptOCCTShim"]),
     ],
     targets: packageTargets,
     cxxLanguageStandard: .cxx17
