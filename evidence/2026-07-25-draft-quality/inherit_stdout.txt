@@ -1,0 +1,29 @@
+
+########## WARM-START INHERITANCE ON (production loadcase posture) ##########
+[tight+inherit] total_cg=95303
+
+--- production tolerance (loose 1e-3), escalation OFF ---
+[draft 1e-3 noesc] total_cg=45982 (2.07x)  TERMINAL flip-frac vs tight = 0.0000 (0/12)
+      r0 vf=0.50 cg=3972 gap=0.0000       flip-vs-tight=0.0000
+      r1 vf=0.35 cg=19066 gap=0.0000       flip-vs-tight=0.0000
+      r2 vf=0.24 cg=22944 gap=0.0056       flip-vs-tight=0.0000
+
+--- AGGRESSIVE loose 5e-1, escalation OFF (does inheritance propagate divergence?) ---
+[draft 5e-1 noesc] total_cg=38441 (2.48x)  TERMINAL flip-frac vs tight = 0.0000 (0/12)
+      r0 vf=0.50 cg=2704 gap=0.0000       flip-vs-tight=0.0000
+      r1 vf=0.35 cg=8423 gap=0.0000       flip-vs-tight=0.1500
+      r2 vf=0.24 cg=27314 gap=0.0000       flip-vs-tight=0.0000
+
+--- AGGRESSIVE loose 5e-1, escalation ON gap<=0 (escalate EVERY rung) ---
+[draft 5e-1 esc-all] total_cg=38494 (2.48x)  TERMINAL flip-frac vs tight = 0.0000 (0/12)
+      r0 vf=0.50 cg=2704 gap=0.0000 [ESC] flip-vs-tight=0.0000
+      r1 vf=0.35 cg=8423 gap=0.0000 [ESC] flip-vs-tight=0.0000
+      r2 vf=0.24 cg=27367 gap=0.0050 [ESC] flip-vs-tight=0.0000
+
+--- AGGRESSIVE loose 5e-1, escalation ON gap=0.02 (gap-triggered) ---
+[draft 5e-1 esc-gap] total_cg=38441 (2.48x)  TERMINAL flip-frac vs tight = 0.0000 (0/12)
+      r0 vf=0.50 cg=2704 gap=0.0000       flip-vs-tight=0.0000
+      r1 vf=0.35 cg=8423 gap=0.0000       flip-vs-tight=0.1500
+      r2 vf=0.24 cg=27314 gap=0.0000       flip-vs-tight=0.0000
+
+########## DONE ##########

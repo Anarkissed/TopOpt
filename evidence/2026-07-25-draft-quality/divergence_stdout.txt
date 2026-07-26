@@ -1,0 +1,32 @@
+
+########## SETUP: tight baseline on grid S (16x8x16) ##########
+[tight] total_cg=95303  rungs: vf0.50(cg=4878,C=20.61) vf0.35(cg=47128,C=78.59) vf0.24(cg=43297,C=994.3) 
+
+########## DIVERGENCE SWEEP + GAP SEPARATION (grid S) ##########
+ loose_tol | total_cg (ratio) | terminal flip-frac vs tight | max rung gap | per-rung (gap|flip)
+  1e-03   |    45982 (2.07x) |   0.0000 (0/12)   |   0.0056   | r0(0.0000|0.0000) r1(0.0000|0.0000) r2(0.0056|0.0000) 
+  3e-03   |    45714 (2.08x) |   0.0000 (0/12)   |   0.0056   | r0(0.0000|0.0000) r1(0.0000|0.0000) r2(0.0056|0.0000) 
+  1e-02   |    43959 (2.17x) |   0.0000 (0/12)   |   0.0058   | r0(0.0000|0.0000) r1(0.0000|0.0000) r2(0.0058|0.0000) 
+  3e-02   |    40024 (2.38x) |   0.0000 (0/12)   |   0.0090   | r0(0.0000|0.0000) r1(0.0090|0.0000) r2(0.0058|0.0000) 
+  1e-01   |    41752 (2.28x) |   0.0000 (0/12)   |   0.0031   | r0(0.0000|0.0000) r1(0.0000|0.0500) r2(0.0031|0.0000) 
+  3e-01   |    39735 (2.40x) |   0.0000 (0/12)   |   0.0310   | r0(0.0001|0.0000) r1(0.0000|0.0000) r2(0.0310|0.0000) 
+  5e-01   |    38441 (2.48x) |   0.0000 (0/12)   |   0.0000   | r0(0.0000|0.0000) r1(0.0000|0.1500) r2(0.0000|0.0000) 
+
+########## B4 THE BELT on genuine divergence (loose=5e-1) ##########
+  belt threshold = 0.020 (>> converged ~5e-3, << diverged gaps below)
+  rung | gap | escalated? | flip-frac vs tight: NO-belt -> belt
+    0  | 0.0000 | trusted   | 0.0000 -> 0.0000
+    1  | 0.0000 | trusted   | 0.1500 -> 0.1500
+    2  | 0.0000 | trusted   | 0.0000 -> 0.0000
+  >> terminal flip-frac vs tight: NO-belt=0.0000 (0 voxels)  ->  belt=0.0000 (0 voxels)
+  >> BELT VERDICT: diverged-then-RECOVERED
+
+########## B5 BIG-GRID WIN (32x16x32) ##########
+  solved grid = 32x16x32 (16384 vox)
+  >> summed trajectory CG: tight=246667 draft=161365  RATIO=1.53x (bar >= 2.0x)
+    vf=0.50  cg     3494 ->     2282 (1.53x)  stag=0/73  flip-frac=0.0000
+    vf=0.35  cg   121581 ->    81742 (1.49x)  stag=3/133  flip-frac=0.0857
+    vf=0.25  cg   121592 ->    77341 (1.57x)  stag=0/153  flip-frac=0.0000
+  rungs that ROSE: 0
+
+########## DONE ##########

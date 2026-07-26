@@ -387,7 +387,8 @@ JobDescription parse_job(const std::string& json_text) {
   reject_unknown_keys(root,
                       {"model", "material", "mode", "resolution",
                        "fixture_faces", "gravity", "ladder", "margin_stop",
-                       "simp", "output", "loads", "design_box", "keep_outs"},
+                       "simp", "draft", "output", "loads", "design_box",
+                       "keep_outs"},
                       "the job");
 
   JobDescription job;
@@ -589,6 +590,32 @@ JobDescription parse_job(const std::string& json_text) {
     if (const JsonValue* iters = find_key(*simp, "max_iterations"))
       job.simp_max_iterations =
           require_positive_int(*iters, "simp.max_iterations");
+  }
+
+  // draft: optional (handoff 2026-07-25-draft-quality). The approximate-trajectory
+  // / exact-certification posture. Absent => OFF (byte-identical). `quality` is
+  // required inside the block (an empty draft block is a config mistake, not a
+  // silent no-op); the two tolerances are optional and default to the option
+  // defaults. loose_tol / escalation_c_gap must be finite and >= 0.
+  if (const JsonValue* draft = find_key(root, "draft")) {
+    require_object(*draft, "draft");
+    reject_unknown_keys(*draft, {"quality", "loose_tol", "escalation_c_gap"},
+                        "draft");
+    job.has_draft = true;
+    const JsonValue& q = require_key(*draft, "quality", "draft");
+    if (q.type != JsonValue::Type::Bool)
+      schema_fail("\"draft.quality\" must be a boolean");
+    job.draft_quality = (q.num != 0.0);
+    if (const JsonValue* lt = find_key(*draft, "loose_tol")) {
+      const double v = require_number(*lt, "draft.loose_tol");
+      if (v < 0.0) schema_fail("\"draft.loose_tol\" must be >= 0");
+      job.draft_loose_tol = v;
+    }
+    if (const JsonValue* eg = find_key(*draft, "escalation_c_gap")) {
+      // A negative value is meaningful (escalate every rung), so only reject
+      // non-finite; require_number already rejects NaN/inf.
+      job.draft_escalation_c_gap = require_number(*eg, "draft.escalation_c_gap");
+    }
   }
 
   // output block.

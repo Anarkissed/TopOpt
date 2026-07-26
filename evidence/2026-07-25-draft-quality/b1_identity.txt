@@ -1,0 +1,5 @@
+B1 byte-identity: draft branch (draft_quality OFF) vs pristine origin/main
+draft branch: B1_CHECKSUM=2e5d752856749df1
+origin/main : B1_CHECKSUM=2e5d752856749df1
+MATCH: YES
+(FNV-1a over full per-rung physical density + compliance + margin + accept + iters, boxed and no-box ladders)

@@ -502,6 +502,31 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       options.conditional_mma_projection_mnd_threshold > 0.0 &&
       options.updater == SimpUpdater::MMA && !options.simp.mma_projection;
 
+  // --- Handoff 2026-07-25-draft-quality: the draft posture, resolved once ---
+  // ARMED only when draft_quality is set AND the loose endpoint is genuinely looser
+  // than the tight certification tolerance — a loose <= tight value would be a knob
+  // that silently does nothing, the failure mode this codebase keeps re-learning
+  // (125 §0), so it is treated as OFF (byte-identical). `kCertTol` is the tight
+  // certification tolerance the whole run must never soften below (B2), captured
+  // once so every assert reads the same number. `kDraftTightBand` is the derived-k
+  // band: a trajectory tolerance at/below it counts as "tight" (within one decade of
+  // the certification floor) for the tail measurement.
+  const double kCertTol = options.simp.cg_tolerance;
+  const bool draft_armed =
+      options.draft_quality && options.draft_loose_tol > kCertTol;
+  const double kDraftTightBand = kCertTol * 10.0;
+  // Record one draft-outcome entry per EVALUATED rung, so the three vectors stay
+  // aligned with `evaluated` / `rung_infeasible` across every terminal branch
+  // (normal / infeasible / cancelled). No-op when draft is disarmed, so the vectors
+  // stay empty on a non-draft run. A cancelled/infeasible rung records the sentinel
+  // (k 0, gap -1 = not measured, not escalated).
+  auto record_draft_rung = [&](int k, double gap, int escalated) {
+    if (!draft_armed) return;
+    result.draft_rung_tail_k.push_back(k);
+    result.draft_rung_c_gap.push_back(gap);
+    result.draft_rung_escalated.push_back(static_cast<char>(escalated));
+  };
+
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
@@ -539,6 +564,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
     // set options.updater = OC to fall back. Overrides any simp.updater.
     opt.updater = options.updater;
+
+    // Handoff draft-quality (a)+(b): drive this rung's adaptive loose→tight
+    // trajectory tolerance. Draft writes ONLY the loose endpoint — opt.cg_tolerance
+    // (the certification tolerance) is left untouched, so the final/certification
+    // solves stay tight (B2). Disarmed => opt.cg_tolerance_loose keeps options.simp's
+    // value (0 in production), byte-identical. Per-rung draft measurements (the
+    // derived k, the escalation gap/verdict) reset here for this rung.
+    if (draft_armed) opt.cg_tolerance_loose = options.draft_loose_tol;
+    int draft_trailing_tight = 0;  // running trailing-tight count -> derived k
+    int draft_k = 0;               // this rung's measured k (captured pre-projection)
+    double draft_gap = -1.0;       // this rung's escalation signal (-1 = not measured)
+    int draft_escalated = 0;       // 1 iff this rung was re-run tight (part d)
 
     // Handoff 110 — the warm-start seed for THIS rung (Part B coarse upsample for
     // rung 0, Part A carry-over from the previous rung otherwise). EMPTY (the
@@ -591,6 +628,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           observed_mg_levels = obs.cg_mg_levels;
         }
         if (obs.cg_hier_built) mg_hierarchy_ever_built = true;
+        // Handoff draft-quality: the DERIVED k. Count this rung's TRAILING
+        // iterations whose adaptive trajectory tolerance has tightened to within one
+        // decade of the certification floor. A tight iteration extends the run; a
+        // loose one resets it, so at rung end the counter holds the trailing tight
+        // tail. Read before any conditional-projection phase (which reuses this same
+        // hook) so it is the grayscale draft rung's tail, not the projection's.
+        if (draft_armed) {
+          if (obs.cg_trajectory_tol <= kDraftTightBand) ++draft_trailing_tight;
+          else draft_trailing_tight = 0;
+        }
         if (options.on_iteration) {
           // Offset the projection phase's restarted iteration counter so `iter`
           // stays monotone within the rung (handoff 123). obs.beta already carries
@@ -639,6 +686,59 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     }
 
     variant.optimization = simp_optimize(G, params, B, loads, opt, mask);
+
+    // --- Handoff 2026-07-25-draft-quality (d): THE ESCALATION GATE ------------
+    // The draft grayscale rung is done. Its self-contained divergence signal is the
+    // gap between its FINAL LOOSE trajectory compliance (history.back()) and its
+    // EXACT CERTIFIED compliance (variant.optimization.compliance — the tight final
+    // solve inside simp_optimize, B2). Both are already computed; NO exact trajectory
+    // is run to obtain the signal, which is the whole point. If the gap exceeds the
+    // envelope the draft basin diverged, so RE-RUN this rung at the tight tolerance
+    // from its OWN warm-start seed — opt.initial_design still holds `warm_seed`,
+    // which is not mutated until AFTER this rung (the seed guard runs post-analysis
+    // below), so the rung IS re-runnable from recoverable state. Measured here,
+    // before conditional projection, so projection (if it fires) runs on the
+    // corrected field. Skipped for a cancelled/infeasible rung (no terminal design
+    // to trust). Inert (and the draft_rung_* vectors stay empty) unless draft armed.
+    if (draft_armed && !variant.optimization.cancelled &&
+        !variant.optimization.infeasible) {
+      draft_k = draft_trailing_tight;  // grayscale draft rung's tightening tail
+      const double c_cert = variant.optimization.compliance;  // tight final solve (B2)
+      const double c_traj = variant.optimization.history.empty()
+                                ? c_cert
+                                : variant.optimization.history.back().compliance;
+      draft_gap = c_cert > 0.0 ? std::fabs(c_cert - c_traj) / c_cert : 0.0;
+      // Escalate on a gap over the threshold; a threshold <= 0 escalates EVERY rung
+      // (the maximally-conservative posture — correctness over the win).
+      const bool escalate = options.draft_escalation_c_gap <= 0.0 ||
+                            draft_gap > options.draft_escalation_c_gap;
+      if (escalate) {
+        // Re-run at the tight tolerance from the SAME seed. Disable the loose
+        // schedule; leave cg_tolerance (certification) untouched. The re-run's
+        // observe is TALLY-ONLY: its iterations are real cost counted toward the
+        // multigrid tally, but they are not a second set of per-iteration CSV /
+        // on_iteration rows for the same rung index, and they must not disturb the
+        // already-captured draft_k.
+        SimpOptions opt_esc = opt;
+        opt_esc.cg_tolerance_loose = 0.0;
+        assert(opt_esc.cg_tolerance == kCertTol &&
+               "draft quality: escalation must never loosen the certification "
+               "tolerance");
+        opt_esc.progress = nullptr;
+        opt_esc.density_observer = nullptr;
+        opt_esc.keyframe = nullptr;
+        opt_esc.observe = [&](const SimpIterationObservation& o) {
+          ++total_solve_count;
+          if (o.cg_used_multigrid) {
+            ++mg_solve_count;
+            observed_mg_levels = o.cg_mg_levels;
+          }
+          if (o.cg_hier_built) mg_hierarchy_ever_built = true;
+        };
+        variant.optimization = simp_optimize(G, params, B, loads, opt_esc, mask);
+        draft_escalated = 1;
+      }
+    }
 
     // --- Handoff 123: conditional MMA projection ("polish only when gray") ----
     // After the rung's GRAYSCALE MMA converges, measure the design-region
@@ -711,6 +811,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       variant.accepted = false;
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(0);
+      record_draft_rung(draft_k, draft_gap, draft_escalated);  // sentinel: cancelled
       result.cancelled = true;
       break;
     }
@@ -773,6 +874,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(1);
+      record_draft_rung(draft_k, draft_gap, draft_escalated);  // sentinel: infeasible
       result.report.rejected.push_back(result.evaluated.back().report);
       assert(result.evaluated.size() <= ladder.size() &&
              "minimize_plastic: result.evaluated grew past its reserved capacity");
@@ -835,6 +937,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // Solver selection (handoff 073) flows from options.simp.solver via `opt`;
     // default JacobiCG keeps this byte-identical. The final recovery solve uses
     // the same solver the ladder ran with.
+    // B2 (draft quality): this recovery / stress-certification solve ALWAYS runs at
+    // the tight cg_tolerance. Draft mode writes only cg_tolerance_loose, so
+    // opt.cg_tolerance here is byte-identical to the non-draft certification
+    // tolerance — asserted, not commented, so draft is structurally incapable of
+    // certifying a part's stress margin on a loosened solve.
+    assert(opt.cg_tolerance == kCertTol &&
+           "draft quality: recovery/certification solve must use the tight "
+           "tolerance");
     const SimpCompliance sc = simp_compliance(G, params, rho, B, loads,
                                               opt.cg_tolerance,
                                               opt.cg_max_iterations,
@@ -1013,6 +1123,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
     result.evaluated.push_back(std::move(variant));
     result.rung_infeasible.push_back(0);  // handoff 131 (aligned with `evaluated`)
+    record_draft_rung(draft_k, draft_gap, draft_escalated);  // draft outcome (aligned)
     // Storage never reallocates (reserved to ladder.size() above), so the
     // references taken below stay valid for the whole run — see the reserve() note.
     assert(result.evaluated.size() <= ladder.size() &&

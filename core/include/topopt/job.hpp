@@ -154,6 +154,16 @@ struct JobDescription {
   int simp_max_iterations = 0;  // optional "simp" block; 0 = SimpOptions default
   JobOutput output;
 
+  // Optional "draft" block (handoff 2026-07-25-draft-quality): the approximate-
+  // trajectory / exact-certification posture. Absent (has_draft == false, the
+  // DEFAULT) => the fields below are ignored and the run keeps the driver's OFF
+  // default (byte-identical). When present, mapped onto MinimizePlasticOptions::
+  // draft_quality / draft_loose_tol / draft_escalation_c_gap in run_job.
+  bool has_draft = false;
+  bool draft_quality = false;
+  double draft_loose_tol = 1e-3;
+  double draft_escalation_c_gap = 0.02;
+
   // Optional declared load case (the "loads" block). When present the run uses
   // build_production_loadcase (anchors + forces) instead of self-weight.
   JobLoadCase loads;
