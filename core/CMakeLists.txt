@@ -113,6 +113,12 @@ if(Eigen3_FOUND)
   # it is gated on Eigen like simp.cpp. CI has Eigen (DEPS=ON), so it always
   # builds in CI.
   target_sources(topopt PRIVATE src/simp/minimize_plastic.cpp)
+  # analyze_fixed_design (handoff 2026-07-26-constrained-smooth): ONE certification
+  # solve on a fixed design, no optimization. minimize_plastic's recovery block
+  # calls it (single source of truth), and the CLI `analyze` verb / bridge re-run it
+  # on an edited mesh's voxelization. Drives simp_compliance, so Eigen-gated like
+  # minimize_plastic.cpp. CI has Eigen (DEPS=ON), so it always builds in CI.
+  target_sources(topopt PRIVATE src/simp/analyze.cpp)
   # Shared production-run configuration (handoff 093 / LAN-offload STEP 0): the
   # single source of truth for the solver + projection + min-feature + Galerkin
   # cache settings both the app (TopOptBridge) and topopt-cli apply. It only uses
@@ -572,6 +578,17 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_galerkin_cache PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME galerkin_cache COMMAND test_galerkin_cache)
+
+  # THE correctness bar for the standalone analysis entry point (handoff
+  # 2026-07-26-constrained-smooth): analyze_fixed_design, handed a variant's OWN
+  # converged density, reproduces that variant's certification numbers BIT-FOR-BIT.
+  # Drives minimize_plastic + analyze_fixed_design (Eigen), and injects the real
+  # settings rule table. CI configures -DTOPOPT_REQUIRE_DEPS=ON.
+  add_executable(test_analyze_fixed_design tests/unit/test_analyze_fixed_design.cpp)
+  target_link_libraries(test_analyze_fixed_design PRIVATE topopt)
+  target_compile_definitions(test_analyze_fixed_design PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME analyze_fixed_design COMMAND test_analyze_fixed_design)
 
   # Handoff 080 regression gate: the design-box "whole-domain optimize" path
   # (freeze_imported_part == false, the default) must REDUCE plastic against the

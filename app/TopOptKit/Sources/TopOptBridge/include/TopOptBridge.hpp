@@ -386,6 +386,59 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
                                     BridgeError& err);
 
 // ---------------------------------------------------------------------------
+// analyze_selfweight — the re-certification "receipt" (handoff
+// 2026-07-26-constrained-smooth). ONE FEA analysis solve on a FIXED design, no
+// optimization: the app hands over an EDITED / smoothed mesh and gets back the
+// NEW stress / mass / margin / gate verdict for that geometry. The pre-edit
+// numbers never come back — the result IS the re-analysed geometry's, tagged as
+// such by the caller. This is the seam a smoothing UI calls after Taubin; it does
+// NOT yet have a Swift caller (the UI is deferred), but the seam is here so that
+// when it lands there is one place, sharing analyze_fixed_design with the CLI and
+// the optimizer's own per-rung certification.
+
+// The re-certification result. Scalars the results screen shows, plus the run's
+// grid metadata and the re-analysed von Mises / displacement fields (float, same
+// layout as OptimizeVariant) so the "smoothed - re-analyzed" stress/flex overlay
+// draws the NEW field, never the pre-edit one.
+struct AnalyzeResult {
+  bool accepted = false;
+  double margin_worst_case = 0.0;      // the SOLID margin (displayed value)
+  double margin_effective = 0.0;       // infill-adjusted margin the gate compares
+  double margin_required = 0.0;
+  double max_stress_mpa = 0.0;
+  double max_interlayer_tension_mpa = 0.0;
+  double voxel_mass_grams = 0.0;       // re-analysed voxel-count mass
+  double mesh_mass_grams = 0.0;        // analysed mesh's surface-enclosed mass (0 if solid)
+  int32_t support_volume_voxels = 0;
+  int32_t min_feature_violations = 0;  // the melt detector on the re-voxelized geometry
+  bool analyzed_mesh = false;          // true iff an edited mesh was re-voxelized (vs solid)
+  // Re-analysis runs on the mesh's VOXELIZATION at `resolution`; the analysed and
+  // printed geometry differ by up to ~half a voxel (the quantization footnote the
+  // provenance tag must disclose).
+  int32_t grid_nx = 0, grid_ny = 0, grid_nz = 0;
+  double grid_origin_x = 0.0, grid_origin_y = 0.0, grid_origin_z = 0.0;
+  double spacing = 0.0;
+  double voxel_volume_mm3 = 0.0;
+  std::vector<float> von_mises_field;    // grid-indexed, MPa (0 off the printed set)
+  std::vector<float> displacement_field; // DOF-ordered (3*node), mm
+};
+
+// Re-certify a FIXED design under self-weight. Imports `model_path` (the geometry
+// the fixture/mount is defined on: the minimum-x boundary slab is clamped, exactly
+// as run_minimize_plastic), builds the self-weight load case, then runs ONE
+// analyze_fixed_design solve and returns the NEW numbers. The design analysed is:
+//   * `analyze_mesh_path` empty — the model as a SOLID part; else
+//   * `analyze_mesh_path` set   — that mesh (e.g. the smoothed variant) re-voxelized
+//     onto the model's grid via voxelize_onto_grid, so the model's clamp still
+//     applies. NEVER optimizes. On failure returns an empty result and sets `err`.
+AnalyzeResult analyze_selfweight(const std::string& model_path,
+                                 const std::string& analyze_mesh_path,
+                                 const std::string& material_name,
+                                 const std::string& materials_path,
+                                 const std::string& rules_path, int resolution,
+                                 double margin_stop, BridgeError& err);
+
+// ---------------------------------------------------------------------------
 // Optimize under the user's DECLARED load case (ARCHITECTURE §1 mode (a)),
 // instead of self-weight. This is the path the app's M7.6 anchors/loads drive so
 // the reported margins/stresses reflect the forces the user actually set — not

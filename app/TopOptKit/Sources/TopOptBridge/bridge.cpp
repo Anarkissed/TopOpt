@@ -20,6 +20,7 @@
 #include <os/log.h>
 #endif
 
+#include "topopt/analyze.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/loadcase.hpp"
@@ -700,6 +701,129 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     err.message = e.what();
     bridge_log(std::string("selfweight: THREW: ") + e.what());
     return OptimizeResult{};
+  }
+  return result;
+}
+
+AnalyzeResult analyze_selfweight(const std::string& model_path,
+                                 const std::string& analyze_mesh_path,
+                                 const std::string& material_name,
+                                 const std::string& materials_path,
+                                 const std::string& rules_path, int resolution,
+                                 double margin_stop, BridgeError& err) {
+  AnalyzeResult result;
+  try {
+    bridge_log("analyze: ENTER res=" + std::to_string(resolution) + " model='" +
+               model_path + "' mesh='" + analyze_mesh_path + "'");
+    // Model -> grid; the minimum-x boundary slab is the mount (SAME clamp as
+    // run_minimize_plastic, so the re-analysis and the run agree on the fixture).
+    topopt::TriangleMesh model_mesh = import_any(model_path);
+    topopt::VoxelGrid grid = topopt::voxelize(model_mesh, resolution);
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        if (grid.solid(0, j, k)) grid.set_tag(0, j, k, topopt::VoxelTag::Fixture);
+    std::vector<topopt::DirichletBC> bcs;
+    for (int c = 0; c <= grid.nz; ++c)
+      for (int b = 0; b <= grid.ny; ++b) {
+        const int n = topopt::fea_node_index(grid, 0, b, c);
+        bcs.push_back({n, 0, 0.0});
+        bcs.push_back({n, 1, 0.0});
+        bcs.push_back({n, 2, 0.0});
+      }
+    const double part_solid = static_cast<double>(grid.solid_count());
+
+    topopt::MaterialLibrary lib = topopt::load_materials_file(materials_path);
+    auto it = lib.find(material_name);
+    if (it == lib.end()) {
+      err.ok = false;
+      err.message = "material not found: " + material_name;
+      return AnalyzeResult{};
+    }
+    topopt::SettingsRules rules = topopt::load_settings_rules_file(rules_path);
+    const topopt::Material& material = it->second;
+
+    // The FIXED design to analyse: the model solid, or an edited/smoothed mesh
+    // re-voxelized onto the model's grid (so the clamp above still applies). The
+    // occupancy carries the model's fixture tags forward.
+    topopt::VoxelGrid design_grid = grid;
+    if (!analyze_mesh_path.empty()) {
+      topopt::TriangleMesh edited = import_any(analyze_mesh_path);
+      design_grid = topopt::voxelize_onto_grid(edited, grid);
+      for (std::size_t i = 0; i < design_grid.tags.size(); ++i)
+        if (grid.tags[i] == topopt::VoxelTag::Fixture &&
+            design_grid.tags[i] != topopt::VoxelTag::Empty)
+          design_grid.tags[i] = topopt::VoxelTag::Fixture;
+      result.analyzed_mesh = true;
+      double v6 = 0.0;  // enclosed volume via the divergence theorem
+      for (const auto& tri : edited.triangles) {
+        const topopt::Vec3& a = edited.vertices[static_cast<std::size_t>(tri[0])];
+        const topopt::Vec3& b = edited.vertices[static_cast<std::size_t>(tri[1])];
+        const topopt::Vec3& c = edited.vertices[static_cast<std::size_t>(tri[2])];
+        v6 += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) +
+              a.z * (b.x * c.y - b.y * c.x);
+      }
+      result.mesh_mass_grams =
+          material.density_g_cm3 * (std::fabs(v6) / 6.0) / 1000.0;
+    }
+    std::vector<double> density(design_grid.voxel_count(), 0.0);
+    for (std::size_t i = 0; i < density.size(); ++i)
+      if (design_grid.tags[i] != topopt::VoxelTag::Empty) density[i] = 1.0;
+
+    // Self-weight load case + params in the same mm-MPa units run_minimize_plastic
+    // uses. The production solver config supplies the cert tolerance / solver, so
+    // the numbers match the optimizer's own certification path.
+    constexpr double kGramPerCm3ToTonnePerMm3 = 1e-9;
+    const double gravity = 9810.0 * kGramPerCm3ToTonnePerMm3;
+    const topopt::Vec3 gdir{0.0, 0.0, -1.0};
+    const topopt::Vec3 build_dir{0.0, 0.0, 1.0};
+    const std::vector<topopt::NodalLoad> loads = topopt::self_weight_loads(
+        design_grid, material.density_g_cm3, gravity, gdir);
+    topopt::SimpParams params;
+    params.youngs_modulus = material.youngs_modulus_mpa;
+    params.poisson = material.poisson;
+    params.penalty = 3.0;
+    topopt::MinimizePlasticOptions opts;
+    topopt::configure_production_options(opts);
+    const double infill_knockdown =
+        topopt::infill_margin_knockdown(opts.infill_percent);
+    const bool load_path_ok =
+        topopt::load_path_connected(design_grid, density, 0.5);
+
+    const topopt::FixedDesignAnalysis a = topopt::analyze_fixed_design(
+        design_grid, params, density, bcs, loads, material, build_dir,
+        opts.simp.cg_tolerance, opts.simp.cg_max_iterations, opts.simp.solver,
+        margin_stop, infill_knockdown, load_path_ok, part_solid);
+
+    result.accepted = a.accepted;
+    result.margin_worst_case = a.margin.worst_case;
+    result.margin_effective = a.margin_effective;
+    result.margin_required = margin_stop;
+    result.max_stress_mpa = a.max_von_mises;
+    result.max_interlayer_tension_mpa = a.max_interlayer_tension;
+    result.voxel_mass_grams = a.mass_grams;
+    result.support_volume_voxels = a.support_volume_voxels;
+    result.min_feature_violations = a.v3.min_feature_violations;
+    result.grid_nx = design_grid.nx;
+    result.grid_ny = design_grid.ny;
+    result.grid_nz = design_grid.nz;
+    result.grid_origin_x = design_grid.origin.x;
+    result.grid_origin_y = design_grid.origin.y;
+    result.grid_origin_z = design_grid.origin.z;
+    result.spacing = design_grid.spacing;
+    result.voxel_volume_mm3 = design_grid.voxel_volume();
+    result.von_mises_field.assign(a.von_mises_field.begin(),
+                                  a.von_mises_field.end());
+    result.displacement_field.assign(a.displacement_field.begin(),
+                                     a.displacement_field.end());
+    bridge_log("analyze: verdict=" +
+               std::string(a.accepted ? "ACCEPTED" : "REJECTED") + " margin=" +
+               std::to_string(a.margin.worst_case) + " minfeat=" +
+               std::to_string(a.v3.min_feature_violations));
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    bridge_log(std::string("analyze: THREW: ") + e.what());
+    return AnalyzeResult{};
   }
   return result;
 }

@@ -1,0 +1,20 @@
+# topopt-cli analyze — device-real transcript (2026-07-26 18:37)
+
+## model solid
+analyze: l-bracket.step as solid part (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.02156 MPa   worst-case margin: 2551 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 41.44 g
+  min-feature violations: 0
+report: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-constrained-variant-smoothing-308d93/b3b29697-9c43-4993-ade0-ff564ded5e0f/scratchpad/an_solid/analysis_report.json
+provenance: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-constrained-variant-smoothing-308d93/b3b29697-9c43-4993-ade0-ff564ded5e0f/scratchpad/an_solid/analysis.json
+
+## variant mesh re-certified
+analyze: mesh variant_030.stl (fixed design, ONE analysis solve, no optimization)
+  peak stress: 0.007426 MPa   worst-case margin: 7406 (required 1.5)
+  verdict: ACCEPTED
+  voxel mass: 10.05 g   mesh mass: 7.453 g
+  min-feature violations: 1085
+report: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-constrained-variant-smoothing-308d93/b3b29697-9c43-4993-ade0-ff564ded5e0f/scratchpad/an_mesh/analysis_report.json
+provenance: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-constrained-variant-smoothing-308d93/b3b29697-9c43-4993-ade0-ff564ded5e0f/scratchpad/an_mesh/analysis.json
+fields: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-constrained-variant-smoothing-308d93/b3b29697-9c43-4993-ade0-ff564ded5e0f/scratchpad/an_mesh/fields.bin

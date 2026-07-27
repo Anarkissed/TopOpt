@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "topopt/analyze.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/orient.hpp"
 #include "topopt/warm_start.hpp"
@@ -36,55 +37,12 @@ Vec3 normalized(const Vec3& v) {
   return Vec3{v.x / n, v.y / n, v.z / n};
 }
 
-// M7.infill-margin — map a sparse-infill fraction to the multiplicative KNOCKDOWN
-// applied to the worst-case stress margin at the ladder ACCEPTANCE gate (only).
-//
-// WHY: the margin (yield / stress) is computed on SOLID material — infill never
-// enters the FEA (ARCHITECTURE §2). A real FDM print at infill fraction f < 1 is
-// weaker than that solid part, so accepting a rung on its solid margin lets the
-// ladder strip material the sparse print cannot carry. This scalar scales the
-// solid margin down to the infill-aware effective margin the acceptance test
-// compares against; nothing else (FEA, stress field, optimizer, or the
-// stored/displayed margin) sees it.
-//
-// CURVE (SEED — the maintainer tunes this; do NOT treat it as final): a
-// Gibson-Ashby cellular-solid scaling, effective/solid strength ~= f^p with
-// p = 1.5 and f = infill_percent / 100. The exponent p > 1 puts the curve BELOW
-// the linear f for f in (0, 1) (sub-linear) and pins it to 1.0 at f = 1 (solid).
-// It deliberately ignores the load the solid perimeters/walls of a real slice
-// carry, so it UNDER-estimates strength — i.e. it is CONSERVATIVE (stops the
-// ladder sooner, retaining more material). Reasonable later tuning: raise p
-// toward 2 (the foam strength exponent), add a wall-count-derived floor, or fit
-// a measured relation.
-//
-// RANGE / DEFAULT: returns a factor in (0, 1]. f >= 1 (the default 100, and any
-// "solid/unset" caller) returns EXACTLY 1.0 with no arithmetic, so
-// margin * knockdown == margin bit-for-bit and an unset run reproduces the
-// current ladder exactly. f in (0, 1) maps to f^p; f <= 0 (a degenerate hollow
-// request) is floored to a small positive knockdown so the factor never leaves
-// (0, 1].
-constexpr double kKnockdownExponent = 1.5;
-constexpr double kKnockdownFloor = 1e-3;
-
-double infill_margin_knockdown(double infill_percent) {
-  const double f = infill_percent / 100.0;
-  if (f >= 1.0) return 1.0;  // solid / unset: exact 1.0, byte-identical gate
-  if (f <= 0.0) return kKnockdownFloor;
-  return std::max(std::pow(f, kKnockdownExponent), kKnockdownFloor);
-}
-
-// Gather one element's 24 nodal displacements from the global solution, in the
-// hex8_stiffness DOF order (node-major interleaved), matching the recovery in
-// the V4/V5 gates.
-std::array<double, 24> element_dofs(const VoxelGrid& grid, const FeaSolution& sol,
-                                    int i, int j, int k) {
-  const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
-  std::array<double, 24> ue{};
-  for (int a = 0; a < 8; ++a)
-    for (int c = 0; c < 3; ++c)
-      ue[static_cast<std::size_t>(3 * a + c)] = sol.at(en[a], c);
-  return ue;
-}
+// infill_margin_knockdown (the M7.infill-margin seed curve) and element_dofs (the
+// per-element displacement gather) moved to analyze.cpp when the recovery/
+// certification block was extracted into analyze_fixed_design (handoff
+// 2026-07-26-constrained-smooth). infill_margin_knockdown is now called through
+// topopt/analyze.hpp so the ladder gate and a standalone re-analysis share ONE
+// definition; element_dofs lives with the stress loop it feeds, inside analyze.cpp.
 
 }  // namespace
 
@@ -932,95 +890,39 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       options.on_density_snapshot(ev);
     }
 
-    // Final penalized solve on the converged density to recover the
-    // displacement field (simp_optimize returns compliance/density, not u).
-    // Solver selection (handoff 073) flows from options.simp.solver via `opt`;
-    // default JacobiCG keeps this byte-identical. The final recovery solve uses
-    // the same solver the ladder ran with.
-    // B2 (draft quality): this recovery / stress-certification solve ALWAYS runs at
-    // the tight cg_tolerance. Draft mode writes only cg_tolerance_loose, so
-    // opt.cg_tolerance here is byte-identical to the non-draft certification
-    // tolerance — asserted, not commented, so draft is structurally incapable of
-    // certifying a part's stress margin on a loosened solve.
+    // The per-rung CERTIFICATION: ONE penalized solve on the converged density,
+    // recovering the per-voxel von Mises / Cauchy-tensor / displacement fields,
+    // printed mass, the support proxy, the worst-case margin, the §7 V3 suite and
+    // the acceptance verdict. Extracted to analyze_fixed_design (handoff
+    // 2026-07-26-constrained-smooth) so a standalone re-analysis of an edited /
+    // smoothed mesh runs the IDENTICAL code: handed THIS variant's own converged
+    // density (with the same grid/BCs/loads/params/solver/tolerance) it reproduces
+    // every number below bit-for-bit — the correctness bar test_analyze_fixed_design
+    // pins.
+    //
+    // Solver selection (handoff 073) and the cert tolerance / max-iterations flow
+    // from `opt` exactly as the inline recovery block used them; default JacobiCG
+    // keeps this byte-identical. B2 (draft quality): the certification solve ALWAYS
+    // runs at the tight cg_tolerance — draft mode writes only cg_tolerance_loose —
+    // asserted (not commented) so draft is structurally incapable of certifying a
+    // stress margin on a loosened solve. load_path_ok is the connectivity belt
+    // verdict measured above, on the converged density; analyze_fixed_design gates
+    // on it so a severed rung is rejected however good its (meaningless) margin.
     assert(opt.cg_tolerance == kCertTol &&
            "draft quality: recovery/certification solve must use the tight "
            "tolerance");
-    const SimpCompliance sc = simp_compliance(G, params, rho, B, loads,
-                                              opt.cg_tolerance,
-                                              opt.cg_max_iterations,
-                                              /*initial_guess=*/nullptr,
-                                              /*solver=*/nullptr, opt.solver);
-
-    // Peak stresses over the PRINTED material (physical density > iso), using
-    // the material's solid modulus. Empty/void voxels stay at zero stress. The
-    // per-voxel von Mises is also retained grid-indexed (M7.0b field (a)), and
-    // the printed voxels are counted for the M7.0b mass (field (d)).
-    std::vector<std::array<double, 6>> stress(G.voxel_count(),
-                                              std::array<double, 6>{});
-    variant.von_mises_field.assign(G.voxel_count(), 0.0);
-    // Per-voxel Cauchy stress tensor, flattened grid-indexed (size
-    // 6*voxel_count): the same `stress` array below, retained instead of
-    // discarded. Voigt [xx,yy,zz,xy,yz,zx], TRUE shear, MPa; zero off the
-    // printed set, exactly like von_mises_field.
-    variant.stress_tensor_field.assign(6 * G.voxel_count(), 0.0);
-    // M7.disp: mark the nodes attached to at least one printed voxel; the
-    // displacement field is exposed only there (zero elsewhere), mirroring how
-    // von_mises_field is zero off the printed set.
-    const int node_count = fea_node_count(G);
-    std::vector<char> node_printed(static_cast<std::size_t>(node_count), 0);
-    std::size_t printed_voxels = 0;
-    double max_von_mises = 0.0;
-    for (int k = 0; k < G.nz; ++k)
-      for (int j = 0; j < G.ny; ++j)
-        for (int i = 0; i < G.nx; ++i) {
-          if (!G.solid(i, j, k)) continue;
-          if (!(rho[G.index(i, j, k)] > kIso)) continue;
-          ++printed_voxels;
-          const std::array<int, 8> en = fea_element_nodes(G, i, j, k);
-          for (int n : en) node_printed[static_cast<std::size_t>(n)] = 1;
-          const std::array<double, 24> ue = element_dofs(G, sc.solution, i, j, k);
-          const Hex8Stress st = hex8_stress(params.youngs_modulus,
-                                            params.poisson, G.spacing, ue);
-          stress[G.index(i, j, k)] = st.sigma;
-          variant.von_mises_field[G.index(i, j, k)] = st.von_mises;
-          const std::size_t base = 6 * G.index(i, j, k);
-          for (int c = 0; c < 6; ++c)
-            variant.stress_tensor_field[base + static_cast<std::size_t>(c)] =
-                st.sigma[static_cast<std::size_t>(c)];
-          if (st.von_mises > max_von_mises) max_von_mises = st.von_mises;
-        }
-    const double max_interlayer = max_interlayer_tension(G, stress, build_dir);
-
-    // M7.disp field: the per-node displacement of the SAME penalized solve
-    // (sc.solution) — no new solve. DOF-ordered (size 3*node_count); exposed on
-    // printed nodes exactly as solved, zeroed on nodes attached only to
-    // non-printed voxels (mirrors von_mises_field). Model units (mm).
-    variant.displacement_field.assign(static_cast<std::size_t>(3 * node_count),
-                                      0.0);
-    for (int n = 0; n < node_count; ++n) {
-      if (!node_printed[static_cast<std::size_t>(n)]) continue;
-      for (int c = 0; c < 3; ++c)
-        variant.displacement_field[static_cast<std::size_t>(3 * n + c)] =
-            sc.solution.at(n, c);
-    }
-
-    // M7.0b field (d): printed mass = material density (g/cm^3) * printed volume.
-    // Volumes are mm^3 (mm-MPa unit system); 1 cm^3 = 1000 mm^3, so divide by
-    // 1000 to land in grams. Spacing-aware via grid.voxel_volume().
-    variant.mass_grams = material.density_g_cm3 *
-                         (static_cast<double>(printed_voxels) *
-                          G.voxel_volume()) /
-                         1000.0;
-
-    // M7.0b field (c): support-volume proxy for the analysed build direction
-    // over THIS variant's printed geometry. The M4.3 proxy is defined on grid
-    // tags, so mark non-printed voxels Empty in a copy and count overhangs on
-    // the printed shape (per-variant, unlike the fixed original solid grid).
-    VoxelGrid printed_grid = G;
-    for (std::size_t idx = 0; idx < printed_grid.tags.size(); ++idx)
-      if (!(rho[idx] > kIso)) printed_grid.tags[idx] = VoxelTag::Empty;
-    variant.support_volume_voxels =
-        support_overhang_voxels(printed_grid, build_dir);
+    FixedDesignAnalysis fda = analyze_fixed_design(
+        G, params, rho, B, loads, material, build_dir, opt.cg_tolerance,
+        opt.cg_max_iterations, opt.solver, options.margin_stop, infill_knockdown,
+        load_path_ok, part_solid);
+    variant.von_mises_field = std::move(fda.von_mises_field);
+    variant.stress_tensor_field = std::move(fda.stress_tensor_field);
+    variant.displacement_field = std::move(fda.displacement_field);
+    variant.mass_grams = fda.mass_grams;
+    variant.support_volume_voxels = fda.support_volume_voxels;
+    const std::size_t printed_voxels = fda.printed_voxels;
+    const double max_von_mises = fda.max_von_mises;
+    const double max_interlayer = fda.max_interlayer_tension;
 
     // --- Two-basis volume reporting (handoff 104, resolving 102) --------------
     // TWO distinct quantities are reported, each answering ONE question, because on
@@ -1060,13 +962,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     if (part_relative && part_solid > 0.0)
       variant.optimization.volume_fraction = printed_fraction;
 
-    // Worst-case stress margin (M5.2 locked definition).
-    const StressMargin margin = compute_stress_margin(
-        material.yield_strength_mpa, material.z_knockdown, max_von_mises,
-        max_interlayer);
-
-    // §7 V3 property suite on this optimizer output (M3.5).
-    variant.v3 = check_v3(G, rho, kIso);
+    // Worst-case stress margin (M5.2 locked definition) and the §7 V3 property
+    // suite (M3.5), both computed inside analyze_fixed_design above.
+    const StressMargin margin = fda.margin;
+    variant.v3 = std::move(fda.v3);
+    // The acceptance verdict, also decided inside analyze_fixed_design: gate on the
+    // INFILL-ADJUSTED margin (margin_effective), rejected if the load path is
+    // severed. The stored/displayed margin (vr.margin) stays the SOLID margin.
+    // margin_ok is the margin test ALONE (no belt) — it decides whether the LADDER
+    // stops (below), exactly the pre-belt condition on the pre-belt numbers.
+    const double margin_effective = fda.margin_effective;
+    const bool margin_ok = margin_effective >= options.margin_stop;
+    variant.accepted = fda.accepted;
 
     // Assemble this rung's report line (M5.2 / M5.2b).
     VariantReport& vr = variant.report;
@@ -1096,21 +1003,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.min_feature_warning =
         min_feature_warning_text(rules, variant.v3.min_feature_violations);
 
-    // M7.infill-margin: gate on the INFILL-ADJUSTED worst-case margin. The stored
-    // report margin (vr.margin above) stays the SOLID margin — this knockdown is
-    // applied ONLY to what the acceptance test compares, never to the FEA, the
-    // stress field, or the displayed value. infill_knockdown == 1.0 for
-    // solid/unset infill, so `margin.worst_case * 1.0 >= margin_stop` is
-    // bit-for-bit the pre-M7.infill gate `margin.worst_case >= margin_stop`.
-    const double margin_effective = margin.worst_case * infill_knockdown;
-    const bool margin_ok = margin_effective >= options.margin_stop;
-    // THE BELT ACTS HERE: a disconnected rung is REJECTED however good its margin
-    // looks (the verdict was measured above, on the converged density). The margin
-    // test is UNCHANGED and still evaluated in its own right — it is what decides
-    // whether the LADDER stops, below.
-    variant.accepted = load_path_ok && margin_ok;
-    // The acceptance verdict and the numbers behind it, carried on the report line
-    // so a REJECTED rung reports its own margin-vs-required (not a silent omission).
+    // The acceptance verdict (variant.accepted) and margin_effective were computed
+    // by analyze_fixed_design above. Carry the numbers behind the verdict on the
+    // report line so a REJECTED rung reports its own margin-vs-required (not a
+    // silent omission).
     vr.accepted = variant.accepted;
     vr.margin_required = options.margin_stop;
     vr.margin_effective = margin_effective;

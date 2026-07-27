@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/analyze.hpp"     // FixedDesignAnalysis
 #include "topopt/materials.hpp"  // MaterialLibrary
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/pipeline.hpp"   // MinimizePlasticResult
@@ -285,5 +286,52 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const MaterialLibrary& materials,
                      const SettingsRules& rules, bool emit_progress = false,
                      const RunObservability& obs = RunObservability{});
+
+// ---------------------------------------------------------------------------
+// analyze_job — ONE FEA analysis solve on a FIXED design, NO optimization
+// (handoff 2026-07-26-constrained-smooth). The "receipt": re-certify a design
+// exactly as run_job certifies each accepted rung (one penalized solve → stress /
+// mass / margins / accept gate), but on a design the optimizer did NOT produce.
+struct AnalyzeJobResult {
+  StepModel model;                     // the imported model (BCs come from ITS faces)
+  std::vector<int> fixture_face_ids;   // faces matched by the fixture selectors
+  FixedDesignAnalysis analysis;        // stress / mass / margin / gate verdict
+  bool analyzed_mesh = false;          // true iff a substitute mesh was re-voxelized
+  std::string analyzed_mesh_path;      // that mesh's path ("" when analyzing the solid)
+  double voxel_mass_grams = 0.0;       // analysis.mass_grams (the re-analyzed voxel mass)
+  double mesh_mass_grams = 0.0;        // enclosed-volume mass of the analysed mesh (0 if solid)
+  std::string report_path;             // <out_dir>/analysis_report.json (VariantReport schema)
+  std::string report_json;             // the bytes written to report_path
+  std::string provenance_path;         // <out_dir>/analysis.json (provenance + BOTH masses)
+  std::string fields_path;             // <out_dir>/fields.bin (one analysed "variant")
+};
+
+// Re-certify a FIXED design under `job`'s self-weight load case. Builds the
+// grid / fixtures / BCs / loads from the job's MODEL exactly as run_job's
+// self-weight path does, then runs ONE analyze_fixed_design solve on a fixed
+// density and writes the results with an honest provenance record. NEVER optimizes.
+//
+// The design analysed is chosen by `analyze_mesh_path`:
+//   * ""            — the job's model as a SOLID part (density 1 on every solid
+//                     voxel): "certify the part as drawn."
+//   * <mesh path>   — a SUBSTITUTE mesh (e.g. a smoothed/edited variant to
+//                     re-certify), voxelized onto the run's grid via
+//                     voxelize_onto_grid, so the model's node-indexed BCs/loads
+//                     still apply. The re-analysis therefore runs on the mesh's
+//                     VOXELIZATION at job.resolution — it differs from the printed
+//                     surface by up to ~half a voxel; this quantization gap is
+//                     recorded in the provenance file, not hidden.
+//
+// Writes analysis_report.json (the NEW, re-analysed numbers — never the design's
+// pre-edit numbers), analysis.json (provenance: analyzed=true, source, resolution,
+// the quantization footnote, and BOTH the voxel mass and the analysed-mesh mass),
+// and fields.bin. Throws JobError for a bad material/model/selector or an
+// unwritable output, and (for now) if the job declares a "loads" block — the
+// declared-loadcase analysis path is not yet wired (self-weight only).
+AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_dir,
+                             const std::string& out_dir,
+                             const MaterialLibrary& materials,
+                             const SettingsRules& rules,
+                             const std::string& analyze_mesh_path = "");
 
 }  // namespace topopt
