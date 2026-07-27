@@ -1,0 +1,4 @@
+lattice,cells,L_mm,vpc,spacing_mm,rho,wall_mm,homog_E100_MPa,homog_E100_over_Es,direct3_E_MPa,direct3_over_Es,gap_pct,verdict
+gyroid,1vs3,5.000,16,0.31250,0.30469,0.6250,419.8525,0.119958,375.0444,0.107156,11.95,NO-GO
+schwarzD,1vs3,5.000,16,0.31250,0.37500,0.6250,711.7667,0.203362,712.0329,0.203438,0.04,GO
+octet,1vs3,5.000,16,0.31250,0.28516,0.6250,280.5832,0.080167,278.3348,0.079524,0.81,GO
