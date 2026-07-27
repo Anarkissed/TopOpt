@@ -1,0 +1,105 @@
+===== B2 self-check =====
+B2 SELF-CHECK — one capped 8-gon prism, r=1.000 L=10.000 mm
+   mesh signed volume  = 28.284271 mm^3
+   analytic n-gon prism= 28.284271 mm^3   (rel err 1.256e-16)
+   ideal round cylinder= 31.415927 mm^3   (tessellation deficit 9.97%)
+   triangles=32  watertight=YES (boundary=0 nonmanifold=0)
+   => PASS (match to >=3 digits)
+===== O1: triangles + memory vs cell size (100% uniform, in-memory) =====
+CASE L=12mm frac=100%(actual 100%, 125/125 cells) uniform INMEM | cells=5x5x5 tris=118920 (strut=105600 node=13320) struts=3300 nodes=666
+   peak_rss=22.9 MB  wall=0.004 s  stl=5.95 MB  min_d=2.400 max_d=2.400 mm
+CASE L=8mm frac=100%(actual 100%, 343/343 cells) uniform INMEM | cells=7x7x7 tris=316000 (strut=282240 node=33760) struts=8820 nodes=1688
+   peak_rss=48.5 MB  wall=0.010 s  stl=15.80 MB  min_d=1.600 max_d=1.600 mm
+CASE L=6mm frac=100%(actual 100%, 1000/1000 cells) uniform INMEM | cells=10x10x10 tris=899020 (strut=806400 node=92620) struts=25200 nodes=4631
+   peak_rss=160.5 MB  wall=0.041 s  stl=44.95 MB  min_d=1.200 max_d=1.200 mm
+CASE L=4mm frac=100%(actual 100%, 3375/3375 cells) uniform INMEM | cells=15x15x15 tris=2976320 (strut=2678400 node=297920) struts=83700 nodes=14896
+   peak_rss=591.2 MB  wall=0.141 s  stl=148.82 MB  min_d=0.800 max_d=0.800 mm
+===== O2: region fraction (L=4, 15^3=3375 cells so fractions resolve) =====
+CASE L=4mm frac=100%(actual 100%, 3375/3375 cells) uniform STREAM | cells=15x15x15 tris=2976320 (strut=2678400 node=297920) struts=83700 nodes=14896
+   peak_rss=2.7 MB  wall=0.243 s  stl=148.82 MB  min_d=0.800 max_d=0.800 mm
+CASE L=4mm frac=50%(actual 39%, 1331/3375 cells) uniform STREAM | cells=15x15x15 tris=1190352 (strut=1068672 node=121680) struts=33396 nodes=6084
+   peak_rss=2.7 MB  wall=0.097 s  stl=59.52 MB  min_d=0.800 max_d=0.800 mm
+CASE L=4mm frac=20%(actual 22%, 729/3375 cells) uniform STREAM | cells=15x15x15 tris=659576 (strut=590976 node=68600) struts=18468 nodes=3430
+   peak_rss=2.7 MB  wall=0.057 s  stl=32.98 MB  min_d=0.800 max_d=0.800 mm
+===== O3: streaming vs in-memory at the LARGEST case (L=4, 100%) =====
+CASE L=4mm frac=100%(actual 100%, 3375/3375 cells) uniform INMEM | cells=15x15x15 tris=2976320 (strut=2678400 node=297920) struts=83700 nodes=14896
+   peak_rss=591.2 MB  wall=0.107 s  stl=148.82 MB  min_d=0.800 max_d=0.800 mm
+CASE L=4mm frac=100%(actual 100%, 3375/3375 cells) uniform STREAM | cells=15x15x15 tris=2976320 (strut=2678400 node=297920) struts=83700 nodes=14896
+   peak_rss=2.7 MB  wall=0.240 s  stl=148.82 MB  min_d=0.800 max_d=0.800 mm
+CASE L=12mm frac=100%(actual 100%, 125/125 cells) uniform STREAM | cells=5x5x5 tris=118920 (strut=105600 node=13320) struts=3300 nodes=666
+   peak_rss=2.7 MB  wall=0.010 s  stl=5.95 MB  min_d=2.400 max_d=2.400 mm
+CASE L=8mm frac=100%(actual 100%, 343/343 cells) uniform STREAM | cells=7x7x7 tris=316000 (strut=282240 node=33760) struts=8820 nodes=1688
+   peak_rss=2.7 MB  wall=0.031 s  stl=15.80 MB  min_d=1.600 max_d=1.600 mm
+CASE L=6mm frac=100%(actual 100%, 1000/1000 cells) uniform STREAM | cells=10x10x10 tris=899020 (strut=806400 node=92620) struts=25200 nodes=4631
+   peak_rss=2.7 MB  wall=0.080 s  stl=44.95 MB  min_d=1.200 max_d=1.200 mm
+CASE L=4mm frac=100%(actual 100%, 3375/3375 cells) uniform STREAM | cells=15x15x15 tris=2976320 (strut=2678400 node=297920) struts=83700 nodes=14896
+   peak_rss=2.7 MB  wall=0.229 s  stl=148.82 MB  min_d=0.800 max_d=0.800 mm
+----- B4 extreme streaming case (L=2mm, PR-184 triangle scale) -----
+CASE L=2mm frac=100%(actual 100%, 24389/24389 cells) uniform STREAM | cells=29x29x29 tris=21107496 (strut=19053696 node=2053800) struts=595428 nodes=102690
+   peak_rss=2.7 MB  wall=1.396 s  stl=1055.37 MB  min_d=0.400 max_d=0.400 mm
+===== O4: graded vs uniform (L=8 and L=4, in-memory) =====
+CASE L=8mm frac=100%(actual 100%, 343/343 cells) uniform INMEM | cells=7x7x7 tris=316000 (strut=282240 node=33760) struts=8820 nodes=1688
+   peak_rss=48.5 MB  wall=0.010 s  stl=15.80 MB  min_d=1.600 max_d=1.600 mm
+CASE L=8mm frac=100%(actual 100%, 343/343 cells) graded INMEM | cells=7x7x7 tris=316000 (strut=282240 node=33760) struts=8820 nodes=1688
+   peak_rss=48.4 MB  wall=0.009 s  stl=15.80 MB  min_d=0.960 max_d=2.240 mm
+CASE L=4mm frac=100%(actual 100%, 3375/3375 cells) uniform INMEM | cells=15x15x15 tris=2976320 (strut=2678400 node=297920) struts=83700 nodes=14896
+   peak_rss=591.2 MB  wall=0.128 s  stl=148.82 MB  min_d=0.800 max_d=0.800 mm
+CASE L=4mm frac=100%(actual 100%, 3375/3375 cells) graded INMEM | cells=15x15x15 tris=2976320 (strut=2678400 node=297920) struts=83700 nodes=14896
+   peak_rss=591.4 MB  wall=0.102 s  stl=148.82 MB  min_d=0.480 max_d=1.120 mm
+===== write real STL + 3MF for size (L=8, 100% uniform) =====
+CASE L=8mm frac=100%(actual 100%, 343/343 cells) uniform INMEM | cells=7x7x7 tris=316000 (strut=282240 node=33760) struts=8820 nodes=1688
+   peak_rss=87.7 MB  wall=0.376 s  stl=15.80 MB  min_d=1.600 max_d=1.600 mm
+   3mf=7.06 MB
+===== B3 DETERMINISM: same inputs twice, byte-identical? =====
+  streaming STL  (run A vs B) : BYTE-IDENTICAL ( 15800084 bytes)
+  in-memory STL  (run A vs B) : BYTE-IDENTICAL ( 15800084 bytes)
+  3MF            (run A vs B) : DIFFERS  (705405b5305f4f3aa809745b68b8906b8f3b43f0c7d53752eb279deabc5973e6 vs 89e5d35ee79a449b53635062b7acdab79c515b40c96cdb9ee09387426b2994a8)
+  streaming vs in-memory STL : DIFFERS  (1fc4a2ef1c1a03c89802df5de33e9fe6ad1e8b828e94c25fd3eb2da42559db1a vs e21ead76e985f85103152c532fff518b2ae1a80698f0ebc8816b0969211dc789)
+===== O5 watertightness =====
+O5 WATERTIGHTNESS — 2x2x2 octet block, L=8 mm
+   triangles=8940  struts=240 nodes=63
+   The generator emits an STL-style UNSHARED triangle soup (every facet carries its own 3 vertices); topology is only defined after welding.
+   WELDED by coordinate (3249 verts, exactly what an STL reader does on re-import):
+     boundary_edges   = 0
+     non_manifold_edges = 2238  (edges shared by >2 faces)
+     connected components = 78
+     check_watertight = FAIL
+   Each prism/node, welded in isolation, IS a closed 2-manifold (see B2). Emitted together, the shared strut endpoints and node spheres weld into
+   non-manifold junctions, and the struts INTERPENETRATE — which the edge check alone cannot see. The intersection scan below proves the overlap.
+   self-intersection scan around the central node: 18216 intersecting triangle pairs of 5710510 tested (3380 local triangles)
+   => the swept-solid union is a self-intersecting soup: individually-closed primitives that INTERPENETRATE.
+===== O6 printability =====
+O6 PRINTABILITY — octet strut angle from VERTICAL (z), L=8 mm
+   (angle 0 = vertical/self-supporting; 90 = horizontal bridge)
+   45 deg : 24 struts (67%)
+   90 deg : 12 struts (33%)
+   struts steeper than 45 deg from vertical (overhang risk): 12 of 36 (33%)
+   min strut diameter at lowest graded density = 0.960 mm
+   *** NOT a printability verdict. The lattice has NO vertical struts: the face-diagonal legs sit at 45 deg from vertical (the borderline FDM
+   self-support limit) and one third are horizontal (90 deg) bridges that categorically need support. These numbers OWE a real FDM print test.
+
+CSV written to /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/assertions-release-builds-bb2d9e/evidence/2026-07-26-octet-generation-cost/octet_cost.csv
+tag     cell_mm  frac_target  frac_actual  graded  streaming  tris      strut_tris  node_tris  struts  nodes   peak_rss_mb  wall_s    stl_bytes   mf_bytes  min_diam_mm  max_diam_mm
+inmem   12       1            1            0       0          118920    105600      13320      3300    666     22.875       0.004281  5946084     -1        2.4          2.4
+inmem   8        1            1            0       0          316000    282240      33760      8820    1688    48.4531      0.010234  15800084    -1        1.6          1.6
+inmem   6        1            1            0       0          899020    806400      92620      25200   4631    160.5        0.041496  44951084    -1        1.2          1.2
+inmem   4        1            1            0       0          2976320   2678400     297920     83700   14896   591.188      0.141064  148816084   -1        0.8          0.8
+stream  4        1            1            0       1          2976320   2678400     297920     83700   14896   2.67188      0.243251  148816084   -1        0.8          0.8
+stream  4        0.5          0.39437      0       1          1190352   1068672     121680     33396   6084    2.67188      0.096637  59517684    -1        0.8          0.8
+stream  4        0.2          0.216        0       1          659576    590976      68600      18468   3430    2.67188      0.057171  32978884    -1        0.8          0.8
+inmem   4        1            1            0       0          2976320   2678400     297920     83700   14896   591.172      0.106536  148816084   -1        0.8          0.8
+stream  4        1            1            0       1          2976320   2678400     297920     83700   14896   2.6875       0.239884  148816084   -1        0.8          0.8
+stream  12       1            1            0       1          118920    105600      13320      3300    666     2.6875       0.009713  5946084     -1        2.4          2.4
+stream  8        1            1            0       1          316000    282240      33760      8820    1688    2.67188      0.031034  15800084    -1        1.6          1.6
+stream  6        1            1            0       1          899020    806400      92620      25200   4631    2.65625      0.079658  44951084    -1        1.2          1.2
+stream  4        1            1            0       1          2976320   2678400     297920     83700   14896   2.6875       0.228959  148816084   -1        0.8          0.8
+stream  2        1            1            0       1          21107496  19053696    2053800    595428  102690  2.6875       1.39628   1055374884  -1        0.4          0.4
+inmem   8        1            1            0       0          316000    282240      33760      8820    1688    48.4531      0.010008  15800084    -1        1.6          1.6
+inmem   8        1            1            1       0          316000    282240      33760      8820    1688    48.4375      0.008963  15800084    -1        0.96         2.24
+inmem   4        1            1            0       0          2976320   2678400     297920     83700   14896   591.172      0.128277  148816084   -1        0.8          0.8
+inmem   4        1            1            1       0          2976320   2678400     297920     83700   14896   591.391      0.101815  148816084   -1        0.48         1.12
+inmem   8        1            1            0       0          316000    282240      33760      8820    1688    87.6875      0.376287  15800084    7057990   1.6          1.6
+stream  8        1            1            0       1          316000    282240      33760      8820    1688    2.67188      0.015867  15800084    -1        1.6          1.6
+stream  8        1            1            0       1          316000    282240      33760      8820    1688    2.6875       0.016557  15800084    -1        1.6          1.6
+inmem   8        1            1            0       0          316000    282240      33760      8820    1688    87.8906      0.365978  15800084    7057980   1.6          1.6
+inmem   8        1            1            0       0          316000    282240      33760      8820    1688    87.9062      0.366531  15800084    7057984   1.6          1.6
