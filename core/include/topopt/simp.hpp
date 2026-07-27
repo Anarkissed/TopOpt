@@ -965,6 +965,20 @@ struct SimpOptions {
 };
 
 // One recorded step of the SIMP trajectory.
+// The draft-quality (handoff 2026-07-25-draft-quality) trajectory CG tolerance for
+// one penalized solve, given the design's max|Δρ| from the PREVIOUS iteration. When
+// the adaptive loose schedule is disabled (cg_tolerance_loose <= cg_tolerance, the
+// default) this returns cg_tolerance on EVERY call, so the default path is
+// byte-identical. When armed (a looser cg_tolerance_loose) it interpolates
+// geometrically between the loose endpoint (design moving at/over the move limit) and
+// the tight cg_tolerance (design settled). Deterministic — a pure function of the
+// options and the recorded change. Exposed so the production parity test can enforce
+// the "gate never softens" invariant (the schedule FLOOR at rest equals the tight
+// certification tolerance and is never tighter than it) NDEBUG-independently — a
+// -DNDEBUG Release build compiles out the simp.cpp assert() that checks the same
+// thing. The accept / final / stress-recovery solves never call this.
+double adaptive_traj_cg_tol(const SimpOptions& options, double prev_change);
+
 struct SimpIteration {
   double compliance = 0.0;       // compliance of xPhys at the START of the step
   double change = 0.0;           // max_e |x_new - x| produced by this step's OC

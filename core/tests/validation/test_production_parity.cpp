@@ -185,6 +185,15 @@ int main() {
     CHECK(opts.simp.active_domain_band == 0,
           "library default leaves the active-domain band OFF (reference untouched, "
           "byte-identical)");
+    // Handoff 2026-07-26-draft-arming — DRAFT QUALITY is a PRODUCTION setting, not a
+    // library default. The reference world never calls configure_production_options,
+    // so it sees draft OFF and every trajectory solve at the tight cg_tolerance —
+    // byte-identical to the pre-arming tree. THE ONE RULE, checked BEFORE the call.
+    CHECK(!opts.draft_quality,
+          "library default leaves draft quality OFF (reference untouched, "
+          "byte-identical)");
+    CHECK(opts.simp.cg_tolerance == 1e-8,
+          "library default certification tolerance is the tight 1e-8");
     const int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
     const int auto_threads = hw_threads > 0 ? hw_threads : 1;
     CHECK(topopt::fea_matfree_thread_count() == auto_threads,
@@ -265,6 +274,60 @@ int main() {
     CHECK(topopt::production_active_domain_band() == -1,
           "the production active-domain band is AUTO (-1): k is derived per job, "
           "never pinned (2026-07-26-ad-arming bar A2)");
+
+    // Handoff 2026-07-26-draft-arming — the ARMED draft posture (bar A1). Draft is the
+    // SECOND production dial that is NOT bit-identical when on (the trajectory drifts
+    // on some mid-ladder rungs; the certificate never does). Asserted against the
+    // NAMED loose tolerance, not a bare 1e-3, so a silent drift fails here. The
+    // escalation trigger stays DISARMED — 185 (compliance gap) and 197 (design-space
+    // probe) each measured it not to separate — so the ALWAYS-exact certification is
+    // the sole safety.
+    CHECK(opts.draft_quality, "production config arms draft quality");
+    CHECK(opts.draft_loose_tol == topopt::production_draft_loose_tol(),
+          "production config arms the named draft loose tolerance (not a literal)");
+    CHECK(topopt::production_draft_loose_tol() == 1e-3,
+          "the production draft loose tolerance is 1e-3 (the measured-safe tight end "
+          "of 185/197's 500x robustness sweep; see the production.cpp TRIPWIRE)");
+    CHECK(!opts.draft_use_design_trigger,
+          "production leaves the design-space escalation trigger DISARMED "
+          "(197: measured structurally blind to basin/path divergence)");
+    // The Phase-1 compliance-gap fallback is DISABLED, not left at its retired 0.02
+    // default: the escalate rule is `gap <= 0 || gap > threshold`, so a threshold far
+    // above any achievable relative compliance gap means "never escalate" (while a
+    // threshold <= 0 would mean escalate EVERY rung — the opposite). Assert it is that
+    // disable sentinel, so a drift back to a firing threshold fails here.
+    CHECK(opts.draft_escalation_c_gap > 1e6,
+          "production DISABLES the compliance-gap escalation fallback (threshold set "
+          "beyond any achievable gap; 197: do not rely on the gap)");
+
+    // Bar A2 — THE GATE NEVER SOFTENS, enforced NDEBUG-INDEPENDENTLY. The C++
+    // assert() guards in simp.cpp (the final certification solve) and
+    // minimize_plastic.cpp (the stress-recovery + escalation solves) are compiled OUT
+    // of a -DNDEBUG Release build, so they cannot be the shipped enforcement. These
+    // CHECKs enforce the SAME invariant unconditionally: production never softens the
+    // certification tolerance, and the draft loose->tight schedule's FLOOR (design at
+    // rest) equals that tight certification tolerance while its ceiling (design at
+    // full motion) is never tighter — so the final certified solve is at least as
+    // tight as every trajectory solve, whatever draft does to the interior. `sched`
+    // is the SimpOptions the driver hands each rung: cg_tolerance_loose set to the
+    // armed draft loose endpoint, exactly as minimize_plastic does per rung.
+    CHECK(opts.simp.cg_tolerance == 1e-8,
+          "production config leaves the certification tolerance tight (1e-8); draft "
+          "arms ONLY the loose trajectory endpoint");
+    {
+      topopt::SimpOptions sched = opts.simp;
+      sched.cg_tolerance_loose = opts.draft_loose_tol;  // what the driver sets per rung
+      CHECK(topopt::adaptive_traj_cg_tol(sched, 0.0) == sched.cg_tolerance,
+            "draft schedule FLOOR (design at rest) == the tight certification "
+            "tolerance — the gate never softens (same invariant as the simp.cpp "
+            "assert, enforced here regardless of NDEBUG)");
+      CHECK(topopt::adaptive_traj_cg_tol(sched, sched.move) >= sched.cg_tolerance,
+            "draft schedule is NEVER tighter than the certification tolerance at any "
+            "design motion");
+      CHECK(sched.cg_tolerance_loose > sched.cg_tolerance,
+            "the armed draft loose endpoint is genuinely looser than the tight "
+            "certification tolerance (a value <= it would silently do nothing)");
+    }
     // The pin is a DEFAULT, not a lock: an explicit fea_set_matfree_threads after
     // configure_production_options must win, and n <= 0 must restore automatic
     // hardware-concurrency resolution. (Restored to the production pin after, so

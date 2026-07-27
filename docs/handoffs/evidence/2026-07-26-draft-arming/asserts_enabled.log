@@ -1,0 +1,5 @@
+assert-enabled build: -O2, no -DNDEBUG (asserts LIVE).
+libtopopt built in build-asserts/ (flags.make: -O2, no NDEBUG).
+harness draft_arming_gate interaction (exercises the draft loose->tight trajectory AND
+the final exact certification solve + the B2 asserts at simp.cpp:1798/2596) ran to
+completion, exit 0 — NO assert tripped. The gate-never-softens asserts hold live.

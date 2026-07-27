@@ -1,0 +1,17 @@
+===== A5 THREE-WAY INTERACTION FIXTURE (stagnation) =====
+  part 12x4x12 (252 solid) -> grid 24x8x24 (4608 elements), dilution=18.3x, spacing=2.00 mm
+  production recycle_dim k=16, AD band=-1 (AUTO), draft loose_tol=1e-03, matfree threads=6
+  single dilute rung (vf 0.50), natural plateau termination, safety cap 200 iters
+
+===== A3 — FULL GATE TABLE (production ladder, draft OFF vs ON; recycling+AD armed in both) =====
+  twice-run bit-identical: OFF YES  ON YES
+
+  rung   vf   | verdict OFF -> ON        | margin OFF -> ON            | dM/M       | mean|drho|  max|drho| | escalated
+   0   0.68 | ACCEPT -> ACCEPT          |     13.9006 -> 13.9005     | 3.940e-06 | 2.566e-08 1.012e-05 | 0
+   1   0.52 | ACCEPT -> ACCEPT          |     5.67028 -> 5.67028     | 5.197e-08 | 3.257e-08 1.415e-05 | 0
+   2   0.38 | ACCEPT -> ACCEPT          |     4.66152 -> 4.66164     | 2.607e-05 | 7.463e-05 1.850e-02 | 0
+   3   0.26 | REJECT -> REJECT          |      2.7873 -> 2.79323     | 2.130e-03 | 2.529e-05 4.545e-03 | 0
+
+  rung count OFF 4 -> ON 4; verdict flips: 0
+  ladder CG OFF 160272 -> ON 111073 (0.693x)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/draft-quality-production-arm-3de27b/docs/handoffs/evidence/2026-07-26-draft-arming/gate.csv

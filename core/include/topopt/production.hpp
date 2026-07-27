@@ -54,6 +54,18 @@ namespace topopt {
 //     (OFF) keeps Gate-V2 / reference byte-identical; echoed into run_info.json
 //     (requested band + resolved per-rung k + both latch outcomes). See
 //     production.cpp for the TRIPWIRE.
+//   * draft_quality = true, draft_loose_tol = 1e-3 (AUTO tightening) — DRAFT QUALITY
+//     (handoff 2026-07-26-draft-arming). Runs each rung's TRAJECTORY penalized solves
+//     on an adaptive loose->tight schedule while the FINAL certification + stress
+//     solves always run tight, cutting the Jacobi-CG grind on the early ultra-dilute
+//     iterations that dominate the design-box class. Like the active-domain band and
+//     UNLIKE every other setting here this is NOT bit-identical — the loose trajectory
+//     drifts on some mid-ladder rungs (never the certificate). Library default
+//     draft_quality=false keeps Gate-V2 / reference byte-identical. The escalation
+//     trigger ships DISARMED (measured not to separate — 185/197); the ALWAYS-exact
+//     certification is the sole safety. Echoed into run_info.json (quality, loose tol,
+//     per-rung tail k, trigger posture, and any escalation with its rung index). See
+//     production.cpp for the TRIPWIRE and the derivation of 1e-3.
 //   * the process-global matrix-free Galerkin block cache is ENABLED (see below).
 //   * the process-global matrix-free THREAD COUNT is pinned to
 //     production_matfree_thread_count() (handoff 132 (C)) — the performance-core
@@ -147,6 +159,17 @@ int production_krylov_recycle_dim();
 // stays 0 (OFF), so the reference world is byte-identical (THE ONE RULE). See
 // production.cpp for the TRIPWIRE and the measured justification.
 int production_active_domain_band();
+
+// Handoff 2026-07-26-draft-arming — the PRODUCTION draft-quality LOOSE trajectory
+// tolerance that configure_production_options arms (draft_loose_tol). Exposed so the
+// parity test and the measurement harnesses assert/read the armed value against the
+// named constant rather than a bare 1e-3 literal, exactly as
+// production_krylov_recycle_dim / production_active_domain_band do. Draft is the
+// second production dial that is NOT bit-identical when on (the trajectory drifts on
+// some mid-ladder rungs; the certificate never does); the library default leaves
+// draft_quality=false so the reference world stays byte-identical (THE ONE RULE). See
+// production.cpp for the TRIPWIRE and the derivation of 1e-3.
+double production_draft_loose_tol();
 
 // The canonical recommendation-driven volume-fraction ladder for production runs
 // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic
