@@ -2380,7 +2380,36 @@ public struct WorkspacePlaceholder: View {
                 clearanceMetricRow("Margin", metricPill("Margin", g.id, key, .margin))
                 clearanceMetricRow("Axial", metricPill("Axial", g.id, key, .axial))
             } else {
+                // A plane's in-plane FOOTPRINT (Length × Width) alongside how far it
+                // sticks out (Depth). Without Length/Width the slab had extent only in
+                // Depth — useless as a keep-out. Each metric is its OWN labelled row, so
+                // no chip is ever two rows high (P6).
+                clearanceMetricRow("Length", extentPill("Length", g.id, mp, .length))
+                clearanceMetricRow("Width", extentPill("Width", g.id, mp, .width))
                 clearanceMetricRow("Depth", metricPill("Depth", g.id, key, .slabDepth))
+            }
+        }
+    }
+
+    /// Which in-plane axis of a manual slab an `extentPill` edits.
+    private enum PlaneExtent { case length, width }
+
+    /// A Selections-panel pill for a manual PLANE's FULL in-plane extent (Length/Width).
+    /// Unlike a clearance metric there is NO "Auto": the extent is the primitive's own
+    /// geometry, always a concrete number — so the pill is number-only (no Auto badge,
+    /// no ↺ reset: `showChrome: false`). It DISPLAYS the FULL extent (2·half — what a
+    /// user measures with calipers) and writes back through the ÷2 boundary in
+    /// `ProjectModel.setManualLength`/`setManualWidth`. It reads the SAME
+    /// `mp.halfUMM`/`halfWMM` the viewport slab (`resolvedClearances`) and the run spec
+    /// (`ManualPrimitive.spec()`) read — one source, so the number can't diverge (P1).
+    private func extentPill(_ title: String, _ gid: UUID, _ mp: ManualPrimitive,
+                            _ which: PlaneExtent) -> GlassValuePill {
+        let full = (which == .length ? mp.halfUMM : mp.halfWMM) * 2
+        return GlassValuePill(title: title, valueMM: full, autoMM: nil,
+                              compact: true, showTitle: false, showChrome: false) {
+            switch which {
+            case .length: project.setManualLength(id: mp.id, in: gid, mm: $0)
+            case .width:  project.setManualWidth(id: mp.id, in: gid, mm: $0)
             }
         }
     }

@@ -18,9 +18,13 @@
 //     its axis_dir → rotating that vector covers every bolt rotation;
 //   • a face's plane is fully defined by its normal + origin; the in-plane (u,v) basis is
 //     DERIVED from the normal (`planeBasis`), so rotating the normal covers every face
-//     rotation EXCEPT a spin about the normal itself — and that spin is a NO-OP for the
-//     square manual slab (halfU == halfW by construction), so it changes no geometry and
-//     needs no stored orientation. Hence NO field was added to the schema.
+//     rotation EXCEPT a spin about the normal itself — and that spin is a NO-OP regardless
+//     of the slab's shape: rotating a vector about ITSELF is the identity, so the normal
+//     (hence the derived u/v basis) is unchanged, so the slab's geometry is unchanged and
+//     no in-plane orientation need be stored. (The slab MAY be rectangular — halfU ≠ halfW
+//     once the user edits Length/Width, or when `convertAutoClearanceToManual` copies a
+//     non-square face outline — so the earlier "square by construction" reasoning no longer
+//     applies, but the no-op conclusion still holds.) Hence NO field was added to the schema.
 //
 // Everything here is a pure value type on simd Doubles (model-space; the same frame the
 // primitive, the mesh and the run share) — no SwiftUI, no GPU, no camera. The gesture

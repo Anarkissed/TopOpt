@@ -709,6 +709,26 @@ public final class ProjectModel: ObservableObject {
     public func setManualSlab(id: UUID, in group: UUID, mm: Double?) {
         mutateManual(id: id, in: group) { $0.override.slabDepthMM = mm }
     }
+
+    /// Edit a manual PLANE's in-plane extents — the Length + Width exposure. The UI
+    /// works in FULL extents (what a user measures across the slab with calipers), so
+    /// the ÷2 to the core rasterizer's CENTRED half-extents (`half_u_mm`/`half_w_mm`)
+    /// happens HERE, at the one boundary, and nowhere else. `fullMM` is the full
+    /// length/width; an emptied field (nil) is IGNORED — an extent is the primitive's
+    /// own geometry, not a clearance distance, so it has no "Auto" to revert to. A
+    /// non-positive entry is floored to one grid step of half-extent so the slab never
+    /// collapses to zero area. Length ↔ the U axis (`halfUMM`), Width ↔ the W axis
+    /// (`halfWMM`); the (u,w) basis is derived from the normal identically for auto +
+    /// manual. Mutating `force` arms the EXISTING undo debounce (B5/P4) and refreshes
+    /// the sidecar (B3), exactly as the Depth override does.
+    public func setManualLength(id: UUID, in group: UUID, mm fullMM: Double?) {
+        guard let full = fullMM else { return }
+        mutateManual(id: id, in: group) { $0.halfUMM = Swift.max(ClearanceQuantize.stepMM, full * 0.5) }
+    }
+    public func setManualWidth(id: UUID, in group: UUID, mm fullMM: Double?) {
+        guard let full = fullMM else { return }
+        mutateManual(id: id, in: group) { $0.halfWMM = Swift.max(ClearanceQuantize.stepMM, full * 0.5) }
+    }
     private func mutateManual(id: UUID, in group: UUID, _ body: (inout ManualPrimitive) -> Void) {
         guard var p = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return }
         body(&p)
