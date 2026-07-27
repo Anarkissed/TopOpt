@@ -323,6 +323,11 @@ regime.
 
 ```bash
 cd core
+# The `topopt` target undefines NDEBUG at the target level (core/CMakeLists.txt),
+# so the draft-quality tolerance-parity asserts in src/simp/{simp,minimize_plastic}.cpp
+# stay LIVE even though `-DCMAKE_BUILD_TYPE=Release` appends -DNDEBUG. Release is
+# used here only for the -O2 timings; it can no longer silently disarm the guards.
+# See docs/handoffs/2026-07-26-ndebug-assertions.md.
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --target topopt -j8
 c++ -std=c++17 -O2 -I include -I /opt/homebrew/include/eigen3 \
   -DSETTINGS_RULES_PATH="\"$PWD/src/settings/rules.json\"" \

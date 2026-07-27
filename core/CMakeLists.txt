@@ -53,6 +53,32 @@ add_library(topopt
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
+# Assertions must survive the build type (handoff 2026-07-26-ndebug-assertions).
+# The Release, RelWithDebInfo and MinSizeRel configs all append -DNDEBUG to the
+# compile line, which compiles out EVERY assert() in the library — including the
+# draft-quality tolerance-parity guards in src/simp/simp.cpp and
+# src/simp/minimize_plastic.cpp that keep a loosened "draft" solve from ever
+# certifying a design's compliance or stress margin. A correct-looking
+# `-DCMAKE_BUILD_TYPE=Release` build would silently disarm those guards while
+# still compiling, testing and shipping green. We refuse to gate that protection
+# on the caller's build type, so we undefine NDEBUG on the topopt target itself.
+#
+# This is deliberately a target compile OPTION, not a compile DEFINITION: CMake
+# emits -D definitions BEFORE the per-config flags but appends target options
+# AFTER them, so a trailing -UNDEBUG reliably wins over the config's -DNDEBUG.
+# PRIVATE: it scopes to the library's own translation units (where every one of
+# the six asserts lives) and does not leak onto consumers of the topopt target.
+#
+# Cost: all six asserts are per-optimize-call (the two finalize/certification
+# solves in simp.cpp) or per-ladder-rung (the four in minimize_plastic.cpp);
+# none sits in the per-iteration CG or per-element inner loops, so keeping them
+# live is not measurable against solver time.
+if(MSVC)
+  target_compile_options(topopt PRIVATE /UNDEBUG)
+else()
+  target_compile_options(topopt PRIVATE -UNDEBUG)
+endif()
+
 # The matrix-free FEA apply (src/fea/matfree.cpp) threads its element loop over a
 # persistent std::thread worker pool, so the library depends on the platform
 # threading runtime. PUBLIC so executables linking the static topopt inherit the
@@ -600,6 +626,15 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_analyze_fixed_design PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME analyze_fixed_design COMMAND test_analyze_fixed_design)
+
+  # Width-aware accept-gate knockdown (handoff 2026-07-26-width-aware-knockdown):
+  # the SHELL+CORE composite width_aware_knockdown() reproduces 191/192's member-scale
+  # numbers (K3), the degenerate cases (K5), the sign (K4), and the local-member-width
+  # distance transform. width_aware_knockdown / wall_area_fraction live in analyze.cpp,
+  # so gate on Eigen like test_analyze_fixed_design. Pure math + voxel ops, no fixture.
+  add_executable(test_width_aware_knockdown tests/unit/test_width_aware_knockdown.cpp)
+  target_link_libraries(test_width_aware_knockdown PRIVATE topopt)
+  add_test(NAME width_aware_knockdown COMMAND test_width_aware_knockdown)
 
   # Handoff 080 regression gate: the design-box "whole-domain optimize" path
   # (freeze_imported_part == false, the default) must REDUCE plastic against the

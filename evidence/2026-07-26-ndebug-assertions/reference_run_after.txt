@@ -1,0 +1,7 @@
+== REFERENCE RUN digest ==
+grid=10x4x10 solid=204  evaluated_rungs=4
+rung 0: req_vf=0.6800 compliance=1.0990391075e+01 accepted=1 infeasible=0 rung_cg=7694 density_fnv=0523f00d99883c3e
+rung 1: req_vf=0.5200 compliance=1.3635248680e+01 accepted=1 infeasible=0 rung_cg=12017 density_fnv=96ba4e10dcfa5ab7
+rung 2: req_vf=0.3800 compliance=2.1118225256e+01 accepted=1 infeasible=0 rung_cg=35149 density_fnv=db70755faa842be5
+rung 3: req_vf=0.2600 compliance=4.3281432314e+01 accepted=0 infeasible=0 rung_cg=56449 density_fnv=90d8b8d0797ced1f
+TOTAL_CG_ITERATIONS=111309

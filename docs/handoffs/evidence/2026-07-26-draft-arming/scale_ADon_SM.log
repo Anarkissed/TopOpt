@@ -1,0 +1,7 @@
+D4 — the win across scale (summed trajectory CG, tight vs draft 1e-3),
+     and D3 probe cost at scale. floor threshold measured on grid S.
+
+==================== POSTURE: AD-on (production, post-187) ====================
+ grid (solid)        | tight CG | draft CG | WIN | probe/ladder % | probe flips(1e-3)
+ S 16x8x16   16x8x16 (1536) |    74791 |    39231 | 1.91x | 2.53% | 0.0000
+ M 24x12x24  24x8x24 (4608) |   187696 |    45707 | 4.11x | 0.74% | 0.0000

@@ -1,0 +1,22 @@
+# A3 cost — full Release ctest, live vs dead assertions (before/after pair)
+# Both runs: same 67-test suite, serial ctest, single machine, measured IDLE, back-to-back.
+
+run                                           guards       result    Total Test time (real)
+ctest-release-baseline.txt (main, no -UNDEBUG) COMPILED-OUT 67/67 ok  1351.82 s
+ctest-release.txt (fixed, -UNDEBUG)           LIVE         67/67 ok   893.88 s
+
+Delta = 893.88 - 1351.82 = -457.94 s: the guards-LIVE run is 34% FASTER than
+guards-out. Assertions can only ADD time, so this delta is entirely environmental
+noise, not assertion cost. A third Release run of the same suite (earlier, sharing
+the machine with the Debug ctest) totalled 838.94 s. Three runs -> 838.94 / 1351.82 /
+893.88 s, a ~500 s spread with the ordering inverted: full-suite ctest wall time is
+dominated by background system load and cannot resolve assertion cost at all.
+
+The valid, controlled cost measurement is A3-A4-cost-byte-identity.txt: the same
+minimize_plastic ladder run against guards-out vs guards-live libraries executes the
+IDENTICAL 111309 CG iterations and produces BYTE-IDENTICAL output. The six asserts are
+6 double-comparisons executed a handful of times per run (never in the CG/element inner
+loops), i.e. nanoseconds — orders of magnitude below the ~500 s ctest noise floor.
+
+Conclusion: the cost of keeping the assertions live is negligible — unmeasurable in
+full-suite wall time and provably zero in algorithmic work (CG iterations, output bytes).

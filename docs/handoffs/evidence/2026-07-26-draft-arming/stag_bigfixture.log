@@ -1,0 +1,26 @@
+===== A5 THREE-WAY INTERACTION FIXTURE (stagnation) =====
+  part 12x4x12 (252 solid) -> grid 24x8x24 (4608 elements), dilution=18.3x, spacing=2.00 mm
+  production recycle_dim k=16, AD band=-1 (AUTO), draft loose_tol=1e-03, matfree threads=6
+  single dilute rung (vf 0.50), natural plateau termination, safety cap 12 iters
+
+===== A5 RECYCLING-WRAP REGIME (big stagnation fixture) =====
+  part 1512 solid -> grid 48x32x48 (73728 elements), dilution=48.8x, spacing=1.00 mm; capped 12 iters, single rung vf 0.50
+
+===== POSTURES (capped 12 iters) =====
+  [rec (no AD)     ] 140.3 s  CG=15349  outer=12  Jacobi-fallback=2/12
+      recycle: max_dim=16  applied on 1/2 Jacobi solves (rc_frac=0.500)  setup_mv=16
+  [rec+AD          ] 150.2 s  CG=19329  outer=12  Jacobi-fallback=2/12
+      recycle: max_dim=15  applied on 1/2 Jacobi solves (rc_frac=0.500)  setup_mv=15
+      AD: band k=4  f_bar=0.9427  latched=1@iter3  escapes=1008  reason="escape detected: 1008 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+  [rec+AD+draft    ] 29.2 s  CG=947  outer=12  Jacobi-fallback=0/12
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      AD: band k=4  f_bar=0.9427  latched=1@iter3  escapes=1008  reason="escape detected: 1008 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+      draft: loose_tol=1e-03  compliance-gap=0.792399 (bar 0.02 = the retired Phase-1 fallback)  tail_k=0  escalated=0
+
+===== RECYCLING & AD LATCH UNDER DRAFT (the A5 interaction) =====
+  rec (no AD)   : 2/12 solves Jacobi, rc_frac=0.500, max_dim=16, setup_mv=16
+  rec+AD        : 2/12 solves Jacobi, rc_frac=0.500, max_dim=15; AD latched=1@3 escapes=1008 reason="escape detected: 1008 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+  rec+AD+draft  : 0/12 solves Jacobi, rc_frac=0.000, max_dim=0; AD latched=1@3 escapes=1008 reason="escape detected: 1008 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"; draft gap=0.792399
+
+  READING: rc_frac with draft ON (0.000) vs draft OFF (0.500) — recycling keeps wrapping (or draft moved solves out of the Jacobi regime) under draft.
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/draft-quality-production-arm-3de27b/docs/handoffs/evidence/2026-07-26-draft-arming/stag.csv

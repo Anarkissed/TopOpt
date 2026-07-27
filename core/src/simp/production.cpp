@@ -68,6 +68,91 @@ constexpr int kProductionRecycleDim = 16;
 // test asserts this resolution on a real production run.
 constexpr int kProductionActiveDomainBand = -1;  // AUTO
 
+// ===========================================================================
+// TRIPWIRE — the DRAFT-QUALITY production loose trajectory tolerance
+// (handoff 2026-07-26-draft-arming).
+// ===========================================================================
+// Before changing this value — or arming/disarming draft_quality, the escalation
+// trigger, or moving the loose endpoint — re-run BOTH:
+//   * core/tests/harness/draft_arming_gate.cpp interaction  (the A5 three-way stack:
+//     recycling x AD x draft — does any pair silently degrade another)
+//   * core/tests/harness/draft_quality_phase2_scale.cpp     (the win-vs-scale trend;
+//     the win TRACKS THE STAGNATION FRACTION, not grid size, and FALLS across the
+//     size endpoints — 2.07x at 16^3 -> 1.53x at 32^3 — so a new value's payoff must
+//     be re-measured at scale, never assumed to transfer)
+// and land a new before/after gate table.
+//
+// Draft is the SECOND production dial that is NOT bit-identical when on (the active-
+// domain band is the other). The loose trajectory solves answer a slightly different
+// question than the tight ones, so the mid-ladder TRAJECTORY drifts on some rungs
+// (185 measured non-terminal REJECT rungs flipping 0.05-0.15 of their solid voxels
+// under aggressive loose tolerances). What is NOT drifted is the shipped part: the
+// FINAL compliance + stress-recovery solves ALWAYS run at the tight cg_tolerance
+// (part c), asserted in simp.cpp / minimize_plastic.cpp (B2/D6) — the certificate is
+// the safety, not the trajectory. ARMING ACCEPTS NO MID-RUN ALARM: the escalation
+// belt was measured NOT to separate (197) and ships DISARMED; the always-exact
+// certification is the sole and sufficient safety.
+//
+// WHY 1e-3, derived not picked. 185/197 measured the shipped (terminal, certified)
+// design CLASSIFICATION-IDENTICAL to a fully-tight run across a 500x loose sweep
+// (1e-3 ... 5e-1), and 1e-3 is the TIGHTEST endpoint of that proven-robust range —
+// the least-aggressive loose value that still moves the early ultra-dilute iterations
+// off the Jacobi-CG stagnation latch and lets multigrid carry them (the win
+// mechanism: 185 §B5 measured a stagnating iteration going ~2200 -> ~150 CG at 1e-3).
+// Looser endpoints buy more per-iteration speed but introduce the mid-ladder
+// transient divergence above; 1e-3 sits at the conservative, measured-safe end. It is
+// the "128 production value" 185 built the schedule around.
+constexpr double kProductionDraftLooseTol = 1e-3;
+
+// Handoff 2026-07-26-draft-arming — the PRODUCTION draft escalation posture: DISARMED.
+// The escalation belt was built twice and measured NOT to separate a diverged rung
+// from a converged one — the Phase-1 compliance gap fires false positives and misses
+// genuine divergence (185), and the Phase-2 design-space probe is structurally blind
+// to the basin/path divergence that matters (197). 197's recommendation is explicit:
+// "escalation DISARMED ... and do not rely on the gap"; the ALWAYS-exact final
+// certification (part c) is the real and sufficient safety.
+//
+// The design-space trigger is left OFF (draft_use_design_trigger=false, its default).
+// The Phase-1 compliance-gap fallback is DISABLED by setting its threshold to a value
+// no relative compliance gap can exceed: the escalate rule is
+// `gap <= 0 || gap > threshold`, so a large positive threshold means "never
+// escalate" (a threshold <= 0 would mean escalate-EVERY-rung — the opposite). This is
+// NOT a picked number with a tuning meaning; it is a DISABLE sentinel, the same
+// 1e30 idiom draft_quality_phase2_scale.cpp uses for its no-escalation runs.
+//
+// WHY explicit-disable rather than the retired 0.02 default. The A5 stagnation
+// measurement (docs/.../2026-07-26-draft-arming) shows the gap is ~2e-5 on a
+// CONVERGED rung (inert) but ~0.79 on an UNCONVERGED / iteration-capped one — so
+// leaving the 0.02 default armed would fire a spurious full tight re-run on any rung
+// that reaches its iteration cap before plateauing (safe, since the re-run is exact,
+// but pure wasted work that catches nothing real — 197's exact finding, reproduced).
+// Disabling it lets draft deliver its win cleanly with the exact certificate as the
+// sole guard. Anyone re-arming escalation must re-run the TRIPWIRE harnesses.
+constexpr double kProductionDraftEscalationDisabled = 1e30;
+// TRIPWIRE — the WIDTH-AWARE accept-gate knockdown (handoff 2026-07-26-width-aware-
+// knockdown).
+// ===========================================================================
+// false = the SHIPPED default: the accept gate keeps the pure scalar `worst_case *
+// f^1.5` knockdown, byte-for-byte the pre-width gate. Measurements 191/192 showed
+// that scalar is CONSERVATIVE at the ~9.4 mm member scale (the slicer's solid wall
+// loops rescue a thin rib) yet still optimistic for envelope-scale solid regions —
+// so the honest correction is size-aware, and this constant arms the SHELL+CORE
+// composite width_aware_knockdown() per member on a distance-transform thickness.
+//
+// ARMING IT CHANGES THE PRODUCT (like the AD band, unlike the recycle/Galerkin/
+// thread dials): every rung's acceptance verdict and terminal-rung choice is re-
+// gated, in the LESS-conservative direction, bounded by how much wall actually
+// rescues the governing member (a thick-governed part is unchanged — f_wall→0 →
+// the composite collapses to today's f^1.5, so caution on thick sections is never
+// silently reduced). Do NOT flip this to true without re-running
+//   * core/tests/harness/width_aware_gate.cpp   (the before/after gate table)
+// and landing a new gate table + a physical-coupon calibration of the composite:
+// the knockdown is a STIFFNESS proxy applied to a STRENGTH margin (191/192 caveat),
+// so arming is a maintainer act with a coupon behind it, not a code flip. The
+// wall geometry it needs (wall_loops / wall_line_width_mm) already crosses the
+// bridge; only this constant gates whether the gate reads it.
+constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
+
 // Handoff 132 (C) — the PRODUCTION matrix-free worker-thread count.
 //
 // The library default (fea_set_matfree_threads(0)) resolves to
@@ -115,6 +200,9 @@ int production_matfree_thread_count() {
 int production_krylov_recycle_dim() { return kProductionRecycleDim; }
 
 int production_active_domain_band() { return kProductionActiveDomainBand; }
+
+double production_draft_loose_tol() { return kProductionDraftLooseTol; }
+bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
 
 void configure_production_options(MinimizePlasticOptions& opts) {
   // Matrix-free geometric-multigrid solver (handoff 079/091). Never assembles
@@ -263,6 +351,45 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // domain_band() and asserts the DERIVED k on a real run. run_info.json echoes the
   // requested band (-1), the resolved per-rung k, and both latch outcomes.
   opts.simp.active_domain_band = kProductionActiveDomainBand;
+
+  // Handoff 2026-07-26-draft-arming — DRAFT QUALITY, armed (maintainer decision,
+  // recorded verbatim in the handoff §"THE DECISION"). Every ladder rung's TRAJECTORY
+  // penalized solves run on the adaptive loose->tight schedule (loose endpoint
+  // kProductionDraftLooseTol = 1e-3, tightening back to the exact cg_tolerance as the
+  // design settles); the FINAL certification + stress-recovery solves ALWAYS run
+  // tight. The win is that on the ultra-dilute design-box class that dominates
+  // production, the early fast-moving iterations — whose sensitivities feed a step
+  // about to be overwritten — no longer grind Jacobi-CG at full tolerance; multigrid
+  // carries the loose residual instead. See the TRIPWIRE beside kProductionDraftLooseTol.
+  //
+  // Like the active-domain band, and UNLIKE every bit-identical dial this function
+  // sets, THIS ONE CHANGES THE PRODUCT slightly: the loose trajectory drifts on some
+  // mid-ladder rungs (never the certificate). THE ONE RULE still holds — the LIBRARY
+  // default is draft_quality=false, so Gate-V2, the property suite and every core
+  // reference run (none of which call this function) are BYTE-FOR-BYTE unchanged,
+  // asserted in test_production_parity before AND after this call.
+  //
+  // ARMING ACCEPTS NO MID-RUN ALARM. The escalation belt (a mid-run divergence
+  // trigger) was built in two forms and measured NOT to separate: the Phase-1
+  // compliance gap fires false positives and misses genuine divergence (185), and the
+  // Phase-2 design-space probe is structurally blind to the basin/path divergence
+  // that matters (197). Both ship DISARMED — the design-space trigger OFF and the
+  // compliance-gap threshold set to the DISABLE sentinel (see
+  // kProductionDraftEscalationDisabled for why explicit-disable beats the retired 0.02
+  // default). The load-bearing safety is part (c) — the ALWAYS-exact final
+  // certification, enforced by the parity test's NDEBUG-independent gate check.
+  opts.draft_quality = true;
+  opts.draft_loose_tol = kProductionDraftLooseTol;
+  opts.draft_use_design_trigger = false;  // 197: the design-space trigger stays disarmed
+  opts.draft_escalation_c_gap = kProductionDraftEscalationDisabled;  // gap fallback OFF
+  // Width-aware accept-gate knockdown (handoff 2026-07-26-width-aware-knockdown).
+  // The shipped default is FALSE (see the TRIPWIRE above), so this sets the gate to
+  // the pure scalar f^1.5 path and production is byte-for-byte unchanged in THIS PR
+  // — arming is a separate maintainer act (flip kProductionWidthAwareKnockdown).
+  // The library default (MinimizePlasticOptions::width_aware_knockdown == false) is
+  // the same value, so Gate-V2 and every reference run, which never call this
+  // function, are unaffected either way (THE ONE RULE).
+  opts.width_aware_knockdown = kProductionWidthAwareKnockdown;
 
   // Handoff 132 (C) — pin the matrix-free apply to the performance cores. See
   // production_matfree_thread_count() above for the measured justification (113's

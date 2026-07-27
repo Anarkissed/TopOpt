@@ -1,0 +1,23 @@
+A1 — THE ONE RULE: the LIBRARY-default (reference) path is BYTE-IDENTICAL after arming.
+
+Harness: core/tests/harness/draft_arm_identity_probe.cpp — a fixed deterministic
+minimize_plastic ladder at the LIBRARY defaults (draft_quality left false, AD band 0,
+recycling off, JacobiCG). It never calls configure_production_options and never names
+a draft/production symbol, so it compiles unchanged against pristine main and the
+arming branch. FNV-1a over: per-rung physical density (all voxels) + compliance +
+worst-case margin + accept flag + iterations, for BOTH a no-box and a boxed ladder.
+
+  H_before  (pristine tree, pre-any-edit)            = 70d2b20564ad1d06
+  H_after   (arming branch, armed lib)               = 70d2b20564ad1d06
+  H_stashed (git stash of the 5 tracked files,       = 70d2b20564ad1d06
+             pristine rebuild of libtopopt.a, re-run)
+
+All three identical. The production diff is purely additive inside
+configure_production_options, a function the reference world never calls; the library
+defaults (draft_quality=false etc.) are untouched, so THE ONE RULE holds. Arming
+moves ONLY the production default.
+
+Stashed files for the pristine rebuild:
+  core/src/simp/production.cpp  core/include/topopt/production.hpp
+  core/src/simp/simp.cpp        core/include/topopt/simp.hpp
+  core/tests/validation/test_production_parity.cpp

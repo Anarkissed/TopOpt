@@ -1,0 +1,103 @@
+==== GRID small  solved=16x6x16  solid=672 voxels ====
+
+[B1] NEGATIVE CONTROL — basin floor (shipped schedule, cg 1e-8 vs 1e-9)
+     rung  vf   class_frac(ctrl-vs-base)  flips  accepted(base/ctrl)  iters(base/ctrl)
+        0 0.68    0.000e+00               0   1/1            141/141
+        1 0.52    0.000e+00               0   1/1            133/133
+        2 0.38    0.000e+00               0   1/1            139/139
+        3 0.26    1.488e-03               1   1/1            201/204
+     => BASIN FLOOR (max over rungs): class_frac=1.488e-03  flips=1
+        (design diffs below are reported as flips + as x-floor when floor>0)
+
+[S1] WHAT EACH β STAGE BUYS  (shipped base schedule; c=compliance, proj=projected field)
+     rung  β    iters   c_in     c_out    Δc%     flips  mnd_proj(in→out)   mfv_proj(in→out)
+        0 gray     55     38.26    18.37   52.0     318  0.799→0.368      36→202 
+        0    1     25      22.9    18.11   20.9      88  0.511→0.352     138→182 
+        0    2     11     17.39    17.49   -0.6       4  0.306→0.308     182→186 
+        0    4     11     16.06    16.09   -0.2      16  0.190→0.186     186→210 
+        0    8     16     15.05    15.01    0.3       4  0.051→0.049     210→210 
+        0   16     12     14.86    14.83    0.2       2  0.022→0.003     210→204 
+        0   32     11     14.83    14.83    0.0       4  0.001→0.001     204→204 
+        1 gray     41     84.54    25.71   69.6     354  0.891→0.478      82→310 
+        1    1     23     42.26     24.9   41.1      70  0.640→0.450     306→304 
+        1    2     11     22.92    22.96   -0.2      12  0.385→0.378     302→296 
+        1    4     25     19.39    19.21    0.9      14  0.211→0.203     296→290 
+        1    8     11      16.9    16.91   -0.1       0  0.042→0.043     290→290 
+        1   16     11     16.53    16.56   -0.2       0  0.014→0.009     290→290 
+        1   32     11     16.51    16.56   -0.3      10  0.009→0.002     286→296 
+        2 gray     50     215.2    41.61   80.7     396  0.816→0.463      60→292 
+        2    1     26     87.03    39.74   54.3      62  0.618→0.438     270→294 
+        2    2     13     35.85    35.66    0.5       8  0.372→0.372     294→294 
+        2    4     17     28.75    28.68    0.2       8  0.216→0.211     290→294 
+        2    8     11        24    24.46   -1.9      12  0.075→0.078     286→290 
+        2   16     11     23.26    23.52   -1.1      16  0.038→0.022     290→290 
+        2   32     11     23.25    23.39   -0.6      30  0.017→0.012     282→288 
+        3 gray     72     669.8    84.92   87.3     354  0.636→0.432      48→198 
+        3    1     34     235.8     79.8   66.2      94  0.531→0.414     160→200 
+        3    2     14     73.11    69.25    5.3      10  0.366→0.366     208→206 
+        3    4     20     55.93    53.05    5.1     133  0.250→0.245     210→219 
+        3    8     39     41.99    39.71    5.4     109  0.129→0.088     210→218 
+        3   16     11     36.57    36.88   -0.8      17  0.037→0.028     217→213 
+        3   32     11     36.32    36.44   -0.4       8  0.014→0.005     210→211 
+
+[S4] PLATEAU LAG PER β STAGE (iters after last ≥1-voxel flip, within each stage)
+     rung  β    iters  last_flip_iter  stage_end  lag   (lag = along-for-the-ride tail)
+        0 gray     55             43         55    12
+        0    1     25             70         80    10
+        0    2     11             85         91     6
+        0    4     11            101        102     1
+        0    8     16            107        118    11
+        0   16     12            120        130    10
+        0   32     11            134        141     7
+       rung 0 total per-stage lag = 57
+        1 gray     41             37         41     4
+        1    1     23             58         64     6
+        1    2     11             74         75     1
+        1    4     25             90        100    10
+        1    8     11           none        111    11
+        1   16     11           none        122    11
+        1   32     11            124        133     9
+       rung 1 total per-stage lag = 52
+        2 gray     50             49         50     1
+        2    1     26             69         76     7
+        2    2     13             87         89     2
+        2    4     17             92        106    14
+        2    8     11            116        117     1
+        2   16     11            120        128     8
+        2   32     11            134        139     5
+       rung 2 total per-stage lag = 38
+        3 gray     72             64         72     8
+        3    1     34            102        106     4
+        3    2     14            109        120    11
+        3    4     20            140        140     0
+        3    8     39            178        179     1
+        3   16     11            190        190     0
+        3   32     11            196        201     5
+       rung 3 total per-stage lag = 29
+     => TOTAL per-stage lag = 176 of 614 iters (28.7%)
+        (193 measured the per-RUN dead tail at 3-5%; per-STAGE lag sums that lag across every stage)
+
+[S2/S3] SCHEDULE COMPARISON vs shipped base  (Σiters, gate verdicts, terminal Δdesign)
+     shipped base: Σiters=614  per-rung iters=[141, 133, 139, 201]
+     schedule Σiters  Δiters   verdict_flips  worst_class_frac  worst_flips  (x-floor)  terminal Δcompliance% (per rung)
+     cap16      570    -44   NONE            2.976e-03          2         2.0x  [+0.02 +0.01 +0.52 +1.14]
+     cap8       525    -89   NONE            1.488e-02         10        10.0x  [+1.19 +2.10 +4.57 +8.78]
+     start4     461   -153   NONE            5.357e-02         36        36.0x  [-1.16 -0.07 +1.57 +0.58]
+     jump16     343   -271   NONE            5.060e-02         34        34.0x  [+1.00 +1.26 +4.17 +14.18]
+     jump32   INFEASIBLE — CG diverged jumping straight to β=32 (mechanical justification for gradual continuation; S3)
+     aggr       536    -78   NONE            1.637e-02         11        11.0x  [-0.09 +0.00 -0.04 +0.26]
+
+[S2] STOP-AT-16 cost per rung  (cap16 vs base)
+     rung  iters(base→cap)  Δcompl%  mnd_final(base→cap)  mfv_final(base→cap)  class_frac  flips  accepted(base→cap)
+        0   141→130         +0.02   0.001→0.003        204→204       0.00e+00     0   1→1
+        1   133→122         +0.01   0.002→0.009        296→290       2.98e-03     2   1→1
+        2   139→128         +0.52   0.012→0.022        288→290       2.98e-03     2   1→1
+        3   201→190         +1.14   0.005→0.028        211→213       2.98e-03     2   1→1
+
+[S2] STOP-AT-8 cost per rung  (cap8 vs base)
+     rung  iters(base→cap)  Δcompl%  mnd_final(base→cap)  mfv_final(base→cap)  class_frac  flips  accepted(base→cap)
+        0   141→118         +1.19   0.001→0.049        204→210       2.98e-03     2   1→1
+        1   133→111         +2.10   0.002→0.043        296→290       2.98e-03     2   1→1
+        2   139→117         +4.57   0.012→0.078        288→290       1.49e-02    10   1→1
+        3   201→179         +8.78   0.005→0.088        211→218       1.04e-02     7   1→1
+
