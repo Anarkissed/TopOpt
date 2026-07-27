@@ -32,6 +32,31 @@
 
 namespace topopt {
 
+// How the acceptance gate knocks the worst-case stress margin down for a sparse
+// print (handoff 2026-07-26-width-aware-knockdown). Bundles the two postures so a
+// single analyze_fixed_design signature serves both, and so a caller cannot forget
+// the width fields when it arms the width-aware path.
+//
+//   infill_knockdown  — the scalar f^1.5 (infill_margin_knockdown of the job's
+//                       infill). This is the WHOLE gate in the default posture
+//                       (`margin.worst_case * infill_knockdown`), and it also stays
+//                       the interlayer-term knockdown in the width-aware posture
+//                       (walls are credited only in-plane — 191/192 measured axial
+//                       and bending, never z-bonding — so the interlayer failure
+//                       mode is never made less conservative than today).
+//   width_aware       — arm the SHELL+CORE composite. false (the default) → the gate
+//                       is exactly the scalar path above (byte-identical).
+//   infill_percent    — the job infill (percent) for the per-voxel core term.
+//   wall_thickness_mm — t = wall_loops · wall_line_width_mm, the solid perimeter ring
+//                       width the slicer wraps around each member. 0 → f_wall = 0 →
+//                       the composite reduces to f^1.5 even when armed.
+struct KnockdownSpec {
+  double infill_knockdown = 1.0;
+  bool width_aware = false;
+  double infill_percent = 100.0;
+  double wall_thickness_mm = 0.0;
+};
+
 // The certification outputs of one fixed-design analysis. Field-for-field the
 // subset of MinimizePlasticVariant that the recovery block fills (von_mises_field,
 // stress_tensor_field, displacement_field, mass_grams, support_volume_voxels,
@@ -76,8 +101,10 @@ struct FixedDesignAnalysis {
 //                         numbers bit-for-bit, pass that run's cert tolerance,
 //                         max-iterations and SolverKind.
 //   margin_stop         — the acceptance threshold.
-//   infill_knockdown    — the multiplicative margin knockdown at the gate
-//                         (infill_margin_knockdown of the job's infill; 1.0 solid).
+//   knockdown           — the margin knockdown posture (KnockdownSpec): the scalar
+//                         f^1.5 in the default posture, or the width-aware SHELL+CORE
+//                         composite when armed. The stored/displayed margin stays the
+//                         SOLID margin; the knockdown scales ONLY what the gate tests.
 //   load_path_ok        — the connectivity belt verdict on `density` (a severed
 //                         design measures ~zero stress → an enormous, meaningless
 //                         margin, so the gate rejects it however good it looks).
@@ -90,7 +117,7 @@ FixedDesignAnalysis analyze_fixed_design(
     const std::vector<double>& density, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, const Material& material,
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
-    SolverKind solver_kind, double margin_stop, double infill_knockdown,
+    SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
     bool load_path_ok, double part_solid);
 
 // The infill margin knockdown seed curve — effective/solid strength ~= f^1.5
@@ -99,6 +126,30 @@ FixedDesignAnalysis analyze_fixed_design(
 // re-analysis gate share ONE definition. (The maintainer tunes this curve; do NOT
 // treat the exponent as final — see the definition.)
 double infill_margin_knockdown(double infill_percent);
+
+// The solid-wall AREA FRACTION of a square W×W member cross-section wrapped by a
+// solid perimeter ring of thickness t: f_wall = 4·t·(W-t)/W² (191/192's φ_wall).
+// Degenerate-safe (handoff 2026-07-26-width-aware-knockdown, bar K5):
+//   * member_width_mm <= 0 or non-finite (an "unbounded"/thick sentinel) → 0 (a
+//     region too thick to be a member gets NO wall rescue — the conservative choice);
+//   * wall_thickness_mm <= 0 (no walls) → 0;
+//   * a ring thicker than the half-width (t > W/2, i.e. a member thinner than the
+//     wall stack) is clamped to t = W/2 → f_wall = 1 (the member is all wall = solid).
+// Always in [0, 1]; never divides by zero.
+double wall_area_fraction(double member_width_mm, double wall_thickness_mm);
+
+// The WIDTH-AWARE infill knockdown — the SHELL+CORE Voigt composite 191/192
+// measured and validated to ~1-3 % (handoff 2026-07-26-width-aware-knockdown):
+//   E_eff/E_solid = f_wall + (1 - f_wall)·infill_margin_knockdown(infill_percent)
+// with f_wall = wall_area_fraction(member_width_mm, wall_thickness_mm). The core
+// term REUSES infill_margin_knockdown so the Gibson-Ashby f^1.5 curve has ONE
+// definition. Reduces EXACTLY to infill_margin_knockdown when there is no wall ring
+// (t = 0 or W unbounded), and to 1.0 for solid infill. Never exceeds 1.0 and never
+// divides by zero. This is the ONE definition of the width-aware law: the per-voxel
+// gate calls it per element on the local member width, and the reproduction test
+// (bar K3) calls it directly against 191/192's member table.
+double width_aware_knockdown(double infill_percent, double member_width_mm,
+                             double wall_thickness_mm);
 
 }  // namespace topopt
 

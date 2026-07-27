@@ -174,6 +174,11 @@ struct RunInfo {
   std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core git sha or "dev")
   std::string mode;          // job.mode
   std::string material;      // job.material
+  // The TRUE source format the user supplied ("step" | "stl" | "3mf"). When the
+  // app normalises a 3MF to an STL working copy (handoff 2026-07-26-3mf-optimize-
+  // path) the model file is STL but this stays "3mf", so run_info never loses the
+  // provenance. Derived from job.source_format, else from the model's extension.
+  std::string source_format;
   int resolution = 0;
   std::string load_source;   // "loadcase" | "self_weight"
   std::string solver;        // resolved SolverKind name (the REQUESTED solver)
@@ -324,6 +329,13 @@ struct RunInfo {
   double min_feature_mm = 0.0;
   double margin_stop = 0.0;
   double infill_percent = 100.0;
+  // Width-aware knockdown posture (handoff 2026-07-26-width-aware-knockdown): whether
+  // the gate ran the SHELL+CORE composite, and the wall geometry it was handed. When
+  // width_aware_knockdown is false the gate used the pure f^1.5 scalar and the wall
+  // fields are inert metadata (echoed for provenance, not used).
+  bool width_aware_knockdown = false;
+  int wall_loops = 0;
+  double wall_line_width_mm = 0.45;
   bool has_design_box = false;
   std::vector<double> ladder;
   long long created_wall_ms = 0;  // run-info write time (epoch ms)

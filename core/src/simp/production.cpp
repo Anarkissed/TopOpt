@@ -129,6 +129,29 @@ constexpr double kProductionDraftLooseTol = 1e-3;
 // Disabling it lets draft deliver its win cleanly with the exact certificate as the
 // sole guard. Anyone re-arming escalation must re-run the TRIPWIRE harnesses.
 constexpr double kProductionDraftEscalationDisabled = 1e30;
+// TRIPWIRE — the WIDTH-AWARE accept-gate knockdown (handoff 2026-07-26-width-aware-
+// knockdown).
+// ===========================================================================
+// false = the SHIPPED default: the accept gate keeps the pure scalar `worst_case *
+// f^1.5` knockdown, byte-for-byte the pre-width gate. Measurements 191/192 showed
+// that scalar is CONSERVATIVE at the ~9.4 mm member scale (the slicer's solid wall
+// loops rescue a thin rib) yet still optimistic for envelope-scale solid regions —
+// so the honest correction is size-aware, and this constant arms the SHELL+CORE
+// composite width_aware_knockdown() per member on a distance-transform thickness.
+//
+// ARMING IT CHANGES THE PRODUCT (like the AD band, unlike the recycle/Galerkin/
+// thread dials): every rung's acceptance verdict and terminal-rung choice is re-
+// gated, in the LESS-conservative direction, bounded by how much wall actually
+// rescues the governing member (a thick-governed part is unchanged — f_wall→0 →
+// the composite collapses to today's f^1.5, so caution on thick sections is never
+// silently reduced). Do NOT flip this to true without re-running
+//   * core/tests/harness/width_aware_gate.cpp   (the before/after gate table)
+// and landing a new gate table + a physical-coupon calibration of the composite:
+// the knockdown is a STIFFNESS proxy applied to a STRENGTH margin (191/192 caveat),
+// so arming is a maintainer act with a coupon behind it, not a code flip. The
+// wall geometry it needs (wall_loops / wall_line_width_mm) already crosses the
+// bridge; only this constant gates whether the gate reads it.
+constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
 
 // Handoff 132 (C) — the PRODUCTION matrix-free worker-thread count.
 //
@@ -179,6 +202,7 @@ int production_krylov_recycle_dim() { return kProductionRecycleDim; }
 int production_active_domain_band() { return kProductionActiveDomainBand; }
 
 double production_draft_loose_tol() { return kProductionDraftLooseTol; }
+bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
 
 void configure_production_options(MinimizePlasticOptions& opts) {
   // Matrix-free geometric-multigrid solver (handoff 079/091). Never assembles
@@ -358,6 +382,14 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   opts.draft_loose_tol = kProductionDraftLooseTol;
   opts.draft_use_design_trigger = false;  // 197: the design-space trigger stays disarmed
   opts.draft_escalation_c_gap = kProductionDraftEscalationDisabled;  // gap fallback OFF
+  // Width-aware accept-gate knockdown (handoff 2026-07-26-width-aware-knockdown).
+  // The shipped default is FALSE (see the TRIPWIRE above), so this sets the gate to
+  // the pure scalar f^1.5 path and production is byte-for-byte unchanged in THIS PR
+  // — arming is a separate maintainer act (flip kProductionWidthAwareKnockdown).
+  // The library default (MinimizePlasticOptions::width_aware_knockdown == false) is
+  // the same value, so Gate-V2 and every reference run, which never call this
+  // function, are unaffected either way (THE ONE RULE).
+  opts.width_aware_knockdown = kProductionWidthAwareKnockdown;
 
   // Handoff 132 (C) — pin the matrix-free apply to the performance cores. See
   // production_matfree_thread_count() above for the measured justification (113's

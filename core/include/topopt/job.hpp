@@ -145,6 +145,14 @@ struct JobLoadCase {
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
   bool minimize_plastic = true;             // true = reduction ladder + pad
+  // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
+  // metadata crossing the bridge for the first time: the perimeter loop count and
+  // its line width, so the accept gate can size the solid wall ring around each
+  // member. Read only when the width-aware gate is armed (a separate maintainer
+  // decision); 0 loops / negative line width → no override → no wall rescue. See
+  // MinimizePlasticOptions::{wall_loops, wall_line_width_mm}.
+  int wall_loops = 0;                        // 0 = none (no wall rescue)
+  double wall_line_width_mm = -1.0;          // < 0 = use the core default (0.45)
 };
 
 // An axis-aligned box in model space (mm), min <= max componentwise — a design
@@ -159,6 +167,13 @@ struct JobBox {
 struct JobDescription {
   std::string model;     // model file path; relative paths resolve against the
                          // job file's directory
+  // Optional. The TRUE source format the user supplied, when the `model` file is
+  // a working copy in a different format (handoff 2026-07-26-3mf-optimize-path):
+  // the app normalises a 3MF import to an STL working copy so the optimize path
+  // never re-parses 3MF, then records "3mf" here so run_info still names the real
+  // source. Empty => run_info derives the format from `model`'s extension, which
+  // is the honest answer for a job that references the source file directly.
+  std::string source_format;
   std::string material;  // key into materials.json (validated by run_job)
   std::string mode;      // "minimize_plastic" (the only supported mode)
   int resolution = 0;    // voxelizer resolution along the longest axis, >= 1

@@ -313,6 +313,9 @@ std::string run_info_json(const RunInfo& info) {
   str("fingerprint", info.fingerprint);
   str("mode", info.mode);
   str("material", info.material);
+  // True source format the user supplied (handoff 2026-07-26-3mf-optimize-path):
+  // "3mf" even when the model file is an STL working copy the app normalised it to.
+  str("source_format", info.source_format);
   num("resolution", fmt_i(info.resolution));
   str("load_source", info.load_source);
   str("solver", info.solver);
@@ -491,6 +494,9 @@ std::string run_info_json(const RunInfo& info) {
   num("min_feature_mm", fmt(info.min_feature_mm));
   num("margin_stop", fmt(info.margin_stop));
   num("infill_percent", fmt(info.infill_percent));
+  num("width_aware_knockdown", bool_json(info.width_aware_knockdown));
+  num("wall_loops", std::to_string(info.wall_loops));
+  num("wall_line_width_mm", fmt(info.wall_line_width_mm));
   num("has_design_box", bool_json(info.has_design_box));
 
   std::string ladder = "[";

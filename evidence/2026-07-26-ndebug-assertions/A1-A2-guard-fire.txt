@@ -1,0 +1,11 @@
+# A1/A2 — the SAME violation compiled with the library's own before/after NDEBUG flags
+# (guard_fire_probe.cpp reproduces simp.cpp:1798's predicate + message verbatim,
+#  with the certification tolerance deliberately loosened off the tight floor.)
+
+## BEFORE flags (main / Release):  c++ -std=c++17 -O2 -DNDEBUG
+REACHED: certified on tol=1e-06 (guard was DEAD)
+exit=0  -> guard DEAD, run reaches 'certified'
+
+## AFTER flags (fixed / Release): c++ -std=c++17 -O2 -DNDEBUG -UNDEBUG
+Assertion failed: (certification_tol == tight_floor && "draft quality: certification tolerance must be the tight floor of the " "trajectory schedule"), function main, file guard_fire_probe.cpp, line 14.
+exit=134  -> guard FIRES (SIGABRT 134)

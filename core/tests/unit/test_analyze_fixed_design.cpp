@@ -174,7 +174,8 @@ int main() {
   const Vec3 build_dir = normalized(Vec3{-o.gravity_direction.x,
                                          -o.gravity_direction.y,
                                          -o.gravity_direction.z});
-  const double infill_knockdown = topopt::infill_margin_knockdown(o.infill_percent);
+  topopt::KnockdownSpec knockdown;
+  knockdown.infill_knockdown = topopt::infill_margin_knockdown(o.infill_percent);
   const bool load_path_ok =
       topopt::load_path_connected(g, v.optimization.physical_density, 0.5);
   const double part_solid = static_cast<double>(g.solid_count());
@@ -182,7 +183,7 @@ int main() {
   const FixedDesignAnalysis a = analyze_fixed_design(
       g, params, v.optimization.physical_density, bcs, tip, material, build_dir,
       o.simp.cg_tolerance, o.simp.cg_max_iterations, o.simp.solver, o.margin_stop,
-      infill_knockdown, load_path_ok, part_solid);
+      knockdown, load_path_ok, part_solid);
 
   // --- THE BAR: every certification number bit-identical to the run's ----------
   CHECK(differing(a.von_mises_field, v.von_mises_field) == 0,
@@ -225,7 +226,7 @@ int main() {
   const FixedDesignAnalysis a2 = analyze_fixed_design(
       g, params, v.optimization.physical_density, bcs, tip, material, build_dir,
       o.simp.cg_tolerance, o.simp.cg_max_iterations, o.simp.solver, o.margin_stop,
-      infill_knockdown, load_path_ok, part_solid);
+      knockdown, load_path_ok, part_solid);
   CHECK(differing(a2.von_mises_field, a.von_mises_field) == 0,
         "analyze_fixed_design is deterministic (re-run bit-identical)");
   CHECK(a2.mass_grams == a.mass_grams && a2.margin.worst_case == a.margin.worst_case,
@@ -239,7 +240,7 @@ int main() {
   const FixedDesignAnalysis rej = analyze_fixed_design(
       g, params, v.optimization.physical_density, bcs, tip, material, build_dir,
       o.simp.cg_tolerance, o.simp.cg_max_iterations, o.simp.solver, just_above,
-      infill_knockdown, load_path_ok, part_solid);
+      knockdown, load_path_ok, part_solid);
   CHECK(!rej.accepted,
         "the gate REJECTS when margin_stop exceeds the measured margin");
   CHECK(differing(rej.von_mises_field, a.von_mises_field) == 0,

@@ -662,6 +662,19 @@ struct SimpIterationObservation {
   // of cg_tolerance is the measured tightening-tail k (see MinimizePlasticOptions::
   // draft_quality). Pure observation — never touches the design.
   double cg_trajectory_tol = 0.0;
+  // Handoff 2026-07-26-adaptive-move — the MOVE LIMIT this iteration's update
+  // actually used, and the oscillation reading that set it. On the fixed-limit
+  // (default) path `move` is the constant SimpOptions::move (0.2), damped to
+  // `move * min(1, 8/beta)` only on the MMA β-continuation stages, and
+  // `osc_fraction` is -1 (the adaptive detector never ran). With
+  // SimpOptions::adaptive_move on (MMA only), `move` is the per-iteration adapted
+  // limit and `osc_fraction` is the fraction of design voxels that REVERSED
+  // direction this step — the Svanberg oscillation sign the asymptote adaptation
+  // already keys on — which drove the grow/shrink. -1 whenever the adaptive rule
+  // held the seed (the first two iterations of a β stage, before two prior steps
+  // exist). Pure observation — never touches the design.
+  double move = 0.0;
+  double osc_fraction = -1.0;
   // Handoff 131 — the RUNG-INFEASIBILITY detector's verdict AT this iteration
   // (the exact predicate `rung_infeasible` the loop consults). The iteration it
   // first reads true is the iteration the rung was ENDED on as infeasible ("load
@@ -675,6 +688,48 @@ struct SimpOptions {
   double volume_fraction = 0.5;  // target physical volume fraction, in (0, 1]
   double filter_radius = 1.5;    // density-filter radius, voxel units (§4: >= 1.5)
   double move = 0.2;             // OC/MMA move limit
+  // --- Adaptive move limit (handoff 2026-07-26-adaptive-move) --------------
+  // The `move` above is FIXED for the whole run (only β-damped on the MMA
+  // continuation stages). Handoff 193 measured the design PINNED at that limit
+  // in 24-36% of outer iterations — concentrated in the early forming phase and
+  // the high-β stages — so the leading edge of the design is step-throttled for a
+  // large share of a rung. This makes the scalar move limit ADAPTIVE: it GROWS
+  // while the design is moving productively (few voxels reversing) and SHRINKS
+  // when it oscillates, letting the productive forming phase take bigger steps and
+  // pulling back before a too-large step thrashes.
+  //
+  // It reuses the SAME signal Svanberg's asymptote adaptation already keys on —
+  // the per-voxel oscillation sign s = (xᵏ−xᵏ⁻¹)(xᵏ⁻¹−xᵏ⁻²) — aggregated to the
+  // fraction of moving design voxels that reversed direction this step
+  // (`osc_fraction`). No second oscillation detector is invented (193 Q4 warned
+  // an independent accelerator FIGHTS the asymptote logic). The grow/shrink
+  // factors default to the asymptote constants (asyincr 1.2 / asydecr 0.7).
+  //
+  // FEASIBILITY IS PRESERVED for any move value, which is why this is not the
+  // BLOCKED-STOP case: the move only sets the trust-region box [alpha, beta],
+  // which is ALWAYS intersected with the asymptote bracket
+  // [L+albefa(x−L), U−albefa(U−x)] ⊂ (L,U) (so x stays strictly inside the
+  // asymptotes where the separable approximation is valid), and the single volume
+  // constraint is enforced by the dual bisection INDEPENDENT of the move. A larger
+  // move only relaxes the trust region toward the asymptote bracket; it can never
+  // return a box- or volume-infeasible iterate. The floor keeps move > 0.
+  //
+  // FALSE (the DEFAULT) => the fixed-0.2 path is UNTOUCHED and every run is
+  // BYTE-FOR-BYTE identical (THE ONE RULE — the opt-in discipline of
+  // min_feature_mm == 0 / cg_tolerance_loose == 0 / active_domain_band == 0). Only
+  // consulted when updater == MMA; a true value with updater == OC (or on the
+  // stress path) is REJECTED (refused, not silently ignored — 125 §0), exactly as
+  // mma_projection is. The adapted value is clamped to [adaptive_move_min,
+  // adaptive_move_max] and reset to the stage's (β-damped) reference at the start
+  // of each β-continuation stage, so the deliberate high-β damping is the SEED the
+  // adaptation grows/shrinks from rather than something it ignores.
+  bool adaptive_move = false;
+  double adaptive_move_grow = 1.2;    // step-up factor (= Svanberg asyincr)
+  double adaptive_move_shrink = 0.7;  // step-down factor (= Svanberg asydecr)
+  double adaptive_move_osc_lo = 0.15;  // osc_fraction below this -> grow
+  double adaptive_move_osc_hi = 0.30;  // osc_fraction above this -> shrink
+  double adaptive_move_max = 0.5;      // ceiling on the adapted move (< 1)
+  double adaptive_move_min = 0.02;     // floor on the adapted move (> 0)
   SimpUpdater updater = SimpUpdater::OC;  // design updater (M7.mma.1); default OC
   // FEA linear-solver selection (handoff 073). Default JacobiCG = the current
   // byte-identical shipping path; MultigridCG opts every penalized solve in this

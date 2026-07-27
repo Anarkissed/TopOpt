@@ -70,6 +70,14 @@ struct ProductionLoadCase {
   // M5.1 recommendation, no knockdown). Only scales the ladder acceptance margin.
   double infill_percent = -1.0;
 
+  // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
+  // The wall-loop (perimeter) count and its line width, forwarded to
+  // MinimizePlasticOptions so the accept gate can size the solid wall ring around
+  // each member when the width-aware gate is armed. 0 loops → no wall rescue; a
+  // negative line width leaves the core default (0.45 mm). Only read when armed.
+  int wall_loops = 0;
+  double wall_line_width_mm = -1.0;          // < 0 = core default
+
   // Optional design-domain expansion (the "add material" feature). When
   // has_design_box is true the run voxelizes onto a larger grid spanning the
   // union of the part and design_box (model-space mm), and the optimizer may grow

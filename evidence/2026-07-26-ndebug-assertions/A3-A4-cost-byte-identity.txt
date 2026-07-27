@@ -1,0 +1,21 @@
+# A3 (cost) + A4 (byte identity) — reference minimize_plastic ladder, tiny 10x4x10 L-bracket
+# BEFORE-lib = libtopopt.a built on main (Release, guards compiled out)
+# AFTER-lib  = libtopopt.a built with the -UNDEBUG fix (Release, guards live)
+
+## A4 byte identity
+cmp: reference_run_before.txt == reference_run_after.txt  (BYTE-IDENTICAL)
+
+## A3 headline — CG-iteration count (must be unchanged; asserts are checks, not math)
+BEFORE: TOTAL_CG_ITERATIONS=111309
+AFTER:  TOTAL_CG_ITERATIONS=111309
+per-rung CG identical: rung0=7694 rung1=12017 rung2=35149 rung3=56449 (see reference_run_*.txt)
+
+## A3 corroboration — wall/user time (method: /usr/bin/time -p, 3 samples each, single-run driver)
+   Labelled as corroboration only (wall clock is not a headline on this project).
+before user(s): 6.82 7.11 6.72 
+after user(s): 6.74 6.84 7.03 
+
+The six asserts execute a handful of times total per run (two per optimize-call in
+simp.cpp finalize; four per ladder-rung in minimize_plastic.cpp) — none in the CG or
+element inner loops — so the before/after user-time ranges overlap and no assert is
+individually chargeable to time.

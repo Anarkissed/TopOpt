@@ -1,0 +1,9 @@
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' started.
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' passed (178.856 seconds).
+Test Suite 'AppModelTests' passed at 2026-07-26 23:16:08.146.
+	 Executed 1 test, with 0 failures (0 unexpected) in 178.856 (178.856) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-07-26 23:16:08.146.
+	 Executed 1 test, with 0 failures (0 unexpected) in 178.856 (178.856) seconds
+Test Suite 'Selected tests' passed at 2026-07-26 23:16:08.146.
+	 Executed 1 test, with 0 failures (0 unexpected) in 178.856 (178.857) seconds
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

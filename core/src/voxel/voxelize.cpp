@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -458,6 +459,151 @@ int min_feature_violations(const VoxelGrid& grid,
       for (int i = 0; i < nx; ++i)
         if (solid(i, j, k) && !covered[grid.index(i, j, k)]) ++violations;
   return violations;
+}
+
+namespace {
+
+// One in-place pass of the Felzenszwalb–Huttenlocher exact 1D squared-distance
+// transform over a strided line of length `n`: f[q] <- min_p (q-p)² + f[p]. Seed
+// samples hold 0, others a large finite value. `scratch_v` / `scratch_z` are
+// caller-owned so the 3D driver reuses them across lines. Used by
+// local_member_thickness_mm's seeded EDT (handoff 2026-07-26-width-aware-knockdown).
+void edt_1d(double* f, int n, int stride, std::vector<int>& v,
+            std::vector<double>& z, std::vector<double>& d) {
+  const double kInf = std::numeric_limits<double>::infinity();
+  int k = 0;
+  v[0] = 0;
+  z[0] = -kInf;
+  z[1] = kInf;
+  for (int q = 1; q < n; ++q) {
+    const double fq = f[static_cast<std::size_t>(q) * stride];
+    double s = ((fq + static_cast<double>(q) * q) -
+                (f[static_cast<std::size_t>(v[k]) * stride] +
+                 static_cast<double>(v[k]) * v[k])) /
+               (2.0 * q - 2.0 * v[k]);
+    while (s <= z[k]) {
+      --k;
+      s = ((fq + static_cast<double>(q) * q) -
+           (f[static_cast<std::size_t>(v[k]) * stride] +
+            static_cast<double>(v[k]) * v[k])) /
+          (2.0 * q - 2.0 * v[k]);
+    }
+    ++k;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = kInf;
+  }
+  k = 0;
+  for (int q = 0; q < n; ++q) {
+    while (z[k + 1] < q) ++k;
+    const double dq = static_cast<double>(q - v[k]);
+    d[q] = dq * dq + f[static_cast<std::size_t>(v[k]) * stride];
+  }
+  for (int q = 0; q < n; ++q) f[static_cast<std::size_t>(q) * stride] = d[q];
+}
+
+// Exact squared Euclidean distance transform of a seed set on the grid: seed[idx]
+// == true → distance 0, else the squared distance (voxel²) to the nearest seed.
+// Separable Felzenszwalb along x, then y, then z. A grid with NO seed returns a
+// large finite value everywhere (treated as "infinitely far" by the caller).
+std::vector<double> squared_edt(const std::vector<char>& seed, int nx, int ny,
+                                int nz) {
+  // A finite sentinel larger than any achievable squared distance on this grid,
+  // small enough that adding q² never overflows the parabola arithmetic.
+  const double kBig = 4.0 * (static_cast<double>(nx) * nx +
+                             static_cast<double>(ny) * ny +
+                             static_cast<double>(nz) * nz) +
+                      1.0;
+  std::vector<double> f(seed.size());
+  for (std::size_t idx = 0; idx < seed.size(); ++idx)
+    f[idx] = seed[idx] ? 0.0 : kBig;
+
+  const int maxdim = std::max({nx, ny, nz});
+  std::vector<int> sv(static_cast<std::size_t>(maxdim));
+  std::vector<double> sz(static_cast<std::size_t>(maxdim) + 1);
+  std::vector<double> sd(static_cast<std::size_t>(maxdim));
+
+  auto index = [nx, ny](int i, int j, int k) {
+    return (static_cast<std::size_t>(k) * ny + j) * nx + i;
+  };
+  // x: contiguous rows (stride 1).
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      edt_1d(&f[index(0, j, k)], nx, 1, sv, sz, sd);
+  // y: stride nx.
+  for (int k = 0; k < nz; ++k)
+    for (int i = 0; i < nx; ++i)
+      edt_1d(&f[index(i, 0, k)], ny, nx, sv, sz, sd);
+  // z: stride nx*ny.
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i)
+      edt_1d(&f[index(i, j, 0)], nz, nx * ny, sv, sz, sd);
+  return f;
+}
+
+}  // namespace
+
+std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
+                                              const std::vector<double>& density,
+                                              double iso, int cap_radius_voxels) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "local_member_thickness_mm: density size != grid.voxel_count()");
+  if (cap_radius_voxels <= 0)
+    throw std::invalid_argument(
+        "local_member_thickness_mm: cap_radius_voxels must be > 0");
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  const std::size_t n = grid.voxel_count();
+
+  // The printed set (the same non-Empty + density>iso material the mesh / mass /
+  // stress field use). Void = everything else.
+  std::vector<char> printed(n, 0);
+  for (int k = 0; k < nz; ++k)
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t idx = grid.index(i, j, k);
+        printed[idx] = (grid.solid(i, j, k) && density[idx] > iso) ? 1 : 0;
+      }
+
+  // d²(v): squared distance from each printed voxel to the nearest VOID voxel
+  // (seeds = void). Out-of-grid is NOT seeded, so a member filling to a grid face
+  // reads no thinner there — the design grid pads the part with void, which is the
+  // free surface. A fully-solid grid has no void seed → d² stays large → every
+  // voxel resolves as "thick" (no wall rescue), the conservative degenerate.
+  std::vector<char> seed_void(n);
+  for (std::size_t idx = 0; idx < n; ++idx) seed_void[idx] = printed[idx] ? 0 : 1;
+  const std::vector<double> d2 = squared_edt(seed_void, nx, ny, nz);
+
+  // Granulometric opening: for r = 1..cap, S_r = { printed voxel with d ≥ r } is the
+  // erosion by a radius-r ball; a voxel SURVIVES the opening by that ball iff it lies
+  // within r of some S_r point (its seeded EDT ≤ r²). The largest surviving r is the
+  // inscribed half-thickness. τ = 2·r·spacing; a voxel still surviving at the cap is
+  // ≥ 2·cap·spacing thick and returns +inf ("thicker than measured" → no rescue).
+  std::vector<int> level(n, 0);
+  std::vector<char> seed_s(n);
+  for (int r = 1; r <= cap_radius_voxels; ++r) {
+    const double r2 = static_cast<double>(r) * r;
+    bool any = false;
+    for (std::size_t idx = 0; idx < n; ++idx) {
+      const bool in = printed[idx] && d2[idx] >= r2;
+      seed_s[idx] = in ? 1 : 0;
+      any = any || in;
+    }
+    if (!any) break;  // no voxel is r-deep: no larger member survives either
+    const std::vector<double> dr2 = squared_edt(seed_s, nx, ny, nz);
+    for (std::size_t idx = 0; idx < n; ++idx)
+      if (printed[idx] && dr2[idx] <= r2) level[idx] = r;
+  }
+
+  std::vector<double> thickness(n, 0.0);
+  const double inf = std::numeric_limits<double>::infinity();
+  for (std::size_t idx = 0; idx < n; ++idx) {
+    if (!printed[idx]) continue;
+    thickness[idx] = (level[idx] >= cap_radius_voxels)
+                         ? inf
+                         : 2.0 * static_cast<double>(level[idx]) * grid.spacing;
+  }
+  return thickness;
 }
 
 bool load_path_connected(const VoxelGrid& grid,

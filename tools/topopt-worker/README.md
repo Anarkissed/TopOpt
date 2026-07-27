@@ -37,6 +37,21 @@ this worker. Prereqs (once): `brew install opencascade eigen pkg-config`. lib3mf
 Without lib3mf, `topopt-cli` still builds and runs, but a job that imports a `.3mf`
 (or writes `output.mesh_format: "3mf"`) fails with *"this build has no 3MF support"*.
 
+> **Stale `core/build` gotcha (read this if `.3mf` jobs fail after you provisioned
+> lib3mf).** `lib3mf_FOUND` / `TOPOPT_HAVE_3MF` are decided at CMake **configure**
+> time and **cached** in `core/build/CMakeCache.txt`. If that directory was first
+> configured *without* lib3mf — e.g. a plain `app/scripts/build_core.sh` run before
+> lib3mf was installed — the cache keeps `lib3mf_DIR-NOTFOUND`, and simply re-running
+> the build does **not** re-search: `find_package` short-circuits on the cached miss,
+> so you get a `topopt-cli` that rejects `.3mf` with *"not available in this build"*
+> even though lib3mf is now present. This is the exact late failure the LAN worker hit
+> (handoff `2026-07-26-3mf-optimize-path`). `build_cli_macos.sh` now clears a stale
+> cache automatically; if you configure by hand, wipe it first:
+> `rm -rf core/build` (or at least `core/build/CMakeCache.txt core/build/CMakeFiles`)
+> and reconfigure. **Note:** since that handoff the iPad app normalises a 3MF import
+> to an STL working copy, so the app→worker flow ships **STL**, not 3MF — the worker
+> only needs lib3mf if you hand it a raw `.3mf` job directly (e.g. via the CLI).
+
 ## Run
 
 ```sh

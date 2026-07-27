@@ -385,15 +385,20 @@ JobDescription parse_job(const std::string& json_text) {
     schema_fail("top level must be an object");
 
   reject_unknown_keys(root,
-                      {"model", "material", "mode", "resolution",
-                       "fixture_faces", "gravity", "ladder", "margin_stop",
-                       "simp", "draft", "output", "loads", "design_box",
-                       "keep_outs"},
+                      {"model", "source_format", "material", "mode",
+                       "resolution", "fixture_faces", "gravity", "ladder",
+                       "margin_stop", "simp", "draft", "output", "loads",
+                       "design_box", "keep_outs"},
                       "the job");
 
   JobDescription job;
   job.model =
       require_nonempty_string(require_key(root, "model", "the job"), "model");
+  // Optional provenance override (handoff 2026-07-26-3mf-optimize-path): the true
+  // source format when `model` is a working copy in another format. A plain string;
+  // empty/absent => run_info derives it from the model extension.
+  if (const JsonValue* sf = find_key(root, "source_format"))
+    job.source_format = require_string(*sf, "source_format");
   job.material = require_nonempty_string(
       require_key(root, "material", "the job"), "material");
   job.mode =
@@ -424,7 +429,8 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(
         lv, {"anchors", "anchor_face_ids", "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
-             "infill_percent", "minimize_plastic"},
+             "infill_percent", "minimize_plastic", "wall_loops",
+             "wall_line_width_mm"},
         "loads");
     job.loads.present = true;
     // anchors: optional, given as geometric selectors ("anchors") OR raw B-rep
@@ -579,6 +585,20 @@ JobDescription parse_job(const std::string& json_text) {
       if (mp->type != JsonValue::Type::Bool)
         schema_fail("\"loads.minimize_plastic\" must be a boolean");
       job.loads.minimize_plastic = (mp->num != 0.0);
+    }
+    // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown).
+    if (const JsonValue* wl = find_key(lv, "wall_loops")) {
+      const double n = require_number(*wl, "loads.wall_loops");
+      if (n < 0.0 || n != std::floor(n) || n > 1000.0)
+        schema_fail("\"loads.wall_loops\" must be a non-negative integer <= 1000");
+      job.loads.wall_loops = static_cast<int>(n);
+    }
+    if (const JsonValue* ww = find_key(lv, "wall_line_width_mm")) {
+      job.loads.wall_line_width_mm =
+          require_number(*ww, "loads.wall_line_width_mm");
+      if (!(job.loads.wall_line_width_mm > 0.0) ||
+          job.loads.wall_line_width_mm > 100.0)
+        schema_fail("\"loads.wall_line_width_mm\" must be in (0, 100]");
     }
   } else {
     // Self-weight mode: fixture_faces (required, non-empty geometric selectors).

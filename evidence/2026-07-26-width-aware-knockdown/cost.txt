@@ -1,0 +1,7 @@
+K6 COST — local-thickness pass (the only new per-gate work) vs one gate FEA solve.
+(Gate solve is JacobiCG on a dilute random field — production multigrid is faster,
+ but the thickness pass runs ONCE per gate, not per CG iteration.)
+
+  N=24   (13824 voxels): thickness pass 1.0 ms | one gate FEA solve 1612.9 ms | thickness = 0.1% of the solve
+  N=40   (64000 voxels): thickness pass 5.2 ms | one gate FEA solve 11581.8 ms | thickness = 0.0% of the solve
+  N=56   (175616 voxels): thickness pass 17.5 ms | one gate FEA solve 59609.0 ms | thickness = 0.0% of the solve

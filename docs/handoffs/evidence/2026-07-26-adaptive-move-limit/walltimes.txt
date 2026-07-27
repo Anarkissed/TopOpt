@@ -1,0 +1,9 @@
+=== wall-clock (fixed / control / adapt) per grid ===
+[small]
+
+[medium]
+168.1s. 179.1s. 161.5s. 
+[large]
+440.3s. 764.4s. 477.7s. 
+[box]
+484.2s. 867.2s. 538.1s. 

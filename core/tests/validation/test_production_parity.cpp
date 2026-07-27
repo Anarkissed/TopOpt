@@ -194,6 +194,11 @@ int main() {
           "byte-identical)");
     CHECK(opts.simp.cg_tolerance == 1e-8,
           "library default certification tolerance is the tight 1e-8");
+    // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown): the library
+    // default leaves it OFF, so the reference world gates on the pure f^1.5 scalar —
+    // byte-identical to the pre-width gate. THE ONE RULE, checked before the call.
+    CHECK(!opts.width_aware_knockdown,
+          "library default leaves the width-aware knockdown OFF (reference untouched)");
     const int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
     const int auto_threads = hw_threads > 0 ? hw_threads : 1;
     CHECK(topopt::fea_matfree_thread_count() == auto_threads,
@@ -204,6 +209,14 @@ int main() {
           "production config selects the matrix-free multigrid solver");
     CHECK(opts.min_feature_mm == 2.5,
           "production config sets the 2.5 mm physical min-feature scale");
+    // Width-aware knockdown stays OFF in the SHIPPED production config — arming is a
+    // separate maintainer act (handoff 2026-07-26-width-aware-knockdown, bar K1). The
+    // config echoes exactly the named constant, so this asserts run_info's posture.
+    CHECK(opts.width_aware_knockdown == topopt::production_width_aware_knockdown(),
+          "production config echoes the width-aware arming constant");
+    CHECK(!opts.width_aware_knockdown,
+          "production config leaves the width-aware knockdown OFF (shipped default; "
+          "arming is a separate maintainer decision)");
     // Config echo (per the 141-lineage mechanism): the production config ARMS the
     // conditional gate at the 0.07 grayness threshold and does NOT set the always-on
     // simp.mma_projection bool — projection is now per-rung and gate-driven.
