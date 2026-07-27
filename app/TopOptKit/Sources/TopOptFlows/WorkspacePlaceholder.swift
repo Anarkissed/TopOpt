@@ -83,9 +83,14 @@ public struct WorkspacePlaceholder: View {
     // toggle; `gizmoSnapLabels` surfaces what the last drag frame snapped to.
     @State private var gizmoTarget: GizmoTarget?
     @State private var gizmoDrag: PrimitiveGizmo.Drag?
-    @State private var draggingGizmoHandle: String?
     @State private var gizmoSnap = true
     @State private var gizmoSnapLabels: [String] = []
+    /// The raymarched gizmo's glowing handle (0 = hub/free, 1…3 = arms X/Y/Z, 4…6 = arcs), or -1.
+    @State private var gizmoActiveId: Float = -1
+    /// True while a drag that started on empty gizmo-box space is orbiting the camera.
+    @State private var gizmoBoxOrbiting = false
+    /// The previous drag location, for orbit deltas / first-frame guard.
+    @State private var gizmoBoxDragLast: CGPoint?
 
     /// The primitive a transform gizmo is bound to (group + primitive id).
     struct GizmoTarget: Equatable { let group: UUID; let id: UUID }
@@ -249,8 +254,8 @@ public struct WorkspacePlaceholder: View {
             // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
             // axial, face → depth) and the floating glass value pill near the selection.
             if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
-            // DEFECT 2: the manual-primitive transform gizmo (translate / plane / free /
-            // rotate / copy) — drawn on the active group's primitives so they can be grabbed.
+            // DEFECT 2: the manual-primitive transform gizmo (translate on one axis / plane /
+            // freely, + copy) — drawn on the active group's primitives so they can be grabbed.
             if force.phase == .edit { primitiveGizmoOverlay.ignoresSafeArea() }
 
             chrome
@@ -1527,15 +1532,16 @@ public struct WorkspacePlaceholder: View {
     /// rationale as `clearanceStageSpace`: `projection.ray` needs the absolute stage point.
     private static let gizmoStageSpace = "primitiveGizmoStage"
 
-    /// The transform-gizmo overlay. For the active group, each manual primitive shows a
-    /// SELECT knob; the selected one (`gizmoTarget`) shows the full gizmo — single-axis
-    /// arrows, plane quads, a free-move centre, rotate rings, plus COPY / snap / dismiss.
+    /// The transform-gizmo overlay. For the active group, each unselected manual primitive
+    /// shows a small SELECT knob; the selected one (`gizmoTarget`) shows the full connected
+    /// gizmo (`gizmoHandles`) — three axis arrows, plane plates and a free-move hub, plus the
+    /// COPY / snap / dismiss cluster. TRANSLATE ONLY: there are no rotation controls.
     ///
-    /// Camera non-fighting (G5): every knob binds its gesture to the SIZED knob BEFORE
-    /// `.position` (the clearance-handle rule), so a touch on a knob owns the drag and empty
-    /// space falls through to orbit — and, symmetrically, an orbit touch never lands on a
-    /// knob so it can't nudge a primitive. The transform math is the pure, tested
-    /// `PrimitiveGizmo`; THIS gesture + knob draw are the device-QA'd layers (G8).
+    /// Camera non-fighting (G4): every hit target binds its gesture to the SIZED view BEFORE
+    /// `.position` (the clearance-handle rule), so a touch on a control owns the drag and
+    /// empty space falls through to orbit — and, symmetrically, an orbit touch never lands on
+    /// a control so it can't nudge a primitive. The transform math is the pure, tested
+    /// `PrimitiveGizmo`; THIS gesture + body draw are the device-QA'd layers.
     @ViewBuilder private var primitiveGizmoOverlay: some View {
         if let proj = projection, let gid = selection.activeGroupID {
             ZStack(alignment: .topLeading) {
@@ -1557,60 +1563,128 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// Every handle for the SELECTED primitive: the full Shapr3D affordance set in TopOpt's
-    /// blue liquid-glass gizmo language (matching the design-box move handle + the 109 gizmo
-    /// frost). Axis knobs carry their letter; plane knobs are squares; rotate knobs a ring
-    /// glyph; the centre is the free-move `move.3d`.
+    /// The SELECTED primitive's transform gizmo — rebuilt (redesign 2026-07-26, take 2) as a
+    /// genuine 3D RAYMARCHED LIQUID-GLASS object, the same way the Position (orientation)
+    /// gizmo is built, so the two read as one set. Take 1's flat 2D path was rejected: it
+    /// looked like squashed rectangles, grew seam lines/holes, and lost half of itself at some
+    /// angles. This renders `TransformGizmo`'s SDF (hub + three axis arms with arrowheads +
+    /// three quarter-arcs welded between adjacent arms) in Metal, with real depth, translucency
+    /// and a lit rim, floating at the primitive's projected centre and rotating with the view.
+    ///
+    /// The glass itself is a non-interactive `TransformGizmoMetalView`. A same-size transparent
+    /// box captures the drag: on grab it SDF-picks the handle (`TransformGizmo.pick`); a hit
+    /// runs the untouched `PrimitiveGizmo` + `moveManualPrimitive` translate; a miss orbits the
+    /// camera (so the box is never a dead zone — G4: a handle drag never orbits, an empty-box
+    /// or outside drag orbits and never nudges).
     @ViewBuilder private func gizmoHandles(_ proj: CameraProjection, group gid: UUID,
                                            mp: ManualPrimitive) -> some View {
-        let a = PrimitiveGizmo.anchors(center: mp.center, length: gizmoLength(mp))
-        let letters = ["X", "Y", "Z"]
-        // Single-axis translate (arrow shafts) — a lettered knob at each axis tip.
-        ForEach(Array(a.axisTips.enumerated()), id: \.offset) { i, t in
-            gizmoAt(proj, t.at) {
-                gizmoCircleKnob(active: draggingGizmoHandle == "axis\(i)", size: 24) {
-                    Text(letters[i]).font(.system(size: 11, weight: .heavy)).foregroundStyle(.white)
+        #if canImport(MetalKit)
+        if let center = proj.project(settledWorld(SIMD3<Float>(mp.center))) {
+            let box = Self.gizmoBoxSize
+            ZStack(alignment: .topLeading) {
+                TransformGizmoMetalView(camera: cameraModel, settle: gizmoSettleMatrix,
+                                        activeId: gizmoActiveId)
+                    .frame(width: box, height: box)
+                    .allowsHitTesting(false)
+                    .position(center)
+
+                Color.clear
+                    .frame(width: box, height: box)
+                    .contentShape(Rectangle())
+                    .gesture(gizmoBoxGesture(proj, group: gid, mp: mp,
+                                             boxCenter: center, boxSize: box))
+                    .position(center)
+
+                // COPY / snap-override / dismiss cluster above the gizmo; snap feedback below.
+                gizmoActionCluster(group: gid, mp: mp)
+                    .position(x: center.x, y: center.y - box / 2 - 4)
+                if !gizmoSnapLabels.isEmpty {
+                    gizmoSnapBadge.position(x: center.x, y: center.y + box / 2 + 4)
                 }
-                .gesture(gizmoDragGesture(.axis(t.axis), id: "axis\(i)", group: gid, mp: mp))
             }
         }
-        // Plane translate (two axes at once) — a square knob per principal plane.
-        ForEach(Array(a.planeHandles.enumerated()), id: \.offset) { i, h in
-            gizmoAt(proj, h.at) {
-                gizmoSquareKnob(active: draggingGizmoHandle == "plane\(i)", size: 20) { EmptyView() }
-                    .gesture(gizmoDragGesture(.plane(h.normal), id: "plane\(i)", group: gid, mp: mp))
-            }
-        }
-        // Rotate about an axis (rings) — a rotate knob per axis.
-        ForEach(Array(a.rotateHandles.enumerated()), id: \.offset) { i, h in
-            gizmoAt(proj, h.at) {
-                gizmoCircleKnob(active: draggingGizmoHandle == "rot\(i)", size: 22) {
-                    Image(systemName: "rotate.3d").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
-                }
-                .gesture(gizmoDragGesture(.rotate(h.axis), id: "rot\(i)", group: gid, mp: mp))
-            }
-        }
-        // Free translate (all three) — the centre knob (the design-box `move.3d` glyph).
-        gizmoAt(proj, a.center) {
-            gizmoCircleKnob(active: draggingGizmoHandle == "free", size: 30) {
-                Image(systemName: "move.3d").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-            }
-            .gesture(gizmoDragGesture(.free, id: "free", group: gid, mp: mp))
-        }
-        // COPY / snap-override / dismiss cluster, above the centre; snap-feedback below it.
-        if let cpt = proj.project(settledWorld(SIMD3<Float>(a.center))) {
-            gizmoActionCluster(group: gid, mp: mp).position(x: cpt.x, y: cpt.y - 56)
-            if !gizmoSnapLabels.isEmpty {
-                gizmoSnapBadge.position(x: cpt.x, y: cpt.y + 56)
-            }
+        #else
+        EmptyView()
+        #endif
+    }
+
+    /// The gizmo's square overlay footprint (pt). Sized so the manipulator reads as a compact,
+    /// professional widget (not oversized), while the SDF pick's fat capsules keep the arms,
+    /// arrowheads, hub and arcs grabbable on touch; empty box space orbits.
+    static let gizmoBoxSize: CGFloat = 150
+
+    /// The model→world settle rotation as a matrix (identity when the part isn't settled), so
+    /// the gizmo's arms line up with the model axes exactly as the viewer draws them.
+    private var gizmoSettleMatrix: simd_float3x3 { simd_float3x3(settleQuat) }
+
+    /// The object→view rotation the render + pick share: the live camera view-rotation
+    /// composed with the settle, so a tap lands on the arm the user sees.
+    private var gizmoRotation: simd_float3x3 { cameraModel.viewRotation * gizmoSettleMatrix }
+
+    private func gizmoActiveIdValue(_ hit: TransformGizmo.Hit) -> Float {
+        switch hit {
+        case .free:            return 0
+        case .axis(let i):     return Float(1 + i)
+        case .plane(let p):    return Float(4 + p)
         }
     }
 
-    /// Project a model-space anchor and position a knob there (knob keeps its own gesture,
-    /// applied BEFORE `.position` — the camera-non-fighting rule).
-    @ViewBuilder private func gizmoAt(_ proj: CameraProjection, _ p: SIMD3<Double>,
-                                      @ViewBuilder _ knob: () -> some View) -> some View {
-        if let pt = proj.project(settledWorld(SIMD3<Float>(p))) { knob().position(pt) }
+    private func gizmoHandle(for hit: TransformGizmo.Hit) -> PrimitiveGizmo.Handle {
+        switch hit {
+        case .free:            return .free
+        case .axis(let i):     return .axis(TransformGizmo.axisVectors[i])
+        case .plane(let p):    return .plane(TransformGizmo.planeNormals[p])
+        }
+    }
+
+    /// The ONE gesture on the gizmo box: pick a handle on grab (SDF), then either run the
+    /// translate drag (untouched `PrimitiveGizmo` → `moveManualPrimitive`) or, on a miss,
+    /// orbit the camera — so the box never fights the camera in either direction.
+    private func gizmoBoxGesture(_ proj: CameraProjection, group gid: UUID, mp: ManualPrimitive,
+                                 boxCenter: CGPoint, boxSize: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
+            .onChanged { v in
+                // First frame: decide handle-drag vs orbit via the SDF pick.
+                if gizmoDrag == nil && !gizmoBoxOrbiting && gizmoBoxDragLast == nil {
+                    let local = CGPoint(x: v.startLocation.x - (boxCenter.x - boxSize / 2),
+                                        y: v.startLocation.y - (boxCenter.y - boxSize / 2))
+                    if let hit = TransformGizmo.pick(point: local,
+                                                     in: CGSize(width: boxSize, height: boxSize),
+                                                     rotation: gizmoRotation),
+                       let ray = modelRay(proj, at: v.location) {
+                        gizmoActiveId = gizmoActiveIdValue(hit)
+                        gizmoDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit),
+                                                        startCenter: mp.center, startAxis: mp.axis,
+                                                        grab: ray, viewDir: ray.dir)
+                        ClearanceHaptics.grab()
+                    } else {
+                        gizmoBoxOrbiting = true
+                    }
+                    gizmoBoxDragLast = v.location
+                }
+                if gizmoBoxOrbiting {
+                    let last = gizmoBoxDragLast ?? v.startLocation
+                    cameraModel.orbit(dx: Float(v.location.x - last.x), dy: Float(v.location.y - last.y))
+                    gizmoBoxDragLast = v.location
+                    return
+                }
+                guard let drag = gizmoDrag, let ray = modelRay(proj, at: v.location) else { return }
+                let out = drag.resolve(currentRay: ray)
+                let labels = project.moveManualPrimitive(id: mp.id, in: gid, to: out.center, snap: gizmoSnap)
+                if labels != gizmoSnapLabels {
+                    if !labels.isEmpty { ClearanceHaptics.detent() }
+                    gizmoSnapLabels = labels
+                }
+            }
+            .onEnded { _ in
+                let wasDragging = gizmoDrag != nil
+                gizmoDrag = nil
+                gizmoBoxOrbiting = false
+                gizmoBoxDragLast = nil
+                gizmoActiveId = -1
+                gizmoSnapLabels = []
+                if wasDragging { ClearanceHaptics.release() }
+            }
     }
 
     /// COPY (duplicate, G6), the snap OVERRIDE toggle (the magnet), and dismiss.
@@ -1662,15 +1736,6 @@ public struct WorkspacePlaceholder: View {
         gizmoTarget = GizmoTarget(group: gid, id: id)
     }
 
-    /// The gizmo's model-space size — scaled off the primitive AND the model so the handles
-    /// sit clear of a small bolt yet don't dwarf a large part.
-    private func gizmoLength(_ mp: ManualPrimitive) -> Double {
-        let base = mp.kind == .bolt ? Swift.max(mp.radiusMM, mp.halfLengthMM)
-                                    : Swift.max(mp.halfUMM, mp.halfWMM)
-        let modelR = Double(viewerMesh?.bounds.radius ?? 1)
-        return Swift.max(base * 1.8, modelR * 0.18)
-    }
-
     /// Turn a stage touch into a MODEL-space ray: the camera ray (settled world) inverse-settled
     /// back into the frame the primitive is stored in, so `PrimitiveGizmo` runs in one frame and
     /// the result is stored directly (no post-hoc transform).
@@ -1683,43 +1748,6 @@ public struct WorkspacePlaceholder: View {
         return PrimitiveGizmo.Ray(origin: SIMD3<Double>(o), dir: SIMD3<Double>(d))
     }
 
-    /// One gizmo handle's drag: build the grab context on the first frame (captured into
-    /// `@State` so it survives the drag's body churn), resolve each frame through the pure
-    /// math, and COMMIT through the existing `moveManualPrimitive` / `rotateManualPrimitive`
-    /// (which arm the SAME UndoHistory + refresh the sidecar — G3/G4). Haptics on grab /
-    /// release / detent; the snap labels drive the "Snapped to" badge.
-    private func gizmoDragGesture(_ handle: PrimitiveGizmo.Handle, id: String,
-                                  group gid: UUID, mp: ManualPrimitive) -> some Gesture {
-        DragGesture(minimumDistance: 1, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
-            .onChanged { v in
-                guard let proj = projection, let ray = modelRay(proj, at: v.location) else { return }
-                if draggingGizmoHandle != id {
-                    draggingGizmoHandle = id
-                    gizmoDrag = PrimitiveGizmo.Drag(handle: handle, startCenter: mp.center,
-                                                    startAxis: mp.axis, grab: ray, viewDir: ray.dir)
-                    ClearanceHaptics.grab()
-                }
-                guard let drag = gizmoDrag else { return }
-                let out = drag.resolve(currentRay: ray)
-                let labels: [String]
-                if case .rotate = handle {
-                    labels = project.rotateManualPrimitive(id: mp.id, in: gid, to: out.axis, snap: gizmoSnap)
-                } else {
-                    labels = project.moveManualPrimitive(id: mp.id, in: gid, to: out.center, snap: gizmoSnap)
-                }
-                if labels != gizmoSnapLabels {
-                    if !labels.isEmpty { ClearanceHaptics.detent() }
-                    gizmoSnapLabels = labels
-                }
-            }
-            .onEnded { _ in
-                draggingGizmoHandle = nil
-                gizmoDrag = nil
-                gizmoSnapLabels = []
-                ClearanceHaptics.release()
-            }
-    }
-
     /// A round blue liquid-glass gizmo knob (the app's gizmo material — 109's blue frost),
     /// with a generous ~48 pt hit target so a fingertip owns it over the orbit camera.
     @ViewBuilder private func gizmoCircleKnob(active: Bool, size: CGFloat,
@@ -1730,17 +1758,6 @@ public struct WorkspacePlaceholder: View {
                          in: Circle(), specular: active ? 1.3 : 1)
             .shadow(color: DS.Color.accent.color.opacity(0.5), radius: 4)
             .contentShape(Circle().inset(by: -12))
-    }
-
-    /// A square gizmo knob (the plane-translate handle), same material as the round one.
-    @ViewBuilder private func gizmoSquareKnob(active: Bool, size: CGFloat,
-                                              @ViewBuilder glyph: () -> some View) -> some View {
-        glyph()
-            .frame(width: size, height: size)
-            .liquidGlass(LiquidGlass.Tint.frost(DS.Color.accent, intensity: active ? 0.85 : 0.55),
-                         in: RoundedRectangle(cornerRadius: 6), specular: active ? 1.3 : 1)
-            .shadow(color: DS.Color.accent.color.opacity(0.5), radius: 4)
-            .contentShape(RoundedRectangle(cornerRadius: 6).inset(by: -12))
     }
 
     // MARK: left Selections panel (design) with the kg/lbs toggle
