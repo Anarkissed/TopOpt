@@ -15,8 +15,12 @@
 //   • a centre HUB sphere (free move — the camera-facing plane);
 //   • three thick AXIS ARMS (shaft + solid conical arrowhead) along model +X/+Y/+Z
 //     (single-axis translate);
-//   • three quarter-circle ARCS welded between adjacent arms (the two-axis plane handles —
-//     the "arcs connecting the arrows" the reference shows).
+//   • three flat SQUARE PLATES in the principal planes (two-axis / plane translate — the
+//     "Squares · slide in that plane" the reference shows), ATTACHED to the arms + hub;
+//   • three quarter-arc RIBBONS welded between adjacent arms (rotate about the ⟂ axis — the
+//     "Ribbons · rotate about the third axis" the reference shows).
+// Everything welds into ONE connected object. Two of the squares and two of the ribbons carry
+// the axis tints (X = red, Y = green); the rest stay the cube's blue.
 //
 // The render (`TransformGizmoMetal`) raymarches the same shape in its own small virtual
 // camera and floats it at the primitive's projected centre, rotated by the live view — so
@@ -54,15 +58,52 @@ public enum TransformGizmo {
         public var tip: Float = 1.0
         /// Arrowhead base radius (its widest point, at `shaftEnd`) — a slim crisp cone.
         public var headR: Float = 0.105
-        /// Radius of the quarter-arc that connects two adjacent arms.
-        public var arcR: Float = 0.52
-        /// In-plane half-width of the connecting arcs. The arcs are FLATTENED ribbons/plates
-        /// (thin out-of-plane, see the shader's squash) so they read as plane handles, clearly
-        /// distinct from the round axis shafts.
+
+        // SQUARE plane handles (two-axis / planar translate) — a flat frosted SQUARE plate in
+        // each principal plane, the "Squares · slide in that plane" the reference design shows.
+        // The plate is ATTACHED (render inner = 0): its two inner edges run ALONG the arms and
+        // its corner meets the hub, so the whole manipulator welds into ONE connected object
+        // (maintainer round 4: "connected as a single object, not floating").
+
+        /// Render near edge of the square (0 → the inner edges lie on the arms → attached).
+        public var plateInner: Float = 0.0
+        /// Far edge of the square. Kept SMALL enough that the square's far CORNER (outer·√2)
+        /// clears the rotation ribbon's inner edge (`arcR − arcTube`) with margin, so the plate
+        /// never cuts into a ribbon. (0.46·√2 ≈ 0.65 < 0.76 − 0.05 = 0.71.)
+        public var plateOuter: Float = 0.46
+        /// Out-of-plane half-thickness of the plate (a thin flat slab, not a rod).
+        public var plateHalfThick: Float = 0.03
+        /// PICK-only near edge of the square: the plane grab starts where the axis grab zone
+        /// ends (`armPickR`), so a tap near an arm grabs the AXIS and one out in the quadrant
+        /// grabs the PLANE — even though the drawn plate reaches all the way in to the arm.
+        public var platePickInner: Float = 0.19
+
+        // ROTATION ribbons (rotate about an axis) — a flattened quarter-arc PLATE welded between
+        // two adjacent arms, the "Ribbons · rotate about the third axis" the reference shows.
+        // Restored in round 4 (the maintainer wants rotation): grabbing a ribbon rotates the
+        // primitive about the axis ⟂ that ribbon's plane. Sits OUTSIDE the squares, connecting
+        // the arms near the arrowheads, so it reads as an arc, not a translate quad.
+        /// Radius of the quarter-arc ribbon (out near the arrowhead bases, connecting two arms).
+        public var arcR: Float = 0.76
+        /// In-plane half-width of the ribbon — a thin curved PLATE (flattened out-of-plane in
+        /// the shader), clearly distinct from the round axis rods.
         public var arcTube: Float = 0.05
+
         /// Weld softness between the unioned parts — TINY, so the arms/arrowheads read as
         /// crisp straight geometry, not melted blobs.
         public var weld: Float = 0.01
+
+        // TOUCH grab radii. The pick tests FAT capsules/spheres so a fingertip lands the handle
+        // even though the drawn glass is slim — the grab zone is INVISIBLE, it never changes the
+        // look. Sized together with `WorkspacePlaceholder.gizmoBoxSize` so every handle's
+        // on-screen touch target is finger-sized (the point-size math is asserted in
+        // TransformGizmoTests.testTouchTargetsAreFingerSized).
+        /// Fat pick radius for the axis arms (perpendicular grab half-width).
+        public var armPickR: Float = 0.19
+        /// Fat pick radius for the free-move hub sphere.
+        public var hubPickR: Float = 0.19
+        /// Fat pick half-width for the rotation ribbons (added to `arcTube`).
+        public var arcPickPad: Float = 0.06
 
         /// Virtual camera the render + pick share (matches the shader's projection).
         public var fov: Float = 36          // vertical FOV (degrees)
@@ -72,13 +113,16 @@ public enum TransformGizmo {
         public static let standard = Constants()
     }
 
-    /// What a tap resolved to — a translate handle, or nil (missed the glass).
+    /// What a tap resolved to — a handle, or nil (missed the glass).
     public enum Hit: Equatable, Sendable {
         /// Single-axis translate along model axis `axis` (0 = X, 1 = Y, 2 = Z).
         case axis(Int)
         /// Two-axis translate in a principal plane (0 = XY→normal Z, 1 = YZ→normal X,
         /// 2 = ZX→normal Y) — the same (pair → normal) mapping as `PrimitiveGizmo`.
         case plane(Int)
+        /// Rotate about the axis ⟂ ribbon-plane `pl` (0 = XY→about Z, 1 = YZ→about X,
+        /// 2 = ZX→about Y). The rotation axis is `planeNormals[pl]`.
+        case rotate(Int)
         /// Free translate (the centre hub) — the camera-facing plane.
         case free
     }
@@ -87,7 +131,9 @@ public enum TransformGizmo {
     public static let axisVectors: [SIMD3<Double>] = [
         SIMD3(1, 0, 0), SIMD3(0, 1, 0), SIMD3(0, 0, 1),
     ]
-    /// Plane-handle normals, indexed the same as `Hit.plane` (0 = Z, 1 = X, 2 = Y).
+    /// Plane-handle normals, indexed the same as `Hit.plane`/`Hit.rotate` (0 = Z, 1 = X, 2 = Y).
+    /// For a plane square this is the slide-plane normal; for a rotation ribbon it is the axis
+    /// the ribbon spins the primitive about.
     public static let planeNormals: [SIMD3<Double>] = [
         SIMD3(0, 0, 1), SIMD3(1, 0, 0), SIMD3(0, 1, 0),
     ]
@@ -125,18 +171,25 @@ public enum TransformGizmo {
             best = t; hit = h
         }
 
-        // Arms (axis) — a capsule from the hub out to the arrowhead tip, radius widened toward
-        // the head so the arrowhead is easy to grab.
+        // Arms (axis) — a FAT capsule (radius `armPickR`, invisible) from the hub out to the
+        // arrowhead tip, so the slim drawn shaft is still an easy finger target.
         for i in 0..<3 {
             let e = SIMD3<Float>(Float(i == 0 ? 1 : 0), Float(i == 1 ? 1 : 0), Float(i == 2 ? 1 : 0))
-            let t = raySegment(ro, rd, a: e * (c.hubR * 0.5), b: e * c.tip,
-                               r: Swift.max(c.armR, c.headR * 0.72))
+            let t = raySegment(ro, rd, a: e * (c.hubR * 0.5), b: e * c.tip, r: c.armPickR)
             consider(t, .axis(i))
         }
 
-        // Arcs (plane) — sample only the MIDDLE of each quarter-arc (its diagonal bulge), NOT
-        // the ends: the arc endpoints sit on the axes atop the arm shafts, so testing them
-        // would steal shaft taps for the plane handle. You grab a plane by its diagonal.
+        // Plane SQUARES — a tap whose ray pierces the plate's plane inside its
+        // [platePickInner, plateOuter]² square (in the +,+ quadrant) grabs that plane handle.
+        // The pick starts at `platePickInner` (not the drawn `plateInner` = 0), so a tap out in
+        // the quadrant is a PLANE grab while a tap near an arm falls to the AXIS above.
+        for pl in 0..<3 {
+            consider(rayPlate(ro, rd, plane: pl, c: c), .plane(pl))
+        }
+
+        // ROTATION ribbons — sample only the MIDDLE of each quarter-arc (its diagonal bulge),
+        // NOT the ends: the arc endpoints sit on the axes atop the arm shafts, so testing them
+        // would steal shaft taps. You grab a ribbon by its diagonal; grabbing it ROTATES.
         for pl in 0..<3 {
             var t: Float? = nil
             let steps = 6
@@ -144,22 +197,22 @@ public enum TransformGizmo {
             for k in 1...steps {
                 let s = 0.20 + 0.60 * Float(k) / Float(steps)
                 let cur = arcPoint(plane: pl, s: s, c: c)
-                if let seg = raySegment(ro, rd, a: prev, b: cur, r: c.arcTube + 0.045) {
+                if let seg = raySegment(ro, rd, a: prev, b: cur, r: c.arcTube + c.arcPickPad) {
                     if t == nil || seg < t! { t = seg }
                 }
                 prev = cur
             }
-            consider(t, .plane(pl))
+            consider(t, .rotate(pl))
         }
 
         // Hub as a normal (lowest-priority) candidate too, so a tap on the hub surface that
         // isn't dead-centre still reads as free when it's the nearest thing.
-        consider(raySphere(ro, rd, r: c.hubR + c.armR * 0.5), .free)
+        consider(raySphere(ro, rd, r: c.hubPickR), .free)
         return hit
     }
 
-    /// A point on plane `pl`'s quarter-arc at parameter `s` ∈ [0, 1] (0 at the first axis,
-    /// 1 at the second). Mirrors the shader's `sdTorusQ` placement.
+    /// A point on ribbon-plane `pl`'s quarter-arc at parameter `s` ∈ [0, 1] (0 at the first
+    /// axis, 1 at the second), radius `arcR`. Mirrors the shader's `sdArc` centreline.
     private static func arcPoint(plane pl: Int, s: Float, c: Constants) -> SIMD3<Float> {
         let a = s * (.pi / 2), ca = cosf(a) * c.arcR, sa = sinf(a) * c.arcR
         switch pl {
@@ -167,6 +220,34 @@ public enum TransformGizmo {
         case 1:  return SIMD3(0, ca, sa)        // YZ: +Y → +Z
         default: return SIMD3(sa, 0, ca)        // ZX: +Z → +X
         }
+    }
+
+    /// Ray vs the square plane handle for plane `pl` (0 = XY → +X,+Y; 1 = YZ → +Y,+Z;
+    /// 2 = ZX → +Z,+X). Intersect the ray with the plate's coordinate plane, then require the
+    /// two in-plane coordinates to fall inside the [inner, outer] square (padded by the plate's
+    /// half-thickness so a near-miss on the slab still grabs). Returns the ray parameter, or nil.
+    private static func rayPlate(_ ro: SIMD3<Float>, _ rd: SIMD3<Float>, plane pl: Int,
+                                 c: Constants) -> Float? {
+        // (normal axis n; the two in-plane axes u, v).
+        let n: Int, u: Int, v: Int
+        switch pl {
+        case 0:  (n, u, v) = (2, 0, 1)     // XY plane, normal Z
+        case 1:  (n, u, v) = (0, 1, 2)     // YZ plane, normal X
+        default: (n, u, v) = (1, 2, 0)     // ZX plane, normal Y
+        }
+        let rdn = rd[n]
+        guard abs(rdn) > 1e-6 else { return nil }      // ray parallel to the plate → no hit
+        let t = -ro[n] / rdn
+        guard t > 0 else { return nil }
+        let p = ro + rd * t
+        let lo = c.platePickInner, hi = c.plateOuter + c.plateHalfThick
+        guard p[u] >= lo, p[u] <= hi, p[v] >= lo, p[v] <= hi else { return nil }
+        // Cap the plate's far diagonal corner to INSIDE the rotation ribbon's inner edge, so a
+        // tap on the ribbon's diagonal grabs ROTATE, not the plane. (The drawn plate may weld
+        // into the ribbon — that's the one connected object — but the two never share a grab.)
+        let rr = sqrtf(p[u] * p[u] + p[v] * p[v])
+        guard rr <= c.arcR - (c.arcTube + c.arcPickPad) else { return nil }
+        return t
     }
 
     /// Ray/sphere-at-origin: nearest positive entry parameter, or nil.

@@ -5,9 +5,11 @@
 // blend) so the transform gizmo looks like it came from the same set as the orientation cube.
 //
 // The geometry is `TransformGizmo.Constants` (the ONE source; `TransformGizmo.pick` reads the
-// same numbers on the CPU). The shape is translate-only: a hub sphere, three axis arms
-// (shaft + conical arrowhead) and three quarter-arcs welded between adjacent arms. `activeId`
-// glows the grabbed handle (0 = hub/free, 1…3 = arms X/Y/Z, 4…6 = arcs XY/YZ/ZX).
+// same numbers on the CPU). The full manipulator: a hub sphere (free move), three axis arms
+// (shaft + conical arrowhead — axis move), three flat SQUARE plates (plane move) and three
+// quarter-arc RIBBONS (rotate about the ⟂ axis), all welded into one object. `activeId` glows
+// the grabbed handle (0 = hub/free, 1…3 = arms X/Y/Z, 4…6 = squares XY/YZ/ZX,
+// 7…9 = ribbons XY/YZ/ZX).
 //
 // Unlike the orientation cube this gizmo does NOT idle-float or wobble — it is ATTACHED to a
 // primitive, so it holds still and only redraws when the view orientation changes (orbit) or
@@ -117,6 +119,9 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
         constant float SHEND  = \(f(c.shaftEnd));
         constant float TIP    = \(f(c.tip));
         constant float HEADR  = \(f(c.headR));
+        constant float PLIN   = \(f(c.plateInner));
+        constant float PLOUT  = \(f(c.plateOuter));
+        constant float PLTH   = \(f(c.plateHalfThick));
         constant float ARCR   = \(f(c.arcR));
         constant float ARCT   = \(f(c.arcTube));
         constant float WELD   = \(f(c.weld));
@@ -150,9 +155,27 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
             float s = (cbx < 0.0 && cay < 0.0) ? -1.0 : 1.0;
             return s * sqrt(min(cax * cax + cay * cay * baba, cbx * cbx + cby * cby * baba));
         }
-        // Quarter arc welded between two adjacent arms (plane pl: 0=XY,1=YZ,2=ZX), as a
-        // FLATTENED ribbon: normal in-plane width, squashed out-of-plane so it reads as a thin
-        // curved PLATE (a plane handle), not another round rod like the axes.
+        static inline float sdBox(float3 p, float3 b){
+            float3 q = abs(p) - b;
+            return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+        }
+        // Flat SQUARE plate = the two-axis (plane) translate handle (plane pl: 0=XY,1=YZ,2=ZX).
+        // A thin slab spanning the [PLIN,PLOUT] square in the +,+ quadrant of its plane, thin
+        // along the plane normal — a real box SDF (Lipschitz-1), so no candy-stripe artifact and
+        // it reads as a flat plate, clearly distinct from the round axis rods (and NOT an arc,
+        // which would read as rotation).
+        static float sdPlate(float3 p, int pl){
+            float mid = 0.5 * (PLIN + PLOUT);
+            float hs = 0.5 * (PLOUT - PLIN);        // half-side (NB: `half` is an MSL type)
+            float3 cen, b;
+            if (pl == 0)      { cen = float3(mid, mid, 0.0); b = float3(hs, hs, PLTH); }
+            else if (pl == 1) { cen = float3(0.0, mid, mid); b = float3(PLTH, hs, hs); }
+            else              { cen = float3(mid, 0.0, mid); b = float3(hs, PLTH, hs); }
+            return sdBox(p - cen, b);
+        }
+        // Quarter-arc RIBBON (rotate handle) welded between two adjacent arms (plane pl:
+        // 0=XY,1=YZ,2=ZX), as a FLATTENED ribbon: in-plane radial width, squashed out-of-plane
+        // so it reads as a thin curved PLATE, distinct from the round rods and the flat squares.
         static float sdArc(float3 p, int pl){
             float2 cc; float zz;
             if (pl == 0) { cc = p.xy; zz = p.z; }
@@ -171,27 +194,31 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
             return d;
         }
 
-        // Per-part distances: [0]=hub, [1..3]=arms X/Y/Z, [4..6]=arcs.
-        static void parts(float3 p, thread float (&dp)[7]){
+        // Per-part distances: [0]=hub, [1..3]=arms X/Y/Z, [4..6]=plates XY/YZ/ZX,
+        // [7..9]=ribbons XY/YZ/ZX (rotation).
+        static void parts(float3 p, thread float (&dp)[10]){
             dp[0] = sdSphere(p, HUBR);
             float3 ex = float3(1,0,0), ey = float3(0,1,0), ez = float3(0,0,1);
             dp[1] = min(sdCap(p, ex*HUBR*0.4, ex*SHEND, ARMR), sdCone(p, ex*SHEND, ex*TIP, HEADR, 0.012));
             dp[2] = min(sdCap(p, ey*HUBR*0.4, ey*SHEND, ARMR), sdCone(p, ey*SHEND, ey*TIP, HEADR, 0.012));
             dp[3] = min(sdCap(p, ez*HUBR*0.4, ez*SHEND, ARMR), sdCone(p, ez*SHEND, ez*TIP, HEADR, 0.012));
-            dp[4] = sdArc(p, 0);
-            dp[5] = sdArc(p, 1);
-            dp[6] = sdArc(p, 2);
+            dp[4] = sdPlate(p, 0);
+            dp[5] = sdPlate(p, 1);
+            dp[6] = sdPlate(p, 2);
+            dp[7] = sdArc(p, 0);
+            dp[8] = sdArc(p, 1);
+            dp[9] = sdArc(p, 2);
         }
         static float mapF(float3 p){
-            float dp[7]; parts(p, dp);
+            float dp[10]; parts(p, dp);
             float d = dp[0];
-            for (int i = 1; i < 7; i++) d = sminf(d, dp[i], WELD);
+            for (int i = 1; i < 10; i++) d = sminf(d, dp[i], WELD);
             return d;
         }
         static int nearestPart(float3 p){
-            float dp[7]; parts(p, dp);
+            float dp[10]; parts(p, dp);
             float m = dp[0]; int mi = 0;
-            for (int i = 1; i < 7; i++) if (dp[i] < m) { m = dp[i]; mi = i; }
+            for (int i = 1; i < 10; i++) if (dp[i] < m) { m = dp[i]; mi = i; }
             return mi;
         }
         static float3 calcNormal(float3 p){
@@ -229,23 +256,25 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
             float ndv = clamp(dot(nW, vW), 0.0, 1.0);
             float fres = pow(1.0 - ndv, 2.6);
 
-            // The SAME liquid-glass material + opacity as the corner Position cube (deep frosted
-            // body, cool inner haze + soft core glow, a bright fresnel rim, a top reflection band
-            // and crisp speculars, translucent so the scene reads through). Two AXES carry a
-            // subtle colour cast — X = red, Y = green — while Z, the arcs and the hub keep the
-            // cube's blue; the frost/rim/opacity are identical, so the tints are a gentle hue
-            // shift, not a different material.
+            // The SAME liquid-glass material as the corner Position cube (deep frosted body, cool
+            // inner haze + soft core glow, a bright fresnel rim, a top reflection band and crisp
+            // speculars) — MORE OPAQUE than the cube so it reads as a control. Axis colour by
+            // part: X = red, Y = green, Z = blue; the plane SQUARE and the rotation RIBBON share
+            // their plane's axis colour (YZ → red, ZX → green, XY → blue), so two of the squares
+            // and two of the ribbons are tinted like the arrows and the rest stay blue.
             int pid = nearestPart(pos);
+            bool isRed   = (pid == 1 || pid == 5 || pid == 8);   // X arm · YZ square · YZ ribbon
+            bool isGreen = (pid == 2 || pid == 6 || pid == 9);   // Y arm · ZX square · ZX ribbon
             float3 bodyC, hazeC, rimC;
-            if (pid == 1) {            // X arm + arrowhead → red
+            if (isRed) {
                 bodyC = float3(0.150, 0.048, 0.052);
                 hazeC = float3(0.86, 0.44, 0.42);
                 rimC  = float3(1.00, 0.70, 0.68);
-            } else if (pid == 2) {     // Y arm + arrowhead → green
+            } else if (isGreen) {
                 bodyC = float3(0.050, 0.135, 0.062);
                 hazeC = float3(0.46, 0.86, 0.50);
                 rimC  = float3(0.70, 1.00, 0.74);
-            } else {                   // Z arm, arcs, hub → the cube's blue
+            } else {                   // Z arm · XY square · XY ribbon · hub → the cube's blue
                 bodyC = float3(0.038, 0.065, 0.135);
                 hazeC = float3(0.34, 0.52, 0.86);
                 rimC  = float3(0.60, 0.78, 1.00);
@@ -269,9 +298,11 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
             float hov = (abs(float(pid) - U.uActive) < 0.5) ? 1.0 : 0.0;
             col = mix(col, float3(1.0), hov * 0.28);
 
-            // Cube-matched opacity: translucent body, firming at the rim + speculars.
-            float a = 0.22 + fres * 0.50 + haze * 0.32 + (s1 + s2) * 0.5 + band * 0.30 + hov * 0.15;
-            a = clamp(a, 0.0, 0.86);
+            // Opacity — firmer than the cube (round-3 ask). A solid frosted body so the gizmo
+            // reads as a control you reach for, still firming further at the rim + speculars and
+            // letting a little of the scene through.
+            float a = 0.46 + fres * 0.42 + haze * 0.30 + (s1 + s2) * 0.5 + band * 0.26 + hov * 0.14;
+            a = clamp(a, 0.0, 0.97);
             return float4(col * a, a);
         }
         """
