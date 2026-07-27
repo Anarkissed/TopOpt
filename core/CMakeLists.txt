@@ -53,6 +53,32 @@ add_library(topopt
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
+# Assertions must survive the build type (handoff 2026-07-26-ndebug-assertions).
+# The Release, RelWithDebInfo and MinSizeRel configs all append -DNDEBUG to the
+# compile line, which compiles out EVERY assert() in the library — including the
+# draft-quality tolerance-parity guards in src/simp/simp.cpp and
+# src/simp/minimize_plastic.cpp that keep a loosened "draft" solve from ever
+# certifying a design's compliance or stress margin. A correct-looking
+# `-DCMAKE_BUILD_TYPE=Release` build would silently disarm those guards while
+# still compiling, testing and shipping green. We refuse to gate that protection
+# on the caller's build type, so we undefine NDEBUG on the topopt target itself.
+#
+# This is deliberately a target compile OPTION, not a compile DEFINITION: CMake
+# emits -D definitions BEFORE the per-config flags but appends target options
+# AFTER them, so a trailing -UNDEBUG reliably wins over the config's -DNDEBUG.
+# PRIVATE: it scopes to the library's own translation units (where every one of
+# the six asserts lives) and does not leak onto consumers of the topopt target.
+#
+# Cost: all six asserts are per-optimize-call (the two finalize/certification
+# solves in simp.cpp) or per-ladder-rung (the four in minimize_plastic.cpp);
+# none sits in the per-iteration CG or per-element inner loops, so keeping them
+# live is not measurable against solver time.
+if(MSVC)
+  target_compile_options(topopt PRIVATE /UNDEBUG)
+else()
+  target_compile_options(topopt PRIVATE -UNDEBUG)
+endif()
+
 # The matrix-free FEA apply (src/fea/matfree.cpp) threads its element loop over a
 # persistent std::thread worker pool, so the library depends on the platform
 # threading runtime. PUBLIC so executables linking the static topopt inherit the
