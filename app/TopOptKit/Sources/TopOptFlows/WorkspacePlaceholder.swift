@@ -79,13 +79,15 @@ public struct WorkspacePlaceholder: View {
     // DEFECT 2 — the manual-primitive TRANSFORM GIZMO. `gizmoTarget` is the primitive the
     // gizmo is attached to (nil = no gizmo shown). `gizmoDrag` captures the grab context of
     // the handle currently being dragged (a value type on @State so it survives the
-    // body-update churn a live drag causes). `gizmoSnap` is the magnet (detents) OVERRIDE
-    // toggle; `gizmoSnapLabels` surfaces what the last drag frame snapped to.
+    // body-update churn a live drag causes). `gizmoSnap` keeps the magnetic detents ON (round 3
+    // removed the crosshair toggle, not the snapping); `gizmoSnapLabels` surfaces what the last
+    // drag frame snapped to.
     @State private var gizmoTarget: GizmoTarget?
     @State private var gizmoDrag: PrimitiveGizmo.Drag?
     @State private var gizmoSnap = true
     @State private var gizmoSnapLabels: [String] = []
-    /// The raymarched gizmo's glowing handle (0 = hub/free, 1…3 = arms X/Y/Z, 4…6 = arcs), or -1.
+    /// The raymarched gizmo's glowing handle (0 = hub/free, 1…3 = arms X/Y/Z, 4…6 = plane squares,
+    /// 7…9 = rotation ribbons XY/YZ/ZX), or -1.
     @State private var gizmoActiveId: Float = -1
     /// True while a drag that started on empty gizmo-box space is orbiting the camera.
     @State private var gizmoBoxOrbiting = false
@@ -1572,8 +1574,9 @@ public struct WorkspacePlaceholder: View {
 
     /// The transform-gizmo overlay. For the active group, each unselected manual primitive
     /// shows a small SELECT knob; the selected one (`gizmoTarget`) shows the full connected
-    /// gizmo (`gizmoHandles`) — three axis arrows, plane plates and a free-move hub, plus the
-    /// COPY / snap / dismiss cluster. TRANSLATE ONLY: there are no rotation controls.
+    /// gizmo (`gizmoHandles`) — three axis arrows (axis move), three square plates (plane move),
+    /// three rotation ribbons (rotate about the ⟂ axis) and a free-move hub, plus the
+    /// COPY / snap / dismiss cluster.
     ///
     /// Camera non-fighting (G4): every hit target binds its gesture to the SIZED view BEFORE
     /// `.position` (the clearance-handle rule), so a touch on a control owns the drag and
@@ -1606,8 +1609,9 @@ public struct WorkspacePlaceholder: View {
     /// gizmo is built, so the two read as one set. Take 1's flat 2D path was rejected: it
     /// looked like squashed rectangles, grew seam lines/holes, and lost half of itself at some
     /// angles. This renders `TransformGizmo`'s SDF (hub + three axis arms with arrowheads +
-    /// three quarter-arcs welded between adjacent arms) in Metal, with real depth, translucency
-    /// and a lit rim, floating at the primitive's projected centre and rotating with the view.
+    /// three flat SQUARE plane plates + three rotation ribbons) in Metal, with real depth,
+    /// translucency and a lit rim, floating at the primitive's projected centre and rotating
+    /// with the view.
     ///
     /// The glass itself is a non-interactive `TransformGizmoMetalView`. A same-size transparent
     /// box captures the drag: on grab it SDF-picks the handle (`TransformGizmo.pick`); a hit
@@ -1646,10 +1650,14 @@ public struct WorkspacePlaceholder: View {
         #endif
     }
 
-    /// The gizmo's square overlay footprint (pt). Sized so the manipulator reads as a compact,
-    /// professional widget (not oversized), while the SDF pick's fat capsules keep the arms,
-    /// arrowheads, hub and arcs grabbable on touch; empty box space orbits.
-    static let gizmoBoxSize: CGFloat = 150
+    /// The gizmo's square overlay footprint (pt). This is the SINGLE size knob: it scales the
+    /// Metal render AND the CPU pick together (both read it), so the drawn glass and the grab
+    /// geometry can't diverge. Enlarged to 330 (round 4 packs in the rotation ribbons too) so the
+    /// manipulator reads as a control you reach for; with the fat pick radii in
+    /// `TransformGizmo.Constants` the touch targets are ≈ 48 pt arms, ≈ 48 pt hub, ≈ 34 pt plane
+    /// squares (kept small so they clear the ribbons) and long ribbon bands (asserted in
+    /// `TransformGizmoTests`). Empty box space orbits.
+    static let gizmoBoxSize: CGFloat = 330
 
     /// The model→world settle rotation as a matrix (identity when the part isn't settled), so
     /// the gizmo's arms line up with the model axes exactly as the viewer draws them.
@@ -1664,6 +1672,7 @@ public struct WorkspacePlaceholder: View {
         case .free:            return 0
         case .axis(let i):     return Float(1 + i)
         case .plane(let p):    return Float(4 + p)
+        case .rotate(let p):   return Float(7 + p)
         }
     }
 
@@ -1672,6 +1681,7 @@ public struct WorkspacePlaceholder: View {
         case .free:            return .free
         case .axis(let i):     return .axis(TransformGizmo.axisVectors[i])
         case .plane(let p):    return .plane(TransformGizmo.planeNormals[p])
+        case .rotate(let p):   return .rotate(TransformGizmo.planeNormals[p])
         }
     }
 
@@ -1708,7 +1718,14 @@ public struct WorkspacePlaceholder: View {
                 }
                 guard let drag = gizmoDrag, let ray = modelRay(proj, at: v.location) else { return }
                 let out = drag.resolve(currentRay: ray)
-                let labels = project.moveManualPrimitive(id: mp.id, in: gid, to: out.center, snap: gizmoSnap)
+                // A ribbon ROTATES (writes the axis, centre fixed); every other handle
+                // TRANSLATES (writes the centre, axis fixed). Same detent-magnet toggle both ways.
+                let labels: [String]
+                if case .rotate = drag.handle {
+                    labels = project.rotateManualPrimitive(id: mp.id, in: gid, to: out.axis, snap: gizmoSnap)
+                } else {
+                    labels = project.moveManualPrimitive(id: mp.id, in: gid, to: out.center, snap: gizmoSnap)
+                }
                 if labels != gizmoSnapLabels {
                     if !labels.isEmpty { ClearanceHaptics.detent() }
                     gizmoSnapLabels = labels
@@ -1746,14 +1763,9 @@ public struct WorkspacePlaceholder: View {
                 }
             }.buttonStyle(.plain).accessibilityLabel("Copy primitive")
 
-            Button { gizmoSnap.toggle() } label: {
-                gizmoCircleKnob(active: gizmoSnap, size: 26) {
-                    Image(systemName: "scope").font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.white.opacity(gizmoSnap ? 1 : 0.4))
-                }
-            }.buttonStyle(.plain)
-                .accessibilityLabel(gizmoSnap ? "Magnetic snapping on" : "Magnetic snapping off")
-
+            // (Round 3 removed the `scope` crosshair toggle here: it read as an aiming/re-centre
+            // control and confused the maintainer. Magnetic detents are UNCHANGED — they stay ON
+            // (`gizmoSnap` below), just without the misleading crosshair button.)
             Button { gizmoTarget = nil } label: {
                 gizmoCircleKnob(active: false, size: 26) {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
