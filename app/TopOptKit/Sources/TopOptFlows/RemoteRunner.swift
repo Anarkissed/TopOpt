@@ -594,6 +594,14 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                        "mesh_prefix": "variant",
                        "smooth_factor": Self.smoothExportFactor],
         ]
+        // The true source format when `model` is a working copy in another format
+        // (a 3MF normalised to STL at import, handoff 2026-07-26-3mf-optimize-path).
+        // The worker echoes it into run_info so the record names the real source even
+        // though it imported an STL. Omitted for a plain STL/STEP part, so those jobs
+        // are byte-identical to before (the CLI derives "stl"/"step" from the model).
+        if !request.sourceFormat.isEmpty {
+            job["source_format"] = request.sourceFormat
+        }
         // The human-facing project name is NOT put in job.json (handoff 129): it is a
         // worker-level label, not a physics input, and the CLI's job schema is strict
         // (`reject_unknown_keys` — a stray "project" key fails the run ON A DEVICE). It

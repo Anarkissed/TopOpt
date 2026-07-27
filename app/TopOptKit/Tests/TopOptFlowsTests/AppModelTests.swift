@@ -190,6 +190,93 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(m.importedFile?.faceCount, 6)
     }
 
+    // A 3MF import is NORMALISED to an STL working copy — even in millimetres —
+    // so the optimize path (bridge AND worker) never re-parses 3MF (handoff
+    // 2026-07-26-3mf-optimize-path). This drives the REAL bridge on the committed
+    // plate_bore.3mf, so it fails if the macOS slice lacks lib3mf (== the iOS slice
+    // path the iPad runs). The provenance survives: the model file is .stl, but the
+    // display name and `sourceFormat` still say 3MF, and the run request carries it.
+    func testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance() throws {
+        let threeMF = Self.core("tests/fixtures/mesh/plate_bore.3mf")
+        let m = realModel()
+        m.loadMaterials()
+        m.pickedFile(atPath: threeMF, displayName: "plate_bore.3mf")
+        // A real 3MF parse happened (needs lib3mf in this slice) → unit prompt, no refusal.
+        XCTAssertNil(m.importRefusal, "3MF should parse; refusal means the slice has no lib3mf")
+        XCTAssertNotNil(m.pendingUnitPrompt)
+
+        XCTAssertTrue(m.resolveUnits(.millimetres))
+        let file = try XCTUnwrap(m.importedFile)
+        // The working file the optimize path reads is STL, NOT the .3mf.
+        XCTAssertEqual((file.path as NSString).pathExtension.lowercased(), "stl",
+                       "3MF must be normalised to an STL working copy")
+        XCTAssertNotEqual(file.path, threeMF)
+        // Provenance is preserved for run_info + the UI.
+        XCTAssertEqual(file.name, "plate_bore.3mf")
+        XCTAssertEqual(file.sourceFormat, "3mf")
+        XCTAssertTrue(file.watertight)
+        // The STL working copy re-imports cleanly with the same manufactured faces
+        // the 3MF gave (plate_bore has 7 pseudo-faces — see core test_3mf_import).
+        XCTAssertEqual(file.faceCount, 7)
+    }
+
+    // Reopening a persisted 3MF project re-imports the STL WORKING COPY, not the
+    // .3mf. The stored model is named model.stl (its actual content), so the reopen
+    // dispatches an STL reader — a model.3mf name would both mis-dispatch and fail on
+    // a lib3mf-less relaunch. The provenance (.3mf name, sourceFormat) survives the
+    // round-trip via originalFileName.
+    func testReopenedThreeMFProjectReimportsTheStlWorkingCopy() throws {
+        let threeMF = Self.core("tests/fixtures/mesh/plate_bore.3mf")
+        // Launch 1: import the 3MF (→ STL working copy), enter the workspace, persist.
+        let m1 = AppModel(materialsPath: Self.materialsPath, store: ProjectStore(rootDir: tempDir))
+        m1.loadMaterials()
+        m1.newTopOpt(); m1.selectMaterial("PLA")
+        m1.pickedFile(atPath: threeMF, displayName: "plate_bore.3mf")
+        XCTAssertTrue(m1.resolveUnits(.millimetres))
+        m1.continueToWorkspace()
+        let id = try XCTUnwrap(m1.project?.id)
+        m1.backHome()   // persists the snapshot + copies the model into the store
+
+        // Launch 2: reopen from disk.
+        let m2 = AppModel(materialsPath: Self.materialsPath, store: ProjectStore(rootDir: tempDir))
+        m2.loadMaterials()
+        let recent = try XCTUnwrap(m2.recentProjects.first { $0.id == id })
+        m2.open(recent)
+        let file = try XCTUnwrap(m2.project?.importedFile)
+        XCTAssertEqual((file.path as NSString).lastPathComponent, "model.stl",
+                       "the persisted model must be the STL working copy, not model.3mf")
+        XCTAssertEqual(file.name, "plate_bore.3mf")   // provenance display preserved
+        XCTAssertEqual(file.sourceFormat, "3mf")
+        XCTAssertTrue(file.watertight)
+        XCTAssertEqual(file.faceCount, 7)
+    }
+
+    // END TO END, on the ON-DEVICE path: import a real .3mf and OPTIMISE it through
+    // the same bridge entry the iPad's Optimize button calls (`run_minimize_plastic`).
+    // The import normalises 3MF → STL working copy, and the optimizer reads THAT — so
+    // the whole flow never re-parses 3MF, yet the part the user chose is a .3mf. This
+    // is the on-device half of the reported bug's fix (the worker half is the LAN
+    // worker E2E in the handoff). Real bridge + real optimizer, so it fails if either
+    // the slice's lib3mf or the mesh optimize path regresses.
+    func testThreeMFImportOptimisesOnDeviceEndToEnd() throws {
+        let threeMF = Self.core("tests/fixtures/mesh/plate_bore.3mf")
+        let rulesPath = Self.core("src/settings/rules.json")
+        let m = realModel()
+        m.loadMaterials()
+        m.pickedFile(atPath: threeMF, displayName: "plate_bore.3mf")
+        XCTAssertTrue(m.resolveUnits(.millimetres))
+        let file = try XCTUnwrap(m.importedFile)
+        XCTAssertEqual((file.path as NSString).pathExtension.lowercased(), "stl")
+
+        // The exact call RunModel makes for an on-device self-weight run, pointed at
+        // the STL working copy the 3MF was normalised to.
+        let outcome = try TopOptKit.minimizePlastic(
+            stlPath: file.path, material: "PLA",
+            materialsPath: Self.materialsPath, rulesPath: rulesPath, resolution: 32)
+        XCTAssertFalse(outcome.variants.isEmpty,
+                       "the on-device optimizer must produce variants for a normalised 3MF part")
+    }
+
     // Cancelling the unit question imports nothing and leaves no residue.
     func testCancellingTheUnitPromptImportsNothing() {
         let m = realModel()
