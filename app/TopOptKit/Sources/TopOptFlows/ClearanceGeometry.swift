@@ -45,6 +45,43 @@ public enum ClearanceSuggestion {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MARK: - The ONE resolved value behind a clearance metric (DEFECT 1 fix)
+
+/// A single clearance distance, resolved once: the user's explicit override (or
+/// nil for Auto) PLUS the geometry-derived Auto suggestion, so `resolved` is the
+/// exact number the run freezes and every UI surface must show.
+///
+/// DEFECT 1 (viewer/panel desync) was two numbers for one value: the Selections
+/// panel derived a manual bolt's Auto from the primitive's OWN radius (→ 9.14 mm),
+/// while the 3D-viewport chip derived it from a B-rep face lookup — and a MANUAL
+/// primitive has no B-rep face, so that lookup returned nil → 0 mm. A manual PLANE
+/// agreed only because its Auto is a constant (3 mm) needing no radius lookup.
+///
+/// The cure is this type: `ProjectModel.clearanceMetric(groupID:faceID:role:)`
+/// computes it ONCE (manual reads the primitive's stored geometry; auto reads the
+/// B-rep face), and BOTH the panel chip and the viewport chip read that one value.
+/// `ManualPrimitiveTests` asserts the two surfaces (and the rendered volume) can
+/// never diverge.
+public struct ClearanceMetric: Equatable, Sendable {
+    /// Which distance this is. `axial` covers both cylinder end-caps (one value).
+    public enum Role: Equatable, Sendable, CaseIterable { case margin, axial, slabDepth }
+
+    /// The user's explicit value (mm), or nil when the distance is Auto-derived.
+    public let override: Double?
+    /// The geometry-derived Auto suggestion (mm) — what `override == nil` resolves to.
+    public let auto: Double
+
+    public init(override: Double?, auto: Double) {
+        self.override = override
+        self.auto = auto
+    }
+
+    /// The value actually rendered and run: the override when set, else the Auto
+    /// suggestion. This is the single number the panel, the chip and the volume show.
+    public var resolved: Double { override ?? auto }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MARK: - Basis + outline helpers
 
 /// A right-handed orthonormal (u, v) basis spanning the plane whose normal is `n`.
@@ -290,6 +327,16 @@ public struct ClearanceHandle: Equatable, Sendable {
         case axialHi
         /// Slab outer face — normal drag sets the slab DEPTH.
         case slabDepth
+
+        /// The clearance-value role this handle writes (both end-caps write one axial
+        /// value) — the key into `ProjectModel.clearanceMetric`/`writeClearanceMetric`.
+        public var metricRole: ClearanceMetric.Role {
+            switch self {
+            case .margin: return .margin
+            case .axialLo, .axialHi: return .axial
+            case .slabDepth: return .slabDepth
+            }
+        }
     }
 
     /// The kind of value this handle writes.

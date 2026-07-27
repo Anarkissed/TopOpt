@@ -477,20 +477,24 @@ public final class ProjectModel: ObservableObject {
                 let geo = mp.syntheticGeometry
                 if mp.kind == .bolt {
                     let span: (lo: Float, hi: Float) = (Float(-mp.halfLengthMM), Float(mp.halfLengthMM))
+                    // Render/run distances come from the SAME `clearanceMetric` the chips
+                    // read (DEFECT 1) — so the picture, the run and both chips are one value.
+                    let margin = clearanceMetric(groupID: g.id, faceID: key, role: .margin)?.resolved ?? mp.resolvedMarginMM
+                    let axial = clearanceMetric(groupID: g.id, faceID: key, role: .axial)?.resolved ?? mp.resolvedAxialMM
                     out.append(ResolvedClearance(
                         groupID: g.id, faceID: key,
                         volume: .bolt(faceID: key, geometry: geo, axialSpan: span,
-                                      marginMM: mp.resolvedMarginMM, axialMM: mp.resolvedAxialMM),
+                                      marginMM: margin, axialMM: axial),
                         boreRadiusMM: Float(mp.radiusMM), axialSpan: span))
                 } else {
                     let n = SIMD3<Float>(mp.axis)
                     let (u, v) = planeBasis(normal: n)
                     let outline = PlaneOutline(center: SIMD3<Float>(mp.center), uAxis: u, vAxis: v,
                                                halfU: Float(mp.halfUMM), halfV: Float(mp.halfWMM))
+                    let depth = clearanceMetric(groupID: g.id, faceID: key, role: .slabDepth)?.resolved ?? mp.resolvedDepthMM
                     out.append(ResolvedClearance(
                         groupID: g.id, faceID: key,
-                        volume: .slab(faceID: key, geometry: geo, outline: outline,
-                                      depthMM: mp.resolvedDepthMM),
+                        volume: .slab(faceID: key, geometry: geo, outline: outline, depthMM: depth),
                         boreRadiusMM: 0, axialSpan: nil))
                 }
             }
@@ -504,11 +508,14 @@ public final class ProjectModel: ObservableObject {
                 if force.isClearanceFaceSuppressed(f) { continue }  // deleted (BAR B3)
                 guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
                 // Per-bore when the group is unsynced, shared when synced (round 4, item 3).
-                let ov = force.clearanceOverride(forGroup: g.id, face: f)
                 if bore {
                     let r = geo.cylinderRadiusMM
-                    let margin = ov.concentricMarginMM ?? ClearanceSuggestion.boltMarginMM(boreRadiusMM: r)
-                    let axial = ov.axialClearanceMM ?? ClearanceSuggestion.boltAxialMM(boreRadiusMM: r)
+                    // Same single source as the chips (DEFECT 1): `clearanceMetric` reads the
+                    // group's effective (synced/per-bore) override + the B-rep radius.
+                    let margin = clearanceMetric(groupID: g.id, faceID: Int(f), role: .margin)?.resolved
+                        ?? ClearanceSuggestion.boltMarginMM(boreRadiusMM: r)
+                    let axial = clearanceMetric(groupID: g.id, faceID: Int(f), role: .axial)?.resolved
+                        ?? ClearanceSuggestion.boltAxialMM(boreRadiusMM: r)
                     let span = mesh.faceAxialSpan(f, axisPoint: SIMD3<Float>(geo.axisPoint),
                                                   axisDir: SIMD3<Float>(geo.axisDir))
                     out.append(ResolvedClearance(
@@ -517,7 +524,8 @@ public final class ProjectModel: ObservableObject {
                                       marginMM: margin, axialMM: axial),
                         boreRadiusMM: Float(r), axialSpan: span))
                 } else {
-                    let depth = ov.slabDepthMM ?? ClearanceSuggestion.faceSlabDepthMM
+                    let depth = clearanceMetric(groupID: g.id, faceID: Int(f), role: .slabDepth)?.resolved
+                        ?? ClearanceSuggestion.faceSlabDepthMM
                     let outline = mesh.facePlaneOutline(f, planeNormal: SIMD3<Float>(geo.planeNormal),
                                                         planeOrigin: SIMD3<Float>(geo.planeOrigin))
                     out.append(ResolvedClearance(
@@ -568,15 +576,101 @@ public final class ProjectModel: ObservableObject {
     /// in `ManualPrimitiveDetent`; this supplies the targets and writes the result.
     @discardableResult
     public func moveManualPrimitive(id: UUID, in group: UUID,
-                                    to freeCenter: SIMD3<Double>) -> [String] {
+                                    to freeCenter: SIMD3<Double>, snap: Bool = true) -> [String] {
         guard var p = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return [] }
-        let targets = manualDetentTargets(excluding: id, in: group)
+        // Detent OVERRIDE (the gizmo's "magnet" toggle): with snap off, no targets are
+        // offered, so the primitive follows the finger exactly — the explicit way to place
+        // a keep-out a snap would otherwise pull off-target. (Dragging past the 3 mm / 8°
+        // tolerance also releases a snap, since `apply` only snaps WITHIN tolerance.)
+        let targets = snap ? manualDetentTargets(excluding: id, in: group) : []
         let result = ManualPrimitiveDetent.apply(freeCenter: freeCenter, axis: p.axis, targets: targets)
         p.center = result.center
         p.axis = result.axis
         force.updateManualPrimitive(p, in: group)
         persistClearances()
         return result.labels
+    }
+
+    /// Rotate a manual primitive's ORIENTATION to `newAxis` (its bolt axis_dir / face
+    /// normal) with magnetic AXIS detents (snap to the world principal axes + nearby
+    /// primitive/bore axes), returning the snap labels. The CENTRE is unchanged — rotation
+    /// is about the primitive's own origin. Rotation is expressed PURELY by the direction
+    /// vector (see `PrimitiveGizmo`'s schema note), so it reaches the run through `spec()`'s
+    /// `axisDir`/`normal` with no schema change. Arms undo + refreshes the sidecar (G3).
+    @discardableResult
+    public func rotateManualPrimitive(id: UUID, in group: UUID,
+                                      to newAxis: SIMD3<Double>, snap: Bool = true) -> [String] {
+        guard var p = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return [] }
+        let targets = snap ? manualDetentTargets(excluding: id, in: group) : []
+        let result = ManualPrimitiveDetent.apply(freeCenter: p.center, axis: newAxis, targets: targets)
+        p.axis = result.axis                    // keep p.center — rotation is in place
+        force.updateManualPrimitive(p, in: group)
+        persistClearances()
+        // Only AXIS-kind snaps are meaningful here (the centre didn't move).
+        return result.snapped.filter { $0.kind != .point }.map(\.label)
+    }
+
+    /// COPY a manual primitive: an INDEPENDENT duplicate (fresh id) in the same group,
+    /// nudged clear of the original so it doesn't hide it. Because `ManualPrimitive` is a
+    /// value type the copy shares NO storage — editing it never touches the original (G6).
+    /// Arms undo + refreshes the sidecar. Returns the new id (nil if the source is gone).
+    @discardableResult
+    public func copyManualPrimitive(id: UUID, in group: UUID) -> UUID? {
+        guard let src = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return nil }
+        let copy = ManualPrimitive(id: UUID(), kind: src.kind, center: src.center + copyOffset(for: src),
+                                   axis: src.axis, radiusMM: src.radiusMM, halfLengthMM: src.halfLengthMM,
+                                   halfUMM: src.halfUMM, halfWMM: src.halfWMM, override: src.override)
+        let newID = force.addManualPrimitive(copy, to: group)
+        persistClearances()
+        return newID
+    }
+
+    /// A small model-space nudge so a copy is visibly distinct from its original — twice the
+    /// primitive's own size, along the world axis most perpendicular to its axis.
+    private func copyOffset(for p: ManualPrimitive) -> SIMD3<Double> {
+        let size = p.kind == .bolt ? max(p.radiusMM, 1) : max(p.halfUMM, 1)
+        let a = simd_abs(p.axis)
+        let dir: SIMD3<Double> = (a.x <= a.y && a.x <= a.z) ? SIMD3(1, 0, 0)
+                               : (a.y <= a.z) ? SIMD3(0, 1, 0) : SIMD3(0, 0, 1)
+        return dir * (size * 2)
+    }
+
+    /// Convert an AUTO-found clearance on `face` into an explicit MANUAL primitive so a
+    /// gizmo can move/rotate it (G2 decision). An auto primitive's geometry is DERIVED from
+    /// the B-rep face and re-read core-side every run — there is nowhere to store a dragged
+    /// centre/axis. So the instant the user grabs its gizmo we MATERIALISE the face's current
+    /// resolved geometry as a `ManualPrimitive` (carrying the exact override over, so no value
+    /// jumps) and SUPPRESS the auto face — an EXPLICIT conversion in the model, never implicit.
+    /// The manual primitive resolves to the identical mask (B2). Returns the new id, or nil for
+    /// a face with no usable B-rep geometry (STL / non-cyl-non-planar).
+    @discardableResult
+    public func convertAutoClearanceToManual(face f: FaceID, in group: UUID) -> UUID? {
+        guard let mesh = viewerMesh, let geo = mesh.faceGeometry(f) else { return nil }
+        let ov = force.clearanceOverride(forGroup: group, face: f)
+        let mp: ManualPrimitive
+        if geo.isCylinder {
+            let span = mesh.faceAxialSpan(f, axisPoint: SIMD3<Float>(geo.axisPoint),
+                                          axisDir: SIMD3<Float>(geo.axisDir))
+            let halfLen = span.map { Double(($0.hi - $0.lo)) * 0.5 } ?? geo.cylinderRadiusMM
+            let mid = span.map { Double(($0.lo + $0.hi)) * 0.5 } ?? 0
+            let center = geo.axisPoint + ManualPrimitive.unit(geo.axisDir) * mid
+            mp = ManualPrimitive(kind: .bolt, center: center, axis: geo.axisDir,
+                                 radiusMM: geo.cylinderRadiusMM, halfLengthMM: halfLen, override: ov)
+        } else if geo.isPlane {
+            let outline = mesh.facePlaneOutline(f, planeNormal: SIMD3<Float>(geo.planeNormal),
+                                                planeOrigin: SIMD3<Float>(geo.planeOrigin))
+            let halfU = outline.map { Double($0.halfU) } ?? ClearanceSuggestion.faceSlabDepthMM
+            let halfW = outline.map { Double($0.halfV) } ?? ClearanceSuggestion.faceSlabDepthMM
+            let center = outline.map { SIMD3<Double>($0.center) } ?? geo.planeOrigin
+            mp = ManualPrimitive(kind: .face, center: center, axis: geo.planeNormal,
+                                 halfUMM: halfU, halfWMM: halfW, override: ov)
+        } else {
+            return nil
+        }
+        let id = force.addManualPrimitive(mp, to: group)
+        force.suppressClearanceFace(f)          // the auto face no longer clears (no double-count)
+        persistClearances()
+        return id
     }
 
     /// The detent targets for moving a primitive: the world principal axes, plus each
@@ -671,6 +765,74 @@ public final class ProjectModel: ObservableObject {
             if let geo = mesh.faceGeometry(f), geo.isCylinder { return geo.cylinderRadiusMM }
         }
         return nil
+    }
+
+    /// ONE cylindrical face's EXACT radius (mm), or nil for a planar / STL / manual face.
+    private func faceBoreRadiusMM(_ f: FaceID) -> Double? {
+        guard let mesh = viewerMesh, let geo = mesh.faceGeometry(f), geo.isCylinder else { return nil }
+        return geo.cylinderRadiusMM
+    }
+
+    // MARK: - the single clearance-value source (DEFECT 1 fix)
+
+    /// The resolved clearance metric (override + Auto) for ONE role of ONE clearance
+    /// primitive, keyed by the SAME `(groupID, faceID)` the viewport handle carries and
+    /// the Selections-panel row identifies. This is THE single value every surface reads:
+    ///
+    ///   • a MANUAL primitive (negative sentinel `faceID`) reads its OWN stored geometry +
+    ///     override — the panel used to do this while the viewport chip fell back to a
+    ///     B-rep face lookup that returned nil (→ 0 mm), the whole of DEFECT 1;
+    ///   • an AUTO primitive (real `faceID`) reads the B-rep face's exact radius + the
+    ///     group's effective override (per-bore when unsynced, shared when synced).
+    ///
+    /// Nil only when the face/primitive no longer exists. Callers render `.resolved`; the
+    /// pill also gets `.override` (nil ⇒ show "Auto") and `.auto` (the suggestion).
+    public func clearanceMetric(groupID: UUID, faceID: Int,
+                                role: ClearanceMetric.Role) -> ClearanceMetric? {
+        if faceID < 0 {
+            guard let mp = force.manualPrimitives(for: groupID)
+                .first(where: { Self.manualFaceKey($0.id) == faceID }) else { return nil }
+            return mp.metric(role)   // the primitive's OWN single source
+        }
+        let f = FaceID(faceID)
+        let ov = force.clearanceOverride(forGroup: groupID, face: f)
+        switch role {
+        case .margin:
+            guard let r = faceBoreRadiusMM(f) else { return nil }
+            return ClearanceMetric(override: ov.concentricMarginMM,
+                                   auto: ClearanceSuggestion.boltMarginMM(boreRadiusMM: r))
+        case .axial:
+            guard let r = faceBoreRadiusMM(f) else { return nil }
+            return ClearanceMetric(override: ov.axialClearanceMM,
+                                   auto: ClearanceSuggestion.boltAxialMM(boreRadiusMM: r))
+        case .slabDepth:
+            return ClearanceMetric(override: ov.slabDepthMM, auto: ClearanceSuggestion.faceSlabDepthMM)
+        }
+    }
+
+    /// WRITE one clearance role's value (mm; nil ⇒ revert to Auto), keyed by the SAME
+    /// `(groupID, faceID)` as `clearanceMetric`. Routes a MANUAL primitive to its own
+    /// override (arming undo + refreshing the sidecar) and an AUTO primitive to the
+    /// group/bore override — so a viewport handle drag lands in the right place for
+    /// both origins, not just the panel-only manual path it used to.
+    public func writeClearanceMetric(groupID: UUID, faceID: Int,
+                                     role: ClearanceMetric.Role, mm: Double?) {
+        if faceID < 0 {
+            guard let mp = force.manualPrimitives(for: groupID)
+                .first(where: { Self.manualFaceKey($0.id) == faceID }) else { return }
+            switch role {
+            case .margin:    setManualMargin(id: mp.id, in: groupID, mm: mm)
+            case .axial:     setManualAxial(id: mp.id, in: groupID, mm: mm)
+            case .slabDepth: setManualSlab(id: mp.id, in: groupID, mm: mm)
+            }
+            return
+        }
+        let f = FaceID(faceID)
+        switch role {
+        case .margin:    force.setClearanceMargin(group: groupID, face: f, mm: mm)
+        case .axial:     force.setClearanceAxial(group: groupID, face: f, mm: mm)
+        case .slabDepth: force.setClearanceSlab(group: groupID, face: f, mm: mm)
+        }
     }
 
     /// A group's model-space outward normal (mean of its faces' normals), or nil.

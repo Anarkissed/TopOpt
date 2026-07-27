@@ -80,18 +80,29 @@ public struct ManualPrimitive: Equatable, Sendable, Codable, Identifiable {
         ManualPrimitive(kind: .face, center: center, axis: normal, halfUMM: half, halfWMM: half)
     }
 
-    /// The RESOLVED clearance distances (the user override, or the geometry-derived
-    /// Auto suggestion — the same suggestions an auto primitive prefills). Used for
-    /// both the run spec and the rendered volume so the picture matches the run.
-    public var resolvedMarginMM: Double {
-        override.concentricMarginMM ?? ClearanceSuggestion.boltMarginMM(boreRadiusMM: radiusMM)
+    /// The ONE resolved value behind a role (override + Auto suggestion) — the single
+    /// source every surface reads (DEFECT 1). The run spec, the rendered volume, the
+    /// Selections-panel chip and the 3D-viewport chip ALL resolve a manual primitive's
+    /// distances through here, so they cannot show different numbers for one value.
+    public func metric(_ role: ClearanceMetric.Role) -> ClearanceMetric {
+        switch role {
+        case .margin:
+            return ClearanceMetric(override: override.concentricMarginMM,
+                                   auto: ClearanceSuggestion.boltMarginMM(boreRadiusMM: radiusMM))
+        case .axial:
+            return ClearanceMetric(override: override.axialClearanceMM,
+                                   auto: ClearanceSuggestion.boltAxialMM(boreRadiusMM: radiusMM))
+        case .slabDepth:
+            return ClearanceMetric(override: override.slabDepthMM,
+                                   auto: ClearanceSuggestion.faceSlabDepthMM)
+        }
     }
-    public var resolvedAxialMM: Double {
-        override.axialClearanceMM ?? ClearanceSuggestion.boltAxialMM(boreRadiusMM: radiusMM)
-    }
-    public var resolvedDepthMM: Double {
-        override.slabDepthMM ?? ClearanceSuggestion.faceSlabDepthMM
-    }
+
+    /// The RESOLVED clearance distances — thin readers over `metric(_:)`, so the run
+    /// spec + rendered volume that already read these get the identical number the chips do.
+    public var resolvedMarginMM: Double { metric(.margin).resolved }
+    public var resolvedAxialMM: Double { metric(.axial).resolved }
+    public var resolvedDepthMM: Double { metric(.slabDepth).resolved }
 
     /// The bridge/job spec for this primitive (inline manual geometry). The
     /// distances are sent ONLY when the user overrode them (non-nil), matching the
