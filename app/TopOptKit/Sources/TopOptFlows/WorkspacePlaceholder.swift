@@ -87,6 +87,21 @@ public struct WorkspacePlaceholder: View {
     @State private var gizmoSnap = true
     @State private var gizmoSnapLabels: [String] = []
 
+    // Gravity DIRECTION widget (2026-07-26 — "set gravity by pointing, not by hunting for a
+    // clean face"). During setup the user drags an arrow to point which way is down instead
+    // of tapping a face (the STL pseudo-face segmentation makes a face tap unreliable);
+    // face-tap stays as a shortcut where it lands cleanly. `gravityDraft` is the pending
+    // model-space direction while pointing (nil → follow the current gravity, else −Y);
+    // `gravityDrag` is the pure-math grab context (survives the body churn a live drag
+    // causes); `gravitySnap` is the axis magnet; `gravitySnapLabel` drives the "Snapped to"
+    // badge. Committing calls `ForceModel.setGravity(direction:)` — the SAME stored vector
+    // the face tap writes, so the job can't tell them apart (BAR V1).
+    @State private var gravityDraft: SIMD3<Float>?
+    @State private var gravityDrag: GravityDirectionGizmo.Drag?
+    @State private var draggingGravity = false
+    @State private var gravitySnap = true
+    @State private var gravitySnapLabel: String?
+
     /// The primitive a transform gizmo is bound to (group + primitive id).
     struct GizmoTarget: Equatable { let group: UUID; let id: UUID }
     /// M7.dom-app / design-overhaul 109: the SINGLE-OWNER design-box drag session. Captures the
@@ -245,6 +260,10 @@ public struct WorkspacePlaceholder: View {
                 .ignoresSafeArea()
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
+            // Gravity direction: a PERSISTENT down-arrow so the current "which way is down"
+            // is always visible without opening anything (edit phase), and the INTERACTIVE
+            // pointing arrow during setup. Both draw the same arrow in the same frame.
+            gravityIndicatorOverlay.ignoresSafeArea()
             if showDesignGizmo { designGizmoOverlay.ignoresSafeArea() }  // dom-app resize/move handles
             // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
             // axial, face → depth) and the floating glass value pill near the selection.
@@ -256,6 +275,9 @@ public struct WorkspacePlaceholder: View {
             chrome
             if force.phase == .setup {
                 gravityBanner
+                // Point which way is down — the reliable route that doesn't depend on a
+                // clean single face. Face-tap still works (handled in `handlePick`).
+                if viewerMesh != nil { gravityDirectionOverlay.ignoresSafeArea() }
             } else {
                 // The Design Box drawer now lives INSIDE `bottomRightControls` (item 11), so it
                 // is no longer placed separately here.
@@ -449,6 +471,10 @@ public struct WorkspacePlaceholder: View {
         if force.phase == .setup {
             if let n = mesh.faceNormal(faceID) {
                 force.setGravity(faceNormal: n, face: faceID)
+                // A face tap commits too — drop any half-pointed draft + stale snap badge
+                // so re-entering setup starts from the direction just set, not the old draft.
+                gravityDraft = nil
+                gravitySnapLabel = nil
                 model.toast = "Gravity set — the part now rests the way it will in real life"
             }
             return
@@ -645,7 +671,7 @@ public struct WorkspacePlaceholder: View {
                 Text("Which way is down?").dsStyle(DS.TypeScale.headline)
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
-            Text("Tap the face that points at the floor in real life. Drag to orbit, pinch to zoom.")
+            Text("Drag the blue arrow to point straight down — it snaps to the axes. Or tap the face that points at the floor. Drag empty space to orbit, pinch to zoom.")
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(DS.Color.textSecondary.color)
                 .multilineTextAlignment(.center)
@@ -868,9 +894,21 @@ public struct WorkspacePlaceholder: View {
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(DS.Color.accent.color)
             Text("Gravity set").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            // Show WHICH way is down without opening anything — the snapped axis (or
+            // "custom"). One inline tag, so the chip stays a single row (BAR V5).
+            Text(gravityDirectionLabel)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(DS.Color.textSecondary.color)
+                .padding(.vertical, 2).padding(.horizontal, 6)
+                .background(Capsule().fill(DS.Color.fillSubtle.color))
+                .fixedSize()
             Button {
                 force.enterGravitySetup()
                 selection.clearActive()
+                // Seed the pointing arrow from the CURRENT gravity (draft nil → falls back to
+                // it) and clear any stale snap badge, so re-opening setup shows what is set.
+                gravityDraft = nil
+                gravitySnapLabel = nil
             } label: {
                 Text("Change").dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
                     .padding(.vertical, 6).padding(.horizontal, DS.Space.m)
@@ -1741,6 +1779,186 @@ public struct WorkspacePlaceholder: View {
                          in: RoundedRectangle(cornerRadius: 6), specular: active ? 1.3 : 1)
             .shadow(color: DS.Color.accent.color.opacity(0.5), radius: 4)
             .contentShape(RoundedRectangle(cornerRadius: 6).inset(by: -12))
+    }
+
+    // MARK: gravity DIRECTION widget (2026-07-26) — point which way is down
+
+    /// The arrow's model-space length: just outside the part so the head + drag knob clear
+    /// the geometry. Scaled off the model radius so it fits a small bolt and a large bracket.
+    private var gravityGizmoLength: Double { Double(viewerMesh?.bounds.radius ?? 1) * 1.25 }
+
+    /// The direction the setup arrow points RIGHT NOW: the live draft while pointing, else
+    /// the current gravity, else model-space down (−Y) as the sensible first guess.
+    private var effectiveGravityDraft: SIMD3<Float> {
+        gravityDraft ?? force.gravity ?? SIMD3<Float>(0, -1, 0)
+    }
+
+    /// The axis label for the CURRENT gravity ("−Y", "+Z", …) or "custom" for an off-axis
+    /// direction — shown on the persistent chip so the set direction reads at a glance.
+    /// A near-zero tolerance so only an exactly-snapped direction earns an axis label.
+    private var gravityDirectionLabel: String {
+        guard let g = force.gravity else { return "custom" }
+        return GravityDirectionGizmo.snap(SIMD3<Double>(g), toleranceDeg: 0.25).label ?? "custom"
+    }
+
+    /// Draw a gravity arrow (model centre → tip along `direction`) into the stage, using the
+    /// SAME projection + settle as every other overlay so it tracks the part. The tail is the
+    /// part centre; the head sticks out just past the surface.
+    private func gravityArrowCanvas(_ proj: CameraProjection, direction: SIMD3<Float>,
+                                    color: Color) -> some View {
+        Canvas { ctx, _ in
+            let c = meshCenter
+            let tip = SIMD3<Float>(GravityDirectionGizmo.tip(center: SIMD3<Double>(c),
+                                                             direction: SIMD3<Double>(direction),
+                                                             length: gravityGizmoLength))
+            guard let a = proj.project(settledWorld(c)), let b = proj.project(settledWorld(tip))
+            else { return }
+            drawArrow(ctx, from: a, to: b, color: color)
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// The PERSISTENT gravity indicator (BAR: show the current down direction at all times
+    /// without opening anything). A dim non-interactive arrow + a "down" tag, shown once
+    /// gravity is set and we're editing. Non-interactive — the editable widget is setup-only.
+    @ViewBuilder private var gravityIndicatorOverlay: some View {
+        if force.phase == .edit, let g = force.gravity, let proj = projection, viewerMesh != nil {
+            ZStack(alignment: .topLeading) {
+                gravityArrowCanvas(proj, direction: g, color: DS.Color.accent.color.opacity(0.85))
+                let tip = SIMD3<Float>(GravityDirectionGizmo.tip(center: SIMD3<Double>(meshCenter),
+                                                                 direction: SIMD3<Double>(g),
+                                                                 length: gravityGizmoLength))
+                if let pt = proj.project(settledWorld(tip)) {
+                    gravityDownTag.position(x: pt.x, y: pt.y + 16)
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// The INTERACTIVE pointing widget (setup phase): a draggable arrow the user pushes to
+    /// point which way is down, with the axis magnet, the "Snapped to" badge, and a confirm
+    /// check. Speaks the transform gizmo's language — the blue liquid-glass knob, the named
+    /// stage space, the `modelRay` grab — so it feels like the position gizmo. Face-tap still
+    /// sets gravity (handled in `handlePick`); this is the reliable route that needs no clean
+    /// face.
+    @ViewBuilder private var gravityDirectionOverlay: some View {
+        if let proj = projection {
+            let dir = effectiveGravityDraft
+            let tipModel = SIMD3<Double>(GravityDirectionGizmo.tip(center: SIMD3<Double>(meshCenter),
+                                                                   direction: SIMD3<Double>(dir),
+                                                                   length: gravityGizmoLength))
+            ZStack(alignment: .topLeading) {
+                gravityArrowCanvas(proj, direction: dir, color: DS.Color.accent.color)
+                // The draggable tip knob (gesture bound to the knob BEFORE `.position` — the
+                // camera-non-fighting rule, so empty space still orbits and a face still taps).
+                gizmoAt(proj, tipModel) {
+                    gizmoCircleKnob(active: draggingGravity, size: 32) {
+                        Image(systemName: "arrow.down").font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    .gesture(gravityDragGesture())
+                    .accessibilityLabel("Drag to point gravity")
+                }
+                if let pt = proj.project(settledWorld(SIMD3<Float>(tipModel))) {
+                    gravitySetupCluster.position(x: pt.x, y: pt.y - 54)
+                    if let label = gravitySnapLabel {
+                        gravitySnapBadge(label).position(x: pt.x, y: pt.y + 40)
+                    }
+                }
+            }
+            .coordinateSpace(name: Self.gizmoStageSpace)
+        }
+    }
+
+    /// The magnet toggle + confirm check above the arrow tip (matches `gizmoActionCluster`).
+    private var gravitySetupCluster: some View {
+        HStack(spacing: DS.Space.s) {
+            Button { gravitySnap.toggle() } label: {
+                gizmoCircleKnob(active: gravitySnap, size: 26) {
+                    Image(systemName: "scope").font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white.opacity(gravitySnap ? 1 : 0.4))
+                }
+            }.buttonStyle(.plain)
+                .accessibilityLabel(gravitySnap ? "Axis snapping on" : "Axis snapping off")
+
+            Button { commitGravityDraft() } label: {
+                gizmoCircleKnob(active: true, size: 32) {
+                    Image(systemName: "checkmark").font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }.buttonStyle(.plain).accessibilityLabel("Set this as down")
+        }
+    }
+
+    /// "Snapped to −Y" — the handoff requires the UI to STATE what it snapped to.
+    private func gravitySnapBadge(_ label: String) -> some View {
+        Text("Snapped to \(label)")
+            .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
+            .padding(.vertical, 4).padding(.horizontal, 8)
+            .background(Capsule().fill(DS.Color.accent.color.opacity(0.9)))
+            .fixedSize()
+            .accessibilityLabel("Snapped to \(label)")
+    }
+
+    /// The small "↓ down" tag at the persistent arrow's tip.
+    private var gravityDownTag: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "arrow.down").font(.system(size: 9, weight: .bold))
+            Text("down").font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(.white)
+        .padding(.vertical, 3).padding(.horizontal, 7)
+        .background(Capsule().fill(DS.Color.accent.color.opacity(0.85)))
+        .fixedSize()
+    }
+
+    /// Commit the pending pointed direction as gravity via `setGravity(direction:)` — the
+    /// same stored `gravity` vector a face tap writes (BAR V1). Mutating `force` republishes
+    /// `ProjectModel`, so the debounced round-6 UndoHistory records this as one step (BAR V3).
+    private func commitGravityDraft() {
+        force.setGravity(direction: effectiveGravityDraft)
+        gravityDraft = nil
+        gravitySnapLabel = nil
+        selection.clearActive()
+        model.toast = "Gravity set — the part now rests the way it will in real life"
+    }
+
+    /// One drag of the arrow tip: build the pure-math grab context on the first frame (into
+    /// `@State` so it survives the body churn), resolve each frame to a pointed direction,
+    /// then snap to the nearest axis when the magnet is on. Haptics on grab / snap / release;
+    /// the snap label drives the badge. Nothing is committed until the confirm check.
+    private func gravityDragGesture() -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
+            .onChanged { v in
+                guard let proj = projection, let ray = modelRay(proj, at: v.location) else { return }
+                if !draggingGravity {
+                    draggingGravity = true
+                    gravityDrag = GravityDirectionGizmo.Drag(
+                        startDirection: SIMD3<Double>(effectiveGravityDraft),
+                        center: SIMD3<Double>(meshCenter),
+                        length: gravityGizmoLength,
+                        grab: ray, viewDir: ray.dir)
+                    ClearanceHaptics.grab()
+                }
+                guard let drag = gravityDrag else { return }
+                var dir = drag.resolve(currentRay: ray)
+                var label: String?
+                if gravitySnap {
+                    let s = GravityDirectionGizmo.snap(dir)
+                    dir = s.dir; label = s.label
+                }
+                if label != gravitySnapLabel {
+                    if label != nil { ClearanceHaptics.detent() }
+                    gravitySnapLabel = label
+                }
+                gravityDraft = SIMD3<Float>(dir)
+            }
+            .onEnded { _ in
+                draggingGravity = false
+                gravityDrag = nil
+                ClearanceHaptics.release()
+            }
     }
 
     // MARK: left Selections panel (design) with the kg/lbs toggle
