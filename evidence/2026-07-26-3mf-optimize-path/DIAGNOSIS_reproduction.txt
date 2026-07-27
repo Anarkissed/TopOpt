@@ -1,0 +1,17 @@
+# Diagnosis reproduction — which binary produced the error
+
+## 1. Error string is unique to the topopt-cli BINARY (not the bridge)
+   core/src/io/part.cpp:44          -> '3MF import requires lib3mf, ...'
+   core/src/cli/run_job.cpp:535     -> 'cannot import model "<f>": ' + <above>
+   core/src/cli/main.cpp:237        -> 'topopt-cli: ' + <above>
+   app/.../TopOptBridge/bridge.cpp  -> err.message = e.what()  (NO 'topopt-cli:' prefix)
+
+## 2. lib3mf-LESS topopt-cli reproduces the maintainer's screenshot BIT-FOR-BIT
+$ topopt-cli run job_3mf.json    # build with OCCT+Eigen, NO lib3mf
+topopt-cli: cannot import model "model.3mf": 3MF import requires lib3mf, which is not available in this build; export the part as STL and import that instead
+exit=1
+
+## 3. The SAME lib3mf-less binary runs the STL twin fine -> ONLY 3mf is affected
+run_info: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-3mf-optimize-lib3mf-2e0c29/46686a5a-cbc1-4871-8921-2be4b219ea73/scratchpad/repro/diag_stl/run_info.json
+iterations: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-3mf-optimize-lib3mf-2e0c29/46686a5a-cbc1-4871-8921-2be4b219ea73/scratchpad/repro/diag_stl/iterations.csv
+exit=

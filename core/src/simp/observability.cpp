@@ -313,6 +313,9 @@ std::string run_info_json(const RunInfo& info) {
   str("fingerprint", info.fingerprint);
   str("mode", info.mode);
   str("material", info.material);
+  // True source format the user supplied (handoff 2026-07-26-3mf-optimize-path):
+  // "3mf" even when the model file is an STL working copy the app normalised it to.
+  str("source_format", info.source_format);
   num("resolution", fmt_i(info.resolution));
   str("load_source", info.load_source);
   str("solver", info.solver);

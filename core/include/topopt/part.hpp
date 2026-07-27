@@ -158,6 +158,10 @@ struct PartModel {
 // (import_any fell through to the STL reader).
 PartFormat part_format_for_path(const std::string& path);
 
+// The lowercase format name ("step" | "stl" | "3mf" | "unknown"). Used to record
+// the true source format in run_info (handoff 2026-07-26-3mf-optimize-path).
+std::string format_name(PartFormat format);
+
 // Import any supported part file into a face-carrying StepModel.
 // Throws PartError if the file cannot be read or parsed, if STEP is requested
 // where OCCT is not compiled in, if 3MF is requested where lib3mf is not, or

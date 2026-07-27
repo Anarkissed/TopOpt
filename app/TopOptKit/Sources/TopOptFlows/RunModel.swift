@@ -25,6 +25,12 @@ import os
 public struct RunRequest: Equatable, Sendable {
     /// The STL/STEP path the core reads.
     public let modelPath: String
+    /// The TRUE source format the user imported ("3mf"), when `modelPath` is a
+    /// working copy in a different format. The app normalises a 3MF import to an
+    /// STL working copy so the optimize path never re-parses 3MF (handoff
+    /// 2026-07-26-3mf-optimize-path); this preserves the provenance the worker's
+    /// run_info records. Empty when `modelPath` IS the source (STL/STEP).
+    public let sourceFormat: String
     public let material: String
     public let materialsPath: String
     public let rulesPath: String
@@ -97,8 +103,9 @@ public struct RunRequest: Equatable, Sendable {
                 keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
                 clearances: [TopOptKit.ClearanceSpec] = [],
                 faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
-                projectID: UUID? = nil) {
+                projectID: UUID? = nil, sourceFormat: String = "") {
         self.modelPath = modelPath
+        self.sourceFormat = sourceFormat
         self.material = material
         self.materialsPath = materialsPath
         self.rulesPath = rulesPath

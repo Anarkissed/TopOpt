@@ -91,6 +91,46 @@ final class JobJSONEquivalenceTests: XCTestCase {
             "mesh and STEP jobs must be field-equivalent once the model path is set aside")
     }
 
+    // MARK: source_format provenance (handoff 2026-07-26-3mf-optimize-path)
+
+    // A 3MF normalised to an STL working copy ships model=part.stl but records
+    // source_format="3mf", so the worker's run_info names the real source. A plain
+    // STL/STEP part emits NO source_format key, keeping its job.json byte-identical
+    // to before (M2) — the CLI derives "stl"/"step" from the model extension.
+    func testSourceFormatEmittedOnlyForANormalisedPart() throws {
+        // Plain STL: no source_format key at all.
+        let stl = try jobDict(modelPath: "/tmp/part.stl")
+        XCTAssertNil(stl["source_format"],
+                     "a plain STL part must not add source_format (job stays byte-identical)")
+
+        // 3MF normalised to STL: model is the .stl copy, provenance is "3mf".
+        let cfg = RemoteRunnerConfig(host: "127.0.0.1", port: 8757,
+                                     expectedFingerprint: "test")
+        var req = request(modelPath: "/tmp/part.stl")
+        req = RunRequest(
+            modelPath: req.modelPath, material: req.material, materialsPath: "",
+            rulesPath: "", resolution: req.resolution, projectName: req.projectName,
+            anchorFaceIDs: req.anchorFaceIDs, loadGroups: req.loadGroups,
+            minimizePlastic: req.minimizePlastic, buildDirection: req.buildDirection,
+            infillPercent: req.infillPercent, designBox: req.designBox,
+            keepOutBoxes: req.keepOutBoxes, clearances: req.clearances,
+            faceProtections: req.faceProtections,
+            faceProtectionDepthMM: req.faceProtectionDepthMM,
+            sourceFormat: "3mf")
+        let run = RemoteRun(config: cfg, request: req,
+                            progress: { _, _, _ in true }, onVariant: { _ in })
+        var threeMF = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: try run.buildJobJSON()) as? [String: Any])
+        XCTAssertEqual(threeMF["model"] as? String, "part.stl",
+                       "the optimize path reads the STL working copy, never the .3mf")
+        XCTAssertEqual(threeMF["source_format"] as? String, "3mf",
+                       "the true source format must ride to the worker's run_info")
+        // Otherwise identical to the plain-STL job (only source_format differs).
+        threeMF["source_format"] = nil
+        XCTAssertEqual((stl as NSDictionary), (threeMF as NSDictionary),
+                       "source_format must be the ONLY addition")
+    }
+
     // MARK: the anti-skeleton guard (the exact shape the bug produced)
 
     func testMeshJobCarriesTheFullLoadCaseNotASkeleton() throws {

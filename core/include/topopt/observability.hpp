@@ -174,6 +174,11 @@ struct RunInfo {
   std::string fingerprint;   // TOPOPT_BUILD_FINGERPRINT (core git sha or "dev")
   std::string mode;          // job.mode
   std::string material;      // job.material
+  // The TRUE source format the user supplied ("step" | "stl" | "3mf"). When the
+  // app normalises a 3MF to an STL working copy (handoff 2026-07-26-3mf-optimize-
+  // path) the model file is STL but this stays "3mf", so run_info never loses the
+  // provenance. Derived from job.source_format, else from the model's extension.
+  std::string source_format;
   int resolution = 0;
   std::string load_source;   // "loadcase" | "self_weight"
   std::string solver;        // resolved SolverKind name (the REQUESTED solver)

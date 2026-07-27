@@ -132,6 +132,13 @@ RunInfo build_run_info(const JobDescription& job,
   info.fingerprint = obs.fingerprint;
   info.mode = job.mode;
   info.material = job.material;
+  // True source format for provenance (handoff 2026-07-26-3mf-optimize-path).
+  // The job may carry an explicit override (the app normalises a 3MF import to an
+  // STL working copy, then records "3mf" here); otherwise the model file IS the
+  // source, so its extension is the honest answer.
+  info.source_format =
+      job.source_format.empty() ? format_name(part_format_for_path(job.model))
+                                : job.source_format;
   info.resolution = job.resolution;
   info.load_source = job.loads.present ? "loadcase" : "self_weight";
   info.solver = solver_name(options.simp.solver);

@@ -385,15 +385,20 @@ JobDescription parse_job(const std::string& json_text) {
     schema_fail("top level must be an object");
 
   reject_unknown_keys(root,
-                      {"model", "material", "mode", "resolution",
-                       "fixture_faces", "gravity", "ladder", "margin_stop",
-                       "simp", "draft", "output", "loads", "design_box",
-                       "keep_outs"},
+                      {"model", "source_format", "material", "mode",
+                       "resolution", "fixture_faces", "gravity", "ladder",
+                       "margin_stop", "simp", "draft", "output", "loads",
+                       "design_box", "keep_outs"},
                       "the job");
 
   JobDescription job;
   job.model =
       require_nonempty_string(require_key(root, "model", "the job"), "model");
+  // Optional provenance override (handoff 2026-07-26-3mf-optimize-path): the true
+  // source format when `model` is a working copy in another format. A plain string;
+  // empty/absent => run_info derives it from the model extension.
+  if (const JsonValue* sf = find_key(root, "source_format"))
+    job.source_format = require_string(*sf, "source_format");
   job.material = require_nonempty_string(
       require_key(root, "material", "the job"), "material");
   job.mode =

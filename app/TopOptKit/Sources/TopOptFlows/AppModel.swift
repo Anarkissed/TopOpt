@@ -245,7 +245,8 @@ public final class AppModel: ObservableObject {
                           clearances: project.clearanceSpecs(),
                           faceProtections: protections.faceIDs,
                           faceProtectionDepthMM: protections.depthMM,
-                          projectID: project.id)
+                          projectID: project.id,
+                          sourceFormat: file.sourceFormat)
     }
 
     // MARK: - Materials
@@ -526,8 +527,19 @@ public final class AppModel: ObservableObject {
         let original = pendingDiagnostics
         pendingDiagnostics = nil
 
+        // Write a millimetre binary-STL working copy when the unit isn't mm OR the
+        // source is a 3MF. Normalising 3MF → STL here (handoff 2026-07-26-3mf-optimize-
+        // path) means the optimize path — the on-device bridge AND the LAN worker's
+        // topopt-cli — never re-parses 3MF, so lib3mf is needed in exactly ONE place:
+        // this import, where a build lacking it already refuses at file-pick (not late,
+        // after the user set up a run). rescale_part_file writes binary STL from any
+        // mesh source, and an STL twin of a 3MF voxelises identically (proven byte-
+        // identical), so a scale of 1.0 is a pure format normalisation that changes no
+        // result. The display name keeps its .3mf extension, so the true source format
+        // survives for the run_info the worker records (see `makeRunRequest`).
+        let sourceIs3MF = (prompt.fileName as NSString).pathExtension.lowercased() == "3mf"
         var importPath = path
-        if unit != .millimetres {
+        if unit != .millimetres || sourceIs3MF {
             let base = (prompt.fileName as NSString).deletingPathExtension
             let dst = FileManager.default.temporaryDirectory
                 .appendingPathComponent("\(base)_mm.stl").path

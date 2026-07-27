@@ -851,7 +851,13 @@ public final class ProjectModel: ObservableObject {
     /// a stable `model.<ext>` name so re-import dispatches by extension.
     public func snapshot(savedAt: Date) -> ProjectSnapshot? {
         guard let file = importedFile else { return nil }
-        let ext = (file.name as NSString).pathExtension.lowercased()
+        // The stored model's extension MUST match the working file's CONTENT (its
+        // `path`), not the display `name`: a 3MF import is normalised to an STL
+        // working copy (handoff 2026-07-26-3mf-optimize-path), so `path` is ".stl"
+        // while `name` stays ".3mf". Naming the stored file model.3mf would make the
+        // reopen re-import dispatch a 3MF reader over STL bytes and fail. The true
+        // source name is preserved separately as `originalFileName`.
+        let ext = (file.path as NSString).pathExtension.lowercased()
         let modelFileName = ext.isEmpty ? "model" : "model.\(ext)"
         return ProjectSnapshot(id: id, name: name, material: material, process: process,
                                modelFileName: modelFileName, originalFileName: file.name,

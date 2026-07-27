@@ -101,6 +101,19 @@ public struct ImportedFile: Equatable, Sendable {
         self.pseudoFaces = pseudoFaces
     }
 
+    /// The TRUE source format when `path` is a working copy in a different format —
+    /// a 3MF the import step normalised to an STL working copy so the optimize path
+    /// never re-parses 3MF (handoff 2026-07-26-3mf-optimize-path). `name` keeps the
+    /// user's original extension (".3mf") while `path` points at the ".stl" copy, so
+    /// their divergence IS the provenance. Empty when `path` is the source itself
+    /// (a plain STL or STEP import). Fed to the worker as job `source_format` so its
+    /// run_info records "3mf" even though it imported an STL.
+    public var sourceFormat: String {
+        let src = (name as NSString).pathExtension.lowercased()
+        let stored = (path as NSString).pathExtension.lowercased()
+        return src != stored ? src : ""
+    }
+
     /// The "2.1 MB · 1 solid body · watertight ✓"-style subline (byte size is the
     /// caller's; here we report what the core actually measured).
     ///
