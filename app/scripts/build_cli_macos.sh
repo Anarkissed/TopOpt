@@ -48,10 +48,26 @@ echo "==> Eigen:  $EIGEN_PREFIX"
 echo "==> lib3mf: $LIB3MF_PREFIX"
 
 # --- configure + build (DEPS=ON: all three must be found, exactly like CI) ---
+# lib3mf_FOUND / TOPOPT_HAVE_3MF are decided at CONFIGURE time and CACHED. A
+# core/build left over from an earlier configure WITHOUT lib3mf (e.g. a plain
+# build_core.sh run before lib3mf was provisioned) keeps `lib3mf_DIR-NOTFOUND`
+# and a topopt-cli that rejects .3mf with "not available in this build" — the
+# exact late-failure the LAN worker hit (handoff 2026-07-26-3mf-optimize-path).
+# Re-running cmake over that cache does NOT re-search: find_package short-circuits
+# on the cached NOTFOUND. So force a clean dependency re-resolution by dropping
+# the cache (cheap; the object files rebuild only where the 3MF compile
+# definition actually flipped). This makes a stale build structurally impossible.
+if [[ -f "$BUILD_DIR/CMakeCache.txt" ]] &&
+   ! grep -q "^lib3mf_DIR:.*$LIB3MF_PREFIX" "$BUILD_DIR/CMakeCache.txt" 2>/dev/null; then
+  echo "==> stale $BUILD_DIR cache does not point at this lib3mf — clearing it"
+  rm -f "$BUILD_DIR/CMakeCache.txt"
+  rm -rf "$BUILD_DIR/CMakeFiles"
+fi
 echo "==> configuring core ($BUILD_DIR, TOPOPT_REQUIRE_DEPS=ON)"
 cmake -S "$CORE_DIR" -B "$BUILD_DIR" \
   -DCMAKE_BUILD_TYPE=Release \
   -DTOPOPT_REQUIRE_DEPS=ON \
+  -Dlib3mf_DIR="$LIB3MF_PREFIX/share/lib3mf" \
   -DCMAKE_PREFIX_PATH="$OCCT_PREFIX;$EIGEN_PREFIX;$LIB3MF_PREFIX"
 
 echo "==> building topopt-cli"

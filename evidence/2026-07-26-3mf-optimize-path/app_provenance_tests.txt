@@ -1,0 +1,10 @@
+Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' passed (0.075 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' passed (0.003 seconds).
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.079 (0.079) seconds
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshAndStepJobsAreFieldEquivalentExceptModel]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshJobCarriesTheFullLoadCaseNotASkeleton]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshNoLoadCaseMatchesStepNoLoadCase]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testSourceFormatEmittedOnlyForANormalisedPart]' passed (0.000 seconds).
+	 Executed 4 tests, with 0 failures (0 unexpected) in 0.002 (0.002) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.081 (0.082) seconds
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.081 (0.083) seconds

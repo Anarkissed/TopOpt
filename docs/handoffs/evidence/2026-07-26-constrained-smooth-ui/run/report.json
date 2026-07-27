@@ -1,0 +1,105 @@
+{
+  "material": "PLA",
+  "variants": [
+    {
+      "volume_fraction": 0.6999725324,
+      "printed_fraction": 0.6755493221,
+      "volume_saved_fraction": 0.3244506779,
+      "max_stress_mpa": 0.02167958939,
+      "max_interlayer_tension_mpa": 0.007579174927,
+      "margin": {
+        "in_plane": 2536.948418,
+        "interlayer": 3991.199608,
+        "worst_case": 2536.948418
+      },
+      "orientation": {
+        "x": -0,
+        "y": -0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 15,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 534,
+      "min_feature_warning": "534 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 2536.948418,
+      "rejection_reason": ""
+    },
+    {
+      "volume_fraction": 0.4999645001,
+      "printed_fraction": 0.4465871903,
+      "volume_saved_fraction": 0.5534128097,
+      "max_stress_mpa": 0.02253182092,
+      "max_interlayer_tension_mpa": 0.007922241755,
+      "margin": {
+        "in_plane": 2440.992239,
+        "interlayer": 3818.363657,
+        "worst_case": 2440.992239
+      },
+      "orientation": {
+        "x": -0,
+        "y": -0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 15,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 672,
+      "min_feature_warning": "672 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 2440.992239,
+      "rejection_reason": ""
+    },
+    {
+      "volume_fraction": 0.2999736156,
+      "printed_fraction": 0.2199625993,
+      "volume_saved_fraction": 0.7800374007,
+      "max_stress_mpa": 0.02681721288,
+      "max_interlayer_tension_mpa": 0.009533328903,
+      "margin": {
+        "in_plane": 2050.921558,
+        "interlayer": 3173.078398,
+        "worst_case": 2050.921558
+      },
+      "orientation": {
+        "x": -0,
+        "y": -0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 15,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 784,
+      "min_feature_warning": "784 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 2050.921558,
+      "rejection_reason": ""
+    }
+  ],
+  "rejected_variants": []
+}

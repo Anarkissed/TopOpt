@@ -1,0 +1,13 @@
+S5 DETERMINISM — same mesh + strength twice = byte-identical
+  topopt-cli analyze <job> --mesh variant_030.stl --smooth 1.00  (run a, run b)
+  cmp det_a/variant_030_smoothed.stl det_b/variant_030_smoothed.stl  -> IDENTICAL
+  cmp det_a/analysis_report.json     det_b/analysis_report.json      -> IDENTICAL
+  (fixed vertex order, uniform umbrella weights, no RNG, no nondeterministic reduction)
+
+S6 OFF IS BYTE-IDENTICAL TO TODAY
+  - The smoothing code path is fully gated behind smooth.enabled / result.smoothed.
+    run_job's export path (the optimizer's own STL/3MF writer) is UNCHANGED.
+  - analyze WITHOUT --smooth: two runs -> analysis.json byte-identical (cmp clean),
+    and the file carries ZERO smoothing keys (17 lines, the PR-196 template exactly).
+  - The clearance rasterizer was refactored to SHARE its inside-test with the new
+    freeze predicate; test_clearance 28/28 proves that refactor is byte-identical.

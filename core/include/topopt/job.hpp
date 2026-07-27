@@ -9,6 +9,7 @@
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/pipeline.hpp"   // MinimizePlasticResult
 #include "topopt/settings.hpp"   // SettingsRules
+#include "topopt/smooth.hpp"     // SmoothStats
 #include "topopt/step.hpp"       // StepModel
 
 namespace topopt {
@@ -158,6 +159,13 @@ struct JobBox {
 struct JobDescription {
   std::string model;     // model file path; relative paths resolve against the
                          // job file's directory
+  // Optional. The TRUE source format the user supplied, when the `model` file is
+  // a working copy in a different format (handoff 2026-07-26-3mf-optimize-path):
+  // the app normalises a 3MF import to an STL working copy so the optimize path
+  // never re-parses 3MF, then records "3mf" here so run_info still names the real
+  // source. Empty => run_info derives the format from `model`'s extension, which
+  // is the honest answer for a job that references the source file directly.
+  std::string source_format;
   std::string material;  // key into materials.json (validated by run_job)
   std::string mode;      // "minimize_plastic" (the only supported mode)
   int resolution = 0;    // voxelizer resolution along the longest axis, >= 1
@@ -308,6 +316,30 @@ struct AnalyzeJobResult {
   std::string report_json;             // the bytes written to report_path
   std::string provenance_path;         // <out_dir>/analysis.json (provenance + BOTH masses)
   std::string fields_path;             // <out_dir>/fields.bin (one analysed "variant")
+
+  // Constrained smoothing (handoff 2026-07-26-constrained-smooth-ui). Populated
+  // only when the request enabled smoothing; the re-analysed numbers above then
+  // describe the SMOOTHED mesh (never the pre-smoothing geometry — the honesty
+  // rule). Default (no smoothing) leaves these zero and every byte on the
+  // analyse-only path unchanged.
+  bool smoothed = false;               // smoothing was applied to the --mesh input
+  double smooth_strength = 0.0;        // the strength knob used (0,1]
+  SmoothStats smooth_stats;            // frozen count, volume drift + bound, min-feature
+  std::string smoothed_mesh_path;      // <out_dir>/<...>_smoothed.stl (the exported mesh)
+};
+
+// A constrained-smoothing request for analyze_job (handoff
+// 2026-07-26-constrained-smooth-ui). Off by default → analyze_job is byte-for-byte
+// its pre-smoothing self. When enabled, analyze_job smooths the --mesh input under
+// freeze predicates derived from the MODEL's B-rep (fixture / clearance / protected
+// faces → exact cylinder/plane geometry) and the min-feature hard constraint, writes
+// the smoothed mesh, then re-certifies THAT mesh through analyze_fixed_design.
+struct SmoothRequest {
+  bool enabled = false;
+  double strength = 0.0;         // (0,1]; ≤0 disables
+  int max_pairs = 20;            // strength 1.0 → this many Taubin λ|μ pairs
+  double freeze_tol_mm = 0.0;    // ≤0 → default (0.75 × voxel spacing)
+  bool enforce_min_feature = true;
 };
 
 // Re-certify a FIXED design under `job`'s self-weight load case. Builds the
@@ -336,6 +368,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                              const std::string& out_dir,
                              const MaterialLibrary& materials,
                              const SettingsRules& rules,
-                             const std::string& analyze_mesh_path = "");
+                             const std::string& analyze_mesh_path = "",
+                             const SmoothRequest& smooth = SmoothRequest{});
 
 }  // namespace topopt

@@ -1,0 +1,5 @@
+===== B3 DETERMINISM: same inputs twice, byte-identical? =====
+  streaming STL  (run A vs B) : BYTE-IDENTICAL ( 15800084 bytes)
+  in-memory STL  (run A vs B) : BYTE-IDENTICAL ( 15800084 bytes)
+  3MF            (run A vs B) : DIFFERS  (705405b5305f4f3aa809745b68b8906b8f3b43f0c7d53752eb279deabc5973e6 vs 89e5d35ee79a449b53635062b7acdab79c515b40c96cdb9ee09387426b2994a8)
+  streaming vs in-memory STL : DIFFERS  (1fc4a2ef1c1a03c89802df5de33e9fe6ad1e8b828e94c25fd3eb2da42559db1a vs e21ead76e985f85103152c532fff518b2ae1a80698f0ebc8816b0969211dc789)

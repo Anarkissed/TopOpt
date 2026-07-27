@@ -40,6 +40,7 @@ add_library(topopt
   src/io/face_overrides.cpp
   src/io/fields.cpp
   src/mesh/mesh.cpp
+  src/mesh/smooth.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
@@ -279,6 +280,16 @@ add_test(NAME warm_start COMMAND test_warm_start)
 add_executable(test_clearance tests/unit/test_clearance.cpp)
 target_link_libraries(test_clearance PRIVATE topopt)
 add_test(NAME clearance COMMAND test_clearance)
+
+# Constrained Taubin smoothing (handoff 2026-07-26-constrained-smooth-ui). Pure
+# C++/std (no OCCT, no Eigen): src/mesh/smooth.cpp + src/voxel/{voxelize,clearance}
+# are always built and the test constructs synthetic meshes + a cylinder predicate
+# in code, so it runs in every configuration. Covers bars S1 (frozen=bit-identical),
+# S2 (min-feature constraint stops a thinning), S4 (volume drift vs bound), S5
+# (determinism), S6 (strength 0 = identity).
+add_executable(test_smooth tests/unit/test_smooth.cpp)
+target_link_libraries(test_smooth PRIVATE topopt)
+add_test(NAME smooth COMMAND test_smooth)
 
 # Observability primitives (handoff 114): the float16 codec, the per-iteration
 # CSV schema (GOLDEN), density-snapshot write/read round-trip, SnapshotCapture
@@ -710,6 +721,15 @@ if(Eigen3_FOUND)
   add_executable(test_mma tests/validation/test_mma.cpp)
   target_link_libraries(test_mma PRIVATE topopt)
   add_test(NAME mma COMMAND test_mma)
+
+  # Adaptive move limit (handoff 2026-07-26-adaptive-move): the opt-in adaptive
+  # MMA move limit. Pins OFF byte-identity (plain + masked), the feasibility
+  # guarantee under a grown move, the MMA-only rejection, and that the feature is
+  # wired to the loop. Drives simp_optimize, so Eigen-gated like the other
+  # optimizer tests.
+  add_executable(test_adaptive_move tests/validation/test_adaptive_move.cpp)
+  target_link_libraries(test_adaptive_move PRIVATE topopt)
+  add_test(NAME adaptive_move COMMAND test_adaptive_move)
 
   # MMA projection-gate (Option B): after the M7.mma.4 switchover the run path
   # must NOT enable a Heaviside projection schedule under MMA (simp_optimize

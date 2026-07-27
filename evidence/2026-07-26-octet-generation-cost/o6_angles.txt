@@ -1,0 +1,9 @@
+===== O6 printability =====
+O6 PRINTABILITY — octet strut angle from VERTICAL (z), L=8 mm
+   (angle 0 = vertical/self-supporting; 90 = horizontal bridge)
+   45 deg : 24 struts (67%)
+   90 deg : 12 struts (33%)
+   struts steeper than 45 deg from vertical (overhang risk): 12 of 36 (33%)
+   min strut diameter at lowest graded density = 0.960 mm
+   *** NOT a printability verdict. The lattice has NO vertical struts: the face-diagonal legs sit at 45 deg from vertical (the borderline FDM
+   self-support limit) and one third are horizontal (90 deg) bridges that categorically need support. These numbers OWE a real FDM print test.

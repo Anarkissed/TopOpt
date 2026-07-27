@@ -187,6 +187,24 @@ ClearanceGeometry resolve_clearance_from_face(const StepModel& model, int face_i
 ClearanceGeometry resolve_clearance_manual(const ManualClearanceGeometry& geom,
                                            const ClearanceParams& params);
 
+// True iff point `p` (model space, mm) lies inside the resolved keep-out region,
+// its boundary inflated OUTWARD by `tol` (mm) on every extent (radius / slab
+// depth / in-plane rectangle / axial band). `tol == 0` is the exact region
+// rasterize_clearance tests at a voxel centre; a positive `tol` widens it into a
+// band around the region surface. A `{valid=false}` region contains nothing.
+//
+// This is the FREEZE PREDICATE the constrained smoother uses (handoff
+// 2026-07-26-constrained-smooth-ui): a mesh vertex on a keep-clear bore wall, an
+// anchor pad or a protected face is FROZEN so smoothing cannot move it. Freezing
+// against the exact primitive geometry (this predicate, resolved once from PR
+// 190's ClearanceGeometry) SURVIVES re-meshing — where a voxel-tag or face-id map
+// does not, because the exported/smoothed mesh carries no face ids. The math is
+// identical to rasterize_clearance's per-voxel inside test, just point-vs-region
+// with an outward `tol`, so a frozen vertex and a FrozenVoid voxel agree on the
+// same geometry.
+bool point_in_clearance_region(const ClearanceGeometry& geom, const Vec3& p,
+                               double tol);
+
 // Rasterize an already-resolved predicate onto `solved_grid`, writing
 // MaskValue::FrozenVoid into `out`. This is the shared rasterizer both the auto
 // and manual paths (and the mask_clearance_region wrapper) funnel through.

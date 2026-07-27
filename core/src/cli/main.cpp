@@ -40,8 +40,9 @@ int usage(const char* argv0) {
                "[--rules PATH]\n"
                "              [--no-iteration-csv] [--snapshots] "
                "[--snapshot-every N] [--snapshot-cap N]\n"
-               "       %s analyze <job.json> [--mesh PATH] [--out DIR] "
-               "[--materials PATH] [--rules PATH]\n"
+               "       %s analyze <job.json> [--mesh PATH] [--smooth S] "
+               "[--no-min-feature] [--out DIR]\n"
+               "              [--materials PATH] [--rules PATH]\n"
                "       %s --version\n"
                "\n"
                "run      optimize the job's ladder and export accepted variants.\n"
@@ -51,6 +52,10 @@ int usage(const char* argv0) {
                "         that mesh (e.g. a smoothed variant) onto the run's grid and\n"
                "         re-analyzes it. Writes analysis_report.json + analysis.json\n"
                "         (provenance + both mass figures) + fields.bin to --out.\n"
+               "         --smooth S (0<S<=1) constrained-Taubin-smooths the --mesh\n"
+               "         input first (bores/pads frozen, min-feature enforced), writes\n"
+               "         <mesh>_smoothed.stl, and re-certifies THAT; --no-min-feature\n"
+               "         disables the thinning constraint (for the S2 demo).\n"
                "\n"
                "Observability (handoff 114), written to --out by `run`:\n"
                "  run_info.json      version + config record (always)\n"
@@ -74,8 +79,14 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
   std::string materials_path = materials_default;
   std::string rules_path = rules_default;
   std::string mesh_path;
+  topopt::SmoothRequest smooth;
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
+    // Value-less flags first.
+    if (arg == "--no-min-feature") {
+      smooth.enforce_min_feature = false;
+      continue;
+    }
     if (i + 1 >= argc) return usage(argv[0]);
     if (arg == "--out") {
       out_dir = argv[++i];
@@ -85,6 +96,9 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
       rules_path = argv[++i];
     } else if (arg == "--mesh") {
       mesh_path = argv[++i];
+    } else if (arg == "--smooth") {
+      smooth.enabled = true;
+      smooth.strength = std::atof(argv[++i]);
     } else {
       return usage(argv[0]);
     }
@@ -98,12 +112,24 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
         topopt::load_settings_rules_file(rules_path);
 
     const topopt::AnalyzeJobResult r = topopt::analyze_job(
-        job, dirname_of(job_path), out_dir, materials, rules, mesh_path);
+        job, dirname_of(job_path), out_dir, materials, rules, mesh_path, smooth);
     const topopt::FixedDesignAnalysis& a = r.analysis;
 
     std::printf("analyze: %s (fixed design, ONE analysis solve, no optimization)\n",
                 r.analyzed_mesh ? ("mesh " + r.analyzed_mesh_path).c_str()
                                 : (job.model + " as solid part").c_str());
+    if (r.smoothed) {
+      const topopt::SmoothStats& s = r.smooth_stats;
+      std::printf("  smoothed \xC2\xB7 re-analyzed: strength %.3g  pairs %d/%d  "
+                  "frozen %zu/%zu\n",
+                  r.smooth_strength, s.applied_pairs, s.requested_pairs,
+                  s.frozen_vertices, s.total_vertices);
+      std::printf("  volume drift: %.4g%% (bound %.4g%%)   min-feature %d->%d%s\n",
+                  100.0 * s.volume_drift_fraction, 100.0 * s.volume_drift_bound,
+                  s.min_feature_baseline, s.min_feature_after,
+                  s.min_feature_limited ? "  [constraint STOPPED smoothing]" : "");
+      std::printf("  smoothed mesh: %s\n", r.smoothed_mesh_path.c_str());
+    }
     std::printf("  peak stress: %.4g MPa   worst-case margin: %.4g "
                 "(required %.4g)\n",
                 a.max_von_mises, a.margin.worst_case, job.margin_stop);

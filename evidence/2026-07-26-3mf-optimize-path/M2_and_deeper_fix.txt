@@ -1,0 +1,19 @@
+# M2 (STL byte-identical) + deeper-fix (3mf==stl, no-lib3mf) proofs
+
+## M2: STL report.json + variant meshes byte-identical, pre-change vs post-change binary
+  report.json: IDENTICAL
+  variant_060.stl: IDENTICAL
+  variant_040.stl: IDENTICAL
+  (run_info.json differs only by the new honest 'source_format':'stl' line + the always-varying created_wall_ms)
+
+## Deeper fix: a 3MF and its STL twin optimise to a byte-identical result
+  raw-3mf report.json == stl report.json: IDENTICAL
+
+## Deeper fix: the app-normalised job (model=model.stl, source_format=3mf) runs on a
+## topopt-cli built from current source WITHOUT lib3mf (raw .3mf still refused):
+   raw .3mf on that binary:
+topopt-cli: cannot import model "model.3mf": 3MF import requires lib3mf, which is not available in this build; export the part as STL and import that instead
+   app-normalised job on that binary:
+   -> completed
+  "source_format": "3mf",
+   -> result IDENTICAL to raw-3mf run

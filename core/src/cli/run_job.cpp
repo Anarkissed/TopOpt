@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "topopt/analyze.hpp"
+#include "topopt/clearance.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/fields.hpp"
 #include "topopt/loadcase.hpp"
@@ -24,6 +25,7 @@
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
 #include "topopt/settings.hpp"
+#include "topopt/smooth.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/version.hpp"
@@ -132,6 +134,13 @@ RunInfo build_run_info(const JobDescription& job,
   info.fingerprint = obs.fingerprint;
   info.mode = job.mode;
   info.material = job.material;
+  // True source format for provenance (handoff 2026-07-26-3mf-optimize-path).
+  // The job may carry an explicit override (the app normalises a 3MF import to an
+  // STL working copy, then records "3mf" here); otherwise the model file IS the
+  // source, so its extension is the honest answer.
+  info.source_format =
+      job.source_format.empty() ? format_name(part_format_for_path(job.model))
+                                : job.source_format;
   info.resolution = job.resolution;
   info.load_source = job.loads.present ? "loadcase" : "self_weight";
   info.solver = solver_name(options.simp.solver);
@@ -267,13 +276,43 @@ std::string json_str(const std::string& s) {
   return out;
 }
 
+// The exact freeze predicates for the constrained smoother, resolved ONCE from
+// the model's B-rep (handoff 2026-07-26-constrained-smooth-ui). Each named face
+// becomes a ClearanceGeometry the smoother tests every mesh vertex against — a
+// cylindrical face → a Bolt bore predicate (keep the hole circular), a planar
+// face → a Face pad predicate (keep the mounting face flat). These predicates
+// survive re-meshing (the smoothed mesh carries NO face ids), which a voxel-tag /
+// face-id map does not. `params` is zero-margin for a bore (freeze the wall at the
+// true radius) and a shallow slab for a pad. Non-matching faces are skipped.
+std::vector<ClearanceGeometry> freeze_regions_from_faces(
+    const StepModel& model, const std::vector<int>& face_ids, double spacing) {
+  std::vector<ClearanceGeometry> regions;
+  for (const int fid : face_ids) {
+    if (fid < 0 || fid >= model.face_count) continue;
+    const StepFaceInfo& face = model.faces[static_cast<std::size_t>(fid)];
+    ClearanceParams p;
+    if (face.kind == StepSurfaceKind::Cylinder) {
+      p.kind = ClearanceKind::Bolt;  // radius = bore radius, band = through-part span
+    } else if (face.kind == StepSurfaceKind::Plane) {
+      p.kind = ClearanceKind::Face;
+      p.slab_depth_mm = spacing;  // a one-voxel slab; the tol band catches the pad
+    } else {
+      continue;
+    }
+    const ClearanceGeometry g = resolve_clearance_from_face(model, fid, p);
+    if (g.valid) regions.push_back(g);
+  }
+  return regions;
+}
+
 }  // namespace
 
 AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_dir,
                              const std::string& out_dir,
                              const MaterialLibrary& materials,
                              const SettingsRules& rules,
-                             const std::string& analyze_mesh_path) {
+                             const std::string& analyze_mesh_path,
+                             const SmoothRequest& smooth) {
   // Self-weight only for now — a declared "loads" block needs the loadcase
   // grid/BC construction (build_production_loadcase), not yet wired here.
   if (job.loads.present)
@@ -327,6 +366,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // stress solve's printed-voxel gate matches it and self-weight is the design's
   // own weight); `density` is that occupancy as a binary field. Same voxel geometry
   // as `model_grid`, so the fixture node indices above stay valid.
+  if (smooth.enabled && analyze_mesh_path.empty())
+    throw JobError("analyze: --smooth requires a --mesh input to smooth");
+
   VoxelGrid design_grid = model_grid;
   if (!analyze_mesh_path.empty()) {
     StepModel edited;
@@ -336,11 +378,46 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       throw JobError(std::string("analyze: cannot import analyze mesh: ") +
                      e.what());
     }
-    // Re-voxelize the edited mesh onto the MODEL's grid geometry, then carry the
-    // model's fixture tags over so the same clamp applies. The occupancy is the
-    // design; the quantization gap (mesh surface vs this voxelization) is disclosed
-    // in the provenance record below.
-    design_grid = voxelize_onto_grid(edited.mesh, model_grid);
+
+    // ── CONSTRAINED SMOOTHING (handoff 2026-07-26-constrained-smooth-ui) ───────
+    // Smooth the input mesh BEFORE re-voxelizing, so everything below re-certifies
+    // the SMOOTHED geometry (the honesty rule: the numbers shown always describe
+    // what is exported). Frozen vertices come from the model's B-rep fixture faces
+    // (bores + pads); the min-feature constraint is evaluated against model_grid.
+    TriangleMesh design_mesh = edited.mesh;
+    if (smooth.enabled) {
+      const TaubinParams params =
+          taubin_params_for_strength(smooth.strength, smooth.max_pairs);
+      SmoothConstraints c;
+      c.freeze_regions = freeze_regions_from_faces(
+          result.model, result.fixture_face_ids, model_grid.spacing);
+      c.freeze_tol_mm = smooth.freeze_tol_mm;
+      c.min_feature_grid = &model_grid;
+      c.enforce_min_feature = smooth.enforce_min_feature;
+      SmoothResult sr = constrained_taubin_smooth(edited.mesh, params, c);
+      design_mesh = std::move(sr.mesh);
+      result.smoothed = true;
+      result.smooth_strength = smooth.strength;
+      result.smooth_stats = sr.stats;
+      // Export the smoothed mesh (task item 5): <analyze_mesh basename>_smoothed.stl.
+      {
+        std::error_code ec;
+        std::filesystem::create_directories(out_dir, ec);
+        if (ec)
+          throw JobError("analyze: cannot create output directory " + out_dir +
+                         ": " + ec.message());
+      }
+      const std::string stem =
+          std::filesystem::path(analyze_mesh_path).stem().string();
+      result.smoothed_mesh_path = join_path(out_dir, stem + "_smoothed.stl");
+      write_stl_file(result.smoothed_mesh_path, design_mesh);
+    }
+
+    // Re-voxelize the (smoothed) mesh onto the MODEL's grid geometry, then carry
+    // the model's fixture tags over so the same clamp applies. The occupancy is
+    // the design; the quantization gap (mesh surface vs this voxelization) is
+    // disclosed in the provenance record below.
+    design_grid = voxelize_onto_grid(design_mesh, model_grid);
     for (std::size_t i = 0; i < design_grid.tags.size(); ++i)
       if (model_grid.tags[i] == VoxelTag::Fixture &&
           design_grid.tags[i] != VoxelTag::Empty)
@@ -348,7 +425,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     result.analyzed_mesh = true;
     result.analyzed_mesh_path = analyze_mesh_path;
     result.mesh_mass_grams =
-        material.density_g_cm3 * mesh_enclosed_volume_mm3(edited.mesh) / 1000.0;
+        material.density_g_cm3 * mesh_enclosed_volume_mm3(design_mesh) / 1000.0;
   }
   std::vector<double> density(design_grid.voxel_count(), 0.0);
   for (std::size_t i = 0; i < density.size(); ++i)
@@ -458,6 +535,32 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
           (result.analyzed_mesh ? json_num(result.mesh_mass_grams)
                                 : std::string("null")) +
           ",\n";
+  // Smoothing receipt (task items 1, 5; bars S2/S4) — emitted ONLY when smoothing
+  // ran, so the analyse-only provenance is byte-identical to before (bar S6). Both
+  // mass figures above already describe the SMOOTHED mesh in this branch.
+  if (result.smoothed) {
+    const SmoothStats& s = result.smooth_stats;
+    prov += "  \"smoothed\": true,\n";
+    prov += "  \"smooth_strength\": " + json_num(result.smooth_strength) + ",\n";
+    prov += "  \"smooth_pairs_requested\": " +
+            std::to_string(s.requested_pairs) + ",\n";
+    prov += "  \"smooth_pairs_applied\": " + std::to_string(s.applied_pairs) +
+            ",\n";
+    prov += "  \"frozen_vertices\": " + std::to_string(s.frozen_vertices) + ",\n";
+    prov += "  \"total_vertices\": " + std::to_string(s.total_vertices) + ",\n";
+    prov += "  \"volume_before_mm3\": " + json_num(s.volume_before_mm3) + ",\n";
+    prov += "  \"volume_after_mm3\": " + json_num(s.volume_after_mm3) + ",\n";
+    prov += "  \"volume_drift_fraction\": " + json_num(s.volume_drift_fraction) +
+            ",\n";
+    prov += "  \"volume_drift_bound\": " + json_num(s.volume_drift_bound) + ",\n";
+    prov += "  \"min_feature_baseline\": " +
+            std::to_string(s.min_feature_baseline) + ",\n";
+    prov += "  \"min_feature_after\": " + std::to_string(s.min_feature_after) +
+            ",\n";
+    prov += "  \"min_feature_limited\": " +
+            std::string(s.min_feature_limited ? "true" : "false") + ",\n";
+    prov += "  \"smoothed_mesh\": " + json_str(result.smoothed_mesh_path) + ",\n";
+  }
   prov += "  \"max_stress_mpa\": " + json_num(a.max_von_mises) + ",\n";
   prov += "  \"margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
   prov += "  \"margin_required\": " + json_num(job.margin_stop) + ",\n";

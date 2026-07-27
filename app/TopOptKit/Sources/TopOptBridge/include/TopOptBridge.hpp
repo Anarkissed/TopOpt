@@ -421,6 +421,48 @@ struct AnalyzeResult {
   double voxel_volume_mm3 = 0.0;
   std::vector<float> von_mises_field;    // grid-indexed, MPa (0 off the printed set)
   std::vector<float> displacement_field; // DOF-ordered (3*node), mm
+
+  // Constrained-smoothing receipt (handoff 2026-07-26-constrained-smooth-ui).
+  // Populated only by smooth_and_recertify_selfweight; on the plain analyze path
+  // `smoothed` stays false and these are zero. When true, EVERY scalar above
+  // describes the SMOOTHED geometry — the pre-smoothing numbers never come back
+  // (the honesty rule). The results screen renders the "smoothed · re-analyzed"
+  // provenance tag from these, and the quantization footnote from `spacing`.
+  bool smoothed = false;
+  double smooth_strength = 0.0;          // the strength knob used (0,1]
+  int32_t smooth_pairs_requested = 0;
+  int32_t smooth_pairs_applied = 0;
+  int64_t frozen_vertices = 0;           // vertices held bit-identical (bores/pads)
+  int64_t total_vertices = 0;
+  double volume_before_mm3 = 0.0;
+  double volume_after_mm3 = 0.0;
+  double volume_drift_fraction = 0.0;    // |Δ vol| / vol
+  double volume_drift_bound = 0.0;       // Taubin's stated transfer-function bound
+  int32_t min_feature_baseline = -1;
+  bool min_feature_limited = false;      // the constraint stopped smoothing early
+  std::string smoothed_mesh_path;        // the exported smoothed STL (task item 5)
+};
+
+// Freeze regions for the constrained smoother, supplied by the app as the SAME
+// manual-primitive geometry PR 190 already threads through the job schema
+// (ManualClearanceGeometry: keep-clear bores, protected/anchor faces). Flattened
+// to scalar vectors so the Swift C++ importer builds it member-wise (no nested
+// struct vectors), exactly like BridgeLoadCase. Region g is a Bolt when
+// kind[g]==0 (a swept cylinder: axis_point + axis_dir, radius, half_length) and a
+// Face when kind[g]==1 (a bounded slab: origin + normal, half_u × half_w). Every
+// vector is indexed by g; the point/dir triples are 3*g. A vertex within the
+// smoother's tolerance of ANY region is FROZEN (bit-identical). Empty => only the
+// mount slab is frozen.
+struct BridgeFreezeRegions {
+  std::vector<int32_t> kind;         // 0 = Bolt (bore), 1 = Face (pad/protect)
+  std::vector<double> axis_point;    // 3*g (Bolt)
+  std::vector<double> axis_dir;      // 3*g (Bolt)
+  std::vector<double> radius_mm;     // g   (Bolt)
+  std::vector<double> half_length_mm;// g   (Bolt)
+  std::vector<double> origin;        // 3*g (Face)
+  std::vector<double> normal;        // 3*g (Face)
+  std::vector<double> half_u_mm;     // g   (Face)
+  std::vector<double> half_w_mm;     // g   (Face)
 };
 
 // Re-certify a FIXED design under self-weight. Imports `model_path` (the geometry
@@ -437,6 +479,24 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
                                  const std::string& materials_path,
                                  const std::string& rules_path, int resolution,
                                  double margin_stop, BridgeError& err);
+
+// Constrained-smooth `input_mesh_path` then re-certify the RESULT (handoff
+// 2026-07-26-constrained-smooth-ui) — the seam a smoothing UI calls after the
+// user picks a strength. Taubin-smooths the mesh under `freeze` (plus the mount
+// slab, always frozen) with the min-feature hard constraint, writes the smoothed
+// mesh to `smoothed_out_path`, then runs analyze_selfweight on THAT — so the
+// returned numbers describe the smoothed geometry and share analyze_fixed_design
+// with the CLI and the optimizer's own certification. `strength` ∈ (0,1];
+// `enforce_min_feature` gates the melt constraint. On failure returns an empty
+// result and sets `err`. (Like analyze_selfweight, this has no Swift caller yet —
+// the UI is deferred — but the seam and its provenance fields are here so the tag
+// has one source of truth when it lands.)
+AnalyzeResult smooth_and_recertify_selfweight(
+    const std::string& model_path, const std::string& input_mesh_path,
+    const std::string& smoothed_out_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, double margin_stop, double strength, bool enforce_min_feature,
+    const BridgeFreezeRegions& freeze, BridgeError& err);
 
 // ---------------------------------------------------------------------------
 // Optimize under the user's DECLARED load case (ARCHITECTURE §1 mode (a)),

@@ -258,13 +258,37 @@ public struct ForceModel: Equatable, Sendable, Codable {
 
     /// Set gravity from the tapped floor-facing face's outward normal. The normal
     /// is normalized and stored in model space; the workspace enters edit
-    /// (proto `setGravity`: `S.quat` settles, `S.phase='edit'`).
+    /// (proto `setGravity`: `S.quat` settles, `S.phase='edit'`). Records the owning
+    /// face so the chip can say the direction came from a tap.
     public mutating func setGravity(faceNormal normal: SIMD3<Float>, face: FaceID) {
-        let n = simd_normalize(normal)
-        guard n.x.isFinite, n.y.isFinite, n.z.isFinite else { return }
-        gravity = n
+        guard storeGravity(normal) else { return }
         gravityFace = face
+    }
+
+    /// Set gravity from a POINTED direction (the direction widget, 2026-07-26) — no owning
+    /// face. This is the reliable route the STL pseudo-face problem made necessary: the user
+    /// points instead of hunting for a clean face to tap.
+    ///
+    /// It writes the SAME single `gravity` vector the face-tap setter does (via the shared
+    /// `storeGravity` core), so downstream — `settleRotation`, `loadForceVectorModel`, and
+    /// the run's `build_dir` — cannot tell how the direction was set: two ways to set ONE
+    /// value, never two stored values that can drift (BAR V1; the manual-primitive desync,
+    /// PR 195, is exactly what this avoids). Clears `gravityFace` — there is no owning face.
+    public mutating func setGravity(direction: SIMD3<Float>) {
+        guard storeGravity(direction) else { return }
+        gravityFace = nil
+    }
+
+    /// The ONE place `gravity` + `phase` are written, shared by both public setters so the
+    /// stored direction is byte-identical regardless of route. Returns false (leaving the
+    /// model untouched) for a non-finite / zero vector.
+    @discardableResult
+    private mutating func storeGravity(_ v: SIMD3<Float>) -> Bool {
+        let n = simd_normalize(v)
+        guard n.x.isFinite, n.y.isFinite, n.z.isFinite else { return false }
+        gravity = n
         phase = .edit
+        return true
     }
 
     /// Re-enter the gravity prompt (design chip's "Change"). Keeps the current

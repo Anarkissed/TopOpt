@@ -1,0 +1,13 @@
+===== O5 watertightness =====
+O5 WATERTIGHTNESS — 2x2x2 octet block, L=8 mm
+   triangles=8940  struts=240 nodes=63
+   The generator emits an STL-style UNSHARED triangle soup (every facet carries its own 3 vertices); topology is only defined after welding.
+   WELDED by coordinate (3249 verts, exactly what an STL reader does on re-import):
+     boundary_edges   = 0
+     non_manifold_edges = 2238  (edges shared by >2 faces)
+     connected components = 78
+     check_watertight = FAIL
+   Each prism/node, welded in isolation, IS a closed 2-manifold (see B2). Emitted together, the shared strut endpoints and node spheres weld into
+   non-manifold junctions, and the struts INTERPENETRATE — which the edge check alone cannot see. The intersection scan below proves the overlap.
+   self-intersection scan around the central node: 18216 intersecting triangle pairs of 5710510 tested (3380 local triangles)
+   => the swept-solid union is a self-intersecting soup: individually-closed primitives that INTERPENETRATE.

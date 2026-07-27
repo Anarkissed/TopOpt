@@ -147,6 +147,20 @@ PartFormat part_format_for_path(const std::string& path) {
   return PartFormat::Unknown;
 }
 
+std::string format_name(PartFormat format) {
+  switch (format) {
+    case PartFormat::Step:
+      return "step";
+    case PartFormat::Stl:
+      return "stl";
+    case PartFormat::ThreeMf:
+      return "3mf";
+    case PartFormat::Unknown:
+      return "unknown";
+  }
+  return "unknown";
+}
+
 std::string describe_defect(PartDefect defect) {
   switch (defect) {
     case PartDefect::EmptyMesh:

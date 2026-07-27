@@ -1,0 +1,16 @@
+RE-CERT SOLVER CONVERGENCE — a real, honest limitation (not a smoother bug)
+  variant_030 @ strength 0.50 : the re-cert FEA solve FAILED:
+    "fea_solve_mgcg_matfree: CG did not reach the requested tolerance within
+     max_iterations"  (deterministic — failed on both attempts)
+  Same variant @ 0.25 and @ 1.00 : SUCCEED.
+  variant_050 and variant_070 @ 0.50 : SUCCEED.
+  So the failure is the production multigrid-CG hitting its iteration cap on ONE
+  ill-conditioned re-voxelized field (variant_030 is the sparsest/tendrilliest of
+  the ladder), NOT the smoother — the smoother produced a valid watertight mesh.
+  The re-cert THROWS rather than reporting numbers from a non-converged solve: the
+  honesty rule holds even at the solver boundary (no false receipt is emitted).
+  OWED FOLLOW-UP: a fixed-design re-analysis is a one-shot solve, not a hot
+  optimizer loop, so it can afford a more robust solver policy (e.g. a higher CG
+  iteration cap or a Jacobi-CG fallback for very sparse designs) WITHOUT the
+  byte-identity concern that blocks changing the optimizer's cert solver. Left for
+  the maintainer because it changes analyze_fixed_design's solver policy.
