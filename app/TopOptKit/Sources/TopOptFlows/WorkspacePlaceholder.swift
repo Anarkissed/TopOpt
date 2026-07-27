@@ -106,6 +106,19 @@ public struct WorkspacePlaceholder: View {
     @State private var draggingGravity = false
     @State private var gravitySnap = true
     @State private var gravitySnapLabel: String?
+    // Round 2 (2026-07-27): the arrow's BASE is movable via the transform gizmo and magnetically
+    // attaches to any face. `gravityBaseDraft` is the pending base while editing (nil → the
+    // stored `force.gravityBaseModel`, else the mesh centre); `gravityBaseDrag` is the transform
+    // gizmo's pure-math grab context; `gravityBaseActiveId` glows the grabbed handle; the orbit
+    // flags let an empty-box drag fall through to the camera. The base is PURELY VISUAL — it is
+    // committed to `ForceModel.gravityBaseModel` (which no run/serializer reads) so it round-trips
+    // but never reaches the job (BAR V4).
+    @State private var gravityBaseDraft: SIMD3<Float>?
+    @State private var gravityBaseDrag: PrimitiveGizmo.Drag?
+    @State private var gravityBaseActiveId: Float = -1
+    @State private var gravityBaseSnapped = false
+    @State private var gravityBaseOrbiting = false
+    @State private var gravityBaseDragLast: CGPoint?
 
     /// The primitive a transform gizmo is bound to (group + primitive id).
     struct GizmoTarget: Equatable { let group: UUID; let id: UUID }
@@ -265,10 +278,10 @@ public struct WorkspacePlaceholder: View {
                 .ignoresSafeArea()
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
-            // Gravity direction: a PERSISTENT down-arrow so the current "which way is down"
-            // is always visible without opening anything (edit phase), and the INTERACTIVE
-            // pointing arrow during setup. Both draw the same arrow in the same frame.
-            gravityIndicatorOverlay.ignoresSafeArea()
+            // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
+            // being edited (the setup phase, below) — the persistent dim arrow + "down" tag are
+            // REMOVED as viewport clutter; the "Gravity set · <axis>" chip is the at-a-glance
+            // readout the rest of the time.
             if showDesignGizmo { designGizmoOverlay.ignoresSafeArea() }  // dom-app resize/move handles
             // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
             // axial, face → depth) and the floating glass value pill near the selection.
@@ -281,8 +294,13 @@ public struct WorkspacePlaceholder: View {
             if force.phase == .setup {
                 gravityBanner
                 // Point which way is down — the reliable route that doesn't depend on a
-                // clean single face. Face-tap still works (handled in `handlePick`).
-                if viewerMesh != nil { gravityDirectionOverlay.ignoresSafeArea() }
+                // clean single face. The tip SNAPS to the part's own face normals (item 1);
+                // the base is moved by the transform gizmo and magnetically sticks to a face
+                // (item 2). Face-tap still works (handled in `handlePick`).
+                if viewerMesh != nil {
+                    gravityDirectionOverlay.ignoresSafeArea()
+                    gravityBaseGizmoOverlay.ignoresSafeArea()
+                }
             } else {
                 // The Design Box drawer now lives INSIDE `bottomRightControls` (item 11), so it
                 // is no longer placed separately here.
@@ -476,9 +494,13 @@ public struct WorkspacePlaceholder: View {
         if force.phase == .setup {
             if let n = mesh.faceNormal(faceID) {
                 force.setGravity(faceNormal: n, face: faceID)
+                // Anchor the (purely-visual) arrow base on the tapped face so the indicator
+                // reads from the surface the part rests on.
+                force.setGravityBase(mesh.faceCentroid(faceID))
                 // A face tap commits too — drop any half-pointed draft + stale snap badge
                 // so re-entering setup starts from the direction just set, not the old draft.
                 gravityDraft = nil
+                gravityBaseDraft = nil
                 gravitySnapLabel = nil
                 model.toast = "Gravity set — the part now rests the way it will in real life"
             }
@@ -676,7 +698,7 @@ public struct WorkspacePlaceholder: View {
                 Text("Which way is down?").dsStyle(DS.TypeScale.headline)
                     .foregroundStyle(DS.Color.textPrimary.color)
             }
-            Text("Drag the blue arrow to point straight down — it snaps to the axes. Or tap the face that points at the floor. Drag empty space to orbit, pinch to zoom.")
+            Text("Drag the arrow to point straight down — it snaps to the part's own faces. Slide its base with the gizmo to sit it on the floor. Or tap the face that rests on the floor. Drag empty space to orbit, pinch to zoom.")
                 .dsStyle(DS.TypeScale.caption)
                 .foregroundStyle(DS.Color.textSecondary.color)
                 .multilineTextAlignment(.center)
@@ -1805,16 +1827,36 @@ public struct WorkspacePlaceholder: View {
             .contentShape(Circle().inset(by: -12))
     }
 
- // MARK: gravity DIRECTION widget (2026-07-26) — point which way is down
+ // MARK: gravity DIRECTION widget (2026-07-26; round 2 2026-07-27) — point which way is down
 
-    /// The arrow's model-space length: just outside the part so the head + drag knob clear
-    /// the geometry. Scaled off the model radius so it fits a small bolt and a large bracket.
-    private var gravityGizmoLength: Double { Double(viewerMesh?.bounds.radius ?? 1) * 1.25 }
+    /// The arrow's model-space length. ROUND 2 item 3: SHORT + THICK — a stubby direction
+    /// indicator, not the old long thin line that ran well past the part (was radius × 1.25).
+    /// Scaled off the model radius so it still fits a small bolt and a large bracket.
+    private var gravityGizmoLength: Double { Double(viewerMesh?.bounds.radius ?? 1) * 0.55 }
 
     /// The direction the setup arrow points RIGHT NOW: the live draft while pointing, else
     /// the current gravity, else model-space down (−Y) as the sensible first guess.
     private var effectiveGravityDraft: SIMD3<Float> {
         gravityDraft ?? force.gravity ?? SIMD3<Float>(0, -1, 0)
+    }
+
+    /// The arrow's BASE position RIGHT NOW (round 2 item 2): the live draft while dragging the
+    /// base gizmo, else the stored (purely-visual) base, else the mesh centre.
+    private var effectiveGravityBase: SIMD3<Float> {
+        gravityBaseDraft ?? force.gravityBaseModel ?? meshCenter
+    }
+
+    /// The magnet pull radius (model mm) for the arrow base: the base sticks to the nearest
+    /// face within this distance, and releases when dragged farther for free placement.
+    private var gravityBaseMagnetDist: Float { (viewerMesh?.bounds.radius ?? 1) * 0.4 }
+
+    /// The part's own flat-face normals as snap targets for the pointing tip (round 2 item 1) —
+    /// the real fix for "Gravity set · custom": gravity snaps perpendicular to the part's actual
+    /// faces, however the import is oriented, not to the model axes. Empty (→ axes only) when the
+    /// mesh carries no face ids.
+    private var gravityFaceSnapTargets: [GravityDirectionGizmo.SnapTarget] {
+        guard let mesh = viewerMesh else { return [] }
+        return GravityDirectionGizmo.faceSnapTargets(mesh.flatFaceNormals().map { SIMD3<Double>($0.normal) })
     }
 
     /// The axis label for the CURRENT gravity ("−Y", "+Z", …) or "custom" for an off-axis
@@ -1825,55 +1867,37 @@ public struct WorkspacePlaceholder: View {
         return GravityDirectionGizmo.snap(SIMD3<Double>(g), toleranceDeg: 0.25).label ?? "custom"
     }
 
-    /// Draw a gravity arrow (model centre → tip along `direction`) into the stage, using the
+    /// Draw the stubby gravity arrow (base → tip along `direction`) into the stage, using the
     /// SAME projection + settle as every other overlay so it tracks the part. The tail is the
-    /// part centre; the head sticks out just past the surface.
-    private func gravityArrowCanvas(_ proj: CameraProjection, direction: SIMD3<Float>,
-                                    color: Color) -> some View {
+    /// (movable) base; the head is a short hop away — thick, so it reads as a solid indicator.
+    private func gravityArrowCanvas(_ proj: CameraProjection, base: SIMD3<Float>,
+                                    direction: SIMD3<Float>, color: Color) -> some View {
         Canvas { ctx, _ in
-            let c = meshCenter
-            let tip = SIMD3<Float>(GravityDirectionGizmo.tip(center: SIMD3<Double>(c),
+            let tip = SIMD3<Float>(GravityDirectionGizmo.tip(center: SIMD3<Double>(base),
                                                              direction: SIMD3<Double>(direction),
                                                              length: gravityGizmoLength))
-            guard let a = proj.project(settledWorld(c)), let b = proj.project(settledWorld(tip))
+            guard let a = proj.project(settledWorld(base)), let b = proj.project(settledWorld(tip))
             else { return }
-            drawArrow(ctx, from: a, to: b, color: color)
+            // Thick widths (item 3): a stubby solid arrow, distinct from the slim force arrows.
+            drawArrow(ctx, from: a, to: b, color: color, w0: 11, w1: 5, headMax: 30)
         }
         .allowsHitTesting(false)
     }
 
-    /// The PERSISTENT gravity indicator (BAR: show the current down direction at all times
-    /// without opening anything). A dim non-interactive arrow + a "down" tag, shown once
-    /// gravity is set and we're editing. Non-interactive — the editable widget is setup-only.
-    @ViewBuilder private var gravityIndicatorOverlay: some View {
-        if force.phase == .edit, let g = force.gravity, let proj = projection, viewerMesh != nil {
-            ZStack(alignment: .topLeading) {
-                gravityArrowCanvas(proj, direction: g, color: DS.Color.accent.color.opacity(0.85))
-                let tip = SIMD3<Float>(GravityDirectionGizmo.tip(center: SIMD3<Double>(meshCenter),
-                                                                 direction: SIMD3<Double>(g),
-                                                                 length: gravityGizmoLength))
-                if let pt = proj.project(settledWorld(tip)) {
-                    gravityDownTag.position(x: pt.x, y: pt.y + 16)
-                }
-            }
-            .allowsHitTesting(false)
-        }
-    }
-
-    /// The INTERACTIVE pointing widget (setup phase): a draggable arrow the user pushes to
-    /// point which way is down, with the axis magnet, the "Snapped to" badge, and a confirm
-    /// check. Speaks the transform gizmo's language — the blue liquid-glass knob, the named
-    /// stage space, the `modelRay` grab — so it feels like the position gizmo. Face-tap still
-    /// sets gravity (handled in `handlePick`); this is the reliable route that needs no clean
-    /// face.
+    /// The INTERACTIVE pointing widget (setup / "being edited" phase — round 2 item 4: it is NOT
+    /// drawn otherwise). A draggable, snapping arrow: the TIP points which way is down (snaps to
+    /// the part's own faces, item 1) and the BASE is moved by the transform gizmo, magnetically
+    /// sticking to a face (item 2, `gravityBaseGizmoOverlay`). The magnet toggle, "Snapped to"
+    /// badge and confirm check sit by the tip. Face-tap still sets gravity (`handlePick`).
     @ViewBuilder private var gravityDirectionOverlay: some View {
         if let proj = projection {
             let dir = effectiveGravityDraft
-            let tipModel = SIMD3<Double>(GravityDirectionGizmo.tip(center: SIMD3<Double>(meshCenter),
+            let base = effectiveGravityBase
+            let tipModel = SIMD3<Double>(GravityDirectionGizmo.tip(center: SIMD3<Double>(base),
                                                                    direction: SIMD3<Double>(dir),
                                                                    length: gravityGizmoLength))
             ZStack(alignment: .topLeading) {
-                gravityArrowCanvas(proj, direction: dir, color: DS.Color.accent.color)
+                gravityArrowCanvas(proj, base: base, direction: dir, color: DS.Color.accent.color)
                 // The draggable tip knob (gesture bound to the knob BEFORE `.position` — the
                 // camera-non-fighting rule, so empty space still orbits and a face still taps).
                 gizmoAt(proj, tipModel) {
@@ -1895,7 +1919,38 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
+    /// The base-mover: the SAME 3D liquid-glass TRANSFORM GIZMO the manual primitives use
+    /// (`TransformGizmoMetalView` + `TransformGizmo.pick`), floated at the arrow's base. A drag
+    /// SDF-picks a translate handle and slides the base (magnetically attaching to the nearest
+    /// face); a miss orbits the camera. This is a SEPARATE overlay from the pointing arrow above,
+    /// so the two coexist without fighting (BAR V7): the arrow canvas is non-interactive, the tip
+    /// knob only aims, and this gizmo only moves the base. Setup-phase only (item 4).
+    @ViewBuilder private var gravityBaseGizmoOverlay: some View {
+        #if canImport(MetalKit)
+        if let proj = projection,
+           let center = proj.project(settledWorld(effectiveGravityBase)) {
+            let box = Self.gizmoBoxSize
+            ZStack(alignment: .topLeading) {
+                TransformGizmoMetalView(camera: cameraModel, settle: gizmoSettleMatrix,
+                                        activeId: gravityBaseActiveId)
+                    .frame(width: box, height: box)
+                    .allowsHitTesting(false)
+                    .position(center)
+                Color.clear
+                    .frame(width: box, height: box)
+                    .contentShape(Rectangle())
+                    .gesture(gravityBaseGizmoGesture(proj, boxCenter: center, boxSize: box))
+                    .position(center)
+            }
+            .coordinateSpace(name: Self.gizmoStageSpace)
+        }
+        #else
+        EmptyView()
+        #endif
+    }
+
     /// The magnet toggle + confirm check above the arrow tip (matches `gizmoActionCluster`).
+    /// The one magnet governs BOTH the tip's face-snap and the base's face-attach.
     private var gravitySetupCluster: some View {
         HStack(spacing: DS.Space.s) {
             Button { gravitySnap.toggle() } label: {
@@ -1904,7 +1959,7 @@ public struct WorkspacePlaceholder: View {
                         .foregroundStyle(.white.opacity(gravitySnap ? 1 : 0.4))
                 }
             }.buttonStyle(.plain)
-                .accessibilityLabel(gravitySnap ? "Axis snapping on" : "Axis snapping off")
+                .accessibilityLabel(gravitySnap ? "Face snapping on" : "Face snapping off")
 
             Button { commitGravityDraft() } label: {
                 gizmoCircleKnob(active: true, size: 32) {
@@ -1915,7 +1970,8 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// "Snapped to −Y" — the handoff requires the UI to STATE what it snapped to.
+    /// "Snapped to −Y" / "Snapped to face" — the handoff requires the UI to STATE what it
+    /// snapped to.
     private func gravitySnapBadge(_ label: String) -> some View {
         Text("Snapped to \(label)")
             .font(.system(size: 10, weight: .semibold)).foregroundStyle(.white)
@@ -1925,33 +1981,24 @@ public struct WorkspacePlaceholder: View {
             .accessibilityLabel("Snapped to \(label)")
     }
 
-    /// The small "↓ down" tag at the persistent arrow's tip.
-    private var gravityDownTag: some View {
-        HStack(spacing: 3) {
-            Image(systemName: "arrow.down").font(.system(size: 9, weight: .bold))
-            Text("down").font(.system(size: 10, weight: .semibold))
-        }
-        .foregroundStyle(.white)
-        .padding(.vertical, 3).padding(.horizontal, 7)
-        .background(Capsule().fill(DS.Color.accent.color.opacity(0.85)))
-        .fixedSize()
-    }
-
-    /// Commit the pending pointed direction as gravity via `setGravity(direction:)` — the
-    /// same stored `gravity` vector a face tap writes (BAR V1). Mutating `force` republishes
-    /// `ProjectModel`, so the debounced round-6 UndoHistory records this as one step (BAR V3).
+    /// Commit the pending pointed direction as gravity via `setGravity(direction:)` — the same
+    /// stored `gravity` vector a face tap writes (BAR V1) — AND the purely-visual arrow base via
+    /// `setGravityBase`. Mutating `force` republishes `ProjectModel`, so the debounced round-6
+    /// UndoHistory records the whole gravity edit as ONE step (BAR V3/V5).
     private func commitGravityDraft() {
         force.setGravity(direction: effectiveGravityDraft)
+        force.setGravityBase(effectiveGravityBase)
         gravityDraft = nil
+        gravityBaseDraft = nil
         gravitySnapLabel = nil
         selection.clearActive()
         model.toast = "Gravity set — the part now rests the way it will in real life"
     }
 
     /// One drag of the arrow tip: build the pure-math grab context on the first frame (into
-    /// `@State` so it survives the body churn), resolve each frame to a pointed direction,
-    /// then snap to the nearest axis when the magnet is on. Haptics on grab / snap / release;
-    /// the snap label drives the badge. Nothing is committed until the confirm check.
+    /// `@State` so it survives the body churn), resolve each frame to a pointed direction, then
+    /// snap to the nearest FACE NORMAL (or principal axis) when the magnet is on (item 1). Haptics
+    /// on grab / snap / release; the snap label drives the badge. Nothing is committed until ✓.
     private func gravityDragGesture() -> some Gesture {
         DragGesture(minimumDistance: 1, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
             .onChanged { v in
@@ -1960,7 +2007,7 @@ public struct WorkspacePlaceholder: View {
                     draggingGravity = true
                     gravityDrag = GravityDirectionGizmo.Drag(
                         startDirection: SIMD3<Double>(effectiveGravityDraft),
-                        center: SIMD3<Double>(meshCenter),
+                        center: SIMD3<Double>(effectiveGravityBase),
                         length: gravityGizmoLength,
                         grab: ray, viewDir: ray.dir)
                     ClearanceHaptics.grab()
@@ -1969,7 +2016,7 @@ public struct WorkspacePlaceholder: View {
                 var dir = drag.resolve(currentRay: ray)
                 var label: String?
                 if gravitySnap {
-                    let s = GravityDirectionGizmo.snap(dir)
+                    let s = GravityDirectionGizmo.snap(dir, extraTargets: gravityFaceSnapTargets)
                     dir = s.dir; label = s.label
                 }
                 if label != gravitySnapLabel {
@@ -1981,6 +2028,61 @@ public struct WorkspacePlaceholder: View {
             .onEnded { _ in
                 draggingGravity = false
                 gravityDrag = nil
+                ClearanceHaptics.release()
+            }
+    }
+
+    /// The base transform gizmo's ONE gesture: on grab, SDF-pick a translate handle; then either
+    /// slide the base (untouched `PrimitiveGizmo` translate → magnetic face-attach) or, on a miss,
+    /// orbit — so the box never fights the camera (the manual-primitive gizmo's rule). The base is
+    /// a live draft; ✓ commits it. This never touches the direction draft (BAR V7).
+    private func gravityBaseGizmoGesture(_ proj: CameraProjection,
+                                         boxCenter: CGPoint, boxSize: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
+            .onChanged { v in
+                if gravityBaseDrag == nil && !gravityBaseOrbiting && gravityBaseDragLast == nil {
+                    let local = CGPoint(x: v.startLocation.x - (boxCenter.x - boxSize / 2),
+                                        y: v.startLocation.y - (boxCenter.y - boxSize / 2))
+                    if let hit = TransformGizmo.pick(point: local,
+                                                     in: CGSize(width: boxSize, height: boxSize),
+                                                     rotation: gizmoRotation),
+                       let ray = modelRay(proj, at: v.location) {
+                        gravityBaseActiveId = gizmoActiveIdValue(hit)
+                        gravityBaseDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit),
+                                                              startCenter: SIMD3<Double>(effectiveGravityBase),
+                                                              startAxis: SIMD3<Double>(0, 1, 0),
+                                                              grab: ray, viewDir: ray.dir)
+                        ClearanceHaptics.grab()
+                    } else {
+                        gravityBaseOrbiting = true
+                    }
+                    gravityBaseDragLast = v.location
+                }
+                if gravityBaseOrbiting {
+                    let last = gravityBaseDragLast ?? v.startLocation
+                    cameraModel.orbit(dx: Float(v.location.x - last.x), dy: Float(v.location.y - last.y))
+                    gravityBaseDragLast = v.location
+                    return
+                }
+                guard let drag = gravityBaseDrag, let ray = modelRay(proj, at: v.location) else { return }
+                var p = SIMD3<Float>(drag.resolve(currentRay: ray).center)
+                var snapped = false
+                if gravitySnap, let mesh = viewerMesh,
+                   let hit = mesh.nearestSurfacePoint(to: p, within: gravityBaseMagnetDist) {
+                    p = hit.point; snapped = true          // magnetically attach to the face
+                }
+                if snapped != gravityBaseSnapped {
+                    if snapped { ClearanceHaptics.detent() }
+                    gravityBaseSnapped = snapped
+                }
+                gravityBaseDraft = p
+            }
+            .onEnded { _ in
+                gravityBaseDrag = nil
+                gravityBaseOrbiting = false
+                gravityBaseDragLast = nil
+                gravityBaseActiveId = -1
+                gravityBaseSnapped = false
                 ClearanceHaptics.release()
             }
     }
@@ -2634,11 +2736,15 @@ public struct WorkspacePlaceholder: View {
 
     /// A tapered arrow polygon from `a` (tail) to `b` (tip) — the prototype's shaft
     /// widths + arrowhead.
-    private func drawArrow(_ ctx: GraphicsContext, from a: CGPoint, to b: CGPoint, color: Color) {
+    /// `w0`/`w1` are the shaft half-widths at tail/neck and `headMax` caps the arrowhead
+    /// length — defaulted to the slim force-arrow look; the stubby gravity arrow passes larger
+    /// values (round 2 item 3) so it reads as a solid direction indicator.
+    private func drawArrow(_ ctx: GraphicsContext, from a: CGPoint, to b: CGPoint, color: Color,
+                           w0: CGFloat = 5.5, w1: CGFloat = 2.2, headMax: CGFloat = 16) {
         let dx = b.x - a.x, dy = b.y - a.y
         let len = max(1, hypot(dx, dy))
         let ux = dx / len, uy = dy / len, px = -uy, py = ux
-        let head = min(16, len * 0.4), w0: CGFloat = 5.5, w1: CGFloat = 2.2
+        let head = min(headMax, len * 0.4)
         let hb = CGPoint(x: b.x - ux * head, y: b.y - uy * head)
         var path = Path()
         path.move(to: CGPoint(x: a.x + px * w0, y: a.y + py * w0))
