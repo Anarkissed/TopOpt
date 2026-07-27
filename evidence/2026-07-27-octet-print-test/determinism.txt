@@ -1,0 +1,5 @@
+# generator determinism — same inputs, byte-identical STL?
+  octet_uniform_40mm.stl : BYTE-IDENTICAL ( 5946084 bytes)
+  octet_graded_40mm.stl : BYTE-IDENTICAL ( 5946084 bytes)
+  octet_uniform_40mm.stl : committed == regenerated
+  octet_graded_40mm.stl : committed == regenerated

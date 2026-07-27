@@ -1,0 +1,4 @@
+[2026-07-27 06:02:01.707447] [0x0000000171c5f000] [error]   rounded_rectangle_extrusion_spacingnegative extrusion : width 0.0429204   height 0.2
+[2026-07-27 06:02:01.986407] [0x00000001fb141e80] [error]   found slicing or export error for partplate 1
+Flow::spacing() produced negative spacing. Did you set some extrusion width too small?
+run found error, exit

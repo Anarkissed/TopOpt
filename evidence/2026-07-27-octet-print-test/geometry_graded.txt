@@ -1,0 +1,16 @@
+GEOMETRY REPORT — octet GRADED 40 mm block (5x5x5 cells @ 8 mm)
+  bbox = [-1.119 -1.119 -0.480] .. [41.119 41.119 41.120] mm
+  raw triangles (STL soup) = 118920   struts = 3300   nodes = 666
+  strut diameter = 0.960 .. 2.240 mm
+  WELDED by coordinate: 49078 verts, 118920 tris
+    boundary_edges     = 0
+    non_manifold_edges = 17732  (edges shared by >2 faces)
+    connected components = 897
+    check_watertight = FAIL
+  self-intersection scan @ one interior node: 19104 intersecting pairs of 5819166 tested (3412 local tris)
+    => swept-solid union is a SELF-INTERSECTING SOUP (union step owed)
+  strut angle from VERTICAL (per reference cell, 0=vertical, 90=horizontal):
+    45 deg : 24 struts (67%)
+    90 deg : 12 struts (33%)
+    steeper than 45 deg (overhang risk): 12 of 36 (33%)
+  NOT a printability verdict — the physical FDM print is owed to the maintainer.
