@@ -446,9 +446,11 @@ Vec jacobi_cg_fallback(const SpMat& Kgg, const Vec& rg, double tolerance,
     info->mg_levels = 0;
   }
   if (cg.info() != Eigen::Success || !xg.allFinite())
-    throw std::runtime_error(
+    throw SolverNonConvergence(
         "fea_solve_mgcg: CG did not reach the requested tolerance within "
-        "max_iterations");
+        "max_iterations",
+        info ? info->iterations : static_cast<int>(cg.iterations()),
+        info ? info->residual : cg.error());
   return xg;
 }
 
@@ -1292,9 +1294,10 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       diag.recycle_setup_matvecs = rec.setup_matvecs;
       if (info) *info = diag;
       if (!diag.converged)
-        throw std::runtime_error(
+        throw SolverNonConvergence(
             "fea_solve_mgcg_matfree: CG did not reach the requested tolerance "
-            "within max_iterations");
+            "within max_iterations",
+            diag.iterations, diag.residual);
     }
 
     diag.recycle_dim = rec.dim;

@@ -637,10 +637,10 @@ inline constexpr const char* kRungInfeasibleReason =
 // VariantReport::rejection_reason values, defined here for the same reason: one
 // definition shared by the driver, the CLI console line and the tests, so the
 // string in report.json cannot drift from the string anything checks for.
-// TOGETHER WITH kRungInfeasibleReason these are exhaustive: every entry of
-// JobReport::rejected carries exactly one of the three, and never "" (the
-// rejection-speaks rule — a rejection that does not say why is a rejection the
-// reader has to guess at).
+// TOGETHER WITH kRungInfeasibleReason and kRungNonConvergentReason (below) these
+// are exhaustive: every entry of JobReport::rejected carries exactly one of the
+// FOUR, and never "" (the rejection-speaks rule — a rejection that does not say why
+// is a rejection the reader has to guess at).
 //   * kMarginBelowRequiredReason — the ordinary strength verdict: the rung was
 //     analysed and its infill-adjusted margin came in under margin_stop. The
 //     margin_effective / margin_required numbers on the line are the detail.
@@ -654,6 +654,23 @@ inline constexpr const char* kMarginBelowRequiredReason =
     "margin below required";
 inline constexpr const char* kLoadPathNotConnectedReason =
     "load path not connected";
+
+// Handoff 2026-07-27-nonconvergence-rejection — the FOURTH rejection_reason: a
+// LINEAR SOLVE of this rung did not converge (SolverNonConvergence: CG reached its
+// iteration cap without meeting the requested relative-residual tolerance), so the
+// rung has no trustworthy field to certify. Distinct from all three above, and
+// deliberately worded so the reader knows it is a SOLVER failure, not a verdict
+// about the design: the margin numbers on such a line are ABSENT (the analysis was
+// skipped), exactly as on an infeasible line — NOT the "measured on a severed
+// structure" numbers a connectivity rejection carries. It arises two ways, both
+// honest and both this same reason: the rung's TRAJECTORY solve failed to converge
+// (SimpOptimizeResult::non_convergent), or its CERTIFICATION solve did
+// (FixedDesignAnalysis::non_convergent — the tight solve is never softened, so a
+// design the certification cannot resolve is rejected, never certified). Like an
+// infeasible rung it does NOT stop the ladder: non-convergence is a property of THIS
+// carve's operator, and the next (lighter) rung gets a fresh attempt.
+inline constexpr const char* kRungNonConvergentReason =
+    "linear solve did not converge";
 
 // One ladder rung actually evaluated by the driver.
 struct MinimizePlasticVariant {
@@ -684,6 +701,18 @@ struct MinimizePlasticVariant {
   // not a strength verdict about lighter targets, and the next rung gets a fresh
   // attempt from the last FEASIBLE field.
   bool infeasible = false;
+
+  // Handoff 2026-07-27-nonconvergence-rejection — true iff a LINEAR SOLVE for this
+  // rung did not converge: either its trajectory solve
+  // (optimization.non_convergent) or its certification solve. Treated exactly like
+  // an infeasible rung — NEVER accepted, per-rung analysis fields
+  // (von_mises_field/…/mesh()) stay default-constructed, `report` carries
+  // rejection_reason kRungNonConvergentReason with zero fabricated numbers, and the
+  // ladder CONTINUES (non-convergence is a property of this carve's operator, not a
+  // strength verdict). Distinct from `infeasible`: an infeasible rung's solves DID
+  // converge on a frozen-high objective; a non_convergent rung's solve could not be
+  // resolved at all. Mutually exclusive with `infeasible` on any one rung.
+  bool non_convergent = false;
 
   // --- M7.0b visualization data (for the app results screen) ---------------
   // Populated for every evaluated NON-cancelled rung, alongside `v3`/`report`.
@@ -748,8 +777,9 @@ struct MinimizePlasticVariant {
 struct MinimizePlasticResult {
   // Every rung the driver actually ran, in ladder order: accepted rungs (each
   // margin >= margin_stop) — optionally interleaved with rungs that do NOT stop
-  // the walk, namely INFEASIBLE ones (handoff 131) and DISCONNECTED ones (handoff
-  // 2026-07-23-gate-honesty-connectivity-rejection) — followed by AT MOST ONE
+  // the walk, namely INFEASIBLE ones (handoff 131), DISCONNECTED ones (handoff
+  // 2026-07-23-gate-honesty-connectivity-rejection) and NON-CONVERGENT ones (handoff
+  // 2026-07-27-nonconvergence-rejection) — followed by AT MOST ONE
   // rejected terminal rung (margin < margin_stop, or cancelled — see `cancelled`
   // below) at which the driver stopped. No rung after the terminal one is
   // evaluated. Only the TOO-WEAK verdict is monotone in the ladder direction, so
@@ -852,6 +882,19 @@ struct MinimizePlasticResult {
   // the positive statement "no rung lost its load path". Echoed into run_info.json
   // as `rung_infeasible`.
   std::vector<char> rung_infeasible;
+
+  // Handoff 2026-07-27-nonconvergence-rejection — RUNG-NON-CONVERGENCE outcome, one
+  // entry per EVALUATED rung (same order and length as `evaluated`), ALWAYS filled
+  // (like rung_infeasible): `rung_non_convergent[i]` is 1 iff rung i was rejected
+  // because a linear solve did not converge (else 0), so all-zeros is the positive
+  // statement "every rung's solves converged". `rung_non_convergent_iteration[i]` is
+  // the CG iteration the failing solve reached and `rung_non_convergent_residual[i]`
+  // the residual it stalled at (both 0 on a rung that converged) — the two numbers
+  // the report and the run_info echo need to say HOW FAR the solve missed. Echoed
+  // into run_info.json as `rung_non_convergent` / `_iteration` / `_residual`.
+  std::vector<char> rung_non_convergent;
+  std::vector<int> rung_non_convergent_iteration;
+  std::vector<double> rung_non_convergent_residual;
 
   // Handoff 2026-07-25-draft-quality — DRAFT QUALITY outcome, one entry per
   // EVALUATED rung (same order and length as `evaluated`), filled as each rung

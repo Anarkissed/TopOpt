@@ -1,6 +1,7 @@
 #include "topopt/analyze.hpp"
 
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -93,10 +94,31 @@ FixedDesignAnalysis analyze_fixed_design(
   // certification solve is stateless (no warm start, no cached solver) so a
   // re-analysis of the same field is bit-identical. Solver selection matches the
   // originating run via `solver_kind`.
-  const SimpCompliance sc =
-      simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
-                      cg_max_iterations, /*initial_guess=*/nullptr,
-                      /*solver=*/nullptr, solver_kind);
+  //
+  // Handoff 2026-07-27-nonconvergence-rejection — the certification solve runs at the
+  // caller's tight `cg_tolerance`, UNCHANGED. If it fails to converge we do NOT soften
+  // it, retry it, or let its throw abort the run: we record the failure and return an
+  // analysis with `accepted` left FALSE. A design whose certification solve the CG
+  // cannot resolve is never certified — the caller rejects that rung. Genuine
+  // malformed-problem throws (bad index, void-only system) are NOT caught and still
+  // propagate.
+  SimpCompliance sc;
+  try {
+    sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
+                         cg_max_iterations, /*initial_guess=*/nullptr,
+                         /*solver=*/nullptr, solver_kind);
+  } catch (const SolverNonConvergence& e) {
+    out.non_convergent = true;
+    out.non_convergent_iteration = e.iterations;
+    out.non_convergent_residual = e.residual;
+    // Invariant (asserted, not commented): a non-converged certification solve can
+    // NEVER yield an accepted design. `accepted` is default-false and the early
+    // return leaves it untouched, below every gate.
+    assert(out.accepted == false &&
+           "non-convergence rejection: a failed certification solve must never "
+           "certify a design");
+    return out;
+  }
 
   // Peak stresses over the PRINTED material (density > iso), using the solid
   // modulus. Empty/void voxels stay at zero stress. The per-voxel von Mises is

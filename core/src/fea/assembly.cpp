@@ -456,9 +456,10 @@ FeaSolution solve_reduced_cg(const ReducedSystem& s, double tolerance,
     diag.converged = (cg.info() == Eigen::Success) && xg.allFinite();
     if (info) *info = diag;
     if (!diag.converged)
-      throw std::runtime_error(
+      throw SolverNonConvergence(
           "fea_solve_cg: CG did not reach the requested tolerance within "
-          "max_iterations");
+          "max_iterations",
+          diag.iterations, diag.residual);
 
     for (int r = 0; r < ng; ++r) u[s.freedofs[kept[r]]] = xg[r];
   } else if (info) {
@@ -792,9 +793,10 @@ FeaSolution PenalizedSolver::solve(const std::vector<double>& youngs_per_voxel,
   diag.converged = (cg.info() == Eigen::Success) && xg.allFinite();
   if (info) *info = diag;
   if (!diag.converged)
-    throw std::runtime_error(
+    throw SolverNonConvergence(
         "fea_solve_cg: CG did not reach the requested tolerance within "
-        "max_iterations");
+        "max_iterations",
+        diag.iterations, diag.residual);
 
   m.warm = xg;
   m.have_warm = true;

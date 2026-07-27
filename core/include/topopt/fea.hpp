@@ -246,6 +246,35 @@ struct CgInfo {
   int recycle_setup_matvecs = 0;
 };
 
+// Thrown by the CG solvers (fea_solve_cg, fea_solve_mgcg, fea_solve_cg_matfree,
+// fea_solve_mgcg_matfree) on the ONE failure that is a property of the LINEAR
+// SOLVE rather than of a malformed problem: the iteration reached its cap without
+// meeting the requested relative-residual `tolerance`. A malformed system (a
+// bad BC/load index, a void-only DOF set, a preconditioner factorization that
+// fails to set up) still throws std::invalid_argument / plain std::runtime_error
+// — those are bugs in the request, not "the design is hard to solve at this
+// carve". This distinct type lets the ladder driver (minimize_plastic) catch a
+// non-convergence PRECISELY and reject just that RUNG — the run survives, already
+// accepted rungs stay exportable, the ladder continues — without swallowing a
+// genuine setup/index error, which must still abort loudly.
+//
+// It IS-A std::runtime_error, so every existing `catch (const std::runtime_error&)`
+// and `catch (const std::exception&)` (e.g. the active-domain restricted-solve
+// fallback) keeps behaving byte-for-byte as before; `what()` is the identical
+// message string the old plain-runtime_error throw carried, so any test or log
+// that reads the message is unaffected. `iterations` and `residual` are the
+// solver's last CgInfo readings at the moment it gave up — the two numbers a
+// rejection needs to say HOW BADLY and HOW FAR the solve missed.
+struct SolverNonConvergence : public std::runtime_error {
+  int iterations;
+  double residual;
+  SolverNonConvergence(const std::string& what_arg, int iterations_,
+                       double residual_)
+      : std::runtime_error(what_arg),
+        iterations(iterations_),
+        residual(residual_) {}
+};
+
 // Solve the same global linear-elastic system as fea_solve, but with a Jacobi
 // (diagonal) preconditioned Conjugate Gradient iterative solver — ARCHITECTURE
 // §4's designated solver for voxel FEA. Intended for large grids (e.g. 64^3)

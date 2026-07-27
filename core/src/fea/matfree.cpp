@@ -783,9 +783,10 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
     diag.recycle_setup_matvecs = rec.setup_matvecs;
     if (info) *info = diag;
     if (!diag.converged)
-      throw std::runtime_error(
+      throw SolverNonConvergence(
           "fea_solve_cg_matfree: CG did not reach the requested tolerance "
-          "within max_iterations");
+          "within max_iterations",
+          diag.iterations, diag.residual);
     for (int k = 0; k < m.ng; ++k)
       u[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])] =
           x[static_cast<std::size_t>(k)];

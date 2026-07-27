@@ -824,6 +824,18 @@ if(Eigen3_FOUND)
     INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible")
   add_test(NAME rung_infeasible COMMAND test_rung_infeasible)
 
+  # Handoff 2026-07-27-nonconvergence-rejection — a non-converging linear solve
+  # rejects the RUNG, not the run. Drives minimize_plastic / analyze_fixed_design
+  # (Eigen-gated); the real settings rule table is injected, and NONCONV_OUT_DIR is
+  # the build dir the exportability check writes its round-trip STL into.
+  add_executable(test_nonconvergence_rejection
+    tests/validation/test_nonconvergence_rejection.cpp)
+  target_link_libraries(test_nonconvergence_rejection PRIVATE topopt)
+  target_compile_definitions(test_nonconvergence_rejection PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    NONCONV_OUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME nonconvergence_rejection COMMAND test_nonconvergence_rejection)
+
   # ACTIVE DOMAIN phase 1 — the restricted-analysis mask (SimpOptions::
   # active_domain_band). Proves the four seams of handoff 134 §6.6: band == 0 is
   # off and an all-covering band is BIT-IDENTICAL to it (the mask is exact when

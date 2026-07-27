@@ -1073,6 +1073,27 @@ struct SimpOptimizeResult {
   // `infeasible_iteration` is that 1-based iteration (0 when not infeasible).
   bool infeasible = false;
   int infeasible_iteration = 0;
+  // Handoff 2026-07-27-nonconvergence-rejection — true iff a LINEAR SOLVE of this
+  // run failed to converge (SolverNonConvergence: CG hit its iteration cap without
+  // meeting the requested relative-residual tolerance) and the run was ended on
+  // that instead of throwing out of simp_optimize. This is a solver failure, not
+  // the infeasibility SIGNATURE (`infeasible`, which is a sustained frozen-high
+  // objective the solves still converged on) — the two are distinct and mutually
+  // exclusive on any one run. A non_convergent result is UNTRUSTWORTHY exactly as
+  // an infeasible one is: `converged` is false, the fields above describe an
+  // iterate the solver could not resolve, and a caller must NOT ship this density,
+  // seed anything from it, or certify it. It is set on two occasions, each honest:
+  //   * a TRAJECTORY solve failed to converge (the loop ended early, mirroring the
+  //     infeasibility fast-fail), or
+  //   * the FINAL B2 CERTIFICATION solve failed to converge — the tight solve is
+  //     never softened (asserted below), so a design the certification solve cannot
+  //     resolve is reported non_convergent rather than certified on a garbage field.
+  // `non_convergent_iteration` is the CG iteration count the failing solve reached,
+  // `non_convergent_residual` the relative residual it stalled at — the two numbers
+  // a rung rejection needs to say how far the solve missed (both 0 when not set).
+  bool non_convergent = false;
+  int non_convergent_iteration = 0;
+  double non_convergent_residual = 0.0;
   // --- ACTIVE DOMAIN outcome (active-domain phase 1) -----------------------
   // `active_domain_band` is the band width this run ACTUALLY ran with (0 = the
   // feature was off; a negative request has already been resolved to its auto
@@ -1111,9 +1132,17 @@ struct SimpOptimizeResult {
 //
 // Throws std::invalid_argument if the params are non-physical (simp_compliance
 // rules), volume_fraction not in (0, 1], move <= 0, max_iterations < 1,
-// change_tol < 0, or filter_radius <= 0 (make_density_filter). Throws
-// std::runtime_error if a penalized CG solve fails to converge (so the caller
-// never optimizes on a garbage field).
+// change_tol < 0, or filter_radius <= 0 (make_density_filter).
+//
+// Handoff 2026-07-27-nonconvergence-rejection — a penalized CG solve that fails to
+// converge (SolverNonConvergence) is NO LONGER thrown out of simp_optimize: the run
+// ends with SimpOptimizeResult::non_convergent set (+ the iteration and residual it
+// reached) and `converged` false, exactly as an infeasible run ends, so the LADDER
+// driver can reject just that rung and keep the run. A caller that treated the old
+// throw as "garbage field, do not use" gets the identical guarantee from the flag:
+// converged==false. Genuine malformed-problem errors (bad BC/load index, void-only
+// system, preconditioner setup failure) still throw std::invalid_argument /
+// std::runtime_error and are NOT caught here.
 SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
                                  const std::vector<DirichletBC>& bcs,
                                  const std::vector<NodalLoad>& loads,

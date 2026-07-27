@@ -926,6 +926,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // nothing either way.
     run_info.rung_infeasible.assign(result.pipeline.rung_infeasible.begin(),
                                     result.pipeline.rung_infeasible.end());
+    // Handoff 2026-07-27-nonconvergence-rejection — finalize the per-rung
+    // non-convergence outcome (which rungs a linear solve failed to converge on,
+    // with the iteration and residual each reached), same finalize-only discipline.
+    run_info.rung_non_convergent.assign(
+        result.pipeline.rung_non_convergent.begin(),
+        result.pipeline.rung_non_convergent.end());
+    run_info.rung_non_convergent_iteration.assign(
+        result.pipeline.rung_non_convergent_iteration.begin(),
+        result.pipeline.rung_non_convergent_iteration.end());
+    run_info.rung_non_convergent_residual.assign(
+        result.pipeline.rung_non_convergent_residual.begin(),
+        result.pipeline.rung_non_convergent_residual.end());
     // active-domain phase 1 — finalize the per-rung latch outcome. All-false
     // (with a band > 0) is the positive statement "the band held for every
     // rung"; a true entry names the rung that fell back to the full domain and
@@ -1001,6 +1013,33 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  options.simp.infeasible_cg_blowup,
                  options.simp.infeasible_window,
                  v.optimization.infeasible_iteration);
+    std::fflush(stderr);
+  }
+
+  // Handoff 2026-07-27-nonconvergence-rejection — LOUD NON-CONVERGENCE. A rung whose
+  // linear solve did not converge is a rejected rung, not a quiet one, and — unlike
+  // before this change — it no longer takes the whole run down with it. Say so on
+  // stderr, once per rung, with the iteration and residual the solve reached, in the
+  // same spirit as the loud infeasibility warning above.
+  for (std::size_t i = 0; i < result.pipeline.evaluated.size(); ++i) {
+    const MinimizePlasticVariant& v = result.pipeline.evaluated[i];
+    if (!v.non_convergent) continue;
+    const int nc_iter = i < result.pipeline.rung_non_convergent_iteration.size()
+                            ? result.pipeline.rung_non_convergent_iteration[i]
+                            : 0;
+    const double nc_resid =
+        i < result.pipeline.rung_non_convergent_residual.size()
+            ? result.pipeline.rung_non_convergent_residual[i]
+            : 0.0;
+    std::fprintf(stderr,
+                 "WARNING: rung %zu (vf %.2f) was REJECTED — %s. A linear solve did "
+                 "not reach the CG tolerance %.3g: it stalled at residual %.3g after "
+                 "%d iterations. This rung was NOT certified and no mesh, stress "
+                 "analysis or margin is reported for it; the run completed and every "
+                 "already-accepted variant is unaffected. See report.json "
+                 "rejected_variants and run_info.json rung_non_convergent.\n",
+                 i, v.requested_volume_fraction, kRungNonConvergentReason,
+                 options.simp.cg_tolerance, nc_resid, nc_iter);
     std::fflush(stderr);
   }
 

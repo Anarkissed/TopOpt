@@ -379,6 +379,33 @@ std::string run_info_json(const RunInfo& info) {
     ri += "]";
     num("rung_infeasible", ri);
   }
+  // Handoff 2026-07-27-nonconvergence-rejection — the per-rung non-convergence
+  // outcome: which rungs a linear solve failed to converge on, and for each the CG
+  // iteration reached and the residual it stalled at (empty until the post-run
+  // finalize; all-false/zeros is "every rung's solves converged").
+  {
+    std::string nc = "[";
+    for (std::size_t i = 0; i < info.rung_non_convergent.size(); ++i) {
+      if (i) nc += ", ";
+      nc += info.rung_non_convergent[i] ? "true" : "false";
+    }
+    nc += "]";
+    num("rung_non_convergent", nc);
+    std::string ni = "[";
+    for (std::size_t i = 0; i < info.rung_non_convergent_iteration.size(); ++i) {
+      if (i) ni += ", ";
+      ni += fmt_i(info.rung_non_convergent_iteration[i]);
+    }
+    ni += "]";
+    num("rung_non_convergent_iteration", ni);
+    std::string nr = "[";
+    for (std::size_t i = 0; i < info.rung_non_convergent_residual.size(); ++i) {
+      if (i) nr += ", ";
+      nr += fmt(info.rung_non_convergent_residual[i]);
+    }
+    nr += "]";
+    num("rung_non_convergent_residual", nr);
+  }
   // active-domain phase 1 — the requested band (config, up-front) and the
   // per-rung latch outcome (empty until the post-run finalize).
   num("active_domain_band", fmt_i(info.active_domain_band));
