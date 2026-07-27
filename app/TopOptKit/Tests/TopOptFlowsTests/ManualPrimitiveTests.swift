@@ -431,6 +431,116 @@ final class ManualPrimitiveTests: XCTestCase {
         XCTAssertNotNil(p.clearanceVolumes().first { $0.volume.faceID == key })
     }
 
+    // MARK: - PLANE Length / Width extents (manual-plane-length-width)
+
+    /// P5 — the DEFAULT a plane loads with. A freshly placed manual plane is SQUARE:
+    /// `halfUMM == halfWMM == 0.2·bounds-radius`, i.e. full Length == full Width. An
+    /// existing project keeps whatever half-extents its sidecar stored, unchanged; this
+    /// pins the placement default so a regression in `defaultFace`/`addManualPrimitive`
+    /// is caught.
+    func testNewManualPlaneDefaultsToASquareFootprint() {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.face, to: boreID)!
+        let mp = p.force.manualPrimitives(for: boreID).first { $0.id == id }!
+        XCTAssertGreaterThan(mp.halfUMM, 0, "a new plane has a real in-plane extent (not zero)")
+        XCTAssertEqual(mp.halfUMM, mp.halfWMM, accuracy: 1e-9, "a new plane is square by default")
+    }
+
+    /// P1 (+ the ÷2 boundary) — the FULL length/width a user types lands as the CENTRED
+    /// half-extent the core wants, and reaches the run spec. Typing 40 mm of Length →
+    /// `halfUMM == 20`; 24 mm of Width → `halfWMM == 12`. The value the user typed is the
+    /// value that reaches the job (asserted again end-to-end in `testEditedPlaneExtents…`).
+    func testSetPlaneLengthWidthConvertsFullToHalfAndReachesSpec() {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.face, to: boreID)!
+        p.setManualLength(id: id, in: boreID, mm: 40)
+        p.setManualWidth(id: id, in: boreID, mm: 24)
+        let mp = p.force.manualPrimitives(for: boreID).first { $0.id == id }!
+        XCTAssertEqual(mp.halfUMM, 20, accuracy: 1e-9, "full Length 40 → half-extent 20")
+        XCTAssertEqual(mp.halfWMM, 12, accuracy: 1e-9, "full Width 24 → half-extent 12")
+
+        let g = try! XCTUnwrap(p.clearanceSpecs().first { $0.manual != nil && $0.kind == .face }?.manual)
+        XCTAssertEqual(g.halfUMM, 20, accuracy: 1e-9, "the typed Length reaches the run spec (halved)")
+        XCTAssertEqual(g.halfWMM, 12, accuracy: 1e-9, "the typed Width reaches the run spec (halved)")
+    }
+
+    /// P1 end-to-end — the typed extent survives all the way to `job.json`. A plane whose
+    /// Length/Width the user edited serializes `half_u_mm`/`half_w_mm` = the HALF of what
+    /// was typed (the ÷2 happens once, at the model boundary; nothing halves it twice).
+    func testEditedPlaneExtentsReachTheJobJSON() throws {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.face, to: boreID)!
+        p.setManualLength(id: id, in: boreID, mm: 50)
+        p.setManualWidth(id: id, in: boreID, mm: 18)
+
+        let req = RunRequest(
+            modelPath: "/tmp/part.stl", material: "PLA", materialsPath: "", rulesPath: "",
+            resolution: 96, projectName: "plane-extents",
+            anchorFaceIDs: [1], loadGroups: [], minimizePlastic: true,
+            buildDirection: SIMD3(0, 0, 1), infillPercent: 40,
+            designBox: nil, keepOutBoxes: [], clearances: p.clearanceSpecs(),
+            faceProtections: [], faceProtectionDepthMM: -1)
+        let cfg = RemoteRunnerConfig(host: "127.0.0.1", port: 8757, expectedFingerprint: "test")
+        let run = RemoteRun(config: cfg, request: req, progress: { _, _, _ in true }, onVariant: { _ in })
+        let job = try XCTUnwrap(JSONSerialization.jsonObject(with: try run.buildJobJSON()) as? [String: Any])
+        let loads = try XCTUnwrap(job["loads"] as? [String: Any])
+        let clist = try XCTUnwrap(loads["clearances"] as? [[String: Any]])
+        let face = try XCTUnwrap(clist.first { ($0["kind"] as? String) == "face" })
+        let geo = try XCTUnwrap(face["geometry"] as? [String: Any])
+        XCTAssertEqual(geo["half_u_mm"] as? Double, 25, "typed Length 50 → half_u_mm 25 in job.json")
+        XCTAssertEqual(geo["half_w_mm"] as? Double, 9, "typed Width 18 → half_w_mm 9 in job.json")
+    }
+
+    /// P2 — the RENDERED slab matches the entered extents. After editing Length/Width, the
+    /// resolved clearance VOLUME the viewport draws carries the identical half-extents the
+    /// spec does (picture == run), because both read `mp.halfUMM`/`halfWMM` — one source.
+    func testRenderedSlabMatchesEnteredExtents() {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.face, to: boreID)!
+        p.setManualLength(id: id, in: boreID, mm: 40)   // → halfU 20
+        p.setManualWidth(id: id, in: boreID, mm: 24)    // → halfW 12
+        let key = ProjectModel.manualFaceKey(id)
+        let vol = try! XCTUnwrap(p.clearanceVolumes().first { $0.volume.faceID == key }).volume
+        guard case let .slab(_, _, _, _, halfU, halfV, _) = vol.shape else { return XCTFail("plane → slab") }
+        XCTAssertEqual(Double(halfU), 20, accuracy: 1e-4, "the drawn slab's U half-extent == entered Length/2")
+        XCTAssertEqual(Double(halfV), 12, accuracy: 1e-4, "the drawn slab's W half-extent == entered Width/2")
+    }
+
+    /// P4 — an extent edit registers in the EXISTING UndoHistory: undo reverts it, redo
+    /// re-applies it (the same debounced auto-commit that covers Depth, add, move, delete).
+    func testUndoRedoCoversAPlaneExtentEdit() {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.face, to: boreID)!
+        p.performUndo(); p.performRedo()                 // settle the ADD as its own step
+        let original = p.force.manualPrimitives(for: boreID).first { $0.id == id }!.halfUMM
+
+        p.setManualLength(id: id, in: boreID, mm: 40)
+        let edited = p.force.manualPrimitives(for: boreID).first { $0.id == id }!.halfUMM
+        XCTAssertEqual(edited, 20, accuracy: 1e-9)
+        XCTAssertNotEqual(edited, original, "the edit changed the half-extent")
+
+        p.performUndo()
+        XCTAssertEqual(p.force.manualPrimitives(for: boreID).first { $0.id == id }!.halfUMM, original,
+                       accuracy: 1e-9, "undo reverts the extent edit")
+        p.performRedo()
+        XCTAssertEqual(p.force.manualPrimitives(for: boreID).first { $0.id == id }!.halfUMM, edited,
+                       accuracy: 1e-9, "redo re-applies it")
+    }
+
+    /// An extent has no "Auto": an emptied field (nil) is a NO-OP (never zeroes the slab),
+    /// and a non-positive entry is floored to one grid step so the footprint stays non-degenerate.
+    func testPlaneExtentIgnoresNilAndFloorsNonPositive() {
+        let (p, boreID, _) = project()
+        let id = p.addManualPrimitive(.face, to: boreID)!
+        p.setManualLength(id: id, in: boreID, mm: 40)
+        p.setManualLength(id: id, in: boreID, mm: nil)   // emptied field → ignored
+        XCTAssertEqual(p.force.manualPrimitives(for: boreID).first { $0.id == id }!.halfUMM, 20,
+                       accuracy: 1e-9, "an emptied field keeps the current extent")
+        p.setManualWidth(id: id, in: boreID, mm: 0)      // zero → floored, not collapsed
+        XCTAssertEqual(p.force.manualPrimitives(for: boreID).first { $0.id == id }!.halfWMM,
+                       ClearanceQuantize.stepMM, accuracy: 1e-9, "zero floors to one grid step")
+    }
+
     /// The snap OVERRIDE: with `snap: false` a placement near a strong detent target is NOT
     /// pulled onto it — the finger wins (the explicit override the handoff requires).
     func testSnapOverrideKeepsAFreePlacement() {
