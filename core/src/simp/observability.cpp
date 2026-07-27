@@ -469,6 +469,24 @@ std::string run_info_json(const RunInfo& info) {
     }
     ex += "]";
     num("draft_escalations", ex);
+    // Handoff 2026-07-26-draft-quality-phase2 — the design-space trigger echo.
+    num("draft_use_design_trigger", bool_json(info.draft_use_design_trigger));
+    num("draft_escalation_design_flip", fmt(info.draft_escalation_design_flip));
+    std::string pf = "[";
+    for (std::size_t i = 0; i < info.draft_rung_probe_flip.size(); ++i) {
+      if (i) pf += ", ";
+      const double v = info.draft_rung_probe_flip[i];
+      pf += (std::isfinite(v) && v >= 0.0) ? fmt(v) : std::string("null");
+    }
+    pf += "]";
+    num("draft_rung_probe_flip", pf);
+    std::string pc = "[";
+    for (std::size_t i = 0; i < info.draft_rung_probe_cg.size(); ++i) {
+      if (i) pc += ", ";
+      pc += fmt_i(static_cast<int>(info.draft_rung_probe_cg[i]));
+    }
+    pc += "]";
+    num("draft_rung_probe_cg", pc);
   }
   num("min_feature_mm", fmt(info.min_feature_mm));
   num("margin_stop", fmt(info.margin_stop));

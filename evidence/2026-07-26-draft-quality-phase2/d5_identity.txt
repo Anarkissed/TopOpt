@@ -1,0 +1,10 @@
+== branch (phase-2 applied), draft OFF ==
+B1_CHECKSUM=8d4b9afed2181d10
+== stashing tracked core changes (-> pre-phase2 == main) ==
+== rebuilt on pre-phase2, draft OFF ==
+B1_CHECKSUM=8d4b9afed2181d10
+== restored; rebuild branch lib ==
+----
+branch : B1_CHECKSUM=8d4b9afed2181d10
+main   : B1_CHECKSUM=8d4b9afed2181d10
+D5 PASS: draft-OFF byte-identical

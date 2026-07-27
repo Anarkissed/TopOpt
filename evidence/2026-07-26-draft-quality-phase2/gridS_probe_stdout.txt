@@ -1,0 +1,81 @@
+grid S solved = 16x8x16 (2048 vox, 1536 solid)
+
+==================== POSTURE: AD-on (production, post-187) ====================
+
+#### D2 NEGATIVE CONTROL FIRST (AD-on (production, post-187)) ####
+ the probe floor = classification flip of a tight probe on an ALREADY-tight design
+ posture           | grid (solid) | per-rung probe flip (probe_cg)
+ tight-vs-tighter  | 16x8x16 (1536) | r0 0.0000 (101)  r1 0.0000 (679)  r2 0.0000 (882)  
+ production 1e-3   | 16x8x16 (1536) | r0 0.0000 (82)  r1 0.0000 (95)  r2 0.0000 (814)  
+ >> NEGATIVE-CONTROL FLOOR (tight-vs-tighter) = 0.0000
+ tight baseline (warm ON) total_cg=74791  [AD-off Phase-1 ref = 95303]
+
+#### D1 GAP-vs-PROBE-vs-TRUTH SWEEP (AD-on (production, post-187), warm ON) ####
+ floor=0.0000   grid 16x8x16 (1536 solid). truth = flip of draft[i] vs tight[i].
+ loose | rung | gap     | probe   | truth (flip vs tight[i]) | probe fires? | gap fires(.02)?
+ 1e-03 |  r0  | 0.00002 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 1e-03 |  r1  | 0.00001 | 0.00000 | 0.0000 (0/17) | no  | no 
+ 1e-03 |  r2  | 0.00002 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 1e-02 |  r0  | 0.00002 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 1e-02 |  r1  | 0.00087 | 0.00000 | 0.0000 (0/17) | no  | no 
+ 1e-02 |  r2  | 0.00002 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 3e-02 |  r0  | 0.00002 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 3e-02 |  r1  | 0.00006 | 0.00000 | 0.0000 (0/17) | no  | no 
+ 3e-02 |  r2  | 0.00002 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 1e-01 |  r0  | 0.00002 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 1e-01 |  r1  | 0.00004 | 0.00000 | 0.0000 (0/17) | no  | no 
+ 1e-01 |  r2  | 0.00256 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 3e-01 |  r0  | 0.00004 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 3e-01 |  r1  | 0.00013 | 0.00000 | 0.0000 (0/17) | no  | no 
+ 3e-01 |  r2  | 0.00002 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 5e-01 |  r0  | 0.00003 | 0.00000 | 0.0303 (1/33) | no  | no 
+ 5e-01 |  r1  | 0.00006 | 0.00000 | 0.0000 (0/17) | no  | no 
+ 5e-01 |  r2  | 0.00001 | 0.00000 | 0.0000 (0/12) | no  | no 
+
+#### D3 PROBE COST (AD-on (production, post-187), warm ON, loose 5e-1) ####
+ grid 16x8x16 (1536 solid). rung | rung_cg | probe_cg | probe/rung % (bar < 5%)
+  r0  |    2816 |       69 | 2.45%
+  r1  |    8900 |       80 | 0.90%
+  r2  |   17267 |      123 | 0.71%
+ >> TOTAL probe/ladder = 0.94% (272 / 28983)
+
+==================== POSTURE: AD-off (Phase-1 pre-187 solve) ====================
+
+#### D2 NEGATIVE CONTROL FIRST (AD-off (Phase-1 pre-187 solve)) ####
+ the probe floor = classification flip of a tight probe on an ALREADY-tight design
+ posture           | grid (solid) | per-rung probe flip (probe_cg)
+ tight-vs-tighter  | 16x8x16 (1536) | r0 0.0000 (105)  r1 0.0000 (556)  r2 0.0000 (398)  
+ production 1e-3   | 16x8x16 (1536) | r0 0.0000 (87)  r1 0.0000 (104)  r2 0.0000 (306)  
+ >> NEGATIVE-CONTROL FLOOR (tight-vs-tighter) = 0.0000
+ tight baseline (warm ON) total_cg=95303  [AD-off Phase-1 ref = 95303]
+
+#### D1 GAP-vs-PROBE-vs-TRUTH SWEEP (AD-off (Phase-1 pre-187 solve), warm ON) ####
+ floor=0.0000   grid 16x8x16 (1536 solid). truth = flip of draft[i] vs tight[i].
+ loose | rung | gap     | probe   | truth (flip vs tight[i]) | probe fires? | gap fires(.02)?
+ 1e-03 |  r0  | 0.00004 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 1e-03 |  r1  | 0.00001 | 0.00000 | 0.0000 (0/20) | no  | no 
+ 1e-03 |  r2  | 0.00560 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 1e-02 |  r0  | 0.00004 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 1e-02 |  r1  | 0.00002 | 0.00000 | 0.0000 (0/20) | no  | no 
+ 1e-02 |  r2  | 0.00582 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 3e-02 |  r0  | 0.00004 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 3e-02 |  r1  | 0.00902 | 0.00000 | 0.0000 (0/20) | no  | no 
+ 3e-02 |  r2  | 0.00583 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 1e-01 |  r0  | 0.00004 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 1e-01 |  r1  | 0.00001 | 0.00000 | 0.0500 (1/20) | no  | no 
+ 1e-01 |  r2  | 0.00315 | 0.00000 | 0.0000 (0/12) | no  | no 
+ 3e-01 |  r0  | 0.00009 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 3e-01 |  r1  | 0.00002 | 0.00000 | 0.0000 (0/20) | no  | no 
+ 3e-01 |  r2  | 0.03103 | 0.00000 | 0.0000 (0/12) | no  | YES
+ 5e-01 |  r0  | 0.00003 | 0.00000 | 0.0000 (0/33) | no  | no 
+ 5e-01 |  r1  | 0.00001 | 0.00000 | 0.1500 (3/20) | no  | no 
+ 5e-01 |  r2  | 0.00003 | 0.00000 | 0.0000 (0/12) | no  | no 
+
+#### D3 PROBE COST (AD-off (Phase-1 pre-187 solve), warm ON, loose 5e-1) ####
+ grid 16x8x16 (1536 solid). rung | rung_cg | probe_cg | probe/rung % (bar < 5%)
+  r0  |    2704 |       70 | 2.59%
+  r1  |    8423 |       77 | 0.91%
+  r2  |   27314 |      221 | 0.81%
+ >> TOTAL probe/ladder = 0.96% (368 / 38441)
+
+########## DONE (grid-S bars). ##########

@@ -1,0 +1,15 @@
+=== D4 scale: win across sizes, tight vs draft(1e-3), probe cost + flips ===
+
+--- AD-on (production, post-187): S,M measured uncapped; L tight does NOT converge (multigrid stall on restricted 32^3 -> matfree throw) ---
+ grid (solid)        | tight CG | draft CG | WIN | probe/ladder % | probe flips(1e-3)
+ S 16x8x16   16x8x16 (1536) |    74791 |    39231 | 1.91x | 2.53% | 0.0000
+ M 24x12x24  24x8x24 (4608) |   187696 |    45707 | 4.11x | 0.74% | 0.0000
+
+--- AD-off (Phase-1 posture; reliably converges; reproduces 185 exactly) ---
+==================== POSTURE: AD-off (Phase-1 pre-187) ====================
+ grid (solid)        | tight CG | draft CG | WIN | probe/ladder % | probe flips(1e-3)
+ S 16x8x16   16x8x16 (1536) |    95303 |    45982 | 2.07x | 1.08% | 0.0000
+ M 24x12x24  24x8x24 (4608) |   143837 |    39728 | 3.62x | 0.72% | 0.0000
+ L 32x16x32  32x16x32 (12288) |   246667 |   161365 | 1.53x | 1.09% | 0.0000
+
+########## DONE (scale bars). ##########

@@ -533,10 +533,63 @@ struct MinimizePlasticOptions {
   // the maximally-CONSERVATIVE override: escalate EVERY rung so every shipped design
   // had a tight trajectory — correctness over the win, and note it costs MORE than a
   // plain tight run (the draft pass plus a tight re-run per rung), the honest price
-  // of a safety net without a reliable trigger ("when in doubt, be slow"). A reliable
-  // trigger would be a design-space signal (e.g. mid-ladder Δρ), left to Phase 2.
+  // of a safety net without a reliable trigger ("when in doubt, be slow").
+  //
+  // SUPERSEDED by the DESIGN-SPACE trigger below (handoff 2026-07-26-draft-quality-
+  // phase2). This gap threshold is retained only as the FALLBACK when the design
+  // trigger is disarmed (draft_escalation_design_flip <= 0) — keeping every existing
+  // Phase-1 harness/test byte-identical — and is NOT the recommended armed posture.
   // Ignored unless draft_quality.
   double draft_escalation_c_gap = 0.02;
+
+  // --- Phase 2 (handoff 2026-07-26-draft-quality-phase2): the DESIGN-SPACE trigger.
+  // Phase 1 escalated on the scalar compliance gap and MEASURED it not to separate:
+  // compliance is flat near the optimum, so a genuinely diverged rung can share the
+  // certified compliance (gap≈0, a MISS) while a converged rung differs slightly in
+  // it (a false alarm). The reliable signal is the DESIGN, not the objective.
+  //
+  // When draft_use_design_trigger is set the design trigger is ARMED and REPLACES the
+  // compliance-gap decision. After a rung's loose plateau the driver takes a probe:
+  // from the rung's own converged loose design it runs TWO memoryless one-step (OC)
+  // reseeds — one whose FEA is solved at the LOOSE trajectory tolerance, one at the
+  // exact TIGHT cg_tolerance (never looser: asserted, B2/D6) — and measures the
+  // fraction of solid voxels whose printed<->void classification DIFFERS between the
+  // two one-step iterates. Both reseeds share the same warm-start inverse-filter and
+  // volume bisection, so that displacement cancels in the difference and only the
+  // FEA-tolerance-driven step difference survives: ~0 when the loose sensitivities
+  // already agree with tight (converged), large when the loose trajectory settled on
+  // sensitivities a tight solve rejects (diverged). The probe results are DISCARDED
+  // (never fed back), so the probe cannot disturb the trajectory it measures.
+  //
+  // The threshold draft_escalation_design_flip is the negative-control noise floor,
+  // DERIVED not fitted: the tight-vs-tighter control (loose barely above cert) flips
+  // 0 voxels, so the floor is 0 and the default threshold 0 means "escalate on ANY
+  // real design disagreement".
+  //
+  // MEASURED LIMITATION (handoff 2026-07-26-draft-quality-phase2, bar D1): this probe
+  // correctly REFUSES the compliance gap's false positive (a converged rung with a
+  // 0.031 gap probes to 0), but it does NOT catch Phase-1's genuine-divergence
+  // counterexample either (a rung 0.15 away from the independent tight design probes
+  // to 0 at EVERY budget). The reason is structural and proven: that divergence is a
+  // locally STABLE alternate basin the loose trajectory fell into upstream, so a probe
+  // seeded FROM the settled plateau cannot see it — only a full tight re-run from the
+  // rung's entry seed (escalation itself) escapes it. So this trigger is NOT a
+  // reliable divergence detector and does not, on its own, justify arming draft in
+  // production; the load-bearing safety remains the ALWAYS-exact certification. It is
+  // provided, disarmed, as a sound detector of a genuinely NON-stationary loose
+  // plateau, should such a regime ever arise (the harness grids do not exhibit one).
+  //
+  // Default: draft_use_design_trigger is OFF, so the Phase-1 gap fallback runs (every
+  // pre-phase2 harness/test byte-identical). Ignored unless draft_quality.
+  bool draft_use_design_trigger = false;
+  double draft_escalation_design_flip = 0.0;
+
+  // The probe budget: how many one-step OC iterations each reseed runs before
+  // comparing classification. Small by design — the probe must cost a small fraction
+  // of the rung it protects (measured into MinimizePlasticResult::draft_rung_probe_cg;
+  // ~1% on the harness grids). 1 = a single OC step per reseed. Ignored unless the
+  // design trigger is armed.
+  int draft_probe_iters = 1;
 };
 
 // Handoff 131 — the VariantReport::rejection_reason a rung ended on the
@@ -782,9 +835,28 @@ struct MinimizePlasticResult {
   //     rung i was RE-RUN at tight tolerance from its own warm-start seed. When 1,
   //     evaluated[i].optimization is the TIGHT re-run, and this rung's trajectory CG
   //     cost includes BOTH passes (the honest, net-of-escalation accounting).
+  //   * draft_rung_probe_flip[i] — Phase 2 DESIGN-SPACE signal: the fraction of rung
+  //     i's loose-plateau solid voxels whose printed<->void classification changed
+  //     under the one-shot tight probe (see draft_escalation_design_flip). -1 when
+  //     the probe did not run (design trigger disarmed, or a cancelled/infeasible
+  //     rung). This is the number the escalation decision is made on when the design
+  //     trigger is armed; recorded even when armed only for measurement (a very high
+  //     threshold measures the signal without firing).
+  //   * draft_rung_probe_cg[i]  — the probe's summed CG iterations, the measured cost
+  //     of the safety belt for rung i (D3: it must be a small fraction of the rung's
+  //     own trajectory CG). 0 when the probe did not run.
   std::vector<int> draft_rung_tail_k;
   std::vector<double> draft_rung_c_gap;
   std::vector<char> draft_rung_escalated;
+  std::vector<double> draft_rung_probe_flip;
+  std::vector<long long> draft_rung_probe_cg;
+  //   * draft_rung_probe_tightmove[i] — DIAGNOSTIC: the fraction of the plateau's
+  //     solid voxels whose classification the tight probe iterate moves relative to
+  //     the loose PLATEAU itself (flip(plateau, tight-step)). Distinct from
+  //     draft_rung_probe_flip (loose-step vs tight-step). Near 0 means the plateau is
+  //     already tight-stationary — a locally stable basin a from-the-plateau probe
+  //     cannot escape. -1 when the probe did not run.
+  std::vector<double> draft_rung_probe_tightmove;
 };
 
 // Run the minimize_plastic pipeline over `grid` (an already-voxelized part with

@@ -654,7 +654,10 @@ JobDescription parse_job(const std::string& json_text) {
   // defaults. loose_tol / escalation_c_gap must be finite and >= 0.
   if (const JsonValue* draft = find_key(root, "draft")) {
     require_object(*draft, "draft");
-    reject_unknown_keys(*draft, {"quality", "loose_tol", "escalation_c_gap"},
+    reject_unknown_keys(*draft,
+                        {"quality", "loose_tol", "escalation_c_gap",
+                         "use_design_trigger", "escalation_design_flip",
+                         "probe_iters"},
                         "draft");
     job.has_draft = true;
     const JsonValue& q = require_key(*draft, "quality", "draft");
@@ -670,6 +673,25 @@ JobDescription parse_job(const std::string& json_text) {
       // A negative value is meaningful (escalate every rung), so only reject
       // non-finite; require_number already rejects NaN/inf.
       job.draft_escalation_c_gap = require_number(*eg, "draft.escalation_c_gap");
+    }
+    // Handoff 2026-07-26-draft-quality-phase2 — the design-space trigger.
+    // use_design_trigger arms it and REPLACES the compliance-gap decision;
+    // escalation_design_flip is the threshold (0 = the negative-control floor);
+    // probe_iters is the per-reseed OC budget (>= 1).
+    if (const JsonValue* ut = find_key(*draft, "use_design_trigger")) {
+      if (ut->type != JsonValue::Type::Bool)
+        schema_fail("\"draft.use_design_trigger\" must be a boolean");
+      job.draft_use_design_trigger = (ut->num != 0.0);
+    }
+    if (const JsonValue* df = find_key(*draft, "escalation_design_flip")) {
+      const double v = require_number(*df, "draft.escalation_design_flip");
+      if (v < 0.0) schema_fail("\"draft.escalation_design_flip\" must be >= 0");
+      job.draft_escalation_design_flip = v;
+    }
+    if (const JsonValue* pi = find_key(*draft, "probe_iters")) {
+      const double v = require_number(*pi, "draft.probe_iters");
+      if (v < 1.0) schema_fail("\"draft.probe_iters\" must be >= 1");
+      job.draft_probe_iters = static_cast<int>(v);
     }
   }
 
