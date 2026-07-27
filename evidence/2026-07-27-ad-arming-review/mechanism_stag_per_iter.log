@@ -1,0 +1,36 @@
+AD stagnation mechanism probe — big stagnation 48x32x48 (73728), capped 12
+
+===== rec (no AD) =====
+ iter |    CG | MG? | hier | cyc | active_frac | AD-latched
+    1 |    52 |  MG  |  Y   |  52 |   1.0000    | (see final)
+    2 |    47 |  MG  |  Y   |  47 |   1.0000    | (see final)
+    3 |  5803 |  Jc  |  Y   | 300 |   1.0000    | (see final)
+    4 |   161 |  MG  |  Y   | 161 |   1.0000    | (see final)
+    5 |  8004 |  Jc  |  Y   | 300 |   1.0000    | (see final)
+    6 |   237 |  MG  |  Y   | 237 |   1.0000    | (see final)
+    7 |   187 |  MG  |  Y   | 187 |   1.0000    | (see final)
+    8 |   231 |  MG  |  Y   | 231 |   1.0000    | (see final)
+    9 |   219 |  MG  |  Y   | 219 |   1.0000    | (see final)
+   10 |   172 |  MG  |  Y   | 172 |   1.0000    | (see final)
+   11 |   150 |  MG  |  Y   | 150 |   1.0000    | (see final)
+   12 |    86 |  MG  |  Y   |  86 |   1.0000    | (see final)
+ trajectory CG total = 15349   (108.9 s incl. final cert)
+ AD: band=0 latched=0@iter0 escapes=0 f_bar=1.0000
+
+===== rec+AD =====
+ iter |    CG | MG? | hier | cyc | active_frac | AD-latched
+    1 |    52 |  MG  |  Y   |  52 |   1.0000    | (see final)
+    2 |   193 |  MG  |  Y   | 193 |   0.3119    | (see final)
+    3 |  6299 |  Jc  |  Y   | 300 |   1.0000    | (see final)
+    4 |   240 |  MG  |  Y   | 240 |   1.0000    | (see final)
+    5 |    62 |  MG  |  Y   |  62 |   1.0000    | (see final)
+    6 | 11987 |  Jc  |  Y   | 300 |   1.0000    | (see final)
+    7 |    52 |  MG  |  Y   |  52 |   1.0000    | (see final)
+    8 |    99 |  MG  |  Y   |  99 |   1.0000    | (see final)
+    9 |    73 |  MG  |  Y   |  73 |   1.0000    | (see final)
+   10 |    78 |  MG  |  Y   |  78 |   1.0000    | (see final)
+   11 |    62 |  MG  |  Y   |  62 |   1.0000    | (see final)
+   12 |   132 |  MG  |  Y   | 132 |   1.0000    | (see final)
+ trajectory CG total = 19329   (195.5 s incl. final cert)
+ AD: band=4 latched=1@iter3 escapes=1008 f_bar=0.9427
+EXIT=0

@@ -1,0 +1,5 @@
+posture,recycling,ad,draft,cg_total,outer_iters,jacobi_solves,solves_total,solves_recycled,rc_frac,max_recycle_dim,setup_mv,ad_band,ad_latched,ad_latch_iter,ad_escapes,ad_fbar,draft_gap,compliance,margin,wall_s
+none,0,0,0,3494,73,0,73,0,0.0000,0,0,0,0,0,0,1.0000,-1.000000,4.948631287,6.23068,37.26
+rec,1,0,0,3494,73,0,73,0,0.0000,0,0,0,0,0,0,1.0000,-1.000000,4.948631287,6.23068,44.70
+rec+AD,1,1,0,2619,57,0,57,0,0.0000,0,0,3,1,3,94,0.9897,-1.000000,4.956845815,5.98014,26.92
+rec+AD+draft,1,1,1,1697,57,0,57,0,0.0000,0,0,3,1,3,94,0.9897,0.000047,4.956845495,5.98021,18.31

@@ -1,0 +1,9 @@
+PR 209 result 2 — L-grid AD-on non-convergence (faithful, uncapped)
+
+[AD-off] L grid 32x16x32, tight 1e-8, UNCAPPED, ladder {0.50,0.35,0.25}
+[AD-off] CONVERGED: trajectory CG=246667, 3 rung(s) evaluated, 413.0 s
+
+[AD-on ] L grid 32x16x32, tight 1e-8, UNCAPPED, ladder {0.50,0.35,0.25}
+[AD-on ] CONVERGED: trajectory CG=223863, 3 rung(s) evaluated, 382.8 s
+
+EXIT=0

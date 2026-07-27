@@ -1,0 +1,7 @@
+D4 — the win across scale (summed trajectory CG, tight vs draft 1e-3),
+     and D3 probe cost at scale. floor threshold measured on grid S.
+
+==================== POSTURE: AD-on (production, post-187) ====================
+ grid (solid)        | tight CG | draft CG | WIN | probe/ladder % | probe flips(1e-3)
+libc++abi: terminating due to uncaught exception of type std::runtime_error: fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations
+EXIT=134
