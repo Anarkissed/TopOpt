@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "topopt/analyze.hpp"   // KnockdownSpec
 #include "topopt/pipeline.hpp"  // MinimizePlasticOptions
 
 namespace topopt {
@@ -179,6 +180,19 @@ double production_draft_loose_tol();
 // matches it (false), so the reference world is byte-identical (THE ONE RULE). See
 // production.cpp for the TRIPWIRE and the measured justification.
 bool production_width_aware_knockdown();
+
+// THE single builder of the accept-gate KnockdownSpec from a job's options (handoff
+// 2026-07-26-post-merge-build-fix). Every certification path that gates a fixed
+// design — the optimizer's per-rung gate (minimize_plastic), the CLI standalone
+// re-analysis (run_job analyze path), and the on-device bridge (TopOptBridge
+// analyze_selfweight) — MUST build its KnockdownSpec here, so the iPad and the Mac
+// certify the same part under the identical rule instead of by three copies that can
+// drift (the post-merge break was exactly such a drift: the bridge kept passing a
+// bare scalar). Reads the posture off `opts` — pass options AFTER
+// configure_production_options and `width_aware` equals production_width_aware_knockdown()
+// by construction (asserted in test_production_parity). A wall-less / solid-infill job
+// yields the pure f^1.5 scalar posture, byte-identical to the pre-width gate.
+KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts);
 
 // The canonical recommendation-driven volume-fraction ladder for production runs
 // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic

@@ -22,6 +22,7 @@
 #include "topopt/analyze.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/orient.hpp"
+#include "topopt/production.hpp"  // knockdown_spec_for
 #include "topopt/warm_start.hpp"
 
 namespace topopt {
@@ -355,22 +356,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                 static_cast<double>(G.nz)}) *
       G.spacing;
 
-  // M7.infill-margin: a single rung-independent scalar in (0, 1] applied to the
-  // worst-case margin at the acceptance gate below. 1.0 for solid/unset infill
-  // (the default 100), making the whole ladder byte-identical to pre-M7.infill.
-  const double infill_knockdown = infill_margin_knockdown(options.infill_percent);
-
   // The acceptance-gate knockdown posture (handoff 2026-07-26-width-aware-knockdown),
-  // resolved once and shared by every rung's certification. width_aware defaults
-  // false → the gate is the pure scalar `worst_case * infill_knockdown` path,
-  // byte-identical to before. When armed, the gate credits the slicer's solid wall
-  // loops per member; wall_thickness_mm = wall_loops · wall_line_width_mm.
-  KnockdownSpec knockdown;
-  knockdown.infill_knockdown = infill_knockdown;
-  knockdown.width_aware = options.width_aware_knockdown;
-  knockdown.infill_percent = options.infill_percent;
-  knockdown.wall_thickness_mm =
-      static_cast<double>(options.wall_loops) * options.wall_line_width_mm;
+  // resolved once and shared by every rung's certification. THE ONE builder
+  // (knockdown_spec_for) — the SAME one the CLI re-analysis and the on-device bridge
+  // use, so all three gate identically. The scalar seed is infill_margin_knockdown of
+  // the job infill (1.0 for solid/unset, so byte-identical to pre-M7.infill);
+  // width_aware defaults false → the pure scalar `worst_case * infill_knockdown` path.
+  // When armed, the gate credits the slicer's solid wall loops per member.
+  const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   MinimizePlasticResult result;
   result.report.material = material_name;

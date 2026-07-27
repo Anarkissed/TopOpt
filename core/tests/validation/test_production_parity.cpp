@@ -34,6 +34,7 @@
 // configured. Drives OCCT (STEP import) + Eigen (minimize_plastic), so it is
 // gated on both in CMake. The demo l-bracket + real rule table are injected.
 
+#include "topopt/analyze.hpp"  // KnockdownSpec, knockdown_spec_for parity
 #include "topopt/fea.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -217,6 +218,30 @@ int main() {
     CHECK(!opts.width_aware_knockdown,
           "production config leaves the width-aware knockdown OFF (shipped default; "
           "arming is a separate maintainer decision)");
+    // Handoff 2026-07-26-post-merge-build-fix (F3) — THE BRIDGE AND THE CLI AGREE.
+    // The accept-gate KnockdownSpec that the on-device bridge (TopOptBridge
+    // analyze_selfweight), the CLI standalone re-analysis (run_job) and the optimizer
+    // all pass is built by ONE shared function, knockdown_spec_for. Assert that the
+    // POSTURE it yields from the production options equals what configure_production_options
+    // arms — checked against the NAMED constant, not a literal. The post-merge break
+    // existed precisely because nothing checked that: the bridge silently kept passing a
+    // bare scalar, so the iPad could have certified a part under a different knockdown
+    // than the Mac worker. This assertion is the tripwire that would have caught it.
+    const topopt::KnockdownSpec bridge_spec = topopt::knockdown_spec_for(opts);
+    CHECK(bridge_spec.width_aware == topopt::production_width_aware_knockdown(),
+          "the shared knockdown_spec_for posture (what the bridge passes) echoes the "
+          "width-aware arming constant configure_production_options arms");
+    CHECK(bridge_spec.width_aware == opts.width_aware_knockdown,
+          "the shared knockdown spec reads the width-aware flag off the same options "
+          "the config populated (bridge == CLI == optimizer by construction)");
+    CHECK(!bridge_spec.width_aware,
+          "the shared knockdown spec is the pure f^1.5 scalar posture in the shipped "
+          "production config (byte-identical to the pre-width gate)");
+    CHECK(bridge_spec.infill_percent == opts.infill_percent,
+          "the shared knockdown spec carries the job infill for the per-voxel core term");
+    CHECK(bridge_spec.wall_thickness_mm ==
+              static_cast<double>(opts.wall_loops) * opts.wall_line_width_mm,
+          "the shared knockdown spec sizes the wall ring t = wall_loops · wall_line_width_mm");
     // Config echo (per the 141-lineage mechanism): the production config ARMS the
     // conditional gate at the 0.07 grayness threshold and does NOT set the always-on
     // simp.mma_projection bool — projection is now per-rung and gate-driven.

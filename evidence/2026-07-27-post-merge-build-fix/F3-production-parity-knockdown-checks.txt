@@ -1,0 +1,9 @@
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+production parity (handoff 093): all checks passed
+--- exit via ctest ---
+
+100% tests passed out of 1
+
+Total Test time (real) =  10.92 sec

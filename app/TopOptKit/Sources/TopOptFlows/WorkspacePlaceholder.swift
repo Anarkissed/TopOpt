@@ -1725,6 +1725,13 @@ public struct WorkspacePlaceholder: View {
             }
     }
 
+    /// Project a model-space anchor and position a knob there (knob keeps its own gesture,
+    /// applied BEFORE `.position` — the camera-non-fighting rule).
+    @ViewBuilder private func gizmoAt(_ proj: CameraProjection, _ p: SIMD3<Double>,
+                                      @ViewBuilder _ knob: () -> some View) -> some View {
+        if let pt = proj.project(settledWorld(SIMD3<Float>(p))) { knob().position(pt) }
+    }
+
     /// COPY (duplicate, G6), the snap OVERRIDE toggle (the magnet), and dismiss.
     @ViewBuilder private func gizmoActionCluster(group gid: UUID, mp: ManualPrimitive) -> some View {
         HStack(spacing: DS.Space.s) {
