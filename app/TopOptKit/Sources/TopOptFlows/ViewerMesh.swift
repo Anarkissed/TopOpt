@@ -102,6 +102,41 @@ public enum MeshGeometry {
         return out
     }
 
+    /// The closest point on triangle `abc` to `p` (Ericson, *Real-Time Collision
+    /// Detection* §5.1.5 — the barycentric Voronoi-region test). Handles the vertex,
+    /// edge and interior cases; pure, so the gravity widget's magnetic base-attach
+    /// (2026-07-27 round 2) can be tested headlessly.
+    public static func closestPointOnTriangle(_ p: SIMD3<Float>, _ a: SIMD3<Float>,
+                                              _ b: SIMD3<Float>, _ c: SIMD3<Float>) -> SIMD3<Float> {
+        let ab = b - a, ac = c - a, ap = p - a
+        let d1 = simd_dot(ab, ap), d2 = simd_dot(ac, ap)
+        if d1 <= 0 && d2 <= 0 { return a }                       // vertex region A
+        let bp = p - b
+        let d3 = simd_dot(ab, bp), d4 = simd_dot(ac, bp)
+        if d3 >= 0 && d4 <= d3 { return b }                      // vertex region B
+        let vc = d1 * d4 - d3 * d2
+        if vc <= 0 && d1 >= 0 && d3 <= 0 {                       // edge AB
+            let v = d1 / (d1 - d3)
+            return a + ab * v
+        }
+        let cp = p - c
+        let d5 = simd_dot(ab, cp), d6 = simd_dot(ac, cp)
+        if d6 >= 0 && d5 <= d6 { return c }                      // vertex region C
+        let vb = d5 * d2 - d1 * d6
+        if vb <= 0 && d2 >= 0 && d6 <= 0 {                       // edge AC
+            let w = d2 / (d2 - d6)
+            return a + ac * w
+        }
+        let va = d3 * d6 - d5 * d4
+        if va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0 {         // edge BC
+            let w = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+            return b + (c - b) * w
+        }
+        let denom = 1 / (va + vb + vc)                           // interior
+        let v = vb * denom, w = vc * denom
+        return a + ab * v + ac * w
+    }
+
     /// Read a flattened xyz vertex at an index, `.zero` if out of range.
     private static func position(_ idx: Int32, in vertices: [Float], vertexCount: Int) -> SIMD3<Float> {
         guard idx >= 0, Int(idx) < vertexCount else { return .zero }
@@ -423,5 +458,117 @@ public struct ViewerMesh {
             t += 3
         }
         return PlaneOutline.fit(points: pts, normal: planeNormal, origin: planeOrigin)
+    }
+
+    /// A large flat face of the part, as an outward-normal snap candidate for the gravity
+    /// DIRECTION widget (2026-07-27 round 2). `area` is mm² (used to rank + threshold).
+    public struct FlatFace: Equatable, Sendable {
+        public let normal: SIMD3<Float>
+        public let faceID: Int32
+        public let area: Float
+        public init(normal: SIMD3<Float>, faceID: Int32, area: Float) {
+            self.normal = normal; self.faceID = faceID; self.area = area
+        }
+    }
+
+    /// The part's own large FLAT faces, as outward-normal snap targets for the gravity
+    /// direction widget. This is the round-2 fix for "Gravity set · custom": PR 199 snapped
+    /// to the six MODEL axes, which only coincide with the part's faces when the part is
+    /// modelled axis-aligned — on the maintainer's imported (arbitrarily-oriented) bracket
+    /// they don't, so the snap never engaged. Snapping to these ACTUAL face normals makes
+    /// gravity land perpendicular to whatever floor/wall the part sits on, however it is
+    /// oriented in model space.
+    ///
+    /// Candidate selection (stated for the handoff):
+    ///   • group the tessellation by its per-triangle face id (STL pseudo-faces or STEP
+    ///     B-rep faces — both work);
+    ///   • for each face accumulate `Σ(cross)` (a vector whose length is 2× the FLAT-
+    ///     projected area and whose direction is the area-weighted normal) and `Σ|cross|`
+    ///     (2× the total triangle area). Their ratio is a FLATNESS score: 1 for a planar
+    ///     face, →0 as it curves (opposing facet normals cancel in the vector sum). So a
+    ///     bore/fillet is rejected and only genuine flat seating faces qualify;
+    ///   • keep faces with flatness ≥ `minFlatness` (default 0.9 ≈ within ~25° of planar)
+    ///     AND area ≥ `minAreaFraction` of the largest flat face (drop slivers);
+    ///   • merge near-parallel normals within `mergeAngleDeg` (default 6°, keeping the
+    ///     larger face) so coplanar facets don't flood the set, and cap to `maxCount`.
+    /// Returns [] for a mesh with no face ids (an optimized result) → the widget falls back
+    /// to the six principal axes only.
+    public func flatFaceNormals(maxCount: Int = 32, minFlatness: Float = 0.9,
+                                minAreaFraction: Float = 0.02,
+                                mergeAngleDeg: Float = 6) -> [FlatFace] {
+        guard !faceIDs.isEmpty else { return [] }
+        let vc = vertexCount
+        func pos(_ i: UInt32) -> SIMD3<Float> {
+            let b = Int(i) * 3
+            return SIMD3<Float>(positions[b], positions[b + 1], positions[b + 2])
+        }
+        var accumVec: [Int32: SIMD3<Float>] = [:]
+        var accumArea2: [Int32: Float] = [:]                     // Σ|cross| == 2 × area
+        var t = 0
+        while t + 2 < indices.count {
+            let tri = t / 3
+            if tri < faceIDs.count {
+                let id = faceIDs[tri]
+                let i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2]
+                if Int(i0) < vc, Int(i1) < vc, Int(i2) < vc {
+                    let cr = simd_cross(pos(i1) - pos(i0), pos(i2) - pos(i0))
+                    accumVec[id, default: .zero] += cr
+                    accumArea2[id, default: 0] += simd_length(cr)
+                }
+            }
+            t += 3
+        }
+        var faces: [FlatFace] = []
+        for (id, vec) in accumVec {
+            let vlen = simd_length(vec)
+            let area2 = accumArea2[id] ?? 0
+            guard vlen > 1e-9, area2 > 1e-9, vlen / area2 >= minFlatness else { continue }
+            faces.append(FlatFace(normal: vec / vlen, faceID: id, area: vlen / 2))
+        }
+        guard let maxArea = faces.map(\.area).max(), maxArea > 0 else { return [] }
+        faces = faces.filter { $0.area >= minAreaFraction * maxArea }
+        faces.sort { $0.area > $1.area }
+        let cosMerge = Foundation.cos(Double(mergeAngleDeg) * .pi / 180)
+        var kept: [FlatFace] = []
+        for f in faces {
+            if kept.contains(where: { Double(simd_dot($0.normal, f.normal)) >= cosMerge }) { continue }
+            kept.append(f)
+            if kept.count >= maxCount { break }
+        }
+        return kept
+    }
+
+    /// The closest point on the mesh SURFACE to model-space point `p`, with that face's
+    /// outward unit normal — or nil if nothing is within `maxDist`. This is the "magnet"
+    /// behind the gravity arrow's movable base (round 2, item 2): as the base is dragged it
+    /// attaches to the nearest face. O(triangles) per query — fine for the imported prismatic
+    /// parts this runs on (a few thousand triangles); it is only called while the base is
+    /// being dragged, never in the run path.
+    public func nearestSurfacePoint(to p: SIMD3<Float>,
+                                    within maxDist: Float) -> (point: SIMD3<Float>, normal: SIMD3<Float>)? {
+        guard !indices.isEmpty else { return nil }
+        let vc = vertexCount
+        func pos(_ i: UInt32) -> SIMD3<Float> {
+            let b = Int(i) * 3
+            return SIMD3<Float>(positions[b], positions[b + 1], positions[b + 2])
+        }
+        var bestD2 = maxDist * maxDist
+        var best: (SIMD3<Float>, SIMD3<Float>)?
+        var t = 0
+        while t + 2 < indices.count {
+            let i0 = indices[t], i1 = indices[t + 1], i2 = indices[t + 2]
+            t += 3
+            guard Int(i0) < vc, Int(i1) < vc, Int(i2) < vc else { continue }
+            let a = pos(i0), b = pos(i1), c = pos(i2)
+            let q = MeshGeometry.closestPointOnTriangle(p, a, b, c)
+            let d2 = simd_length_squared(q - p)
+            if d2 < bestD2 {
+                bestD2 = d2
+                let n = simd_cross(b - a, c - a)
+                let nl = simd_length(n)
+                best = (q, nl > 1e-12 ? n / nl : SIMD3<Float>(0, 1, 0))
+            }
+        }
+        return best
     }
 }

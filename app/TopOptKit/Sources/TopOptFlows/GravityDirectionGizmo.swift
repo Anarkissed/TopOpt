@@ -38,12 +38,21 @@ public enum GravityDirectionGizmo {
         }
     }
 
-    /// The snap set: the six SIGNED principal axes.
-    ///
-    /// In MODEL space the part's bounding box is axis-aligned, so its six outward face
-    /// normals are EXACTLY these six signed axes — this one set therefore covers both snap
-    /// requirements at once ("snap to the principal axes" AND "snap to the part's own
-    /// bounding-box faces"). The label names the axis; `−Y` is the conventional "down".
+    /// Build snap targets from the part's own flat FACE normals (round 2, 2026-07-27). These
+    /// are the real requirement: gravity snaps perpendicular to whatever floor/wall the part
+    /// sits on, however the part is oriented in model space — unlike the principal axes, which
+    /// only coincide with the faces when the part is modelled axis-aligned (the "Gravity set ·
+    /// custom" failure on the maintainer's imported bracket). The stored direction is the EXACT
+    /// candidate normal, so a snapped gravity is bit-for-bit that face's normal (BAR V2).
+    public static func faceSnapTargets(_ normals: [SIMD3<Double>]) -> [SnapTarget] {
+        normals.map { SnapTarget(direction: unit($0), label: "face") }
+    }
+
+    /// The snap set: the six SIGNED principal axes — kept as cheap ADDITIONAL detents on top
+    /// of the face normals (item 1). They coincide with the bounding-box faces of an
+    /// axis-aligned part; the part's actual face normals (`faceSnapTargets`) are what make the
+    /// snap engage on a real, arbitrarily-oriented import. The label names the axis; `−Y` is
+    /// the conventional "down".
     public static let snapTargets: [SnapTarget] = [
         SnapTarget(direction: SIMD3<Double>( 1,  0,  0), label: "+X"),
         SnapTarget(direction: SIMD3<Double>(-1,  0,  0), label: "−X"),
@@ -61,21 +70,25 @@ public enum GravityDirectionGizmo {
 
     /// Snap a pointed direction to the nearest snap target within `toleranceDeg`.
     ///
-    /// When a target is within tolerance the EXACT target vector is returned — a snapped
-    /// "down" is bit-exactly `(0, -1, 0)`, never `(0.0001, -0.9999, …)` (BAR V2). Outside
-    /// tolerance the normalized input passes through unchanged with no label. Ties resolve
-    /// to the closest (largest dot); the target list order breaks an exact tie.
-    public static func snap(_ dir: SIMD3<Double>, toleranceDeg: Double = snapToleranceDegrees)
+    /// The candidate set is the six principal axes FOLLOWED BY the part's own flat-face
+    /// normals (`extraTargets`, item 1). When a target is within tolerance the EXACT target
+    /// vector is returned — a snapped "down" is bit-exactly `(0, -1, 0)`, and a snapped face
+    /// is bit-for-bit that face's normal, never `(0.0001, -0.9999, …)` (BAR V2). Outside
+    /// tolerance the normalized input passes through unchanged with no label. The strongest
+    /// dot wins; the FIRST target wins an exact tie — axes are listed first, so a face normal
+    /// that happens to coincide with an axis reports the clean axis label.
+    public static func snap(_ dir: SIMD3<Double>, extraTargets: [SnapTarget] = [],
+                            toleranceDeg: Double = snapToleranceDegrees)
         -> (dir: SIMD3<Double>, label: String?) {
         let n = unit(dir)
         let cosTol = Foundation.cos(toleranceDeg * .pi / 180)
         var best: SnapTarget?
         var bestDot = cosTol
-        for t in snapTargets {
+        for t in snapTargets + extraTargets {
             let d = simd_dot(n, t.direction)
-            if d >= bestDot { bestDot = d; best = t }
+            if d > bestDot { bestDot = d; best = t }
         }
-        if let b = best { return (b.direction, b.label) }   // EXACT canonical axis vector
+        if let b = best { return (b.direction, b.label) }   // EXACT canonical / face vector
         return (n, nil)
     }
 

@@ -178,6 +178,16 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public private(set) var gravity: SIMD3<Float>?
     /// The B-rep face the user tapped as "down" (proto `S.gravityFace`).
     public private(set) var gravityFace: FaceID?
+    /// The gravity arrow's BASE position in model space (direction widget, round 2,
+    /// 2026-07-27). PURELY VISUAL — it is only where the stubby indicator is DRAWN, so the
+    /// user can slide it onto the floor/wall the part rests on (magnetically attaching to a
+    /// face) and read the direction against that surface. It is NOT consulted by any run or
+    /// serializer path: gravity is a DIRECTION, so `build_dir` (= −gravity) and the gravity
+    /// load depend ONLY on `gravity`. Moving the base therefore never changes the job
+    /// (BAR V4 — asserted by testBasePositionDoesNotChangeTheJob). nil = draw from the mesh
+    /// centre. Optional + only-encoded-when-set, so a project saved before this change decodes
+    /// with base nil and the on-disk format is byte-identical when unused (BAR V6).
+    public private(set) var gravityBaseModel: SIMD3<Float>?
     /// Setup (prompt) vs edit (proto `S.phase`).
     public private(set) var phase: GravityPhase = .setup
     /// The global display unit (proto `S.unit`).
@@ -289,6 +299,12 @@ public struct ForceModel: Equatable, Sendable, Codable {
         gravity = n
         phase = .edit
         return true
+    }
+
+    /// Set (or clear, with nil) the PURELY-VISUAL base position of the gravity arrow (round
+    /// 2). Does not touch `gravity`, `phase`, or anything the job reads — see the field doc.
+    public mutating func setGravityBase(_ p: SIMD3<Float>?) {
+        gravityBaseModel = p
     }
 
     /// Re-enter the gravity prompt (design chip's "Change"). Keeps the current
@@ -820,6 +836,7 @@ extension ForceModel {
         case faceProtectDepthMM     // ONE global preserve-depth in mm (handoff 124, optional)
         case manualPrimitives       // user-placed primitives (handoff group-editing, optional)
         case suppressedClearanceFaces  // deleted auto clearance faces (handoff group-editing, optional)
+        case gravityBaseModel       // purely-visual arrow base (gravity round 2, optional)
     }
 
     public init(from decoder: Decoder) throws {
@@ -861,6 +878,9 @@ extension ForceModel {
                                                  forKey: .manualPrimitives)
         suppressedClearanceFaces = try c.decodeIfPresent(Set<Int32>.self,
                                                          forKey: .suppressedClearanceFaces)
+        // Gravity round 2 — the purely-visual arrow base. Absent in pre-round-2 snapshots →
+        // nil (draw from the mesh centre), so old projects load with gravity unchanged (V6).
+        gravityBaseModel = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .gravityBaseModel)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -884,5 +904,8 @@ extension ForceModel {
         // manual primitives and no deletions is byte-identical to a pre-handoff one.
         try c.encodeIfPresent(manualPrimitives, forKey: .manualPrimitives)
         try c.encodeIfPresent(suppressedClearanceFaces, forKey: .suppressedClearanceFaces)
+        // Gravity round 2 — only emit the arrow base when the user has placed one, so a
+        // project that never touched it is byte-identical to a pre-round-2 snapshot (V6).
+        try c.encodeIfPresent(gravityBaseModel, forKey: .gravityBaseModel)
     }
 }
