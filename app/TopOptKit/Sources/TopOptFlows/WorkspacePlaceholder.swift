@@ -1798,18 +1798,7 @@ public struct WorkspacePlaceholder: View {
             .contentShape(Circle().inset(by: -12))
     }
 
-    /// A square gizmo knob (the plane-translate handle), same material as the round one.
-    @ViewBuilder private func gizmoSquareKnob(active: Bool, size: CGFloat,
-                                              @ViewBuilder glyph: () -> some View) -> some View {
-        glyph()
-            .frame(width: size, height: size)
-            .liquidGlass(LiquidGlass.Tint.frost(DS.Color.accent, intensity: active ? 0.85 : 0.55),
-                         in: RoundedRectangle(cornerRadius: 6), specular: active ? 1.3 : 1)
-            .shadow(color: DS.Color.accent.color.opacity(0.5), radius: 4)
-            .contentShape(RoundedRectangle(cornerRadius: 6).inset(by: -12))
-    }
-
-    // MARK: gravity DIRECTION widget (2026-07-26) — point which way is down
+ // MARK: gravity DIRECTION widget (2026-07-26) — point which way is down
 
     /// The arrow's model-space length: just outside the part so the head + drag knob clear
     /// the geometry. Scaled off the model radius so it fits a small bolt and a large bracket.
