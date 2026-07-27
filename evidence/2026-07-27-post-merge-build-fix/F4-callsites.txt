@@ -1,0 +1,9 @@
+=== F4: every call site of analyze_fixed_design (the ONLY signature PR206 changed) ===
+core/tests/unit/test_analyze_fixed_design.cpp:183:  const FixedDesignAnalysis a = analyze_fixed_design(
+core/tests/unit/test_analyze_fixed_design.cpp:226:  const FixedDesignAnalysis a2 = analyze_fixed_design(
+core/tests/unit/test_analyze_fixed_design.cpp:240:  const FixedDesignAnalysis rej = analyze_fixed_design(
+core/tests/harness/width_aware_gate.cpp:91:  return analyze_fixed_design(g, params, rho, bcs, loads, mat, build_dir, 1e-6,
+core/src/cli/run_job.cpp:464:  result.analysis = analyze_fixed_design(
+core/src/simp/minimize_plastic.cpp:1031:    FixedDesignAnalysis fda = analyze_fixed_design(
+core/src/simp/analyze.cpp:83:FixedDesignAnalysis analyze_fixed_design(
+app/TopOptKit/Sources/TopOptBridge/bridge.cpp:801:    const topopt::FixedDesignAnalysis a = topopt::analyze_fixed_design(

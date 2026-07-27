@@ -2,6 +2,7 @@
 
 #include <thread>  // std::thread::hardware_concurrency (portable fallback)
 
+#include "topopt/analyze.hpp"  // KnockdownSpec, infill_margin_knockdown
 #include "topopt/fea.hpp"   // fea_set_matfree_galerkin_block_cache
 #include "topopt/simp.hpp"  // SolverKind, projection_supported, heaviside_continuation_schedule
 
@@ -203,6 +204,21 @@ int production_active_domain_band() { return kProductionActiveDomainBand; }
 
 double production_draft_loose_tol() { return kProductionDraftLooseTol; }
 bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
+
+KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
+  // The ONE construction (handoff 2026-07-26-post-merge-build-fix). All four fields
+  // are read straight off `opts`: the scalar f^1.5 seed from the job infill, the
+  // width-aware arming flag (equals production_width_aware_knockdown() once the
+  // options came through configure_production_options), the infill for the per-voxel
+  // core term, and the slicer wall-ring thickness t = wall_loops · wall_line_width_mm.
+  KnockdownSpec knockdown;
+  knockdown.infill_knockdown = infill_margin_knockdown(opts.infill_percent);
+  knockdown.width_aware = opts.width_aware_knockdown;
+  knockdown.infill_percent = opts.infill_percent;
+  knockdown.wall_thickness_mm =
+      static_cast<double>(opts.wall_loops) * opts.wall_line_width_mm;
+  return knockdown;
+}
 
 void configure_production_options(MinimizePlasticOptions& opts) {
   // Matrix-free geometric-multigrid solver (handoff 079/091). Never assembles

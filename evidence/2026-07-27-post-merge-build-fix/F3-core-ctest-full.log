@@ -1,0 +1,44 @@
+[ 98%] Built target test_loadcase_small_face
+[100%] Linking CXX executable test_mesh_job
+[100%] Built target test_mesh_job
+=== full ctest ===
+      Start 54: mma
+54/71 Test #54: mma ..............................   Passed   80.83 sec
+      Start 55: adaptive_move
+55/71 Test #55: adaptive_move ....................   Passed   13.38 sec
+      Start 56: mma_projection_gate
+56/71 Test #56: mma_projection_gate ..............   Passed    1.32 sec
+      Start 57: mma_projection
+57/71 Test #57: mma_projection ...................   Passed   41.70 sec
+      Start 58: conditional_projection
+58/71 Test #58: conditional_projection ...........   Passed   41.91 sec
+      Start 59: rung_infeasible
+59/71 Test #59: rung_infeasible ..................   Passed   40.26 sec
+      Start 60: active_domain
+60/71 Test #60: active_domain ....................   Passed    8.49 sec
+      Start 61: stress
+61/71 Test #61: stress ...........................   Passed   19.91 sec
+      Start 62: step_import
+62/71 Test #62: step_import ......................   Passed    0.49 sec
+      Start 63: segment_vs_step
+63/71 Test #63: segment_vs_step ..................   Passed    0.50 sec
+      Start 64: face_tag
+64/71 Test #64: face_tag .........................   Passed    0.25 sec
+      Start 65: mask_face
+65/71 Test #65: mask_face ........................   Passed    0.33 sec
+      Start 66: cli_demo
+66/71 Test #66: cli_demo .........................   Passed  180.64 sec
+      Start 67: production_parity
+67/71 Test #67: production_parity ................   Passed   14.76 sec
+      Start 68: clearance_parity
+68/71 Test #68: clearance_parity .................   Passed   11.58 sec
+      Start 69: face_protection_parity
+69/71 Test #69: face_protection_parity ...........   Passed    3.91 sec
+      Start 70: loadcase_small_face
+70/71 Test #70: loadcase_small_face ..............   Passed    0.42 sec
+      Start 71: mesh_job
+71/71 Test #71: mesh_job .........................   Passed    6.65 sec
+
+100% tests passed out of 71
+
+Total Test time (real) = 865.72 sec

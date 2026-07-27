@@ -455,13 +455,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   const bool load_path_ok = load_path_connected(design_grid, density, 0.5);
   // The gate knockdown posture (handoff 2026-07-26-width-aware-knockdown), built
   // from the SAME options the originating run used so a standalone re-analysis gates
-  // on the identical rule. width_aware defaults false → the scalar f^1.5 gate.
-  topopt::KnockdownSpec knockdown;
-  knockdown.infill_knockdown = infill_margin_knockdown(options.infill_percent);
-  knockdown.width_aware = options.width_aware_knockdown;
-  knockdown.infill_percent = options.infill_percent;
-  knockdown.wall_thickness_mm =
-      static_cast<double>(options.wall_loops) * options.wall_line_width_mm;
+  // on the identical rule. THE ONE builder (knockdown_spec_for) — shared with the
+  // optimizer's per-rung gate and the on-device bridge so all three agree by
+  // construction. width_aware defaults false → the scalar f^1.5 gate.
+  const KnockdownSpec knockdown = knockdown_spec_for(options);
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
   result.analysis = analyze_fixed_design(

@@ -786,15 +786,22 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
     params.penalty = 3.0;
     topopt::MinimizePlasticOptions opts;
     topopt::configure_production_options(opts);
-    const double infill_knockdown =
-        topopt::infill_margin_knockdown(opts.infill_percent);
+    // The gate knockdown posture (handoff 2026-07-26-post-merge-build-fix), built by
+    // THE ONE builder (knockdown_spec_for) the CLI/worker uses (run_job.cpp) off the
+    // SAME configure_production_options object, so the iPad and the Mac certify a part
+    // under the IDENTICAL rule instead of by hand-copied field assignments that drift
+    // (this call site is exactly where the post-merge break was: it kept passing a
+    // bare scalar). width_aware defaults false (kProductionWidthAwareKnockdown OFF) →
+    // the scalar f^1.5 gate, byte-identical to the pre-width bridge; if arming ever
+    // flips, the bridge picks it up here because it reads the shared options object.
+    const topopt::KnockdownSpec knockdown = topopt::knockdown_spec_for(opts);
     const bool load_path_ok =
         topopt::load_path_connected(design_grid, density, 0.5);
 
     const topopt::FixedDesignAnalysis a = topopt::analyze_fixed_design(
         design_grid, params, density, bcs, loads, material, build_dir,
         opts.simp.cg_tolerance, opts.simp.cg_max_iterations, opts.simp.solver,
-        margin_stop, infill_knockdown, load_path_ok, part_solid);
+        margin_stop, knockdown, load_path_ok, part_solid);
 
     result.accepted = a.accepted;
     result.margin_worst_case = a.margin.worst_case;
