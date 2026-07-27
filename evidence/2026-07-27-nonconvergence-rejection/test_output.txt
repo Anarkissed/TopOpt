@@ -1,0 +1,6 @@
+[group 1] mechanism fires at each layer
+[group 2] driver: run completes, accepted variant survives
+[group 3] N3 — warm-start unchanged across a rejected rung
+[group 4] N1 — inert on a run that never hits non-convergence
+
+47 checks, 0 failures

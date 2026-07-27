@@ -503,6 +503,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     result.draft_rung_probe_cg.push_back(probe_cg);
     result.draft_rung_probe_tightmove.push_back(probe_tightmove);
   };
+  // Handoff 2026-07-27-nonconvergence-rejection — record one non-convergence entry
+  // per EVALUATED rung, so the three vectors stay aligned with `evaluated` /
+  // `rung_infeasible` across EVERY terminal branch (normal / cancelled / infeasible /
+  // non-convergent). Always filled (like rung_infeasible): all-zeros is the positive
+  // statement "every rung's solves converged". Called exactly once per loop iteration,
+  // beside the matching result.rung_infeasible.push_back.
+  auto record_rung_convergence = [&](bool non_convergent, int iteration,
+                                     double residual) {
+    result.rung_non_convergent.push_back(non_convergent ? 1 : 0);
+    result.rung_non_convergent_iteration.push_back(iteration);
+    result.rung_non_convergent_residual.push_back(residual);
+  };
   // Phase 2 design-space trigger: ARMED only when draft is armed AND the maintainer
   // opted in (draft_use_design_trigger). The threshold draft_escalation_design_flip
   // (default 0 = the measured negative-control floor) is then how much classification
@@ -688,7 +700,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // corrected field. Skipped for a cancelled/infeasible rung (no terminal design
     // to trust). Inert (and the draft_rung_* vectors stay empty) unless draft armed.
     if (draft_armed && !variant.optimization.cancelled &&
-        !variant.optimization.infeasible) {
+        !variant.optimization.infeasible && !variant.optimization.non_convergent) {
       draft_k = draft_trailing_tight;  // grayscale draft rung's tightening tail
       const double c_cert = variant.optimization.compliance;  // tight final solve (B2)
       const double c_traj = variant.optimization.history.empty()
@@ -834,7 +846,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // on a severed structure is hours spent sharpening a corpse. The gate is
     // skipped exactly as it is for a cancelled rung.
     if (conditional_projection_armed && !variant.optimization.cancelled &&
-        !variant.optimization.infeasible) {
+        !variant.optimization.infeasible && !variant.optimization.non_convergent) {
       rung_mnd = design_discreteness_mnd(G, variant.optimization.physical_density,
                                          mask);
       if (rung_mnd > options.conditional_mma_projection_mnd_threshold) {
@@ -886,6 +898,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       variant.accepted = false;
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(0);
+      record_rung_convergence(false, 0, 0.0);  // cancelled: no solve verdict
       record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: cancelled
       result.cancelled = true;
       break;
@@ -949,7 +962,69 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
       result.evaluated.push_back(std::move(variant));
       result.rung_infeasible.push_back(1);
+      record_rung_convergence(false, 0, 0.0);  // infeasible: the solves converged
       record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: infeasible
+      result.report.rejected.push_back(result.evaluated.back().report);
+      assert(result.evaluated.size() <= ladder.size() &&
+             "minimize_plastic: result.evaluated grew past its reserved capacity");
+      continue;  // (2) warm_seed untouched, (3) ladder continues
+    }
+
+    // --- Handoff 2026-07-27-nonconvergence-rejection: RUNG NON-CONVERGENT --------
+    // A TRAJECTORY solve for this rung did not converge (SolverNonConvergence: CG
+    // hit its cap short of tolerance), so simp_optimize ended the rung with
+    // `non_convergent` set instead of throwing out of the whole run (PR 209's AD-on-
+    // at-L posture is exactly this: it does not converge at all). This rung is
+    // handled EXACTLY as an infeasible one — the SAME three consequences, each for
+    // the same reason:
+    //   (1) NO ANALYSIS. There is no trustworthy field: the solver could not resolve
+    //       the displacement, so stress/margin/mesh would be built on garbage. The
+    //       stress solve, V3 suite and settings are skipped, exactly as for a
+    //       cancelled or infeasible rung.
+    //   (2) NO INHERITANCE. This branch sits BEFORE the warm_seed update below, so
+    //       `warm_seed` is left holding the last FEASIBLE (converged, connected)
+    //       rung's density (or empty). A rung that could not be solved must not seed
+    //       the next — handoff 131's rule, for the same reason. Shown by the test:
+    //       the rung AFTER a non-convergent one inherits what it would have inherited
+    //       had the non-convergent rung not run.
+    //   (3) NO STOP. The ladder continues. Non-convergence is a property of THIS
+    //       carve's operator (a near-singular high-contrast field), not a strength
+    //       verdict about lighter targets, so the next rung gets a fresh attempt.
+    // Reported, never dropped: a rejected line whose rejection_reason is
+    // kRungNonConvergentReason, carrying the geometry it honestly has (printed voxel
+    // count) and ZERO placeholders for the analysis it never ran; the iteration and
+    // residual the solve reached go to run_info.json (rung_non_convergent_*).
+    if (variant.optimization.non_convergent) {
+      variant.non_convergent = true;
+      variant.accepted = false;
+
+      std::size_t printed_voxels = 0;
+      for (int k = 0; k < G.nz; ++k)
+        for (int j = 0; j < G.ny; ++j)
+          for (int i = 0; i < G.nx; ++i) {
+            if (!G.solid(i, j, k)) continue;
+            if (variant.optimization.physical_density[G.index(i, j, k)] > kIso)
+              ++printed_voxels;
+          }
+      const double printed_fraction =
+          part_solid > 0.0 ? static_cast<double>(printed_voxels) / part_solid
+                           : 0.0;
+
+      VariantReport& vr = variant.report;
+      vr.volume_fraction = std::min(1.0, printed_fraction);
+      vr.printed_fraction = std::min(1.0, printed_fraction);
+      vr.accepted = false;
+      vr.margin_required = options.margin_stop;
+      vr.rejection_reason = kRungNonConvergentReason;
+      // Every other field stays default-constructed — NOT measurements. The
+      // rejection_reason is the flag that says so.
+
+      const int nc_iter = variant.optimization.non_convergent_iteration;
+      const double nc_resid = variant.optimization.non_convergent_residual;
+      result.evaluated.push_back(std::move(variant));
+      result.rung_infeasible.push_back(0);
+      record_rung_convergence(true, nc_iter, nc_resid);
+      record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: non-convergent
       result.report.rejected.push_back(result.evaluated.back().report);
       assert(result.evaluated.size() <= ladder.size() &&
              "minimize_plastic: result.evaluated grew past its reserved capacity");
@@ -1032,6 +1107,64 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         G, params, rho, B, loads, material, build_dir, opt.cg_tolerance,
         opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
         load_path_ok, part_solid);
+
+    // --- Handoff 2026-07-27-nonconvergence-rejection: CERTIFICATION NON-CONVERGENT ─
+    // The trajectory converged to a connected design, but the CERTIFICATION solve —
+    // stateless, cold, at the tight cg_tolerance — did not converge (PR 200 found a
+    // real variant that does exactly this during re-certification). N2's rule is
+    // absolute: the certification tolerance was NOT softened (analyze_fixed_design
+    // asserts it), so a design the certification solve cannot resolve is REJECTED,
+    // never certified. `fda.accepted` is forced false on this path, but we branch on
+    // the flag directly and reject here — before reading ANY of fda's default/empty
+    // fields as if they were measurements.
+    //
+    // Warm-start (N3): unlike the trajectory-non-convergent branch above, warm_seed
+    // was ALREADY updated (a few lines up, gated on load_path_ok) with THIS rung's
+    // converged, connected density — and it is left as-is. That is handoff 131's rule
+    // exactly: warm_seed carries the last rung that produced a converged, connected
+    // field, whether or not it was ultimately accepted (a too-weak rung seeds the next
+    // one the same way). The certification solve failing does not make the trajectory
+    // design a corpse: it converged, it is connected, and it is the right seed. What
+    // does NOT seed is a rung whose TRAJECTORY could not be solved (handled above,
+    // before this update). The two branches differ because the facts differ.
+    if (fda.non_convergent) {
+      variant.non_convergent = true;
+      variant.accepted = false;
+
+      // The trajectory converged, so `rho` is a real design: count its printed
+      // voxels honestly (analyze returned early with printed_voxels == 0, so we do
+      // NOT read that). This is the one geometry number we legitimately have.
+      std::size_t printed_voxels_nc = 0;
+      for (int k = 0; k < G.nz; ++k)
+        for (int j = 0; j < G.ny; ++j)
+          for (int i = 0; i < G.nx; ++i) {
+            if (!G.solid(i, j, k)) continue;
+            if (rho[G.index(i, j, k)] > kIso) ++printed_voxels_nc;
+          }
+      VariantReport& vr = variant.report;
+      const double printed_fraction_nc =
+          part_solid > 0.0
+              ? static_cast<double>(printed_voxels_nc) / part_solid
+              : 0.0;
+      vr.volume_fraction = std::min(1.0, printed_fraction_nc);
+      vr.printed_fraction = std::min(1.0, printed_fraction_nc);
+      vr.accepted = false;
+      vr.margin_required = options.margin_stop;
+      vr.rejection_reason = kRungNonConvergentReason;
+      // No margin, stress, orientation or settings — the certification never
+      // completed. The rejection_reason is the flag that says so.
+
+      result.evaluated.push_back(std::move(variant));
+      result.rung_infeasible.push_back(0);
+      record_rung_convergence(true, fda.non_convergent_iteration,
+                              fda.non_convergent_residual);
+      record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: non-convergent
+      result.report.rejected.push_back(result.evaluated.back().report);
+      assert(result.evaluated.size() <= ladder.size() &&
+             "minimize_plastic: result.evaluated grew past its reserved capacity");
+      continue;  // (3) ladder continues
+    }
+
     variant.von_mises_field = std::move(fda.von_mises_field);
     variant.stress_tensor_field = std::move(fda.stress_tensor_field);
     variant.displacement_field = std::move(fda.displacement_field);
@@ -1136,6 +1269,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
     result.evaluated.push_back(std::move(variant));
     result.rung_infeasible.push_back(0);  // handoff 131 (aligned with `evaluated`)
+    record_rung_convergence(false, 0, 0.0);  // analysed rung: solves converged
     record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // draft outcome (aligned)
     // Storage never reallocates (reserved to ladder.size() above), so the
     // references taken below stay valid for the whole run — see the reserve() note.

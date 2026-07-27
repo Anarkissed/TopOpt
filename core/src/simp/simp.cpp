@@ -1729,15 +1729,36 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // final/certified solve below is always full-domain). `af` is 1.0 whenever
       // the full domain ran.
       double af = 1.0;
-      const SimpCompliance c = active_domain_solve(
-          active_domain, grid, params, xphys, bcs, loads, traj_tol,
-          options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
-          use_solver ? solver.get() : nullptr, options.solver,
-          result.iterations + 1, af);
+      SimpCompliance c;
+      try {
+        c = active_domain_solve(
+            active_domain, grid, params, xphys, bcs, loads, traj_tol,
+            options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
+            use_solver ? solver.get() : nullptr, options.solver,
+            result.iterations + 1, af);
+      } catch (const SolverNonConvergence& e) {
+        // Handoff 2026-07-27-nonconvergence-rejection — a TRAJECTORY solve did not
+        // converge. End the run here, honestly labelled, WITHOUT throwing out of
+        // simp_optimize — exactly as the infeasibility fast-fail below ends a corpse.
+        // The caller then rejects THIS rung (kRungNonConvergentReason) while the run
+        // survives and the ladder continues. active_domain_solve already caught the
+        // restricted-solve failure and retried the FULL domain (it catches
+        // std::exception), so a SolverNonConvergence reaching here is the full-domain
+        // solve itself failing to converge — a real property of this carve.
+        result.non_convergent = true;
+        result.non_convergent_iteration = e.iterations;
+        result.non_convergent_residual = e.residual;
+        break;
+      }
       if (!use_solver) warm = c.solution;
-      if (!c.cg.converged)
-        throw std::runtime_error(
-            "simp_optimize: penalized CG solve did not converge");
+      if (!c.cg.converged) {
+        // Some solver paths REPORT non-convergence via cg.converged rather than
+        // throwing; treat it identically to the throw above (same honest end).
+        result.non_convergent = true;
+        result.non_convergent_iteration = c.cg.iterations;
+        result.non_convergent_residual = c.cg.residual;
+        break;
+      }
 
       std::vector<double> x_new;
       if (st.mma_continuation) {
@@ -1873,7 +1894,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // continuation proceeds either way. The loop is `converged` iff its LAST
     // stage was (a cancelled stage never is).
     result.converged = stage_converged;
-    if (result.cancelled || result.infeasible) break;
+    if (result.cancelled || result.infeasible || result.non_convergent) break;
   }
 
   // Report a self-consistent final state: physical_density = filter(design)
@@ -1897,7 +1918,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // value, the same number the final CSV row carries — rather than a fresh
   // measurement of the post-step field. With `infeasible` true and `converged`
   // false no caller can read it as an achievement.
-  if (result.infeasible) {
+  if (result.infeasible || result.non_convergent) {
+    // Handoff 2026-07-27-nonconvergence-rejection — a non_convergent run SKIPS the
+    // final recovery solve for the SAME reason 131 skips it on an infeasible run: it
+    // is the most expensive single solve and the one that would THROW, and there is
+    // nothing to certify — the caller is going to reject this rung. `compliance` is
+    // the last recorded objective; with `converged` false and the flag set, no caller
+    // reads it as an achievement.
     result.compliance =
         result.history.empty() ? 0.0 : result.history.back().compliance;
   } else {
@@ -1914,11 +1941,25 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
            adaptive_traj_cg_tol(options, options.move) >= options.cg_tolerance &&
            "draft quality: certification tolerance must be the tight floor of the "
            "trajectory schedule");
-    const SimpCompliance fc = simp_compliance(
-        grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
-        options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
-        options.solver);
-    result.compliance = fc.compliance;
+    // Handoff 2026-07-27-nonconvergence-rejection — the certification solve runs at
+    // the tight tolerance UNCHANGED (never softened); if IT fails to converge the
+    // design is reported non_convergent, never certified on an unresolved field. The
+    // catch does not loosen the tolerance or retry — it records the failure and lets
+    // the caller reject the rung.
+    try {
+      const SimpCompliance fc = simp_compliance(
+          grid, params, result.physical_density, bcs, loads, options.cg_tolerance,
+          options.cg_max_iterations, nullptr, use_solver ? solver.get() : nullptr,
+          options.solver);
+      result.compliance = fc.compliance;
+    } catch (const SolverNonConvergence& e) {
+      result.non_convergent = true;
+      result.non_convergent_iteration = e.iterations;
+      result.non_convergent_residual = e.residual;
+      result.converged = false;
+      result.compliance =
+          result.history.empty() ? 0.0 : result.history.back().compliance;
+    }
   }
   result.volume_fraction = phys_volfrac(result.physical_density);
   // ACTIVE DOMAIN: FINALIZE-ONLY. The band, the latch and the mean active
@@ -2566,15 +2607,30 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // ACTIVE DOMAIN: trajectory-only, on the ANALYSIS grid (the design box) —
       // the grid the dilution lives on and the one this feature exists for.
       double af = 1.0;
-      const SimpCompliance c = active_domain_solve(
-          active_domain, analysis, params, xphys, bcs, loads, traj_tol,
-          options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
-          use_solver ? solver.get() : nullptr, options.solver,
-          result.iterations + 1, af);
+      SimpCompliance c;
+      try {
+        c = active_domain_solve(
+            active_domain, analysis, params, xphys, bcs, loads, traj_tol,
+            options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
+            use_solver ? solver.get() : nullptr, options.solver,
+            result.iterations + 1, af);
+      } catch (const SolverNonConvergence& e) {
+        // Handoff 2026-07-27-nonconvergence-rejection — a TRAJECTORY solve did not
+        // converge (masked/passive-region overload). End the run WITHOUT throwing, as
+        // the infeasibility fast-fail does; the caller rejects this rung and the ladder
+        // continues. See the unconstrained overload for the full rationale.
+        result.non_convergent = true;
+        result.non_convergent_iteration = e.iterations;
+        result.non_convergent_residual = e.residual;
+        break;
+      }
       if (!use_solver) warm = c.solution;
-      if (!c.cg.converged)
-        throw std::runtime_error(
-            "simp_optimize: penalized CG solve did not converge");
+      if (!c.cg.converged) {
+        result.non_convergent = true;
+        result.non_convergent_iteration = c.cg.iterations;
+        result.non_convergent_residual = c.cg.residual;
+        break;
+      }
 
       std::vector<double> x_new;
       if (st.mma_continuation) {
@@ -2711,7 +2767,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // Continuation proceeds stage by stage; `converged` reports the LAST one
     // (a cancelled stage never is).
     result.converged = stage_converged;
-    if (result.cancelled || result.infeasible) break;
+    if (result.cancelled || result.infeasible || result.non_convergent) break;
   }
 
   // Self-consistent final state (projected at the final stage's beta when
@@ -2726,10 +2782,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     project_active(eff, result.physical_density, mma_beta, eta);
   std::vector<double> xfinal_unpinned = result.physical_density;
   apply_mask_pins(eff, result.physical_density);
-  // Handoff 131 — an INFEASIBLE run skips this final recovery solve; see the
-  // unconstrained overload for why (it is both the most expensive solve of the run
-  // and the one that could throw instead of reporting the honest verdict).
-  if (result.infeasible) {
+  // Handoff 131 / 2026-07-27-nonconvergence-rejection — an INFEASIBLE or
+  // NON_CONVERGENT run skips this final recovery solve; see the unconstrained
+  // overload for why (it is both the most expensive solve of the run and the one
+  // that could throw instead of reporting the honest verdict).
+  if (result.infeasible || result.non_convergent) {
     result.compliance =
         result.history.empty() ? 0.0 : result.history.back().compliance;
   } else {
@@ -2741,11 +2798,23 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
            adaptive_traj_cg_tol(options, options.move) >= options.cg_tolerance &&
            "draft quality: certification tolerance must be the tight floor of the "
            "trajectory schedule");
-    const SimpCompliance fc = simp_compliance(
-        analysis, params, result.physical_density, bcs, loads,
-        options.cg_tolerance, options.cg_max_iterations, nullptr,
-        use_solver ? solver.get() : nullptr, options.solver);
-    result.compliance = fc.compliance;
+    // Handoff 2026-07-27-nonconvergence-rejection — the certification solve stays at
+    // the tight tolerance; if IT does not converge the design is reported
+    // non_convergent (never certified on an unresolved field), not softened or retried.
+    try {
+      const SimpCompliance fc = simp_compliance(
+          analysis, params, result.physical_density, bcs, loads,
+          options.cg_tolerance, options.cg_max_iterations, nullptr,
+          use_solver ? solver.get() : nullptr, options.solver);
+      result.compliance = fc.compliance;
+    } catch (const SolverNonConvergence& e) {
+      result.non_convergent = true;
+      result.non_convergent_iteration = e.iterations;
+      result.non_convergent_residual = e.residual;
+      result.converged = false;
+      result.compliance =
+          result.history.empty() ? 0.0 : result.history.back().compliance;
+    }
   }
   result.volume_fraction = active_volfrac(xfinal_unpinned);
   finalize_active_domain(active_domain, result);  // active domain: finalize-only

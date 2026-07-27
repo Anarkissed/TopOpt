@@ -257,6 +257,24 @@ struct RunInfo {
   double infeasible_flat_tol = 0.0;
   int infeasible_window = 0;
   std::vector<int> rung_infeasible;
+  // Handoff 2026-07-27-nonconvergence-rejection — RUNG-NON-CONVERGENCE echo, the
+  // OUTCOME (no config: non-convergence is intrinsic to the solve, not a tunable
+  // threshold), filled AFTER the run from MinimizePlasticResult with the same
+  // finalize-only discipline as rung_infeasible — so an unfinished run asserts
+  // nothing. One entry per EVALUATED rung, in ladder order:
+  //   rung_non_convergent[i]            1 iff rung i was rejected because a linear
+  //                                     solve did not converge, else 0. All-false is
+  //                                     the positive statement "every rung's solves
+  //                                     converged".
+  //   rung_non_convergent_iteration[i]  the CG iteration the failing solve reached
+  //                                     (0 on a converged rung) — WHICH iteration.
+  //   rung_non_convergent_residual[i]   the relative residual it stalled at (0 on a
+  //                                     converged rung) — HOW FAR it missed.
+  // Together they satisfy the handoff's bar: run_info records which rungs were
+  // rejected for non-convergence, with the iteration and the residual reached.
+  std::vector<int> rung_non_convergent;
+  std::vector<int> rung_non_convergent_iteration;
+  std::vector<double> rung_non_convergent_residual;
   // ACTIVE DOMAIN (active-domain phase 1). `active_domain_band` is the REQUESTED
   // band (config, written up-front): 0 = off, > 0 = the explicit half-width in
   // voxels, < 0 = auto (resolved per rung from the filter radius). The two

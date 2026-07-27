@@ -1,0 +1,60 @@
+43/72 Test #41: design_domain ....................   Passed    1.73 sec
+      Start 42: galerkin_cache
+44/72 Test #42: galerkin_cache ...................   Passed    4.67 sec
+      Start 44: width_aware_knockdown
+45/72 Test #44: width_aware_knockdown ............   Passed    0.50 sec
+      Start 45: designbox_reduction
+46/72 Test #45: designbox_reduction ..............   Passed    2.07 sec
+      Start 46: savings_part_relative
+47/72 Test #46: savings_part_relative ............   Passed    1.41 sec
+      Start 47: ladder_rung_count
+48/72 Test #40: load_retention_connectivity ......   Passed   12.19 sec
+      Start 49: designbox_anchor_pad
+49/72 Test #49: designbox_anchor_pad .............   Passed    4.24 sec
+      Start 50: face_protection
+50/72 Test #47: ladder_rung_count ................   Passed    6.43 sec
+      Start 51: designbox_padding
+51/72 Test #51: designbox_padding ................   Passed    0.72 sec
+      Start 52: coarsen_rule
+52/72 Test #50: face_protection ..................   Passed    6.06 sec
+      Start 53: designbox_grid_report
+53/72 Test #53: designbox_grid_report ............   Passed    0.48 sec
+      Start 54: mma
+54/72 Test #33: gate_v2 ..........................   Passed   64.45 sec
+      Start 55: adaptive_move
+55/72 Test #27: beam_validation ..................   Passed   78.43 sec
+      Start 56: mma_projection_gate
+56/72 Test #56: mma_projection_gate ..............   Passed    1.18 sec
+      Start 57: mma_projection
+57/72 Test #55: adaptive_move ....................   Passed   14.84 sec
+      Start 58: conditional_projection
+58/72 Test #52: coarsen_rule .....................   Passed   55.91 sec
+      Start 61: active_domain
+59/72 Test #61: active_domain ....................   Passed    9.34 sec
+      Start 62: stress
+60/72 Test #57: mma_projection ...................   Passed   45.48 sec
+      Start 63: step_import
+61/72 Test #62: stress ...........................   Passed   21.23 sec
+      Start 64: segment_vs_step
+62/72 Test #63: step_import ......................   Passed    0.32 sec
+      Start 65: face_tag
+63/72 Test #64: segment_vs_step ..................   Passed    0.36 sec
+      Start 66: mask_face
+64/72 Test #65: face_tag .........................   Passed    0.76 sec
+      Start 67: cli_demo
+65/72 Test #66: mask_face ........................   Passed    0.64 sec
+      Start 69: clearance_parity
+66/72 Test #58: conditional_projection ...........   Passed   46.92 sec
+      Start 70: face_protection_parity
+67/72 Test #54: mma ..............................   Passed   92.59 sec
+      Start 71: loadcase_small_face
+68/72 Test #71: loadcase_small_face ..............   Passed    0.49 sec
+      Start 72: mesh_job
+69/72 Test #70: face_protection_parity ...........   Passed    8.88 sec
+70/72 Test #72: mesh_job .........................   Passed   10.91 sec
+71/72 Test #69: clearance_parity .................   Passed   24.74 sec
+72/72 Test #67: cli_demo .........................   Passed  222.12 sec
+
+100% tests passed out of 72
+
+Total Test time (real) = 474.35 sec

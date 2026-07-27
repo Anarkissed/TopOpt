@@ -84,6 +84,18 @@ struct FixedDesignAnalysis {
   // infill_knockdown; accepted = load_path_ok && (margin_effective >= margin_stop).
   double margin_effective = 0.0;
   bool accepted = false;
+  // Handoff 2026-07-27-nonconvergence-rejection — true iff the CERTIFICATION solve
+  // (simp_compliance at the tight cg_tolerance) did NOT converge. When set, every
+  // field above is default/empty (the analysis never ran) and `accepted` is FALSE:
+  // a design whose certification solve the CG cannot resolve is NEVER certified. The
+  // caller (minimize_plastic) rejects that rung with kRungNonConvergentReason rather
+  // than letting the solve's throw destroy the whole run. `non_convergent_iteration`
+  // / `non_convergent_residual` are the failing solve's last CG readings (0 when it
+  // converged). The certification solve is NOT softened or retried — the tolerance
+  // is unchanged; this flag only records that it missed.
+  bool non_convergent = false;
+  int non_convergent_iteration = 0;
+  double non_convergent_residual = 0.0;
 };
 
 // Run one certification analysis of `density` on `grid`.
@@ -110,8 +122,12 @@ struct FixedDesignAnalysis {
 //                         margin, so the gate rejects it however good it looks).
 //   part_solid          — the printed_fraction denominator (grid.solid_count()).
 //
-// Throws whatever simp_compliance throws (bad BC/load index, non-physical params,
-// CG non-convergence) and ReportError from compute_stress_margin.
+// Throws whatever simp_compliance throws for a MALFORMED problem (bad BC/load
+// index, non-physical params) and ReportError from compute_stress_margin. A CG
+// NON-CONVERGENCE (SolverNonConvergence) of the certification solve is NOT thrown:
+// it is caught and reported via FixedDesignAnalysis::non_convergent with accepted
+// forced false (handoff 2026-07-27-nonconvergence-rejection), so a run's
+// certification of one hard-to-solve variant cannot abort the whole run.
 FixedDesignAnalysis analyze_fixed_design(
     const VoxelGrid& grid, const SimpParams& params,
     const std::vector<double>& density, const std::vector<DirichletBC>& bcs,

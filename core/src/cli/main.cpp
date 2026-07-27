@@ -242,6 +242,14 @@ int main(int argc, char** argv) {
                     v.optimization.infeasible_iteration);
         continue;
       }
+      // Handoff 2026-07-27-nonconvergence-rejection — a non-convergent rung also has
+      // NO measured margin (its analysis was skipped): print the reason, not a
+      // fabricated number, and distinctly from the infeasible line above.
+      if (v.non_convergent) {
+        std::printf("  vf %.2f: %s — not certified\n",
+                    v.requested_volume_fraction, topopt::kRungNonConvergentReason);
+        continue;
+      }
       std::printf(
           "  vf %.2f: margin %.3g, %s\n", v.requested_volume_fraction,
           v.report.margin.worst_case,
