@@ -21,6 +21,7 @@
 #endif
 
 #include "topopt/analyze.hpp"
+#include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/loadcase.hpp"
@@ -31,6 +32,7 @@
 #include "topopt/production.hpp"
 #include "topopt/report.hpp"
 #include "topopt/settings.hpp"
+#include "topopt/smooth.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
 #include "topopt/version.hpp"
@@ -826,6 +828,111 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
     return AnalyzeResult{};
   }
   return result;
+}
+
+AnalyzeResult smooth_and_recertify_selfweight(
+    const std::string& model_path, const std::string& input_mesh_path,
+    const std::string& smoothed_out_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, double margin_stop, double strength, bool enforce_min_feature,
+    const BridgeFreezeRegions& freeze, BridgeError& err) {
+  try {
+    bridge_log("smooth+recertify: ENTER strength=" + std::to_string(strength) +
+               " mesh='" + input_mesh_path + "'");
+    // The reference grid the smoother's min-feature constraint voxelizes against —
+    // the SAME model grid analyze_selfweight re-certifies on (min-x mount slab).
+    topopt::TriangleMesh model_mesh = import_any(model_path);
+    topopt::VoxelGrid grid = topopt::voxelize(model_mesh, resolution);
+
+    // Freeze regions: the mount slab (the clamped min-x face, always frozen) plus
+    // every app-supplied bore / pad primitive, resolved to the exact predicate via
+    // PR 190's ManualClearanceGeometry. These survive re-meshing (the smoothed mesh
+    // carries no face ids).
+    std::vector<topopt::ClearanceGeometry> regions;
+    {
+      topopt::ManualClearanceGeometry mount;
+      mount.kind = topopt::ClearanceKind::Face;
+      mount.origin = topopt::Vec3{grid.origin.x,
+                                  grid.origin.y + 0.5 * grid.ny * grid.spacing,
+                                  grid.origin.z + 0.5 * grid.nz * grid.spacing};
+      mount.normal = topopt::Vec3{1.0, 0.0, 0.0};  // into the part
+      mount.half_u_mm = grid.ny * grid.spacing;
+      mount.half_w_mm = grid.nz * grid.spacing;
+      topopt::ClearanceParams mp;
+      mp.kind = topopt::ClearanceKind::Face;
+      mp.slab_depth_mm = grid.spacing;
+      const topopt::ClearanceGeometry mg =
+          topopt::resolve_clearance_manual(mount, mp);
+      if (mg.valid) regions.push_back(mg);
+    }
+    for (std::size_t g = 0; g < freeze.kind.size(); ++g) {
+      topopt::ManualClearanceGeometry mgeo;
+      topopt::ClearanceParams p;  // zero margins: freeze the true bore / pad
+      const bool bolt = freeze.kind[g] == 0;
+      mgeo.kind = p.kind =
+          bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
+      auto tri = [&](const std::vector<double>& v) {
+        return topopt::Vec3{v[3 * g], v[3 * g + 1], v[3 * g + 2]};
+      };
+      if (bolt) {
+        mgeo.axis_point = tri(freeze.axis_point);
+        mgeo.axis_dir = tri(freeze.axis_dir);
+        mgeo.radius_mm = freeze.radius_mm[g];
+        mgeo.half_length_mm = freeze.half_length_mm[g];
+      } else {
+        mgeo.origin = tri(freeze.origin);
+        mgeo.normal = tri(freeze.normal);
+        mgeo.half_u_mm = freeze.half_u_mm[g];
+        mgeo.half_w_mm = freeze.half_w_mm[g];
+        p.slab_depth_mm = grid.spacing;
+      }
+      const topopt::ClearanceGeometry cg =
+          topopt::resolve_clearance_manual(mgeo, p);
+      if (cg.valid) regions.push_back(cg);
+    }
+
+    topopt::TriangleMesh input = import_any(input_mesh_path);
+    topopt::TaubinParams params = topopt::taubin_params_for_strength(strength);
+    topopt::SmoothConstraints c;
+    c.freeze_regions = std::move(regions);
+    c.min_feature_grid = &grid;
+    c.enforce_min_feature = enforce_min_feature;
+    const topopt::SmoothResult sr =
+        topopt::constrained_taubin_smooth(input, params, c);
+    topopt::write_stl_file(smoothed_out_path, sr.mesh);
+
+    // Re-certify the SMOOTHED mesh (single source of truth: same path the plain
+    // analyze uses, so the numbers are the smoothed geometry's).
+    AnalyzeResult result = analyze_selfweight(
+        model_path, smoothed_out_path, material_name, materials_path, rules_path,
+        resolution, margin_stop, err);
+    if (!err.ok) return result;
+
+    const topopt::SmoothStats& s = sr.stats;
+    result.smoothed = true;
+    result.smooth_strength = strength;
+    result.smooth_pairs_requested = s.requested_pairs;
+    result.smooth_pairs_applied = s.applied_pairs;
+    result.frozen_vertices = static_cast<int64_t>(s.frozen_vertices);
+    result.total_vertices = static_cast<int64_t>(s.total_vertices);
+    result.volume_before_mm3 = s.volume_before_mm3;
+    result.volume_after_mm3 = s.volume_after_mm3;
+    result.volume_drift_fraction = s.volume_drift_fraction;
+    result.volume_drift_bound = s.volume_drift_bound;
+    result.min_feature_baseline = s.min_feature_baseline;
+    result.min_feature_limited = s.min_feature_limited;
+    result.smoothed_mesh_path = smoothed_out_path;
+    bridge_log("smooth+recertify: pairs=" + std::to_string(s.applied_pairs) + "/" +
+               std::to_string(s.requested_pairs) + " frozen=" +
+               std::to_string(s.frozen_vertices) + " drift=" +
+               std::to_string(s.volume_drift_fraction));
+    return result;
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    bridge_log(std::string("smooth+recertify: THREW: ") + e.what());
+    return AnalyzeResult{};
+  }
 }
 
 OptimizeResult run_minimize_plastic_loadcase(

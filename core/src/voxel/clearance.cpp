@@ -86,7 +86,37 @@ bool face_plane_extent(const StepModel& model, int face_id, const Vec3& origin,
   return any;
 }
 
+// True iff `p` is inside `geom`, its boundary grown outward by `tol` on every
+// extent. The single inside test rasterize_clearance and the freeze predicate
+// share, so a frozen mesh vertex and a FrozenVoid voxel agree on the geometry.
+// `tol` is the outward band (mm); the caller passes the voxel-centre eps for the
+// rasterizer and a physical band for the freeze predicate.
+bool region_contains(const ClearanceGeometry& geom, const Vec3& p, double tol) {
+  if (!geom.valid) return false;
+  if (geom.kind == ClearanceKind::Bolt) {
+    const Vec3 rel = sub(p, geom.axis_point);
+    const double t = dot(rel, geom.axis_dir);
+    if (t < geom.t_lo - tol || t > geom.t_hi + tol) return false;
+    const Vec3 radial = Vec3{rel.x - t * geom.axis_dir.x,
+                             rel.y - t * geom.axis_dir.y,
+                             rel.z - t * geom.axis_dir.z};
+    return norm(radial) <= geom.radius + tol;
+  }
+  // Face slab.
+  const Vec3 rel = sub(p, geom.origin);
+  const double s = dot(rel, geom.normal);
+  if (s < -tol || s > geom.depth + tol) return false;
+  const double du = dot(rel, geom.u), dw = dot(rel, geom.w);
+  return du >= geom.u_lo - tol && du <= geom.u_hi + tol &&
+         dw >= geom.w_lo - tol && dw <= geom.w_hi + tol;
+}
+
 }  // namespace
+
+bool point_in_clearance_region(const ClearanceGeometry& geom, const Vec3& p,
+                               double tol) {
+  return region_contains(geom, p, tol);
+}
 
 // ── AUTO path: resolve the predicate from a B-rep / pseudo face. ────────────
 // This is the geometry-derivation block that used to live inline in
@@ -191,27 +221,7 @@ ClearanceRasterResult rasterize_clearance(const VoxelGrid& solved_grid,
     for (int j = 0; j < solved_grid.ny; ++j)
       for (int i = 0; i < solved_grid.nx; ++i) {
         const Vec3 p = solved_grid.voxel_center(i, j, k);
-        bool inside = false;
-        if (geom.kind == ClearanceKind::Bolt) {
-          const Vec3 rel = sub(p, geom.axis_point);
-          const double t = dot(rel, geom.axis_dir);
-          if (t >= geom.t_lo - eps && t <= geom.t_hi + eps) {
-            const Vec3 radial = Vec3{rel.x - t * geom.axis_dir.x,
-                                     rel.y - t * geom.axis_dir.y,
-                                     rel.z - t * geom.axis_dir.z};
-            if (norm(radial) <= geom.radius + eps) inside = true;
-          }
-        } else {  // Face slab
-          const Vec3 rel = sub(p, geom.origin);
-          const double s = dot(rel, geom.normal);
-          if (s >= -eps && s <= geom.depth + eps) {
-            const double du = dot(rel, geom.u), dw = dot(rel, geom.w);
-            if (du >= geom.u_lo - eps && du <= geom.u_hi + eps &&
-                dw >= geom.w_lo - eps && dw <= geom.w_hi + eps)
-              inside = true;
-          }
-        }
-        if (!inside) continue;
+        if (!region_contains(geom, p, eps)) continue;
         ++result.region_voxels;
 
         // PRECEDENCE: never void PART material. A solved voxel mapping to a
