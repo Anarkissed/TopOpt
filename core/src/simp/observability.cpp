@@ -491,6 +491,9 @@ std::string run_info_json(const RunInfo& info) {
   num("min_feature_mm", fmt(info.min_feature_mm));
   num("margin_stop", fmt(info.margin_stop));
   num("infill_percent", fmt(info.infill_percent));
+  num("width_aware_knockdown", bool_json(info.width_aware_knockdown));
+  num("wall_loops", std::to_string(info.wall_loops));
+  num("wall_line_width_mm", fmt(info.wall_line_width_mm));
   num("has_design_box", bool_json(info.has_design_box));
 
   std::string ladder = "[";

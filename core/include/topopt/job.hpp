@@ -145,6 +145,14 @@ struct JobLoadCase {
   Vec3 build_dir{0.0, 0.0, 1.0};            // interlayer-margin orientation
   double infill_percent = -1.0;             // < 0 = no override
   bool minimize_plastic = true;             // true = reduction ladder + pad
+  // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
+  // metadata crossing the bridge for the first time: the perimeter loop count and
+  // its line width, so the accept gate can size the solid wall ring around each
+  // member. Read only when the width-aware gate is armed (a separate maintainer
+  // decision); 0 loops / negative line width → no override → no wall rescue. See
+  // MinimizePlasticOptions::{wall_loops, wall_line_width_mm}.
+  int wall_loops = 0;                        // 0 = none (no wall rescue)
+  double wall_line_width_mm = -1.0;          // < 0 = use the core default (0.45)
 };
 
 // An axis-aligned box in model space (mm), min <= max componentwise — a design

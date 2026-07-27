@@ -176,6 +176,9 @@ RunInfo build_run_info(const JobDescription& job,
   info.min_feature_mm = options.min_feature_mm;
   info.margin_stop = options.margin_stop;
   info.infill_percent = options.infill_percent;
+  info.width_aware_knockdown = options.width_aware_knockdown;
+  info.wall_loops = options.wall_loops;
+  info.wall_line_width_mm = options.wall_line_width_mm;
   info.has_design_box = options.design_box.has_value();
   info.ladder = options.volume_fraction_ladder;
   info.created_wall_ms = wall_clock_ms();
@@ -443,13 +446,21 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       self_weight_loads(design_grid, material.density_g_cm3, options.gravity,
                         options.gravity_direction);
   const bool load_path_ok = load_path_connected(design_grid, density, 0.5);
-  const double infill_knockdown = infill_margin_knockdown(options.infill_percent);
+  // The gate knockdown posture (handoff 2026-07-26-width-aware-knockdown), built
+  // from the SAME options the originating run used so a standalone re-analysis gates
+  // on the identical rule. width_aware defaults false → the scalar f^1.5 gate.
+  topopt::KnockdownSpec knockdown;
+  knockdown.infill_knockdown = infill_margin_knockdown(options.infill_percent);
+  knockdown.width_aware = options.width_aware_knockdown;
+  knockdown.infill_percent = options.infill_percent;
+  knockdown.wall_thickness_mm =
+      static_cast<double>(options.wall_loops) * options.wall_line_width_mm;
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
   result.analysis = analyze_fixed_design(
       design_grid, params, density, bcs, loads, material, build_dir,
       options.simp.cg_tolerance, options.simp.cg_max_iterations,
-      options.simp.solver, options.margin_stop, infill_knockdown, load_path_ok,
+      options.simp.solver, options.margin_stop, knockdown, load_path_ok,
       part_solid);
   const FixedDesignAnalysis& a = result.analysis;
   result.voxel_mass_grams = a.mass_grams;
@@ -721,6 +732,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     lc.minimize_plastic = job.loads.minimize_plastic;
     lc.build_dir = job.loads.build_dir;
     lc.infill_percent = job.loads.infill_percent;
+    lc.wall_loops = job.loads.wall_loops;
+    lc.wall_line_width_mm = job.loads.wall_line_width_mm;
     lc.has_design_box = job.has_design_box;
     if (job.has_design_box) {
       lc.design_box = to_design_box(job.design_box);

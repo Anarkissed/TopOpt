@@ -24,6 +24,17 @@ constexpr double kIso = 0.5;
 constexpr double kKnockdownExponent = 1.5;
 constexpr double kKnockdownFloor = 1e-3;
 
+// Width-aware gate (handoff 2026-07-26-width-aware-knockdown): the local-thickness
+// distance transform sweeps ball radii up to this many voxels. It BOUNDS the cost
+// (one seeded EDT per level → O(cap · voxel_count), bar K6) and it sets the
+// "thick" cutoff: a voxel still solid under the radius-`cap` opening is at least
+// 2·cap·spacing mm thick, gets +inf thickness, and therefore NO wall rescue — the
+// conservative treatment of envelope-scale solid regions (bar K4). At production
+// spacing (1.5–3 mm on a 200 mm part) 2·32·spacing ≈ 96–192 mm comfortably spans
+// 191's ~59–98 mm crossover; at finer spacing the cutoff drops, which only makes
+// the thick-region gate MORE conservative.
+constexpr int kWidthAwareThicknessCapVoxels = 32;
+
 // Gather one element's 24 nodal displacements from the global solution, in the
 // hex8_stiffness DOF order (node-major interleaved). Same helper the recovery
 // block used; moved here with the stress loop.
@@ -46,12 +57,35 @@ double infill_margin_knockdown(double infill_percent) {
   return std::max(std::pow(f, kKnockdownExponent), kKnockdownFloor);
 }
 
+double wall_area_fraction(double member_width_mm, double wall_thickness_mm) {
+  const double W = member_width_mm;
+  // An unbounded/degenerate width (the "thicker than we measured" sentinel, or a
+  // non-member) gets NO wall rescue — the conservative choice (bar K4/K5).
+  if (!std::isfinite(W) || W <= 0.0) return 0.0;
+  double t = wall_thickness_mm;
+  if (!(t > 0.0)) return 0.0;                 // no walls → no rescue
+  if (t > 0.5 * W) t = 0.5 * W;               // a ring can't exceed the half-width:
+                                              // a member thinner than 2t is all wall
+  const double f = 4.0 * t * (W - t) / (W * W);
+  return f < 0.0 ? 0.0 : (f > 1.0 ? 1.0 : f);
+}
+
+double width_aware_knockdown(double infill_percent, double member_width_mm,
+                             double wall_thickness_mm) {
+  // The infill core term is the SAME Gibson-Ashby curve the scalar gate uses — ONE
+  // definition of f^1.5 (bar K7). Solid infill → 1.0, so the composite is 1.0 too.
+  const double core = infill_margin_knockdown(infill_percent);
+  const double fw = wall_area_fraction(member_width_mm, wall_thickness_mm);
+  const double k = fw + (1.0 - fw) * core;    // Voigt: walls in parallel with core
+  return k > 1.0 ? 1.0 : k;                    // both terms in (0,1] → k in (0,1]
+}
+
 FixedDesignAnalysis analyze_fixed_design(
     const VoxelGrid& grid, const SimpParams& params,
     const std::vector<double>& density, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, const Material& material,
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
-    SolverKind solver_kind, double margin_stop, double infill_knockdown,
+    SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
     bool load_path_ok, double part_solid) {
   FixedDesignAnalysis out;
 
@@ -75,6 +109,24 @@ FixedDesignAnalysis analyze_fixed_design(
   std::vector<char> node_printed(static_cast<std::size_t>(node_count), 0);
   std::size_t printed_voxels = 0;
   double max_von_mises = 0.0;
+
+  // --- Width-aware knockdown, part 1: the local member width (handoff
+  // 2026-07-26-width-aware-knockdown). When armed, measure the printed field's local
+  // thickness ONCE (bar K6) so the gate can credit the slicer's solid wall loops per
+  // element. The OFF path never enters here and stays byte-identical. `max_von_mises_eff`
+  // is the peak of the SOLID-EQUIVALENT von Mises vm/k(W) — dividing each voxel's
+  // stress by its own width-aware knockdown inflates it to the stress a solid part
+  // would show, so a thin walled rib (k→1, little inflation) and a thick region
+  // (k→f^1.5, large inflation) compete for the worst effective point on the SAME
+  // scale. This is what keeps caution on thick sections (bar K4): a thick region
+  // whose real stress is only a fraction of the rib peak can still govern once
+  // inflated by its small knockdown.
+  std::vector<double> member_width_mm;
+  double max_von_mises_eff = 0.0;
+  if (knockdown.width_aware)
+    member_width_mm = local_member_thickness_mm(grid, density, kIso,
+                                                kWidthAwareThicknessCapVoxels);
+
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
@@ -88,6 +140,15 @@ FixedDesignAnalysis analyze_fixed_design(
                                           grid.spacing, ue);
         stress[grid.index(i, j, k)] = st.sigma;
         out.von_mises_field[grid.index(i, j, k)] = st.von_mises;
+        if (knockdown.width_aware) {
+          // k_v in (0, 1] (wall_area_fraction in [0,1], core knockdown >= floor),
+          // so vm/k_v never divides by zero and only ever inflates the stress.
+          const double k_v = width_aware_knockdown(
+              knockdown.infill_percent, member_width_mm[grid.index(i, j, k)],
+              knockdown.wall_thickness_mm);
+          const double vm_eff = st.von_mises / k_v;
+          if (vm_eff > max_von_mises_eff) max_von_mises_eff = vm_eff;
+        }
         const std::size_t base = 6 * grid.index(i, j, k);
         for (int c = 0; c < 6; ++c)
           out.stress_tensor_field[base + static_cast<std::size_t>(c)] =
@@ -135,10 +196,33 @@ FixedDesignAnalysis analyze_fixed_design(
 
   // Gate on the INFILL-ADJUSTED worst-case margin (the stored/displayed margin
   // stays the SOLID margin; the knockdown scales ONLY what the acceptance test
-  // compares). infill_knockdown == 1.0 for solid/unset infill, so this is
-  // bit-for-bit the pre-M7.infill gate. THE CONNECTIVITY BELT ACTS HERE: a severed
-  // design is rejected however good its (meaningless, near-zero-stress) margin.
-  const double margin_effective = margin.worst_case * infill_knockdown;
+  // compares). THE CONNECTIVITY BELT ACTS HERE: a severed design is rejected however
+  // good its (meaningless, near-zero-stress) margin.
+  double margin_effective;
+  if (knockdown.width_aware) {
+    // --- Width-aware posture (handoff 2026-07-26-width-aware-knockdown) ----------
+    // In-plane: the worst SOLID-EQUIVALENT von Mises max(vm/k(W)) over the printed
+    // field already folds the per-voxel wall rescue in, so the in-plane effective
+    // margin is yield / max_von_mises_eff. Interlayer: 191/192 measured axial and
+    // bending only — NOT z-bonding — so the interlayer term keeps the UNMODIFIED
+    // f^1.5 (infill_knockdown); passing max_interlayer / infill_knockdown through
+    // compute_stress_margin reproduces margin.interlayer * infill_knockdown exactly,
+    // so the gate is never made LESS conservative than today on interlayer (bar K4).
+    // With no walls (wall_thickness_mm == 0) k(W) == f^1.5 for every voxel, so this
+    // collapses to margin.worst_case * infill_knockdown (the scalar path) to within
+    // floating point — the armed-but-unconfigured run matches the default posture.
+    const double il_scaled = knockdown.infill_knockdown > 0.0
+                                 ? max_interlayer / knockdown.infill_knockdown
+                                 : max_interlayer;
+    const StressMargin me =
+        compute_stress_margin(material.yield_strength_mpa, material.z_knockdown,
+                              max_von_mises_eff, il_scaled);
+    margin_effective = me.worst_case;
+  } else {
+    // Default posture: the pure scalar f^1.5 gate, byte-for-byte the pre-width gate
+    // (infill_knockdown == 1.0 for solid/unset infill → the pre-M7.infill gate).
+    margin_effective = margin.worst_case * knockdown.infill_knockdown;
+  }
   const bool margin_ok = margin_effective >= margin_stop;
 
   out.printed_voxels = printed_voxels;

@@ -267,9 +267,23 @@ public enum FlexAnimation {
 /// load the user applied). Nothing here solves, meshes, or calls the optimizer.
 public enum FailureLoad {
     /// Gibson-Ashby knockdown exponent — MUST match the core's
-    /// `minimize_plastic.cpp infill_margin_knockdown()` (`kKnockdownExponent`), so
-    /// the infill-adjusted failure load here AGREES with the ladder's infill-aware
-    /// acceptance gate (M7.infill-margin). Do NOT invent a different curve.
+    /// `analyze.cpp infill_margin_knockdown()` (`kKnockdownExponent`), so the
+    /// infill-adjusted failure load here AGREES with the core gate's SHIPPED scalar
+    /// knockdown (M7.infill-margin). Do NOT invent a different curve.
+    ///
+    /// SINGLE SOURCE, and its boundary (handoff 2026-07-26-width-aware-knockdown, bar
+    /// K7). This mirror reproduces exactly ONE core law — `infill_margin_knockdown`,
+    /// the pure-`f^1.5` scalar that is the shipped accept-gate knockdown and stays a
+    /// pure function of infill percent. The core ALSO has a WIDTH-AWARE composite
+    /// (`width_aware_knockdown`) that credits the slicer's wall loops per member on a
+    /// distance-transform thickness of the density field. That is deliberately NOT
+    /// mirrored here: it depends on a per-element member width the app does not have
+    /// (only core measures it, at the gate), so the app must CONSUME core's computed
+    /// `margin_effective` / failure fields, never recompute the composite. Two copies
+    /// of a width-aware law is exactly the drift K7 forbids — so there is only one,
+    /// in core. If/when the maintainer arms the width-aware gate in production, this
+    /// f^1.5 failure-load display becomes a (conservative) lower-bound estimate for a
+    /// walled part; the accept verdict the user sees still comes from core.
     public static let knockdownExponent: Double = 1.5
     /// The core's `kKnockdownFloor`: a degenerate (≤ 0%) infill never yields a
     /// non-positive factor, so the knockdown stays in (0, 1].
@@ -278,9 +292,9 @@ public enum FailureLoad {
     /// The multiplicative infill knockdown on strength (and therefore on the failure
     /// LOAD, which scales with strength): `f^1.5` with `f = infill% / 100`, pinned to
     /// EXACTLY 1.0 at ≥ 100% (solid) so a solid/unset project shows no adjustment.
-    /// Byte-for-byte the core `infill_margin_knockdown` (which knocks down the
-    /// acceptance MARGIN); strength ∝ margin·load⁻¹, so the same factor applies to
-    /// the failure load. See `minimize_plastic.cpp` (M7.infill-margin).
+    /// Byte-for-byte the core `infill_margin_knockdown` (the shipped scalar gate);
+    /// strength ∝ margin·load⁻¹, so the same factor applies to the failure load. See
+    /// `analyze.cpp` (M7.infill-margin) and the width-aware boundary noted above.
     public static func infillKnockdown(percent: Double) -> Double {
         let f = percent / 100.0
         if f >= 1.0 { return 1.0 }

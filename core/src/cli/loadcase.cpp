@@ -311,6 +311,14 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // leaves the core default (100 = solid, knockdown 1.0) untouched.
   if (lc.infill_percent >= 0.0) opts.infill_percent = lc.infill_percent;
 
+  // Width-aware knockdown slicer metadata (handoff 2026-07-26-width-aware-knockdown):
+  // forward the wall geometry so the accept gate can size the solid wall ring when
+  // armed. wall_loops always carries (0 = none); a negative line width leaves the
+  // core default. The width-aware gate itself is armed by configure_production_options
+  // (kProductionWidthAwareKnockdown), not here — this only supplies its inputs.
+  opts.wall_loops = lc.wall_loops;
+  if (lc.wall_line_width_mm > 0.0) opts.wall_line_width_mm = lc.wall_line_width_mm;
+
   // The grid the run will actually solve on (the expanded domain when a design
   // box is set), computed WITHOUT running the solve — the SAME expand_design_domain
   // the driver runs, so the two never disagree. Needed up front to index a

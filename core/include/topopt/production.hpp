@@ -148,6 +148,16 @@ int production_krylov_recycle_dim();
 // production.cpp for the TRIPWIRE and the measured justification.
 int production_active_domain_band();
 
+// Handoff 2026-07-26-width-aware-knockdown — whether configure_production_options
+// arms the WIDTH-AWARE accept-gate knockdown. false = the SHIPPED default (the pure
+// scalar f^1.5 gate, byte-for-byte the pre-width gate); true = the SHELL+CORE
+// composite sized per member on a distance-transform thickness. Exposed so the
+// parity test asserts the echo against this named constant, and run_info can report
+// the posture. The library default (MinimizePlasticOptions::width_aware_knockdown)
+// matches it (false), so the reference world is byte-identical (THE ONE RULE). See
+// production.cpp for the TRIPWIRE and the measured justification.
+bool production_width_aware_knockdown();
+
 // The canonical recommendation-driven volume-fraction ladder for production runs
 // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic
 // walks the margin-SAFE prefix and stops at the first rung below margin_stop, so
