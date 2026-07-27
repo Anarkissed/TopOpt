@@ -1,0 +1,34 @@
+KNOCKDOWN MEMBER PROBE — member-scale + bending vs f^1.5 gate
+  E_solid=3500 MPa  nu=0.33  strain=1e-03  cell L=5.0 mm
+
+===== SELF-CHECK A (axial): solid block must recover E_solid =====
+  axis 0: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+  axis 1: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+  axis 2: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+
+===== SELF-CHECK B (bending): solid slender beam, vpc=12 =====
+  E_bend reported vs E_solid=3500; composite knockdown is normalized by the MATCHED solid E_bend below, so this bias cancels in the ratio.
+  Kxy    Kz     Wx_mm      E_bend     ratio    cg    
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/knockdown-width-envelope-member-66a955/evidence/2026-07-26-knockdown-member-scale/Bself_bending.csv]
+  1      2      5.0        3514.0499  1.00401  11    
+  1      4      5.0        3514.0499  1.00401  11    
+  1      6      5.0        3514.0499  1.00401  11    
+  2      4      10.0       3503.5132  1.00100  13    
+  2      6      10.0       3503.5132  1.00100  13    
+
+===== BEND-vs-AXIAL: prismatic wall+core MEMBER (no caps), beam_len=6 cells (30 mm), vpc=12 (h=0.417 mm) =====
+  (bending stiffness is length-independent for a solid -- self-check B; fixed length bounds cost + averages the core)
+  r_axial, r_bend = stiffness relative to a MATCHED SOLID beam (same grid/BC), so discretization cancels.
+  gate error = f^1.5 / r (>1 NON-CONS, <1 CONS). Bending weights the outer walls by distance^2 -> expect MORE conservative.
+  K    W_mm   loops  infill  phi_wall r_axial   asm/ax    r_bend    asm/bnd   mgn@1.5ax mgn@1.5bnd
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/knockdown-width-envelope-member-66a955/evidence/2026-07-26-knockdown-member-scale/BendAxial.csv]
+  [K=2 matched solid: E_axial=3500.00  E_bend=3503.51 MPa]
+  2    10     0      0.15    0.0000   0.06408   0.907     0.05433   1.069     1.655     1.403    
+  2    10     3      0.15    0.4375   0.48769   0.119     0.71396   0.081     12.592    18.434   
+  2    10     5      0.15    0.6597   0.69051   0.084     0.89470   0.065     17.829    23.101   
+  2    10     0      0.30    0.0000   0.08144   2.018     0.07003   2.346     0.743     0.639    
+  2    10     3      0.30    0.4375   0.50064   0.328     0.72170   0.228     4.570     6.588    
+  2    10     5      0.30    0.6597   0.69681   0.236     0.89653   0.183     6.361     8.184    
+  2    10     0      0.60    0.0000   0.34715   1.339     0.29611   1.570     1.120     0.956    
+  2    10     3      0.60    0.4375   0.66491   0.699     0.81240   0.572     2.146     2.622    
+  2    10     5      0.60    0.6597   0.80401   0.578     0.93441   0.497     2.595     3.016    

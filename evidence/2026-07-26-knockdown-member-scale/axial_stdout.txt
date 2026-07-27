@@ -1,0 +1,43 @@
+KNOCKDOWN MEMBER PROBE — member-scale + bending vs f^1.5 gate
+  E_solid=3500 MPa  nu=0.33  strain=1e-03  cell L=5.0 mm
+
+===== SELF-CHECK A (axial): solid block must recover E_solid =====
+  axis 0: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+  axis 1: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+  axis 2: E_app=3500.0000 MPa  E_solid=3500.0  ratio=1.000000  cg=11
+
+===== SELF-CHECK B (bending): solid slender beam, vpc=12 =====
+  E_bend reported vs E_solid=3500; composite knockdown is normalized by the MATCHED solid E_bend below, so this bias cancels in the ratio.
+  Kxy    Kz     Wx_mm      E_bend     ratio    cg    
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/knockdown-width-envelope-member-66a955/evidence/2026-07-26-knockdown-member-scale/Bself_bending.csv]
+  1      2      5.0        3514.0499  1.00401  11    
+  1      4      5.0        3514.0499  1.00401  11    
+  1      6      5.0        3514.0499  1.00401  11    
+  2      4      10.0       3503.5132  1.00100  13    
+  2      6      10.0       3503.5132  1.00100  13    
+
+===== M-AXIAL: wall+core MEMBER, DIRECT resolution, TENSION, vpc=16 (h=0.312 mm) =====
+  walls=loops*0.45mm on x/y perimeter (full-height columns), caps=5*0.20mm z-shells; load axis z
+  asm/meas = f^1.5 / E_meas (gate error, SIGN); margin@1.5 = 1.5*E_meas/f^1.5 (true margin of a part the gate passes at 1.5)
+  K    W_mm   loops  infill  phi_wall E_meas/Es  f^1.5    asm/meas  sign     margin@1.5
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/knockdown-width-envelope-member-66a955/evidence/2026-07-26-knockdown-member-scale/M_axial.csv]
+  1    5      0      0.15    0.0000   0.08047    0.05809  0.722     CONS     2.078     
+  1    5      3      0.15    0.7500   0.80103    0.05809  0.073     CONS     20.683    
+  1    5      5      0.15    0.9844   0.99004    0.05809  0.059     CONS     25.563    
+  1    5      0      0.30    0.0000   0.14030    0.16432  1.171     NON-CONS 1.281     
+  1    5      3      0.30    0.7500   0.81299    0.16432  0.202     CONS     7.422     
+  1    5      5      0.30    0.9844   0.99004    0.16432  0.166     CONS     9.038     
+  1    5      0      0.60    0.0000   0.42597    0.46476  1.091     NON-CONS 1.375     
+  1    5      3      0.60    0.7500   0.88498    0.46476  0.525     CONS     2.856     
+  1    5      5      0.60    0.9844   0.99698    0.46476  0.466     CONS     3.218     
+  2    10     0      0.15    0.0000   0.06220    0.05809  0.934     CONS     1.606     
+  2    10     3      0.15    0.4375   0.49411    0.05809  0.118     CONS     12.758    
+  2    10     5      0.15    0.6836   0.71821    0.05809  0.081     CONS     18.544    
+  2    10     0      0.30    0.0000   0.10849    0.16432  1.515     NON-CONS 0.990     
+  2    10     3      0.30    0.4375   0.52100    0.16432  0.315     CONS     4.756     
+  2    10     5      0.30    0.6836   0.73210    0.16432  0.224     CONS     6.683     
+  2    10     0      0.60    0.0000   0.37160    0.46476  1.251     NON-CONS 1.199     
+  2    10     3      0.60    0.4375   0.67906    0.46476  0.684     CONS     2.192     
+  2    10     5      0.60    0.6836   0.82249    0.46476  0.565     CONS     2.655     
+  3    15     0      0.15    0.0000   0.06013    0.05809  0.966     CONS     1.553     
+  3    15     3      0.15    0.3056   0.36220    0.05809  0.160     CONS     9.352     
