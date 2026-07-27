@@ -1,0 +1,7 @@
+device mesh: 4344 verts, 8700 triangles; frozen region = 228 verts
+  strength 0.10: frozen_changed=0 (MUST be 0)  free_moved=4114
+  strength 0.25: frozen_changed=0 (MUST be 0)  free_moved=4116
+  strength 0.50: frozen_changed=0 (MUST be 0)  free_moved=4116
+  strength 0.75: frozen_changed=0 (MUST be 0)  free_moved=4116
+  strength 1.00: frozen_changed=0 (MUST be 0)  free_moved=4116
+S1 DEVICE-REAL PASS: every frozen vertex bit-identical at every strength
