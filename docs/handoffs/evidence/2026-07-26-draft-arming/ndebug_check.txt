@@ -1,0 +1,18 @@
+A2 — the -DNDEBUG reality (why the C++ asserts are not the shipped enforcement).
+
+The project Release build compiles with -DNDEBUG:
+  build/CMakeCache.txt:  CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+  build/CMakeFiles/topopt.dir/flags.make:  CXX_FLAGS = -O3 -DNDEBUG -std=c++17 -arch arm64
+
+Empirical confirmation that -DNDEBUG makes assert() a no-op (assert(1==2) below):
+  $ c++ -O3 -DNDEBUG -std=c++17 assert_test.cpp && ./a.out
+    ASSERTS_DISABLED (NDEBUG active)          <- did NOT abort
+  $ c++ -O2         -std=c++17 assert_test.cpp && ./a.out
+    Assertion failed: (1==2 ...), function main   <- aborted; asserts live
+
+Therefore the source guards at simp.cpp:1798 / 2596 and minimize_plastic.cpp:747 / 785 /
+1014 are compiled OUT of the shipped Release library and cannot be the shipped
+enforcement. The gate-never-softens invariant is enforced instead by
+test_production_parity's CHECK-based assertions (NDEBUG-independent), echoed against the
+tight cg_tolerance and the adaptive_traj_cg_tol schedule floor. The source asserts remain
+and are live in any assert-enabled build (see asserts_enabled.log).

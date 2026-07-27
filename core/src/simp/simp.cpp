@@ -958,27 +958,6 @@ bool observe_infeasible(const SimpOptions& options,
                          options.infeasible_window);
 }
 
-// Adaptive early CG tolerance (handoff 128; see SimpOptions::cg_tolerance_loose).
-// Returns the tolerance the INTERIOR / trajectory penalized solve should use this
-// iteration, given the design's max|Δρ| from the PREVIOUS iteration (a
-// deterministic function of the recorded history — no wall clock, no randomness).
-// Disabled (loose <= tight) => always the tight cg_tolerance, so the default path
-// is byte-identical. Enabled => geometric interpolation between loose (design
-// moving at/over the move limit) and tight (design settled), so a fast-moving
-// early design gets a cheap approximate solve and a settling design tightens back
-// toward the certified tolerance. The accept/final solve never calls this.
-double adaptive_traj_cg_tol(const SimpOptions& options, double prev_change) {
-  const double tight = options.cg_tolerance;
-  const double loose = options.cg_tolerance_loose;
-  if (!(loose > tight)) return tight;  // disabled or degenerate -> always tight
-  const double ref = options.move > 0.0 ? options.move : 0.2;
-  double frac = prev_change / ref;     // 1 at/above the move limit, 0 when still
-  if (frac < 0.0) frac = 0.0;
-  if (frac > 1.0) frac = 1.0;
-  // tight^(1-frac) * loose^frac, i.e. log-linear between the two tolerances.
-  return tight * std::pow(loose / tight, frac);
-}
-
 // ---------------------------------------------------------------------------
 // MMA updater (ROADMAP M7.mma.1), Svanberg, "The method of moving asymptotes -
 // a new method for structural optimization", Int. J. Numer. Methods Eng. 24
@@ -1560,6 +1539,32 @@ void finalize_active_domain(const ActiveDomainRun& ad, SimpOptimizeResult& r) {
 }
 
 }  // namespace
+
+// Adaptive early CG tolerance (handoff 128; see SimpOptions::cg_tolerance_loose).
+// Returns the tolerance the INTERIOR / trajectory penalized solve should use this
+// iteration, given the design's max|Δρ| from the PREVIOUS iteration (a
+// deterministic function of the recorded history — no wall clock, no randomness).
+// Disabled (loose <= tight) => always the tight cg_tolerance, so the default path
+// is byte-identical. Enabled => geometric interpolation between loose (design
+// moving at/over the move limit) and tight (design settled), so a fast-moving
+// early design gets a cheap approximate solve and a settling design tightens back
+// toward the certified tolerance. The accept/final solve never calls this.
+//
+// Declared in simp.hpp (handoff 2026-07-26-draft-arming) with library-internal
+// linkage — was file-local — so the production parity test can enforce the "gate
+// never softens" invariant NDEBUG-independently. Pure and deterministic; giving it
+// external linkage changes no behaviour and no call site.
+double adaptive_traj_cg_tol(const SimpOptions& options, double prev_change) {
+  const double tight = options.cg_tolerance;
+  const double loose = options.cg_tolerance_loose;
+  if (!(loose > tight)) return tight;  // disabled or degenerate -> always tight
+  const double ref = options.move > 0.0 ? options.move : 0.2;
+  double frac = prev_change / ref;     // 1 at/above the move limit, 0 when still
+  if (frac < 0.0) frac = 0.0;
+  if (frac > 1.0) frac = 1.0;
+  // tight^(1-frac) * loose^frac, i.e. log-linear between the two tolerances.
+  return tight * std::pow(loose / tight, frac);
+}
 
 SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params,
                                  const std::vector<DirichletBC>& bcs,

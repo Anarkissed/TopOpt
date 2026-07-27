@@ -1,0 +1,39 @@
+===== A5 THREE-WAY INTERACTION FIXTURE (stagnation) =====
+  part 8x3x8 (84 solid) -> grid 16x8x16 (1536 elements), dilution=18.3x, spacing=2.00 mm
+  production recycle_dim k=16, AD band=-1 (AUTO), draft loose_tol=1e-03, matfree threads=6
+  single dilute rung (vf 0.50), natural plateau termination, safety cap 200 iters
+
+===== FOUR POSTURES (CG + outer iterations) =====
+  [none            ] 4.1 s  CG=4878  outer=60  Jacobi-fallback=0/60
+  [rec             ] 3.7 s  CG=4878  outer=60  Jacobi-fallback=0/60
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+  [rec+AD          ] 1.9 s  CG=4062  outer=52  Jacobi-fallback=0/52
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      AD: band k=3  f_bar=0.5798  latched=0@iter0  escapes=0  reason=""
+  [rec+AD+draft    ] 1.7 s  CG=3232  outer=52  Jacobi-fallback=0/52
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      AD: band k=3  f_bar=0.5798  latched=0@iter0  escapes=0  reason=""
+      draft: loose_tol=1e-03  compliance-gap=0.000020 (bar 0.02 = the retired Phase-1 fallback)  tail_k=12  escalated=0
+
+===== DOES ANY FEATURE SILENTLY DEGRADE ANOTHER? =====
+  [recycling exact] P1(rec) design == P0(none) bit-for-bit: YES (recycling is a pure preconditioner, 133)
+  [production deterministic] rec+AD+draft twice bit-identical (design+compliance+CG): YES
+  [recycling survives draft] with draft ON: recycle max_dim=0, rc_frac=0.000 (rec+AD off-draft rc_frac=0.000)
+  [AD latch under draft] rec+AD(draft off): latched=0@0 escapes=0 reason=""
+                         rec+AD+draft     : latched=0@0 escapes=0 reason=""
+  [escalation inert] draft compliance-gap at loose 1e-3 = 0.000020 (retired Phase-1 fallback bar 0.02): BELOW bar -> no escalation; design trigger armed=NO
+
+===== CROSS-POSTURE DESIGN DELTAS (the stack changes the trajectory, the certificate stays exact) =====
+  rec    vs none    : mean|drho|=0.000e+00 max=0.000e+00  (expect 0 — exact)
+  rec+AD vs rec     : mean|drho|=1.108e-03 max=1.553e-01  (AD is an approximation)
+  +draft vs rec+AD  : mean|drho|=1.978e-08 max=2.405e-06  (draft loosens the trajectory; the FINAL solve is always exact)
+
+===== CG-ITERATION LADDER ACROSS THE STACK =====
+  none          CG=4878  outer=60
+  rec           CG=4878  outer=60  (1.000x vs none)
+  rec+AD        CG=4062  outer=52  (0.833x vs none)
+  rec+AD+draft  CG=3232  outer=52  (0.663x vs none)
+
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/draft-quality-production-arm-3de27b/docs/handoffs/evidence/2026-07-26-draft-arming/interaction.csv
+
+===== A5 VERDICT: the three features COEXIST (recycling exact, production deterministic; no pair silently degrades another) =====
