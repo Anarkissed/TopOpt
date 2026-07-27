@@ -1,0 +1,12 @@
+Question (d): is AD redundant once draft is armed? big stagnation 73728, recycling ON all, capped 12 iters
+
+ posture        |    CG | Jacobi | AD latch
+ rec            | 15349 |  2/12  | -
+ rec+AD         | 19329 |  2/12  | latched=1@3 esc=1008
+ rec+draft      |  1210 |  0/12  | -
+ rec+AD+draft   |   947 |  0/12  | latched=1@3 esc=1008
+
+ READING:
+  AD effect, draft OFF: rec+AD/rec       = 1.259x  (+3980 CG)
+  AD effect, draft ON : rec+AD+draft/rec+draft = 0.783x  (-263 CG)
+  draft effect (AD off): rec+draft/rec    = 0.079x

@@ -1,0 +1,5 @@
+L-grid full ladder, DRAFT ON (production stack): does AD still break?
+
+[AD-off+draft ] CONVERGED: CG=161365, Jacobi=284/359, 3 rungs, 252.1 s
+[AD-on +draft ] CONVERGED: CG=140162, Jacobi=192/251, 3 rungs, 338.0 s
+EXIT=0

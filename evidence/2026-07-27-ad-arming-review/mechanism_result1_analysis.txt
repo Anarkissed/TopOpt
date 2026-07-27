@@ -1,0 +1,52 @@
+RESULT 1 MECHANISM — why AD costs +3980 CG (+26%) on the stagnating 73728-element job
+====================================================================================
+Source: mechanism_stag_per_iter.log (per-iteration probe, big stagnation 48x32x48,
+recycling armed in both postures, draft OFF, capped 12 iters).
+
+Per-iteration CG (MG = multigrid carried; Jc = V-cycle stagnated -> Jacobi fallback):
+
+  iter | rec(noAD) CG  | rec+AD CG      | note
+  -----+---------------+----------------+-------------------------------------------
+   1   |   52  MG      |    52  MG       | restricted, but band covers uniform seed (frac 1.0)
+   2   |   47  MG      |   193  MG       | AD RESTRICTS (active_frac 0.31): +146 CG penalty
+   3   | 5803  Jc  ****| 6299  Jc  ***  | escape latch FIRES @3 (1008 esc) -> full domain hereafter
+   4   |  161  MG      |   240  MG       |
+   5   | 8004  Jc  ****|   62  MG        | <-- rec stagnates here; AD does NOT (trajectory diverged)
+   6   |  237  MG      |11987  Jc  ***  | <-- AD stagnates here (deeper); rec does NOT
+   7   |  187  MG      |    52  MG       |
+   8   |  231  MG      |    99  MG       |
+   9   |  219  MG      |    73  MG       |
+  10   |  172  MG      |    78  MG       |
+  11   |  150  MG      |    62  MG       |
+  12   |   86  MG      |   132  MG       |
+  -----+---------------+----------------+
+ total | 15349         | 19329  (+3980, +25.9%)
+
+DEEP-JACOBI EVENTS (the cost driver — each is a stagnated V-cycle that bailed to Jacobi
+after the 300-cycle budget, then ground thousands of CG iters):
+  rec(noAD): 2 events @ iters {3,5} = 5803 + 8004 = 13807 CG
+  rec+AD   : 2 events @ iters {3,6} = 6299 + 11987 = 18286 CG   (+4479 in the deep events)
+
+THE MECHANISM, NAMED:
+  * The restriction OVERHEAD is negligible: AD only actually restricts iter 2 (active_frac
+    0.31), costing +146 CG. Everything else is downstream.
+  * The escape latch works AS DESIGNED: the band fights the optimizer's descent for 2
+    steps, the optimizer pushes 1008 elements out of the band, the latch detects it at
+    iter 3 and reverts to full domain. From iter 3 on, BOTH postures solve the identical
+    full-domain operator.
+  * The +3980 is TRAJECTORY DIVERGENCE, not overhead. The 2 pre-latch restricted steps
+    seed a DIFFERENT design at iter 3. On this job the per-iteration cost is dominated by
+    a FEW unpredictable deep Jacobi-stagnation solves (5k-12k CG each); a different design
+    path lands a different set of those events. Here it landed a WORSE one: rec's second
+    deep solve was 8004 CG (iter 5); AD's was 11987 CG (iter 6).
+  * So AD cannot deliver a reliable win in this regime. Its dilution mechanism (shrink the
+    domain to cut Jacobi work) never operates sustainedly — the latch turns it off after 2
+    iters — and the residual effect is chaotic trajectory noise. The SIGN of that noise is
+    not controlled; here it is +26%, but the point is it is a coin-flip on a chaos-
+    sensitive stagnating trajectory, paid on top of AD's setup + O(N) escape detection.
+
+Contrast with the HEALTHY regime (draft-arming A5, 16x8x16, no stagnation): there the band
+never latches (f_bar 0.58) and rec+AD = 4062 vs rec = 4878 CG — AD saves 17%, because every
+solve is cheap multigrid and shrinking the domain shrinks each cheap solve proportionally.
+The win exists ONLY where multigrid carries every solve; it inverts to a loss the moment the
+job stagnates (which is exactly the 128^3 design-box regime AD was armed FOR).

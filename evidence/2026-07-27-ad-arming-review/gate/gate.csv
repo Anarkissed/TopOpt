@@ -1,0 +1,3 @@
+rung,vf,off_iters,on_iters,off_compliance,on_compliance,compliance_rel_delta,off_margin,on_margin,margin_rel_delta,off_accepted,on_accepted,off_printed,on_printed,mean_abs_drho,max_abs_drho,on_f_bar,on_latched
+0,0.6800,38,39,4.63900268409,4.63896056871,9.078543e-06,1.759473614,1.759376208,5.536071e-05,1,1,0.515152,0.515152,3.939951e-06,1.188298e-03,0.416955,0
+1,0.5200,59,59,8.71832620191,8.71819342373,1.522978e-05,0.8423430743,0.8414190437,1.096977e-03,0,0,0.371212,0.367424,6.815050e-06,1.397552e-03,0.991411,1

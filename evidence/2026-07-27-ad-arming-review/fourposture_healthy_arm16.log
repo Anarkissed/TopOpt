@@ -1,0 +1,39 @@
+===== A5 THREE-WAY INTERACTION FIXTURE (stagnation) =====
+  part 16x6x16 (672 solid) -> grid 32x16x32 (12288 elements), dilution=18.3x, spacing=2.00 mm
+  production recycle_dim k=16, AD band=-1 (AUTO), draft loose_tol=1e-03, matfree threads=6
+  single dilute rung (vf 0.50), natural plateau termination, safety cap 200 iters
+
+===== FOUR POSTURES (CG + outer iterations) =====
+  [none            ] 37.3 s  CG=3494  outer=73  Jacobi-fallback=0/73
+  [rec             ] 44.7 s  CG=3494  outer=73  Jacobi-fallback=0/73
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+  [rec+AD          ] 26.9 s  CG=2619  outer=57  Jacobi-fallback=0/57
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      AD: band k=3  f_bar=0.9897  latched=1@iter3  escapes=94  reason="escape detected: 94 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+  [rec+AD+draft    ] 18.3 s  CG=1697  outer=57  Jacobi-fallback=0/57
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      AD: band k=3  f_bar=0.9897  latched=1@iter3  escapes=94  reason="escape detected: 94 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+      draft: loose_tol=1e-03  compliance-gap=0.000047 (bar 0.02 = the retired Phase-1 fallback)  tail_k=0  escalated=0
+
+===== DOES ANY FEATURE SILENTLY DEGRADE ANOTHER? =====
+  [recycling exact] P1(rec) design == P0(none) bit-for-bit: YES (recycling is a pure preconditioner, 133)
+  [production deterministic] rec+AD+draft twice bit-identical (design+compliance+CG): YES
+  [recycling survives draft] with draft ON: recycle max_dim=0, rc_frac=0.000 (rec+AD off-draft rc_frac=0.000)
+  [AD latch under draft] rec+AD(draft off): latched=1@3 escapes=94 reason="escape detected: 94 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+                         rec+AD+draft     : latched=1@3 escapes=94 reason="escape detected: 94 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+  [escalation inert] draft compliance-gap at loose 1e-3 = 0.000047 (retired Phase-1 fallback bar 0.02): BELOW bar -> no escalation; design trigger armed=NO
+
+===== CROSS-POSTURE DESIGN DELTAS (the stack changes the trajectory, the certificate stays exact) =====
+  rec    vs none    : mean|drho|=0.000e+00 max=0.000e+00  (expect 0 — exact)
+  rec+AD vs rec     : mean|drho|=4.853e-04 max=2.682e-01  (AD is an approximation)
+  +draft vs rec+AD  : mean|drho|=4.678e-08 max=4.061e-05  (draft loosens the trajectory; the FINAL solve is always exact)
+
+===== CG-ITERATION LADDER ACROSS THE STACK =====
+  none          CG=3494  outer=73
+  rec           CG=3494  outer=73  (1.000x vs none)
+  rec+AD        CG=2619  outer=57  (0.750x vs none)
+  rec+AD+draft  CG=1697  outer=57  (0.486x vs none)
+
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/amg-phase-1-measurement-7f3f3b/evidence/2026-07-27-ad-arming-review/interaction.csv
+
+===== A5 VERDICT: the three features COEXIST (recycling exact, production deterministic; no pair silently degrades another) =====

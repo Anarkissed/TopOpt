@@ -1,0 +1,45 @@
+===== FIXTURE =====
+  part 14x4x14 (528 solid voxels) -> analysis grid 32x24x32 (24576 elements)
+  fill=2.148%  dilution=46.5x  spacing=1.00 mm  min_feature=2.50 mm -> rmin=2.500 voxels  auto band=4
+  ladder: 0.68 0.52 0.38 0.26   matfree threads=6
+
+===== STEP 2 — THE GATE (full ladder; ON=AUTO(-1) vs OFF, each twice) =====
+  [gate/off#1] 34.1 s wall, 97 iterations, 2384 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759 printed=0.5152 compliance=4.639002684  f_bar=1.0000
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423 printed=0.3712 compliance=8.718326202  f_bar=1.0000
+  [gate/off#2] 33.2 s wall, 97 iterations, 2384 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759 printed=0.5152 compliance=4.639002684  f_bar=1.0000
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423 printed=0.3712 compliance=8.718326202  f_bar=1.0000
+  [gate/on#1  AUTO] 28.9 s wall, 98 iterations, 2618 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 39 accept margin=1.759 printed=0.5152 compliance=4.638960569  f_bar=0.4170
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8414 printed=0.3674 compliance=8.718193424  f_bar=0.9914  LATCHED
+  [gate/on#2  AUTO] 30.1 s wall, 98 iterations, 2618 CG iterations, 0 Jacobi-fallback solves, 2 rungs
+    rung 0 vf=0.68 iters= 39 accept margin=1.759 printed=0.5152 compliance=4.638960569  f_bar=0.4170
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8414 printed=0.3674 compliance=8.718193424  f_bar=0.9914  LATCHED
+
+===== GATE VERDICT =====
+  twice-run bit-identical: OFF YES   ON YES
+  gate verdicts identical: YES (2 vs 2 rungs evaluated)
+  terminal recommendation: OFF "fdm walls=4 top=5 bottom=4 infill=45%gyroid"  ON "fdm walls=4 top=5 bottom=4 infill=45%gyroid"
+
+  rung   vf   f_bar  |  mean|drho|   max|drho| | dC/C       margin OFF -> ON            dM/M
+   0    0.68  0.4170 |  3.9400e-06  1.1883e-03 | 9.079e-06         1.75947 -> 1.75938        5.5361e-05
+   1    0.52  0.9914 |  6.8151e-06  1.3976e-03 | 1.523e-05        0.842343 -> 0.841419       1.0970e-03
+
+  WORST mean|drho| 6.8151e-06   (bar: 1e-4)
+  WORST max|drho|  1.3976e-03
+  WORST margin relative delta 1.0970e-03   (bar: 1e-3 = 0.1%)
+
+  COST: wall  OFF 34.1 s -> ON 28.9 s  (0.849x)
+        CG iterations  OFF 2384 -> ON 2618  (1.098x)
+        optimizer iterations  OFF 97 -> ON 98
+        Jacobi-fallback solves  OFF 0  ON 0
+        mean f_bar 0.7042  =>  134's 0.65/f law projects 0.92x per-solve
+
+  ARMED-PATH (AUTO) latch + recycle summary (bars A5/A6):
+    derived k per rung: 4 4
+    latch firing: 1/2 rungs latched, 50 total escapes
+      rung 1 LATCHED @iter 3 (escapes=50): escape detected: 50 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored
+    recycle: 0/0 Jacobi solves applied a carried basis (rc_frac=0.000), 0 setup matvecs; 0/98 solves ran Jacobi
+
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/amg-phase-1-measurement-7f3f3b/evidence/2026-07-27-ad-arming-review/gate/gate.csv

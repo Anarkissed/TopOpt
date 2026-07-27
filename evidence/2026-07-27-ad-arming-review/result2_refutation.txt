@@ -1,0 +1,48 @@
+RESULT 2 — "AD-on does NOT converge at L (throws)" — DOES NOT REPRODUCE (faithful)
+=================================================================================
+PR 209 A6/gap#1 claim: at L 32x16x32 the ARMED posture (AD-on) fails to converge —
+the tight multigrid stalls into Jacobi-CG and fea_solve_mgcg_matfree throws.
+
+WHAT ACTUALLY HAPPENS (faithful, UNCAPPED, single production ladder per posture;
+repro_L_convergence_faithful.log):
+
+  posture       result       trajectory CG   wall
+  AD-off tight  CONVERGED       246667        413.0 s
+  AD-on  tight  CONVERGED       223863        382.8 s   <-- did NOT throw; 0.91x of AD-off
+
+AD-on L CONVERGES. It does not throw. And it is actually CHEAPER than AD-off here
+(223863 vs 246667, 0.91x) — the opposite sign to result 1's +26%. Same mechanism
+(trajectory divergence redistributing the deep-Jacobi-stagnation events); the sign is
+uncontrolled, a coin-flip. On big-stag the divergence cost +26%; on L tight it saved 9%.
+
+WHY MY FIRST (cap-2000) REPRODUCTION WAS A FALSE POSITIVE — the CONFOUND, named:
+  repro_L_ADon_cap2000.log : AD-on L threw at CG cap 2000.
+  repro_L_ADoff_cap2000.log: AD-off L ALSO threw at CG cap 2000.
+  The L grid's stagnating tight solves need ~250k trajectory CG (246667 uncapped). A
+  per-solve cap of 2000 forces NON-CONVERGENCE on the FULL-DOMAIN solve regardless of
+  AD — so both postures throw. The cap, not AD, produced the throw. A cap high enough
+  to be a fair discriminator (>= the real per-solve need) lets BOTH converge; there is
+  no cap at which AD-on throws and AD-off converges on this fixture.
+
+MECHANISM — why AD-on converges (the escape latch saves it):
+  On every stagnating fixture measured, AD's escape latch fires ~iter3 (L, big-stag,
+  ARM12, the gate fixture) and reverts to the FULL domain for the rest of the run. So
+  AD-on runs restricted for only ~2 iterations, then IS AD-off. The final full-domain
+  tight certification (simp.cpp:1917, the only uncaught-throw site) therefore certifies
+  the same class of design AD-off certifies, and converges. For AD-on to throw at L, the
+  latch would have to STAY QUIET while AD ran restricted the whole way into a
+  non-coarsenable severed domain — which does not happen on this fixture.
+
+CORROBORATION VIA THE EXACT PR 209 HARNESS (repro_L_ADon_scaleharness_uncapped.log):
+  draft_quality_phase2_scale, TOPOPT_SCALE_AD=on, L 32x16x32, UNCAPPED, run to completion:
+    L 32x16x32 (12288) | tight CG 223863 | draft CG 140162 | WIN 1.60x | exit 0
+  CONVERGED — no throw. tight CG 223863 matches the faithful single-ladder probe TO THE
+  DIGIT. So result 2 does not reproduce in the very harness whose A6 reported it.
+
+HONEST CAVEAT: this is the scale harness's "L" on the CURRENT build (main incl.
+#206/#207/#208/#210). It is possible PR 209's throw was real on its exact transient run
+(deep Jacobi is chaotic) or on a since-changed solver path. But the CLEAN, repeatable
+statement, confirmed in the exact harness, is: under faithful uncapped conditions AD-on L
+CONVERGES, and the only way to make it "throw" was an unfairly low CG cap that also breaks
+AD-off. Per the task's R1 ("if either does not reproduce, say so — that is the best
+outcome"): result 2 does not reproduce as an AD-caused non-convergence.

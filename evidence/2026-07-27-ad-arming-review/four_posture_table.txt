@@ -1,0 +1,48 @@
+FOUR POSTURES x MULTIPLE GRIDS x BOTH REGIMES  (R2)
+===================================================
+none = recycling OFF, AD OFF, draft OFF   (the reference cost)
+rec  = recycling ON,  AD OFF, draft OFF   (production minus AD/draft)
+rec+AD        = recycling ON, AD ON, draft OFF   (the AD arming, PR 187)
+rec+AD+draft  = recycling ON, AD ON, draft ON    (full production, post PR 209)
+
+Baseline for "AD effect" is REC (recycling is armed in production, so rec is the
+honest baseline the AD flip is measured against). All CG counts are deterministic
+(P-core pin, matfree threads 6). Sources: fourposture_healthy_arm{8,12,16}.log,
+mechanism_stag_per_iter.log / stag.csv.
+
+ fixture / grid          | Jacobi (stagnating?) | none  | rec   | rec+AD | rec+AD+draft | AD vs rec
+ ------------------------+----------------------+-------+-------+--------+--------------+-----------
+ ARM8   16x6x16          | 0/60   HEALTHY       | 4878  | 4878  |  4062  |     3232     | 0.833x  HELPS -17%
+ ARM16  32x12x32         | 0/73   HEALTHY       | 3494  | 3494  |  2619  |     1697     | 0.750x  HELPS -25%
+ ARM12  24x8x24          | 2-3/59 MILD STAG     |17605  |17661  | 18921  |    11574     | 1.071x  HURTS +7%
+ big-stag 48x32x48       | 2/12   DEEP STAG     |  -    |15349  | 19329  |      947     | 1.259x  HURTS +26%
+ scale-L 32x12x32,       | deep dilute rungs    |  -    | conv. |  THROWS (non-converge) | n/a  (see result 2)
+   full ladder {.50,.35,.25}
+
+AD latch on each: ARM8 no latch (f_bar 0.58); ARM16 latch@3 94 esc; ARM12 latch@3
+30 esc; big-stag latch@3 1008 esc. (The latch fires on EVERY stagnating fixture and
+on ARM16 too, but on ARM16 the run is healthy so the 2 pre-latch restricted steps are
+cheap multigrid and AD still nets a win.)
+
+THE PATTERN (the whole recommendation rests on this):
+  * AD's SIGN is set by whether the run STAGNATES (falls to Jacobi-CG), NOT by grid
+    size. ARM16 (larger) is healthy and AD helps; ARM12 (smaller) stagnates and AD
+    hurts. Grid size is a confound; stagnation is the real axis (matches the memory
+    "draft win tracks stagnation fraction not grid size").
+  * HEALTHY (0 Jacobi): every solve is cheap multigrid; restricting the domain shrinks
+    each cheap solve, so AD saves 17-25%. This is the regime PR 187's 1.79x fixture
+    lived in.
+  * STAGNATING (Jacobi fallbacks): cost is dominated by a few unpredictable deep
+    Jacobi solves (5k-12k CG each). AD restricts for only ~2 iterations before the
+    escape latch reverts it; those 2 steps DIVERGE the trajectory and redistribute the
+    deep-Jacobi events, netting +7% to +26%. At the deep-dilute end the diverged design
+    can't be certified and the run THROWS (result 2).
+  * The maintainer's real 128^3 design-box job stagnates in ~100% of iterations -> it
+    is the DEEP-STAG / non-converge end of this table, precisely where AD is armed FOR
+    and precisely where it hurts or breaks.
+
+DRAFT'S EFFECT (relevant to question d): rec+AD+draft is far below rec+AD on EVERY
+stagnating fixture (big-stag 19329 -> 947, 0/12 Jacobi; ARM12 18921 -> 11574). Draft
+removes the Jacobi grind by loosening the early ultra-dilute solves off the stagnation
+latch. See question_d_ad_redundant.log for the rec+draft (AD-off) control that isolates
+whether AD adds anything once draft is on.

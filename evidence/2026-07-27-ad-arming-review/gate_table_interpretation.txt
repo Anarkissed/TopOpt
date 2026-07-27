@@ -1,0 +1,41 @@
+GATE TABLE — AD ARMED (AUTO) vs DISARMED (band 0), full production ladder  (R3)
+==============================================================================
+Fixture: the AD-arming Phase-1 gate fixture (24576 elements, 46.5x dilution, HEALTHY
+multigrid). Source: gate_table_adg_arm.log, gate/gate.csv. Each posture run twice.
+"OFF" (band 0) is the DISARMED posture this review recommends; "ON" (AUTO) is the
+posture production ships today (PR 187). Disarming = switching ON -> OFF.
+
+  rung  vf    verdict OFF->ON   margin OFF -> ON        dM/M       mean|drho|  max|drho|  latch (ON)
+  ----  ----  ---------------   --------------------    --------   ----------  ---------  -----------
+   0    0.68  ACCEPT -> ACCEPT  1.75947 -> 1.75938      5.54e-5    3.94e-6     1.19e-3    - (f_bar 0.417)
+   1    0.52  REJECT -> REJECT  0.842343 -> 0.841419    1.097e-3   6.82e-6     1.40e-3    LATCHED@3, 50 esc
+
+  twice-run bit-identical:   OFF YES   ON YES
+  gate verdicts identical:   YES (rung 0 ACCEPT, rung 1 REJECT; ladder stops at rung 1, both)
+  terminal recommendation:   IDENTICAL — "fdm walls=4 top=5 bottom=4 infill=45% gyroid"
+  CG iterations:             OFF 2384 -> ON 2618  (1.098x — AD is +9.8% MORE CG even here)
+  Jacobi-fallback solves:    OFF 0    ON 0   (healthy fixture; 0/98 solves ran Jacobi)
+  WORST margin rel delta:    1.097e-3  (bar 1e-3 = 0.1%) -> ON MISSES the bar on rung 1
+
+READING (what the gate table establishes for the recommendation):
+  1. DISARMING AD IS GATE-SAFE. OFF and ON produce IDENTICAL verdicts and an IDENTICAL
+     terminal recommendation. Switching the armed default ON->OFF changes nothing the
+     gate decides. OFF is additionally byte-identical to the pre-187 reference world
+     that reproduces 185/197 to the digit (THE ONE RULE: band 0 derives no mask).
+  2. THE ARMED POSTURE IS ALREADY THE WORSE ONE ON THIS GATE FIXTURE. Even on a HEALTHY
+     46.5x fixture, ON costs +9.8% CG and MISSES the 0.1% margin bar on rung 1 (dM/M
+     1.097e-3 vs OFF), because rung 1's trajectory is mildly divergent: the escape latch
+     fires @iter3 (50 escapes) and AD pays the restriction + trajectory-divergence cost
+     without the sustained-restriction benefit. This is the SAME mechanism as result 1,
+     in miniature, on the gate fixture itself.
+  3. AD's healthy-regime WIN is FRAGILE: it materialises only when the trajectory is
+     healthy AND never trips the escape latch (ARM8 -17%, ARM16 -25%). The moment the
+     latch fires (this gate fixture, ARM12, big-stag) AD is a net LOSS. Production cannot
+     choose the fixtures it runs; the maintainer's target (128^3, deep stagnation) is
+     the loss end.
+
+Note on absolute CG vs the PR 187 handoff: that handoff reported this gate's CG as
+OFF 3454 -> ON 3885; here it is OFF 2384 -> ON 2618. The VERDICTS and MARGINS match to
+the digit (1.75947 / 0.842343); the absolute CG differs because solver-path PRs merged
+after 187 (beta-continuation #207, width-aware accept-gate #206). The 1.098x ON/OFF
+RATIO and the rung-1 latch/margin-miss are unchanged in character.
