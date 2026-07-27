@@ -312,6 +312,40 @@ struct MinimizePlasticOptions {
   // finite.
   double infill_percent = 100.0;
 
+  // --- Width-aware infill knockdown (handoff 2026-07-26-width-aware-knockdown) ---
+  // The plain infill_percent knockdown above is a pure function of infill fraction:
+  // margin_effective = worst_case * f^1.5, with NO width term. Measurements 191/192
+  // showed that is wrong in BOTH directions — f^1.5 is CONSERVATIVE at the ~9.4 mm
+  // member scale an optimized part is made of (the slicer's solid wall loops rescue
+  // a thin rib) yet still optimistic for envelope-scale solid regions. This block
+  // arms the SHELL+CORE composite that 191/192 measured and validated to ~1-3 %:
+  //   E_eff/E_solid = f_wall + (1 - f_wall)·f^1.5,   f_wall = 4·t·(W-t)/W²
+  // per-voxel on the LOCAL member width W (a distance-transform thickness of the
+  // printed field, computed once at the gate), with t = wall_loops·wall_line_width_mm.
+  // See analyze.hpp width_aware_knockdown() / local_member_thickness_mm().
+  //
+  // width_aware_knockdown == false (the DEFAULT) is THE ONE RULE: the gate keeps the
+  // pure `worst_case * f^1.5` scalar path, byte-for-byte identical to the pre-width
+  // behaviour, and wall_loops / wall_line_width_mm are carried but never read. ARMING
+  // is a separate maintainer act — the shipped production default (production.cpp
+  // kProductionWidthAwareKnockdown) stays false in this PR (same opt-in discipline as
+  // active_domain_band == 0 / min_feature_mm == 0). When true the gate credits walls
+  // ONLY on the in-plane (von Mises) term — 191/192 measured axial + bending, NOT
+  // z-bonding — so the interlayer term keeps the unmodified f^1.5, and the gate is
+  // NEVER less conservative than today on the interlayer failure mode.
+  bool width_aware_knockdown = false;
+  // Slicer wall-loop (perimeter) count wrapped around each printed member. Pure
+  // slicer metadata until now (app-side PrintParams.wallLoops); it crosses the bridge
+  // for the first time here so the width-aware gate can size the solid wall ring. 0
+  // (the DEFAULT) → wall thickness t = 0 → f_wall = 0 → the composite reduces to the
+  // plain f^1.5 even when width_aware_knockdown is armed (a wall-less member gets no
+  // rescue). Must be >= 0.
+  int wall_loops = 0;
+  // The slicer extrusion/line width (mm) of one wall loop, so t = wall_loops·this.
+  // 0.45 mm is the common 0.4 mm-nozzle default and the value 191/192 measured with.
+  // Only read when width_aware_knockdown is armed AND wall_loops > 0. Must be >= 0.
+  double wall_line_width_mm = 0.45;
+
   // Handoff 100 — "Keep clear" clearance keep-out overlay. A SOLVED-grid-indexed
   // mask (size == the grid minimize_plastic solves on, i.e.
   // minimize_plastic_solved_grid(grid, *this)) carrying MaskValue::FrozenVoid on

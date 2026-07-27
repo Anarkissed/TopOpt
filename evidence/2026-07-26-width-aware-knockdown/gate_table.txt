@@ -1,0 +1,23 @@
+WIDTH-AWARE GATE TABLE (handoff 2026-07-26-width-aware-knockdown)
+Each rung's converged density re-gated under OFF (worst_case·f^1.5) and ON
+(per-voxel SHELL+CORE composite) at margin_stop=1.5. Sign is the ON vs OFF
+effective margin: LESS-cons = walls relieve (accept lighter); unchanged =
+thick region, no rescue (caution kept, bar K4).
+
+=== MEMBER-SCALE cantilever (thin ribs) | infill 30% (f^1.5=0.1643) | 5 wall loops × 0.45 mm | spacing 3.00 mm ===
+  rung vf     | worst_case | eff(OFF)  verdict | eff(ON)   verdict | sign
+  1    0.800  | 22.0293    | 3.6198    ACCEPT  | 5.5394    ACCEPT  | LESS-cons
+  2    0.600  | 20.7515    | 3.4098    ACCEPT  | 5.8465    ACCEPT  | LESS-cons
+  3    0.450  | 15.6676    | 2.5744    ACCEPT  | 4.2706    ACCEPT  | LESS-cons
+  4    0.350  | 8.7652     | 1.4403    reject  | 2.1469    ACCEPT  | LESS-cons <== FLIP
+  5    0.250  | 5.8628     | 0.9634    reject  | 2.0652    ACCEPT  | LESS-cons <== FLIP
+  cost: OFF gate 42.1 ms/rung, ON gate 41.6 ms/rung (+-0.5 ms = the local-thickness pass), over 5 rungs
+
+=== ENVELOPE-SCALE solid block (thick) | infill 30% (f^1.5=0.1643) | 5 wall loops × 0.45 mm | spacing 3.00 mm ===
+  rung vf     | worst_case | eff(OFF)  verdict | eff(ON)   verdict | sign
+  1    0.800  | 66.8542    | 10.9853   ACCEPT  | 13.0757   ACCEPT  | LESS-cons
+  2    0.600  | 41.6198    | 6.8388    ACCEPT  | 6.8388    ACCEPT  | unchanged
+  3    0.450  | 24.5635    | 4.0362    ACCEPT  | 4.0362    ACCEPT  | unchanged
+  4    0.350  | 16.5446    | 2.7185    ACCEPT  | 2.7185    ACCEPT  | unchanged
+  5    0.250  | 11.0578    | 1.8170    ACCEPT  | 1.8170    ACCEPT  | unchanged
+  cost: OFF gate 164.9 ms/rung, ON gate 193.4 ms/rung (+28.5 ms = the local-thickness pass), over 5 rungs

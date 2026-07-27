@@ -299,6 +299,28 @@ int min_feature_violations(const VoxelGrid& grid,
 V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,
                   double iso = 0.5);
 
+// LOCAL MEMBER THICKNESS (mm), per voxel, of the printed set (density > iso), for
+// the width-aware knockdown gate (handoff 2026-07-26-width-aware-knockdown). The
+// Hildebrand inscribed-sphere thickness: τ(v) = the diameter of the largest sphere
+// that fits inside the printed material AND contains v — so every voxel of a rib is
+// assigned the rib's full width, including the outer-fibre voxels where bending
+// stress peaks (a plain 2·EDT would under-size those and over-credit the walls).
+// Computed as a granulometric opening driven by a seeded squared Euclidean distance
+// transform: for r = 1,2,… the opening by a radius-r ball keeps v iff some point
+// with EDT-to-void >= r lies within r of v; τ(v) = 2·(largest surviving r)·spacing.
+//
+// Void voxels (and non-solid tags) return 0. The radius sweep is capped at
+// `cap_radius_voxels` for a BOUNDED cost (bar K6): any voxel still covered at the
+// cap is at least that thick and returns +infinity — a "thicker than we measured"
+// sentinel that wall_area_fraction() treats as NO wall rescue (the conservative
+// direction, bar K4; it also means the thick-region gate is never made LESS
+// conservative than today's f^1.5). Cost is O(cap_radius_voxels · voxel_count): one
+// seeded EDT per radius level. Throws std::invalid_argument on a size mismatch or a
+// non-positive cap.
+std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
+                                              const std::vector<double>& density,
+                                              double iso, int cap_radius_voxels);
+
 // ---------------------------------------------------------------------------
 // The CONNECTIVITY BELT (handoff 2026-07-23-gate-honesty-connectivity-rejection).
 //

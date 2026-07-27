@@ -104,6 +104,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (!std::isfinite(options.infill_percent))
     throw std::invalid_argument(
         "minimize_plastic: infill_percent must be finite");
+  // Width-aware knockdown inputs (handoff 2026-07-26-width-aware-knockdown). Both
+  // default to a no-op (wall_loops 0, and width_aware_knockdown false), so this
+  // rejects only a genuinely malformed value and every existing caller is unaffected.
+  if (options.wall_loops < 0)
+    throw std::invalid_argument("minimize_plastic: wall_loops must be >= 0");
+  if (!std::isfinite(options.wall_line_width_mm) ||
+      options.wall_line_width_mm < 0.0)
+    throw std::invalid_argument(
+        "minimize_plastic: wall_line_width_mm must be finite and >= 0");
   // Diagnosis 095 — the silent-self-weight-fall-through guard. A load-case caller
   // sets require_external_loads; an empty external_loads then means the user's
   // force never reached the solver, and falling through to self-weight would ship
@@ -350,6 +359,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // worst-case margin at the acceptance gate below. 1.0 for solid/unset infill
   // (the default 100), making the whole ladder byte-identical to pre-M7.infill.
   const double infill_knockdown = infill_margin_knockdown(options.infill_percent);
+
+  // The acceptance-gate knockdown posture (handoff 2026-07-26-width-aware-knockdown),
+  // resolved once and shared by every rung's certification. width_aware defaults
+  // false → the gate is the pure scalar `worst_case * infill_knockdown` path,
+  // byte-identical to before. When armed, the gate credits the slicer's solid wall
+  // loops per member; wall_thickness_mm = wall_loops · wall_line_width_mm.
+  KnockdownSpec knockdown;
+  knockdown.infill_knockdown = infill_knockdown;
+  knockdown.width_aware = options.width_aware_knockdown;
+  knockdown.infill_percent = options.infill_percent;
+  knockdown.wall_thickness_mm =
+      static_cast<double>(options.wall_loops) * options.wall_line_width_mm;
 
   MinimizePlasticResult result;
   result.report.material = material_name;
@@ -1016,7 +1037,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
            "tolerance");
     FixedDesignAnalysis fda = analyze_fixed_design(
         G, params, rho, B, loads, material, build_dir, opt.cg_tolerance,
-        opt.cg_max_iterations, opt.solver, options.margin_stop, infill_knockdown,
+        opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
         load_path_ok, part_solid);
     variant.von_mises_field = std::move(fda.von_mises_field);
     variant.stress_tensor_field = std::move(fda.stress_tensor_field);
@@ -1144,12 +1165,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       // M7.anchor-integrity (FIX 2): the ladder FLOOR. Once an accepted rung
       // already clears the comfort floor, stop — do NOT keep stripping toward the
       // lightest rung just because the part could survive there. The comparison
-      // uses the SAME infill-adjusted margin the acceptance gate above uses, so
-      // the floor and the ceiling are measured on one scale. Disabled by default
+      // uses `margin_effective` — the SAME infill-adjusted margin the acceptance
+      // gate above uses (the width-aware composite when armed, else the scalar
+      // worst_case·infill_knockdown), so the floor and the ceiling stay on one
+      // scale (byte-identical to the pre-width test on the default path, where
+      // margin_effective == worst_case·infill_knockdown). Disabled by default
       // (margin_floor_multiple == +infinity): the RHS is +infinity (or NaN when
       // margin_stop == 0), so the test is false for every finite margin and the
       // walk is byte-identical to the pre-M7.anchor-integrity ladder.
-      if (margin.worst_case * infill_knockdown >=
+      if (margin_effective >=
           options.margin_floor_multiple * options.margin_stop) {
         result.stopped_on_floor = true;
         break;

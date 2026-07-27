@@ -417,6 +417,50 @@ static void test_clearances_manual() {
       "manual: negative radius_mm rejected");
 }
 
+// Width-aware knockdown slicer metadata crossing the bridge (handoff
+// 2026-07-26-width-aware-knockdown): loads.wall_loops / loads.wall_line_width_mm.
+static void test_wall_loops() {
+  const std::string base = R"({
+  "model": "part.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "loads": {
+    "anchor_face_ids": [8],
+    "groups": [ { "face_ids": [0], "force": [0, 0, -50] } ],
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.45
+  }
+})";
+  const JobDescription j = parse_job(base);
+  CHECK(j.loads.wall_loops == 5, "wall_loops parsed");
+  CHECK(j.loads.wall_line_width_mm == 0.45, "wall_line_width_mm parsed");
+
+  // Omitted → defaults (no override): 0 loops, negative line width (= core default).
+  const std::string none = R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ] }
+})";
+  const JobDescription jn = parse_job(none);
+  CHECK(jn.loads.wall_loops == 0, "wall_loops defaults to 0 (no rescue)");
+  CHECK(jn.loads.wall_line_width_mm < 0.0, "wall_line_width_mm defaults to core default");
+
+  auto replace_first = [&](const std::string& from, const std::string& to) {
+    std::string s = base;
+    const auto at = s.find(from);
+    return s.replace(at, from.size(), to);
+  };
+  check_rejects(replace_first("\"wall_loops\": 5", "\"wall_loops\": -1"),
+                "wall_loops: negative rejected");
+  check_rejects(replace_first("\"wall_loops\": 5", "\"wall_loops\": 2.5"),
+                "wall_loops: non-integer rejected");
+  check_rejects(replace_first("\"wall_line_width_mm\": 0.45",
+                              "\"wall_line_width_mm\": 0.0"),
+                "wall_line_width_mm: zero rejected");
+}
+
 int main() {
   test_valid_baseline();
   test_demo_fixture();
@@ -427,6 +471,7 @@ int main() {
   test_malformed();
   test_clearances();
   test_clearances_manual();
+  test_wall_loops();
 
   if (g_failures == 0) {
     std::printf("job schema (M6.2): all %d checks passed\n", g_checks);

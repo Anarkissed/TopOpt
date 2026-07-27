@@ -601,6 +601,15 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME analyze_fixed_design COMMAND test_analyze_fixed_design)
 
+  # Width-aware accept-gate knockdown (handoff 2026-07-26-width-aware-knockdown):
+  # the SHELL+CORE composite width_aware_knockdown() reproduces 191/192's member-scale
+  # numbers (K3), the degenerate cases (K5), the sign (K4), and the local-member-width
+  # distance transform. width_aware_knockdown / wall_area_fraction live in analyze.cpp,
+  # so gate on Eigen like test_analyze_fixed_design. Pure math + voxel ops, no fixture.
+  add_executable(test_width_aware_knockdown tests/unit/test_width_aware_knockdown.cpp)
+  target_link_libraries(test_width_aware_knockdown PRIVATE topopt)
+  add_test(NAME width_aware_knockdown COMMAND test_width_aware_knockdown)
+
   # Handoff 080 regression gate: the design-box "whole-domain optimize" path
   # (freeze_imported_part == false, the default) must REDUCE plastic against the
   # imported part — removes material, baseline == part mass, and the ladder walks
