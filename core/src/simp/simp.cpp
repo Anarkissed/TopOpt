@@ -108,6 +108,38 @@ void validate_mma_projection_options(const SimpOptions& o) {
         ">= mma_projection_beta0");
 }
 
+// Validate the adaptive move-limit opt-in (handoff 2026-07-26-adaptive-move).
+// MMA-only: the signal it reuses is the MMA moving-asymptote oscillation sign,
+// which the OC updater does not compute, so adaptive_move + OC is REFUSED rather
+// than silently ignored (125 §0), exactly as mma_projection is. When
+// adaptive_move is false (default) nothing here fires and the run is
+// byte-identical.
+void validate_adaptive_move_options(const SimpOptions& o) {
+  if (!o.adaptive_move) return;
+  if (o.updater != SimpUpdater::MMA)
+    throw std::invalid_argument(
+        "simp_optimize: adaptive_move requires the MMA updater (it reuses MMA's "
+        "moving-asymptote oscillation signal)");
+  if (!(o.adaptive_move_grow > 1.0) || !std::isfinite(o.adaptive_move_grow))
+    throw std::invalid_argument(
+        "simp_optimize: adaptive_move_grow must be finite and > 1");
+  if (!(o.adaptive_move_shrink > 0.0 && o.adaptive_move_shrink < 1.0))
+    throw std::invalid_argument(
+        "simp_optimize: adaptive_move_shrink must be in (0, 1)");
+  if (!(o.adaptive_move_osc_lo >= 0.0 &&
+        o.adaptive_move_osc_lo <= o.adaptive_move_osc_hi &&
+        o.adaptive_move_osc_hi <= 1.0))
+    throw std::invalid_argument(
+        "simp_optimize: adaptive_move_osc thresholds must satisfy "
+        "0 <= lo <= hi <= 1");
+  if (!(o.adaptive_move_min > 0.0) ||
+      !(o.adaptive_move_max >= o.adaptive_move_min) ||
+      !(o.adaptive_move_max < 1.0))
+    throw std::invalid_argument(
+        "simp_optimize: adaptive_move bounds must satisfy "
+        "0 < min <= max < 1");
+}
+
 // Whether the MMA Heaviside-projection continuation path is active for this run.
 // The default (mma_projection == false) is false, so every existing MMA run
 // takes the unchanged grayscale branch.
@@ -127,6 +159,47 @@ bool mma_projection_active(const SimpOptions& o) {
 double mma_continuation_move(double move, double beta) {
   const double damp = beta > 8.0 ? 8.0 / beta : 1.0;
   return move * damp;
+}
+
+// Adaptive move limit (handoff 2026-07-26-adaptive-move). The oscillation reading:
+// among the design voxels that MOVED on both of the last two steps, the fraction
+// whose direction REVERSED — the SAME sign s = (xᵏ−xᵏ⁻¹)(xᵏ⁻¹−xᵏ⁻²) < 0 the
+// Svanberg asymptote adaptation keys on (reused, not reinvented — task bar). A
+// voxel sitting at a bound (either step 0) has no direction and is excluded from
+// both numerator and denominator. Returns 0 when nothing moved (treated as
+// "monotone" — grows the step so a stalled design pushes harder).
+double oscillation_fraction(const std::vector<double>& x,
+                            const std::vector<double>& xold1,
+                            const std::vector<double>& xold2,
+                            const std::vector<std::size_t>& dof) {
+  long long n_osc = 0, n_move = 0;
+  for (std::size_t e : dof) {
+    const double a = x[e] - xold1[e];
+    const double b = xold1[e] - xold2[e];
+    if (a == 0.0 || b == 0.0) continue;  // at a bound: no direction this step
+    ++n_move;
+    if (a * b < 0.0) ++n_osc;
+  }
+  return n_move > 0 ? static_cast<double>(n_osc) / static_cast<double>(n_move)
+                    : 0.0;
+}
+
+// One update of the adaptive move VALUE from the oscillation reading, mirroring
+// the Svanberg asymptote rule at the global move-limit level: SHRINK (asydecr)
+// when the design is predominantly oscillating (f_osc above the high threshold),
+// GROW (asyincr) when it is predominantly monotone (below the low threshold),
+// HOLD in the dead band between. `cur` is this stage's evolving move (seeded to
+// the β-damped reference at the stage start); the result is clamped to
+// [adaptive_move_min, adaptive_move_max] so it stays strictly positive (feasibility)
+// and cannot ratchet away unboundedly.
+double adapt_move_value(double cur, double f_osc, const SimpOptions& o) {
+  if (f_osc > o.adaptive_move_osc_hi)
+    cur *= o.adaptive_move_shrink;
+  else if (f_osc < o.adaptive_move_osc_lo)
+    cur *= o.adaptive_move_grow;
+  if (cur < o.adaptive_move_min) cur = o.adaptive_move_min;
+  if (cur > o.adaptive_move_max) cur = o.adaptive_move_max;
+  return cur;
 }
 
 }  // namespace
@@ -1504,6 +1577,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   validate_projection_options(options);
   validate_updater_options(options);  // MMA + projection rejected (M7.mma.1)
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
+  validate_adaptive_move_options(options);   // adaptive move opt-in (MMA-only)
 
   // ACTIVE DOMAIN (active-domain phase 1): resolve the band ONCE per run (an
   // AUTO request reads the filter radius this run uses) and reject a non-zero
@@ -1522,6 +1596,23 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // (unprojected) branch below owns the single continuous MMA iteration count.
   MmaState mma_state;
   int mma_iter = 0;
+
+  // Adaptive move limit (handoff 2026-07-26-adaptive-move). `adaptive_move_val`
+  // is the current adapted move within the running β stage; it is (re)seeded to
+  // that stage's reference (possibly β-damped) move while < 2 prior steps exist,
+  // then evolves by adapt_move_value. `adaptive_move_dof` is the design (solid)
+  // voxel set the oscillation fraction is measured over — built ONCE, and only
+  // when the feature is on, so the default path pays nothing and stays
+  // byte-identical.
+  double adaptive_move_val = 0.0;
+  std::vector<std::size_t> adaptive_move_dof;
+  if (options.adaptive_move) {
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i)
+          if (grid.solid(i, j, k))
+            adaptive_move_dof.push_back(grid.index(i, j, k));
+  }
 
   // MMA Heaviside beta-continuation state (handoff 114). `mma_beta` is the
   // current sharpness (starts at beta0, doubles on a plateau up to beta_max);
@@ -1604,9 +1695,26 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // for the MMA stage the sharpness is the dynamic `mma_beta`.
       const bool projecting = st.project || st.mma_continuation;
       const double cur_beta = st.mma_continuation ? mma_beta : st.beta;
-      const double cur_move =
+      // Fixed reference move (β-damped on the continuation stage). The default
+      // (adaptive_move off) uses it verbatim — byte-identical.
+      const double ref_move =
           st.mma_continuation ? mma_continuation_move(st.move, cur_beta)
                               : st.move;
+      double cur_move = ref_move;
+      double cur_osc = -1.0;  // adaptive oscillation reading (-1 = not adapted)
+      if (options.adaptive_move) {
+        // Reuse the Svanberg oscillation sign only once two prior steps exist in
+        // THIS β stage (mma_iter counts completed updates in the stage; it resets
+        // to 0 on each β advance, so the seed re-anchors to the new damped ref).
+        if (mma_iter < 2 || mma_state.xold2.empty()) {
+          adaptive_move_val = ref_move;  // seed
+        } else {
+          cur_osc = oscillation_fraction(x, mma_state.xold1, mma_state.xold2,
+                                         adaptive_move_dof);
+          adaptive_move_val = adapt_move_value(adaptive_move_val, cur_osc, options);
+        }
+        cur_move = adaptive_move_val;
+      }
       std::vector<double> xphys = filter.filter_density(x);
       if (projecting) project_solid(grid, xphys, cur_beta, eta);
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
@@ -1694,6 +1802,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
         obs.cg_trajectory_tol = traj_tol;  // draft-quality: this iter's loose→tight tol
+        obs.move = cur_move;         // adaptive move: the limit this step used
+        obs.osc_fraction = cur_osc;  // -1 unless the adaptive rule ran
         obs.infeasible = infeasible_now;  // handoff 131
         options.observe(obs);
       }
@@ -2304,6 +2414,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // is the OC-locked Gate-V2 formulation — see validate_updater_options).
   validate_updater_options(options);
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
+  validate_adaptive_move_options(options);   // adaptive move opt-in (MMA-only)
 
   // ACTIVE DOMAIN (active-domain phase 1): resolved once per run, exactly as in
   // the unconstrained overload. This is the overload the production design-box
@@ -2366,6 +2477,17 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   MmaState mma_state;
   int mma_iter = 0;
 
+  // Adaptive move limit (handoff 2026-07-26-adaptive-move); see the unconstrained
+  // overload for the contract. The oscillation fraction is measured over the
+  // ACTIVE voxel set (the design set of this masked loop), built ONCE and only
+  // when the feature is on so the default path is byte-identical.
+  double adaptive_move_val = 0.0;
+  std::vector<std::size_t> adaptive_move_dof;
+  if (options.adaptive_move) {
+    for (std::size_t e = 0; e < eff.size(); ++e)
+      if (eff[e] == MaskValue::Active) adaptive_move_dof.push_back(e);
+  }
+
   // MMA Heaviside beta-continuation state (handoff 114); see the unconstrained
   // overload for the contract. Inert unless the plan carries the single
   // mma_continuation stage.
@@ -2412,9 +2534,24 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       }
       const bool projecting = st.project || st.mma_continuation;
       const double cur_beta = st.mma_continuation ? mma_beta : st.beta;
-      const double cur_move =
+      // Fixed reference move (β-damped on the continuation stage); the default
+      // path uses it verbatim (byte-identical). Adaptive move evolves from it —
+      // see the unconstrained overload for the seed/evolve/feasibility contract.
+      const double ref_move =
           st.mma_continuation ? mma_continuation_move(st.move, cur_beta)
                               : st.move;
+      double cur_move = ref_move;
+      double cur_osc = -1.0;  // adaptive oscillation reading (-1 = not adapted)
+      if (options.adaptive_move) {
+        if (mma_iter < 2 || mma_state.xold2.empty()) {
+          adaptive_move_val = ref_move;  // seed (re-anchors on each β advance)
+        } else {
+          cur_osc = oscillation_fraction(x, mma_state.xold1, mma_state.xold2,
+                                         adaptive_move_dof);
+          adaptive_move_val = adapt_move_value(adaptive_move_val, cur_osc, options);
+        }
+        cur_move = adaptive_move_val;
+      }
       std::vector<double> xphys = filter.filter_density(x);
       if (projecting) project_active(eff, xphys, cur_beta, eta);
       apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
@@ -2503,6 +2640,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         // projecting), so the CSV beta column reflects the sharpening stage.
         obs.beta = projecting ? cur_beta : 0.0;
         obs.cg_trajectory_tol = traj_tol;  // draft-quality: this iter's loose→tight tol
+        obs.move = cur_move;         // adaptive move: the limit this step used
+        obs.osc_fraction = cur_osc;  // -1 unless the adaptive rule ran
         obs.infeasible = infeasible_now;  // handoff 131
         options.observe(obs);
       }
@@ -3087,6 +3226,10 @@ SimpOptimizeResult simp_optimize_stress(const VoxelGrid& grid,
     throw std::invalid_argument(
         "simp_optimize_stress: active_domain_band is not supported on the "
         "stress path");
+  if (options.adaptive_move)
+    throw std::invalid_argument(
+        "simp_optimize_stress: adaptive_move is not supported on the "
+        "stress path (handoff 2026-07-26-adaptive-move)");
   if (!(stress.stress_cap > 0.0))
     throw std::invalid_argument("simp_optimize_stress: stress_cap must be > 0");
   if (!(stress.p_norm > 1.0))

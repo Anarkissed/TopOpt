@@ -711,6 +711,15 @@ if(Eigen3_FOUND)
   target_link_libraries(test_mma PRIVATE topopt)
   add_test(NAME mma COMMAND test_mma)
 
+  # Adaptive move limit (handoff 2026-07-26-adaptive-move): the opt-in adaptive
+  # MMA move limit. Pins OFF byte-identity (plain + masked), the feasibility
+  # guarantee under a grown move, the MMA-only rejection, and that the feature is
+  # wired to the loop. Drives simp_optimize, so Eigen-gated like the other
+  # optimizer tests.
+  add_executable(test_adaptive_move tests/validation/test_adaptive_move.cpp)
+  target_link_libraries(test_adaptive_move PRIVATE topopt)
+  add_test(NAME adaptive_move COMMAND test_adaptive_move)
+
   # MMA projection-gate (Option B): after the M7.mma.4 switchover the run path
   # must NOT enable a Heaviside projection schedule under MMA (simp_optimize
   # rejects it). Pins the pure gate predicate (projection_supported) and both

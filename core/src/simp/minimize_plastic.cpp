@@ -717,6 +717,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         auto probe_step = [&](double step_loose_tol, long long& cg_out) {
           SimpOptions op = opt;
           op.updater = SimpUpdater::OC;   // memoryless: a KKT point maps to itself
+          op.adaptive_move = false;       // OC path: adaptive move is MMA-only (rejected)
           op.cg_tolerance = kCertTol;     // the tight endpoint is always exact (D6)
           op.cg_tolerance_loose = step_loose_tol;  // this step's FEA tolerance
           op.max_iterations = std::max(1, options.draft_probe_iters);

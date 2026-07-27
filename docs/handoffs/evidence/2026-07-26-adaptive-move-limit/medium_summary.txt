@@ -1,0 +1,38 @@
+[M2] BASIN FLOOR — FIXED(1e-8) vs CONTROL(1e-9) terminal design
+     solved grid=32x12x32  solid=5376
+     rung 0 vf=0.68 : class_frac=0.000e+00  mean|drho|=2.115e-11  max|drho|=6.250e-08  (solid=5376)
+     rung 1 vf=0.52 : class_frac=0.000e+00  mean|drho|=3.384e-12  max|drho|=5.185e-09  (solid=5376)
+     rung 2 vf=0.38 : class_frac=0.000e+00  mean|drho|=4.389e-12  max|drho|=8.423e-09  (solid=5376)
+     rung 3 vf=0.26 : class_frac=0.000e+00  mean|drho|=1.922e-11  max|drho|=1.516e-08  (solid=5376)
+     => BASIN FLOOR (max class_frac over rungs) = 0.000e+00
+
+[M3] OUTER ITERATIONS per rung — FIXED vs ADAPT (bar: >=20% fewer)
+     rung  vf    fixed  adapt   delta   pct
+     0     0.68   146    146     +0   +0.0%
+     1     0.52   147    147     +0   +0.0%
+     2     0.38   160    160     +0   +0.0%
+     3     0.26   183    187     -4   -2.2%
+     Σ            636    640     -4   -0.6%
+
+[M4] TERMINAL DESIGN — ADAPT vs FIXED class-change fraction (floor=0.000e+00)
+     rung  vf    class_frac   mean|drho|   max|drho|   solid   verdict
+     0     0.68  3.720e-04   1.106e-04   2.685e-01    5376   DIFFERS (> floor)
+     1     0.52  0.000e+00   1.178e-04   1.511e-01    5376   == within floor
+     2     0.38  0.000e+00   1.087e-05   1.353e-02    5376   == within floor
+     3     0.26  0.000e+00   8.704e-05   4.294e-02    5376   == within floor
+
+[M5] GATE VERDICTS per rung — FIXED vs ADAPT (must be identical)
+     rung  vf    fixed(acc,margin)   adapt(acc,margin)   match
+     0     0.68  (1, 13.909)          (1, 13.909)          verdict OK
+     1     0.52  (1, 13.033)          (1, 13.033)          verdict OK
+     2     0.38  (1, 11.215)          (1, 11.215)          verdict OK
+     3     0.26  (1, 6.470)          (1, 6.469)          verdict OK
+
+[M6] STABILITY — ADAPT move span, mean oscillation, plateau-firing iter (vs FIXED iters)
+     rung  vf    move[min..max] (mean)     osc_mean   adapt_iters  fixed_iters
+     0     0.68  [0.021..0.500] (0.344)   0.125       146          146
+     1     0.52  [0.020..0.500] (0.357)   0.127       147          147
+     2     0.38  [0.020..0.500] (0.355)   0.129       160          160
+     3     0.26  [0.024..0.500] (0.295)   0.185       187          183
+
+[done] CSVs in /tmp/am/medium
