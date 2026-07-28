@@ -206,17 +206,31 @@ public enum ManualPrimitiveDetent {
     /// can then snap onto the snapped axis line); centre snaps to the closest point
     /// target OR the projection onto a snapped primitive/world axis line through its
     /// reference point, whichever is nearer within tolerance.
+    ///
+    /// `leavingAxis` (rotation only): the orientation this drag STARTED from. Any axis
+    /// target within `angleTolDeg` of it is dropped, so a rotation is never magnetically
+    /// pulled straight back onto the direction it is leaving — that snap-back was an 8°
+    /// dead-zone in which the ribbons never turned (2026-07-27 ribbon-rotation fix). Nil
+    /// (the translate path + every prior caller) keeps the original behaviour byte-for-byte:
+    /// the axis still snaps to a NEW principal/bore axis as it approaches one.
     public static func apply(freeCenter: SIMD3<Double>, axis: SIMD3<Double>,
                              targets: [PrimitiveSnapTarget],
                              angleTolDeg: Double = angleTolDeg,
-                             distanceTolMM: Double = distanceTolMM) -> PrimitiveDetentResult {
+                             distanceTolMM: Double = distanceTolMM,
+                             leavingAxis: SIMD3<Double>? = nil) -> PrimitiveDetentResult {
         var snapped: [PrimitiveSnapTarget] = []
         let a = ManualPrimitive.unit(axis)
+        let leaving = leavingAxis.map(ManualPrimitive.unit)
 
         // ── Axis snap: nearest axis target within the angular tolerance. ──
         var bestAxis: (t: PrimitiveSnapTarget, ang: Double)? = nil
         for t in targets where t.kind == .worldAxis || t.kind == .primitiveAxis {
             let d = ManualPrimitive.unit(t.direction)
+            // Skip the orientation the rotation is leaving (see `leavingAxis`), so the drag
+            // is free to turn away from it instead of being snapped back into it.
+            if let leaving, acos(min(1.0, abs(simd_dot(leaving, d)))) * 180.0 / .pi <= angleTolDeg {
+                continue
+            }
             // Direction-agnostic angle (a bolt axis has no polarity): fold to [0,90].
             let c = min(1.0, abs(simd_dot(a, d)))
             let ang = acos(c) * 180.0 / .pi

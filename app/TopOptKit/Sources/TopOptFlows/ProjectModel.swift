@@ -597,12 +597,19 @@ public final class ProjectModel: ObservableObject {
     /// is about the primitive's own origin. Rotation is expressed PURELY by the direction
     /// vector (see `PrimitiveGizmo`'s schema note), so it reaches the run through `spec()`'s
     /// `axisDir`/`normal` with no schema change. Arms undo + refreshes the sidecar (G3).
+    /// `from` is the orientation the drag GRABBED (its start axis). Passing it lets the
+    /// detent drop the world/primitive axis the primitive is already sitting on, so a small
+    /// turn is not snapped straight back to where it started — the 8° dead-zone that made all
+    /// three ribbons read as dead (2026-07-27 ribbon-rotation fix). The axis still snaps to a
+    /// DIFFERENT principal/bore axis as the drag approaches one. `nil` keeps the old behaviour.
     @discardableResult
     public func rotateManualPrimitive(id: UUID, in group: UUID,
-                                      to newAxis: SIMD3<Double>, snap: Bool = true) -> [String] {
+                                      to newAxis: SIMD3<Double>, from startAxis: SIMD3<Double>? = nil,
+                                      snap: Bool = true) -> [String] {
         guard var p = force.manualPrimitives(for: group).first(where: { $0.id == id }) else { return [] }
         let targets = snap ? manualDetentTargets(excluding: id, in: group) : []
-        let result = ManualPrimitiveDetent.apply(freeCenter: p.center, axis: newAxis, targets: targets)
+        let result = ManualPrimitiveDetent.apply(freeCenter: p.center, axis: newAxis,
+                                                 targets: targets, leavingAxis: startAxis)
         p.axis = result.axis                    // keep p.center — rotation is in place
         force.updateManualPrimitive(p, in: group)
         persistClearances()

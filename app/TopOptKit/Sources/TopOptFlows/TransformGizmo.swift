@@ -98,10 +98,12 @@ public enum TransformGizmo {
         // look. Sized together with `WorkspacePlaceholder.gizmoBoxSize` so every handle's
         // on-screen touch target is finger-sized (the point-size math is asserted in
         // TransformGizmoTests.testTouchTargetsAreFingerSized).
-        /// Fat pick radius for the axis arms (perpendicular grab half-width).
-        public var armPickR: Float = 0.19
-        /// Fat pick radius for the free-move hub sphere.
-        public var hubPickR: Float = 0.19
+        /// Fat pick radius for the axis arms (perpendicular grab half-width). Nudged 0.19→0.20
+        /// when the box shrank to 297 so the arm touch target stays ≥ 44 pt (invisible; the drawn
+        /// shaft is still `armR`).
+        public var armPickR: Float = 0.20
+        /// Fat pick radius for the free-move hub sphere (see `armPickR` note).
+        public var hubPickR: Float = 0.20
         /// Fat pick half-width for the rotation ribbons (added to `arcTube`).
         public var arcPickPad: Float = 0.06
 
