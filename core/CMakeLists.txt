@@ -46,6 +46,7 @@ add_library(topopt
   src/simp/warm_start.cpp
   src/simp/observability.cpp
   src/fea/hex_element.cpp
+  src/fea/lattice.cpp
   src/orient/orient.cpp
   src/settings/settings.cpp
   src/settings/report.cpp
@@ -626,6 +627,16 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_analyze_fixed_design PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME analyze_fixed_design COMMAND test_analyze_fixed_design)
+
+  # Lattice certification Phase 1 (handoff 2026-07-27-lattice-certification): the
+  # cubic element (hex8_stiffness_cubic) and lattice solver (fea_solve_cg_lattice)
+  # reduce to the isotropic path bit-for-bit, the octet library returns the measured
+  # tensors, and analyze_fixed_design certifies a composite object — carrying the
+  # homogenized tensor in the lattice region, keeping the gate constant (C4) and the
+  # lattice-OFF path byte-identical (C1). Drives analyze.cpp (Eigen), so gate on Eigen.
+  add_executable(test_lattice_certification tests/validation/test_lattice_certification.cpp)
+  target_link_libraries(test_lattice_certification PRIVATE topopt)
+  add_test(NAME lattice_certification COMMAND test_lattice_certification)
 
   # Width-aware accept-gate knockdown (handoff 2026-07-26-width-aware-knockdown):
   # the SHELL+CORE composite width_aware_knockdown() reproduces 191/192's member-scale

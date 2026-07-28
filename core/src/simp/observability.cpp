@@ -538,7 +538,28 @@ std::string run_info_json(const RunInfo& info) {
   num("iteration_csv", bool_json(info.iteration_csv));
   num("density_snapshots", bool_json(info.density_snapshots));
   num("snapshot_every", fmt_i(info.snapshot_every));
-  num("snapshot_cap", fmt_i(info.snapshot_cap), /*comma=*/false);
+
+  // Lattice certification posture (handoff 2026-07-27-lattice-certification). Emitted
+  // ONLY when a lattice region was certified, so a non-latticed run (every current
+  // run — no job front-end declares a region yet) is byte-for-byte the pre-lattice
+  // record: snapshot_cap stays the last field with no trailing comma and NO lattice
+  // key is written. A latticed run appends a nested "lattice" object with the topology,
+  // cell size, relative-density RANGE and region size, and the strut-strength-
+  // uncertified flag (the margin certifies composite stiffness + solid strength, not
+  // strut strength — Phase 2 de-homogenization).
+  if (info.lattice_present) {
+    num("snapshot_cap", fmt_i(info.snapshot_cap));  // no longer last -> trailing comma
+    std::string lat = "{\"topology\": \"" + info.lattice_topology + "\"";
+    lat += ", \"cell_size_mm\": " + fmt(info.lattice_cell_size_mm);
+    lat += ", \"rho_min\": " + fmt(info.lattice_rho_min);
+    lat += ", \"rho_max\": " + fmt(info.lattice_rho_max);
+    lat += ", \"region_voxels\": " + fmt_ll(info.lattice_region_voxels);
+    lat += ", \"strength_uncertified\": " + bool_json(info.lattice_strength_uncertified);
+    lat += "}";
+    num("lattice", lat, /*comma=*/false);
+  } else {
+    num("snapshot_cap", fmt_i(info.snapshot_cap), /*comma=*/false);  // last field, as before
+  }
 
   s += "}\n";
   return s;

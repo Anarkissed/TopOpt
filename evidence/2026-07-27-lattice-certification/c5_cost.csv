@@ -1,0 +1,4 @@
+case,cells,ndof,solve_ms,note
+solid_macro,27,192,0.5,mask=0 isotropic
+lattice_macro,27,192,0.4,cubic tensor
+resolved_struts,27,352947,5183.4,full strut geometry vpc16

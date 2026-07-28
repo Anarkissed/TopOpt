@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "topopt/fea.hpp"        // DirichletBC, NodalLoad
+#include "topopt/lattice.hpp"    // LatticeTopology (lattice certification)
 #include "topopt/materials.hpp"  // Material
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/report.hpp"     // StressMargin
@@ -31,6 +32,30 @@
 #include "topopt/voxel.hpp"      // VoxelGrid, V3Report
 
 namespace topopt {
+
+// A latticed region for a certification analysis (lattice certification Phase 1,
+// handoff 2026-07-27-lattice-certification). Declares WHICH voxels of the fixed
+// design are filled with a lattice instead of solid material, and at what relative
+// density, so analyze_fixed_design can solve of the REAL composite object — the
+// latticed elements carry the homogenized effective cubic tensor (lattice.hpp), the
+// solid elements are unchanged — rather than of solid material with a scalar infill
+// knockdown bolted on at display. A null LatticePosture* (the default) is the exact
+// pre-lattice path, byte-for-byte.
+//
+// HOW A REGION IS DECLARED is out of scope for this task (the UI / grading-law
+// front-end that fills `mask` and `relative_density` is a separate task). This struct
+// is the in-memory contract the certification engine consumes; no production job path
+// populates it yet, so every current run passes nullptr and is byte-identical.
+struct LatticePosture {
+  LatticeTopology topology = LatticeTopology::Octet;
+  double cell_size_mm = 0.0;  // recorded in the analysis/run_info; not used in the math
+  // grid-indexed (grid.voxel_count()); mask[e] != 0 marks voxel e as latticed.
+  std::vector<char> mask;
+  // grid-indexed; the lattice's LOCAL relative density at voxel e (in the library's
+  // valid range; clamped otherwise). Meaningful only where mask[e] != 0. A uniform
+  // region fills this with one value; the grading law (separate task) fills it graded.
+  std::vector<double> relative_density;
+};
 
 // How the acceptance gate knocks the worst-case stress margin down for a sparse
 // print (handoff 2026-07-26-width-aware-knockdown). Bundles the two postures so a
@@ -96,6 +121,31 @@ struct FixedDesignAnalysis {
   bool non_convergent = false;
   int non_convergent_iteration = 0;
   double non_convergent_residual = 0.0;
+
+  // --- Lattice certification (handoff 2026-07-27-lattice-certification) --------
+  // All false/zero unless a LatticePosture was applied to this analysis (a nullptr
+  // posture leaves every field here at its default and the whole solve byte-identical).
+  //
+  // WHAT THE MARGIN DESCRIBES WITH A LATTICE REGION. The certification solve now
+  // carries the latticed elements' homogenized effective cubic tensor, so the
+  // displacement field, the compliance/STIFFNESS, and the SOLID region's stresses
+  // describe the REAL composite object (a softer lattice load path), not a solid
+  // object with a scalar knockdown. `margin`/`accepted` are the SOLID region's
+  // worst-case STRENGTH margin over that real composite field (the lattice voxels are
+  // excluded from max_von_mises — see below). The lattice region is certified for
+  // STIFFNESS but NOT for strut-level STRENGTH: the recovered lattice stress is the
+  // EFFECTIVE (macro, smeared) stress, which is lower than the peak strut stress by a
+  // stress-concentration factor. Certifying strut strength needs the de-homogenization
+  // step named in handoff 2026-07-26-lattice-homog-phase0 (Phase 2). Hence
+  // `lattice_strength_uncertified` is set whenever a lattice region is present.
+  bool lattice_certified = false;    // a LatticePosture was applied to this solve
+  LatticeTopology lattice_topology = LatticeTopology::Octet;  // recorded posture
+  double lattice_cell_size_mm = 0.0;       // recorded posture cell size
+  std::size_t lattice_voxels = 0;    // # latticed voxels in the printed set
+  double lattice_rho_min = 0.0;      // min relative density used over the region
+  double lattice_rho_max = 0.0;      // max relative density used over the region
+  double lattice_max_effective_vm = 0.0;   // worst EFFECTIVE (macro) von Mises there
+  bool lattice_strength_uncertified = false;  // strut strength not gated (Phase 2)
 };
 
 // Run one certification analysis of `density` on `grid`.
@@ -134,7 +184,7 @@ FixedDesignAnalysis analyze_fixed_design(
     const std::vector<NodalLoad>& loads, const Material& material,
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
-    bool load_path_ok, double part_solid);
+    bool load_path_ok, double part_solid, const LatticePosture* lattice = nullptr);
 
 // The infill margin knockdown seed curve — effective/solid strength ~= f^1.5
 // (Gibson-Ashby), f = infill_percent/100, pinned to EXACTLY 1.0 for f >= 1

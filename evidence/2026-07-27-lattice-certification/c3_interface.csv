@@ -1,0 +1,9 @@
+quantity,target_vf,rho,resolved,homogenized,rel_err_pct
+series_interface_overall,0.30,0.28516,516.3753,514.5639,0.35
+layer_strain_0_solid,0.30,0.28516,0.14575,0.14746,-1.16
+layer_strain_1_solid,0.30,0.28516,0.14578,0.15266,-4.51
+layer_strain_2_solid,0.30,0.28516,0.16976,0.17887,-5.09
+layer_strain_3_octet,0.30,0.28516,1.82397,1.75020,4.21
+layer_strain_4_octet,0.30,0.28516,1.85367,1.86603,-0.66
+layer_strain_5_octet,0.30,0.28516,1.86107,1.90478,-2.29
+free_surface_1cell_vs_3cell,0.30,0.28516,278.3348,274.1050,-1.52

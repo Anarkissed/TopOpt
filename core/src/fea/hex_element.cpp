@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace topopt {
 namespace {
@@ -160,6 +161,40 @@ Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
   return integrate_hex8(D, h);
 }
 
+namespace {
+
+// Build the cubic constitutive matrix D (Voigt [xx,yy,zz,gxy,gyz,gzx], engineering
+// shear) from the three cubic constants and validate physical admissibility. Shared
+// by hex8_stiffness_cubic and hex8_stress_cubic so the two agree on the tensor.
+void cubic_D(double C11, double C12, double C44, double h, const char* who,
+             double D[6][6]) {
+  if (!(h > 0.0))
+    throw std::invalid_argument(std::string(who) + ": element_size must be > 0");
+  // Positive-definiteness of a cubic tensor: the normal block has eigenvalues
+  // C11 - C12 (double) and C11 + 2*C12 (single); the shear block is 3*C44. All
+  // three must be > 0 for a physical (SPD) material.
+  if (!(C44 > 0.0))
+    throw std::invalid_argument(std::string(who) + ": C44 must be > 0");
+  if (!(C11 - C12 > 0.0))
+    throw std::invalid_argument(std::string(who) + ": C11 - C12 must be > 0");
+  if (!(C11 + 2.0 * C12 > 0.0))
+    throw std::invalid_argument(std::string(who) + ": C11 + 2*C12 must be > 0");
+  for (int r = 0; r < 6; ++r)
+    for (int c = 0; c < 6; ++c) D[r][c] = 0.0;
+  D[0][0] = D[1][1] = D[2][2] = C11;
+  D[0][1] = D[0][2] = D[1][0] = D[1][2] = D[2][0] = D[2][1] = C12;
+  D[3][3] = D[4][4] = D[5][5] = C44;
+}
+
+}  // namespace
+
+Hex8Stiffness hex8_stiffness_cubic(double C11, double C12, double C44,
+                                   double element_size) {
+  double D[6][6];
+  cubic_D(C11, C12, C44, element_size, "hex8_stiffness_cubic", D);
+  return integrate_hex8(D, element_size);
+}
+
 Hex8Stress hex8_stress(double youngs_modulus, double poisson,
                        double element_size,
                        const std::array<double, 24>& u_elem, double xi,
@@ -227,6 +262,60 @@ Hex8Stress hex8_stress(double youngs_modulus, double poisson,
     out.sigma[static_cast<std::size_t>(r)] = s;
   }
 
+  const double sxx = out.sigma[0], syy = out.sigma[1], szz = out.sigma[2];
+  const double txy = out.sigma[3], tyz = out.sigma[4], tzx = out.sigma[5];
+  out.von_mises = std::sqrt(
+      0.5 * ((sxx - syy) * (sxx - syy) + (syy - szz) * (syy - szz) +
+             (szz - sxx) * (szz - sxx)) +
+      3.0 * (txy * txy + tyz * tyz + tzx * tzx));
+  return out;
+}
+
+Hex8Stress hex8_stress_cubic(double C11, double C12, double C44,
+                             double element_size,
+                             const std::array<double, 24>& u_elem, double xi,
+                             double eta, double zeta) {
+  double D[6][6];
+  cubic_D(C11, C12, C44, element_size, "hex8_stress_cubic", D);
+
+  // Same isoparametric B (6x24) at (xi,eta,zeta) as hex8_stress.
+  const double h = element_size;
+  const double dnat_to_dx = 2.0 / h;
+  double dNdx[8], dNdy[8], dNdz[8];
+  for (int a = 0; a < 8; ++a) {
+    const double xa = kXi[a], ea = kEta[a], za = kZeta[a];
+    const double dNdxi = 0.125 * xa * (1.0 + eta * ea) * (1.0 + zeta * za);
+    const double dNdeta = 0.125 * ea * (1.0 + xi * xa) * (1.0 + zeta * za);
+    const double dNdzeta = 0.125 * za * (1.0 + xi * xa) * (1.0 + eta * ea);
+    dNdx[a] = dnat_to_dx * dNdxi;
+    dNdy[a] = dnat_to_dx * dNdeta;
+    dNdz[a] = dnat_to_dx * dNdzeta;
+  }
+  double B[6][24] = {};
+  for (int a = 0; a < 8; ++a) {
+    const int cx = 3 * a, cy = 3 * a + 1, cz = 3 * a + 2;
+    B[0][cx] = dNdx[a];
+    B[1][cy] = dNdy[a];
+    B[2][cz] = dNdz[a];
+    B[3][cx] = dNdy[a];
+    B[3][cy] = dNdx[a];
+    B[4][cy] = dNdz[a];
+    B[4][cz] = dNdy[a];
+    B[5][cx] = dNdz[a];
+    B[5][cz] = dNdx[a];
+  }
+  double strain[6];
+  for (int r = 0; r < 6; ++r) {
+    double s = 0.0;
+    for (int col = 0; col < 24; ++col) s += B[r][col] * u_elem[col];
+    strain[r] = s;
+  }
+  Hex8Stress out;
+  for (int r = 0; r < 6; ++r) {
+    double s = 0.0;
+    for (int m = 0; m < 6; ++m) s += D[r][m] * strain[m];
+    out.sigma[static_cast<std::size_t>(r)] = s;
+  }
   const double sxx = out.sigma[0], syy = out.sigma[1], szz = out.sigma[2];
   const double txy = out.sigma[3], tyz = out.sigma[4], tzx = out.sigma[5];
   out.von_mises = std::sqrt(

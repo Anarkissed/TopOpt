@@ -362,6 +362,22 @@ struct RunInfo {
   bool density_snapshots = false;
   int snapshot_every = 0;
   int snapshot_cap = 0;
+  // Lattice certification posture (handoff 2026-07-27-lattice-certification). When
+  // `lattice_present` is false (every current run — no job front-end declares a
+  // lattice region yet) the serializer emits `"lattice": null`, so a non-latticed
+  // run's meaningful record is unchanged. When a certification carried a lattice
+  // region, these echo WHAT was latticed and HOW: the topology, the cell size, the
+  // relative-density RANGE over the region, and the region's voxel count. The margin
+  // such a run reports certifies the composite object's STIFFNESS and the SOLID
+  // region's strength; the lattice region's strut-level strength is NOT gated (Phase 2
+  // de-homogenization) — see FixedDesignAnalysis::lattice_strength_uncertified.
+  bool lattice_present = false;
+  std::string lattice_topology;      // "octet" (only topology this task ships)
+  double lattice_cell_size_mm = 0.0;
+  double lattice_rho_min = 0.0;
+  double lattice_rho_max = 0.0;
+  long long lattice_region_voxels = 0;
+  bool lattice_strength_uncertified = false;
 };
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's
