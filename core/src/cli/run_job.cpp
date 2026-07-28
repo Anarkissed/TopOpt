@@ -900,6 +900,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.cg_multigrid = result.pipeline.used_multigrid;
     run_info.mg_levels = result.pipeline.mg_levels;
     run_info.cg_multigrid_observed = true;  // outcome now known -> emit real values
+    // Lattice certification posture (handoff 2026-07-27-lattice-certification): the
+    // RunInfo record CARRIES the posture (topology / cell size / rho range / region
+    // size), and the serializer emits it when `lattice_present`. It is left unset here
+    // because the optimize path's certification lives inside the minimize_plastic
+    // pipeline (no FixedDesignAnalysis is surfaced at this level) AND no production job
+    // declares a lattice region yet — the region/grading front-end is a separate task.
+    // So every current run emits NO lattice key and run_info.json is byte-identical.
+    // The certification ENGINE records the full posture in FixedDesignAnalysis today;
+    // surfacing it here is a mechanical copy once a posture reaches this level.
     // Handoff 128 — the run-level fallback mode. Only meaningful for a multigrid
     // solver; for JacobiCG leave mg_mode empty (serialized null). "carried" when
     // MG carried the run; otherwise "stagnated-latched" if a hierarchy ever built

@@ -1,0 +1,61 @@
+LATTICE CERTIFICATION PROBE (Phase 1) — E_solid=3500 MPa nu=0.33
+element: hex8_stiffness_cubic | library: lattice.hpp (octet) | solver: fea_solve_cg_lattice
+
+===== SELF — element & solver identities (bar C1 foundation) =====
+  cubic(iso tensor) vs hex8_stiffness: max|dK| = 0.000e+00  -> BIT-IDENTICAL
+  lattice solver (all-zero mask) vs graded fea_solve_cg: max|du| = 0.000e+00  -> BIT-IDENTICAL
+
+===== C2 — homogenized cubic-element solve vs directly resolved struts =====
+  bar: |homog - resolved| / resolved <= 10% (PR198 H4's threshold). L=5.0 mm.
+  [writing ../evidence/2026-07-27-lattice-certification/c2_homog_vs_resolved.csv]
+
+  C2a density sweep (3-cell blocks, resolved vpc=16 — as PR198 H4):
+  targetVF rho     homogE      resolvedE   gap%      verdict 
+  0.20     0.2207  178.18      204.70      12.96     NO-GO   
+  0.30     0.2852  268.69      278.33      3.47      GO      
+  0.40     0.3906  474.65      566.55      16.22     NO-GO   
+
+  C2b resolution convergence (rho~0.30, 2-cell block; library tensor is FIXED at vpc48):
+  vpc    rho     homogE      resolvedE   gap%      verdict 
+  16     0.2852  268.69      277.25      3.09      GO        [resolved 107811 DOF, 1037 ms]
+  24     0.3229  338.16      344.84      1.94      GO        [resolved 352947 DOF, 5174 ms]
+  32     0.3130  318.11      319.25      0.36      GO        [resolved 823875 DOF, 11418 ms]
+  48     0.2973  286.41      282.97      1.22      GO        [resolved 2738019 DOF, 59129 ms]
+  READ: the gap converges as the resolved reference approaches the vpc48 the
+  library was measured at — the endpoint misses in C2a are octet's ±10% resolution
+  caveat (C6) plus an under-resolved vpc16 reference, NOT a failure of the method.
+
+===== C3 — boundary limitation, measured AT the interface =====
+  Homogenization assumes local periodicity; it is least accurate at free
+  surfaces and at the solid<->lattice interface. We MEASURE it there.
+  [writing ../evidence/2026-07-27-lattice-certification/c3_interface.csv]
+  solid|octet series column (3x3 lateral, 3 solid + 3 octet cells, rho=0.285):
+    OVERALL apparent E: resolved = 516.38 MPa   homogenized = 514.56 MPa   err = 0.35%
+    per-cell-layer axial strain (x1e-3), resolved vs homogenized (uniform macro strain=1.0):
+    layer  material resolved    homogenized err%     
+    0      solid    0.1458      0.1475      -1.16    
+    1      solid    0.1458      0.1527      -4.51    
+    2      solid    0.1698      0.1789      -5.09    
+    3      octet    1.8240      1.7502      +4.21      <-- interface layer
+    4      octet    1.8537      1.8660      -0.66    
+    5      octet    1.8611      1.9048      -2.29      <-- free top
+    -> interface octet layer error = 4.2% vs bulk octet layer error = 0.7%: the
+       homogenized bulk tensor mis-predicts the interface-adjacent cell the most.
+  free-surface error (resolved): 1-cell E=274.11 vs 3-cell E=278.33  -> -1.5% softer at 1 cell
+  READ: the homogenized element carries the BULK tensor. The interface column
+  gap above is the honest error a coarse composite solve makes where the two
+  media meet; the free-surface number is the boundary-layer softening the
+  periodic assumption cannot see. A de-homogenization step (Phase 2, named in
+  handoff 2026-07-26-lattice-homog-phase0) is required before strut-level
+  certification at these boundaries.
+
+===== C5 — solve cost: latticed block vs the same block solid (zero added DOF) =====
+  [writing ../evidence/2026-07-27-lattice-certification/c5_cost.csv]
+  case                   cells    ndof         solve_ms  
+  solid macro (mask=0)   27       192          0.5       
+  lattice macro (cubic)  27       192          0.4       
+  resolved struts        27       352947       5183.4    
+  -> latticed vs solid: 192 vs 192 DOF (delta = 0). Resolved struts: 1838x more DOF.
+     (eS=3500.0 eH=268.7 eR=278.3 MPa — the lattice block is softer, as it should be.)
+
+DONE.

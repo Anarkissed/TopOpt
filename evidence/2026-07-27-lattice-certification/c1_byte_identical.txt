@@ -1,0 +1,24 @@
+C1 — LATTICE OFF IS BYTE-IDENTICAL (proof against a stashed pre-change build)
+============================================================================
+Method: lattice_parity_probe.cpp calls analyze_fixed_design WITHOUT a lattice
+argument (the pre-lattice call, which compiles against both headers) on a fixed
+deterministic design (16x8x8, graded density in [0.30,0.98], clamped x=0 face,
+tip load -z, PLA-like material, default scalar knockdown). It FNV-1a hashes every
+certification output: von_mises_field, stress_tensor_field, displacement_field,
+mass_grams, support_volume_voxels, printed_voxels, printed_fraction, max_von_mises,
+max_interlayer_tension, margin.{in_plane,interlayer,worst_case}, margin_effective,
+v3.min_feature_violations, accepted.
+
+  POST-CHANGE build (current):  PARITY_FNV 49f41d08663177f8
+                                mass=0.895280000 maxvm=227.821723541
+                                worst=0.219469852 eff=0.219469852 acc=1 printed=722
+
+  PRE-CHANGE build (git stash): PARITY_FNV 49f41d08663177f8
+                                mass=0.895280000 maxvm=227.821723541
+                                worst=0.219469852 eff=0.219469852 acc=1 printed=722
+
+  IDENTICAL. The lattice-OFF path (LatticePosture* == nullptr) is byte-for-byte
+  the pre-change certification gate. Corroborated by the full regression suite:
+  analyze_fixed_design, fea_assembly, hex_element, fea_matfree, fea_mgcg_matfree,
+  galerkin_cache, nonconvergence_rejection, stress, traction_loads,
+  production_parity, materials_loader — 12/12 pass unchanged.

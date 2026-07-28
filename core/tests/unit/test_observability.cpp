@@ -247,6 +247,32 @@ int main() {
     // Also exercise the on-disk writer.
     write_run_info(tmp + "/run_info.json", info);
     check(read_all(tmp + "/run_info.json") == js, "write_run_info == run_info_json");
+
+    // Lattice certification posture (handoff 2026-07-27-lattice-certification). A
+    // non-latticed run (every current run) emits NO lattice key at all — its record is
+    // byte-for-byte the pre-lattice record; a latticed run appends a "lattice" object.
+    check(js.find("\"lattice\"") == std::string::npos,
+          "run_info omits the lattice key entirely when no region is latticed");
+    RunInfo latt = info;
+    latt.lattice_present = true;
+    latt.lattice_topology = "octet";
+    latt.lattice_cell_size_mm = 8.0;
+    latt.lattice_rho_min = 0.20;
+    latt.lattice_rho_max = 0.45;
+    latt.lattice_region_voxels = 4096;
+    latt.lattice_strength_uncertified = true;
+    const std::string ljs = run_info_json(latt);
+    check(ljs.find("\"topology\": \"octet\"") != std::string::npos,
+          "run_info lattice topology echoed");
+    check(ljs.find("\"cell_size_mm\": 8") != std::string::npos,
+          "run_info lattice cell size echoed");
+    check(ljs.find("\"rho_min\": 0.2") != std::string::npos &&
+          ljs.find("\"rho_max\": 0.45") != std::string::npos,
+          "run_info lattice relative-density range echoed");
+    check(ljs.find("\"region_voxels\": 4096") != std::string::npos,
+          "run_info lattice region size echoed");
+    check(ljs.find("\"strength_uncertified\": true") != std::string::npos,
+          "run_info lattice strut-strength-uncertified flag echoed");
   }
 
   if (g_failures == 0) {

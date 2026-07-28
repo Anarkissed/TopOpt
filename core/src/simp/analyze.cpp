@@ -1,5 +1,6 @@
 #include "topopt/analyze.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -87,8 +88,37 @@ FixedDesignAnalysis analyze_fixed_design(
     const std::vector<NodalLoad>& loads, const Material& material,
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
-    bool load_path_ok, double part_solid) {
+    bool load_path_ok, double part_solid, const LatticePosture* lattice) {
   FixedDesignAnalysis out;
+
+  // --- Lattice certification (handoff 2026-07-27-lattice-certification) --------
+  // When a LatticePosture is supplied, the certification solve carries each latticed
+  // voxel's homogenized effective cubic tensor (fea_solve_cg_lattice) instead of the
+  // scalar-penalized isotropic modulus, so the solve is of the REAL composite object.
+  // A null posture (the default, every current caller) skips ALL of this and the
+  // function is byte-for-byte the pre-lattice path. Validate the posture arrays here.
+  const bool has_lattice = (lattice != nullptr);
+  std::vector<char> lat_mask;
+  std::vector<double> lat_c11, lat_c12, lat_c44;
+  if (has_lattice) {
+    const std::size_t nv = grid.voxel_count();
+    if (lattice->mask.size() != nv || lattice->relative_density.size() != nv)
+      throw std::invalid_argument(
+          "analyze_fixed_design: LatticePosture mask/relative_density size != "
+          "voxel_count");
+    lat_mask = lattice->mask;
+    lat_c11.assign(nv, 0.0);
+    lat_c12.assign(nv, 0.0);
+    lat_c44.assign(nv, 0.0);
+    for (std::size_t e = 0; e < nv; ++e) {
+      if (!lat_mask[e]) continue;
+      const CubicTensor T = lattice_cubic_tensor(
+          lattice->topology, lattice->relative_density[e], params.youngs_modulus);
+      lat_c11[e] = T.C11;
+      lat_c12[e] = T.C12;
+      lat_c44[e] = T.C44;
+    }
+  }
 
   // Penalized solve on the FIXED density to recover the displacement field. The
   // certification solve is stateless (no warm start, no cached solver) so a
@@ -104,9 +134,31 @@ FixedDesignAnalysis analyze_fixed_design(
   // propagate.
   SimpCompliance sc;
   try {
-    sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
-                         cg_max_iterations, /*initial_guess=*/nullptr,
-                         /*solver=*/nullptr, solver_kind);
+    if (has_lattice) {
+      // Composite solve: solid voxels use the scalar-penalized isotropic modulus
+      // E(rho) (bit-identical to what simp_compliance builds for them); latticed
+      // voxels use their cubic tensor. This is the ASSEMBLED Jacobi-CG path
+      // (fea_solve_cg_lattice) — the production accelerator paths (matrix-free,
+      // multigrid) remain scalar-modulus, so a latticed certification is assembled
+      // regardless of `solver_kind` (see the handoff's scope note). The gate still
+      // runs at the caller's tight `cg_tolerance`, UNCHANGED.
+      std::vector<double> elem_youngs(grid.voxel_count(), 0.0);
+      for (int k = 0; k < grid.nz; ++k)
+        for (int j = 0; j < grid.ny; ++j)
+          for (int i = 0; i < grid.nx; ++i) {
+            if (!grid.solid(i, j, k)) continue;
+            const std::size_t e = grid.index(i, j, k);
+            if (!lat_mask[e]) elem_youngs[e] = simp_youngs(params, density[e]);
+          }
+      sc.solution = fea_solve_cg_lattice(grid, elem_youngs, lat_mask, lat_c11,
+                                         lat_c12, lat_c44, params.poisson, bcs,
+                                         loads, cg_tolerance, cg_max_iterations,
+                                         &sc.cg);
+    } else {
+      sc = simp_compliance(grid, params, density, bcs, loads, cg_tolerance,
+                           cg_max_iterations, /*initial_guess=*/nullptr,
+                           /*solver=*/nullptr, solver_kind);
+    }
   } catch (const SolverNonConvergence& e) {
     out.non_convergent = true;
     out.non_convergent_iteration = e.iterations;
@@ -149,33 +201,65 @@ FixedDesignAnalysis analyze_fixed_design(
     member_width_mm = local_member_thickness_mm(grid, density, kIso,
                                                 kWidthAwareThicknessCapVoxels);
 
+  // Lattice accounting (all inert when has_lattice is false). `effective_material`
+  // is the mass-bearing volume in voxel-equivalents: a solid printed voxel counts 1,
+  // a latticed printed voxel counts its relative density (the lattice fills only that
+  // fraction of the envelope). A latticed voxel's stress is the EFFECTIVE (macro)
+  // stress and is EXCLUDED from the solid strength maxima (max_von_mises,
+  // max_von_mises_eff) and from the interlayer field — its strut-level strength is not
+  // certifiable from the macro stress (Phase 2). It IS recorded in the fields.
+  double effective_material = 0.0;
+  std::size_t lattice_voxels = 0;
+  double lat_rho_lo = 1e300, lat_rho_hi = -1e300, lat_max_vm = 0.0;
+
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         if (!grid.solid(i, j, k)) continue;
-        if (!(density[grid.index(i, j, k)] > kIso)) continue;
+        const std::size_t idx = grid.index(i, j, k);
+        if (!(density[idx] > kIso)) continue;
         ++printed_voxels;
+        const bool is_lat = has_lattice && lat_mask[idx];
         const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
         for (int n : en) node_printed[static_cast<std::size_t>(n)] = 1;
         const std::array<double, 24> ue = element_dofs(grid, sc.solution, i, j, k);
-        const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson,
-                                          grid.spacing, ue);
-        stress[grid.index(i, j, k)] = st.sigma;
-        out.von_mises_field[grid.index(i, j, k)] = st.von_mises;
-        if (knockdown.width_aware) {
-          // k_v in (0, 1] (wall_area_fraction in [0,1], core knockdown >= floor),
-          // so vm/k_v never divides by zero and only ever inflates the stress.
-          const double k_v = width_aware_knockdown(
-              knockdown.infill_percent, member_width_mm[grid.index(i, j, k)],
-              knockdown.wall_thickness_mm);
-          const double vm_eff = st.von_mises / k_v;
-          if (vm_eff > max_von_mises_eff) max_von_mises_eff = vm_eff;
+        const std::size_t base = 6 * idx;
+        if (is_lat) {
+          // EFFECTIVE (macro) stress of the latticed element — its own cubic tensor.
+          const Hex8Stress st = hex8_stress_cubic(lat_c11[idx], lat_c12[idx],
+                                                  lat_c44[idx], grid.spacing, ue);
+          out.von_mises_field[idx] = st.von_mises;
+          for (int c = 0; c < 6; ++c)
+            out.stress_tensor_field[base + static_cast<std::size_t>(c)] =
+                st.sigma[static_cast<std::size_t>(c)];
+          // `stress[idx]` stays zero -> excluded from interlayer. Excluded from the
+          // solid strength maxima too. Tracked separately.
+          ++lattice_voxels;
+          const double rho = lattice->relative_density[idx];
+          lat_rho_lo = std::min(lat_rho_lo, rho);
+          lat_rho_hi = std::max(lat_rho_hi, rho);
+          lat_max_vm = std::max(lat_max_vm, st.von_mises);
+          effective_material += rho;
+        } else {
+          const Hex8Stress st = hex8_stress(params.youngs_modulus, params.poisson,
+                                            grid.spacing, ue);
+          stress[idx] = st.sigma;
+          out.von_mises_field[idx] = st.von_mises;
+          if (knockdown.width_aware) {
+            // k_v in (0, 1] (wall_area_fraction in [0,1], core knockdown >= floor),
+            // so vm/k_v never divides by zero and only ever inflates the stress.
+            const double k_v = width_aware_knockdown(
+                knockdown.infill_percent, member_width_mm[idx],
+                knockdown.wall_thickness_mm);
+            const double vm_eff = st.von_mises / k_v;
+            if (vm_eff > max_von_mises_eff) max_von_mises_eff = vm_eff;
+          }
+          for (int c = 0; c < 6; ++c)
+            out.stress_tensor_field[base + static_cast<std::size_t>(c)] =
+                st.sigma[static_cast<std::size_t>(c)];
+          if (st.von_mises > max_von_mises) max_von_mises = st.von_mises;
+          effective_material += 1.0;
         }
-        const std::size_t base = 6 * grid.index(i, j, k);
-        for (int c = 0; c < 6; ++c)
-          out.stress_tensor_field[base + static_cast<std::size_t>(c)] =
-              st.sigma[static_cast<std::size_t>(c)];
-        if (st.von_mises > max_von_mises) max_von_mises = st.von_mises;
       }
   const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
 
@@ -192,9 +276,12 @@ FixedDesignAnalysis analyze_fixed_design(
 
   // Printed mass = material density (g/cm^3) * printed volume. Volumes are mm^3;
   // 1 cm^3 = 1000 mm^3, so divide by 1000 to land in grams. Spacing-aware.
+  // `effective_material` is the mass-bearing volume in voxel-equivalents: a solid
+  // printed voxel contributes 1, a latticed one contributes its relative density.
+  // With no lattice region it equals printed_voxels exactly (a sum of 1.0's), so the
+  // mass is byte-identical to the pre-lattice path.
   out.mass_grams = material.density_g_cm3 *
-                   (static_cast<double>(printed_voxels) * grid.voxel_volume()) /
-                   1000.0;
+                   (effective_material * grid.voxel_volume()) / 1000.0;
 
   // Support-volume proxy for the analysed build direction over THIS design's
   // printed geometry: mark non-printed voxels Empty in a copy and count overhangs.
@@ -254,6 +341,21 @@ FixedDesignAnalysis analyze_fixed_design(
   out.margin = margin;
   out.margin_effective = margin_effective;
   out.accepted = load_path_ok && margin_ok;
+
+  // Lattice reporting (all default when no posture was applied). `margin`/`accepted`
+  // above are the SOLID region's strength over the real composite field; the lattice
+  // region contributed its true (softer) stiffness to that field but its strut-level
+  // strength is NOT gated here (Phase 2 de-homogenization). See FixedDesignAnalysis.
+  if (has_lattice) {
+    out.lattice_certified = true;
+    out.lattice_topology = lattice->topology;
+    out.lattice_cell_size_mm = lattice->cell_size_mm;
+    out.lattice_voxels = lattice_voxels;
+    out.lattice_rho_min = lattice_voxels ? lat_rho_lo : 0.0;
+    out.lattice_rho_max = lattice_voxels ? lat_rho_hi : 0.0;
+    out.lattice_max_effective_vm = lat_max_vm;
+    out.lattice_strength_uncertified = (lattice_voxels > 0);
+  }
   return out;
 }
 

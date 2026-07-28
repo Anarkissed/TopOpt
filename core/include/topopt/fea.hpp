@@ -66,6 +66,25 @@ Hex8Stiffness hex8_stiffness(double youngs_modulus, double poisson,
 Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
                                         double element_size, double z_knockdown);
 
+// Cubic (anisotropic) 8-node hexahedral element stiffness (lattice certification,
+// handoff 2026-07-27-lattice-certification). The constitutive law is a CUBIC
+// material — three independent constants C11, C12, C44 in Voigt order
+// [xx,yy,zz,gxy,gyz,gzx] with ENGINEERING shear — the effective (homogenized)
+// stiffness tensor of a cubic-symmetric periodic lattice cell (PR 198's library):
+//   D[0..2][0..2] = C11 on the diagonal, C12 off-diagonal (the normal block);
+//   D[3][3] = D[4][4] = D[5][5] = C44 (the engineering-shear block).
+// The cell axes are the grid axes (the lattice is generated aligned to the voxel
+// grid), so no rotation of the tensor is needed. This is the SAME 2x2x2-Gauss
+// integrator, DOF order and Voigt convention as hex8_stiffness; it differs ONLY in
+// D. A cubic material with C44 == (C11 - C12)/2 IS isotropic, and passing the
+// isotropic triplet (C11 = c(1-nu), C12 = c*nu, C44 = E/(2(1+nu))) reproduces
+// hex8_stiffness(E, nu, element_size) bit-for-bit (identical D → identical Ke), so
+// isotropic is the exact special case. Throws std::invalid_argument on a
+// non-physical element size or a non-positive-definite cubic tensor (the physical
+// admissibility conditions C11 > |C12|, C11 + 2*C12 > 0, C44 > 0).
+Hex8Stiffness hex8_stiffness_cubic(double C11, double C12, double C44,
+                                   double element_size);
+
 // Cauchy stress recovered at one point of a Hex8 element from its nodal
 // displacements. `sigma` is Voigt order [xx, yy, zz, xy, yz, zx] with TRUE shear
 // stresses (tau, not doubled). `von_mises` is the scalar von Mises equivalent
@@ -85,6 +104,20 @@ Hex8Stress hex8_stress(double youngs_modulus, double poisson,
                        double element_size,
                        const std::array<double, 24>& u_elem, double xi = 0.0,
                        double eta = 0.0, double zeta = 0.0);
+
+// Cubic-material counterpart of hex8_stress (lattice certification). Recovers the
+// EFFECTIVE (homogenized, macro) Cauchy stress sigma = C : strain of a latticed
+// element from its nodal displacements, using the same cubic (C11, C12, C44)
+// constitutive matrix as hex8_stiffness_cubic. This is the SMEARED continuum stress
+// of the effective medium — NOT the peak strut stress inside the cell, which is
+// higher by a stress-concentration factor and is the subject of the de-homogenization
+// step named in handoff 2026-07-26-lattice-homog-phase0 (Phase 2). Same DOF order,
+// Voigt convention and centroid default as hex8_stress. Throws std::invalid_argument
+// on the same admissibility conditions as hex8_stiffness_cubic.
+Hex8Stress hex8_stress_cubic(double C11, double C12, double C44,
+                             double element_size,
+                             const std::array<double, 24>& u_elem, double xi = 0.0,
+                             double eta = 0.0, double zeta = 0.0);
 
 // ---------------------------------------------------------------------------
 // Global linear-elastic system over a voxel grid (ROADMAP M2.2).
@@ -329,6 +362,42 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid,
                          double tolerance = 1e-8, int max_iterations = 0,
                          CgInfo* info = nullptr,
                          const FeaSolution* initial_guess = nullptr);
+
+// Heterogeneous ISOTROPIC-OR-CUBIC solve (lattice certification, handoff
+// 2026-07-27-lattice-certification). Solves the SAME BC-reduced, void-gated
+// Jacobi-CG system as the graded fea_solve_cg — same free-DOF numbering, same M3.1
+// void-DOF gate, same relative-residual stopping criterion — but a solid voxel MAY
+// carry a full CUBIC element stiffness instead of the scalar-scaled isotropic one.
+// Per solid voxel e (grid.index):
+//   * lattice_mask[e] == 0  -> the element is youngs_per_voxel[e] * hex8_stiffness(1,
+//     poisson, spacing), i.e. BIT-IDENTICAL to the graded fea_solve_cg for that voxel
+//     (the SOLID region's path is unchanged); lattice_c11/c12/c44[e] are ignored.
+//   * lattice_mask[e] != 0  -> the element is hex8_stiffness_cubic(lattice_c11[e],
+//     lattice_c12[e], lattice_c44[e], spacing): the homogenized effective cubic tensor
+//     of the lattice cell at that voxel. youngs_per_voxel[e] is ignored.
+//
+// This adds ZERO degrees of freedom over a solid solve of the same grid — the lattice
+// is represented by a softer, anisotropic MATERIAL on the same macro element, not by
+// resolving the struts (which is what the homogenization buys, handoff
+// 2026-07-26-lattice-homog-phase0). With an all-zero lattice_mask the result is the
+// graded fea_solve_cg BIT-FOR-BIT (the cubic arrays are never read), so a job with no
+// latticed region is byte-identical to today.
+//
+// All of youngs_per_voxel, lattice_mask, lattice_c11, lattice_c12, lattice_c44 have
+// size grid.voxel_count(). Throws std::invalid_argument on a size mismatch, a
+// non-positive isotropic modulus on a non-lattice solid voxel, or a non-physical
+// cubic tensor on a lattice voxel (hex8_stiffness_cubic's admissibility). Throws
+// SolverNonConvergence / std::runtime_error on the same solver conditions as
+// fea_solve_cg. This is the ASSEMBLED Jacobi-CG path only (no multigrid, no
+// matrix-free): the production accelerator paths remain scalar-modulus — see the
+// handoff's scope note.
+FeaSolution fea_solve_cg_lattice(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    const std::vector<char>& lattice_mask, const std::vector<double>& lattice_c11,
+    const std::vector<double>& lattice_c12, const std::vector<double>& lattice_c44,
+    double poisson, const std::vector<DirichletBC>& bcs,
+    const std::vector<NodalLoad>& loads, double tolerance = 1e-8,
+    int max_iterations = 0, CgInfo* info = nullptr);
 
 // Geometric-multigrid-preconditioned CG variants of fea_solve_cg (handoff 072).
 // These solve the IDENTICAL BC-reduced, void-gated system Ku=f as fea_solve_cg,

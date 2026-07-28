@@ -547,6 +547,124 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid,
   return solve_reduced_cg(s, tolerance, max_iterations, info, initial_guess);
 }
 
+namespace {
+
+// Lattice-aware reduced assembly (lattice certification). Mirrors
+// assemble_reduced's graded path EXACTLY — same triplet order, same P selection,
+// same K*P^T then P*(...) product sequence — so that when no voxel is a lattice
+// voxel it produces the bit-identical ReducedSystem the graded fea_solve_cg does.
+// The ONLY difference is the per-element stiffness: a lattice voxel scatters a full
+// cubic element (hex8_stiffness_cubic) instead of factor * K_unit_iso.
+ReducedSystem assemble_reduced_lattice(
+    const VoxelGrid& grid, double poisson,
+    const std::vector<double>& youngs_per_voxel,
+    const std::vector<char>& lattice_mask, const std::vector<double>& c11,
+    const std::vector<double>& c12, const std::vector<double>& c44,
+    const std::vector<DirichletBC>& bcs, const std::vector<NodalLoad>& loads) {
+  const char* who = "fea_solve_cg_lattice";
+  const std::size_t nv = grid.voxel_count();
+  if (youngs_per_voxel.size() != nv || lattice_mask.size() != nv ||
+      c11.size() != nv || c12.size() != nv || c44.size() != nv)
+    throw std::invalid_argument(
+        std::string(who) + ": a per-voxel array size != voxel_count");
+
+  const int num_nodes = fea_node_count(grid);
+  const int ndof = 3 * num_nodes;
+
+  // The isotropic unit element (identical to the graded path): a non-lattice solid
+  // voxel scatters youngs_per_voxel[e] * K_unit_iso, bit-for-bit as fea_solve_cg.
+  const Hex8Stiffness Ke_iso = hex8_stiffness(1.0, poisson, grid.spacing);
+
+  std::vector<Eigen::Triplet<double>> trips;
+  trips.reserve(static_cast<std::size_t>(grid.solid_count()) * 576);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t e = grid.index(i, j, k);
+        const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+        int edof[24];
+        for (int a = 0; a < 8; ++a)
+          for (int c = 0; c < 3; ++c) edof[3 * a + c] = 3 * en[a] + c;
+        if (lattice_mask[e]) {
+          // Lattice voxel: full cubic element. hex8_stiffness_cubic validates the
+          // tensor's positive-definiteness and throws on a non-physical tensor.
+          const Hex8Stiffness Kc =
+              hex8_stiffness_cubic(c11[e], c12[e], c44[e], grid.spacing);
+          for (int r = 0; r < 24; ++r)
+            for (int c = 0; c < 24; ++c)
+              trips.emplace_back(edof[r], edof[c], Kc(r, c));
+        } else {
+          const double factor = youngs_per_voxel[e];
+          if (!(factor > 0.0))
+            throw std::invalid_argument(
+                std::string(who) +
+                ": per-voxel Young's modulus must be > 0 on a solid voxel");
+          for (int r = 0; r < 24; ++r)
+            for (int c = 0; c < 24; ++c)
+              trips.emplace_back(edof[r], edof[c], factor * Ke_iso(r, c));
+        }
+      }
+  SpMat K(ndof, ndof);
+  K.setFromTriplets(trips.begin(), trips.end());
+
+  Vec f = Vec::Zero(ndof);
+  for (const NodalLoad& l : loads) {
+    if (l.node < 0 || l.node >= num_nodes || l.component < 0 || l.component > 2)
+      throw std::invalid_argument(std::string(who) + ": load index out of range");
+    f[3 * l.node + l.component] += l.value;
+  }
+
+  std::vector<char> fixed(static_cast<std::size_t>(ndof), 0);
+  Vec up = Vec::Zero(ndof);
+  for (const DirichletBC& bc : bcs) {
+    if (bc.node < 0 || bc.node >= num_nodes || bc.component < 0 ||
+        bc.component > 2)
+      throw std::invalid_argument(std::string(who) + ": BC index out of range");
+    const int dof = 3 * bc.node + bc.component;
+    fixed[static_cast<std::size_t>(dof)] = 1;
+    up[dof] = bc.value;
+  }
+
+  const Vec rhs_full = f - K * up;
+
+  ReducedSystem out;
+  out.ndof = ndof;
+  out.up = up;
+  out.freedofs.reserve(static_cast<std::size_t>(ndof));
+  for (int d = 0; d < ndof; ++d)
+    if (!fixed[static_cast<std::size_t>(d)]) out.freedofs.push_back(d);
+  const int nf = static_cast<int>(out.freedofs.size());
+
+  if (nf > 0) {
+    SpMat P(nf, ndof);
+    std::vector<Eigen::Triplet<double>> ptrips;
+    ptrips.reserve(static_cast<std::size_t>(nf));
+    for (int r = 0; r < nf; ++r) ptrips.emplace_back(r, out.freedofs[r], 1.0);
+    P.setFromTriplets(ptrips.begin(), ptrips.end());
+    const SpMat KPt = K * P.transpose();
+    out.Kff = P * KPt;
+    out.Kff.makeCompressed();
+    out.rf = P * rhs_full;
+  }
+  return out;
+}
+
+}  // namespace
+
+FeaSolution fea_solve_cg_lattice(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    const std::vector<char>& lattice_mask, const std::vector<double>& lattice_c11,
+    const std::vector<double>& lattice_c12, const std::vector<double>& lattice_c44,
+    double poisson, const std::vector<DirichletBC>& bcs,
+    const std::vector<NodalLoad>& loads, double tolerance, int max_iterations,
+    CgInfo* info) {
+  ReducedSystem s = assemble_reduced_lattice(
+      grid, poisson, youngs_per_voxel, lattice_mask, lattice_c11, lattice_c12,
+      lattice_c44, bcs, loads);
+  return solve_reduced_cg(s, tolerance, max_iterations, info);
+}
+
 // ---------------------------------------------------------------------------
 // PenalizedSolver: assemble the BC-reduced, void-gated stiffness PATTERN once,
 // then per solve only rescale the cached values and warm-start CG. See the
