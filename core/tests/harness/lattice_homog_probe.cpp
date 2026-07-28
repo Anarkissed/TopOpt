@@ -705,6 +705,64 @@ void H3_convergence(double L, int vpc, double tvf) {
 }
 
 // =========================================================================
+// H3B — DIRECT free-surface convergence, K = 1,2,3,5,7. Fills the column the
+// original H3 left at 0.0 for K>3 (line 668 short-circuited the direct solve to
+// a literal 0.0 above 3 cells; it was a hardcoded skip, not a solver result).
+// Periodic bulk is K-independent and exact, so it is computed ONCE from K=1 and
+// reused; only the DIRECT solves run per K. CSV flushed per row so a slow K=7
+// cannot lose K=5.
+// =========================================================================
+void H3B_direct_convergence(double L, int vpc, double tvf) {
+  std::printf("\n===== H3B DIRECT free-surface convergence — K=1,2,3,5,7 (L=%.1f mm, vpc=%d, rho~%.2f) =====\n",
+              L, vpc, tvf);
+  std::printf("  periodic bulk computed ONCE from K=1 (exact, K-independent); direct solve run per K.\n");
+  FILE* csv = csv_open("h3b_direct_convergence.csv");
+  if (csv)
+    std::fprintf(csv, "lattice,cells,vpc,voxels,rho,wall_mm,periodic_bulk_E_MPa,"
+                      "direct_freeface_E_MPa,direct_over_Es,gap_vs_bulk_pct,direct_solve_ms\n");
+  const char* only_lat = std::getenv("TOPOPT_H3B_LATTICE");  // e.g. "gyroid"
+  const char* kmax_env = std::getenv("TOPOPT_H3B_KMAX");     // cap cell count
+  const int kmax = kmax_env ? std::atoi(kmax_env) : 7;
+  const int Ks[] = {1, 2, 3, 5, 7};
+  for (Lattice l : {Lattice::Gyroid, Lattice::SchwarzD, Lattice::Octet}) {
+    if (only_lat && std::string(only_lat) != name_of(l)) continue;
+    std::printf("\n  --- %s ---\n", name_of(l));
+    GenParams g = calibrated(l, L, tvf, vpc);
+    // exact periodic bulk from a single cell
+    VoxelGrid cell = build_lattice(g, 1, 1, 1, vpc);
+    double bulk = cubic_of(homogenize(cell, kCubic2, 1e-9), false).E100;
+    std::printf("  periodic bulk E100 = %.4f MPa  (%.4f * Es)\n", bulk, bulk / kE);
+    std::printf("  %-6s %-11s %-6s %-8s | %-13s %-10s %-8s %-9s\n",
+                "cells", "voxels", "rho", "wall_mm", "directE(free)", "gap%", "cg_ms", "gapsign");
+    for (int K : Ks) {
+      if (K > kmax) continue;
+      VoxelGrid grid = build_lattice(g, K, K, K, vpc);
+      double rho = volume_fraction(grid);
+      double wall_mm = median_wall_voxels(grid) * grid.spacing;
+      auto t0 = std::chrono::steady_clock::now();
+      double dirE = direct_apparent_E(grid, 2);
+      auto t1 = std::chrono::steady_clock::now();
+      double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+      double gap = (dirE > 0 && bulk > 0) ? 100.0 * (dirE - bulk) / bulk : 0.0;
+      if (dirE > 0)
+        std::printf("  %-6d %-11zu %-6.3f %-8.3f | %-13.4f %+-10.2f %-8.0f %s\n",
+                    K, grid.voxel_count(), rho, wall_mm, dirE, gap, ms,
+                    gap < 0 ? "(soft)" : "(stiff)");
+      else
+        std::printf("  %-6d %-11zu %-6.3f %-8.3f | %-13s %-10s %-8.0f (FAILED %.0f)\n",
+                    K, grid.voxel_count(), rho, wall_mm, "NONCONV", "-", ms, dirE);
+      if (csv) {
+        std::fprintf(csv, "%s,%d,%d,%zu,%.5f,%.4f,%.4f,%.4f,%.6f,%.4f,%.0f\n",
+                     name_of(l), K, vpc, grid.voxel_count(), rho, wall_mm, bulk,
+                     dirE, dirE / kE, gap, ms);
+        std::fflush(csv);
+      }
+    }
+  }
+  if (csv) std::fclose(csv);
+}
+
+// =========================================================================
 // HR — RESOLUTION convergence of the homogenized tensor. The tensor library
 // must be computed at a voxel resolution where the periodic modulus has stopped
 // moving; and the persistent periodic-vs-free-surface gap seen in H3/H4 must be
@@ -831,6 +889,7 @@ int main() {
   if (want("hr")) HR_resolution(5.0, 0.30);
   if (want("h5")) H5_density_sweep(5.0, 48);
   if (want("h3")) H3_convergence(5.0, 16, 0.30);
+  if (want("h3b")) H3B_direct_convergence(5.0, 16, 0.30);
   if (want("h4")) H4_go_no_go(5.0, 16, 0.30);
 
   std::printf("\nDONE.\n");

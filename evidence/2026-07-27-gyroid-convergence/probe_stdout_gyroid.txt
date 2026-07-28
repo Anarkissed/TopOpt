@@ -1,0 +1,17 @@
+LATTICE HOMOGENIZATION LIBRARY (Phase 0) — E_solid=3500 MPa nu=0.33
+method: periodic-BC strain homogenization, production Hex8 element
+
+===== H3B DIRECT free-surface convergence — K=1,2,3,5,7 (L=5.0 mm, vpc=16, rho~0.30) =====
+  periodic bulk computed ONCE from K=1 (exact, K-independent); direct solve run per K.
+  [writing ../evidence/2026-07-27-gyroid-convergence/h3b_direct_convergence.csv]
+
+  --- gyroid ---
+  periodic bulk E100 = 419.8525 MPa  (0.1200 * Es)
+  cells  voxels      rho    wall_mm  | directE(free) gap%       cg_ms    gapsign  
+  1      4096        0.305  0.625    | 291.5544      -30.56     3300     (soft)
+  2      32768       0.305  0.625    | 353.9947      -15.69     36172    (soft)
+  3      110592      0.305  0.625    | 375.0444      -10.67     102904   (soft)
+  5      512000      0.305  0.625    | 392.4798      -6.52      734724   (soft)
+  7      1404928     0.305  0.625    | 400.3620      -4.64      1402852  (soft)
+
+DONE.
