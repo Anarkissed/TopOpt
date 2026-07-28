@@ -1,0 +1,47 @@
+W5 — Does any OTHER Print Parameters field the knockdown model needs stay unplumbed?
+
+The accept-gate knockdown model is KnockdownSpec (core/include/topopt/analyze.hpp)
+consumed by width_aware_knockdown() (core/src/simp/analyze.cpp). Its inputs:
+
+  KnockdownSpec:
+    infill_knockdown   = infill_margin_knockdown(opts.infill_percent)   <- infill_percent
+    width_aware        = opts.width_aware_knockdown                      <- ARMING FLAG (not a print param)
+    infill_percent     = opts.infill_percent                            <- infill_percent
+    wall_thickness_mm  = opts.wall_loops * opts.wall_line_width_mm       <- wall_loops, wall_line_width_mm
+
+  width_aware_knockdown(infill_percent, member_width_mm, wall_thickness_mm):
+    member_width_mm    = local_member_thickness_mm(...)  <- MEASURED from the printed
+                          voxel field, NOT a print parameter.
+
+Print Parameters the app captures (PrintParams.swift):
+    layerHeightMM, wallLoops, topLayers, bottomLayers, infillPercent, infillPattern
+
+Cross-check — which of the knockdown's inputs come from Print Parameters, and are they plumbed?
+
+  infill_percent      NEEDED  <- infillPercent   PLUMBED (bridge lc.infill_percent; LAN loads.infill_percent). Pre-existing.
+  wall_loops          NEEDED  <- wallLoops       PLUMBED BY THIS CHANGE (bridge lc.wall_loops; LAN loads.wall_loops).
+  wall_line_width_mm  NEEDED  <- (no field)      NOT a captured Print Parameter. The CLI 'loads' schema
+                                                 ACCEPTS loads.wall_line_width_mm, but the app has no
+                                                 line-width control, so NEITHER front-end sets it — both
+                                                 fall back to the core default 0.45 mm. Consistent across
+                                                 paths (no divergence), but it is a fixed modelling
+                                                 assumption, not the user's real nozzle line width.
+
+Print Parameters the knockdown model does NOT consume (captured, correctly left unplumbed to core):
+    topLayers, bottomLayers  -> feed only the M5.1 recommend-settings engine; the knockdown reads member
+                                width from geometry, never a shell count.
+    layerHeightMM            -> not wired anywhere in core (no field), per M7.params scope.
+    infillPattern            -> the f^1.5 Gibson-Ashby curve is pattern-agnostic.
+
+Proof no top/bottom shell / layer-height / pattern term exists in the knockdown path:
+  $ rg -n "top_layers|bottom_layers|layer_height|infill_pattern" \
+        core/src/simp/analyze.cpp core/src/simp/production.cpp \
+        core/src/simp/minimize_plastic.cpp core/include/topopt/analyze.hpp
+  (no matches)
+
+CONCLUSION: after this change the knockdown model's Print-Parameters inputs are fully
+plumbed EXCEPT wall_line_width_mm, which is not a captured field and is defaulted to
+0.45 mm identically on both paths. If the maintainer arms width_aware_knockdown AND
+wants the true nozzle line width to matter, that needs a NEW Print Parameters field
+(sheet + PrintParams + both serializers). No other captured field is both needed by
+the knockdown and unplumbed.

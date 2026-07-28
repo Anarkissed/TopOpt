@@ -55,6 +55,14 @@ public struct RunRequest: Equatable, Sendable {
     /// changing infill re-enables Optimize (it feeds the optimizer, unlike the other
     /// print parameters, which are slicer-settings overrides only).
     public let infillPercent: Int
+    /// The user's perimeter wall-loop count from the Print Parameters sheet (handoff
+    /// 2026-07-27-wall-loops-plumbing). Threaded to core through BOTH front-ends — the
+    /// bridge (`BridgeLoadCase.wall_loops`) and the LAN job.json (`loads.wall_loops`) —
+    /// for the width-aware knockdown's solid wall-ring term. Part of the request
+    /// identity (it feeds the accept gate once armed, like `infillPercent`). A pre-
+    /// PrintParams project decodes its params to `.fdmDefault` (3 walls) upstream, so
+    /// this is never the buggy 0 that made run_info read `wall_loops: 0`.
+    public let wallLoops: Int
     /// The M7.dom-app design box (model space, mm) the optimizer may GROW material
     /// into beyond the import, or nil for the default no-box run (byte-identical to
     /// before). Consumed on the load-case path for STEP and mesh parts alike. Part of
@@ -99,6 +107,7 @@ public struct RunRequest: Equatable, Sendable {
                 anchorFaceIDs: [Int] = [], loadGroups: [TopOptKit.LoadGroupSpec] = [],
                 minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
                 infillPercent: Int = -1,
+                wallLoops: Int = PrintParams.fdmDefault.wallLoops,
                 designBox: TopOptKit.DesignBoxSpec? = nil,
                 keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
                 clearances: [TopOptKit.ClearanceSpec] = [],
@@ -116,6 +125,7 @@ public struct RunRequest: Equatable, Sendable {
         self.minimizePlastic = minimizePlastic
         self.buildDirection = buildDirection
         self.infillPercent = infillPercent
+        self.wallLoops = wallLoops
         self.designBox = designBox
         self.keepOutBoxes = keepOutBoxes
         self.clearances = clearances
@@ -776,6 +786,7 @@ public final class RunModel: ObservableObject {
                 resolution: request.resolution, anchorFaceIDs: request.anchorFaceIDs,
                 loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
                 buildDirection: request.buildDirection, infillPercent: request.infillPercent,
+                wallLoops: request.wallLoops,
                 designBox: request.designBox, keepOutBoxes: request.keepOutBoxes,
                 clearances: request.clearances,
                 faceProtections: request.faceProtections,

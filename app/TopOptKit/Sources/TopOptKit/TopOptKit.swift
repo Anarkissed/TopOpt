@@ -863,11 +863,23 @@ public enum TopOptKit {
         }
     }
 
+    /// The wall-loop count the on-device bridge load case carries to core for the
+    /// width-aware knockdown, given the project's Print-Parameters wall-loop override.
+    /// Isolated as ONE mapping (the identity `Int32(wallLoops)`) so the CLI/bridge
+    /// parity test can assert the on-device serializer and the LAN `buildJobJSON` emit
+    /// the SAME value for one project without importing the C++ POD. `minimizePlasticLoadCase`
+    /// sets `BridgeLoadCase.wall_loops` from THIS, so the asserted value and the value
+    /// the bridge actually sends can never drift — this is the bridge/CLI-divergence
+    /// class knockdown_spec_for already fixed once (handoff 2026-07-27-post-merge-build-fix).
+    public static func bridgeWallLoops(forOverride wallLoops: Int) -> Int32 {
+        Int32(wallLoops)
+    }
+
     public static func minimizePlasticLoadCase(
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
         minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
-        infillPercent: Int = -1,
+        infillPercent: Int = -1, wallLoops: Int = 0,
         designBox: DesignBoxSpec? = nil, keepOutBoxes: [DesignBoxSpec] = [],
         clearances: [ClearanceSpec] = [],
         faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
@@ -916,6 +928,11 @@ public enum TopOptKit {
         lc.build_dir_y = buildDirection.y
         lc.build_dir_z = buildDirection.z
         lc.infill_percent = Int32(infillPercent)
+        // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing).
+        // The user's wall-loop count, via the SAME mapping the CLI/bridge parity test
+        // asserts against. Consumed only when the width-aware gate is armed, so this is
+        // byte-identical to the pre-plumbing run (which sent the POD default 0) today.
+        lc.wall_loops = bridgeWallLoops(forOverride: wallLoops)
 
         // M7.dom-app: the optional design-domain expansion. Unset → has_design_box
         // stays false and the run is byte-identical to a no-box run (default off).

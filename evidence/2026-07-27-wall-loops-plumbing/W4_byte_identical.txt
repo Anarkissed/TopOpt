@@ -1,0 +1,27 @@
+W4 — byte-identical results while width_aware_knockdown is false.
+Two topopt-cli runs of the SAME job differing ONLY in loads.wall_loops (0 vs 5).
+
+== report.json diff (accepted variants + margins) ==
+IDENTICAL report.json (no diff)
+
+== variant STL mesh checksums ==
+-- wall_loops=0 --
+0caa441b2455ebce5ce9e519f87a2643e0ce13cb  variant_026.stl
+a31e6935063a99241945f61529a00613100e8a31  variant_038.stl
+a2218d957f1e1ce906cb024519b08e16eca31c2a  variant_052.stl
+3265e251780eddfc918016c9bd37b5286a443d17  variant_068.stl
+-- wall_loops=5 --
+0caa441b2455ebce5ce9e519f87a2643e0ce13cb  variant_026.stl
+a31e6935063a99241945f61529a00613100e8a31  variant_038.stl
+a2218d957f1e1ce906cb024519b08e16eca31c2a  variant_052.stl
+3265e251780eddfc918016c9bd37b5286a443d17  variant_068.stl
+
+== run_info.json diff (expect ONLY wall_loops + created_wall_ms timestamp) ==
+55c55
+<   "wall_loops": 0,
+---
+>   "wall_loops": 5,
+59c59
+<   "created_wall_ms": 1785272264633,
+---
+>   "created_wall_ms": 1785272177074,

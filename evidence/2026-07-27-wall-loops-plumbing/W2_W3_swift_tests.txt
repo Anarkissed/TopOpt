@@ -1,0 +1,19 @@
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshAndStepJobsAreFieldEquivalentExceptModel]' started.
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshAndStepJobsAreFieldEquivalentExceptModel]' passed (0.004 seconds).
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshJobCarriesTheFullLoadCaseNotASkeleton]' started.
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshJobCarriesTheFullLoadCaseNotASkeleton]' passed (0.001 seconds).
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshNoLoadCaseMatchesStepNoLoadCase]' started.
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testMeshNoLoadCaseMatchesStepNoLoadCase]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testSourceFormatEmittedOnlyForANormalisedPart]' started.
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testSourceFormatEmittedOnlyForANormalisedPart]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsAgreeAcrossBridgeAndCLI]' started.
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsAgreeAcrossBridgeAndCLI]' passed (0.000 seconds).
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsDefaultsToTheFDMDefaultNotZero]' started.
+  Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLoopsDefaultsToTheFDMDefaultNotZero]' passed (0.000 seconds).
+  Test Suite 'JobJSONEquivalenceTests' passed at 2026-07-28 17:02:32.613.
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+  Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-07-28 17:02:32.613.
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 0.006 (0.007) seconds
+  Test Suite 'Selected tests' passed at 2026-07-28 17:02:32.613.
+  	 Executed 6 tests, with 0 failures (0 unexpected) in 0.006 (0.008) seconds
+  ✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

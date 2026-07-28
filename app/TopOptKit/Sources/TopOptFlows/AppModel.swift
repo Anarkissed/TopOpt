@@ -240,6 +240,7 @@ public final class AppModel: ObservableObject {
                           minimizePlastic: project.minimizePlastic,
                           buildDirection: lc.buildDirection,
                           infillPercent: project.printParams.infillPercent,
+                          wallLoops: project.printParams.wallLoops,
                           designBox: project.designBox.bridgeBox,
                           keepOutBoxes: project.designBox.bridgeKeepOuts,
                           clearances: project.clearanceSpecs(),
