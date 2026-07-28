@@ -255,6 +255,9 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
             float3 vW = -rdW;
             float ndv = clamp(dot(nW, vW), 0.0, 1.0);
             float fres = pow(1.0 - ndv, 2.6);
+            // A TIGHT silhouette term for a crisp EDGE LIGHT (round-4 ask: the glass body stays
+            // see-through, but a bright hard rim makes the gizmo pop out instead of reading ghostly).
+            float edge = pow(1.0 - ndv, 6.0);
 
             // The SAME liquid-glass material as the corner Position cube (deep frosted body, cool
             // inner haze + soft core glow, a bright fresnel rim, a top reflection band and crisp
@@ -284,7 +287,8 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
             float core = smoothstep(0.50, 0.05, coreNear) * 0.20;
             float haze = 0.14 * ndv + core;
             float3 col = mix(bodyC, hazeC, haze);
-            col += rimC * fres * 0.9;                                     // fresnel rim
+            col += rimC * fres * 1.05;                                    // soft fresnel rim
+            col += mix(rimC, float3(1.0), 0.55) * edge * 1.5;            // crisp bright EDGE LIGHT
             float3 refl = reflect(rdW, nW);
             float band = smoothstep(0.55, 0.92, refl.y) * pow(clamp(refl.y, 0.0, 1.0), 2.0);
             col += rimC * band * 0.42;                                    // top reflection
@@ -301,8 +305,10 @@ final class TransformGizmoRenderer: NSObject, MTKViewDelegate {
             // Opacity — firmer than the cube (round-3 ask). A solid frosted body so the gizmo
             // reads as a control you reach for, still firming further at the rim + speculars and
             // letting a little of the scene through.
-            float a = 0.46 + fres * 0.42 + haze * 0.30 + (s1 + s2) * 0.5 + band * 0.26 + hov * 0.14;
-            a = clamp(a, 0.0, 0.97);
+            // Body keeps its glassy base (0.46); the EDGE firms toward opaque so the silhouette
+            // reads as a solid lit rim, not a faint ghost.
+            float a = 0.46 + fres * 0.44 + edge * 0.5 + haze * 0.30 + (s1 + s2) * 0.5 + band * 0.26 + hov * 0.14;
+            a = clamp(a, 0.0, 0.99);
             return float4(col * a, a);
         }
         """
