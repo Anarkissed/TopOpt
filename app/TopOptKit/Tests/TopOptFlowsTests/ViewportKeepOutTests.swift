@@ -209,6 +209,73 @@ final class ViewportKeepOutTests: XCTestCase {
         XCTAssertEqual(idx, 1)
     }
 
+    // MARK: clearance UNITS (knob+pill) slide on the cylinder locus off the gizmo + each other
+
+    /// Reproduces the maintainer's "margin sits on the z-arrow" scene (pass 1 of the view's two
+    /// passes): a transform gizmo centred on a cylinder, and two clearance KNOBS whose home lands on
+    /// a gizmo arm. Each knob carries circumferential candidates (the cylinder wall / end-face rim).
+    /// After the pass, both knobs are clear of the gizmo AND each other, sitting on their locus.
+    func testClearanceKnobsSlideOffGizmoAndDontStack() {
+        let centre = CGPoint(x: 600, y: 430)
+        let gizmo = KeepOutElement(id: "gizmo", anchor: centre,
+                                   bounds: CGSize(width: 250, height: 250),
+                                   touch: CGSize(width: 250, height: 250), priority: .gizmo)
+        let knob = CGSize(width: 46, height: 46)
+        // Wall/rim candidates on a circle of radius 160; home (12 o'clock) is on the vertical arm.
+        func ring() -> [CGPoint] {
+            (0..<12).map { k in
+                let a = (-90 + Double(k) * 30) * .pi / 180
+                return CGPoint(x: centre.x + 160 * CGFloat(cos(a)), y: centre.y + 160 * CGFloat(sin(a)))
+            }
+        }
+        let margin = KeepOutElement(id: "knob.margin", anchor: ring()[0], bounds: knob, touch: knob,
+                                    priority: .handle, candidates: ring(), maxShift: 60)
+        let axial = KeepOutElement(id: "knob.axial", anchor: ring()[0], bounds: knob, touch: knob,
+                                   priority: .handle, candidates: ring(), maxShift: 60)
+        let placed = byId(KeepOutSolver.resolve([gizmo, margin, axial], viewport: viewport))
+        assertNoOverlap(Array(placed.values), ["gizmo": CGSize(width: 250, height: 250), "knob.margin": knob, "knob.axial": knob])
+        for id in ["knob.margin", "knob.axial"] {
+            let c = placed[id]!.center
+            let nearest = ring().map { hypot($0.x - c.x, $0.y - c.y) }.min()!
+            XCTAssertLessThan(nearest, 62, "‹\(id)› should sit on its circumferential locus (nudge ≤ maxShift)")
+        }
+    }
+
+    // MARK: ClearanceRing — knobs/pills seated radially just outside the gizmo (maintainer feedback)
+
+    func testClearanceRingPushesInsidePointOutToRing() {
+        let centre = CGPoint(x: 600, y: 430)
+        // A knob buried near the centre (on an arm) is pushed OUT to the ring, keeping its angle.
+        let onArm = CGPoint(x: 600, y: 380)                       // straight up, 50 pt from centre
+        let r = ClearanceRing.place(onArm, around: centre, ringRadius: 174)
+        XCTAssertEqual(hypot(r.x - centre.x, r.y - centre.y), 174, accuracy: 0.01, "seated on the ring")
+        XCTAssertEqual(r.x, 600, accuracy: 0.01, "same angle (straight up)")
+        XCTAssertLessThan(r.y, centre.y, "still above the centre")
+    }
+
+    func testClearanceRingKeepsBoundaryOutsideRing() {
+        let centre = CGPoint(x: 600, y: 430)
+        let onBoundary = CGPoint(x: 600, y: 180)                  // 250 pt out — the clearance boundary
+        let r = ClearanceRing.place(onBoundary, around: centre, ringRadius: 155)
+        // Outside the ring it stays ON the boundary, so the knob tracks the margin (comes in when
+        // the margin shrinks, out when it grows) instead of being frozen at a fixed radius.
+        XCTAssertEqual(r, onBoundary, "a boundary outside the ring is left alone (tracks the margin)")
+    }
+
+    func testClearanceRingCentreFallback() {
+        let centre = CGPoint(x: 600, y: 430)
+        let r = ClearanceRing.place(centre, around: centre, ringRadius: 174)
+        XCTAssertEqual(r, CGPoint(x: 774, y: 430), "a knob at the centre falls back to due-right on the ring")
+    }
+
+    func testClearanceRingPillSeatsBeyondKnob() {
+        let centre = CGPoint(x: 600, y: 430)
+        let knob = CGPoint(x: 774, y: 430)                        // on the ring, due right
+        let pill = ClearanceRing.nudgeOutward(knob, from: centre, by: 72)
+        XCTAssertEqual(pill.x, 846, accuracy: 0.01, "pill sits 72 pt further out")
+        XCTAssertEqual(pill.y, 430, accuracy: 0.01, "same angle")
+    }
+
     // MARK: maxShift — a handle/chip only nudges SLIGHTLY, never floats far (maintainer rule)
 
     func testMaxShiftCapsDisplacementAndKeepsVisible() {

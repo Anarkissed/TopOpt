@@ -201,11 +201,13 @@ public enum KeepOutSolver {
 
             // Locus-constrained controls start at the candidate that clears best (a clearance
             // knob slides around its cylinder before it floats off it); everything else starts
-            // at its anchor. From there the 2-D separation loop still runs, so the element may
-            // nudge slightly off its locus when even the best candidate is blocked.
-            var center = e.candidates.isEmpty
+            // at its anchor. Sliding along the locus to a far candidate is legitimate (still ON
+            // the geometry), so `maxShift` caps only the 2-D nudge FROM this start, not the whole
+            // move from the home anchor.
+            let start = e.candidates.isEmpty
                 ? e.anchor
                 : e.candidates[bestCandidateIndex(e.candidates, size: size, avoiding: occupied)]
+            var center = start
             var iterations = 0
             while iterations < maxIterations {
                 iterations += 1
@@ -216,17 +218,19 @@ public enum KeepOutSolver {
                 center = clamp(center: center, size: size, viewport: viewport)
             }
 
-            // SLIGHT-MOVEMENT CAP: a control must stay close to its referent, so clamp the
-            // shift to `maxShift` even if that leaves a little overlap. A capped element is
-            // never hidden — close-but-touching beats far-but-clear (the maintainer's rule).
-            var disp = CGVector(dx: center.x - e.anchor.x, dy: center.y - e.anchor.y)
-            var dist = CoreGraphics.hypot(disp.dx, disp.dy)
-            if dist > e.maxShift {
-                let k = e.maxShift / dist
-                disp = CGVector(dx: disp.dx * k, dy: disp.dy * k)
-                center = CGPoint(x: e.anchor.x + disp.dx, y: e.anchor.y + disp.dy)
-                dist = e.maxShift
+            // SLIGHT-MOVEMENT CAP on the 2-D NUDGE from the chosen locus point: a control may
+            // slide freely along its locus (that stays on the geometry), but only nudges a little
+            // off it, even if that leaves a small overlap. A capped element is never hidden —
+            // close-but-touching beats far-but-clear (the maintainer's rule).
+            var nudge = CGVector(dx: center.x - start.x, dy: center.y - start.y)
+            let nd = CoreGraphics.hypot(nudge.dx, nudge.dy)
+            if nd > e.maxShift {
+                let k = e.maxShift / nd
+                nudge = CGVector(dx: nudge.dx * k, dy: nudge.dy * k)
+                center = CGPoint(x: start.x + nudge.dx, y: start.y + nudge.dy)
             }
+            let disp = CGVector(dx: center.x - e.anchor.x, dy: center.y - e.anchor.y)
+            let dist = CoreGraphics.hypot(disp.dx, disp.dy)
             // Only an UNBOUNDED element withdraws when it still can't clear (requirement 7);
             // a capped control stays visible and close.
             let hidden = e.maxShift.isFinite
@@ -312,6 +316,34 @@ public enum KeepOutSolver {
         let y: CGFloat = viewport.height >= size.height
             ? Swift.min(Swift.max(center.y, hh), viewport.height - hh) : viewport.height / 2
         return CGPoint(x: x, y: y)
+    }
+}
+
+/// Radial placement around a central obstacle (the transform gizmo). A clearance knob's home is on
+/// the clearance BOUNDARY (the primitive side + margin), so it TRACKS the value — it comes in as the
+/// margin shrinks and out as it grows. But it can't sit UNDER the gizmo, so it is never seated
+/// closer than a tight ring just beyond the gizmo's ribbons: on the boundary when that's outside the
+/// ring, on the ring when the boundary would be inside the gizmo. The gizmo is a fixed on-screen
+/// size, so the ring floor is zoom-independent. Keeps its angle from the gizmo centre. Pure + tested.
+public enum ClearanceRing {
+    /// `p` (the boundary point) kept along `centre→p` but never closer to `centre` than `ringRadius`
+    /// — so it tracks the margin outside the ring and clears the gizmo inside it. A point at the
+    /// centre falls back to due-right on the ring.
+    public static func place(_ p: CGPoint, around centre: CGPoint, ringRadius: CGFloat) -> CGPoint {
+        let vx = p.x - centre.x, vy = p.y - centre.y
+        let d = CoreGraphics.hypot(vx, vy)
+        guard d > 0.5 else { return CGPoint(x: centre.x + ringRadius, y: centre.y) }
+        let r = Swift.max(d, ringRadius)
+        return CGPoint(x: centre.x + vx / d * r, y: centre.y + vy / d * r)
+    }
+
+    /// A point `outward` points farther from `centre` than `p`, along `centre→p` — used to seat a
+    /// value pill just beyond its knob, radially, so it too stays clear of the gizmo.
+    public static func nudgeOutward(_ p: CGPoint, from centre: CGPoint, by outward: CGFloat) -> CGPoint {
+        let vx = p.x - centre.x, vy = p.y - centre.y
+        let d = CoreGraphics.hypot(vx, vy)
+        guard d > 0.5 else { return CGPoint(x: p.x + outward, y: p.y) }
+        return CGPoint(x: centre.x + vx / d * (d + outward), y: centre.y + vy / d * (d + outward))
     }
 }
 

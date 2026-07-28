@@ -635,27 +635,90 @@ public struct WorkspacePlaceholder: View {
     private static let loadPillSize  = CGSize(width: 96, height: 44)   // weight pill (+ snap row headroom)
     private static let boxHandleTouch = CGSize(width: 44, height: 44)  // design-box grab circle
 
-    /// The MOST any handle / chip is allowed to shift from its anchor (points). The
-    /// maintainer's rule: a SLIGHT nudge to clear a neighbour, never floated far — a
-    /// control must always read as belonging to its geometry. Past this the control stays
-    /// put and accepts a little overlap (close-but-touching beats far-but-clear).
-    private static let keepOutMaxShift: CGFloat = 40
-    /// The gizmo's keep-out footprint (points) — its VISIBLE arm span, not the full 330 pt
-    /// touch box. Reserving the whole box would demand a huge shift; the visible span is
-    /// what handles actually need to clear, so a slight nudge suffices.
-    private static let gizmoKeepOutSize: CGFloat = 150
+    /// How far a chip/pill may be nudged from its anchor before it stops (a slight nudge to
+    /// clear a neighbour, never floated far — the LOCUS sliding does the heavy lifting).
+    private static let keepOutMaxShift: CGFloat = 60
+    /// The radius (points) a clearance knob is seated at, out from the gizmo centre — a TIGHT ring
+    /// just past the gizmo's outer rotation ribbons (≈0.42·box) so the knob clears the gizmo but
+    /// still hugs it, whatever the primitive's size.
+    private static var gizmoRingRadius: CGFloat { gizmoBoxSize * 0.42 + 30 }
 
-    /// The stable keep-out id for a floating value pill / its knob / a box handle.
-    private func clrPillID(_ item: ClearanceHandleItem) -> String { "clr.pill.\(item.id)" }
-    private func clrKnobID(_ item: ClearanceHandleItem) -> String { "clr.knob.\(item.id)" }
+    /// The stable keep-out id for a clearance knob / its value pill / a box handle.
     private func boxHandleID(_ i: Int) -> String { "box.\(i)" }
+    private func clrKnobID(_ item: ClearanceHandleItem) -> String { "clr.knob.\(item.id)" }
+    private func clrPillID(_ item: ClearanceHandleItem) -> String { "clr.pill.\(item.id)" }
 
-    /// The keep-out element set for the CURRENT camera projection + model state. Built fresh
-    /// each read (see `keepOutResolved`) so a handle/chip always tracks the primitive as it is
-    /// moved or resized — no cached, lagging positions. Only the gizmo box and the static
-    /// chrome are RIGID; every handle and chip is MOVABLE with a small `maxShift` so it nudges
-    /// slightly clear and never floats away. See `ViewportKeepOut.swift` for the priorities.
-    private func keepOutElements(_ proj: CameraProjection) -> [KeepOutElement] {
+    /// The screen centre of the manual-primitive transform gizmo currently up (the `gizmoTarget`
+    /// primitive's centre), or nil if none — the point clearance knobs/pills are seated around.
+    private func manualGizmoScreenCentre(_ proj: CameraProjection) -> CGPoint? {
+        gizmoClearInfo(proj)?.centre
+    }
+
+    /// The transform gizmo's screen centre + a SHAPE test: `isClear(p)` is true when stage point `p`
+    /// misses the gizmo's (fat) pick zones — the SAME shape the gizmo grabs with (`TransformGizmo.pick`),
+    /// so a clearance knob is only seated where it won't sit on the gizmo OR steal its touches. Nil
+    /// when no manual-primitive gizmo is up.
+    private func gizmoClearInfo(_ proj: CameraProjection) -> (centre: CGPoint, isClear: (CGPoint) -> Bool)? {
+        guard force.phase == .edit, let gid = selection.activeGroupID else { return nil }
+        for mp in project.manualPrimitives(in: gid)
+        where gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
+            guard let centre = proj.project(settledWorld(SIMD3<Float>(mp.center))) else { return nil }
+            let box = Self.gizmoBoxSize
+            let rot = gizmoRotation * primitiveOrientation(mp)
+            let test: (CGPoint) -> Bool = { p in
+                let local = CGPoint(x: p.x - (centre.x - box / 2), y: p.y - (centre.y - box / 2))
+                if local.x < 0 || local.y < 0 || local.x > box || local.y > box { return true }   // outside the box
+                return TransformGizmo.pick(point: local, in: CGSize(width: box, height: box), rotation: rot) == nil
+            }
+            return (centre, test)
+        }
+        return nil
+    }
+
+    /// Candidate SCREEN positions a clearance knob may occupy — its geometric locus (the cylinder
+    /// wall for margin, the end-face rim for axial) at the CURRENT clearance boundary radius (so it
+    /// tracks the margin), sampled at angles ordered NEAREST-FIRST from the home angle. The drag math
+    /// is angle-agnostic, so any is an exact grab point. A slab handle (no cylinder) → just home.
+    private func clearanceKnobCandidates(_ item: ClearanceHandleItem, _ proj: CameraProjection) -> [CGPoint] {
+        let h = item.handle.settled(center: meshCenter, rotation: settleQuat)
+        let home = proj.project(h.anchor)
+        func rot(_ v: SIMD3<Float>, _ axis: SIMD3<Float>, _ a: Float) -> SIMD3<Float> {
+            let k = simd_normalize(axis), c = cosf(a), s = sinf(a)
+            return v * c + simd_cross(k, v) * s + k * (simd_dot(k, v) * (1 - c))
+        }
+        guard simd_length(h.axisDir) > 1e-5 else { return [home].compactMap { $0 } }
+        let axis = simd_normalize(h.axisDir)
+        // 0, +30, −30, +60, −60, … so the FIRST clear candidate is the closest angle to home.
+        var degs: [Float] = [0]
+        for d in stride(from: 30, through: 180, by: 30) { degs.append(Float(d)); if d != 180 { degs.append(-Float(d)) } }
+        let angles = degs.map { $0 * .pi / 180 }
+        var world: [SIMD3<Float>] = []
+        switch item.handle.role {
+        case .margin:
+            // Slide around the cylinder WALL at the boundary radius (rotate the axis→knob radial).
+            let onAxis = h.axisPoint + axis * simd_dot(h.anchor - h.axisPoint, axis)
+            let radial = h.anchor - onAxis
+            guard simd_length(radial) > 1e-4 else { return [home].compactMap { $0 } }
+            world = angles.map { onAxis + rot(radial, axis, $0) }
+        case .axialLo, .axialHi:
+            // Slide around the END-FACE RIM (the axial anchor sits on the axis; offset it onto the
+            // rim so it can move off the gizmo end into the "space below").
+            let (u, _) = planeBasis(normal: axis)
+            let r = Swift.max(h.boreRadiusMM, 1)
+            world = angles.map { h.anchor + rot(u * r, axis, $0) }
+        case .slabDepth:
+            return [home].compactMap { $0 }
+        }
+        let projected = world.compactMap { proj.project($0) }
+        return projected.isEmpty ? [home].compactMap { $0 } : projected
+    }
+
+    /// The BASE keep-out elements (everything EXCEPT the clearance value pills) for the CURRENT
+    /// camera projection + model state. Built fresh each read so a handle tracks the primitive
+    /// live. The gizmo box + static chrome are RIGID; the clearance KNOBS slide on their cylinder
+    /// locus to clear the gizmo. The value pills are placed in a SECOND pass beside each knob's
+    /// resolved position (see `keepOutResolved`). See `ViewportKeepOut.swift` for the priorities.
+    private func keepOutBaseElements(_ proj: CameraProjection) -> [KeepOutElement] {
         let W = proj.viewportSize.width
         var elements: [KeepOutElement] = []
 
@@ -666,39 +729,25 @@ public struct WorkspacePlaceholder: View {
             touch: CGSize(width: 132, height: 132), priority: .chrome))
 
         if force.phase == .edit {
-            // ── RIGID: the manual-primitive transform gizmo (its visible span; L5: never
-            //    displaced, it nudges the handles/pills around it) ──
-            if let gid = selection.activeGroupID {
-                for mp in project.manualPrimitives(in: gid)
-                where gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
-                    if let c = proj.project(settledWorld(SIMD3<Float>(mp.center))) {
-                        let box = Self.gizmoKeepOutSize
-                        elements.append(KeepOutElement(
-                            id: "gizmo.transform", anchor: c,
-                            bounds: CGSize(width: box, height: box),
-                            touch: CGSize(width: box, height: box), priority: .gizmo))
-                    }
-                }
-            }
+            // The transform gizmo's shape test (if one is up). A clearance knob keeps its home on
+            // the clearance boundary (tracking the margin); only if that lands ON the gizmo does it
+            // SLIDE around its locus (wall / rim, same boundary radius) to the nearest angle the
+            // gizmo's own pick shape says is clear — using the real arms/gaps, not a circle. If the
+            // whole boundary is inside the gizmo it falls back to the tight radial ring.
+            let gizmo = gizmoClearInfo(proj)
 
-            // ── MOVABLE (handle): every clearance drag knob, nudged slightly to clear a
-            //    neighbour (the drag reads the finger ray, so a small nudge stays exact) ──
+            // ── MOVABLE (handle): each clearance knob, shape-aware around the gizmo. ──
             for item in clearanceHandleItems {
-                if let k = proj.project(settledWorld(item.handle.anchor)) {
-                    elements.append(KeepOutElement(id: clrKnobID(item), anchor: k,
-                                                   bounds: Self.clrKnobTouch, touch: Self.clrKnobTouch,
-                                                   priority: .handle, maxShift: Self.keepOutMaxShift))
+                guard let raw = proj.project(settledWorld(item.handle.anchor)) else { continue }
+                var anchor = raw
+                if let gizmo, !gizmo.isClear(raw) {
+                    let cands = clearanceKnobCandidates(item, proj)
+                    anchor = cands.first(where: gizmo.isClear)
+                        ?? ClearanceRing.place(raw, around: gizmo.centre, ringRadius: Self.gizmoRingRadius)
                 }
-            }
-
-            // ── MOVABLE (label): the value pill beside each knob ──
-            for item in syncCollapsedChipItems {
-                if let k = proj.project(settledWorld(item.handle.anchor)) {
-                    let anchor = CGPoint(x: k.x + Self.chipKnobClearance + Self.clrPillSize.width / 2, y: k.y)
-                    elements.append(KeepOutElement(id: clrPillID(item), anchor: anchor,
-                                                   bounds: Self.clrPillSize, touch: Self.clrPillSize,
-                                                   priority: .label, maxShift: Self.keepOutMaxShift))
-                }
+                elements.append(KeepOutElement(id: clrKnobID(item), anchor: anchor,
+                                               bounds: Self.clrKnobTouch, touch: Self.clrKnobTouch,
+                                               priority: .handle, maxShift: Self.keepOutMaxShift))
             }
 
             // ── MOVABLE (pill): the pending selection's Anchor/Load/Keep-clear action bar ──
@@ -738,14 +787,55 @@ public struct WorkspacePlaceholder: View {
         return elements
     }
 
-    /// Resolve the keep-out layout INLINE for this projection and return the placements by id.
-    /// Pure + stateless (deterministic `KeepOutSolver.resolve`), computed fresh on demand so
-    /// overlays always draw at live positions that track the geometry — no async cache to go
-    /// stale, no smoothing lag while a primitive is dragged. Cheap (a handful of elements).
+    /// Resolve the keep-out layout INLINE (two passes) for this projection, keyed by id. Pure +
+    /// stateless, computed fresh on demand so overlays draw at live positions that track the
+    /// geometry — no cache to go stale, no smoothing lag while a primitive is dragged.
+    ///
+    /// Pass 1 places everything but the clearance value pills (knobs slide on their locus off the
+    /// gizmo). Pass 2 anchors each pill beside its knob's RESOLVED position and clears it against
+    /// the pass-1 layout (held rigid) — so a pill never separates from its knob and two pills never
+    /// stack, even after the knob slid.
     private func keepOutResolved(_ proj: CameraProjection) -> [String: KeepOutPlacement] {
         guard proj.isUsable else { return [:] }
-        let placed = KeepOutSolver.resolve(keepOutElements(proj), viewport: proj.viewportSize)
-        return Dictionary(placed.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let vp = proj.viewportSize
+        let base = keepOutBaseElements(proj)
+        let r1 = KeepOutSolver.resolve(base, viewport: vp)
+        var map = Dictionary(r1.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+
+        // Pass 2: value pills seated just beyond their resolved knobs — radially outward from the
+        // gizmo, nudged further out until they clear the gizmo shape too (or beside the knob when
+        // no gizmo is up).
+        let gizmo = gizmoClearInfo(proj)
+        let pillOut = Self.chipKnobClearance + Self.clrPillSize.width / 2
+        var pass2: [KeepOutElement] = []
+        for item in syncCollapsedChipItems {
+            guard let knob = map[clrKnobID(item)]?.center, !(map[clrKnobID(item)]?.hidden ?? true) else { continue }
+            var anchor = gizmo.map { ClearanceRing.nudgeOutward(knob, from: $0.centre, by: pillOut) }
+                ?? CGPoint(x: knob.x + pillOut, y: knob.y)
+            // Push the pill further out along the radial until it clears the gizmo (a few steps max).
+            if let gizmo {
+                var step = 0
+                while step < 4, !gizmo.isClear(anchor) {
+                    anchor = ClearanceRing.nudgeOutward(anchor, from: gizmo.centre, by: Self.clrPillSize.width / 2)
+                    step += 1
+                }
+            }
+            pass2.append(KeepOutElement(id: clrPillID(item), anchor: anchor,
+                                        bounds: Self.clrPillSize, touch: Self.clrPillSize,
+                                        priority: .label, maxShift: Self.keepOutMaxShift))
+        }
+        if !pass2.isEmpty {
+            // The pass-1 layout, held rigid, so the pills clear the gizmo/knobs/each other.
+            let occupiers = base.compactMap { e -> KeepOutElement? in
+                guard let c = map[e.id]?.center, !(map[e.id]?.hidden ?? true) else { return nil }
+                return KeepOutElement(id: "occ.\(e.id)", anchor: c, bounds: e.bounds, touch: e.touch,
+                                      priority: .gizmo, rigid: true)
+            }
+            for p in KeepOutSolver.resolve(occupiers + pass2, viewport: vp) where p.id.hasPrefix("clr.pill.") {
+                map[p.id] = p
+            }
+        }
+        return map
     }
 
     // MARK: top-left chrome (back + project / material chip)
@@ -1544,15 +1634,15 @@ public struct WorkspacePlaceholder: View {
             if let proj = projection {
                 let placed = keepOutResolved(proj)
                 ForEach(clearanceHandleItems) { item in
-                    if let pt = proj.project(settledWorld(item.handle.anchor)) {
-                        // Keep-out pass owns placement (handoff 2026-07-27): the knob is nudged
-                        // slightly to clear a neighbour and tracks the primitive live. The drag
-                        // reads the finger's ray, not the knob's position, so a nudge stays exact.
-                        let center = placed[clrKnobID(item)]?.center ?? pt
+                    if let raw = proj.project(settledWorld(item.handle.anchor)) {
+                        // The knob slid around its cylinder locus to clear the gizmo (keep-out pass);
+                        // the drag reads the finger ray, so sliding it stays exact. Fallback to the
+                        // raw projection before the first resolve.
+                        let knob = placed[clrKnobID(item)]?.center ?? raw
                         clearanceHandleKnob(role: item.handle.role, active: draggingHandleID == item.id)
                             .gesture(clearanceHandleDrag(item))
-                            .position(center)
-                            .animation(DS.Motion.emphasized, value: center)
+                            .position(knob)
+                            .animation(DS.Motion.emphasized, value: knob)
                     }
                 }
                 clearanceValuePill(proj, placed)
@@ -1576,12 +1666,13 @@ public struct WorkspacePlaceholder: View {
     /// duplicate stacked "DEPTH 3 mm" chips are gone. The drag knobs are NOT collapsed.
     @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection, _ placed: [String: KeepOutPlacement]) -> some View {
         ForEach(syncCollapsedChipItems) { item in
-            if let knob = proj.project(settledWorld(item.handle.anchor)) {
-                // Keep-out pass owns placement (handoff 2026-07-27): the pill sits beside its
-                // knob and is nudged slightly to clear a neighbour — always close enough to read
-                // as belonging to it (no leader line). Resolved live so it tracks the primitive.
-                let anchor = CGPoint(x: knob.x + Self.chipKnobClearance + Self.clrPillSize.width / 2, y: knob.y)
-                let center = placed[clrPillID(item)]?.center ?? anchor
+            // The pill was placed (pass 2) beside its knob's resolved position and cleared of the
+            // gizmo / other pills — so it stays with its knob and never stacks. Fallback beside the
+            // raw projection before the first resolve.
+            let fallback = proj.project(settledWorld(item.handle.anchor)).map {
+                CGPoint(x: $0.x + Self.chipKnobClearance + Self.clrPillSize.width / 2, y: $0.y)
+            }
+            if let center = placed[clrPillID(item)]?.center ?? fallback {
                 clearanceHandleChip(item).fixedSize()
                     .position(center)
                     .animation(DS.Motion.emphasized, value: center)
