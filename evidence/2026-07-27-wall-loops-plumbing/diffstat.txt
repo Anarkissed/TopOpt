@@ -1,0 +1,8 @@
+ app/TopOptKit/Sources/TopOptBridge/bridge.cpp      |  7 +++
+ .../Sources/TopOptBridge/include/TopOptBridge.hpp  | 13 ++++++
+ app/TopOptKit/Sources/TopOptFlows/AppModel.swift   |  1 +
+ .../Sources/TopOptFlows/RemoteRunner.swift         |  8 ++++
+ app/TopOptKit/Sources/TopOptFlows/RunModel.swift   | 11 +++++
+ app/TopOptKit/Sources/TopOptKit/TopOptKit.swift    | 19 +++++++-
+ .../TopOptFlowsTests/JobJSONEquivalenceTests.swift | 51 +++++++++++++++++++++-
+ 7 files changed, 108 insertions(+), 2 deletions(-)

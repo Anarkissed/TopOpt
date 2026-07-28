@@ -535,6 +535,19 @@ struct BridgeLoadCase {
   // and stops there. See the M7.params handoff.
   int infill_percent = -1;
 
+  // Width-aware knockdown slicer metadata (handoff 2026-07-27-wall-loops-plumbing).
+  // The user's perimeter wall-loop count from the Print Parameters sheet (0 = none).
+  // The shell+core composite accept gate sizes the solid wall ring around each member
+  // as t = wall_loops · wall_line_width_mm; without this the bridge left it at the POD
+  // default 0, so the LAN worker's run_info showed `wall_loops: 0` even when the user
+  // set 5 — bare infill, the NON-CONSERVATIVE regime PR 191 measured, the moment the
+  // width-aware gate is armed. ADDITIVE + DEFAULTED (0), so a caller that omits it is
+  // byte-identical to before AND (because the shipped gate is OFF) to a run that sets
+  // it. `wall_line_width_mm` is NOT captured on the sheet, so it is not carried here:
+  // both the bridge and the CLI leave it at the core default (0.45 mm). The CLI job
+  // schema's `loads.wall_loops` is the LAN twin of this field.
+  int wall_loops = 0;
+
   // M7.dom-app — the design-domain expansion (the "ADD MATERIAL" feature). When
   // `has_design_box` is true the run voxelizes the part onto a LARGER grid spanning
   // the union of the part and this design box (model-space mm, axis-aligned), and

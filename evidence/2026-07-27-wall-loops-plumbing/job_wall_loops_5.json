@@ -1,0 +1,16 @@
+{
+  "_comment": "W1 evidence job (handoff 2026-07-27-wall-loops-plumbing): a loads-block minimize_plastic job carrying a NON-DEFAULT wall count (5) so run_info.json is checked to echo the value the user set, not 0. Small resolution + capped iterations for a fast evidence run.",
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 16,
+  "loads": {
+    "anchors": [ { "kind": "cylindrical", "radius_mm": 2.5 } ],
+    "minimize_plastic": true,
+    "build_dir": [0.0, 0.0, 1.0],
+    "infill_percent": 20,
+    "wall_loops": 5
+  },
+  "simp": { "max_iterations": 4 },
+  "output": { "report": "report.json", "mesh_format": "stl", "mesh_prefix": "variant" }
+}

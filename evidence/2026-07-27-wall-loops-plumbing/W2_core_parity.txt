@@ -1,0 +1,7 @@
+=== core parity (wall_thickness = wall_loops·wall_line_width assertion) ===
+[loadcase] warm_start_inherit=1 mode=load-case
+  [AD arming] AUTO band resolved to k=3 (rmin=1.500 voxels, spacing=2.500 mm) on 4 rung(s)
+  [132 (C)] design bit-identical at 6 and 10 threads
+production parity (handoff 093): all checks passed
+=== core job schema (test_wall_loops among 113) ===
+job schema (M6.2): all 113 checks passed

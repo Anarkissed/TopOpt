@@ -43,6 +43,7 @@ final class JobJSONEquivalenceTests: XCTestCase {
             minimizePlastic: true,
             buildDirection: SIMD3(0, 0, 1),
             infillPercent: 40,
+            wallLoops: 5,
             designBox: TopOptKit.DesignBoxSpec(min: SIMD3(-5, -5, -5),
                                                max: SIMD3(30, 20, 10)),
             keepOutBoxes: [TopOptKit.DesignBoxSpec(min: SIMD3(0, 0, 0),
@@ -112,7 +113,8 @@ final class JobJSONEquivalenceTests: XCTestCase {
             rulesPath: "", resolution: req.resolution, projectName: req.projectName,
             anchorFaceIDs: req.anchorFaceIDs, loadGroups: req.loadGroups,
             minimizePlastic: req.minimizePlastic, buildDirection: req.buildDirection,
-            infillPercent: req.infillPercent, designBox: req.designBox,
+            infillPercent: req.infillPercent, wallLoops: req.wallLoops,
+            designBox: req.designBox,
             keepOutBoxes: req.keepOutBoxes, clearances: req.clearances,
             faceProtections: req.faceProtections,
             faceProtectionDepthMM: req.faceProtectionDepthMM,
@@ -147,6 +149,8 @@ final class JobJSONEquivalenceTests: XCTestCase {
                        "anchors (pseudo-face ids) must survive for a mesh")
         XCTAssertEqual(loads["infill_percent"] as? Int, 40,
                        "the chosen infill must survive — not silently 100%")
+        XCTAssertEqual(loads["wall_loops"] as? Int, 5,
+                       "the chosen wall count must survive — not silently 0 (bare infill)")
         XCTAssertEqual(loads["minimize_plastic"] as? Bool, true)
 
         let groups = try XCTUnwrap(loads["groups"] as? [[String: Any]],
@@ -191,5 +195,50 @@ final class JobJSONEquivalenceTests: XCTestCase {
                        "even with no load case, mesh and STEP jobs match once model is set aside")
         XCTAssertNotNil((mesh["loads"] as? [String: Any])?["build_dir"],
                         "the loads block is well-formed, not a skeleton")
+    }
+
+    // MARK: wall_loops — the CLI/bridge parity bar (handoff 2026-07-27-wall-loops-plumbing)
+
+    /// W2 — BOTH front-ends agree on the wall-loop count for one project. The LAN
+    /// worker path serializes it into `loads.wall_loops`; the on-device path sets it on
+    /// `BridgeLoadCase.wall_loops` via `TopOptKit.bridgeWallLoops`. This asserts the two
+    /// are the SAME value for the same RunRequest — the bridge/CLI-divergence class that
+    /// bit knockdown_spec_for once (a bare scalar reached one path and not the other).
+    /// It is the app-side twin of test_production_parity.cpp's knockdown-spec assertion:
+    /// there the two front-ends share one C++ builder; here they share one Swift mapping.
+    func testWallLoopsAgreeAcrossBridgeAndCLI() throws {
+        let mesh = try jobDict(modelPath: "/tmp/part.stl")
+        let step = try jobDict(modelPath: "/tmp/part.step")
+        let cliMesh = (mesh["loads"] as? [String: Any])?["wall_loops"] as? Int
+        let cliStep = (step["loads"] as? [String: Any])?["wall_loops"] as? Int
+
+        // The LAN job.json carries the request's value on BOTH model sources.
+        XCTAssertEqual(cliMesh, 5, "mesh LAN job carries the wall count")
+        XCTAssertEqual(cliStep, 5, "STEP LAN job carries the wall count")
+
+        // The on-device bridge POD carries the SAME value, through the shared mapping
+        // minimizePlasticLoadCase uses to set BridgeLoadCase.wall_loops.
+        let bridge = Int(TopOptKit.bridgeWallLoops(forOverride: request(modelPath: "/tmp/part.stl").wallLoops))
+        XCTAssertEqual(bridge, 5, "the on-device bridge carries the wall count")
+        XCTAssertEqual(cliMesh, bridge, "bridge and CLI must produce the same wall count")
+        XCTAssertEqual(cliStep, bridge, "bridge and CLI must produce the same wall count")
+    }
+
+    /// W3 — a project that carries no explicit wall count (the reattach carrier, or a
+    /// pre-PrintParams project whose params decode to `.fdmDefault`) serializes the FDM
+    /// default of 3 walls, never the buggy 0. Both front-ends land on the same default.
+    func testWallLoopsDefaultsToTheFDMDefaultNotZero() throws {
+        let cfg = RemoteRunnerConfig(host: "127.0.0.1", port: 8757, expectedFingerprint: "test")
+        let req = RunRequest(modelPath: "/tmp/bare.stl", material: "PLA", materialsPath: "",
+                             rulesPath: "", resolution: 64, projectName: "bare")
+        XCTAssertEqual(req.wallLoops, PrintParams.fdmDefault.wallLoops,
+                       "an unspecified wall count defaults to the FDM default")
+        XCTAssertEqual(req.wallLoops, 3, "the FDM default is 3 walls (the sheet's seed), not 0")
+        let run = RemoteRun(config: cfg, request: req, progress: { _, _, _ in true }, onVariant: { _ in })
+        let job = try XCTUnwrap(JSONSerialization.jsonObject(with: try run.buildJobJSON()) as? [String: Any])
+        XCTAssertEqual((job["loads"] as? [String: Any])?["wall_loops"] as? Int, 3,
+                       "the default project still emits a concrete non-zero wall count")
+        XCTAssertEqual(Int(TopOptKit.bridgeWallLoops(forOverride: req.wallLoops)), 3,
+                       "the on-device path agrees on the default")
     }
 }
