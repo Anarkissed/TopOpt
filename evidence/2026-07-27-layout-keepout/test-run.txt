@@ -1,0 +1,35 @@
+Test Case 'testBestCandidatePrefersHomeThenLeastOverlap' started.
+Test Case 'testBestCandidatePrefersHomeThenLeastOverlap' passed (0.002 seconds).
+Test Case 'testBusyProjectBeforeAfterCaptureHasNoOverlap' started.
+Test Case 'testBusyProjectBeforeAfterCaptureHasNoOverlap' passed (0.001 seconds).
+Test Case 'testDensePileResolvesToZeroOverlap' started.
+Test Case 'testDensePileResolvesToZeroOverlap' passed (0.001 seconds).
+Test Case 'testDeterministicIndependentOfInputOrder' started.
+Test Case 'testDeterministicIndependentOfInputOrder' passed (0.000 seconds).
+Test Case 'testDeterministicSameInputSameOutput' started.
+Test Case 'testDeterministicSameInputSameOutput' passed (0.000 seconds).
+Test Case 'testHigherPriorityStaysCloserToAnchorThanLower' started.
+Test Case 'testHigherPriorityStaysCloserToAnchorThanLower' passed (0.000 seconds).
+Test Case 'testLeaderLineKicksInPastThreshold' started.
+Test Case 'testLeaderLineKicksInPastThreshold' passed (0.000 seconds).
+Test Case 'testLocusKnobSlidesToClearCandidate' started.
+Test Case 'testLocusKnobSlidesToClearCandidate' passed (0.000 seconds).
+Test Case 'testMinimumTouchIsEnforced' started.
+Test Case 'testMinimumTouchIsEnforced' passed (0.000 seconds).
+Test Case 'testNoRoomHidesLowestPriorityNeverStacks' started.
+Test Case 'testNoRoomHidesLowestPriorityNeverStacks' passed (0.000 seconds).
+Test Case 'testRawProjectedAnchorsOverlapButPassSeparatesThem' started.
+Test Case 'testRawProjectedAnchorsOverlapButPassSeparatesThem' passed (0.001 seconds).
+Test Case 'testResolvesOnTouchBoundsNotDrawnBounds' started.
+Test Case 'testResolvesOnTouchBoundsNotDrawnBounds' passed (0.000 seconds).
+Test Case 'testRigidGizmoNeverMovesAndDisplacesOthers' started.
+Test Case 'testRigidGizmoNeverMovesAndDisplacesOthers' passed (0.000 seconds).
+Test Case 'testSlowOrbitIsStableAndWritesCapture' started.
+Test Case 'testSlowOrbitIsStableAndWritesCapture' passed (0.014 seconds).
+Test Case 'testStabilizerConvergesMonotoneNoOvershoot' started.
+Test Case 'testStabilizerConvergesMonotoneNoOvershoot' passed (0.000 seconds).
+Test Case 'testStabilizerDeadBandHoldsStill' started.
+Test Case 'testStabilizerDeadBandHoldsStill' passed (0.000 seconds).
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.022 (0.023) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.022 (0.023) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.022 (0.024) seconds

@@ -300,8 +300,13 @@ public struct WorkspacePlaceholder: View {
                 // the base is moved by the transform gizmo and magnetically sticks to a face
                 // (item 2). Face-tap still works (handled in `handlePick`).
                 if viewerMesh != nil {
-                    gravityDirectionOverlay.ignoresSafeArea()
+                    // The base gizmo's large transparent hit-box must sit BELOW the direction
+                    // overlay, otherwise it swallows taps on the confirm ✓ / snap buttons that
+                    // float near the arrow tip (the "checkmark doesn't work" bug). The arrow
+                    // canvas is non-interactive and the tip knob/cluster are small, so the base
+                    // gizmo stays grabbable everywhere else.
                     gravityBaseGizmoOverlay.ignoresSafeArea()
+                    gravityDirectionOverlay.ignoresSafeArea()
                 }
             } else {
                 // The Design Box drawer now lives INSIDE `bottomRightControls` (item 11), so it
@@ -613,6 +618,128 @@ public struct WorkspacePlaceholder: View {
     private func groupScreen(_ g: SelectionGroup) -> CGPoint? {
         guard let proj = projection, let cm = groupCentroidModel(g) else { return nil }
         return proj.project(settledWorld(cm))
+    }
+
+    // MARK: keep-out layout pass (handoff 2026-07-27)
+
+    // Approximate touch/drawn sizes of the floating controls (points). The pass only
+    // needs rects — a small over-estimate is safe (it keeps a touch margin).
+    private static let clrPillSize   = CGSize(width: 64, height: 40)   // number-only value pill
+    private static let clrKnobTouch  = CGSize(width: 46, height: 46)   // red clearance drag knob
+    private static let loadPillSize  = CGSize(width: 96, height: 44)   // weight pill (+ snap row headroom)
+    private static let boxHandleTouch = CGSize(width: 44, height: 44)  // design-box grab circle
+
+    /// The MOST any handle / chip is allowed to shift from its anchor (points). The
+    /// maintainer's rule: a SLIGHT nudge to clear a neighbour, never floated far — a
+    /// control must always read as belonging to its geometry. Past this the control stays
+    /// put and accepts a little overlap (close-but-touching beats far-but-clear).
+    private static let keepOutMaxShift: CGFloat = 40
+    /// The gizmo's keep-out footprint (points) — its VISIBLE arm span, not the full 330 pt
+    /// touch box. Reserving the whole box would demand a huge shift; the visible span is
+    /// what handles actually need to clear, so a slight nudge suffices.
+    private static let gizmoKeepOutSize: CGFloat = 150
+
+    /// The stable keep-out id for a floating value pill / its knob / a box handle.
+    private func clrPillID(_ item: ClearanceHandleItem) -> String { "clr.pill.\(item.id)" }
+    private func clrKnobID(_ item: ClearanceHandleItem) -> String { "clr.knob.\(item.id)" }
+    private func boxHandleID(_ i: Int) -> String { "box.\(i)" }
+
+    /// The keep-out element set for the CURRENT camera projection + model state. Built fresh
+    /// each read (see `keepOutResolved`) so a handle/chip always tracks the primitive as it is
+    /// moved or resized — no cached, lagging positions. Only the gizmo box and the static
+    /// chrome are RIGID; every handle and chip is MOVABLE with a small `maxShift` so it nudges
+    /// slightly clear and never floats away. See `ViewportKeepOut.swift` for the priorities.
+    private func keepOutElements(_ proj: CameraProjection) -> [KeepOutElement] {
+        let W = proj.viewportSize.width
+        var elements: [KeepOutElement] = []
+
+        // ── RIGID: the top-right orientation gizmo (screen-fixed chrome band) ─────────
+        elements.append(KeepOutElement(
+            id: "chrome.orientationGizmo",
+            anchor: CGPoint(x: W - 74, y: 74), bounds: CGSize(width: 132, height: 132),
+            touch: CGSize(width: 132, height: 132), priority: .chrome))
+
+        if force.phase == .edit {
+            // ── RIGID: the manual-primitive transform gizmo (its visible span; L5: never
+            //    displaced, it nudges the handles/pills around it) ──
+            if let gid = selection.activeGroupID {
+                for mp in project.manualPrimitives(in: gid)
+                where gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
+                    if let c = proj.project(settledWorld(SIMD3<Float>(mp.center))) {
+                        let box = Self.gizmoKeepOutSize
+                        elements.append(KeepOutElement(
+                            id: "gizmo.transform", anchor: c,
+                            bounds: CGSize(width: box, height: box),
+                            touch: CGSize(width: box, height: box), priority: .gizmo))
+                    }
+                }
+            }
+
+            // ── MOVABLE (handle): every clearance drag knob, nudged slightly to clear a
+            //    neighbour (the drag reads the finger ray, so a small nudge stays exact) ──
+            for item in clearanceHandleItems {
+                if let k = proj.project(settledWorld(item.handle.anchor)) {
+                    elements.append(KeepOutElement(id: clrKnobID(item), anchor: k,
+                                                   bounds: Self.clrKnobTouch, touch: Self.clrKnobTouch,
+                                                   priority: .handle, maxShift: Self.keepOutMaxShift))
+                }
+            }
+
+            // ── MOVABLE (label): the value pill beside each knob ──
+            for item in syncCollapsedChipItems {
+                if let k = proj.project(settledWorld(item.handle.anchor)) {
+                    let anchor = CGPoint(x: k.x + Self.chipKnobClearance + Self.clrPillSize.width / 2, y: k.y)
+                    elements.append(KeepOutElement(id: clrPillID(item), anchor: anchor,
+                                                   bounds: Self.clrPillSize, touch: Self.clrPillSize,
+                                                   priority: .label, maxShift: Self.keepOutMaxShift))
+                }
+            }
+
+            // ── MOVABLE (pill): the pending selection's Anchor/Load/Keep-clear action bar ──
+            if let g = activeGroup, force.kind(for: g.id).isPending,
+               let cm = groupCentroidModel(g), let c = proj.project(settledWorld(cm)) {
+                elements.append(KeepOutElement(id: "load.pendingchip",
+                                               anchor: CGPoint(x: c.x, y: c.y - 60),
+                                               bounds: CGSize(width: 300, height: 44),
+                                               touch: CGSize(width: 300, height: 44),
+                                               priority: .pill, maxShift: Self.keepOutMaxShift))
+            }
+
+            // ── MOVABLE (pill): each load group's weight pill at its arrow tail ──
+            if let mesh = viewerMesh {
+                for g in loadGroups {
+                    if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
+                        let active = g.id == selection.activeGroupID
+                        let anchor = CGPoint(x: arrow.tail.x, y: arrow.tail.y - (active ? 26 : 0))
+                        elements.append(KeepOutElement(id: "load.\(g.id.uuidString)", anchor: anchor,
+                                                       bounds: Self.loadPillSize, touch: Self.loadPillSize,
+                                                       priority: .pill, maxShift: Self.keepOutMaxShift))
+                    }
+                }
+            }
+        }
+
+        // ── MOVABLE (handle): the design-box / keep-out grab handles (visual + hit layer
+        //    both read the resolved position, so they can't desync) ──
+        if showDesignGizmo {
+            for (i, t) in boxCandidates(proj).enumerated() {
+                elements.append(KeepOutElement(id: boxHandleID(i), anchor: t.screen,
+                                               bounds: Self.boxHandleTouch, touch: Self.boxHandleTouch,
+                                               priority: .handle, maxShift: Self.keepOutMaxShift))
+            }
+        }
+
+        return elements
+    }
+
+    /// Resolve the keep-out layout INLINE for this projection and return the placements by id.
+    /// Pure + stateless (deterministic `KeepOutSolver.resolve`), computed fresh on demand so
+    /// overlays always draw at live positions that track the geometry — no async cache to go
+    /// stale, no smoothing lag while a primitive is dragged. Cheap (a handful of elements).
+    private func keepOutResolved(_ proj: CameraProjection) -> [String: KeepOutPlacement] {
+        guard proj.isUsable else { return [:] }
+        let placed = KeepOutSolver.resolve(keepOutElements(proj), viewport: proj.viewportSize)
+        return Dictionary(placed.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
     }
 
     // MARK: top-left chrome (back + project / material chip)
@@ -1119,10 +1246,10 @@ public struct WorkspacePlaceholder: View {
 
     private var designGizmoOverlay: some View {
         ZStack(alignment: .topLeading) {
-            if let proj = projection, let box = project.designBox.box {
-                boxHandleVisuals(box: box, proj: proj)
+            if let proj = projection, project.designBox.box != nil {
+                boxHandleVisuals(proj)
                     .allowsHitTesting(false)                 // chrome only — the hit layer owns touches
-                boxHitLayer(boxCandidates(proj))
+                boxHitLayer(resolvedBoxCandidates(proj))
                 if boxDragDebug, let d = boxDragDiag { boxDragDiagnosticHUD(d) }
             }
         }
@@ -1132,27 +1259,23 @@ public struct WorkspacePlaceholder: View {
         .coordinateSpace(name: Self.boxStageSpace)
     }
 
-    /// The visible handles — a centre move dot + six face squares for the design box,
-    /// and the same per keep-out. Pure chrome; the hit layer below owns all touches.
-    @ViewBuilder private func boxHandleVisuals(box: DesignBoxBounds, proj: CameraProjection) -> some View {
-        if let c = proj.project(settledWorld(box.center)) {
-            moveHandle(tint: Self.designGlass).position(c)
-        }
-        ForEach(0..<6, id: \.self) { i in
-            let axis = i / 2, isMax = (i % 2 == 1)
-            if let pt = faceHandleScreen(box, axis: axis, isMax: isMax, proj: proj) {
-                resizeHandle(tint: Self.designGlass).position(pt)
-            }
-        }
-        ForEach(Array(project.designBox.keepOuts.enumerated()), id: \.offset) { _, ko in
-            if let c = proj.project(settledWorld(ko.center)) {
-                moveHandle(tint: Self.keepOutGlass).position(c)
-            }
-            ForEach(0..<6, id: \.self) { i in
-                let axis = i / 2, isMax = (i % 2 == 1)
-                if let pt = faceHandleScreen(ko, axis: axis, isMax: isMax, proj: proj) {
-                    resizeHandle(tint: Self.keepOutGlass).position(pt)
-                }
+    /// The visible handles — a centre move dot + six face squares for the design box, and the
+    /// same per keep-out. Keep-out pass owns placement (handoff 2026-07-27): each is drawn at
+    /// its RESOLVED position so a handle floats clear of the gizmo/pills. Visual + hit layers
+    /// both iterate the SAME `boxCandidates` list and read `boxHandleScreen(i)`, so they can't
+    /// desync. Pure chrome; the hit layer below owns all touches.
+    @ViewBuilder private func boxHandleVisuals(_ proj: CameraProjection) -> some View {
+        let targets = boxCandidates(proj)
+        let placed = keepOutResolved(proj)
+        ForEach(targets.indices, id: \.self) { i in
+            let t = targets[i]
+            let pos = placed[boxHandleID(i)]?.center ?? t.screen
+            let keepOutTint: Bool = { if case .keepOut = t.handle.target { return true } else { return false } }()
+            let tint = keepOutTint ? Self.keepOutGlass : Self.designGlass
+            if case .move = t.handle.kind {
+                moveHandle(tint: tint).position(pos)
+            } else {
+                resizeHandle(tint: tint).position(pos)
             }
         }
     }
@@ -1162,6 +1285,15 @@ public struct WorkspacePlaceholder: View {
     private func boxCandidates(_ proj: CameraProjection) -> [DesignBoxHitTest.Target] {
         DesignBoxHandles.candidates(box: project.designBox.box, keepOuts: project.designBox.keepOuts,
                                     settledWorld: settledWorld, project: proj.project)
+    }
+
+    /// `boxCandidates` with each handle moved to its RESOLVED keep-out position — the hit set the
+    /// drag chooses among, so a touch on a displaced handle picks that handle (visual + hit agree).
+    private func resolvedBoxCandidates(_ proj: CameraProjection) -> [DesignBoxHitTest.Target] {
+        let placed = keepOutResolved(proj)
+        return boxCandidates(proj).enumerated().map { i, t in
+            DesignBoxHitTest.Target(handle: t.handle, screen: placed[boxHandleID(i)]?.center ?? t.screen)
+        }
     }
 
     /// The ONE interactive layer: a transparent grab circle per handle, offset into
@@ -1258,7 +1390,7 @@ public struct WorkspacePlaceholder: View {
                 if let owner = boxDrag.activeOwner {
                     chosen = owner
                 } else if let hit = DesignBoxHitTest.choose(at: v.startLocation,
-                                                            among: boxCandidates(proj),
+                                                            among: resolvedBoxCandidates(proj),
                                                             radius: Self.boxHandleGrabRadius) {
                     chosen = hit
                 } else {
@@ -1404,14 +1536,20 @@ public struct WorkspacePlaceholder: View {
     private var clearanceHandlesOverlay: some View {
         ZStack(alignment: .topLeading) {
             if let proj = projection {
+                let placed = keepOutResolved(proj)
                 ForEach(clearanceHandleItems) { item in
                     if let pt = proj.project(settledWorld(item.handle.anchor)) {
+                        // Keep-out pass owns placement (handoff 2026-07-27): the knob is nudged
+                        // slightly to clear a neighbour and tracks the primitive live. The drag
+                        // reads the finger's ray, not the knob's position, so a nudge stays exact.
+                        let center = placed[clrKnobID(item)]?.center ?? pt
                         clearanceHandleKnob(role: item.handle.role, active: draggingHandleID == item.id)
                             .gesture(clearanceHandleDrag(item))
-                            .position(pt)
+                            .position(center)
+                            .animation(DS.Motion.emphasized, value: center)
                     }
                 }
-                clearanceValuePill(proj)
+                clearanceValuePill(proj, placed)
             }
         }
         // Fill the stage so the named coordinate space (and the `.position` anchors)
@@ -1430,26 +1568,17 @@ public struct WorkspacePlaceholder: View {
     /// Round-5 (Task A6 item 1): a SYNCED group collapses to ONE shared chip set — only its
     /// representative primitive's chips draw (`syncCollapsedChipItems`), so the maintainer's
     /// duplicate stacked "DEPTH 3 mm" chips are gone. The drag knobs are NOT collapsed.
-    @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection) -> some View {
-        let W = proj.viewportSize.width
+    @ViewBuilder private func clearanceValuePill(_ proj: CameraProjection, _ placed: [String: KeepOutPlacement]) -> some View {
         ForEach(syncCollapsedChipItems) { item in
-            if let pt = proj.project(settledWorld(item.handle.anchor)) {
-                // Round-6 item 1 (shipping blocker): the chip must sit BESIDE the knob with the
-                // knob's full hit target clear — never on top of it. `.position` centres a view, so
-                // the old "centre at pt.x + 46" let a wider number slide its LEFT edge back onto the
-                // ~50 pt knob. Instead anchor the chip's LEADING edge a fixed clearance right of the
-                // knob centre: a right-extending, hit-transparent container (empty Spacer, no
-                // background → touches fall through to the knobs/camera) pins the number-only chip
-                // left, so its left edge lands at `leadingX` regardless of the value's width.
-                let leadingX = clampX(pt.x + Self.chipKnobClearance, W)
-                let boxW = Swift.max(1, W - leadingX)
-                HStack(spacing: 0) {
-                    clearanceHandleChip(item).fixedSize()
-                    Spacer(minLength: 0)
-                }
-                .frame(width: boxW, alignment: .leading)
-                .position(x: leadingX + boxW / 2, y: clamp(pt.y, proj.viewportSize.height))
-                .animation(DS.Motion.emphasized, value: pt)
+            if let knob = proj.project(settledWorld(item.handle.anchor)) {
+                // Keep-out pass owns placement (handoff 2026-07-27): the pill sits beside its
+                // knob and is nudged slightly to clear a neighbour — always close enough to read
+                // as belonging to it (no leader line). Resolved live so it tracks the primitive.
+                let anchor = CGPoint(x: knob.x + Self.chipKnobClearance + Self.clrPillSize.width / 2, y: knob.y)
+                let center = placed[clrPillID(item)]?.center ?? anchor
+                clearanceHandleChip(item).fixedSize()
+                    .position(center)
+                    .animation(DS.Motion.emphasized, value: center)
             }
         }
     }
@@ -2783,15 +2912,23 @@ public struct WorkspacePlaceholder: View {
             let W = geo.size.width, H = geo.size.height
             ZStack(alignment: .topLeading) {
                 if force.phase == .edit, let mesh = viewerMesh, let proj = projection {
+                    let placed = keepOutResolved(proj)
                     if let g = activeGroup, force.kind(for: g.id).isPending {
                         let pt = groupScreen(g)
+                        // Keep-out pass owns placement (handoff 2026-07-27): the action bar is
+                        // nudged clear of the weight pills. Fallback = the old centroid-above anchor.
+                        let fallback = CGPoint(x: pt?.x ?? W / 2,
+                                               y: pt.map { clamp($0.y - 60, H) } ?? H - 150)
                         anchorLoadChip(g)
-                            .position(x: pt?.x ?? W / 2,
-                                      y: pt.map { clamp($0.y - 60, H) } ?? H - 150)
+                            .position(placed["load.pendingchip"]?.center ?? fallback)
                     }
                     ForEach(loadGroups) { g in
                         if let arrow = loadArrowGeometry(g, mesh: mesh, proj: proj) {
                             let active = g.id == selection.activeGroupID
+                            // Keep-out pass owns placement (handoff 2026-07-27): the weight pill is
+                            // nudged clear of neighbours. Fallback = the old tail anchor.
+                            let anchor = CGPoint(x: arrow.tail.x, y: clamp(arrow.tail.y - (active ? 26 : 0), H))
+                            let center = placed["load.\(g.id.uuidString)"]?.center ?? anchor
                             Group {
                                 if active {
                                     VStack(spacing: DS.Space.xs) {
@@ -2802,7 +2939,7 @@ public struct WorkspacePlaceholder: View {
                                     dimPill(g).onTapGesture { selection.setActive(g.id) }
                                 }
                             }
-                            .position(x: arrow.tail.x, y: clamp(arrow.tail.y - (active ? 26 : 0), H))
+                            .position(center)
                         }
                     }
                 }
