@@ -1,0 +1,34 @@
+mg_rearm_probe — Phase-0 latch re-arm measurement
+
+=== LADDER — develop real OC field, measure geometric MG at each rung START (M2/M4/M5) ===
+extents=192x112x128 occ=0.40  oc_iters/rung=8  develop_tol=1e-03  measure_tol=1e-6
+Warm-start INHERIT: rung k+1 seeds from rung k's converged field (production warm_start_inherit).
+'rung START field' = what the latch would judge if re-armed at that boundary.
+
+--- REGIME: NO-HOLE (AMG-P1 §6 dilute regime) ---
+  part(design) voxels=443520  bore=0  empty=2308992
+  rung     vf        | START-field geometric MG            | Jacobi | END-field (converged rung) geometric MG
+                     | verdict   lvl   cyc   cgit       sec |   cgit | verdict     cyc   cgit
+  [rung 0 vf 0.680: start measured (CARRIES, cyc 157, jac 707); developing 8 OC iters...]
+  0        0.680     | CARRIES     4   157    157     19.48 |    707 | CARRIES     268    268
+  [rung 1 vf 0.520: start measured (CARRIES, cyc 268, jac 1267); developing 8 OC iters...]
+  1        0.520     | CARRIES     4   268    268     30.56 |   1267 | STAGNATED   300   2105
+  [rung 2 vf 0.380: start measured (STAGNATED, cyc 300, jac 2105); developing 8 OC iters...]
+  2        0.380     | STAGNATED   0   300   2105     76.47 |   2105 | STAGNATED   300   2409
+  [rung 3 vf 0.260: start measured (STAGNATED, cyc 300, jac 2409); developing 8 OC iters...]
+  3        0.260     | STAGNATED   0   300   2409     78.30 |   2409 | STAGNATED   300   3043
+
+--- REGIME: WITH-HOLE (125 super-additive regime) ---
+  part(design) voxels=242816  bore=200704  empty=2308992
+  rung     vf        | START-field geometric MG            | Jacobi | END-field (converged rung) geometric MG
+                     | verdict   lvl   cyc   cgit       sec |   cgit | verdict     cyc   cgit
+  [rung 0 vf 0.680: start measured (STAGNATED, cyc 300, jac 3600); developing 8 OC iters...]
+  0        0.680     | STAGNATED   0   300   3600     54.38 |   3600 | STAGNATED   300   5235
+  [rung 1 vf 0.520: start measured (STAGNATED, cyc 300, jac 5235); developing 8 OC iters...]
+  1        0.520     | STAGNATED   0   300   5235     69.43 |   5235 | STAGNATED   300   6199
+  [rung 2 vf 0.380: start measured (STAGNATED, cyc 300, jac 6199); developing 8 OC iters...]
+  2        0.380     | STAGNATED   0   300   6199     89.62 |   6199 | STAGNATED   300   7690
+  [rung 3 vf 0.260: start measured (STAGNATED, cyc 300, jac 7690); developing 8 OC iters...]
+  3        0.260     | STAGNATED   0   300   7690    100.30 |   7690 | STAGNATED   300   8627
+
+done.
