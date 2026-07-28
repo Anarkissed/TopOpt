@@ -1,0 +1,100 @@
+UNION CHARACTER sc — 2x2x2 block, L=8 mm
+   raw soup tris=2268  struts=54 nodes=27
+   welded by coordinate: 837 verts, 2268 tris
+     boundary_edges     = 0
+     non_manifold_edges = 486
+     connected components = 28
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 240 intersecting pairs of 13366 tested (164 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER bcc — 2x2x2 block, L=8 mm
+   raw soup tris=2748  struts=64 nodes=35
+   welded by coordinate: 1123 verts, 2748 tris
+     boundary_edges     = 0
+     non_manifold_edges = 572
+     connected components = 41
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 3416 intersecting pairs of 676866 tested (1164 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER bccz — 2x2x2 block, L=8 mm
+   raw soup tris=3324  struts=82 nodes=35
+   welded by coordinate: 1255 verts, 3324 tris
+     boundary_edges     = 0
+     non_manifold_edges = 736
+     connected components = 37
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 3688 intersecting pairs of 733866 tested (1212 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER fcc — 2x2x2 block, L=8 mm
+   raw soup tris=5868  struts=144 nodes=63
+   welded by coordinate: 2241 verts, 5868 tris
+     boundary_edges     = 0
+     non_manifold_edges = 1422
+     connected components = 72
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 2928 intersecting pairs of 714610 tested (1196 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER fccz — 2x2x2 block, L=8 mm
+   raw soup tris=6444  struts=162 nodes=63
+   welded by coordinate: 2265 verts, 6444 tris
+     boundary_edges     = 0
+     non_manifold_edges = 1622
+     connected components = 64
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 3288 intersecting pairs of 773146 tested (1244 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER octet — 2x2x2 block, L=8 mm
+   raw soup tris=8940  struts=240 nodes=63
+   welded by coordinate: 3249 verts, 8940 tris
+     boundary_edges     = 0
+     non_manifold_edges = 2238
+     connected components = 78
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 9768 intersecting pairs of 3103786 tested (2492 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER diamond — 2x2x2 block, L=8 mm
+   raw soup tris=5996  struts=128 nodes=95
+   welded by coordinate: 3079 verts, 5996 tris
+     boundary_edges     = 0
+     non_manifold_edges = 200
+     connected components = 123
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 3112 intersecting pairs of 973710 tested (1396 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER kelvin — 2x2x2 block, L=8 mm
+   raw soup tris=10560  struts=240 nodes=144
+   welded by coordinate: 5328 verts, 10560 tris
+     boundary_edges     = 0
+     non_manifold_edges = 384
+     connected components = 234
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 3552 intersecting pairs of 1796460 tested (1896 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER rhombic — 2x2x2 block, L=8 mm
+   raw soup tris=10712  struts=256 nodes=126
+   welded by coordinate: 4862 verts, 10712 tris
+     boundary_edges     = 0
+     non_manifold_edges = 1208
+     connected components = 162
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 8000 intersecting pairs of 3557778 tested (2668 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+
+UNION CHARACTER reentrant — 2x2x2 block, L=8 mm
+   raw soup tris=5852  struts=146 nodes=59
+   welded by coordinate: 2767 verts, 5852 tris
+     boundary_edges     = 0
+     non_manifold_edges = 456
+     connected components = 96
+     check_watertight = FAIL
+   self-intersection scan @ interior node: 6496 intersecting pairs of 1209790 tested (1556 local tris)
+   => union is a SELF-INTERSECTING SOUP (boolean union owed; slicer accepts it) — same character as octet: individually-closed prisms that INTERPENETRATE.
+

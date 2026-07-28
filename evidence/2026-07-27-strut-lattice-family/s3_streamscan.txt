@@ -1,0 +1,90 @@
+STREAMSCAN sc — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3         5888         294484       2.70
+       5        21600        1080084       2.70
+       7        53248        2662484       2.70
+       9       106400        5320084       2.70
+      11       186624        9331284       2.70
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN bcc — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3         8732         436684       2.70
+       5        38820        1941084       2.70
+       7       104908        5245484       2.70
+       9       221204       11060284       2.70
+      11       401916       20095884       2.70
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN bccz — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        10268         513484       2.72
+       5        44580        2229084       2.72
+       7       119244        5962284       2.72
+       9       250004       12500284       2.72
+      11       452604       22630284       2.72
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN fcc — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        17264         863284       2.73
+       5        70920        3546084       2.73
+       7       184288        9214484       2.73
+       9       379640       18982084       2.73
+      11       679248       33962484       2.73
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN fccz — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        18800         940084       2.77
+       5        76680        3834084       2.77
+       7       198624        9931284       2.77
+       9       408440       20422084       2.77
+      11       729936       36496884       2.77
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN octet — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        27632        1381684       2.70
+       5       118920        5946084       2.70
+       7       316000       15800084       2.70
+       9       659576       32978884       2.70
+      11      1190352       59517684       2.70
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN diamond — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        19424         971284       2.72
+       5        87320        4366084       2.72
+       7       236816       11840884       2.72
+       9       500168       25008484       2.72
+      11       909632       45481684       2.72
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN kelvin — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        32832        1641684       2.70
+       5       141600        7080084       2.70
+       7       376320       18816084       2.70
+       9       785376       39268884       2.70
+      11      1417152       70857684       2.70
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN rhombic — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        35388        1769484       2.73
+       5       161300        8065084       2.73
+       7       439852       21992684       2.73
+       9       931716       46585884       2.73
+      11      1697564       84878284       2.73
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+
+STREAMSCAN reentrant — peak RSS vs block size (streaming, L=8 mm)
+   cells         tris      stl_bytes    peak_MB
+       3        18800         940084       2.70
+       5        84080        4204084       2.70
+       7       227632       11381684       2.70
+       9       480368       24018484       2.70
+      11       873200       43660084       2.70
+   => peak RSS is FLAT while tris/bytes grow ~n^3: streaming holds (S3).
+

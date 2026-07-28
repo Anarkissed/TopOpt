@@ -1,0 +1,11 @@
+S2 DETERMINISM — md5 of each 40 mm STL over two independent runs
+  sc         63c4792d68aa5abc8e96d257fb0349a6 BYTE-IDENTICAL
+  bcc        c7e6808d6b4fa78c5fc10072f41346d5 BYTE-IDENTICAL
+  bccz       a107dc21ed12c52fff87542a75fdcf2c BYTE-IDENTICAL
+  fcc        01a9b7a5665035cc6dbf2e272294986f BYTE-IDENTICAL
+  fccz       ae80c754a71f93fc10dd0e8412ef55c2 BYTE-IDENTICAL
+  octet      21fa13830b8ef34e699bffbb1d2a4a1d BYTE-IDENTICAL
+  diamond    130cd7e46c15ac84fb5f482ffa5ed1f3 BYTE-IDENTICAL
+  kelvin     edf98b6774d7c8ed58ed0d1ef2d8b415 BYTE-IDENTICAL
+  rhombic    f43a4f4156165d3be585efd140290639 BYTE-IDENTICAL
+  reentrant  700a6939e1379c0a0a374a7f37a74c41 BYTE-IDENTICAL

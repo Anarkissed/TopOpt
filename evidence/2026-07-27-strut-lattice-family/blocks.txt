@@ -1,0 +1,30 @@
+BLOCK sc        40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.80 -0.80 -0.80]..[40.80 40.80 40.80]
+   tris=21600 struts=540 nodes=216  STL=1.08 MB  3MF=0.46 MB
+BLOCK bcc       40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.68 -0.68 -0.68]..[40.68 40.68 40.68]
+   tris=38820 struts=1000 nodes=341  STL=1.94 MB  3MF=0.86 MB
+BLOCK bccz      40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.80 -0.80 -0.68]..[40.80 40.80 40.68]
+   tris=44580 struts=1180 nodes=341  STL=2.23 MB  3MF=0.99 MB
+BLOCK fcc       40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.80 -0.80 -0.80]..[40.80 40.80 40.80]
+   tris=70920 struts=1800 nodes=666  STL=3.55 MB  3MF=1.59 MB
+BLOCK fccz      40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.80 -0.80 -0.80]..[40.80 40.80 40.80]
+   tris=76680 struts=1980 nodes=666  STL=3.83 MB  3MF=1.71 MB
+BLOCK octet     40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.80 -0.80 -0.80]..[40.80 40.80 40.80]
+   tris=118920 struts=3300 nodes=666  STL=5.95 MB  3MF=2.67 MB
+BLOCK diamond   40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.68 -0.68 -0.68]..[40.68 40.68 40.68]
+   tris=87320 struts=2000 nodes=1166  STL=4.37 MB  3MF=1.98 MB
+BLOCK kelvin    40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.80 -0.80 -0.80]..[40.80 40.80 40.80]
+   tris=141600 struts=3300 nodes=1800  STL=7.08 MB  3MF=3.19 MB
+BLOCK rhombic   40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.68 -0.68 -0.68]..[40.68 40.68 40.68]
+   tris=161300 struts=4000 nodes=1665  STL=8.07 MB  3MF=3.60 MB
+BLOCK reentrant 40x40x40 mm (5x5x5 @ 8 mm)
+   bbox=[-0.80 -0.80 -0.68]..[40.80 40.80 40.68]
+   tris=84080 struts=2180 nodes=716  STL=4.20 MB  3MF=1.88 MB
