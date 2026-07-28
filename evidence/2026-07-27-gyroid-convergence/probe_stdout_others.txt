@@ -1,0 +1,32 @@
+LATTICE HOMOGENIZATION LIBRARY (Phase 0) — E_solid=3500 MPa nu=0.33
+method: periodic-BC strain homogenization, production Hex8 element
+
+===== H3B DIRECT free-surface convergence — K=1,2,3,5,7 (L=5.0 mm, vpc=16, rho~0.30) =====
+  periodic bulk computed ONCE from K=1 (exact, K-independent); direct solve run per K.
+  [writing /private/tmp/claude-501/scratch_h3b/h3b_direct_convergence.csv]
+
+  --- gyroid ---
+  periodic bulk E100 = 419.8525 MPa  (0.1200 * Es)
+  cells  voxels      rho    wall_mm  | directE(free) gap%       cg_ms    gapsign  
+  1      4096        0.305  0.625    | 291.5544      -30.56     3102     (soft)
+  2      32768       0.305  0.625    | 353.9947      -15.69     30081    (soft)
+  3      110592      0.305  0.625    | 375.0444      -10.67     102008   (soft)
+  5      512000      0.305  0.625    | 392.4798      -6.52      700778   (soft)
+
+  --- schwarzD ---
+  periodic bulk E100 = 711.7667 MPa  (0.2034 * Es)
+  cells  voxels      rho    wall_mm  | directE(free) gap%       cg_ms    gapsign  
+  1      4096        0.375  0.625    | 709.6200      -0.30      2712     (soft)
+  2      32768       0.375  0.625    | 711.7493      -0.00      25220    (soft)
+  3      110592      0.375  0.625    | 712.0329      +0.04      103375   (stiff)
+  5      512000      0.375  0.625    | 712.1927      +0.06      375137   (stiff)
+
+  --- octet ---
+  periodic bulk E100 = 280.5832 MPa  (0.0802 * Es)
+  cells  voxels      rho    wall_mm  | directE(free) gap%       cg_ms    gapsign  
+  1      4096        0.285  0.625    | 274.1052      -2.31      2477     (soft)
+  2      32768       0.285  0.938    | 277.2459      -1.19      22261    (soft)
+  3      110592      0.285  1.250    | 278.3348      -0.80      102190   (soft)
+  5      512000      0.285  1.250    | 279.2550      -0.47      548982   (soft)
+
+DONE.

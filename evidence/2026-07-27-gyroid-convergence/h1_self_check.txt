@@ -1,0 +1,10 @@
+LATTICE HOMOGENIZATION LIBRARY (Phase 0) — E_solid=3500 MPa nu=0.33
+method: periodic-BC strain homogenization, production Hex8 element
+
+===== H1 SELF-CHECK — solid cell must recover solid tensor =====
+  analytic (isotropic PLA E=3500.0 nu=0.33):  C11=5185.7585  C12=2554.1796  C44=1315.7895  Zener=1.0000
+  measured (periodic homogenization):      C11=5185.7585  C12=2554.1796  C44=1315.7895  Zener=1.0000
+  rel.err:  C11=8.07e-15  C12=4.99e-15  C44=7.26e-15   off-cubic residual=3.88e-13  (cg<=49)
+  -> PASS (bar: all three within 1e-4 = 4 digits)
+
+DONE.
