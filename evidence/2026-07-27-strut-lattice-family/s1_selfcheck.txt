@@ -1,0 +1,70 @@
+S1 SELF-CHECK — sc, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 3
+   mesh strut volume  = 30.547013 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 30.547013 mm^3  (sum of n-gon prisms)
+   relative error     = 5.815e-16
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — bcc, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 8
+   mesh strut volume  = 70.545305 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 70.545305 mm^3  (sum of n-gon prisms)
+   relative error     = 2.014e-16
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — bccz, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 9
+   mesh strut volume  = 80.727642 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 80.727642 mm^3  (sum of n-gon prisms)
+   relative error     = 1.760e-16
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — fcc, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 12
+   mesh strut volume  = 86.400000 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 86.400000 mm^3  (sum of n-gon prisms)
+   relative error     = 3.290e-16
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — fccz, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 13
+   mesh strut volume  = 96.582338 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 96.582338 mm^3  (sum of n-gon prisms)
+   relative error     = 1.471e-16
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — octet, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 24
+   mesh strut volume  = 172.800000 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 172.800000 mm^3  (sum of n-gon prisms)
+   relative error     = 4.934e-16
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — diamond, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 16
+   mesh strut volume  = 70.545305 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 70.545305 mm^3  (sum of n-gon prisms)
+   relative error     = 1.410e-15
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — kelvin, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 24
+   mesh strut volume  = 86.400000 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 86.400000 mm^3  (sum of n-gon prisms)
+   relative error     = 4.934e-16
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — rhombic, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 32
+   mesh strut volume  = 141.090609 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 141.090609 mm^3  (sum of n-gon prisms)
+   relative error     = 1.410e-15
+   => PASS (match to >=3 digits)
+
+S1 SELF-CHECK — reentrant, one unit cell (L=10.0 mm, r=0.60, 8-gon)
+   canonical struts   = 17
+   mesh strut volume  = 132.370389 mm^3  (sum of per-prism signed vols)
+   analytic strut vol = 132.370389 mm^3  (sum of n-gon prisms)
+   relative error     = 6.441e-16
+   => PASS (match to >=3 digits)
+

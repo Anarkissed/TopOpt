@@ -1,0 +1,12 @@
+STRUT-LATTICE FAMILY — per-cell segment tables
+lattice      S  struts   nodes  description
+sc           2       3       1  simple cubic: 3 orthogonal edges/cell (2 horizontal, 1 vertical)
+bcc          2       8       2  body-centred cubic: 8 body diagonals, all at 54.7 deg
+bccz         2       9       2  BCC + vertical struts (adds the 0-deg columns BCC lacks)
+fcc          2      12       4  FCC struts: corner<->face-centre legs only (no octahedral braces)
+fccz         2      13       4  FCC legs + vertical struts
+octet        2      24       4  octet truss: all 12 FCC nearest-neighbour bonds (legs+octahedron)
+diamond      4      16       8  diamond cubic: 4-valent open network, all struts at 54.7 deg
+kelvin       4      24      12  Kelvin cell (truncated octahedron / BCC Voronoi), 24 struts/cell
+rhombic      4      32      12  rhombic dodecahedron (FCC Voronoi), 32 struts/cell, all 54.7 deg
+reentrant    4      17       5  re-entrant/auxetic: waist nodes pulled inward -> concave walls

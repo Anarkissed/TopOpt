@@ -1,0 +1,24 @@
+WEAIRE-PHELAN — attempt & verdict
+  The Weaire-Phelan (A15 / Pm-3n) foam IS periodic in a single cubic cell,
+  so at first glance it looks like just another table entry. It is not, for
+  the current per-cell SEGMENT model, and here is the concrete reason:
+
+  Its 8-cell unit (2 dodecahedra + 6 tetrakaidecahedra) is the VORONOI
+  tessellation of the A15 point set
+     2a:  (0,0,0), (1/2,1/2,1/2)
+     6c:  (1/4,0,1/2) and its 5 axis permutations.
+  The strut skeleton is the Plateau-border network of that tessellation:
+  its vertices are 4-valent junctions sitting at positions that are NOT the
+  corner / edge / face-centre / body-centre dictionary the other nine
+  lattices share, and the edges are the Voronoi edges of an 8-seed cell.
+
+  Producing that edge list REQUIRES the seed-Voronoi step this task puts
+  OUT OF SCOPE ("Voronoi ... needs seed generation and robust thickening").
+  A per-cell integer segment table cannot express it without either (a)
+  running that Voronoi construction, or (b) hand-transcribing an arbitrary
+  straight-edge approximation of relaxed, slightly-curved Plateau borders.
+  Either way it is NEW machinery, not a table row.
+
+  VERDICT: attempted; does NOT fit the current per-cell segment model. Not
+  forced. It belongs with the out-of-scope Voronoi generator, alongside the
+  TPMS sheets (isosurface generator). Said plainly, as the task asked.

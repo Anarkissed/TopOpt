@@ -1,0 +1,88 @@
+ANGLES sc — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+    0 deg : 1 struts (33%)
+   90 deg : 2 struts (67%)
+   vertical (0 deg) struts : 1 of 3 (33%)
+   HORIZONTAL (90 deg) struts : 2 of 3 (67%)
+   steeper than 45 deg (overhang risk): 2 of 3 (67%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES bcc — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+   55 deg : 8 struts (100%)
+   vertical (0 deg) struts : 0 of 8 (0%)
+   HORIZONTAL (90 deg) struts : 0 of 8 (0%)
+   steeper than 45 deg (overhang risk): 8 of 8 (100%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES bccz — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+    0 deg : 1 struts (11%)
+   55 deg : 8 struts (89%)
+   vertical (0 deg) struts : 1 of 9 (11%)
+   HORIZONTAL (90 deg) struts : 0 of 9 (0%)
+   steeper than 45 deg (overhang risk): 8 of 9 (89%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES fcc — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+   45 deg : 8 struts (67%)
+   90 deg : 4 struts (33%)
+   vertical (0 deg) struts : 0 of 12 (0%)
+   HORIZONTAL (90 deg) struts : 4 of 12 (33%)
+   steeper than 45 deg (overhang risk): 4 of 12 (33%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES fccz — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+    0 deg : 1 struts (8%)
+   45 deg : 8 struts (62%)
+   90 deg : 4 struts (31%)
+   vertical (0 deg) struts : 1 of 13 (8%)
+   HORIZONTAL (90 deg) struts : 4 of 13 (31%)
+   steeper than 45 deg (overhang risk): 4 of 13 (31%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES octet — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+   45 deg : 16 struts (67%)
+   90 deg : 8 struts (33%)
+   vertical (0 deg) struts : 0 of 24 (0%)
+   HORIZONTAL (90 deg) struts : 8 of 24 (33%)
+   steeper than 45 deg (overhang risk): 8 of 24 (33%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES diamond — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+   55 deg : 16 struts (100%)
+   vertical (0 deg) struts : 0 of 16 (0%)
+   HORIZONTAL (90 deg) struts : 0 of 16 (0%)
+   steeper than 45 deg (overhang risk): 16 of 16 (100%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES kelvin — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+   45 deg : 16 struts (67%)
+   90 deg : 8 struts (33%)
+   vertical (0 deg) struts : 0 of 24 (0%)
+   HORIZONTAL (90 deg) struts : 8 of 24 (33%)
+   steeper than 45 deg (overhang risk): 8 of 24 (33%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES rhombic — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+   55 deg : 32 struts (100%)
+   vertical (0 deg) struts : 0 of 32 (0%)
+   HORIZONTAL (90 deg) struts : 0 of 32 (0%)
+   steeper than 45 deg (overhang risk): 32 of 32 (100%)
+   NOT a printability verdict — a real FDM print is owed.
+
+ANGLES reentrant — strut angle from VERTICAL (per canonical cell), L=8
+   (0 = vertical/self-supporting column, 90 = horizontal bridge)
+    0 deg : 1 struts (6%)
+   50 deg : 16 struts (94%)
+   vertical (0 deg) struts : 1 of 17 (6%)
+   HORIZONTAL (90 deg) struts : 0 of 17 (0%)
+   steeper than 45 deg (overhang risk): 16 of 17 (94%)
+   NOT a printability verdict — a real FDM print is owed.
+

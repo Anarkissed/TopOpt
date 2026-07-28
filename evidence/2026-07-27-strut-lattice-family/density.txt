@@ -1,0 +1,70 @@
+DENSITY sc — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 24.0000 mm  (= 3.0000 * L)
+   rho (n-gon struts, analytic)  = 0.08485
+   rho (measured mesh, one cell) = 0.08485  (rel err 1.64e-16)
+   rho (ideal round struts)      = 0.09425
+   MAPPING  rho ~= 8.4853 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY bcc — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 55.4256 mm  (= 6.9282 * L)
+   rho (n-gon struts, analytic)  = 0.19596
+   rho (measured mesh, one cell) = 0.19596  (rel err 8.50e-16)
+   rho (ideal round struts)      = 0.21766
+   MAPPING  rho ~= 19.5959 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY bccz — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 63.4256 mm  (= 7.9282 * L)
+   rho (n-gon struts, analytic)  = 0.22424
+   rho (measured mesh, one cell) = 0.22424  (rel err 8.66e-16)
+   rho (ideal round struts)      = 0.24907
+   MAPPING  rho ~= 22.4243 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY fcc — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 67.8823 mm  (= 8.4853 * L)
+   rho (n-gon struts, analytic)  = 0.24000
+   rho (measured mesh, one cell) = 0.24000  (rel err 1.16e-16)
+   rho (ideal round struts)      = 0.26657
+   MAPPING  rho ~= 24.0000 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY fccz — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 75.8823 mm  (= 9.4853 * L)
+   rho (n-gon struts, analytic)  = 0.26828
+   rho (measured mesh, one cell) = 0.26828  (rel err 4.14e-16)
+   rho (ideal round struts)      = 0.29799
+   MAPPING  rho ~= 26.8284 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY octet — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 135.7645 mm  (= 16.9706 * L)
+   rho (n-gon struts, analytic)  = 0.48000
+   rho (measured mesh, one cell) = 0.48000  (rel err 3.47e-16)
+   rho (ideal round struts)      = 0.53315
+   MAPPING  rho ~= 48.0000 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY diamond — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 55.4256 mm  (= 6.9282 * L)
+   rho (n-gon struts, analytic)  = 0.19596
+   rho (measured mesh, one cell) = 0.19596  (rel err 8.50e-16)
+   rho (ideal round struts)      = 0.21766
+   MAPPING  rho ~= 19.5959 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY kelvin — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 67.8823 mm  (= 8.4853 * L)
+   rho (n-gon struts, analytic)  = 0.24000
+   rho (measured mesh, one cell) = 0.24000  (rel err 3.47e-16)
+   rho (ideal round struts)      = 0.26657
+   MAPPING  rho ~= 24.0000 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY rhombic — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 110.8513 mm  (= 13.8564 * L)
+   rho (n-gon struts, analytic)  = 0.39192
+   rho (measured mesh, one cell) = 0.39192  (rel err 1.42e-15)
+   rho (ideal round struts)      = 0.43531
+   MAPPING  rho ~= 39.1918 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
+DENSITY reentrant — L=8.0 mm, r=0.800 mm (r/L=0.1000)
+   canonical strut length / cell = 104.0000 mm  (= 13.0000 * L)
+   rho (n-gon struts, analytic)  = 0.36770
+   rho (measured mesh, one cell) = 0.36770  (rel err 1.51e-16)
+   rho (ideal round struts)      = 0.40841
+   MAPPING  rho ~= 36.7696 * (r/L)^2   (low-density, n-gon; grading inverts this)
+
