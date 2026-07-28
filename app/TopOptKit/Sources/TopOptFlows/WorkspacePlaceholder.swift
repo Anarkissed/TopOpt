@@ -86,6 +86,8 @@ public struct WorkspacePlaceholder: View {
     @State private var gizmoDrag: PrimitiveGizmo.Drag?
     @State private var gizmoSnap = true
     @State private var gizmoSnapLabels: [String] = []
+    /// Which 15°-tick the current rotation drag has passed, so a haptic fires once per step.
+    @State private var gizmoRotTickStep = 0
     /// The raymarched gizmo's glowing handle (0 = hub/free, 1…3 = arms X/Y/Z, 4…6 = plane squares,
     /// 7…9 = rotation ribbons XY/YZ/ZX), or -1.
     @State private var gizmoActiveId: Float = -1
@@ -285,12 +287,16 @@ public struct WorkspacePlaceholder: View {
             // REMOVED as viewport clutter; the "Gravity set · <axis>" chip is the at-a-glance
             // readout the rest of the time.
             if showDesignGizmo { designGizmoOverlay.ignoresSafeArea() }  // dom-app resize/move handles
-            // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
-            // axial, face → depth) and the floating glass value pill near the selection.
-            if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
             // DEFECT 2: the manual-primitive transform gizmo (translate on one axis / plane /
-            // freely, + copy) — drawn on the active group's primitives so they can be grabbed.
+            // freely, rotate, + copy) — drawn on the active group's primitives so they can be
+            // grabbed. Rendered BENEATH the clearance chips below, so the 330 pt gizmo box can
+            // never occlude a value chip (the chip/knob hit areas are small and the rest of that
+            // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
             if force.phase == .edit { primitiveGizmoOverlay.ignoresSafeArea() }
+            // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
+            // axial, face → depth) and the floating glass value pill near the selection — ON TOP
+            // of the gizmo so the values stay readable while transforming.
+            if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
 
             chrome
             if force.phase == .setup {
@@ -1646,7 +1652,11 @@ public struct WorkspacePlaceholder: View {
         if let center = proj.project(settledWorld(SIMD3<Float>(mp.center))) {
             let box = Self.gizmoBoxSize
             ZStack(alignment: .topLeading) {
-                TransformGizmoMetalView(camera: cameraModel, settle: gizmoSettleMatrix,
+                // The gizmo tracks the primitive's OWN orientation (rotates WITH the body), so the
+                // glass stays visually attached as you turn it. Same matrix drives render + pick +
+                // handle axes below, so the drawn ribbons and the axis a grab rotates about agree.
+                TransformGizmoMetalView(camera: cameraModel,
+                                        settle: gizmoSettleMatrix * primitiveOrientation(mp),
                                         activeId: gizmoActiveId)
                     .frame(width: box, height: box)
                     .allowsHitTesting(false)
@@ -1679,7 +1689,7 @@ public struct WorkspacePlaceholder: View {
     /// `TransformGizmo.Constants` the touch targets are ≈ 48 pt arms, ≈ 48 pt hub, ≈ 34 pt plane
     /// squares (kept small so they clear the ribbons) and long ribbon bands (asserted in
     /// `TransformGizmoTests`). Empty box space orbits.
-    static let gizmoBoxSize: CGFloat = 330
+    static let gizmoBoxSize: CGFloat = 297
 
     /// The model→world settle rotation as a matrix (identity when the part isn't settled), so
     /// the gizmo's arms line up with the model axes exactly as the viewer draws them.
@@ -1688,6 +1698,20 @@ public struct WorkspacePlaceholder: View {
     /// The object→view rotation the render + pick share: the live camera view-rotation
     /// composed with the settle, so a tap lands on the arm the user sees.
     private var gizmoRotation: simd_float3x3 { cameraModel.viewRotation * gizmoSettleMatrix }
+
+    /// The primitive's OWN orientation as a model-space rotation (shortest arc from the default
+    /// axis +Z to `mp.axis`), so the gizmo rotates WITH the body. Composed into the render, the
+    /// pick and the handle axes identically, so grabbing a ribbon rotates about the axis the user
+    /// sees. Identity for a fresh (+Z) primitive → byte-identical to the old world-aligned gizmo.
+    private func primitiveOrientation(_ mp: ManualPrimitive) -> simd_float3x3 {
+        let to = simd_normalize(SIMD3<Float>(mp.axis))
+        let from = SIMD3<Float>(0, 0, 1)
+        let d = simd_dot(from, to)
+        if d >= 0.99999 { return matrix_identity_float3x3 }
+        if d <= -0.99999 { return simd_float3x3(simd_quatf(angle: .pi, axis: SIMD3<Float>(1, 0, 0))) }
+        let axis = simd_normalize(simd_cross(from, to))
+        return simd_float3x3(simd_quatf(angle: acosf(d), axis: axis))
+    }
 
     private func gizmoActiveIdValue(_ hit: TransformGizmo.Hit) -> Float {
         switch hit {
@@ -1698,12 +1722,16 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    private func gizmoHandle(for hit: TransformGizmo.Hit) -> PrimitiveGizmo.Handle {
+    /// Map a picked handle to its model-space vector, rotated into the primitive's own frame by
+    /// `O` so a tap on a tilted ribbon rotates about the axis drawn under the finger (the gizmo
+    /// tracks the body). `O = identity` reproduces the world-aligned mapping exactly.
+    private func gizmoHandle(for hit: TransformGizmo.Hit, orientation O: simd_float3x3) -> PrimitiveGizmo.Handle {
+        func local(_ v: SIMD3<Double>) -> SIMD3<Double> { SIMD3<Double>(O * SIMD3<Float>(v)) }
         switch hit {
         case .free:            return .free
-        case .axis(let i):     return .axis(TransformGizmo.axisVectors[i])
-        case .plane(let p):    return .plane(TransformGizmo.planeNormals[p])
-        case .rotate(let p):   return .rotate(TransformGizmo.planeNormals[p])
+        case .axis(let i):     return .axis(local(TransformGizmo.axisVectors[i]))
+        case .plane(let p):    return .plane(local(TransformGizmo.planeNormals[p]))
+        case .rotate(let p):   return .rotate(local(TransformGizmo.planeNormals[p]))
         }
     }
 
@@ -1718,14 +1746,18 @@ public struct WorkspacePlaceholder: View {
                 if gizmoDrag == nil && !gizmoBoxOrbiting && gizmoBoxDragLast == nil {
                     let local = CGPoint(x: v.startLocation.x - (boxCenter.x - boxSize / 2),
                                         y: v.startLocation.y - (boxCenter.y - boxSize / 2))
+                    // Pick + handle axes use the SAME primitive-orientation matrix the render does,
+                    // so a grab on a tilted ribbon rotates about the axis drawn under the finger.
+                    let orient = primitiveOrientation(mp)
                     if let hit = TransformGizmo.pick(point: local,
                                                      in: CGSize(width: boxSize, height: boxSize),
-                                                     rotation: gizmoRotation),
+                                                     rotation: gizmoRotation * orient),
                        let ray = modelRay(proj, at: v.location) {
                         gizmoActiveId = gizmoActiveIdValue(hit)
-                        gizmoDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit),
+                        gizmoDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit, orientation: orient),
                                                         startCenter: mp.center, startAxis: mp.axis,
                                                         grab: ray, viewDir: ray.dir)
+                        gizmoRotTickStep = 0
                         ClearanceHaptics.grab()
                     } else {
                         gizmoBoxOrbiting = true
@@ -1744,7 +1776,18 @@ public struct WorkspacePlaceholder: View {
                 // TRANSLATES (writes the centre, axis fixed). Same detent-magnet toggle both ways.
                 let labels: [String]
                 if case .rotate = drag.handle {
-                    labels = project.rotateManualPrimitive(id: mp.id, in: gid, to: out.axis, snap: gizmoSnap)
+                    // Pass the grabbed start axis so the detent won't snap the turn back onto the
+                    // orientation it's leaving (the 8° dead-zone that made the ribbons read dead).
+                    labels = project.rotateManualPrimitive(id: mp.id, in: gid, to: out.axis,
+                                                           from: drag.startAxis, snap: gizmoSnap)
+                    // Tactile TICKS every 15° swept, so a rotation feels stepped, not silent.
+                    let deg = acos(min(1, abs(simd_dot(PrimitiveGizmo.unit(drag.startAxis),
+                                                       PrimitiveGizmo.unit(out.axis))))) * 180 / .pi
+                    let step = Int(deg / 15)
+                    if step != gizmoRotTickStep {
+                        if step > gizmoRotTickStep { ClearanceHaptics.detent() }
+                        gizmoRotTickStep = step
+                    }
                 } else {
                     labels = project.moveManualPrimitive(id: mp.id, in: gid, to: out.center, snap: gizmoSnap)
                 }
@@ -2044,10 +2087,11 @@ public struct WorkspacePlaceholder: View {
             }
     }
 
-    /// The base transform gizmo's ONE gesture: on grab, SDF-pick a translate handle; then either
-    /// slide the base (untouched `PrimitiveGizmo` translate → magnetic face-attach) or, on a miss,
-    /// orbit — so the box never fights the camera (the manual-primitive gizmo's rule). The base is
-    /// a live draft; ✓ commits it. This never touches the direction draft (BAR V7).
+    /// The gravity gizmo's ONE gesture: on grab, SDF-pick a handle; then either RIBBON → rotate the
+    /// gravity DIRECTION (aim the arrow, snapping to face normals), ARM/PLANE/HUB → slide the base
+    /// (untouched `PrimitiveGizmo` translate → magnetic face-attach), or on a miss orbit — so the
+    /// box never fights the camera (the manual-primitive gizmo's rule). Both are live drafts; ✓
+    /// commits. (Ribbons used to be dead here — the base gesture read only `.center`; 2026-07-27.)
     private func gravityBaseGizmoGesture(_ proj: CameraProjection,
                                          boxCenter: CGPoint, boxSize: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
@@ -2060,9 +2104,12 @@ public struct WorkspacePlaceholder: View {
                                                      rotation: gizmoRotation),
                        let ray = modelRay(proj, at: v.location) {
                         gravityBaseActiveId = gizmoActiveIdValue(hit)
-                        gravityBaseDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit),
+                        // startAxis = the CURRENT gravity direction, so a RIBBON grab rotates
+                        // the arrow's aim (a ribbon `resolve` turns `startAxis` about the ribbon
+                        // axis). Arms/plane/hub ignore startAxis and slide the base as before.
+                        gravityBaseDrag = PrimitiveGizmo.Drag(handle: gizmoHandle(for: hit, orientation: matrix_identity_float3x3),
                                                               startCenter: SIMD3<Double>(effectiveGravityBase),
-                                                              startAxis: SIMD3<Double>(0, 1, 0),
+                                                              startAxis: SIMD3<Double>(effectiveGravityDraft),
                                                               grab: ray, viewDir: ray.dir)
                         ClearanceHaptics.grab()
                     } else {
@@ -2077,7 +2124,25 @@ public struct WorkspacePlaceholder: View {
                     return
                 }
                 guard let drag = gravityBaseDrag, let ray = modelRay(proj, at: v.location) else { return }
-                var p = SIMD3<Float>(drag.resolve(currentRay: ray).center)
+                let out = drag.resolve(currentRay: ray)
+                // A RIBBON rotates the gravity DIRECTION (aims the arrow) about that axis — the
+                // same affordance the manual-primitive gizmo uses; the arms/plane/hub keep sliding
+                // the base. Snaps to the part's own face normals like the tip drag (item 1).
+                if case .rotate = drag.handle {
+                    var dir = SIMD3<Float>(out.axis)
+                    var label: String?
+                    if gravitySnap {
+                        let s = GravityDirectionGizmo.snap(SIMD3<Double>(dir), extraTargets: gravityFaceSnapTargets)
+                        dir = SIMD3<Float>(s.dir); label = s.label
+                    }
+                    if label != gravitySnapLabel {
+                        if label != nil { ClearanceHaptics.detent() }
+                        gravitySnapLabel = label
+                    }
+                    gravityDraft = dir
+                    return
+                }
+                var p = SIMD3<Float>(out.center)
                 var snapped = false
                 if gravitySnap, let mesh = viewerMesh,
                    let hit = mesh.nearestSurfacePoint(to: p, within: gravityBaseMagnetDist) {

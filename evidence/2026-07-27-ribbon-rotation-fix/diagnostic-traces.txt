@@ -1,0 +1,77 @@
+=== DETENT snap-back — default +Z primitive, rotate about X, snap=ON (angleTol=8.0°) ===
+drag   2.0°  newAxis=(0.000,-0.035,0.999)  ->  stored=(0.000,0.000,1.000)  net  0.00°  <<< SNAPPED BACK TO START
+drag   5.0°  newAxis=(0.000,-0.087,0.996)  ->  stored=(0.000,0.000,1.000)  net  0.00°  <<< SNAPPED BACK TO START
+drag   7.9°  newAxis=(0.000,-0.137,0.991)  ->  stored=(0.000,0.000,1.000)  net  0.00°  <<< SNAPPED BACK TO START
+drag   8.1°  newAxis=(0.000,-0.141,0.990)  ->  stored=(0.000,-0.141,0.990)  net  8.10°  (labels: [])
+drag  15.0°  newAxis=(0.000,-0.259,0.966)  ->  stored=(0.000,-0.259,0.966)  net 15.00°  (labels: [])
+drag  30.0°  newAxis=(0.000,-0.500,0.866)  ->  stored=(0.000,-0.500,0.866)  net 30.00°  (labels: [])
+drag  45.0°  newAxis=(0.000,-0.707,0.707)  ->  stored=(0.000,-0.707,0.707)  net 45.00°  (labels: [])
+drag  83.0°  newAxis=(0.000,-0.993,0.122)  ->  stored=(0.000,-1.000,0.000)  net 90.00°  (labels: ["world Y axis"])
+=== END-TO-END ProjectModel.rotateManualPrimitive (snap=true, as shipped) — start axis (0.0,0.0,1.0) ===
+drag   3.0°  ->  STORED axis=(0.000,-0.052,0.999)  net  3.00°  moved labels=[]
+drag   6.0°  ->  STORED axis=(0.000,-0.105,0.995)  net  6.00°  moved labels=[]
+drag  10.0°  ->  STORED axis=(0.000,-0.174,0.985)  net 10.00°  moved labels=[]
+drag  20.0°  ->  STORED axis=(0.000,-0.342,0.940)  net 20.00°  moved labels=[]
+drag  40.0°  ->  STORED axis=(0.000,-0.643,0.766)  net 40.00°  moved labels=[]
+=== PICK GRID [FRONT-ON] (26x26) — F=free A=axis P=plane R=rotate .=miss ===
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  A1 A1 .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A1 A1 .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A1 A1 .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 R1 R1 A1 .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 R1 R1 A1 R0 R0 .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 R1 R1 A1 R0 R0 R0 R0 .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 R1 R1 A1 .  R0 R0 R0 R0 .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 R1 R1 A1 P0 P0 P0 R0 R0 .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 R1 R1 A1 P0 P0 P0 R0 R0 R0 .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 R1 R1 A1 P0 P0 P0 .  R0 R0 .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A2 A2 A2 A2 A0 A0 A0 A0 A0 A0 A0 A0 A0 .  .  
+.  .  .  .  .  .  .  .  .  .  .  A2 F  F  A2 R2 R2 R2 R2 R2 R2 R2 A0 A0 A0 .  
+.  .  .  .  .  .  .  .  .  .  .  A2 F  F  A2 R2 R2 R2 R2 R2 R2 R2 A0 A0 A0 .  
+.  .  .  .  .  .  .  .  .  .  .  A2 A2 A2 A2 A0 A0 A0 A0 A0 A0 A0 A0 A0 .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+[FRONT-ON] tally: .=558 A0=24 A1=24 A2=12 F=4 P0=9 R0=17 R1=14 R2=14
+[FRONT-ON] ROTATE cells: R0=17 R1=14 R2=14  total=45
+=== PICK GRID [ISO] (26x26) — F=free A=axis P=plane R=rotate .=miss ===
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A1 A1 .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A1 R1 R1 R1 R1 .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 R1 R1 R1 R1 R1 R1 .  A2 .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A1 A1 P1 R1 R1 A2 A2 A2 A2 A2 .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A1 P1 P1 .  A2 A2 A2 A2 A2 A2 .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A1 P1 A2 A2 A2 A2 A2 A2 A2 A2 .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 A1 A2 A2 A2 A2 A2 A2 A2 A2 A2 .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  A1 F  A2 A2 A2 A2 A2 A2 A2 R2 R2 .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  F  F  F  A2 A2 A2 A2 P2 R2 R2 R2 .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  F  F  F  F  A2 A0 P2 A0 R2 R2 .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  F  F  A0 A0 A0 A0 A0 R2 R2 .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  A0 A0 A0 A0 A0 A0 A0 .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  A0 A0 A0 A0 .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+.  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  
+[ISO] tally: .=558 A0=18 A1=22 A2=41 F=10 P1=4 P2=2 R1=12 R2=9
+[ISO] ROTATE cells: R0=0 R1=12 R2=9  total=21
+=== resolve(.rotate) PURE (no detents) — startAxis = +Z default, drag 30° ===
+ribbon pl=0 about Z  ->  axis=(0.000,0.000,1.000)  moved 0.00°  <<< DEAD no-op (rotation about own axis)
+ribbon pl=1 about X  ->  axis=(0.000,-0.500,0.866)  moved 30.00°  rotates
+ribbon pl=2 about Y  ->  axis=(0.500,0.000,0.866)  moved 30.00°  rotates
