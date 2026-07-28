@@ -1,0 +1,15 @@
+[
+  {"id":"box.0","priority":"handle","rigid":false,"tw":44.0,"th":44.0,"ax":460.00,"ay":300.00,"cx":425.50,"cy":300.00,"leader":true,"hidden":false},
+  {"id":"box.1","priority":"handle","rigid":false,"tw":44.0,"th":44.0,"ax":780.00,"ay":300.00,"cx":780.00,"cy":300.00,"leader":false,"hidden":false},
+  {"id":"box.2","priority":"handle","rigid":false,"tw":44.0,"th":44.0,"ax":460.00,"ay":560.00,"cx":425.50,"cy":560.00,"leader":true,"hidden":false},
+  {"id":"box.3","priority":"handle","rigid":false,"tw":44.0,"th":44.0,"ax":780.00,"ay":560.00,"cx":780.00,"cy":560.00,"leader":false,"hidden":false},
+  {"id":"clr.knob.0","priority":"handle","rigid":false,"tw":46.0,"th":46.0,"ax":560.00,"ay":380.00,"cx":424.50,"cy":380.00,"leader":true,"hidden":false},
+  {"id":"clr.knob.1","priority":"handle","rigid":false,"tw":46.0,"th":46.0,"ax":640.00,"ay":470.00,"cx":775.50,"cy":470.00,"leader":true,"hidden":false},
+  {"id":"clr.knob.2","priority":"handle","rigid":false,"tw":46.0,"th":46.0,"ax":820.00,"ay":300.00,"cx":829.00,"cy":300.00,"leader":false,"hidden":false},
+  {"id":"clr.pill.0","priority":"label","rigid":false,"tw":64.0,"th":44.0,"ax":632.00,"ay":380.00,"cx":632.00,"cy":255.50,"leader":true,"hidden":false},
+  {"id":"clr.pill.1","priority":"label","rigid":false,"tw":64.0,"th":44.0,"ax":712.00,"ay":470.00,"cx":712.00,"cy":604.50,"leader":true,"hidden":false},
+  {"id":"clr.pill.2","priority":"label","rigid":false,"tw":64.0,"th":44.0,"ax":892.00,"ay":300.00,"cx":892.00,"cy":300.00,"leader":false,"hidden":false},
+  {"id":"gizmo.transform","priority":"gizmo","rigid":true,"tw":297.0,"th":297.0,"ax":600.00,"ay":430.00,"cx":600.00,"cy":430.00,"leader":false,"hidden":false},
+  {"id":"load.0","priority":"pill","rigid":false,"tw":96.0,"th":44.0,"ax":500.00,"ay":430.00,"cx":500.00,"cy":604.50,"leader":true,"hidden":false},
+  {"id":"load.1","priority":"pill","rigid":false,"tw":96.0,"th":44.0,"ax":300.00,"ay":520.00,"cx":300.00,"cy":520.00,"leader":false,"hidden":false}
+]
