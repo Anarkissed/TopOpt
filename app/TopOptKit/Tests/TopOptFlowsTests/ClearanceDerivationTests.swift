@@ -13,10 +13,16 @@ import TopOptKit
 @MainActor
 final class ClearanceDerivationTests: XCTestCase {
 
-    /// An octagonal-prism wall (curved bore, faces 1 & 2) capped by a planar octagon
-    /// (face 3), with per-face B-rep geometry attached: faces 1/2 are a cylinder of
-    /// radius 2.5 about +Z, face 3 a plane with +Z outward normal. Mirrors the
-    /// FaceSelection octagon fixture but carries `faceGeometry` (keep-clear v2).
+    /// An octagonal-prism bore WALL (curved bore, faces 1 & 2) capped by a planar
+    /// octagon (face 3), with per-face B-rep geometry attached: faces 1/2 are a
+    /// cylinder of radius 2.5 about +Z, face 3 a plane with +Z outward normal.
+    ///
+    /// The wall triangles are wound so their geometric normals point INWARD, toward
+    /// the axis — a genuine through-HOLE, exactly as a real STL import winds a bore
+    /// (the outward-from-solid normal of a hole wall faces into the cavity). This
+    /// matters for `isFastenerBore` (handoff 2026-07-29), whose concavity vote
+    /// separates a real hole from a convex boss / outer rim; a peg-wound octagon
+    /// (normals outward) would be — correctly — rejected as not-a-fastener-bore.
     private func borePlusPlaneMesh() -> ViewerMesh {
         let n = 8
         var verts: [Float] = []
@@ -30,17 +36,21 @@ final class ClearanceDerivationTests: XCTestCase {
         func B(_ k: Int) -> Int32 { Int32(k % n) }
         func T(_ k: Int) -> Int32 { Int32(n + (k % n)) }
         for k in 0..<n {
-            indices += [B(k), B(k + 1), T(k + 1), B(k), T(k + 1), T(k)]
-            let id: Int32 = k < 4 ? 1 : 2
-            faceIDs += [id, id]
+            // Concave (inward-normal) winding — a hole wall, not a peg (see doc above).
+            indices += [B(k), T(k + 1), B(k + 1), B(k), T(k), T(k + 1)]
+            faceIDs += [1, 1]   // the WHOLE barrel is one pseudo-face (a full-wrap hole)
         }
         for k in 0..<n { indices += [topCentre, T(k), T(k + 1)]; faceIDs += [3] }
-        // faceGeometry indexed by face id (size 4): 0 unused, 1&2 cylinder, 3 plane.
+        // The bore is ONE face wrapping the full 360° — as the dihedral segmenter keeps
+        // a smoothly-tessellated barrel (it fragments only on coarse >35° facets, the
+        // PR-167 caveat). A ≥ 300°-wrap concave cylinder is a fastener bore (2026-07-29).
+        // faceGeometry indexed by face id (size 4): 0/2 unused, 1 cylinder, 3 plane.
         let cyl = StepFaceGeometry(kind: .cylinder, cylinderRadiusMM: 2.5,
                                    axisPoint: SIMD3(0, 0, 0), axisDir: SIMD3(0, 0, 1))
         let plane = StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 0, 1),
                                      planeOrigin: SIMD3(0, 0, 10))
-        let geo: [StepFaceGeometry] = [StepFaceGeometry(kind: .other), cyl, cyl, plane]
+        let geo: [StepFaceGeometry] = [StepFaceGeometry(kind: .other), cyl,
+                                       StepFaceGeometry(kind: .other), plane]
         return ViewerMesh(vertices: verts, indices: indices, faceIDs: faceIDs, faceGeometry: geo)
     }
 
@@ -169,5 +179,108 @@ final class ClearanceDerivationTests: XCTestCase {
         let planeEntry = try! XCTUnwrap(p.clearanceHandles().first { $0.faceID == 3 })
         XCTAssertEqual(planeEntry.handles.count, 1)
         XCTAssertEqual(planeEntry.handles[0].role, .slabDepth)
+    }
+
+    // MARK: - fastener-bore gate (handoff 2026-07-29, clearance-heuristic-fix)
+
+    /// A cylinder-wall face (id 1) of `segments` quads of a regular n-gon about +Z,
+    /// wound `concave` (a hole) or convex (a boss / outer rim). `hasRadius == false`
+    /// attaches an `.other` face geometry (a curved-but-not-a-fitted-cylinder face —
+    /// the blank-Auto class). The wall wraps ≈ `segments/n · 360°`.
+    private func cylWallMesh(n: Int, segments: Int, concave: Bool,
+                             r: Float = 2.5, hasRadius: Bool = true) -> ViewerMesh {
+        let ring = segments == n            // a full ring wraps; a partial arc does not
+        let count = ring ? n : segments + 1
+        var verts: [Float] = []
+        for k in 0..<count { let a = Float(k) * (2 * .pi / Float(n)); verts += [r*cos(a), r*sin(a), 0] }
+        for k in 0..<count { let a = Float(k) * (2 * .pi / Float(n)); verts += [r*cos(a), r*sin(a), 10] }
+        var indices: [Int32] = []; var faceIDs: [Int32] = []
+        func B(_ k: Int) -> Int32 { Int32(k % count) }
+        func T(_ k: Int) -> Int32 { Int32(count + (k % count)) }
+        for k in 0..<segments {
+            if concave { indices += [B(k), T(k + 1), B(k + 1), B(k), T(k), T(k + 1)] }   // inward
+            else       { indices += [B(k), B(k + 1), T(k + 1), B(k), T(k + 1), T(k)] }   // outward
+            faceIDs += [1, 1]
+        }
+        let wall = hasRadius
+            ? StepFaceGeometry(kind: .cylinder, cylinderRadiusMM: Double(r),
+                               axisPoint: SIMD3(0, 0, 0), axisDir: SIMD3(0, 0, 1))
+            : StepFaceGeometry(kind: .other)
+        return ViewerMesh(vertices: verts, indices: indices, faceIDs: faceIDs,
+                          faceGeometry: [StepFaceGeometry(kind: .other), wall])
+    }
+
+    /// A full concave through-hole is a fastener bore.
+    func testFastenerBoreAcceptsConcaveFullHole() {
+        let mesh = cylWallMesh(n: 8, segments: 8, concave: true)
+        XCTAssertTrue(FaceTopology.isFastenerBore(1, in: mesh))
+    }
+
+    /// A full CONVEX ring (a boss / a round plate's outer rim) is a fitted cylinder and
+    /// wraps 360° — but its walls face AWAY from the axis, so it is NOT a fastener bore.
+    /// This is the `filleted_bore_plate` 22 mm-rim false positive the old test offered as
+    /// a bolt hole. `isCurved` still calls it curved; the gate is what rejects it.
+    func testFastenerBoreRejectsConvexRim() {
+        let mesh = cylWallMesh(n: 8, segments: 8, concave: false)
+        XCTAssertTrue(FaceTopology.isCurved(1, in: mesh), "the old 5° test accepts it")
+        XCTAssertFalse(FaceTopology.isFastenerBore(1, in: mesh), "the gate rejects the convex rim")
+    }
+
+    /// A concave cylinder covering only a shallow arc (a rounded pocket corner, not a
+    /// through-hole) wraps far below 300° and is rejected.
+    func testFastenerBoreRejectsShallowArc() {
+        let mesh = cylWallMesh(n: 8, segments: 2, concave: true)   // ~90° of wrap
+        XCTAssertTrue(FaceTopology.isCurved(1, in: mesh))
+        XCTAssertFalse(FaceTopology.isFastenerBore(1, in: mesh))
+    }
+
+    /// A curved face the segmenter could NOT fit as a cylinder (`.other`, no radius) —
+    /// a sphere patch, cone, or pocket blend — is the source of every blank "— mm Auto"
+    /// row. `isCurved` accepts it (→ a bore with no radius → blank); the gate rejects it.
+    func testFastenerBoreRejectsNonCylinderCurvedFace() {
+        let mesh = cylWallMesh(n: 8, segments: 8, concave: true, hasRadius: false)
+        XCTAssertTrue(FaceTopology.isCurved(1, in: mesh), "curved, so the old test proposed a bore")
+        XCTAssertFalse(FaceTopology.isFastenerBore(1, in: mesh), "no fitted radius → not a bore, no blank row")
+    }
+
+    /// C2: a non-cylinder curved face on an anchored group proposes NO auto clearance —
+    /// so there is no bore row that could render a blank Auto pill, and the run stays
+    /// byte-identical (empty specs / volumes).
+    func testNonBoreCurvedFaceProducesNoBlankClearance() {
+        let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                             importedFile: nil, importedMesh: nil)
+        p.viewerMesh = cylWallMesh(n: 8, segments: 8, concave: true, hasRadius: false)
+        var sel = SelectionModel(); sel.addGroup(); sel.pickFaces([1]); p.selection = sel
+        p.force.makeAnchor(sel.groups[0].id)
+        XCTAssertFalse(p.autoClearanceApplies(sel.groups[0], in: p.viewerMesh!),
+                       "a non-fitted curved face does not arm the auto rule")
+        XCTAssertTrue(p.clearanceSpecs().isEmpty, "no bogus bore spec")
+        XCTAssertTrue(p.clearanceVolumes().isEmpty, "no blank bore volume")
+    }
+
+    /// A convex boss on an anchored group likewise proposes nothing (over-finding fix).
+    func testConvexBossDoesNotAutoClear() {
+        let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                             importedFile: nil, importedMesh: nil)
+        p.viewerMesh = cylWallMesh(n: 8, segments: 8, concave: false)   // convex, has radius
+        var sel = SelectionModel(); sel.addGroup(); sel.pickFaces([1]); p.selection = sel
+        p.force.makeAnchor(sel.groups[0].id)
+        XCTAssertTrue(p.clearanceSpecs().isEmpty, "a convex cylinder is not a fastener bore")
+    }
+
+    /// C4: a manually-added primitive is emitted regardless of the gate — the escape
+    /// hatch forces a clearance onto a face the tightened detector would reject.
+    func testManualPrimitiveUnaffectedByGate() {
+        let p = ProjectModel(id: UUID(), name: "P", material: "PLA", process: .fdm,
+                             importedFile: nil, importedMesh: nil)
+        p.viewerMesh = cylWallMesh(n: 8, segments: 2, concave: true)   // a face the gate rejects
+        var sel = SelectionModel(); sel.addGroup(); sel.pickFaces([1]); p.selection = sel
+        let gid = sel.groups[0].id
+        let mp = ManualPrimitive(kind: .bolt, center: SIMD3(0, 0, 5), axis: SIMD3(0, 0, 1),
+                                 radiusMM: 3, halfLengthMM: 5)
+        _ = p.force.addManualPrimitive(mp, to: gid)
+        let specs = p.clearanceSpecs()
+        XCTAssertEqual(specs.count, 1, "the manual bolt is emitted even though the face fails the gate")
+        XCTAssertEqual(specs.first?.kind, .bolt)
     }
 }

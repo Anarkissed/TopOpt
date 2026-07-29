@@ -127,7 +127,19 @@ struct SegmentOptions {
   // keep-clear tapped on such a face would sweep a keep-out of that bogus
   // radius. Found on the handoff-134 reference bracket, where a 60 mm plate's
   // side fit as a 140 mm cylinder.
-  double max_cylinder_radius_span = 1.0;
+  //
+  // TIGHTENED 1.0 → 0.5 (handoff 2026-07-29, clearance-heuristic-fix). At 1.0
+  // the ceiling was the WHOLE bbox diagonal, so on the 290 mm WallMount shelf
+  // bracket a nearly-flat outer edge fit a 221 mm "cylinder" (r/diag 0.77) and
+  // passed — feeding the auto-clearance finder a Ø443 mm bolt keep-out on a
+  // 20 mm-thick plate (the "135 mm axial", now 443 mm, that got the heuristic
+  // flagged). A cylinder wider than HALF the part's space diagonal is not a
+  // feature of the part; 0.5 rejects those flat-wall misfits (the bracket's
+  // 0.77 and 0.69 fits fall back to Other) while leaving every real bore
+  // untouched — the widest genuine bore across the mesh fixtures is the
+  // filleted-plate rim at r/diag 0.35, well under 0.5, so all fixtures whose
+  // classification was already correct are byte-identical (evidence 2026-07-29).
+  double max_cylinder_radius_span = 0.5;
 };
 
 // The manufactured face partition. Shaped to drop straight into StepModel.

@@ -13,7 +13,11 @@ import TopOptKit
 @MainActor
 final class ManualPrimitiveTests: XCTestCase {
 
-    /// A bore+plane mesh carrying `faceGeometry` (a cylinder on faces 1&2, a plane on 3).
+    /// A bore+plane mesh carrying `faceGeometry`: a full-wrap through-HOLE (face 1, a
+    /// concave cylinder) capped by a plane (face 3). The wall triangles wind INWARD
+    /// (normals toward the axis), as a real STL import winds a hole, so the bore passes
+    /// `FaceTopology.isFastenerBore` (handoff 2026-07-29); a peg-wound / arc-split bore
+    /// would be — correctly — rejected as not a fastener bore.
     private func borePlusPlaneMesh() -> ViewerMesh {
         let n = 8
         var verts: [Float] = []
@@ -27,16 +31,16 @@ final class ManualPrimitiveTests: XCTestCase {
         func B(_ k: Int) -> Int32 { Int32(k % n) }
         func T(_ k: Int) -> Int32 { Int32(n + (k % n)) }
         for k in 0..<n {
-            indices += [B(k), B(k + 1), T(k + 1), B(k), T(k + 1), T(k)]
-            let id: Int32 = k < 4 ? 1 : 2
-            faceIDs += [id, id]
+            indices += [B(k), T(k + 1), B(k + 1), B(k), T(k), T(k + 1)]   // inward-normal (hole)
+            faceIDs += [1, 1]                                            // one full-wrap barrel
         }
         for k in 0..<n { indices += [topCentre, T(k), T(k + 1)]; faceIDs += [3] }
         let cyl = StepFaceGeometry(kind: .cylinder, cylinderRadiusMM: 2.5,
                                    axisPoint: SIMD3(0, 0, 0), axisDir: SIMD3(0, 0, 1))
         let plane = StepFaceGeometry(kind: .plane, planeNormal: SIMD3(0, 0, 1),
                                      planeOrigin: SIMD3(0, 0, 10))
-        let geo: [StepFaceGeometry] = [StepFaceGeometry(kind: .other), cyl, cyl, plane]
+        let geo: [StepFaceGeometry] = [StepFaceGeometry(kind: .other), cyl,
+                                       StepFaceGeometry(kind: .other), plane]
         return ViewerMesh(vertices: verts, indices: indices, faceIDs: faceIDs, faceGeometry: geo)
     }
 

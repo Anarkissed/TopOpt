@@ -1,0 +1,9 @@
+# Device-real Swift test — real bridge import of WallMount_ShelfBracket.stl + shipping FaceTopology.isFastenerBore
+# (segmentation runs with the tightened 0.5*bbox cylinder-radius bound; predicate is the app's own)
+
+Test Case '-[TopOptFlowsTests.ClearanceHeuristicBracketTests testShelfBracketClearanceSpecs]' passed (0.033 seconds).
+Test Case '-[TopOptFlowsTests.ClearanceHeuristicBracketTests testShelfBracketFastenerCensus]' passed (0.036 seconds).
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.069 (0.069) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.069 (0.069) seconds
+	 Executed 2 tests, with 0 failures (0 unexpected) in 0.069 (0.070) seconds
+[bracket] OLD isCurved bores = 24 (10 blank-Auto) | NEW fastener bores = 2 | worst auto axial = 9.00000099294503 mm
