@@ -210,13 +210,27 @@ KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
   // are read straight off `opts`: the scalar f^1.5 seed from the job infill, the
   // width-aware arming flag (equals production_width_aware_knockdown() once the
   // options came through configure_production_options), the infill for the per-voxel
-  // core term, and the slicer wall-ring thickness t = wall_loops · wall_line_width_mm.
+  // core term, and the slicer wall-ring thickness.
   KnockdownSpec knockdown;
   knockdown.infill_knockdown = infill_margin_knockdown(opts.infill_percent);
   knockdown.width_aware = opts.width_aware_knockdown;
   knockdown.infill_percent = opts.infill_percent;
+  // Slicer wall-ring thickness (handoff line-width-plumbing). Bambu Studio / OrcaSlicer
+  // deposit the single OUTER perimeter at its own line width and the remaining
+  // (wall_loops - 1) INNER loops at wall_line_width_mm, so the faithful ring is
+  //   t = outer + (loops - 1)·inner,
+  // which is what the slicer lays down — not the naive loops·inner. A
+  // wall_line_width_outer_mm < 0 is the "mirror inner" sentinel, collapsing this to the
+  // old t = loops·inner byte-for-byte; 0 loops → t = 0. This is the ONLY place t is
+  // formed (bridge == CLI == optimizer by construction; run_info echoes it via the same
+  // function), so the outer/inner split can never diverge between the two front-ends.
+  const double inner_w = opts.wall_line_width_mm;
+  const double outer_w =
+      opts.wall_line_width_outer_mm >= 0.0 ? opts.wall_line_width_outer_mm : inner_w;
   knockdown.wall_thickness_mm =
-      static_cast<double>(opts.wall_loops) * opts.wall_line_width_mm;
+      opts.wall_loops > 0
+          ? outer_w + static_cast<double>(opts.wall_loops - 1) * inner_w
+          : 0.0;
   return knockdown;
 }
 

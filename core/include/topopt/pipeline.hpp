@@ -341,10 +341,22 @@ struct MinimizePlasticOptions {
   // plain f^1.5 even when width_aware_knockdown is armed (a wall-less member gets no
   // rescue). Must be >= 0.
   int wall_loops = 0;
-  // The slicer extrusion/line width (mm) of one wall loop, so t = wall_loops·this.
-  // 0.45 mm is the common 0.4 mm-nozzle default and the value 191/192 measured with.
-  // Only read when width_aware_knockdown is armed AND wall_loops > 0. Must be >= 0.
+  // The slicer extrusion/line width (mm) of one INNER wall loop. This is a bead width
+  // (a slicer setting, typically 1.0–1.2× the nozzle), NOT the nozzle diameter. 0.45 mm
+  // is the common 0.4 mm-nozzle default and the value 191/192 measured with. Only read
+  // when width_aware_knockdown is armed AND wall_loops > 0. Must be >= 0.
   double wall_line_width_mm = 0.45;
+  // The slicer extrusion/line width (mm) of the single OUTER wall loop. Bambu Studio /
+  // OrcaSlicer expose the outermost perimeter's width SEPARATELY from the inner loops
+  // (users routinely run a narrower outer for surface quality, a wider inner for
+  // speed/strength), so the solid wall ring the slicer actually deposits is
+  //   t = wall_line_width_outer_mm + (wall_loops - 1)·wall_line_width_mm
+  // rather than the naive wall_loops·wall_line_width_mm (handoff line-width-plumbing).
+  // < 0 (the DEFAULT) is the "mirror inner" sentinel: outer := wall_line_width_mm, which
+  // collapses the ring to the old single-width t = wall_loops·wall_line_width_mm EXACTLY
+  // (byte-identical). Like the inner width, this is a bead width, not the nozzle. Only
+  // read when width_aware_knockdown is armed AND wall_loops > 0. Must be finite.
+  double wall_line_width_outer_mm = -1.0;
 
   // Handoff 100 — "Keep clear" clearance keep-out overlay. A SOLVED-grid-indexed
   // mask (size == the grid minimize_plastic solves on, i.e.

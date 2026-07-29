@@ -34,7 +34,9 @@ public struct PrintParamsSheet: View {
     @State private var editingField: ParamField?
 
     /// The editable numeric fields, so one `editingField` drives every field's pad.
-    private enum ParamField: Hashable { case layerHeight, wallLoops, topLayers, bottomLayers, infill }
+    private enum ParamField: Hashable {
+        case layerHeight, wallLoops, outerLineWidth, innerLineWidth, topLayers, bottomLayers, infill
+    }
 
     private func padBinding(_ field: ParamField) -> Binding<Bool> {
         Binding(get: { editingField == field }, set: { if !$0 { editingField = nil } })
@@ -163,14 +165,32 @@ public struct PrintParamsSheet: View {
                 decimalField("Layer height", field: .layerHeight, suffix: "mm",
                              value: binding(\.layerHeightMM), onStep: stepLayerHeight)
                 intField("Wall loops", field: .wallLoops, value: binding(\.wallLoops), onStep: stepWallLoops)
+                // The wall EXTRUSION line widths (bead widths), grouped under Wall loops.
+                // Labelled "line width" and footnoted below so they can't be read as the
+                // nozzle diameter (handoff line-width-plumbing).
+                decimalField("Outer line width", field: .outerLineWidth, suffix: "mm",
+                             value: binding(\.wallLineWidthOuterMM), onStep: stepOuterLineWidth)
+                decimalField("Inner line width", field: .innerLineWidth, suffix: "mm",
+                             value: binding(\.wallLineWidthInnerMM), onStep: stepInnerLineWidth)
                 intField("Top shell layers", field: .topLayers, value: binding(\.topLayers), onStep: stepTopLayers)
                 intField("Bottom shell layers", field: .bottomLayers, value: binding(\.bottomLayers), onStep: stepBottomLayers)
             }
             .padding(.top, DS.Space.xl3)
 
+            lineWidthFootnote.padding(.top, DS.Space.s)
+
             infillRow.padding(.top, DS.Space.ml)
             patternRow.padding(.top, DS.Space.ml)
         }
+    }
+
+    /// Disambiguates the two line-width fields: they are extrusion BEAD widths (a slicer
+    /// setting), never the nozzle diameter — the distinction the whole feature turns on.
+    private var lineWidthFootnote: some View {
+        Text("Line width is the width of one deposited wall bead (≈1.0–1.2× nozzle), not the nozzle diameter.")
+            .dsStyle(DS.TypeScale.caption2)
+            .foregroundStyle(DS.Color.textTertiary.color)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: locked body (read-only, post-creation)
@@ -186,12 +206,16 @@ public struct PrintParamsSheet: View {
                 readOnlyField("Layer height",
                               value: p.layerHeightMM.formatted(.number.precision(.fractionLength(0...2))) + " mm")
                 readOnlyField("Wall loops", value: "\(p.wallLoops)")
+                readOnlyField("Outer line width", value: lineWidthLabel(p.wallLineWidthOuterMM))
+                readOnlyField("Inner line width", value: lineWidthLabel(p.wallLineWidthInnerMM))
                 readOnlyField("Top shell layers", value: "\(p.topLayers)")
                 readOnlyField("Bottom shell layers", value: "\(p.bottomLayers)")
                 readOnlyField("Infill density", value: "\(p.infillPercent)%")
                 readOnlyField("Infill pattern", value: p.infillPattern.capitalized)
             }
             .padding(.top, DS.Space.xl3)
+
+            lineWidthFootnote.padding(.top, DS.Space.s)
 
             HStack(spacing: DS.Space.s) {
                 Image(systemName: "info.circle").font(.system(size: 12, weight: .semibold))
@@ -297,6 +321,18 @@ public struct PrintParamsSheet: View {
     }
     private func stepBottomLayers(_ delta: Int) {
         project.printParams.bottomLayers = project.printParams.steppingBottomLayers(by: delta)
+    }
+    private func stepOuterLineWidth(_ steps: Int) {
+        project.printParams.wallLineWidthOuterMM = project.printParams.steppingOuterLineWidth(by: steps)
+    }
+    private func stepInnerLineWidth(_ steps: Int) {
+        project.printParams.wallLineWidthInnerMM = project.printParams.steppingInnerLineWidth(by: steps)
+    }
+
+    /// A read-only mm value shown to 0–2 decimals (locked mode), matching the editable
+    /// decimal fields' formatting.
+    private func lineWidthLabel(_ mm: Double) -> String {
+        mm.formatted(.number.precision(.fractionLength(0...2))) + " mm"
     }
 
     /// The slider reads the value pinned into its 0–100 track (the tap-to-edit field

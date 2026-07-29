@@ -318,6 +318,11 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // (kProductionWidthAwareKnockdown), not here — this only supplies its inputs.
   opts.wall_loops = lc.wall_loops;
   if (lc.wall_line_width_mm > 0.0) opts.wall_line_width_mm = lc.wall_line_width_mm;
+  // Only forward a real outer-width override (> 0); a negative value leaves the
+  // MinimizePlasticOptions default (< 0 → mirror inner), so a caller that supplies one
+  // line width still sizes the ring at loops·inner, byte-identical to before.
+  if (lc.wall_line_width_outer_mm > 0.0)
+    opts.wall_line_width_outer_mm = lc.wall_line_width_outer_mm;
 
   // The grid the run will actually solve on (the expanded domain when a design
   // box is set), computed WITHOUT running the solve — the SAME expand_design_domain

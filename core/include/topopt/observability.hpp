@@ -353,7 +353,13 @@ struct RunInfo {
   // fields are inert metadata (echoed for provenance, not used).
   bool width_aware_knockdown = false;
   int wall_loops = 0;
-  double wall_line_width_mm = 0.45;
+  double wall_line_width_mm = 0.45;         // inner wall line width (mm)
+  // The EFFECTIVE outer wall line width (mm) — the value actually used, with the
+  // mirror-inner sentinel already resolved — and the derived solid wall-ring thickness
+  // t = outer + (loops-1)·inner (handoff line-width-plumbing). Both echoed for
+  // provenance; inert when width_aware_knockdown is false.
+  double wall_line_width_outer_mm = 0.45;
+  double wall_thickness_mm = 0.0;
   bool has_design_box = false;
   std::vector<double> ladder;
   long long created_wall_ms = 0;  // run-info write time (epoch ms)

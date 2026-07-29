@@ -535,18 +535,26 @@ struct BridgeLoadCase {
   // and stops there. See the M7.params handoff.
   int infill_percent = -1;
 
-  // Width-aware knockdown slicer metadata (handoff 2026-07-27-wall-loops-plumbing).
-  // The user's perimeter wall-loop count from the Print Parameters sheet (0 = none).
-  // The shell+core composite accept gate sizes the solid wall ring around each member
-  // as t = wall_loops · wall_line_width_mm; without this the bridge left it at the POD
-  // default 0, so the LAN worker's run_info showed `wall_loops: 0` even when the user
-  // set 5 — bare infill, the NON-CONSERVATIVE regime PR 191 measured, the moment the
-  // width-aware gate is armed. ADDITIVE + DEFAULTED (0), so a caller that omits it is
-  // byte-identical to before AND (because the shipped gate is OFF) to a run that sets
-  // it. `wall_line_width_mm` is NOT captured on the sheet, so it is not carried here:
-  // both the bridge and the CLI leave it at the core default (0.45 mm). The CLI job
-  // schema's `loads.wall_loops` is the LAN twin of this field.
+  // Width-aware knockdown slicer metadata (handoff 2026-07-27-wall-loops-plumbing +
+  // line-width-plumbing). The user's perimeter wall-loop count and the INNER / OUTER
+  // wall LINE WIDTHS from the Print Parameters sheet (0 loops = none). The shell+core
+  // composite accept gate sizes the solid wall ring around each member as
+  // t = outer + (wall_loops - 1)·inner; without these the bridge left the geometry at
+  // the POD defaults, so the LAN worker's run_info showed the modelling assumption
+  // rather than the user's real settings the moment the width-aware gate is armed.
+  // ADDITIVE + DEFAULTED, so a caller that omits them is byte-identical to before AND
+  // (because the shipped gate is OFF) to a run that sets them.
+  //
+  // The line widths are BEAD widths (a slicer setting, ~1.0–1.2× nozzle), NOT the
+  // nozzle diameter. `wall_line_width_mm` is the inner loops' width and
+  // `wall_line_width_outer_mm` the single outer loop's; a value < 0 means "unset" —
+  // inner falls back to the core default (0.45 mm), outer mirrors inner — so both paths
+  // collapse to the old t = loops·inner. The CLI job schema's
+  // `loads.{wall_loops, wall_line_width_mm, wall_line_width_outer_mm}` are the LAN twins
+  // of these fields (asserted equal in JobJSONEquivalenceTests).
   int wall_loops = 0;
+  double wall_line_width_mm = -1.0;          // inner; < 0 = core default (0.45 mm)
+  double wall_line_width_outer_mm = -1.0;    // outer; < 0 = mirror inner
 
   // M7.dom-app — the design-domain expansion (the "ADD MATERIAL" feature). When
   // `has_design_box` is true the run voxelizes the part onto a LARGER grid spanning

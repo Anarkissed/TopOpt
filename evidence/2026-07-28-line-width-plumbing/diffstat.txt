@@ -1,0 +1,24 @@
+ app/TopOptKit/Sources/TopOptBridge/bridge.cpp      | 18 +++--
+ .../Sources/TopOptBridge/include/TopOptBridge.hpp  | 30 +++++---
+ app/TopOptKit/Sources/TopOptFlows/AppModel.swift   |  2 +
+ .../Sources/TopOptFlows/PrintParams.swift          | 84 ++++++++++++++++++++--
+ .../Sources/TopOptFlows/PrintParamsSheet.swift     | 38 +++++++++-
+ .../Sources/TopOptFlows/RemoteRunner.swift         | 18 +++--
+ app/TopOptKit/Sources/TopOptFlows/RunModel.swift   | 16 +++++
+ app/TopOptKit/Sources/TopOptKit/TopOptKit.swift    | 31 ++++++--
+ .../TopOptFlowsTests/JobJSONEquivalenceTests.swift | 66 +++++++++++++++++
+ .../Tests/TopOptFlowsTests/PrintParamsTests.swift  | 68 ++++++++++++++++++
+ core/include/topopt/analyze.hpp                    |  9 ++-
+ core/include/topopt/job.hpp                        | 12 ++--
+ core/include/topopt/loadcase.hpp                   | 14 ++--
+ core/include/topopt/observability.hpp              |  8 ++-
+ core/include/topopt/pipeline.hpp                   | 18 ++++-
+ core/src/cli/job.cpp                               | 12 +++-
+ core/src/cli/loadcase.cpp                          |  5 ++
+ core/src/cli/run_job.cpp                           | 11 +++
+ core/src/simp/minimize_plastic.cpp                 |  5 ++
+ core/src/simp/observability.cpp                    |  2 +
+ core/src/simp/production.cpp                       | 18 ++++-
+ core/tests/unit/test_job.cpp                       | 30 +++++++-
+ core/tests/validation/test_production_parity.cpp   | 29 +++++++-
+ 23 files changed, 484 insertions(+), 60 deletions(-)

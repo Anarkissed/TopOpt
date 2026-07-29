@@ -430,14 +430,17 @@ static void test_wall_loops() {
     "anchor_face_ids": [8],
     "groups": [ { "face_ids": [0], "force": [0, 0, -50] } ],
     "wall_loops": 5,
-    "wall_line_width_mm": 0.45
+    "wall_line_width_mm": 0.45,
+    "wall_line_width_outer_mm": 0.42
   }
 })";
   const JobDescription j = parse_job(base);
   CHECK(j.loads.wall_loops == 5, "wall_loops parsed");
-  CHECK(j.loads.wall_line_width_mm == 0.45, "wall_line_width_mm parsed");
+  CHECK(j.loads.wall_line_width_mm == 0.45, "wall_line_width_mm (inner) parsed");
+  CHECK(j.loads.wall_line_width_outer_mm == 0.42, "wall_line_width_outer_mm parsed");
 
-  // Omitted → defaults (no override): 0 loops, negative line width (= core default).
+  // Omitted → defaults (no override): 0 loops, negative widths (inner = core default,
+  // outer = mirror inner).
   const std::string none = R"({
   "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
   "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
@@ -446,6 +449,21 @@ static void test_wall_loops() {
   const JobDescription jn = parse_job(none);
   CHECK(jn.loads.wall_loops == 0, "wall_loops defaults to 0 (no rescue)");
   CHECK(jn.loads.wall_line_width_mm < 0.0, "wall_line_width_mm defaults to core default");
+  CHECK(jn.loads.wall_line_width_outer_mm < 0.0,
+        "wall_line_width_outer_mm defaults to mirror-inner sentinel");
+
+  // A job that supplies ONLY the inner width still leaves outer at the mirror sentinel,
+  // so it sizes t = loops·inner — byte-identical to a pre-split job.
+  const std::string inner_only = R"({
+  "model": "part.step", "material": "PLA", "mode": "minimize_plastic", "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "3mf", "mesh_prefix": "variant" },
+  "loads": { "anchor_face_ids": [8], "groups": [ { "face_ids": [0], "force": [0,0,-50] } ],
+             "wall_loops": 3, "wall_line_width_mm": 0.5 }
+})";
+  const JobDescription ji = parse_job(inner_only);
+  CHECK(ji.loads.wall_line_width_mm == 0.5, "inner width parsed without an outer");
+  CHECK(ji.loads.wall_line_width_outer_mm < 0.0,
+        "an omitted outer stays the mirror-inner sentinel (single-width back-compat)");
 
   auto replace_first = [&](const std::string& from, const std::string& to) {
     std::string s = base;
@@ -459,6 +477,12 @@ static void test_wall_loops() {
   check_rejects(replace_first("\"wall_line_width_mm\": 0.45",
                               "\"wall_line_width_mm\": 0.0"),
                 "wall_line_width_mm: zero rejected");
+  check_rejects(replace_first("\"wall_line_width_outer_mm\": 0.42",
+                              "\"wall_line_width_outer_mm\": 0.0"),
+                "wall_line_width_outer_mm: zero rejected");
+  check_rejects(replace_first("\"wall_line_width_outer_mm\": 0.42",
+                              "\"wall_line_width_outer_mm\": 200.0"),
+                "wall_line_width_outer_mm: over-100 rejected");
 }
 
 int main() {

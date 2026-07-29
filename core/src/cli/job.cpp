@@ -430,7 +430,7 @@ JobDescription parse_job(const std::string& json_text) {
         lv, {"anchors", "anchor_face_ids", "groups", "clearances",
              "face_protections", "face_protection_depth_mm", "build_dir",
              "infill_percent", "minimize_plastic", "wall_loops",
-             "wall_line_width_mm"},
+             "wall_line_width_mm", "wall_line_width_outer_mm"},
         "loads");
     job.loads.present = true;
     // anchors: optional, given as geometric selectors ("anchors") OR raw B-rep
@@ -599,6 +599,16 @@ JobDescription parse_job(const std::string& json_text) {
       if (!(job.loads.wall_line_width_mm > 0.0) ||
           job.loads.wall_line_width_mm > 100.0)
         schema_fail("\"loads.wall_line_width_mm\" must be in (0, 100]");
+    }
+    // The OUTER-wall line width (handoff line-width-plumbing). Same (0, 100] bound as
+    // the inner width; omitted → the JobLoads default -1 (mirror inner), so a job that
+    // supplies only wall_line_width_mm is byte-identical to before.
+    if (const JsonValue* wwo = find_key(lv, "wall_line_width_outer_mm")) {
+      job.loads.wall_line_width_outer_mm =
+          require_number(*wwo, "loads.wall_line_width_outer_mm");
+      if (!(job.loads.wall_line_width_outer_mm > 0.0) ||
+          job.loads.wall_line_width_outer_mm > 100.0)
+        schema_fail("\"loads.wall_line_width_outer_mm\" must be in (0, 100]");
     }
   } else {
     // Self-weight mode: fixture_faces (required, non-empty geometric selectors).

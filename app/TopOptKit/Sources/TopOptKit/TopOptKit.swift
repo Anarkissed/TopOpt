@@ -875,11 +875,29 @@ public enum TopOptKit {
         Int32(wallLoops)
     }
 
+    /// The INNER / OUTER wall LINE WIDTHS (mm) the on-device bridge load case carries to
+    /// core for the width-aware knockdown's wall-ring term t = outer + (loops-1)·inner
+    /// (handoff line-width-plumbing). These are BEAD widths, not the nozzle diameter. A
+    /// value <= 0 is the "unset" sentinel the bridge/CLI both leave at the core default
+    /// (inner → 0.45 mm, outer → mirror inner). Isolated as ONE mapping each (a Double
+    /// identity) so the CLI/bridge parity test can assert `buildJobJSON`'s `loads.*` and
+    /// this serializer's `BridgeLoadCase.*` are the SAME value for one project —
+    /// `minimizePlasticLoadCase` sets the POD from THESE, so the asserted value and the
+    /// value the bridge sends can never drift (the divergence class the wall-loops parity
+    /// test guards).
+    public static func bridgeWallLineWidthMM(forOverride widthMM: Double) -> Double {
+        widthMM
+    }
+    public static func bridgeWallLineWidthOuterMM(forOverride widthMM: Double) -> Double {
+        widthMM
+    }
+
     public static func minimizePlasticLoadCase(
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
         minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
         infillPercent: Int = -1, wallLoops: Int = 0,
+        wallLineWidthInnerMM: Double = -1, wallLineWidthOuterMM: Double = -1,
         designBox: DesignBoxSpec? = nil, keepOutBoxes: [DesignBoxSpec] = [],
         clearances: [ClearanceSpec] = [],
         faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
@@ -928,11 +946,16 @@ public enum TopOptKit {
         lc.build_dir_y = buildDirection.y
         lc.build_dir_z = buildDirection.z
         lc.infill_percent = Int32(infillPercent)
-        // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing).
-        // The user's wall-loop count, via the SAME mapping the CLI/bridge parity test
-        // asserts against. Consumed only when the width-aware gate is armed, so this is
-        // byte-identical to the pre-plumbing run (which sent the POD default 0) today.
+        // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing +
+        // line-width-plumbing). The user's wall-loop count and inner/outer line widths,
+        // via the SAME mappings the CLI/bridge parity test asserts against. Consumed only
+        // when the width-aware gate is armed, so this is byte-identical to the pre-plumbing
+        // run today. A negative width is the "unset" sentinel the bridge leaves at the core
+        // default (inner 0.45 mm, outer mirrors inner).
         lc.wall_loops = bridgeWallLoops(forOverride: wallLoops)
+        lc.wall_line_width_mm = bridgeWallLineWidthMM(forOverride: wallLineWidthInnerMM)
+        lc.wall_line_width_outer_mm =
+            bridgeWallLineWidthOuterMM(forOverride: wallLineWidthOuterMM)
 
         // M7.dom-app: the optional design-domain expansion. Unset → has_design_box
         // stays false and the run is byte-identical to a no-box run (default off).

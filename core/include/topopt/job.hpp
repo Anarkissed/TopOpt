@@ -147,12 +147,14 @@ struct JobLoadCase {
   bool minimize_plastic = true;             // true = reduction ladder + pad
   // Width-aware knockdown (handoff 2026-07-26-width-aware-knockdown). Slicer wall
   // metadata crossing the bridge for the first time: the perimeter loop count and
-  // its line width, so the accept gate can size the solid wall ring around each
-  // member. Read only when the width-aware gate is armed (a separate maintainer
-  // decision); 0 loops / negative line width → no override → no wall rescue. See
-  // MinimizePlasticOptions::{wall_loops, wall_line_width_mm}.
+  // its INNER / OUTER line widths, so the accept gate can size the solid wall ring
+  // t = outer + (loops-1)·inner around each member. Read only when the width-aware
+  // gate is armed (a separate maintainer decision); 0 loops / negative line width →
+  // no override → no wall rescue. See
+  // MinimizePlasticOptions::{wall_loops, wall_line_width_mm, wall_line_width_outer_mm}.
   int wall_loops = 0;                        // 0 = none (no wall rescue)
-  double wall_line_width_mm = -1.0;          // < 0 = use the core default (0.45)
+  double wall_line_width_mm = -1.0;          // inner; < 0 = core default (0.45)
+  double wall_line_width_outer_mm = -1.0;    // outer; < 0 = mirror inner
 };
 
 // An axis-aligned box in model space (mm), min <= max componentwise — a design

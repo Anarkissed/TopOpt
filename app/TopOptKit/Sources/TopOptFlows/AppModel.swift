@@ -241,6 +241,8 @@ public final class AppModel: ObservableObject {
                           buildDirection: lc.buildDirection,
                           infillPercent: project.printParams.infillPercent,
                           wallLoops: project.printParams.wallLoops,
+                          wallLineWidthOuterMM: project.printParams.wallLineWidthOuterMM,
+                          wallLineWidthInnerMM: project.printParams.wallLineWidthInnerMM,
                           designBox: project.designBox.bridgeBox,
                           keepOutBoxes: project.designBox.bridgeKeepOuts,
                           clearances: project.clearanceSpecs(),
