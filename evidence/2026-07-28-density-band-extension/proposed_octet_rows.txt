@@ -1,0 +1,40 @@
+PROPOSED EXTENDED OCTET LIBRARY (offline — NOT wired into topopt/lattice.cpp; B4)
+=================================================================================
+Measured by periodic homogenization, PLA Es=3500 MPa, L=5 mm. Effective stiffness is
+exactly linear in Es (scale by Es/3500). rho is the MEASURED (voxelised) relative
+density — L6: the analytic cylinder-sum rho(r) over-counts (node/strut merge) and MUST
+NOT be the key; the library keys on measured rho. Every row resolved & validated:
+  LOW rows  (vpc128 converged truth): clean resolution drift < 2.4%, vox/strut >= 6-8
+            at the certified vpc (see analyze_low.txt / low_end.csv).
+  MID rows  (unchanged, PR 198 vpc48): the existing library — reproduced (B3).
+  HIGH rows (vpc48, validated vs vpc64): drift < 2.4%; replace the frozen clamp.
+
+Complete proposed kOctet (rho, C11, C12, C44 in MPa @ Es=3500), ascending:
+
+  // --- NEW low-density rows (vpc128; extend the floor 0.148 -> 0.05) ---
+  {0.05047,   37.0649,   18.3510,   16.8552, true},   // vpc128, 11.4 vox/str, Zener 1.80
+  {0.06355,   48.3025,   23.7203,   21.6214, true},   // vpc128, 13.1 vox/str, Zener 1.76
+  {0.08109,   64.4784,   31.2998,   28.2686, true},   // vpc128, 15.0 vox/str, Zener 1.70
+  {0.09882,   81.7907,   39.2954,   35.2762, true},   // vpc128, 17.0 vox/str, Zener 1.66
+  {0.11908,  102.9136,   48.7092,   43.5388, true},   // vpc128, 18.6 vox/str, Zener 1.61
+  // --- EXISTING rows (unchanged; PR 198 vpc48) ---
+  {0.14764,  136.9621,   64.0645,   56.6726, true},   // (was the floor)
+  {0.20414,  213.7779,   94.5363,   83.3612, true},
+  {0.25297,  295.1031,  124.0143,  109.1889, true},
+  {0.29731,  374.2029,  151.9733,  135.0535, true},
+  {0.39786,  611.4884,  226.3148,  204.0181, true},
+  {0.50644,  974.8665,  328.8413,  297.3223, true},
+  {0.59093, 1344.7034,  443.6894,  392.1883, true},   // (was the clamp / rho_max)
+  // --- NEW high-density rows (vpc48, validated vs vpc64; remove the clamp) ---
+  {0.61509, 1464.0552,  485.7181,  423.7420, true},   // Zener 0.866, clamp was -8.7% low
+  {0.65502, 1677.7877,  562.6095,  480.4917, true},   // Zener 0.862, clamp -24%
+  {0.69871, 1975.2811,  676.0779,  550.7189, true},   // Zener 0.848, clamp -45%
+  {0.75210, 2351.3476,  842.3622,  650.7516, true},   // Zener 0.863, clamp -70%
+  {0.79753, 2720.7120, 1018.8917,  743.9973, true},   // Zener 0.874, clamp -93%
+  {0.85120, 3276.6604, 1312.7907,  878.5398, true},   // Zener 0.895, clamp -125%
+  {0.89988, 3832.0119, 1640.8200, 1011.6316, true},   // Zener 0.923 (nearing isotropy), clamp -153%
+
+New lattice_rho_min ~= 0.050 (was 0.148); new lattice_rho_max ~= 0.900 (was 0.591).
+For the near-solid rows (>~0.85) a de-homogenization step (named in
+2026-07-26-lattice-homog-phase0) should ride alongside for strut-strength; the
+STIFFNESS tensor itself is converged and validated here.

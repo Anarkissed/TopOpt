@@ -1,0 +1,24 @@
+LATTICE BAND-EXTENSION PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+library resolved band today: rho [0.148, 0.591]. Extending BOTH ends (offline, B4).
+
+===== HIGH END (L5/L6/L7/L8) — remove the clamp, real tensors to rho 0.90 =====
+  frozen-clamp tensor (rho_max=0.591): C11=1344.7 C12=443.7 C44=392.2  E100=1124.6 MPa.
+  library row quoted at vpc48; validated (L7) against periodic vpc64, bar 2.4%.
+
+  [writing /tmp/bx_evidence/high_end.csv]
+  rho    an_rho  an_over% vox/str  E100     clampFix% zener    E100_ref  drift%    valid     note
+  0.5909 0.9806  65.9     18.41    1124.6   -0.0      0.8705   1111.7    +1.16     GO        (anchor)
+  0.6151 1.0500  70.7     19.05    1222.1   +8.7      0.8662   1222.0    +0.00     GO        
+  0.6550 1.1194  70.9     19.67    1395.2   +24.1     0.8617   1375.7    +1.42     GO        
+  0.6987 1.2814  83.4     21.05    1630.5   +45.0     0.8478   1612.8    +1.10     GO        
+  0.7521 1.4202  88.8     22.16    1907.0   +69.6     0.8625   1890.4    +0.88     GO        
+  0.7975 1.6227  103.5    23.69    2165.5   +92.6     0.8744   2180.9    -0.71     GO        
+  0.8512 1.8310  115.1    25.16    2525.6   +124.6    0.8947   2503.2    +0.90     GO        
+  0.8999 2.1376  137.5    27.18    2848.1   +153.3    0.9234   2855.4    -0.25     GO        
+
+  L5 clampFix% = real E100 vs the frozen 1124.55 MPa: it is the -16/-31/-60% drift, now MEASURED.
+  L6 an_over% = analytic cylinder-sum rho over MEASURED rho: grows as struts merge (key on measured).
+  L7 drift% = periodic vpc48 vs vpc64: < 2.4% == converged/validated row.
+  L8 zener -> if it trends to 1.0 as rho->0.9, octet becomes effectively ISOTROPIC near solid.
+
+DONE.
