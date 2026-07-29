@@ -1,0 +1,17 @@
+# H3 Accelerate/AMX FP64  (M2 Pro, 6P+4E)
+# element block = 24x24; production hand kernel measured ~90 GFLOP/s (H2, 6 thr, gather-bound)
+
+[3] dgemm  512x512  :    637.0 GFLOP/s
+[3] dgemm 1024x1024 :    604.0 GFLOP/s
+[3] dgemm 2048x2048 :    484.9 GFLOP/s
+    => empirical AMX FP64 peak on this machine ~ 637 GFLOP/s
+
+[1] dgemv 24x24 (per-element, cache-hot):   15.4 GFLOP/s  (2.4% of AMX peak)
+[2] dgemm 24x24 * 24x64   (batched apply):  136.3 GFLOP/s  (21.4% of AMX peak)
+[2] dgemm 24x24 * 24x256  (batched apply):  208.1 GFLOP/s  (32.7% of AMX peak)
+[2] dgemm 24x24 * 24x1024 (batched apply):  200.8 GFLOP/s  (31.5% of AMX peak)
+[2] dgemm 24x24 * 24x4096 (batched apply):  170.8 GFLOP/s  (26.8% of AMX peak)
+
+# note: [1]/[2] are COMPUTE ceilings (data hot, no gather/scatter). The
+# production apply is gather-bound (H2 ~90 GFLOP/s / ~54 GB/s issued), so a
+# BLAS swap only helps if the gather is amortised (batching a colour).

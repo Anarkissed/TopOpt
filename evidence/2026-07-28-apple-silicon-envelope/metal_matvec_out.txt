@@ -1,0 +1,24 @@
+# H4 Metal FP32 element-apply prototype  grid 96x96x96
+# ndof=2738019  solid elements=884736  reps=100 (best-of)  GPU=Apple M2 Pro
+# M2 Pro theoretical peak = 200 GB/s; the GPU shares the SAME unified bus
+
+Metal FP32 apply : 0.00273 s/matvec  |  125.6 GB/s issued (62.8% of 200)  |  372.9 GFLOP/s
+CPU  FP64 apply  : (H2) ~54 GB/s issued / ~90 GFLOP/s on 6 P-cores
+
+# ACCURACY (the usability question)
+rel L2  GPU-FP32 vs CPU-FP64 = 6.890e-08
+rel L2  CPU-FP32 vs CPU-FP64 = 7.332e-08   (same FP32 floor, CPU)
+rel L2  GPU-FP32 vs CPU-FP32 = 7.086e-08   (kernel agreement, not precision)
+
+############ 128x128x128 ############
+# H4 Metal FP32 element-apply prototype  grid 128x128x128
+# ndof=6440067  solid elements=2097152  reps=60 (best-of)  GPU=Apple M2 Pro
+# M2 Pro theoretical peak = 200 GB/s; the GPU shares the SAME unified bus
+
+Metal FP32 apply : 0.00587 s/matvec  |  138.7 GB/s issued (69.4% of 200)  |  411.9 GFLOP/s
+CPU  FP64 apply  : (H2) ~54 GB/s issued / ~90 GFLOP/s on 6 P-cores
+
+# ACCURACY (the usability question)
+rel L2  GPU-FP32 vs CPU-FP64 = 6.882e-08
+rel L2  CPU-FP32 vs CPU-FP64 = 7.324e-08   (same FP32 floor, CPU)
+rel L2  GPU-FP32 vs CPU-FP32 = 7.082e-08   (kernel agreement, not precision)
