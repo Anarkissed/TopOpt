@@ -26,6 +26,35 @@ struct TriangleMesh {
   bool empty() const { return triangles.empty(); }
 };
 
+// A write-only streaming triangle sink: a producer (e.g. the lattice generator,
+// handoff 2026-07-28-lattice-generation-production) pushes one triangle at a time
+// and NEVER holds the whole mesh, so a sink that flushes each triangle to disk
+// keeps peak memory flat in the output SIZE. That property is what makes a 1 GB
+// lattice a disk cost rather than a memory cost; the streaming STL/3MF writers
+// (topopt/stl.hpp, topopt/threemf_stream.hpp) implement it. An in-memory sink that
+// accumulates a TriangleMesh (MeshSink, below) is provided for callers that DO
+// want the whole mesh (tests, watertight checks) — that one is NOT flat in size.
+struct TriangleSink {
+  virtual ~TriangleSink() = default;
+  virtual void add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) = 0;
+};
+
+// A TriangleSink that accumulates an in-memory TriangleMesh as an UNSHARED
+// triangle soup (three fresh vertices per triangle, exactly what a binary-STL
+// body stores). Peak memory grows with the mesh, so this is for bounded meshes /
+// tests, not the streaming production path. Weld by coordinate to recover shared
+// topology (that is what the STL reader does on re-import).
+struct MeshSink : TriangleSink {
+  TriangleMesh mesh;
+  void add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) override {
+    const int base = static_cast<int>(mesh.vertices.size());
+    mesh.vertices.push_back(a);
+    mesh.vertices.push_back(b);
+    mesh.vertices.push_back(c);
+    mesh.triangles.push_back({base, base + 1, base + 2});
+  }
+};
+
 // Result of the watertight / 2-manifold check. A mesh is watertight when every
 // edge is shared by exactly two triangles: no boundary edges (an open hole) and
 // no non-manifold edges (an edge shared by three or more triangles).

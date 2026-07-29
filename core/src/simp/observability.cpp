@@ -549,8 +549,14 @@ std::string run_info_json(const RunInfo& info) {
   // cell size, relative-density RANGE and region size, and the strut-strength-
   // uncertified flag (the margin certifies composite stiffness + solid strength, not
   // strut strength — Phase 2 de-homogenization).
-  if (info.lattice_present) {
-    num("snapshot_cap", fmt_i(info.snapshot_cap));  // no longer last -> trailing comma
+  // Two optional trailing objects: the certification `lattice` and the GEOMETRY
+  // `lattice_export` (handoff 2026-07-28-lattice-generation-production). The LAST
+  // emitted field carries no trailing comma; when both are absent snapshot_cap is
+  // last exactly as before (byte-identical, the P1 bar).
+  const bool has_cert = info.lattice_present;
+  const bool has_exp = info.lattice_export_present;
+  num("snapshot_cap", fmt_i(info.snapshot_cap), /*comma=*/has_cert || has_exp);
+  if (has_cert) {
     std::string lat = "{\"topology\": \"" + info.lattice_topology + "\"";
     lat += ", \"cell_size_mm\": " + fmt(info.lattice_cell_size_mm);
     lat += ", \"rho_min\": " + fmt(info.lattice_rho_min);
@@ -558,9 +564,25 @@ std::string run_info_json(const RunInfo& info) {
     lat += ", \"region_voxels\": " + fmt_ll(info.lattice_region_voxels);
     lat += ", \"strength_uncertified\": " + bool_json(info.lattice_strength_uncertified);
     lat += "}";
-    num("lattice", lat, /*comma=*/false);
-  } else {
-    num("snapshot_cap", fmt_i(info.snapshot_cap), /*comma=*/false);  // last field, as before
+    num("lattice", lat, /*comma=*/has_exp);
+  }
+  if (has_exp) {
+    std::string le = "{\"topology\": \"" + info.lattice_export_topology + "\"";
+    le += ", \"cell_size_mm\": " + fmt(info.lattice_export_cell_mm);
+    le += ", \"strut_radius_min_mm\": " + fmt(info.lattice_export_strut_radius_min_mm);
+    le += ", \"strut_radius_max_mm\": " + fmt(info.lattice_export_strut_radius_max_mm);
+    le += ", \"latticed_cells\": " + fmt_ll(info.lattice_export_latticed_cells);
+    le += ", \"region_voxels\": " + fmt_ll(info.lattice_export_region_voxels);
+    le += ", \"triangles\": " + fmt_ll(info.lattice_export_triangles);
+    le += ", \"variant_count\": " + fmt_i(info.lattice_export_variant_count);
+    le += ", \"emit_stl\": " + bool_json(info.lattice_export_emit_stl);
+    le += ", \"emit_3mf\": " + bool_json(info.lattice_export_emit_3mf);
+    le += ", \"interpenetrating_soup\": " +
+          bool_json(info.lattice_export_interpenetrating_soup);
+    le += ", \"gen_seconds\": " + fmt(info.lattice_export_gen_seconds);
+    le += ", \"gen_fraction\": " + fmt(info.lattice_export_gen_fraction);
+    le += "}";
+    num("lattice_export", le, /*comma=*/false);  // always last when present
   }
 
   s += "}\n";

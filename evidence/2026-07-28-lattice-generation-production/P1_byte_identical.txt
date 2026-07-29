@@ -1,0 +1,18 @@
+P1 — LATTICE OFF IS BYTE-IDENTICAL (handoff 2026-07-28-lattice-generation-production)
+========================================================================
+Compared: no-lattice job vs lattice job, SAME binary, SAME solve inputs.
+
+Solid mesh  variant_060.stl : BYTE-IDENTICAL (cmp)
+report.json                 : BYTE-IDENTICAL (cmp)
+fields.bin                  : BYTE-IDENTICAL (cmp)
+iterations.csv              : identical except the wall_ms TIMESTAMP column
+run_info.json               : identical except:
+   - added key 'lattice_export' (the new posture)
+   - 'created_wall_ms' (wall-clock stamp, varies run-to-run regardless)
+
+run_info keys differing (excluding lattice_export): ['created_wall_ms']
+  -> only 'created_wall_ms', a timestamp. Every physics/config value equal.
+
+Conclusion: with no lattice block the result is byte-identical to today;
+with a lattice block the SOLID result is untouched and only additive lattice
+artifacts + one run_info key appear. P1 proven, not assumed.

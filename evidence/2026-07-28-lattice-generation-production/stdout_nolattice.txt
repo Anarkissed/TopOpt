@@ -1,0 +1,28 @@
+PROGRESS rung=0 rungs=1 iter=1
+PROGRESS rung=0 rungs=1 iter=2
+PROGRESS rung=0 rungs=1 iter=3
+PROGRESS rung=0 rungs=1 iter=4
+PROGRESS rung=0 rungs=1 iter=5
+PROGRESS rung=0 rungs=1 iter=6
+PROGRESS rung=0 rungs=1 iter=7
+PROGRESS rung=0 rungs=1 iter=8
+PROGRESS rung=0 rungs=1 iter=9
+PROGRESS rung=0 rungs=1 iter=10
+PROGRESS rung=0 rungs=1 iter=11
+PROGRESS rung=0 rungs=1 iter=12
+PROGRESS rung=0 rungs=1 iter=13
+PROGRESS rung=0 rungs=1 iter=14
+PROGRESS rung=0 rungs=1 iter=15
+PROGRESS rung=0 rungs=1 iter=16
+PROGRESS rung=0 rungs=1 iter=17
+PROGRESS rung=0 rungs=1 iter=18
+PROGRESS rung=0 rungs=1 iter=19
+PROGRESS rung=0 rungs=1 iter=20
+VARIANT vf=0.600000 achieved=0.599476 printed=0.548086 margin=5167.72 accepted=1 mesh=evidence/2026-07-28-lattice-generation-production/out_nolattice/variant_060.stl
+model: l-bracket.step (10 B-rep faces, 2 fixture faces matched)
+variants: 1 evaluated, 1 accepted
+  vf 0.60: margin 5.17e+03, accepted
+report: evidence/2026-07-28-lattice-generation-production/out_nolattice/report.json
+mesh: evidence/2026-07-28-lattice-generation-production/out_nolattice/variant_060.stl
+run_info: evidence/2026-07-28-lattice-generation-production/out_nolattice/run_info.json
+iterations: evidence/2026-07-28-lattice-generation-production/out_nolattice/iterations.csv

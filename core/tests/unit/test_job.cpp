@@ -485,6 +485,61 @@ static void test_wall_loops() {
                 "wall_line_width_outer_mm: over-100 rejected");
 }
 
+// --- Optional "lattice" block (handoff 2026-07-28-lattice-generation-production)
+static void test_lattice_block() {
+  // Absent => present false, defaults untouched (the byte-identical P1 posture).
+  {
+    const JobDescription j = parse_job(valid_job());
+    CHECK(!j.lattice.present, "lattice: absent block => not present");
+  }
+  // A full block parses into every field.
+  {
+    const std::string s = mutate(
+        "\"output\": { \"report\": \"report.json\", \"mesh_format\": \"3mf\", "
+        "\"mesh_prefix\": \"variant\" }",
+        "\"output\": { \"report\": \"report.json\", \"mesh_format\": \"3mf\", "
+        "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"topology\": "
+        "\"octet\", \"cell_mm\": 6.0, \"strut_radius_mm\": 0.9, \"emit_stl\": "
+        "true, \"emit_3mf\": true }");
+    const JobDescription j = parse_job(s);
+    CHECK(j.lattice.present, "lattice: present");
+    CHECK(j.lattice.topology == "octet", "lattice: topology");
+    CHECK(j.lattice.cell_mm == 6.0, "lattice: cell_mm");
+    CHECK(j.lattice.strut_radius_mm == 0.9, "lattice: strut_radius_mm");
+    CHECK(j.lattice.emit_stl && j.lattice.emit_3mf, "lattice: both formats");
+  }
+  // Minimal block: only the required numbers; formats default (stl on, 3mf off).
+  {
+    const std::string s = mutate(
+        "\"mesh_prefix\": \"variant\" }",
+        "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"cell_mm\": 5.0, "
+        "\"strut_radius_mm\": 0.7 }");
+    const JobDescription j = parse_job(s);
+    CHECK(j.lattice.present && j.lattice.emit_stl && !j.lattice.emit_3mf,
+          "lattice: default formats (stl on, 3mf off)");
+  }
+  // Rejections: bad topology, non-positive cell/radius, unknown key, neither
+  // format, missing required numbers.
+  auto lat = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
+  };
+  check_rejects(lat("{ \"topology\": \"gyroid\", \"cell_mm\": 5, \"strut_radius_mm\": 0.7 }"),
+                "lattice: rejects unimplemented topology");
+  check_rejects(lat("{ \"cell_mm\": 0, \"strut_radius_mm\": 0.7 }"),
+                "lattice: rejects cell_mm <= 0");
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": -1 }"),
+                "lattice: rejects strut_radius_mm <= 0");
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"bogus\": 1 }"),
+                "lattice: rejects unknown key");
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"emit_stl\": false, \"emit_3mf\": false }"),
+                "lattice: rejects neither-format");
+  check_rejects(lat("{ \"strut_radius_mm\": 0.7 }"),
+                "lattice: rejects missing cell_mm");
+  check_rejects(lat("{ \"cell_mm\": 5 }"),
+                "lattice: rejects missing strut_radius_mm");
+}
+
 int main() {
   test_valid_baseline();
   test_demo_fixture();
@@ -496,6 +551,7 @@ int main() {
   test_clearances();
   test_clearances_manual();
   test_wall_loops();
+  test_lattice_block();
 
   if (g_failures == 0) {
     std::printf("job schema (M6.2): all %d checks passed\n", g_checks);
