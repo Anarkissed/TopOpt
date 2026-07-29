@@ -322,6 +322,9 @@ struct AnalyzeJobResult {
   std::string analyzed_mesh_path;      // that mesh's path ("" when analyzing the solid)
   double voxel_mass_grams = 0.0;       // analysis.mass_grams (the re-analyzed voxel mass)
   double mesh_mass_grams = 0.0;        // enclosed-volume mass of the analysed mesh (0 if solid)
+  double margin_required = 0.0;        // the margin_stop the gate USED (job.margin_stop in
+                                       // self-weight mode; the production default in loadcase
+                                       // mode, where the loads schema rejects a margin_stop key)
   std::string report_path;             // <out_dir>/analysis_report.json (VariantReport schema)
   std::string report_json;             // the bytes written to report_path
   std::string provenance_path;         // <out_dir>/analysis.json (provenance + BOTH masses)
@@ -352,10 +355,18 @@ struct SmoothRequest {
   bool enforce_min_feature = true;
 };
 
-// Re-certify a FIXED design under `job`'s self-weight load case. Builds the
-// grid / fixtures / BCs / loads from the job's MODEL exactly as run_job's
-// self-weight path does, then runs ONE analyze_fixed_design solve on a fixed
-// density and writes the results with an honest provenance record. NEVER optimizes.
+// Re-certify a FIXED design under `job`'s load case. Builds the grid / fixtures /
+// BCs / loads from the job's MODEL exactly as run_job does — a declared "loads"
+// block re-certifies under that EXTERNAL load (the anchors clamp, the force groups
+// become distributed tractions, via the SAME production_loadcase_from_job +
+// build_production_loadcase seam the optimizer uses); no "loads" block is the
+// self-weight + fixture_faces path (unchanged) — then runs ONE analyze_fixed_design
+// solve on a fixed density and writes the results with an honest provenance record.
+// NEVER optimizes.
+//
+// A declared load that references a face which does not exist, or whose every
+// group tags no voxel / is zero-force, FAILS LOUDLY (JobError) — it never silently
+// falls back to self-weight (that silent degradation is the PR-178 bug).
 //
 // The design analysed is chosen by `analyze_mesh_path`:
 //   * ""            — the job's model as a SOLID part (density 1 on every solid
@@ -371,9 +382,9 @@ struct SmoothRequest {
 // Writes analysis_report.json (the NEW, re-analysed numbers — never the design's
 // pre-edit numbers), analysis.json (provenance: analyzed=true, source, resolution,
 // the quantization footnote, and BOTH the voxel mass and the analysed-mesh mass),
-// and fields.bin. Throws JobError for a bad material/model/selector or an
-// unwritable output, and (for now) if the job declares a "loads" block — the
-// declared-loadcase analysis path is not yet wired (self-weight only).
+// and fields.bin. Throws JobError for a bad material/model/selector, a declared
+// load referencing a nonexistent / sub-voxel face (never a self-weight fallback),
+// or an unwritable output.
 AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_dir,
                              const std::string& out_dir,
                              const MaterialLibrary& materials,

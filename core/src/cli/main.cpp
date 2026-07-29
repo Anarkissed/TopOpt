@@ -132,7 +132,9 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
     }
     std::printf("  peak stress: %.4g MPa   worst-case margin: %.4g "
                 "(required %.4g)\n",
-                a.max_von_mises, a.margin.worst_case, job.margin_stop);
+                a.max_von_mises, a.margin.worst_case, r.margin_required);
+    std::printf("  load case: %s\n",
+                job.loads.present ? "declared external load" : "self-weight");
     std::printf("  verdict: %s\n", a.accepted ? "ACCEPTED" : "REJECTED");
     std::printf("  voxel mass: %.4g g", r.voxel_mass_grams);
     if (r.analyzed_mesh)

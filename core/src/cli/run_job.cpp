@@ -318,6 +318,94 @@ std::vector<ClearanceGeometry> freeze_regions_from_faces(
   return regions;
 }
 
+// Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
+// core builder (build_production_loadcase) consumes. This is the ONE mapping —
+// run_job's optimize path AND analyze_job's re-certification path both call it, so
+// a declared load case is resolved IDENTICALLY whether it is optimized or merely
+// analyzed (no second schema, per the loadcase-analyze handoff). Geometric anchor/
+// load-face selectors are resolved against `model` here (resolve_selectors THROWS
+// a JobError naming any selector that matches nothing — the loud "face does not
+// exist" failure), and compose with any raw B-rep face ids. Clearance / face-
+// protection / design-box / infill / wall metadata are forwarded verbatim.
+ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
+                                               const StepModel& model) {
+  ProductionLoadCase lc;
+  // Anchors: raw B-rep ids (from the app) and/or geometric selectors compose.
+  lc.anchor_face_ids = job.loads.anchor_face_ids;
+  for (const int id : resolve_selectors(model, job.loads.anchors, "anchors"))
+    lc.anchor_face_ids.push_back(id);
+  for (const JobLoadGroup& g : job.loads.groups) {
+    ProductionLoadCase::LoadGroup lg;
+    lg.face_ids = g.face_ids;
+    for (const int id : resolve_selectors(model, g.faces, "loads group faces"))
+      lg.face_ids.push_back(id);
+    lg.force = g.force;
+    lc.load_groups.push_back(std::move(lg));
+  }
+  // Clearances (handoff 100): map each job clearance to a ProductionLoadCase
+  // clearance. A distance the job omitted (== 0) defaults to the same spec
+  // suggestion the app prefills — for a bolt those depend on the bore radius,
+  // read from the imported face geometry, so a hand-authored job need only give
+  // face_id + kind.
+  for (const JobClearance& jc : job.loads.clearances) {
+    ProductionLoadCase::Clearance c;
+    c.face_id = jc.face_id;
+    c.manual = jc.manual;
+    const bool bolt = jc.kind == "bolt";
+    // Default suggestions depend on the bore radius: an auto bolt reads it from
+    // the imported face geometry; a manual bolt carries its own radius_mm. A
+    // hand-authored job need only give face_id/geometry + kind and the same
+    // spec-suggestion defaults fill the rest.
+    double bore_r = 0.0;
+    if (bolt) {
+      if (jc.manual)
+        bore_r = jc.radius_mm;
+      else if (jc.face_id >= 0 && jc.face_id < model.face_count)
+        bore_r = model.faces[static_cast<std::size_t>(jc.face_id)]
+                     .cylinder_radius_mm;
+    }
+    c.params = bolt ? topopt::default_bolt_clearance(bore_r)
+                    : topopt::default_face_clearance();
+    if (jc.concentric_margin_mm > 0.0)
+      c.params.concentric_margin_mm = jc.concentric_margin_mm;
+    if (jc.axial_clearance_mm > 0.0)
+      c.params.axial_clearance_mm = jc.axial_clearance_mm;
+    if (jc.slab_depth_mm > 0.0) c.params.slab_depth_mm = jc.slab_depth_mm;
+    if (jc.manual) {
+      c.manual_geom.kind =
+          bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
+      c.manual_geom.axis_point = jc.axis_point;
+      c.manual_geom.axis_dir = jc.axis_dir;
+      c.manual_geom.radius_mm = jc.radius_mm;
+      c.manual_geom.half_length_mm = jc.half_length_mm;
+      c.manual_geom.origin = jc.origin;
+      c.manual_geom.normal = jc.normal;
+      c.manual_geom.half_u_mm = jc.half_u_mm;
+      c.manual_geom.half_w_mm = jc.half_w_mm;
+    }
+    lc.clearances.push_back(c);
+  }
+  // Face protections (handoff 124): the raw face ids + the ONE global depth. A
+  // depth <= 0 in the job means "use the core default"; leave the
+  // ProductionLoadCase field at its default so the builder derives voxels from
+  // kFaceProtectionDepthDefaultMm. Empty list => byte-identical.
+  lc.face_protection_face_ids = job.loads.face_protection_face_ids;
+  if (job.loads.face_protection_depth_mm > 0.0)
+    lc.face_protection_depth_mm = job.loads.face_protection_depth_mm;
+  lc.minimize_plastic = job.loads.minimize_plastic;
+  lc.build_dir = job.loads.build_dir;
+  lc.infill_percent = job.loads.infill_percent;
+  lc.wall_loops = job.loads.wall_loops;
+  lc.wall_line_width_mm = job.loads.wall_line_width_mm;
+  lc.has_design_box = job.has_design_box;
+  if (job.has_design_box) {
+    lc.design_box = to_design_box(job.design_box);
+    for (const JobBox& ko : job.keep_out_boxes)
+      lc.keep_out_boxes.push_back(to_design_box(ko));
+  }
+  return lc;
+}
+
 }  // namespace
 
 AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_dir,
@@ -326,13 +414,6 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                              const SettingsRules& rules,
                              const std::string& analyze_mesh_path,
                              const SmoothRequest& smooth) {
-  // Self-weight only for now — a declared "loads" block needs the loadcase
-  // grid/BC construction (build_production_loadcase), not yet wired here.
-  if (job.loads.present)
-    throw JobError(
-        "analyze: jobs with a \"loads\" block are not yet supported "
-        "(self-weight jobs only)");
-
   const auto mat_it = materials.find(job.material);
   if (mat_it == materials.end())
     throw JobError("material \"" + job.material +
@@ -341,7 +422,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
 
   AnalyzeJobResult result;
 
-  // ── import the ORIGINAL model (the BCs are keyed on ITS fixture faces) ───────
+  // ── import the ORIGINAL model (the BCs are keyed on ITS anchor/fixture faces) ─
   const std::string model_path = join_path(job_dir, job.model);
   const bool model_is_mesh =
       part_format_for_path(job.model) != PartFormat::Step;
@@ -353,25 +434,90 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   if (!check_watertight(result.model.mesh).watertight)
     throw JobError("analyze: model tessellation is not watertight: " + job.model);
 
-  // ── the model grid: the fixture BCs and the printed-fraction BASELINE ────────
-  // Voxelize the model and tag its fixture faces. The fixture NODE indices and the
-  // part-solid count are geometry (independent of which design we analyse), so we
-  // take them from the model grid and reuse them for any same-geometry design.
-  VoxelGrid model_grid = voxelize(result.model.mesh, job.resolution);
-  result.fixture_face_ids =
-      resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
-  std::size_t tagged = 0;
-  for (const int f : result.fixture_face_ids)
-    tagged += model_is_mesh
-                  ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
-                  : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
-  if (tagged == 0)
-    throw JobError(
-        "analyze: fixture faces tagged no voxels (resolution too coarse "
-        "for the selected faces?)");
+  // ── the model grid + BCs + production options, MODE-SPECIFIC ──────────────────
+  // A declared "loads" block re-certifies the design under that EXTERNAL load; no
+  // "loads" block is the self-weight path (unchanged). Both establish the same
+  // downstream contract: `model_grid` (fixture/anchor node indices + part-solid
+  // baseline), `bcs`, and `options` (production solver config + gravity/build
+  // orientation + margin_stop). The single certification tail below is shared.
+  VoxelGrid model_grid;
   std::vector<DirichletBC> bcs;
-  for (const int n : fea_tagged_nodes(model_grid, VoxelTag::Fixture))
-    for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+  MinimizePlasticOptions options;
+  const bool loadcase = job.loads.present;
+  // loadcase only: the distributed tractions from the declared force groups,
+  // computed on the model faces up front (INDEPENDENT of the fixed design's
+  // internal geometry — a substitute/smoothed design changes no external load).
+  std::vector<NodalLoad> external_loads;
+
+  if (loadcase) {
+    // The SAME front-end-neutral mapping + core builder the optimizer's loadcase
+    // path uses (production_loadcase_from_job → build_production_loadcase), so a
+    // declared load case is resolved identically whether it is optimized or merely
+    // analyzed. The anchors become the Dirichlet BCs (or the min-x fallback the
+    // builder applies when none are declared); each force group becomes a
+    // distributed traction; the production margin (default 1.5) + gravity/build
+    // orientation come back on `options`.
+    const ProductionLoadCase lc =
+        production_loadcase_from_job(job, result.model);
+    result.fixture_face_ids = lc.anchor_face_ids;
+    ProductionRunSetup setup;
+    try {
+      setup = build_production_loadcase(result.model, job.resolution, lc);
+    } catch (const JobError&) {
+      throw;  // already a clean, loud job diagnostic (e.g. a selector match miss)
+    } catch (const std::exception& e) {
+      // A raw anchor/load face id outside the model's face set reaches here as a
+      // tag_step_face "face_id out of range" — surface it as a loud analyze-level
+      // diagnostic (L5: a declared load referencing a face that does not exist
+      // must fail, never silently degrade).
+      throw JobError(
+          std::string("analyze: cannot build the declared load case — a load or "
+                      "anchor face id is out of range for this model: ") +
+          e.what());
+    }
+    // L5 — NEVER silently fall back to self-weight. When the job declared load
+    // groups but every one was zero-force or tagged no voxels at this resolution,
+    // the builder arms require_external_loads and leaves external_loads empty.
+    // The optimizer would refuse in minimize_plastic; the analyze path never runs
+    // the optimizer, so it must refuse HERE — analyzing under self-weight instead
+    // of the declared load is exactly the silent-degradation bug (PR 178).
+    if (setup.options.require_external_loads &&
+        setup.options.external_loads.empty())
+      throw JobError(
+          "analyze: the declared load case produced NO external load — every "
+          "force group was zero-force or its faces tag no voxel at resolution " +
+          std::to_string(job.resolution) +
+          ". Refusing to analyze under SELF-WEIGHT instead of the declared load "
+          "(that silent fallback is the PR-178 param-drop bug). Fix the load "
+          "faces / forces or raise the resolution.");
+    model_grid = std::move(setup.grid);
+    bcs = std::move(setup.bcs);
+    options = std::move(setup.options);
+    external_loads = options.external_loads;
+  } else {
+    // ── SELF-WEIGHT path (unchanged): voxelize + tag the fixture faces, clamp
+    // their nodes, and apply the production config + the job's gravity/margin.
+    // The fixture NODE indices and the part-solid count are geometry, so we take
+    // them from the model grid and reuse them for any same-geometry design.
+    model_grid = voxelize(result.model.mesh, job.resolution);
+    result.fixture_face_ids =
+        resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
+    std::size_t tagged = 0;
+    for (const int f : result.fixture_face_ids)
+      tagged += model_is_mesh
+                    ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
+                    : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
+    if (tagged == 0)
+      throw JobError(
+          "analyze: fixture faces tagged no voxels (resolution too coarse "
+          "for the selected faces?)");
+    for (const int n : fea_tagged_nodes(model_grid, VoxelTag::Fixture))
+      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+    configure_production_options(options);
+    options.margin_stop = job.margin_stop;
+    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
+    options.gravity_direction = job.gravity.direction;
+  }
   const double part_solid = static_cast<double>(model_grid.solid_count());
 
   // ── the FIXED design to analyse (its OWN occupancy grid) ─────────────────────
@@ -427,14 +573,17 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     }
 
     // Re-voxelize the (smoothed) mesh onto the MODEL's grid geometry, then carry
-    // the model's fixture tags over so the same clamp applies. The occupancy is
-    // the design; the quantization gap (mesh surface vs this voxelization) is
-    // disclosed in the provenance record below.
+    // the model's Fixture (clamp) AND Load (traction) tags over where the substitute
+    // still has material, so the same BCs apply and the connectivity belt sees the
+    // load voxels. In self-weight mode `model_grid` carries no Load tags, so this is
+    // byte-identical to carrying Fixture alone. The occupancy is the design; the
+    // quantization gap (mesh surface vs this voxelization) is disclosed below.
     design_grid = voxelize_onto_grid(design_mesh, model_grid);
     for (std::size_t i = 0; i < design_grid.tags.size(); ++i)
-      if (model_grid.tags[i] == VoxelTag::Fixture &&
-          design_grid.tags[i] != VoxelTag::Empty)
-        design_grid.tags[i] = VoxelTag::Fixture;
+      if (design_grid.tags[i] != VoxelTag::Empty &&
+          (model_grid.tags[i] == VoxelTag::Fixture ||
+           model_grid.tags[i] == VoxelTag::Load))
+        design_grid.tags[i] = model_grid.tags[i];
     result.analyzed_mesh = true;
     result.analyzed_mesh_path = analyze_mesh_path;
     result.mesh_mass_grams =
@@ -444,13 +593,14 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   for (std::size_t i = 0; i < density.size(); ++i)
     if (design_grid.tags[i] != VoxelTag::Empty) density[i] = 1.0;
 
-  // ── production solver config + self-weight load case (as run_job applies) ────
-  MinimizePlasticOptions options;
-  configure_production_options(options);
-  options.margin_stop = job.margin_stop;
-  options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
-  options.gravity_direction = job.gravity.direction;
-
+  // ── the certification load case (production config already on `options`) ─────
+  // The production solver config + margin + gravity/build orientation were set on
+  // `options` in the mode branch above (build_production_loadcase in loadcase mode,
+  // configure_production_options in self-weight mode). Here we only pick the loads:
+  //   * loadcase   — the declared EXTERNAL tractions, fixed on the model faces
+  //                  (independent of the fixed design's internal geometry);
+  //   * self-weight — the DESIGN's own weight, recomputed on `design_grid` so a
+  //                  substitute/smoothed design carries its own mass.
   SimpParams params;
   params.youngs_modulus = material.youngs_modulus_mpa;
   params.poisson = material.poisson;
@@ -460,8 +610,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                                          -options.gravity_direction.y,
                                          -options.gravity_direction.z});
   const std::vector<NodalLoad> loads =
-      self_weight_loads(design_grid, material.density_g_cm3, options.gravity,
-                        options.gravity_direction);
+      loadcase ? external_loads
+               : self_weight_loads(design_grid, material.density_g_cm3,
+                                   options.gravity, options.gravity_direction);
   const bool load_path_ok = load_path_connected(design_grid, density, 0.5);
   // The gate knockdown posture (handoff 2026-07-26-width-aware-knockdown), built
   // from the SAME options the originating run used so a standalone re-analysis gates
@@ -506,7 +657,14 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   vr.min_feature_warning =
       min_feature_warning_text(rules, a.v3.min_feature_violations);
   vr.accepted = a.accepted;
-  vr.margin_required = job.margin_stop;
+  // The REQUIRED margin is the one the gate actually used (options.margin_stop):
+  // job.margin_stop in self-weight mode (identical), the production default in
+  // loadcase mode (the loads schema rejects a margin_stop key, so job.margin_stop
+  // is unset there — reporting it would falsely show 0). Surfaced on the result so
+  // the CLI prints the threshold the verdict was made against.
+  const double margin_required = options.margin_stop;
+  result.margin_required = margin_required;
+  vr.margin_required = margin_required;
   vr.margin_effective = a.margin_effective;
   if (!a.accepted)
     vr.rejection_reason =
@@ -553,6 +711,30 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
           (result.analyzed_mesh ? json_num(result.mesh_mass_grams)
                                 : std::string("null")) +
           ",\n";
+  // Load-case receipt (loadcase-analyze handoff) — emitted ONLY in loadcase mode,
+  // so the self-weight provenance is byte-identical to before (L1). Records that
+  // this re-analysis ran under a DECLARED external load (never self-weight), the
+  // declared force groups + their resultant, the anchor count, and the number of
+  // nodal loads the tractions produced — the honest counterpart to the self-weight
+  // path's implicit "load_source": self_weight.
+  if (loadcase) {
+    Vec3 resultant{0.0, 0.0, 0.0};
+    for (const JobLoadGroup& g : job.loads.groups) {
+      resultant.x += g.force.x;
+      resultant.y += g.force.y;
+      resultant.z += g.force.z;
+    }
+    const double resultant_mag =
+        std::sqrt(resultant.x * resultant.x + resultant.y * resultant.y +
+                  resultant.z * resultant.z);
+    prov += "  \"load_source\": \"loadcase\",\n";
+    prov += "  \"load_groups\": " + std::to_string(job.loads.groups.size()) +
+            ",\n";
+    prov += "  \"anchor_faces\": " +
+            std::to_string(result.fixture_face_ids.size()) + ",\n";
+    prov += "  \"external_load_nodes\": " + std::to_string(loads.size()) + ",\n";
+    prov += "  \"declared_force_resultant_n\": " + json_num(resultant_mag) + ",\n";
+  }
   // Smoothing receipt (task items 1, 5; bars S2/S4) — emitted ONLY when smoothing
   // ran, so the analyse-only provenance is byte-identical to before (bar S6). Both
   // mass figures above already describe the SMOOTHED mesh in this branch.
@@ -581,7 +763,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   }
   prov += "  \"max_stress_mpa\": " + json_num(a.max_von_mises) + ",\n";
   prov += "  \"margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
-  prov += "  \"margin_required\": " + json_num(job.margin_stop) + ",\n";
+  prov += "  \"margin_required\": " + json_num(margin_required) + ",\n";
   prov += "  \"margin_effective\": " + json_num(a.margin_effective) + ",\n";
   prov += "  \"accepted\": " + std::string(a.accepted ? "true" : "false") + ",\n";
   prov += "  \"min_feature_violations\": " +
@@ -679,82 +861,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // front-end-neutral ProductionLoadCase, and hand it to the SAME core builder
     // the bridge calls. The CLI and app therefore produce the same design for the
     // same STEP + load case + resolution.
-    ProductionLoadCase lc;
-    // Anchors: raw B-rep ids (from the app) and/or geometric selectors compose.
-    lc.anchor_face_ids = job.loads.anchor_face_ids;
-    for (const int id : resolve_selectors(result.model, job.loads.anchors, "anchors"))
-      lc.anchor_face_ids.push_back(id);
+    const ProductionLoadCase lc =
+        production_loadcase_from_job(job, result.model);
     result.fixture_face_ids = lc.anchor_face_ids;
-    for (const JobLoadGroup& g : job.loads.groups) {
-      ProductionLoadCase::LoadGroup lg;
-      lg.face_ids = g.face_ids;
-      for (const int id : resolve_selectors(result.model, g.faces, "loads group faces"))
-        lg.face_ids.push_back(id);
-      lg.force = g.force;
-      lc.load_groups.push_back(std::move(lg));
-    }
-    // Clearances (handoff 100): map each job clearance to a ProductionLoadCase
-    // clearance. A distance the job omitted (== 0) defaults to the same spec
-    // suggestion the app prefills — for a bolt those depend on the bore radius,
-    // read from the imported face geometry, so a hand-authored job need only give
-    // face_id + kind.
-    for (const JobClearance& jc : job.loads.clearances) {
-      ProductionLoadCase::Clearance c;
-      c.face_id = jc.face_id;
-      c.manual = jc.manual;
-      const bool bolt = jc.kind == "bolt";
-      // Default suggestions depend on the bore radius: an auto bolt reads it from
-      // the imported face geometry; a manual bolt carries its own radius_mm. A
-      // hand-authored job need only give face_id/geometry + kind and the same
-      // spec-suggestion defaults fill the rest.
-      double bore_r = 0.0;
-      if (bolt) {
-        if (jc.manual)
-          bore_r = jc.radius_mm;
-        else if (jc.face_id >= 0 && jc.face_id < result.model.face_count)
-          bore_r = result.model.faces[static_cast<std::size_t>(jc.face_id)]
-                       .cylinder_radius_mm;
-      }
-      c.params = bolt ? topopt::default_bolt_clearance(bore_r)
-                      : topopt::default_face_clearance();
-      if (jc.concentric_margin_mm > 0.0)
-        c.params.concentric_margin_mm = jc.concentric_margin_mm;
-      if (jc.axial_clearance_mm > 0.0)
-        c.params.axial_clearance_mm = jc.axial_clearance_mm;
-      if (jc.slab_depth_mm > 0.0) c.params.slab_depth_mm = jc.slab_depth_mm;
-      if (jc.manual) {
-        c.manual_geom.kind =
-            bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
-        c.manual_geom.axis_point = jc.axis_point;
-        c.manual_geom.axis_dir = jc.axis_dir;
-        c.manual_geom.radius_mm = jc.radius_mm;
-        c.manual_geom.half_length_mm = jc.half_length_mm;
-        c.manual_geom.origin = jc.origin;
-        c.manual_geom.normal = jc.normal;
-        c.manual_geom.half_u_mm = jc.half_u_mm;
-        c.manual_geom.half_w_mm = jc.half_w_mm;
-      }
-      lc.clearances.push_back(c);
-    }
-    // Face protections (handoff 124): the raw face ids + the ONE global depth.
-    // A depth <= 0 in the job means "use the core default"; leave the
-    // ProductionLoadCase field at its default so the builder derives voxels from
-    // kFaceProtectionDepthDefaultMm. Empty list => byte-identical.
-    lc.face_protection_face_ids = job.loads.face_protection_face_ids;
-    if (job.loads.face_protection_depth_mm > 0.0)
-      lc.face_protection_depth_mm = job.loads.face_protection_depth_mm;
-    lc.minimize_plastic = job.loads.minimize_plastic;
-    lc.build_dir = job.loads.build_dir;
-    lc.infill_percent = job.loads.infill_percent;
-    lc.wall_loops = job.loads.wall_loops;
-    lc.wall_line_width_mm = job.loads.wall_line_width_mm;
-    lc.wall_line_width_outer_mm = job.loads.wall_line_width_outer_mm;
-    lc.has_design_box = job.has_design_box;
-    if (job.has_design_box) {
-      lc.design_box = to_design_box(job.design_box);
-      for (const JobBox& ko : job.keep_out_boxes)
-        lc.keep_out_boxes.push_back(to_design_box(ko));
-    }
 
     ProductionRunSetup setup =
         build_production_loadcase(result.model, job.resolution, lc);
