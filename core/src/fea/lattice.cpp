@@ -92,54 +92,184 @@ constexpr std::array<Row, 8> kOctet = {{
     {0.59093, 1344.7034, 443.6894, 392.1883, true},
 }};
 
-const std::array<Row, 8>& rows_of(LatticeTopology topo) {
+// ─── the nine-topology extension (handoff 2026-07-29-tensor-library-nine) ───────
+// Measured by tensor_library_nine_probe.cpp: the SAME periodic homogenization PR 198
+// used, run over the strut-lattice family table. vpc48 row (the library basis, like
+// kOctet), converged against vpc64 (matched rho, clean interpolated drift metric).
+// A row is `resolved` when it sits in the CONTIGUOUS validated block (drift < 2.4% vs
+// vpc64 AND strut diameter >= 6 voxels); rows outside are kept for provenance. Only
+// the CUBIC-symmetric topologies are here — the three tetragonal variants (bccz/fccz/
+// reentrant) get NO table (rows_of returns empty) and are refused by lattice_cubic_
+// tensor (bar B3). NOTE: kFcc is geometrically the legs-only octet, so its rows match
+// kOctet where the density sampling coincides (rho 0.297, 0.591 are byte-identical) —
+// the live proof this driver reproduces the shipped octet. See the handoff for the
+// shipped-"octet"-is-legs-only finding.
+
+// sc: cubic, extreme LOW shear (Zener 0.045-0.60). Worst in-band drift 0.71%.
+constexpr std::array<Row, 8> kSimpleCubic = {{
+    {0.08659, 124.1566, 7.4660, 2.6536, true},
+    {0.10749, 158.5235, 10.8871, 4.4241, true},
+    {0.15184, 234.9730, 19.8418, 9.6988, true},
+    {0.20095, 328.7364, 33.6360, 19.3835, true},
+    {0.30107, 549.8922, 75.8114, 54.8253, true},
+    {0.40271, 820.7973, 142.6197, 117.1334, true},
+    {0.49638, 1122.1090, 233.9830, 201.3808, true},
+    {0.60171, 1567.5924, 404.5519, 346.1360, false},
+}};
+// bcc: cubic, extreme HIGH Zener (1.56-34.7, bending). Worst in-band drift 1.75%.
+constexpr std::array<Row, 8> kBcc = {{
+    {0.06684, 33.4693, 31.7886, 29.1699, false},
+    {0.09288, 52.1153, 48.2770, 43.9143, false},
+    {0.15755, 102.6131, 88.9380, 79.5135, false},
+    {0.21050, 156.4198, 127.3111, 113.1794, true},
+    {0.30729, 288.2758, 205.7559, 182.7549, true},
+    {0.38932, 447.0414, 281.7155, 252.5690, true},
+    {0.50043, 754.6963, 399.8495, 361.9060, true},
+    {0.59288, 1125.8347, 522.3899, 470.7912, true},
+}};
+// fcc: cubic (== the shipped octet-legs geometry). Worst in-band drift 1.94%.
+constexpr std::array<Row, 8> kFcc = {{
+    {0.07812, 62.2005, 30.5343, 27.5372, false},
+    {0.09505, 79.1299, 38.1537, 34.1013, true},
+    {0.15524, 147.2712, 67.8645, 59.9030, true},
+    {0.19611, 205.2342, 90.3098, 79.2466, true},
+    {0.29731, 374.2029, 151.9733, 135.0535, true},
+    {0.40958, 645.8690, 235.1929, 212.4952, true},
+    {0.49732, 933.7064, 317.7636, 288.2518, true},
+    {0.59093, 1344.7034, 443.6894, 392.1883, true},
+}};
+// diamond: cubic (Zener 1.57-2.92). Worst in-band drift 2.02%.
+constexpr std::array<Row, 8> kDiamond = {{
+    {0.06655, 36.4377, 30.8178, 8.2156, false},
+    {0.09259, 57.5708, 46.1752, 16.5792, false},
+    {0.15712, 119.1238, 83.4693, 47.9097, true},
+    {0.21007, 185.0863, 118.3592, 84.1557, true},
+    {0.30671, 339.7180, 190.8679, 167.0811, true},
+    {0.38860, 522.8239, 268.4643, 256.3348, true},
+    {0.49971, 843.5858, 401.4833, 390.5869, true},
+    {0.59201, 1222.7132, 557.3286, 520.9273, true},
+}};
+// kelvin: cubic (Zener 0.68-0.89). Worst in-band drift 3.20% (one interior node at
+// rho~0.21; <=2.0% elsewhere) — disclosed in the handoff, kept as an interp node
+// because E100(rho) is convex and dropping it over-estimates across the gap.
+constexpr std::array<Row, 8> kKelvin = {{
+    {0.07726, 51.2160, 36.8961, 5.8569, false},
+    {0.09375, 69.5508, 44.6326, 8.7574, true},
+    {0.15191, 144.1969, 73.4013, 23.9669, true},
+    {0.20660, 234.3606, 102.4685, 45.4661, true},
+    {0.30469, 470.5138, 159.9250, 104.8460, true},
+    {0.39149, 734.2983, 229.6667, 177.5998, true},
+    {0.50521, 1157.2768, 376.2459, 314.8977, true},
+    {0.60764, 1638.2366, 576.4350, 473.0362, false},
+}};
+// rhombic: cubic (Zener 1.23-2.78); 32 struts -> thin at low rho, narrower band.
+// Worst in-band drift 1.72%.
+constexpr std::array<Row, 8> kRhombic = {{
+    {0.09317, 54.3000, 47.1262, 9.9597, false},
+    {0.10995, 70.0522, 58.8325, 15.0200, false},
+    {0.12558, 82.0597, 66.7054, 19.8245, false},
+    {0.17245, 134.1116, 100.7815, 40.7273, true},
+    {0.28299, 299.5816, 184.9281, 115.2281, true},
+    {0.39236, 556.9667, 290.3696, 223.0394, true},
+    {0.51331, 998.3655, 448.7741, 377.5713, true},
+    {0.59925, 1446.0481, 612.3678, 511.1671, false},
+}};
+
+// A view over one topology's row table (variable length — octet has 8, others differ).
+struct RowTable {
+  const Row* data;
+  int n;
+  bool empty() const { return data == nullptr || n == 0; }
+};
+
+// The certifiable topologies carry a table; the tetragonal ones (and any not covered)
+// return an EMPTY table, which every accessor below treats as "refuse / not certifiable".
+RowTable rows_of(LatticeTopology topo) {
   switch (topo) {
-    case LatticeTopology::Octet:
-      return kOctet;
+    case LatticeTopology::Octet:       return {kOctet.data(), (int)kOctet.size()};
+    case LatticeTopology::SimpleCubic: return {kSimpleCubic.data(), (int)kSimpleCubic.size()};
+    case LatticeTopology::Bcc:         return {kBcc.data(), (int)kBcc.size()};
+    case LatticeTopology::Fcc:         return {kFcc.data(), (int)kFcc.size()};
+    case LatticeTopology::Diamond:     return {kDiamond.data(), (int)kDiamond.size()};
+    case LatticeTopology::Kelvin:      return {kKelvin.data(), (int)kKelvin.size()};
+    case LatticeTopology::Rhombic:     return {kRhombic.data(), (int)kRhombic.size()};
+    case LatticeTopology::Bccz:
+    case LatticeTopology::Fccz:
+    case LatticeTopology::Reentrant:   return {nullptr, 0};  // tetragonal: not certifiable
   }
-  return kOctet;
+  return {nullptr, 0};
 }
 
-// Index range [lo, hi] of the RESOLVED rows (the interpolation domain).
-void resolved_span(const std::array<Row, 8>& rows, int& lo, int& hi) {
+// Index range [lo, hi] of the RESOLVED rows (the interpolation domain). Requires a
+// non-empty table (callers guard with rows_of(...).empty()).
+void resolved_span(const RowTable& t, int& lo, int& hi) {
   lo = 0;
-  while (lo < static_cast<int>(rows.size()) && !rows[lo].resolved) ++lo;
-  hi = static_cast<int>(rows.size()) - 1;
-  while (hi > lo && !rows[hi].resolved) --hi;
+  while (lo < t.n && !t.data[lo].resolved) ++lo;
+  hi = t.n - 1;
+  while (hi > lo && !t.data[hi].resolved) --hi;
 }
 
 }  // namespace
 
 const char* lattice_topology_name(LatticeTopology topo) {
   switch (topo) {
-    case LatticeTopology::Octet:
-      return "octet";
+    case LatticeTopology::Octet:       return "octet";
+    case LatticeTopology::SimpleCubic: return "sc";
+    case LatticeTopology::Bcc:         return "bcc";
+    case LatticeTopology::Fcc:         return "fcc";
+    case LatticeTopology::Diamond:     return "diamond";
+    case LatticeTopology::Kelvin:      return "kelvin";
+    case LatticeTopology::Rhombic:     return "rhombic";
+    case LatticeTopology::Bccz:        return "bccz";
+    case LatticeTopology::Fccz:        return "fccz";
+    case LatticeTopology::Reentrant:   return "reentrant";
   }
   return "?";
 }
 
+bool lattice_topology_certifiable(LatticeTopology topo) {
+  return !rows_of(topo).empty();
+}
+
+std::vector<std::string> lattice_certifiable_topology_names() {
+  std::vector<std::string> out;
+  for (LatticeTopology t : {LatticeTopology::Octet, LatticeTopology::SimpleCubic,
+                            LatticeTopology::Bcc, LatticeTopology::Fcc,
+                            LatticeTopology::Diamond, LatticeTopology::Kelvin,
+                            LatticeTopology::Rhombic, LatticeTopology::Bccz,
+                            LatticeTopology::Fccz, LatticeTopology::Reentrant})
+    if (lattice_topology_certifiable(t)) out.emplace_back(lattice_topology_name(t));
+  return out;
+}
+
 double lattice_rho_min(LatticeTopology topo) {
-  const std::array<Row, 8>& rows = rows_of(topo);
+  RowTable t = rows_of(topo);
+  if (t.empty()) return 0.0;  // not certifiable — band is meaningless (gate refuses)
   int lo, hi;
-  resolved_span(rows, lo, hi);
-  return rows[lo].rho;
+  resolved_span(t, lo, hi);
+  return t.data[lo].rho;
 }
 
 double lattice_rho_max(LatticeTopology topo) {
-  const std::array<Row, 8>& rows = rows_of(topo);
+  RowTable t = rows_of(topo);
+  if (t.empty()) return 0.0;
   int lo, hi;
-  resolved_span(rows, lo, hi);
-  return rows[hi].rho;
+  resolved_span(t, lo, hi);
+  return t.data[hi].rho;
 }
 
 double lattice_cells_per_member_min(LatticeTopology topo) {
-  switch (topo) {
-    case LatticeTopology::Octet:
-      // Bending ceiling, handoff 2026-07-28-graded-cell-size-phase0 C2b — see the
-      // header tripwire. The crossing of the 2.4% homogenization-error band sits
-      // between 4 and 5 cells across, so 5 is the smallest count that clears it.
-      return 5.0;
-  }
+  // MEASURED for octet (bending ceiling, handoff 2026-07-28-graded-cell-size-phase0
+  // C2b): the 2.4% band is crossed between 4 and 5 cells across, so 5. For the other
+  // certifiable topologies the bending floor is NOT independently measured here — that
+  // needs the PR 235 guided-cantilever finite-block study (handoff
+  // 2026-07-29-tensor-library-nine, T4). octet's 5 is forwarded as a documented
+  // placeholder; it is representative for the stretch-dominated lattices (fcc, rhombic)
+  // and is expected to be an UNDER-estimate for the bending-dominated ones (bcc, kelvin,
+  // diamond, sc), so re-measure before grading those. It is load-bearing only for the
+  // grading law, which is octet-only in production — no other topology is graded against
+  // it today. Change the number HERE, per topology, once measured.
+  (void)topo;
   return 5.0;
 }
 
@@ -197,26 +327,36 @@ CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,
   if (!(youngs_modulus_solid > 0.0))
     throw std::invalid_argument(
         "lattice_cubic_tensor: youngs_modulus_solid must be > 0");
-  const std::array<Row, 8>& rows = rows_of(topo);
+  RowTable tbl = rows_of(topo);
+  // A topology the cubic library does not carry a validated tensor for — the
+  // tetragonal variants (bccz/fccz/reentrant), whose effective tensor is not cubic —
+  // is REFUSED, never certified against a wrong-symmetry or default tensor (bar B3).
+  if (tbl.empty())
+    throw LatticeTopologyNotCertifiable(
+        std::string("lattice_cubic_tensor: topology '") +
+        lattice_topology_name(topo) +
+        "' has no validated cubic tensor (it is tetragonal / generate-but-not-certify);"
+        " the certification gate refuses it — a cubic (C11,C12,C44) tensor cannot"
+        " represent it. See handoff 2026-07-29-tensor-library-nine.");
   int lo, hi;
-  resolved_span(rows, lo, hi);
+  resolved_span(tbl, lo, hi);
 
   bool clamped = false;
   double r = rho;
-  if (r <= rows[lo].rho) {
-    r = rows[lo].rho;
-    clamped = (rho < rows[lo].rho);
-  } else if (r >= rows[hi].rho) {
-    r = rows[hi].rho;
-    clamped = (rho > rows[hi].rho);
+  if (r <= tbl.data[lo].rho) {
+    r = tbl.data[lo].rho;
+    clamped = (rho < tbl.data[lo].rho);
+  } else if (r >= tbl.data[hi].rho) {
+    r = tbl.data[hi].rho;
+    clamped = (rho > tbl.data[hi].rho);
   }
   if (rho_clamped) *rho_clamped = clamped;
 
   // Piecewise-linear interpolation in rho between the two bracketing resolved rows.
   int a = lo;
-  while (a < hi && rows[a + 1].rho < r) ++a;
-  const Row& r0 = rows[a];
-  const Row& r1 = rows[a + 1 <= hi ? a + 1 : hi];
+  while (a < hi && tbl.data[a + 1].rho < r) ++a;
+  const Row& r0 = tbl.data[a];
+  const Row& r1 = tbl.data[a + 1 <= hi ? a + 1 : hi];
   double t = 0.0;
   if (r1.rho > r0.rho) t = (r - r0.rho) / (r1.rho - r0.rho);
   const double scale = youngs_modulus_solid / kLibraryEs;

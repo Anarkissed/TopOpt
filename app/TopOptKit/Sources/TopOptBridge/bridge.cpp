@@ -1463,9 +1463,20 @@ namespace {
 // own lattice_topology_name so it can never drift from the enum.
 bool lattice_topology_from_name(const std::string& name,
                                 topopt::LatticeTopology& out) {
-  if (name == topopt::lattice_topology_name(topopt::LatticeTopology::Octet)) {
-    out = topopt::LatticeTopology::Octet;
-    return true;
+  // Map a name to the enum ONLY if core carries a validated (certifiable) tensor for
+  // it — the tetragonal variants (bccz/fccz/reentrant) are generate-but-not-certify, so
+  // they never map here and the UI greys them (handoff 2026-07-29-tensor-library-nine).
+  for (topopt::LatticeTopology t :
+       {topopt::LatticeTopology::Octet, topopt::LatticeTopology::SimpleCubic,
+        topopt::LatticeTopology::Bcc, topopt::LatticeTopology::Fcc,
+        topopt::LatticeTopology::Diamond, topopt::LatticeTopology::Kelvin,
+        topopt::LatticeTopology::Rhombic, topopt::LatticeTopology::Bccz,
+        topopt::LatticeTopology::Fccz, topopt::LatticeTopology::Reentrant}) {
+    if (topopt::lattice_topology_certifiable(t) &&
+        name == topopt::lattice_topology_name(t)) {
+      out = t;
+      return true;
+    }
   }
   return false;
 }
@@ -1492,9 +1503,11 @@ LatticeLimits lattice_limits(const std::string& topology) {
 }
 
 std::vector<std::string> lattice_certifiable_topologies() {
-  // The core certification enum's covered set, in the core's order. Octet only
-  // today; this list grows by mirroring core's LatticeTopology, never by app fiat.
-  return {std::string(topopt::lattice_topology_name(topopt::LatticeTopology::Octet))};
+  // The core certification library's covered set, in core order — mirrored directly
+  // from core so it can never drift from the enum (handoff
+  // 2026-07-29-tensor-library-nine widened this from octet-only to the seven cubic
+  // topologies; the three tetragonal ones are deliberately absent — not certifiable).
+  return topopt::lattice_certifiable_topology_names();
 }
 
 }  // namespace topoptbridge

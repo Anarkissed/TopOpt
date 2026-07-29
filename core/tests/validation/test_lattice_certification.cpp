@@ -108,6 +108,60 @@ int main() {
           lattice_rho_max(LatticeTopology::Octet) > 0.5, "resolved range reported");
   }
 
+  std::printf("== 2a. nine-topology tensor library (2026-07-29-tensor-library-nine) ==\n");
+  {
+    // B2 — octet rows UNCHANGED: at the exact anchor rho the library returns the
+    // shipped PR 198 numbers byte-for-byte (interpolation weight is 0 at an anchor).
+    CubicTensor oc = lattice_cubic_tensor(LatticeTopology::Octet, 0.29731, E, nullptr);
+    check(std::fabs(oc.C11 - 374.2029) < 1e-9 && std::fabs(oc.C12 - 151.9733) < 1e-9 &&
+          std::fabs(oc.C44 - 135.0535) < 1e-9, "B2: octet anchor row is byte-identical");
+
+    // The seven cubic topologies are certifiable; the three tetragonal ones are not.
+    check(lattice_topology_certifiable(LatticeTopology::SimpleCubic) &&
+          lattice_topology_certifiable(LatticeTopology::Bcc) &&
+          lattice_topology_certifiable(LatticeTopology::Fcc) &&
+          lattice_topology_certifiable(LatticeTopology::Diamond) &&
+          lattice_topology_certifiable(LatticeTopology::Kelvin) &&
+          lattice_topology_certifiable(LatticeTopology::Rhombic),
+          "the six new cubic topologies are certifiable");
+    check(!lattice_topology_certifiable(LatticeTopology::Bccz) &&
+          !lattice_topology_certifiable(LatticeTopology::Fccz) &&
+          !lattice_topology_certifiable(LatticeTopology::Reentrant),
+          "the three tetragonal topologies are NOT certifiable");
+    check(lattice_certifiable_topology_names().size() == 7,
+          "certifiable-names accessor lists exactly the 7 cubic topologies");
+
+    // A new cubic topology (diamond) returns a valid, anisotropic, monotone,
+    // Es-linear tensor with a reported band.
+    CubicTensor d = lattice_cubic_tensor(LatticeTopology::Diamond, 0.30, E, nullptr);
+    check(d.C11 > d.C12 && d.C44 > 0, "diamond tensor positive-definite shape");
+    check(std::fabs(2.0 * d.C44 / (d.C11 - d.C12) - 1.0) > 0.05,
+          "diamond is anisotropic (Zener != 1)");
+    CubicTensor dlo = lattice_cubic_tensor(LatticeTopology::Diamond, 0.20, E, nullptr);
+    check(dlo.C11 < d.C11, "diamond C11 increases with rho");
+    check(lattice_rho_min(LatticeTopology::Diamond) > 0.10 &&
+          lattice_rho_max(LatticeTopology::Diamond) > 0.5, "diamond band reported");
+
+    // fcc IS the shipped octet-legs geometry: at the shared anchor rho the tensors match.
+    CubicTensor fc = lattice_cubic_tensor(LatticeTopology::Fcc, 0.29731, E, nullptr);
+    check(std::fabs(fc.C11 - oc.C11) < 1e-9 && std::fabs(fc.C44 - oc.C44) < 1e-9,
+          "fcc == octet-legs at the shared anchor row");
+
+    // B3 — a tetragonal topology is REFUSED (a cubic tensor cannot represent it),
+    // via a typed exception distinct from the out-of-band one.
+    for (LatticeTopology tetr : {LatticeTopology::Bccz, LatticeTopology::Fccz,
+                                 LatticeTopology::Reentrant}) {
+      bool threw = false;
+      try {
+        lattice_cubic_tensor(tetr, 0.30, E, nullptr);
+      } catch (const LatticeTopologyNotCertifiable&) {
+        threw = true;
+      } catch (...) {
+      }
+      check(threw, "B3: tetragonal topology throws LatticeTopologyNotCertifiable");
+    }
+  }
+
   std::printf("== 2b. octet_relative_density: printed geometry -> library rho ==\n");
   {
     // The map from a job's (cell_mm, strut_radius_mm) to the rho the tensor library

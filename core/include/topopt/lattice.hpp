@@ -13,8 +13,13 @@
 // latticed element's real (anisotropic, cubic) effective stiffness instead of a
 // solid modulus with a scalar knockdown bolted on afterwards.
 //
-// SCOPE: OCTET ONLY (this task). Schwarz-D, gyroid and the rest attach to the same
-// machinery later; the enum leaves room for them but only Octet is populated.
+// SCOPE: the SEVEN CUBIC strut topologies (octet-legs, sc, bcc, fcc, diamond, kelvin,
+// rhombic) carry a validated tensor; handoff 2026-07-29-tensor-library-nine widened
+// this from octet-only by re-running PR 198's homogenization over the strut-lattice
+// family. The three "z-privileged" family members (bccz, fccz, reentrant) are
+// TETRAGONAL and are deliberately NOT populated — a cubic tensor cannot represent
+// them, so they are generate-but-not-certify (see lattice_topology_certifiable). TPMS
+// sheets (Schwarz-D, gyroid) attach to the same machinery later.
 //
 // ANISOTROPY IS REAL: PR 198 measured octet's Zener ratio at 1.22 (C44 vs the
 // isotropic (C11-C12)/2), so the three constants C11, C12, C44 are genuinely
@@ -29,6 +34,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace topopt {
 
@@ -41,9 +47,42 @@ struct CubicTensor {
   double C44 = 0.0;
 };
 
-enum class LatticeTopology { Octet };
+// The strut-lattice topologies of the generation family (PR 219). The homogenized
+// cubic-tensor library (this task, 2026-07-29-tensor-library-nine) covers the ones
+// whose effective stiffness is genuinely CUBIC — for those a single (C11,C12,C44)
+// tensor is exact and lattice_topology_certifiable() is true. The three "z-privileged"
+// variants (Bccz, Fccz, Reentrant) add vertical struts / an auxetic waist on ONE axis,
+// which makes the effective tensor TETRAGONAL (C33 != C11): a cubic tensor structurally
+// cannot represent them, so they are GENERATE-but-NOT-CERTIFY — certifiable() is false
+// and lattice_cubic_tensor() REFUSES them (bar B3). Octet is UNCHANGED and its rows are
+// byte-identical to the shipped library. NOTE (carried, see the handoff): the shipped
+// "octet" tensor was measured on LEGS-ONLY geometry (fc<->corner, no octahedral braces)
+// — geometrically identical to Fcc — while the production generator meshes the full
+// octet; that pre-existing labelling gap is documented, not silently changed here.
+enum class LatticeTopology {
+  Octet,        // shipped rows (legs-only fc<->corner geometry); cubic; UNCHANGED
+  SimpleCubic,  // "sc"      — cubic, extreme low shear (Zener << 1)
+  Bcc,          // "bcc"     — cubic, bending-dominated (Zener >> 1)
+  Fcc,          // "fcc"     — cubic (== the shipped octet-legs geometry)
+  Diamond,      // "diamond" — cubic
+  Kelvin,       // "kelvin"  — cubic (truncated octahedron / BCC Voronoi)
+  Rhombic,      // "rhombic" — cubic (rhombic dodecahedron / FCC Voronoi)
+  Bccz,         // "bccz"    — TETRAGONAL (z columns): generate-but-NOT-certify
+  Fccz,         // "fccz"    — TETRAGONAL (z columns): generate-but-NOT-certify
+  Reentrant,    // "reentrant" — TETRAGONAL/auxetic (z waist): generate-but-NOT-certify
+};
 
 const char* lattice_topology_name(LatticeTopology topo);
+
+// True iff the homogenized library carries a validated CUBIC tensor for `topo` (the
+// cubic-symmetric, resolution-converged topologies). False for the tetragonal
+// variants and any topology with no validated rows — for those lattice_cubic_tensor
+// THROWS rather than certify against a wrong-symmetry or default tensor (bar B3).
+bool lattice_topology_certifiable(LatticeTopology topo);
+
+// The names of the certifiable topologies, in enum order — the single source the app
+// bridge mirrors so its UI set can never drift from the core library.
+std::vector<std::string> lattice_certifiable_topology_names();
 
 // The relative-density range over which the embedded library is trustworthy — the
 // RESOLVED rows of PR 198's octet sweep (wall >= 4 voxels at vpc48). Below the min
@@ -138,6 +177,17 @@ struct LatticeDensityOutOfBand : std::runtime_error {
   double rho, rho_min, rho_max;
   LatticeDensityOutOfBand(double rho_, double lo, double hi, const std::string& msg)
       : std::runtime_error(msg), rho(rho_), rho_min(lo), rho_max(hi) {}
+};
+
+// Thrown by lattice_cubic_tensor (and thus analyze_fixed_design) when a posture asks
+// to certify a topology the homogenized library does NOT carry a validated cubic
+// tensor for — the tetragonal variants (Bccz/Fccz/Reentrant) or any topology with no
+// rows. The gate REFUSES rather than certify against a wrong-symmetry or neighbour's
+// tensor (bar B3). Distinct from LatticeDensityOutOfBand (that one is a valid topology
+// at an out-of-band density; this one is a topology the cubic model cannot represent).
+struct LatticeTopologyNotCertifiable : std::runtime_error {
+  explicit LatticeTopologyNotCertifiable(const std::string& msg)
+      : std::runtime_error(msg) {}
 };
 
 }  // namespace topopt
