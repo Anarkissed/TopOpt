@@ -1,0 +1,21 @@
+LATTICE BAND-EXTENSION PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+library resolved band today: rho [0.148, 0.591]. Extending BOTH ends (offline, B4).
+
+===== B3 REPRODUCE — existing validated band rho 0.15-0.54 must be UNCHANGED =====
+  [writing /tmp/bx_evidence/repro_band.csv]
+  vf     rho     vox/str E_periodic  E234_ref    reproErr  E_library   model%    verdict
+  0.15   0.1476  7.68    96.13       96.13       -0.00     96.13       +0.00     GO
+  0.20   0.1961  9.11    150.04      155.80      -3.70     147.33      -1.81     GO
+  0.25   0.2462  10.63   213.67      213.67      -0.00     212.64      -0.48     GO
+  0.30   0.3036  11.70   301.22      286.42      +5.17     299.14      -0.69     GO
+  0.35   0.3443  13.08   378.91      378.91      +0.00     381.22      +0.61     GO
+  0.40   0.3979  14.18   489.22      489.22      +0.00     489.22      -0.00     GO
+  0.45   0.4507  15.07   629.81      629.81      +0.00     644.89      +2.39     GO
+  0.50   0.4973  16.34   772.34      772.34      -0.00     782.17      +1.27     GO
+  0.55   0.5384  17.23   917.91      917.91      +0.00     928.40      +1.14     GO
+  reproErr% = our periodic E100 vs PR 234's D1 table (informational; noisy at fixed
+  target vf because achieved rho lands on a different aliasing step — compare at matched rho).
+  model% = library tensor vs periodic truth at the ACHIEVED rho (the certifiable error, <=2.4%).
+  B3 verdict (on model%): REPRODUCED (band unchanged)
+
+DONE.

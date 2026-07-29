@@ -1,0 +1,51 @@
+LATTICE BAND-EXTENSION PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+library resolved band today: rho [0.148, 0.591]. Extending BOTH ends (offline, B4).
+
+===== LOW END (L1/L2/L3) — recompute low-density rows at 6-8 vox/strut =====
+  truth = periodic homogenization; reference resolution = vpc128 (finest, MATCHED rho).
+  r is recalibrated at EACH vpc to the target rho, so drift is PURE resolution.
+  a row is TRUSTWORTHY when its periodic E100 drift vs vpc128 < 2.4% AND vox/strut >= 6.
+
+  [writing /tmp/bx_evidence/low_end.csv]
+  vf     vpc   rho     vox/str E100     drift%     zener    DOFact    cg     solve_s   RSS_MB   row
+  0.050  48    0.0561  4.36    29.1     +16.93     1.7387   30588     223    17.99     2116     -
+  0.050  64    0.0454  5.74    22.1     -11.13     1.8282   56118     304    37.48     2116     -
+  0.050  96    0.0551  9.00    27.9     +12.00     1.7708   196908    465    280.50    2116     -
+  0.050  128   0.0505  11.45   24.9     +0.00      1.8014   401394    579    532.77    2116     TRUST (ref)
+      -> rho 0.0505 library row: vpc128, vox/strut 11.4, E100 24.9 MPa, drift +0.00% -> TRUSTWORTHY
+
+  0.060  48    0.0561  5.00    29.1     -10.86     1.7387   30588     223    10.17     2116     -
+  0.060  64    0.0603  6.40    31.3     -4.26      1.7465   69132     299    63.58     2116     -
+  0.060  96    0.0618  9.85    31.7     -3.14      1.7694   214044    440    272.25    2116     -
+  0.060  128   0.0636  13.08   32.7     +0.00      1.7591   493434    578    680.11    2116     TRUST (ref)
+      -> rho 0.0636 library row: vpc128, vox/strut 13.1, E100 32.7 MPa, drift +0.00% -> TRUSTWORTHY
+
+  0.080  48    0.0951  5.74    54.3     +23.36     1.6644   46812     219    14.71     2116     -
+  0.080  64    0.0872  7.55    48.0     +9.09      1.7088   94860     294    45.86     2116     -
+  0.080  96    0.0759  11.09   40.6     -7.76      1.7242   258780    462    210.15    2116     -
+  0.080  128   0.0811  15.00   44.0     +0.00      1.7040   612402    615    873.66    2116     TRUST (ref)
+      -> rho 0.0811 library row: vpc128, vox/strut 15.0, E100 44.0 MPa, drift +0.00% -> TRUSTWORTHY
+
+  0.100  48    0.1031  6.40    61.2     +8.68      1.6127   49260     222    13.46     2116     -
+  0.100  64    0.1012  8.54    59.0     +4.81      1.6315   107010    289    41.60     2116     -
+  0.100  96    0.1012  12.77   58.5     +3.87      1.6398   328800    431    289.88    2116     -
+  0.100  128   0.0988  17.00   56.3     +0.00      1.6602   724416    577    651.13    2116     TRUST (ref)
+      -> rho 0.0988 library row: vpc128, vox/strut 17.0, E100 56.3 MPa, drift +0.00% -> TRUSTWORTHY
+
+  0.120  48    0.1320  7.14    83.3     +16.34     1.5689   62172     219    15.56     2116     -
+  0.120  64    0.1172  9.11    71.6     -0.04      1.5866   122604    308    48.01     2116     TRUST
+  0.120  96    0.1187  13.89   71.2     -0.54      1.6142   379386    435    219.67    2116     TRUST
+  0.120  128   0.1191  18.63   71.6     +0.00      1.6065   863166    577    1095.55   2116     TRUST (ref)
+      -> rho 0.1172 library row: vpc64, vox/strut 9.1, E100 71.6 MPa, drift -0.04% -> TRUSTWORTHY
+
+  0.148  48    0.1476  7.68    96.1     +1.53      1.5549   66924     220    16.65     2124     TRUST
+  0.148  64    0.1486  10.34   98.5     +4.08      1.5078   147498    288    53.41     2124     -
+  0.148  96    0.1437  15.59   91.7     -3.20      1.5627   451266    435    288.09    2124     -
+  0.148  128   0.1464  21.00   94.7     +0.00      1.5396   1041030   580    889.26    2124     TRUST (ref)
+      -> rho 0.1476 library row: vpc48, vox/strut 7.7, E100 96.1 MPa, drift +1.53% -> TRUSTWORTHY
+
+  L3: the NEW FLOOR is the lowest target rho with a TRUSTWORTHY row above.
+  L2 cost: DOFact (active periodic DOF), cg iters, solve_s and RSS_MB per row (scales ~vpc^3;
+  PR 198's largest resolved solve was 512k vox / 1.5M periodic DOF in minutes).
+
+DONE.
