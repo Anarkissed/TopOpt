@@ -618,6 +618,23 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 }
             }
         }
+        // The lattice block (handoff 2026-07-29-lattice-mode-ui), a TOP-LEVEL sibling of
+        // design_box exactly as the core job schema (`find_key(root, "lattice")`) parses
+        // it. Present ONLY when lattice mode is on AND the settings are runnable-as-
+        // certified (`LatticeSettings.runSpec`) — so a non-lattice run adds no key and the
+        // job.json is byte-identical to today (BAR U1). The worker's topopt-cli generates
+        // the streamed lattice artifact; the on-device bridge path has no lattice concept
+        // and simply ignores `request.lattice`. The core schema requires at least one of
+        // emit_stl / emit_3mf, which `runSpec` guarantees (STL by default).
+        if let lat = request.lattice {
+            job["lattice"] = [
+                "topology": lat.topologyID,
+                "cell_mm": lat.cellMM,
+                "strut_radius_mm": lat.strutRadiusMM,
+                "emit_stl": lat.emitSTL,
+                "emit_3mf": lat.emit3MF,
+            ]
+        }
         // The declared load case is emitted for EVERY model source — STEP B-rep
         // faces AND STL/3MF pseudo-faces (handoff 134 made the segmenter's pseudo-face
         // ids share the exact face-id contract, and the mesh-optimize work made the
@@ -842,6 +859,42 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                                      finishedAt: obj["finished_at"] as? Double)
         if t == nil { diag("worker reported no finish time — no run duration shown") }
         return t
+    }
+
+    /// The lattice a remote run carried (handoff 2026-07-29-lattice-mode-ui): the
+    /// settings echo from `request.lattice` (always, when a lattice was requested) plus
+    /// the worker's generated facts parsed from run_info.json's `lattice_export` record
+    /// (best-effort — a worker that didn't emit it, or a transport error, leaves the
+    /// facts nil and only the requested settings show, honestly labelled). nil when no
+    /// lattice was requested, so a non-lattice run's outcome is unchanged.
+    private func fetchLatticeReport() -> LatticeReport? {
+        guard let lat = request.lattice else { return nil }
+        var generated: LatticeReport.Generated? = nil
+        if let id = jobID {
+            let url = config.baseURL.appendingPathComponent("jobs")
+                .appendingPathComponent(id).appendingPathComponent("files")
+                .appendingPathComponent("run_info.json")
+            if let info = try? getJSON(url),
+               let le = info["lattice_export"] as? [String: Any] {
+                func d(_ k: String) -> Double { (le[k] as? Double) ?? 0 }
+                func i(_ k: String) -> Int { (le[k] as? Int) ?? Int((le[k] as? Double) ?? 0) }
+                func b(_ k: String) -> Bool { (le[k] as? Bool) ?? false }
+                generated = LatticeReport.Generated(
+                    emitSTL: b("emit_stl"), emit3MF: b("emit_3mf"),
+                    latticedCells: i("latticed_cells"), regionVoxels: i("region_voxels"),
+                    triangles: i("triangles"),
+                    strutRadiusMinMM: d("strut_radius_min_mm"),
+                    strutRadiusMaxMM: d("strut_radius_max_mm"))
+            } else {
+                diag("run_info lattice_export unavailable — showing requested lattice only")
+            }
+        }
+        return LatticeReport(
+            topologyID: lat.topologyID, cellMM: lat.cellMM,
+            generateRelativeDensity: lat.generateRelativeDensity,
+            minRelativeDensity: lat.minRelativeDensity,
+            maxRelativeDensity: lat.maxRelativeDensity,
+            regionScoped: lat.regionScoped, generated: generated)
     }
 
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {
@@ -1102,6 +1155,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // The worker's own duration record (handoff 134, item 1) — never the client's
         // wall clock, which on a re-attach measures when someone looked, not the run.
         let timing = fetchTiming()
+        // The lattice the run carried (handoff 2026-07-29-lattice-mode-ui); nil for a
+        // non-lattice run, so the outcome below is unchanged for every current run.
+        let latticeReport = fetchLatticeReport()
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 
@@ -1130,7 +1186,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                             fields: fields?.variant(forRequestedVF: s.requestedVF))
             }
             return remoteOutcome(variants: variants, acceptedCount: variants.count,
-                                 fields: fields, timing: timing)
+                                 fields: fields, timing: timing, latticeReport: latticeReport)
         }
 
         // No accepted variant streamed: report-only rows. They carry no mesh, so they
@@ -1139,7 +1195,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // still ride along on the outcome below.
         let rejected = reportVariants.map { makeVariant(streamed: nil, report: $0, fields: nil) }
         return remoteOutcome(variants: rejected, acceptedCount: 0, fields: fields,
-                             timing: timing)
+                             timing: timing, latticeReport: latticeReport)
     }
 
     /// Wrap remote variants in an OptimizeOutcome, carrying the run's grid metadata
@@ -1148,7 +1204,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     /// stay `isEmpty` (gated) even if — hypothetically — a variant carried arrays.
     private func remoteOutcome(variants: [OptimizeVariant], acceptedCount: Int,
                                fields: RemoteFieldsContainer?,
-                               timing: RunTiming? = nil) -> OptimizeOutcome {
+                               timing: RunTiming? = nil,
+                               latticeReport: LatticeReport? = nil) -> OptimizeOutcome {
         OptimizeOutcome(variants: variants, stoppedOnMargin: false, cancelled: false,
                         acceptedCount: acceptedCount,
                         voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
@@ -1157,7 +1214,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                         gridOrigin: fields?.gridOrigin ?? .zero,
                         spacing: fields?.spacing ?? 0,
                         computedRemotely: true,
-                        timing: timing)
+                        timing: timing,
+                        latticeReport: latticeReport)
     }
 
     private func makeVariant(streamed s: StreamedVariant?,

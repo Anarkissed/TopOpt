@@ -24,6 +24,7 @@
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
+#include "topopt/lattice.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -1453,5 +1454,47 @@ SmokeResult bridge_smoke(const std::string& materials_path,
 }
 
 std::string core_version() { return std::string(topopt::version()); }
+
+// --- lattice certification limits (handoff 2026-07-29-lattice-mode-ui) --------
+namespace {
+// Map a job-schema topology name to the core certification enum. ONLY names the
+// core library actually covers map — everything else is "not certifiable", which
+// is exactly what the UI needs to grey a preview-only topology. Keyed off core's
+// own lattice_topology_name so it can never drift from the enum.
+bool lattice_topology_from_name(const std::string& name,
+                                topopt::LatticeTopology& out) {
+  if (name == topopt::lattice_topology_name(topopt::LatticeTopology::Octet)) {
+    out = topopt::LatticeTopology::Octet;
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
+LatticeLimits lattice_limits(const std::string& topology) {
+  LatticeLimits lim;
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) {
+    // certifiable stays false, band stays zero — the UI greys this topology.
+    return lim;
+  }
+  lim.certifiable = true;
+  lim.rho_min = topopt::lattice_rho_min(topo);
+  lim.rho_max = topopt::lattice_rho_max(topo);
+  // The core exposes NO cells-per-member certification constant yet (that
+  // measurement is landing in a parallel task). We forward what core provides;
+  // today that is nothing, so 0.0 = "advisory, not a hard clamp". When core adds an
+  // accessor (e.g. lattice_min_cells_per_member(topo)) this becomes a one-line call
+  // and the UI clamp engages with no further app change — the number is never
+  // invented here.
+  lim.min_cells_per_member = 0.0;
+  return lim;
+}
+
+std::vector<std::string> lattice_certifiable_topologies() {
+  // The core certification enum's covered set, in the core's order. Octet only
+  // today; this list grows by mirroring core's LatticeTopology, never by app fiat.
+  return {std::string(topopt::lattice_topology_name(topopt::LatticeTopology::Octet))};
+}
 
 }  // namespace topoptbridge

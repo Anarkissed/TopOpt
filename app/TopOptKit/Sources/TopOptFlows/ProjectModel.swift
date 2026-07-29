@@ -58,6 +58,13 @@ public final class ProjectModel: ObservableObject {
     /// Persisted on the project; threaded to the core via `AppModel.makeRunRequest`.
     @Published public var designBox = DesignBoxModel()
 
+    /// Lattice mode (handoff 2026-07-29-lattice-mode-ui): the mode toggle, topology, cell
+    /// size, density range and region. Default OFF ⇒ no lattice block reaches the job, so
+    /// the project produces exactly today's job (BAR U1). Persisted on the project and
+    /// folded into the undo slice so every lattice edit is one undo step (BAR U4). Its
+    /// controls are bounded at USE by the core-read `TopOptKit.LatticeLimits`, never here.
+    @Published public var lattice = LatticeSettings()
+
     /// Round-6 item 4: the workspace undo/redo history over the edit slice (selection + force +
     /// design-box). Published so the header's Undo/Redo buttons enable/disable with `canUndo`/
     /// `canRedo`. Fed by a debounced auto-commit (`installUndoAutoCommit`) so a settled edit — a
@@ -167,6 +174,7 @@ public final class ProjectModel: ObservableObject {
         self.quality = snapshot.quality ?? .fast
         self.printParams = snapshot.printParams ?? .fdmDefault
         self.designBox = snapshot.designBox ?? DesignBoxModel()
+        self.lattice = snapshot.lattice ?? LatticeSettings()
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
@@ -176,7 +184,8 @@ public final class ProjectModel: ObservableObject {
 
     /// The current undoable slice — the value copy the history snapshots and restores.
     public var editSnapshot: EditSnapshot {
-        EditSnapshot(selection: selection, force: force, designBox: designBox, paint: paint)
+        EditSnapshot(selection: selection, force: force, designBox: designBox, paint: paint,
+                     lattice: lattice)
     }
 
     /// Whether an undo is available RIGHT NOW — a committed step, OR an in-flight edit the debounce
@@ -234,6 +243,7 @@ public final class ProjectModel: ObservableObject {
         selection = s.selection
         force = s.force
         designBox = s.designBox
+        lattice = s.lattice
         // Restore the paint overlay too, so undoing/redoing a brush stroke reverts the exact
         // painted triangles (not just the group membership). Only when the project actually has a
         // paint overlay — a nil snapshot on a paintable project would wrongly erase all paint.
@@ -542,6 +552,52 @@ public final class ProjectModel: ObservableObject {
     /// collides with a real (non-negative) B-rep/pseudo face id in the render +
     /// handle maps. Session-stable (rebuilt per frame from the geometry anyway).
     static func manualFaceKey(_ id: UUID) -> Int { -(abs(id.hashValue) % 1_000_000_000) - 1 }
+
+    // MARK: - lattice region (handoff 2026-07-29-lattice-mode-ui)
+
+    /// Place the lattice region as a hand-placed primitive, REUSING the manual-primitive
+    /// value type + gizmo (no second placement mechanism, task requirement 2). Centred on
+    /// the model, sized off the model radius so it is visible; the user then drags its
+    /// gizmo (`moveLatticeRegion` / `rotateLatticeRegion`). Republishing arms the undo
+    /// debounce (BAR U4) and the setting persists (BAR U3). No-op without a mesh.
+    public func placeLatticeRegion(_ kind: ManualPrimitive.Kind) {
+        guard let mesh = viewerMesh else { return }
+        let c = SIMD3<Double>(mesh.bounds.center)
+        let r = max(1.0, Double(mesh.bounds.radius))
+        lattice.region = kind == .bolt
+            ? .defaultBolt(at: c, radiusMM: r * 0.4, halfLengthMM: r * 0.8)
+            : .defaultFace(at: c, halfMM: r * 0.5)
+    }
+
+    /// Move the lattice region to `freeCenter` with the SAME magnetic detents the manual
+    /// primitives use (snap to world/part axes), returning the snap labels. Reuses
+    /// `ManualPrimitiveDetent`; writes back onto `lattice.region` (undo via republish).
+    @discardableResult
+    public func moveLatticeRegion(to freeCenter: SIMD3<Double>, snap: Bool = true) -> [String] {
+        guard var p = lattice.region else { return [] }
+        let targets = snap ? ManualPrimitiveDetent.worldAxisTargets() : []
+        let result = ManualPrimitiveDetent.apply(freeCenter: freeCenter, axis: p.axis, targets: targets)
+        p.center = result.center
+        p.axis = result.axis
+        lattice.region = p
+        return result.labels
+    }
+
+    /// Rotate the lattice region's orientation to `newAxis` with axis detents (its
+    /// centre is unchanged), returning the snap labels. Mirrors `rotateManualPrimitive`.
+    @discardableResult
+    public func rotateLatticeRegion(to newAxis: SIMD3<Double>,
+                                    from startAxis: SIMD3<Double>? = nil,
+                                    snap: Bool = true) -> [String] {
+        guard var p = lattice.region else { return [] }
+        let targets = snap ? ManualPrimitiveDetent.worldAxisTargets() : []
+        let result = ManualPrimitiveDetent.apply(freeCenter: p.center, axis: newAxis,
+                                                 targets: targets, leavingAxis: startAxis)
+        p.center = result.center
+        p.axis = result.axis
+        lattice.region = p
+        return result.labels
+    }
 
     // MARK: - manual primitive editing (handoff group-editing)
 
@@ -891,7 +947,8 @@ public final class ProjectModel: ObservableObject {
                                savedAt: savedAt, selection: selection, force: force,
                                minimizePlastic: minimizePlastic, quality: quality,
                                optimized: hasResults, printParams: printParams,
-                               designBox: designBox)
+                               designBox: designBox,
+                               lattice: lattice.enabled ? lattice : nil)
     }
 
     /// The URL of the imported model file to copy into the store on first save.

@@ -1,0 +1,17 @@
+Clamp reasons (LatticeBounds), the ★ 'say why a control is clamped' bar.
+Band read from core: [0.14764, 0.59093]
+
+— octet, range 0–99% (both ends out of band)
+  density → [0.14764, 0.59093] certifiable=true
+  low:  below the certifiable density range (≥ 15%)
+  high: above the certifiable density range (≤ 59%)
+  cell: cells-per-member ceiling not yet certified by core — shown as a guide, not a limit
+
+— bcc (preview-only topology)
+  density → [0.0, 1.0] certifiable=false
+  topo: Body-centred cubic is preview-only — not yet certifiable, so a run won't lattice it
+
+— octet 16mm cell on a 9.4mm rib, IF core certified 3 cells/member (future)
+  density → [0.14764, 0.59093] certifiable=true
+  cell: too few cells across this member to certify — need ≥ 3 across 9.4 mm, so cell ≤ 3.1 mm
+

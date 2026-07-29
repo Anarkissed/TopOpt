@@ -422,6 +422,14 @@ public struct OptimizeOutcome {
     /// results screen then shows no duration rather than one derived from `now()`.
     public let timing: RunTiming?
 
+    /// Handoff 2026-07-29-lattice-mode-ui — the lattice the RUN carried (what was
+    /// generated), so the results screen names it HONESTLY rather than showing the
+    /// project's current (possibly since-edited) settings. nil for a non-lattice run.
+    /// Carries the settings echo always, and the worker's generated facts when the
+    /// run_info `lattice_export` record was available (remote runs). On-device runs
+    /// don't generate lattices, so a local outcome leaves this nil.
+    public let latticeReport: LatticeReport?
+
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
@@ -429,7 +437,8 @@ public struct OptimizeOutcome {
                 computedRemotely: Bool = false,
                 appliedClearances: [AppliedClearance] = [],
                 appliedFaceProtections: [AppliedFaceProtection] = [],
-                timing: RunTiming? = nil) {
+                timing: RunTiming? = nil,
+                latticeReport: LatticeReport? = nil) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -444,6 +453,7 @@ public struct OptimizeOutcome {
         self.appliedClearances = appliedClearances
         self.appliedFaceProtections = appliedFaceProtections
         self.timing = timing
+        self.latticeReport = latticeReport
     }
 
     /// A copy carrying `timing` — how the run flow stamps a LOCAL run's measured
@@ -459,7 +469,75 @@ public struct OptimizeOutcome {
                         computedRemotely: computedRemotely,
                         appliedClearances: appliedClearances,
                         appliedFaceProtections: appliedFaceProtections,
-                        timing: timing ?? self.timing)
+                        timing: timing ?? self.timing,
+                        latticeReport: latticeReport)
+    }
+
+    /// A copy carrying `latticeReport` — how the run flow stamps the run's lattice onto
+    /// an outcome the solver/assembler built without one (the request is known at the
+    /// run flow, not inside the bridge). Never overwrites a report already present.
+    public func withLatticeReport(_ report: LatticeReport?) -> OptimizeOutcome {
+        OptimizeOutcome(variants: variants, stoppedOnMargin: stoppedOnMargin,
+                        cancelled: cancelled, acceptedCount: acceptedCount,
+                        voxelVolumeMM3: voxelVolumeMM3,
+                        gridNx: gridNx, gridNy: gridNy, gridNz: gridNz,
+                        gridOrigin: gridOrigin, spacing: spacing,
+                        computedRemotely: computedRemotely,
+                        appliedClearances: appliedClearances,
+                        appliedFaceProtections: appliedFaceProtections,
+                        timing: timing,
+                        latticeReport: self.latticeReport ?? report)
+    }
+}
+
+/// The lattice a RUN carried (handoff 2026-07-29-lattice-mode-ui): the settings echo
+/// the app sent, plus the facts the worker's run_info `lattice_export` reported when a
+/// lattice was actually generated. A plain data record for the results screen — no
+/// core dependency, populated by the run flow from the request + run_info.
+public struct LatticeReport: Equatable, Sendable {
+    public let topologyID: String
+    public let cellMM: Double
+    /// The single density the uniform build filled at (the range's dense end).
+    public let generateRelativeDensity: Double
+    public let minRelativeDensity: Double
+    public let maxRelativeDensity: Double
+    /// True iff a sub-region primitive scoped the preview (vs the whole part).
+    public let regionScoped: Bool
+    /// Worker-generated facts from run_info `lattice_export`; nil when unavailable
+    /// (a local run, or the run_info couldn't be read) — then only the settings echo
+    /// shows, honestly labelled "requested".
+    public let generated: Generated?
+
+    public struct Generated: Equatable, Sendable {
+        public let emitSTL: Bool
+        public let emit3MF: Bool
+        public let latticedCells: Int
+        public let regionVoxels: Int
+        public let triangles: Int
+        public let strutRadiusMinMM: Double
+        public let strutRadiusMaxMM: Double
+        public init(emitSTL: Bool, emit3MF: Bool, latticedCells: Int, regionVoxels: Int,
+                    triangles: Int, strutRadiusMinMM: Double, strutRadiusMaxMM: Double) {
+            self.emitSTL = emitSTL
+            self.emit3MF = emit3MF
+            self.latticedCells = latticedCells
+            self.regionVoxels = regionVoxels
+            self.triangles = triangles
+            self.strutRadiusMinMM = strutRadiusMinMM
+            self.strutRadiusMaxMM = strutRadiusMaxMM
+        }
+    }
+
+    public init(topologyID: String, cellMM: Double, generateRelativeDensity: Double,
+                minRelativeDensity: Double, maxRelativeDensity: Double,
+                regionScoped: Bool, generated: Generated? = nil) {
+        self.topologyID = topologyID
+        self.cellMM = cellMM
+        self.generateRelativeDensity = generateRelativeDensity
+        self.minRelativeDensity = minRelativeDensity
+        self.maxRelativeDensity = maxRelativeDensity
+        self.regionScoped = regionScoped
+        self.generated = generated
     }
 }
 
@@ -530,6 +608,43 @@ public enum TopOptKit {
 
     /// The core library version (topopt::version()); a trivial liveness check.
     public static var coreVersion: String { String(topoptbridge.core_version()) }
+
+    // MARK: lattice certification limits (handoff 2026-07-29-lattice-mode-ui)
+
+    /// The certifiable bounds the lattice-mode controls clamp to, READ FROM CORE at
+    /// runtime (topopt::lattice_rho_min/max via the bridge) — the app hardcodes none
+    /// of these numbers, so the controls widen automatically the moment core's
+    /// measurement widens. `certifiable == false` means the core does not carry a
+    /// homogenized tensor for the topology (preview-only); `minCellsPerMember == 0`
+    /// means core does not yet certify a cells-per-member ceiling, so the UI shows
+    /// that readout as advisory rather than a hard clamp.
+    public struct LatticeLimits: Equatable, Sendable {
+        public let rhoMin: Double
+        public let rhoMax: Double
+        public let certifiable: Bool
+        public let minCellsPerMember: Double
+        public init(rhoMin: Double, rhoMax: Double, certifiable: Bool, minCellsPerMember: Double) {
+            self.rhoMin = rhoMin
+            self.rhoMax = rhoMax
+            self.certifiable = certifiable
+            self.minCellsPerMember = minCellsPerMember
+        }
+    }
+
+    /// The core's certifiable limits for a lattice topology named as the job schema
+    /// names it (`"octet"`). Forwards `topoptbridge::lattice_limits`; never throws.
+    public static func latticeLimits(topology: String) -> LatticeLimits {
+        let lim = topoptbridge.lattice_limits(std.string(topology))
+        return LatticeLimits(rhoMin: lim.rho_min, rhoMax: lim.rho_max,
+                             certifiable: lim.certifiable,
+                             minCellsPerMember: lim.min_cells_per_member)
+    }
+
+    /// The topology names the core can RUN and certify today (`["octet"]`). The UI
+    /// reads this to mark which picker entries are certifiable rather than assuming.
+    public static var latticeCertifiableTopologies: [String] {
+        topoptbridge.lattice_certifiable_topologies().map { String($0) }
+    }
 
     /// Load and validate a materials.json file (ARCHITECTURE §6). Materials are
     /// returned in the core's deterministic name-sorted order.

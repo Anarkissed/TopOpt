@@ -32,13 +32,20 @@ public struct EditSnapshot: Equatable, Sendable {
     /// project with no paintable mesh. Part of the slice so a painted stroke is undoable through
     /// the SAME history as every other edit (see PAINT COORDINATION above).
     public var paint: PaintModel?
+    /// The lattice-mode settings (handoff 2026-07-29-lattice-mode-ui): the mode toggle,
+    /// topology, cell size, density range and region. Folded into the slice so every lattice
+    /// edit — toggling the mode, picking a topology, scrubbing the cell/density, moving the
+    /// region — is one undo step through the SAME history as every other edit (BAR U4).
+    /// Defaulted so existing `EditSnapshot(...)` call sites are unchanged.
+    public var lattice: LatticeSettings
 
     public init(selection: SelectionModel, force: ForceModel, designBox: DesignBoxModel,
-                paint: PaintModel? = nil) {
+                paint: PaintModel? = nil, lattice: LatticeSettings = LatticeSettings()) {
         self.selection = selection
         self.force = force
         self.designBox = designBox
         self.paint = paint
+        self.lattice = lattice
     }
 }
 

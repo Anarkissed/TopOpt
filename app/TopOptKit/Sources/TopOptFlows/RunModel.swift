@@ -95,6 +95,14 @@ public struct RunRequest: Equatable, Sendable {
     /// The ONE global preserve-depth (mm) governing every Face protection; <= 0
     /// means "use the core default". Part of the request identity.
     public let faceProtectionDepthMM: Double
+    /// The lattice block (handoff 2026-07-29-lattice-mode-ui), or nil for a non-lattice
+    /// run (byte-identical to today, BAR U1). Present only when lattice mode is on AND the
+    /// settings are runnable-as-certified (a core-certifiable topology within the core band
+    /// and any real cells-per-member ceiling). Consumed on the LAN/worker path only — the
+    /// worker's topopt-cli generates the streamed lattice artifact; the on-device bridge
+    /// solver does not generate lattices, so the local path ignores it. Part of the request
+    /// identity, so editing lattice settings re-enables Optimize.
+    public let lattice: LatticeSpec?
     /// The owning project's id (handoff 119). Carried so a REMOTE run persists which
     /// project it belongs to (`PersistedRemoteJob.projectID`), letting a cold-launch
     /// re-attach reopen that project and land the streamed result in the normal
@@ -124,7 +132,8 @@ public struct RunRequest: Equatable, Sendable {
                 keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
                 clearances: [TopOptKit.ClearanceSpec] = [],
                 faceProtections: [Int] = [], faceProtectionDepthMM: Double = -1,
-                projectID: UUID? = nil, sourceFormat: String = "") {
+                projectID: UUID? = nil, sourceFormat: String = "",
+                lattice: LatticeSpec? = nil) {
         self.modelPath = modelPath
         self.sourceFormat = sourceFormat
         self.material = material
@@ -146,6 +155,7 @@ public struct RunRequest: Equatable, Sendable {
         self.faceProtections = faceProtections
         self.faceProtectionDepthMM = faceProtectionDepthMM
         self.projectID = projectID
+        self.lattice = lattice
     }
 }
 

@@ -1,0 +1,17 @@
+LATTICE OFF vs ON job.json (U1).
+
+OFF keys: ["loads", "material", "mode", "model", "output", "resolution"]
+ON  keys: ["lattice", "loads", "material", "mode", "model", "output", "resolution"]
+
+The ONLY added key is "lattice":
+{
+  "cell_mm" : 8,
+  "emit_3mf" : false,
+  "emit_stl" : true,
+  "strut_radius_mm" : 0.88764106860074166,
+  "topology" : "octet"
+}
+
+ON minus the lattice block == OFF: true
+
+Generate density (uniform build, dense end of the clamped range): 0.59093  → strut radius 0.8876 mm at 8.0 mm cell

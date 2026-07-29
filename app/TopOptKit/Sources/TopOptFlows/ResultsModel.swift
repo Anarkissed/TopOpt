@@ -738,6 +738,38 @@ public final class ResultsModel: ObservableObject {
     /// it. Empty when no protection was declared; the numbers shown are the run's.
     public private(set) var faceProtectionNotes: [String] = []
 
+    /// Handoff 2026-07-29-lattice-mode-ui — honest lattice notes: what the run's lattice
+    /// WAS (topology, cell, the density it filled at + the range) and, when the worker
+    /// reported it, what it GENERATED (cells, triangles, strut radii). Empty for a
+    /// non-lattice run. The settings shown are the run's, not the project's current
+    /// (possibly since-edited) settings, so a stale results screen never misreports.
+    public private(set) var latticeNotes: [String] = []
+
+    /// Format a run's lattice report into honest lines.
+    public static func latticeNotes(_ report: LatticeReport?) -> [String] {
+        guard let r = report else { return [] }
+        func pct(_ x: Double) -> String { "\(Int((x * 100).rounded()))%" }
+        var lines: [String] = []
+        let name = LatticeType.named(r.topologyID).displayName
+        let scope = r.regionScoped
+            ? " Region-scoped in the preview; this build lattices the whole solid interior."
+            : ""
+        lines.append("Lattice: \(name), \(String(format: "%g", r.cellMM)) mm cell, "
+            + "filled at \(pct(r.generateRelativeDensity)) density "
+            + "(previewed \(pct(r.minRelativeDensity))–\(pct(r.maxRelativeDensity))).\(scope)")
+        if let g = r.generated {
+            let fmts = [g.emitSTL ? "STL" : nil, g.emit3MF ? "3MF" : nil].compactMap { $0 }
+            lines.append("Generated: \(g.latticedCells) cells, \(g.triangles) triangles"
+                + (fmts.isEmpty ? "" : " (\(fmts.joined(separator: " + ")))")
+                + (g.strutRadiusMaxMM > 0
+                    ? ", strut radius \(String(format: "%.2f", g.strutRadiusMinMM))–\(String(format: "%.2f", g.strutRadiusMaxMM)) mm."
+                    : "."))
+        } else {
+            lines.append("Generated on the worker; the export record wasn't available to summarise here.")
+        }
+        return lines
+    }
+
     /// Format the Face-protection diagnostics from a finished outcome into honest lines.
     public static func faceProtectionNotes(_ applied: [AppliedFaceProtection]) -> [String] {
         applied.map { p in
@@ -880,6 +912,10 @@ public final class ResultsModel: ObservableObject {
         if let t = outcome.timing { runTiming = t }
         clearanceNotes = ResultsModel.clearanceNotes(outcome.appliedClearances)
         faceProtectionNotes = ResultsModel.faceProtectionNotes(outcome.appliedFaceProtections)
+        // Only a report-bearing outcome updates the lattice notes: `apply` also runs for
+        // every streamed partial (which has no report), and a partial landing after the
+        // authoritative final must not erase the run's lattice record (mirrors `timing`).
+        if let lr = outcome.latticeReport { latticeNotes = ResultsModel.latticeNotes(lr) }
         gridDim = (outcome.gridNx, outcome.gridNy, outcome.gridNz)
         gridOrigin = SIMD3<Float>(outcome.gridOrigin)
         spacing = Float(outcome.spacing)
