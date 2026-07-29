@@ -1,0 +1,14 @@
+E5 — THE DENSITY BAND IS ENFORCED AT CERTIFICATION (band read from core: [0.14764, 0.59093])
+
+Fast-fail (run_job pre-flight, before any import/voxelize/solve — nothing written):
+$ topopt-cli run job_step_belowband.json
+  -> topopt-cli: lattice cell_mm 5.000000 / strut_radius_mm 0.300000 implies octet relative density 0.095052, outside the certifiable band [0.147640, 0.590930]. The gate refuses to certify against a clamped tensor (bar E5); choose a strut radius whose density lands in the band.
+  -> exit=1   out dir created: no
+
+$ topopt-cli run job_step_aboveband.json
+  -> topopt-cli: lattice cell_mm 5.000000 / strut_radius_mm 1.050000 implies octet relative density 0.667390, outside the certifiable band [0.147640, 0.590930]. The gate refuses to certify against a clamped tensor (bar E5); choose a strut radius whose density lands in the band.
+  -> exit=1   out dir created: no
+
+Definitive gate: analyze_fixed_design throws LatticeDensityOutOfBand for an
+out-of-band posture rho (covered by test_lattice_certification section 2c —
+below AND above band refused; the exception carries the band read from core).

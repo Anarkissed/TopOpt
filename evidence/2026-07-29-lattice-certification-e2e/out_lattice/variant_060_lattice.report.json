@@ -1,0 +1,20 @@
+{
+  "topology": "octet",
+  "cell_mm": 5,
+  "strut_radius_mm": 0.75,
+  "relative_density": 0.4095775463,
+  "certifiable_band": [0.14764, 0.59093],
+  "lattice_voxels": 844,
+  "describes": "the exported latticed mesh (solid shell + octet interior) solved with the octet homogenized cubic tensor",
+  "solid_margin_worst_case": 5167.716045,
+  "solid_margin_reproduced": 5167.716045,
+  "solid_reconstruction_exact": true,
+  "lattice_margin_worst_case": 3810.728054,
+  "lattice_margin_effective": 3810.728054,
+  "margin_required": 1.5,
+  "lattice_accepted": true,
+  "lattice_mass_grams": 13.09136683,
+  "lattice_max_effective_von_mises_mpa": 0.007001168363,
+  "strut_strength_uncertified": true,
+  "note": "stiffness and solid-region strength are certified against the real composite; the lattice region's macro (effective) stress is recovered but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. Octet tensor magnitudes carry PR 198's +-10% resolution caveat."
+}

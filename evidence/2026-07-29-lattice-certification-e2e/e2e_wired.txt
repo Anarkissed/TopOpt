@@ -1,0 +1,51 @@
+E1/E3/E4 — THE MARGIN DESCRIBES THE EXPORTED FILE (wired topopt-cli)
+
+Job: l-bracket.step, self-weight, octet cell 5mm / strut r 0.75mm (rho 0.4096).
+
+--- streaming checkpoint (worker-parseable) ---
+VARIANT vf=0.600000 achieved=0.599476 printed=0.548086 margin=5167.72 accepted=1 mesh=out_lattice/variant_060.stl
+LATTICE vf=0.600000 topology=octet cell_mm=5 strut_r_mm=0.75 rho=0.409578 cells=139 tris=148896 lattice_margin=3810.73 lattice_accepted=1 report=out_lattice/variant_060_lattice.report.json mesh=out_lattice/variant_060_lattice.stl
+LATTICE vf=0.600000 topology=octet cell_mm=5 strut_r_mm=0.75 rho=0.409578 cells=139 tris=148896 lattice_margin=3810.73 lattice_accepted=1 report=out_lattice/variant_060_lattice.report.json mesh=out_lattice/variant_060_lattice.3mf
+
+--- variant_060_lattice.report.json  (the RECEIPT beside the exported latticed mesh) ---
+{
+  "topology": "octet",
+  "cell_mm": 5,
+  "strut_radius_mm": 0.75,
+  "relative_density": 0.4095775463,
+  "certifiable_band": [0.14764, 0.59093],
+  "lattice_voxels": 844,
+  "describes": "the exported latticed mesh (solid shell + octet interior) solved with the octet homogenized cubic tensor",
+  "solid_margin_worst_case": 5167.716045,
+  "solid_margin_reproduced": 5167.716045,
+  "solid_reconstruction_exact": true,
+  "lattice_margin_worst_case": 3810.728054,
+  "lattice_margin_effective": 3810.728054,
+  "margin_required": 1.5,
+  "lattice_accepted": true,
+  "lattice_mass_grams": 13.09136683,
+  "lattice_max_effective_von_mises_mpa": 0.007001168363,
+  "strut_strength_uncertified": true,
+  "note": "stiffness and solid-region strength are certified against the real composite; the lattice region's macro (effective) stress is recovered but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. Octet tensor magnitudes carry PR 198's +-10% resolution caveat."
+}
+
+--- run_info.json "lattice" (certification posture, E3) ---
+{
+  "topology": "octet",
+  "cell_size_mm": 5,
+  "rho_min": 0.4095775463,
+  "rho_max": 0.4095775463,
+  "region_voxels": 844,
+  "margin_worst_case": 3810.728054,
+  "margin_effective": 3810.728054,
+  "accepted": true,
+  "strength_uncertified": true
+}
+
+KEY FACTS:
+ * SOLID margin (variant_060.stl)          = 5167.716045
+ * COMPOSITE margin (variant_060_lattice.*) = 3810.728054   <- DIFFERENT object
+ * solid_reconstruction_exact = true: the null-posture re-cert reproduces the
+   SOLID margin BIT-FOR-BIT, proving the composite reconstruction is faithful.
+ * E4: certification runs at the run's tight cg_tolerance (1e-8) — asserted in code
+   (certify_latticed_variant), not commented.

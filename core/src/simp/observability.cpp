@@ -564,6 +564,9 @@ std::string run_info_json(const RunInfo& info) {
     lat += ", \"rho_min\": " + fmt(info.lattice_rho_min);
     lat += ", \"rho_max\": " + fmt(info.lattice_rho_max);
     lat += ", \"region_voxels\": " + fmt_ll(info.lattice_region_voxels);
+    lat += ", \"margin_worst_case\": " + fmt(info.lattice_margin_worst_case);
+    lat += ", \"margin_effective\": " + fmt(info.lattice_margin_effective);
+    lat += ", \"accepted\": " + bool_json(info.lattice_accepted);
     lat += ", \"strength_uncertified\": " + bool_json(info.lattice_strength_uncertified);
     lat += "}";
     num("lattice", lat, /*comma=*/has_exp || has_grad);
