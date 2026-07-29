@@ -384,6 +384,16 @@ struct RunInfo {
   double lattice_rho_max = 0.0;
   long long lattice_region_voxels = 0;
   bool lattice_strength_uncertified = false;
+  // The CERTIFIED verdict of the composite (handoff 2026-07-29-lattice-certification-
+  // e2e, bars E1/E3): the worst (min over accepted latticed variants) composite
+  // strength margin the octet-tensor solve produced, its gated value, and whether the
+  // latticed object PASSES the run's margin_stop — so a variant's provenance records
+  // WHAT was certified (the composite), not only that a lattice was present. The
+  // certifiable band [lattice_rho_min, lattice_rho_max] the gate enforced (E5) is the
+  // rho range above.
+  double lattice_margin_worst_case = 0.0;
+  double lattice_margin_effective = 0.0;
+  bool lattice_accepted = false;
 
   // Lattice EXPORT posture (handoff 2026-07-28-lattice-generation-production) — the
   // printable GEOMETRY generator, distinct from the certification posture above.

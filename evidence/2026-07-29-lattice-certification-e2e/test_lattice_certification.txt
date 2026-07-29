@@ -1,0 +1,40 @@
+== 1. cubic element / stress reduce to isotropic ==
+  [PASS] hex8_stiffness_cubic(iso tensor) == hex8_stiffness bit-for-bit
+  [PASS] hex8_stress_cubic(iso tensor) == hex8_stress bit-for-bit
+  [PASS] non-positive-definite cubic tensor is rejected
+== 2. octet lattice library ==
+  [PASS] octet C11 at rho=0.30 in measured band
+  [PASS] rho=0.30 is within the resolved range (not clamped)
+  [PASS] octet is anisotropic (Zener > 1.05 — a scalar would misrepresent)
+  [PASS] tensor scales linearly in Es
+  [PASS] C11 increases with relative density
+  [PASS] a rho below the resolved range is clamped and flagged
+  [PASS] resolved range reported
+== 2b. octet_relative_density: printed geometry -> library rho ==
+  [PASS] octet_relative_density(5,0.75) lands INSIDE the certifiable band
+  [PASS] octet_relative_density is cell-size invariant (depends only on r/L)
+  [PASS] octet_relative_density increases with strut radius
+  [PASS] a thin strut maps BELOW the band (the E5 refusal case)
+  [PASS] a fat strut maps ABOVE the band (the E5 refusal case)
+  [PASS] a non-positive strut radius is rejected
+== 2c. E5: certification REFUSES an out-of-band density ==
+  [PASS] an in-band rho (0.30) certifies without refusal
+  [PASS] a rho BELOW the band is REFUSED (LatticeDensityOutOfBand)
+  [PASS] the refusal carries the band read from core
+  [PASS] a rho ABOVE the band is REFUSED
+== 3. lattice solver reduces to graded fea_solve_cg ==
+  [PASS] fea_solve_cg_lattice(all-zero mask) == graded fea_solve_cg bit-for-bit
+  [PASS] an all-octet block is far softer than the solid block
+== 4 & 5. composite certification + gate constant ==
+  [PASS] no posture => lattice fields default (byte-identical path)
+  [PASS] posture => lattice_certified
+  [PASS] all latticed printed voxels counted
+  [PASS] relative-density range recorded
+  [PASS] strut-level strength flagged UNCERTIFIED (Phase 2 de-homogenization)
+  [PASS] effective (macro) lattice stress recorded
+  [PASS] composite mass < solid mass (lattice region weighs its relative density)
+  [PASS] composite solve differs from the solid-everywhere solve (tensor is in the solve)
+  [PASS] composite accepts at margin_stop just BELOW its worst-case margin
+  [PASS] composite REJECTS at margin_stop just ABOVE (gate unsoftened, exact)
+  [PASS] the reported margin is the same constant regardless of the gate
+ALL PASS (0 failures)

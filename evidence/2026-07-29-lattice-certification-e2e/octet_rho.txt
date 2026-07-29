@@ -1,0 +1,7 @@
+band = [0.14764, 0.59093]
+L=5 r=0.30 (r/L=0.060) -> rho=0.0951  OUT-OF-BAND
+L=5 r=0.50 (r/L=0.100) -> rho=0.2117  IN-BAND
+L=5 r=0.75 (r/L=0.150) -> rho=0.4096  IN-BAND
+L=5 r=1.00 (r/L=0.200) -> rho=0.6279  OUT-OF-BAND
+L=5 r=1.20 (r/L=0.240) -> rho=0.7747  OUT-OF-BAND
+invariance: rho(L=5,r=0.75)=0.409578  rho(L=10,r=1.5)=0.409578

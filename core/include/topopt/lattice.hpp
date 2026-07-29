@@ -27,6 +27,9 @@
 // least reliable. A margin quoted to three digits on a ±10% material property is
 // false precision — see the handoff.
 
+#include <stdexcept>
+#include <string>
+
 namespace topopt {
 
 // A cubic-symmetric stiffness tensor, three independent constants, Voigt order
@@ -62,6 +65,46 @@ double lattice_rho_max(LatticeTopology topo);
 CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,
                                  double youngs_modulus_solid,
                                  bool* rho_clamped = nullptr);
+
+// The relative density (solid volume fraction) of ONE `topo` unit cell of edge
+// `cell_mm` filled with cylindrical struts of radius `strut_radius_mm` — the map
+// from the PRINTED geometry a job declares (cell size + uniform strut radius) to
+// the `rho` the tensor library above is keyed on (lattice certification E2E,
+// handoff 2026-07-29-lattice-certification-e2e).
+//
+// It is computed on the LIBRARY'S OWN BASIS: the single octet cell is voxelized at
+// the resolution PR 198 measured the library at (kLatticeLibraryVpc = 48 voxels
+// per cell edge) with the identical strut distance field, and rho is the solid
+// voxel fraction. This is the exact forward of the calibrate_octet_r inversion
+// PR 198 used to place each library row, so a query at a printed radius lands on
+// the same rho scale the tensor rows carry — the two cannot drift. Deterministic
+// (fixed voxel sweep, no RNG/threads); rho in (0, 1). Depends only on the RATIO
+// strut_radius_mm / cell_mm (the field scales with the cell), so it is cell-size
+// invariant. Throws std::invalid_argument if cell_mm or strut_radius_mm is not
+// finite/> 0, or if the radius is so large the cell fills solid (rho would be 1).
+//
+// NOTE (carried, not hidden): the production generator (lattice_gen.cpp) meshes
+// each strut as an n=8 prism, a printable inner approximation of the cylinder this
+// uses; the ~1-2 % polygon-vs-circle area gap sits well inside octet's ±10 %
+// resolution caveat (C6) and does not move the library row a query interpolates.
+double octet_relative_density(double cell_mm, double strut_radius_mm);
+
+// The resolution (voxels per cell edge) the octet tensor library was measured at,
+// and the basis octet_relative_density voxelizes on so a printed radius maps onto
+// the same rho scale the library rows carry (PR 198, vpc48).
+constexpr int kLatticeLibraryVpc = 48;
+
+// Thrown by analyze_fixed_design when a LatticePosture asks to certify a relative
+// density OUTSIDE the trustworthy library band [lattice_rho_min, lattice_rho_max]
+// (lattice certification E2E bar E5). The certification REFUSES rather than certify
+// against a clamped or extrapolated tensor — the band is a hard gate at
+// certification, not only at generation. `rho`, `rho_min`, `rho_max` carry the
+// offending value and the band read from core so the caller can report both.
+struct LatticeDensityOutOfBand : std::runtime_error {
+  double rho, rho_min, rho_max;
+  LatticeDensityOutOfBand(double rho_, double lo, double hi, const std::string& msg)
+      : std::runtime_error(msg), rho(rho_), rho_min(lo), rho_max(hi) {}
+};
 
 }  // namespace topopt
 

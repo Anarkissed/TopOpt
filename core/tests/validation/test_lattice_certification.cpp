@@ -108,6 +108,83 @@ int main() {
           lattice_rho_max(LatticeTopology::Octet) > 0.5, "resolved range reported");
   }
 
+  std::printf("== 2b. octet_relative_density: printed geometry -> library rho ==\n");
+  {
+    // The map from a job's (cell_mm, strut_radius_mm) to the rho the tensor library
+    // is keyed on (lattice certification E2E). Cell-size invariant (depends only on
+    // r/L), monotone in radius, and bracketed by the band at representative radii.
+    const double lo = lattice_rho_min(LatticeTopology::Octet);
+    const double hi = lattice_rho_max(LatticeTopology::Octet);
+    const double rho_075 = octet_relative_density(5.0, 0.75);  // r/L = 0.15
+    check(rho_075 > lo && rho_075 < hi,
+          "octet_relative_density(5,0.75) lands INSIDE the certifiable band");
+    check(std::fabs(octet_relative_density(10.0, 1.5) - rho_075) < 1e-9,
+          "octet_relative_density is cell-size invariant (depends only on r/L)");
+    check(octet_relative_density(5.0, 0.50) < rho_075 &&
+              rho_075 < octet_relative_density(5.0, 1.0),
+          "octet_relative_density increases with strut radius");
+    check(octet_relative_density(5.0, 0.30) < lo,
+          "a thin strut maps BELOW the band (the E5 refusal case)");
+    check(octet_relative_density(5.0, 1.05) > hi,
+          "a fat strut maps ABOVE the band (the E5 refusal case)");
+    bool threw = false;
+    try { octet_relative_density(5.0, 0.0); }
+    catch (const std::invalid_argument&) { threw = true; }
+    check(threw, "a non-positive strut radius is rejected");
+  }
+
+  std::printf("== 2c. E5: certification REFUSES an out-of-band density ==\n");
+  {
+    // The band is a HARD gate AT CERTIFICATION (bar E5): analyze_fixed_design refuses
+    // an out-of-band posture rho rather than certify against a clamped tensor.
+    VoxelGrid g = solid_grid(6, 4, 4, h);
+    std::vector<double> density(g.voxel_count(), 1.0);
+    std::vector<DirichletBC> bcs;
+    for (int j = 0; j < g.ny; ++j)
+      for (int k = 0; k < g.nz; ++k) {
+        const std::array<int, 8> en = fea_element_nodes(g, 0, j, k);
+        for (int n : {en[0], en[3], en[4], en[7]})
+          for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+      }
+    std::vector<NodalLoad> loads;
+    { const std::array<int, 8> en = fea_element_nodes(g, g.nx - 1, 0, 0);
+      loads.push_back({en[1], 2, -10.0}); }
+    Material mat = pla();
+    SimpParams params; params.youngs_modulus = mat.youngs_modulus_mpa;
+    params.poisson = mat.poisson; params.penalty = 3.0;
+    Vec3 build_dir{0, 0, 1};
+    KnockdownSpec kd;
+    const double lo = lattice_rho_min(LatticeTopology::Octet);
+    const double hi = lattice_rho_max(LatticeTopology::Octet);
+    auto certify_at = [&](double rho) {
+      LatticePosture post;
+      post.topology = LatticeTopology::Octet; post.cell_size_mm = 8.0;
+      post.mask.assign(g.voxel_count(), 0);
+      post.relative_density.assign(g.voxel_count(), 0.0);
+      post.mask[g.index(g.nx - 1, 0, 0)] = 1;
+      post.relative_density[g.index(g.nx - 1, 0, 0)] = rho;
+      return analyze_fixed_design(g, params, density, bcs, loads, mat, build_dir,
+                                  1e-8, 0, SolverKind::JacobiCG, 1.5, kd, true,
+                                  (double)g.solid_count(), &post);
+    };
+    // In-band: certifies (no throw).
+    bool inband_ok = true;
+    try { certify_at(0.30); } catch (...) { inband_ok = false; }
+    check(inband_ok, "an in-band rho (0.30) certifies without refusal");
+    // Below the band: refused with the typed exception carrying the band.
+    bool below_threw = false; LatticeDensityOutOfBand caught(0, 0, 0, "");
+    try { certify_at(lo * 0.5); }
+    catch (const LatticeDensityOutOfBand& e) { below_threw = true; caught = e; }
+    check(below_threw, "a rho BELOW the band is REFUSED (LatticeDensityOutOfBand)");
+    check(caught.rho_min == lo && caught.rho_max == hi,
+          "the refusal carries the band read from core");
+    // Above the band: also refused.
+    bool above_threw = false;
+    try { certify_at(hi * 1.5); }
+    catch (const LatticeDensityOutOfBand&) { above_threw = true; }
+    check(above_threw, "a rho ABOVE the band is REFUSED");
+  }
+
   std::printf("== 3. lattice solver reduces to graded fea_solve_cg ==\n");
   {
     VoxelGrid g = solid_grid(6, 4, 4, h);

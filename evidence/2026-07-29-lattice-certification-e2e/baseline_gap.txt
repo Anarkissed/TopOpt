@@ -1,0 +1,11 @@
+BASELINE GAP (unmodified topopt-cli @ 020bac0) — a lattice job's report describes the SOLID object
+
+report.json (accompanies BOTH variant_060.stl AND variant_060_lattice.stl):
+  margin.worst_case = 5167.716045 (SOLID)
+  max_stress_mpa    = 0.01064299964 (solid material)
+
+run_info.json:
+  lattice (certification posture) = None
+  lattice_export (generation only)  present = True
+
+=> the exported latticed mesh is certified as SOLID. E1 conflation. Wiring required.

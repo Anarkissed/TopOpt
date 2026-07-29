@@ -1,0 +1,22 @@
+E2 — BYTE-IDENTICAL when lattice is OFF, and generation UNCHANGED when ON.
+PRE  = topopt-cli at base commit 020bac0 (before this change)
+POST = topopt-cli with lattice certification wired
+
+[A] No-lattice job (job_step_nolattice.json): PRE vs POST
+  IDENTICAL  report.json
+  IDENTICAL  variant_060.stl
+  IDENTICAL  fields.bin
+  run_info.json equal (minus created_wall_ms wall stamp): True
+  no lattice/lattice_export keys in POST: True
+  iterations.csv equal (minus wall_ms col): True
+
+[B] Lattice job (job_step_lattice.json): PRE geometry vs POST geometry
+    (the SOLID design, SOLID mesh, and GENERATED lattice mesh must be unchanged;
+     the certification + receipt + run_info cert key are the ONLY additions)
+  IDENTICAL  report.json
+  IDENTICAL  variant_060.stl
+  IDENTICAL  variant_060_lattice.stl
+  IDENTICAL  variant_060_lattice.3mf
+  IDENTICAL  fields.bin
+  receipt variant_060_lattice.report.json: PRE=ABSENT  POST=present
+  run_info "lattice" cert key: PRE= None  POST present= True

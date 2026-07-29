@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 #include "topopt/fea.hpp"
@@ -110,10 +111,32 @@ FixedDesignAnalysis analyze_fixed_design(
     lat_c11.assign(nv, 0.0);
     lat_c12.assign(nv, 0.0);
     lat_c44.assign(nv, 0.0);
+    // Density band enforced AT CERTIFICATION (lattice certification E2E, bar E5).
+    // The band [lattice_rho_min, lattice_rho_max] is the RESOLVED span of PR 198's
+    // sweep — the only densities the tensor library is trustworthy at. Outside it,
+    // lattice_cubic_tensor would silently CLAMP to the endpoint and certify against
+    // a tensor for a DIFFERENT density than the exported file carries. That is the
+    // conflation this feature exists to prevent, so a posture asking to certify an
+    // out-of-band density is REFUSED here — read from core (lattice_rho_min/max),
+    // not hardcoded — rather than certified against a clamped/stale tensor. The band
+    // gates the CERTIFICATION, independently of any check the generator made.
+    const double rho_min = lattice_rho_min(lattice->topology);
+    const double rho_max = lattice_rho_max(lattice->topology);
     for (std::size_t e = 0; e < nv; ++e) {
       if (!lat_mask[e]) continue;
-      const CubicTensor T = lattice_cubic_tensor(
-          lattice->topology, lattice->relative_density[e], params.youngs_modulus);
+      bool clamped = false;
+      const CubicTensor T =
+          lattice_cubic_tensor(lattice->topology, lattice->relative_density[e],
+                               params.youngs_modulus, &clamped);
+      if (clamped)
+        throw LatticeDensityOutOfBand(
+            lattice->relative_density[e], rho_min, rho_max,
+            "analyze_fixed_design: lattice relative density " +
+                std::to_string(lattice->relative_density[e]) +
+                " is outside the certifiable " +
+                std::string(lattice_topology_name(lattice->topology)) + " band [" +
+                std::to_string(rho_min) + ", " + std::to_string(rho_max) +
+                "] — refusing to certify against a clamped tensor (bar E5)");
       lat_c11[e] = T.C11;
       lat_c12[e] = T.C12;
       lat_c44[e] = T.C44;
