@@ -387,7 +387,7 @@ public final class ProjectModel: ObservableObject {
             // holes), never a plane, exactly as handoff 100 shipped.
             let explicit = force.keepClearAffix(for: g.id) == .on
             for f in g.faces {
-                let bore = FaceTopology.isCurved(f, in: mesh)
+                let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
                 // The "−" on an auto primitive's row DELETES it: a suppressed face's
                 // keep-out is dropped from the run (handoff group-editing, BAR B3). The
@@ -427,11 +427,14 @@ public final class ProjectModel: ObservableObject {
     }
 
     /// Whether the anchored-bore AUTO clearance rule applies to a group (keep-clear
-    /// v2): an anchor group with at least one bore (curved) face — a fastener hole
+    /// v2): an anchor group with at least one fastener-bore face — a bolt through-hole
     /// (design 095). This is the default the keep-clear attribute deviates from.
+    /// Gated on `isFastenerBore` (not the old 5° `isCurved`) so a group whose only
+    /// curved faces are pocket corners / fillets / a boss no longer auto-clears
+    /// (handoff 2026-07-29).
     public func autoClearanceApplies(_ g: SelectionGroup, in mesh: ViewerMesh) -> Bool {
         guard force.kind(for: g.id).isAnchor else { return false }
-        return g.faces.contains { FaceTopology.isCurved($0, in: mesh) }
+        return g.faces.contains { FaceTopology.isFastenerBore($0, in: mesh) }
     }
 
     /// Whether "Keep clear" is effectively on for a group given the current mesh —
@@ -513,7 +516,7 @@ public final class ProjectModel: ObservableObject {
             guard force.keepClearIsOn(g.id, autoDefault: auto) else { continue }
             let explicit = force.keepClearAffix(for: g.id) == .on
             for f in g.faces {
-                let bore = FaceTopology.isCurved(f, in: mesh)
+                let bore = FaceTopology.isFastenerBore(f, in: mesh)
                 if !explicit && !bore { continue }
                 if force.isClearanceFaceSuppressed(f) { continue }  // deleted (BAR B3)
                 guard let geo = mesh.faceGeometry(f) else { continue }  // STL / no B-rep
@@ -749,8 +752,8 @@ public final class ProjectModel: ObservableObject {
             targets.append(.init(kind: .point, point: other.center, label: "primitive \(i) centre"))
         }
         if let mesh = viewerMesh, let g = selection.groups.first(where: { $0.id == group }) {
-            for f in g.faces where FaceTopology.isCurved(f, in: mesh) {
-                if let geo = mesh.faceGeometry(f), geo.isCylinder {
+            for f in g.faces where FaceTopology.isFastenerBore(f, in: mesh) {
+                if let geo = mesh.faceGeometry(f) {   // isFastenerBore ⇒ a fitted cylinder
                     targets.append(.init(kind: .primitiveAxis, point: geo.axisPoint,
                                          direction: geo.axisDir, label: "bore axis"))
                     targets.append(.init(kind: .point, point: geo.axisPoint, label: "bore centre"))

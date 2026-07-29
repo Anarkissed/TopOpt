@@ -2851,7 +2851,7 @@ public struct WorkspacePlaceholder: View {
     private func groupClearanceFaces(_ g: SelectionGroup) -> [FaceID] {
         guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return [] }
         let explicit = force.keepClearAffix(for: g.id) == .on
-        return g.faces.filter { FaceTopology.isCurved($0, in: mesh) || explicit }
+        return g.faces.filter { FaceTopology.isFastenerBore($0, in: mesh) || explicit }
     }
 
     /// The PER-GROUP "Sync" checkbox (round-4 item 3), always enabled, default checked. Toggling
@@ -2881,9 +2881,11 @@ public struct WorkspacePlaceholder: View {
         guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return [] }
         let explicit = force.keepClearAffix(for: g.id) == .on
         return g.faces.compactMap { f in
-            let bore = FaceTopology.isCurved(f, in: mesh)
+            let bore = FaceTopology.isFastenerBore(f, in: mesh)
             guard bore || explicit else { return nil }        // auto affixes only bores
             guard mesh.faceGeometry(f) != nil else { return nil }  // STL / no B-rep
+            // A fastener bore is always a fitted cylinder, so `faceBoreRadius` is
+            // never nil for a bore row — no blank "— mm Auto" (C2, handoff 2026-07-29).
             return ClearancePrimitive(id: f, isBore: bore, radiusMM: bore ? faceBoreRadius(f) : nil)
         }
     }

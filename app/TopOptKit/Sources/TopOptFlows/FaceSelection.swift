@@ -159,6 +159,93 @@ public enum FaceTopology {
         faceIDs(in: mesh).filter { isCurved($0, in: mesh, thresholdDeg: thresholdDeg) }
     }
 
+    // MARK: - fastener-bore predicate (auto-clearance, handoff 2026-07-29)
+
+    /// Minimum angular WRAP (degrees) about a fitted bore axis for the face to
+    /// count as a fastener through-hole rather than a rounded pocket-corner /
+    /// chamfer arc. A through-hole encircles its axis (~360°); the widest non-hole
+    /// concave arc measured across the mesh fixtures wrapped 198° (evidence
+    /// 2026-07-29), so 300° separates real holes from misfits with a wide margin.
+    public static let fastenerWrapMinDeg: Float = 300
+
+    /// Whether `face` is an auto-clearance FASTENER BORE — the bore predicate the
+    /// auto keep-clear rule, its chips, and its rendered volumes all read, REPLACING
+    /// the old `isCurved` test (handoff 2026-07-29, clearance-heuristic-fix; PR 188
+    /// diagnosis).
+    ///
+    /// `isCurved` (5° normal fan) marked ANY curved region a bore — pocket-corner
+    /// blends, outer rounded edges, fillets, whole spheres — so a 290 mm truss shelf
+    /// bracket with 3 bolt holes proposed 24 primitives, 8 of them BLANK (curved but
+    /// not a fitted cylinder → no Auto radius to show) and several with absurd
+    /// tens-to-hundreds-of-mm margins. A fastener bore is instead a face that is ALL
+    /// of:
+    ///   • a fitted CYLINDER with a real radius (`mesh.faceGeometry(face).isCylinder`)
+    ///     — so a proposed bore ALWAYS has an Auto margin/axial: no blank rows (C2);
+    ///   • CONCAVE — its wall faces the axis (a hole), not away from it (a boss, or a
+    ///     round plate's OUTER rim, which a least-squares fit also reads as a cylinder
+    ///     — e.g. the 22 mm filleted-plate rim `isCurved` mis-offered as a bolt hole);
+    ///   • nearly FULLY WRAPPED about the axis (≥ `wrapMinDeg`) — a through-hole
+    ///     encircles its axis; a rounded corner covers only a shallow arc.
+    /// The three discriminators were measured to separate real holes from wall /
+    /// corner misfits on every mesh fixture (evidence 2026-07-29). STL / optimized
+    /// meshes carry no `faceGeometry` → never a bore (auto keep-clear stays a no-op,
+    /// byte-identical). A hole the segmenter FRAGMENTS into sub-`wrapMinDeg` arcs (the
+    /// PR-167 coarse-tessellation caveat) is left to the manual "+ primitive" escape
+    /// hatch rather than loosening the gate into the false positives this fixes.
+    public static func isFastenerBore(_ face: FaceID, in mesh: ViewerMesh,
+                                      wrapMinDeg: Float = fastenerWrapMinDeg) -> Bool {
+        guard let geo = mesh.faceGeometry(face), geo.isCylinder else { return false }
+        let axisDir = SIMD3<Float>(geo.axisDir)
+        guard simd_length(axisDir) > 1e-6 else { return false }
+        let m = boreAxisMetrics(face, in: mesh, axisPoint: SIMD3<Float>(geo.axisPoint),
+                                axisDir: simd_normalize(axisDir))
+        return m.concave && m.wrapDeg >= wrapMinDeg
+    }
+
+    /// The angular WRAP (degrees, 0…360) a face's triangles cover about the axis ray
+    /// (`axisPoint` + t·`axisDir`, `axisDir` UNIT) plus a CONCAVITY vote (majority of
+    /// triangles whose geometric normal faces the axis). Pure geometry — the exact
+    /// measure the diagnosis evidence (`analyze.cpp`) used, mirrored here so the app
+    /// gate and the offline probe agree. A face with < 2 usable triangles wraps 0.
+    static func boreAxisMetrics(_ face: FaceID, in mesh: ViewerMesh,
+                                axisPoint: SIMD3<Float>, axisDir: SIMD3<Float>)
+        -> (wrapDeg: Float, concave: Bool) {
+        // A stable (u, v) basis spanning the plane perpendicular to the axis.
+        let seed = abs(axisDir.x) < 0.9 ? SIMD3<Float>(1, 0, 0) : SIMD3<Float>(0, 1, 0)
+        var u = seed - axisDir * simd_dot(seed, axisDir)
+        let lu = simd_length(u)
+        u = lu > 1e-6 ? u / lu : SIMD3<Float>(1, 0, 0)
+        let v = simd_normalize(simd_cross(axisDir, u))
+        let idx = mesh.indices
+        var angles: [Float] = []
+        var concave = 0, convex = 0
+        for t in triangles(ofFace: face, in: mesh) {
+            let i = t * 3
+            guard i + 2 < idx.count else { continue }
+            let p0 = position(idx[i], mesh), p1 = position(idx[i + 1], mesh), p2 = position(idx[i + 2], mesh)
+            let nRaw = simd_cross(p1 - p0, p2 - p0)
+            let nl = simd_length(nRaw)
+            guard nl > 1e-12 else { continue }              // degenerate: no normal
+            let normal = nRaw / nl
+            let centroid = (p0 + p1 + p2) / 3
+            let rel = centroid - axisPoint
+            angles.append(atan2(simd_dot(rel, v), simd_dot(rel, u)))
+            let radial = rel - axisDir * simd_dot(rel, axisDir)     // component ⊥ axis
+            let rl = simd_length(radial)
+            if rl > 1e-9 {
+                // normal toward the axis (opposite the outward radial) ⇒ concave (a hole).
+                if simd_dot(normal, radial / rl) < 0 { concave += 1 } else { convex += 1 }
+            }
+        }
+        guard angles.count > 1 else { return (0, false) }
+        angles.sort()
+        var maxGap: Float = 0
+        for i in 1..<angles.count { maxGap = Swift.max(maxGap, angles[i] - angles[i - 1]) }
+        maxGap = Swift.max(maxGap, (angles[0] + 2 * .pi) - angles[angles.count - 1])
+        let wrapDeg = (2 * Float.pi - maxGap) * 180 / .pi
+        return (wrapDeg, concave > convex)
+    }
+
     /// Face-level edge adjacency: two faces are adjacent iff a triangle of one and a
     /// triangle of the other share a mesh edge (an undirected vertex-index pair).
     public static func adjacency(in mesh: ViewerMesh) -> [FaceID: Set<FaceID>] {

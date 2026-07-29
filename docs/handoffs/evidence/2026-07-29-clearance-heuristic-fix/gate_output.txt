@@ -1,0 +1,106 @@
+GATE: wrap>=300 deg, concave, radius<=0.40*diag
+
+============================================================
+FIXTURE: WallMount_ShelfBracket
+  2224 tris, 31 faces, bbox diag 289.6 mm | real holes = 3
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  0    Other         -     0.0     -1 -        | BLANK-Auto | -
+  1    Cyl       16.71     5.8     32 convex   | bore       | -
+  3    Cyl       18.34     6.3     45 convex   | bore       | -
+  4    Cyl        3.00     1.0     13 convex   | bore       | -
+  5    Cyl       23.33     8.1     56 concave  | bore       | -
+  6    Other         -     0.0     -1 -        | BLANK-Auto | -
+  9    Cyl        7.37     2.5     37 concave  | bore       | -
+  10   Other         -     0.0     -1 -        | BLANK-Auto | -
+  12   Other         -     0.0     -1 -        | BLANK-Auto | -
+  13   Other         -     0.0     -1 -        | BLANK-Auto | -
+  14   Cyl        2.00     0.7    353 concave  | bore       | BORE
+  15   Cyl        4.50     1.6    354 concave  | bore       | BORE
+  16   Cyl        2.31     0.8     20 concave  | bore       | -
+  17   Other         -     0.0     -1 -        | BLANK-Auto | -
+  18   Other         -     0.0     -1 -        | BLANK-Auto | -
+  19   Cyl        4.50     1.6     80 concave  | bore       | -
+  20   Cyl        4.50     1.6    274 concave  | bore       | -
+  21   Cyl       55.79    19.3    198 concave  | bore       | -
+  22   Other         -     0.0     -1 -        | BLANK-Auto | -
+  25   Other         -     0.0     -1 -        | BLANK-Auto | -
+  26   Cyl       57.98    20.0     47 concave  | bore       | -
+  27   Other         -     0.0     -1 -        | BLANK-Auto | -
+  28   Cyl       17.10     5.9     73 convex   | bore       | -
+  29   Cyl        3.00     1.0     13 convex   | bore       | -
+  SUMMARY  OLD: 24 bores (10 blank-Auto)  |  NEW: 2 bores  |  real holes: 3
+    [under] new < real (escape hatch)
+
+============================================================
+FIXTURE: plate_bore
+  416 tris, 7 faces, bbox diag 29.1 mm | real holes = 1
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  2    Cyl        3.00    10.3    355 concave  | bore       | BORE
+  SUMMARY  OLD: 1 bores (0 blank-Auto)  |  NEW: 1 bores  |  real holes: 1
+    [OK] new count == real holes
+
+============================================================
+FIXTURE: filleted_bore_plate
+  1440 tris, 4 faces, bbox diag 62.5 mm | real holes = 1
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  0    Other         -     0.0     -1 -        | BLANK-Auto | -
+  1    Other         -     0.0     -1 -        | BLANK-Auto | -
+  3    Cyl       22.00    35.2    355 convex   | bore       | -
+  SUMMARY  OLD: 3 bores (2 blank-Auto)  |  NEW: 0 bores  |  real holes: 1
+    [under] new < real (escape hatch)
+
+============================================================
+FIXTURE: l-bracket
+  236 tris, 10 faces, bbox diag 93.8 mm | real holes = 2
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  8    Cyl        2.50     2.7    351 concave  | bore       | BORE
+  9    Cyl        2.50     2.7    351 concave  | bore       | BORE
+  SUMMARY  OLD: 2 bores (0 blank-Auto)  |  NEW: 2 bores  |  real holes: 2
+    [OK] new count == real holes
+
+============================================================
+FIXTURE: hook
+  212 tris, 6 faces, bbox diag 54.4 mm | real holes = 0
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  2    Other         -     0.0     -1 -        | BLANK-Auto | -
+  4    Other         -     0.0     -1 -        | BLANK-Auto | -
+  SUMMARY  OLD: 2 bores (2 blank-Auto)  |  NEW: 0 bores  |  real holes: 0
+    [OK] new count == real holes
+
+============================================================
+FIXTURE: sphere_r10mm
+  320 tris, 1 faces, bbox diag 34.6 mm | real holes = 0
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  0    Other         -     0.0     -1 -        | BLANK-Auto | -
+  SUMMARY  OLD: 1 bores (1 blank-Auto)  |  NEW: 0 bores  |  real holes: 0
+    [OK] new count == real holes
+
+============================================================
+FIXTURE: cube_10mm
+  12 tris, 6 faces, bbox diag 17.3 mm | real holes = 0
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  SUMMARY  OLD: 0 bores (0 blank-Auto)  |  NEW: 0 bores  |  real holes: 0
+    [OK] new count == real holes
+
+============================================================
+FIXTURE: sample_cube
+  12 tris, 6 faces, bbox diag 17.3 mm | real holes = 0
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  SUMMARY  OLD: 0 bores (0 blank-Auto)  |  NEW: 0 bores  |  real holes: 0
+    [OK] new count == real holes
+
+============================================================
+FIXTURE: bracket_clean
+  416 tris, 7 faces, bbox diag 72.4 mm | real holes = 1
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  2    Cyl        5.00     6.9    355 concave  | bore       | BORE
+  SUMMARY  OLD: 1 bores (0 blank-Auto)  |  NEW: 1 bores  |  real holes: 1
+    [OK] new count == real holes
+
+============================================================
+FIXTURE: bracket_small_hole
+  418 tris, 7 faces, bbox diag 72.4 mm | real holes = 1
+  face kind       fitR r/bbox%   wrap concave  | OLD        | NEW gate
+  1    Cyl        5.00     6.9    355 concave  | bore       | BORE
+  SUMMARY  OLD: 1 bores (0 blank-Auto)  |  NEW: 1 bores  |  real holes: 1
+    [OK] new count == real holes
