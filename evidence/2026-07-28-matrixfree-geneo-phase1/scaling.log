@@ -1,0 +1,15 @@
+## STEP 0 scaling: cantilever 64x32x64 (fine DOF=418275), develop 40 OC iters rung 0.35
+   develop wall=80.0 s
+
+ core  ov  nsub  nsampled  n(med/max)     iters(med/max)   mv/sub(med)  modes(med/max)  capture(sampled ref)
+    6   1    726     104     1944/2187       47/109   cap1        3800      6/12        66/66 worst=1.0000
+    8   1    256     128     3630/3993       52/120   cap4        4200      6/7         42/42 worst=1.0000
+   10   1    196      98     5148/6591       56/141   cap5        4520      6/10        81/81 worst=0.9998
+   12   1    108     108     6750/10125      62/399   cap15        5000      6/12        21/21 worst=0.9999
+   14   1     75      75     8670/14739      66/399   cap15        5320      6/12        36/39 worst=0.0331
+   16   1     32      32    18468/19494      83/399   cap4        6680      6/12        0/0 worst=1.0000
+
+   READ: if iters(med/p90) is roughly FLAT vs n across the sweep, the eigensolve does
+   NOT blow up with subdomain size and the route stays open. 'cap' = # sampled subs that
+   hit the 400-iter cap (the hard near-disconnection tail; still capture all modes).
+./core/build/geneo_coarse_probe scaling   7868.37s user 171.14s system 453% cpu 29:33.21 total
