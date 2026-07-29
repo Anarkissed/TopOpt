@@ -1,0 +1,7 @@
+===== DEFLATION PROBE [load] part 16x5x16, 560 solid, h=2.0, conn=6 =====
+  solved_grid 16x5x16 (1280 voxels), rungs evaluated=4
+  vf=0.68 accept     printed=    394 ng=   2430 | comps 6c=  1 26c=  1 largest=100.0% small=0 | k_raw=6 k=6 setup_mv=6 mem=0.1MB | CG base=445(mf=444) defl=316 cut=29.0% | kappa 89412.8->6775.4
+  vf=0.52 accept     printed=    311 ng=   2430 | comps 6c=  1 26c=  1 largest=100.0% small=0 | k_raw=6 k=6 setup_mv=6 mem=0.1MB | CG base=598(mf=597) defl=451 cut=24.6% | kappa 184686.5->16717.9
+  vf=0.38 accept     printed=    238 ng=   2430 | comps 6c=  2 26c=  1 largest=89.9% small=0 | k_raw=12 k=12 setup_mv=12 mem=0.2MB | CG base=980(mf=979) defl=742 cut=24.3% | kappa 429956.9->13996.3
+  vf=0.26 reject     printed=    177 ng=   2430 | comps 6c=  2 26c=  1 largest=98.9% small=0 | k_raw=12 k=12 setup_mv=12 mem=0.2MB | CG base=1061(mf=1060) defl=910 cut=14.2% | kappa 1103803.7->31988.0
+  wrote ../evidence/2026-07-28-deflation-phase0/load16/deflation_load.csv
