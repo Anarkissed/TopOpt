@@ -1,0 +1,15 @@
+===== A7 — HEALTHY REGIME (small grid, multigrid carries) =====
+  [prod, GenEO off ] 1.3 s  CG=3232  outer=52  Jacobi-fallback=0/52
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      AD: band k=3  f_bar=0.5798  latched=0@iter0  escapes=0  reason=""
+      draft: loose_tol=1e-03  compliance-gap=0.000020  escalated=0
+  [prod, GenEO on  ] 1.4 s  CG=3232  outer=52  Jacobi-fallback=0/52
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      geneo: deflated 0 traj steps (max Nt=0); run builds=0 refreshes=0 armed_solves=0 basis=0.0 MB; traj actions reuse/refresh/build/refused=0/0/0/0
+      AD: band k=3  f_bar=0.5798  latched=0@iter0  escapes=0  reason=""
+      draft: loose_tol=1e-03  compliance-gap=0.000020  escalated=0
+
+  Jacobi fallbacks: off=0 on=0; GenEO builds=0 armed_solves=0
+  CG off=3232 on=3232; design bit-identical=YES
+  => GenEO STRUCTURALLY INERT (0 builds, bit-identical) on the healthy regime
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/manual-plane-length-width-a165d5/evidence/2026-07-29-geneo-arming/healthy.csv

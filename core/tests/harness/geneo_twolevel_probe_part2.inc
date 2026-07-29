@@ -194,6 +194,10 @@ DevelopedCase develop_pipeline(int arm, int span, int ny, int t, double h, doubl
   SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
   const Material material = fdm_material();
   fea_set_krylov_recycling(false); fea_reset_krylov_recycle_space();
+  // 2026-07-29-geneo-arming: configure_production_options now ARMS the internal
+  // GenEO deflation; the developed FIELD must stay the plain reference one, so
+  // disable it for the develop exactly as recycling is disabled above.
+  fea_set_geneo_twolevel(false); fea_reset_geneo_basis();
   MinimizePlasticResult r = minimize_plastic(part, material, "fdm", pbcs, rules, o);
   D.grid = r.solved_grid;
   if (!r.evaluated.empty() && r.evaluated.back().optimization.physical_density.size()==D.grid.voxel_count())
@@ -476,6 +480,11 @@ struct SolveResult { int iters=0; double residual=0; bool converged=false; doubl
 SolveResult solve_reduced(const MatfreeReduced& m, double tol, int maxit, TwoLevel* tl,
                           const VoxelGrid& g, const std::vector<double>& emod) {
   if (maxit<=0 && std::getenv("TL_MAXIT")) maxit = std::atoi(std::getenv("TL_MAXIT"));
+  // 2026-07-29-geneo-arming: TL_GENEO=1 arms the LIBRARY-INTERNAL provider for
+  // the BASELINE (tl == nullptr) solves, so p2 measures the ARMED production
+  // path (trigger + in-solve build + cross-solve reuse) on the real rung. The
+  // hook-driven two-level solve keeps the internal provider off.
+  if (std::getenv("TL_GENEO")) fea_set_geneo_twolevel(tl == nullptr);
   MfSolveContext ctx; ctx.grid=&g; ctx.elem_youngs=&emod; ctx.youngs_modulus=kE0; ctx.poisson=kNu;
   std::vector<double> x(static_cast<std::size_t>(m.ng), 0.0);
   SolveResult R; const double t0=now_ms();

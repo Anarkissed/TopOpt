@@ -1,0 +1,10 @@
+   [cache hit /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/manual-plane-length-width-a165d5/evidence/2026-07-29-geneo-arming/stag_20_20_8_4_vf26_it18.bin]
+## P2 stagnating rung: grid 40x32x40 (51200 vox, 48000 solid), vf=0.26
+   cfg core=8 ov=1 cut=0.05 local=jacobi liters=4 tailcg=0
+
+ iter   ng     Jacobi-CG   two-level   ratio   Nt   build(s)  jacW(s) tlW(s)
+    0 156198        754        249     3.0x   595    19.11    20.5    2.5  
+   G2 MEMORY: basis=22.9 MB  subdomain-ops=18.5 MB  process peak RSS=300 MB (baseline 120 MB)
+   coarse: Nt=595 dense=1 cond=6.77e+09  nsub=100 tail=98  LOBPCG iters med/max=60/799 modes med/max=6/10
+    1 156198        118        117     1.0x   588    20.37     5.8    1.1  
+    2 156198        129        129     1.0x   588    13.98     8.7    1.0  

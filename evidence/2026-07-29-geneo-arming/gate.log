@@ -1,0 +1,20 @@
+===== A3 — FULL GATE TABLE (production ladder, GenEO OFF vs ARMED; recycling+AD+draft armed in both) =====
+  twice-run bit-identical: OFF YES  ON YES
+  Jacobi fallbacks OFF=235 ON=266; GenEO builds ON=3, deflated solves ON=270
+
+  rung   vf   | verdict OFF -> ON        | margin OFF -> ON            | dM/M       | mean|drho|  max|drho|
+   0   0.68 | ACCEPT -> ACCEPT          |     13.9005 -> 13.9005     | 0.000e+00 | 0.000e+00 0.000e+00
+   1   0.52 | ACCEPT -> ACCEPT          |     5.67028 -> 5.67028     | 0.000e+00 | 0.000e+00 0.000e+00
+   2   0.38 | ACCEPT -> ACCEPT          |     4.66164 -> 4.66151     | 2.901e-05 | 9.493e-04 2.639e-01
+   3   0.26 | REJECT -> REJECT          |     2.79323 -> 2.77503     | 6.516e-03 | 3.171e-05 5.755e-03
+
+  rung count OFF 4 -> ON 4; verdict flips: 0
+  ladder CG OFF 111073 -> ON 62933 (0.567x)
+
+  A4 — classification flips over solid voxels (grid 24x8x24):
+  rung |  solid  | NEG CONTROL 1e-9 vs OFF (floor)          | GenEO ON vs OFF
+   0   |    4608 | 0.000e+00 (0 flips) drho 2.0e-09/8.9e-07 | 0.000e+00 (0 flips) drho 0.0e+00/0.0e+00
+   1   |    4608 | 0.000e+00 (0 flips) drho 8.5e-10/3.6e-07 | 0.000e+00 (0 flips) drho 0.0e+00/0.0e+00
+   2   |    4608 | 0.000e+00 (0 flips) drho 3.6e-05/1.9e-02 | 1.519e-03 (7 flips) drho 9.5e-04/2.6e-01
+   3   |    4608 | 0.000e+00 (0 flips) drho 3.3e-05/5.5e-03 | 0.000e+00 (0 flips) drho 3.2e-05/5.8e-03
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/manual-plane-length-width-a165d5/evidence/2026-07-29-geneo-arming/gate.csv

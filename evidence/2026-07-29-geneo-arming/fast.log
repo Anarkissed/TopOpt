@@ -1,0 +1,14 @@
+===== A6 — FAST-MOVING DESIGN (violent moduli jumps, direct Jacobi-fallback solves) =====
+  step |  CG(on) | action | Nt | CG(off twin) | max|du|/max|u| vs off
+     0 |     591 |   3    | 288 |          628 | 2.44e-09
+     1 |     362 |   2    | 288 |          976 | 2.76e-09
+     2 |     364 |   2    | 288 |         1054 | 1.49e-09
+     3 |     369 |   2    | 288 |         1140 | 6.99e-10
+  ---- checkerboard phase INVERTED (the held basis is now wrong for this design) ----
+     4 |     247 |   2    | 288 |          628 | 1.18e-09
+     5 |     328 |   2    | 288 |          970 | 6.71e-10
+     6 |     365 |   2    | 288 |         1063 | 8.87e-10
+     7 |     399 |   2    | 288 |         1151 | 1.18e-09
+
+  builds=1 refreshes=7 armed_solves=8
+  READ: a refresh-only policy under violent motion shows the degradation trigger (action 3 after a slow refreshed solve); every row's exactness column stays <= ~1e-7.

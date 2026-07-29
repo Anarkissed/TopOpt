@@ -1822,6 +1822,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_mg_cycles_attempted = c.cg.mg_cycles_attempted;
         obs.cg_recycle_dim = c.cg.recycle_dim;
         obs.cg_recycle_setup_matvecs = c.cg.recycle_setup_matvecs;
+        obs.cg_geneo_dim = c.cg.geneo_dim;
+        obs.cg_geneo_action = c.cg.geneo_action;
         obs.plateau = observe_plateau(options, result.history);
         obs.active_fraction = af;  // active-domain phase 1 (1.0 when full-domain)
         // Handoff 123 — the continuation β active this iteration (0 when not
@@ -2695,6 +2697,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_mg_cycles_attempted = c.cg.mg_cycles_attempted;
         obs.cg_recycle_dim = c.cg.recycle_dim;
         obs.cg_recycle_setup_matvecs = c.cg.recycle_setup_matvecs;
+        obs.cg_geneo_dim = c.cg.geneo_dim;
+        obs.cg_geneo_action = c.cg.geneo_action;
         obs.plateau = observe_plateau(options, result.history);
         obs.active_fraction = af;  // active-domain phase 1 (1.0 when full-domain)
         // Handoff 123 — the continuation β active this iteration (0 when not

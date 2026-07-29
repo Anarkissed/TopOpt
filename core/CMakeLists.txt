@@ -135,6 +135,13 @@ if(Eigen3_FOUND)
   # matfree.cpp it is itself Eigen-FREE, but it is compiled into the same solver
   # group and both its call sites are Eigen-gated, so it is gated the same way.
   target_sources(topopt PRIVATE src/fea/recycle.cpp)
+  # GenEO two-level deflation provider (handoff 2026-07-29-geneo-arming): the
+  # capture-LOBPCG coarse basis + V^T A V coarse operator that mf_cg_solve (the
+  # Jacobi-CG stagnation fallback) applies when fea_set_geneo_twolevel is on
+  # (LIBRARY default OFF; production arms it). Uses Eigen for the small dense
+  # eigensolves/factorizations — the fine system is never assembled — so it is
+  # gated on Eigen like multigrid.cpp. CI has Eigen (DEPS=ON).
+  target_sources(topopt PRIVATE src/fea/geneo.cpp)
   # SIMP density interpolation + penalized compliance/sensitivities (M3.2). It
   # drives the graded fea_solve_cg overload in assembly.cpp, so it is gated on
   # Eigen the same way. CI has Eigen (DEPS=ON), so it always builds in CI.
@@ -446,6 +453,14 @@ if(Eigen3_FOUND)
   add_executable(test_recycle tests/unit/test_recycle.cpp)
   target_link_libraries(test_recycle PRIVATE topopt)
   add_test(NAME krylov_recycling COMMAND test_recycle)
+
+  # GenEO two-level deflation guards (handoff 2026-07-29-geneo-arming): library
+  # default OFF / inertness, the stagnation trigger, exactness (same field to
+  # 1e-6), the reuse/refresh lifecycle and determinism, on the phase-2
+  # checkerboard high-contrast composite. Eigen-gated like the solver group.
+  add_executable(test_geneo tests/unit/test_geneo.cpp)
+  target_link_libraries(test_geneo PRIVATE topopt)
+  add_test(NAME geneo_twolevel COMMAND test_geneo)
 
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises

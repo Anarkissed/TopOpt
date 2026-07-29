@@ -337,6 +337,16 @@ std::string run_info_json(const RunInfo& info) {
   num("krylov_recycling", bool_json(info.krylov_recycling));
   num("krylov_recycle_dim", fmt_i(info.krylov_recycle_dim));
   num("krylov_recycle_wrap_multigrid", bool_json(info.krylov_recycle_wrap_multigrid));
+  // Handoff 2026-07-29-geneo-arming — the GenEO deflation posture + lifecycle.
+  num("geneo_twolevel", bool_json(info.geneo_twolevel));
+  num("geneo_trigger_iters", fmt_i(info.geneo_trigger_iters));
+  num("geneo_rebuild_factor", fmt(info.geneo_rebuild_factor));
+  num("geneo_basis_builds", fmt_i(static_cast<int>(info.geneo_basis_builds)));
+  num("geneo_coarse_refreshes",
+      fmt_i(static_cast<int>(info.geneo_coarse_refreshes)));
+  num("geneo_armed_solves", fmt_i(static_cast<int>(info.geneo_armed_solves)));
+  num("geneo_basis_dim", fmt_i(info.geneo_basis_dim));
+  num("geneo_basis_mb", fmt(info.geneo_basis_mb));
   num("warm_start_inherit", bool_json(info.warm_start_inherit));
   num("warm_start_coarse", bool_json(info.warm_start_coarse));
   num("projection", bool_json(info.projection));

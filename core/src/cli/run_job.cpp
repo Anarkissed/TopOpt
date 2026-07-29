@@ -171,6 +171,12 @@ RunInfo build_run_info(const JobDescription& job,
   info.krylov_recycling = fea_krylov_recycling_enabled();
   info.krylov_recycle_dim = fea_krylov_recycle_dim();
   info.krylov_recycle_wrap_multigrid = fea_krylov_recycle_wrap_multigrid();
+  // Handoff 2026-07-29-geneo-arming — the armed GenEO posture (config echo: the
+  // ACTUAL process-global state + the named policy constants). The lifecycle
+  // counters are filled post-run (finalize below).
+  info.geneo_twolevel = fea_geneo_twolevel_enabled();
+  info.geneo_trigger_iters = fea_geneo_trigger_iters();
+  info.geneo_rebuild_factor = fea_geneo_rebuild_factor();
   info.warm_start_inherit = options.warm_start_inherit;
   info.warm_start_coarse = options.warm_start_coarse;
   info.projection = !options.simp.projection.empty();
@@ -1644,6 +1650,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // Handoff 2026-07-26-draft-quality-phase2 — the design-space probe outcome.
     run_info.draft_rung_probe_flip = result.pipeline.draft_rung_probe_flip;
     run_info.draft_rung_probe_cg = result.pipeline.draft_rung_probe_cg;
+    // Handoff 2026-07-29-geneo-arming — finalize the GenEO deflation lifecycle:
+    // basis builds / coarse refreshes / preconditioned fallback solves this run,
+    // and the coarse dimension + stored MB held at run end. All 0 when the
+    // feature is off or no solve ever reached the stagnation trigger.
+    run_info.geneo_basis_builds = fea_geneo_basis_builds();
+    run_info.geneo_coarse_refreshes = fea_geneo_coarse_refreshes();
+    run_info.geneo_armed_solves = fea_geneo_armed_solves();
+    run_info.geneo_basis_dim = fea_geneo_basis_dim();
+    run_info.geneo_basis_mb =
+        static_cast<double>(fea_geneo_basis_bytes()) / (1024.0 * 1024.0);
     // Lattice EXPORT + CERTIFICATION posture — finalized via the shared lambda so the
     // streaming and batch paths agree; a no-lattice run writes NO key (P1 / bar E2).
     // On the batch path lat_agg is still empty here (emit_lattice runs after the mesh
