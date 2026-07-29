@@ -1,0 +1,27 @@
+
+## Primary fixture: cantilever 48x24x48, fine DOF=180075, developing 40 OC iters/rung
+[G1] cantilever rung=0.68 contrast=1e+09 core=8 ov=1 : nsub=108(solved 108) Ntot=579 (0.32% of fine 180075)  modes/sub[min/med/max]=0/6/7 basis=15.6MB coarseOpCeil=2.6MB | 8.44M-DOF proj: Nt~27137 basis~732MB
+[G1] cantilever rung=0.52 contrast=1e+09 core=8 ov=1 : nsub=108(solved 108) Ntot=574 (0.32% of fine 180075)  modes/sub[min/med/max]=0/6/6 basis=15.5MB coarseOpCeil=2.5MB | 8.44M-DOF proj: Nt~26903 basis~727MB
+[G1] cantilever rung=0.38 contrast=1e+09 core=8 ov=1 : nsub=108(solved 108) Ntot=602 (0.33% of fine 180075)  modes/sub[min/med/max]=0/6/12 basis=16.3MB coarseOpCeil=2.8MB | 8.44M-DOF proj: Nt~28215 basis~764MB
+[G1] cantilever rung=0.26 contrast=1e+09 core=8 ov=1 : nsub=108(solved 108) Ntot=633 (0.35% of fine 180075)  modes/sub[min/med/max]=0/6/12 basis=17.1MB coarseOpCeil=3.1MB | 8.44M-DOF proj: Nt~29668 basis~802MB
+
+## Decomposition (subdomain-size) sweep on rung 0.68, contrast 1e9
+[DECOMP] cantilever rung=0.68 contrast=1e+09 core=6 ov=1 : nsub=256(solved 256) Ntot=1414 (0.79% of fine 180075)  modes/sub[min/med/max]=0/6/12 basis=21.2MB coarseOpCeil=15.3MB | 8.44M-DOF proj: Nt~66273 basis~994MB
+[DECOMP] cantilever rung=0.68 contrast=1e+09 core=8 ov=1 : nsub=108(solved 108) Ntot=579 (0.32% of fine 180075)  modes/sub[min/med/max]=0/6/7 basis=15.6MB coarseOpCeil=2.6MB | 8.44M-DOF proj: Nt~27137 basis~732MB
+[DECOMP] cantilever rung=0.68 contrast=1e+09 core=10 ov=1 : nsub=75(solved 75) Ntot=394 (0.22% of fine 180075)  modes/sub[min/med/max]=0/6/7 basis=13.8MB coarseOpCeil=1.2MB | 8.44M-DOF proj: Nt~18466 basis~647MB
+[DECOMP] cantilever rung=0.68 contrast=1e+09 core=12 ov=1 : nsub=32(solved 32) Ntot=178 (0.10% of fine 180075)  modes/sub[min/med/max]=0/6/12 basis=11.9MB coarseOpCeil=0.2MB | 8.44M-DOF proj: Nt~8342 basis~559MB
+
+## Contrast sweep on rung 0.52, core=8 (gap a: 1e6 vs 1e9)
+[CONTRAST] cantilever rung=0.52 contrast=1e+09 core=8 ov=1 : nsub=108(solved 108) Ntot=574 (0.32% of fine 180075)  modes/sub[min/med/max]=0/6/6 basis=15.5MB coarseOpCeil=2.5MB | 8.44M-DOF proj: Nt~26903 basis~727MB
+[CONTRAST] cantilever rung=0.52 contrast=1e+06 core=8 ov=1 : nsub=108(solved 108) Ntot=571 (0.32% of fine 180075)  modes/sub[min/med/max]=0/6/6 basis=15.4MB coarseOpCeil=2.5MB | 8.44M-DOF proj: Nt~26762 basis~723MB
+
+## G4: soft-void(1e9) vs void-ELIMINATED vs raised rho_min(1e6), rung 0.38
+[G4soft] cantilever rung=0.38 contrast=1e+09 core=8 ov=1 : nsub=108(solved 108) Ntot=602 (0.33% of fine 180075)  modes/sub[min/med/max]=0/6/12 basis=16.3MB coarseOpCeil=2.8MB | 8.44M-DOF proj: Nt~28215 basis~764MB
+[G4voidcut] cantilever rung=0.38 contrast=1e+09 core=8 ov=1 : nsub=108(solved 90) Ntot=507 (0.28% of fine 180075)  modes/sub[min/med/max]=0/6/12 basis=8.4MB coarseOpCeil=2.0MB | 8.44M-DOF proj: Nt~23762 basis~393MB
+[G4rhomin] cantilever rung=0.38 contrast=1e+06 core=8 ov=1 : nsub=108(solved 108) Ntot=584 (0.32% of fine 180075)  modes/sub[min/med/max]=0/6/10 basis=15.8MB coarseOpCeil=2.6MB | 8.44M-DOF proj: Nt~27371 basis~742MB
+
+## Secondary fixture: ultradilute 48x32x48 (part_frac=0.021), rungs 0.68 & 0.26
+[DILUTE] ultradilute rung=0.68 contrast=1e+09 core=8 ov=1 : nsub=144(solved 144) Ntot=859 (0.36% of fine 237699)  modes/sub[min/med/max]=0/6/9 basis=23.5MB coarseOpCeil=5.6MB | 8.44M-DOF proj: Nt~30500 basis~835MB
+[DILUTE] ultradilute rung=0.26 contrast=1e+09 core=8 ov=1 : nsub=144(solved 144) Ntot=857 (0.36% of fine 237699)  modes/sub[min/med/max]=0/6/9 basis=23.5MB coarseOpCeil=5.6MB | 8.44M-DOF proj: Nt~30429 basis~833MB
+
+CSVs written to evidence/2026-07-28-spectral-coarse-space-phase0
