@@ -1,0 +1,11 @@
+   [cache hit /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-geneo-two-level-preconditioner-eb39f0/ea595dbb-13ed-4ba7-b015-d8965ebe65d1/scratchpad/ev/stag_20_20_8_4_vf26_it18.bin]
+## P2 stagnating rung: grid 40x32x40 (51200 vox, 48000 solid), vf=0.26
+   cfg core=8 ov=1 cut=0.05 local=jacobi liters=4 tailcg=0
+
+ iter   ng     Jacobi-CG   two-level   ratio   Nt   build(s)  jacW(s) tlW(s)
+    0 156198       5412        249    21.7x   595    13.36     8.8    1.3  
+   G2 MEMORY: basis=22.9 MB  subdomain-ops=18.5 MB  process peak RSS=409 MB (baseline 120 MB)
+   coarse: Nt=595 dense=1 cond=6.77e+09  nsub=100 tail=98  LOBPCG iters med/max=60/799 modes med/max=6/10
+    1 156198        738        117     6.3x   588     8.49     1.2    0.6  
+    2 156198        564        129     4.4x   588     8.82     0.9    0.7  
+DONE

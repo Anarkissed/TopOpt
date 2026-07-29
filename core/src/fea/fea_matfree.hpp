@@ -183,6 +183,45 @@ struct RecycleReport {
   int setup_matvecs = 0;
 };
 
+// ---------------------------------------------------------------------------
+// EXTERNAL ADDITIVE PRECONDITIONER HOOK (matrix-free GenEO two-level, handoff
+// 2026-07-29 phase 2). OPT-IN, DEFAULT NULL => byte-identical.
+//
+// The hook is a SECOND SPD additive correction the Jacobi-CG loop applies right
+// after (and independently of) the base Jacobi preconditioner and the Krylov
+// recycling correction:  z <- D^-1 r + [recycle] + hook(m, ctx, r, .).  It exists
+// so an EXTERNAL provider (a measurement harness that links Eigen — the matrix-free
+// library stays Eigen-free) can inject the two-level GenEO additive-Schwarz
+// preconditioner M2^-1 = R_0^T A_0^-1 R_0 + sum_i R_i^T A_i^-1 R_i without the
+// eigensolve / decomposition machinery entering the production library. Because
+// every SPD additive term keeps the compound preconditioner SPD, the hook can only
+// change the ITERATION COUNT, never the converged field or the stopping test — the
+// exact-fallback contract is untouched. With no hook installed the branch is never
+// entered and mf_cg_solve is byte-for-byte the pre-hook path (the tripwire constant
+// kMatfreeExternalPrecondDefaultOff in topopt/fea.hpp documents the default-off
+// invariant). The hook lives on the Jacobi-CG regime ONLY (the stagnation
+// fallback), so a healthy multigrid solve never invokes it.
+//
+// The hook receives the reduced system `m` (operator apply_kgg, invdiag, kept_global,
+// ng) plus a `MfSolveContext` giving the grid and per-voxel moduli it needs to build
+// the coarse basis / subdomain decomposition. It ADDS its correction into `z`.
+struct MfSolveContext {
+  const VoxelGrid* grid = nullptr;
+  // Per-voxel modulus vector (graded path), or null for the uniform path in which
+  // case `youngs_modulus` is the single modulus. `poisson` is nu.
+  const std::vector<double>* elem_youngs = nullptr;
+  double youngs_modulus = 0.0;
+  double poisson = 0.0;
+};
+using MfPrecondHook = std::function<void(const MatfreeReduced& m,
+                                         const MfSolveContext& ctx, const double* r,
+                                         double* z)>;
+// Install (or clear, with a default-constructed hook) the process-global external
+// additive preconditioner. Returns the previous hook. Thread-global, like the other
+// matrix-free toggles; intended to be set once around a solve/run and cleared after.
+MfPrecondHook mf_set_precond_hook(MfPrecondHook hook);
+bool mf_precond_hook_installed();
+
 // Matrix-free Jacobi-preconditioned CG on the reduced system `m`, replicating
 // Eigen's ConjugateGradient<..., DiagonalPreconditioner> algorithm and relative-
 // residual criterion (sqrt(||r||^2/||rhs||^2) <= tolerance). `x` is seeded (warm
@@ -192,9 +231,15 @@ struct RecycleReport {
 // When Krylov recycling is enabled the SPD additive coarse correction wraps the
 // Jacobi preconditioner (see topopt/fea.hpp and recycle.hpp); `rec` receives the
 // per-solve diagnostics. With recycling off this function is byte-unchanged.
+//
+// `ctx` (default null) carries the grid + moduli the external preconditioner hook
+// needs; it is consulted ONLY when a hook is installed (mf_set_precond_hook). With
+// no hook installed `ctx` is never read, so the solve is byte-identical whether or
+// not a context is supplied.
 void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
                  std::vector<double>& x, int& iters_out, double& error_out,
-                 bool& converged_out, RecycleReport* rec = nullptr);
+                 bool& converged_out, RecycleReport* rec = nullptr,
+                 const MfSolveContext* ctx = nullptr);
 
 }  // namespace fea_detail
 }  // namespace topopt

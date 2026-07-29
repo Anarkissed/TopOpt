@@ -1,0 +1,11 @@
+## P4-DESIGN full ladder stock vs two-level, fixture arm=16 span=16 ny=4 t=4 vf=0.26 iters=12
+   stock (Jacobi/MG) done 7.7s
+   two-level armed done 7.7s (0 basis builds)
+   neg control (tol 1e-9) done 7.7s
+
+ rung  grid          solid    flips(2L vs stock)   flips(1e-9 vs stock=floor)  gate(stock/2L)
+    0  32x24x32     22528   0.000e+00 (0)      0.000e+00 (0)          0/0
+       compliance stock=9.648445e+07 2L=9.648445e+07  margin stock=1.1600 2L=1.1600
+   READ: two-level-vs-stock voxel flips must be <= the neg-control (1e-9-vs-1e-8) floor,
+   and gate verdicts identical — the two-level solver yields the SAME certified design.
+EXIT 0

@@ -339,6 +339,29 @@ bool mf_mixed_precision_enabled() {
   return g_mf_mixed_precision.load();
 }
 
+// External additive preconditioner hook (matrix-free GenEO two-level, phase 2).
+// DEFAULT EMPTY => byte-identical: mf_cg_solve never enters the hook branch. Guarded
+// by g_mf_precond_hook_installed so the hot loop pays a single relaxed atomic load,
+// not a std::function copy, per solve. The std::function itself is guarded by its
+// own mutex only at set time (rare); reads happen between solves in the intended
+// single-driver usage, matching the other thread-global matrix-free toggles.
+namespace {
+std::mutex g_mf_precond_hook_mu;
+MfPrecondHook g_mf_precond_hook;
+std::atomic<bool> g_mf_precond_hook_installed{false};
+}  // namespace
+
+MfPrecondHook mf_set_precond_hook(MfPrecondHook hook) {
+  std::lock_guard<std::mutex> lk(g_mf_precond_hook_mu);
+  MfPrecondHook prev = std::move(g_mf_precond_hook);
+  g_mf_precond_hook = std::move(hook);
+  g_mf_precond_hook_installed.store(static_cast<bool>(g_mf_precond_hook));
+  return prev;
+}
+bool mf_precond_hook_installed() {
+  return g_mf_precond_hook_installed.load();
+}
+
 int mf_thread_count() {
   int n = g_mf_threads.load();
   if (n <= 0) {
@@ -628,10 +651,22 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
 // zero) and holds the solution on the kept DOFs.
 void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
                  std::vector<double>& x, int& iters_out, double& error_out,
-                 bool& converged_out, RecycleReport* rec) {
+                 bool& converged_out, RecycleReport* rec, const MfSolveContext* ctx) {
   const int n = m.ng;
   const double tol = tolerance;
   const int maxIters = (max_iterations > 0) ? max_iterations : 2 * n;
+
+  // External additive preconditioner (matrix-free GenEO two-level, phase 2). Snapshot
+  // the installed hook once for the whole solve; when none is installed (the default)
+  // `hook` stays empty and every call site below is skipped => byte-identical. The
+  // hook needs the grid/moduli context; without one it cannot run, so both must be
+  // present. A second SPD additive correction (like recycling): changes iterations,
+  // never the converged field or the stopping test.
+  MfPrecondHook hook;
+  if (ctx != nullptr && g_mf_precond_hook_installed.load()) {
+    std::lock_guard<std::mutex> lk(g_mf_precond_hook_mu);
+    hook = g_mf_precond_hook;
+  }
 
   auto dot = [n](const std::vector<double>& a, const std::vector<double>& b) {
     double s = 0.0;
@@ -684,6 +719,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     p[static_cast<std::size_t>(i)] =
         m.invdiag[static_cast<std::size_t>(i)] * residual[static_cast<std::size_t>(i)];
   recycle.augment(residual.data(), p.data());  // + U E^-1 U^T residual
+  if (hook) hook(m, *ctx, residual.data(), p.data());  // + two-level GenEO correction
   double absNew = dot(residual, p);
 
   int i = 0;
@@ -703,6 +739,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
       z[static_cast<std::size_t>(q)] =
           m.invdiag[static_cast<std::size_t>(q)] * residual[static_cast<std::size_t>(q)];
     recycle.augment(residual.data(), z.data());  // + U E^-1 U^T residual
+    if (hook) hook(m, *ctx, residual.data(), z.data());  // + two-level GenEO correction
     const double absOld = absNew;
     absNew = dot(residual, z);
     const double beta = absNew / absOld;
@@ -777,8 +814,15 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
             m.kept_global[static_cast<std::size_t>(k)])];
 
     fea_detail::RecycleReport rec;
+    // Context for the external additive preconditioner hook (inert when none is
+    // installed; see mf_set_precond_hook). Carries the grid + moduli the hook needs.
+    fea_detail::MfSolveContext pc;
+    pc.grid = &grid;
+    pc.elem_youngs = elem_youngs;
+    pc.youngs_modulus = youngs_modulus;
+    pc.poisson = poisson;
     fea_detail::mf_cg_solve(m, tolerance, max_iterations, x, diag.iterations,
-                            diag.residual, diag.converged, &rec);
+                            diag.residual, diag.converged, &rec, &pc);
     diag.recycle_dim = rec.dim;
     diag.recycle_setup_matvecs = rec.setup_matvecs;
     if (info) *info = diag;

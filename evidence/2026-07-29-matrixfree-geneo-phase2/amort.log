@@ -1,0 +1,14 @@
+   [cache hit /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-geneo-two-level-preconditioner-eb39f0/ea595dbb-13ed-4ba7-b015-d8965ebe65d1/scratchpad/ev/stag_16_16_4_4_vf26_it12.bin]
+## AMORT grid 32x24x32: reuse a state-0 basis over 4 consecutive states
+   state-0 basis build=7.29 s  Nt=253
+
+ state  ng     Jacobi  rebuilt  reused   rebuild(s) refresh(s)
+     0  75066    1685     344     344       7.32     0.386
+     1  75066     477     222     251       7.56     0.389
+     2  75066     445     195     243       7.05     0.393
+     3  75066     286     169     229       6.48     0.396
+     4  75066     319     161     225       4.05     0.399
+   READ: 'reused' keeps the state-0 LOBPCG basis, refreshing only the cheap coarse
+   operator (refresh << rebuild). If reused stays near rebuilt, the eigensolve
+   amortizes across design iterations — the Alexandersen-Lazarov property.
+EXIT 0

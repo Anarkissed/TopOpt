@@ -1,0 +1,9 @@
+## HARD checkerboard high-contrast composite, cell=4, contrast 1e9
+
+   n     ng     Jacobi-CG   two-level   ratio    Nt   build(s) jac(s) tl(s)  cond
+   24   45000        489        257     1.9x   108     2.56    0.3    0.3  6.4e+01
+   32  104544        628        249     2.5x   288     6.68    0.7    0.7  1.6e+02
+   40  201720        771        261     3.0x   600    14.47    1.7    1.6  3.0e+02
+   48  345744        916        253     3.6x  1080    28.87    3.3    2.8  4.9e+02
+   READ: if the Jacobi column grows faster than the two-level column as n grows,
+   the two-level route is mode-count/contrast independent — the GenEO promise.
