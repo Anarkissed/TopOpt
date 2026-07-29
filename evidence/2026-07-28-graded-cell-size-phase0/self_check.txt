@@ -1,0 +1,11 @@
+GRADED CELL SIZE PROBE — E_solid=3500 MPa nu=0.33, octet.
+cores: matfree=6. library max resolved rho=0.591, min=0.148.
+
+===== SELF (bar B1) — instrument recovers E_solid to 4 digits =====
+  L=4    mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  L=8    mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  L=16   mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  L=32   mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  cubic(iso tensor) vs hex8_stiffness: max|dK|=0.000e+00 -> BIT-IDENTICAL
+
+DONE.
