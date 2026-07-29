@@ -1,0 +1,17 @@
+LATTICE DENSITY-BAND + RAMP PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+cores: matfree=6 (6 P-core Mac). library max resolved rho=0.591.
+
+===== D5 — how long must the ramp be? error + stress-concentration vs length =====
+  [writing /tmp/dbrun/d5_ramp_length.csv]
+  vpc=12, 2x2 lateral, rho_lo=0.40 -> solid. transition length in cells:
+  Ltrans   E_resolved  E_homog     gap%      SCF     clamped  res_ms    
+  1        1621.26     1375.74     15.14     2.603   1        11544
+  2        1717.07     1370.47     20.19     2.590   2        12863
+  3        1826.47     1529.00     16.29     2.593   1        15682
+  4        1856.08     1447.94     21.99     2.596   2        16614
+  6        1970.88     1523.24     22.71     2.596   3        17190
+  8        2028.86     1465.99     27.74     2.597   4        23311
+  READ: find the shortest Ltrans where SCF and gap% stop improving. A ramp that must be
+  many cells long is a costlier feature than one that works in 2.
+
+DONE.
