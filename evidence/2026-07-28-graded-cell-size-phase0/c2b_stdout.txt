@@ -1,0 +1,11 @@
+  [writing /tmp/gcs/c2b_bending.csv]
+    1            0.1991   7.195         10.686        +48.52      NO-GO   
+    2            0.1991   93.609        101.528       +8.46       NO-GO   
+    3            0.1991   339.258       353.229       +4.12       NO-GO   
+    4            0.1991   772.352       792.346       +2.59       NO-GO   
+    5            0.1991   1390.542      1415.312      +1.78       GO      
+  READ: the smallest cells_across with |bend_err|<=2.4% is the BENDING ceiling. This is the
+  binding structural number (>= the axial ceiling) because bending loads the section's outer
+  cells hardest and the homogenized continuum cannot be meshed finer than one cell.
+
+DONE.

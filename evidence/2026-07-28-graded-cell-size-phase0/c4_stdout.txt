@@ -1,0 +1,13 @@
+===== C4 — DYADIC transition (cell S -> 2S), resolved =====
+  fine cell S=5.0 (rho=0.199, d=1.250 mm), coarse 2S=10.0 (rho=0.170, d=1.816 mm).
+  block 48x48x84 vox (W=20.0 mm, H=35.0 mm), interface at z=15.0 mm.
+  confined Ez = 175.30 MPa (612255 DOF, 55092 ms).
+  SCF at interface (peak vM in +-1 cell / mean vM) = 3.752;  control SCF in fine bulk = 2.237
+  interface stress riser = 1.68x the fine-bulk concentration.
+  [writing /tmp/gcs/c4_dyadic.csv]
+  READ: coarse octet nodes NEST in the fine grid (2x), so the levels connect at shared
+  nodes with ZERO bridge struts and ZERO extra transition triangles; the coarse layer is
+  simply 8x fewer triangles per volume. The cost is that only half the fine interface nodes
+  meet a coarse strut -> the interface SCF above tells whether that funnelling matters.
+
+DONE.

@@ -1,0 +1,2 @@
+cell_fine_mm,cell_coarse_mm,rho_fine,rho_coarse,d_fine_mm,d_coarse_mm,Ez_MPa,scf_interface,scf_fine_control,dof,ms
+5.00,10.00,0.1991,0.1696,1.2500,1.8162,175.3015,3.7519,2.2368,612255,55092

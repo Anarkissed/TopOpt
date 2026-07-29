@@ -1,0 +1,78 @@
+GRADED CELL SIZE PROBE — E_solid=3500 MPa nu=0.33, octet.
+cores: matfree=6. library max resolved rho=0.591, min=0.148.
+
+===== SELF (bar B1) — instrument recovers E_solid to 4 digits =====
+  L=4    mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  L=8    mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  L=16   mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  L=32   mm solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  cubic(iso tensor) vs hex8_stiffness: max|dK|=0.000e+00 -> BIT-IDENTICAL
+
+DONE.
+=====C1=====
+GRADED CELL SIZE PROBE — E_solid=3500 MPa nu=0.33, octet.
+cores: matfree=6. library max resolved rho=0.591, min=0.148.
+
+===== C1 — tensor scale-invariance: octet at cells 4/8/16/32 mm =====
+  [writing /tmp/gcs/c1_scale_invariance.csv]
+
+  target rho=0.20, vpc=16:
+    cell_mm  rho      strut_d_mm  vox/str   C11         C12         C44         Zener    E100       
+    4.0      0.1191   0.7500      3.00      111.809     52.329      45.514      1.5304   78.443     
+    8.0      0.1191   1.5000      3.00      111.809     52.329      45.514      1.5304   78.443     
+    16.0     0.1191   3.0000      3.00      111.809     52.329      45.514      1.5304   78.443     
+    32.0     0.1191   6.0000      3.00      111.809     52.329      45.514      1.5304   78.443     
+    -> max |E100 deviation| across 4x cell-size range = 0.000e+00  (SCALE-INVARIANT to CG precision)
+    -> strut diameter spans 0.750..6.000 mm (8.0x) at IDENTICAL tensor.
+
+  target rho=0.20, vpc=24:
+    cell_mm  rho      strut_d_mm  vox/str   C11         C12         C44         Zener    E100       
+    4.0      0.2153   0.8333      5.00      239.499     104.020     91.156      1.3457   176.504    
+    8.0      0.2153   1.6667      5.00      239.499     104.020     91.156      1.3457   176.504    
+    16.0     0.2153   3.3333      5.00      239.499     104.020     91.156      1.3457   176.504    
+    32.0     0.2153   6.6667      5.00      239.499     104.020     91.156      1.3457   176.504    
+    -> max |E100 deviation| across 4x cell-size range = 0.000e+00  (SCALE-INVARIANT to CG precision)
+    -> strut diameter spans 0.833..6.667 mm (8.0x) at IDENTICAL tensor.
+
+  target rho=0.20, vpc=32:
+    cell_mm  rho      strut_d_mm  vox/str   C11         C12         C44         Zener    E100       
+    4.0      0.1978   0.8004      6.40      208.232     92.156      80.865      1.3933   151.687    
+    8.0      0.1978   1.6008      6.40      208.232     92.156      80.865      1.3933   151.687    
+    16.0     0.1978   3.2016      6.40      208.232     92.156      80.865      1.3933   151.687    
+    32.0     0.1978   6.4031      6.40      208.232     92.156      80.865      1.3933   151.687    
+    -> max |E100 deviation| across 4x cell-size range = 0.000e+00  (SCALE-INVARIANT to CG precision)
+    -> strut diameter spans 0.800..6.403 mm (8.0x) at IDENTICAL tensor.
+
+  target rho=0.40, vpc=16:
+    cell_mm  rho      strut_d_mm  vox/str   C11         C12         C44         Zener    E100       
+    4.0      0.4219   1.2500      5.00      747.394     263.063     234.583     0.9687   610.422    
+    8.0      0.4219   2.5000      5.00      747.394     263.063     234.583     0.9687   610.422    
+    16.0     0.4219   5.0000      5.00      747.394     263.063     234.583     0.9687   610.422    
+    32.0     0.4219   10.0000     5.00      747.394     263.063     234.583     0.9687   610.422    
+    -> max |E100 deviation| across 4x cell-size range = 0.000e+00  (SCALE-INVARIANT to CG precision)
+    -> strut diameter spans 1.250..10.000 mm (8.0x) at IDENTICAL tensor.
+
+  target rho=0.40, vpc=24:
+    cell_mm  rho      strut_d_mm  vox/str   C11         C12         C44         Zener    E100       
+    4.0      0.3825   1.1902      7.14      597.888     223.469     198.175     1.0586   476.288    
+    8.0      0.3825   2.3805      7.14      597.888     223.469     198.175     1.0586   476.288    
+    16.0     0.3825   4.7610      7.14      597.888     223.469     198.175     1.0586   476.288    
+    32.0     0.3825   9.5219      7.14      597.888     223.469     198.175     1.0586   476.288    
+    -> max |E100 deviation| across 4x cell-size range = 0.000e+00  (SCALE-INVARIANT to CG precision)
+    -> strut diameter spans 1.190..9.522 mm (8.0x) at IDENTICAL tensor.
+
+  target rho=0.40, vpc=32:
+    cell_mm  rho      strut_d_mm  vox/str   C11         C12         C44         Zener    E100       
+    4.0      0.4019   1.1388      9.11      635.971     232.498     208.696     1.0345   511.487    
+    8.0      0.4019   2.2776      9.11      635.971     232.498     208.696     1.0345   511.487    
+    16.0     0.4019   4.5552      9.11      635.971     232.498     208.696     1.0345   511.487    
+    32.0     0.4019   9.1104      9.11      635.971     232.498     208.696     1.0345   511.487    
+    -> max |E100 deviation| across 4x cell-size range = 0.000e+00  (SCALE-INVARIANT to CG precision)
+    -> strut diameter spans 1.139..9.110 mm (8.0x) at IDENTICAL tensor.
+
+  READ: at fixed r/L and vpc the voxel occupancy pattern is IDENTICAL for every cell
+  size (voxel centres map to the same unit-cell fractions), and the hex8 homogenization
+  is exactly a uniform mesh SCALING -> CH is invariant by construction (algebra: Ke~h,
+  chi0~h, solve x~h, CH=(1/vol)chi0.Ke.(chi0-x) ~ h^3/h^3 = 1). Any residual is CG tol.
+
+DONE.

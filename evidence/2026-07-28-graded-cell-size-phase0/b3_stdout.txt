@@ -1,0 +1,13 @@
+===== B3 — printed strut diameter along the density ramp (0.4mm nozzle) =====
+  strut diameter d(rho, cell) in mm; extrudable floor: 1 bead=0.4 mm, reliable=0.8 mm.
+  rho       S=4     mm  S=8     mm  S=16    mm  S=32    mm
+  [writing /tmp/gcs/b3_printability.csv]
+  0.05       0.363x     0.726~     1.453      2.906   
+  0.08       0.479~     0.957      1.915      3.830   
+  0.10       0.534~     1.067      2.134      4.269   
+  0.15       0.640~     1.280      2.560      5.121   
+  0.20       0.759~     1.518      3.037      6.074   
+  0.30       0.975      1.951      3.902      7.803   
+  0.40       1.181      2.363      4.726      9.452   
+  0.60       1.534      3.069      6.137     12.275   
+  (x = below 1-bead 0.4mm, unprintable;  ~ = 0.4-0.8mm, single-bead/unreliable)

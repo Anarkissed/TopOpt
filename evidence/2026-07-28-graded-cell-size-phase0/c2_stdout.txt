@@ -1,0 +1,17 @@
+===== C2 — homogenization error vs CELLS-PER-MEMBER (the ceiling) =====
+  cell S=5.0 mm, vpc=16, 2 cells long, axial (free lateral surfaces).
+  bar: |E100_periodic - E_resolved|/E_resolved <= 2.4% (library's validated band).
+
+  [writing /tmp/gcs2/c2_cells_per_member.csv]
+  target rho=0.30: E100_periodic=280.58 MPa, strut d=1.288 mm (4.1 vox/strut)
+    cells_across rho      E_resolved    E100_periodic homog_err%  verdict 
+    0.50         0.1875   0.00          280.58        nan         DISCONNECTED
+    1.00         0.2852   274.11        280.58        +2.36       GO      
+    2.00         0.2852   277.23        280.58        +1.21       GO      
+    3.00         0.2852   278.33        280.58        +0.81       GO      
+
+  READ: the smallest cells_across whose |homog_err| <= 2.4% is the CEILING (minimum
+  cells per member). Cell growth that pushes a member below it leaves the certifiable band.
+  Axial (RVE-convergence) is the ROBUST lower bound; bending stresses the surface layer
+  harder and needs MORE cells -> the true structural ceiling is >= this one.
+

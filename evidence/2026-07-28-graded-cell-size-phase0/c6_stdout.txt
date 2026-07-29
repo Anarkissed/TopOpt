@@ -1,0 +1,32 @@
+===== C6 — resolved DYADIC vs CONFORMAL graded column =====
+  base lateral cell S0=4.0 mm, 2x2 lateral, vpc=12. density grade 0.60 (bottom) -> 0.05 (top).
+  [writing /tmp/gcs/c6_layers.csv]
+  DYADIC route: 6 cells, total H=44.0 mm
+    i    z_mid    height    rho       strut_d_mm  printable 
+    0    2.00     4.000     0.5750    1.4530      yes       
+    1    6.00     4.000     0.5250    1.4530      yes       
+    2    10.00    4.000     0.4750    1.3744      yes       
+    3    16.00    8.000     0.4000    1.3824      yes       
+    4    24.00    8.000     0.3000    1.0954      yes       
+    5    36.00    16.000    0.1500    0.9497      yes       
+  CONFORMAL route: 8 cells, total H=44.0 mm
+    i    z_mid    height    rho       strut_d_mm  printable 
+    0    1.24     2.486     0.5845    1.2500      yes       
+    1    4.00     3.031     0.5500    1.3146      yes       
+    2    7.36     3.694     0.5079    1.3067      yes       
+    3    11.46    4.504     0.4567    1.3153      yes       
+    4    16.46    5.490     0.3943    1.2869      yes       
+    5    22.55    6.692     0.3181    1.1409      yes       
+    6    29.98    8.158     0.2253    1.0244      yes       
+    7    39.03    9.945     0.1122    0.6471      marginal  
+
+  route      E_confined_MPa   peak/mean vM (whole)   SCF at worst transition   DOF    ms
+  DYADIC     613.83           -                      3.717                     249375 24716
+  CONFORMAL  446.67           -                      7.572                     249375 29923
+  [writing /tmp/gcs/c6_summary.csv]
+  min strut diameter: dyadic 0.950 mm, conformal 0.647 mm (0.4mm nozzle floor).
+  READ: same density grade, same height. Compare E (stiffness), worst-transition SCF
+  (dyadic's factor-2 jumps vs conformal's smooth growth), and where strut d drops below
+  printable. The route to ship is the one with lower SCF and printable struts throughout.
+
+DONE.
