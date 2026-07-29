@@ -558,6 +558,11 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // computed on the model faces up front (INDEPENDENT of the fixed design's
   // internal geometry — a substitute/smoothed design changes no external load).
   std::vector<NodalLoad> external_loads;
+  // loadcase only: the LOAD faces, frozen (alongside the anchors) when smoothing so
+  // the traction stays attached to bit-identical solid. Empty in self-weight mode
+  // (byte-identical). Without this a smoothed load cap erodes and the traction lands
+  // on a void DOF ("under-constrained system") — the S3 specimen hits exactly that.
+  std::vector<int> load_freeze_face_ids;
 
   if (loadcase) {
     // The SAME front-end-neutral mapping + core builder the optimizer's loadcase
@@ -604,6 +609,8 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
     external_loads = options.external_loads;
+    for (const ProductionLoadCase::LoadGroup& g : lc.load_groups)
+      for (const int fid : g.face_ids) load_freeze_face_ids.push_back(fid);
   } else {
     // ── SELF-WEIGHT path (unchanged): voxelize + tag the fixture faces, clamp
     // their nodes, and apply the production config + the job's gravity/margin.
@@ -652,14 +659,22 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // Smooth the input mesh BEFORE re-voxelizing, so everything below re-certifies
     // the SMOOTHED geometry (the honesty rule: the numbers shown always describe
     // what is exported). Frozen vertices come from the model's B-rep fixture faces
-    // (bores + pads); the min-feature constraint is evaluated against model_grid.
+    // (bores + pads) AND — in loadcase mode — the LOAD faces, so both the clamp and
+    // the traction stay attached to bit-identical solid across the re-voxelization
+    // (without the load faces frozen, smoothing erodes the loaded cap and the
+    // traction lands on a void DOF). The min-feature constraint is evaluated against
+    // model_grid.
     TriangleMesh design_mesh = edited.mesh;
     if (smooth.enabled) {
       const TaubinParams params =
           taubin_params_for_strength(smooth.strength, smooth.max_pairs);
       SmoothConstraints c;
+      std::vector<int> freeze_face_ids = result.fixture_face_ids;
+      freeze_face_ids.insert(freeze_face_ids.end(),
+                             load_freeze_face_ids.begin(),
+                             load_freeze_face_ids.end());
       c.freeze_regions = freeze_regions_from_faces(
-          result.model, result.fixture_face_ids, model_grid.spacing);
+          result.model, freeze_face_ids, model_grid.spacing);
       c.freeze_tol_mm = smooth.freeze_tol_mm;
       c.min_feature_grid = &model_grid;
       c.enforce_min_feature = smooth.enforce_min_feature;
@@ -682,18 +697,33 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       write_stl_file(result.smoothed_mesh_path, design_mesh);
     }
 
-    // Re-voxelize the (smoothed) mesh onto the MODEL's grid geometry, then carry
-    // the model's Fixture (clamp) AND Load (traction) tags over where the substitute
-    // still has material, so the same BCs apply and the connectivity belt sees the
-    // load voxels. In self-weight mode `model_grid` carries no Load tags, so this is
-    // byte-identical to carrying Fixture alone. The occupancy is the design; the
-    // quantization gap (mesh surface vs this voxelization) is disclosed below.
+    // Re-voxelize the (smoothed) mesh onto the MODEL's grid geometry, then carry the
+    // model's Fixture (clamp) and Load (traction) tags over. The Fixture clamp is
+    // carried only where the substitute still has material. The LOAD surface is
+    // FORCED solid — the declared traction is applied to a mounting interface that is
+    // implicitly FrozenSolid the same way the optimizer retains load faces, so the
+    // force always has stiffness even where an aggressive smooth eroded the loaded
+    // cap (otherwise the solve hits a void DOF — no equilibrium). This restores
+    // exactly the loaded face the traction was declared on; the load-bearing BODY
+    // (the ribs) still erodes and still lowers the margin. In self-weight mode
+    // `model_grid` carries no Load tags, so this is byte-identical to carrying
+    // Fixture alone. The quantization gap (mesh surface vs this voxelization) is
+    // disclosed below.
     design_grid = voxelize_onto_grid(design_mesh, model_grid);
-    for (std::size_t i = 0; i < design_grid.tags.size(); ++i)
-      if (design_grid.tags[i] != VoxelTag::Empty &&
-          (model_grid.tags[i] == VoxelTag::Fixture ||
-           model_grid.tags[i] == VoxelTag::Load))
-        design_grid.tags[i] = model_grid.tags[i];
+    for (std::size_t i = 0; i < design_grid.tags.size(); ++i) {
+      if (model_grid.tags[i] == VoxelTag::Load) {
+        // When WE smoothed, the loaded cap is restored solid (see above). For a raw
+        // substitute mesh (no smoothing) keep 228's contract — certify what was
+        // handed in, carrying the Load tag only where the mesh has material — so the
+        // non-smoothed loadcase analyze stays byte-identical (bar S6).
+        if (smooth.enabled) design_grid.tags[i] = VoxelTag::Load;
+        else if (design_grid.tags[i] != VoxelTag::Empty)
+          design_grid.tags[i] = VoxelTag::Load;
+      } else if (design_grid.tags[i] != VoxelTag::Empty &&
+                 model_grid.tags[i] == VoxelTag::Fixture) {
+        design_grid.tags[i] = VoxelTag::Fixture;
+      }
+    }
     result.analyzed_mesh = true;
     result.analyzed_mesh_path = analyze_mesh_path;
     result.mesh_mass_grams =

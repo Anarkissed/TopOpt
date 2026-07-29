@@ -50,17 +50,21 @@ material**: print terracing, marching-cubes stair-steps, sharp ribs. On a
 
 ### Core
 
-1. **Declared load case in `analyze_job`** (`core/src/cli/run_job.cpp`). The analyze
-   path threw on a `"loads"` block; it now branches through the SHARED
-   `build_production_loadcase` (anchors + tractions) exactly as the optimizer does, so
-   a re-certification runs under the IDENTICAL grid / BCs / traction the run used.
-   Self-weight stays byte-identical. A new `production_loadcase_from_job(job, model)`
-   helper is the ONE job→ProductionLoadCase mapping, called by both the optimize and
-   analyze paths (extracted from the optimize path, behaviour-preserving — the loadcase
-   parity tests still pass). `AnalyzeJobResult::margin_required` reports the gate
-   actually used (production 1.5 for a loadcase, whose schema has no `margin_stop`) so
-   the CLI / provenance never show a false 0. Load faces are frozen during smoothing
-   and their voxels retagged after re-voxelization, so the traction stays attached.
+1. **Declared load case in `analyze_job`** (`core/src/cli/run_job.cpp`). The declared-
+   loadcase analyze path — the branch through the SHARED `production_loadcase_from_job`
+   + `build_production_loadcase`, the L5 loud-failure guards, `AnalyzeJobResult::
+   margin_required`, and the loadcase receipt block — **landed in PR 228**, which this
+   branch was rebased onto. This pass keeps all of that and adds the piece PR 228's
+   analyze path lacked for the SMOOTHING case: **a smoothed load-bearing part must keep
+   its traction attached**. Without it, aggressive smoothing erodes the loaded cap and
+   the traction lands on a void DOF (`fea_solve_mgcg_matfree: under-constrained system`
+   — the S3 specimen hits exactly this at strength ≥ 0.4). The fix, in the smoothing
+   path only (so PR 228's non-smoothed loadcase analyze stays byte-identical):
+   the LOAD faces are frozen alongside the anchors during smoothing (so the mounting
+   interface's geometry stays bit-identical), and the Load voxels are FORCED solid on
+   re-voxelization — the loaded cap is a mounting interface the optimizer already
+   retains as FrozenSolid, so the declared traction always has stiffness while the
+   load-bearing BODY (the ribs) still erodes and still lowers the margin.
 
 2. **The S3 proof** — `core/tests/validation/test_smooth_recert_loadcase.cpp` (30
    checks). Builds the cog specimen IN CODE (a welded `StepModel`, no OCCT), drives it
