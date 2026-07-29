@@ -1,0 +1,57 @@
+THE RECEIPT IS REAL — constrained smoothing weakens a load-bearing part, and the
+re-certification reports the LOWER margin (bar S3). Device-real, produced by
+core/build/topopt-cli built from this worktree on the synthetic cog specimen.
+
+Specimen: an 8-tooth cog bar (a star cross-section — the teeth are load-bearing
+ribs) in axial TENSION. PLA, resolution 48 (1 mm voxels). Anchor = the -X cap
+(pseudo-face 20), traction 3550 N on the +X cap (pseudo-face 21). Gate = the
+production 1.5 margin stop. A DECLARED EXTERNAL LOAD is the key: unlike self-weight
+(a lighter part is always safer, so a margin can only RISE — PR 196/200's wall),
+a fixed traction does not fall when material is removed, so rounding the ribs off
+LOWERS the margin.
+
+  strength  pairs   peak stress   margin   verdict     min-feat.viol.
+  --------  -----   -----------   ------   --------     --------------
+   solid       0     33.64 MPa    1.635    ACCEPTED         288
+   0.05        1     33.65 MPa    1.635    ACCEPTED         290
+   0.10        2     33.65 MPa    1.635    ACCEPTED         292
+   0.20        4     49.04 MPa    1.122    REJECTED  <--- the crossing / the flip
+   0.40        8     51.77 MPa    1.062    REJECTED          23
+   1.00       20     51.61 MPa    1.066    REJECTED          27
+
+  (all rows: gate "required" = 1.5, the production loadcase margin stop.)
+
+Reading it:
+  * The SOLID part is ACCEPTED at margin 1.635.
+  * GENTLE smoothing (1-2 Taubin pairs) barely moves the ribs — margin holds at
+    1.635, still ACCEPTED. (A smooth surface has almost nothing to denoise.)
+  * Rounding the ribs off (4+ pairs) shrinks the tension-carrying section, peak
+    stress climbs 33.6 -> 49-52 MPa, and the re-analysed margin drops through the
+    1.5 stop to ~1.1 — the gate flips to REJECTED. The numbers on screen are the
+    SMOOTHED part's, never the solid's (the honesty rule).
+  * min-feature VIOLATIONS fall (288 -> 23-32) because smoothing removes the
+    terracing — yet the part gets WEAKER. Two independent facts, both reported
+    honestly; "less terraced" is not "stronger".
+
+THE MIN-FEATURE HARD CONSTRAINT IS THE SAFETY (last row of the transcript):
+  strength 1.00, constraint ON  ->  pairs 0/20 applied, min_feature_limited=1,
+  margin 1.635, ACCEPTED.
+The constraint REFUSES to round ribs that would thin below the printable floor, so
+a user on the default (constraint on) never reaches the REJECTED state — the melt
+is structurally impossible, and the receipt says the strength was capped.
+
+Volume drift (bar S4) is reported at every strength against the Taubin bound. Here
+it EXCEEDS the small-perturbation bound (~1-5% vs ~0.03-0.57%): rounding real ribs
+moves far more material than denoising a smooth surface, and the receipt shows the
+TRUE drift — that IS the honest signal ("this was aggressive, not gentle").
+
+Reproduce (from core/):
+  cmake --build build --target topopt_cli test_smooth_recert_loadcase -j8
+  # unit proof (also writes the specimen STL for the CLI):
+  TOPOPT_S3_EVIDENCE_DIR=../evidence/2026-07-28-constrained-smooth-ui \
+    ./build/test_smooth_recert_loadcase
+  cd ../evidence/2026-07-28-constrained-smooth-ui
+  CLI=../../core/build/topopt-cli
+  $CLI analyze job.json --out out_solid
+  $CLI analyze job.json --mesh cog_bar.stl --smooth 0.20 --no-min-feature --out out_s0.20
+  $CLI analyze job.json --mesh cog_bar.stl --smooth 1.00 --out out_mfon   # constraint ON

@@ -52,6 +52,12 @@ public struct ResultsScreen: View {
     /// "See Original Model" — reveal the editable workspace (the variants stay
     /// saved; re-optimizing there starts over).
     var onSeeOriginal: () -> Void
+    /// Constrained smoothing + re-certification (handoff 2026-07-28-constrained-
+    /// smooth-ui). nil (a self-weight run, or a caller that has not wired it) hides
+    /// the Smooth chip — data-gated exactly like the other viz chips. When set, the
+    /// chip opens SmoothingPanel, whose numbers are the RE-ANALYSED ones (the honesty
+    /// rule lives in SmoothingModel, unit-tested).
+    var smoothing: SmoothingModel?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var orientOpen = false
@@ -67,6 +73,8 @@ public struct ResultsScreen: View {
     /// The written STL file awaiting the share sheet (nil when no export is in flight).
     /// Set when the user taps Export; drives the UIActivityViewController presentation.
     @State private var stlExportURL: URL?
+    /// Whether the constrained-smoothing drawer is open (only when `smoothing != nil`).
+    @State private var smoothOpen = false
     /// An export failure message (rare — a temp-dir write error), surfaced as an alert
     /// rather than failing silently.
     @State private var stlExportError: String?
@@ -90,6 +98,7 @@ public struct ResultsScreen: View {
                 runResolution: Int = 64, runMaterialName: String = "",
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {},
+                smoothing: SmoothingModel? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
         // through an injected scheduler / runner / notifier the same way). The screen
@@ -110,6 +119,7 @@ public struct ResultsScreen: View {
         self.onClose = onClose
         self.onExport = onExport
         self.onSeeOriginal = onSeeOriginal
+        self.smoothing = smoothing
     }
 
     /// The merge trigger, and the ONLY safe way to hand the fresh outcome to the
@@ -1005,6 +1015,18 @@ public struct ResultsScreen: View {
             if model.hasFailurePrediction {
                 vizRow(open: model.failureOn, drawer: { failureDrawer }, chip: { failureChip })
             }
+            // Constrained smoothing + re-certification — only when a caller wired a
+            // SmoothingModel (a declared-loadcase run). The drawer's numbers are the
+            // RE-ANALYSED ones (the honesty rule is SmoothingModel's, unit-tested).
+            if let sm = smoothing {
+                vizRow(open: smoothOpen,
+                       drawer: {
+                           SmoothingPanel(model: sm,
+                                          onExport: { path in stlExportURL = URL(fileURLWithPath: path) },
+                                          onClose: { smoothOpen = false })
+                       },
+                       chip: { smoothChip })
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.horizontal, DS.Space.xl4)   // align the chips' right edge with the cube
@@ -1013,6 +1035,14 @@ public struct ResultsScreen: View {
         .animation(DS.Motion.sheetIn, value: model.flexOn)
         .animation(DS.Motion.sheetIn, value: model.loadPathOn)
         .animation(DS.Motion.sheetIn, value: model.failureOn)
+        .animation(DS.Motion.sheetIn, value: smoothOpen)
+    }
+
+    /// The Smooth rail chip (constrained smoothing + re-certification).
+    private var smoothChip: some View {
+        vizChip(label: "Smooth", isOn: smoothOpen, action: { smoothOpen.toggle() }) {
+            Image(systemName: "wand.and.rays")
+        }
     }
 
     /// One rail row: the chip pinned to the right edge, its drawer sliding out to the
