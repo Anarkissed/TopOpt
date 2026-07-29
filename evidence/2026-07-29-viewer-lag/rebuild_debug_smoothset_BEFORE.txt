@@ -1,0 +1,5 @@
+== VIEWER REBUILD PROFILE (2026-07-29 viewer-lag) — per-body-eval CPU cost ==
+variant | tris | selectedMesh ms (min of 60) | 30 fps budget used
+variant_070.stl | 14984 | 50.465 | 151.4%
+variant_050.stl | 13784 | 46.613 | 139.8%
+variant_030.stl | 8700 | 29.304 | 87.9%
