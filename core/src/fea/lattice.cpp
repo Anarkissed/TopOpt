@@ -1,6 +1,7 @@
 #include "topopt/lattice.hpp"
 
 #include <array>
+#include <cmath>
 #include <stdexcept>
 
 namespace topopt {
@@ -71,6 +72,66 @@ double lattice_rho_max(LatticeTopology topo) {
   int lo, hi;
   resolved_span(rows, lo, hi);
   return rows[hi].rho;
+}
+
+double lattice_cells_per_member_min(LatticeTopology topo) {
+  switch (topo) {
+    case LatticeTopology::Octet:
+      // Bending ceiling, handoff 2026-07-28-graded-cell-size-phase0 C2b — see the
+      // header tripwire. The crossing of the 2.4% homogenization-error band sits
+      // between 4 and 5 cells across, so 5 is the smallest count that clears it.
+      return 5.0;
+  }
+  return 5.0;
+}
+
+namespace {
+
+// The printed octet strut DIAMETER at cell edge 4 mm, per relative density, measured
+// at vpc48 — evidence/2026-07-28-graded-cell-size-phase0/b3_printability.csv, column
+// d_mm_cell4, VERBATIM. Diameter is exactly linear in cell size (that CSV's cell8/16/
+// 32 columns are 2/4/8x these to four digits), so a query at any cell scales by
+// cell/4. Ordered by rho; the span (0.05..0.60) brackets the certifiable band.
+struct DiaRow { double rho, d_at_cell4_mm; };
+constexpr double kOctetDiaCellMm = 4.0;
+constexpr std::array<DiaRow, 8> kOctetDia = {{
+    {0.05, 0.3632},
+    {0.08, 0.4787},
+    {0.10, 0.5336},
+    {0.15, 0.6401},
+    {0.20, 0.7592},
+    {0.30, 0.9754},
+    {0.40, 1.1815},
+    {0.60, 1.5343},
+}};
+
+}  // namespace
+
+double octet_strut_diameter_mm(double rho, double cell_size_mm) {
+  if (!(cell_size_mm > 0.0))
+    throw std::invalid_argument(
+        "octet_strut_diameter_mm: cell_size_mm must be > 0");
+  if (!(std::isfinite(rho) && rho >= 0.0))
+    throw std::invalid_argument(
+        "octet_strut_diameter_mm: rho must be finite and >= 0");
+
+  const std::array<DiaRow, 8>& rows = kOctetDia;
+  const int n = static_cast<int>(rows.size());
+  double d4;  // diameter at the reference 4 mm cell
+  if (rho <= rows[0].rho) {
+    d4 = rows[0].d_at_cell4_mm;
+  } else if (rho >= rows[n - 1].rho) {
+    d4 = rows[n - 1].d_at_cell4_mm;
+  } else {
+    int a = 0;
+    while (a + 1 < n && rows[a + 1].rho < rho) ++a;
+    const DiaRow& r0 = rows[a];
+    const DiaRow& r1 = rows[a + 1];
+    const double t =
+        r1.rho > r0.rho ? (rho - r0.rho) / (r1.rho - r0.rho) : 0.0;
+    d4 = r0.d_at_cell4_mm + t * (r1.d_at_cell4_mm - r0.d_at_cell4_mm);
+  }
+  return d4 * (cell_size_mm / kOctetDiaCellMm);
 }
 
 CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,

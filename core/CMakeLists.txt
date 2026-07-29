@@ -46,6 +46,7 @@ add_library(topopt
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
+  src/simp/grading.cpp
   src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/fea/lattice.cpp
@@ -199,6 +200,12 @@ target_link_libraries(test_lattice_gen PRIVATE topopt)
 target_compile_definitions(test_lattice_gen PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_gen COMMAND test_lattice_gen)
+
+# The lattice grading law (handoff 2026-07-29-lattice-grading-law): stress -> a
+# certifiable (density, cell size) posture. Tests the bars L2/L4/L5 and read-from-core.
+add_executable(test_grading tests/unit/test_grading.cpp)
+target_link_libraries(test_grading PRIVATE topopt)
+add_test(NAME grading COMMAND test_grading)
 
 # Pseudo-face segmentation + the STL/3MF import adapter (handoff 134). The
 # synthetic meshes are built in code; the determinism and refusal tests write

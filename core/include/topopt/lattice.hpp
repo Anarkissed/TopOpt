@@ -50,6 +50,40 @@ const char* lattice_topology_name(LatticeTopology topo);
 double lattice_rho_min(LatticeTopology topo);
 double lattice_rho_max(LatticeTopology topo);
 
+// ★ THE CELLS-PER-MEMBER FLOOR — the minimum number of lattice cells that must span
+// a structural member for the homogenized cubic tensor to describe it, i.e. for the
+// scale separation homogenization assumes to hold. Read this; do NOT hardcode it —
+// the grading law (grading.hpp) clamps cell size against it via the local member
+// width, so when the measurement moves this the law picks it up.
+//
+// TRIPWIRE — MEASURED, and being re-measured. Value = 5.0, the BENDING ceiling of
+// handoff 2026-07-28-graded-cell-size-phase0 (C2b): the homogenized macro model's
+// transverse-stiffness error crosses the 2.4% band BETWEEN 4 and 5 cells across a
+// member "as deployed" (1c +48.5%, 2c +8.5%, 3c +4.1%, 4c +2.59%, 5c +1.78%).
+// Bending is the BINDING case — the generous axial ceiling is ~1 cell (C2), but a
+// member that only carries axial load is the exception, so the law uses the bending
+// number. If the re-measurement (a running task) moves the crossing, change the
+// number HERE, in the one place, and re-run the grading unit tests: the assertion
+// that no emitted point sits below the floor (bar L2) is what catches a stale value.
+double lattice_cells_per_member_min(LatticeTopology topo);
+
+// The printed octet strut DIAMETER (mm) at relative density `rho` and cell edge
+// `cell_size_mm`. For the printability CHECK of the grading law (bar L3 / requirement
+// 3) — NOT the certification math (that is the tensor above; diameter never enters a
+// solve). Backed by PR 235's B3 measurement (evidence/2026-07-28-graded-cell-size-
+// phase0/b3_printability.csv): the diameter is EXACTLY linear in cell size (d at
+// cell 8 = 2·d at cell 4 to four digits, because the octet occupancy pattern is
+// scale-invariant — the same fact that makes the tensor scale-invariant), so
+// d(rho, S) = S · phi(rho) with phi the measured diameter-per-unit-cell, piecewise-
+// linearly interpolated in rho and clamped at the ends of the measured span
+// (rho 0.05..0.60, which brackets the certifiable band). Monotonic increasing in rho
+// and in cell size. Throws std::invalid_argument if cell_size_mm is not > 0 or rho
+// is not finite and >= 0.
+//
+// TRIPWIRE — the numbers are the vpc48 B3 rows, verbatim. They carry the octet
+// ±quantization the handoff logs; a diameter quoted to microns is false precision.
+double octet_strut_diameter_mm(double rho, double cell_size_mm);
+
 // The homogenized effective cubic tensor of `topo` at relative density `rho`, scaled
 // to solid Young's modulus `youngs_modulus_solid` (the library is measured at PLA
 // Es = 3500 MPa and effective stiffness is exactly linear in Es, so this multiplies

@@ -1,0 +1,17 @@
+{
+  "_comment": "Example analyze job with a grading block (handoff 2026-07-29-lattice-grading-law). Run via the analyze subcommand on a fixed design; the certification's von Mises field is fed to the grading law and the report is written to run_info.json's grading object. Absent this block the run is byte-identical (bar L1). The certifiable band and cells-per-member floor are NOT job knobs — the law reads them from core.",
+  "model": "bracket.step",
+  "material": "pla",
+  "mode": "minimize_plastic",
+  "resolution": 64,
+  "fixture_faces": [{ "axis": "z", "side": "max" }],
+  "gravity": { "g": 9.81, "direction": { "x": 0, "y": 0, "z": -1 } },
+  "margin_stop": 1.5,
+  "output": { "report": "report.json", "mesh_format": "stl", "mesh_prefix": "variant" },
+  "grading": {
+    "topology": "octet",
+    "cell_mm": 2.0,
+    "min_extrudable_width_mm": 0.4,
+    "demand_exponent": 1.0
+  }
+}

@@ -1,0 +1,4 @@
+name,nx,ny,nz,h_mm,band_rho_min,band_rho_max,cpm_floor,cell_mm,floor_mm,floored,region_vox,latticed_vox,solid_fallback_vox,rho_min,rho_max,strut_min_mm,strut_max_mm,thin_member_mm,min_cpm,region_ungradeable
+A_maintainer_bracket_9p4mm,26,16,26,1.000,0.14764,0.59093,5.0,2.519,2.519,1,2790,0,2790,0.0000,0.0000,0.000,0.000,0.000,0.000,1
+B_thick_bracket,36,26,36,1.000,0.14764,0.59093,5.0,2.519,2.519,1,14080,12212,1868,0.1476,0.5909,0.400,0.956,14.000,5.557,0
+C_thick_bracket_big_cell,36,26,36,1.000,0.14764,0.59093,5.0,6.000,2.519,0,14080,0,14080,0.0000,0.0000,0.000,0.000,0.000,0.000,1
