@@ -1,0 +1,56 @@
+Rebase onto main (PR #246, nine-topology tensor library)
+=========================================================
+
+PR #246 (tensor-library-nine-topologies) merged into main after this branch was cut.
+It added eight more topology tables (sc/bcc/fcc/diamond/kelvin/rhombic cubic +
+bccz/fccz/reentrant tetragonal) to core/src/fea/lattice.cpp. This branch made kOctet
+19 rows; #246's tables are 8 rows each. Rebased this branch onto current main and
+resolved.
+
+REPRESENTATION — pointer + size (main's `RowTable`), NOT a fixed-size array
+--------------------------------------------------------------------------
+The structural conflict was already solved by #246. Before #246, rows_of returned
+`const std::array<Row, N>&`, which hard-codes ONE row count for every topology — the
+exact thing that breaks when octet is 19 and the others are 8. #246 replaced that with
+
+    struct RowTable { const Row* data; int n; bool empty() const {...} };
+    RowTable rows_of(LatticeTopology topo);   // returns {table.data(), table.size()}
+
+a view (pointer + length) returned by value. resolved_span / lattice_rho_min/max /
+lattice_cubic_tensor all consume RowTable, so they are size-agnostic. Chosen
+representation: KEEP RowTable. Octet becomes std::array<Row,19>; rows_of already does
+`{kOctet.data(), (int)kOctet.size()}` so it reports 19 with no change. The eight other
+tables stay std::array<Row,8>; the three tetragonal return {nullptr,0}. Nothing in
+rows_of / the accessors needed editing for the size change.
+
+(std::span was the other option but the codebase is C++17 and compiles without
+-std=c++20; RowTable is the existing, already-proven idiom, so there was no reason to
+introduce a new vocabulary type.)
+
+BOTH CHANGES SURVIVE — verified on the rebased tree
+---------------------------------------------------
+T1  every octet row == proposed_octet_rows.txt (row_diff.txt): 19 == 19, diff empty.
+T3  octet band: rho_min=0.05047, rho_max=0.89988.
+T4  octet MID rows (0.148..0.591) bit-for-bit unchanged (verify_output.txt).
+    Per-topology bands each derive from that topology's OWN resolved rows
+    (verify_per_topology_bands.txt):
+       octet   [0.05047, 0.89988]   <- widened by PR 237
+       sc      [0.08659, 0.49638]
+       bcc     [0.21050, 0.59288]
+       fcc     [0.09505, 0.59093]
+       diamond [0.15712, 0.59201]
+       kelvin  [0.09375, 0.50521]
+       rhombic [0.17245, 0.51331]
+    Octet is the only wide band; the eight others are untouched.
+    B2 anchor (octet 0.29731) still byte-identical; fcc==octet-legs at 0.29731 holds.
+    Tetragonal (bccz/fccz/reentrant) still refused (LatticeTopologyNotCertifiable).
+
+SECTION 2b AFTER ADDING NINE TOPOLOGIES
+---------------------------------------
+The nine topologies do NOT change the 2b fix: 2b probes OCTET's band only, and
+octet_relative_density is octet geometry. The stale radii were re-picked as r/L ratios
+(r/L=0.03 -> rho~0.0148 below rho_min; r/L=0.34 -> rho~0.963 above rho_max); both still
+land outside octet's [0.05, 0.90]. See section2b_radii_diagnosis.txt.
+
+RESULT: full test_lattice_certification ALL PASS (sections 1, 2, 2a, 2b, 2c, 3, 4&5);
+test_grading 23360 checks, 0 failures. See test_lattice_certification.txt / test_grading.txt.

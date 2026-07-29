@@ -1,0 +1,28 @@
+== T3: octet band (expect ~0.05047 / ~0.89988) ==
+  octet rho_min=0.05047 rho_max=0.89988
+
+== each topology reports its OWN band ==
+  octet    certifiable=1  band [0.05047, 0.89988]
+  sc       certifiable=1  band [0.08659, 0.49638]
+  bcc      certifiable=1  band [0.21050, 0.59288]
+  fcc      certifiable=1  band [0.09505, 0.59093]
+  diamond  certifiable=1  band [0.15712, 0.59201]
+  kelvin   certifiable=1  band [0.09375, 0.50521]
+  rhombic  certifiable=1  band [0.17245, 0.51331]
+
+== T4: octet MID rows bit-for-bit (query exact rho) ==
+  T4 PASS (all 7 MID rows bit-identical)
+
+== T7: octet extremes ==
+  rho=0.05047 C11=37.0649 (exp 37.0649) clamped=0(exp0)
+  rho=0.02    clamped=1(exp1)
+  rho=0.89988 C11=3832.0119 (exp 3832.0119) clamped=0(exp0)
+  rho=1.0     clamped=1(exp1)
+
+== tetragonal refusal (unchanged by octet widening) ==
+  bccz refused=1
+  fccz refused=1
+  reentrant refused=1
+
+== fcc==octet-legs anchor 0.29731 (B2 cross-check) ==
+  octet C11=374.2029  fcc C11=374.2029  match=1
