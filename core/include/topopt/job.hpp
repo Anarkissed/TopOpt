@@ -107,6 +107,23 @@ struct JobLattice {
   bool emit_3mf = false;           // write <prefix>_<vf>_lattice.3mf (streaming)
 };
 
+// Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the
+// stress-to-lattice grading law in the analyze/certification path. Absent =>
+// byte-identical run (bar L1). When present, the certification's von Mises field is
+// fed to grade_lattice (grading.hpp), which produces a per-voxel density + one uniform
+// cell size clamped to the certifiable band and the cells-per-member floor, and the
+// report is written to run_info's "grading" object. The law READS the band/floor from
+// core; only the knobs a job legitimately sets live here.
+struct JobGrading {
+  bool present = false;
+  std::string topology = "octet";       // only "octet" is implemented
+  double cell_mm = 0.0;                 // TARGET uniform cell edge (mm), finite > 0;
+                                        // raised to the printability floor if too small
+  double min_extrudable_width_mm = 0.0; // stated minimum strut width (mm), finite > 0
+  double demand_exponent = 1.0;         // rho = rho_max*(demand/max)^exp; 1.0 = fully-
+                                        // stressed on von Mises. finite > 0
+};
+
 // One load group of a declared load case (handoff 093): its faces are chosen
 // GEOMETRICALLY (the same selector rule as fixture_faces), and its total force
 // (newtons) is spread as a distributed traction over them. Mirrors one
@@ -214,6 +231,7 @@ struct JobDescription {
   int simp_max_iterations = 0;  // optional "simp" block; 0 = SimpOptions default
   JobOutput output;
   JobLattice lattice;  // optional "lattice" block; absent => byte-identical run
+  JobGrading grading;  // optional "grading" block; absent => byte-identical run
 
   // Optional "draft" block (handoff 2026-07-25-draft-quality): the approximate-
   // trajectory / exact-certification posture. Absent (has_draft == false, the
@@ -366,6 +384,13 @@ struct AnalyzeJobResult {
   double smooth_strength = 0.0;        // the strength knob used (0,1]
   SmoothStats smooth_stats;            // frozen count, volume drift + bound, min-feature
   std::string smoothed_mesh_path;      // <out_dir>/<...>_smoothed.stl (the exported mesh)
+
+  // Lattice grading (handoff 2026-07-29-lattice-grading-law). Populated only when the
+  // job carried a "grading" block: the certification's von Mises field is fed to the
+  // grading law and a run_info.json carrying the "grading" report is written. Default
+  // (no grading block) leaves these unset and writes no run_info — byte-identical (L1).
+  bool graded = false;
+  std::string grading_run_info_path;   // <out_dir>/run_info.json (the grading report)
 };
 
 // A constrained-smoothing request for analyze_job (handoff

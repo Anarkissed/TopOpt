@@ -1,0 +1,31 @@
+Lattice grading law — L3/L4 evidence on the maintainer's L-bracket.
+0.4 mm nozzle (min extrudable strut width). Uniform cell per region.
+
+===== A_maintainer_bracket_9p4mm (26x16x26 @ 1.00 mm) =====
+  limits READ from core: band rho [0.14764, 0.59093], cells/member floor 5.0
+  target cell 2.000 mm -> chosen 2.519 mm (printability floor 2.519 mm, floored: yes)
+  region candidates: 2790   latticed: 0   SOLID fallback (L4): 2790
+  >> L4: REGION UNGRADEABLE — no printable cell holds the floor in any
+     member; the whole region stays SOLID. (This is the honest answer
+     for a member thinner than floor x printability-floor cell.)
+  CERTIFY: nothing latticed -> the design is the solid part (margin 0.0749, mass 3.46 g).
+
+===== B_thick_bracket (36x26x36 @ 1.00 mm) =====
+  limits READ from core: band rho [0.14764, 0.59093], cells/member floor 5.0
+  target cell 2.000 mm -> chosen 2.519 mm (printability floor 2.519 mm, floored: yes)
+  region candidates: 14080   latticed: 12212   SOLID fallback (L4): 1868
+  density field: rho in [0.1476, 0.5909]  (clamped to the band)
+  strut diameter: [0.400, 0.956] mm   (min extrudable 0.400 mm; any below: no)
+  thinnest latticed member: 14.000 mm  ->  cells/member 5.557  (floor 5.0)
+  CERTIFY (L2, end to end): posture consumed -> lattice_certified=yes, margin 0.0303 (solid 0.1190), mass 4.87 g (solid 17.46 g)
+
+===== C_thick_bracket_big_cell (36x26x36 @ 1.00 mm) =====
+  limits READ from core: band rho [0.14764, 0.59093], cells/member floor 5.0
+  target cell 6.000 mm -> chosen 6.000 mm (printability floor 2.519 mm, floored: no)
+  region candidates: 14080   latticed: 0   SOLID fallback (L4): 14080
+  >> L4: REGION UNGRADEABLE — no printable cell holds the floor in any
+     member; the whole region stays SOLID. (This is the honest answer
+     for a member thinner than floor x printability-floor cell.)
+  CERTIFY: nothing latticed -> the design is the solid part (margin 0.1190, mass 17.46 g).
+
+Done.

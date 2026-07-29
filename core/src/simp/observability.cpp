@@ -555,7 +555,9 @@ std::string run_info_json(const RunInfo& info) {
   // last exactly as before (byte-identical, the P1 bar).
   const bool has_cert = info.lattice_present;
   const bool has_exp = info.lattice_export_present;
-  num("snapshot_cap", fmt_i(info.snapshot_cap), /*comma=*/has_cert || has_exp);
+  const bool has_grad = info.grading_present;
+  num("snapshot_cap", fmt_i(info.snapshot_cap),
+      /*comma=*/has_cert || has_exp || has_grad);
   if (has_cert) {
     std::string lat = "{\"topology\": \"" + info.lattice_topology + "\"";
     lat += ", \"cell_size_mm\": " + fmt(info.lattice_cell_size_mm);
@@ -564,7 +566,7 @@ std::string run_info_json(const RunInfo& info) {
     lat += ", \"region_voxels\": " + fmt_ll(info.lattice_region_voxels);
     lat += ", \"strength_uncertified\": " + bool_json(info.lattice_strength_uncertified);
     lat += "}";
-    num("lattice", lat, /*comma=*/has_exp);
+    num("lattice", lat, /*comma=*/has_exp || has_grad);
   }
   if (has_exp) {
     std::string le = "{\"topology\": \"" + info.lattice_export_topology + "\"";
@@ -582,7 +584,47 @@ std::string run_info_json(const RunInfo& info) {
     le += ", \"gen_seconds\": " + fmt(info.lattice_export_gen_seconds);
     le += ", \"gen_fraction\": " + fmt(info.lattice_export_gen_fraction);
     le += "}";
-    num("lattice_export", le, /*comma=*/false);  // always last when present
+    num("lattice_export", le, /*comma=*/has_grad);
+  }
+  if (has_grad) {
+    // The grading-law report (handoff 2026-07-29-lattice-grading-law). `band_*` and
+    // `cells_per_member_floor` are the limits the law READ from core (provenance);
+    // `solid_fallback_voxels` / `region_ungradeable` are bar L4 (members too thin to
+    // grade stayed solid); `min_strut_diameter_mm` / `any_strut_below_min` are the
+    // requirement-3 printability check. ALWAYS last when present (no trailing comma).
+    std::string gr = "{\"topology\": \"" + info.grading_topology + "\"";
+    gr += ", \"band_rho_min\": " + fmt(info.grading_band_rho_min);
+    gr += ", \"band_rho_max\": " + fmt(info.grading_band_rho_max);
+    gr += ", \"cells_per_member_floor\": " +
+          fmt(info.grading_cells_per_member_floor);
+    gr += ", \"cell_size_mm\": " + fmt(info.grading_cell_size_mm);
+    gr += ", \"printability_floor_mm\": " + fmt(info.grading_printability_floor_mm);
+    gr += ", \"cell_size_floored\": " + bool_json(info.grading_cell_size_floored);
+    gr += ", \"min_extrudable_width_mm\": " +
+          fmt(info.grading_min_extrudable_width_mm);
+    gr += ", \"rho_min_used\": " + fmt(info.grading_rho_min_used);
+    gr += ", \"rho_max_used\": " + fmt(info.grading_rho_max_used);
+    gr += ", \"region_voxels\": " + fmt_ll(info.grading_region_voxels);
+    gr += ", \"latticed_voxels\": " + fmt_ll(info.grading_latticed_voxels);
+    gr += ", \"solid_fallback_voxels\": " +
+          fmt_ll(info.grading_solid_fallback_voxels);
+    // Both can be the +inf "thicker than the EDT cap" sentinel (every latticed member
+    // exceeds it); JSON has no infinity, so emit null exactly as the Mnd field does.
+    gr += ", \"min_member_width_mm\": " +
+          (std::isfinite(info.grading_min_member_width_mm)
+               ? fmt(info.grading_min_member_width_mm)
+               : std::string("null"));
+    gr += ", \"min_cells_per_member\": " +
+          (std::isfinite(info.grading_min_cells_per_member)
+               ? fmt(info.grading_min_cells_per_member)
+               : std::string("null"));
+    gr += ", \"min_strut_diameter_mm\": " + fmt(info.grading_min_strut_diameter_mm);
+    gr += ", \"max_strut_diameter_mm\": " + fmt(info.grading_max_strut_diameter_mm);
+    gr += ", \"any_strut_below_min\": " +
+          bool_json(info.grading_any_strut_below_min);
+    gr += ", \"region_ungradeable\": " + bool_json(info.grading_region_ungradeable);
+    gr += "}";
+    num("grading", gr, /*comma=*/false);  // always last when present
   }
 
   s += "}\n";

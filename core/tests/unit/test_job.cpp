@@ -540,6 +540,59 @@ static void test_lattice_block() {
                 "lattice: rejects missing strut_radius_mm");
 }
 
+// --- Optional "grading" block (handoff 2026-07-29-lattice-grading-law)
+static void test_grading_block() {
+  // Absent => present false (byte-identical, bar L1).
+  {
+    const JobDescription j = parse_job(valid_job());
+    CHECK(!j.grading.present, "grading: absent block => not present");
+  }
+  // A full block parses into every field.
+  {
+    const std::string s =
+        mutate("\"mesh_prefix\": \"variant\" }",
+               "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"topology\": "
+               "\"octet\", \"cell_mm\": 3.0, \"min_extrudable_width_mm\": 0.4, "
+               "\"demand_exponent\": 0.5 }");
+    const JobDescription j = parse_job(s);
+    CHECK(j.grading.present, "grading: present");
+    CHECK(j.grading.topology == "octet", "grading: topology");
+    CHECK(j.grading.cell_mm == 3.0, "grading: cell_mm");
+    CHECK(j.grading.min_extrudable_width_mm == 0.4, "grading: min width");
+    CHECK(j.grading.demand_exponent == 0.5, "grading: demand_exponent");
+  }
+  // Minimal block: only the two required numbers; exponent defaults to 1.0.
+  {
+    const std::string s = mutate(
+        "\"mesh_prefix\": \"variant\" }",
+        "\"mesh_prefix\": \"variant\" },\n  \"grading\": { \"cell_mm\": 4.0, "
+        "\"min_extrudable_width_mm\": 0.8 }");
+    const JobDescription j = parse_job(s);
+    CHECK(j.grading.present && j.grading.demand_exponent == 1.0,
+          "grading: demand_exponent defaults to 1.0");
+  }
+  auto gr = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"grading\": " + body);
+  };
+  check_rejects(
+      gr("{ \"topology\": \"gyroid\", \"cell_mm\": 4, \"min_extrudable_width_mm\": 0.4 }"),
+      "grading: rejects unimplemented topology");
+  check_rejects(gr("{ \"cell_mm\": 0, \"min_extrudable_width_mm\": 0.4 }"),
+                "grading: rejects cell_mm <= 0");
+  check_rejects(gr("{ \"cell_mm\": 4, \"min_extrudable_width_mm\": 0 }"),
+                "grading: rejects min_extrudable_width_mm <= 0");
+  check_rejects(
+      gr("{ \"cell_mm\": 4, \"min_extrudable_width_mm\": 0.4, \"demand_exponent\": 0 }"),
+      "grading: rejects demand_exponent <= 0");
+  check_rejects(gr("{ \"cell_mm\": 4, \"min_extrudable_width_mm\": 0.4, \"bogus\": 1 }"),
+                "grading: rejects unknown key");
+  check_rejects(gr("{ \"min_extrudable_width_mm\": 0.4 }"),
+                "grading: rejects missing cell_mm");
+  check_rejects(gr("{ \"cell_mm\": 4 }"),
+                "grading: rejects missing min_extrudable_width_mm");
+}
+
 int main() {
   test_valid_baseline();
   test_demo_fixture();
@@ -552,6 +605,7 @@ int main() {
   test_clearances_manual();
   test_wall_loops();
   test_lattice_block();
+  test_grading_block();
 
   if (g_failures == 0) {
     std::printf("job schema (M6.2): all %d checks passed\n", g_checks);

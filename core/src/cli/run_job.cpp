@@ -17,6 +17,8 @@
 #include "topopt/clearance.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/fields.hpp"
+#include "topopt/grading.hpp"
+#include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -776,6 +778,50 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     if (ec)
       throw JobError("analyze: cannot create output directory " + out_dir + ": " +
                      ec.message());
+  }
+
+  // ── the LATTICE GRADING LAW (handoff 2026-07-29-lattice-grading-law) ─────────────
+  // When a "grading" block is present, feed the certification's von Mises field to the
+  // grading law: it produces a per-voxel density + one uniform cell size, clamped to
+  // the certifiable band and the cells-per-member floor it READS from core, and leaves
+  // members too thin to grade SOLID (bar L4). The full report is written to run_info's
+  // "grading" object. Absent -> this block is skipped, no run_info is written, and the
+  // analyze path is byte-identical (bar L1).
+  if (job.grading.present) {
+    GradingLawParams gp;
+    gp.topology = LatticeTopology::Octet;  // job schema restricts topology to octet
+    gp.target_cell_size_mm = job.grading.cell_mm;
+    gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
+    gp.demand_exponent = job.grading.demand_exponent;
+    const GradedField gf =
+        grade_lattice(design_grid, density, a.von_mises_field, nullptr, gp);
+
+    RunInfo gi = build_run_info(job, options, RunObservability{});
+    gi.grading_present = true;
+    gi.grading_topology = lattice_topology_name(gf.posture.topology);
+    gi.grading_band_rho_min = gf.band_rho_min;
+    gi.grading_band_rho_max = gf.band_rho_max;
+    gi.grading_cells_per_member_floor = gf.cells_per_member_floor;
+    gi.grading_cell_size_mm = gf.cell_size_mm;
+    gi.grading_printability_floor_mm = gf.printability_floor_mm;
+    gi.grading_cell_size_floored = gf.cell_size_floored;
+    gi.grading_min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
+    gi.grading_rho_min_used = gf.rho_min_used;
+    gi.grading_rho_max_used = gf.rho_max_used;
+    gi.grading_region_voxels = static_cast<long long>(gf.region_voxels);
+    gi.grading_latticed_voxels = static_cast<long long>(gf.latticed_voxels);
+    gi.grading_solid_fallback_voxels =
+        static_cast<long long>(gf.solid_fallback_voxels);
+    gi.grading_min_member_width_mm = gf.min_member_width_mm;
+    gi.grading_min_cells_per_member = gf.min_cells_per_member;
+    gi.grading_min_strut_diameter_mm = gf.min_strut_diameter_mm;
+    gi.grading_max_strut_diameter_mm = gf.max_strut_diameter_mm;
+    gi.grading_any_strut_below_min = gf.any_strut_below_min;
+    gi.grading_region_ungradeable = gf.region_ungradeable;
+
+    result.grading_run_info_path = join_path(out_dir, "run_info.json");
+    write_run_info(result.grading_run_info_path, gi);
+    result.graded = true;
   }
 
   // ── report.json (VariantReport schema — the NEW, re-analysed numbers) ────────

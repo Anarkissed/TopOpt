@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -273,6 +274,54 @@ int main() {
           "run_info lattice region size echoed");
     check(ljs.find("\"strength_uncertified\": true") != std::string::npos,
           "run_info lattice strut-strength-uncertified flag echoed");
+  }
+
+  // Grading-law report (handoff 2026-07-29-lattice-grading-law). Absent => NO grading
+  // key (byte-identical, bar L1); present => a trailing "grading" object with the
+  // limits read from core, the L4 solid-fallback counts and the L3 printability report.
+  {
+    RunInfo base;
+    base.fingerprint = "abc";
+    check(run_info_json(base).find("\"grading\"") == std::string::npos,
+          "run_info omits the grading key entirely when no grading block ran");
+    RunInfo gr = base;
+    gr.grading_present = true;
+    gr.grading_topology = "octet";
+    gr.grading_band_rho_min = 0.14764;
+    gr.grading_band_rho_max = 0.59093;
+    gr.grading_cells_per_member_floor = 5.0;
+    gr.grading_cell_size_mm = 2.5;
+    gr.grading_printability_floor_mm = 2.5;
+    gr.grading_cell_size_floored = true;
+    gr.grading_min_extrudable_width_mm = 0.4;
+    gr.grading_rho_min_used = 0.14764;
+    gr.grading_rho_max_used = 0.59093;
+    gr.grading_region_voxels = 1000;
+    gr.grading_latticed_voxels = 600;
+    gr.grading_solid_fallback_voxels = 400;
+    gr.grading_min_member_width_mm = 13.0;
+    gr.grading_min_cells_per_member = 5.2;
+    gr.grading_min_strut_diameter_mm = 0.4;
+    gr.grading_max_strut_diameter_mm = 1.5;
+    gr.grading_any_strut_below_min = false;
+    gr.grading_region_ungradeable = false;
+    const std::string gjs = run_info_json(gr);
+    check(gjs.find("\"grading\": {") != std::string::npos, "grading object emitted");
+    check(gjs.find("\"cells_per_member_floor\": 5") != std::string::npos,
+          "grading floor (read from core) echoed");
+    check(gjs.find("\"band_rho_max\": 0.59093") != std::string::npos,
+          "grading band top (read from core) echoed");
+    check(gjs.find("\"solid_fallback_voxels\": 400") != std::string::npos,
+          "grading L4 solid-fallback count echoed");
+    check(gjs.find("\"any_strut_below_min\": false") != std::string::npos,
+          "grading printability honesty flag echoed");
+    // +inf member width serializes as null (JSON has no infinity).
+    RunInfo inf = gr;
+    inf.grading_min_member_width_mm = std::numeric_limits<double>::infinity();
+    inf.grading_min_cells_per_member = std::numeric_limits<double>::infinity();
+    const std::string ijs = run_info_json(inf);
+    check(ijs.find("\"min_member_width_mm\": null") != std::string::npos,
+          "grading +inf member width serializes as null");
   }
 
   if (g_failures == 0) {

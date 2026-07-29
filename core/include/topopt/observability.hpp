@@ -410,6 +410,39 @@ struct RunInfo {
   bool lattice_export_interpenetrating_soup = true;
   double lattice_export_gen_seconds = 0.0;      // generation wall time
   double lattice_export_gen_fraction = 0.0;     // gen time / total job time (P6)
+
+  // GRADING LAW posture (handoff 2026-07-29-lattice-grading-law) — what the stress-to-
+  // lattice grading law produced for a "grading" job block. Set only in the analyze/
+  // certification path when a grading block is present; the serializer emits a nested
+  // "grading" object ONLY then, so a run with no grading block writes no key and stays
+  // byte-identical (bar L1). It records: the limits the law READ from core (the
+  // certifiable band and the cells-per-member floor — provenance, so a stale limit is
+  // visible), the chosen uniform cell size and whether the printability floor raised it,
+  // the achieved relative-density range, the region/latticed/solid-fallback voxel counts
+  // (bar L4 — how much of the region was too thin to grade and stayed SOLID), the
+  // resulting strut-diameter range and the thinnest member's cells-per-member (bar L3),
+  // and two honesty flags: any strut below the stated minimum width, and whether the
+  // whole region was ungradeable.
+  bool grading_present = false;
+  std::string grading_topology;             // "octet"
+  double grading_band_rho_min = 0.0;        // lattice_rho_min (read from core)
+  double grading_band_rho_max = 0.0;        // lattice_rho_max (read from core)
+  double grading_cells_per_member_floor = 0.0;  // lattice_cells_per_member_min
+  double grading_cell_size_mm = 0.0;        // the chosen uniform cell
+  double grading_printability_floor_mm = 0.0;
+  bool grading_cell_size_floored = false;   // target raised to the printability floor
+  double grading_min_extrudable_width_mm = 0.0;  // the STATED minimum (the input)
+  double grading_rho_min_used = 0.0;        // achieved band over latticed voxels
+  double grading_rho_max_used = 0.0;
+  long long grading_region_voxels = 0;      // printed candidates
+  long long grading_latticed_voxels = 0;    // graded to lattice
+  long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
+  double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
+  double grading_min_cells_per_member = 0.0;    // at that member (>= floor)
+  double grading_min_strut_diameter_mm = 0.0;
+  double grading_max_strut_diameter_mm = 0.0;
+  bool grading_any_strut_below_min = false; // requirement 3 honesty flag
+  bool grading_region_ungradeable = false;  // L4 at region scale
 };
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's

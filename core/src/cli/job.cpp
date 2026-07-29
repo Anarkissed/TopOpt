@@ -388,7 +388,7 @@ JobDescription parse_job(const std::string& json_text) {
                       {"model", "source_format", "material", "mode",
                        "resolution", "fixture_faces", "gravity", "ladder",
                        "margin_stop", "simp", "draft", "output", "lattice",
-                       "loads", "design_box", "keep_outs"},
+                       "grading", "loads", "design_box", "keep_outs"},
                       "the job");
 
   JobDescription job;
@@ -785,6 +785,38 @@ JobDescription parse_job(const std::string& json_text) {
     }
     if (!job.lattice.emit_stl && !job.lattice.emit_3mf)
       schema_fail("lattice block requests neither STL nor 3MF output");
+  }
+
+  // Optional "grading" block (handoff 2026-07-29-lattice-grading-law). Absent =>
+  // present stays false and the run is byte-identical (bar L1). The certifiable band
+  // and cells-per-member floor are NOT job knobs — the law reads them from core — so
+  // they are not accepted here.
+  if (const JsonValue* gradv = find_key(root, "grading")) {
+    const JsonValue& gr = require_object(*gradv, "grading");
+    reject_unknown_keys(
+        gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent"},
+        "grading");
+    job.grading.present = true;
+    if (const JsonValue* t = find_key(gr, "topology")) {
+      job.grading.topology = require_nonempty_string(*t, "grading.topology");
+      if (job.grading.topology != "octet")
+        schema_fail("grading \"topology\" must be \"octet\" (got \"" +
+                    job.grading.topology + "\")");
+    }
+    job.grading.cell_mm =
+        require_number(require_key(gr, "cell_mm", "grading"), "grading.cell_mm");
+    if (!(job.grading.cell_mm > 0.0))
+      schema_fail("grading \"cell_mm\" must be > 0");
+    job.grading.min_extrudable_width_mm = require_number(
+        require_key(gr, "min_extrudable_width_mm", "grading"),
+        "grading.min_extrudable_width_mm");
+    if (!(job.grading.min_extrudable_width_mm > 0.0))
+      schema_fail("grading \"min_extrudable_width_mm\" must be > 0");
+    if (const JsonValue* e = find_key(gr, "demand_exponent")) {
+      job.grading.demand_exponent = require_number(*e, "grading.demand_exponent");
+      if (!(job.grading.demand_exponent > 0.0))
+        schema_fail("grading \"demand_exponent\" must be > 0");
+    }
   }
 
   return job;

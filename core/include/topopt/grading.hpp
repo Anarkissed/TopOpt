@@ -1,0 +1,137 @@
+#ifndef TOPOPT_GRADING_HPP
+#define TOPOPT_GRADING_HPP
+
+// THE LATTICE GRADING LAW (handoff 2026-07-29-lattice-grading-law).
+//
+// This is the FRONT-END that turns a stress (or strain-energy) field into a
+// printable, certifiable lattice posture — the piece analyze.hpp's LatticePosture
+// comment calls "the grading law (separate task)". It maps a per-voxel demand to a
+// per-voxel relative density and ONE uniform cell size, then hands back a
+// LatticePosture the certification engine (analyze_fixed_design) already consumes.
+//
+// IT READS ITS LIMITS FROM CORE, IT DOES NOT HARDCODE THEM (bar ★):
+//   * the certifiable DENSITY BAND is lattice_rho_min / lattice_rho_max (lattice.hpp)
+//   * the CELLS-PER-MEMBER floor is lattice_cells_per_member_min (lattice.hpp)
+//   * the LOCAL MEMBER WIDTH is local_member_thickness_mm (voxel.hpp, PR 206)
+// When those measurements move, this law moves with them — no rewrite.
+//
+// THE THREE CONSTRAINTS IT ENFORCES (task requirements 1-3):
+//   1. DENSITY is clamped into [rho_min, rho_max]. Every emitted density is
+//      certifiable by construction (bar L2).
+//   2. CELL SIZE is clamped so cells-per-member (member_width / cell) stays at or
+//      above the floor, using the real local member width. A member too thin to hold
+//      the floor at a printable cell STAYS SOLID (bar L4) — never a sub-floor lattice.
+//   3. STRUT DIAMETER is checked against the stated minimum extrudable width and
+//      REPORTED (min_strut_diameter_mm, any_strut_below_min) — never silently violated.
+//
+// UNIFORM CELL SIZE PER REGION. This law emits ONE cell size for the whole region
+// (the smallest that keeps the lowest-density strut printable, but never below the
+// caller's target). Building a cell-size TRANSITION (dyadic vs conformal — PR 235
+// compared them) is a SEPARATE task and is deliberately NOT done here.
+//
+// DETERMINISTIC. Pure arithmetic in a fixed voxel order, no RNG/threads/atomics: the
+// same (grid, density, demand, params) always produce a byte-identical field (bar L5).
+
+#include <cstddef>
+#include <vector>
+
+#include "topopt/analyze.hpp"   // LatticePosture
+#include "topopt/lattice.hpp"   // LatticeTopology
+#include "topopt/voxel.hpp"     // VoxelGrid
+
+namespace topopt {
+
+// How the law maps demand to (density, cell size). All fields must be positive where
+// noted; grade_lattice throws std::invalid_argument otherwise.
+struct GradingLawParams {
+  LatticeTopology topology = LatticeTopology::Octet;
+
+  // The requested uniform cell edge (mm). The chosen cell is max(this, printability
+  // floor) — a target below the floor is raised (and cell_size_floored is set), never
+  // used as-is, because it would make the lowest-density strut unprintable. Must be > 0.
+  double target_cell_size_mm = 0.0;
+
+  // The STATED minimum extrudable strut width (mm) — requirement 3, an INPUT the law
+  // honours and reports against, not a magic number. The printability floor is set so
+  // a strut at rho_min prints at exactly this width; every higher-density strut is
+  // fatter. Must be > 0.
+  double min_extrudable_width_mm = 0.0;
+
+  // rho = rho_max * (demand / demand_max)^demand_exponent, clamped to the band.
+  //   1.0 (default) — fully-stressed grading for a STRESS-like demand (von Mises):
+  //     octet strength is ~linear in rho, so rho proportional to stress holds an even
+  //     margin.
+  //   0.5 — the same stress-proportional grade from a strain-ENERGY demand (u ~ s^2).
+  // Must be > 0.
+  double demand_exponent = 1.0;
+
+  // The local-member-thickness EDT radius cap (voxels), mirroring analyze.cpp's
+  // kWidthAwareThicknessCapVoxels. A member thicker than 2*cap*spacing reads the +inf
+  // "thicker than measured" sentinel and always clears the ceiling. Must be >= 1.
+  int thickness_cap_voxels = 32;
+};
+
+// The law's output: the posture the certification engine consumes, plus a full report
+// of what it produced and what it had to leave solid (bars L3 / L4). Every scalar here
+// is meant for run_info.
+struct GradedField {
+  // ── the deliverable: the certification posture ──────────────────────────────────
+  LatticePosture posture;  // topology, cell_size_mm, per-voxel mask + relative_density
+
+  // ── provenance: the limits READ FROM CORE (so run_info records what governed) ────
+  double band_rho_min = 0.0;           // lattice_rho_min(topology)
+  double band_rho_max = 0.0;           // lattice_rho_max(topology)
+  double cells_per_member_floor = 0.0; // lattice_cells_per_member_min(topology)
+
+  // ── the chosen uniform cell ─────────────────────────────────────────────────────
+  double cell_size_mm = 0.0;           // = posture.cell_size_mm = max(target, floor)
+  double printability_floor_mm = 0.0;  // smallest cell that prints the rho_min strut
+  bool cell_size_floored = false;      // target was below the floor and got raised
+
+  // ── what was produced (L3) ──────────────────────────────────────────────────────
+  std::size_t region_voxels = 0;          // candidate voxels (printed AND in region)
+  std::size_t latticed_voxels = 0;        // graded to lattice
+  std::size_t solid_fallback_voxels = 0;  // L4: too thin for the floor -> stayed SOLID
+  double rho_min_used = 0.0;              // achieved rho band over latticed voxels
+  double rho_max_used = 0.0;
+  double min_member_width_mm = 0.0;       // thinnest LATTICED member (mm); +inf if all
+                                          //   latticed members exceed the EDT cap
+  double min_cells_per_member = 0.0;      // at that thinnest member (>= floor always)
+  double min_strut_diameter_mm = 0.0;     // thinnest emitted strut
+  double max_strut_diameter_mm = 0.0;     // fattest emitted strut
+
+  // ── honesty flags ───────────────────────────────────────────────────────────────
+  bool any_strut_below_min = false;    // requirement 3: some strut under the min width
+                                       //   (false by construction; a tripwire, not a mode)
+  bool region_ungradeable = false;     // L4 at region scale: candidates existed but NONE
+                                       //   could be graded — the whole region stayed solid
+};
+
+// Grade `density`'s printed set (optionally restricted to `region`) from the per-voxel
+// `demand` field, returning the posture + report.
+//
+//   grid, density  — the FIXED design; a printed voxel is density > iso.
+//   demand         — per-voxel nonnegative demand (grid.voxel_count()); von Mises
+//                    stress for fully-stressed grading (demand_exponent 1), or strain-
+//                    energy density (demand_exponent 0.5). Off the printed set it is
+//                    ignored. All-zero demand -> a uniform rho_min lattice.
+//   region         — optional candidate mask (grid.voxel_count()); region[e] != 0 marks
+//                    voxel e a lattice candidate. Null -> every printed voxel is a
+//                    candidate. A candidate that fails the cells-per-member floor stays
+//                    solid regardless (L4).
+//   params, iso    — see above; iso is the printed-set threshold (0.5).
+//
+// Guarantees (bar L2, asserted internally before returning): for EVERY voxel the
+// returned posture marks latticed, relative_density is in [rho_min, rho_max] AND
+// member_width / cell_size >= cells_per_member_floor. A point the gate cannot certify
+// is never emitted. Throws std::invalid_argument on a size mismatch or a non-positive
+// param, std::logic_error if the internal certifiability invariant is ever violated.
+GradedField grade_lattice(const VoxelGrid& grid,
+                          const std::vector<double>& density,
+                          const std::vector<double>& demand,
+                          const std::vector<char>* region,
+                          const GradingLawParams& params, double iso = 0.5);
+
+}  // namespace topopt
+
+#endif  // TOPOPT_GRADING_HPP
