@@ -1082,6 +1082,26 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   #      variants + fields, deterministic twice-run.
   # Drives run_job (OCCT+Eigen) + the STL fixture; the demo/materials/rules and
   # the build dir (for run outputs + the temporary STL export) are injected.
+  # Loadcase-analyze (handoff 2026-07-28-loadcase-analyze): the analyze path now
+  # certifies a FIXED design under a DECLARED external load, not only self-weight —
+  # the fact bar S3 needs (under self-weight a lighter part is always safer, so no
+  # geometry change can move a verdict DOWN). Proves, at the analyze_fixed_design +
+  # build_production_loadcase seam (synthetic model, full control) and end to end
+  # through analyze_job on the demo l-bracket (OCCT front door): L1 self-weight
+  # reproduction bit-identical, L2 loadcase rung reproduction bit-identical, L3 the
+  # gate REJECTS under a declared load, L4 deterministic re-run, and L5 a nonexistent
+  # / empty-external load FAILS LOUDLY (never a silent self-weight fallback). Drives
+  # minimize_plastic + analyze_fixed_design (Eigen) and analyze_job (OCCT); the demo
+  # fixture, materials, rules and the temp dir are injected.
+  add_executable(test_loadcase_analyze tests/validation/test_loadcase_analyze.cpp)
+  target_link_libraries(test_loadcase_analyze PRIVATE topopt)
+  target_compile_definitions(test_loadcase_analyze PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME loadcase_analyze COMMAND test_loadcase_analyze)
+
   add_executable(test_mesh_job tests/validation/test_mesh_job.cpp)
   target_link_libraries(test_mesh_job PRIVATE topopt)
   target_compile_definitions(test_mesh_job PRIVATE

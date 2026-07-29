@@ -1,0 +1,22 @@
+{
+  "provenance": "smoothed / re-analyzed",
+  "analyzed": true,
+  "optimization": false,
+  "source": "model_solid",
+  "model": "l-bracket.step",
+  "resolution": 48,
+  "voxel_mass_grams": 41.443125,
+  "mesh_mass_grams": null,
+  "load_source": "loadcase",
+  "load_groups": 1,
+  "anchor_faces": 2,
+  "external_load_nodes": 1777,
+  "declared_force_resultant_n": 60000,
+  "max_stress_mpa": 6532.660586,
+  "margin_worst_case": 0.008419234288,
+  "margin_required": 1.5,
+  "margin_effective": 0.008419234288,
+  "accepted": false,
+  "min_feature_violations": 0,
+  "quantization_note": "Re-analysis runs on the voxelization of the analyzed mesh at the grid resolution, so the analyzed and printed geometry differ by up to ~half a voxel. The stress margin and voxel mass describe the voxel proxy; the mesh mass is the surface-enclosed volume."
+}
