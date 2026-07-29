@@ -84,11 +84,15 @@ bool lattice_topology_certifiable(LatticeTopology topo);
 // bridge mirrors so its UI set can never drift from the core library.
 std::vector<std::string> lattice_certifiable_topology_names();
 
-// The relative-density range over which the embedded library is trustworthy — the
-// RESOLVED rows of PR 198's octet sweep (wall >= 4 voxels at vpc48). Below the min
-// the struts alias badly (the under-resolved rows PR 198 flagged and excluded from
-// its fits); above the max the part is nearly solid. A query outside [min, max] is
-// CLAMPED to the endpoint and `rho_clamped` is set true so the caller can flag it.
+// The relative-density range over which the embedded library is trustworthy, PER
+// TOPOLOGY — derived from that topology's own RESOLVED rows (the contiguous validated
+// block), so each topology reports its own band. Octet's band was widened to
+// ~0.05..0.90 by PR 237 (evidence/2026-07-28-density-band-extension): its LOW end is
+// vpc128 converged truth and its HIGH end vpc48 validated vs vpc64, each within ±2.4%
+// of periodic-homogenization truth; the eight other topologies keep the ~0.15..0.60
+// bands their sweeps validated. Below the min the struts alias badly; above the max
+// the part is nearly solid. A query outside [min, max] is CLAMPED to the endpoint and
+// `rho_clamped` is set true so the caller can flag it.
 double lattice_rho_min(LatticeTopology topo);
 double lattice_rho_max(LatticeTopology topo);
 

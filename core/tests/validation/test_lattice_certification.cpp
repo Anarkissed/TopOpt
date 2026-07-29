@@ -104,8 +104,10 @@ int main() {
     // clamped below the resolved minimum
     lattice_cubic_tensor(LatticeTopology::Octet, 0.02, E, &clamped);
     check(clamped, "a rho below the resolved range is clamped and flagged");
-    check(lattice_rho_min(LatticeTopology::Octet) > 0.1 &&
-          lattice_rho_max(LatticeTopology::Octet) > 0.5, "resolved range reported");
+    // PR 237 widened the certified OCTET band to ~0.05..0.90 (was ~0.148..0.591).
+    check(lattice_rho_min(LatticeTopology::Octet) > 0.04 &&
+          lattice_rho_min(LatticeTopology::Octet) < 0.10 &&
+          lattice_rho_max(LatticeTopology::Octet) > 0.85, "resolved range reported");
   }
 
   std::printf("== 2a. nine-topology tensor library (2026-07-29-tensor-library-nine) ==\n");
@@ -177,10 +179,18 @@ int main() {
     check(octet_relative_density(5.0, 0.50) < rho_075 &&
               rho_075 < octet_relative_density(5.0, 1.0),
           "octet_relative_density increases with strut radius");
-    check(octet_relative_density(5.0, 0.30) < lo,
-          "a thin strut maps BELOW the band (the E5 refusal case)");
-    check(octet_relative_density(5.0, 1.05) > hi,
-          "a fat strut maps ABOVE the band (the E5 refusal case)");
+    // Out-of-band probes, expressed as an r/L RATIO (cell = 1, so the second arg is
+    // r/L). octet_relative_density is cell-invariant, so the ratio — not a bare radius
+    // — is what places a strut relative to the band. Chosen with margin outside the
+    // CURRENT octet band [~0.05, ~0.90]: r/L=0.03 -> rho~0.0148 (below rho_min ~0.05),
+    // r/L=0.34 -> rho~0.963 (above rho_max ~0.90, still < 1). PR 237's band extension
+    // is exactly what invalidated the previous 0.30 / 1.05 radii (they crept inside the
+    // widened band); if the band moves again these ratios must be re-checked (handoff
+    // 2026-07-29-octet-rows-land).
+    check(octet_relative_density(1.0, 0.03) < lo,
+          "a thin strut (r/L=0.03) maps BELOW the band (the E5 refusal case)");
+    check(octet_relative_density(1.0, 0.34) > hi,
+          "a fat strut (r/L=0.34) maps ABOVE the band (the E5 refusal case)");
     bool threw = false;
     try { octet_relative_density(5.0, 0.0); }
     catch (const std::invalid_argument&) { threw = true; }
