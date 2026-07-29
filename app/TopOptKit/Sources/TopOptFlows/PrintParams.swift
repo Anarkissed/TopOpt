@@ -40,23 +40,73 @@ public struct PrintParams: Equatable, Sendable, Codable {
     public var infillPercent: Int
     /// Infill pattern name (the M5.1 `infill_pattern` override).
     public var infillPattern: String
+    /// Extrusion line width (mm) of the single OUTER wall loop — the width of one
+    /// deposited bead, a slicer setting (typically 1.0–1.2× the nozzle), NOT the nozzle
+    /// diameter. Bambu Studio / OrcaSlicer expose the outer perimeter's width separately
+    /// from the inner loops, so the solid wall ring the slicer lays down is
+    /// `outer + (wallLoops - 1) · inner`. Threaded through BOTH front-ends for the
+    /// width-aware knockdown's wall-ring term (handoff line-width-plumbing).
+    public var wallLineWidthOuterMM: Double
+    /// Extrusion line width (mm) of the INNER wall loops (see `wallLineWidthOuterMM`).
+    /// A bead width, not the nozzle diameter. This is the core's historical single
+    /// `wall_line_width_mm`.
+    public var wallLineWidthInnerMM: Double
 
     public init(layerHeightMM: Double, wallLoops: Int, topLayers: Int,
-                bottomLayers: Int, infillPercent: Int, infillPattern: String) {
+                bottomLayers: Int, infillPercent: Int, infillPattern: String,
+                wallLineWidthOuterMM: Double = PrintParams.fdmDefault.wallLineWidthOuterMM,
+                wallLineWidthInnerMM: Double = PrintParams.fdmDefault.wallLineWidthInnerMM) {
         self.layerHeightMM = layerHeightMM
         self.wallLoops = wallLoops
         self.topLayers = topLayers
         self.bottomLayers = bottomLayers
         self.infillPercent = infillPercent
         self.infillPattern = infillPattern
+        self.wallLineWidthOuterMM = wallLineWidthOuterMM
+        self.wallLineWidthInnerMM = wallLineWidthInnerMM
+    }
+
+    // MARK: - Codable (back-compat, N4)
+
+    private enum CodingKeys: String, CodingKey {
+        case layerHeightMM, wallLoops, topLayers, bottomLayers, infillPercent, infillPattern
+        case wallLineWidthOuterMM, wallLineWidthInnerMM
+    }
+
+    /// A project saved BEFORE the line-width fields existed (its JSON carries the six
+    /// original keys but neither width) decodes with the two widths defaulted to the FDM
+    /// starting point, so an old project loads instead of failing to decode (N4). The
+    /// synthesized decoder would throw on the missing keys; this restores the same
+    /// "missing → default" tolerance the whole-struct-optional `printParams?` already
+    /// gives a pre-M7.params snapshot.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        layerHeightMM = try c.decode(Double.self, forKey: .layerHeightMM)
+        wallLoops = try c.decode(Int.self, forKey: .wallLoops)
+        topLayers = try c.decode(Int.self, forKey: .topLayers)
+        bottomLayers = try c.decode(Int.self, forKey: .bottomLayers)
+        infillPercent = try c.decode(Int.self, forKey: .infillPercent)
+        infillPattern = try c.decode(String.self, forKey: .infillPattern)
+        wallLineWidthOuterMM = try c.decodeIfPresent(Double.self, forKey: .wallLineWidthOuterMM)
+            ?? PrintParams.fdmDefault.wallLineWidthOuterMM
+        wallLineWidthInnerMM = try c.decodeIfPresent(Double.self, forKey: .wallLineWidthInnerMM)
+            ?? PrintParams.fdmDefault.wallLineWidthInnerMM
     }
 
     /// FDM-sensible defaults (a typical desktop-FDM starting point: 0.2 mm layers,
     /// 3 walls, 4 top / 4 bottom shells, 20 % gyroid infill). The sheet seeds from
     /// this and the "Default" button resets to it.
+    ///
+    /// Line-width defaults assume a 0.4 mm nozzle and follow the Bambu Studio /
+    /// OrcaSlicer 0.4-nozzle system profile: a 0.42 mm OUTER wall (a hair narrower for
+    /// surface quality) and a 0.45 mm INNER wall. 0.45 mm is also the core's historical
+    /// `wall_line_width_mm` and the value coupons 191/192 were measured at, so the inner
+    /// term is continuous with the calibrated knockdown. These are BEAD widths, not the
+    /// nozzle diameter.
     public static let fdmDefault = PrintParams(
         layerHeightMM: 0.2, wallLoops: 3, topLayers: 4,
-        bottomLayers: 4, infillPercent: 20, infillPattern: "gyroid")
+        bottomLayers: 4, infillPercent: 20, infillPattern: "gyroid",
+        wallLineWidthOuterMM: 0.42, wallLineWidthInnerMM: 0.45)
 
     /// The infill-pattern options the sheet offers (design PRINT PARAMETERS sheet:
     /// 6 patterns). `gyroid` is the default and the core rules.json's FDM pattern.
@@ -73,10 +123,15 @@ public struct PrintParams: Equatable, Sendable, Codable {
     public static let wallLoopsRange: ClosedRange<Int> = 0...10
     public static let shellLayersRange: ClosedRange<Int> = 0...15
     public static let infillRange: ClosedRange<Int> = 0...100
+    /// Wall extrusion line width bounds (mm). A bead is ~0.6–2.0× the nozzle, and
+    /// nozzles run ~0.2–1.0 mm, so 0.1–2.0 mm covers every realistic FDM profile while
+    /// staying inside the core schema's (0, 100] guard. Shared by outer and inner.
+    public static let lineWidthRange: ClosedRange<Double> = 0.1...2.0
 
-    /// The nudge each field's − / + stepper applies: layer height by 0.02 mm, the
-    /// wall / shell counts and infill % by 1.
+    /// The nudge each field's − / + stepper applies: layer height and line width by
+    /// 0.02 mm, the wall / shell counts and infill % by 1.
     public static let layerHeightStep: Double = 0.02
+    public static let lineWidthStep: Double = 0.02
 
     // MARK: - Validation
 
@@ -90,7 +145,9 @@ public struct PrintParams: Equatable, Sendable, Codable {
             topLayers: Self.clamp(topLayers, Self.shellLayersRange),
             bottomLayers: Self.clamp(bottomLayers, Self.shellLayersRange),
             infillPercent: Self.clamp(infillPercent, Self.infillRange),
-            infillPattern: PrintParams.patternOptions.contains(infillPattern) ? infillPattern : PrintParams.fdmDefault.infillPattern)
+            infillPattern: PrintParams.patternOptions.contains(infillPattern) ? infillPattern : PrintParams.fdmDefault.infillPattern,
+            wallLineWidthOuterMM: wallLineWidthOuterMM.isFinite ? Self.clamp(wallLineWidthOuterMM, Self.lineWidthRange) : PrintParams.fdmDefault.wallLineWidthOuterMM,
+            wallLineWidthInnerMM: wallLineWidthInnerMM.isFinite ? Self.clamp(wallLineWidthInnerMM, Self.lineWidthRange) : PrintParams.fdmDefault.wallLineWidthInnerMM)
     }
 
     private static func clamp<V: Comparable>(_ v: V, _ range: ClosedRange<V>) -> V {
@@ -126,6 +183,23 @@ public struct PrintParams: Equatable, Sendable, Codable {
     /// Bottom shell layers after stepping by `delta`, clamped to 0–15.
     public func steppingBottomLayers(by delta: Int) -> Int {
         Self.clamp(bottomLayers + delta, Self.shellLayersRange)
+    }
+
+    /// Outer wall line width after nudging by `steps` × 0.02 mm, clamped to 0.1–2.0 mm
+    /// and rounded to a clean 2-dp mm value (no float drift under repeated steps).
+    public func steppingOuterLineWidth(by steps: Int) -> Double {
+        Self.steppedWidth(wallLineWidthOuterMM, by: steps)
+    }
+
+    /// Inner wall line width after nudging by `steps` × 0.02 mm, clamped to 0.1–2.0 mm.
+    public func steppingInnerLineWidth(by steps: Int) -> Double {
+        Self.steppedWidth(wallLineWidthInnerMM, by: steps)
+    }
+
+    private static func steppedWidth(_ w: Double, by steps: Int) -> Double {
+        let nudged = w + Double(steps) * lineWidthStep
+        let clamped = clamp(nudged, lineWidthRange)
+        return (clamped * 100).rounded() / 100
     }
 
     /// Infill pinned to the 0–100 slider track. The tap-to-edit field can briefly

@@ -45,6 +45,58 @@ final class PrintParamsTests: XCTestCase {
         XCTAssertEqual(d.infillPercent, 20)
         XCTAssertEqual(d.infillPattern, "gyroid")
         XCTAssertTrue(PrintParams.patternOptions.contains(d.infillPattern))
+        // Stated 0.4-nozzle line-width defaults (Bambu/Orca profile): a hair-narrower
+        // outer for surface quality, 0.45 mm inner = the core's historical width.
+        XCTAssertEqual(d.wallLineWidthOuterMM, 0.42)
+        XCTAssertEqual(d.wallLineWidthInnerMM, 0.45)
+    }
+
+    /// N4 — a project persisted BEFORE the line-width fields existed (its PrintParams
+    /// JSON carries the six original keys and neither width) decodes with the widths
+    /// filled from the stated FDM defaults, instead of failing to decode. This is the
+    /// exact shape the synthesized decoder would have rejected.
+    func testLegacyPrintParamsJSONDecodesWidthsToDefault() throws {
+        let legacy = """
+        {"layerHeightMM":0.16,"wallLoops":5,"topLayers":6,"bottomLayers":5,
+         "infillPercent":42,"infillPattern":"grid"}
+        """.data(using: .utf8)!
+        let p = try JSONDecoder().decode(PrintParams.self, from: legacy)
+        // The original fields survived…
+        XCTAssertEqual(p.wallLoops, 5)
+        XCTAssertEqual(p.infillPercent, 42)
+        XCTAssertEqual(p.infillPattern, "grid")
+        // …and the two new widths defaulted (not zero, not a decode failure).
+        XCTAssertEqual(p.wallLineWidthOuterMM, PrintParams.fdmDefault.wallLineWidthOuterMM)
+        XCTAssertEqual(p.wallLineWidthInnerMM, PrintParams.fdmDefault.wallLineWidthInnerMM)
+    }
+
+    func testPrintParamsCodableRoundTripCarriesWidths() throws {
+        let p = PrintParams(layerHeightMM: 0.2, wallLoops: 4, topLayers: 4, bottomLayers: 4,
+                            infillPercent: 30, infillPattern: "cubic",
+                            wallLineWidthOuterMM: 0.4, wallLineWidthInnerMM: 0.6)
+        let back = try JSONDecoder().decode(PrintParams.self,
+                                            from: try JSONEncoder().encode(p))
+        XCTAssertEqual(back, p, "the custom Codable encodes + decodes the widths losslessly")
+    }
+
+    func testSteppingLineWidthsNudgeAndClamp() {
+        var p = PrintParams.fdmDefault
+        p.wallLineWidthOuterMM = 0.42
+        XCTAssertEqual(p.steppingOuterLineWidth(by: 1), 0.44, accuracy: 1e-9, "+1 step = +0.02 mm")
+        XCTAssertEqual(p.steppingOuterLineWidth(by: -1), 0.40, accuracy: 1e-9)
+        p.wallLineWidthInnerMM = 2.0
+        XCTAssertEqual(p.steppingInnerLineWidth(by: 1), 2.0, "capped at 2.0 mm")
+        p.wallLineWidthInnerMM = 0.1
+        XCTAssertEqual(p.steppingInnerLineWidth(by: -1), 0.1, "floored at 0.1 mm")
+    }
+
+    func testClampLineWidthsToBounds() {
+        let wild = PrintParams(layerHeightMM: 0.2, wallLoops: 3, topLayers: 4, bottomLayers: 4,
+                               infillPercent: 20, infillPattern: "gyroid",
+                               wallLineWidthOuterMM: 9.0, wallLineWidthInnerMM: 0.001)
+        let c = wild.clamped()
+        XCTAssertEqual(c.wallLineWidthOuterMM, 2.0, "outer capped at 2.0 mm")
+        XCTAssertEqual(c.wallLineWidthInnerMM, 0.1, "inner floored at 0.1 mm")
     }
 
     func testClampToSaneFDMBounds() {
@@ -316,6 +368,22 @@ final class PrintParamsTests: XCTestCase {
         let request = try XCTUnwrap(m.makeRunRequest())
         XCTAssertEqual(request.infillPercent, 45,
                        "the project's infill override is threaded into the run request → bridge")
+    }
+
+    func testLineWidthsArePartOfRequestIdentity() {
+        // Changing a line width must change the request (it feeds the width-aware
+        // knockdown's wall ring once armed), so Optimize re-enables after a width edit.
+        let base = RunRequest(modelPath: "/m.step", material: "PLA", materialsPath: "/mat",
+                              rulesPath: "/rules", resolution: 64, projectName: "P",
+                              wallLineWidthOuterMM: 0.42, wallLineWidthInnerMM: 0.45)
+        let outerChanged = RunRequest(modelPath: "/m.step", material: "PLA", materialsPath: "/mat",
+                                      rulesPath: "/rules", resolution: 64, projectName: "P",
+                                      wallLineWidthOuterMM: 0.40, wallLineWidthInnerMM: 0.45)
+        let innerChanged = RunRequest(modelPath: "/m.step", material: "PLA", materialsPath: "/mat",
+                                      rulesPath: "/rules", resolution: 64, projectName: "P",
+                                      wallLineWidthOuterMM: 0.42, wallLineWidthInnerMM: 0.50)
+        XCTAssertNotEqual(base, outerChanged)
+        XCTAssertNotEqual(base, innerChanged)
     }
 
     func testInfillIsPartOfRequestIdentity() {

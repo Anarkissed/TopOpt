@@ -1,0 +1,95 @@
+conditioning_probe: grid 16x8x16 solids=1920 (occ=0.938) filter_r=1.50 phase=all
+
+--- baseline simp_optimize per rung (density_min=1e-3 => contrast 1e-9) ---
+  baseline rung vf=0.68 achieved=0.6800 solid_frac=0.645
+  baseline rung vf=0.52 achieved=0.5200 solid_frac=0.494
+  baseline rung vf=0.38 achieved=0.3800 solid_frac=0.361
+  baseline rung vf=0.26 achieved=0.2600 solid_frac=0.246
+
+========== PHASE cond — conditioning at FIXED geometry ==========
+grid 16x8x16  spacing=2.000  solid_voxels=1920
+  [csv ../evidence/2026-07-28-conditioning-stage0/grid16/cond_sweep.csv]
+
+-- rung vf=0.68 (achieved 0.680) --
+   contr  dmin      |   cg_raw   cg_jac  cg_resc |      kappa | mgOK  hier  cycles    mg_cg
+   1e-9   1.00e-03  |    40000      208      206 |  4.027e+06 |    1     1      35       35
+   1e-8   2.15e-03  |    40000      208      207 |  3.984e+06 |    1     1      35       35
+   1e-7   4.64e-03  |    40000      208      207 |  3.610e+06 |    1     1      35       35
+   1e-6   1.00e-02  |    23689      207      207 |  1.882e+06 |    1     1      35       35
+   1e-5   2.15e-02  |    12042      208      207 |  4.478e+05 |    1     1      35       35
+
+-- rung vf=0.52 (achieved 0.520) --
+   contr  dmin      |   cg_raw   cg_jac  cg_resc |      kappa | mgOK  hier  cycles    mg_cg
+   1e-9   1.00e-03  |    40000      251      250 |  3.173e+06 |    1     1      45       45
+   1e-8   2.15e-03  |    40000      251      250 |  3.143e+06 |    1     1      45       45
+   1e-7   4.64e-03  |    40000      252      251 |  2.884e+06 |    1     1      45       45
+   1e-6   1.00e-02  |    36694      252      250 |  1.599e+06 |    1     1      45       45
+   1e-5   2.15e-02  |    15286      252      250 |  3.838e+05 |    1     1      45       45
+
+-- rung vf=0.38 (achieved 0.380) --
+   contr  dmin      |   cg_raw   cg_jac  cg_resc |      kappa | mgOK  hier  cycles    mg_cg
+   1e-9   1.00e-03  |    40000      320      319 |  3.707e+06 |    1     1      62       62
+   1e-8   2.15e-03  |    40000      319      319 |  3.660e+06 |    1     1      62       62
+   1e-7   4.64e-03  |    40000      319      319 |  3.254e+06 |    1     1      60       60
+   1e-6   1.00e-02  |    39779      319      318 |  1.576e+06 |    1     1      56       56
+   1e-5   2.15e-02  |    15824      319      318 |  3.569e+05 |    1     1      56       56
+
+-- rung vf=0.26 (achieved 0.260) --
+   contr  dmin      |   cg_raw   cg_jac  cg_resc |      kappa | mgOK  hier  cycles    mg_cg
+   1e-9   1.00e-03  |    40000      691      682 |  3.781e+06 |    1     1     117      117
+   1e-8   2.15e-03  |    40000      691      688 |  3.718e+06 |    1     1     117      117
+   1e-7   4.64e-03  |    40000      692      682 |  3.166e+06 |    1     1     117      117
+   1e-6   1.00e-02  |    33575      691      689 |  1.306e+06 |    1     1     115      115
+   1e-5   2.15e-02  |    14962      691      686 |  2.723e+05 |    1     1     118      118
+
+========== PHASE combo (S5) — rescaling + rho_min=1e-6 ==========
+
+-- rung vf=0.68 --
+   contrast=1e-09 dmin=1.00e-03 : mg_used=1 hier=1 cycles=35 cg_iters=35 converged=1
+   contrast=1e-06 dmin=1.00e-02 : mg_used=1 hier=1 cycles=35 cg_iters=35 converged=1
+
+-- rung vf=0.52 --
+   contrast=1e-09 dmin=1.00e-03 : mg_used=1 hier=1 cycles=45 cg_iters=45 converged=1
+   contrast=1e-06 dmin=1.00e-02 : mg_used=1 hier=1 cycles=45 cg_iters=45 converged=1
+
+-- rung vf=0.38 --
+   contrast=1e-09 dmin=1.00e-03 : mg_used=1 hier=1 cycles=62 cg_iters=62 converged=1
+   contrast=1e-06 dmin=1.00e-02 : mg_used=1 hier=1 cycles=56 cg_iters=56 converged=1
+
+-- rung vf=0.26 --
+   contrast=1e-09 dmin=1.00e-03 : mg_used=1 hier=1 cycles=117 cg_iters=117 converged=1
+   contrast=1e-06 dmin=1.00e-02 : mg_used=1 hier=1 cycles=115 cg_iters=115 converged=1
+
+========== PHASE design (S4) — design cost of raising rho_min ==========
+grid 16x8x16  solid_voxels=1920
+  [csv ../evidence/2026-07-28-conditioning-stage0/grid16/design_cost.csv]
+
+-- rung vf=0.68 --
+   contrast dmin      ctl  |   solidB   solidV changed |  marginB  marginV  acc
+   1e-8     2.15e-03  NEG  |     1320     1320       0 |  99.1199  99.0779  acc
+   1e-7     4.64e-03       |     1320     1320       4 |  99.1199  99.1287  acc
+   1e-6     1.00e-02       |     1320     1312      12 |  99.1199  99.3096  acc
+   1e-5     2.15e-02       |     1320     1304      20 |  99.1199  99.2328  acc
+
+-- rung vf=0.52 --
+   contrast dmin      ctl  |   solidB   solidV changed |  marginB  marginV  acc
+   1e-8     2.15e-03  NEG  |     1012     1010       2 |  69.3892  68.7536  acc
+   1e-7     4.64e-03       |     1012     1008       4 |  69.3892  67.1456  acc
+   1e-6     1.00e-02       |     1012      998      18 |  69.3892  67.5501  acc
+   1e-5     2.15e-02       |     1012      990      54 |  69.3892  67.2240  acc
+
+-- rung vf=0.38 --
+   contrast dmin      ctl  |   solidB   solidV changed |  marginB  marginV  acc
+   1e-8     2.15e-03  NEG  |      740      738      38 |  37.8551  38.1703  acc
+   1e-7     4.64e-03       |      740      740      36 |  37.8551  38.1526  acc
+   1e-6     1.00e-02       |      740      732       8 |  37.8551  36.4090  acc
+   1e-5     2.15e-02       |      740      716      76 |  37.8551  30.4677  acc
+
+-- rung vf=0.26 --
+   contrast dmin      ctl  |   solidB   solidV changed |  marginB  marginV  acc
+   1e-8     2.15e-03  NEG  |      504      504       0 |  24.9988  24.5260  acc
+   1e-7     4.64e-03       |      504      502       2 |  24.9988  23.8730  acc
+   1e-6     1.00e-02       |      504      490      14 |  24.9988  22.2644  acc
+   1e-5     2.15e-02       |      504      482      26 |  24.9988  20.3647  acc
+
+conditioning_probe: done.

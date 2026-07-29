@@ -1,0 +1,16 @@
+conditioning_probe: grid 32x16x32 solids=15360 (occ=0.938) filter_r=1.50 phase=upsample
+
+========== PHASE upsample (S5 scaling) — does the floor rescue MG carry? ==========
+  base 16x8x16 deep-rung achieved=0.260
+  [csv ../evidence/2026-07-28-conditioning-stage0/upsample/upsample_s5.csv]
+   factor grid         | contrast |  mgOK  hier  cycles cg_iters   conv
+   x1     16x 8x16 | 1e-09    |     1     1     117      117      1
+   x1     16x 8x16 | 1e-06    |     1     1     115      115      1
+   x2     32x16x32 | 1e-09    |     1     1      57       57      1
+   x2     32x16x32 | 1e-06    |     1     1      57       57      1
+   x3     48x24x48 | 1e-09    |     1     1     154      154      1
+   x3     48x24x48 | 1e-06    |     1     1      99       99      1
+   x4     64x32x64 | 1e-09    |     1     1      58       58      1
+   x4     64x32x64 | 1e-06    |     1     1      58       58      1
+
+conditioning_probe: done.

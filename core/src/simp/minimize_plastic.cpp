@@ -114,6 +114,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       options.wall_line_width_mm < 0.0)
     throw std::invalid_argument(
         "minimize_plastic: wall_line_width_mm must be finite and >= 0");
+  // The outer-wall width's < 0 is the "mirror inner" sentinel (the default), so only a
+  // finite value is required here — a NaN / +inf outer width is still rejected.
+  if (!std::isfinite(options.wall_line_width_outer_mm))
+    throw std::invalid_argument(
+        "minimize_plastic: wall_line_width_outer_mm must be finite");
   // Diagnosis 095 — the silent-self-weight-fall-through guard. A load-case caller
   // sets require_external_loads; an empty external_loads then means the user's
   // force never reached the solver, and falling through to self-weight would ship

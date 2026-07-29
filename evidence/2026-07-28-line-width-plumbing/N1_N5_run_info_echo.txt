@@ -1,0 +1,48 @@
+N1 / N5 / back-compat — run_info.json echoes the wall LINE WIDTHS the user set and the
+derived solid wall-ring thickness t = outer + (wall_loops - 1)·inner.
+
+Command (LAN worker == CLI path), run per job from core/tests/fixtures/demo/ so
+"l-bracket.step" resolves:
+  topopt-cli run <job> --out <out> --materials materials.json --rules rules.json --no-iteration-csv
+
+Grep of out_<job>/run_info.json:
+=== job_split ===
+  "load_source": "loadcase",
+  "infill_percent": 20,
+  "width_aware_knockdown": false,
+  "wall_loops": 5,
+  "wall_line_width_mm": 0.5,
+  "wall_line_width_outer_mm": 0.4,
+  "wall_thickness_mm": 2.4,
+
+=== job_maintainer_defaults ===
+  "load_source": "loadcase",
+  "infill_percent": 20,
+  "width_aware_knockdown": false,
+  "wall_loops": 5,
+  "wall_line_width_mm": 0.45,
+  "wall_line_width_outer_mm": 0.42,
+  "wall_thickness_mm": 2.22,
+
+=== job_inner_only ===
+  "load_source": "loadcase",
+  "infill_percent": 20,
+  "width_aware_knockdown": false,
+  "wall_loops": 5,
+  "wall_line_width_mm": 0.45,
+  "wall_line_width_outer_mm": 0.45,
+  "wall_thickness_mm": 2.25,
+
+Readout:
+  job_split (inner 0.5, outer 0.4, 5 loops):   wall_thickness_mm = 0.4 + 4·0.5 = 2.40  ← N1: the user's non-default split, echoed.
+  job_maintainer_defaults (0.42/0.45, 5 loops): wall_thickness_mm = 0.42 + 4·0.45 = 2.22 ← N5.
+  job_inner_only (0.45, outer omitted, 5 loops): wall_thickness_mm = 5·0.45 = 2.25       ← outer mirrors inner; byte-identical to the OLD hardcoded 5×0.45.
+
+N5 — maintainer's own settings (5 loops, 0.4 mm nozzle), at the app's stated 0.4-nozzle
+defaults (outer 0.42 mm, inner 0.45 mm):
+    NEW model:  t = 0.42 + 4·0.45 = 2.22 mm
+    OLD hardcoded: t = 5 × 0.45   = 2.25 mm
+    Δ = -0.03 mm (-1.3%). The true bead layout is a hair thinner because the single
+    OUTER wall (0.42) is narrower than the inner loops (0.45); the old model over-counted
+    it as a full 0.45 mm wall. width_aware_knockdown is OFF (shipped default), so this t is
+    an inert provenance echo today; it only bites once a maintainer arms the gate.

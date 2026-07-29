@@ -186,6 +186,16 @@ RunInfo build_run_info(const JobDescription& job,
   info.width_aware_knockdown = options.width_aware_knockdown;
   info.wall_loops = options.wall_loops;
   info.wall_line_width_mm = options.wall_line_width_mm;
+  // Echo the EFFECTIVE outer line width (< 0 mirror → inner) and the derived solid
+  // wall-ring thickness t the accept gate would size — so run_info records what was
+  // actually used, and the maintainer can read t off a real job (handoff
+  // line-width-plumbing). The thickness comes from the ONE construction
+  // (knockdown_spec_for), never a re-derived formula, so the echo can't drift from the
+  // gate's own value.
+  info.wall_line_width_outer_mm = options.wall_line_width_outer_mm >= 0.0
+                                      ? options.wall_line_width_outer_mm
+                                      : options.wall_line_width_mm;
+  info.wall_thickness_mm = knockdown_spec_for(options).wall_thickness_mm;
   info.has_design_box = options.design_box.has_value();
   info.ladder = options.volume_fraction_ladder;
   info.created_wall_ms = wall_clock_ms();

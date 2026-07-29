@@ -63,6 +63,16 @@ public struct RunRequest: Equatable, Sendable {
     /// PrintParams project decodes its params to `.fdmDefault` (3 walls) upstream, so
     /// this is never the buggy 0 that made run_info read `wall_loops: 0`.
     public let wallLoops: Int
+    /// The user's OUTER / INNER wall extrusion LINE WIDTHS (mm) from the Print Parameters
+    /// sheet (handoff line-width-plumbing). Bead widths — a slicer setting, NOT the
+    /// nozzle diameter. Threaded to core through BOTH front-ends — the bridge
+    /// (`BridgeLoadCase.wall_line_width_{outer_,}mm`) and the LAN job.json
+    /// (`loads.wall_line_width_{outer_,}mm`) — so the width-aware knockdown sizes the
+    /// wall ring `outer + (wallLoops-1)·inner` from the user's real settings rather than
+    /// the fixed 0.45 mm modelling assumption. Part of the request identity (they feed
+    /// the accept gate once armed, like `wallLoops`), so editing them re-enables Optimize.
+    public let wallLineWidthOuterMM: Double
+    public let wallLineWidthInnerMM: Double
     /// The M7.dom-app design box (model space, mm) the optimizer may GROW material
     /// into beyond the import, or nil for the default no-box run (byte-identical to
     /// before). Consumed on the load-case path for STEP and mesh parts alike. Part of
@@ -108,6 +118,8 @@ public struct RunRequest: Equatable, Sendable {
                 minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
                 infillPercent: Int = -1,
                 wallLoops: Int = PrintParams.fdmDefault.wallLoops,
+                wallLineWidthOuterMM: Double = PrintParams.fdmDefault.wallLineWidthOuterMM,
+                wallLineWidthInnerMM: Double = PrintParams.fdmDefault.wallLineWidthInnerMM,
                 designBox: TopOptKit.DesignBoxSpec? = nil,
                 keepOutBoxes: [TopOptKit.DesignBoxSpec] = [],
                 clearances: [TopOptKit.ClearanceSpec] = [],
@@ -126,6 +138,8 @@ public struct RunRequest: Equatable, Sendable {
         self.buildDirection = buildDirection
         self.infillPercent = infillPercent
         self.wallLoops = wallLoops
+        self.wallLineWidthOuterMM = wallLineWidthOuterMM
+        self.wallLineWidthInnerMM = wallLineWidthInnerMM
         self.designBox = designBox
         self.keepOutBoxes = keepOutBoxes
         self.clearances = clearances
@@ -787,6 +801,8 @@ public final class RunModel: ObservableObject {
                 loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
                 buildDirection: request.buildDirection, infillPercent: request.infillPercent,
                 wallLoops: request.wallLoops,
+                wallLineWidthInnerMM: request.wallLineWidthInnerMM,
+                wallLineWidthOuterMM: request.wallLineWidthOuterMM,
                 designBox: request.designBox, keepOutBoxes: request.keepOutBoxes,
                 clearances: request.clearances,
                 faceProtections: request.faceProtections,

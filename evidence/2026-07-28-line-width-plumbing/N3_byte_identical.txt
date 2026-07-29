@@ -1,0 +1,35 @@
+N3 — Byte-identical optimizer output while width_aware_knockdown is false (the shipped
+default). The line widths only form wall_thickness_mm, which is inert when the gate is
+OFF, so the exported variant meshes must be identical to a run that carries no wall
+metadata at all.
+
+Four runs, same everything except wall metadata:
+  out_baseline               — NO wall keys (wall_loops absent, both widths default)
+  out_job_split              — wall_loops 5, inner 0.5, outer 0.4
+  out_job_maintainer_defaults— wall_loops 5, inner 0.45, outer 0.42
+  out_job_inner_only         — wall_loops 5, inner 0.45, outer omitted
+
+Per-run variant STL md5 (from each out_<job>/variant_md5.txt):
+-- baseline --
+cabef701d93ba91cbd9d695308233b68 variant_026.stl
+79ddfa14f2d0b13033c01ac159748a66 variant_038.stl
+966810efe125403fb40380dc9faa05c2 variant_052.stl
+ab219d1a7a0800d83acbcbbb2135dd5c variant_068.stl
+-- job_split --
+cabef701d93ba91cbd9d695308233b68 variant_026.stl
+79ddfa14f2d0b13033c01ac159748a66 variant_038.stl
+966810efe125403fb40380dc9faa05c2 variant_052.stl
+ab219d1a7a0800d83acbcbbb2135dd5c variant_068.stl
+-- job_maintainer_defaults --
+cabef701d93ba91cbd9d695308233b68 variant_026.stl
+79ddfa14f2d0b13033c01ac159748a66 variant_038.stl
+966810efe125403fb40380dc9faa05c2 variant_052.stl
+ab219d1a7a0800d83acbcbbb2135dd5c variant_068.stl
+-- job_inner_only --
+cabef701d93ba91cbd9d695308233b68 variant_026.stl
+79ddfa14f2d0b13033c01ac159748a66 variant_038.stl
+966810efe125403fb40380dc9faa05c2 variant_052.stl
+ab219d1a7a0800d83acbcbbb2135dd5c variant_068.stl
+
+All four runs produce IDENTICAL md5s for every ladder rung → byte-identical meshes.
+The widths are a pure provenance echo until a maintainer arms the width-aware gate.
