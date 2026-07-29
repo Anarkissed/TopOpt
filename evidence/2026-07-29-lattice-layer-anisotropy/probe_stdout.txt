@@ -1,0 +1,59 @@
+H0 element self-check: max|ke_general - hex8_stiffness| = 5.684e-14
+
+======== octet vf_target=0.20  rho_measured=0.1978  vpc=32  solid=6480 ========
+  ISO base tensor: C11=208.23 C22=208.23 C33=208.23 | C12=92.16 C13=92.16 C23=92.16 | C44=80.86 C55=80.86 C66=80.86
+  Zener=1.393  E100/Es=0.04334  E110/Es=0.01329  E111/Es=0.00639  (conv=1)
+  -- stiffness (transverse base, layer normal = build dir) --
+     build [001]  k=1.00  E_build: 151.7 (iso) -> 151.7 (1.000 x)  C33/C11=1.000
+     build [001]  k=0.85  E_build: 151.7 (iso) -> 133.4 (0.880 x)  C33/C11=0.908
+     build [001]  k=0.70  E_build: 151.7 (iso) -> 114.2 (0.753 x)  C33/C11=0.807
+     build [001]  k=0.55  E_build: 151.7 (iso) -> 93.7 (0.618 x)  C33/C11=0.692
+     build [011]  k=1.00  E_build: 186.0 (iso) -> 186.0 (1.000 x)  C33/C11=1.000
+     build [011]  k=0.85  E_build: 186.0 (iso) -> 158.8 (0.854 x)  C33/C11=0.977
+     build [011]  k=0.70  E_build: 186.0 (iso) -> 131.6 (0.707 x)  C33/C11=0.958
+     build [011]  k=0.55  E_build: 186.0 (iso) -> 104.3 (0.561 x)  C33/C11=0.944
+     build [111]  k=1.00  E_build: 201.2 (iso) -> 201.2 (1.000 x)  C33/C11=1.000
+     build [111]  k=0.85  E_build: 201.2 (iso) -> 173.4 (0.862 x)  C33/C11=1.000
+     build [111]  k=0.70  E_build: 201.2 (iso) -> 145.0 (0.721 x)  C33/C11=1.000
+     build [111]  k=0.55  E_build: 201.2 (iso) -> 115.8 (0.576 x)  C33/C11=1.000
+  -- interlayer strength: fixed load [100] (macro_vm=116.076, strut max_vm=5084.43, vm_conc=43.8x) --
+     build xz@0     ang(load)=   0  max(n.s.n)/peak_vm=1.160  conc(n.s.n/macro)=50.8x
+     build xz@15    ang(load)=  15  max(n.s.n)/peak_vm=1.213  conc(n.s.n/macro)=53.1x
+     build xz@30    ang(load)=  30  max(n.s.n)/peak_vm=1.141  conc(n.s.n/macro)=50.0x
+     build xz@45    ang(load)=  45  max(n.s.n)/peak_vm=0.964  conc(n.s.n/macro)=42.2x
+     build xz@60    ang(load)=  60  max(n.s.n)/peak_vm=0.730  conc(n.s.n/macro)=32.0x
+     build xz@75    ang(load)=  75  max(n.s.n)/peak_vm=0.562  conc(n.s.n/macro)=24.6x
+     build xz@90    ang(load)=  90  max(n.s.n)/peak_vm=0.408  conc(n.s.n/macro)=17.9x
+     build [110]    ang(load)=  45  max(n.s.n)/peak_vm=0.964  conc(n.s.n/macro)=42.2x
+     build [111]    ang(load)=  55  max(n.s.n)/peak_vm=0.754  conc(n.s.n/macro)=33.0x
+  => BEST build xz@90 (max interlayer = 0.408 x peak vm), WORST xz@15 (1.213 x). Interlayer governs vs in-plane when this ratio > z_knockdown k.
+
+======== octet vf_target=0.30  rho_measured=0.3130  vpc=32  solid=10256 ========
+  ISO base tensor: C11=416.45 C22=416.45 C33=416.45 | C12=164.95 C13=164.95 C23=164.95 | C44=146.06 C55=146.06 C66=146.06
+  Zener=1.162  E100/Es=0.09224  E110/Es=0.02532  E111/Es=0.01163  (conv=1)
+  -- stiffness (transverse base, layer normal = build dir) --
+     build [001]  k=1.00  E_build: 322.9 (iso) -> 322.9 (1.000 x)  C33/C11=1.000
+     build [001]  k=0.85  E_build: 322.9 (iso) -> 280.5 (0.869 x)  C33/C11=0.896
+     build [001]  k=0.70  E_build: 322.9 (iso) -> 236.8 (0.733 x)  C33/C11=0.784
+     build [001]  k=0.55  E_build: 322.9 (iso) -> 191.4 (0.593 x)  C33/C11=0.662
+     build [011]  k=1.00  E_build: 354.5 (iso) -> 354.5 (1.000 x)  C33/C11=1.000
+     build [011]  k=0.85  E_build: 354.5 (iso) -> 303.4 (0.856 x)  C33/C11=0.958
+     build [011]  k=0.70  E_build: 354.5 (iso) -> 252.1 (0.711 x)  C33/C11=0.915
+     build [011]  k=0.55  E_build: 354.5 (iso) -> 200.7 (0.566 x)  C33/C11=0.872
+     build [111]  k=1.00  E_build: 366.5 (iso) -> 366.5 (1.000 x)  C33/C11=1.000
+     build [111]  k=0.85  E_build: 366.5 (iso) -> 315.7 (0.861 x)  C33/C11=1.000
+     build [111]  k=0.70  E_build: 366.5 (iso) -> 263.9 (0.720 x)  C33/C11=1.000
+     build [111]  k=0.55  E_build: 366.5 (iso) -> 210.8 (0.575 x)  C33/C11=1.000
+  -- interlayer strength: fixed load [100] (macro_vm=251.504, strut max_vm=6212.67, vm_conc=24.7x) --
+     build xz@0     ang(load)=   0  max(n.s.n)/peak_vm=1.171  conc(n.s.n/macro)=28.9x
+     build xz@15    ang(load)=  15  max(n.s.n)/peak_vm=1.209  conc(n.s.n/macro)=29.9x
+     build xz@30    ang(load)=  30  max(n.s.n)/peak_vm=1.124  conc(n.s.n/macro)=27.8x
+     build xz@45    ang(load)=  45  max(n.s.n)/peak_vm=0.938  conc(n.s.n/macro)=23.2x
+     build xz@60    ang(load)=  60  max(n.s.n)/peak_vm=0.700  conc(n.s.n/macro)=17.3x
+     build xz@75    ang(load)=  75  max(n.s.n)/peak_vm=0.516  conc(n.s.n/macro)=12.7x
+     build xz@90    ang(load)=  90  max(n.s.n)/peak_vm=0.387  conc(n.s.n/macro)=9.5x
+     build [110]    ang(load)=  45  max(n.s.n)/peak_vm=0.938  conc(n.s.n/macro)=23.2x
+     build [111]    ang(load)=  55  max(n.s.n)/peak_vm=0.821  conc(n.s.n/macro)=20.3x
+  => BEST build xz@90 (max interlayer = 0.387 x peak vm), WORST xz@15 (1.209 x). Interlayer governs vs in-plane when this ratio > z_knockdown k.
+
+DONE.
