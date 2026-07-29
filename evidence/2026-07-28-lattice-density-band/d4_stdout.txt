@@ -1,0 +1,16 @@
+LATTICE DENSITY-BAND + RAMP PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+cores: matfree=6 (6 P-core Mac). library max resolved rho=0.591.
+
+===== D4 — continuous lattice->solid RAMP vs homogenized (per-element rho) =====
+  vpc=12, 2x2 lateral, layout: 2 lattice(rho~0.40) + 4 ramp + 2 solid cells.
+  octet becomes solid at r=2.292 mm (rho=1.0000); r_lo=0.691 mm.
+  [writing /tmp/dbrun/d4_ramp_layers.csv]
+  [writing /tmp/dbrun/d4_ramp_summary.csv]
+  design   E_resolved  E_homog     gap%      SCF     clamped  resolved    
+  graded   1856.08     1447.94     21.99     2.596   2        181875 DOF 18023 ms
+  hard     1468.65     1383.72     5.78      2.604   0        181875 DOF 19253 ms
+  READ: 'clamped' = ramp cells whose rho exceeds the library's max resolved row
+  (0.591) and are therefore modeled with a FROZEN too-soft tensor. SCF is peak/far-field
+  von Mises in the RESOLVED struts — the hard boundary's stress concentration vs the ramp's.
+
+DONE.

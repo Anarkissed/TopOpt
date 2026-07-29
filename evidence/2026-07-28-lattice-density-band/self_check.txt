@@ -1,0 +1,12 @@
+LATTICE DENSITY-BAND + RAMP PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+cores: matfree=6 (6 P-core Mac). library max resolved rho=0.591.
+
+===== SELF (bar B1) — instrument recovers E_solid =====
+  vpc8   solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=+0.000000  Zener=1.0000 -> PASS (4 digits)
+  vpc16  solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  vpc24  solid cell: E100=3500.0000 MPa (E_solid=3500.0)  rel=-0.000000  Zener=1.0000 -> PASS (4 digits)
+  cubic(iso tensor) vs hex8_stiffness: max|dK|=0.000e+00 -> BIT-IDENTICAL
+  library E100 at solid limit (rho=0.591 clamp): 1124.6 MPa (vs E_solid 3500.0) — the
+  library CANNOT represent solid: its max resolved row is rho=0.591.
+
+DONE.

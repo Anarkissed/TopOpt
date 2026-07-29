@@ -1,0 +1,73 @@
+LATTICE DENSITY-BAND + RAMP PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+cores: matfree=6 (6 P-core Mac). library max resolved rho=0.591.
+
+===== D1/D2/D3 — density band: homogenized model vs RESOLVED truth =====
+  finite block = 2^3 cells; TRUTH = periodic homogenization (resolved unit cell).
+  bar: |E_library - E_periodic| / E_periodic <= 10%. band quoted at vpc48.
+  resolved FINITE blocks (C2 method) run only up to vpc16 (cost gate, B4); shown for cross-check.
+
+  [writing /tmp/dbrun/d1_density_band.csv]
+  vf     rho     vpc   vox/str  E_periodic  E_library   E_resFinite model%    resdft%  verdict 
+  0.15   0.1191  16    2.56     78.44       96.13       78          +22.55    -18.40   NO-GO    [CLAMPED]
+  0.15   0.1289  32    5.12     82.19       96.13       —         +16.96    -14.50   NO-GO    [CLAMPED]
+  0.15   0.1476  48    7.68     96.13       96.13       —         +0.00     +0.00    GO      
+
+  0.20   0.2207  16    3.04     205.92      178.18      204         -13.47    +32.17   NO-GO   
+  0.20   0.1978  32    6.07     151.69      149.07      —         -1.73     -2.64    GO      
+  0.20   0.2041  48    9.11     155.80      155.80      —         -0.00     +0.00    GO      
+
+  0.25   0.2852  16    3.54     280.58      268.69      277         -4.24     +31.32   GO      
+  0.25   0.2375  32    7.09     201.08      200.91      —         -0.08     -5.89    GO      
+  0.25   0.2462  48    10.63    213.67      212.64      —         -0.48     +0.00    GO      
+
+  0.30   0.2852  16    3.90     280.58      268.69      277         -4.24     -2.04    GO      
+  0.30   0.3130  32    7.80     322.86      318.11      —         -1.47     +12.72   GO      
+  0.30   0.2973  48    11.70    286.42      286.41      —         -0.00     +0.00    GO      
+
+  0.35   0.3379  16    4.36     395.94      368.38      393         -6.96     +4.49    GO      
+  0.35   0.3533  32    8.72     419.27      399.40      —         -4.74     +10.65   GO      
+  0.35   0.3443  48    13.08    378.91      381.22      —         +0.61     +0.00    GO      
+
+  0.40   0.3906  16    4.73     571.32      474.65      564         -16.92    +16.78   NO-GO   
+  0.40   0.4158  32    9.45     533.25      542.07      —         +1.65     +9.00    GO      
+  0.40   0.3979  48    14.18    489.22      489.22      —         -0.00     +0.00    GO      
+
+  0.45   0.4219  16    5.02     610.42      560.07      601         -8.25     -3.08    GO      
+  0.45   0.4626  32    10.04    685.16      680.16      —         -0.73     +8.79    GO      
+  0.45   0.4507  48    15.07    629.81      644.89      —         +2.39     +0.00    GO      
+
+  0.50   0.5156  16    5.45     883.87      843.29      876         -4.59     +14.44   GO      
+  0.50   0.4846  32    10.89    762.38      744.81      —         -2.31     -1.29    GO      
+  0.50   0.4973  48    16.34    772.34      782.17      —         +1.27     +0.00    GO      
+
+  0.55   0.5156  16    5.74     883.87      843.29      876         -4.59     -3.71    GO      
+  0.55   0.5581  32    11.49    998.53      1001.96     —         +0.34     +8.78    GO      
+  0.55   0.5384  48    17.23    917.91      928.40      —         +1.14     +0.00    GO      
+
+  0.60   0.5977  16    6.14     1253.63     1124.55     1240        -10.30    +7.75    NO-GO    [CLAMPED]
+  0.60   0.5867  32    12.27    1125.79     1108.64     —         -1.52     -3.24    GO      
+  0.60   0.6000  48    18.41    1163.49     1124.55     —         -3.35     +0.00    GO       [CLAMPED]
+
+  0.65   0.6270  16    6.56     1438.68     1124.55     1431        -21.83    +7.45    NO-GO    [CLAMPED]
+  0.65   0.6572  32    13.11    1430.52     1124.55     —         -21.39    +6.84    NO-GO    [CLAMPED]
+  0.65   0.6448  48    19.67    1338.91     1124.55     —         -16.01    +0.00    NO-GO    [CLAMPED]
+
+  0.70   0.6816  16    7.02     1651.93     1124.55     1643        -31.92    +0.68    NO-GO    [CLAMPED]
+  0.70   0.7041  32    14.03    1668.31     1124.55     —         -32.59    +1.68    NO-GO    [CLAMPED]
+  0.70   0.7041  48    21.05    1640.75     1124.55     —         -31.46    +0.00    NO-GO    [CLAMPED]
+
+  0.80   0.8164  16    7.90     2416.27     1124.55     2406        -53.46    +8.37    NO-GO    [CLAMPED]
+  0.80   0.8113  32    15.79    2301.89     1124.55     —         -51.15    +3.24    NO-GO    [CLAMPED]
+  0.80   0.8066  48    23.69    2229.59     1124.55     —         -49.56    +0.00    NO-GO    [CLAMPED]
+
+  0.90   0.8887  16    9.06     2826.93     1124.55     2814        -60.22    -0.79    NO-GO    [CLAMPED]
+  0.90   0.8972  32    18.12    2853.41     1124.55     —         -60.59    +0.14    NO-GO    [CLAMPED]
+  0.90   0.9001  48    27.18    2849.41     1124.55     —         -60.53    +0.00    NO-GO    [CLAMPED]
+
+  READ: model% = library tensor vs periodic truth at that vpc — the certifiable error.
+  resdft% = the periodic tensor's own resolution drift (->0 at vpc48): if it is small while
+  model% is large, the miss is the MODEL, not the mesh. [CLAMPED] = rho exceeds the
+  library's max resolved row (0.591), so the tensor is FROZEN and model% grows without bound.
+  E_resFinite / finite_gap (CSV) cross-check against PR220's finite-block C2 method where affordable.
+
+DONE.

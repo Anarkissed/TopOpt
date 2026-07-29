@@ -1,0 +1,3 @@
+design,vpc,Nl,pad_lo,Ltrans,pad_hi,E_resolved_MPa,E_homog_MPa,model_gap_pct,scf,clamped_cells,resolved_dof,resolved_ms
+graded,12,2,2,4,2,1856.0824,1447.9371,21.99,2.5962,2,181875,18023
+hard,12,2,2,4,2,1468.6511,1383.7223,5.78,2.6042,0,181875,19253

@@ -1,0 +1,11 @@
+LATTICE DENSITY-BAND + RAMP PROBE — E_solid=3500 MPa nu=0.33, octet, L=5 mm
+cores: matfree=6 (6 P-core Mac). library max resolved rho=0.591.
+
+===== D1/D2/D3 — density band: homogenized model vs RESOLVED truth =====
+  finite block = 2^3 cells; TRUTH = periodic homogenization (resolved unit cell).
+  bar: |E_library - E_periodic| / E_periodic <= 10%. band quoted at vpc48.
+  resolved FINITE blocks (C2 method) run only up to vpc48 (cost gate, B4); shown for cross-check.
+
+  vf     rho     vpc   vox/str  E_periodic  E_library   E_resFinite model%    resdft%  verdict 
+  0.50   0.5156  16    5.45     883.87      843.29      876         -4.59     +14.44   GO      
+  0.50   0.4846  32    10.89    762.38      744.81      753         -2.31     -1.29    GO      
