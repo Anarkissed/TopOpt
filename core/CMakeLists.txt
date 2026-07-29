@@ -640,6 +640,18 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME analyze_fixed_design COMMAND test_analyze_fixed_design)
 
+  # THE RECEIPT IS REAL (handoff 2026-07-28-constrained-smooth-ui, bar S3): a
+  # synthetic bar in axial tension, driven through build_production_loadcase and
+  # re-certified through analyze_fixed_design, whose worst-case margin DROPS as
+  # constrained smoothing rounds its load-bearing section and flips ACCEPTED ->
+  # REJECTED at a large enough strength. Also locks S4 (drift under bound), S5
+  # (determinism) and S7 (non-convergence -> no false receipt). Drives analyze.cpp
+  # (Eigen), so gate on Eigen like test_analyze_fixed_design.
+  add_executable(test_smooth_recert_loadcase
+    tests/validation/test_smooth_recert_loadcase.cpp)
+  target_link_libraries(test_smooth_recert_loadcase PRIVATE topopt)
+  add_test(NAME smooth_recert_loadcase COMMAND test_smooth_recert_loadcase)
+
   # Lattice certification Phase 1 (handoff 2026-07-27-lattice-certification): the
   # cubic element (hex8_stiffness_cubic) and lattice solver (fea_solve_cg_lattice)
   # reduce to the isotropic path bit-for-bit, the octet library returns the measured

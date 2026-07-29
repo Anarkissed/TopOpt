@@ -1,0 +1,14 @@
+{
+  "model": "cog_bar.stl",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 48,
+  "output": { "report": "report.json", "mesh_format": "stl", "mesh_prefix": "variant" },
+  "loads": {
+    "anchor_face_ids": [20],
+    "groups": [
+      { "face_ids": [21], "force": [3550.0, 0.0, 0.0] }
+    ],
+    "minimize_plastic": false
+  }
+}

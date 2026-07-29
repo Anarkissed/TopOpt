@@ -402,6 +402,15 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
 // draws the NEW field, never the pre-edit one.
 struct AnalyzeResult {
   bool accepted = false;
+  // The certification solve did NOT converge (handoff 2026-07-27-nonconvergence-
+  // rejection): the re-voxelized field was too ill-conditioned for the production
+  // multigrid-CG at the tight cert tolerance. When true EVERY number below is
+  // meaningless (the solve never finished) and `accepted` is forced false — this is
+  // NOT a genuine "weaker, rejected" verdict, it is "could not certify". The UI must
+  // distinguish the two: a non-convergent re-cert shows "couldn't re-certify at this
+  // strength — try lower", never a fabricated margin. The re-cert reports this rather
+  // than emitting a false receipt (the honesty rule at the solver boundary).
+  bool non_convergent = false;
   double margin_worst_case = 0.0;      // the SOLID margin (displayed value)
   double margin_effective = 0.0;       // infill-adjusted margin the gate compares
   double margin_required = 0.0;
@@ -645,6 +654,39 @@ OptimizeResult run_minimize_plastic_loadcase(
     const std::string& materials_path, const std::string& rules_path,
     int resolution, const BridgeLoadCase& load_case, ProgressFn progress,
     void* ctx, const bool* cancel_flag, VariantFn variant_fn, void* variant_ctx,
+    BridgeError& err);
+
+// Re-certify a FIXED design under the user's DECLARED LOAD CASE (anchors + tractions),
+// the loadcase twin of analyze_selfweight (handoff 2026-07-28-constrained-smooth-ui).
+// Builds the grid / BCs / traction through the SAME build_production_loadcase the
+// optimizer and the CLI use, so the re-certification runs under the identical load the
+// run did. A declared external load is what lets the receipt LOWER a margin when
+// smoothing removes load-bearing material (bar S3) — self-weight can only ever raise
+// it. `analyze_mesh_path` empty => the model solid; set => that mesh re-voxelized. On
+// failure returns an empty result and sets `err`; a certification that cannot converge
+// returns `non_convergent = true` with `accepted = false` (never a false receipt).
+AnalyzeResult analyze_loadcase(const std::string& model_path,
+                               const std::string& analyze_mesh_path,
+                               const std::string& material_name,
+                               const std::string& materials_path,
+                               const std::string& rules_path, int resolution,
+                               const BridgeLoadCase& load_case, BridgeError& err);
+
+// Constrained-smooth `input_mesh_path` then re-certify the RESULT under the DECLARED
+// LOAD CASE — the seam the smoothing UI calls for a load-bearing part (handoff
+// 2026-07-28-constrained-smooth-ui). Taubin-smooths under `freeze` PLUS the anchor and
+// load faces of `load_case` (both structural — kept bit-identical so the clamp and the
+// traction stay attached) with the min-feature hard constraint, writes the smoothed
+// mesh to `smoothed_out_path`, then runs analyze_loadcase on THAT — so the returned
+// numbers describe the smoothed geometry and can drop below the gate. `strength` ∈
+// (0,1]; `enforce_min_feature` gates the melt constraint. On failure returns an empty
+// result and sets `err`.
+AnalyzeResult smooth_and_recertify_loadcase(
+    const std::string& model_path, const std::string& input_mesh_path,
+    const std::string& smoothed_out_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, double strength, bool enforce_min_feature,
+    const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     BridgeError& err);
 
 // ---------------------------------------------------------------------------

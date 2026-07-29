@@ -1,0 +1,94 @@
+### SOLID (no smooth)
+analyze: cog_bar.stl as solid part (fixed design, ONE analysis solve, no optimization)
+  peak stress: 33.64 MPa   worst-case margin: 1.635 (required 1.5)
+  load case: declared external load
+  verdict: ACCEPTED
+  voxel mass: 14.76 g
+  min-feature violations: 288
+report: out_solid/analysis_report.json
+provenance: out_solid/analysis.json
+fields: out_solid/fields.bin
+
+### smooth 0.05 (min-feature OFF)
+analyze: mesh cog_bar.stl (fixed design, ONE analysis solve, no optimization)
+  smoothed · re-analyzed: strength 0.05  pairs 1/1  frozen 42/502
+  volume drift: 0.4132% (bound 0.02815%)   min-feature -1->-1
+  smoothed mesh: out_s0.05/cog_bar_smoothed.stl
+  peak stress: 33.65 MPa   worst-case margin: 1.635 (required 1.5)
+  load case: declared external load
+  verdict: ACCEPTED
+  voxel mass: 14.99 g   mesh mass: 14.77 g
+  min-feature violations: 290
+report: out_s0.05/analysis_report.json
+provenance: out_s0.05/analysis.json
+fields: out_s0.05/fields.bin
+
+### smooth 0.10 (min-feature OFF)
+analyze: mesh cog_bar.stl (fixed design, ONE analysis solve, no optimization)
+  smoothed · re-analyzed: strength 0.1  pairs 2/2  frozen 42/502
+  volume drift: 0.7044% (bound 0.05632%)   min-feature -1->-1
+  smoothed mesh: out_s0.10/cog_bar_smoothed.stl
+  peak stress: 33.65 MPa   worst-case margin: 1.635 (required 1.5)
+  load case: declared external load
+  verdict: ACCEPTED
+  voxel mass: 15 g   mesh mass: 14.82 g
+  min-feature violations: 292
+report: out_s0.10/analysis_report.json
+provenance: out_s0.10/analysis.json
+fields: out_s0.10/fields.bin
+
+### smooth 0.20 (min-feature OFF)
+analyze: mesh cog_bar.stl (fixed design, ONE analysis solve, no optimization)
+  smoothed · re-analyzed: strength 0.2  pairs 4/4  frozen 42/502
+  volume drift: 1.064% (bound 0.1127%)   min-feature -1->-1
+  smoothed mesh: out_s0.20/cog_bar_smoothed.stl
+  peak stress: 49.04 MPa   worst-case margin: 1.122 (required 1.5)
+  load case: declared external load
+  verdict: REJECTED
+  voxel mass: 14.67 g   mesh mass: 14.87 g
+  min-feature violations: 32
+report: out_s0.20/analysis_report.json
+provenance: out_s0.20/analysis.json
+fields: out_s0.20/fields.bin
+
+### smooth 0.40 (min-feature OFF)
+analyze: mesh cog_bar.stl (fixed design, ONE analysis solve, no optimization)
+  smoothed · re-analyzed: strength 0.4  pairs 8/8  frozen 42/502
+  volume drift: 1.388% (bound 0.2255%)   min-feature -1->-1
+  smoothed mesh: out_s0.40/cog_bar_smoothed.stl
+  peak stress: 51.77 MPa   worst-case margin: 1.062 (required 1.5)
+  load case: declared external load
+  verdict: REJECTED
+  voxel mass: 14.87 g   mesh mass: 14.92 g
+  min-feature violations: 23
+report: out_s0.40/analysis_report.json
+provenance: out_s0.40/analysis.json
+fields: out_s0.40/fields.bin
+
+### smooth 1.00 (min-feature OFF)
+analyze: mesh cog_bar.stl (fixed design, ONE analysis solve, no optimization)
+  smoothed · re-analyzed: strength 1  pairs 20/20  frozen 42/502
+  volume drift: 1.822% (bound 0.5646%)   min-feature -1->-1
+  smoothed mesh: out_s1.00/cog_bar_smoothed.stl
+  peak stress: 51.61 MPa   worst-case margin: 1.066 (required 1.5)
+  load case: declared external load
+  verdict: REJECTED
+  voxel mass: 14.93 g   mesh mass: 14.98 g
+  min-feature violations: 27
+report: out_s1.00/analysis_report.json
+provenance: out_s1.00/analysis.json
+fields: out_s1.00/fields.bin
+
+### smooth 1.00 (min-feature ON — the safety)
+analyze: mesh cog_bar.stl (fixed design, ONE analysis solve, no optimization)
+  smoothed · re-analyzed: strength 1  pairs 0/20  frozen 42/502
+  volume drift: 0% (bound 0.5646%)   min-feature 288->288  [constraint STOPPED smoothing]
+  smoothed mesh: out_mfon/cog_bar_smoothed.stl
+  peak stress: 33.64 MPa   worst-case margin: 1.635 (required 1.5)
+  load case: declared external load
+  verdict: ACCEPTED
+  voxel mass: 14.76 g   mesh mass: 14.71 g
+  min-feature violations: 288
+report: out_mfon/analysis_report.json
+provenance: out_mfon/analysis.json
+fields: out_mfon/fields.bin

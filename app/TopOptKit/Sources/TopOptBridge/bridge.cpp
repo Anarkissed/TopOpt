@@ -373,6 +373,122 @@ void set_variant_stream(topopt::MinimizePlasticOptions& opts,
   };
 }
 
+// Unflatten a BridgeLoadCase into the front-end-neutral ProductionLoadCase that
+// build_production_loadcase consumes. The ONE mapping shared by the optimize path
+// (run_minimize_plastic_loadcase) and the re-certification path (analyze_loadcase),
+// so a smoothed part is re-certified under EXACTLY the load case it was optimized
+// under — no second, drifting copy ([[knockdown-spec-shared-builder]]). `model`
+// supplies the bore radius an auto-bolt clearance reads from the STEP.
+topopt::ProductionLoadCase production_loadcase_from_bridge(
+    const BridgeLoadCase& load_case, const topopt::StepModel& model) {
+  topopt::ProductionLoadCase lc;
+  lc.anchor_face_ids.assign(load_case.anchor_face_ids.begin(),
+                            load_case.anchor_face_ids.end());
+  {
+    const std::size_t group_count = load_case.load_group_sizes.size();
+    std::size_t face_off = 0;
+    for (std::size_t g = 0; g < group_count; ++g) {
+      topopt::ProductionLoadCase::LoadGroup lg;
+      lg.force = topopt::Vec3{
+          3 * g + 0 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 0] : 0.0,
+          3 * g + 1 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 1] : 0.0,
+          3 * g + 2 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 2] : 0.0};
+      const std::size_t n = static_cast<std::size_t>(load_case.load_group_sizes[g]);
+      for (std::size_t f = 0; f < n && face_off + f < load_case.load_face_ids.size(); ++f)
+        lg.face_ids.push_back(load_case.load_face_ids[face_off + f]);
+      face_off += n;
+      lc.load_groups.push_back(std::move(lg));
+    }
+  }
+  lc.minimize_plastic = load_case.minimize_plastic;
+  lc.build_dir = topopt::Vec3{load_case.build_dir_x, load_case.build_dir_y,
+                              load_case.build_dir_z};
+  lc.infill_percent = static_cast<double>(load_case.infill_percent);
+  lc.wall_loops = load_case.wall_loops;
+  if (load_case.wall_line_width_mm > 0.0)
+    lc.wall_line_width_mm = load_case.wall_line_width_mm;
+  if (load_case.wall_line_width_outer_mm > 0.0)
+    lc.wall_line_width_outer_mm = load_case.wall_line_width_outer_mm;
+  lc.has_design_box = load_case.has_design_box;
+  if (load_case.has_design_box) {
+    lc.design_box.min = topopt::Vec3{load_case.design_box_min_x,
+                                     load_case.design_box_min_y,
+                                     load_case.design_box_min_z};
+    lc.design_box.max = topopt::Vec3{load_case.design_box_max_x,
+                                     load_case.design_box_max_y,
+                                     load_case.design_box_max_z};
+    const std::size_t kn =
+        std::min(load_case.keep_out_min.size(), load_case.keep_out_max.size()) / 3;
+    for (std::size_t b = 0; b < kn; ++b) {
+      topopt::DesignBox ko;
+      ko.min = topopt::Vec3{load_case.keep_out_min[3 * b + 0],
+                            load_case.keep_out_min[3 * b + 1],
+                            load_case.keep_out_min[3 * b + 2]};
+      ko.max = topopt::Vec3{load_case.keep_out_max[3 * b + 0],
+                            load_case.keep_out_max[3 * b + 1],
+                            load_case.keep_out_max[3 * b + 2]};
+      lc.keep_out_boxes.push_back(ko);
+    }
+  }
+  {
+    const std::size_t cn = load_case.clearance_face_ids.size();
+    for (std::size_t c = 0; c < cn; ++c) {
+      topopt::ProductionLoadCase::Clearance cl;
+      cl.face_id = load_case.clearance_face_ids[c];
+      const bool bolt =
+          c < load_case.clearance_kinds.size() && load_case.clearance_kinds[c] == 0;
+      const bool manual =
+          c < load_case.clearance_manual.size() && load_case.clearance_manual[c];
+      cl.manual = manual;
+      double bore_r = 0.0;
+      if (bolt) {
+        if (manual && c < load_case.clearance_radius_mm.size())
+          bore_r = load_case.clearance_radius_mm[c];
+        else if (!manual && cl.face_id >= 0 && cl.face_id < model.face_count)
+          bore_r = model.faces[static_cast<std::size_t>(cl.face_id)]
+                       .cylinder_radius_mm;
+      }
+      cl.params = bolt ? topopt::default_bolt_clearance(bore_r)
+                       : topopt::default_face_clearance();
+      if (c < load_case.clearance_margin_mm.size() &&
+          load_case.clearance_margin_mm[c] > 0.0)
+        cl.params.concentric_margin_mm = load_case.clearance_margin_mm[c];
+      if (c < load_case.clearance_axial_mm.size() &&
+          load_case.clearance_axial_mm[c] > 0.0)
+        cl.params.axial_clearance_mm = load_case.clearance_axial_mm[c];
+      if (c < load_case.clearance_slab_mm.size() &&
+          load_case.clearance_slab_mm[c] > 0.0)
+        cl.params.slab_depth_mm = load_case.clearance_slab_mm[c];
+      if (manual) {
+        auto xyz = [&](const std::vector<double>& v) {
+          return (3 * c + 2 < v.size())
+                     ? topopt::Vec3{v[3 * c + 0], v[3 * c + 1], v[3 * c + 2]}
+                     : topopt::Vec3{0.0, 0.0, 0.0};
+        };
+        auto scalar = [&](const std::vector<double>& v) {
+          return c < v.size() ? v[c] : 0.0;
+        };
+        cl.manual_geom.kind =
+            bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
+        cl.manual_geom.axis_point = xyz(load_case.clearance_axis_point_xyz);
+        cl.manual_geom.axis_dir = xyz(load_case.clearance_axis_dir_xyz);
+        cl.manual_geom.radius_mm = scalar(load_case.clearance_radius_mm);
+        cl.manual_geom.half_length_mm = scalar(load_case.clearance_half_len_mm);
+        cl.manual_geom.origin = xyz(load_case.clearance_origin_xyz);
+        cl.manual_geom.normal = xyz(load_case.clearance_normal_xyz);
+        cl.manual_geom.half_u_mm = scalar(load_case.clearance_half_u_mm);
+        cl.manual_geom.half_w_mm = scalar(load_case.clearance_half_w_mm);
+      }
+      lc.clearances.push_back(cl);
+    }
+  }
+  lc.face_protection_face_ids.assign(load_case.face_protection_face_ids.begin(),
+                                     load_case.face_protection_face_ids.end());
+  if (load_case.face_protection_depth_mm > 0.0)
+    lc.face_protection_depth_mm = load_case.face_protection_depth_mm;
+  return lc;
+}
+
 }  // namespace
 
 std::vector<MaterialInfo> load_materials(const std::string& path,
@@ -804,6 +920,7 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
         margin_stop, knockdown, load_path_ok, part_solid);
 
     result.accepted = a.accepted;
+    result.non_convergent = a.non_convergent;
     result.margin_worst_case = a.margin.worst_case;
     result.margin_effective = a.margin_effective;
     result.margin_required = margin_stop;
@@ -942,6 +1059,265 @@ AnalyzeResult smooth_and_recertify_selfweight(
   }
 }
 
+namespace {
+// Exact freeze predicates for the smoother from a model's B-rep faces (bridge twin
+// of run_job's freeze_regions_from_faces): a cylindrical face → a Bolt bore (keep
+// the hole circular), a planar face → a Face pad (keep the mounting face flat).
+// Used to freeze the loadcase's anchor and load faces so the clamp and the traction
+// stay attached to bit-identical solid across the re-voxelization. Non-plane/-cyl
+// (or pseudo-)faces that do not resolve are simply skipped — the app's own `freeze`
+// primitives plus the Fixture/Load retag below still keep the surfaces attached.
+std::vector<topopt::ClearanceGeometry> freeze_regions_from_model_faces(
+    const topopt::StepModel& model, const std::vector<int>& face_ids, double spacing) {
+  std::vector<topopt::ClearanceGeometry> regions;
+  for (const int fid : face_ids) {
+    if (fid < 0 || fid >= model.face_count) continue;
+    const topopt::StepFaceInfo& face = model.faces[static_cast<std::size_t>(fid)];
+    topopt::ClearanceParams p;
+    if (face.kind == topopt::StepSurfaceKind::Cylinder) {
+      p.kind = topopt::ClearanceKind::Bolt;
+    } else if (face.kind == topopt::StepSurfaceKind::Plane) {
+      p.kind = topopt::ClearanceKind::Face;
+      p.slab_depth_mm = spacing;
+    } else {
+      continue;
+    }
+    const topopt::ClearanceGeometry g =
+        topopt::resolve_clearance_from_face(model, fid, p);
+    if (g.valid) regions.push_back(g);
+  }
+  return regions;
+}
+}  // namespace
+
+AnalyzeResult analyze_loadcase(const std::string& model_path,
+                               const std::string& analyze_mesh_path,
+                               const std::string& material_name,
+                               const std::string& materials_path,
+                               const std::string& rules_path, int resolution,
+                               const BridgeLoadCase& load_case, BridgeError& err) {
+  AnalyzeResult result;
+  try {
+    bridge_log("analyze_loadcase: ENTER res=" + std::to_string(resolution) +
+               " model='" + model_path + "' mesh='" + analyze_mesh_path + "'");
+    topopt::StepModel model = topopt::import_part_file_resolved(model_path);
+    const topopt::ProductionLoadCase lc =
+        production_loadcase_from_bridge(load_case, model);
+    topopt::ProductionRunSetup setup =
+        topopt::build_production_loadcase(model, resolution, lc);
+    if (setup.options.external_loads.empty()) {
+      err.ok = false;
+      err.message =
+          "analyze: the load case resolved to no external load (every group "
+          "zero-force or tagged no voxels) — nothing to certify under";
+      return AnalyzeResult{};
+    }
+    topopt::VoxelGrid& model_grid = setup.grid;
+    const double part_solid = static_cast<double>(model_grid.solid_count());
+
+    topopt::MaterialLibrary lib = topopt::load_materials_file(materials_path);
+    auto it = lib.find(material_name);
+    if (it == lib.end()) {
+      err.ok = false;
+      err.message = "material not found: " + material_name;
+      return AnalyzeResult{};
+    }
+    const topopt::Material& material = it->second;
+
+    // The FIXED design to analyse: the model solid, or an edited/smoothed mesh
+    // re-voxelized onto the model grid (so the anchors' clamp and the traction's
+    // node set still apply). Carry both Fixture AND Load tags forward.
+    topopt::VoxelGrid design_grid = model_grid;
+    if (!analyze_mesh_path.empty()) {
+      topopt::TriangleMesh edited = import_any(analyze_mesh_path);
+      design_grid = topopt::voxelize_onto_grid(edited, model_grid);
+      for (std::size_t i = 0; i < design_grid.tags.size(); ++i) {
+        if (model_grid.tags[i] == topopt::VoxelTag::Fixture &&
+            design_grid.tags[i] != topopt::VoxelTag::Empty)
+          design_grid.tags[i] = topopt::VoxelTag::Fixture;
+        else if (model_grid.tags[i] == topopt::VoxelTag::Load)
+          design_grid.tags[i] = topopt::VoxelTag::Load;
+      }
+      result.analyzed_mesh = true;
+      double v6 = 0.0;
+      for (const auto& tri : edited.triangles) {
+        const topopt::Vec3& a = edited.vertices[static_cast<std::size_t>(tri[0])];
+        const topopt::Vec3& b = edited.vertices[static_cast<std::size_t>(tri[1])];
+        const topopt::Vec3& c = edited.vertices[static_cast<std::size_t>(tri[2])];
+        v6 += a.x * (b.y * c.z - b.z * c.y) - a.y * (b.x * c.z - b.z * c.x) +
+              a.z * (b.x * c.y - b.y * c.x);
+      }
+      result.mesh_mass_grams =
+          material.density_g_cm3 * (std::fabs(v6) / 6.0) / 1000.0;
+    }
+    std::vector<double> density(design_grid.voxel_count(), 0.0);
+    for (std::size_t i = 0; i < density.size(); ++i)
+      if (design_grid.tags[i] != topopt::VoxelTag::Empty) density[i] = 1.0;
+
+    topopt::SimpParams params;
+    params.youngs_modulus = material.youngs_modulus_mpa;
+    params.poisson = material.poisson;
+    params.penalty = 3.0;
+    const topopt::Vec3 gdir = setup.options.gravity_direction;
+    const double gn =
+        std::sqrt(gdir.x * gdir.x + gdir.y * gdir.y + gdir.z * gdir.z);
+    const topopt::Vec3 build_dir =
+        gn > 0.0 ? topopt::Vec3{-gdir.x / gn, -gdir.y / gn, -gdir.z / gn}
+                 : topopt::Vec3{0.0, 0.0, 1.0};
+    const topopt::KnockdownSpec knockdown =
+        topopt::knockdown_spec_for(setup.options);
+    const bool load_path_ok =
+        topopt::load_path_connected(design_grid, density, 0.5);
+
+    const topopt::FixedDesignAnalysis a = topopt::analyze_fixed_design(
+        design_grid, params, density, setup.bcs, setup.options.external_loads,
+        material, build_dir, setup.options.simp.cg_tolerance,
+        setup.options.simp.cg_max_iterations, setup.options.simp.solver,
+        setup.options.margin_stop, knockdown, load_path_ok, part_solid);
+
+    result.accepted = a.accepted;
+    result.non_convergent = a.non_convergent;
+    result.margin_worst_case = a.margin.worst_case;
+    result.margin_effective = a.margin_effective;
+    result.margin_required = setup.options.margin_stop;
+    result.max_stress_mpa = a.max_von_mises;
+    result.max_interlayer_tension_mpa = a.max_interlayer_tension;
+    result.voxel_mass_grams = a.mass_grams;
+    result.support_volume_voxels = a.support_volume_voxels;
+    result.min_feature_violations = a.v3.min_feature_violations;
+    result.grid_nx = design_grid.nx;
+    result.grid_ny = design_grid.ny;
+    result.grid_nz = design_grid.nz;
+    result.grid_origin_x = design_grid.origin.x;
+    result.grid_origin_y = design_grid.origin.y;
+    result.grid_origin_z = design_grid.origin.z;
+    result.spacing = design_grid.spacing;
+    result.voxel_volume_mm3 = design_grid.voxel_volume();
+    result.von_mises_field.assign(a.von_mises_field.begin(),
+                                  a.von_mises_field.end());
+    result.displacement_field.assign(a.displacement_field.begin(),
+                                     a.displacement_field.end());
+    bridge_log("analyze_loadcase: verdict=" +
+               std::string(a.non_convergent ? "NON_CONVERGENT"
+                                            : (a.accepted ? "ACCEPTED" : "REJECTED")) +
+               " margin=" + std::to_string(a.margin.worst_case) + " required=" +
+               std::to_string(setup.options.margin_stop));
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    bridge_log(std::string("analyze_loadcase: THREW: ") + e.what());
+    return AnalyzeResult{};
+  }
+  return result;
+}
+
+AnalyzeResult smooth_and_recertify_loadcase(
+    const std::string& model_path, const std::string& input_mesh_path,
+    const std::string& smoothed_out_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, double strength, bool enforce_min_feature,
+    const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
+    BridgeError& err) {
+  try {
+    bridge_log("smooth+recertify(loadcase): ENTER strength=" +
+               std::to_string(strength) + " mesh='" + input_mesh_path + "'");
+    // The reference grid the min-feature constraint voxelizes against — the SAME
+    // grid analyze_loadcase re-certifies on. Build it through build_production_
+    // loadcase so the anchors/load faces are tagged and their B-rep geometry is
+    // available for the freeze predicates.
+    topopt::StepModel model = topopt::import_part_file_resolved(model_path);
+    const topopt::ProductionLoadCase lc =
+        production_loadcase_from_bridge(load_case, model);
+    topopt::ProductionRunSetup setup =
+        topopt::build_production_loadcase(model, resolution, lc);
+    topopt::VoxelGrid& grid = setup.grid;
+
+    // Freeze regions: the anchors and the load faces (structural — keep the clamp
+    // and the traction attached), PLUS every app-supplied bore/pad/protect
+    // primitive. All resolve to the exact predicate that survives re-meshing.
+    std::vector<topopt::ClearanceGeometry> regions;
+    {
+      std::vector<int> structural = lc.anchor_face_ids;
+      for (const auto& g : lc.load_groups)
+        for (const int fid : g.face_ids) structural.push_back(fid);
+      for (auto& r :
+           freeze_regions_from_model_faces(model, structural, grid.spacing))
+        regions.push_back(std::move(r));
+    }
+    for (std::size_t g = 0; g < freeze.kind.size(); ++g) {
+      topopt::ManualClearanceGeometry mgeo;
+      topopt::ClearanceParams p;  // zero margins: freeze the true bore / pad
+      const bool bolt = freeze.kind[g] == 0;
+      mgeo.kind = p.kind =
+          bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
+      auto tri = [&](const std::vector<double>& v) {
+        return topopt::Vec3{v[3 * g], v[3 * g + 1], v[3 * g + 2]};
+      };
+      if (bolt) {
+        mgeo.axis_point = tri(freeze.axis_point);
+        mgeo.axis_dir = tri(freeze.axis_dir);
+        mgeo.radius_mm = freeze.radius_mm[g];
+        mgeo.half_length_mm = freeze.half_length_mm[g];
+      } else {
+        mgeo.origin = tri(freeze.origin);
+        mgeo.normal = tri(freeze.normal);
+        mgeo.half_u_mm = freeze.half_u_mm[g];
+        mgeo.half_w_mm = freeze.half_w_mm[g];
+        p.slab_depth_mm = grid.spacing;
+      }
+      const topopt::ClearanceGeometry cg =
+          topopt::resolve_clearance_manual(mgeo, p);
+      if (cg.valid) regions.push_back(cg);
+    }
+
+    topopt::TriangleMesh input = import_any(input_mesh_path);
+    topopt::TaubinParams params = topopt::taubin_params_for_strength(strength);
+    topopt::SmoothConstraints c;
+    c.freeze_regions = std::move(regions);
+    c.min_feature_grid = &grid;
+    c.enforce_min_feature = enforce_min_feature;
+    const topopt::SmoothResult sr =
+        topopt::constrained_taubin_smooth(input, params, c);
+    topopt::write_stl_file(smoothed_out_path, sr.mesh);
+
+    // Re-certify the SMOOTHED mesh under the SAME load case (single source of
+    // truth: analyze_loadcase), so every returned number describes the smoothed
+    // geometry — the honesty rule.
+    AnalyzeResult result =
+        analyze_loadcase(model_path, smoothed_out_path, material_name,
+                         materials_path, rules_path, resolution, load_case, err);
+    if (!err.ok) return result;
+
+    const topopt::SmoothStats& s = sr.stats;
+    result.smoothed = true;
+    result.smooth_strength = strength;
+    result.smooth_pairs_requested = s.requested_pairs;
+    result.smooth_pairs_applied = s.applied_pairs;
+    result.frozen_vertices = static_cast<int64_t>(s.frozen_vertices);
+    result.total_vertices = static_cast<int64_t>(s.total_vertices);
+    result.volume_before_mm3 = s.volume_before_mm3;
+    result.volume_after_mm3 = s.volume_after_mm3;
+    result.volume_drift_fraction = s.volume_drift_fraction;
+    result.volume_drift_bound = s.volume_drift_bound;
+    result.min_feature_baseline = s.min_feature_baseline;
+    result.min_feature_limited = s.min_feature_limited;
+    result.smoothed_mesh_path = smoothed_out_path;
+    bridge_log("smooth+recertify(loadcase): pairs=" +
+               std::to_string(s.applied_pairs) + "/" +
+               std::to_string(s.requested_pairs) + " frozen=" +
+               std::to_string(s.frozen_vertices) + " drift=" +
+               std::to_string(s.volume_drift_fraction) + " margin=" +
+               std::to_string(result.margin_worst_case) + " accepted=" +
+               std::to_string(result.accepted ? 1 : 0));
+    return result;
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    bridge_log(std::string("smooth+recertify(loadcase): THREW: ") + e.what());
+    return AnalyzeResult{};
+  }
+}
+
 OptimizeResult run_minimize_plastic_loadcase(
     const std::string& step_path, const std::string& material_name,
     const std::string& materials_path, const std::string& rules_path,
@@ -973,132 +1349,8 @@ OptimizeResult run_minimize_plastic_loadcase(
     // same STEP + load case + resolution (handoff 093). The flattened load groups
     // (group g's faces are the load_group_sizes[g] entries of load_face_ids after
     // the earlier groups', its force load_forces[3g..3g+2]) unflatten here.
-    topopt::ProductionLoadCase lc;
-    lc.anchor_face_ids.assign(load_case.anchor_face_ids.begin(),
-                              load_case.anchor_face_ids.end());
-    {
-      const std::size_t group_count = load_case.load_group_sizes.size();
-      std::size_t face_off = 0;
-      for (std::size_t g = 0; g < group_count; ++g) {
-        topopt::ProductionLoadCase::LoadGroup lg;
-        lg.force = topopt::Vec3{
-            3 * g + 0 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 0] : 0.0,
-            3 * g + 1 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 1] : 0.0,
-            3 * g + 2 < load_case.load_forces.size() ? load_case.load_forces[3 * g + 2] : 0.0};
-        const std::size_t n = static_cast<std::size_t>(load_case.load_group_sizes[g]);
-        for (std::size_t f = 0; f < n && face_off + f < load_case.load_face_ids.size(); ++f)
-          lg.face_ids.push_back(load_case.load_face_ids[face_off + f]);
-        face_off += n;
-        lc.load_groups.push_back(std::move(lg));
-      }
-    }
-    lc.minimize_plastic = load_case.minimize_plastic;
-    lc.build_dir = topopt::Vec3{load_case.build_dir_x, load_case.build_dir_y,
-                                load_case.build_dir_z};
-    lc.infill_percent = static_cast<double>(load_case.infill_percent);
-    // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing +
-    // line-width-plumbing). Carry the user's wall-loop count AND the inner/outer wall
-    // line widths onto the shared ProductionLoadCase so the on-device path reaches the
-    // SAME opts.{wall_loops, wall_line_width_mm, wall_line_width_outer_mm} the CLI's
-    // run_job sets from loads.* — the shared build_production_loadcase copies them into
-    // the accept-gate knockdown (t = outer + (loops-1)·inner). A negative width is the
-    // "unset" sentinel (inner → core default 0.45 mm, outer → mirror inner), identical
-    // to a CLI job that omits the key, so an omitting caller is byte-identical.
-    lc.wall_loops = load_case.wall_loops;
-    if (load_case.wall_line_width_mm > 0.0)
-      lc.wall_line_width_mm = load_case.wall_line_width_mm;
-    if (load_case.wall_line_width_outer_mm > 0.0)
-      lc.wall_line_width_outer_mm = load_case.wall_line_width_outer_mm;
-    lc.has_design_box = load_case.has_design_box;
-    if (load_case.has_design_box) {
-      lc.design_box.min = topopt::Vec3{load_case.design_box_min_x,
-                                       load_case.design_box_min_y,
-                                       load_case.design_box_min_z};
-      lc.design_box.max = topopt::Vec3{load_case.design_box_max_x,
-                                       load_case.design_box_max_y,
-                                       load_case.design_box_max_z};
-      const std::size_t kn =
-          std::min(load_case.keep_out_min.size(), load_case.keep_out_max.size()) / 3;
-      for (std::size_t b = 0; b < kn; ++b) {
-        topopt::DesignBox ko;
-        ko.min = topopt::Vec3{load_case.keep_out_min[3 * b + 0],
-                              load_case.keep_out_min[3 * b + 1],
-                              load_case.keep_out_min[3 * b + 2]};
-        ko.max = topopt::Vec3{load_case.keep_out_max[3 * b + 0],
-                              load_case.keep_out_max[3 * b + 1],
-                              load_case.keep_out_max[3 * b + 2]};
-        lc.keep_out_boxes.push_back(ko);
-      }
-    }
-
-    // Handoff 100 — unflatten the "Keep clear" clearances. Each region ships only
-    // a face id + kind + editable distances; build_production_loadcase re-reads
-    // the exact bore axis/radius or plane normal from the STEP. A distance the app
-    // left at 0 defaults to the same spec suggestion the CLI uses (for a bolt,
-    // derived from the bore radius). No clearance → byte-identical to today.
-    {
-      const std::size_t cn = load_case.clearance_face_ids.size();
-      for (std::size_t c = 0; c < cn; ++c) {
-        topopt::ProductionLoadCase::Clearance cl;
-        cl.face_id = load_case.clearance_face_ids[c];
-        const bool bolt =
-            c < load_case.clearance_kinds.size() && load_case.clearance_kinds[c] == 0;
-        const bool manual =
-            c < load_case.clearance_manual.size() && load_case.clearance_manual[c];
-        cl.manual = manual;
-        // Default suggestions depend on the bore radius: an auto bolt reads it from
-        // the STEP face, a manual bolt carries its own radius here.
-        double bore_r = 0.0;
-        if (bolt) {
-          if (manual && c < load_case.clearance_radius_mm.size())
-            bore_r = load_case.clearance_radius_mm[c];
-          else if (!manual && cl.face_id >= 0 && cl.face_id < model.face_count)
-            bore_r = model.faces[static_cast<std::size_t>(cl.face_id)]
-                         .cylinder_radius_mm;
-        }
-        cl.params = bolt ? topopt::default_bolt_clearance(bore_r)
-                         : topopt::default_face_clearance();
-        if (c < load_case.clearance_margin_mm.size() &&
-            load_case.clearance_margin_mm[c] > 0.0)
-          cl.params.concentric_margin_mm = load_case.clearance_margin_mm[c];
-        if (c < load_case.clearance_axial_mm.size() &&
-            load_case.clearance_axial_mm[c] > 0.0)
-          cl.params.axial_clearance_mm = load_case.clearance_axial_mm[c];
-        if (c < load_case.clearance_slab_mm.size() &&
-            load_case.clearance_slab_mm[c] > 0.0)
-          cl.params.slab_depth_mm = load_case.clearance_slab_mm[c];
-        if (manual) {
-          auto xyz = [&](const std::vector<double>& v) {
-            return (3 * c + 2 < v.size())
-                       ? topopt::Vec3{v[3 * c + 0], v[3 * c + 1], v[3 * c + 2]}
-                       : topopt::Vec3{0.0, 0.0, 0.0};
-          };
-          auto scalar = [&](const std::vector<double>& v) {
-            return c < v.size() ? v[c] : 0.0;
-          };
-          cl.manual_geom.kind =
-              bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
-          cl.manual_geom.axis_point = xyz(load_case.clearance_axis_point_xyz);
-          cl.manual_geom.axis_dir = xyz(load_case.clearance_axis_dir_xyz);
-          cl.manual_geom.radius_mm = scalar(load_case.clearance_radius_mm);
-          cl.manual_geom.half_length_mm = scalar(load_case.clearance_half_len_mm);
-          cl.manual_geom.origin = xyz(load_case.clearance_origin_xyz);
-          cl.manual_geom.normal = xyz(load_case.clearance_normal_xyz);
-          cl.manual_geom.half_u_mm = scalar(load_case.clearance_half_u_mm);
-          cl.manual_geom.half_w_mm = scalar(load_case.clearance_half_w_mm);
-        }
-        lc.clearances.push_back(cl);
-      }
-    }
-
-    // Handoff 124 — Face protections (preserve-skin). Ship the raw face ids + ONE
-    // global depth; the core freezes the part-solid skin behind each FrozenSolid.
-    // A depth <= 0 means "use the core default" (leave the ProductionLoadCase field
-    // at its default). Empty list → no protection → byte-identical to today.
-    lc.face_protection_face_ids.assign(load_case.face_protection_face_ids.begin(),
-                                       load_case.face_protection_face_ids.end());
-    if (load_case.face_protection_depth_mm > 0.0)
-      lc.face_protection_depth_mm = load_case.face_protection_depth_mm;
+    const topopt::ProductionLoadCase lc =
+        production_loadcase_from_bridge(load_case, model);
 
     topopt::ProductionRunSetup setup =
         topopt::build_production_loadcase(model, resolution, lc);
