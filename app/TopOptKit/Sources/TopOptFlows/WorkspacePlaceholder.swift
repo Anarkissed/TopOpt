@@ -51,6 +51,12 @@ public struct WorkspacePlaceholder: View {
     /// discovered by Bonjour. Owned here so the choice + discovery live for the
     /// workspace session; nil `activeRemote` → the on-device bridge runner (unchanged).
     @StateObject private var compute = ComputeLocationModel()
+    /// The lattice viewer proxy (handoff 2026-07-28): shades the part surface by local
+    /// lattice DENSITY instead of rendering the ~316k-triangle-and-up lattice mesh the
+    /// device cannot hold. Off by default; when on, feeds the density tints into the
+    /// viewer's existing per-vertex colour channel (zero new GPU buffers) and shows the
+    /// honest legend + true-geometry sample patch.
+    @StateObject private var latticeProxy = LatticeProxyModel()
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When a project has saved variants, results show by default; tapping "See
@@ -261,6 +267,13 @@ public struct WorkspacePlaceholder: View {
                           // double-tap undoes, THREE-finger double-tap redoes.
                           onUndo: { project.performUndo() },
                           onRedo: { project.performRedo() },
+                          // Lattice proxy (2026-07-28): when previewing, paint the body
+                          // by local lattice density through the existing per-vertex
+                          // tint channel — no lattice geometry, no new GPU buffer. No
+                          // demand field in the workspace pre-run → a uniform preview;
+                          // graded shading engages when a result's von Mises field is
+                          // present (proven in LatticeProxyTests + the evidence render).
+                          stressTints: latticeProxyTints,
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn.
                           designBox: showDesignGizmo ? project.designBox.box : nil,
@@ -319,6 +332,7 @@ public struct WorkspacePlaceholder: View {
                 // is no longer placed separately here.
                 if force.gravityIsSet { bottomRightControls }
                 if viewerMesh != nil { selectionsPanel }
+                if viewerMesh != nil { latticePreviewOverlay }
             }
             loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
             if viewerMesh != nil { orientationGizmo }           // orientation gizmo — top-right, always
@@ -484,6 +498,15 @@ public struct WorkspacePlaceholder: View {
             for f in g.faces { tints[f] = SIMD4<Float>(p.x, p.y, p.z, 1) }
         }
         return tints
+    }
+
+    /// The per-vertex density tints the lattice proxy paints the body with, or nil when
+    /// the proxy is off (body keeps its neutral clay). Uniform in the workspace (no
+    /// demand field pre-run); the density GRADING engages wherever a von Mises field is
+    /// supplied (see LatticeDensityProxy.tints).
+    private var latticeProxyTints: [SIMD4<Float>]? {
+        guard latticeProxy.isActive, let mesh = viewerMesh else { return nil }
+        return latticeProxy.densityTints(for: mesh, field: nil)
     }
 
     /// The clearance volumes to render (keep-clear v2 Part 3), each tagged whether its
@@ -936,6 +959,69 @@ public struct WorkspacePlaceholder: View {
         .frame(maxWidth: 460)
         .frame(maxWidth: .infinity, alignment: .center)
         .padding(.top, DS.Space.xl4)
+    }
+
+    // MARK: lattice viewer proxy (handoff 2026-07-28)
+
+    /// The lattice-preview toggle + legend, LEADING-anchored so it is clear of the
+    /// centre gizmo, the top-right orientation gizmo and the bottom-right settings
+    /// chips (the legend also carries a `.label` keep-out element — the lowest
+    /// priority — so it floats clear of any control it would otherwise touch; see
+    /// LatticeProxyLayout + LatticeProxyKeepOutTests). Off by default.
+    private var latticePreviewOverlay: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            latticePreviewChip
+            if latticeProxy.isActive {
+                LatticeProxyLegend(model: latticeProxy,
+                                   partVolumeMM3: partSolidVolumeMM3,
+                                   memberMM: nil)
+                    .transition(.move(edge: .leading).combined(with: .opacity))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .padding(.leading, DS.Space.l)
+        .animation(DS.Motion.emphasized, value: latticeProxy.isActive)
+    }
+
+    /// The toggle: enter/leave the lattice density preview. Uses the density ramp's own
+    /// indigo so it reads as its own tool.
+    private var latticePreviewChip: some View {
+        Button { latticeProxy.isActive.toggle() } label: {
+            HStack(spacing: DS.Space.xs) {
+                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .bold))
+                Text(latticeProxy.isActive ? "Lattice preview · on" : "Lattice preview")
+                    .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+            }
+            .foregroundStyle(latticeProxy.isActive
+                ? LatticeDensityProxy.densityColor(fraction: 0.75).color
+                : DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
+            .background(Capsule().fill(DS.Surface.panel.color)
+                .overlay(Capsule().strokeBorder(
+                    (latticeProxy.isActive ? LatticeDensityProxy.densityColor(fraction: 0.6).opacity(0.6)
+                                           : DS.Color.strokeSubtle).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .dsShadow(DS.Shadow.panel)
+        .help("Preview the lattice infill as a density map — no heavy lattice mesh on the device.")
+    }
+
+    /// The part's solid volume (mm³) for the proxy cost comparison — signed tetra sum
+    /// over the viewer mesh (0 when no mesh).
+    private var partSolidVolumeMM3: Double {
+        guard let mesh = viewerMesh else { return 0 }
+        let p = mesh.positions, idx = mesh.indices
+        var vol = 0.0
+        var t = 0
+        func v(_ i: UInt32) -> SIMD3<Double> {
+            let b = Int(i) * 3
+            return SIMD3<Double>(Double(p[b]), Double(p[b + 1]), Double(p[b + 2]))
+        }
+        while t + 2 < idx.count {
+            vol += simd_dot(v(idx[t]), simd_cross(v(idx[t + 1]), v(idx[t + 2]))) / 6
+            t += 3
+        }
+        return abs(vol)
     }
 
     /// The settings chips (Gravity · Minimize plastic · quality · Design Box) stack BOTTOM-right,
