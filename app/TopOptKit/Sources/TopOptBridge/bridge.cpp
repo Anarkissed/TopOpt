@@ -996,13 +996,19 @@ OptimizeResult run_minimize_plastic_loadcase(
     lc.build_dir = topopt::Vec3{load_case.build_dir_x, load_case.build_dir_y,
                                 load_case.build_dir_z};
     lc.infill_percent = static_cast<double>(load_case.infill_percent);
-    // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing).
-    // Carry the user's wall-loop count onto the shared ProductionLoadCase so the
-    // on-device path reaches the SAME opts.wall_loops the CLI's run_job sets from
-    // loads.wall_loops — the shared build_production_loadcase copies it into the
-    // accept-gate knockdown. wall_line_width_mm is left at the ProductionLoadCase
-    // default (< 0 → core default 0.45 mm), identical to a CLI job that omits it.
+    // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing +
+    // line-width-plumbing). Carry the user's wall-loop count AND the inner/outer wall
+    // line widths onto the shared ProductionLoadCase so the on-device path reaches the
+    // SAME opts.{wall_loops, wall_line_width_mm, wall_line_width_outer_mm} the CLI's
+    // run_job sets from loads.* — the shared build_production_loadcase copies them into
+    // the accept-gate knockdown (t = outer + (loops-1)·inner). A negative width is the
+    // "unset" sentinel (inner → core default 0.45 mm, outer → mirror inner), identical
+    // to a CLI job that omits the key, so an omitting caller is byte-identical.
     lc.wall_loops = load_case.wall_loops;
+    if (load_case.wall_line_width_mm > 0.0)
+      lc.wall_line_width_mm = load_case.wall_line_width_mm;
+    if (load_case.wall_line_width_outer_mm > 0.0)
+      lc.wall_line_width_outer_mm = load_case.wall_line_width_outer_mm;
     lc.has_design_box = load_case.has_design_box;
     if (load_case.has_design_box) {
       lc.design_box.min = topopt::Vec3{load_case.design_box_min_x,

@@ -1,0 +1,18 @@
+{
+  "_comment": "N1 evidence (handoff line-width-plumbing): a loads-block minimize_plastic job with NON-DEFAULT, DISTINCT wall line widths (inner 0.5, outer 0.4) and 5 loops, so run_info.json is checked to echo the values the user set AND the derived wall_thickness_mm = 0.4 + 4*0.5 = 2.4 mm (the outer+ (loops-1)*inner split), not the naive 5*0.45 = 2.25.",
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 16,
+  "loads": {
+    "anchors": [ { "kind": "cylindrical", "radius_mm": 2.5 } ],
+    "minimize_plastic": true,
+    "build_dir": [0.0, 0.0, 1.0],
+    "infill_percent": 20,
+    "wall_loops": 5,
+    "wall_line_width_mm": 0.5,
+    "wall_line_width_outer_mm": 0.4
+  },
+  "simp": { "max_iterations": 4 },
+  "output": { "report": "report.json", "mesh_format": "stl", "mesh_prefix": "variant" }
+}

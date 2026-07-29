@@ -647,14 +647,18 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         if request.infillPercent >= 0 {
             loads["infill_percent"] = request.infillPercent
         }
-        // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing).
-        // Emit the user's wall-loop count ALWAYS (0 is a meaningful "no walls", and the
-        // CLI defaults loads.wall_loops to 0 when the key is absent — the exact bug that
-        // made a walled part's run_info read `wall_loops: 0`). The on-device bridge sends
-        // the SAME value via BridgeLoadCase.wall_loops (asserted equal in
-        // JobJSONEquivalenceTests). wall_line_width_mm is not carried — it is not a Print
-        // Parameter, so both paths fall back to the core default (0.45 mm).
+        // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing +
+        // line-width-plumbing). Emit the user's wall-loop count and the inner/outer wall
+        // LINE WIDTHS ALWAYS (0 loops is a meaningful "no walls", and the CLI defaults the
+        // absent keys — the exact bug that made a walled part's run_info read the modelling
+        // assumption instead of the user's settings). The on-device bridge sends the SAME
+        // values via BridgeLoadCase.{wall_loops, wall_line_width_mm, wall_line_width_outer_mm}
+        // through the SAME TopOptKit mappings (asserted equal in JobJSONEquivalenceTests).
         loads["wall_loops"] = Int(TopOptKit.bridgeWallLoops(forOverride: request.wallLoops))
+        loads["wall_line_width_mm"] =
+            TopOptKit.bridgeWallLineWidthMM(forOverride: request.wallLineWidthInnerMM)
+        loads["wall_line_width_outer_mm"] =
+            TopOptKit.bridgeWallLineWidthOuterMM(forOverride: request.wallLineWidthOuterMM)
         if !request.clearances.isEmpty {
             loads["clearances"] = request.clearances.map { c -> [String: Any] in
                 // The kind + distance fields are IDENTICAL for auto and manual (BAR

@@ -524,6 +524,8 @@ std::string run_info_json(const RunInfo& info) {
   num("width_aware_knockdown", bool_json(info.width_aware_knockdown));
   num("wall_loops", std::to_string(info.wall_loops));
   num("wall_line_width_mm", fmt(info.wall_line_width_mm));
+  num("wall_line_width_outer_mm", fmt(info.wall_line_width_outer_mm));
+  num("wall_thickness_mm", fmt(info.wall_thickness_mm));
   num("has_design_box", bool_json(info.has_design_box));
 
   std::string ladder = "[";

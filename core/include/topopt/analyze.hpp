@@ -72,9 +72,12 @@ struct LatticePosture {
 //   width_aware       — arm the SHELL+CORE composite. false (the default) → the gate
 //                       is exactly the scalar path above (byte-identical).
 //   infill_percent    — the job infill (percent) for the per-voxel core term.
-//   wall_thickness_mm — t = wall_loops · wall_line_width_mm, the solid perimeter ring
-//                       width the slicer wraps around each member. 0 → f_wall = 0 →
-//                       the composite reduces to f^1.5 even when armed.
+//   wall_thickness_mm — t = outer + (wall_loops - 1)·inner, the solid perimeter ring
+//                       width the slicer wraps around each member (one OUTER line width
+//                       + the remaining inner loops at the INNER line width — what
+//                       Bambu/Orca actually deposit). A mirror-inner outer collapses
+//                       this to loops·inner. 0 → f_wall = 0 → the composite reduces to
+//                       f^1.5 even when armed. Built once in knockdown_spec_for.
 struct KnockdownSpec {
   double infill_knockdown = 1.0;
   bool width_aware = false;

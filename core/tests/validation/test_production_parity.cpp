@@ -239,9 +239,34 @@ int main() {
           "production config (byte-identical to the pre-width gate)");
     CHECK(bridge_spec.infill_percent == opts.infill_percent,
           "the shared knockdown spec carries the job infill for the per-voxel core term");
-    CHECK(bridge_spec.wall_thickness_mm ==
+    // Wall-ring thickness (handoff line-width-plumbing). The shared spec sizes it from
+  // the outer/inner split t = outer + (loops-1)·inner. In the production opts the outer
+  // width is the mirror-inner sentinel (< 0), so it MUST collapse to loops·inner — the
+  // byte-identical value the pre-split formula produced. This pins that the split never
+  // perturbs a single-width job.
+  CHECK(bridge_spec.wall_thickness_mm ==
               static_cast<double>(opts.wall_loops) * opts.wall_line_width_mm,
-          "the shared knockdown spec sizes the wall ring t = wall_loops · wall_line_width_mm");
+          "the shared knockdown spec sizes the wall ring to loops·inner when the outer "
+          "width mirrors the inner (byte-identical to the pre-split formula)");
+  // And when the outer width is set DIFFERENTLY from the inner, the spec lays down one
+  // outer bead + (loops-1) inner beads — what Bambu/Orca actually deposit — not loops×
+  // either width. This is the whole point of the split.
+  {
+    MinimizePlasticOptions split = opts;
+    split.wall_loops = 5;
+    split.wall_line_width_mm = 0.45;        // inner
+    split.wall_line_width_outer_mm = 0.42;  // outer (narrower, a common real profile)
+    const topopt::KnockdownSpec s = topopt::knockdown_spec_for(split);
+    CHECK(std::abs(s.wall_thickness_mm - (0.42 + 4.0 * 0.45)) < 1e-12,
+          "outer≠inner sizes t = outer + (loops-1)·inner (0.42 + 4·0.45 = 2.22 mm)");
+    // The naive loops·inner would read 2.25 mm — assert we are NOT that.
+    CHECK(std::abs(s.wall_thickness_mm - 5.0 * 0.45) > 1e-6,
+          "the split is not the naive loops·inner (2.25 mm)");
+    // 0 loops → no ring regardless of the widths.
+    split.wall_loops = 0;
+    CHECK(topopt::knockdown_spec_for(split).wall_thickness_mm == 0.0,
+          "0 wall loops → t = 0 (no wall rescue) even with widths set");
+  }
     // Config echo (per the 141-lineage mechanism): the production config ARMS the
     // conditional gate at the 0.07 grayness threshold and does NOT set the always-on
     // simp.mma_projection bool — projection is now per-rung and gate-driven.

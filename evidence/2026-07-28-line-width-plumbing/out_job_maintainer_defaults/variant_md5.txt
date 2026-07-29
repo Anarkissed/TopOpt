@@ -1,0 +1,4 @@
+cabef701d93ba91cbd9d695308233b68 variant_026.stl
+79ddfa14f2d0b13033c01ac159748a66 variant_038.stl
+966810efe125403fb40380dc9faa05c2 variant_052.stl
+ab219d1a7a0800d83acbcbbb2135dd5c variant_068.stl

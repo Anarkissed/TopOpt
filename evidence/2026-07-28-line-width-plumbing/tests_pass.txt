@@ -1,0 +1,24 @@
+N2 — parity + schema tests (core C++)
+======================================
+$ core/build/test_job
+job schema (M6.2): all 119 checks passed
+
+$ core/build/test_production_parity
+production parity (handoff 093): all checks passed
+
+N2/N4 — app Swift tests (bridge==CLI parity, legacy decode, request identity)
+============================================================================
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsAgreeAcrossBridgeAndCLI]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsAgreeAcrossBridgeAndCLI]' passed
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsDefaultToTheStatedFDMDefaults]' started.
+Test Case '-[TopOptFlowsTests.JobJSONEquivalenceTests testWallLineWidthsDefaultToTheStatedFDMDefaults]' passed
+	 Executed 8 tests, with 0 failures
+Test Case '-[TopOptFlowsTests.PrintParamsTests testLegacyPrintParamsJSONDecodesWidthsToDefault]' started.
+Test Case '-[TopOptFlowsTests.PrintParamsTests testLegacyPrintParamsJSONDecodesWidthsToDefault]' passed
+Test Case '-[TopOptFlowsTests.PrintParamsTests testLineWidthsArePartOfRequestIdentity]' started.
+Test Case '-[TopOptFlowsTests.PrintParamsTests testLineWidthsArePartOfRequestIdentity]' passed
+Test Case '-[TopOptFlowsTests.PrintParamsTests testPrintParamsCodableRoundTripCarriesWidths]' started.
+Test Case '-[TopOptFlowsTests.PrintParamsTests testPrintParamsCodableRoundTripCarriesWidths]' passed
+	 Executed 34 tests, with 0 failures
+	 Executed 42 tests, with 0 failures
+	 Executed 42 tests, with 0 failures

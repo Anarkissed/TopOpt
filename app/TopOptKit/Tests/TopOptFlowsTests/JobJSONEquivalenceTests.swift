@@ -44,6 +44,10 @@ final class JobJSONEquivalenceTests: XCTestCase {
             buildDirection: SIMD3(0, 0, 1),
             infillPercent: 40,
             wallLoops: 5,
+            // Non-default, DISTINCT outer/inner widths so the parity + carry tests catch
+            // a front-end that drops one or swaps them (handoff line-width-plumbing).
+            wallLineWidthOuterMM: 0.4,
+            wallLineWidthInnerMM: 0.5,
             designBox: TopOptKit.DesignBoxSpec(min: SIMD3(-5, -5, -5),
                                                max: SIMD3(30, 20, 10)),
             keepOutBoxes: [TopOptKit.DesignBoxSpec(min: SIMD3(0, 0, 0),
@@ -114,6 +118,8 @@ final class JobJSONEquivalenceTests: XCTestCase {
             anchorFaceIDs: req.anchorFaceIDs, loadGroups: req.loadGroups,
             minimizePlastic: req.minimizePlastic, buildDirection: req.buildDirection,
             infillPercent: req.infillPercent, wallLoops: req.wallLoops,
+            wallLineWidthOuterMM: req.wallLineWidthOuterMM,
+            wallLineWidthInnerMM: req.wallLineWidthInnerMM,
             designBox: req.designBox,
             keepOutBoxes: req.keepOutBoxes, clearances: req.clearances,
             faceProtections: req.faceProtections,
@@ -151,6 +157,10 @@ final class JobJSONEquivalenceTests: XCTestCase {
                        "the chosen infill must survive — not silently 100%")
         XCTAssertEqual(loads["wall_loops"] as? Int, 5,
                        "the chosen wall count must survive — not silently 0 (bare infill)")
+        XCTAssertEqual(loads["wall_line_width_mm"] as? Double, 0.5,
+                       "the chosen INNER line width must survive — not the 0.45 mm assumption")
+        XCTAssertEqual(loads["wall_line_width_outer_mm"] as? Double, 0.4,
+                       "the chosen OUTER line width must survive as its own key (the split)")
         XCTAssertEqual(loads["minimize_plastic"] as? Bool, true)
 
         let groups = try XCTUnwrap(loads["groups"] as? [[String: Any]],
@@ -240,5 +250,61 @@ final class JobJSONEquivalenceTests: XCTestCase {
                        "the default project still emits a concrete non-zero wall count")
         XCTAssertEqual(Int(TopOptKit.bridgeWallLoops(forOverride: req.wallLoops)), 3,
                        "the on-device path agrees on the default")
+    }
+
+    // MARK: wall line widths — the CLI/bridge parity bar (handoff line-width-plumbing)
+
+    /// N2 — BOTH front-ends agree on the outer AND inner wall LINE WIDTHS for one
+    /// project, and keep them as SEPARATE keys (option b: the slicer lays down one outer
+    /// bead + (loops-1) inner beads). The LAN worker path serializes them into
+    /// `loads.wall_line_width_{outer_,}mm`; the on-device path sets them on
+    /// `BridgeLoadCase.wall_line_width_{outer_,}mm` via the SAME TopOptKit mappings. This
+    /// asserts the two are the same values for the same RunRequest — the bridge/CLI
+    /// divergence class that bit knockdown_spec_for once. It is the app-side twin of
+    /// test_production_parity.cpp's split-thickness assertion.
+    func testWallLineWidthsAgreeAcrossBridgeAndCLI() throws {
+        let mesh = try jobDict(modelPath: "/tmp/part.stl")
+        let step = try jobDict(modelPath: "/tmp/part.step")
+        let req = request(modelPath: "/tmp/part.stl")
+
+        for (label, job) in [("mesh", mesh), ("step", step)] {
+            let loads = try XCTUnwrap(job["loads"] as? [String: Any])
+            XCTAssertEqual(loads["wall_line_width_mm"] as? Double, 0.5,
+                           "\(label) LAN job carries the inner line width")
+            XCTAssertEqual(loads["wall_line_width_outer_mm"] as? Double, 0.4,
+                           "\(label) LAN job carries the outer line width as its own key")
+        }
+
+        // The on-device bridge POD carries the SAME values through the shared mappings
+        // minimizePlasticLoadCase uses to set BridgeLoadCase.wall_line_width_{outer_,}mm.
+        let bridgeInner = TopOptKit.bridgeWallLineWidthMM(forOverride: req.wallLineWidthInnerMM)
+        let bridgeOuter = TopOptKit.bridgeWallLineWidthOuterMM(forOverride: req.wallLineWidthOuterMM)
+        XCTAssertEqual(bridgeInner, 0.5, "the bridge carries the inner line width")
+        XCTAssertEqual(bridgeOuter, 0.4, "the bridge carries the outer line width")
+        XCTAssertEqual((mesh["loads"] as? [String: Any])?["wall_line_width_mm"] as? Double,
+                       bridgeInner, "bridge and CLI must produce the same inner width")
+        XCTAssertEqual((mesh["loads"] as? [String: Any])?["wall_line_width_outer_mm"] as? Double,
+                       bridgeOuter, "bridge and CLI must produce the same outer width")
+    }
+
+    /// N4-adjacent — a request built with NO explicit widths (a pre-line-width project
+    /// whose params decode to `.fdmDefault`) serializes the stated FDM defaults on both
+    /// front-ends: outer 0.42 mm, inner 0.45 mm (the 0.4-nozzle Bambu/Orca profile), never
+    /// a dropped key or a bare 0.
+    func testWallLineWidthsDefaultToTheStatedFDMDefaults() throws {
+        let cfg = RemoteRunnerConfig(host: "127.0.0.1", port: 8757, expectedFingerprint: "test")
+        let req = RunRequest(modelPath: "/tmp/bare.stl", material: "PLA", materialsPath: "",
+                             rulesPath: "", resolution: 64, projectName: "bare")
+        XCTAssertEqual(req.wallLineWidthOuterMM, PrintParams.fdmDefault.wallLineWidthOuterMM)
+        XCTAssertEqual(req.wallLineWidthInnerMM, PrintParams.fdmDefault.wallLineWidthInnerMM)
+        XCTAssertEqual(req.wallLineWidthOuterMM, 0.42, "stated 0.4-nozzle outer default")
+        XCTAssertEqual(req.wallLineWidthInnerMM, 0.45, "stated 0.4-nozzle inner default")
+        let run = RemoteRun(config: cfg, request: req, progress: { _, _, _ in true }, onVariant: { _ in })
+        let loads = try XCTUnwrap(
+            (JSONSerialization.jsonObject(with: try run.buildJobJSON()) as? [String: Any])?["loads"] as? [String: Any])
+        XCTAssertEqual(loads["wall_line_width_mm"] as? Double, 0.45,
+                       "the default project still emits a concrete inner width")
+        XCTAssertEqual(loads["wall_line_width_outer_mm"] as? Double, 0.42,
+                       "the default project still emits a concrete outer width")
     }
 }
