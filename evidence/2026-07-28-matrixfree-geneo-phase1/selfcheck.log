@@ -1,0 +1,9 @@
+=== SELF-CHECK (GenEO coarse-basis harness) ===
+  PoU sum_i D_i = 1 : free DOF=10608  max|sum-1|=2.220e-16  PASS
+  uniform free block: n=2187 #(lambda<1e-8)=6  PASS(6 rigid)
+  capture vs tight  : ref_below=6  tight[iters=399 capt=6/6 mv=13859]  capture[iters=40 capt=6/6 mv=2268]  PASS
+  capture on REAL field: 18 subs, captured 97/97 modes (worst=0.9999), saturated=0, subs-with-miss=0, iters_max=499, total mv=189328  PASS
+  coarse op         : Nt=24 factorized=1 spd=1 lam_min=1.434e-01 cond=6.30e+01  PASS
+SELF-CHECK: ALL PASS
+
+EXIT 0

@@ -1,0 +1,8 @@
+## AMORT: cantilever 48x24x48, develop 40 OC iters rung 0.35, snapshot every iter
+   iter30->31    rho L2 change=0.0016   coarse-subspace change (1-cos angle) med=0.0000 max=0.0014  (n=54 subs)
+   iter30->35    rho L2 change=0.0074   coarse-subspace change (1-cos angle) med=0.0000 max=0.9999  (n=54 subs)
+   iter20->30    rho L2 change=0.0203   coarse-subspace change (1-cos angle) med=0.0000 max=1.0000  (n=54 subs)
+   READ: small subspace change over a gap => the basis from an earlier iter is
+   REUSABLE for that many design iterations (amortizes the eigensolve setup).
+./core/build/geneo_coarse_probe amort   516.75s user 6.62s system 431% cpu 2:01.18 total
+EXIT 0

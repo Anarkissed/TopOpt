@@ -1,0 +1,20 @@
+## BASIS build: cantilever 64x32x64 (fine DOF=418275), develop 40 OC iters rung 0.35
+   develop wall=80.7 s
+
+## Decomposition core=8 ov=1, lambda_cut=0.05, capture-based stop
+   nsub=256  Nt=1410 (0.337% of fine)  modes/sub med/max=6/12  iters med/max=52/799
+   build wall=39.18 s  total matvecs=1650822  saturated subs (block too small)=0
+   G2 MEMORY: stored basis=59.2 MB  largest single-subdomain transient=0.24 MB  process peak RSS=750 MB
+   G1 CAPTURE (16 sampled subdomains, dense ref): captured modes=13/13 worst per-mode capture=1.0000  count(kept==ref_below)=16/16  ALL MODES CAPTURED
+   PIECE 3 coarse op V^T A V: Nt=1410  1410 global applies  assemble=14.15 s  LDLT factor=0.062 s  factorized=1 spd=1  cond=5.55e+07  dense=15.2 MB
+   8.44M-DOF projection: ~5166 subdomains, Nt~28451, stored basis~1194 MB, 1-thread build~791 s (embarrassingly parallel over subdomains)
+
+## Decomposition core=10 ov=1, lambda_cut=0.05, capture-based stop
+   nsub=196  Nt=1095 (0.262% of fine)  modes/sub med/max=6/10  iters med/max=56/799
+   build wall=48.24 s  total matvecs=1567410  saturated subs (block too small)=0
+   G2 MEMORY: stored basis=55.7 MB  largest single-subdomain transient=0.40 MB  process peak RSS=2890 MB
+   G1 CAPTURE (17 sampled subdomains, dense ref): captured modes=85/85 worst per-mode capture=1.0000  count(kept==ref_below)=17/17  ALL MODES CAPTURED
+   PIECE 3 coarse op V^T A V: Nt=1095  1095 global applies  assemble=10.74 s  LDLT factor=0.030 s  factorized=1 spd=1  cond=7.35e+07  dense=9.1 MB
+   8.44M-DOF projection: ~3955 subdomains, Nt~22095, stored basis~1123 MB, 1-thread build~973 s (embarrassingly parallel over subdomains)
+./core/build/geneo_coarse_probe basis   3778.01s user 262.26s system 453% cpu 14:50.07 total
+EXIT 0

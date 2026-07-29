@@ -1,0 +1,3 @@
+tag,core,ov,fine_dof,nsub,Nt,frac_fine_pct,modes_med,modes_max,iters_med,iters_max,build_s,total_mv,basis_MB,max_sub_MB,peak_RSS_MB,coarse_Nt,coarse_factorized,coarse_spd,coarse_cond,coarse_dense_MB,coarse_assemble_s,coarse_factor_s
+BASIS,8,1,418275,256,1410,0.3371,6,12,52,799,39.18,1650822,59.18,0.236,750,1410,1,1,5.548e+07,15.17,14.154,0.062
+BASIS,10,1,418275,196,1095,0.2618,6,10,56,799,48.24,1567410,55.66,0.398,2890,1095,1,1,7.351e+07,9.15,10.742,0.030
