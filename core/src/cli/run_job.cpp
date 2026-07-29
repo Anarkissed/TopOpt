@@ -1,6 +1,7 @@
 #include "topopt/job.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include "topopt/clearance.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/fields.hpp"
+#include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -28,6 +30,7 @@
 #include "topopt/smooth.hpp"
 #include "topopt/step.hpp"
 #include "topopt/stl.hpp"
+#include "topopt/threemf_stream.hpp"
 #include "topopt/version.hpp"
 #include "topopt/voxel.hpp"
 #ifdef TOPOPT_HAVE_3MF
@@ -48,6 +51,15 @@ constexpr double kGramPerCm3ToTonnePerMm3 = 1e-9;
 std::string join_path(const std::string& dir, const std::string& name) {
   if (std::filesystem::path(name).is_absolute()) return name;
   return dir + "/" + name;
+}
+
+// Monotonic wall-clock seconds (handoff 2026-07-28-lattice-generation-production).
+// Used ONLY to time lattice generation and the whole job for the P6 fraction; a
+// pure observer, never consulted on the byte-identical no-lattice path.
+double wall_seconds() {
+  return std::chrono::duration<double>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
 }
 
 // <prefix>_<fraction*100, 3 digits>.<format>, per the demo fixture's
@@ -245,6 +257,104 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
     write_stl_file(path, export_mesh);
   }
   return path;
+}
+
+// --- Lattice export (handoff 2026-07-28-lattice-generation-production) --------
+// Emit a LATTICED companion to an accepted variant's solid mesh: the solid shell
+// (variant.v3.mesh) unioned with an octet strut lattice filling the part's solid
+// interior, STREAMED to disk so peak RSS stays flat in the output size. The union
+// is written as an interpenetrating triangle soup — three fresh vertices per
+// facet, exactly what the harness emitted and the PR 201 print certified — so the
+// slicer's boolean union resolves the overlaps. Runs wherever run_job runs (the
+// Mac worker's topopt-cli); the file lands in out_dir and is fetched on demand, so
+// the iPad never holds the mesh.
+struct LatticeExportOutcome {
+  std::vector<std::string> paths;  // files written (STL and/or 3MF)
+  LatticeGenStats stats;           // generator counts (identical across formats)
+  long long region_voxels = 0;     // SOLID voxels inside the latticed cells
+};
+
+std::string lattice_base_name(const std::string& prefix, double requested_vf) {
+  char digits[8];
+  std::snprintf(digits, sizeof(digits), "%03d",
+                static_cast<int>(std::lround(requested_vf * 100.0)));
+  return prefix + "_" + digits + "_lattice";
+}
+
+LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& variant,
+                                             const std::string& out_dir,
+                                             const JobOutput& out,
+                                             const JobLattice& lat,
+                                             const VoxelGrid& sg) {
+  // Occupancy: a lattice cell is latticed iff its CENTRE falls in a solid voxel of
+  // the accepted design (physical_density >= 0.5 — the marching-cubes iso). This
+  // is the "which regions were latticed" record: the part's solid interior.
+  const std::vector<double>& dens = variant.optimization.physical_density;
+  auto solid_at = [&](const Vec3& p) -> bool {
+    const int i = static_cast<int>(std::floor((p.x - sg.origin.x) / sg.spacing));
+    const int j = static_cast<int>(std::floor((p.y - sg.origin.y) / sg.spacing));
+    const int k = static_cast<int>(std::floor((p.z - sg.origin.z) / sg.spacing));
+    if (i < 0 || j < 0 || k < 0 || i >= sg.nx || j >= sg.ny || k >= sg.nz)
+      return false;
+    return dens[sg.index(i, j, k)] >= 0.5;
+  };
+
+  LatticeRegion R;
+  R.origin = sg.origin;
+  R.cell_mm = lat.cell_mm;
+  R.nx = std::max(1, static_cast<int>(std::ceil(sg.nx * sg.spacing / lat.cell_mm)));
+  R.ny = std::max(1, static_cast<int>(std::ceil(sg.ny * sg.spacing / lat.cell_mm)));
+  R.nz = std::max(1, static_cast<int>(std::ceil(sg.nz * sg.spacing / lat.cell_mm)));
+  const double cell = lat.cell_mm;
+  const Vec3 org = R.origin;
+  R.latticed = [solid_at, cell, org](int ci, int cj, int ck) {
+    const Vec3 c{org.x + (ci + 0.5) * cell, org.y + (cj + 0.5) * cell,
+                 org.z + (ck + 0.5) * cell};
+    return solid_at(c);
+  };
+
+  LatticeRadiusField G;
+  G.uniform_mm = lat.strut_radius_mm;
+  G.nseg = 8;
+
+  const TriangleMesh& shell = variant.v3.mesh;
+  auto push_shell = [&shell](TriangleSink& sink) {
+    for (const auto& t : shell.triangles)
+      sink.add_triangle(shell.vertices[static_cast<std::size_t>(t[0])],
+                        shell.vertices[static_cast<std::size_t>(t[1])],
+                        shell.vertices[static_cast<std::size_t>(t[2])]);
+  };
+
+  LatticeExportOutcome oc;
+  const std::string base =
+      join_path(out_dir, lattice_base_name(out.mesh_prefix,
+                                           variant.requested_volume_fraction));
+  if (lat.emit_stl) {
+    const std::string path = base + ".stl";
+    StreamingStlWriter w(path);
+    push_shell(w);  // solid shell first, then the streamed lattice
+    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w);
+    w.finish();
+    oc.paths.push_back(path);
+  }
+  if (lat.emit_3mf) {
+    const std::string path = base + ".3mf";
+    StreamingThreeMfWriter w(path);
+    push_shell(w);
+    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w);
+    w.finish();
+    oc.paths.push_back(path);
+  }
+
+  // The latticed region's SOLID voxel count (the region actually filled): every
+  // solid voxel whose owning lattice cell was latticed. A solid voxel maps to the
+  // cell containing its centre, which the predicate accepts by construction, so
+  // this is simply the design's solid-voxel count restricted to the grid.
+  for (int k = 0; k < sg.nz; ++k)
+    for (int j = 0; j < sg.ny; ++j)
+      for (int i = 0; i < sg.nx; ++i)
+        if (dens[sg.index(i, j, k)] >= 0.5) ++oc.region_voxels;
+  return oc;
 }
 
 // --- analyze_job helpers (handoff 2026-07-26-constrained-smooth) -------------
@@ -944,6 +1054,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // up front so a streamed variant's mesh is resampled on the right grid.
   const VoxelGrid solved_grid = minimize_plastic_solved_grid(grid, options);
 
+  // Job wall clock start (lattice P6: generation time as a fraction of the whole
+  // job). Captured here, after import/voxelize, so it spans the solve + export the
+  // lattice generation competes with. An observer — never affects output bytes.
+  const double job_t0 = wall_seconds();
+
   // Streaming (topopt-cli binary): print machine-parseable checkpoints and export
   // each accepted variant's mesh AS IT COMPLETES, so a wrapper can forward live
   // progress + progressive artifacts. Pure observers — the design/report/mesh
@@ -982,6 +1097,48 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     }
   }
 
+  // Lattice-export accumulator (handoff 2026-07-28-lattice-generation-production).
+  // Summed over accepted variants so run_info records ONE posture for the run.
+  // `wall_s` is the generation time only — its fraction of total job time is the
+  // P6 bar (finalized after the run). Untouched when no lattice block is present.
+  struct LatticeAgg {
+    bool any = false;
+    long long cells = 0, voxels = 0, tris = 0;
+    int variants = 0;
+    double r_min = 1e30, r_max = 0.0;
+    double wall_s = 0.0;
+  } lat_agg;
+  std::vector<std::string> lattice_paths;  // merged into result.mesh_paths at end
+  // Emit + fold one accepted variant's lattice export into the accumulator, and
+  // (streaming path) print a machine-parseable LATTICE checkpoint per file so the
+  // worker forwards it as a progressive artifact.
+  auto emit_lattice = [&](const MinimizePlasticVariant& v, bool stream_lines) {
+    if (!job.lattice.present) return;
+    const double t0 = wall_seconds();
+    LatticeExportOutcome oc =
+        export_latticed_variant(v, out_dir, job.output, job.lattice, solved_grid);
+    lat_agg.wall_s += wall_seconds() - t0;
+    lat_agg.any = true;
+    lat_agg.cells += oc.stats.latticed_cells;
+    lat_agg.voxels += oc.region_voxels;
+    lat_agg.tris += static_cast<long long>(oc.stats.triangles);
+    ++lat_agg.variants;
+    lat_agg.r_min = std::min(lat_agg.r_min, oc.stats.min_strut_diameter_mm / 2.0);
+    lat_agg.r_max = std::max(lat_agg.r_max, oc.stats.max_strut_diameter_mm / 2.0);
+    lattice_paths.insert(lattice_paths.end(), oc.paths.begin(), oc.paths.end());
+    if (stream_lines)
+      for (const std::string& p : oc.paths) {
+        std::printf(
+            "LATTICE vf=%.6f topology=%s cell_mm=%.6g strut_r_mm=%.6g "
+            "cells=%lld tris=%llu mesh=%s\n",
+            v.requested_volume_fraction, job.lattice.topology.c_str(),
+            job.lattice.cell_mm, job.lattice.strut_radius_mm,
+            oc.stats.latticed_cells, (unsigned long long)oc.stats.triangles,
+            p.c_str());
+        std::fflush(stdout);
+      }
+  };
+
   std::vector<std::string> streamed_paths;
   if (emit_progress) {
     options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
@@ -1002,6 +1159,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           v.requested_volume_fraction, v.optimization.volume_fraction,
           v.report.printed_fraction, v.report.margin.worst_case, p.c_str());
       std::fflush(stdout);
+      // Latticed companion (streaming path): generated + checkpointed as the
+      // variant completes, alongside the solid mesh.
+      emit_lattice(v, /*stream_lines=*/true);
     };
   }
 
@@ -1101,6 +1261,28 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // Handoff 2026-07-26-draft-quality-phase2 — the design-space probe outcome.
     run_info.draft_rung_probe_flip = result.pipeline.draft_rung_probe_flip;
     run_info.draft_rung_probe_cg = result.pipeline.draft_rung_probe_cg;
+    // Lattice EXPORT posture (handoff 2026-07-28-lattice-generation-production).
+    // Finalized here — like cg_multigrid — from the summed per-variant generation,
+    // so an unlatticed run (lat_agg.any == false) writes NO lattice_export key and
+    // run_info.json stays byte-identical (the P1 bar). gen_fraction is the P6
+    // number: lattice generation wall time over the whole job's wall time.
+    if (lat_agg.any) {
+      const double job_wall = std::max(1e-9, wall_seconds() - job_t0);
+      run_info.lattice_export_present = true;
+      run_info.lattice_export_topology = job.lattice.topology;
+      run_info.lattice_export_cell_mm = job.lattice.cell_mm;
+      run_info.lattice_export_strut_radius_min_mm = lat_agg.r_min;
+      run_info.lattice_export_strut_radius_max_mm = lat_agg.r_max;
+      run_info.lattice_export_latticed_cells = lat_agg.cells;
+      run_info.lattice_export_region_voxels = lat_agg.voxels;
+      run_info.lattice_export_triangles = lat_agg.tris;
+      run_info.lattice_export_variant_count = lat_agg.variants;
+      run_info.lattice_export_emit_stl = job.lattice.emit_stl;
+      run_info.lattice_export_emit_3mf = job.lattice.emit_3mf;
+      run_info.lattice_export_interpenetrating_soup = true;
+      run_info.lattice_export_gen_seconds = lat_agg.wall_s;
+      run_info.lattice_export_gen_fraction = lat_agg.wall_s / job_wall;
+    }
     write_run_info(result.run_info_path, run_info);
   }
   // A recovery solve (which sets used_multigrid) runs only for a non-cancelled
@@ -1228,13 +1410,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // exported mesh per accepted variant now (byte-identical to the streamed files).
   if (emit_progress) {
     result.mesh_paths = std::move(streamed_paths);
+    // Lattice companions were generated in the on_variant callback (streaming).
   } else {
     for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
       if (!variant.accepted) continue;
       result.mesh_paths.push_back(export_variant_mesh(
           variant, out_dir, job.output, result.pipeline.solved_grid));
+      emit_lattice(variant, /*stream_lines=*/false);  // batch: no stdout lines
     }
   }
+  // Latticed companions land AFTER the solid meshes in mesh_paths (both paths), so
+  // the worker serves them as ordinary out_dir artifacts (item 3: the iPad fetches
+  // the file, never holds the mesh).
+  result.mesh_paths.insert(result.mesh_paths.end(), lattice_paths.begin(),
+                           lattice_paths.end());
 
   // ──▶ per-voxel result fields (handoff 122): one versioned container for the
   // accepted variants' von Mises / displacement fields + voxel mass & support,

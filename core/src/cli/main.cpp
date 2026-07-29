@@ -230,8 +230,14 @@ int main(int argc, char** argv) {
     std::printf("model: %s (%d %s faces, %zu fixture faces matched)\n",
                 job.model.c_str(), result.model.face_count,
                 is_mesh ? "pseudo" : "B-rep", result.fixture_face_ids.size());
+    // Count ACCEPTED VARIANTS, not mesh files: a latticed run writes extra
+    // companion meshes per variant (handoff 2026-07-28-lattice-generation), so
+    // mesh_paths.size() no longer equals the accepted-variant count.
+    std::size_t accepted_variants = 0;
+    for (const topopt::MinimizePlasticVariant& v : result.pipeline.evaluated)
+      if (v.accepted) ++accepted_variants;
     std::printf("variants: %zu evaluated, %zu accepted%s\n",
-                result.pipeline.evaluated.size(), result.mesh_paths.size(),
+                result.pipeline.evaluated.size(), accepted_variants,
                 result.pipeline.stopped_on_margin
                     ? " (stopped on margin)"
                     : "");

@@ -261,4 +261,62 @@ void write_stl_file(const std::string& path, const TriangleMesh& mesh,
   if (!f) throw StlError("failed writing STL file: " + path);
 }
 
+// --- Streaming binary-STL writer (handoff 2026-07-28-lattice-generation) ------
+// Byte-for-byte the write_binary_stl layout, but the count is a placeholder
+// patched at finish() so triangles can be flushed as they arrive.
+StreamingStlWriter::StreamingStlWriter(const std::string& path)
+    : os_(path, std::ios::binary), path_(path) {
+  if (!os_) throw StlError("cannot open STL file for writing: " + path);
+  std::string header = "topopt binary STL export";  // same tag as write_binary_stl
+  header.resize(80, '\0');
+  os_.write(header.data(), 80);
+  std::string count;
+  append_le_u32(count, 0);  // placeholder, patched by finish()
+  os_.write(count.data(), static_cast<std::streamsize>(count.size()));
+  if (!os_) throw StlError("failed writing STL header: " + path);
+}
+
+void StreamingStlWriter::add_triangle(const Vec3& a, const Vec3& b, const Vec3& c) {
+  if (finished_) throw StlError("StreamingStlWriter: add_triangle after finish()");
+  std::string rec;
+  rec.reserve(50);
+  const Vec3 n = facet_normal(a, b, c);
+  append_le_float(rec, static_cast<float>(n.x));
+  append_le_float(rec, static_cast<float>(n.y));
+  append_le_float(rec, static_cast<float>(n.z));
+  for (const Vec3* v : {&a, &b, &c}) {
+    append_le_float(rec, static_cast<float>(v->x));
+    append_le_float(rec, static_cast<float>(v->y));
+    append_le_float(rec, static_cast<float>(v->z));
+  }
+  rec.push_back('\0');  // 2-byte attribute count, 0
+  rec.push_back('\0');
+  os_.write(rec.data(), static_cast<std::streamsize>(rec.size()));
+  if (!os_) throw StlError("failed writing STL facet: " + path_);
+  ++count_;
+}
+
+void StreamingStlWriter::finish() {
+  if (finished_) return;
+  finished_ = true;
+  os_.seekp(80, std::ios::beg);  // patch the header triangle count
+  std::string count;
+  append_le_u32(count, count_);
+  os_.write(count.data(), static_cast<std::streamsize>(count.size()));
+  os_.flush();
+  if (!os_) throw StlError("failed finalizing STL file: " + path_);
+  os_.close();
+  if (!os_) throw StlError("failed closing STL file: " + path_);
+}
+
+StreamingStlWriter::~StreamingStlWriter() {
+  if (finished_) return;
+  // Best-effort: patch the count so a caller that forgot finish() still gets a
+  // valid file; a hard error here would be thrown from a destructor.
+  os_.seekp(80, std::ios::beg);
+  std::string count;
+  append_le_u32(count, count_);
+  os_.write(count.data(), static_cast<std::streamsize>(count.size()));
+}
+
 }  // namespace topopt

@@ -81,6 +81,32 @@ struct JobOutput {
   int smooth_factor = 1;
 };
 
+// Optional "lattice" block (handoff 2026-07-28-lattice-generation-production).
+// When present, run_job emits — ALONGSIDE each accepted variant's solid mesh — a
+// LATTICED variant: the solid shell unioned with an octet strut lattice filling
+// the part's solid interior, streamed to disk (peak RSS flat in output size). The
+// union is the interpenetrating triangle soup a slicer accepts. Absent (present ==
+// false, the DEFAULT) => no lattice file, no run_info lattice key, byte-identical
+// to a pre-lattice run — the P1 bar.
+//
+// GENERATION RUNS WHEREVER run_job RUNS, i.e. the Mac worker's topopt-cli (the
+// iPad's on-device path never populates this block). The mesh is written to
+// out_dir and served as a downloadable artifact, so the iPad fetches the file and
+// never holds the full mesh — item 3 of the task.
+//
+// The strut RADIUS is uniform here (`strut_radius_mm`). An externally supplied
+// radius/density FIELD is carried by the core generator (topopt/lattice_gen.hpp);
+// how that field is DERIVED from stress (the grading law) is a separate task, so
+// the job front-end ships uniform for now and records the density it implies.
+struct JobLattice {
+  bool present = false;
+  std::string topology = "octet";  // only "octet" is implemented
+  double cell_mm = 0.0;            // cell edge (mm), finite > 0
+  double strut_radius_mm = 0.0;    // uniform strut radius (mm), finite > 0
+  bool emit_stl = true;            // write <prefix>_<vf>_lattice.stl
+  bool emit_3mf = false;           // write <prefix>_<vf>_lattice.3mf (streaming)
+};
+
 // One load group of a declared load case (handoff 093): its faces are chosen
 // GEOMETRICALLY (the same selector rule as fixture_faces), and its total force
 // (newtons) is spread as a distributed traction over them. Mirrors one
@@ -187,6 +213,7 @@ struct JobDescription {
   double margin_stop = 0.0;    // finite >= 0 (0 disables the stop)
   int simp_max_iterations = 0;  // optional "simp" block; 0 = SimpOptions default
   JobOutput output;
+  JobLattice lattice;  // optional "lattice" block; absent => byte-identical run
 
   // Optional "draft" block (handoff 2026-07-25-draft-quality): the approximate-
   // trajectory / exact-certification posture. Absent (has_draft == false, the

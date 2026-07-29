@@ -384,6 +384,32 @@ struct RunInfo {
   double lattice_rho_max = 0.0;
   long long lattice_region_voxels = 0;
   bool lattice_strength_uncertified = false;
+
+  // Lattice EXPORT posture (handoff 2026-07-28-lattice-generation-production) — the
+  // printable GEOMETRY generator, distinct from the certification posture above.
+  // Set when a job's "lattice" block made run_job emit latticed variant meshes; the
+  // serializer emits a nested "lattice_export" object ONLY then, so a run with no
+  // lattice block writes no key and stays byte-identical (the P1 bar). Records the
+  // posture the task requires: topology, cell size, strut-radius range (min==max
+  // while radius is uniform; graded-field-ready), the latticed region (cells +
+  // solid voxels), the emitted formats, the total lattice triangles, and the
+  // generation wall-time fraction of the whole job (P6). The union is an
+  // interpenetrating soup (`interpenetrating_soup`), not a single 2-manifold — the
+  // slicer-accepted form the PR 201 print certified.
+  bool lattice_export_present = false;
+  std::string lattice_export_topology;          // "octet"
+  double lattice_export_cell_mm = 0.0;
+  double lattice_export_strut_radius_min_mm = 0.0;
+  double lattice_export_strut_radius_max_mm = 0.0;
+  long long lattice_export_latticed_cells = 0;  // summed over emitted variants
+  long long lattice_export_region_voxels = 0;   // summed solid voxels latticed
+  long long lattice_export_triangles = 0;       // summed lattice triangles
+  int lattice_export_variant_count = 0;         // accepted variants latticed
+  bool lattice_export_emit_stl = false;
+  bool lattice_export_emit_3mf = false;
+  bool lattice_export_interpenetrating_soup = true;
+  double lattice_export_gen_seconds = 0.0;      // generation wall time
+  double lattice_export_gen_fraction = 0.0;     // gen time / total job time (P6)
 };
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's

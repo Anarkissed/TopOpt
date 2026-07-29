@@ -387,8 +387,8 @@ JobDescription parse_job(const std::string& json_text) {
   reject_unknown_keys(root,
                       {"model", "source_format", "material", "mode",
                        "resolution", "fixture_faces", "gravity", "ladder",
-                       "margin_stop", "simp", "draft", "output", "loads",
-                       "design_box", "keep_outs"},
+                       "margin_stop", "simp", "draft", "output", "lattice",
+                       "loads", "design_box", "keep_outs"},
                       "the job");
 
   JobDescription job;
@@ -749,6 +749,42 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("output \"smooth_factor\" must be in [1, 4] (got " +
                     std::to_string(job.output.smooth_factor) + ")");
     }
+  }
+
+  // Optional "lattice" block (handoff 2026-07-28-lattice-generation-production).
+  // Absent => present stays false and the run is byte-identical (the P1 bar).
+  if (const JsonValue* latv = find_key(root, "lattice")) {
+    const JsonValue& lat = require_object(*latv, "lattice");
+    reject_unknown_keys(
+        lat, {"topology", "cell_mm", "strut_radius_mm", "emit_stl", "emit_3mf"},
+        "lattice");
+    job.lattice.present = true;
+    if (const JsonValue* t = find_key(lat, "topology")) {
+      job.lattice.topology = require_nonempty_string(*t, "lattice.topology");
+      if (job.lattice.topology != "octet")
+        schema_fail("lattice \"topology\" must be \"octet\" (got \"" +
+                    job.lattice.topology + "\")");
+    }
+    job.lattice.cell_mm =
+        require_number(require_key(lat, "cell_mm", "lattice"), "lattice.cell_mm");
+    if (!(job.lattice.cell_mm > 0.0))
+      schema_fail("lattice \"cell_mm\" must be > 0");
+    job.lattice.strut_radius_mm = require_number(
+        require_key(lat, "strut_radius_mm", "lattice"), "lattice.strut_radius_mm");
+    if (!(job.lattice.strut_radius_mm > 0.0))
+      schema_fail("lattice \"strut_radius_mm\" must be > 0");
+    if (const JsonValue* s = find_key(lat, "emit_stl")) {
+      if (s->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_stl\" must be a boolean");
+      job.lattice.emit_stl = (s->num != 0.0);
+    }
+    if (const JsonValue* m = find_key(lat, "emit_3mf")) {
+      if (m->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"emit_3mf\" must be a boolean");
+      job.lattice.emit_3mf = (m->num != 0.0);
+    }
+    if (!job.lattice.emit_stl && !job.lattice.emit_3mf)
+      schema_fail("lattice block requests neither STL nor 3MF output");
   }
 
   return job;

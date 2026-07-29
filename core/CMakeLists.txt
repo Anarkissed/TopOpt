@@ -34,6 +34,7 @@ add_library(topopt
   src/version.cpp
   src/materials/materials.cpp
   src/io/stl.cpp
+  src/io/threemf_stream.cpp
   src/io/segment.cpp
   src/io/part.cpp
   src/io/face_tag.cpp
@@ -41,6 +42,7 @@ add_library(topopt
   src/io/fields.cpp
   src/mesh/mesh.cpp
   src/mesh/smooth.cpp
+  src/mesh/lattice_gen.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
@@ -187,6 +189,16 @@ target_link_libraries(test_stl PRIVATE topopt)
 target_compile_definitions(test_stl PRIVATE
   STL_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/stl")
 add_test(NAME stl_import COMMAND test_stl)
+
+# Strut-lattice generator + streaming STL/3MF writers (handoff
+# 2026-07-28-lattice-generation-production). Pure mesh/std (no OCCT, no Eigen, no
+# lib3mf): builds its regions in code and streams throwaway files to a writable
+# dir. Reproduces PR 201's golden octet counts and proves streaming == buffered.
+add_executable(test_lattice_gen tests/unit/test_lattice_gen.cpp)
+target_link_libraries(test_lattice_gen PRIVATE topopt)
+target_compile_definitions(test_lattice_gen PRIVATE
+  LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME lattice_gen COMMAND test_lattice_gen)
 
 # Pseudo-face segmentation + the STL/3MF import adapter (handoff 134). The
 # synthetic meshes are built in code; the determinism and refusal tests write
