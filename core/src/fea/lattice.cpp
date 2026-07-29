@@ -76,13 +76,29 @@ struct Row {
   bool resolved;              // wall >= 4 voxels at vpc48
 };
 
-// OCTET — copied VERBATIM from PR 198's octet rows in
-// evidence/2026-07-26-lattice-homog-phase0/tensor_library.csv (L=5 mm, vpc=48,
-// Es=3500). Ordered by relative density. The first row (rho 0.103) is the
-// under-resolved (wall < 4 vox) row PR 198 flagged and excluded from its fits; it
-// is kept here for provenance but the interpolation range is the resolved rows only.
-constexpr std::array<Row, 8> kOctet = {{
-    {0.10308, 88.2389, 41.9795, 37.3012, false},
+// OCTET — the homogenized cubic tensor per MEASURED (voxelised) relative density
+// (L=5 mm, Es=3500), ordered by rho. Three provenance bands:
+//   MID  (0.148..0.591): PR 198's original library, vpc48. Reproduced bit-for-bit
+//        (PR 234 validated 0.15..0.54 within +-2.4%). UNCHANGED here — these rows are
+//        byte-identical to the shipped library (the B2 anchor test asserts it).
+//   LOW  (0.050..0.119): PR 237, vpc128 converged truth (analyze_low.txt,
+//        evidence/2026-07-28-density-band-extension). Extends the floor 0.148 -> 0.05.
+//        vox/strut 11.4..18.6; resolution drift < 2.4%. Supersedes PR 198's single
+//        under-resolved 0.103 row (dropped: it was excluded from every fit).
+//   HIGH (0.615..0.900): PR 237, vpc48 validated vs vpc64 (high_end.csv); drift
+//        < 2.4%. Replaces the old frozen clamp at 0.591 (which read up to -153% low).
+// Every row here is resolved & validated (PR 237's verdict), so the interpolation
+// range spans the full 0.050..0.900 band. Values transcribed VERBATIM from
+// evidence/2026-07-28-density-band-extension/proposed_octet_rows.txt. This is the
+// ONLY topology PR 237 re-measured; the eight tables below keep their own bands.
+constexpr std::array<Row, 19> kOctet = {{
+    // --- LOW rows (PR 237, vpc128; floor 0.148 -> 0.05) ---
+    {0.05047, 37.0649, 18.3510, 16.8552, true},
+    {0.06355, 48.3025, 23.7203, 21.6214, true},
+    {0.08109, 64.4784, 31.2998, 28.2686, true},
+    {0.09882, 81.7907, 39.2954, 35.2762, true},
+    {0.11908, 102.9136, 48.7092, 43.5388, true},
+    // --- MID rows (PR 198, vpc48; UNCHANGED) ---
     {0.14764, 136.9621, 64.0645, 56.6726, true},
     {0.20414, 213.7779, 94.5363, 83.3612, true},
     {0.25297, 295.1031, 124.0143, 109.1889, true},
@@ -90,6 +106,14 @@ constexpr std::array<Row, 8> kOctet = {{
     {0.39786, 611.4884, 226.3148, 204.0181, true},
     {0.50644, 974.8665, 328.8413, 297.3223, true},
     {0.59093, 1344.7034, 443.6894, 392.1883, true},
+    // --- HIGH rows (PR 237, vpc48 validated vs vpc64; clamp 0.591 -> 0.90) ---
+    {0.61509, 1464.0552, 485.7181, 423.7420, true},
+    {0.65502, 1677.7877, 562.6095, 480.4917, true},
+    {0.69871, 1975.2811, 676.0779, 550.7189, true},
+    {0.75210, 2351.3476, 842.3622, 650.7516, true},
+    {0.79753, 2720.7120, 1018.8917, 743.9973, true},
+    {0.85120, 3276.6604, 1312.7907, 878.5398, true},
+    {0.89988, 3832.0119, 1640.8200, 1011.6316, true},
 }};
 
 // ─── the nine-topology extension (handoff 2026-07-29-tensor-library-nine) ───────

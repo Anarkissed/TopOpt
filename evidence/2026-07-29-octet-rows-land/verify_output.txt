@@ -1,0 +1,28 @@
+== T2/T3: resolved band ==
+lattice_rho_min = 0.05047
+lattice_rho_max = 0.89988
+
+== T4: MID rows (old band) reproduced bit-for-bit ==
+rho=0.14764  C11 136.9621/136.9621  C12 64.0645/64.0645  C44 56.6726/56.6726  OK
+rho=0.20414  C11 213.7779/213.7779  C12 94.5363/94.5363  C44 83.3612/83.3612  OK
+rho=0.25297  C11 295.1031/295.1031  C12 124.0143/124.0143  C44 109.1889/109.1889  OK
+rho=0.29731  C11 374.2029/374.2029  C12 151.9733/151.9733  C44 135.0535/135.0535  OK
+rho=0.39786  C11 611.4884/611.4884  C12 226.3148/226.3148  C44 204.0181/204.0181  OK
+rho=0.50644  C11 974.8665/974.8665  C12 328.8413/328.8413  C44 297.3223/297.3223  OK
+rho=0.59093  C11 1344.7034/1344.7034  C12 443.6894/443.6894  C44 392.1883/392.1883  OK
+T4 PASS (bit-identical)
+
+== T7: interpolation at the new extremes ==
+rho=0.05047  C11=37.0649 (expect 37.0649)  clamped=0 (expect 0)
+rho=0.02     C11=37.0649 (expect 37.0649)  clamped=1 (expect 1)
+rho=0.05701  C11=42.6837 (expect 42.6837 = mean)  clamped=0
+rho=0.89988  C11=3832.0119 (expect 3832.0119)  clamped=0 (expect 0)
+rho=1.0      C11=3832.0119 (expect 3832.0119)  clamped=1 (expect 1)
+rho=0.87554  C11=3554.3362 (expect 3554.3362 = mean)  clamped=0
+
+== monotonic across full band (sanity) ==
+C11 monotonic non-decreasing across 0.05..0.90: yes
+
+== T5: grading clamp bounds (== lattice_rho_min/max read from core) ==
+BEFORE (old band): grading clamps rho into [0.14764, 0.59093]
+AFTER  (new band): grading clamps rho into [0.05047, 0.89988]

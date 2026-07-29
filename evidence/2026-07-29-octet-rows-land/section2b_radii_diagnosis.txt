@@ -1,0 +1,50 @@
+Section 2b CI failure — diagnosis and fix
+==========================================
+
+CI failed test_lattice_certification section 2b on two checks:
+  "a thin strut maps BELOW the band"
+  "a fat strut maps ABOVE the band"
+
+Section 2b/2c were added on main by PR #242 (lattice-certification-e2e, commit
+23350ac) AFTER this branch forked at 67921f8. This branch is 10 commits behind main,
+so the failure only appears in the PR's merge (main's newer 2b run against this
+branch's widened band). Fix: merged main into the branch and re-picked the radii.
+
+DIAGNOSIS — stale expectation, NOT a mapping regression
+-------------------------------------------------------
+octet_relative_density(cell, r) is pure geometry: it voxelizes one octet unit cell
+on the library basis (vpc48) and returns the solid fraction. It NEVER reads kOctet,
+so a given r/L maps to exactly the same rho before and after the band change. Only
+the band edges (lattice_rho_min/max) moved. Mapped rho for the ORIGINAL radii:
+
+  case                  r/L     rho        OLD[0.14764,0.59093]   NEW[0.05047,0.89988]
+  thin  (5.0, 0.30)     0.060   0.095052   BELOW                  INSIDE   <- fails "< lo"
+  fat   (5.0, 1.05)     0.210   0.667390   ABOVE                  INSIDE   <- fails "> hi"
+  mid   (5.0, 0.75)     0.150   0.409578   INSIDE                 INSIDE   (still ok)
+
+The thin strut (0.0951) used to sit below the old floor 0.148 and now sits above the
+new floor 0.050; the fat strut (0.6674) used to sit above the old ceiling 0.591 and
+now sits below the new ceiling 0.900. The map is unchanged and correct — the test's
+radii were chosen against the old band and became stale when PR 237 widened it.
+2c (refusal) still passes because it feeds explicit out-of-band rho values, not radii.
+
+FIX — re-pick as r/L ratios with margin outside the NEW band
+------------------------------------------------------------
+Expressed as octet_relative_density(1.0, r/L) so the argument IS the ratio (the map
+is cell-invariant, as 2b itself asserts):
+
+  thin: r/L=0.03 -> rho ~= 0.014829   (BELOW 0.05047 by 0.036)
+  fat:  r/L=0.34 -> rho ~= 0.962746   (ABOVE 0.89988 by 0.063, and < 1.0)
+
+Scan used to pick them (new band [0.05047, 0.89988]):
+  thin candidates                    fat candidates
+    r/L=0.030 -> 0.014829  BELOW       r/L=0.28 -> 0.881800  in
+    r/L=0.035 -> 0.038339  BELOW       r/L=0.30 -> 0.922237  ABOVE
+    r/L=0.045 -> 0.047237  BELOW       r/L=0.32 -> 0.945312  ABOVE
+    r/L=0.050 -> 0.056134  in          r/L=0.34 -> 0.962746  ABOVE
+                                       r/L=0.38 -> 0.984375  ABOVE
+
+RESULT — full test_lattice_certification on the merged tree
+-----------------------------------------------------------
+All sections pass (1, 2, 2b, 2c, 3, 4&5) — ALL PASS (0 failures).
+See section2b_test_output.txt.
