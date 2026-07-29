@@ -1,0 +1,30 @@
+# B1 — exact machine (captured 2026-07-28T23:50:42Z)
+
+## system_profiler
+      Model Name: Mac mini
+      Model Identifier: Mac14,12
+      Chip: Apple M2 Pro
+      Total Number of Cores: 10 (6 Performance and 4 Efficiency)
+      Memory: 16 GB
+
+## sysctl
+brand         : Apple M2 Pro
+ncpu(logical) : 10
+P-cores       : 6 (perflevel0=Performance)
+E-cores       : 4 (perflevel1=Efficiency)
+memsize       : 17179869184 bytes (16.00 GiB)
+cpufreq_max   : 
+
+## OS / toolchain
+macOS         : 26.5.1 (25F80)
+clang         : Apple clang version 21.0.0 (clang-2100.1.1.101)
+metal         : error: error: cannot execute tool 'metal' due to missing Metal Toolchain; use: xcodebuild -downloadComponent MetalToolchain
+
+## Theoretical peak (spec, not measured)
+M2 Pro unified memory bandwidth = 200 GB/s (LPDDR5-6400, 256-bit bus)
+
+## Metal note
+The OFFLINE `metal` CLI toolchain component is not installed on this box, but the
+Metal RUNTIME compiler (MTLDevice newLibraryWithSource:) is present and was used to
+build the H4 kernel at run time — see metal_matvec_out.txt (GPU = "Apple M2 Pro").
+No offline .metallib build step is required.
