@@ -318,11 +318,21 @@ public struct ResultsScreen: View {
     /// edges (a clearance that fell outside the solved area; a protection thinner than
     /// its depth). Shown only when a clearance or a protection was declared.
     @ViewBuilder private var clearanceNote: some View {
-        if !model.clearanceNotes.isEmpty || !model.faceProtectionNotes.isEmpty {
+        if !model.clearanceNotes.isEmpty || !model.faceProtectionNotes.isEmpty
+            || !model.latticeNotes.isEmpty {
             VStack(alignment: .leading, spacing: DS.Space.xs) {
+                if !model.latticeNotes.isEmpty {
+                    Label("Lattice", systemImage: "square.grid.3x3.fill")
+                        .font(.system(size: DS.TypeScale.footnote.size, weight: .bold))
+                    ForEach(Array(model.latticeNotes.enumerated()), id: \.offset) { _, line in
+                        Text(line).dsStyle(DS.TypeScale.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if !model.clearanceNotes.isEmpty {
                     Label("Keep clear applied", systemImage: "nosign")
                         .font(.system(size: DS.TypeScale.footnote.size, weight: .bold))
+                        .padding(.top, model.latticeNotes.isEmpty ? 0 : DS.Space.xs)
                     ForEach(Array(model.clearanceNotes.enumerated()), id: \.offset) { _, line in
                         Text(line).dsStyle(DS.TypeScale.caption)
                             .fixedSize(horizontal: false, vertical: true)
@@ -331,7 +341,7 @@ public struct ResultsScreen: View {
                 if !model.faceProtectionNotes.isEmpty {
                     Label("Protection applied", systemImage: "shield.lefthalf.filled")
                         .font(.system(size: DS.TypeScale.footnote.size, weight: .bold))
-                        .padding(.top, model.clearanceNotes.isEmpty ? 0 : DS.Space.xs)
+                        .padding(.top, (model.clearanceNotes.isEmpty && model.latticeNotes.isEmpty) ? 0 : DS.Space.xs)
                     ForEach(Array(model.faceProtectionNotes.enumerated()), id: \.offset) { _, line in
                         Text(line).dsStyle(DS.TypeScale.caption)
                             .fixedSize(horizontal: false, vertical: true)

@@ -69,6 +69,27 @@ enum OutcomeCodec {
         let thinnerThanDepth: Bool
     }
 
+    // Handoff 2026-07-29-lattice-mode-ui — the lattice a run carried, mirrored for
+    // persistence so a reopened lattice run keeps its honest lattice notes
+    // (ResultsModel.latticeNotes), the same honesty-round-trip discipline as the
+    // clearance/protection DTOs. `generated*` fields are present only when the worker
+    // reported a lattice_export; all optional so pre-lattice blobs decode (→ nil).
+    struct LatticeReportDTO: Codable, Sendable {
+        let topologyID: String
+        let cellMM: Double
+        let generateRelativeDensity: Double
+        let minRelativeDensity: Double
+        let maxRelativeDensity: Double
+        let regionScoped: Bool
+        let genEmitSTL: Bool?
+        let genEmit3MF: Bool?
+        let genLatticedCells: Int?
+        let genRegionVoxels: Int?
+        let genTriangles: Int?
+        let genStrutRadiusMinMM: Double?
+        let genStrutRadiusMaxMM: Double?
+    }
+
     struct OutcomeDTO: Codable, Sendable {
         let variants: [VariantDTO]
         let stoppedOnMargin, cancelled: Bool
@@ -101,6 +122,9 @@ enum OutcomeCodec {
         // never recorded one).
         let queuedSeconds: Double?
         let solveSeconds: Double?
+        // Handoff 2026-07-29-lattice-mode-ui — nil on pre-lattice blobs (→ no lattice
+        // notes), present when the run carried a lattice.
+        let latticeReport: LatticeReportDTO?
     }
 
     // MARK: OptimizeOutcome → DTO (cheap: array→Data is a memcpy)
@@ -144,7 +168,20 @@ enum OutcomeCodec {
                                          depthVoxels: $0.depthVoxels,
                                          thinnerThanDepth: $0.thinnerThanDepth) },
             queuedSeconds: o.timing?.queuedSeconds,
-            solveSeconds: o.timing?.solveSeconds)
+            solveSeconds: o.timing?.solveSeconds,
+            latticeReport: o.latticeReport.map { r in
+                LatticeReportDTO(
+                    topologyID: r.topologyID, cellMM: r.cellMM,
+                    generateRelativeDensity: r.generateRelativeDensity,
+                    minRelativeDensity: r.minRelativeDensity,
+                    maxRelativeDensity: r.maxRelativeDensity,
+                    regionScoped: r.regionScoped,
+                    genEmitSTL: r.generated?.emitSTL, genEmit3MF: r.generated?.emit3MF,
+                    genLatticedCells: r.generated?.latticedCells,
+                    genRegionVoxels: r.generated?.regionVoxels,
+                    genTriangles: r.generated?.triangles,
+                    genStrutRadiusMinMM: r.generated?.strutRadiusMinMM,
+                    genStrutRadiusMaxMM: r.generated?.strutRadiusMaxMM) })
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -192,7 +229,22 @@ enum OutcomeCodec {
             // just a queue wait (impossible today, but decode defensively) is not a
             // duration and stays nil rather than reporting "solved 0s".
             timing: d.solveSeconds.map {
-                RunTiming(queuedSeconds: d.queuedSeconds ?? 0, solveSeconds: $0) })
+                RunTiming(queuedSeconds: d.queuedSeconds ?? 0, solveSeconds: $0) },
+            latticeReport: d.latticeReport.map { r in
+                LatticeReport(
+                    topologyID: r.topologyID, cellMM: r.cellMM,
+                    generateRelativeDensity: r.generateRelativeDensity,
+                    minRelativeDensity: r.minRelativeDensity,
+                    maxRelativeDensity: r.maxRelativeDensity,
+                    regionScoped: r.regionScoped,
+                    generated: r.genTriangles.map { tris in
+                        LatticeReport.Generated(
+                            emitSTL: r.genEmitSTL ?? true, emit3MF: r.genEmit3MF ?? false,
+                            latticedCells: r.genLatticedCells ?? 0,
+                            regionVoxels: r.genRegionVoxels ?? 0,
+                            triangles: tris,
+                            strutRadiusMinMM: r.genStrutRadiusMinMM ?? 0,
+                            strutRadiusMaxMM: r.genStrutRadiusMaxMM ?? 0) }) })
     }
 
     // MARK: Encode / decode (binary plist)

@@ -232,6 +232,16 @@ public final class AppModel: ObservableObject {
               let materialsPath, let rulesPath else { return nil }
         let lc = project.loadCase()
         let protections = project.faceProtectionSpecs()
+        // The lattice block, gated by the core-read certifiable limits (handoff
+        // 2026-07-29-lattice-mode-ui). runSpec returns nil unless lattice mode is on and
+        // the settings are runnable-as-certified, so a non-lattice project yields the
+        // exact request it does today (lattice: nil → job omits the block, BAR U1). The
+        // outer wall line width is the strut printability reference (the user's own
+        // setting, not a hardcoded number).
+        let latticeSpec = project.lattice.runSpec(
+            topology: project.lattice.topologyID,
+            memberMM: project.lattice.regionMemberMM ?? 0,
+            lineWidthMM: project.printParams.wallLineWidthOuterMM)
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,
@@ -249,7 +259,8 @@ public final class AppModel: ObservableObject {
                           faceProtections: protections.faceIDs,
                           faceProtectionDepthMM: protections.depthMM,
                           projectID: project.id,
-                          sourceFormat: file.sourceFormat)
+                          sourceFormat: file.sourceFormat,
+                          lattice: latticeSpec)
     }
 
     // MARK: - Materials

@@ -102,6 +102,15 @@ public struct WorkspacePlaceholder: View {
     /// The previous drag location, for orbit deltas / first-frame guard.
     @State private var gizmoBoxDragLast: CGPoint?
 
+    // Lattice mode (handoff 2026-07-29-lattice-mode-ui). The controls panel's open state
+    // and the lattice-region gizmo drag state — the region reuses the SAME transform-gizmo
+    // components as the manual primitives (renderer + SDF pick + PrimitiveGizmo.Drag),
+    // committing to `project.lattice.region` instead of a force-group primitive.
+    @State private var showLatticePanel = false
+    @State private var latticeRegionDrag: PrimitiveGizmo.Drag?
+    @State private var latticeRegionActiveId: Float = -1
+    @State private var latticeRegionOrbiting = false
+
     // Gravity DIRECTION widget (2026-07-26 — "set gravity by pointing, not by hunting for a
     // clean face"). During setup the user drags an arrow to point which way is down instead
     // of tapping a face (the STL pseudo-face segmentation makes a face tap unreliable);
@@ -306,6 +315,9 @@ public struct WorkspacePlaceholder: View {
             // never occlude a value chip (the chip/knob hit areas are small and the rest of that
             // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
             if force.phase == .edit { primitiveGizmoOverlay.ignoresSafeArea() }
+            // The lattice region's transform gizmo — only while the lattice panel is open
+            // and a region exists, so it never coincides with the force gizmo (U5).
+            latticeRegionGizmoOverlay.ignoresSafeArea()
             // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
             // axial, face → depth) and the floating glass value pill near the selection — ON TOP
             // of the gizmo so the values stay readable while transforming.
@@ -505,8 +517,31 @@ public struct WorkspacePlaceholder: View {
     /// demand field pre-run); the density GRADING engages wherever a von Mises field is
     /// supplied (see LatticeDensityProxy.tints).
     private var latticeProxyTints: [SIMD4<Float>]? {
-        guard latticeProxy.isActive, let mesh = viewerMesh else { return nil }
-        return latticeProxy.densityTints(for: mesh, field: nil)
+        guard project.lattice.enabled, let mesh = viewerMesh else { return nil }
+        // Derive the proxy params FRESH from the lattice settings (density range clamped
+        // to the core band), so the surface shading always reflects the current controls
+        // with no stateful sync. Uniform pre-run (no demand field on device yet).
+        let params = project.lattice.proxyParams(limits: latticeLimits)
+        return LatticeDensityProxy.tints(for: mesh, demand: nil, params: params)
+    }
+
+    /// The certifiable limits for the current topology, READ FROM CORE at runtime (the
+    /// controls' single source of truth — nothing bound here is hardcoded in the app).
+    private var latticeLimits: TopOptKit.LatticeLimits {
+        TopOptKit.latticeLimits(topology: project.lattice.topologyID)
+    }
+
+    /// The governing member width (mm) for the cells-per-member readout, from the region
+    /// if one is placed (nil ⇒ whole part → the readout is omitted, not faked).
+    private var latticeMemberMM: Double? { project.lattice.regionMemberMM }
+
+    /// Push the current lattice settings into the proxy model that backs the legend's
+    /// sample patch + gradient + cost. Reading `project.lattice` (a reference-held value)
+    /// is always current here. The surface tints derive their own params, so this only
+    /// keeps the LEGEND in step.
+    private func syncLatticeProxy() {
+        latticeProxy.params = project.lattice.proxyParams(limits: latticeLimits)
+        latticeProxy.isActive = project.lattice.enabled
     }
 
     /// The clearance volumes to render (keep-clear v2 Part 3), each tagged whether its
@@ -971,39 +1006,54 @@ public struct WorkspacePlaceholder: View {
     private var latticePreviewOverlay: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             latticePreviewChip
-            if latticeProxy.isActive {
-                LatticeProxyLegend(model: latticeProxy,
-                                   partVolumeMM3: partSolidVolumeMM3,
-                                   memberMM: nil)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
+            if showLatticePanel {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LatticeControlsPanel(project: project, proxy: latticeProxy,
+                                         limits: latticeLimits,
+                                         partVolumeMM3: partSolidVolumeMM3,
+                                         memberMM: latticeMemberMM,
+                                         onPlaceRegion: { project.placeLatticeRegion($0) },
+                                         onClearRegion: { project.lattice.region = nil })
+                }
+                .frame(maxHeight: 560)
+                .transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.leading, DS.Space.l)
-        .animation(DS.Motion.emphasized, value: latticeProxy.isActive)
+        .padding(.top, DS.Space.xl6)   // clear the top bar
+        .animation(DS.Motion.emphasized, value: showLatticePanel)
+        // Keep the legend/panel proxy in step with the settings (the legend is the only
+        // consumer of `latticeProxy`; the surface tints derive their own params).
+        .onChange(of: project.lattice) { _ in syncLatticeProxy() }
+        .onChange(of: showLatticePanel) { open in if open { syncLatticeProxy() } }
+        .onAppear { syncLatticeProxy() }
     }
 
-    /// The toggle: enter/leave the lattice density preview. Uses the density ramp's own
+    /// The chip that opens/closes the lattice CONTROLS panel (the mode toggle lives inside
+    /// the panel). Shows "· on" when lattice mode is enabled, tinted the density ramp's
     /// indigo so it reads as its own tool.
     private var latticePreviewChip: some View {
-        Button { latticeProxy.isActive.toggle() } label: {
+        Button { showLatticePanel.toggle() } label: {
             HStack(spacing: DS.Space.xs) {
                 Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .bold))
-                Text(latticeProxy.isActive ? "Lattice preview · on" : "Lattice preview")
+                Text(project.lattice.enabled ? "Lattice · on" : "Lattice")
                     .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+                Image(systemName: showLatticePanel ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
             }
-            .foregroundStyle(latticeProxy.isActive
+            .foregroundStyle(project.lattice.enabled
                 ? LatticeDensityProxy.densityColor(fraction: 0.75).color
                 : DS.Color.textSecondary.color)
             .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
             .background(Capsule().fill(DS.Surface.panel.color)
                 .overlay(Capsule().strokeBorder(
-                    (latticeProxy.isActive ? LatticeDensityProxy.densityColor(fraction: 0.6).opacity(0.6)
-                                           : DS.Color.strokeSubtle).color, lineWidth: 1)))
+                    (project.lattice.enabled ? LatticeDensityProxy.densityColor(fraction: 0.6).opacity(0.6)
+                                             : DS.Color.strokeSubtle).color, lineWidth: 1)))
         }
         .buttonStyle(.plain)
         .dsShadow(DS.Shadow.panel)
-        .help("Preview the lattice infill as a density map — no heavy lattice mesh on the device.")
+        .help("Lattice mode — pick a topology, cell size and density range, bounded by what core certifies.")
     }
 
     /// The part's solid volume (mm³) for the proxy cost comparison — signed tetra sum
@@ -2110,6 +2160,91 @@ public struct WorkspacePlaceholder: View {
                 gizmoActiveId = -1
                 gizmoSnapLabels = []
                 if wasDragging { ClearanceHaptics.release() }
+            }
+    }
+
+    /// The LATTICE REGION's transform gizmo (handoff 2026-07-29-lattice-mode-ui). Reuses
+    /// the SAME components as the manual-primitive gizmo — the raymarched
+    /// `TransformGizmoMetalView` glass, the analytic `TransformGizmo.pick`, and the
+    /// `PrimitiveGizmo.Drag` translate/rotate math — but commits to `project.lattice.region`
+    /// instead of a force-group primitive (task requirement 2: reuse the gizmo, don't build
+    /// a second placement mechanism). Shown only while the lattice panel is open and a
+    /// region exists, so it never coincides with the force gizmo or steals its taps (U5).
+    @ViewBuilder private var latticeRegionGizmoOverlay: some View {
+        #if canImport(MetalKit)
+        // Never while a force primitive is selected for transform (gizmoTarget != nil): that
+        // is the only time the force gizmo draws its full 297pt box, so gating here means the
+        // two gizmo boxes can never coincide or steal each other's taps (U5).
+        if showLatticePanel, project.lattice.enabled, gizmoTarget == nil,
+           let region = project.lattice.region,
+           let proj = projection,
+           let center = proj.project(settledWorld(SIMD3<Float>(region.center))) {
+            let box = Self.gizmoBoxSize
+            ZStack(alignment: .topLeading) {
+                TransformGizmoMetalView(camera: cameraModel,
+                                        settle: gizmoSettleMatrix * primitiveOrientation(region),
+                                        activeId: latticeRegionActiveId)
+                    .frame(width: box, height: box)
+                    .allowsHitTesting(false)
+                    .position(center)
+                Color.clear
+                    .frame(width: box, height: box)
+                    .contentShape(Rectangle())
+                    .gesture(latticeRegionGizmoGesture(proj, region: region,
+                                                       boxCenter: center, boxSize: box))
+                    .position(center)
+            }
+            .coordinateSpace(name: Self.gizmoStageSpace)
+        }
+        #endif
+    }
+
+    /// The lattice-region gizmo's gesture — the trimmed twin of `gizmoBoxGesture`
+    /// (translate + rotate, no copy/dismiss cluster), committing to the region.
+    private func latticeRegionGizmoGesture(_ proj: CameraProjection, region: ManualPrimitive,
+                                           boxCenter: CGPoint, boxSize: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: CoordinateSpace.named(Self.gizmoStageSpace))
+            .onChanged { v in
+                if latticeRegionDrag == nil && !latticeRegionOrbiting && gizmoBoxDragLast == nil {
+                    let local = CGPoint(x: v.startLocation.x - (boxCenter.x - boxSize / 2),
+                                        y: v.startLocation.y - (boxCenter.y - boxSize / 2))
+                    let orient = primitiveOrientation(region)
+                    if let hit = TransformGizmo.pick(point: local,
+                                                     in: CGSize(width: boxSize, height: boxSize),
+                                                     rotation: gizmoRotation * orient),
+                       let ray = modelRay(proj, at: v.location) {
+                        latticeRegionActiveId = gizmoActiveIdValue(hit)
+                        latticeRegionDrag = PrimitiveGizmo.Drag(
+                            handle: gizmoHandle(for: hit, orientation: orient),
+                            startCenter: region.center, startAxis: region.axis,
+                            grab: ray, viewDir: ray.dir)
+                        ClearanceHaptics.grab()
+                    } else {
+                        latticeRegionOrbiting = true
+                    }
+                    gizmoBoxDragLast = v.location
+                }
+                if latticeRegionOrbiting {
+                    let last = gizmoBoxDragLast ?? v.startLocation
+                    cameraModel.orbit(dx: Float(v.location.x - last.x), dy: Float(v.location.y - last.y))
+                    gizmoBoxDragLast = v.location
+                    return
+                }
+                guard let drag = latticeRegionDrag, let ray = modelRay(proj, at: v.location) else { return }
+                let out = drag.resolve(currentRay: ray)
+                if case .rotate = drag.handle {
+                    _ = project.rotateLatticeRegion(to: out.axis, from: drag.startAxis)
+                } else {
+                    _ = project.moveLatticeRegion(to: out.center)
+                }
+            }
+            .onEnded { _ in
+                let was = latticeRegionDrag != nil
+                latticeRegionDrag = nil
+                latticeRegionOrbiting = false
+                gizmoBoxDragLast = nil
+                latticeRegionActiveId = -1
+                if was { ClearanceHaptics.release() }
             }
     }
 

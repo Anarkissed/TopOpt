@@ -52,6 +52,11 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
     /// written before this field still decode — nil is treated as the default-off
     /// `DesignBoxModel()` (no box → no design-domain expansion on the run).
     public var designBox: DesignBoxModel?
+    /// The lattice-mode settings (handoff 2026-07-29-lattice-mode-ui). OPTIONAL so
+    /// snapshots written before this field still decode — nil (also written whenever
+    /// lattice mode is OFF) is treated as the default-off `LatticeSettings()`, so a
+    /// non-lattice project's project.json is byte-identical to a pre-lattice one.
+    public var lattice: LatticeSettings?
 
     public init(schemaVersion: Int = ProjectSnapshot.currentSchema, id: UUID, name: String,
                 material: String, process: ProcessKind, modelFileName: String,
@@ -59,7 +64,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
                 selection: SelectionModel, force: ForceModel,
                 minimizePlastic: Bool? = nil, quality: RunQuality? = nil,
                 optimized: Bool? = nil, printParams: PrintParams? = nil,
-                designBox: DesignBoxModel? = nil) {
+                designBox: DesignBoxModel? = nil, lattice: LatticeSettings? = nil) {
         self.schemaVersion = schemaVersion
         self.id = id
         self.name = name
@@ -75,6 +80,7 @@ public struct ProjectSnapshot: Codable, Equatable, Sendable {
         self.optimized = optimized
         self.printParams = printParams
         self.designBox = designBox
+        self.lattice = lattice
     }
 }
 

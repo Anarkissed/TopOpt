@@ -1,0 +1,13 @@
+Certifiable lattice limits, read from CORE at runtime (topoptbridge.lattice_limits):
+
+certifiable topologies (core): ["octet"]
+
+sc certifiable=no   band=[0.00000, 0.00000]  minCellsPerMember=0.000
+bcc certifiable=no   band=[0.00000, 0.00000]  minCellsPerMember=0.000
+bccz certifiable=no   band=[0.00000, 0.00000]  minCellsPerMember=0.000
+fcc certifiable=no   band=[0.00000, 0.00000]  minCellsPerMember=0.000
+fccz certifiable=no   band=[0.00000, 0.00000]  minCellsPerMember=0.000
+diamond certifiable=no   band=[0.00000, 0.00000]  minCellsPerMember=0.000
+octet certifiable=YES  band=[0.14764, 0.59093]  minCellsPerMember=0.000
+
+The app hardcodes NONE of these — LatticeModeTests.testNoHardcodedCertifiableBandLiteralsInControlSources greps the control sources for the band.

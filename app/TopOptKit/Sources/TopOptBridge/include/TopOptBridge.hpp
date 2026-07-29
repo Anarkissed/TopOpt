@@ -708,4 +708,41 @@ SmokeResult bridge_smoke(const std::string& materials_path,
 // call used as the most basic bridge liveness check.
 std::string core_version();
 
+// ---------------------------------------------------------------------------
+// Lattice certification limits (lattice mode UI, handoff 2026-07-29-lattice-mode-
+// ui). The app's lattice controls MUST be bounded by what the core actually
+// certifies, read at RUNTIME — never a number hardcoded in the app — so the UI
+// widens automatically the moment core's measurement widens. These accessors
+// FORWARD core's own values (topopt::lattice_rho_min/max, lattice_topology_name);
+// they add no logic and touch neither the grading law nor the generator.
+struct LatticeLimits {
+  // The certifiable relative-density band for the queried topology, straight from
+  // topopt::lattice_rho_min / lattice_rho_max. Meaningful only when `certifiable`.
+  double rho_min = 0.0;
+  double rho_max = 0.0;
+  // True iff the core certification library carries a homogenized tensor (and thus
+  // a band) for the topology — i.e. a run may lattice + certify it. Octet is the
+  // only true value today; the set widens as core's LatticeTopology enum grows, and
+  // this accessor reflects that with no app change.
+  bool certifiable = false;
+  // The minimum number of cells that must span a member for the homogenized
+  // certification to hold (the scale-separation ceiling: max printable cell =
+  // member_width / this). 0.0 == the core does NOT yet expose a certified value
+  // (that measurement is landing in a parallel task) — the UI then treats
+  // cells-per-member as ADVISORY (a readout, not a hard clamp) and the clamp
+  // engages automatically once core returns a positive value here. This is NOT an
+  // app-side limit: it is exactly whatever the core reports.
+  double min_cells_per_member = 0.0;
+};
+
+// The certifiable limits for a lattice topology named as the job schema names it
+// ("octet"). An unknown / not-yet-certified name returns `certifiable == false`
+// with a zero band (the UI greys that topology and says why). Never throws.
+LatticeLimits lattice_limits(const std::string& topology);
+
+// The topology names the core certification library covers (can be RUN and
+// certified), in the core's own order — ["octet"] today. The UI reads this to know
+// which picker entries are certifiable rather than assuming a set. Never throws.
+std::vector<std::string> lattice_certifiable_topologies();
+
 }  // namespace topoptbridge
