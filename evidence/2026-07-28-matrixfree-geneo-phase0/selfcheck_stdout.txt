@@ -1,0 +1,9 @@
+=== SELF-CHECK (GenEO matrix-free harness) ===
+  uniform solid : n=2187 lam[0..7]=-7.09e-10 -1.21e-10 -8.75e-13 -6.05e-13 9.18e-15 1.21e-11 | 3.51e-01 3.51e-01  #(<1e-8)=6  PASS(6 rigid)
+  analytic rigid modes capture ref lambda~0 space: worst=1.000000  PASS
+  sigma-insensitivity #(<1e-03): sigma1e-8=6 1e-10=6 1e-12=6  PASS
+  LOBPCG smallest-12 (kappa1e3): conv=0 iters=399 captured=12/12 worst_capture=1.00000  PASS
+    ref  lambda[0..13]: -9.406e-10 -1.160e-11 -2.951e-13 -2.912e-14 -1.548e-14 4.006e-10 3.241e-01 3.241e-01 3.431e-01 3.431e-01 3.756e-01 3.768e-01 3.768e-01 4.128e-01 
+    lob  lambda[0..13]: 5.533e-12 7.168e-12 8.540e-12 1.202e-11 1.241e-11 1.462e-11 3.241e-01 3.241e-01 3.431e-01 3.431e-01 3.756e-01 3.768e-01 3.768e-01 4.128e-01 
+SELF-CHECK: ALL PASS
+
