@@ -1,0 +1,6 @@
+kappa,precond,inner_it,iters,converged,captured,ref_below,worst_capture,neu_mv,dad_mv,inner_pcg_total_mv
+1e9,none,0,499,0,11,12,0.998886,30000,10040,60
+1e9,jacobi,0,299,1,12,12,1.000000,10335,6020,35
+1e9,innerCG5,5,61,1,12,12,1.000000,8318,1280,136
+1e9,innerCG20,20,17,1,12,12,1.000000,7455,420,439
+1e9,innerCG50,50,8,1,12,12,1.000000,8343,220,1043

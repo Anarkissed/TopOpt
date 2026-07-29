@@ -1,0 +1,5 @@
+case,kappa,n,block_m,lambda_cut,ref_below,captured,worst_capture,max_lam_relerr,iters,converged
+E1,1e9,1728,17,1.232328e-02,9,9,1.000000,6.850376e-14,122,1
+E1,1e9,1728,17,1.232328e-02,9,9,0.999932,8.813592e-11,17,1
+E1b_surcharge,1e9,1728,20,2.263313e-05,12,12,1.000000,5.141512e-16,299,1
+E1b_surcharge,1e9,1728,20,2.263313e-05,12,12,1.000000,1.288920e-14,17,1

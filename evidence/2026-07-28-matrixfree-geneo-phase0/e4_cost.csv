@@ -1,0 +1,2 @@
+phase,n,nelem,bytes_matfree,bytes_dense,neu_mv,dad_mv,wall_ms,peak_rss_mb
+lobpcg_jacobi_1e9,1728,392,2188096,95551488,5273,2108,372.0,567

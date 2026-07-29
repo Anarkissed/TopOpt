@@ -1,0 +1,41 @@
+## Real field: cantilever 32x16x32, fine DOF=55539, developing 40 OC iters (rung 0.30)
+## Scanning core-6 ov-1 agglomerates for the largest high-contrast surcharge (modes in (1e-8,5e-02) beyond 6 rigid) @ kappa=1e9...
+   picked core=[18,24)x[0,6)x[0,6)  n=1728 solid_frac=0.27  modes<5e-02=13 (surcharge beyond rigid=7)
+
+## E1: dense reference vs matrix-free LOBPCG on the hardest subdomain, kappa=1e9
+   n=1728  rigid(lambda<1e-8)=6  wanted(lambda<1.23e-02)=9
+   ref smallest lambda: -3.55e-10 -1.40e-11 -2.38e-13 2.74e-15 5.36e-14 9.34e-13 2.23e-03 3.96e-03 8.37e-03 1.81e-02 2.02e-02 2.53e-02 4.11e-02 6.50e-02 1.08e-01 1.12e-01 
+   LOBPCG[jacobi] m=17: iters=122 conv=1 captured=9/9 worst_capture=1.0000 lam_relerr=6.85e-14 neu_mv=5273 dad_mv=2108
+   LOBPCG[innerCG20] m=17: iters=17 conv=1 captured=9/9 worst_capture=0.9999 lam_relerr=8.81e-11 neu_mv=6356 dad_mv=340
+
+## E1b: adversarial high-surcharge (real density + inserted soft-void channel), kappa=1e9
+   n=1728 rigid=6 wanted(lambda<2.26e-05)=12
+   ref smallest lambda: -3.24e-11 -5.94e-12 -4.23e-14 6.35e-14 2.54e-13 1.86e-10 1.26e-08 1.56e-08 4.97e-08 6.24e-08 1.78e-07 2.29e-07 2.24e-03 3.97e-03 8.37e-03 1.82e-02 2.02e-02 2.53e-02 4.11e-02 6.50e-02 
+   LOBPCG[jacobi] m=20: iters=299 conv=1 captured=12/12 worst_capture=1.0000 neu_mv=10335 dad_mv=6020  ALL MODES
+   LOBPCG[innerCG20] m=20: iters=17 conv=1 captured=12/12 worst_capture=1.0000 neu_mv=7455 dad_mv=420  ALL MODES
+
+## E2: convergence vs contrast on the SURCHARGE geometry (channel), re-moduli. Jacobi + innerCG20.
+   kappa=1e+03 n=1728 rigid=6 wanted(<1.65e-01)=12 LOBPCG[jacobi]: iters=124 conv=1 captured=12/12 worst=1.0000
+   kappa=1e+03 n=1728 rigid=6 wanted(<1.65e-01)=12 LOBPCG[innerCG20]: iters=32 conv=1 captured=12/12 worst=1.0000
+   kappa=1e+06 n=1728 rigid=6 wanted(<1.71e-03)=12 LOBPCG[jacobi]: iters=187 conv=1 captured=12/12 worst=1.0000
+   kappa=1e+06 n=1728 rigid=6 wanted(<1.71e-03)=12 LOBPCG[innerCG20]: iters=399 conv=0 captured=12/12 worst=0.9998
+   kappa=1e+09 n=1728 rigid=6 wanted(<2.26e-05)=12 LOBPCG[jacobi]: iters=299 conv=1 captured=12/12 worst=1.0000
+   kappa=1e+09 n=1728 rigid=6 wanted(<2.26e-05)=12 LOBPCG[innerCG20]: iters=17 conv=1 captured=12/12 worst=1.0000
+   kappa=1e+12 n=1728 rigid=6 wanted(<2.26e-05)=12 LOBPCG[jacobi]: iters=299 conv=1 captured=12/12 worst=1.0000
+   kappa=1e+12 n=1728 rigid=6 wanted(<2.26e-05)=12 LOBPCG[innerCG20]: iters=17 conv=1 captured=12/12 worst=1.0000
+
+## E3: preconditioner @ kappa=1e9 on the SURCHARGE geometry (None / Jacobi / innerCG{5,20,50}). Circular-dep probe = inner PCG iters.
+   [none] iters=499 conv=0 captured=11/12 worst=0.9989 neu_mv=30000 dad_mv=10040 neu/iter=60
+   [jacobi] iters=299 conv=1 captured=12/12 worst=1.0000 neu_mv=10335 dad_mv=6020 neu/iter=35
+   [innerCG5] iters=61 conv=1 captured=12/12 worst=1.0000 neu_mv=8318 dad_mv=1280 neu/iter=136
+   [innerCG20] iters=17 conv=1 captured=12/12 worst=1.0000 neu_mv=7455 dad_mv=420 neu/iter=439
+   [innerCG50] iters=8 conv=1 captured=12/12 worst=1.0000 neu_mv=8343 dad_mv=220 neu/iter=1043
+
+## E4: memory (matrix-free vs assembled) and cost per subdomain, kappa=1e9
+   n=1728 nelem=392 block_m=17
+   matrix-free footprint ~= 2.09 MB   |   dense assembled+factorized ~= 91.12 MB   (ratio 43.7x)
+   LOBPCG(jacobi) one-subdomain solve: neu_mv=5273 dad_mv=2108 wall=372.0 ms  process peak RSS=567 MB
+   extrapolation @ 8.44M DOF: ~4884 subdomains of this size; matrix-free eigensolve peak = 2.09 MB (one subdomain at a time; embarrassingly parallel) or 9.95 GB (all resident at once)
+      vs assembled-GenEO per-subdomain 91.12 MB * 4884 = 434.6 GB resident (the PR230 20-35 GB blocker)
+
+CSVs written to evidence/2026-07-28-matrixfree-geneo-phase0
