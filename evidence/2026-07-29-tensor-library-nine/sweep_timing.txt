@@ -1,0 +1,11 @@
+sc 240s
+bcc 314s
+fcc 429s
+bccz 431s
+fccz 471s
+diamond 481s
+octet 499s
+kelvin 510s
+reentrant 548s
+rhombic 564s
+TOTAL_WALL 564s
