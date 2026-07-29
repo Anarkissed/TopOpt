@@ -1,0 +1,15 @@
+mg_rearm_probe — Phase-0 latch re-arm measurement
+
+=== SCAN — geometric MG on the UNIFORM (iteration-0) field ===
+Entry point: fea_solve_mgcg_matfree (production). tol=1e-6.
+Locates where stagnation BEGINS (M1). rho=0.5 uniform, no structure.
+
+case                            nsolid     nbore | verdict    lvl    cyc   cgit      resid |      sec
+64^3      occ1.0 nohole         262144         0 | CARRIES      4     14     14   9.47e-07 |     3.05
+64^3      occ0.4 hole0.4          9728     33536 | STAGNATED    0    300   1274   9.78e-07 |     2.49
+128x80x96 occ0.45 nohole        200448         0 | CARRIES      4     55     55   9.03e-07 |     3.66
+128x80x96 occ0.45 hole0.4       122496     77952 | CARRIES      4    102    102   9.09e-07 |     3.65
+192x112x128 occ0.4 nohole       443520         0 | CARRIES      4    157    157   8.20e-07 |    16.11
+192x112x128 occ0.4 hole0.4      242816    200704 | STAGNATED    0    300   3602   9.97e-07 |    54.81
+
+done.

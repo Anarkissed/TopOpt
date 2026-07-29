@@ -1,0 +1,34 @@
+mg_rearm_probe — Phase-0 latch re-arm measurement
+
+=== LADDER — develop real OC field, measure geometric MG at each rung START (M2/M4/M5) ===
+extents=128x80x96 occ=0.45  oc_iters/rung=12  develop_tol=1e-04  measure_tol=1e-6
+Warm-start INHERIT: rung k+1 seeds from rung k's converged field (production warm_start_inherit).
+'rung START field' = what the latch would judge if re-armed at that boundary.
+
+--- REGIME: NO-HOLE (AMG-P1 §6 dilute regime) ---
+  part(design) voxels=200448  bore=0  empty=782592
+  rung     vf        | START-field geometric MG            | Jacobi | END-field (converged rung) geometric MG
+                     | verdict   lvl   cyc   cgit       sec |   cgit | verdict     cyc   cgit
+  [rung 0 vf 0.680: start measured (CARRIES, cyc 55, jac 539); developing 12 OC iters...]
+  0        0.680     | CARRIES     4    55     55      9.88 |    539 | CARRIES      98     98
+  [rung 1 vf 0.520: start measured (CARRIES, cyc 98, jac 730); developing 12 OC iters...]
+  1        0.520     | CARRIES     4    98     98      6.24 |    730 | CARRIES     136    136
+  [rung 2 vf 0.380: start measured (CARRIES, cyc 136, jac 898); developing 12 OC iters...]
+  2        0.380     | CARRIES     4   136    136      6.66 |    898 | CARRIES     186    186
+  [rung 3 vf 0.260: start measured (CARRIES, cyc 186, jac 1127); developing 12 OC iters...]
+  3        0.260     | CARRIES     4   186    186      8.69 |   1127 | CARRIES     253    253
+
+--- REGIME: WITH-HOLE (125 super-additive regime) ---
+  part(design) voxels=122496  bore=77952  empty=782592
+  rung     vf        | START-field geometric MG            | Jacobi | END-field (converged rung) geometric MG
+                     | verdict   lvl   cyc   cgit       sec |   cgit | verdict     cyc   cgit
+  [rung 0 vf 0.680: start measured (CARRIES, cyc 102, jac 805); developing 12 OC iters...]
+  0        0.680     | CARRIES     4   102    102      3.77 |    805 | CARRIES     177    177
+  [rung 1 vf 0.520: start measured (CARRIES, cyc 177, jac 1064); developing 12 OC iters...]
+  1        0.520     | CARRIES     4   177    177      5.08 |   1064 | CARRIES     237    237
+  [rung 2 vf 0.380: start measured (CARRIES, cyc 237, jac 1213); developing 12 OC iters...]
+  2        0.380     | CARRIES     4   237    237      7.45 |   1213 | CARRIES     251    251
+  [rung 3 vf 0.260: start measured (CARRIES, cyc 251, jac 1531); developing 12 OC iters...]
+  3        0.260     | CARRIES     4   251    251      7.01 |   1531 | STAGNATED   300   1899
+
+done.
