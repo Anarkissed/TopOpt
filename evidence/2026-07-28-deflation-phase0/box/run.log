@@ -1,0 +1,6 @@
+===== DEFLATION PROBE [box] part 16x5x16, 476 solid, h=2.0, conn=6, design box =====
+  solved_grid 32x16x24 (12288 voxels), rungs evaluated=3
+  vf=0.68 accept     printed=    318 ng=  27045 | comps 6c=  1 26c=  1 largest=100.0% small=0 | k_raw=6 k=6 setup_mv=6 mem=1.2MB | CG base=721(mf=720) defl=626 cut=13.2% | kappa 157932.1->21269.8
+  vf=0.52 accept     printed=    237 ng=  27045 | comps 6c=  1 26c=  1 largest=100.0% small=0 | k_raw=6 k=6 setup_mv=6 mem=1.2MB | CG base=789(mf=788) defl=670 cut=15.1% | kappa 261114.2->24191.7
+  vf=0.38 reject     printed=    157 ng=  27045 | comps 6c=  1 26c=  1 largest=100.0% small=0 | k_raw=6 k=6 setup_mv=6 mem=1.2MB | CG base=986(mf=985) defl=872 cut=11.6% | kappa 822749.8->49567.4
+  wrote /tmp/df_out/deflation_box.csv
