@@ -1,0 +1,6 @@
+## BYTEID full production ladder, hook OFF (P1)
+   hook installed: before=0 after=0 (must be 0/0)
+   run1: rungs=2 fnv=5bff3f90b90babeb
+   run2: rungs=2 fnv=5bff3f90b90babeb
+   => DETERMINISTIC + HOOK OFF (write this fnv to evidence; compare against a stashed pre-change build)
+EXIT 0

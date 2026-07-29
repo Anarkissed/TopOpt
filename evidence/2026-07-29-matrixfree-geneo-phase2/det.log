@@ -1,0 +1,6 @@
+   [cache hit /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-geneo-two-level-preconditioner-eb39f0/ea595dbb-13ed-4ba7-b015-d8965ebe65d1/scratchpad/ev/stag_20_20_8_4_vf26_it18.bin]
+## DET grid 40x32x40 ng=156198
+   run1: iters=249 fnv=a5df20221d00b8bc
+   run2: iters=249 fnv=a5df20221d00b8bc
+   => DETERMINISTIC (identical)
+EXIT 0

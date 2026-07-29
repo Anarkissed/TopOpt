@@ -1285,9 +1285,17 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     if (!solved) {
       // Exact matrix-free fallback (Jacobi-CG). Reports the Jacobi attempt in
       // *info (used_multigrid=false); throws on non-convergence, parity with
-      // fea_solve_cg and the assembled fea_solve_mgcg fallback.
+      // fea_solve_cg and the assembled fea_solve_mgcg fallback. This is the
+      // high-contrast stagnation regime the two-level GenEO preconditioner targets;
+      // the context lets an installed hook (default none => byte-identical) build
+      // its coarse basis / decomposition for THIS system.
+      fea_detail::MfSolveContext pc;
+      pc.grid = &grid;
+      pc.elem_youngs = elem_youngs;
+      pc.youngs_modulus = youngs_modulus;
+      pc.poisson = poisson;
       fea_detail::mf_cg_solve(m, tolerance, cap, xkept, diag.iterations,
-                              diag.residual, diag.converged, &rec);
+                              diag.residual, diag.converged, &rec, &pc);
       diag.used_multigrid = false;
       diag.mg_levels = 0;
       diag.recycle_dim = rec.dim;

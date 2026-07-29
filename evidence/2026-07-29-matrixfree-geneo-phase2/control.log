@@ -1,0 +1,6 @@
+   [cache hit /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-geneo-two-level-preconditioner-eb39f0/ea595dbb-13ed-4ba7-b015-d8965ebe65d1/scratchpad/ev/stag_20_20_8_4_vf26_it18.bin]
+## CONTROL (same-answer floor) grid 40x32x40 ng=156198
+   NEG CONTROL (Jacobi 1e-9 vs 1e-8): max|du|/max|u| = 4.899e-12   [5723 vs 5412 it]  <-- basin floor
+   TWO-LEVEL  (2L 1e-8 vs Jacobi 1e-8): max|du|/max|u| = 1.445e-08   [249 vs 5412 it]
+   => two-level solve field is within the basin floor: YES (same answer at the solve level)
+EXIT 0

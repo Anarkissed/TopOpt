@@ -1,0 +1,7 @@
+## HEALTHY grid 32x16x32 rho=0.6 (well-connected; MG carries)
+   MG-CG: used_multigrid=1 cycles=18  wall=0.23 s
+   Jacobi-CG: 327 it (0.29 s)   two-level: 152 it (0.28 s, +2.52s build, Nt=144)
+   READ: where MG carries (18 cycles), the two-level Jacobi-regime route is far more
+   expensive than the V-cycle — so it must be armed ONLY on stagnation (the hook lives
+   on the Jacobi-CG fallback, so healthy rungs never invoke it).
+EXIT 0

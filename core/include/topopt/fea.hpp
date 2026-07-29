@@ -691,6 +691,32 @@ int fea_matfree_thread_count();
 bool fea_matfree_galerkin_block_cache_enabled();
 bool fea_matfree_mixed_precision_enabled();
 
+// ---------------------------------------------------------------------------
+// EXTERNAL ADDITIVE PRECONDITIONER — DEFAULT-OFF TRIPWIRE (matrix-free GenEO
+// two-level, handoff 2026-07-29 phase 2).
+//
+// The matrix-free Jacobi-CG (the high-contrast stagnation fallback) exposes an
+// OPT-IN slot for a second SPD additive correction — the two-level GenEO
+// additive-Schwarz preconditioner — installed by an EXTERNAL provider that links
+// Eigen (a measurement harness), so the production library stays Eigen-free and
+// the eigensolve/decomposition machinery never enters it. The slot is declared in
+// the internal fea/fea_matfree.hpp (mf_set_precond_hook); it is NOT part of the
+// public API because no production caller installs it.
+//
+// This constant is the DEFAULT-OFF INVARIANT made explicit: nothing in the
+// production build installs a hook, so mf_cg_solve is byte-for-byte the pre-phase-2
+// path and the MG-CG path is untouched. If a future change wires a hook into a
+// production path, flip this to false DELIBERATELY and update the byte-identical
+// evidence — the static_assert is the tripwire that forces that to be a conscious
+// act, not an accident. Because any SPD additive term keeps the compound
+// preconditioner SPD, an installed hook can only change the ITERATION COUNT, never
+// the converged field or the exact stopping test.
+constexpr bool kMatfreeExternalPrecondDefaultOff = true;
+static_assert(kMatfreeExternalPrecondDefaultOff,
+              "matrix-free external preconditioner hook must ship default-off: no "
+              "production path may install it without updating the phase-2 "
+              "byte-identical evidence");
+
 // Per-run multigrid stagnation latch (handoff 127). When the matrix-free MG-CG
 // stagnates (builds a hierarchy but never contracts — the high-contrast
 // design-box regime) on several consecutive solves, it stops attempting MG for
