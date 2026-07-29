@@ -896,7 +896,8 @@ public final class ResultsModel: ObservableObject {
         stressScaleMaxMPa = effectiveYieldStrengthMPa > 0
             ? effectiveYieldStrengthMPa
             : (acc.map(\.maxStressMPa).max() ?? 0)
-        keyframeCache = nil   // variant data changed → rebuild keyframes on demand
+        selectedMeshCache = nil // variant data changed → rebuild the viewer mesh on demand
+        keyframeCache = nil   // …and the history keyframes
         flexCache = nil       // …and the per-vertex flex displacements
         loadPathCache = nil   // …and the derived load-path glyphs
         loadPathSegmentCache = nil
@@ -1064,17 +1065,34 @@ public final class ResultsModel: ObservableObject {
             Double(spacing), minFeatureMM)
     }
 
+    /// The built `ViewerMesh` for the current `selectedIndex`, so the O(triangles)
+    /// build runs once per selection, not once per SwiftUI body evaluation. Keyed on
+    /// `selectedIndex` exactly like `flexCache`/`keyframeCache`/`loadPathCache`, and
+    /// reset alongside them in `update(from:)` when variant data changes.
+    private var selectedMeshCache: (index: Int, mesh: ViewerMesh)?
+
     /// The selected variant's isosurface for display (nil if it has no geometry).
     public var selectedMesh: ViewerMesh? {
         guard let v = selectedVariant, !v.meshVertices.isEmpty else { return nil }
+        // Cache the built mesh on the selection (viewer-lag fix, 2026-07-29). This is
+        // read from `ResultsScreen.body` — once per orbit frame (the shared camera
+        // republishes) and 30×/s while an animation runs — and the ViewerMesh build
+        // (smooth normals + the 6× unshared flat-shaded soup) is O(triangles), so
+        // rebuilding it per body evaluation made the viewer sluggish on real (higher-
+        // resolution) variants. Every sibling derived quantity is already cached on
+        // `selectedIndex`; this one was the exception. The cache returns the SAME
+        // ViewerMesh, so the displayed and exported geometry are unchanged.
+        if let c = selectedMeshCache, c.index == selectedIndex { return c.mesh }
         // Smooth-shade the organic optimized surface (083): flat per-face normals
         // turn every facet into a visible terrace on coarse (large-part) grids.
         // The `smoothShaded` flag only recomputes NORMALS — it changes neither the
         // geometry nor the mass. The geometry itself (v.meshVertices/meshIndices) is
         // now the smooth-export surface: the bridge resamples the field finer before
         // marching cubes (handoff 087), so display and export share one smooth mesh.
-        return ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
-                          smoothShaded: true)
+        let mesh = ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
+                              smoothShaded: true)
+        selectedMeshCache = (selectedIndex, mesh)
+        return mesh
     }
 
     /// The selected variant's stress field, tied to the run's grid geometry. Gated on

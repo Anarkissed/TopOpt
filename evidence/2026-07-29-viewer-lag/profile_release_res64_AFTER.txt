@@ -1,0 +1,11 @@
+results at rest/orbit: 2 draw calls, 77523 vertices/frame
+== VIEWER PROFILE (handoff 134 item 3) — GPU: Apple M2 Pro ==
+variant | tris | raw verts (soup) | welded verts | weld ratio | pos+nrm KB | tint KB | flex KB | total KB | GPU ms @1024² | GPU ms @2048²
+variant_070.stl | 33028 | 99084 | 16512 | 6.00× | 2322 | 1548 | 1161 | 5032 | 0.467 | 1.010
+variant_050.stl | 25840 | 77520 | 12908 | 6.01× | 1817 | 1211 | 908 | 3937 | 0.409 | 0.969
+variant_030.stl | 16756 | 50268 | 8366 | 6.01× | 1178 | 785 | 589 | 2553 | 0.336 | 0.881
+== VIEWER REBUILD PROFILE (2026-07-29 viewer-lag) — per-body-eval CPU cost ==
+variant | tris | selectedMesh ms (min of 60) | 30 fps budget used
+variant_070.stl | 33028 | 0.001 | 0.0%
+variant_050.stl | 25840 | 0.001 | 0.0%
+variant_030.stl | 16756 | 0.001 | 0.0%
