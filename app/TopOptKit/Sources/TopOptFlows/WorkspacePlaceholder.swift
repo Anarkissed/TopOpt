@@ -1074,6 +1074,12 @@ public struct WorkspacePlaceholder: View {
             }
         }
         .onChange(of: showLatticePanel) { open in if open { syncLatticeProxy() } }
+        // Graded follow-up: when a run's accepted variants land (streamed or final),
+        // rebake the strut scene so its radii grade by the fresh von Mises field.
+        // Keyed on acceptedCount (cheap, Equatable); no-op while the preview is off.
+        .onChange(of: run.outcome?.acceptedCount ?? -1) { _ in
+            if showStrutPreview { buildStrutScene() }
+        }
         .onAppear { syncLatticeProxy() }
     }
 
@@ -1108,13 +1114,19 @@ public struct WorkspacePlaceholder: View {
     }
 
     /// Bake the strut-preview scene (occupancy + exact part SDF + segment soup) OFF
-    /// the main thread — ~a second on a big part, once per mesh/lattice-type change,
-    /// never per frame (P2). The layer appears when the bake lands.
+    /// the main thread — ~a second on a big part, once per mesh/lattice-type/result
+    /// change, never per frame (P2). The layer appears when the bake lands.
+    ///
+    /// GRADED after a run (follow-up, maintainer-approved): when the run's outcome
+    /// carries a von Mises field, the strut radii grade by it — thick struts on the
+    /// load path, sparse in quiet regions, the lattice the grading law would build.
+    /// Pre-run (or when no field exists) the preview is uniform, like the proxy.
     private func buildStrutScene() {
         guard let mesh = viewerMesh else { return }
         let latticeID = latticeProxy.params.latticeID
+        let field = LatticeSDFScene.demandField(from: run.outcome)
         DispatchQueue.global(qos: .userInitiated).async {
-            let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: latticeID)
+            let scene = LatticeSDFScene(mesh: mesh, field: field, latticeID: latticeID)
             DispatchQueue.main.async {
                 strutScene = scene
                 strutSceneToken += 1

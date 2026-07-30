@@ -193,6 +193,29 @@ Maintainer: *"That looks amazing! Ship it!"* Wired for real:
   both layers: **0.2–0.3 ms + ~13 ms ≈ 13.9 ms @1024², inside the 16.6 ms 60 Hz
   budget**. Full lattice sweep (SDF + proxy + patch + type): 30 tests green.
 
+## Round 6 — graded-by-the-real-run follow-up (2026-07-29)
+
+**Done with the maintainer's direct permission** ("yes, please. Go ahead" after the
+gap was explained), closing the first honest gap below: the strut preview now
+grades by the RUN'S OWN von Mises field instead of always previewing uniform.
+
+- `LatticeSDFScene.demandField(from: OptimizeOutcome?)` — a pure, tested extractor:
+  the NEWEST accepted variant carrying a `vonMisesField` (the ladder streams
+  heavier→lighter, so that is the recommendation tier), on the run's own grid
+  (`gridN*/gridOrigin/spacing`, the PR 222 fields plumbing). nil pre-run /
+  cancelled / fieldless (remote fetch failure) → the preview stays uniform and
+  honest, exactly like the density proxy's no-field case.
+- `buildStrutScene()` passes it into the bake; a new `onChange` on
+  `outcome.acceptedCount` rebakes (off-main) as accepted variants land, so the
+  radii track the freshest result. No-op while the preview is off.
+- Test: `testDemandFieldPicksNewestAcceptedWithField` — skips rejected and
+  accepted-but-fieldless variants, picks the newest accepted with a field, and
+  returns nil when nothing usable exists.
+
+With this, toggling "Struts" on a finished design shows thick struts along the
+load path and sparse cells in quiet regions — the lattice the grading law would
+actually build — with the same banner, budget and byte-identical-off guarantees.
+
 ## Honest gaps
 
 - **132-capsule soup** is the literal octet period; an abs-fold octant reduction
@@ -204,9 +227,8 @@ Maintainer: *"That looks amazing! Ship it!"* Wired for real:
   once the worker's owed lattice∪wall union lands.
 - Only **octet** is wired (the print-tested cell, and the only one core certifies);
   other family members are one segment-table swap away.
-- The workspace preview is **uniform pre-run** (no demand field exists before a
-  solve), exactly like the density proxy; wiring a result's von Mises field into
-  `LatticeSDFScene(field:)` engages graded strut radii — the code path is proven by
-  the graded evidence renders.
+- ~~The workspace preview is uniform pre-run~~ **Closed by round 6** (maintainer-
+  approved follow-up): post-run the preview grades by the result's real von Mises
+  field; pre-run it is uniform, which is the honest state (no field exists yet).
 - The 2048² native numbers (38–48 ms) are the honest uncapped cost; the live layer
   never runs there (1152 px cap).

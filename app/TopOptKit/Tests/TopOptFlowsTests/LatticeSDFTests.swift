@@ -6,6 +6,7 @@
 import XCTest
 import simd
 import TopOptDesign
+import TopOptKit
 @testable import TopOptFlows
 
 final class LatticeSDFTests: XCTestCase {
@@ -98,6 +99,39 @@ final class LatticeSDFTests: XCTestCase {
         let bounds = MeshGeometry.bounds(vertices: v)
         let occ = LatticePreviewOccupancy.occupancy(positions: v, indices: i, bounds: bounds, maxDim: 16)
         XCTAssertNil(LatticePreviewOccupancy.demand(like: occ, field: nil))
+    }
+
+    // MARK: run-outcome demand field (the graded follow-up)
+
+    func testDemandFieldPicksNewestAcceptedWithField() {
+        func variant(accepted: Bool, vm: [Float], mass: Double) -> OptimizeVariant {
+            OptimizeVariant(requestedVolumeFraction: 0.5, achievedVolumeFraction: 0.5,
+                            massGrams: mass, supportVolumeVoxels: 0, meshTriangleCount: 12,
+                            worstCaseMargin: 3, accepted: accepted, v3Passes: true,
+                            meshVertices: [0, 0, 0], meshIndices: [0], vonMisesField: vm)
+        }
+        let n = 2 * 2 * 2
+        let older = variant(accepted: true, vm: [Float](repeating: 1, count: n), mass: 100)
+        let fieldless = variant(accepted: true, vm: [], mass: 80)         // e.g. fetch failed
+        let rejected = variant(accepted: false, vm: [Float](repeating: 9, count: n), mass: 60)
+        let newest = variant(accepted: true, vm: [Float](repeating: 2, count: n), mass: 70)
+
+        let outcome = OptimizeOutcome(variants: [older, newest, fieldless, rejected],
+                                      stoppedOnMargin: false, cancelled: false, acceptedCount: 3,
+                                      gridNx: 2, gridNy: 2, gridNz: 2,
+                                      gridOrigin: .zero, spacing: 1)
+        let f = LatticeSDFScene.demandField(from: outcome)
+        // Skips the rejected variant and the accepted-but-fieldless one; takes the
+        // NEWEST accepted variant that actually carries a field.
+        XCTAssertEqual(f?.values.first, 2)
+        XCTAssertEqual(f?.nx, 2)
+
+        // No outcome / nothing usable → nil (the preview stays uniform, honestly).
+        XCTAssertNil(LatticeSDFScene.demandField(from: nil))
+        let bare = OptimizeOutcome(variants: [fieldless, rejected], stoppedOnMargin: false,
+                                   cancelled: false, acceptedCount: 1,
+                                   gridNx: 2, gridNy: 2, gridNz: 2, gridOrigin: .zero, spacing: 1)
+        XCTAssertNil(LatticeSDFScene.demandField(from: bare))
     }
 
     // MARK: helpers

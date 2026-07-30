@@ -32,6 +32,7 @@ import SwiftUI
 import Combine
 import simd
 import TopOptDesign
+import TopOptKit
 
 // MARK: - Uniforms (layout MUST match the MSL struct)
 
@@ -75,6 +76,27 @@ public struct LatticeSDFScene {
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
         self.demand = LatticePreviewOccupancy.demand(like: occupancy, field: field)
         self.bounds = mesh.bounds
+    }
+}
+
+public extension LatticeSDFScene {
+    /// The demand field the strut preview grades by AFTER a run (follow-up shipped
+    /// with the maintainer's direct permission — see the handoff): the von Mises
+    /// field of the NEWEST accepted variant carrying one, on the run's own grid.
+    /// The savings ladder streams variants lighter-first-to-lightest-last, so the
+    /// last accepted is the ladder's recommendation tier. Returns nil pre-run, for
+    /// a cancelled run, or when no accepted variant carries a field (a remote run
+    /// whose fields.bin fetch failed) — the preview then stays uniform and honest,
+    /// exactly like the density proxy's no-field case.
+    static func demandField(from outcome: OptimizeOutcome?) -> StressField? {
+        guard let o = outcome else { return nil }
+        for v in o.variants.reversed() where v.accepted && !v.vonMisesField.isEmpty {
+            let f = StressField(nx: o.gridNx, ny: o.gridNy, nz: o.gridNz,
+                                origin: SIMD3<Float>(o.gridOrigin), spacing: Float(o.spacing),
+                                values: v.vonMisesField)
+            if !f.isEmpty { return f }
+        }
+        return nil
     }
 }
 
