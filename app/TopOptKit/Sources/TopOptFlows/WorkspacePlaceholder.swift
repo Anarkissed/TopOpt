@@ -57,6 +57,13 @@ public struct WorkspacePlaceholder: View {
     /// viewer's existing per-vertex colour channel (zero new GPU buffers) and shows the
     /// honest legend + true-geometry sample patch.
     @StateObject private var latticeProxy = LatticeProxyModel()
+    // Strut preview (handoff 2026-07-29-lattice-preview): the raymarched TRUE-strut
+    // layer. Off by default → the workspace draw is byte-identical. The scene (part
+    // occupancy + exact narrow-band SDF + segment soup) bakes ONCE off-main when the
+    // toggle turns on or the lattice type changes — never per frame (P2).
+    @State private var showStrutPreview = false
+    @State private var strutScene: LatticeSDFScene? = nil
+    @State private var strutSceneToken = 0
     /// Snap the settle instead of animating it, for reduced-motion users (D2).
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// When a project has saved variants, results show by default; tapping "See
@@ -291,6 +298,10 @@ public struct WorkspacePlaceholder: View {
                           // whenever gravity is set (edit phase) so the user can SEE and
                           // reason about every keep-out; the selected group's volume brightens.
                           clearanceVolumes: force.phase == .edit ? clearanceRenderItems : [],
+                          // Strut preview (2026-07-29): while the raymarched lattice layer
+                          // is up, thin the body to a glass shell so the TRUE struts inside
+                          // read clearly; 1 (opaque) otherwise — byte-identical when off.
+                          bodyAlpha: (showStrutPreview && strutScene != nil) ? 0.22 : 1,
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
                           detentPulse: detentPulse,
                           // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
@@ -302,6 +313,17 @@ public struct WorkspacePlaceholder: View {
                           paintFaceIDs: project.effectivePaintFaceIDs(),
                           onBrush: handleBrush)
                 .ignoresSafeArea()
+
+            // Strut preview: the raymarched true-strut layer, riding the SAME shared
+            // orbit camera as the mesh view (so the lattice sits exactly in the part).
+            // Non-interactive — orbit/tap gestures fall through to the mesh view.
+            if showStrutPreview, let scene = strutScene {
+                LatticeSDFPreviewView(camera: cameraModel, scene: scene,
+                                      params: latticeProxy.params,
+                                      sceneToken: strutSceneToken)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
 
             arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
             // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
@@ -1005,7 +1027,20 @@ public struct WorkspacePlaceholder: View {
     /// LatticeProxyLayout + LatticeProxyKeepOutTests). Off by default.
     private var latticePreviewOverlay: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
-            latticePreviewChip
+            HStack(spacing: DS.Space.s) {
+                latticePreviewChip
+                if project.lattice.enabled { strutPreviewChip }
+            }
+            // Honesty banner (bar P1): whenever the strut layer is up the user is told
+            // in place what they are looking at — the live analytic strut field, not
+            // the worker's exported mesh.
+            if showStrutPreview, let scene = strutScene {
+                Text(scene.preview.previewLabel)
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .padding(.vertical, DS.Space.xs).padding(.horizontal, DS.Space.s)
+                    .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
+            }
             if showLatticePanel {
                 ScrollView(.vertical, showsIndicators: false) {
                     LatticeControlsPanel(project: project, proxy: latticeProxy,
@@ -1025,9 +1060,66 @@ public struct WorkspacePlaceholder: View {
         .animation(DS.Motion.emphasized, value: showLatticePanel)
         // Keep the legend/panel proxy in step with the settings (the legend is the only
         // consumer of `latticeProxy`; the surface tints derive their own params).
-        .onChange(of: project.lattice) { _ in syncLatticeProxy() }
+        .onChange(of: project.lattice) { _ in
+            syncLatticeProxy()
+            // The strut preview follows lattice mode: off with it; rebaked when the
+            // lattice TYPE changes (the segment soup is per-lattice; cell size and
+            // density are live shader params and need no rebake).
+            if !project.lattice.enabled {
+                showStrutPreview = false
+            } else if showStrutPreview,
+                      let scene = strutScene,
+                      scene.preview.lattice.id != latticeProxy.params.latticeID {
+                buildStrutScene()
+            }
+        }
         .onChange(of: showLatticePanel) { open in if open { syncLatticeProxy() } }
         .onAppear { syncLatticeProxy() }
+    }
+
+    /// The strut-preview toggle chip — shows the ACTUAL lattice geometry, raymarched
+    /// with zero triangles (handoff 2026-07-29-lattice-preview). Off by default.
+    private var strutPreviewChip: some View {
+        Button {
+            if showStrutPreview {
+                showStrutPreview = false
+            } else {
+                showStrutPreview = true
+                if strutScene == nil { buildStrutScene() }
+            }
+        } label: {
+            HStack(spacing: DS.Space.xs) {
+                Image(systemName: "cube.transparent").font(.system(size: 12, weight: .bold))
+                Text(showStrutPreview ? "Struts · on" : "Struts")
+                    .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+            }
+            .foregroundStyle(showStrutPreview
+                ? LatticeDensityProxy.densityColor(fraction: 0.75).color
+                : DS.Color.textSecondary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
+            .background(Capsule().fill(DS.Surface.panel.color)
+                .overlay(Capsule().strokeBorder(
+                    (showStrutPreview ? LatticeDensityProxy.densityColor(fraction: 0.6).opacity(0.6)
+                                      : DS.Color.strokeSubtle).color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .dsShadow(DS.Shadow.panel)
+        .help("Show the actual strut lattice, raymarched live — a preview of the geometry, not the exported mesh.")
+    }
+
+    /// Bake the strut-preview scene (occupancy + exact part SDF + segment soup) OFF
+    /// the main thread — ~a second on a big part, once per mesh/lattice-type change,
+    /// never per frame (P2). The layer appears when the bake lands.
+    private func buildStrutScene() {
+        guard let mesh = viewerMesh else { return }
+        let latticeID = latticeProxy.params.latticeID
+        DispatchQueue.global(qos: .userInitiated).async {
+            let scene = LatticeSDFScene(mesh: mesh, field: nil, latticeID: latticeID)
+            DispatchQueue.main.async {
+                strutScene = scene
+                strutSceneToken += 1
+            }
+        }
     }
 
     /// The chip that opens/closes the lattice CONTROLS panel (the mode toggle lives inside
