@@ -58,6 +58,51 @@ double keep_out_signed_distance(const ClearanceGeometry& g, const Vec3& p) {
   return -std::sqrt(os * os + ou * ou + ow * ow);
 }
 
+// The certified midpoint refinement shared by both clip entry points. `f` is a
+// 1-Lipschitz function of arc length t in [0, len]; kept spans PROVE f >= 0
+// throughout, dropped spans prove f <= 0, and undecided slivers at the `tol`
+// floor are dropped (conservative) and counted. Deterministic: fixed midpoint
+// refinement, ascending-t processing, no RNG. (This is the exact loop
+// clip_segment always ran, hoisted so clip_segment_relaxed_base can share it
+// with a different f — same arithmetic, same order.)
+template <class F>
+std::vector<LatticeClipSpan> certified_clip_spans(double len, F&& f, double tol,
+                                                  long long* uncertified_dropped) {
+  std::vector<LatticeClipSpan> spans;
+  struct Node {
+    double t0, t1, f0, f1;
+  };
+  std::vector<Node> stack;
+  stack.push_back({0.0, len, f(0.0), f(len)});
+  auto emit = [&spans](double t0, double t1) {
+    if (!spans.empty() && std::fabs(spans.back().t1 - t0) < 1e-12)
+      spans.back().t1 = t1;  // merge adjacent certified spans
+    else
+      spans.push_back({t0, t1});
+  };
+  while (!stack.empty()) {
+    // Process the node with the smallest t0 (stack is LIFO; we push the right
+    // half first so the left half is on top — ascending order overall).
+    Node n = stack.back();
+    stack.pop_back();
+    const double half = 0.5 * (n.t1 - n.t0);
+    if (std::min(n.f0, n.f1) >= half) {
+      emit(n.t0, n.t1);
+      continue;
+    }
+    if (std::max(n.f0, n.f1) <= -half) continue;
+    if (n.t1 - n.t0 <= tol) {
+      if (uncertified_dropped) ++(*uncertified_dropped);
+      continue;  // undecided sliver: conservative drop
+    }
+    const double tm = 0.5 * (n.t0 + n.t1);
+    const double fm = f(tm);
+    stack.push_back({tm, n.t1, fm, n.f1});  // right half (processed later)
+    stack.push_back({n.t0, tm, n.f0, fm});  // left half (processed next)
+  }
+  return spans;
+}
+
 }  // namespace
 
 void LatticeBoundary::add_half_space(const Vec3& point, const Vec3& outward_normal) {
@@ -190,9 +235,9 @@ double LatticeBoundary::signed_distance(const Vec3& p) const {
   return signed_distance_excluding(p, -1, -1);
 }
 
-double LatticeBoundary::signed_distance_excluding(const Vec3& p,
-                                                  int exclude_face_a,
-                                                  int exclude_face_b) const {
+double LatticeBoundary::sd_excluding_relaxed(const Vec3& p, int exclude_face_a,
+                                             int exclude_face_b,
+                                             double base_relax) const {
   auto excluded = [exclude_face_a, exclude_face_b](int face) {
     return face >= 0 && (face == exclude_face_a || face == exclude_face_b);
   };
@@ -201,12 +246,23 @@ double LatticeBoundary::signed_distance_excluding(const Vec3& p,
     if (excluded(pl.face)) continue;
     d = std::min(d, -vdot(vsub(p, pl.point), pl.unit_outward));
   }
-  if (voxel_grid_) d = std::min(d, voxel_distance(p));
+  if (voxel_grid_) d = std::min(d, voxel_distance(p) + base_relax);
   for (std::size_t i = 0; i < keep_outs_.size(); ++i) {
     if (excluded(keep_out_face_[i])) continue;
     d = std::min(d, -keep_out_signed_distance(keep_outs_[i], p));
   }
   return d;
+}
+
+double LatticeBoundary::signed_distance_excluding(const Vec3& p,
+                                                  int exclude_face_a,
+                                                  int exclude_face_b) const {
+  return sd_excluding_relaxed(p, exclude_face_a, exclude_face_b, 0.0);
+}
+
+double LatticeBoundary::signed_distance_relaxed_base(const Vec3& p,
+                                                     double base_relax) const {
+  return sd_excluding_relaxed(p, -1, -1, base_relax);
 }
 
 int LatticeBoundary::nearest_face(const Vec3& p) const {
@@ -253,57 +309,26 @@ bool LatticeBoundary::cell_may_overlap(const Vec3& cell_min, double cell_mm) con
 
 std::vector<LatticeClipSpan> LatticeBoundary::clip_segment(
     const Vec3& a, const Vec3& b, double erosion, int exclude_face_a,
-    int exclude_face_b, long long* uncertified_dropped) const {
+    int exclude_face_b, long long* uncertified_dropped,
+    double base_relax) const {
   std::vector<LatticeClipSpan> spans;
   const Vec3 ab = vsub(b, a);
   const double len = vnorm(ab);
   if (!(len > 0.0)) return spans;
   const Vec3 dir = vscale(ab, 1.0 / len);
-  auto f = [&](double t) {
-    return signed_distance_excluding(vadd(a, vscale(dir, t)), exclude_face_a,
-                                     exclude_face_b) -
-           erosion;
-  };
-
-  // Certified midpoint refinement on an explicit stack, processed in ascending-
-  // t order so spans come out sorted and merging is a single pass. f is
-  // 1-Lipschitz in t, so:
-  //   min(f0, f1) >= (t1-t0)/2  proves f >= 0 on [t0, t1]  (keep, certified)
-  //   max(f0, f1) <= -(t1-t0)/2 proves f <= 0 on [t0, t1]  (drop, certified)
-  // At the tolerance floor an undecided sliver is DROPPED (conservative: the
-  // part never grows) and counted.
-  struct Node {
-    double t0, t1, f0, f1;
-  };
-  std::vector<Node> stack;
-  stack.push_back({0.0, len, f(0.0), f(len)});
-  auto emit = [&spans](double t0, double t1) {
-    if (!spans.empty() && std::fabs(spans.back().t1 - t0) < 1e-12)
-      spans.back().t1 = t1;  // merge adjacent certified spans
-    else
-      spans.push_back({t0, t1});
-  };
-  while (!stack.empty()) {
-    // Process the node with the smallest t0 (stack is LIFO; we push the right
-    // half first so the left half is on top — ascending order overall).
-    Node n = stack.back();
-    stack.pop_back();
-    const double half = 0.5 * (n.t1 - n.t0);
-    if (std::min(n.f0, n.f1) >= half) {
-      emit(n.t0, n.t1);
-      continue;
-    }
-    if (std::max(n.f0, n.f1) <= -half) continue;
-    if (n.t1 - n.t0 <= kClipTolMm) {
-      if (uncertified_dropped) ++(*uncertified_dropped);
-      continue;  // undecided sliver: conservative drop
-    }
-    const double tm = 0.5 * (n.t0 + n.t1);
-    const double fm = f(tm);
-    stack.push_back({tm, n.t1, fm, n.f1});  // right half (processed later)
-    stack.push_back({n.t0, tm, n.f0, fm});  // left half (processed next)
-  }
-  return spans;
+  // Certified midpoint refinement (certified_clip_spans): f is 1-Lipschitz in
+  // t, so min(f0, f1) >= (t1-t0)/2 proves f >= 0 on [t0, t1] (keep) and
+  // max(f0, f1) <= -(t1-t0)/2 proves f <= 0 (drop); undecided slivers at the
+  // tolerance floor are dropped (conservative: the part never grows) and
+  // counted. base_relax relaxes the voxel term only (see the header).
+  return certified_clip_spans(
+      len,
+      [&](double t) {
+        return sd_excluding_relaxed(vadd(a, vscale(dir, t)), exclude_face_a,
+                                    exclude_face_b, base_relax) -
+               erosion;
+      },
+      kClipTolMm, uncertified_dropped);
 }
 
 std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,

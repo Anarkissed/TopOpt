@@ -263,6 +263,58 @@ constexpr int kSkinDegree = 8;
 constexpr double kBoreStationRad = 0.30;  // collar edge angular subdivision
 constexpr double kRimSagMm = 0.02;        // rim torus facet sag budget
 
+// ── freeform skin (task 2026-07-30-lattice-skin-freeform) ────────────────────
+// The explicit sag budget the freeform skin buys against the VOXEL surface only
+// (clip_segment_relaxed_base): emitted skin may overshoot the voxel surface by
+// at most this, strictly under the 0.05 mm geometric bar; keep-outs and planes
+// stay at full erosion (zero intrusion). It exists because a chord riding the
+// exact offset surface has f == 0 against the voxel term everywhere — the same
+// degeneracy the plane skin dodges by excluding its own face, which the voxel
+// base (face == -1) cannot offer.
+constexpr double kSkinSagBudgetMm = 0.045;
+// Straight-chord surface band: a candidate chord whose sampled deviation from
+// its local offset surface leaves the band is REJECTED whole — never bent
+// silently (bar E4's rejection clause). The band is ASYMMETRIC:
+//   * BULGE (outward, dev < 0): rejected past max(r_skin, 0.15 cell) — a
+//     centreline that far outside has taken the whole tube out of the part
+//     (a chord across a concavity / air gap); the certified clip would only
+//     shred it into fragments.
+//   * TUNNEL (inward, dev > 0): rejected past 0.35 cell — deeper than that
+//     the chord is shortcutting under a ridge / through a fin, where the
+//     nearest-surface projection is no longer trustworthy. Kept generous so
+//     voxel-staircase deviations (~half a voxel) on real optimized parts pass.
+constexpr double kSkinBulgeFactor = 0.15;
+constexpr double kSkinTunnelFactor = 0.35;
+constexpr int kSkinProjIters = 8;         // fixed Newton budget (determinism)
+constexpr double kSkinProjTolMm = 1e-3;   // projection residual acceptance
+constexpr double kSkinGradEpsMm = 1e-3;   // central-difference gradient step
+
+// Project q onto the offset level set {signed_distance == target} by Newton
+// steps along the finite-difference gradient. Deterministic: fixed iteration
+// budget, early exit on the residual only (a pure function of the values).
+// Returns false when the residual cannot be brought under kSkinProjTolMm —
+// the caller rejects the chord rather than emit unproven geometry.
+bool project_to_offset(const LatticeBoundary& B, double target, Vec3& q) {
+  for (int it = 0; it < kSkinProjIters; ++it) {
+    const double f = B.signed_distance(q) - target;
+    if (std::fabs(f) <= kSkinProjTolMm) return true;
+    const double e = kSkinGradEpsMm;
+    const Vec3 g{(B.signed_distance({q.x + e, q.y, q.z}) -
+                  B.signed_distance({q.x - e, q.y, q.z})) /
+                     (2.0 * e),
+                 (B.signed_distance({q.x, q.y + e, q.z}) -
+                  B.signed_distance({q.x, q.y - e, q.z})) /
+                     (2.0 * e),
+                 (B.signed_distance({q.x, q.y, q.z + e}) -
+                  B.signed_distance({q.x, q.y, q.z - e})) /
+                     (2.0 * e)};
+    const double g2 = dot(g, g);
+    if (g2 < 1e-12) return false;  // flat gradient: no direction to move
+    q = sub(q, scale(g, f / g2));
+  }
+  return std::fabs(B.signed_distance(q) - target) <= kSkinProjTolMm;
+}
+
 // Deterministically recompute the clipped struts of ONE cell: the SAME
 // ownership walk as the main emission loop (single source — the skin pass calls
 // this for neighbour cells instead of keeping any global landing set, which is
@@ -398,10 +450,18 @@ void emit_skin_edge(TriangleSink& sink, const LatticeRegion& R,
   double r_e = 1e30;
   for (const double r : rs) r_e = std::min(r_e, r);
 
+  // Voxel term relaxed by the sag budget ONLY when the freeform skin is armed:
+  // on a voxel-based part a collar / skin edge can run ALONG the voxel surface
+  // (landings sit exactly on its offset), where the exact term degenerates to
+  // f == 0 and grinds to the tolerance floor — the analytic-face analogue is
+  // the face exclusion. Disarmed, the clip is EXACT, byte-identical to the
+  // boundary finish (bar E1 — real parts do emit collar edges on the default
+  // path wherever the voxel wall clears the bore wall).
+  const double relax = skin.freeform ? kSkinSagBudgetMm : 0.0;
   for (std::size_t i = 0; i + 1 < stations.size(); ++i) {
     const auto spans = B->clip_segment(stations[i], stations[i + 1], r_e,
                                        face_idx, -1,
-                                       &st.uncertified_spans_dropped);
+                                       &st.uncertified_spans_dropped, relax);
     const double len = norm(sub(stations[i + 1], stations[i]));
     if (!(len > 0.0)) continue;
     const Vec3 dir = scale(sub(stations[i + 1], stations[i]), 1.0 / len);
@@ -418,6 +478,113 @@ void emit_skin_edge(TriangleSink& sink, const LatticeRegion& R,
       st.skin_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
       note_diameter(st, r_e);
     }
+  }
+}
+
+// Emit one FREEFORM skin chord between two landings on the non-analytic
+// (voxel-base) surface — the arbitrary curved outer boundary of a real
+// optimized part (task 2026-07-30-lattice-skin-freeform). The chord is walked
+// as a station polyline: each station starts on the straight chord and is
+// projected onto the composite offset surface {sd == local skin radius}, so
+// the emitted skin RIDES the curved surface instead of chording it. Emission
+// stays certified: every station segment is clipped through
+// clip_segment_relaxed_base (analytic terms exact — zero keep-out intrusion;
+// voxel term relaxed by kSkinSagBudgetMm — bounded, explicit overshoot).
+void emit_freeform_skin_edge(TriangleSink& sink, const LatticeRegion& R,
+                             const LatticeRadiusField& G,
+                             const LatticeSkinSpec& skin, const Landing& A,
+                             const Landing& Bl, LatticeGenStats& st,
+                             const LatticeGenObserver* obs) {
+  const LatticeBoundary* B = R.boundary;
+  const Vec3 ab = sub(Bl.pos, A.pos);
+  const double len = norm(ab);
+  if (!(len > 0.0)) return;
+  const Vec3 dir = scale(ab, 1.0 / len);
+  auto verdict = [&](LatticeSkinChordVerdict v) {
+    if (obs && obs->on_skin_chord) obs->on_skin_chord(A.pos, Bl.pos, v);
+  };
+
+  // Station spacing: on the offset level set at depth d the concave rounding
+  // radius is >= d (a distance-function property), so a station chord of
+  // length s sags at most s^2/(8 d) — kept under HALF the sag budget so the
+  // certified clip has the other half to certify with.
+  const double r_probe = std::min(skin_radius_at(G, skin, A.pos),
+                                  skin_radius_at(G, skin, Bl.pos));
+  const double station =
+      std::max(0.05, std::min(0.25 * R.cell_mm,
+                              2.0 * std::sqrt(r_probe * kSkinSagBudgetMm)));
+  const int nst = std::max(1, static_cast<int>(std::ceil(len / station)));
+
+  // (1) The straight-chord surface band: sampled deviation from the local
+  // offset surface. Outward = bulging across a concavity; inward = tunnelling
+  // under a convex ridge. Either rejects the WHOLE chord (never a silent bend).
+  for (int i = 0; i <= nst; ++i) {
+    const Vec3 q = add(A.pos, scale(dir, (len * i) / nst));
+    const double r_q = skin_radius_at(G, skin, q);
+    const double dev = B->signed_distance(q) - r_q;
+    if (dev < -std::max(r_q, kSkinBulgeFactor * R.cell_mm) ||
+        dev > kSkinTunnelFactor * R.cell_mm) {
+      ++st.skin_chords_rejected_band;
+      verdict(LatticeSkinChordVerdict::RejectedBand);
+      return;
+    }
+  }
+
+  // (2) Stations projected onto {sd == r_s}, the radius re-read at the
+  // projected point (two fixed passes, the rim walk's discipline).
+  std::vector<Vec3> stations(static_cast<std::size_t>(nst) + 1);
+  std::vector<double> rs(static_cast<std::size_t>(nst) + 1);
+  for (int i = 0; i <= nst; ++i) {
+    Vec3 q = add(A.pos, scale(dir, (len * i) / nst));
+    double r_s = skin_radius_at(G, skin, q);
+    bool ok = project_to_offset(*B, r_s, q);
+    if (ok) {
+      r_s = skin_radius_at(G, skin, q);
+      ok = project_to_offset(*B, r_s, q);
+    }
+    if (!ok) {
+      ++st.skin_chords_rejected_projection;
+      verdict(LatticeSkinChordVerdict::RejectedProjection);
+      return;
+    }
+    stations[static_cast<std::size_t>(i)] = q;
+    rs[static_cast<std::size_t>(i)] = r_s;
+  }
+
+  // (3) Certified emission per station segment.
+  bool any = false;
+  for (int i = 0; i < nst; ++i) {
+    const Vec3& sa = stations[static_cast<std::size_t>(i)];
+    const Vec3& sb = stations[static_cast<std::size_t>(i) + 1];
+    const double r_e = std::min(rs[static_cast<std::size_t>(i)],
+                                rs[static_cast<std::size_t>(i) + 1]);
+    const double slen = norm(sub(sb, sa));
+    if (!(slen > 0.0)) continue;
+    const Vec3 sdir = scale(sub(sb, sa), 1.0 / slen);
+    const auto spans =
+        B->clip_segment(sa, sb, r_e, -1, -1, &st.uncertified_spans_dropped,
+                        kSkinSagBudgetMm);
+    for (const auto& s : spans) {
+      if (s.t1 - s.t0 < kMinFragMm) continue;
+      const Vec3 qa = add(sa, scale(sdir, s.t0));
+      const Vec3 qb = add(sa, scale(sdir, s.t1));
+      emit_strut(sink, qa, qb, r_e, G.nseg);
+      if (obs && obs->on_element)
+        obs->on_element(LatticeGenElement::SkinStrut, qa, qb, r_e);
+      any = true;
+      ++st.skin_struts;
+      st.skin_triangles += 4ull * G.nseg;
+      st.triangles += 4ull * G.nseg;
+      st.skin_volume_mm3 += ngon_prism_volume(r_e, s.t1 - s.t0, G.nseg);
+      note_diameter(st, r_e);
+    }
+  }
+  if (any) {
+    ++st.skin_chords;
+    verdict(LatticeSkinChordVerdict::Accepted);
+  } else {
+    ++st.skin_chords_clipped_away;
+    verdict(LatticeSkinChordVerdict::ClippedAway);
   }
 }
 
@@ -474,10 +641,11 @@ void emit_rim_line(TriangleSink& sink, const LatticeRegion& R,
     rs.push_back(r_s);
   }
 
+  const double relax = skin.freeform ? kSkinSagBudgetMm : 0.0;  // see emit_skin_edge
   for (std::size_t i = 0; i + 1 < stations.size(); ++i) {
     const double r_e = std::min(rs[i], rs[i + 1]);
     const auto spans = B->clip_segment(stations[i], stations[i + 1], r_e, fa, fb,
-                                       &st.uncertified_spans_dropped);
+                                       &st.uncertified_spans_dropped, relax);
     const double len = norm(sub(stations[i + 1], stations[i]));
     if (!(len > 0.0)) continue;
     const Vec3 sdir = scale(sub(stations[i + 1], stations[i]), 1.0 / len);
@@ -820,15 +988,41 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
             const Vec3 cmin{R.origin.x + ci * R.cell_mm,
                             R.origin.y + cj * R.cell_mm,
                             R.origin.z + ck * R.cell_mm};
+            // FREEFORM landing dedup (task 2026-07-30-lattice-skin-freeform).
+            // Clipping an octet corner spills several near-coincident landings
+            // (up to the corner's whole leg bundle); left distinct, they
+            // exhaust each other's kSkinDegree rank budget and the cluster
+            // links only to itself — measured as 15% ISOLATED landings on the
+            // curved fixture. Freeform (face == -1) landings within the local
+            // merge radius therefore collapse to their first hood occurrence
+            // (greedy, deterministic); analytic faces are left untouched so
+            // the boundary-finish skin stays byte-identical.
+            std::vector<std::size_t> dup_of(hood.size());
+            for (std::size_t a = 0; a < hood.size(); ++a) {
+              dup_of[a] = a;
+              if (!skin.freeform || hood[a].face >= 0) continue;
+              for (std::size_t c = 0; c < a; ++c) {
+                if (dup_of[c] != c || hood[c].face != hood[a].face) continue;
+                const double merge =
+                    std::min(2.0 * std::min(hood[a].r, hood[c].r),
+                             0.3 * R.cell_mm);
+                if (norm(sub(hood[a].pos, hood[c].pos)) < merge) {
+                  dup_of[a] = c;
+                  break;
+                }
+              }
+            }
             // Mutual-kNN rank within the hood: how many same-face landings sit
             // closer to `a` than `b` does (ties broken by index — the hood
-            // order is deterministic, so ranks are too).
-            auto rank = [&hood](std::size_t a, std::size_t b) {
+            // order is deterministic, so ranks are too). Merged duplicates are
+            // invisible to the rank (they are the SAME skin knot).
+            auto rank = [&hood, &dup_of](std::size_t a, std::size_t b) {
               const Landing& A = hood[a];
               const double d_ab = norm(sub(hood[b].pos, A.pos));
               int r = 0;
               for (std::size_t c = 0; c < hood.size(); ++c) {
                 if (c == a || c == b) continue;
+                if (dup_of[c] != c) continue;
                 if (hood[c].face != A.face) continue;
                 const double d = norm(sub(hood[c].pos, A.pos));
                 if (d < d_ab - 1e-12 ||
@@ -839,13 +1033,20 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
             };
             for (std::size_t a = 0; a < hood.size(); ++a)
               for (std::size_t b = a + 1; b < hood.size(); ++b) {
+                if (dup_of[a] != a || dup_of[b] != b) continue;
                 const Landing& A = hood[a];
                 const Landing& Bl = hood[b];
-                if (A.face < 0 || A.face != Bl.face) continue;
-                const LatticeBoundaryFace& F =
-                    B->faces()[static_cast<std::size_t>(A.face)];
-                if (F.kind == LatticeBoundaryFace::Kind::Bore && !F.collar)
-                  continue;
+                if (A.face != Bl.face) continue;
+                // face == -1 (the voxel base / freeform surface): linked only
+                // when the spec arms the freeform skin — off, this is exactly
+                // the boundary-finish skip (byte-identical).
+                if (A.face < 0 && !skin.freeform) continue;
+                if (A.face >= 0) {
+                  const LatticeBoundaryFace& F =
+                      B->faces()[static_cast<std::size_t>(A.face)];
+                  if (F.kind == LatticeBoundaryFace::Kind::Bore && !F.collar)
+                    continue;
+                }
                 const double dist = norm(sub(Bl.pos, A.pos));
                 if (dist < 1e-9 || dist > link) continue;
                 const Vec3 mid = scale(add(A.pos, Bl.pos), 0.5);
@@ -859,7 +1060,10 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
                 // clique wherever landings cluster.
                 if (rank(a, b) >= kSkinDegree || rank(b, a) >= kSkinDegree)
                   continue;
-                emit_skin_edge(sink, R, G, skin, A.face, A, Bl, st, obs);
+                if (A.face < 0)
+                  emit_freeform_skin_edge(sink, R, G, skin, A, Bl, st, obs);
+                else
+                  emit_skin_edge(sink, R, G, skin, A.face, A, Bl, st, obs);
               }
           }
     }

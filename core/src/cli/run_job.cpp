@@ -296,6 +296,7 @@ std::string lattice_base_name(const std::string& prefix, double requested_vf) {
 Vec3 normalized(const Vec3& v);
 std::string json_num(double v);
 std::string json_str(const std::string& s);
+double mesh_enclosed_volume_mm3(const TriangleMesh& m);
 
 // Shared lattice OCCUPANCY + BOUNDARY (lattice certification E2E, handoff
 // 2026-07-29-lattice-certification-e2e; boundary finish, handoff
@@ -394,6 +395,11 @@ LatticeSkinSpec lattice_skin_for(const JobLattice& lat) {
   S.min_radius_mm = lat.min_extrudable_width_mm > 0.0
                         ? lattice_skin_min_radius_mm(lat.min_extrudable_width_mm)
                         : 0.0;
+  // A non-"shell" outer finish arms the FREEFORM skin (task 2026-07-30-
+  // lattice-skin-freeform): the diagrid extends onto the voxel-derived outer
+  // surface — as the outer finish itself ("skin") or laid on the shell
+  // ("shell+skin"). Default "shell" leaves it off: byte-identical.
+  S.freeform = lat.outer_finish != "shell";
   return S;
 }
 
@@ -429,10 +435,14 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
   const std::string base =
       join_path(out_dir, lattice_base_name(out.mesh_prefix,
                                            variant.requested_volume_fraction));
+  // Outer finish (task 2026-07-30-lattice-skin-freeform): "skin" REPLACES the
+  // solid shell with the freeform diagrid (open, see-through); "shell" and
+  // "shell+skin" keep the shell exactly as before.
+  const bool with_shell = lat.outer_finish != "skin";
   if (lat.emit_stl) {
     const std::string path = base + ".stl";
     StreamingStlWriter w(path);
-    push_shell(w);  // solid shell first, then the streamed lattice
+    if (with_shell) push_shell(w);  // solid shell first, then the streamed lattice
     oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w, skin);
     w.finish();
     oc.paths.push_back(path);
@@ -440,7 +450,7 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
   if (lat.emit_3mf) {
     const std::string path = base + ".3mf";
     StreamingThreeMfWriter w(path);
-    push_shell(w);
+    if (with_shell) push_shell(w);
     oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w, skin);
     w.finish();
     oc.paths.push_back(path);
@@ -601,6 +611,27 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   // Boundary finish (bar B9 — the mass/volume accounting includes skin, rim and
   // collar; soup basis, overlaps not deducted).
   s += "  \"skin\": " + json_str(lat.skin) + ",\n";
+  // Outer finish (task 2026-07-30-lattice-skin-freeform). Emitted ONLY for a
+  // non-default finish so a "shell" run's receipt stays byte-identical to the
+  // boundary-finish receipt (bar E1).
+  if (lat.outer_finish != "shell") {
+    s += "  \"outer_finish\": " + json_str(lat.outer_finish) + ",\n";
+    s += "  \"skin_chords\": " + std::to_string(gs.skin_chords) + ",\n";
+    s += "  \"skin_chords_rejected_band\": " +
+         std::to_string(gs.skin_chords_rejected_band) + ",\n";
+    s += "  \"skin_chords_rejected_projection\": " +
+         std::to_string(gs.skin_chords_rejected_projection) + ",\n";
+    s += "  \"skin_chords_clipped_away\": " +
+         std::to_string(gs.skin_chords_clipped_away) + ",\n";
+    // Shell volume on the same disclosure basis as the lattice volumes: the
+    // volume the closed shell surface encloses (divergence theorem) when the
+    // shell is in the file, 0 when the "skin" finish dropped it.
+    s += "  \"shell_enclosed_volume_mm3\": " +
+         json_num(lat.outer_finish == "skin"
+                      ? 0.0
+                      : mesh_enclosed_volume_mm3(variant.v3.mesh)) +
+         ",\n";
+  }
   s += "  \"clipped_struts\": " + std::to_string(gs.clipped_struts) + ",\n";
   s += "  \"landings\": " + std::to_string(gs.landings) + ",\n";
   s += "  \"anchor_nodes\": " + std::to_string(gs.anchor_nodes) + ",\n";
@@ -614,8 +645,17 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
        json_num(lattice_rho_min(a.lattice_topology)) + ", " +
        json_num(lattice_rho_max(a.lattice_topology)) + "],\n";
   s += "  \"lattice_voxels\": " + std::to_string(a.lattice_voxels) + ",\n";
-  s += "  \"describes\": \"the exported latticed mesh (solid shell + octet interior) "
-       "solved with the octet homogenized cubic tensor\",\n";
+  if (lat.outer_finish == "skin")
+    s += "  \"describes\": \"the exported latticed mesh (octet interior + freeform "
+         "2D boundary skin, NO solid shell) — the composite model below is "
+         "shell-blind, see finish_note\",\n";
+  else if (lat.outer_finish == "shell+skin")
+    s += "  \"describes\": \"the exported latticed mesh (solid shell + octet "
+         "interior + decorative freeform skin) solved with the octet homogenized "
+         "cubic tensor\",\n";
+  else
+    s += "  \"describes\": \"the exported latticed mesh (solid shell + octet interior) "
+         "solved with the octet homogenized cubic tensor\",\n";
   // What the SOLID variant mesh certifies (unchanged), and the proof the composite
   // reconstruction reproduces it exactly with a null posture.
   s += "  \"solid_margin_worst_case\": " + json_num(c.solid_margin.worst_case) + ",\n";
@@ -626,7 +666,29 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   s += "  \"lattice_margin_worst_case\": " + json_num(a.margin.worst_case) + ",\n";
   s += "  \"lattice_margin_effective\": " + json_num(a.margin_effective) + ",\n";
   s += "  \"margin_required\": " + json_num(variant.report.margin_required) + ",\n";
-  s += "  \"lattice_accepted\": " + std::string(a.accepted ? "true" : "false") + ",\n";
+  // The receipt's verdict. The GATE's own verdict logic is untouched; a "skin"
+  // finish is refused UPSTREAM of it (like the density-band fast-fail) because
+  // the composite posture assumes every latticed voxel carries at least the
+  // periodic octet stiffness, and the solid shell is what backstopped that
+  // assumption at clipped boundary cells. Without the shell the assumption is
+  // provably broken there, so an "accepted" receipt would describe a model the
+  // exported file does not honour.
+  const bool finish_certified = lat.outer_finish != "skin";
+  s += "  \"lattice_accepted\": " +
+       std::string((a.accepted && finish_certified) ? "true" : "false") + ",\n";
+  if (lat.outer_finish != "shell") {
+    s += "  \"finish_certified\": " +
+         std::string(finish_certified ? "true" : "false") + ",\n";
+    if (!finish_certified)
+      s += "  \"finish_note\": \"outer_finish 'skin' drops the solid shell; the "
+           "composite certification model is shell-blind (the posture never "
+           "credited the shell), so the margins above describe the same model "
+           "as a 'shell' run and do NOT certify the open, shell-less object: "
+           "clipped boundary cells fall below the periodic-octet stiffness the "
+           "posture assumes and the 2D skin's contribution is uncertified. "
+           "Refused upstream of the gate; the gate's verdict logic is "
+           "unchanged.\",\n";
+  }
   s += "  \"lattice_mass_grams\": " + json_num(a.mass_grams) + ",\n";
   s += "  \"lattice_max_effective_von_mises_mpa\": " +
        json_num(a.lattice_max_effective_vm) + ",\n";
@@ -1500,6 +1562,9 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     long long clipped = 0, landings = 0, anchors = 0;
     long long skin_tris = 0, rim_tris = 0;
     double interior_vol = 0.0, skin_vol = 0.0, rim_vol = 0.0;
+    // Freeform skin (task 2026-07-30-lattice-skin-freeform): chord accounting,
+    // summed over variants. All zero on the default "shell" finish.
+    long long chords = 0, chords_band = 0, chords_proj = 0, chords_clipped = 0;
     // Certification posture (E2E bars E1/E3), summed over accepted latticed variants
     // so run_info records ONE posture. rho is uniform (same for every variant) so its
     // range is a point; the margins are the WORST (min) over the variants — the
@@ -1561,6 +1626,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     lat_agg.interior_vol += oc.stats.interior_volume_mm3;
     lat_agg.skin_vol += oc.stats.skin_volume_mm3;
     lat_agg.rim_vol += oc.stats.rim_volume_mm3;
+    lat_agg.chords += static_cast<long long>(oc.stats.skin_chords);
+    lat_agg.chords_band +=
+        static_cast<long long>(oc.stats.skin_chords_rejected_band);
+    lat_agg.chords_proj +=
+        static_cast<long long>(oc.stats.skin_chords_rejected_projection);
+    lat_agg.chords_clipped +=
+        static_cast<long long>(oc.stats.skin_chords_clipped_away);
     ++lat_agg.variants;
     lat_agg.r_min = std::min(lat_agg.r_min, oc.stats.min_strut_diameter_mm / 2.0);
     lat_agg.r_max = std::max(lat_agg.r_max, oc.stats.max_strut_diameter_mm / 2.0);
@@ -1572,7 +1644,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         std::min(lat_agg.lat_margin_min, cc.lattice.margin.worst_case);
     lat_agg.lat_margin_eff_min =
         std::min(lat_agg.lat_margin_eff_min, cc.lattice.margin_effective);
-    lat_agg.lat_accepted_all = lat_agg.lat_accepted_all && cc.lattice.accepted;
+    // The run-level verdict uses the same upstream finish refusal as the
+    // receipt: a "skin" finish is never reported accepted (finish_note there).
+    const bool eff_accepted =
+        cc.lattice.accepted && job.lattice.outer_finish != "skin";
+    lat_agg.lat_accepted_all = lat_agg.lat_accepted_all && eff_accepted;
     lat_agg.strut_uncertified =
         lat_agg.strut_uncertified || cc.lattice.lattice_strength_uncertified;
     lattice_paths.insert(lattice_paths.end(), oc.paths.begin(), oc.paths.end());
@@ -1585,7 +1661,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
             v.requested_volume_fraction, job.lattice.topology.c_str(),
             job.lattice.cell_mm, job.lattice.strut_radius_mm, cc.rho,
             oc.stats.latticed_cells, (unsigned long long)oc.stats.triangles,
-            cc.lattice.margin.worst_case, cc.lattice.accepted ? 1 : 0,
+            cc.lattice.margin.worst_case, eff_accepted ? 1 : 0,
             rcpt_path.c_str(), p.c_str());
         std::fflush(stdout);
       }
@@ -1626,6 +1702,14 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.lattice_export_interior_volume_mm3 = lat_agg.interior_vol;
     run_info.lattice_export_skin_volume_mm3 = lat_agg.skin_vol;
     run_info.lattice_export_rim_volume_mm3 = lat_agg.rim_vol;
+    // Outer finish (task 2026-07-30-lattice-skin-freeform); the serializer
+    // writes these keys only for a non-"shell" finish (byte-identity).
+    run_info.lattice_export_outer_finish = job.lattice.outer_finish;
+    run_info.lattice_export_skin_chords = lat_agg.chords;
+    run_info.lattice_export_skin_chords_rejected_band = lat_agg.chords_band;
+    run_info.lattice_export_skin_chords_rejected_projection = lat_agg.chords_proj;
+    run_info.lattice_export_skin_chords_clipped_away = lat_agg.chords_clipped;
+    run_info.lattice_export_finish_certified = job.lattice.outer_finish != "skin";
     // Certification (handoff 2026-07-29-lattice-certification-e2e, bars E1/E3) — WHAT
     // the composite gate certified, so a variant's provenance is recoverable.
     if (lat_agg.cert_ran) {

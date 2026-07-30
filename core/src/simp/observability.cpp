@@ -609,6 +609,21 @@ std::string run_info_json(const RunInfo& info) {
           fmt(info.lattice_export_interior_volume_mm3);
     le += ", \"skin_volume_mm3\": " + fmt(info.lattice_export_skin_volume_mm3);
     le += ", \"rim_volume_mm3\": " + fmt(info.lattice_export_rim_volume_mm3);
+    // Outer finish (task 2026-07-30-lattice-skin-freeform): keys appear ONLY
+    // for a non-default finish, so a "shell" run's record is byte-identical to
+    // the boundary-finish record (bar E1).
+    if (info.lattice_export_outer_finish != "shell") {
+      le += ", \"outer_finish\": \"" + info.lattice_export_outer_finish + "\"";
+      le += ", \"skin_chords\": " + fmt_ll(info.lattice_export_skin_chords);
+      le += ", \"skin_chords_rejected_band\": " +
+            fmt_ll(info.lattice_export_skin_chords_rejected_band);
+      le += ", \"skin_chords_rejected_projection\": " +
+            fmt_ll(info.lattice_export_skin_chords_rejected_projection);
+      le += ", \"skin_chords_clipped_away\": " +
+            fmt_ll(info.lattice_export_skin_chords_clipped_away);
+      le += ", \"finish_certified\": " +
+            bool_json(info.lattice_export_finish_certified);
+    }
     le += "}";
     num("lattice_export", le, /*comma=*/has_grad);
   }

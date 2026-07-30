@@ -1,0 +1,58 @@
+{
+  "model": "cube_10mm.stl",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 24,
+  "loads": {
+    "anchor_face_ids": [
+      0
+    ],
+    "groups": [
+      {
+        "face_ids": [
+          1
+        ],
+        "force": [
+          0.0,
+          0.0,
+          -50.0
+        ]
+      }
+    ],
+    "clearances": [
+      {
+        "kind": "bolt",
+        "geometry": {
+          "axis_point": [
+            5.0,
+            5.0,
+            5.0
+          ],
+          "axis_dir": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "radius_mm": 2.0,
+          "half_length_mm": 7.0
+        },
+        "concentric_margin_mm": 0.5,
+        "axial_clearance_mm": 0.5
+      }
+    ]
+  },
+  "output": {
+    "report": "report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  },
+  "lattice": {
+    "topology": "octet",
+    "cell_mm": 2.5,
+    "strut_radius_mm": 0.25,
+    "emit_stl": true,
+    "skin": "diagrid",
+    "min_extrudable_width_mm": 0.4,
+    "outer_finish": "skin"
+  }
+}

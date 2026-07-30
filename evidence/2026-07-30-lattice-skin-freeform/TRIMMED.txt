@@ -1,0 +1,18 @@
+Trimmed to keep the evidence directory committable. Every deleted file is
+reproducible with reproduce.sh (deterministic, byte-identical: bar E10) and
+its numbers survive in the probe_*.txt outputs and receipts.
+
+Deleted:
+* probe STLs at 4 mm and 2 mm and the graded STLs (freeform_{on,off}_{4,2}mm.stl,
+  freeform_on_graded_{8,4}mm.stl) — kept the 8 mm pair (before/after on the
+  curved fixture).
+* cube E2E: variant meshes of out_lattice_skin / out_lattice_shellskin except
+  vf 0.26 (kept: the organic variant in all three finishes + every receipt);
+  out_lattice_before variant meshes (byte-identical to out_lattice_shell,
+  see e1_compare.txt) except receipts/report/fields.
+* cylinder E2E: variant meshes except vf 0.26 in each of the six
+  finish x cell dirs (kept: vf 0.26 solid + lattice STL per config + every
+  receipt + report.json + fields.bin).
+* STLs larger than 5 MB are stored gzip-compressed (*.stl.gz) — byte-identical
+  after `gunzip` (checksums in e1_checksums.txt are over the uncompressed
+  bytes where applicable).

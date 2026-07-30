@@ -450,6 +450,15 @@ struct RunInfo {
   double lattice_export_interior_volume_mm3 = 0.0;
   double lattice_export_skin_volume_mm3 = 0.0;
   double lattice_export_rim_volume_mm3 = 0.0;
+  // Outer finish + freeform skin (task 2026-07-30-lattice-skin-freeform).
+  // Serialized ONLY when outer_finish != "shell", so a default run's
+  // lattice_export record is byte-identical to the boundary-finish record.
+  std::string lattice_export_outer_finish = "shell";  // "shell"|"skin"|"shell+skin"
+  long long lattice_export_skin_chords = 0;            // freeform chords emitted
+  long long lattice_export_skin_chords_rejected_band = 0;
+  long long lattice_export_skin_chords_rejected_projection = 0;
+  long long lattice_export_skin_chords_clipped_away = 0;
+  bool lattice_export_finish_certified = true;  // false: "skin" (shell dropped)
 
   // GRADING LAW posture (handoff 2026-07-29-lattice-grading-law) — what the stress-to-
   // lattice grading law produced for a "grading" job block. Set only in the analyze/

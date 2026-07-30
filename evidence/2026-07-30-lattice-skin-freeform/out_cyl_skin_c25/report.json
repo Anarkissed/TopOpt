@@ -1,0 +1,138 @@
+{
+  "material": "PLA",
+  "variants": [
+    {
+      "volume_fraction": 0.6799858318,
+      "printed_fraction": 0.7398036254,
+      "volume_saved_fraction": 0.2601963746,
+      "max_stress_mpa": 0.6503194941,
+      "max_interlayer_tension_mpa": 0,
+      "margin": {
+        "in_plane": 84.5738141,
+        "interlayer": null,
+        "worst_case": 84.5738141
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 20,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 38,
+      "min_feature_warning": "38 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 84.5738141,
+      "rejection_reason": ""
+    },
+    {
+      "volume_fraction": 0.5199958087,
+      "printed_fraction": 0.6100830816,
+      "volume_saved_fraction": 0.3899169184,
+      "max_stress_mpa": 0.8286424296,
+      "max_interlayer_tension_mpa": 0.0008450575061,
+      "margin": {
+        "in_plane": 66.37362273,
+        "interlayer": 35796.38046,
+        "worst_case": 66.37362273
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 20,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 0,
+      "min_feature_warning": "",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 66.37362273,
+      "rejection_reason": ""
+    },
+    {
+      "volume_fraction": 0.3799960289,
+      "printed_fraction": 0.4961291541,
+      "volume_saved_fraction": 0.5038708459,
+      "max_stress_mpa": 1.164405918,
+      "max_interlayer_tension_mpa": 0.003594031002,
+      "margin": {
+        "in_plane": 47.23438722,
+        "interlayer": 8416.733185,
+        "worst_case": 47.23438722
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 20,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 0,
+      "min_feature_warning": "",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 47.23438722,
+      "rejection_reason": ""
+    },
+    {
+      "volume_fraction": 0.2599966234,
+      "printed_fraction": 0.3989803625,
+      "volume_saved_fraction": 0.6010196375,
+      "max_stress_mpa": 1.676203776,
+      "max_interlayer_tension_mpa": 0.007432774839,
+      "margin": {
+        "in_plane": 32.81223966,
+        "interlayer": 4069.812507,
+        "worst_case": 32.81223966
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 2,
+        "top_layers": 4,
+        "bottom_layers": 3,
+        "infill_percent": 20,
+        "infill_pattern": "grid",
+        "print_mode": "",
+        "warning": ""
+      },
+      "min_feature_violations": 0,
+      "min_feature_warning": "",
+      "accepted": true,
+      "margin_required": 1.5,
+      "margin_effective": 32.81223966,
+      "rejection_reason": ""
+    }
+  ],
+  "rejected_variants": []
+}

@@ -1,0 +1,13 @@
+E8 — certified margin, per finish (same job, same part)
+  vf 0.026: shell: margin=7.436436 accepted=True finish_certified=True | skin: margin=7.436436 accepted=False finish_certified=False | shell+skin: margin=7.436436 accepted=True finish_certified=True
+  vf 0.038: shell: margin=6.275332 accepted=True finish_certified=True | skin: margin=6.275332 accepted=False finish_certified=False | shell+skin: margin=6.275332 accepted=True finish_certified=True
+  vf 0.052: shell: margin=4.082028 accepted=True finish_certified=True | skin: margin=4.082028 accepted=False finish_certified=False | shell+skin: margin=4.082028 accepted=True finish_certified=True
+  vf 0.068: shell: margin=14.001176 accepted=True finish_certified=True | skin: margin=14.001176 accepted=False finish_certified=False | shell+skin: margin=14.001176 accepted=True finish_certified=True
+
+E9 — volume accounting (mm^3, soup basis: analytic per-primitive sums, overlaps NOT deducted;
+shell = volume ENCLOSED by the closed shell surface, divergence theorem)
+  shell      interior=   615.0 skin=   184.0 rim=   0.0 shell_enclosed=  (no field: receipt byte-identical to PR250; same variant meshes as shell+skin)
+  skin       interior=   615.0 skin=  1909.9 rim=   0.0 shell_enclosed=     0.0
+  shell+skin interior=   615.0 skin=  1909.9 rim=   0.0 shell_enclosed=  2575.6
+
+per-variant shell_enclosed (shell+skin receipts): [438.2, 530.7, 635.6, 971.0]

@@ -85,6 +85,18 @@ struct LatticeSkinSpec {
   // max(local interior strut radius, min_radius_mm). Compute it with
   // lattice_skin_min_radius_mm below — callers never hardcode the law.
   double min_radius_mm = 0.0;
+  // FREEFORM skin (task 2026-07-30-lattice-skin-freeform). false (default):
+  // the diagrid links landings on ANALYTIC faces only — byte-identical to the
+  // boundary-finish behaviour, which left the voxel-derived outer surface of a
+  // real optimized part bare (its landings own no analytic face). true: landings
+  // attributed to no analytic face (face == -1, the voxel base) are ALSO linked
+  // by the same mutual-kNN discipline; each accepted chord is re-walked as a
+  // station polyline projected onto the composite offset surface {sd == r_skin}
+  // and certified-clipped with clip_segment_relaxed_base, so the skin rides an
+  // ARBITRARY triangulated/voxel surface. Chords that leave the surface band
+  // (bulge across a concavity / tunnel under a convex ridge) are REJECTED and
+  // counted, never bent silently. Requires mode == Diagrid to emit anything.
+  bool freeform = false;
 };
 
 // The skin printability clamp law (bar (e)) — CORE owns this number, callers
@@ -137,6 +149,14 @@ struct LatticeGenStats {
   std::uint64_t rim_triangles = 0;     // rim loops (tori + plane-pair lines)
   long long uncertified_spans_dropped = 0;  // clip slivers conservatively dropped
   long long skipped_nonorthogonal_rims = 0; // face pairs the rim pass cannot dress
+  // ── freeform skin (task 2026-07-30-lattice-skin-freeform; all zero unless
+  //    LatticeSkinSpec.freeform) ─────────────────────────────────────────────
+  // A CHORD is one accepted mutual-kNN landing pair; its polyline emission
+  // fragments into several skin_struts (station segments), so both are counted.
+  std::uint64_t skin_chords = 0;                    // chords emitted (>=1 span)
+  std::uint64_t skin_chords_rejected_band = 0;      // left the surface band
+  std::uint64_t skin_chords_rejected_projection = 0;// station projection failed
+  std::uint64_t skin_chords_clipped_away = 0;       // accepted, but 0 spans kept
   // Emitted-solid volume accounting (bar B9). Analytic per-primitive volumes of
   // the interpenetrating soup; overlaps are NOT deducted (same basis as the
   // triangle counts — state it wherever these are reported).
@@ -162,6 +182,15 @@ enum class LatticeGenElement {
   RimStrut,       // a plane-pair rim line fragment: a -> b
   RimTorusChord,  // one station chord of a rim torus run: a -> b, tube radius r
 };
+// The freeform skin pass's per-chord verdict (see LatticeSkinSpec.freeform) —
+// how the E3/E4 bars are measured from the real generator.
+enum class LatticeSkinChordVerdict {
+  Accepted,            // emitted (at least one certified span)
+  RejectedBand,        // straight chord left the surface band (bulge/tunnel)
+  RejectedProjection,  // a station could not be projected onto the surface
+  ClippedAway,         // accepted geometry entirely removed by the clip
+};
+
 struct LatticeGenObserver {
   // A clipped strut's cut end (landing): position, the strut's radius there,
   // and the boundary face it landed on (-1: no analytic face).
@@ -170,6 +199,10 @@ struct LatticeGenObserver {
   std::function<void(LatticeGenElement kind, const Vec3& a, const Vec3& b,
                      double r)>
       on_element;
+  // Every freeform skin CHORD considered (the landing pair, straight-line
+  // endpoints) and its verdict — fired once per chord, in emission order.
+  std::function<void(const Vec3& a, const Vec3& b, LatticeSkinChordVerdict v)>
+      on_skin_chord;
 };
 
 // Generate `topo` over `region` with `radius`, pushing every triangle to `sink`

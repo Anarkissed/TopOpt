@@ -757,7 +757,8 @@ JobDescription parse_job(const std::string& json_text) {
     const JsonValue& lat = require_object(*latv, "lattice");
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
-                         "emit_3mf", "skin", "min_extrudable_width_mm"},
+                         "emit_3mf", "skin", "min_extrudable_width_mm",
+                         "outer_finish"},
                         "lattice");
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
@@ -800,6 +801,21 @@ JobDescription parse_job(const std::string& json_text) {
           require_number(*w, "lattice.min_extrudable_width_mm");
       if (!(job.lattice.min_extrudable_width_mm > 0.0))
         schema_fail("lattice \"min_extrudable_width_mm\" must be > 0");
+    }
+    // Outer finish (task 2026-07-30-lattice-skin-freeform). Absent => "shell",
+    // byte-identical to the boundary-finish behaviour.
+    if (const JsonValue* f = find_key(lat, "outer_finish")) {
+      job.lattice.outer_finish =
+          require_nonempty_string(*f, "lattice.outer_finish");
+      if (job.lattice.outer_finish != "shell" &&
+          job.lattice.outer_finish != "skin" &&
+          job.lattice.outer_finish != "shell+skin")
+        schema_fail("lattice \"outer_finish\" must be \"shell\", \"skin\" or "
+                    "\"shell+skin\" (got \"" + job.lattice.outer_finish + "\")");
+      if (job.lattice.outer_finish != "shell" && job.lattice.skin != "diagrid")
+        schema_fail("lattice outer_finish \"" + job.lattice.outer_finish +
+                    "\" needs skin \"diagrid\" — the diagrid IS the outer "
+                    "finish that replaces or dresses the shell");
     }
   }
 

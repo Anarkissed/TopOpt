@@ -118,6 +118,21 @@ struct JobLattice {
   // like grading.hpp's floor). 0 (absent) states no printability claim: the
   // skin then simply tracks the local interior strut radius.
   double min_extrudable_width_mm = 0.0;
+
+  // Outer finish (task 2026-07-30-lattice-skin-freeform) — what covers the
+  // part's outer boundary in the exported file:
+  //   "shell"      (DEFAULT) — the solid shell mesh, exactly as before;
+  //                byte-identical output.
+  //   "skin"       — NO solid shell: the freeform 2D lattice skin rides the
+  //                voxel-derived outer surface instead (open, see-through).
+  //                NOT certifiable by the existing gate — the shell is what
+  //                backstopped clipped boundary cells against the posture's
+  //                periodic-octet assumption — so the receipt reports the
+  //                composite margins but lattice_accepted is forced false.
+  //   "shell+skin" — shell retained, freeform skin laid on it (decorative,
+  //                closed); certification unchanged from "shell".
+  // A non-"shell" finish requires skin == "diagrid" (the skin IS the finish).
+  std::string outer_finish = "shell";
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the

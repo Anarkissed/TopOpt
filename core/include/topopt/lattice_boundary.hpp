@@ -119,6 +119,18 @@ class LatticeBoundary {
   double signed_distance_excluding(const Vec3& p, int exclude_face_a,
                                    int exclude_face_b) const;
 
+  // signed_distance with the VOXEL-BASE term relaxed outward by `base_relax`
+  // (mm): min(analytic terms, voxel term + base_relax). Still a 1-Lipschitz
+  // bound. This is the freeform skin's clip predicate (task 2026-07-30-lattice-
+  // skin-freeform): a skin edge riding the voxel surface's offset would make
+  // f == 0 degenerate against the exact voxel term (the same degeneracy the
+  // plane skin dodges via signed_distance_excluding), but the voxel base has
+  // no face index to exclude — so the freeform skin buys a small, EXPLICIT sag
+  // budget against the voxel surface ONLY. Plane and keep-out terms stay
+  // exact, so a kept span still proves zero keep-out intrusion (bar E5) while
+  // allowing at most `base_relax` of overshoot past the voxel surface (E4).
+  double signed_distance_relaxed_base(const Vec3& p, double base_relax) const;
+
   // The face whose term is the active (minimal) constraint at p — how a clipped
   // strut's cut end is attributed to the surface it landed on. Returns -1 when
   // the active term has no analytic face (the voxel base or a slab keep-out).
@@ -144,10 +156,22 @@ class LatticeBoundary {
   // non-null) is incremented for every sliver that had to be dropped because
   // the certificate could not decide it at the tolerance floor (conservative:
   // dropped, never kept). Deterministic: fixed midpoint refinement, no RNG.
+  // `base_relax` (mm, default 0 — exact): relaxes the VOXEL-BASE term only,
+  // clipping against {signed_distance_relaxed_base-style min >= erosion} with
+  // faces excluded as before. This is the SKIN passes' clip: an edge riding
+  // the voxel surface's offset would degenerate into f == 0 against the exact
+  // voxel term (millions of undecidable slivers ground to the tolerance
+  // floor), the same degeneracy face exclusion solves for analytic faces —
+  // which the voxel base cannot offer, so the skin buys a small EXPLICIT sag
+  // budget against the voxel surface only. Plane and keep-out terms stay
+  // exact: a kept span still proves zero keep-out intrusion (bar E5) while
+  // allowing at most base_relax of overshoot past the voxel surface (E4).
   std::vector<LatticeClipSpan> clip_segment(const Vec3& a, const Vec3& b,
                                             double erosion, int exclude_face_a,
                                             int exclude_face_b,
-                                            long long* uncertified_dropped) const;
+                                            long long* uncertified_dropped,
+                                            double base_relax = 0.0) const;
+
 
   // The analytic boundary faces (skin/rim/collar surfaces). Plane faces appear
   // in the order their half-spaces were added; Bore faces in keep-out order.
@@ -167,6 +191,10 @@ class LatticeBoundary {
     int face = -1;  // index into faces_
   };
   double voxel_distance(const Vec3& p) const;  // exact, window-clamped
+  // The general term evaluation both public signed-distance views forward to:
+  // min over non-excluded analytic terms (exact) and the voxel term + relax.
+  double sd_excluding_relaxed(const Vec3& p, int exclude_face_a,
+                              int exclude_face_b, double base_relax) const;
 
   std::vector<Plane> planes_;
   std::vector<ClearanceGeometry> keep_outs_;
