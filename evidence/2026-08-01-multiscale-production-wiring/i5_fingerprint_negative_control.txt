@@ -1,0 +1,44 @@
+I5 — THE RECYCLE/DEFLATION FINGERPRINT NEGATIVE CONTROL
+========================================================
+Bar: a fixture where two designs share the SAME scalar-modulus-equivalent field
+but DIFFERENT cubic tensors must INVALIDATE the fingerprint. The test must FAIL
+against the unfixed fingerprint (i.e. the failure mode — silent reuse of a
+stale basis/coarse operator — must actually be caught, not assumed).
+
+Where the modulus-keyed fingerprint lives (audit result):
+  * RecycleSession (recycle.cpp) carries NO modulus fingerprint at all: its
+    carried basis keys on (n, configured k) only, and at the production rebuild
+    cycle = 1 EVERY solve re-forms E = U^T A U with k exact matvecs of the
+    CURRENT operator inside RecycleSession::setup — E is never stale, and the
+    additive form U E^-1 U^T is SPD for ANY carried U, so exactness is
+    unconditional (recycle.hpp's documented contract; exercised on the cubic
+    operator by test_matfree_cubic section 7).
+  * geneo.cpp's moduli_fingerprint IS the modulus-keyed fingerprint of the
+    deflation family: geneo_solve_begin compares it to decide REUSE (action 1,
+    coarse operator untouched) vs REFRESH (action 2, mandatory rebuild of
+    V^T A V — phase 2 §P6 measured divergence from stale reuse). Before this
+    task it hashed ONLY ctx.elem_youngs (+ poisson): blind to c11/c12/c44 and
+    the lattice mask.
+
+The fix: moduli_fingerprint now hashes the lattice presence tag, mask, c11,
+c12, c44 (geneo.cpp). MfSolveContext carries the lattice arrays.
+
+Test: test_matfree_cubic.cpp section 6 — cubic_checkerboard(33, 4, c44_scale):
+design A (c44_scale=1.0) and design B (c44_scale=1.5) have memcmp-IDENTICAL
+scalar youngs fields and DIFFERENT c44 arrays.
+
+WITH THE FIX (shipped code):
+  geneo fp: A#1 651 iters action=3 Nt=608 burn=500     (build past trigger)
+  A#2 action=1                                          (identical system: reuse)
+  geneo fp: B#1 229 iters action=2                      (tensor-only change: REFRESH)
+  test_matfree_cubic: 29 checks, 0 failures
+
+AGAINST THE UNFIXED FINGERPRINT (negative control: the lattice-field hashing
+in moduli_fingerprint compiled out, everything else identical):
+  geneo fp: A#1 651 iters action=3 Nt=608 burn=500
+  geneo fp: B#1 230 iters action=1                      (SILENT STALE REUSE)
+  FAIL (line 483): TENSOR-ONLY change invalidates the moduli fingerprint: the
+    coarse operator REFRESHES (action 2), never silently reuses (action 1)
+  test_matfree_cubic: 29 checks, 1 failures
+
+The test catches exactly the failure mode the bar names.

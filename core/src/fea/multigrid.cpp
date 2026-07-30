@@ -587,7 +587,9 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
 // ===========================================================================
 
 using fea_detail::MatfreeReduced;
+using fea_detail::MfCubElem;
 using fea_detail::MfElem;
+using fea_detail::MfLatticeArrays;
 
 // Single-precision Eigen types for the mixed-precision V-cycle (handoff 092).
 using SpMatF = Eigen::SparseMatrix<float>;
@@ -905,7 +907,19 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   // build is dominated by the element block arithmetic below (~73% of build time,
   // measured), which this assembly change does not touch; coeffRef was ~2 s of it.
   constexpr int kDof = Hex8Stiffness::kDof;  // 24
-  const int nelems = static_cast<int>(m.elems.size());
+  // CUBIC LATTICE (multiscale production wiring): the Galerkin product runs
+  // over BOTH element lists — the iso elements first (indices [0, niso), the
+  // path below unchanged so a cubic-free build is bit-identical), then the
+  // cubic elements (indices [niso, nelems)), whose projected block is
+  // W^T (a*K_A + b*K_B + c*K_C) W — the coarse-block decomposition PR 252
+  // proved identical to the assembled Galerkin product.
+  const int niso = static_cast<int>(m.elems.size());
+  const int ncub = static_cast<int>(m.cub_elems.size());
+  const int nelems = niso + ncub;
+  const auto elem_edof = [&](int e) -> const int* {
+    return e < niso ? m.elems[static_cast<std::size_t>(e)].edof
+                    : m.cub_elems[static_cast<std::size_t>(e - niso)].edof;
+  };
 
   // Pass 0: per-element distinct coarse DOFs (CSR ecds_off/ecds), same discovery
   // order the old per-element loop used, so the projected blocks are identical.
@@ -917,10 +931,11 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   {
     std::vector<int> cds;
     cds.reserve(kDof);
-    for (const MfElem& el : m.elems) {
+    for (int e = 0; e < nelems; ++e) {
+      const int* edof = elem_edof(e);
       cds.clear();
       for (int r = 0; r < kDof; ++r) {
-        const int kgr = active[static_cast<std::size_t>(el.edof[r])];
+        const int kgr = active[static_cast<std::size_t>(edof[r])];
         if (kgr < 0) continue;
         for (const auto& pr : prolong[static_cast<std::size_t>(kgr)]) {
           bool found = false;
@@ -1071,19 +1086,27 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
     }
     int color = 0;  // m.elems is colour-sorted; walk the colour ranges alongside e
 
+    // Per-element COMBINED cubic block scratch (row-major, matching m.Ke's
+    // access pattern below): Kcomb = a*K_A + b*K_B + c*K_C, the same fuse the
+    // apply kernel performs, formed only for cubic elements.
+    double Kcomb[kDof][kDof];
+
     for (int e = 0; e < nelems; ++e) {
-      if (use_cache)
+      const bool is_cubic = e >= niso;
+      if (use_cache && !is_cubic)
         while (color + 1 < fea_detail::kNumColors &&
                e >= m.color_offsets[static_cast<std::size_t>(color) + 1])
           ++color;
       const int cb = ecds_off[static_cast<std::size_t>(e)];
       const int mloc = ecds_off[static_cast<std::size_t>(e) + 1] - cb;
       if (mloc == 0) continue;
-      const MfElem& el = m.elems[static_cast<std::size_t>(e)];
+      const int* edof = elem_edof(e);
       for (int r = 0; r < kDof; ++r)
-        kg[r] = active[static_cast<std::size_t>(el.edof[r])];
+        kg[r] = active[static_cast<std::size_t>(edof[r])];
 
-      bool generic = use_cache && mloc == kDof;
+      // The colour cache is an ISO-only optimisation: a cubic element's block
+      // depends on its own (a,b,c), so it is never generic.
+      bool generic = use_cache && !is_cubic && mloc == kDof;
       if (generic)
         for (int r = 0; r < kDof; ++r)
           if (kg[r] < 0) { generic = false; break; }
@@ -1095,6 +1118,13 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
         for (int cl = 0; cl < mloc; ++cl)
           for (int dl = 0; dl < mloc; ++dl) S[cl][dl] = src[cl * kDof + dl];
       } else {
+        if (is_cubic) {
+          const MfCubElem& cel = m.cub_elems[static_cast<std::size_t>(e - niso)];
+          for (int r = 0; r < kDof; ++r)
+            for (int c = 0; c < kDof; ++c)
+              Kcomb[r][c] = cel.a * m.KA(r, c) + cel.b * m.KB(r, c) +
+                            cel.c * m.KC(r, c);
+        }
         for (int r = 0; r < kDof; ++r)
           for (int cl = 0; cl < mloc; ++cl) W[r][cl] = 0.0;
         for (int r = 0; r < kDof; ++r) {
@@ -1108,7 +1138,11 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
         for (int r = 0; r < kDof; ++r)
           for (int cl = 0; cl < mloc; ++cl) {
             double s = 0.0;
-            for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
+            if (is_cubic) {
+              for (int c = 0; c < kDof; ++c) s += Kcomb[r][c] * W[c][cl];
+            } else {
+              for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
+            }
             KW[r][cl] = s;
           }
         for (int cl = 0; cl < mloc; ++cl)
@@ -1125,10 +1159,14 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
         }
       }
 
+      // The cubic block already carries its coefficients; its scatter factor is
+      // 1. The iso path keeps el.factor * S untouched.
+      const double factor =
+          is_cubic ? 1.0 : m.elems[static_cast<std::size_t>(e)].factor;
       for (int cl = 0; cl < mloc; ++cl) {
         const int i = ecds[static_cast<std::size_t>(cb + cl)];
         for (int dl = 0; dl < mloc; ++dl) {
-          const double v = el.factor * S[cl][dl];
+          const double v = factor * S[cl][dl];
           if (v == 0.0) continue;
           const int j = ecds[static_cast<std::size_t>(cb + dl)];
           int lo = Aouter[j], hi = Aouter[j + 1];
@@ -1195,16 +1233,22 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
                                const std::vector<NodalLoad>& loads,
                                double tolerance, int max_iterations, CgInfo* info,
                                const std::vector<double>* elem_youngs,
-                               const std::vector<char>* active_mask) {
+                               const std::vector<char>* active_mask,
+                               const MfLatticeArrays* lattice = nullptr) {
   // Build the reduced, void-gated matrix-free system (throws + sets *info on a
   // void-gate rejection, exactly like solve_reduced_mgcg's gate). `active_mask`
   // (active-domain phase 1) restricts WHICH solid voxels contribute an element;
   // everything below — the void gate, the kept-DOF numbering, the Jacobi
   // diagonal, this hierarchy build and every V-cycle — then operates on the
   // surviving system unchanged and exactly. Null = the pre-feature path.
+  // `lattice` (multiscale production wiring) selects the composite
+  // isotropic-or-cubic operator; every stage below is operator-agnostic and
+  // needs no per-stage lattice handling beyond the mixed-precision guard.
   MatfreeReduced m = fea_detail::mf_build_reduced(
       grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
-      "fea_solve_mgcg_matfree", info, active_mask);
+      lattice != nullptr ? "fea_solve_cg_lattice_matfree"
+                         : "fea_solve_mgcg_matfree",
+      info, active_mask, lattice);
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
@@ -1247,8 +1291,11 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // budget, RETRY the exact FP64 MG-CG on the same hierarchy before the Jacobi
       // fallback below — never ship an unconverged result (fallback discipline of
       // 078/079). When mixed precision is OFF this is exactly the prior FP64 call.
+      // The FP32 V-cycle carries no cubic pass (apply_kgg_raw_f32's tripwire),
+      // so a cubic system always preconditions in FP64 — mixed precision is
+      // production-blocked anyway (handoff 132 D).
       const bool mixed = fea_detail::mf_mixed_precision_enabled() &&
-                         H.fine_dinv_f.size() == m.ng;
+                         H.fine_dinv_f.size() == m.ng && !m.has_cubic;
       if (mixed) scratch.resize_f(m.ng, static_cast<int>(H.P0.cols()));
       bool ok =
           mf_mgpcg(H, scratch, rgv, tolerance, mg_cap, xg, it, res, mixed, &rec);
@@ -1295,6 +1342,11 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       pc.elem_youngs = elem_youngs;
       pc.youngs_modulus = youngs_modulus;
       pc.poisson = poisson;
+      // Lattice fields (multiscale production wiring): GenEO assembles its
+      // local operators from the true composite blocks AND keys its moduli
+      // fingerprint on these — a tensor-only design change must refresh the
+      // held coarse operator, never silently reuse it.
+      if (lattice != nullptr) pc.lattice = *lattice;
       fea_detail::mf_cg_solve(m, tolerance, cap, xkept, diag.iterations,
                               diag.residual, diag.converged, &rec, &pc);
       diag.used_multigrid = false;
@@ -1453,6 +1505,31 @@ FeaSolution fea_solve_mgcg_matfree(const VoxelGrid& grid,
                                    const std::vector<char>* active_mask) {
   return solve_mgcg_matfree(grid, 1.0, poisson, bcs, loads, tolerance,
                             max_iterations, info, &youngs_per_voxel, active_mask);
+}
+
+// Matrix-free CUBIC LATTICE solve (multiscale production wiring): the composite
+// isotropic-or-cubic system of fea_solve_cg_lattice on the FULL matrix-free
+// accelerator stack — multigrid-first (Galerkin coarse operators decomposed
+// over the three reference blocks), exact matrix-free Jacobi-CG fallback with
+// GenEO two-level deflation and Krylov recycling exactly as the scalar
+// production solver runs them. Same solution within `tolerance` as the
+// assembled path; a different iteration route, never a different answer (every
+// preconditioner term is SPD and the stopping test is unchanged).
+FeaSolution fea_solve_cg_lattice_matfree(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    const std::vector<char>& lattice_mask, const std::vector<double>& lattice_c11,
+    const std::vector<double>& lattice_c12, const std::vector<double>& lattice_c44,
+    double poisson, const std::vector<DirichletBC>& bcs,
+    const std::vector<NodalLoad>& loads, double tolerance, int max_iterations,
+    CgInfo* info, const std::vector<char>* active_mask) {
+  MfLatticeArrays lat;
+  lat.mask = &lattice_mask;
+  lat.c11 = &lattice_c11;
+  lat.c12 = &lattice_c12;
+  lat.c44 = &lattice_c44;
+  return solve_mgcg_matfree(grid, 1.0, poisson, bcs, loads, tolerance,
+                            max_iterations, info, &youngs_per_voxel, active_mask,
+                            &lat);
 }
 
 std::size_t fea_mgcg_assembled_operator_nonzeros(

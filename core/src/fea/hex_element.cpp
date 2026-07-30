@@ -4,6 +4,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "fea_matfree.hpp"  // fea_detail::hex8_cubic_reference_blocks/_validate
+
 namespace topopt {
 namespace {
 
@@ -170,15 +172,7 @@ void cubic_D(double C11, double C12, double C44, double h, const char* who,
              double D[6][6]) {
   if (!(h > 0.0))
     throw std::invalid_argument(std::string(who) + ": element_size must be > 0");
-  // Positive-definiteness of a cubic tensor: the normal block has eigenvalues
-  // C11 - C12 (double) and C11 + 2*C12 (single); the shear block is 3*C44. All
-  // three must be > 0 for a physical (SPD) material.
-  if (!(C44 > 0.0))
-    throw std::invalid_argument(std::string(who) + ": C44 must be > 0");
-  if (!(C11 - C12 > 0.0))
-    throw std::invalid_argument(std::string(who) + ": C11 - C12 must be > 0");
-  if (!(C11 + 2.0 * C12 > 0.0))
-    throw std::invalid_argument(std::string(who) + ": C11 + 2*C12 must be > 0");
+  fea_detail::hex8_cubic_validate(C11, C12, C44, who);
   for (int r = 0; r < 6; ++r)
     for (int c = 0; c < 6; ++c) D[r][c] = 0.0;
   D[0][0] = D[1][1] = D[2][2] = C11;
@@ -187,6 +181,45 @@ void cubic_D(double C11, double C12, double C44, double h, const char* who,
 }
 
 }  // namespace
+
+namespace fea_detail {
+
+// The ONE cubic admissibility rule (extracted from cubic_D so the matrix-free
+// cubic element build validates per-voxel tensors identically to the assembled
+// path). Positive-definiteness of a cubic tensor: the normal block has
+// eigenvalues C11 - C12 (double) and C11 + 2*C12 (single); the shear block is
+// 3*C44. All three must be > 0 for a physical (SPD) material.
+void hex8_cubic_validate(double C11, double C12, double C44, const char* who) {
+  if (!(C44 > 0.0))
+    throw std::invalid_argument(std::string(who) + ": C44 must be > 0");
+  if (!(C11 - C12 > 0.0))
+    throw std::invalid_argument(std::string(who) + ": C11 - C12 must be > 0");
+  if (!(C11 + 2.0 * C12 > 0.0))
+    throw std::invalid_argument(std::string(who) + ": C11 + 2*C12 must be > 0");
+}
+
+// The three fixed reference blocks of the exact cubic decomposition
+// Ke = C11*K_A + C12*K_B + C44*K_C (PR 252 bar d1: worst rel err 8.5e-16 over
+// 8,696 cases), integrated by THE SAME integrate_hex8 hex8_stiffness_cubic
+// uses, on the three 0/1 D-matrices the decomposition splits D into. These are
+// basis blocks, not physical tensors, so no admissibility check applies (D_A
+// alone has C44 = 0 — the SUM the apply forms is what must be admissible, and
+// the element build validates each voxel's triplet before it enters the table).
+void hex8_cubic_reference_blocks(double element_size, Hex8Stiffness& KA,
+                                 Hex8Stiffness& KB, Hex8Stiffness& KC) {
+  if (!(element_size > 0.0))
+    throw std::invalid_argument(
+        "hex8_cubic_reference_blocks: element_size must be > 0");
+  double DA[6][6] = {}, DB[6][6] = {}, DC[6][6] = {};
+  DA[0][0] = DA[1][1] = DA[2][2] = 1.0;
+  DB[0][1] = DB[0][2] = DB[1][0] = DB[1][2] = DB[2][0] = DB[2][1] = 1.0;
+  DC[3][3] = DC[4][4] = DC[5][5] = 1.0;
+  KA = integrate_hex8(DA, element_size);
+  KB = integrate_hex8(DB, element_size);
+  KC = integrate_hex8(DC, element_size);
+}
+
+}  // namespace fea_detail
 
 Hex8Stiffness hex8_stiffness_cubic(double C11, double C12, double C44,
                                    double element_size) {

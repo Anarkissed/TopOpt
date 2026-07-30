@@ -1,0 +1,5 @@
+item,bytes_this_grid,mb_this_grid,mb_at_8.44M_dof
+coeff_arrays,221184,0.21,64.4
+cubic_elem_table_all_cubic,1105920,1.05,322.0
+elem_table_delta_vs_iso,147456,0.14,42.9
+reference_blocks_extra,9216,0.0088,0.0088

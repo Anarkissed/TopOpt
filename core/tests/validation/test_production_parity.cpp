@@ -190,6 +190,16 @@ int main() {
     CHECK(topopt::fea_geneo_basis_dim() == 0 &&
               topopt::fea_geneo_basis_builds() == 0,
           "no GenEO basis exists before any production run");
+    // Handoff 2026-08-01-multiscale-production-wiring — the MATRIX-FREE CUBIC
+    // LATTICE route is a PRODUCTION setting, not a library default: the
+    // reference world never calls configure_production_options, so every
+    // fea_solve_cg_lattice it runs is the assembled Jacobi-CG path
+    // byte-identical to the pre-wiring tree. THE ONE RULE, checked BEFORE the
+    // call (and pinned by the header static_assert on
+    // kMatfreeCubicLatticeLibraryDefaultOff).
+    CHECK(!topopt::fea_matfree_cubic_lattice_enabled(),
+          "library default leaves the matrix-free cubic lattice route OFF "
+          "(reference untouched, byte-identical)");
     // Handoff 2026-07-26-ad-arming — the ACTIVE DOMAIN band is a PRODUCTION
     // setting, not a library default. The reference world (Gate-V2, the property
     // suite, every core test) never calls configure_production_options, so it sees
@@ -356,6 +366,20 @@ int main() {
     CHECK(topopt::fea_geneo_rebuild_factor() == 2.0,
           "the degradation rebuild factor is 2.0 (phase 2 §P6: healthy reuse "
           "stays within 1.42x of a fresh rebuild)");
+    // Handoff 2026-08-01-multiscale-production-wiring — the ARMED matrix-free
+    // cubic lattice route: every lattice certification solve now rides the
+    // matrix-free multigrid + GenEO + recycling stack on the exact three-block
+    // cubic operator. Asserted against the named constant (see the TRIPWIRE in
+    // production.cpp); an exact accelerator like recycling/GenEO — SPD
+    // preconditioners, unchanged stopping test — so the certificate's verdict
+    // logic and tolerance are untouched.
+    CHECK(topopt::fea_matfree_cubic_lattice_enabled() ==
+              topopt::production_matfree_cubic_lattice(),
+          "production config arms the matrix-free cubic lattice route to the "
+          "named constant");
+    CHECK(topopt::production_matfree_cubic_lattice(),
+          "the production cubic-lattice posture is ARMED "
+          "(2026-08-01 multiscale production wiring)");
     // Handoff 2026-07-26-ad-arming — the ARMED active-domain band. AUTO (-1), NOT
     // a pinned width: k is derived per job downstream (asserted concretely on the
     // real run below). Asserted against the named sentinel, not a bare -1, so a

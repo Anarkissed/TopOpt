@@ -1,0 +1,5 @@
+threads,kernel,median_ms,ratio_vs_scalar
+1,scalar,0.5387,1.0
+1,cubic_combined,1.4215,2.639
+10,scalar,0.6779,1.0
+10,cubic_combined,1.2149,1.792
