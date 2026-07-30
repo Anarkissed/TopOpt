@@ -52,6 +52,73 @@ public struct LatticeSegment: Equatable, Sendable {
     }
 }
 
+/// Face-role tints ON the lattice (2026-07-30 alignment handoff, bar A4). With the
+/// body no longer drawn while the strut preview is up (bar A3), the anchor / load /
+/// keep-clear / protect face markings must read on the LATTICE instead. This bakes
+/// the mesh view's own `[FaceID: color]` tint dictionary — the single source of
+/// truth, no second colour table — into an rgba8 volume on the part-SDF grid: every
+/// marked face's triangles stamp their surface voxels (plus the 6-neighbourhood, so
+/// the flush-trim's 0.35-voxel erosion still lands inside the stamped shell) with
+/// the face's colour. The shader tints a hit by a trilinear sample of this volume.
+/// Pure CPU math, headless-testable (the /app/ standard).
+public enum LatticeFaceTintVolume {
+
+    /// Bake the tint volume: rgba8 bytes (x fastest, then y, then z — the 3D-texture
+    /// layout), one voxel per cell of `grid`. Returns nil when nothing is marked, so
+    /// the caller can drop the texture entirely. Colours pass through VERBATIM
+    /// (quantised to unorm8) — `LatticeSDFAlignmentTests` asserts the round-trip.
+    public static func bake(mesh: ViewerMesh, tints: [FaceID: SIMD4<Float>],
+                            like grid: LatticeVoxelGrid) -> [UInt8]? {
+        guard !tints.isEmpty, !mesh.faceIDs.isEmpty, grid.count > 0 else { return nil }
+        var out = [UInt8](repeating: 0, count: grid.count * 4)
+        var any = false
+        let minSpacing = Swift.min(grid.spacing.x, Swift.min(grid.spacing.y, grid.spacing.z))
+        let sampleStep = Swift.max(1e-4, 0.5 * minSpacing)
+
+        func stamp(_ p: SIMD3<Float>, _ c: SIMD4<Float>) {
+            let g = (p - grid.origin) / grid.spacing
+            let vx = Int(g.x.rounded()), vy = Int(g.y.rounded()), vz = Int(g.z.rounded())
+            // The voxel containing the surface point plus its 6-neighbourhood: the
+            // shader samples at flush-trimmed hits ~0.35 voxel INSIDE the face, so
+            // the stamped shell must be one voxel thick toward the interior too.
+            for (dx, dy, dz) in [(0, 0, 0), (1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)] {
+                let x = vx + dx, y = vy + dy, z = vz + dz
+                guard x >= 0, x < grid.nx, y >= 0, y < grid.ny, z >= 0, z < grid.nz else { continue }
+                let n = ((z * grid.ny + y) * grid.nx + x) * 4
+                out[n] = UInt8((Swift.max(0, Swift.min(1, c.x)) * 255).rounded())
+                out[n + 1] = UInt8((Swift.max(0, Swift.min(1, c.y)) * 255).rounded())
+                out[n + 2] = UInt8((Swift.max(0, Swift.min(1, c.z)) * 255).rounded())
+                out[n + 3] = 255
+                any = true
+            }
+        }
+
+        // Deterministic: triangles in index order; a voxel shared by two marked faces
+        // takes the later triangle's colour (the same arbitrary-at-the-seam behaviour
+        // the body's per-vertex tint has at a face edge).
+        let triCount = Swift.min(mesh.triangleCount, mesh.faceIDs.count)
+        for t in 0..<triCount {
+            guard let color = tints[mesh.faceIDs[t]] else { continue }
+            let i0 = Int(mesh.indices[3 * t]), i1 = Int(mesh.indices[3 * t + 1]), i2 = Int(mesh.indices[3 * t + 2])
+            func v(_ i: Int) -> SIMD3<Float> {
+                SIMD3<Float>(mesh.positions[3 * i], mesh.positions[3 * i + 1], mesh.positions[3 * i + 2])
+            }
+            let p0 = v(i0), e1 = v(i1) - p0, e2 = v(i2) - p0
+            let n1 = Swift.max(1, Int((simd_length(e1) / sampleStep).rounded(.up)))
+            let n2 = Swift.max(1, Int((simd_length(e2) / sampleStep).rounded(.up)))
+            for a in 0...n1 {
+                let fa = Float(a) / Float(n1)
+                for b in 0...n2 {
+                    let fb = Float(b) / Float(n2)
+                    guard fa + fb <= 1.0001 else { break }
+                    stamp(p0 + e1 * fa + e2 * fb, color)
+                }
+            }
+        }
+        return any ? out : nil
+    }
+}
+
 /// The geometry + honesty model for the raymarched preview of one lattice.
 public struct LatticeSDFPreview: Equatable, Sendable {
 
