@@ -1,0 +1,9 @@
+threads,kernel,median_ms,mean_ms,ratio_vs_scalar
+1,scalar_production,14.7275,14.7159,1.0
+1,scalar_probe,14.6875,14.7331,0.997
+1,cubic_probe,56.0800,56.0411,3.808
+1,cubic_combined,39.6504,39.8139,2.692
+10,scalar_production,3.2657,3.2881,1.0
+10,scalar_probe,3.3260,3.3412,1.018
+10,cubic_probe,10.8490,10.8414,3.322
+10,cubic_combined,7.8445,7.8104,2.402

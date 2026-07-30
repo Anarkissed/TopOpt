@@ -1,0 +1,12 @@
+config,solve,iters,converged
+jacobi,0,1742,1
+recycle_off,0,1742,1
+recycle_on,0,1742,1
+recycle_off,1,1736,1
+recycle_on,1,1981,1
+recycle_off,2,1727,1
+recycle_on,2,1409,1
+recycle_off,3,1738,1
+recycle_on,3,1528,1
+two_level_galerkin,0,21,1
+geneo_style,0,443,1
