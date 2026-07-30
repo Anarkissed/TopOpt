@@ -1,0 +1,90 @@
+== G1: fit accuracy (bar: row max <= 5%, row RMS <= 2%, LOO max <= 10%) ==
+  [PASS] octet    C11  n=19 nt=4  row max 0.95% rms 0.48%  LOO max 1.17%
+  [PASS] octet    C12  n=19 nt=4  row max 3.09% rms 1.52%  LOO max 5.07%
+  [PASS] octet    C44  n=19 nt=4  row max 0.62% rms 0.25%  LOO max 0.73%
+  [PASS] sc       C11  n=7 nt=4  row max 0.22% rms 0.10%  LOO max 0.41%
+  [PASS] sc       C12  n=7 nt=4  row max 0.75% rms 0.37%  LOO max 1.83%
+  [PASS] sc       C44  n=7 nt=4  row max 1.83% rms 0.90%  LOO max 6.50%
+  [PASS] bcc      C11  n=5 nt=3  row max 0.59% rms 0.37%  LOO max 3.16%
+  [PASS] bcc      C12  n=5 nt=3  row max 0.68% rms 0.40%  LOO max 2.61%
+  [PASS] bcc      C44  n=5 nt=3  row max 0.18% rms 0.12%  LOO max 0.45%
+  [PASS] fcc      C11  n=7 nt=4  row max 0.82% rms 0.43%  LOO max 1.52%
+  [PASS] fcc      C12  n=7 nt=4  row max 0.50% rms 0.28%  LOO max 2.46%
+  [PASS] fcc      C44  n=7 nt=4  row max 0.19% rms 0.11%  LOO max 0.96%
+  [PASS] diamond  C11  n=6 nt=4  row max 0.69% rms 0.41%  LOO max 1.92%
+  [PASS] diamond  C12  n=6 nt=4  row max 0.39% rms 0.23%  LOO max 1.27%
+  [PASS] diamond  C44  n=6 nt=4  row max 0.63% rms 0.38%  LOO max 1.94%
+  [PASS] kelvin   C11  n=6 nt=4  row max 1.01% rms 0.59%  LOO max 4.86%
+  [PASS] kelvin   C12  n=6 nt=4  row max 0.37% rms 0.22%  LOO max 1.51%
+  [PASS] kelvin   C44  n=6 nt=4  row max 0.81% rms 0.46%  LOO max 4.06%
+  [PASS] rhombic  C11  n=4 nt=3  row max 0.36% rms 0.24%  LOO max 3.40%
+  [PASS] rhombic  C12  n=4 nt=3  row max 0.35% rms 0.25%  LOO max 2.59%
+  [PASS] rhombic  C44  n=4 nt=3  row max 0.06% rms 0.04%  LOO max 0.76%
+== G2: admissibility sweep (bar: every tensor margin > 0 over (0,1]) ==
+  [PASS] octet    full-range tensor margins: C11-|C12| 0.507  C11+2C12 1.661  C44/C11 0.2537 (worst near rho=1.000); deriv-PSD mins 7.0 26.5 6.3
+  [PASS] sc       full-range tensor margins: C11-|C12| 0.507  C11+2C12 1.085  C44/C11 0.0092 (worst near rho=0.000); deriv-PSD mins 15.0 17.0 0.1
+  [PASS] bcc      full-range tensor margins: C11-|C12| 0.055  C11+2C12 1.875  C44/C11 0.2537 (worst near rho=0.000); deriv-PSD mins 0.2 7.9 2.3
+  [PASS] fcc      full-range tensor margins: C11-|C12| 0.501  C11+2C12 1.657  C44/C11 0.2537 (worst near rho=1.000); deriv-PSD mins 3.9 15.5 3.5
+  [PASS] diamond  full-range tensor margins: C11-|C12| 0.165  C11+2C12 1.906  C44/C11 0.2537 (worst near rho=0.000); deriv-PSD mins 0.6 9.9 1.0
+  [PASS] kelvin   full-range tensor margins: C11-|C12| 0.213  C11+2C12 1.620  C44/C11 0.0721 (worst near rho=0.000); deriv-PSD mins 1.3 16.2 0.5
+  [PASS] rhombic  full-range tensor margins: C11-|C12| 0.093  C11+2C12 1.862  C44/C11 0.1656 (worst near rho=0.000); deriv-PSD mins 0.3 9.8 0.6
+== G3: sensitivities (bar: FD rel err <= 1e-6 away from the two C1 joints) ==
+  [PASS] octet    dC11/drho FD rel err 9.25e-09 interior (0.00e+00 at joints)
+  [PASS] octet    dC12/drho FD rel err 9.14e-09 interior (0.00e+00 at joints)
+  [PASS] octet    dC44/drho FD rel err 9.56e-09 interior (0.00e+00 at joints)
+  [PASS] sc       dC11/drho FD rel err 5.48e-09 interior (0.00e+00 at joints)
+  [PASS] sc       dC12/drho FD rel err 2.92e-09 interior (0.00e+00 at joints)
+  [PASS] sc       dC44/drho FD rel err 2.76e-09 interior (0.00e+00 at joints)
+  [PASS] bcc      dC11/drho FD rel err 1.67e-09 interior (1.24e-06 at joints)
+  [PASS] bcc      dC12/drho FD rel err 2.10e-09 interior (1.60e-06 at joints)
+  [PASS] bcc      dC44/drho FD rel err 2.08e-09 interior (1.55e-06 at joints)
+  [PASS] fcc      dC11/drho FD rel err 4.59e-09 interior (0.00e+00 at joints)
+  [PASS] fcc      dC12/drho FD rel err 4.80e-09 interior (0.00e+00 at joints)
+  [PASS] fcc      dC44/drho FD rel err 4.94e-09 interior (0.00e+00 at joints)
+  [PASS] diamond  dC11/drho FD rel err 2.21e-09 interior (0.00e+00 at joints)
+  [PASS] diamond  dC12/drho FD rel err 2.88e-09 interior (0.00e+00 at joints)
+  [PASS] diamond  dC44/drho FD rel err 2.34e-10 interior (0.00e+00 at joints)
+  [PASS] kelvin   dC11/drho FD rel err 3.99e-09 interior (0.00e+00 at joints)
+  [PASS] kelvin   dC12/drho FD rel err 5.25e-09 interior (0.00e+00 at joints)
+  [PASS] kelvin   dC44/drho FD rel err 1.01e-09 interior (0.00e+00 at joints)
+  [PASS] rhombic  dC11/drho FD rel err 2.04e-09 interior (0.00e+00 at joints)
+  [PASS] rhombic  dC12/drho FD rel err 2.68e-09 interior (0.00e+00 at joints)
+  [PASS] rhombic  dC44/drho FD rel err 1.11e-09 interior (0.00e+00 at joints)
+== G4: table adequacy (read: value dev <= 5% and deriv dev <= 15% supports the model) ==
+  [SUPPORTS] octet 8-row (nt=4) C11: value dev 0.25%  deriv dev 0.74%
+  [SUPPORTS] octet 8-row (nt=4) C12: value dev 1.08%  deriv dev 2.10%
+  [SUPPORTS] octet 8-row (nt=4) C44: value dev 0.18%  deriv dev 0.17%
+  [SUPPORTS] octet 6-row (nt=4) C11: value dev 0.52%  deriv dev 0.58%
+  [SUPPORTS] octet 6-row (nt=4) C12: value dev 2.34%  deriv dev 4.19%
+  [SUPPORTS] octet 6-row (nt=4) C44: value dev 0.33%  deriv dev 0.67%
+  [SUPPORTS] octet 5-row (nt=3) C11: value dev 3.87%  deriv dev 13.23%
+  [TOO FEW ] octet 5-row (nt=3) C12: value dev 14.43%  deriv dev 35.31%
+  [TOO FEW ] octet 5-row (nt=3) C44: value dev 4.04%  deriv dev 17.41%
+  [SUPPORTS] octet 4-row (nt=3) C11: value dev 4.56%  deriv dev 14.28%
+  [TOO FEW ] octet 4-row (nt=3) C12: value dev 13.32%  deriv dev 34.89%
+  [TOO FEW ] octet 4-row (nt=3) C44: value dev 4.03%  deriv dev 17.16%
+  note: the six analysis-only topologies have 4-7 RESOLVED rows (sc 7, fcc 7, kelvin 6, diamond 6, bcc 5, rhombic 4) — the decimation rows above are the read-across.
+== G4b: forbidden-gap severity ==
+  octet    band [0.050, 0.900]  lower gap 0.050  UPPER GAP 0.100 (2.0x wider)  solid/band-top C11 ratio 1.36
+  sc       band [0.087, 0.496]  lower gap 0.087  UPPER GAP 0.504 (5.8x wider)  solid/band-top C11 ratio 4.62
+  bcc      band [0.210, 0.593]  lower gap 0.210  UPPER GAP 0.407 (1.9x wider)  solid/band-top C11 ratio 4.62
+  fcc      band [0.095, 0.591]  lower gap 0.095  UPPER GAP 0.409 (4.3x wider)  solid/band-top C11 ratio 3.85
+  diamond  band [0.157, 0.592]  lower gap 0.157  UPPER GAP 0.408 (2.6x wider)  solid/band-top C11 ratio 4.25
+  kelvin   band [0.094, 0.505]  lower gap 0.094  UPPER GAP 0.495 (5.3x wider)  solid/band-top C11 ratio 4.48
+  rhombic  band [0.172, 0.513]  lower gap 0.172  UPPER GAP 0.487 (2.8x wider)  solid/band-top C11 ratio 5.20
+== G5: bridge continuity (bar: C0 and C1 relative jump <= 1e-9 at both joints) ==
+  [PASS] octet    void_to_band C11: C0 jump 4.50e-08  C1 jump 2.06e-08
+  [PASS] octet    band_to_solid C11: C0 jump 6.21e-09  C1 jump 5.89e-09
+  [PASS] sc       void_to_band C11: C0 jump 2.55e-08  C1 jump 1.44e-08
+  [PASS] sc       band_to_solid C11: C0 jump 6.26e-09  C1 jump 7.09e-09
+  [PASS] bcc      void_to_band C11: C0 jump 1.38e-08  C1 jump 3.82e-09
+  [PASS] bcc      band_to_solid C11: C0 jump 8.01e-09  C1 jump 8.91e-09
+  [PASS] fcc      void_to_band C11: C0 jump 2.59e-08  C1 jump 5.35e-09
+  [PASS] fcc      band_to_solid C11: C0 jump 7.59e-09  C1 jump 7.30e-09
+  [PASS] diamond  void_to_band C11: C0 jump 1.87e-08  C1 jump 3.59e-09
+  [PASS] diamond  band_to_solid C11: C0 jump 7.62e-09  C1 jump 8.40e-09
+  [PASS] kelvin   void_to_band C11: C0 jump 3.00e-08  C1 jump 3.96e-09
+  [PASS] kelvin   band_to_solid C11: C0 jump 6.81e-09  C1 jump 5.01e-09
+  [PASS] rhombic  void_to_band C11: C0 jump 1.69e-08  C1 jump 4.21e-09
+  [PASS] rhombic  band_to_solid C11: C0 jump 8.79e-09  C1 jump 7.05e-09
+ALL BARS PASS

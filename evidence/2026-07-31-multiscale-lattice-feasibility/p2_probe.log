@@ -1,0 +1,43 @@
+octet band read from core: [0.05047, 0.89988]
+s2 kink at rho_lo: dC11 2199.3 -> 833.1 (x0.38)
+s2 kink at rho_hi: dC11 11823.3 -> 0.0 (x0.00)
+== strategy simp ==
+  simp iter  20  c=2.1034e+02  cg=453  gaps(lo/up)=836/588
+  simp iter  40  c=2.0644e+02  cg=456  gaps(lo/up)=608/524
+  simp iter  60  c=2.0592e+02  cg=458  gaps(lo/up)=608/532
+  simp iter  80  c=2.0565e+02  cg=457  gaps(lo/up)=588/512
+  simp iter 100  c=2.0545e+02  cg=453  gaps(lo/up)=564/516
+  simp iter 120  c=2.0530e+02  cg=452  gaps(lo/up)=556/512
+  ramp fraction: lower-gap 100.0%  upper-gap 100.0%
+  final: void 2636 | lower-gap 556 | band 2556 | upper-gap 508 | solid 656
+== strategy s0_plain ==
+  s0_plain iter  20  c=2.1863e+02  cg=300  gaps(lo/up)=448/292
+  s0_plain iter  40  c=1.8997e+02  cg=359  gaps(lo/up)=904/420
+  s0_plain iter  60  c=1.8683e+02  cg=366  gaps(lo/up)=632/436
+  s0_plain iter  80  c=1.8578e+02  cg=365  gaps(lo/up)=512/448
+  s0_plain iter 100  c=1.8548e+02  cg=365  gaps(lo/up)=516/452
+  s0_plain iter 120  c=1.8535e+02  cg=363  gaps(lo/up)=524/412
+  ramp fraction: lower-gap 100.0%  upper-gap 98.1%
+  final: void 2120 | lower-gap 528 | band 3320 | upper-gap 412 | solid 532
+  snap: 528 lower + 412 upper -> compliance -0.48%  volume +0.18%
+== strategy s2_gappen ==
+  s2_gappen iter  20  c=2.2169e+02  cg=291  gaps(lo/up)=176/164
+  s2_gappen iter  40  c=1.9352e+02  cg=355  gaps(lo/up)=1316/292
+  s2_gappen iter  60  c=1.8881e+02  cg=521  gaps(lo/up)=724/284
+  s2_gappen iter  80  c=1.8766e+02  cg=535  gaps(lo/up)=456/296
+  s2_gappen iter 100  c=1.8729e+02  cg=685  gaps(lo/up)=468/276
+  s2_gappen iter 120  c=1.8688e+02  cg=677  gaps(lo/up)=515/282
+  ramp fraction: lower-gap 99.5%  upper-gap 100.0%
+  final: void 2036 | lower-gap 425 | band 3613 | upper-gap 266 | solid 572
+  snap: 425 lower + 266 upper -> compliance -0.41%  volume +0.13%
+== strategy s3_contin ==
+  s3_contin iter  20  c=2.1863e+02  cg=300  gaps(lo/up)=448/292
+  s3_contin iter  40  c=1.8997e+02  cg=359  gaps(lo/up)=904/420
+  s3_contin iter  60  c=1.8880e+02  cg=364  gaps(lo/up)=528/292
+  s3_contin iter  80  c=1.8810e+02  cg=368  gaps(lo/up)=476/312
+  s3_contin iter 100  c=1.8898e+02  cg=405  gaps(lo/up)=406/308
+  s3_contin iter 120  c=1.8890e+02  cg=914  gaps(lo/up)=404/309
+  ramp fraction: lower-gap 96.5%  upper-gap 100.0%
+  final: void 2022 | lower-gap 402 | band 3565 | upper-gap 303 | solid 620
+  snap: 402 lower + 303 upper -> compliance -0.46%  volume +0.13%
+done — evidence in evidence/2026-07-31-multiscale-lattice-feasibility

@@ -1,0 +1,4 @@
+strategy,snapped_lower,snapped_upper,compliance_before,compliance_after,compliance_delta_pct,vol_before,vol_after,vol_delta_pct
+s0_plain,528,412,1.85346297e+02,1.84447742e+02,-0.485,0.35000,0.35064,0.183
+s2_gappen,425,266,1.85406154e+02,1.84638742e+02,-0.414,0.35000,0.35046,0.132
+s3_contin,402,303,1.86193944e+02,1.85328378e+02,-0.465,0.35000,0.35046,0.132

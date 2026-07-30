@@ -1,0 +1,27 @@
+== gate receipt: s0_plain (snapped) ==
+printed voxels 4504  latticed 3648  solid 856
+VERDICT: ACCEPTED
+lattice_certified=1 lattice_voxels=3648 rho_range=[0.0505,0.8999]
+margin.worst_case=1.4967 margin_effective=1.4967 max_vm=36.748
+lattice_max_effective_vm=16.112 strength_uncertified=1 non_convergent=0
+
+== gate receipt: s2_gappen (snapped) ==
+printed voxels 4619  latticed 3833  solid 786
+VERDICT: ACCEPTED
+lattice_certified=1 lattice_voxels=3833 rho_range=[0.0505,0.8999]
+margin.worst_case=1.4811 margin_effective=1.4811 max_vm=37.134
+lattice_max_effective_vm=16.531 strength_uncertified=1 non_convergent=0
+
+== gate receipt: s3_contin (snapped) ==
+printed voxels 4610  latticed 3750  solid 860
+VERDICT: ACCEPTED
+lattice_certified=1 lattice_voxels=3750 rho_range=[0.0505,0.8999]
+margin.worst_case=1.4550 margin_effective=1.4550 max_vm=37.800
+lattice_max_effective_vm=17.769 strength_uncertified=1 non_convergent=0
+
+== gate receipt: s0_plain UNSNAPPED (expect E5 refusal) ==
+printed voxels 4792  latticed 4260  solid 532
+VERDICT: REFUSED (LatticeDensityOutOfBand)
+offending rho=0.993584 band=[0.0505,0.8999]
+message: analyze_fixed_design: lattice relative density 0.993584 is outside the certifiable octet band [0.050470, 0.899880] — refusing to certify against a clamped tensor (bar E5)
+
