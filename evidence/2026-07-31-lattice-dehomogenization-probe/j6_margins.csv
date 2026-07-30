@@ -1,0 +1,4 @@
+design,accepted_as_shipped,margin_reported,lattice_voxels,max_macro_vm_lattice,max_strut_vm_bound,argmax_rho,margin_strut,max_strut_il_bound,margin_il_strut,margin_would_be,accept_would_be_at_0.5,ratio_vs_reported
+s0_plain,1,1.4967,3648,16.1124,89.234,0.6307,0.6164,76.858,0.3936,0.3936,0,0.2630
+s2_gappen,1,1.4811,3833,16.5314,87.025,0.8980,0.6320,79.627,0.3799,0.3799,0,0.2565
+s3_contin,1,1.4550,3750,17.7691,87.772,0.8999,0.6266,80.264,0.3769,0.3769,0,0.2590

@@ -1,0 +1,21 @@
+== s0_plain ==
+as shipped: ACCEPTED, margin.worst_case=1.4967, margin_effective=1.4967, lattice_voxels=3648, strength_uncertified=1
+measured-K bound: max lattice macro vm=16.1124 MPa -> max strut vm bound=89.234 MPa (argmax rho=0.6307)
+  strut vm margin      = 0.6164
+  strut interlayer     = 76.858 MPa -> margin 0.3936  (z_knockdown=0.55 UNSOURCED — ratio is the finding, ARCHITECTURE.md:118)
+  margin would be      = 0.3936  -> WOULD BE REJECTED at margin_stop 0.5
+
+== s2_gappen ==
+as shipped: ACCEPTED, margin.worst_case=1.4811, margin_effective=1.4811, lattice_voxels=3833, strength_uncertified=1
+measured-K bound: max lattice macro vm=16.5314 MPa -> max strut vm bound=87.025 MPa (argmax rho=0.8980)
+  strut vm margin      = 0.6320
+  strut interlayer     = 79.627 MPa -> margin 0.3799  (z_knockdown=0.55 UNSOURCED — ratio is the finding, ARCHITECTURE.md:118)
+  margin would be      = 0.3799  -> WOULD BE REJECTED at margin_stop 0.5
+
+== s3_contin ==
+as shipped: ACCEPTED, margin.worst_case=1.4550, margin_effective=1.4550, lattice_voxels=3750, strength_uncertified=1
+measured-K bound: max lattice macro vm=17.7691 MPa -> max strut vm bound=87.772 MPa (argmax rho=0.8999)
+  strut vm margin      = 0.6266
+  strut interlayer     = 80.264 MPa -> margin 0.3769  (z_knockdown=0.55 UNSOURCED — ratio is the finding, ARCHITECTURE.md:118)
+  margin would be      = 0.3769  -> WOULD BE REJECTED at margin_stop 0.5
+

@@ -1,0 +1,12 @@
+LATTICE DE-HOMOGENIZATION PROBE — octet band [0.05047, 0.89988] (read from core)
+
+===== FINITE KUBC BLOCKS — N-convergence of the interior (J1) =====
+  rho 0.204 N2 vpc16: interior K_dev=0.0  (2s, cg<=225)
+  rho 0.204 N3 vpc16: interior K_dev=24.6  (11s, cg<=370)
+  rho 0.204 N4 vpc16: interior K_dev=24.8  (35s, cg<=429)
+  rho 0.444 N2 vpc16: interior K_dev=0.0  (3s, cg<=179)
+  rho 0.444 N3 vpc16: interior K_dev=8.1  (17s, cg<=268)
+  rho 0.444 N4 vpc16: interior K_dev=8.1  (57s, cg<=346)
+  rho 0.204 N3 vpc24: interior K_dev=25.7  (44s, cg<=529)
+
+DONE (rc=0).
