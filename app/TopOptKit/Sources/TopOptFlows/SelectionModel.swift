@@ -163,6 +163,27 @@ public struct SelectionModel: Equatable, Sendable, Codable {
         groups.removeAll { $0.faces.isEmpty && $0.id != activeID }
     }
 
+    /// Group-TARGETED face add for programmatic flows (the lattice page's paint
+    /// pane paints into its dedicated protect group, not the active one). Steals
+    /// from any other holder — a face belongs to exactly one group, the same
+    /// invariant `pickFaces` keeps. Unknown id → no-op.
+    public mutating func addFaces(_ keys: [FaceID], to id: UUID) {
+        guard !keys.isEmpty, let idx = groups.firstIndex(where: { $0.id == id }) else { return }
+        for i in groups.indices where groups[i].id != id {
+            groups[i].removeFaces(keys)
+        }
+        groups[idx].addFaces(keys)
+        groups.removeAll { $0.faces.isEmpty && $0.id != id && $0.id != activeGroupID }
+    }
+
+    /// Group-targeted face removal (the paint pane's tap-again-to-remove). The
+    /// group is KEPT when emptied — the page's paint target must survive an
+    /// empty-then-repaint sequence. Unknown id → no-op.
+    public mutating func removeFaces(_ keys: [FaceID], from id: UUID) {
+        guard let idx = groups.firstIndex(where: { $0.id == id }) else { return }
+        groups[idx].removeFaces(keys)
+    }
+
     // MARK: - edits (design group-row rename / select; explicit remove)
 
     /// Rename a group (design group-row `rename`). No-op for an unknown id.

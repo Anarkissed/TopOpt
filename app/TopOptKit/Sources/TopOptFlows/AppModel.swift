@@ -227,6 +227,22 @@ public final class AppModel: ObservableObject {
     /// Assemble the inputs `minimize_plastic` needs for the M7.7 run, or nil if a
     /// file / material / config path is missing (Optimize is gated on these, so nil
     /// only happens if wiring is incomplete).
+    /// The lattice page's RUN SIM inputs: the SOLID part + page one's declared
+    /// anchors and loads, at the COARSE (fast-tier) resolution. Nil when no part /
+    /// material paths exist — the page's sim button is then disabled.
+    public func makeLatticeSimContext(resolution: Int = RunQuality.fast.resolution)
+        -> LatticeSimModel.Context? {
+        guard let project, let file = project.importedFile,
+              let materialsPath, let rulesPath else { return nil }
+        let lc = project.loadCase()
+        return LatticeSimModel.Context(
+            modelPath: file.path, material: project.material,
+            materialsPath: materialsPath, rulesPath: rulesPath,
+            resolution: resolution,
+            anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
+            buildDirection: lc.buildDirection)
+    }
+
     public func makeRunRequest() -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }

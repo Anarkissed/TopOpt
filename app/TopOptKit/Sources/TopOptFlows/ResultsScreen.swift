@@ -52,6 +52,11 @@ public struct ResultsScreen: View {
     /// "See Original Model" — reveal the editable workspace (the variants stay
     /// saved; re-optimizing there starts over).
     var onSeeOriginal: () -> Void
+    /// "Lattice" on the selected variant (handoff 2026-07-30-lattice-page): opens
+    /// the lattice page with THIS variant's own von Mises field as the demand field
+    /// (auto density with no sim — bar B6's variants entry). Invoked with the
+    /// selected variant's index. nil hides the affordance.
+    var onLattice: ((Int) -> Void)?
     /// Constrained smoothing + re-certification (handoff 2026-07-28-constrained-
     /// smooth-ui). nil (a self-weight run, or a caller that has not wired it) hides
     /// the Smooth chip — data-gated exactly like the other viz chips. When set, the
@@ -98,6 +103,7 @@ public struct ResultsScreen: View {
                 runResolution: Int = 64, runMaterialName: String = "",
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {},
+                onLattice: ((Int) -> Void)? = nil,
                 smoothing: SmoothingModel? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
@@ -119,6 +125,7 @@ public struct ResultsScreen: View {
         self.onClose = onClose
         self.onExport = onExport
         self.onSeeOriginal = onSeeOriginal
+        self.onLattice = onLattice
         self.smoothing = smoothing
     }
 
@@ -978,6 +985,25 @@ public struct ResultsScreen: View {
                 // pushed to the far right — the absolute top-right corner now belongs to the
                 // orientation gizmo alone.
                 exportButton
+
+                // Per-variant lattice entry (handoff 2026-07-30-lattice-page): opens
+                // the lattice page with the SELECTED variant's field as the demand
+                // field. Hidden when the caller wired nothing.
+                if let onLattice {
+                    Button { onLattice(model.selectedIndex) } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "square.grid.3x3.fill")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Lattice").dsStyle(DS.TypeScale.callout)
+                        }
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .fixedSize()
+                        .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                        .background(Capsule().fill(DS.Surface.bar.color)
+                            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                    }
+                    .buttonStyle(.plain)
+                }
 
                 Spacer(minLength: DS.Space.m)
             }

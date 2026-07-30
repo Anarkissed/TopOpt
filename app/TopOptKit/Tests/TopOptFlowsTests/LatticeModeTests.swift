@@ -55,10 +55,13 @@ final class LatticeModeTests: XCTestCase {
 
     func testNonCertifiableTopologyIsPreviewOnlyWithReason() {
         // A topology the core certification library does NOT cover: certifiable == false,
-        // no runnable spec, and the UI is handed a reason.
-        let limits = TopOptKit.latticeLimits(topology: "bcc")
-        XCTAssertFalse(limits.certifiable, "only octet is certifiable in core today")
-        let s = LatticeSettings(enabled: true, topologyID: "bcc")
+        // no runnable spec, and the UI is handed a reason. (This used "bcc" when core
+        // certified octet only; tensor-library-nine made the seven cubic topologies
+        // certifiable, so the genuinely non-certifiable tetragonal bccz carries the
+        // same intent now — the assertion itself is unchanged.)
+        let limits = TopOptKit.latticeLimits(topology: "bccz")
+        XCTAssertFalse(limits.certifiable, "bccz is tetragonal — generate-but-not-certify")
+        let s = LatticeSettings(enabled: true, topologyID: "bccz")
         let b = LatticeBounds.compute(settings: s, limits: limits)
         XCTAssertFalse(b.certifiable)
         XCTAssertFalse(b.runnableAsCertified)
@@ -66,18 +69,23 @@ final class LatticeModeTests: XCTestCase {
         XCTAssertTrue(b.topologyReason!.lowercased().contains("preview"))
     }
 
-    func testCellsPerMemberIsAdvisoryWhileCoreCertifiesNoCeiling() {
-        // Core exposes no cells-per-member ceiling yet (minCellsPerMember == 0), so a big
-        // cell over a thin member is NOT a hard clamp — it is an advisory readout. The
-        // machinery is present; it engages the moment core returns a positive value.
+    func testCellsPerMemberCeilingComesFromCoreAndEngages() {
+        // The bridge FORWARDS core's own scale-separation floor
+        // (topopt::lattice_cells_per_member_min — the stub that returned 0 with a
+        // stale "core exposes no accessor" claim is fixed, handoff 2026-07-30-
+        // lattice-page). The clamp machinery this test always exercised (via the
+        // simulated future value below) now ALSO engages on the live number.
         let core = TopOptKit.latticeLimits(topology: "octet")
-        XCTAssertEqual(core.minCellsPerMember, 0, "no core ceiling today → advisory")
+        XCTAssertGreaterThan(core.minCellsPerMember, 0,
+                             "core certifies a cells-per-member floor — forwarded, not invented")
         var s = LatticeSettings(enabled: true, topologyID: "octet")
         s.cellMM = 16
         let b = LatticeBounds.compute(settings: s, limits: core, memberMM: 9.4)
-        XCTAssertNil(b.cellCeilingMM, "no core ceiling → no hard ceiling")
-        XCTAssertFalse(b.cellOverCeiling)
-        XCTAssertNotNil(b.cellReason, "still shows the advisory note")
+        XCTAssertNotNil(b.cellCeilingMM, "a real core ceiling → a hard ceiling")
+        XCTAssertEqual(b.cellCeilingMM ?? 0, 9.4 / core.minCellsPerMember, accuracy: 1e-9,
+                       "ceiling = member width / core's floor")
+        XCTAssertTrue(b.cellOverCeiling, "a 16 mm cell over a 9.4 mm member breaches it")
+        XCTAssertNotNil(b.cellReason)
         XCTAssertGreaterThan(b.cellsAcrossMember, 0)
 
         // Simulate a FUTURE core that certifies a ceiling: the same math then clamps + names it.
@@ -95,7 +103,9 @@ final class LatticeModeTests: XCTestCase {
         // certifiable-band numbers — they must be read from core. (The proxy's own preview
         // defaults are a different concern; these are the control BOUNDS.)
         let sources = Self.sourcesDir()
-        let files = ["LatticeSettings.swift", "LatticeControlsPanel.swift"]
+        // The lattice page replaced LatticeControlsPanel (handoff 2026-07-30-lattice-
+        // page); every file that defines lattice controls is scanned.
+        let files = ["LatticeSettings.swift", "LatticePage.swift", "LatticePageModel.swift"]
         let forbidden = ["0.148", "0.14764", "0.591", "0.59093", "0.15", "0.62"]
         for f in files {
             let text = try String(contentsOf: sources.appendingPathComponent(f), encoding: .utf8)
@@ -144,8 +154,12 @@ final class LatticeModeTests: XCTestCase {
                        "the uniform build fills at the clamped dense end")
         let expected = LatticeType.octet.strutRadiusMM(relativeDensity: core.rhoMax, cellMM: s.cellMM)
         XCTAssertEqual(spec.strutRadiusMM, expected, accuracy: 1e-9)
-        // Enabled but a preview-only topology → nil (no certified run).
+        // Enabled but a topology the GENERATOR can't emit → nil (bcc now certifies,
+        // but core's LatticeGenTopology is octet-only — the B0 generatable gate).
         s.topologyID = "bcc"
+        XCTAssertNil(s.runSpec())
+        // And a topology that certifies nothing at all → nil too.
+        s.topologyID = "bccz"
         XCTAssertNil(s.runSpec())
     }
 

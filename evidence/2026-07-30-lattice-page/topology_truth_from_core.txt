@@ -1,0 +1,15 @@
+Topology truth read from CORE at runtime (bar B0):
+
+certifiable (lattice_certifiable_topologies): ["octet", "sc", "bcc", "fcc", "diamond", "kelvin", "rhombic"]
+generatable (lattice_generatable_topologies):  ["octet"]
+
+picker rows (certifiable ∪ generatable):
+  octet cert=Y gen=Y badge="CERTIFIABLE" band=[0.05047, 0.89988] minCells=5.0
+  sc cert=Y gen=n badge="CERTIFIES · NO GEOMETRY YET" band=[0.08659, 0.49638] minCells=5.0
+  bcc cert=Y gen=n badge="CERTIFIES · NO GEOMETRY YET" band=[0.21050, 0.59288] minCells=5.0
+  fcc cert=Y gen=n badge="CERTIFIES · NO GEOMETRY YET" band=[0.09505, 0.59093] minCells=5.0
+  diamond cert=Y gen=n badge="CERTIFIES · NO GEOMETRY YET" band=[0.15712, 0.59201] minCells=5.0
+  kelvin cert=Y gen=n badge="CERTIFIES · NO GEOMETRY YET" band=[0.09375, 0.50521] minCells=5.0
+  rhombic cert=Y gen=n badge="CERTIFIES · NO GEOMETRY YET" band=[0.17245, 0.51331] minCells=5.0
+
+default: octet (must be certifiable AND generatable — asserted in LatticePageTests)

@@ -25,6 +25,7 @@
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/lattice.hpp"
+#include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
@@ -1492,13 +1493,10 @@ LatticeLimits lattice_limits(const std::string& topology) {
   lim.certifiable = true;
   lim.rho_min = topopt::lattice_rho_min(topo);
   lim.rho_max = topopt::lattice_rho_max(topo);
-  // The core exposes NO cells-per-member certification constant yet (that
-  // measurement is landing in a parallel task). We forward what core provides;
-  // today that is nothing, so 0.0 = "advisory, not a hard clamp". When core adds an
-  // accessor (e.g. lattice_min_cells_per_member(topo)) this becomes a one-line call
-  // and the UI clamp engages with no further app change — the number is never
-  // invented here.
-  lim.min_cells_per_member = 0.0;
+  // Forwarded from core's own scale-separation floor. (The earlier stub returned
+  // 0.0 claiming core exposed no accessor; topopt::lattice_cells_per_member_min
+  // exists — the stale claim is fixed, the number is still never invented here.)
+  lim.min_cells_per_member = topopt::lattice_cells_per_member_min(topo);
   return lim;
 }
 
@@ -1508,6 +1506,20 @@ std::vector<std::string> lattice_certifiable_topologies() {
   // 2026-07-29-tensor-library-nine widened this from octet-only to the seven cubic
   // topologies; the three tetragonal ones are deliberately absent — not certifiable).
   return topopt::lattice_certifiable_topology_names();
+}
+
+std::vector<std::string> lattice_generatable_topologies() {
+  // The geometry generator's covered set. Core's LatticeGenTopology has no
+  // enumeration API (the gap reported in handoff 2026-07-30-lattice-page), so the
+  // case list is mirrored here — but every NAME comes from core's own
+  // lattice_gen_topology_name, and generate_lattice throws for anything outside
+  // this enum, so a drifted list fails loudly at the generator, never silently.
+  // When core grows the enum, add the matching case here (one line).
+  std::vector<std::string> out;
+  for (topopt::LatticeGenTopology t : {topopt::LatticeGenTopology::Octet}) {
+    out.push_back(topopt::lattice_gen_topology_name(t));
+  }
+  return out;
 }
 
 }  // namespace topoptbridge

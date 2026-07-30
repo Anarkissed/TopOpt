@@ -602,6 +602,94 @@ public final class ProjectModel: ObservableObject {
         return result.labels
     }
 
+    // MARK: - lattice page role helpers (handoff 2026-07-30-lattice-page)
+    //
+    // The page's three region roles map onto three EXISTING, distinct concepts —
+    // never a new parallel one (bar B3):
+    //   clearance       → a keep-clear group + manual primitive (loads.clearances)
+    //   lattice-include → LatticeSettings.includePrimitives (preview scope)
+    //   lattice-exclude → a protect group (loads.face_protections, FrozenSolid)
+
+    /// Append a lattice-INCLUDE primitive, centred + sized off the model like the
+    /// legacy single region. Returns its id. Undo via republish (BAR U4).
+    @discardableResult
+    public func addLatticeIncludePrimitive(_ kind: ManualPrimitive.Kind) -> UUID? {
+        guard let mesh = viewerMesh else { return nil }
+        let c = SIMD3<Double>(mesh.bounds.center)
+        let r = max(1.0, Double(mesh.bounds.radius))
+        let p: ManualPrimitive = kind == .bolt
+            ? .defaultBolt(at: c, radiusMM: r * 0.4, halfLengthMM: r * 0.8)
+            : .defaultFace(at: c, halfMM: r * 0.5)
+        lattice.includePrimitives.append(p)
+        return p.id
+    }
+
+    /// Update / remove an include primitive by id.
+    public func updateLatticeIncludePrimitive(_ p: ManualPrimitive) {
+        guard let i = lattice.includePrimitives.firstIndex(where: { $0.id == p.id }) else { return }
+        lattice.includePrimitives[i] = p
+    }
+    public func removeLatticeIncludePrimitive(id: UUID) {
+        lattice.includePrimitives.removeAll { $0.id == id }
+    }
+
+    /// Add a CLEARANCE primitive from the lattice page: a dedicated keep-clear
+    /// group holding one hand-placed primitive, riding the exact machinery the
+    /// workspace's manual clearances use (`ForceModel.addManualPrimitive` →
+    /// `clearanceSpecs` → `loads.clearances`). Returns (group, primitive) ids.
+    @discardableResult
+    public func addLatticeClearancePrimitive(_ kind: ManualPrimitive.Kind) -> (group: UUID, primitive: UUID)? {
+        guard viewerMesh != nil else { return nil }
+        let gid = selection.addGroup()
+        selection.rename(gid, to: "Clearance")
+        guard let pid = addManualPrimitive(kind, to: gid) else { return nil }
+        return (gid, pid)
+    }
+
+    /// The dedicated lattice-EXCLUDE (protect) group, created on first use. Its
+    /// faces ship as `loads.face_protections` (FrozenSolid — material KEPT SOLID),
+    /// the opposite polarity of a clearance; one protect concept, no twin.
+    public func latticeExcludeGroupID(createIfNeeded: Bool) -> UUID? {
+        if let g = selection.groups.first(where: { $0.name == Self.latticeExcludeGroupName }) {
+            return g.id
+        }
+        guard createIfNeeded else { return nil }
+        let gid = selection.addGroup()
+        selection.rename(gid, to: Self.latticeExcludeGroupName)
+        force.setProtected(gid, true)
+        return gid
+    }
+    public static let latticeExcludeGroupName = "Lattice-exclude"
+
+    /// Toggle a painted face for the page's paint pane. Include faces live on
+    /// `LatticeSettings.paintedIncludeFaces` (preview scope — no job carrier, the
+    /// reported gap); exclude faces live on the protect group above (a real job
+    /// field). Returns true if the face is now painted.
+    @discardableResult
+    public func toggleLatticePaintFace(_ face: FaceID, role: LatticeRegionRole) -> Bool {
+        switch role {
+        case .include:
+            let f = Int(face)
+            if let i = lattice.paintedIncludeFaces.firstIndex(of: f) {
+                lattice.paintedIncludeFaces.remove(at: i)
+                return false
+            }
+            lattice.paintedIncludeFaces.append(f)
+            return true
+        case .exclude:
+            guard let gid = latticeExcludeGroupID(createIfNeeded: true) else { return false }
+            if let g = selection.groups.first(where: { $0.id == gid }), g.faces.contains(face) {
+                selection.removeFaces([face], from: gid)
+                return false
+            }
+            selection.addFaces([face], to: gid)
+            force.setProtected(gid, true)
+            return true
+        case .clearance:
+            return false   // the paint pane offers include/exclude only (the prototype's rule)
+        }
+    }
+
     // MARK: - manual primitive editing (handoff group-editing)
 
     /// Add a hand-placed primitive to `group` (the group the user is locked into).
