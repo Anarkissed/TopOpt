@@ -1,0 +1,1 @@
+LATTICE vf=1.000000 topology=octet cell_mm=0.767103 graded=1 rho_min=0.05047 rho_max=0.89988 cells=2997 tris=2611856 lattice_margin=46037 lattice_accepted=1 report=/tmp/hookup_evidence/graded1/variant_100_lattice.report.json mesh=/tmp/hookup_evidence/graded1/variant_100_lattice.stl

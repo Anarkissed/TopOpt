@@ -1,0 +1,21 @@
+{
+  "provenance": "smoothed / re-analyzed",
+  "analyzed": true,
+  "optimization": false,
+  "analysis_solves": 1,
+  "variant_meshes_written": 0,
+  "field_scope": "solid_part",
+  "field_scope_note": "this stress/displacement field describes the SOLID part under the declared load case; a topology-optimized design has different geometry, so optimization INVALIDATES this field",
+  "source": "model_solid",
+  "model": "plate_bore.stl",
+  "resolution": 32,
+  "voxel_mass_grams": 1.62691875,
+  "mesh_mass_grams": null,
+  "max_stress_mpa": 0.001591863922,
+  "margin_worst_case": 34550.69196,
+  "margin_required": 0,
+  "margin_effective": 34550.69196,
+  "accepted": true,
+  "min_feature_violations": 0,
+  "quantization_note": "Re-analysis runs on the voxelization of the analyzed mesh at the grid resolution, so the analyzed and printed geometry differ by up to ~half a voxel. The stress margin and voxel mass describe the voxel proxy; the mesh mass is the surface-enclosed volume."
+}

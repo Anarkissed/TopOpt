@@ -629,14 +629,29 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         if let lat = request.lattice {
             var block: [String: Any] = [
                 "topology": lat.topologyID,
-                "cell_mm": lat.cellMM,
-                "strut_radius_mm": lat.strutRadiusMM,
                 "emit_stl": lat.emitSTL,
                 "emit_3mf": lat.emit3MF,
                 // The boundary treatment (handoff 2026-07-29-lattice-boundary-finish):
                 // "none" | "rim" | "diagrid", the page's three-way choice (bar B7).
                 "skin": lat.skin,
             ]
+            if lat.graded {
+                // GRADED run (task lattice-page-core-hookup stage 4): the schema
+                // REJECTS cell_mm/strut_radius_mm alongside a "grading" block —
+                // core derives the cell (target raised to its printability floor)
+                // and the strut radii from the run's OWN final stress field, and
+                // writes the provenance + clamp accounting into each variant's
+                // lattice receipt.
+                job["grading"] = [
+                    "topology": lat.topologyID,
+                    "cell_mm": lat.cellMM,
+                    // Required by the grading schema: the printability floor's input.
+                    "min_extrudable_width_mm": lat.minExtrudableWidthMM ?? 0,
+                ] as [String: Any]
+            } else {
+                block["cell_mm"] = lat.cellMM
+                block["strut_radius_mm"] = lat.strutRadiusMM
+            }
             if let w = lat.minExtrudableWidthMM {
                 // Arms core's OWN skin printability clamp (lattice_skin_min_radius_mm)
                 // with the user's outer line width — the number stays core-owned.

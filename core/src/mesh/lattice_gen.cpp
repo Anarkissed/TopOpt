@@ -814,7 +814,21 @@ const char* lattice_gen_topology_name(LatticeGenTopology topo) {
     case LatticeGenTopology::Octet:
       return "octet";
   }
-  return "octet";
+  // No silent fallback: an enum case without a name must be named above before
+  // anything can serialize it (and -Wswitch flags the missing case at compile
+  // time). The old `return "octet"` here would have mislabeled a new topology.
+  throw std::logic_error("lattice_gen_topology_name: unnamed LatticeGenTopology");
+}
+
+std::vector<std::string> lattice_gen_topology_names() {
+  // EVERY implemented topology, in enum order. The drift tripwire is
+  // test_lattice_gen's enum probe: any enum value lattice_gen_topology_name can
+  // name must appear here, so a topology added to the enum + name switch but not
+  // to this list fails the suite rather than silently vanishing from pickers.
+  std::vector<std::string> out;
+  for (LatticeGenTopology t : {LatticeGenTopology::Octet})
+    out.emplace_back(lattice_gen_topology_name(t));
+  return out;
 }
 
 long long latticed_cell_count(const LatticeRegion& R) {

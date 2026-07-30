@@ -1,0 +1,1 @@
+LATTICE vf=0.600000 topology=octet cell_mm=3 strut_r_mm=0.45 rho=0.409578 cells=72 tris=30028 lattice_margin=21221.8 lattice_accepted=1 report=/tmp/hookup_evidence/include_exclude/variant_060_lattice.report.json mesh=/tmp/hookup_evidence/include_exclude/variant_060_lattice.stl

@@ -107,6 +107,42 @@ class LatticeBoundary {
   // (the same safe no-op the rasterizer produces).
   void add_keep_out(const ClearanceGeometry& geom, bool collar);
 
+  // ── lattice ROLES (task 2026-07-31-lattice-page-core-hookup) ──────────────
+  // The job's `lattice.regions` primitives, resolved through the SAME
+  // ClearanceGeometry machinery as keep-outs (resolve_clearance_manual — no
+  // second geometry concept). The three roles are three different instructions:
+  //   clearance (add_keep_out)  — NO MATERIAL: subtracts from the allowed
+  //                               region, struts are CLIPPED out of it.
+  //   include                   — material stays, LATTICED: when any include
+  //                               region exists, only cells/voxels inside the
+  //                               include UNION are latticed; the rest of the
+  //                               part stays SOLID.
+  //   exclude                   — material stays, SOLID: cells/voxels inside
+  //                               an exclude region are never latticed.
+  // PRECEDENCE (tested, test_lattice_boundary): clearance beats both (no
+  // material means nothing to lattice — the design is void there and struts are
+  // clipped out); exclude beats include (the subtractive instruction wins,
+  // mirroring how FrozenSolid part material wins over FrozenVoid growth in the
+  // clearance rasterizer — solid is the conservative, always-certifiable state).
+  //
+  // DELIBERATELY NOT part of signed_distance/clip_segment: an exclude region
+  // stays SOLID, so a strut welding into it is material bonded onto material
+  // (the interpenetrating-soup union) — clipping struts short of it, as we do at
+  // keep-outs, would leave the lattice/solid interface unbonded. Roles therefore
+  // act on ACTIVATION (cell_may_overlap) and on the certification mask
+  // (lattice_certification_mask), which both consume this ONE object — the
+  // generator's silhouette and the certified mask still cannot drift (bar H1b).
+  // Invalid geometries are ignored (the rasterizer's safe no-op).
+  void add_include_region(const ClearanceGeometry& geom);
+  void add_exclude_region(const ClearanceGeometry& geom);
+  bool has_include_regions() const { return !includes_.empty(); }
+  std::size_t include_region_count() const { return includes_.size(); }
+  std::size_t exclude_region_count() const { return excludes_.size(); }
+  // Membership at a point — point_in_clearance_region on each stored region
+  // (identical math to the keep-out / rasterizer membership test).
+  bool in_include_region(const Vec3& p, double tol) const;
+  bool in_exclude_region(const Vec3& p, double tol) const;
+
   // ── the predicate ─────────────────────────────────────────────────────────
   // 1-Lipschitz lower bound on the true signed distance to the allowed-region
   // boundary; > 0 inside, < 0 outside.
@@ -147,6 +183,10 @@ class LatticeBoundary {
   // allowed region (signed_distance(centre) <= -half_diagonal). A cell this
   // returns true for may still emit nothing once clipped — harmless; a cell it
   // returns false for provably contains no allowed material.
+  // ROLES extend the same proof discipline: a cell is also inactive when it
+  // provably misses EVERY include region (when any exist) or provably sits
+  // entirely INSIDE an exclude region — so no cell whose voxels could certify
+  // latticed is ever dropped, and a cell with no certifiable voxel emits nothing.
   bool cell_may_overlap(const Vec3& cell_min, double cell_mm) const;
 
   // ── clipping (bar (b)) ────────────────────────────────────────────────────
@@ -199,6 +239,11 @@ class LatticeBoundary {
   std::vector<Plane> planes_;
   std::vector<ClearanceGeometry> keep_outs_;
   std::vector<int> keep_out_face_;  // index into faces_ (-1: slab, no face)
+  // Lattice roles (see above). Contribute NO analytic faces (a landing at a
+  // role interface attributes to face -1, like the voxel base) and NO signed-
+  // distance terms — activation + certification mask only.
+  std::vector<ClearanceGeometry> includes_;
+  std::vector<ClearanceGeometry> excludes_;
   std::vector<LatticeBoundaryFace> faces_;
 
   const VoxelGrid* voxel_grid_ = nullptr;
@@ -211,7 +256,10 @@ class LatticeBoundary {
 // generator emits against (bar B7): voxel e is latticed iff its density is
 // printed (>= iso) AND its owning lattice cell (edge cell_mm, grid anchored at
 // region_origin) may overlap the allowed region AND its centre is not inside
-// any keep-out. Returns grid.voxel_count() flags (1 = latticed).
+// any keep-out AND — when the boundary carries lattice roles — its centre is
+// not inside any EXCLUDE region and (if any include region exists) is inside
+// the include union. Voxels the roles leave out are certified SOLID, exactly
+// like keep-out voxels. Returns grid.voxel_count() flags (1 = latticed).
 std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
                                              const VoxelGrid& grid,
                                              const std::vector<double>& density,

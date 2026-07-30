@@ -255,6 +255,19 @@ add_test(NAME lattice_material_model COMMAND test_lattice_material_model)
 add_executable(test_lattice_dehomog tests/unit/test_lattice_dehomog.cpp)
 target_link_libraries(test_lattice_dehomog PRIVATE topopt)
 add_test(NAME lattice_dehomog COMMAND test_lattice_dehomog)
+# Harness-side surface stiffness numerics (surface-stiffness probe,
+# 2026-07-31). The model lives in tests/harness/surface_stiffness_model.hpp
+# (nothing in production consumes it); this test pins its integrator to the
+# production element bit-for-bit, the rod-Voigt smear and cubic projection to
+# their analytic values, the embedded-bar coupling to the pin-jointed bar, and
+# the harness assembled solver to the production fea_solve energy. Uses Eigen
+# directly (the harness solver), so it is gated like assembly.cpp.
+if(Eigen3_FOUND)
+  add_executable(test_surface_stiffness_model
+                 tests/unit/test_surface_stiffness_model.cpp)
+  target_link_libraries(test_surface_stiffness_model PRIVATE topopt Eigen3::Eigen)
+  add_test(NAME surface_stiffness_model COMMAND test_surface_stiffness_model)
+endif()
 
 # Pseudo-face segmentation + the STL/3MF import adapter (handoff 134). The
 # synthetic meshes are built in code; the determinism and refusal tests write
@@ -503,6 +516,16 @@ if(Eigen3_FOUND)
   add_executable(test_geneo tests/unit/test_geneo.cpp)
   target_link_libraries(test_geneo PRIVATE topopt)
   add_test(NAME geneo_twolevel COMMAND test_geneo)
+
+  # Matrix-free cubic lattice path guards (handoff 2026-08-01-multiscale-
+  # production-wiring): library default OFF, apply/solve exactness vs the
+  # assembled lattice operator (<= 1e-12 / iterations within 1), all-scalar
+  # bit-identity, the armed route, the GenEO moduli-fingerprint invalidation on
+  # a tensor-only design change, and recycling exactness across a tensor
+  # change. Eigen-gated like the solver group.
+  add_executable(test_matfree_cubic tests/unit/test_matfree_cubic.cpp)
+  target_link_libraries(test_matfree_cubic PRIVATE topopt)
+  add_test(NAME matfree_cubic_lattice COMMAND test_matfree_cubic)
 
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises
@@ -1189,6 +1212,20 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME loadcase_analyze COMMAND test_loadcase_analyze)
+
+  # Task lattice-page-core-hookup: primitive ROLES in the job schema (stage 1),
+  # grading on the optimize path (stage 4) and the analyze mode (stage 3), end
+  # to end through run_job / analyze_job on the committed plate_bore fixture and
+  # a synthetic thick cylinder. Voxel-exact role precedence is unit-tested in
+  # lattice_boundary; this proves the schema -> run -> receipt plumbing.
+  add_executable(test_lattice_hookup tests/validation/test_lattice_hookup.cpp)
+  target_link_libraries(test_lattice_hookup PRIVATE topopt)
+  target_compile_definitions(test_lattice_hookup PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_hookup COMMAND test_lattice_hookup)
 
   add_executable(test_mesh_job tests/validation/test_mesh_job.cpp)
   target_link_libraries(test_mesh_job PRIVATE topopt)

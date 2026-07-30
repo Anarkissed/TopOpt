@@ -1,0 +1,59 @@
+{
+  "model": "plate_bore.stl",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 32,
+  "fixture_faces": [
+    {
+      "kind": "cylindrical",
+      "radius_mm": 3.0
+    }
+  ],
+  "gravity": {
+    "direction": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "magnitude_mm_s2": 9810.0
+  },
+  "ladder": [
+    0.6
+  ],
+  "margin_stop": 0.0,
+  "simp": {
+    "max_iterations": 8
+  },
+  "output": {
+    "report": "report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  },
+  "lattice": {
+    "topology": "octet",
+    "cell_mm": 3.0,
+    "strut_radius_mm": 0.45,
+    "emit_stl": true,
+    "regions": [
+      {
+        "role": "include",
+        "kind": "face",
+        "geometry": {
+          "origin": [
+            -12,
+            0,
+            2
+          ],
+          "normal": [
+            1,
+            0,
+            0
+          ],
+          "half_u_mm": 50,
+          "half_w_mm": 50,
+          "depth_mm": 14
+        }
+      }
+    ]
+  }
+}

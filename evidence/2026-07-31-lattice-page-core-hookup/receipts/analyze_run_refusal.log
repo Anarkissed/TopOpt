@@ -1,0 +1,1 @@
+topopt-cli: unsupported mode for `run`: "analyze" is one fixed-design analysis solve, not an optimization — run it with `topopt-cli analyze <job.json>`

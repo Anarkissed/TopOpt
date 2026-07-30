@@ -1,0 +1,103 @@
+surface_stiffness_probe — bars stated BEFORE measurement:
+  BAR-T  total K within +-10% of reference, every state
+  BAR-D  skin delta within +-25% where delta_ref >= 5% of base
+  BAR-C  no over-credit: K_route <= 1.10 * K_ref, every state
+
+fixture: plate 24x24x4 mm, cell 4, uniform r=0.458333 mm (rho=0.259702), skin clamp r>=0.600 mm
+uniform: base elements 1356, skin elements 2076 (gen: struts=672 skin_struts=1972 rim=104 landings=624)
+graded:  base elements 1356, skin elements 2229
+
+k1 h=0.5 base   S1_tension_x   K=5491.28 iters=120 mg=1 (0.5s)
+k1 h=0.5 base   S2_tension_y   K=5491.28 iters=120 mg=1 (0.4s)
+k1 h=0.5 base   S3_shear_xy    K=1583.12 iters=134 mg=1 (0.5s)
+k1 h=0.5 base   S4_compress_z  K=203549 iters=50 mg=1 (0.2s)
+k1 h=0.5 base   S5_bend_tipz   K=134.78 iters=182 mg=1 (0.7s)
+k1 h=0.5 base   S6_shear_zx    K=70960.4 iters=58 mg=1 (0.3s)
+k1 h=0.25 base   S1_tension_x   K=2406.94 iters=291 mg=1 (6.4s)
+k1 h=0.25 base   S2_tension_y   K=2406.94 iters=291 mg=1 (4.9s)
+k1 h=0.25 base   S3_shear_xy    K=741.116 iters=289 mg=1 (5.3s)
+k1 h=0.25 base   S4_compress_z  K=90706 iters=67 mg=1 (2.2s)
+k1 h=0.25 base   S5_bend_tipz   K=49.6939 iters=1197 mg=0 (10.7s)
+k1 h=0.25 base   S6_shear_zx    K=34775.2 iters=83 mg=1 (2.4s)
+k1 h=0.2 base   S1_tension_x   K=2305.53 iters=862 mg=0 (13.7s)
+k1 h=0.2 base   S2_tension_y   K=2305.53 iters=862 mg=0 (10.1s)
+k1 h=0.2 base   S3_shear_xy    K=632.671 iters=943 mg=0 (7.3s)
+k1 h=0.2 base   S4_compress_z  K=88774.1 iters=349 mg=0 (3.6s)
+k1 h=0.2 base   S5_bend_tipz   K=46.9772 iters=1575 mg=0 (14.4s)
+k1 h=0.2 base   S6_shear_zx    K=31632.2 iters=437 mg=0 (4.2s)
+k1 h=0.167 base   S1_tension_x   K=2083.87 iters=1078 mg=0 (30.3s)
+k1 h=0.167 base   S2_tension_y   K=2083.87 iters=1078 mg=0 (29.6s)
+k1 h=0.167 base   S3_shear_xy    K=638.554 iters=1159 mg=0 (42.5s)
+k1 h=0.167 base   S4_compress_z  K=79339.4 iters=430 mg=0 (5.9s)
+k1 h=0.167 base   S5_bend_tipz   K=42.2222 iters=1922 mg=0 (27.0s)
+k1 h=0.167 base   S6_shear_zx    K=31666 iters=533 mg=0 (6.4s)
+k1 h=0.5 skin   S1_tension_x   K=10772.7 iters=226 mg=0 (0.3s)
+k1 h=0.5 skin   S2_tension_y   K=10772.7 iters=226 mg=0 (0.5s)
+k1 h=0.5 skin   S3_shear_xy    K=3004.8 iters=256 mg=0 (0.5s)
+k1 h=0.5 skin   S4_compress_z  K=375996 iters=80 mg=0 (0.1s)
+k1 h=0.5 skin   S5_bend_tipz   K=452.636 iters=349 mg=0 (0.6s)
+k1 h=0.5 skin   S6_shear_zx    K=114730 iters=93 mg=0 (0.2s)
+k1 h=0.25 skin   S1_tension_x   K=9372.6 iters=469 mg=0 (3.7s)
+k1 h=0.25 skin   S2_tension_y   K=9372.6 iters=469 mg=0 (3.7s)
+k1 h=0.25 skin   S3_shear_xy    K=2692.13 iters=532 mg=0 (4.1s)
+k1 h=0.25 skin   S4_compress_z  K=268680 iters=176 mg=0 (1.4s)
+k1 h=0.25 skin   S5_bend_tipz   K=364.579 iters=753 mg=0 (9.8s)
+k1 h=0.25 skin   S6_shear_zx    K=87166.6 iters=215 mg=0 (2.5s)
+k1 h=0.2 skin   S1_tension_x   K=9018.56 iters=594 mg=0 (8.6s)
+k1 h=0.2 skin   S2_tension_y   K=9018.56 iters=594 mg=0 (7.1s)
+k1 h=0.2 skin   S3_shear_xy    K=2604.86 iters=664 mg=0 (7.5s)
+k1 h=0.2 skin   S4_compress_z  K=253876 iters=222 mg=0 (2.3s)
+k1 h=0.2 skin   S5_bend_tipz   K=357.304 iters=946 mg=0 (9.4s)
+k1 h=0.2 skin   S6_shear_zx    K=82183.2 iters=265 mg=0 (4.3s)
+k1 h=0.167 skin   S1_tension_x   K=8467.79 iters=736 mg=0 (14.0s)
+k1 h=0.167 skin   S2_tension_y   K=8467.79 iters=736 mg=0 (10.9s)
+k1 h=0.167 skin   S3_shear_xy    K=2501.44 iters=826 mg=0 (16.3s)
+k1 h=0.167 skin   S4_compress_z  K=236543 iters=281 mg=0 (7.2s)
+k1 h=0.167 skin   S5_bend_tipz   K=344.52 iters=1153 mg=0 (23.7s)
+k1 h=0.167 skin   S6_shear_zx    K=78203.6 iters=339 mg=0 (5.8s)
+k1 h=0.25 gbase  S1_tension_x   K=5174.16 iters=574 mg=0 (3.0s)
+k1 h=0.25 gbase  S2_tension_y   K=6853.31 iters=761 mg=0 (4.3s)
+k1 h=0.25 gbase  S3_shear_xy    K=1525.1 iters=638 mg=0 (2.7s)
+k1 h=0.25 gbase  S4_compress_z  K=215608 iters=310 mg=0 (1.6s)
+k1 h=0.25 gbase  S5_bend_tipz   K=138.265 iters=984 mg=0 (5.6s)
+k1 h=0.25 gbase  S6_shear_zx    K=69024.8 iters=345 mg=0 (2.4s)
+k1 h=0.25 gskin  S1_tension_x   K=13302.8 iters=901 mg=0 (7.5s)
+k1 h=0.25 gskin  S2_tension_y   K=13619.2 iters=870 mg=0 (5.9s)
+k1 h=0.25 gskin  S3_shear_xy    K=3590.17 iters=1027 mg=0 (6.3s)
+k1 h=0.25 gskin  S4_compress_z  K=453450 iters=192 mg=0 (1.2s)
+k1 h=0.25 gskin  S5_bend_tipz   K=512.839 iters=975 mg=0 (7.9s)
+k1 h=0.25 gskin  S6_shear_zx    K=129604 iters=214 mg=0 (1.7s)
+k1 h=0.25 shell  S1_tension_x   K=9463.66 iters=474 mg=0 (3.6s)
+k1 h=0.25 shell  S2_tension_y   K=9463.66 iters=474 mg=0 (3.9s)
+k1 h=0.25 shell  S3_shear_xy    K=2681.79 iters=531 mg=0 (2.9s)
+k1 h=0.25 shell  S4_compress_z  K=262002 iters=162 mg=0 (0.9s)
+k1 h=0.25 shell  S5_bend_tipz   K=472.763 iters=743 mg=0 (4.1s)
+k1 h=0.25 shell  S6_shear_zx    K=80619.9 iters=186 mg=0 (1.4s)
+k2 overlap correction: skin soup volume 3740.1 mm3, union 1219.8 mm3 (ratio 0.326)
+k2/k3 S1_tension_x   dref=+6384  errT% iso=+15.4 cubic=-73.0 aniso=-68.7 B=-37.1 Bu=-66.5 | errD% iso=+34.8 cubic=-82.4 aniso=-76.8 B=-34.8 Bu=-73.7
+k2/k3 S2_tension_y   dref=+6384  errT% iso=+15.4 cubic=-73.0 aniso=-68.7 B=-37.1 Bu=-66.5 | errD% iso=+34.8 cubic=-82.4 aniso=-76.8 B=-34.8 Bu=-73.7
+k2/k3 S3_shear_xy    dref=+1863  errT% iso=+6.1 cubic=-70.5 aniso=-52.9 B=+17.4 Bu=-46.9 | errD% iso=+22.4 cubic=-80.5 aniso=-56.9 B=+37.6 Bu=-48.7
+k2/k3 S4_compress_z  dref=+1.572e+05  errT% iso=+28.9 cubic=-69.1 aniso=-79.0 B=-77.7 Bu=-79.6 | errD% iso=+67.1 cubic=-80.3 aniso=-95.3 B=-93.2 Bu=-96.0
+k2/k3 S5_bend_tipz   dref=+302.3  errT% iso=+33.0 cubic=-68.6 aniso=-60.3 B=-32.7 Bu=-61.6 | errD% iso=+36.3 cubic=-79.4 aniso=-70.0 B=-38.5 Bu=-71.5
+k2/k3 S6_shear_zx    dref=+4.654e+04  errT% iso=+7.1 cubic=-69.3 aniso=-75.7 B=-73.7 Bu=-76.5 | errD% iso=+46.7 cubic=-81.7 aniso=-92.4 B=-89.0 Bu=-93.8
+k2b S1_tension_x   base2_err%=+12.5 errD% A2=-74.9 B2=-25.7 B2u=-70.3
+k2b S2_tension_y   base2_err%=+12.5 errD% A2=-74.9 B2=-25.7 B2u=-70.3
+k2b S3_shear_xy    base2_err%=+5.4 errD% A2=-54.2 B2=+50.0 B2u=-44.9
+k2b S4_compress_z  base2_err%=+2.9 errD% A2=-94.8 B2=-90.3 B2u=-95.1
+k2b S5_bend_tipz   base2_err%=+114.6 errD% A2=-67.6 B2=-25.9 B2u=-68.2
+k2b S6_shear_zx    base2_err%=-14.2 errD% A2=-91.9 B2=-85.1 B2u=-92.3
+k4 overlap correction: graded skin soup 5763.6 mm3, union 1578.0 mm3 (ratio 0.274)
+k4 S1_tension_x   dref=+8129 errT% A=-59.0 B=-2.1 | errD% A=-67.1 B=+26.0
+k4 S2_tension_y   dref=+6766 errT% A=-52.2 B=+25.9 | errD% A=-61.5 B=+95.8
+k4 S3_shear_xy    dref=+2065 errT% A=-51.6 B=+22.9 | errD% A=-55.0 B=+74.6
+k4 S4_compress_z  dref=+2.378e+05 errT% A=-68.7 B=-67.0 | errD% A=-96.3 B=-93.1
+k4 S5_bend_tipz   dref=+374.6 errT% A=-51.4 B=-18.0 | errD% A=-65.7 B=-20.0
+k4 S6_shear_zx    dref=+6.058e+04 errT% A=-67.2 B=-64.7 | errD% A=-95.4 B=-90.0
+k5 S1_tension_x   dref=+7057 errT% iso=-10.5 aniso=-11.5 | errD% iso=+3.6 aniso=+2.2
+k5 S2_tension_y   dref=+7057 errT% iso=-10.5 aniso=-11.5 | errD% iso=+3.6 aniso=+2.2
+k5 S3_shear_xy    dref=+1941 errT% iso=-15.6 aniso=-17.1 | errD% iso=-2.7 aniso=-4.6
+k5 S4_compress_z  dref=+1.713e+05 errT% iso=-40.0 aniso=-62.5 | errD% iso=-32.8 aniso=-67.2
+k5 S5_bend_tipz   dref=+423.1 errT% iso=-23.4 aniso=-34.7 | errD% iso=-25.3 aniso=-38.0
+k5 S6_shear_zx    dref=+4.584e+04 errT% iso=-41.6 aniso=-68.7 | errD% iso=-31.1 aniso=-78.7
+
+done in 467.5 s

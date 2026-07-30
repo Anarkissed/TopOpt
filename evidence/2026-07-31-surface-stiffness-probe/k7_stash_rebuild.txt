@@ -1,0 +1,21 @@
+K7 — stash-rebuild proof that no production file changed
+=========================================================
+Method: two FRESH Release builds of core (cmake -S core -B <dir>), one with the
+probe's working tree (harness + unit test + CMake test registration), one with
+`git stash -u` applied (the pre-probe tree). The archive-level sha256 of
+libtopopt.a differs between any two fresh build directories because `ar`
+embeds member timestamps; the member OBJECTS are the compiled truth, so both
+archives were extracted (ar -x) and every member compared bytewise.
+
+Result: 37 member objects, 0 differing — the production library compiled from
+the probe branch is BYTE-IDENTICAL to the pre-probe library, member for
+member. The only production-tree file touched is core/CMakeLists.txt, and only
+to register the harness-pinning unit test target (test_surface_stiffness_model),
+which does not enter libtopopt.a.
+
+  with-changes  build: /tmp/ssp_with_build/libtopopt.a
+    sha256(archive) 3fa4b066336c907c7f131f8dcd54a950618b066418debd4e638e0caa820405db
+  stashed (pre-probe) build: /tmp/ssp_stash_build/libtopopt.a
+    sha256(archive) 791ab9ab17bd3108fb0c7c83ab5da48dbbdf92d294efd1d5a6ef4ad98dfc0035
+    (archives differ: ar timestamp metadata only)
+  member-object comparison: objects: 37, differing: 0

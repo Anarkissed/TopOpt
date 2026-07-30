@@ -624,6 +624,23 @@ std::string run_info_json(const RunInfo& info) {
       le += ", \"finish_certified\": " +
             bool_json(info.lattice_export_finish_certified);
     }
+    // Lattice ROLE regions + solid companion (task lattice-page-core-hookup,
+    // stage 1): keys appear ONLY when roles/companion were in play, so a job
+    // with no lattice.regions and no grading writes a byte-identical record.
+    if (info.lattice_export_role_regions_present) {
+      le += ", \"include_regions\": " +
+            fmt_ll(info.lattice_export_include_regions);
+      le += ", \"exclude_regions\": " +
+            fmt_ll(info.lattice_export_exclude_regions);
+      le += ", \"solid_region_voxels\": " +
+            fmt_ll(info.lattice_export_solid_region_voxels);
+      le += ", \"solid_region_volume_mm3\": " +
+            fmt(info.lattice_export_solid_region_volume_mm3);
+      le += ", \"solid_region_triangles\": " +
+            fmt_ll(info.lattice_export_solid_region_triangles);
+      le += ", \"include_void_voxels\": " +
+            fmt_ll(info.lattice_export_include_void_voxels);
+    }
     le += "}";
     num("lattice_export", le, /*comma=*/has_grad);
   }

@@ -31,6 +31,8 @@
 #include <cstdint>
 #include <functional>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "topopt/mesh.hpp"  // Vec3, TriangleSink
 
@@ -40,10 +42,22 @@ class LatticeBoundary;  // topopt/lattice_boundary.hpp — the shared predicate
 
 // The strut-lattice topologies. Only Octet is implemented this task (the printed,
 // certified one); the enum leaves room for the rest exactly as lattice.hpp does.
-enum class LatticeGenTopology { Octet };
+// (Explicit underlying type so the enum-probe tripwire in test_lattice_gen can
+// legally test values beyond the last case.)
+enum class LatticeGenTopology : int { Octet };
 
 // Human-readable name ("octet"), stable for run_info / job serialization.
+// Throws std::logic_error for an enum value with no name — a new case must be
+// named here before anything can serialize it (never a silent fallback).
 const char* lattice_gen_topology_name(LatticeGenTopology topo);
+
+// The names of every GENERATABLE topology, in enum order — the single source the
+// app bridge reads so its picker set can never drift from this enum (the exact
+// counterpart of lattice_certifiable_topology_names(), which the certification
+// library already exposes; handoff 2026-07-30-lattice-page reported this one
+// missing). test_lattice_gen's enum-probe tripwire fails if a new enum case is
+// named in lattice_gen_topology_name but not enumerated here.
+std::vector<std::string> lattice_gen_topology_names();
 
 // The lattice REGION: a rectangular block of nx*ny*nz cubic cells of edge
 // `cell_mm`, its (i=0,j=0,k=0) corner at `origin` (model mm). Cell (ci,cj,ck) is

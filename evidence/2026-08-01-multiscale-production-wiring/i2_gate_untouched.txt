@@ -1,0 +1,35 @@
+I2 — THE GATE NEVER SOFTENS (proof by diff, branch vs main)
+============================================================
+$ git diff main -- core/src/simp/analyze.cpp core/src/cli/run_job.cpp
+(empty — both files byte-identical to main)
+
+The full diff touches ONLY:
+  core/CMakeLists.txt                   (register test_matfree_cubic)
+  core/include/topopt/fea.hpp           (declarations + tripwire constant)
+  core/include/topopt/production.hpp    (accessor declaration)
+  core/src/fea/assembly.cpp             (the route check in fea_solve_cg_lattice)
+  core/src/fea/fea_matfree.hpp          (internal types/declarations)
+  core/src/fea/geneo.cpp                (three-block build_local + fingerprint)
+  core/src/fea/hex_element.cpp          (reference blocks + shared validator)
+  core/src/fea/matfree.cpp              (cubic kernel + build + toggle)
+  core/src/fea/multigrid.cpp            (Galerkin over both lists + lattice entry)
+  core/src/simp/production.cpp          (the ONE named arming constant)
+  core/tests/*                          (guards)
+plus new files: core/tests/unit/test_matfree_cubic.cpp,
+core/tests/harness/multiscale_stack_probe.cpp, this evidence dir, the handoff.
+
+No verdict logic, no tolerance, no fixture, no materials.json, no assertion
+deleted or weakened (the diff adds assertions/throws only: the FP32 cubic
+tripwire and input validation on the new entry points).
+ core/CMakeLists.txt                              |  10 +
+ core/include/topopt/fea.hpp                      |  85 ++++++++-
+ core/include/topopt/production.hpp               |  12 ++
+ core/src/fea/assembly.cpp                        |  13 ++
+ core/src/fea/fea_matfree.hpp                     | 111 ++++++++++-
+ core/src/fea/geneo.cpp                           | 104 +++++++++-
+ core/src/fea/hex_element.cpp                     |  51 ++++-
+ core/src/fea/matfree.cpp                         | 232 ++++++++++++++++++++++-
+ core/src/fea/multigrid.cpp                       | 101 ++++++++--
+ core/src/simp/production.cpp                     |  46 +++++
+ core/tests/validation/test_production_parity.cpp |  24 +++
+ 11 files changed, 752 insertions(+), 37 deletions(-)

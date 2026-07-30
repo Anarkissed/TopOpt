@@ -593,6 +593,132 @@ static void test_grading_block() {
                 "grading: rejects missing min_extrudable_width_mm");
 }
 
+// --- Mode "analyze" (task lattice-page-core-hookup stage 3, H3a) ------------
+static void test_mode_analyze() {
+  // "analyze" is a valid mode...
+  {
+    const JobDescription j = parse_job(
+        mutate("\"mode\": \"minimize_plastic\"", "\"mode\": \"analyze\""));
+    CHECK(j.mode == "analyze", "mode: analyze parses");
+  }
+  // ...and the validation stays STRICT: an unknown mode is refused, exactly as
+  // before (adding a mode must never make the field permissive).
+  check_rejects(mutate("\"mode\": \"minimize_plastic\"", "\"mode\": \"optimize\""),
+                "mode: unknown mode still refused (H3a)");
+  check_rejects(mutate("\"mode\": \"minimize_plastic\"", "\"mode\": \"Analyze\""),
+                "mode: case-mangled mode refused (no fuzzy match)");
+}
+
+// --- lattice.regions roles (task lattice-page-core-hookup stage 1, H1e) ------
+static void test_lattice_regions() {
+  auto lat = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + body);
+  };
+  const std::string bolt_geom =
+      "\"geometry\": { \"axis_point\": [1,2,3], \"axis_dir\": [0,0,1], "
+      "\"radius_mm\": 4.0, \"half_length_mm\": 6.0 }";
+  const std::string face_geom =
+      "\"geometry\": { \"origin\": [0,0,0], \"normal\": [1,0,0], "
+      "\"half_u_mm\": 10.0, \"half_w_mm\": 8.0, \"depth_mm\": 5.0 }";
+  // Valid: one include bolt + one exclude face.
+  {
+    const JobDescription j = parse_job(lat(
+        "{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": [\n"
+        "  { \"role\": \"include\", \"kind\": \"bolt\", " + bolt_geom + " },\n"
+        "  { \"role\": \"exclude\", \"kind\": \"face\", " + face_geom + " } ] }"));
+    CHECK(j.lattice.regions.size() == 2, "regions: two entries parsed");
+    CHECK(j.lattice.regions[0].role == "include" &&
+              j.lattice.regions[0].kind == "bolt" &&
+              j.lattice.regions[0].radius_mm == 4.0 &&
+              j.lattice.regions[0].half_length_mm == 6.0,
+          "regions: include bolt fields");
+    CHECK(j.lattice.regions[1].role == "exclude" &&
+              j.lattice.regions[1].kind == "face" &&
+              j.lattice.regions[1].depth_mm == 5.0,
+          "regions: exclude face fields");
+  }
+  // No regions key => empty (byte-identical whole-part lattice).
+  {
+    const JobDescription j =
+        parse_job(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7 }"));
+    CHECK(j.lattice.regions.empty(), "regions: absent => empty");
+  }
+  // H1e — a malformed ROLE is refused, never defaulted.
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+                    "{ \"role\": \"solid\", \"kind\": \"bolt\", " + bolt_geom +
+                    " } ] }"),
+                "regions: unknown role refused");
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+                    "{ \"role\": \"include\", \"kind\": \"sphere\", " + bolt_geom +
+                    " } ] }"),
+                "regions: unknown kind refused");
+  // H1e — reject_unknown_keys still rejects at every level.
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+                    "{ \"role\": \"include\", \"kind\": \"bolt\", \"extra\": 1, " +
+                    bolt_geom + " } ] }"),
+                "regions: unknown region key refused");
+  check_rejects(
+      lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+          "{ \"role\": \"include\", \"kind\": \"bolt\", \"geometry\": { "
+          "\"axis_point\": [1,2,3], \"axis_dir\": [0,0,1], \"radius_mm\": 4.0, "
+          "\"half_length_mm\": 6.0, \"taper\": 1 } } ] }"),
+      "regions: unknown geometry key refused");
+  // Degenerate extents refused (a zero-extent region marks nothing — a config
+  // mistake, not a silent no-op).
+  check_rejects(
+      lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+          "{ \"role\": \"exclude\", \"kind\": \"bolt\", \"geometry\": { "
+          "\"axis_point\": [1,2,3], \"axis_dir\": [0,0,1], \"radius_mm\": 0, "
+          "\"half_length_mm\": 6.0 } } ] }"),
+      "regions: zero radius refused");
+  check_rejects(
+      lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+          "{ \"role\": \"exclude\", \"kind\": \"bolt\", \"geometry\": { "
+          "\"axis_point\": [1,2,3], \"axis_dir\": [0,0,0], \"radius_mm\": 4, "
+          "\"half_length_mm\": 6.0 } } ] }"),
+      "regions: zero axis_dir refused");
+  // Missing geometry / role refused.
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+                    "{ \"role\": \"include\", \"kind\": \"bolt\" } ] }"),
+                "regions: missing geometry refused");
+  check_rejects(lat("{ \"cell_mm\": 5, \"strut_radius_mm\": 0.7, \"regions\": ["
+                    "{ \"kind\": \"bolt\", " + bolt_geom + " } ] }"),
+                "regions: missing role refused");
+}
+
+// --- lattice x grading coupling (task lattice-page-core-hookup stage 4) ------
+static void test_lattice_grading_coupling() {
+  auto both = [](const std::string& lat_body) {
+    return mutate(
+        "\"mesh_prefix\": \"variant\" }",
+        "\"mesh_prefix\": \"variant\" },\n  \"lattice\": " + lat_body +
+            ",\n  \"grading\": { \"cell_mm\": 4.0, "
+            "\"min_extrudable_width_mm\": 0.4 }");
+  };
+  // With a grading block the lattice block carries NO uniform geometry: the
+  // graded run derives cell + radii from the run's own field.
+  {
+    const JobDescription j = parse_job(both("{ \"topology\": \"octet\" }"));
+    CHECK(j.lattice.present && j.grading.present,
+          "grading+lattice: both blocks parse");
+    CHECK(j.lattice.cell_mm == 0.0 && j.lattice.strut_radius_mm == 0.0,
+          "grading+lattice: no uniform geometry carried");
+  }
+  // A uniform cell/radius alongside grading is REFUSED (conflict), never
+  // silently ignored.
+  check_rejects(both("{ \"cell_mm\": 5.0 }"),
+                "grading+lattice: cell_mm refused with grading");
+  check_rejects(both("{ \"strut_radius_mm\": 0.7 }"),
+                "grading+lattice: strut_radius_mm refused with grading");
+  // Without grading the uniform geometry stays REQUIRED (unchanged).
+  check_rejects(
+      mutate("\"mesh_prefix\": \"variant\" }",
+             "\"mesh_prefix\": \"variant\" },\n  \"lattice\": { \"topology\": "
+             "\"octet\" }"),
+      "lattice alone: cell_mm still required");
+}
+
 int main() {
   test_valid_baseline();
   test_demo_fixture();
@@ -606,6 +732,9 @@ int main() {
   test_wall_loops();
   test_lattice_block();
   test_grading_block();
+  test_mode_analyze();
+  test_lattice_regions();
+  test_lattice_grading_coupling();
 
   if (g_failures == 0) {
     std::printf("job schema (M6.2): all %d checks passed\n", g_checks);

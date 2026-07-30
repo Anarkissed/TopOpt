@@ -45,6 +45,45 @@ struct MfElem {
   int edof[Hex8Stiffness::kDof];
 };
 
+// One CUBIC (latticed) element: its three constitutive coefficients and its 24
+// global DOF indices. The element stiffness is the EXACT three-block
+// decomposition (PR 252, worst rel err 8.5e-16 over 8,696 cases):
+//   Ke(C11,C12,C44) = C11*K_A + C12*K_B + C44*K_C
+// with K_A/K_B/K_C the three FIXED reference blocks (hex8_cubic_reference_blocks)
+// — the same 0/1-D-matrix integrals the production hex8_stiffness_cubic performs,
+// split by linearity of Ke in D. Stored in its own colour-sorted table beside the
+// isotropic one; an empty table keeps every apply byte-for-byte the scalar path.
+struct MfCubElem {
+  double a = 0.0, b = 0.0, c = 0.0;  // C11, C12, C44
+  int edof[Hex8Stiffness::kDof];
+};
+
+// Pointer bundle for the per-voxel lattice arrays of the composite
+// isotropic-or-cubic operator (fea_solve_cg_lattice's contract): mask[e] != 0
+// selects the cubic element (c11/c12/c44[e]); mask[e] == 0 the isotropic graded
+// one. All-null (the default) is the pure scalar path, byte-for-byte.
+struct MfLatticeArrays {
+  const std::vector<char>* mask = nullptr;
+  const std::vector<double>* c11 = nullptr;
+  const std::vector<double>* c12 = nullptr;
+  const std::vector<double>* c44 = nullptr;
+  bool present() const { return mask != nullptr; }
+};
+
+// The three fixed reference blocks of the cubic decomposition, integrated by the
+// PRODUCTION Gauss rule (hex_element.cpp's integrate_hex8 on the 0/1 D-matrices
+// D_A = diag(1,1,1,0,0,0), D_B = normal off-diagonal ones, D_C = diag(0,0,0,1,1,1))
+// — so C11*K_A + C12*K_B + C44*K_C recomposes hex8_stiffness_cubic to summation
+// roundoff (PR 252 bar d1). Defined in hex_element.cpp beside the integrator.
+void hex8_cubic_reference_blocks(double element_size, Hex8Stiffness& KA,
+                                 Hex8Stiffness& KB, Hex8Stiffness& KC);
+
+// The cubic-tensor admissibility test of hex8_stiffness_cubic (C44 > 0,
+// C11 - C12 > 0, C11 + 2*C12 > 0), shared so the matrix-free build validates
+// per-voxel tensors by the SAME rule as the assembled path. Throws
+// std::invalid_argument naming `who` on a non-physical tensor.
+void hex8_cubic_validate(double C11, double C12, double C44, const char* who);
+
 // Build the solid-element table (edof + factor), SORTED BY COLOUR. `elem_youngs`
 // selects the graded path (factor = per-voxel modulus, validated > 0) when
 // non-null; otherwise the uniform path (factor = 1, the modulus already baked into
@@ -67,6 +106,18 @@ std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
                                    const char* who,
                                    std::vector<int>* color_offsets = nullptr,
                                    const std::vector<char>* active_mask = nullptr);
+
+// Build the CUBIC (latticed) element table, colour-sorted with the same 2x2x2
+// parity rule and grid-scan order as mf_build_elems: a solid voxel with
+// lattice.mask[e] != 0 (and, when `active_mask` is given, active_mask[e] != 0 —
+// the Active Domain skip applies to both lists uniformly) contributes one
+// MfCubElem carrying (c11[e], c12[e], c44[e]), validated by the SAME
+// admissibility rule as hex8_stiffness_cubic (hex8_cubic_validate). Throws
+// std::invalid_argument on a size mismatch or a non-physical tensor.
+std::vector<MfCubElem> mf_build_cubic_elems(
+    const VoxelGrid& grid, const MfLatticeArrays& lattice, const char* who,
+    std::vector<int>* color_offsets = nullptr,
+    const std::vector<char>* active_mask = nullptr);
 
 // Set the worker-thread count for the matrix-free element apply. n<=0 selects an
 // automatic count (hardware concurrency). Threading is deterministic (see
@@ -106,6 +157,18 @@ bool mf_galerkin_block_cache_enabled();
 bool mf_set_mixed_precision(bool enable);
 bool mf_mixed_precision_enabled();
 
+// Matrix-free CUBIC LATTICE routing toggle (handoff 2026-08-01-multiscale-
+// production-wiring; public face: fea_set_matfree_cubic_lattice). Opt-in,
+// LIBRARY DEFAULT OFF. Read by fea_solve_cg_lattice (assembly.cpp): when ON the
+// lattice-aware solve routes to the matrix-free cubic path (multigrid + GenEO +
+// recycling capable, fea_solve_cg_lattice_matfree) instead of assembling; when
+// OFF (the default) the assembled Jacobi-CG path runs byte-for-byte unchanged.
+// The kernel itself (MfCubElem tables on MatfreeReduced) is independent of this
+// toggle — callers of fea_solve_cg_lattice_matfree get it regardless; the toggle
+// only decides the ROUTE taken by the pre-existing entry point.
+bool mf_set_cubic_lattice(bool enable);
+bool mf_cubic_lattice_enabled();
+
 // y = K x over the FULL global stiffness, element-by-element, COLOUR by COLOUR in
 // fixed order; each colour's elements are apply'd (optionally across threads, no
 // races). `x` and `y` are full ndof vectors; `y` is overwritten (zeroed) then
@@ -123,6 +186,24 @@ void mf_apply_full_f32(const std::vector<MfElem>& elems,
                        const Hex8Stiffness& Ke, const std::vector<float>& x,
                        std::vector<float>& y);
 
+// CUBIC pass of the composite apply: y += sum over cubic elements of
+// (a*K_A + b*K_B + c*K_C) x_e — NOT zeroed, call after mf_apply_full. The
+// COMBINED-BLOCK kernel shape PR 252 measured at 2.4-2.7x the scalar apply
+// (UNDER the 3x flop ratio): per element the three L1-resident reference blocks
+// are fused into ONE column-major element block (576 mul-adds), then the
+// standard single-block AXPY sweep runs — gather/scatter and the y-write
+// traffic are shared with the scalar kernel's shape, and one 24-double
+// accumulator never spills the NEON register file (the 3-accumulator variant
+// measured 3.3-3.8x from exactly those spills). Colour-by-colour in fixed order
+// on the shared worker pool, so the composite apply stays bit-identical for any
+// thread count (same argument as mf_apply_full; the iso pass completes before
+// the cubic pass starts, so the per-node accumulation order is fixed).
+void mf_apply_cubic_add(const std::vector<MfCubElem>& elems,
+                        const std::vector<int>& color_offsets,
+                        const Hex8Stiffness& KA, const Hex8Stiffness& KB,
+                        const Hex8Stiffness& KC, const std::vector<double>& x,
+                        std::vector<double>& y);
+
 // The reduced, void-gated system in matrix-free form. `kept_global[kg]` is the
 // global DOF of surviving free DOF kg; `apply_kgg` realises y_g = K_gg x_g by
 // scatter -> full apply -> gather, reusing full-length scratch across iterations.
@@ -133,6 +214,13 @@ struct MatfreeReduced {
   std::vector<MfElem> elems;
   std::vector<int> color_offsets;   // kNumColors+1 delimiters into elems
   Hex8Stiffness Ke;
+  // CUBIC (latticed) element table + the three reference blocks (multiscale
+  // production wiring). Empty/unbuilt on every scalar path — has_cubic == false
+  // keeps apply_kgg_raw byte-for-byte the pre-cubic apply.
+  std::vector<MfCubElem> cub_elems;
+  std::vector<int> cub_color_offsets;  // kNumColors+1 delimiters into cub_elems
+  Hex8Stiffness KA, KB, KC;            // built only when a lattice build ran
+  bool has_cubic = false;
   int ndof = 0;
   int ng = 0;                       // surviving free-DOF count
   std::vector<int> kept_global;     // kg -> global DOF
@@ -155,6 +243,10 @@ struct MatfreeReduced {
   void apply_kgg_raw(const double* xg, double* yg) const;
   // FP32 core of the reduced matvec: yg[0..ng) = K_gg xg[0..ng), driven off
   // contiguous float storage (handoff 092). Same operator, single precision.
+  // The FP32 kernel carries NO cubic pass: it throws std::logic_error when
+  // has_cubic (the mixed-precision V-cycle is guarded off on cubic systems in
+  // solve_mgcg_matfree — see the guard there — so this is a tripwire, not a
+  // reachable path).
   void apply_kgg_raw_f32(const float* xg, float* yg) const;
 };
 
@@ -164,13 +256,22 @@ struct MatfreeReduced {
 // solve_reduced_cg. `who` names the caller in thrown messages.
 // `active_mask` (active-domain phase 1) is forwarded verbatim to mf_build_elems;
 // null keeps the pre-feature build byte-for-byte.
+//
+// `lattice` (multiscale production wiring), when non-null and present(), selects
+// the COMPOSITE isotropic-or-cubic build: a solid voxel with mask[e] != 0
+// contributes a cubic element (its scalar modulus is never read — matching
+// fea_solve_cg_lattice's contract, where analyze.cpp passes 0 there); every
+// other solid voxel contributes the isotropic graded element exactly as today.
+// The void-DOF gate, the Jacobi diagonal and the K*up apply all run over BOTH
+// element lists. Null (the default) is the pre-cubic build byte-for-byte.
 MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
                                 double poisson,
                                 const std::vector<DirichletBC>& bcs,
                                 const std::vector<NodalLoad>& loads,
                                 const std::vector<double>* elem_youngs,
                                 const char* who, CgInfo* info,
-                                const std::vector<char>* active_mask = nullptr);
+                                const std::vector<char>* active_mask = nullptr,
+                                const MfLatticeArrays* lattice = nullptr);
 
 // What Krylov recycling (handoff 133) did to ONE solve: the number of recycle
 // columns that actually preconditioned it, and the operator applies charged to
@@ -212,6 +313,14 @@ struct MfSolveContext {
   const std::vector<double>* elem_youngs = nullptr;
   double youngs_modulus = 0.0;
   double poisson = 0.0;
+  // Per-voxel lattice arrays of the composite cubic operator (all-null on every
+  // scalar path). GenEO reads these BOTH to assemble its local subdomain
+  // operators from the true composite blocks AND in its moduli fingerprint: two
+  // designs sharing the same scalar field but different cubic tensors are
+  // DIFFERENT operators, and a held basis's coarse operator must refresh — a
+  // fingerprint blind to these fields would silently reuse a stale coarse
+  // operator (the phase-2 §P6 divergence).
+  MfLatticeArrays lattice;
 };
 using MfPrecondHook = std::function<void(const MatfreeReduced& m,
                                          const MfSolveContext& ctx, const double* r,

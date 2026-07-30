@@ -818,7 +818,15 @@ class Handler(BaseHTTPRequestHandler):
             with open(job_path, "w") as f:
                 json.dump(job_doc, f)
 
-        cmd = [CFG.cli, "run", job_path, "--out", out_dir]
+        # Route on the job's own mode (task lattice-page-core-hookup stage 3):
+        # an "analyze" job is ONE fixed-design analysis solve (`topopt-cli
+        # analyze` — writes analysis_report.json / analysis.json / fields.bin,
+        # NO variant meshes), everything else is the optimize ladder (`run`).
+        # The CLI stays the validator: `run` REFUSES an analyze job and the
+        # parser refuses any unknown mode, so this routing can never widen what
+        # actually executes.
+        subcmd = "analyze" if job_doc.get("mode") == "analyze" else "run"
+        cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
             cmd += ["--materials", CFG.materials]
         if CFG.rules:

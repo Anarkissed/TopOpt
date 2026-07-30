@@ -138,7 +138,8 @@ public struct LatticePage: View {
             topologyDisplayName: topologyDisplayName,
             cellMM: project.lattice.cellMM,
             bounds: project.lattice.enabled ? bounds : nil,
-            running: optimizing)
+            running: optimizing,
+            lineWidthMM: project.printParams.wallLineWidthOuterMM)
     }
 
     private var clearanceCount: Int { project.clearanceSpecs().count }

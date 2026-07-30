@@ -75,6 +75,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
   post.cell_size_mm = cell;
   post.mask.assign(n, 0);
   post.relative_density.assign(n, 0.0);
+  out.clamp_flags.assign(n, 0);
 
   const double kInf = std::numeric_limits<double>::infinity();
   double rho_min_used = kInf, rho_max_used = 0.0;
@@ -102,8 +103,19 @@ GradedField grade_lattice(const VoxelGrid& grid,
         demand_max > 0.0 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
                          : 0.0;
     double rho = rho_hi * std::pow(frac, gamma);
-    if (rho < rho_lo) rho = rho_lo;
-    if (rho > rho_hi) rho = rho_hi;
+    // Band-clamp accounting (H4b): count voxels the demand placed outside the
+    // certifiable band before the clamp. (rho > rho_hi is unreachable with the
+    // rho_hi * frac^gamma map, frac <= 1 — counted anyway so a future demand map
+    // cannot clamp silently.)
+    if (rho < rho_lo) {
+      ++out.clamped_lo_voxels;
+      out.clamp_flags[e] = 1;
+      rho = rho_lo;
+    } else if (rho > rho_hi) {
+      ++out.clamped_hi_voxels;
+      out.clamp_flags[e] = 2;
+      rho = rho_hi;
+    }
 
     post.mask[e] = 1;
     post.relative_density[e] = rho;
