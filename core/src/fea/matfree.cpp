@@ -183,6 +183,35 @@ inline void apply_one_element_f32(const MfElem& el, const float* KeCM,
     y[static_cast<std::size_t>(el.edof[r])] += f * res[r];
 }
 
+// Apply the COMBINED cubic block to ONE element (multiscale production wiring —
+// the PR 252 combined-block kernel shape, measured 2.4-2.7x the scalar apply
+// against 3.3-3.8x for three separate accumulators, which spill the NEON
+// register file). `Kcomb` is caller-provided 576-double scratch: the three
+// column-major reference blocks are fused into ONE element block
+// a*K_A + b*K_B + c*K_C (a streaming pass over three L1-resident 4.6 KB
+// blocks), then the standard single-accumulator AXPY sweep runs — the same
+// gather/scatter and y-write shape as apply_one_element, so the extra cost is
+// the fuse plus the shared sweep, not three sweeps. The scatter carries factor
+// 1 (the coefficients are already inside Kcomb).
+inline void apply_one_cubic_combined(const MfCubElem& el, const double* KAcm,
+                                     const double* KBcm, const double* KCcm,
+                                     double* Kcomb,
+                                     const std::vector<double>& x,
+                                     std::vector<double>& y) {
+  for (int t = 0; t < kDof * kDof; ++t)
+    Kcomb[t] = el.a * KAcm[t] + el.b * KBcm[t] + el.c * KCcm[t];
+  alignas(16) double ul[kDof];
+  alignas(16) double res[kDof];
+  for (int r = 0; r < kDof; ++r) {
+    ul[r] = x[static_cast<std::size_t>(el.edof[r])];
+    res[r] = 0.0;
+  }
+  for (int c = 0; c < kDof; ++c)
+    axpy24(res, ul[c], &Kcomb[static_cast<std::size_t>(c) * kDof]);
+  for (int r = 0; r < kDof; ++r)
+    y[static_cast<std::size_t>(el.edof[r])] += res[r];
+}
+
 // Requested worker-thread count (0 = auto). Global, set once per run; the apply
 // reads it. Determinism does NOT depend on it (colour partition), so it is a pure
 // performance knob.
@@ -340,6 +369,17 @@ bool mf_mixed_precision_enabled() {
   return g_mf_mixed_precision.load();
 }
 
+// Matrix-free cubic-lattice routing toggle (multiscale production wiring).
+// Opt-in, LIBRARY DEFAULT OFF: fea_solve_cg_lattice keeps its assembled
+// Jacobi-CG path byte-for-byte unless a caller (production) arms the route.
+namespace {
+std::atomic<bool> g_mf_cubic_lattice{false};
+}
+bool mf_set_cubic_lattice(bool enable) {
+  return g_mf_cubic_lattice.exchange(enable);
+}
+bool mf_cubic_lattice_enabled() { return g_mf_cubic_lattice.load(); }
+
 // External additive preconditioner hook (matrix-free GenEO two-level, phase 2).
 // DEFAULT EMPTY => byte-identical: mf_cg_solve never enters the hook branch. Guarded
 // by g_mf_precond_hook_installed so the hot loop pays a single relaxed atomic load,
@@ -430,6 +470,60 @@ std::vector<MfElem> mf_build_elems(const VoxelGrid& grid,
   return elems;
 }
 
+// Build the CUBIC element table (edof + the three coefficients), SORTED BY
+// COLOUR with the same parity rule and grid-scan order as mf_build_elems. A
+// solid voxel joins iff lattice.mask[e] != 0 (and the Active Domain mask, when
+// given, admits it — the skip applies BEFORE any array read, mirroring
+// mf_build_elems). Each voxel's triplet is validated by the SAME admissibility
+// rule as the assembled hex8_stiffness_cubic path.
+std::vector<MfCubElem> mf_build_cubic_elems(const VoxelGrid& grid,
+                                            const MfLatticeArrays& lattice,
+                                            const char* who,
+                                            std::vector<int>* color_offsets,
+                                            const std::vector<char>* active_mask) {
+  const std::size_t nv = grid.voxel_count();
+  if (!lattice.present() || lattice.c11 == nullptr || lattice.c12 == nullptr ||
+      lattice.c44 == nullptr)
+    throw std::invalid_argument(
+        std::string(who) + ": lattice arrays must all be present");
+  if (lattice.mask->size() != nv || lattice.c11->size() != nv ||
+      lattice.c12->size() != nv || lattice.c44->size() != nv)
+    throw std::invalid_argument(
+        std::string(who) + ": a per-voxel lattice array size != voxel_count");
+  if (active_mask != nullptr && active_mask->size() != nv)
+    throw std::invalid_argument(
+        std::string(who) + ": active-domain mask size != voxel_count");
+
+  std::vector<MfCubElem> buckets[kNumColors];
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        if (!grid.solid(i, j, k)) continue;
+        const std::size_t e = grid.index(i, j, k);
+        if (active_mask != nullptr && (*active_mask)[e] == 0) continue;
+        if ((*lattice.mask)[e] == 0) continue;
+        MfCubElem el;
+        el.a = (*lattice.c11)[e];
+        el.b = (*lattice.c12)[e];
+        el.c = (*lattice.c44)[e];
+        hex8_cubic_validate(el.a, el.b, el.c, who);
+        const std::array<int, 8> en = fea_element_nodes(grid, i, j, k);
+        for (int a = 0; a < 8; ++a)
+          for (int c = 0; c < 3; ++c) el.edof[3 * a + c] = 3 * en[a] + c;
+        const int color = (i & 1) | ((j & 1) << 1) | ((k & 1) << 2);
+        buckets[color].push_back(el);
+      }
+
+  std::vector<MfCubElem> elems;
+  if (color_offsets) color_offsets->assign(kNumColors + 1, 0);
+  for (int color = 0; color < kNumColors; ++color) {
+    if (color_offsets) (*color_offsets)[color] = static_cast<int>(elems.size());
+    elems.insert(elems.end(), buckets[color].begin(), buckets[color].end());
+  }
+  if (color_offsets) (*color_offsets)[kNumColors] = static_cast<int>(elems.size());
+  return elems;
+}
+
 // y = K x over the full global stiffness, COLOUR by COLOUR in fixed order 0..7.
 // Within a colour no two elements share a node, so the colour's elements are
 // apply'd in parallel (parallel_ranges) with NO races and NO order dependence —
@@ -457,12 +551,44 @@ void mf_apply_full(const std::vector<MfElem>& elems,
   }
 }
 
+// The cubic pass: y += (a*K_A + b*K_B + c*K_C) x per cubic element (NOT zeroed
+// — call after mf_apply_full). Combined-block kernel, colour-by-colour on the
+// shared worker pool; the per-chunk Kcomb scratch lives on the worker stack, so
+// the pass is race-free and bit-identical for any thread count by the same
+// colour-partition argument as the scalar apply.
+void mf_apply_cubic_add(const std::vector<MfCubElem>& elems,
+                        const std::vector<int>& color_offsets,
+                        const Hex8Stiffness& KA, const Hex8Stiffness& KB,
+                        const Hex8Stiffness& KC, const std::vector<double>& x,
+                        std::vector<double>& y) {
+  alignas(16) double KAcm[static_cast<std::size_t>(kDof) * kDof];
+  alignas(16) double KBcm[static_cast<std::size_t>(kDof) * kDof];
+  alignas(16) double KCcm[static_cast<std::size_t>(kDof) * kDof];
+  build_ke_colmajor(KA, KAcm);
+  build_ke_colmajor(KB, KBcm);
+  build_ke_colmajor(KC, KCcm);
+  const int nthreads = mf_thread_count();
+  const std::function<void(int, int)> body = [&](int lo, int hi) {
+    alignas(16) double Kcomb[static_cast<std::size_t>(kDof) * kDof];
+    for (int i = lo; i < hi; ++i)
+      apply_one_cubic_combined(elems[static_cast<std::size_t>(i)], KAcm, KBcm,
+                               KCcm, Kcomb, x, y);
+  };
+  for (int color = 0; color < kNumColors; ++color) {
+    const int b = color_offsets[static_cast<std::size_t>(color)];
+    const int e = color_offsets[static_cast<std::size_t>(color) + 1];
+    parallel_ranges(b, e, nthreads, body);
+  }
+}
+
 void MatfreeReduced::apply_kgg_raw(const double* xg, double* yg) const {
   std::fill(xfull.begin(), xfull.end(), 0.0);
   for (int k = 0; k < ng; ++k)
     xfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
         xg[static_cast<std::size_t>(k)];
   mf_apply_full(elems, color_offsets, Ke, xfull, yfull);
+  if (has_cubic)
+    mf_apply_cubic_add(cub_elems, cub_color_offsets, KA, KB, KC, xfull, yfull);
   // yg is fully overwritten (every kept DOF is written), so no pre-zero needed.
   for (int k = 0; k < ng; ++k)
     yg[static_cast<std::size_t>(k)] =
@@ -497,6 +623,13 @@ void mf_apply_full_f32(const std::vector<MfElem>& elems,
 // caller's float buffers across iterations). Full-length float scratch is sized
 // lazily on first use, so the FP64 path pays nothing for it.
 void MatfreeReduced::apply_kgg_raw_f32(const float* xg, float* yg) const {
+  // Tripwire: the FP32 kernel carries no cubic pass. solve_mgcg_matfree guards
+  // the mixed-precision V-cycle off on cubic systems, so this is unreachable in
+  // production; a future caller wiring FP32 onto a cubic operator must extend
+  // the kernel, not silently drop the cubic terms.
+  if (has_cubic)
+    throw std::logic_error(
+        "MatfreeReduced::apply_kgg_raw_f32: FP32 apply has no cubic pass");
   if (xfull_f.size() != static_cast<std::size_t>(ndof)) {
     xfull_f.assign(static_cast<std::size_t>(ndof), 0.0f);
     yfull_f.assign(static_cast<std::size_t>(ndof), 0.0f);
@@ -527,7 +660,8 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
                                 const std::vector<NodalLoad>& loads,
                                 const std::vector<double>* elem_youngs,
                                 const char* who, CgInfo* info,
-                                const std::vector<char>* active_mask) {
+                                const std::vector<char>* active_mask,
+                                const MfLatticeArrays* lattice) {
   const int num_nodes = fea_node_count(grid);
   const int ndof = 3 * num_nodes;
 
@@ -535,7 +669,34 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
   m.ndof = ndof;
   m.Ke = hex8_stiffness(elem_youngs != nullptr ? 1.0 : youngs_modulus, poisson,
                         grid.spacing);
-  m.elems = mf_build_elems(grid, elem_youngs, who, &m.color_offsets, active_mask);
+  const bool with_lattice = lattice != nullptr && lattice->present();
+  if (with_lattice) {
+    if (elem_youngs == nullptr)
+      throw std::invalid_argument(
+          std::string(who) + ": the lattice build requires per-voxel moduli");
+    if (lattice->mask->size() != grid.voxel_count())
+      throw std::invalid_argument(
+          std::string(who) + ": lattice mask size != voxel_count");
+    // The iso list must SKIP latticed voxels (their scalar modulus is never
+    // read — fea_solve_cg_lattice's contract, where analyze.cpp leaves 0
+    // there). Mechanically that is the same "contributes no element" skip the
+    // Active Domain mask performs, so compose the two into one derived mask.
+    std::vector<char> iso_admit(grid.voxel_count(), 1);
+    for (std::size_t e = 0; e < iso_admit.size(); ++e) {
+      const bool active = active_mask == nullptr || (*active_mask)[e] != 0;
+      iso_admit[e] = (active && (*lattice->mask)[e] == 0) ? 1 : 0;
+    }
+    m.elems = mf_build_elems(grid, elem_youngs, who, &m.color_offsets,
+                             &iso_admit);
+    m.cub_elems = mf_build_cubic_elems(grid, *lattice, who,
+                                       &m.cub_color_offsets, active_mask);
+    m.has_cubic = !m.cub_elems.empty();
+    if (m.has_cubic)
+      hex8_cubic_reference_blocks(grid.spacing, m.KA, m.KB, m.KC);
+  } else {
+    m.elems =
+        mf_build_elems(grid, elem_youngs, who, &m.color_offsets, active_mask);
+  }
   m.xfull.assign(static_cast<std::size_t>(ndof), 0.0);
   m.yfull.assign(static_cast<std::size_t>(ndof), 0.0);
 
@@ -567,6 +728,9 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
   if (nonzero_bc) {
     std::vector<double> kup(static_cast<std::size_t>(ndof), 0.0);
     mf_apply_full(m.elems, m.color_offsets, m.Ke, m.up, kup);
+    if (m.has_cubic)
+      mf_apply_cubic_add(m.cub_elems, m.cub_color_offsets, m.KA, m.KB, m.KC,
+                         m.up, kup);
     for (int d = 0; d < ndof; ++d)
       rhs_full[static_cast<std::size_t>(d)] -= kup[static_cast<std::size_t>(d)];
   }
@@ -589,6 +753,17 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
       if (fr >= 0) touched[static_cast<std::size_t>(fr)] = 1;
       diagfull[static_cast<std::size_t>(el.edof[r])] +=
           el.factor * m.Ke(r, r);
+    }
+  // Cubic elements gate and precondition identically: their diagonal is the
+  // decomposed a*K_A(r,r) + b*K_B(r,r) + c*K_C(r,r) (K_B's diagonal is zero but
+  // is kept in the sum for the structural point — the diagonal IS the element's
+  // own, not an isotropic surrogate).
+  for (const MfCubElem& el : m.cub_elems)
+    for (int r = 0; r < kDof; ++r) {
+      const int fr = free_of_dof[static_cast<std::size_t>(el.edof[r])];
+      if (fr >= 0) touched[static_cast<std::size_t>(fr)] = 1;
+      diagfull[static_cast<std::size_t>(el.edof[r])] +=
+          el.a * m.KA(r, r) + el.b * m.KB(r, r) + el.c * m.KC(r, r);
     }
 
   // Under-constrained: every free DOF void (no stiffness anywhere).
@@ -903,6 +1078,59 @@ std::vector<double> fea_matfree_apply(const VoxelGrid& grid,
                                       double poisson,
                                       const std::vector<double>& u) {
   return matfree_apply_impl(grid, 1.0, poisson, &youngs_per_voxel, u);
+}
+
+// Composite isotropic-or-cubic matrix-free apply (multiscale production
+// wiring): y = K u for the SAME operator assemble_reduced_lattice scatters —
+// iso pass (mask == 0 voxels, factor = per-voxel modulus) then the cubic
+// combined-block pass (mask != 0 voxels, exact three-block decomposition).
+// With an all-zero mask the cubic list is empty and this is fea_matfree_apply
+// bit-for-bit.
+std::vector<double> fea_matfree_apply_lattice(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    const std::vector<char>& lattice_mask, const std::vector<double>& lattice_c11,
+    const std::vector<double>& lattice_c12, const std::vector<double>& lattice_c44,
+    double poisson, const std::vector<double>& u) {
+  const int ndof = 3 * fea_node_count(grid);
+  if (static_cast<int>(u.size()) != ndof)
+    throw std::invalid_argument(
+        "fea_matfree_apply_lattice: u size != 3*fea_node_count");
+  const char* who = "fea_matfree_apply_lattice";
+  fea_detail::MfLatticeArrays lat;
+  lat.mask = &lattice_mask;
+  lat.c11 = &lattice_c11;
+  lat.c12 = &lattice_c12;
+  lat.c44 = &lattice_c44;
+  const Hex8Stiffness Ke = hex8_stiffness(1.0, poisson, grid.spacing);
+  std::vector<char> iso_admit(grid.voxel_count(), 1);
+  if (lattice_mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        std::string(who) + ": lattice mask size != voxel_count");
+  for (std::size_t e = 0; e < iso_admit.size(); ++e)
+    iso_admit[e] = lattice_mask[e] == 0 ? 1 : 0;
+  std::vector<int> color_offsets, cub_offsets;
+  const std::vector<MfElem> elems = fea_detail::mf_build_elems(
+      grid, &youngs_per_voxel, who, &color_offsets, &iso_admit);
+  const std::vector<fea_detail::MfCubElem> cub =
+      fea_detail::mf_build_cubic_elems(grid, lat, who, &cub_offsets, nullptr);
+  std::vector<double> y(static_cast<std::size_t>(ndof), 0.0);
+  fea_detail::mf_apply_full(elems, color_offsets, Ke, u, y);
+  if (!cub.empty()) {
+    Hex8Stiffness KA, KB, KC;
+    fea_detail::hex8_cubic_reference_blocks(grid.spacing, KA, KB, KC);
+    fea_detail::mf_apply_cubic_add(cub, cub_offsets, KA, KB, KC, u, y);
+  }
+  return y;
+}
+
+// Multiscale production wiring — the matrix-free cubic-lattice ROUTE toggle.
+// Opt-in, LIBRARY DEFAULT OFF; see fea.hpp for the contract and the tripwire
+// constant, and production.cpp for the arming site.
+bool fea_set_matfree_cubic_lattice(bool enable) {
+  return fea_detail::mf_set_cubic_lattice(enable);
+}
+bool fea_matfree_cubic_lattice_enabled() {
+  return fea_detail::mf_cubic_lattice_enabled();
 }
 
 std::size_t fea_matfree_operator_storage_doubles() {

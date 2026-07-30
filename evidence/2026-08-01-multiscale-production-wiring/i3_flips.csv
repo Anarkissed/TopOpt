@@ -1,0 +1,3 @@
+comparison,n_class_flips,max_drho,mean_drho
+control_1e-9_vs_plain,24,3.042e-02,1.710e-04
+fullstack_vs_plain,28,1.876e-02,1.998e-04

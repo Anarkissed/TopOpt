@@ -493,6 +493,16 @@ if(Eigen3_FOUND)
   target_link_libraries(test_geneo PRIVATE topopt)
   add_test(NAME geneo_twolevel COMMAND test_geneo)
 
+  # Matrix-free cubic lattice path guards (handoff 2026-08-01-multiscale-
+  # production-wiring): library default OFF, apply/solve exactness vs the
+  # assembled lattice operator (<= 1e-12 / iterations within 1), all-scalar
+  # bit-identity, the armed route, the GenEO moduli-fingerprint invalidation on
+  # a tensor-only design change, and recycling exactness across a tensor
+  # change. Eigen-gated like the solver group.
+  add_executable(test_matfree_cubic tests/unit/test_matfree_cubic.cpp)
+  target_link_libraries(test_matfree_cubic PRIVATE topopt)
+  add_test(NAME matfree_cubic_lattice COMMAND test_matfree_cubic)
+
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs
   # Euler-Bernoulli with convergence across 3 resolutions, plus the von Mises
   # stress field output. Builds its beam grids in code (no fixture) and drives

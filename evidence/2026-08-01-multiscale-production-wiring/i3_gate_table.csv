@@ -1,0 +1,10 @@
+design,route,verdict,margin_worst,margin_effective,max_vm,lattice_max_vm,lattice_voxels,non_convergent
+plain_snapped,assembled_off,ACCEPTED,1.955518974,1.955518974,28.125526,13.153744,4060,0
+plain_snapped,matfree_armed,ACCEPTED,1.955518977,1.955518977,28.125526,13.153744,4060,0
+plain_snapped,assembled_control_1e-9,ACCEPTED,1.955518972,1.955518972,28.125526,13.153744,4060,0
+fullstack_snapped,assembled_off,ACCEPTED,1.955850301,1.955850301,28.120762,13.152709,4060,0
+fullstack_snapped,matfree_armed,ACCEPTED,1.955850282,1.955850282,28.120762,13.152709,4060,0
+fullstack_snapped,assembled_control_1e-9,ACCEPTED,1.955850299,1.955850299,28.120762,13.152709,4060,0
+plain_unsnapped,assembled_off,REFUSED_E5(rho=0.983541),0.000000000,0.000000000,0.000000,0.000000,0,0
+plain_unsnapped,matfree_armed,REFUSED_E5(rho=0.983541),0.000000000,0.000000000,0.000000,0.000000,0,0
+plain_unsnapped,assembled_control_1e-9,REFUSED_E5(rho=0.983541),0.000000000,0.000000000,0.000000,0.000000,0,0

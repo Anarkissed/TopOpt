@@ -1,0 +1,35 @@
+I1 — OFF IS BYTE-IDENTICAL (stash-rebuild, branch vs main)
+===========================================================
+Procedure: (1) on the BRANCH build, run the demo production job
+(core/tests/fixtures/demo/job.json with output.mesh_format stl — this build has
+no lib3mf; the fixture itself is untouched) via topopt-cli, plus a probe that
+solves a mixed lattice certification system through fea_solve_cg_lattice
+(library default OFF) and two scalar matrix-free solves, printing FNV-1a of
+each displacement field. (2) git stash (the branch's tracked changes), rebuild
+the SAME build dir at main state, re-run both. (3) compare. (4) git stash pop,
+rebuild.
+
+Self-determinism (branch, two runs of the CLI job): report.json, fields.bin and
+every variant STL byte-identical; run_info.json differs only in its wall-clock
+duration fields and is excluded (the same exclusion prior arming handoffs used).
+
+CLI job outputs, BRANCH vs MAIN:
+  report.json      IDENTICAL  (sha256 ee06cad13acb7c48...)
+  fields.bin       IDENTICAL  (sha256 a5841ecf74b584bb...)
+  variant_030.stl  IDENTICAL
+  variant_050.stl  IDENTICAL
+  variant_070.stl  IDENTICAL
+
+Solver probe, BRANCH vs MAIN (identical to the byte):
+  lattice_assembled    u_fnv=b97335b210cd4d7b iters=295   (fea_solve_cg_lattice, route OFF)
+  scalar_matfree       u_fnv=8bc8ce4a5816cb6a iters=275   (fea_solve_cg_matfree)
+  scalar_mgcg_matfree  u_fnv=62d91a63e2aa60da iters=19    (fea_solve_mgcg_matfree, used_mg=1)
+
+Note the CLI job is run through configure_production_options, i.e. with the new
+route ARMED — and is STILL byte-identical, because a scalar job never reaches
+fea_solve_cg_lattice. The route only changes latticed certifications, measured
+in I3.
+
+Full test suite on the branch: 82/82 passed (ctest, Release; includes the new
+matfree_cubic_lattice guard and the extended production_parity before/after
+assertions).

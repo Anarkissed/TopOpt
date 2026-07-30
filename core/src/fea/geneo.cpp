@@ -90,13 +90,24 @@ inline double raw_weight(const Block& core, const Block& agg, const VoxelGrid& g
 struct LocalOp {
   int n = 0;
   std::vector<std::array<int, 24>> edof;
-  std::vector<double> eE;       // per-element modulus
+  std::vector<double> eE;       // per-element modulus (iso elements)
+  // CUBIC (latticed) elements (multiscale production wiring): ecub[e] != 0
+  // selects the exact three-block element eA*K_A + eB*K_B + eC*K_C instead of
+  // eE*K0 — the SAME decomposition the global operator applies, so the local
+  // Neumann pencil sees the true composite stiffness, not a scalar surrogate.
+  // All-zero ecub (every scalar path) leaves applyNeu on the K0 branch
+  // element-for-element as before.
+  std::vector<char> ecub;
+  std::vector<double> eA, eB, eC;
   std::vector<double> D;        // normalized PoU diagonal (w_i / W)
   std::vector<double> diagNeu;  // diag(A^Neu) for the LOBPCG Jacobi step
   std::vector<int> dofNode;
   std::vector<double> nodeXYZ;
   std::vector<int> gdof;  // local dof -> GLOBAL dof (3*node+comp)
   const Eigen::Matrix<double, 24, 24>* K0 = nullptr;
+  const Eigen::Matrix<double, 24, 24>* KA = nullptr;
+  const Eigen::Matrix<double, 24, 24>* KB = nullptr;
+  const Eigen::Matrix<double, 24, 24>* KC = nullptr;
 
   void applyNeu(const double* x, double* y) const {
     for (int i = 0; i < n; ++i) y[i] = 0.0;
@@ -104,10 +115,18 @@ struct LocalOp {
     for (std::size_t e = 0; e < edof.size(); ++e) {
       const auto& d = edof[e];
       for (int a = 0; a < 24; ++a) xe(a) = (d[a] >= 0) ? x[d[a]] : 0.0;
-      ye.noalias() = (*K0) * xe;
-      const double E = eE[e];
-      for (int a = 0; a < 24; ++a)
-        if (d[a] >= 0) y[d[a]] += E * ye(a);
+      if (ecub[e]) {
+        ye.noalias() = eA[e] * ((*KA) * xe);
+        ye.noalias() += eB[e] * ((*KB) * xe);
+        ye.noalias() += eC[e] * ((*KC) * xe);
+        for (int a = 0; a < 24; ++a)
+          if (d[a] >= 0) y[d[a]] += ye(a);
+      } else {
+        ye.noalias() = (*K0) * xe;
+        const double E = eE[e];
+        for (int a = 0; a < 24; ++a)
+          if (d[a] >= 0) y[d[a]] += E * ye(a);
+      }
     }
   }
   VectorXd applyNeuV(const VectorXd& x) const {
@@ -168,10 +187,17 @@ LocalOp build_local(const VoxelGrid& g, const std::vector<double>& emod,
                     const Block& core, int ov,
                     const Eigen::Matrix<double, 24, 24>& K0,
                     const std::vector<char>& fixed_dof_lut,
-                    const std::vector<double>& nodeWglobal) {
+                    const std::vector<double>& nodeWglobal,
+                    const MfLatticeArrays& lat,
+                    const Eigen::Matrix<double, 24, 24>* KA,
+                    const Eigen::Matrix<double, 24, 24>* KB,
+                    const Eigen::Matrix<double, 24, 24>* KC) {
   const Block agg = agglomerate(core, ov, g);
   LocalOp L;
   L.K0 = &K0;
+  L.KA = KA;
+  L.KB = KB;
+  L.KC = KC;
   std::unordered_map<int, int> lmap;
   lmap.reserve(8192);
   auto local_dof = [&](int gd) -> int {
@@ -196,8 +222,23 @@ LocalOp build_local(const VoxelGrid& g, const std::vector<double>& emod,
             if (ld >= 0) any = true;
           }
         if (!any) continue;
+        const std::size_t idx = g.index(i, j, k);
+        const bool cub = lat.present() && (*lat.mask)[idx] != 0;
         L.edof.push_back(d);
-        L.eE.push_back(emod[g.index(i, j, k)]);
+        L.ecub.push_back(cub ? 1 : 0);
+        if (cub) {
+          // Latticed voxel: the true composite element (its scalar modulus is
+          // never read — matching the global operator's contract).
+          L.eE.push_back(0.0);
+          L.eA.push_back((*lat.c11)[idx]);
+          L.eB.push_back((*lat.c12)[idx]);
+          L.eC.push_back((*lat.c44)[idx]);
+        } else {
+          L.eE.push_back(emod[idx]);
+          L.eA.push_back(0.0);
+          L.eB.push_back(0.0);
+          L.eC.push_back(0.0);
+        }
       }
   L.n = static_cast<int>(lmap.size());
   L.dofNode.assign(L.n, -1);
@@ -244,8 +285,13 @@ LocalOp build_local(const VoxelGrid& g, const std::vector<double>& emod,
   L.diagNeu.assign(L.n, 0.0);
   for (std::size_t e = 0; e < L.edof.size(); ++e) {
     const auto& d = L.edof[e];
-    for (int a = 0; a < 24; ++a)
-      if (d[a] >= 0) L.diagNeu[d[a]] += L.eE[e] * K0(a, a);
+    for (int a = 0; a < 24; ++a) {
+      if (d[a] < 0) continue;
+      L.diagNeu[d[a]] +=
+          L.ecub[e] ? L.eA[e] * (*KA)(a, a) + L.eB[e] * (*KB)(a, a) +
+                          L.eC[e] * (*KC)(a, a)
+                    : L.eE[e] * K0(a, a);
+    }
   }
   return L;
 }
@@ -498,6 +544,23 @@ std::uint64_t moduli_fingerprint(const MfSolveContext& ctx) {
   else
     f.add(&ctx.youngs_modulus, sizeof ctx.youngs_modulus);
   f.add(&ctx.poisson, sizeof ctx.poisson);
+  // CUBIC LATTICE FIELDS (multiscale production wiring). A cubic design is
+  // THREE fields beyond the scalar moduli; two designs sharing the same
+  // scalar-modulus-equivalent field but different tensors are DIFFERENT
+  // operators, and a fingerprint blind to the tensors would silently reuse the
+  // held coarse operator V^T A_old V against the new A — exactly the stale
+  // reuse the mandatory refresh exists to prevent (phase 2 §P6 measured
+  // divergence). The mask participates too: moving a voxel between the iso and
+  // cubic lists changes the operator even if every array value is unchanged. A
+  // presence tag keeps "no lattice" distinct from "empty lattice arrays".
+  const unsigned char lat_present = ctx.lattice.present() ? 1 : 0;
+  f.add(&lat_present, sizeof lat_present);
+  if (ctx.lattice.present()) {
+    f.add(ctx.lattice.mask->data(), ctx.lattice.mask->size() * sizeof(char));
+    f.add(ctx.lattice.c11->data(), ctx.lattice.c11->size() * sizeof(double));
+    f.add(ctx.lattice.c12->data(), ctx.lattice.c12->size() * sizeof(double));
+    f.add(ctx.lattice.c44->data(), ctx.lattice.c44->size() * sizeof(double));
+  }
   return f.h;
 }
 
@@ -578,6 +641,26 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
     for (int r = 0; r < 24; ++r)
       for (int c = 0; c < 24; ++c) K0(r, c) = k(r, c);
   }
+  // The three cubic reference blocks (multiscale production wiring), built only
+  // when the solve context carries lattice fields — the scalar path allocates
+  // and computes nothing extra.
+  Eigen::Matrix<double, 24, 24> KAe, KBe, KCe;
+  const Eigen::Matrix<double, 24, 24>* KAp = nullptr;
+  const Eigen::Matrix<double, 24, 24>* KBp = nullptr;
+  const Eigen::Matrix<double, 24, 24>* KCp = nullptr;
+  if (ctx.lattice.present()) {
+    Hex8Stiffness kA, kB, kC;
+    hex8_cubic_reference_blocks(g.spacing, kA, kB, kC);
+    for (int r = 0; r < 24; ++r)
+      for (int c = 0; c < 24; ++c) {
+        KAe(r, c) = kA(r, c);
+        KBe(r, c) = kB(r, c);
+        KCe(r, c) = kC(r, c);
+      }
+    KAp = &KAe;
+    KBp = &KBe;
+    KCp = &KCe;
+  }
   // global DOF -> kept index; a DOF is eliminated iff not kept (Dirichlet-fixed
   // OR void-gated) — the exact set the reduced system drops, so every subdomain
   // inherits the global Dirichlet boundary (classical A_i = R_i A R_i^T).
@@ -602,7 +685,8 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
   mf_parallel_ranges(
       0, static_cast<int>(cores.size()), 1, [&](int lo, int hi) {
         for (int si = lo; si < hi; ++si) {
-          LocalOp L = build_local(g, emod, cores[si], kGeneoOverlap, K0, fixed, W);
+          LocalOp L = build_local(g, emod, cores[si], kGeneoOverlap, K0, fixed,
+                                  W, ctx.lattice, KAp, KBp, KCp);
           if (L.n < 24) continue;
           const int mm = std::min(kGeneoBlockM, L.n);
           LobpcgResult lob = lobpcg(L, mm, kGeneoLambdaCut, 800,

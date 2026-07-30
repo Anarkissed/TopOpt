@@ -190,6 +190,38 @@ constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
 // FNV in the arming handoff.
 constexpr bool kProductionGeneoTwoLevel = true;  // ARMED
 
+// ===========================================================================
+// TRIPWIRE — the MATRIX-FREE CUBIC LATTICE route production arming
+// (handoff 2026-08-01-multiscale-production-wiring; kernel proven in
+// 2026-07-30-matfree-cubic-probe, formulation in
+// 2026-07-31-multiscale-lattice-feasibility).
+// ===========================================================================
+// Do NOT disarm this, or change the kernel shape (combined-block), the GenEO
+// three-block local assembly, or the Galerkin three-block coarse build, without
+// re-running core/tests/harness/multiscale_stack_probe.cpp (both regimes: the
+// mild plain-lattice loop AND the sharpened gap-curve phases) and landing a new
+// gate table against the negative-control floor.
+//
+// WHAT IT IS. fea_solve_cg_lattice — the lattice certification solve
+// analyze_fixed_design runs for every LatticePosture — routes to the
+// matrix-free cubic path: the exact three-block element decomposition
+// Ke = C11*K_A + C12*K_B + C44*K_C (PR 252: worst rel err 8.5e-16; apply
+// 2.4-2.7x scalar cost in the combined-block shape) on the full accelerator
+// stack (multigrid, GenEO deflation, Krylov recycling). Before this the
+// lattice solve was ASSEMBLED Jacobi-CG regardless of solver_kind — the only
+// production solve still trapped off the accelerator stack, and the path a
+// multiscale in-loop solve would have been stuck on.
+//
+// LIKE recycling/GenEO and UNLIKE the AD band / draft, the route is an EXACT
+// accelerator: every preconditioner term is SPD and the stopping test is
+// unchanged, so it changes iteration counts and in-basin rounding, never the
+// verdict logic or tolerance. It is NOT bit-identical when it engages, which
+// is why the arming evidence is a gate table + negative-control basin floor
+// (the 248 discipline), not a bit-parity claim. The LIBRARY default stays OFF
+// (THE ONE RULE, static-asserted in fea.hpp): reference runs never call
+// configure_production_options and are byte-for-byte unchanged.
+constexpr bool kProductionMatfreeCubicLattice = true;  // ARMED
+
 // Handoff 132 (C) — the PRODUCTION matrix-free worker-thread count.
 //
 // The library default (fea_set_matfree_threads(0)) resolves to
@@ -241,6 +273,7 @@ int production_active_domain_band() { return kProductionActiveDomainBand; }
 double production_draft_loose_tol() { return kProductionDraftLooseTol; }
 bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
 bool production_geneo_twolevel() { return kProductionGeneoTwoLevel; }
+bool production_matfree_cubic_lattice() { return kProductionMatfreeCubicLattice; }
 
 KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
   // The ONE construction (handoff 2026-07-26-post-merge-build-fix). All four fields
@@ -401,6 +434,19 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // run_info.json echoes the armed posture and the per-run basis lifecycle
   // (builds / refreshes / armed solves / dim / bytes).
   fea_set_geneo_twolevel(kProductionGeneoTwoLevel);
+
+  // Handoff 2026-08-01-multiscale-production-wiring — MATRIX-FREE CUBIC
+  // LATTICE route, armed (see the TRIPWIRE beside kProductionMatfreeCubicLattice).
+  // Every lattice certification solve (fea_solve_cg_lattice, the path
+  // analyze_fixed_design runs for a LatticePosture) now rides the same
+  // matrix-free multigrid + GenEO + recycling stack as the scalar production
+  // solver, on the exact three-block cubic operator. Exact accelerator: SPD
+  // preconditioners, unchanged stopping test — iteration route changes, the
+  // certificate's verdict logic and tolerance do not. The LIBRARY default
+  // stays OFF (THE ONE RULE): reference runs never call this function and are
+  // byte-for-byte unchanged, asserted in test_production_parity before AND
+  // after this call.
+  fea_set_matfree_cubic_lattice(kProductionMatfreeCubicLattice);
 
   // Handoff 2026-07-26-ad-arming — ACTIVE DOMAIN, armed in AUTO (maintainer
   // decision, recorded verbatim in the handoff §"THE DECISION"). The band

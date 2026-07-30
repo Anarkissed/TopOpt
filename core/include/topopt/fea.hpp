@@ -405,9 +405,15 @@ FeaSolution fea_solve_cg(const VoxelGrid& grid,
 // non-positive isotropic modulus on a non-lattice solid voxel, or a non-physical
 // cubic tensor on a lattice voxel (hex8_stiffness_cubic's admissibility). Throws
 // SolverNonConvergence / std::runtime_error on the same solver conditions as
-// fea_solve_cg. This is the ASSEMBLED Jacobi-CG path only (no multigrid, no
-// matrix-free): the production accelerator paths remain scalar-modulus — see the
-// handoff's scope note.
+// fea_solve_cg.
+//
+// ROUTE (multiscale production wiring, 2026-08-01). With the matrix-free cubic
+// route OFF — the LIBRARY DEFAULT, and every reference run — this is the
+// ASSEMBLED Jacobi-CG path, byte-for-byte the pre-wiring solver. When a caller
+// arms fea_set_matfree_cubic_lattice (production does), the SAME system routes
+// to fea_solve_cg_lattice_matfree below: the full matrix-free accelerator stack
+// (multigrid, GenEO deflation, Krylov recycling). Same solution within
+// `tolerance`; a different iteration route, never a different answer.
 FeaSolution fea_solve_cg_lattice(
     const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
     const std::vector<char>& lattice_mask, const std::vector<double>& lattice_c11,
@@ -415,6 +421,36 @@ FeaSolution fea_solve_cg_lattice(
     double poisson, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, double tolerance = 1e-8,
     int max_iterations = 0, CgInfo* info = nullptr);
+
+// MATRIX-FREE CUBIC LATTICE solve (multiscale production wiring, handoff
+// 2026-08-01-multiscale-production-wiring). Solves the IDENTICAL composite
+// isotropic-or-cubic system as fea_solve_cg_lattice — same per-voxel element
+// rule, same M3.1 void gate, same relative-residual stopping test — WITHOUT
+// ever assembling it, on the production accelerator stack:
+//   * the element apply is the EXACT three-block decomposition
+//     Ke = C11*K_A + C12*K_B + C44*K_C (PR 252, worst rel err 8.5e-16), run in
+//     the COMBINED-BLOCK kernel shape (one fused element block per cubic
+//     element; measured 2.4-2.7x the scalar apply, under the 3x flop ratio);
+//   * multigrid-first: the Galerkin coarse operator decomposes over the same
+//     three blocks (W^T Ke W = C11*W^T K_A W + ...), so the V-cycle carries the
+//     composite contrast exactly;
+//   * the Jacobi-CG fallback keeps GenEO two-level deflation (its subdomain
+//     operators assembled from the true composite blocks, its moduli
+//     fingerprint keyed on ALL THREE cubic fields plus the mask) and Krylov
+//     recycling, both SPD-additive: iteration counts change, the converged
+//     field and the stopping test never do.
+// With an all-zero lattice_mask the cubic table is empty and this is
+// fea_solve_mgcg_matfree on the graded moduli, bit-for-bit. `active_mask`
+// composes as in fea_solve_mgcg_matfree (a masked voxel contributes no element
+// from EITHER list). Throws exactly as fea_solve_cg_lattice.
+FeaSolution fea_solve_cg_lattice_matfree(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    const std::vector<char>& lattice_mask, const std::vector<double>& lattice_c11,
+    const std::vector<double>& lattice_c12, const std::vector<double>& lattice_c44,
+    double poisson, const std::vector<DirichletBC>& bcs,
+    const std::vector<NodalLoad>& loads, double tolerance = 1e-8,
+    int max_iterations = 0, CgInfo* info = nullptr,
+    const std::vector<char>* active_mask = nullptr);
 
 // Geometric-multigrid-preconditioned CG variants of fea_solve_cg (handoff 072).
 // These solve the IDENTICAL BC-reduced, void-gated system Ku=f as fea_solve_cg,
@@ -553,6 +589,19 @@ std::vector<double> fea_matfree_apply(const VoxelGrid& grid,
                                       const std::vector<double>& youngs_per_voxel,
                                       double poisson,
                                       const std::vector<double>& u);
+
+// Composite ISOTROPIC-OR-CUBIC matrix-free apply (multiscale production
+// wiring): y = K u for the SAME operator fea_solve_cg_lattice assembles — a
+// mask==0 solid voxel applies youngs_per_voxel[e] * K_unit_iso, a mask!=0 one
+// the exact three-block cubic element C11*K_A + C12*K_B + C44*K_C
+// (combined-block kernel). With an all-zero mask this is the graded
+// fea_matfree_apply bit-for-bit (the cubic table is empty). Array contract and
+// throwing behaviour follow fea_solve_cg_lattice.
+std::vector<double> fea_matfree_apply_lattice(
+    const VoxelGrid& grid, const std::vector<double>& youngs_per_voxel,
+    const std::vector<char>& lattice_mask, const std::vector<double>& lattice_c11,
+    const std::vector<double>& lattice_c12, const std::vector<double>& lattice_c44,
+    double poisson, const std::vector<double>& u);
 
 // Assembled reference for the operator above: y = K u over the same full global
 // stiffness, but computed by materialising the sparse K and multiplying. This is
@@ -729,6 +778,36 @@ static_assert(kMatfreeExternalPrecondDefaultOff,
               "matrix-free external preconditioner hook must ship default-off: no "
               "production path may install it without updating the phase-2 "
               "byte-identical evidence");
+
+// ---------------------------------------------------------------------------
+// MATRIX-FREE CUBIC LATTICE ROUTE (multiscale production wiring, handoff
+// 2026-08-01-multiscale-production-wiring). OPT-IN, LIBRARY DEFAULT OFF;
+// production arms it in configure_production_options (the ONE named constant
+// kProductionMatfreeCubicLattice in production.cpp).
+//
+// WHAT IT GATES. Only the ROUTE taken by fea_solve_cg_lattice: OFF (the
+// default, and every reference run) keeps the assembled Jacobi-CG path
+// byte-for-byte; ON routes the same composite system to
+// fea_solve_cg_lattice_matfree — multigrid + GenEO deflation + Krylov
+// recycling on the exact three-block cubic operator. The direct entry points
+// (fea_solve_cg_lattice_matfree, fea_matfree_apply_lattice) are plain opt-in
+// functions and ignore this toggle.
+//
+// EXACTNESS. The armed route is an ACCELERATOR-CLASS change (like recycling /
+// GenEO, unlike the AD band): every preconditioner term is SPD and the
+// relative-residual stopping test is unchanged, so it changes CG iteration
+// counts and the in-basin rounding of the converged field, never the answer or
+// any gate's verdict logic. It is NOT bit-identical when it engages — the
+// arming evidence therefore carries a gate table against a negative-control
+// basin floor, not a bit-parity claim (the 248 discipline).
+constexpr bool kMatfreeCubicLatticeLibraryDefaultOff = true;
+static_assert(kMatfreeCubicLatticeLibraryDefaultOff,
+              "the matrix-free cubic lattice route must ship LIBRARY-default "
+              "OFF: reference runs never call configure_production_options and "
+              "must stay byte-identical (THE ONE RULE)");
+// Returns the previous value. Thread-global, like the other matrix-free dials.
+bool fea_set_matfree_cubic_lattice(bool enable);
+bool fea_matfree_cubic_lattice_enabled();
 
 // ---------------------------------------------------------------------------
 // GENEO TWO-LEVEL DEFLATION (handoff 2026-07-29-geneo-arming). OPT-IN, LIBRARY

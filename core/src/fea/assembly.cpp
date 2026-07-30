@@ -659,6 +659,19 @@ FeaSolution fea_solve_cg_lattice(
     double poisson, const std::vector<DirichletBC>& bcs,
     const std::vector<NodalLoad>& loads, double tolerance, int max_iterations,
     CgInfo* info) {
+  // MATRIX-FREE CUBIC ROUTE (multiscale production wiring). Opt-in, LIBRARY
+  // DEFAULT OFF (fea_set_matfree_cubic_lattice; production arms it): when armed
+  // the SAME composite system solves on the full matrix-free accelerator stack
+  // — multigrid, GenEO deflation, Krylov recycling — instead of assembling.
+  // Same solution within `tolerance`, different iteration route. When OFF (the
+  // default, and every reference run) the assembled path below is byte-for-byte
+  // the pre-wiring solver. Routing HERE, inside fea/, means the analyze.cpp
+  // certification call site needs no edit to gain the armed path.
+  if (fea_matfree_cubic_lattice_enabled())
+    return fea_solve_cg_lattice_matfree(grid, youngs_per_voxel, lattice_mask,
+                                        lattice_c11, lattice_c12, lattice_c44,
+                                        poisson, bcs, loads, tolerance,
+                                        max_iterations, info);
   ReducedSystem s = assemble_reduced_lattice(
       grid, poisson, youngs_per_voxel, lattice_mask, lattice_c11, lattice_c12,
       lattice_c44, bcs, loads);

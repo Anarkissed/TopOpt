@@ -198,6 +198,18 @@ double production_draft_loose_tol();
 // recipe constants and their derivations.
 bool production_geneo_twolevel();
 
+// Handoff 2026-08-01-multiscale-production-wiring — whether
+// configure_production_options arms the MATRIX-FREE CUBIC LATTICE route (true =
+// ARMED): fea_solve_cg_lattice then solves the composite isotropic-or-cubic
+// system on the full matrix-free accelerator stack (multigrid + GenEO +
+// recycling, exact three-block cubic operator) instead of assembling. Exposed
+// so the parity test asserts fea_matfree_cubic_lattice_enabled() against this
+// named constant rather than a bare true. The LIBRARY default stays OFF
+// (kMatfreeCubicLatticeLibraryDefaultOff in fea.hpp), so Gate-V2 and every
+// reference run are byte-identical (THE ONE RULE). See production.cpp for the
+// TRIPWIRE and the arming evidence.
+bool production_matfree_cubic_lattice();
+
 // Handoff 2026-07-26-width-aware-knockdown — whether configure_production_options
 // arms the WIDTH-AWARE accept-gate knockdown. false = the SHIPPED default (the pure
 // scalar f^1.5 gate, byte-for-byte the pre-width gate); true = the SHELL+CORE
