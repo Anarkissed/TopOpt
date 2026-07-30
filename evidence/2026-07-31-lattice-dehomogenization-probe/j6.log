@@ -1,0 +1,8 @@
+LATTICE DE-HOMOGENIZATION PROBE — octet band [0.05047, 0.89988] (read from core)
+
+===== J6 — PR 255's certified designs under the measured K =====
+  s0_plain: shipped margin 1.497 -> strut-bound margin 0.3936 (WOULD BE REJECTED)
+  s2_gappen: shipped margin 1.481 -> strut-bound margin 0.3799 (WOULD BE REJECTED)
+  s3_contin: shipped margin 1.455 -> strut-bound margin 0.3769 (WOULD BE REJECTED)
+
+DONE (rc=0).

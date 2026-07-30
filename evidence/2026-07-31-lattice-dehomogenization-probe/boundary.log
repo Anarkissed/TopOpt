@@ -1,0 +1,21 @@
+LATTICE DE-HOMOGENIZATION PROBE — octet band [0.05047, 0.89988] (read from core)
+
+===== BOUNDARY POPULATIONS — free surfaces and cut cells (J4) =====
+  sandwich rho 0.048 N4 vpc16: K_dev free=0.0 interior=0.0 dropped=10240 (0s, cg<=34)
+  sandwich rho 0.095 N4 vpc16: K_dev free=57.2 interior=48.7 dropped=0 (35s, cg<=1003)
+  sandwich rho 0.155 N4 vpc16: K_dev free=30.4 interior=26.2 dropped=0 (38s, cg<=1003)
+  sandwich rho 0.204 N4 vpc16: K_dev free=26.4 interior=22.9 dropped=0 (60s, cg<=793)
+  sandwich rho 0.316 N4 vpc16: K_dev free=13.3 interior=12.1 dropped=0 (60s, cg<=714)
+  sandwich rho 0.444 N4 vpc16: K_dev free=9.2 interior=8.0 dropped=0 (83s, cg<=628)
+  sandwich rho 0.600 N4 vpc16: K_dev free=5.9 interior=5.2 dropped=0 (116s, cg<=521)
+  sandwich rho 0.752 N4 vpc16: K_dev free=3.5 interior=3.5 dropped=0 (172s, cg<=453)
+  sandwich rho 0.896 N4 vpc16: K_dev free=2.5 interior=2.4 dropped=0 (169s, cg<=431)
+  sandwich rho 0.204 N4 vpc24: K_dev free=27.3 interior=24.3 dropped=0 (238s, cg<=1201)
+  sandwich rho 0.048 N3 vpc24: K_dev free=104.5 interior=97.3 dropped=0 (43s, cg<=1966)
+  sandwich rho 0.095 N3 vpc24: K_dev free=61.9 interior=51.0 dropped=0 (58s, cg<=1382)
+  sandwich rho 0.155 N3 vpc24: K_dev free=32.2 interior=30.0 dropped=0 (64s, cg<=1170)
+  cut rho 0.204 N4 vpc16: K_dev free=26.6 interior=24.3 dropped=0 (75s, cg<=1117)
+  cut rho 0.316 N4 vpc16: K_dev free=13.4 interior=12.8 dropped=0 (86s, cg<=1049)
+  cut rho 0.600 N4 vpc16: K_dev free=5.9 interior=5.2 dropped=0 (186s, cg<=785)
+
+DONE (rc=0).

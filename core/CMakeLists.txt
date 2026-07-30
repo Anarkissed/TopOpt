@@ -245,6 +245,16 @@ add_executable(test_lattice_material_model
 target_link_libraries(test_lattice_material_model PRIVATE topopt)
 add_test(NAME lattice_material_model COMMAND test_lattice_material_model)
 
+# De-homogenization probe instrument (lattice-dehomogenization probe,
+# 2026-07-31). The probe itself (tests/harness/lattice_dehomog_probe.cpp,
+# Eigen, offline) measures macro->strut stress amplification; this test pins
+# the instrument to production without Eigen: KUBC affine patch (K==1 on a
+# solid block), superposition exactness, the production octet rho mapping the
+# radii are calibrated through, hex8_stress affine consistency, and the cubic
+# eigenspace split the probe's dev/vol bound rests on.
+add_executable(test_lattice_dehomog tests/unit/test_lattice_dehomog.cpp)
+target_link_libraries(test_lattice_dehomog PRIVATE topopt)
+add_test(NAME lattice_dehomog COMMAND test_lattice_dehomog)
 # Harness-side surface stiffness numerics (surface-stiffness probe,
 # 2026-07-31). The model lives in tests/harness/surface_stiffness_model.hpp
 # (nothing in production consumes it); this test pins its integrator to the
