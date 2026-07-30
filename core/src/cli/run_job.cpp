@@ -20,6 +20,7 @@
 #include "topopt/fields.hpp"
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
+#include "topopt/lattice_boundary.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
 #include "topopt/materials.hpp"
@@ -294,54 +295,123 @@ std::string lattice_base_name(const std::string& prefix, double requested_vf) {
 // the lattice certification helpers below (which precede them) can use them.
 Vec3 normalized(const Vec3& v);
 std::string json_num(double v);
+std::string json_str(const std::string& s);
 
-// Shared lattice OCCUPANCY (lattice certification E2E, handoff
-// 2026-07-29-lattice-certification-e2e). A lattice cell is latticed iff its CENTRE
-// falls in a solid voxel (physical_density >= 0.5, the marching-cubes iso) of the
-// design. BOTH the exported geometry (this LatticeRegion feeds generate_lattice) and
-// the certification posture (build_lattice_posture's voxel mask) are built from THIS
-// ONE predicate, so the object the gate certifies and the file the slicer opens are
-// the SAME region by construction — the whole point of the E2E join. `sg`/`dens`
-// must outlive any use of the returned region's predicate (both call sites use it
-// within the caller's scope).
-LatticeRegion lattice_region_for(const VoxelGrid& sg,
-                                 const std::vector<double>& dens, double cell_mm) {
-  const VoxelGrid* sgp = &sg;
-  const std::vector<double>* densp = &dens;
-  auto solid_at = [sgp, densp](const Vec3& p) -> bool {
-    const int i = static_cast<int>(std::floor((p.x - sgp->origin.x) / sgp->spacing));
-    const int j = static_cast<int>(std::floor((p.y - sgp->origin.y) / sgp->spacing));
-    const int k = static_cast<int>(std::floor((p.z - sgp->origin.z) / sgp->spacing));
-    if (i < 0 || j < 0 || k < 0 || i >= sgp->nx || j >= sgp->ny || k >= sgp->nz)
-      return false;
-    return (*densp)[sgp->index(i, j, k)] >= 0.5;
-  };
+// Shared lattice OCCUPANCY + BOUNDARY (lattice certification E2E, handoff
+// 2026-07-29-lattice-certification-e2e; boundary finish, handoff
+// 2026-07-29-lattice-boundary-finish). The ONE predicate is now a
+// LatticeBoundary: the design's solid voxel set (physical_density >= 0.5, the
+// marching-cubes iso) as the base region, minus every declared clearance
+// keep-out — the EXISTING resolved ClearanceGeometry, never a second keep-out
+// concept. BOTH the exported geometry (generate_lattice activates cells by
+// OVERLAP with it and clips every strut solid against it) and the certification
+// posture (lattice_certification_mask) are built from THIS ONE object, so the
+// object the gate certifies and the file the slicer opens are the SAME region
+// by construction — extended from the region to the boundary (bar B7).
+// `sg`/`dens` must outlive the returned boundary.
+LatticeBoundary lattice_boundary_for(const VoxelGrid& sg,
+                                     const std::vector<double>& dens,
+                                     double cell_mm,
+                                     const std::vector<ClearanceGeometry>& kos) {
+  LatticeBoundary B;
+  // Window: clipping needs exact distances only out to one cell of slack past
+  // the largest erosion; two cells is comfortably conservative.
+  B.set_voxel_base(&sg, &dens, 0.5, 2.0 * cell_mm);
+  for (const ClearanceGeometry& g : kos)
+    B.add_keep_out(g, /*collar=*/g.kind == ClearanceKind::Bolt);
+  return B;
+}
+
+// The lattice keep-outs: the job's clearance regions resolved through the SAME
+// functions the optimizer's FrozenVoid rasterization uses (handoff 100 /
+// group-editing) — resolve_clearance_from_face for B-rep faces,
+// resolve_clearance_manual for hand-placed primitives.
+std::vector<ClearanceGeometry> lattice_keep_outs_from_job(
+    const JobDescription& job, const StepModel& model) {
+  std::vector<ClearanceGeometry> out;
+  if (!job.loads.present) return out;
+  for (const JobClearance& jc : job.loads.clearances) {
+    const bool bolt = jc.kind == "bolt";
+    double bore_r = 0.0;
+    if (bolt) {
+      if (jc.manual)
+        bore_r = jc.radius_mm;
+      else if (jc.face_id >= 0 && jc.face_id < model.face_count)
+        bore_r =
+            model.faces[static_cast<std::size_t>(jc.face_id)].cylinder_radius_mm;
+    }
+    ClearanceParams params = bolt ? default_bolt_clearance(bore_r)
+                                  : default_face_clearance();
+    if (jc.concentric_margin_mm > 0.0)
+      params.concentric_margin_mm = jc.concentric_margin_mm;
+    if (jc.axial_clearance_mm > 0.0)
+      params.axial_clearance_mm = jc.axial_clearance_mm;
+    if (jc.slab_depth_mm > 0.0) params.slab_depth_mm = jc.slab_depth_mm;
+    ClearanceGeometry g;
+    if (jc.manual) {
+      ManualClearanceGeometry mg;
+      mg.kind = bolt ? ClearanceKind::Bolt : ClearanceKind::Face;
+      mg.axis_point = jc.axis_point;
+      mg.axis_dir = jc.axis_dir;
+      mg.radius_mm = jc.radius_mm;
+      mg.half_length_mm = jc.half_length_mm;
+      mg.origin = jc.origin;
+      mg.normal = jc.normal;
+      mg.half_u_mm = jc.half_u_mm;
+      mg.half_w_mm = jc.half_w_mm;
+      g = resolve_clearance_manual(mg, params);
+    } else {
+      if (jc.face_id < 0 || jc.face_id >= model.face_count) continue;
+      g = resolve_clearance_from_face(model, jc.face_id, params);
+    }
+    if (g.valid) out.push_back(g);
+  }
+  return out;
+}
+
+// The lattice cell grid over the solved grid; activation (which cells emit) is
+// decided by `boundary` (overlap, not centre — bar (a)).
+LatticeRegion lattice_region_for(const VoxelGrid& sg, double cell_mm,
+                                 const LatticeBoundary* boundary) {
   LatticeRegion R;
   R.origin = sg.origin;
   R.cell_mm = cell_mm;
   R.nx = std::max(1, static_cast<int>(std::ceil(sg.nx * sg.spacing / cell_mm)));
   R.ny = std::max(1, static_cast<int>(std::ceil(sg.ny * sg.spacing / cell_mm)));
   R.nz = std::max(1, static_cast<int>(std::ceil(sg.nz * sg.spacing / cell_mm)));
-  const Vec3 org = R.origin;
-  R.latticed = [solid_at, cell_mm, org](int ci, int cj, int ck) {
-    const Vec3 c{org.x + (ci + 0.5) * cell_mm, org.y + (cj + 0.5) * cell_mm,
-                 org.z + (ck + 0.5) * cell_mm};
-    return solid_at(c);
-  };
+  R.boundary = boundary;
   return R;
+}
+
+// The skin spec a job's lattice block implies. The clamp is computed by CORE's
+// law (lattice_skin_min_radius_mm) from the STATED extrudable width; a job that
+// states none makes no printability claim and the skin tracks the interior.
+LatticeSkinSpec lattice_skin_for(const JobLattice& lat) {
+  LatticeSkinSpec S;
+  S.mode = lat.skin == "none"  ? LatticeSkinMode::None
+           : lat.skin == "rim" ? LatticeSkinMode::Rim
+                               : LatticeSkinMode::Diagrid;
+  S.min_radius_mm = lat.min_extrudable_width_mm > 0.0
+                        ? lattice_skin_min_radius_mm(lat.min_extrudable_width_mm)
+                        : 0.0;
+  return S;
 }
 
 LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& variant,
                                              const std::string& out_dir,
                                              const JobOutput& out,
                                              const JobLattice& lat,
-                                             const VoxelGrid& sg) {
-  // Occupancy: the shared predicate (lattice_region_for) — a cell is latticed iff its
-  // CENTRE falls in a solid voxel of the accepted design. This is the SAME region the
-  // certification posture is built from, so the sliced file and the certified object
-  // agree by construction.
+                                             const VoxelGrid& sg,
+                                             const LatticeBoundary& boundary) {
+  // Occupancy + boundary: the shared predicate (`boundary`, built by the caller
+  // from THIS variant's density + the declared clearance keep-outs). Cells
+  // activate by OVERLAP with it; strut solids are clipped against it; the skin
+  // and collar ride its analytic faces. It is the SAME object the certification
+  // posture is built from, so the sliced file and the certified object agree by
+  // construction (bar B7).
   const std::vector<double>& dens = variant.optimization.physical_density;
-  const LatticeRegion R = lattice_region_for(sg, dens, lat.cell_mm);
+  const LatticeRegion R = lattice_region_for(sg, lat.cell_mm, &boundary);
+  const LatticeSkinSpec skin = lattice_skin_for(lat);
 
   LatticeRadiusField G;
   G.uniform_mm = lat.strut_radius_mm;
@@ -363,7 +433,7 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
     const std::string path = base + ".stl";
     StreamingStlWriter w(path);
     push_shell(w);  // solid shell first, then the streamed lattice
-    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w);
+    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w, skin);
     w.finish();
     oc.paths.push_back(path);
   }
@@ -371,7 +441,7 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
     const std::string path = base + ".3mf";
     StreamingThreeMfWriter w(path);
     push_shell(w);
-    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w);
+    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w, skin);
     w.finish();
     oc.paths.push_back(path);
   }
@@ -397,36 +467,30 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
 // so the displacement field, the stiffness, and the SOLID-region strength margin
 // describe the composite object the slicer opens.
 
-// The certification posture matching the exported lattice geometry EXACTLY: every
-// solid voxel whose owning cell is latticed (the shared occupancy) carries the octet
-// tensor at the printed relative density `rho`. Solid voxels in non-latticed cells
-// (the thin boundary shell the marching-cubes surface keeps solid) stay solid —
-// slightly conservative, and faithful to the exported shell. analyze gates on
+// The certification posture matching the exported lattice geometry EXACTLY: the
+// SAME LatticeBoundary that activated cells and clipped struts decides, through
+// lattice_certification_mask, which solid voxels carry the octet tensor at the
+// printed relative density `rho` (bar B7 — one predicate, no third rule). Solid
+// voxels in inactive cells or inside a clearance keep-out stay solid — slightly
+// conservative, and faithful to the exported geometry. analyze gates on
 // solid+printed voxels, so a mask over solid voxels is exactly what it consumes.
 LatticePosture build_lattice_posture(const VoxelGrid& sg,
                                      const std::vector<double>& dens,
-                                     const JobLattice& lat, double rho) {
-  const LatticeRegion R = lattice_region_for(sg, dens, lat.cell_mm);
+                                     const JobLattice& lat, double rho,
+                                     const LatticeBoundary& boundary) {
   LatticePosture post;
   post.topology = LatticeTopology::Octet;  // job schema restricts topology to octet
   post.cell_size_mm = lat.cell_mm;
   const std::size_t nv = sg.voxel_count();
   post.mask.assign(nv, 0);
   post.relative_density.assign(nv, 0.0);
-  for (int k = 0; k < sg.nz; ++k)
-    for (int j = 0; j < sg.ny; ++j)
-      for (int i = 0; i < sg.nx; ++i) {
-        const std::size_t e = sg.index(i, j, k);
-        if (!(dens[e] >= 0.5)) continue;  // only solid/printed voxels are latticed
-        // Owning cell of this voxel's centre (same origin/cell as the region), so a
-        // voxel is masked iff its cell is one generate_lattice fills.
-        const int ci = static_cast<int>(std::floor((i + 0.5) * sg.spacing / lat.cell_mm));
-        const int cj = static_cast<int>(std::floor((j + 0.5) * sg.spacing / lat.cell_mm));
-        const int ck = static_cast<int>(std::floor((k + 0.5) * sg.spacing / lat.cell_mm));
-        if (!R.latticed(ci, cj, ck)) continue;
-        post.mask[e] = 1;
-        post.relative_density[e] = rho;
-      }
+  const std::vector<char> mask = lattice_certification_mask(
+      boundary, sg, dens, 0.5, sg.origin, lat.cell_mm);
+  for (std::size_t e = 0; e < nv; ++e) {
+    if (!mask[e]) continue;
+    post.mask[e] = 1;
+    post.relative_density[e] = rho;
+  }
   return post;
 }
 
@@ -453,7 +517,8 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
                                             const MinimizePlasticOptions& options,
                                             const Material& material,
                                             const std::vector<DirichletBC>& bcs,
-                                            const JobLattice& lat) {
+                                            const JobLattice& lat,
+                                            const LatticeBoundary& boundary) {
   LatticeCertOutcome oc;
   const std::vector<double>& density = variant.optimization.physical_density;
 
@@ -509,7 +574,7 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
 
   // (2) Latticed cert — the octet tensor on the shared occupancy. THIS margin
   // describes the exported file.
-  LatticePosture post = build_lattice_posture(sg, density, lat, oc.rho);
+  LatticePosture post = build_lattice_posture(sg, density, lat, oc.rho, boundary);
   oc.lattice = analyze_fixed_design(
       sg, params, density, bcs, loads, material, build_dir, cert_tol,
       options.simp.cg_max_iterations, options.simp.solver, options.margin_stop,
@@ -525,13 +590,25 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
 // composite margin + posture + the honest "strut strength not certified" flag.
 std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      const JobLattice& lat,
-                                     const LatticeCertOutcome& c) {
+                                     const LatticeCertOutcome& c,
+                                     const LatticeGenStats& gs) {
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
   s += "  \"topology\": \"" + std::string(lattice_topology_name(a.lattice_topology)) +
        "\",\n";
   s += "  \"cell_mm\": " + json_num(lat.cell_mm) + ",\n";
   s += "  \"strut_radius_mm\": " + json_num(lat.strut_radius_mm) + ",\n";
+  // Boundary finish (bar B9 — the mass/volume accounting includes skin, rim and
+  // collar; soup basis, overlaps not deducted).
+  s += "  \"skin\": " + json_str(lat.skin) + ",\n";
+  s += "  \"clipped_struts\": " + std::to_string(gs.clipped_struts) + ",\n";
+  s += "  \"landings\": " + std::to_string(gs.landings) + ",\n";
+  s += "  \"anchor_nodes\": " + std::to_string(gs.anchor_nodes) + ",\n";
+  s += "  \"skin_struts\": " + std::to_string(gs.skin_struts) + ",\n";
+  s += "  \"rim_elements\": " + std::to_string(gs.rim_elements) + ",\n";
+  s += "  \"interior_volume_mm3\": " + json_num(gs.interior_volume_mm3) + ",\n";
+  s += "  \"skin_volume_mm3\": " + json_num(gs.skin_volume_mm3) + ",\n";
+  s += "  \"rim_volume_mm3\": " + json_num(gs.rim_volume_mm3) + ",\n";
   s += "  \"relative_density\": " + json_num(c.rho) + ",\n";
   s += "  \"certifiable_band\": [" +
        json_num(lattice_rho_min(a.lattice_topology)) + ", " +
@@ -1418,6 +1495,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     int variants = 0;
     double r_min = 1e30, r_max = 0.0;
     double wall_s = 0.0;
+    // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): what the
+    // clip/skin passes did, summed over variants — B9's volume accounting.
+    long long clipped = 0, landings = 0, anchors = 0;
+    long long skin_tris = 0, rim_tris = 0;
+    double interior_vol = 0.0, skin_vol = 0.0, rim_vol = 0.0;
     // Certification posture (E2E bars E1/E3), summed over accepted latticed variants
     // so run_info records ONE posture. rho is uniform (same for every variant) so its
     // range is a point; the margins are the WORST (min) over the variants — the
@@ -1436,27 +1518,49 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // not the solid design), write the per-variant certification receipt, fold both into
   // the accumulator, and (streaming path) print a machine-parseable LATTICE checkpoint
   // carrying the LATTICED margin so the worker forwards the right verdict.
+  // The lattice keep-outs (protected features): resolved ONCE per job from the
+  // declared clearances via the existing clearance machinery. Empty when no
+  // loads/clearances are declared — the boundary is then just the solid design.
+  const std::vector<ClearanceGeometry> lattice_kos =
+      job.lattice.present
+          ? lattice_keep_outs_from_job(job, result.model)
+          : std::vector<ClearanceGeometry>{};
   auto emit_lattice = [&](const MinimizePlasticVariant& v, bool stream_lines) {
     if (!job.lattice.present) return;
+    // THE shared boundary for this variant: its solid density as the base, the
+    // resolved clearance keep-outs subtracted. Geometry (a) and certification
+    // (b) below both consume this ONE object (bar B7).
+    const LatticeBoundary boundary = lattice_boundary_for(
+        solved_grid, v.optimization.physical_density, job.lattice.cell_mm,
+        lattice_kos);
     // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
     const double tg0 = wall_seconds();
-    LatticeExportOutcome oc =
-        export_latticed_variant(v, out_dir, job.output, job.lattice, solved_grid);
+    LatticeExportOutcome oc = export_latticed_variant(
+        v, out_dir, job.output, job.lattice, solved_grid, boundary);
     lat_agg.wall_s += wall_seconds() - tg0;
     // (b) certification of the composite — the octet tensor on the SAME occupancy the
     // geometry used. certify_latticed_variant refuses an out-of-band density (E5).
     const LatticeCertOutcome cc = certify_latticed_variant(
-        v, solved_grid, options, material, bcs, job.lattice);
+        v, solved_grid, options, material, bcs, job.lattice, boundary);
     const std::string rcpt_path =
         join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
                                              v.requested_volume_fraction) +
                                ".report.json");
-    write_text_file(rcpt_path, lattice_cert_report_json(v, job.lattice, cc));
+    write_text_file(rcpt_path,
+                    lattice_cert_report_json(v, job.lattice, cc, oc.stats));
 
     lat_agg.any = true;
     lat_agg.cells += oc.stats.latticed_cells;
     lat_agg.voxels += oc.region_voxels;
     lat_agg.tris += static_cast<long long>(oc.stats.triangles);
+    lat_agg.clipped += static_cast<long long>(oc.stats.clipped_struts);
+    lat_agg.landings += static_cast<long long>(oc.stats.landings);
+    lat_agg.anchors += static_cast<long long>(oc.stats.anchor_nodes);
+    lat_agg.skin_tris += static_cast<long long>(oc.stats.skin_triangles);
+    lat_agg.rim_tris += static_cast<long long>(oc.stats.rim_triangles);
+    lat_agg.interior_vol += oc.stats.interior_volume_mm3;
+    lat_agg.skin_vol += oc.stats.skin_volume_mm3;
+    lat_agg.rim_vol += oc.stats.rim_volume_mm3;
     ++lat_agg.variants;
     lat_agg.r_min = std::min(lat_agg.r_min, oc.stats.min_strut_diameter_mm / 2.0);
     lat_agg.r_max = std::max(lat_agg.r_max, oc.stats.max_strut_diameter_mm / 2.0);
@@ -1510,6 +1614,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.lattice_export_interpenetrating_soup = true;
     run_info.lattice_export_gen_seconds = lat_agg.wall_s;
     run_info.lattice_export_gen_fraction = lat_agg.wall_s / job_wall;
+    // Boundary finish (bar B9): the skin/rim/collar are part of the printed
+    // object, so their triangle and volume shares are recorded, not folded in
+    // silently. Volumes are the analytic per-primitive sums (soup basis).
+    run_info.lattice_export_skin = job.lattice.skin;
+    run_info.lattice_export_clipped_struts = lat_agg.clipped;
+    run_info.lattice_export_landings = lat_agg.landings;
+    run_info.lattice_export_anchor_nodes = lat_agg.anchors;
+    run_info.lattice_export_skin_triangles = lat_agg.skin_tris;
+    run_info.lattice_export_rim_triangles = lat_agg.rim_tris;
+    run_info.lattice_export_interior_volume_mm3 = lat_agg.interior_vol;
+    run_info.lattice_export_skin_volume_mm3 = lat_agg.skin_vol;
+    run_info.lattice_export_rim_volume_mm3 = lat_agg.rim_vol;
     // Certification (handoff 2026-07-29-lattice-certification-e2e, bars E1/E3) — WHAT
     // the composite gate certified, so a variant's provenance is recoverable.
     if (lat_agg.cert_ran) {

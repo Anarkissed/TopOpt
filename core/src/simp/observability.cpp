@@ -596,6 +596,19 @@ std::string run_info_json(const RunInfo& info) {
           bool_json(info.lattice_export_interpenetrating_soup);
     le += ", \"gen_seconds\": " + fmt(info.lattice_export_gen_seconds);
     le += ", \"gen_fraction\": " + fmt(info.lattice_export_gen_fraction);
+    // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): the clip /
+    // skin / collar record + the B9 volume accounting (analytic per-primitive
+    // sums on the soup basis, overlaps not deducted).
+    le += ", \"skin\": \"" + info.lattice_export_skin + "\"";
+    le += ", \"clipped_struts\": " + fmt_ll(info.lattice_export_clipped_struts);
+    le += ", \"landings\": " + fmt_ll(info.lattice_export_landings);
+    le += ", \"anchor_nodes\": " + fmt_ll(info.lattice_export_anchor_nodes);
+    le += ", \"skin_triangles\": " + fmt_ll(info.lattice_export_skin_triangles);
+    le += ", \"rim_triangles\": " + fmt_ll(info.lattice_export_rim_triangles);
+    le += ", \"interior_volume_mm3\": " +
+          fmt(info.lattice_export_interior_volume_mm3);
+    le += ", \"skin_volume_mm3\": " + fmt(info.lattice_export_skin_volume_mm3);
+    le += ", \"rim_volume_mm3\": " + fmt(info.lattice_export_rim_volume_mm3);
     le += "}";
     num("lattice_export", le, /*comma=*/has_grad);
   }

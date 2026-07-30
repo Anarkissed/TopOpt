@@ -43,6 +43,7 @@ add_library(topopt
   src/mesh/mesh.cpp
   src/mesh/smooth.cpp
   src/mesh/lattice_gen.cpp
+  src/mesh/lattice_boundary.cpp
   src/voxel/voxelize.cpp
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
@@ -207,6 +208,16 @@ target_link_libraries(test_lattice_gen PRIVATE topopt)
 target_compile_definitions(test_lattice_gen PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_gen COMMAND test_lattice_gen)
+
+# The lattice boundary finish (handoff 2026-07-29-lattice-boundary-finish): the
+# shared boundary predicate, solid-safe clipping (B3 is adversarial against a
+# centreline-clipped variant), overlap activation, the anchored skin/collar, and
+# generator/certification-mask agreement (B7).
+add_executable(test_lattice_boundary tests/unit/test_lattice_boundary.cpp)
+target_link_libraries(test_lattice_boundary PRIVATE topopt)
+target_compile_definitions(test_lattice_boundary PRIVATE
+  LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME lattice_boundary COMMAND test_lattice_boundary)
 
 # The lattice grading law (handoff 2026-07-29-lattice-grading-law): stress -> a
 # certifiable (density, cell size) posture. Tests the bars L2/L4/L5 and read-from-core.

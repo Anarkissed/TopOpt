@@ -1,0 +1,1 @@
+(evidence_2mm.stl / graded_4mm.stl / before_4mm.stl regenerable via reproduce.sh; measurements in the .txt files)
