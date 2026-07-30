@@ -1,0 +1,19 @@
+== LATTICE PROXY PROFILE (handoff 2026-07-28) — GPU: Apple M2 Pro ==
+part: WallMount_ShelfBracket  tris=2224  solid≈204.7 cm³  bbox=201×207×20 mm
+V1  cell | real tris | real GPU | proxy tris | proxy GPU | tri× | GPU×
+    8 mm |      368328 | 54.8 MB |       8940 | 1.3 MB |    41× |   41×
+    6 mm |      873073 | 129.9 MB |       8940 | 1.3 MB |    98× |   98×
+    4 mm |     2946620 | 438.4 MB |       8940 | 1.3 MB |   330× |  330×
+V2  busy scene @1024²: proxy OFF 0.149 ms | proxy ON 0.311 ms  (handoff 134 body @1024²: 0.436 ms)
+V2  busy scene @2048²: proxy OFF 1.665 ms | proxy ON 1.852 ms  (handoff 134 body @1024²: 0.436 ms)
+V2  sample-patch inset @512²: 0.163 ms  (8940 tris)
+== LATTICE SDF PREVIEW PROFILE (handoff 2026-07-29) — GPU: Apple M2 Pro ==
+part: WallMount_ShelfBracket  bbox=201×207×20 mm  occupancy grid=124×128×12 (0.4 MB f16)
+segments in shader soup: 132 capsules (octet)
+GEOMETRY: 0 triangles, 0 vertex buffers — a full-screen triangle + one uniform buffer, at EVERY cell.
+P3/V2  cell |  @1024²  |  @2048²   (proxy busy scene: 0.31 ms @1024²; 134 body: 0.436 ms)
+       8 mm | 13.633 ms | 38.308 ms
+       6 mm | 14.164 ms | 40.840 ms
+       4 mm | 15.471 ms | 47.700 ms
+       8→4 mm frame-time ratio: 1.13×  (a real MESH would be 8.0× the triangles)
+P4  busy strut-mode scene @1024²: mesh+stage+boxes 0.245 ms + raymarch 13.692 ms = 13.937 ms (60 Hz budget 16.6)
