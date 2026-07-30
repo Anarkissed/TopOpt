@@ -741,8 +741,19 @@ struct LatticeLimits {
 LatticeLimits lattice_limits(const std::string& topology);
 
 // The topology names the core certification library covers (can be RUN and
-// certified), in the core's own order — ["octet"] today. The UI reads this to know
-// which picker entries are certifiable rather than assuming a set. Never throws.
+// certified), in the core's own order — the seven cubic topologies today. The UI
+// reads this to know which picker entries are certifiable rather than assuming a
+// set. Never throws.
 std::vector<std::string> lattice_certifiable_topologies();
+
+// The topology names the core GEOMETRY GENERATOR can emit (topopt::
+// LatticeGenTopology, named by topopt::lattice_gen_topology_name) — ["octet"]
+// today. Certifiability and generatability are INDEPENDENT properties: core
+// certifies seven topologies but can generate geometry for only this set, so a
+// picker must read BOTH and never infer one from the other. Names come from
+// core's own lattice_gen_topology_name; the case list mirrors core's enum (which
+// has no enumeration API yet — the reported gap; when core grows the enum this
+// forwarder needs the matching one-line case). Never throws.
+std::vector<std::string> lattice_generatable_topologies();
 
 }  // namespace topoptbridge

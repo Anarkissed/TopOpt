@@ -15,9 +15,45 @@ import Foundation
 import simd
 import TopOptKit
 
+/// The boundary treatment — a THREE-WAY choice mapping 1:1 onto the core job
+/// schema's `lattice.skin` field, so "skin without rim" is UNREPRESENTABLE (bar
+/// B7): core's diagrid skin is BUILT ON the rim (anchored landings + rim loops +
+/// collar tori, handoff 2026-07-29-lattice-boundary-finish), and this enum has no
+/// case that could ask for faces without the border.
+public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, Sendable {
+    /// Lattice to the edge — no rim, no skin (`skin: "none"`).
+    case none
+    /// Closed border only — rim loops + collar tori on protected bores (`skin: "rim"`).
+    case rim
+    /// Rim + woven face skin — the anchored diagrid (`skin: "diagrid"`).
+    case fullSkin
+
+    /// The exact core job-schema value (`job.lattice.skin`).
+    public var jobSkinValue: String {
+        switch self {
+        case .none: return "none"
+        case .rim: return "rim"
+        case .fullSkin: return "diagrid"
+        }
+    }
+}
+
+/// How the lattice density is chosen. `uniform` is the shipped run path (fills at
+/// the range's clamped dense end). `auto` grades the PREVIEW from a real von Mises
+/// field (a solid-part sim or a finished variant's own field) — it is OFFERED only
+/// when such a field exists, and it can NOT ride an optimize job yet (core's
+/// grading law runs only on the analyze path; the worker only routes `run`), so
+/// selecting it gates Optimize with a stated reason rather than silently filling
+/// uniform (bar B6: "auto must never silently mean uniform").
+public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
+    case uniform
+    case auto
+}
+
 /// The lattice block the run carries — the exact fields the core job schema's
 /// `lattice` object accepts (topology / cell_mm / strut_radius_mm / emit_stl /
-/// emit_3mf), plus the density facts the run report echoes. Present on a RunRequest
+/// emit_3mf / skin / min_extrudable_width_mm), plus the density facts the run
+/// report echoes. Present on a RunRequest
 /// ONLY when lattice mode is on AND the settings are runnable-as-certified; absent ⇒
 /// the job is byte-identical to a non-lattice run (BAR U1). The worker generates a
 /// UNIFORM lattice at `strutRadiusMM` (the shipped generator has no grading law yet).
@@ -40,11 +76,20 @@ public struct LatticeSpec: Equatable, Sendable {
     /// for the run report's honesty note; the region itself does not reach the job (the
     /// worker lattices the whole solid interior — core job carries no region yet).
     public let regionScoped: Bool
+    /// The boundary treatment's core job value (`job.lattice.skin`): "none" | "rim" |
+    /// "diagrid" (handoff 2026-07-29-lattice-boundary-finish).
+    public let skin: String
+    /// The user's outer extrusion line width (mm), arming core's OWN skin
+    /// printability clamp (`lattice_skin_min_radius_mm`). nil ⇒ the key is omitted
+    /// and core uses its default.
+    public let minExtrudableWidthMM: Double?
 
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
                 maxRelativeDensity: Double, emitSTL: Bool = true, emit3MF: Bool = false,
-                regionScoped: Bool = false) {
+                regionScoped: Bool = false,
+                skin: String = LatticeBoundaryTreatment.rim.jobSkinValue,
+                minExtrudableWidthMM: Double? = nil) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.strutRadiusMM = strutRadiusMM
@@ -54,6 +99,8 @@ public struct LatticeSpec: Equatable, Sendable {
         self.emitSTL = emitSTL
         self.emit3MF = emit3MF
         self.regionScoped = regionScoped
+        self.skin = skin
+        self.minExtrudableWidthMM = minExtrudableWidthMM
     }
 }
 
@@ -79,21 +126,105 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// (`LatticeBounds`). The neutral open defaults (0…1) carry no band number.
     public var minRelativeDensity: Double
     public var maxRelativeDensity: Double
-    /// The optional region that scopes the preview, reusing the manual-primitive value
-    /// type + gizmo (bolt = cylinder region, face = slab region). nil ⇒ the whole solid
-    /// part — which is exactly the extent the worker generates today.
-    public var region: ManualPrimitive?
+    /// The lattice-INCLUDE region primitives ("Material, latticed"), reusing the
+    /// manual-primitive value type + gizmo (bolt = cylinder region, face = slab
+    /// region). Empty ⇒ the whole solid part — which is exactly the extent the
+    /// worker generates today. These scope the PREVIEW + the report's honesty note;
+    /// the core job schema carries no region yet (the reported gap).
+    public var includePrimitives: [ManualPrimitive]
+    /// Boundary treatment (three-way; maps 1:1 onto `job.lattice.skin`, bar B7).
+    public var boundary: LatticeBoundaryTreatment
+    /// Density mode (uniform run fill vs field-graded preview, bar B6).
+    public var densityMode: LatticeDensityMode
+    /// Faces painted "Material, latticed" (lattice-include). Preview-scope only —
+    /// no job carrier exists (the reported gap). The EXCLUDE paint role has a real
+    /// carrier and deliberately does NOT live here: it drives the existing protect
+    /// affix (`loads.face_protections`, FrozenSolid) so there is ONE protect concept.
+    public var paintedIncludeFaces: [Int]
+    /// Depth (mm) the painted include faces reach into the part (preview-scope).
+    public var paintDepthMM: Double
+
+    /// The FIRST include primitive — the legacy single-region accessor the existing
+    /// gizmo plumbing (`placeLatticeRegion` / `moveLatticeRegion` / proxy scoping)
+    /// reads and writes. One source of truth: this is a view over
+    /// `includePrimitives`, never a second stored value.
+    public var region: ManualPrimitive? {
+        get { includePrimitives.first }
+        set {
+            if let v = newValue {
+                if includePrimitives.isEmpty { includePrimitives = [v] }
+                else { includePrimitives[0] = v }
+            } else if !includePrimitives.isEmpty {
+                includePrimitives.removeFirst()
+            }
+        }
+    }
 
     public init(enabled: Bool = false, topologyID: String = LatticeType.octet.id,
                 cellMM: Double = LatticeSettings.defaultCellMM,
                 minRelativeDensity: Double = 0, maxRelativeDensity: Double = 1,
-                region: ManualPrimitive? = nil) {
+                region: ManualPrimitive? = nil,
+                includePrimitives: [ManualPrimitive] = [],
+                boundary: LatticeBoundaryTreatment = .rim,
+                densityMode: LatticeDensityMode = .uniform,
+                paintedIncludeFaces: [Int] = [],
+                paintDepthMM: Double = 4) {
         self.enabled = enabled
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.minRelativeDensity = minRelativeDensity
         self.maxRelativeDensity = maxRelativeDensity
-        self.region = region
+        self.includePrimitives = includePrimitives
+        self.boundary = boundary
+        self.densityMode = densityMode
+        self.paintedIncludeFaces = paintedIncludeFaces
+        self.paintDepthMM = paintDepthMM
+        if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
+    }
+
+    // Codable by hand: every field newer than the first shipped snapshot decodes
+    // with `decodeIfPresent` + its default, so PRE-EXISTING project snapshots (which
+    // stored `region`, not `includePrimitives`) still decode — the legacy `region`
+    // key migrates into the list (LatticeModeTests.testPreLatticeSnapshotStillDecodes
+    // guards the older layer of the same rule).
+    private enum CodingKeys: String, CodingKey {
+        case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
+        case region                     // legacy single-region snapshots
+        case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        topologyID = try c.decodeIfPresent(String.self, forKey: .topologyID) ?? LatticeType.octet.id
+        cellMM = try c.decodeIfPresent(Double.self, forKey: .cellMM) ?? LatticeSettings.defaultCellMM
+        minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
+        maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
+        if let list = try c.decodeIfPresent([ManualPrimitive].self, forKey: .includePrimitives) {
+            includePrimitives = list
+        } else if let legacy = try c.decodeIfPresent(ManualPrimitive.self, forKey: .region) {
+            includePrimitives = [legacy]
+        } else {
+            includePrimitives = []
+        }
+        boundary = try c.decodeIfPresent(LatticeBoundaryTreatment.self, forKey: .boundary) ?? .rim
+        densityMode = try c.decodeIfPresent(LatticeDensityMode.self, forKey: .densityMode) ?? .uniform
+        paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
+        paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(enabled, forKey: .enabled)
+        try c.encode(topologyID, forKey: .topologyID)
+        try c.encode(cellMM, forKey: .cellMM)
+        try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
+        try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)
+        try c.encode(includePrimitives, forKey: .includePrimitives)
+        try c.encode(boundary, forKey: .boundary)
+        try c.encode(densityMode, forKey: .densityMode)
+        try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
+        try c.encode(paintDepthMM, forKey: .paintDepthMM)
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the
@@ -125,11 +256,17 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// print facts (only affect the advisory readouts today, since core exposes no cell
     /// ceiling yet). The generated uniform strut radius is the topology's grading law at
     /// the range's clamped dense end.
-    public func runSpec(limits: TopOptKit.LatticeLimits, memberMM: Double = 0,
+    public func runSpec(limits: TopOptKit.LatticeLimits, generatable: Bool,
+                        memberMM: Double = 0,
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
                         emit3MF: Bool = false) -> LatticeSpec? {
         guard enabled else { return nil }
+        // Auto density cannot ride an optimize job (core grades only on the analyze
+        // path) — the page gates Optimize with the reason; a silent uniform fill
+        // here would be exactly the lie bar B6 forbids.
+        guard densityMode == .uniform else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
+                                      generatable: generatable,
                                       memberMM: memberMM, lineWidthMM: lineWidthMM)
         guard b.runnableAsCertified else { return nil }
         let genRho = b.generateRelativeDensity
@@ -138,18 +275,23 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: radius,
                            generateRelativeDensity: genRho,
                            minRelativeDensity: b.densityLo, maxRelativeDensity: b.densityHi,
-                           emitSTL: emitSTL, emit3MF: emit3MF, regionScoped: region != nil)
+                           emitSTL: emitSTL, emit3MF: emit3MF, regionScoped: region != nil,
+                           skin: boundary.jobSkinValue,
+                           minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil)
     }
 
-    /// Convenience: read the certifiable limits from core for this topology, then build
-    /// the run spec. `topology` is accepted (defaulting to `topologyID`) so a caller can
-    /// be explicit; it must match `topologyID`. Used by `AppModel.makeRunRequest`.
+    /// Convenience: read the certifiable limits AND the generatable set from core
+    /// for this topology, then build the run spec. `topology` is accepted
+    /// (defaulting to `topologyID`) so a caller can be explicit; it must match
+    /// `topologyID`. Used by `AppModel.makeRunRequest`.
     public func runSpec(topology: String? = nil, memberMM: Double = 0,
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
                         emit3MF: Bool = false) -> LatticeSpec? {
-        let limits = TopOptKit.latticeLimits(topology: topology ?? topologyID)
-        return runSpec(limits: limits, memberMM: memberMM, lineWidthMM: lineWidthMM,
-                       emitSTL: emitSTL, emit3MF: emit3MF)
+        let id = topology ?? topologyID
+        let limits = TopOptKit.latticeLimits(topology: id)
+        let generatable = TopOptKit.latticeGeneratableTopologies.contains(id)
+        return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
+                       lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF)
     }
 
     /// The proxy grading parameters for the current settings, with the density range
@@ -189,6 +331,13 @@ public struct LatticeBounds: Equatable, Sendable {
     public let certifiable: Bool
     /// Non-nil iff the chosen topology is preview-only (why a run won't lattice it).
     public let topologyReason: String?
+    /// True iff core's GEOMETRY GENERATOR can emit the chosen topology
+    /// (`TopOptKit.latticeGeneratableTopologies`) — INDEPENDENT of `certifiable`:
+    /// core certifies seven topologies but generates only octet today (bar B0).
+    public let generatable: Bool
+    /// Non-nil iff the topology certifies but cannot be generated (why a run
+    /// can't lattice it even though the band displays).
+    public let generatableReason: String?
 
     // --- cell size ----------------------------------------------------------
     /// The certifiable cell CEILING (mm) for the current member width, or nil when core
@@ -230,9 +379,14 @@ public struct LatticeBounds: Equatable, Sendable {
     ///     printability floor. Pass 0 to skip the strut-printability check.
     public static func compute(settings: LatticeSettings,
                                limits: TopOptKit.LatticeLimits,
+                               generatable: Bool = true,
                                memberMM: Double = 0,
                                lineWidthMM: Double = 0) -> LatticeBounds {
         let topo = settings.lattice
+        // Display name for the reasons. LatticeType.named falls back to octet for
+        // ids it has no geometry for (kelvin/rhombic), which would put the WRONG
+        // name in a reason string — resolve the name independently.
+        let name = LatticeType.displayName(forID: settings.topologyID)
 
         // Density: clamp the user's range into the core band. When core does not
         // certify this topology the band is degenerate (0…0); we then leave the range
@@ -250,10 +404,15 @@ public struct LatticeBounds: Equatable, Sendable {
             if hi < lo { hi = lo }
         }
 
-        // Topology.
+        // Topology. Certifiability and generatability are INDEPENDENT properties
+        // (bar B0): the first is whether core carries a tensor (band displays), the
+        // second is whether core's geometry generator can emit it (a run exists).
         let topoReason: String? = limits.certifiable
             ? nil
-            : "\(topo.displayName) is preview-only — not yet certifiable, so a run won't lattice it"
+            : "\(name) is preview-only — not yet certifiable, so a run won't lattice it"
+        let genReason: String? = generatable
+            ? nil
+            : "\(name) certifies, but core has no geometry generator for it yet — a run can't lattice it"
 
         // Cell size ceiling from cells-per-member. minCellsPerMember == 0 ⇒ core has
         // not certified a ceiling yet ⇒ ADVISORY (readout only, no clamp).
@@ -286,6 +445,7 @@ public struct LatticeBounds: Equatable, Sendable {
             densityLo: lo, densityHi: hi, bandLo: bandLo, bandHi: bandHi,
             densityLoReason: loReason, densityHiReason: hiReason,
             certifiable: limits.certifiable, topologyReason: topoReason,
+            generatable: generatable, generatableReason: genReason,
             cellCeilingMM: ceiling, cellsAcrossMember: cells, cellOverCeiling: overCeiling,
             cellReason: cellReason,
             strutRadiusMM: strutR, strutFloorMM: floor, strutTooThin: tooThin,
@@ -300,7 +460,7 @@ public struct LatticeBounds: Equatable, Sendable {
     /// printable — `strutTooThin` is a sparse-end preview advisory only. A false here is
     /// why the job omits the lattice block; the reasons above say which condition failed.
     public var runnableAsCertified: Bool {
-        certifiable && !cellOverCeiling
+        certifiable && generatable && !cellOverCeiling
     }
 
     /// The single relative density the RUN generates at. The shipped generator is

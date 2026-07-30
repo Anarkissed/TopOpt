@@ -627,13 +627,22 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // and simply ignores `request.lattice`. The core schema requires at least one of
         // emit_stl / emit_3mf, which `runSpec` guarantees (STL by default).
         if let lat = request.lattice {
-            job["lattice"] = [
+            var block: [String: Any] = [
                 "topology": lat.topologyID,
                 "cell_mm": lat.cellMM,
                 "strut_radius_mm": lat.strutRadiusMM,
                 "emit_stl": lat.emitSTL,
                 "emit_3mf": lat.emit3MF,
+                // The boundary treatment (handoff 2026-07-29-lattice-boundary-finish):
+                // "none" | "rim" | "diagrid", the page's three-way choice (bar B7).
+                "skin": lat.skin,
             ]
+            if let w = lat.minExtrudableWidthMM {
+                // Arms core's OWN skin printability clamp (lattice_skin_min_radius_mm)
+                // with the user's outer line width — the number stays core-owned.
+                block["min_extrudable_width_mm"] = w
+            }
+            job["lattice"] = block
         }
         // The declared load case is emitted for EVERY model source — STEP B-rep
         // faces AND STL/3MF pseudo-faces (handoff 134 made the segmenter's pseudo-face

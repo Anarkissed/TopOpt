@@ -97,6 +97,22 @@ public extension LatticeType {
         family.first { $0.id == id } ?? octet
     }
 
+    /// A display name for ANY core topology id — including the ones this family
+    /// carries no geometry for (kelvin / rhombic / reentrant, whose polyhedron-edge
+    /// cells are not ported). `named(_:)` falls back to octet, which would put the
+    /// WRONG name on a picker row or a reason string; this never does. An id neither
+    /// here nor in the family renders as itself, so a topology core adds tomorrow is
+    /// at worst plainly named, never mislabelled.
+    static func displayName(forID id: String) -> String {
+        if let t = family.first(where: { $0.id == id }) { return t.displayName }
+        switch id {
+        case "kelvin": return "Kelvin"
+        case "rhombic": return "Rhombic"
+        case "reentrant": return "Re-entrant"
+        default: return id
+        }
+    }
+
     static let sc = build("sc", "Simple cubic", 8.4853,
         "3 orthogonal edges/cell — 2 horizontal bridges, 1 vertical column",
         S: 2, basis: [Node(0, 0, 0)]) { a, b, S in d2(a, b) == S * S }

@@ -109,11 +109,17 @@ public struct WorkspacePlaceholder: View {
     /// The previous drag location, for orbit deltas / first-frame guard.
     @State private var gizmoBoxDragLast: CGPoint?
 
-    // Lattice mode (handoff 2026-07-29-lattice-mode-ui). The controls panel's open state
-    // and the lattice-region gizmo drag state — the region reuses the SAME transform-gizmo
+    // Lattice mode (handoff 2026-07-29-lattice-mode-ui → 2026-07-30-lattice-page).
+    // The full-screen lattice PAGE replaced the old side panel; the lattice-region
+    // gizmo drag state stays — the region reuses the SAME transform-gizmo
     // components as the manual primitives (renderer + SDF pick + PrimitiveGizmo.Drag),
     // committing to `project.lattice.region` instead of a force-group primitive.
-    @State private var showLatticePanel = false
+    @State private var showLatticePage = false
+    /// The variants-entry demand field (that run's own von Mises); nil from the
+    /// workspace entry (bar B6's two paths).
+    @State private var latticePageVariantField: LatticeDemandField?
+    @StateObject private var latticeSim = LatticeSimModel()
+    @StateObject private var latticePageModel = LatticePageModel()
     @State private var latticeRegionDrag: PrimitiveGizmo.Drag?
     @State private var latticeRegionActiveId: Float = -1
     @State private var latticeRegionOrbiting = false
@@ -353,7 +359,7 @@ public struct WorkspacePlaceholder: View {
             // of the gizmo so the values stay readable while transforming.
             if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
 
-            chrome
+            if !showLatticePage { chrome }
             if force.phase == .setup {
                 gravityBanner
                 // Point which way is down — the reliable route that doesn't depend on a
@@ -369,16 +375,20 @@ public struct WorkspacePlaceholder: View {
                     gravityBaseGizmoOverlay.ignoresSafeArea()
                     gravityDirectionOverlay.ignoresSafeArea()
                 }
-            } else {
+            } else if !showLatticePage {
                 // The Design Box drawer now lives INSIDE `bottomRightControls` (item 11), so it
                 // is no longer placed separately here.
                 if force.gravityIsSet { bottomRightControls }
                 if viewerMesh != nil { selectionsPanel }
                 if viewerMesh != nil { latticePreviewOverlay }
             }
-            loadOverlays.ignoresSafeArea()                      // D3/D4/D5: tappable pills at each arrow
+            if !showLatticePage { loadOverlays.ignoresSafeArea() }  // D3/D4/D5: tappable pills at each arrow
             if viewerMesh != nil { orientationGizmo }           // orientation gizmo — top-right, always
-            bottomBar
+            if !showLatticePage { bottomBar }
+            // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
+            // over the SAME live stage — the workspace chrome above is hidden while
+            // it is open, so exactly one set of controls exists at a time.
+            if showLatticePage { latticePageOverlay }
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
                       resolution: runResolution,
@@ -425,11 +435,20 @@ public struct WorkspacePlaceholder: View {
                               // left, and returned to). Cancelling here used to wipe the
                               // streamed results (RunModel.finish cancelled branch → nil).
                               onClose: { model.backHome() },
-                              onSeeOriginal: { viewOriginal = true })
+                              onSeeOriginal: { viewOriginal = true },
+                              // Per-variant lattice entry (handoff 2026-07-30-lattice-
+                              // page): the selected variant's own field rides in as the
+                              // demand field; the results overlay steps aside so the
+                              // page (mounted above the workspace stage) is visible.
+                              onLattice: { idx in
+                                  viewOriginal = true
+                                  openLatticePage(variantIndex: idx)
+                              })
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view.
-            if viewOriginal, let outcome = run.outcome, outcome.variants.contains(where: { $0.accepted }) {
+            if viewOriginal, !showLatticePage, let outcome = run.outcome,
+               outcome.variants.contains(where: { $0.accepted }) {
                 seeResultsChip
             }
         }
@@ -606,6 +625,16 @@ public struct WorkspacePlaceholder: View {
                 model.toast = "Gravity set — the part now rests the way it will in real life"
             }
             return
+        }
+        // Lattice page PAINT pane: a face tap toggles the face's paint role
+        // (include → LatticeSettings, exclude → the protect group) instead of the
+        // normal selection routing — the page owns the tap while its paint pane is up.
+        if showLatticePage {
+            if latticePageModel.pane == .paint {
+                project.toggleLatticePaintFace(faceID, role: latticePageModel.paintRole)
+                force.sync(groups: selection.groups)
+            }
+            return   // no selection edits from under the page's other panes
         }
         let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
         WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force)
@@ -1049,23 +1078,11 @@ public struct WorkspacePlaceholder: View {
                     .padding(.vertical, DS.Space.xs).padding(.horizontal, DS.Space.s)
                     .background(Capsule().fill(DS.Surface.panel.color.opacity(0.9)))
             }
-            if showLatticePanel {
-                ScrollView(.vertical, showsIndicators: false) {
-                    LatticeControlsPanel(project: project, proxy: latticeProxy,
-                                         limits: latticeLimits,
-                                         partVolumeMM3: partSolidVolumeMM3,
-                                         memberMM: latticeMemberMM,
-                                         onPlaceRegion: { project.placeLatticeRegion($0) },
-                                         onClearRegion: { project.lattice.region = nil })
-                }
-                .frame(maxHeight: 560)
-                .transition(.move(edge: .leading).combined(with: .opacity))
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .padding(.leading, DS.Space.l)
         .padding(.top, DS.Space.xl6)   // clear the top bar
-        .animation(DS.Motion.emphasized, value: showLatticePanel)
+        .animation(DS.Motion.emphasized, value: showLatticePage)
         // Keep the legend/panel proxy in step with the settings (the legend is the only
         // consumer of `latticeProxy`; the surface tints derive their own params).
         .onChange(of: project.lattice) { _ in
@@ -1081,7 +1098,7 @@ public struct WorkspacePlaceholder: View {
                 buildStrutScene()
             }
         }
-        .onChange(of: showLatticePanel) { open in if open { syncLatticeProxy() } }
+        .onChange(of: showLatticePage) { open in if open { syncLatticeProxy() } }
         // Graded follow-up: when a run's accepted variants land (streamed or final),
         // rebake the strut scene so its radii grade by the fresh von Mises field.
         // Keyed on acceptedCount (cheap, Equatable); no-op while the preview is off.
@@ -1089,6 +1106,44 @@ public struct WorkspacePlaceholder: View {
             if showStrutPreview { buildStrutScene() }
         }
         .onAppear { syncLatticeProxy() }
+    }
+
+    // MARK: the lattice page (handoff 2026-07-30-lattice-page)
+
+    /// Open the full-screen lattice page. `variantIndex` non-nil = the variants
+    /// entry: that variant's own von Mises field becomes the demand field, so Auto
+    /// density is available with NO sim (bar B6's second path).
+    private func openLatticePage(variantIndex: Int?) {
+        if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
+           !o.variants[idx].vonMisesField.isEmpty {
+            latticePageVariantField = LatticeDemandField(
+                vonMises: o.variants[idx].vonMisesField,
+                nx: o.gridNx, ny: o.gridNy, nz: o.gridNz,
+                origin: o.gridOrigin, spacingMM: o.spacing,
+                provenance: .variant(runName: project.name, variantIndex: idx,
+                                     date: nil))
+        } else {
+            latticePageVariantField = nil
+        }
+        showLatticePage = true
+    }
+
+    private var latticePageOverlay: some View {
+        LatticePage(model: model, project: project, run: run,
+                    sim: latticeSim, page: latticePageModel,
+                    variantField: latticePageVariantField,
+                    previewOn: Binding(
+                        get: { showStrutPreview },
+                        set: { on in
+                            showStrutPreview = on
+                            if on, strutScene == nil { buildStrutScene() }
+                        }),
+                    baseCanOptimize: canOptimize,
+                    baseSummary: force.optimizeSummary(in: selection.groups),
+                    onOptimize: { startRun() },
+                    onClose: { showLatticePage = false },
+                    onBackToSetup: { showLatticePage = false })
+            .ignoresSafeArea(.keyboard)
     }
 
     /// The strut-preview toggle chip — shows the ACTUAL lattice geometry, raymarched
@@ -1132,7 +1187,19 @@ public struct WorkspacePlaceholder: View {
     private func buildStrutScene() {
         guard let mesh = viewerMesh else { return }
         let latticeID = latticeProxy.params.latticeID
-        let field = LatticeSDFScene.demandField(from: run.outcome)
+        // Auto density on the lattice page grades the preview from the page's OWN
+        // demand field (the variant's field on the variants entry, else the sim's) —
+        // provenance the page shows next to the Auto control (bar B6). Otherwise the
+        // shipped behaviour: the newest accepted variant's field, uniform pre-run.
+        let field: StressField?
+        if showLatticePage, project.lattice.densityMode == .auto,
+           let f = latticePageVariantField ?? latticeSim.field {
+            field = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
+                                origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
+                                values: f.vonMises)
+        } else {
+            field = LatticeSDFScene.demandField(from: run.outcome)
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let scene = LatticeSDFScene(mesh: mesh, field: field, latticeID: latticeID)
             DispatchQueue.main.async {
@@ -1142,17 +1209,16 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// The chip that opens/closes the lattice CONTROLS panel (the mode toggle lives inside
-    /// the panel). Shows "· on" when lattice mode is enabled, tinted the density ramp's
-    /// indigo so it reads as its own tool.
+    /// The chip that opens the full-screen LATTICE PAGE (handoff 2026-07-30-lattice-
+    /// page; the page replaced the old side panel). Shows "· on" when lattice mode is
+    /// enabled, tinted the density ramp's indigo so it reads as its own tool.
     private var latticePreviewChip: some View {
-        Button { showLatticePanel.toggle() } label: {
+        Button { openLatticePage(variantIndex: nil) } label: {
             HStack(spacing: DS.Space.xs) {
                 Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .bold))
                 Text(project.lattice.enabled ? "Lattice · on" : "Lattice")
                     .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
-                Image(systemName: showLatticePanel ? "chevron.up" : "chevron.down")
-                    .font(.system(size: 9, weight: .bold))
+                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .bold))
             }
             .foregroundStyle(project.lattice.enabled
                 ? LatticeDensityProxy.densityColor(fraction: 0.75).color
@@ -2287,7 +2353,7 @@ public struct WorkspacePlaceholder: View {
         // Never while a force primitive is selected for transform (gizmoTarget != nil): that
         // is the only time the force gizmo draws its full 297pt box, so gating here means the
         // two gizmo boxes can never coincide or steal each other's taps (U5).
-        if showLatticePanel, project.lattice.enabled, gizmoTarget == nil,
+        if showLatticePage, project.lattice.enabled, gizmoTarget == nil,
            let region = project.lattice.region,
            let proj = projection,
            let center = proj.project(settledWorld(SIMD3<Float>(region.center))) {

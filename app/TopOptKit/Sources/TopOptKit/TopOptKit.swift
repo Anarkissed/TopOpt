@@ -640,10 +640,20 @@ public enum TopOptKit {
                              minCellsPerMember: lim.min_cells_per_member)
     }
 
-    /// The topology names the core can RUN and certify today (`["octet"]`). The UI
-    /// reads this to mark which picker entries are certifiable rather than assuming.
+    /// The topology names the core can RUN and certify today (the seven cubic
+    /// topologies). The UI reads this to mark which picker entries are certifiable
+    /// rather than assuming.
     public static var latticeCertifiableTopologies: [String] {
         topoptbridge.lattice_certifiable_topologies().map { String($0) }
+    }
+
+    /// The topology names the core GEOMETRY GENERATOR can emit (`["octet"]` today).
+    /// Certifiability and generatability are INDEPENDENT: core certifies seven
+    /// topologies but can generate geometry for only this set. The picker reads
+    /// BOTH sets and never infers one from the other (handoff
+    /// 2026-07-30-lattice-page, bar B0).
+    public static var latticeGeneratableTopologies: [String] {
+        topoptbridge.lattice_generatable_topologies().map { String($0) }
     }
 
     /// Load and validate a materials.json file (ARCHITECTURE §6). Materials are
