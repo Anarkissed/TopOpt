@@ -1,0 +1,17 @@
+===== A6 — ARMED REUSE POLICY (big stagnation fixture, draft off, 12 capped iters) =====
+
+  step | mg | CG off | CG on | action (0 none 1 reuse 2 refresh 3 build 4 refused) | Nt
+     0 |  1 |     52 |    52 | 0 | 0
+     1 |  1 |    193 |   193 | 0 | 0
+     2 |  0 |   6299 |   889 | 3 | 864
+     3 |  1 |    240 |   239 | 0 | 0
+     4 |  1 |     62 |    60 | 0 | 0
+     5 |  0 |  11987 |  2716 | 2 | 864
+     6 |  1 |     52 |    56 | 0 | 0
+     7 |  1 |     99 |    97 | 0 | 0
+     8 |  1 |     73 |    72 | 0 | 0
+     9 |  1 |     78 |    78 | 0 | 0
+    10 |  1 |     62 |    58 | 0 | 0
+    11 |  1 |    132 |   129 | 0 | 0
+
+  trajectory CG: off=19329 on=4639 (0.240x); whole-run builds=1 refreshes=1

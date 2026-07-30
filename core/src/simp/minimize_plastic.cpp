@@ -245,6 +245,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // thread-local, so a prior run's subspace must never leak into this one. Inert
   // when recycling is off (the library default).
   fea_reset_krylov_recycle_space();
+  // Handoff 2026-07-29-geneo-arming — same discipline for the GenEO deflation
+  // basis + its lifecycle counters: a prior run's coarse space (or its
+  // degradation reference) must never leak into this one. Inert when the
+  // deflation is off (the library default).
+  fea_reset_geneo_basis();
 
   // --- Fixed pipeline setup (shared across every rung) ---------------------
   // The design load, computed once and held across rungs (pipeline.hpp modeling

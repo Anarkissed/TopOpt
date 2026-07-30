@@ -228,6 +228,25 @@ struct RunInfo {
   // it changes which solves the accelerator touched at all, so a run record that
   // omitted it could not be used to interpret the CSV's recycle_dim column.
   bool krylov_recycle_wrap_multigrid = false;
+  // Handoff 2026-07-29-geneo-arming — GenEO two-level deflation echo.
+  // `geneo_twolevel` is the ACTUAL process-global state the run executed under
+  // (read from fea_geneo_twolevel_enabled, never inferred — the 132 discipline);
+  // `geneo_trigger_iters` / `geneo_rebuild_factor` echo the named recipe
+  // constants (the stagnation-trigger budget and the degradation rebuild
+  // factor), so a run record names the policy it ran, not just the on/off bit.
+  // The lifecycle counters are filled post-run (finalize): how many times the
+  // eigensolve basis was BUILT, how many cheap coarse-operator REFRESHES were
+  // paid, how many fallback solves the deflation actually preconditioned, and
+  // the held coarse dimension N_t / stored basis MB at run end. All 0 / false
+  // when the feature is off (the library default).
+  bool geneo_twolevel = false;
+  int geneo_trigger_iters = 0;
+  double geneo_rebuild_factor = 0.0;
+  long long geneo_basis_builds = 0;
+  long long geneo_coarse_refreshes = 0;
+  long long geneo_armed_solves = 0;
+  int geneo_basis_dim = 0;
+  double geneo_basis_mb = 0.0;
   bool warm_start_inherit = false;
   bool warm_start_coarse = false;
   bool projection = false;

@@ -49,6 +49,7 @@
 #include <Eigen/SparseCore>
 
 #include "fea_matfree.hpp"
+#include "geneo.hpp"
 #include "recycle.hpp"
 #include "fea_reduced.hpp"
 
@@ -1300,6 +1301,14 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       diag.mg_levels = 0;
       diag.recycle_dim = rec.dim;
       diag.recycle_setup_matvecs = rec.setup_matvecs;
+      {
+        // GenEO two-level diagnostics for THIS fallback solve (all 0 when the
+        // deflation is off or never engaged — the library default).
+        const fea_detail::GeneoReport gr = fea_detail::geneo_last_report();
+        diag.geneo_dim = gr.dim;
+        diag.geneo_action = gr.action;
+        diag.geneo_trigger_burn = gr.trigger_burn;
+      }
       if (info) *info = diag;
       if (!diag.converged)
         throw SolverNonConvergence(

@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "fea_matfree.hpp"
+#include "geneo.hpp"  // interface is Eigen-free; the provider TU links Eigen
 #include "recycle.hpp"
 
 #if defined(__ARM_NEON)
@@ -668,6 +669,21 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     hook = g_mf_precond_hook;
   }
 
+  // GenEO two-level deflation (handoff 2026-07-29-geneo-arming). LIBRARY default
+  // OFF (fea_set_geneo_twolevel; production arms it) => both branches below are
+  // dead and the loop is byte-identical. When armed, a held basis is refreshed
+  // and applied from iteration 0; with no basis yet the solve runs plain up to
+  // the stagnation trigger, and only a solve that burns kGeneoTriggerIters
+  // unconverged pays the eigensolve (so a healthy fallback never does). Like
+  // recycling and the hook, the correction is SPD-additive: it changes the
+  // ITERATION COUNT, never the converged field or the stopping test.
+  bool geneo_active = false;
+  bool geneo_pending = false;
+  if (ctx != nullptr && geneo_enabled()) {
+    geneo_active = geneo_solve_begin(m, *ctx);
+    geneo_pending = !geneo_active;
+  }
+
   auto dot = [n](const std::vector<double>& a, const std::vector<double>& b) {
     double s = 0.0;
     for (int i = 0; i < n; ++i)
@@ -719,6 +735,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     p[static_cast<std::size_t>(i)] =
         m.invdiag[static_cast<std::size_t>(i)] * residual[static_cast<std::size_t>(i)];
   recycle.augment(residual.data(), p.data());  // + U E^-1 U^T residual
+  if (geneo_active) geneo_apply(residual.data(), p.data());  // + V (V^T A V)^-1 V^T r
   if (hook) hook(m, *ctx, residual.data(), p.data());  // + two-level GenEO correction
   double absNew = dot(residual, p);
 
@@ -735,10 +752,34 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     }
     residualNorm2 = dot(residual, residual);
     if (residualNorm2 < threshold) break;
+    // GenEO stagnation trigger: this solve has burned the trigger budget of plain
+    // iterations without converging — it IS the stagnation regime, so pay the
+    // basis build now, then RESTART the PCG recurrence (p = M^-1 r, beta = 0)
+    // with the deflated preconditioner: CG's conjugacy assumes a fixed M, and a
+    // restart from the current x is a warm start — exactness untouched. The
+    // iteration counter keeps running (the burned iterations are charged).
+    if (geneo_pending && i + 1 >= kGeneoTriggerIters) {
+      geneo_pending = false;
+      if (geneo_build_now(m, *ctx, i + 1)) {
+        geneo_active = true;
+        for (int q = 0; q < n; ++q)
+          z[static_cast<std::size_t>(q)] = m.invdiag[static_cast<std::size_t>(q)] *
+                                           residual[static_cast<std::size_t>(q)];
+        recycle.augment(residual.data(), z.data());
+        geneo_apply(residual.data(), z.data());
+        if (hook) hook(m, *ctx, residual.data(), z.data());
+        absNew = dot(residual, z);
+        for (int q = 0; q < n; ++q)
+          p[static_cast<std::size_t>(q)] = z[static_cast<std::size_t>(q)];
+        ++i;
+        continue;
+      }
+    }
     for (int q = 0; q < n; ++q)
       z[static_cast<std::size_t>(q)] =
           m.invdiag[static_cast<std::size_t>(q)] * residual[static_cast<std::size_t>(q)];
     recycle.augment(residual.data(), z.data());  // + U E^-1 U^T residual
+    if (geneo_active) geneo_apply(residual.data(), z.data());  // + V (V^T A V)^-1 V^T r
     if (hook) hook(m, *ctx, residual.data(), z.data());  // + two-level GenEO correction
     const double absOld = absNew;
     absNew = dot(residual, z);
@@ -754,6 +795,8 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   for (int q = 0; q < n; ++q)
     if (!std::isfinite(x[static_cast<std::size_t>(q)])) { finite = false; break; }
   converged_out = (error_out <= tol) && finite;
+  // GenEO degradation bookkeeping (inert when the deflation never engaged).
+  if (ctx != nullptr && geneo_enabled()) geneo_solve_end(i, converged_out);
   // Rebuild the carried basis ONLY from a solve that actually reached tolerance:
   // a stagnated or broken-down solve's directions are not evidence about the
   // operator's slow modes.
@@ -825,6 +868,10 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
                             diag.residual, diag.converged, &rec, &pc);
     diag.recycle_dim = rec.dim;
     diag.recycle_setup_matvecs = rec.setup_matvecs;
+    const fea_detail::GeneoReport gr = fea_detail::geneo_last_report();
+    diag.geneo_dim = gr.dim;
+    diag.geneo_action = gr.action;
+    diag.geneo_trigger_burn = gr.trigger_burn;
     if (info) *info = diag;
     if (!diag.converged)
       throw SolverNonConvergence(
@@ -892,6 +939,23 @@ void fea_reset_krylov_recycle_space() { fea_detail::rc_reset_space(); }
 bool fea_krylov_recycle_space_active() { return fea_detail::rc_space_active(); }
 int fea_krylov_recycle_space_dim() { return fea_detail::rc_space_dim(); }
 std::size_t fea_krylov_recycle_bytes() { return fea_detail::rc_space_bytes(); }
+
+// Handoff 2026-07-29-geneo-arming — GenEO two-level deflation. Opt-in, default
+// OFF; see fea.hpp for the contract and geneo.hpp for the recipe tripwire.
+bool fea_set_geneo_twolevel(bool enable) {
+  return fea_detail::geneo_set_enabled(enable);
+}
+bool fea_geneo_twolevel_enabled() { return fea_detail::geneo_enabled(); }
+void fea_reset_geneo_basis() { fea_detail::geneo_reset(); }
+int fea_geneo_basis_dim() { return fea_detail::geneo_basis_dim(); }
+std::size_t fea_geneo_basis_bytes() { return fea_detail::geneo_basis_bytes(); }
+long long fea_geneo_basis_builds() { return fea_detail::geneo_basis_builds(); }
+long long fea_geneo_coarse_refreshes() {
+  return fea_detail::geneo_coarse_refreshes();
+}
+long long fea_geneo_armed_solves() { return fea_detail::geneo_armed_solves(); }
+int fea_geneo_trigger_iters() { return fea_detail::kGeneoTriggerIters; }
+double fea_geneo_rebuild_factor() { return fea_detail::kGeneoRebuildFactor; }
 
 // Handoff 114 — read-only accessors for the run version record. Pure reads.
 int fea_matfree_thread_count() { return fea_detail::mf_thread_count(); }

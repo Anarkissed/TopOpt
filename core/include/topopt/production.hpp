@@ -67,6 +67,22 @@ namespace topopt {
 //     certification is the sole safety. Echoed into run_info.json (quality, loose tol,
 //     per-rung tail k, trigger posture, and any escalation with its rung index). See
 //     production.cpp for the TRIPWIRE and the derivation of 1e-3.
+//   * the process-global GenEO TWO-LEVEL DEFLATION is ENABLED (handoff
+//     2026-07-29-geneo-arming). The Jacobi-CG stagnation fallback — and ONLY it;
+//     a healthy multigrid rung never enters that loop — gains the GenEO
+//     coarse-space correction M^-1 = D^-1 + V (V^T A V)^-1 V^T, built matrix-free
+//     (capture-LOBPCG over overlapping subdomains) once a solve burns the
+//     stagnation-trigger budget unconverged, then reused across design
+//     iterations with a cheap coarse-operator refresh (rebuilt on DOF-set change
+//     or measured degradation). Phase 2 measured 21.7x on the real stagnating
+//     rung, growing with size. LIKE recycling (and unlike AD/draft) it is an
+//     EXACT accelerator — SPD-additive, iteration counts only, certificate
+//     untouched — though not bit-identical when it engages (a different
+//     iteration path lands elsewhere in the 1e-8 basin; A4 charges this against
+//     the negative-control floor). Library default OFF keeps Gate-V2 /
+//     reference byte-identical; echoed into run_info.json (armed posture +
+//     basis builds / refreshes / armed solves / dim / bytes). See
+//     production.cpp for the TRIPWIRE and src/fea/geneo.hpp for the recipe.
 //   * the process-global matrix-free Galerkin block cache is ENABLED (see below).
 //   * the process-global matrix-free THREAD COUNT is pinned to
 //     production_matfree_thread_count() (handoff 132 (C)) — the performance-core
@@ -171,6 +187,17 @@ int production_active_domain_band();
 // draft_quality=false so the reference world stays byte-identical (THE ONE RULE). See
 // production.cpp for the TRIPWIRE and the derivation of 1e-3.
 double production_draft_loose_tol();
+
+// Handoff 2026-07-29-geneo-arming — whether configure_production_options arms the
+// GenEO two-level deflation on the Jacobi-CG stagnation fallback (true = ARMED).
+// Exposed so the parity test asserts fea_geneo_twolevel_enabled() against this
+// named constant rather than a bare true, and so run_info names the posture. The
+// LIBRARY default stays OFF (fea_set_geneo_twolevel is never called by the
+// reference world), so Gate-V2 and every reference run are byte-identical (THE
+// ONE RULE). See production.cpp for the TRIPWIRE and src/fea/geneo.hpp for the
+// recipe constants and their derivations.
+bool production_geneo_twolevel();
+
 // Handoff 2026-07-26-width-aware-knockdown — whether configure_production_options
 // arms the WIDTH-AWARE accept-gate knockdown. false = the SHIPPED default (the pure
 // scalar f^1.5 gate, byte-for-byte the pre-width gate); true = the SHELL+CORE

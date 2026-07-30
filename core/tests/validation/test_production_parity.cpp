@@ -178,6 +178,18 @@ int main() {
           "library default leaves Krylov recycling OFF (reference untouched)");
     CHECK(!opts.krylov_recycle_reset_per_rung,
           "library default carries the recycle basis across rungs (133 §4 lifetime)");
+    // Handoff 2026-07-29-geneo-arming — the GenEO two-level deflation is a
+    // PRODUCTION setting, not a library default: the reference world never calls
+    // configure_production_options, so it sees the deflation OFF and every
+    // Jacobi-CG fallback byte-identical to the pre-arming tree. THE ONE RULE,
+    // checked BEFORE the call (and pinned by the header static_assert on
+    // kGeneoTwoLevelLibraryDefaultOff).
+    CHECK(!topopt::fea_geneo_twolevel_enabled(),
+          "library default leaves the GenEO two-level deflation OFF (reference "
+          "untouched, byte-identical)");
+    CHECK(topopt::fea_geneo_basis_dim() == 0 &&
+              topopt::fea_geneo_basis_builds() == 0,
+          "no GenEO basis exists before any production run");
     // Handoff 2026-07-26-ad-arming — the ACTIVE DOMAIN band is a PRODUCTION
     // setting, not a library default. The reference world (Gate-V2, the property
     // suite, every core test) never calls configure_production_options, so it sees
@@ -326,6 +338,24 @@ int main() {
     CHECK(!opts.krylov_recycle_reset_per_rung,
           "production config carries the recycle basis across rung boundaries "
           "(133 §4: measured mildly better in both regimes, worse in neither)");
+    // Handoff 2026-07-29-geneo-arming — the ARMED GenEO two-level deflation.
+    // These assertions ARE the config echo run_info.json emits (geneo_twolevel /
+    // geneo_trigger_iters / geneo_rebuild_factor come from these same accessors
+    // in run_job.cpp). Each value is a measured decision (see the TRIPWIRE in
+    // production.cpp and the recipe tripwire in src/fea/geneo.hpp); changing any
+    // requires re-running geneo_twolevel_probe + geneo_arming_gate and landing a
+    // new gate table.
+    CHECK(topopt::fea_geneo_twolevel_enabled() ==
+              topopt::production_geneo_twolevel(),
+          "production config arms the GenEO deflation to the named constant");
+    CHECK(topopt::production_geneo_twolevel(),
+          "the production GenEO posture is ARMED (2026-07-29 maintainer decision)");
+    CHECK(topopt::fea_geneo_trigger_iters() == 500,
+          "the stagnation trigger is 500 plain iterations (~1.5x the measured "
+          "healthy-fallback ceiling of ~327, ~0.3x the 1.7k-41k stagnation floor)");
+    CHECK(topopt::fea_geneo_rebuild_factor() == 2.0,
+          "the degradation rebuild factor is 2.0 (phase 2 §P6: healthy reuse "
+          "stays within 1.42x of a fresh rebuild)");
     // Handoff 2026-07-26-ad-arming — the ARMED active-domain band. AUTO (-1), NOT
     // a pinned width: k is derived per job downstream (asserted concretely on the
     // real run below). Asserted against the named sentinel, not a bare -1, so a

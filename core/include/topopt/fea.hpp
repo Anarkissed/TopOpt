@@ -277,6 +277,23 @@ struct CgInfo {
   // without re-deriving it. Both stay 0 on every path when recycling is off.
   int recycle_dim = 0;
   int recycle_setup_matvecs = 0;
+  // GenEO two-level deflation diagnostics (handoff 2026-07-29-geneo-arming).
+  // All 0 on every path when the feature is off (the library default) or when
+  // the solve never engaged it (multigrid carried, or the fallback converged
+  // under the stagnation trigger).
+  //   geneo_dim           N_t, the coarse-space dimension that preconditioned
+  //                       this solve (0 = deflation never applied)
+  //   geneo_action        0 = never engaged; 1 = held basis REUSED as-is;
+  //                       2 = coarse operator REFRESHED for this system;
+  //                       3 = basis (RE)BUILT — first build via the stagnation
+  //                       trigger, or a scheduled degradation/DOF-set rebuild;
+  //                       4 = build REFUSED by the memory cap (solve stayed
+  //                       plain Jacobi-CG — exact, just slower)
+  //   geneo_trigger_burn  plain Jacobi-CG iterations burned before an in-solve
+  //                       trigger build (action 3); 0 when the basis pre-existed
+  int geneo_dim = 0;
+  int geneo_action = 0;
+  int geneo_trigger_burn = 0;
 };
 
 // Thrown by the CG solvers (fea_solve_cg, fea_solve_mgcg, fea_solve_cg_matfree,
@@ -696,26 +713,84 @@ bool fea_matfree_mixed_precision_enabled();
 // two-level, handoff 2026-07-29 phase 2).
 //
 // The matrix-free Jacobi-CG (the high-contrast stagnation fallback) exposes an
-// OPT-IN slot for a second SPD additive correction — the two-level GenEO
-// additive-Schwarz preconditioner — installed by an EXTERNAL provider that links
-// Eigen (a measurement harness), so the production library stays Eigen-free and
-// the eigensolve/decomposition machinery never enters it. The slot is declared in
+// OPT-IN slot for a second SPD additive correction, installed by an EXTERNAL
+// provider that links Eigen (a measurement harness). The slot is declared in
 // the internal fea/fea_matfree.hpp (mf_set_precond_hook); it is NOT part of the
-// public API because no production caller installs it.
-//
-// This constant is the DEFAULT-OFF INVARIANT made explicit: nothing in the
-// production build installs a hook, so mf_cg_solve is byte-for-byte the pre-phase-2
-// path and the MG-CG path is untouched. If a future change wires a hook into a
-// production path, flip this to false DELIBERATELY and update the byte-identical
-// evidence — the static_assert is the tripwire that forces that to be a conscious
-// act, not an accident. Because any SPD additive term keeps the compound
-// preconditioner SPD, an installed hook can only change the ITERATION COUNT, never
-// the converged field or the exact stopping test.
+// public API because no production caller installs it — the PRODUCTION GenEO
+// deflation is the separate library-internal provider below
+// (fea_set_geneo_twolevel), not this hook, so this invariant SURVIVES the
+// 2026-07-29 arming: nothing in the production build installs a hook, and the
+// hook branch stays dead unless a harness installs one. Because any SPD
+// additive term keeps the compound preconditioner SPD, an installed hook can
+// only change the ITERATION COUNT, never the converged field or the exact
+// stopping test.
 constexpr bool kMatfreeExternalPrecondDefaultOff = true;
 static_assert(kMatfreeExternalPrecondDefaultOff,
               "matrix-free external preconditioner hook must ship default-off: no "
               "production path may install it without updating the phase-2 "
               "byte-identical evidence");
+
+// ---------------------------------------------------------------------------
+// GENEO TWO-LEVEL DEFLATION (handoff 2026-07-29-geneo-arming). OPT-IN, LIBRARY
+// DEFAULT OFF; production arms it in configure_production_options.
+//
+// WHY. On the high-contrast stagnating design-box rungs the geometric multigrid
+// fails to contract and the run falls to thousands-to-tens-of-thousands of
+// Jacobi-CG iterations per solve (handoffs 125/131: 4.5k-44k). Phase 2
+// (2026-07-29-matrixfree-geneo-phase2) measured the GenEO coarse-space deflation
+//     M^-1 = D^-1 + V (V^T A V)^-1 V^T          (arXiv 1912.13225 eq. 9)
+// cutting the real stagnating rung's cold solve 5,412 -> 249 iterations (21.7x),
+// with the reduction GROWING with problem size (1.9x -> 3.6x on a controlled
+// sweep as Jacobi degrades and the two-level count stays flat ~255) — the
+// contrast/mode-count independence that projects the maintainer's 128^3 rung
+// (Jacobi ~41k) to low hundreds. V is a capture-LOBPCG GenEO basis built
+// MATRIX-FREE from overlapping subdomain generalized eigenproblems (phase 1);
+// the fine system is never assembled.
+//
+// WHERE IT LIVES. Inside mf_cg_solve ONLY — the Jacobi-CG stagnation fallback.
+// A healthy multigrid rung never enters it, so the feature is conditional on
+// stagnation BY PLACEMENT; and within the fallback a basis is built only after
+// a solve burns fea_geneo_trigger_iters() plain iterations unconverged, so a
+// brief healthy fallback never pays the eigensolve either. Once built, the
+// basis is REUSED across design iterations with a cheap per-solve coarse-
+// operator refresh, rebuilt on DOF-set change or measured degradation (the
+// recipe constants + derivations live beside the tripwire in src/fea/geneo.hpp).
+//
+// EXACTNESS. The correction is SPD-additive around the same Jacobi base (the
+// recycling structure): it changes the ITERATION COUNT, never the converged
+// field or the exact stopping test. The certification gate is untouched.
+//
+// This constant is the LIBRARY-DEFAULT-OFF invariant made explicit (THE ONE
+// RULE): Gate-V2, the property suite and every reference run — none of which
+// call configure_production_options — execute the deflation-off loop
+// byte-for-byte. Arming moved the PRODUCTION default only.
+constexpr bool kGeneoTwoLevelLibraryDefaultOff = true;
+static_assert(kGeneoTwoLevelLibraryDefaultOff,
+              "the GenEO two-level deflation must ship library-default-off: only "
+              "configure_production_options arms it, and changing that demands a "
+              "new byte-identity + gate table (2026-07-29-geneo-arming)");
+
+// Enable/disable the GenEO two-level deflation on the matrix-free Jacobi-CG
+// fallback. Returns the previous setting. Process-global like the recycling
+// toggles; set once around a run. fea_reset_geneo_basis() drops the held basis
+// and counters — the driver calls it at run start (the recycle-space
+// discipline), so one run's basis never leaks into the next.
+bool fea_set_geneo_twolevel(bool enable);
+bool fea_geneo_twolevel_enabled();
+void fea_reset_geneo_basis();
+
+// Read-only diagnostics for the run version record (the 114/132 discipline:
+// echo the ACTUAL solver configuration, never infer it). Dim/bytes describe the
+// currently-held basis; builds/refreshes/armed_solves are cumulative since the
+// last reset. The trigger/rebuild-factor accessors echo the named recipe
+// constants so tests assert against them rather than literals.
+int fea_geneo_basis_dim();
+std::size_t fea_geneo_basis_bytes();
+long long fea_geneo_basis_builds();
+long long fea_geneo_coarse_refreshes();
+long long fea_geneo_armed_solves();
+int fea_geneo_trigger_iters();
+double fea_geneo_rebuild_factor();
 
 // Per-run multigrid stagnation latch (handoff 127). When the matrix-free MG-CG
 // stagnates (builds a hierarchy but never contracts — the high-contrast

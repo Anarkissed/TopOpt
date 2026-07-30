@@ -154,6 +154,42 @@ constexpr double kProductionDraftEscalationDisabled = 1e30;
 // bridge; only this constant gates whether the gate reads it.
 constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
 
+// ===========================================================================
+// TRIPWIRE — the GENEO TWO-LEVEL DEFLATION production arming
+// (handoff 2026-07-29-geneo-arming; measured in 2026-07-29-matrixfree-geneo-
+// phase2).
+// ===========================================================================
+// Do NOT disarm this, arm it anywhere but the matrix-free Jacobi-CG fallback,
+// or change any recipe constant beside the tripwire in src/fea/geneo.hpp
+// (trigger, rebuild factor, subdomain tiling, lambda cut, memory cap), without
+// re-running BOTH:
+//   * core/tests/harness/geneo_twolevel_probe.cpp   p2 / control / amort / healthy
+//   * core/tests/harness/geneo_arming_gate.cpp      gate / interaction / stag
+// and landing a new before/after gate table plus a fresh four-way interaction
+// row (recycling x AD x draft x GenEO — the 2026-07-29 arming measured the
+// stack; any change here re-opens it).
+//
+// WHAT IT IS. On the stagnating design-box rungs whose multigrid falls to
+// Jacobi-CG (125/131: 4.5k-44k iterations per solve), the GenEO coarse-space
+// deflation M^-1 = D^-1 + V (V^T A V)^-1 V^T cut the real rung's cold solve
+// 21.7x, growing with problem size (phase 2 §P2). It fires ONLY on that
+// fallback, and only after a solve burns fea_geneo_trigger_iters() plain
+// iterations unconverged — so a healthy multigrid rung, and even a brief
+// healthy fallback, never pays the eigensolve. Conditional-on-stagnation is
+// structural, not configured.
+//
+// LIKE recycling and UNLIKE the AD band / draft, the deflation is an EXACT
+// accelerator: every added term is SPD, so it changes CG iteration counts,
+// never the converged field, the stopping test, or the certificate. It is NOT
+// bit-identical when it engages (a different iteration path lands elsewhere in
+// the 1e-8 basin — the same class of difference as a thread-count change in an
+// iterative refinement), which is why the arming evidence includes the
+// negative-control basin floor and the classification-flip table (A4), not a
+// bit-parity claim. The LIBRARY default stays OFF (THE ONE RULE): Gate-V2 and
+// every reference run are byte-for-byte unchanged, re-proven by stash-rebuild
+// FNV in the arming handoff.
+constexpr bool kProductionGeneoTwoLevel = true;  // ARMED
+
 // Handoff 132 (C) — the PRODUCTION matrix-free worker-thread count.
 //
 // The library default (fea_set_matfree_threads(0)) resolves to
@@ -204,6 +240,7 @@ int production_active_domain_band() { return kProductionActiveDomainBand; }
 
 double production_draft_loose_tol() { return kProductionDraftLooseTol; }
 bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
+bool production_geneo_twolevel() { return kProductionGeneoTwoLevel; }
 
 KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
   // The ONE construction (handoff 2026-07-26-post-merge-build-fix). All four fields
@@ -347,6 +384,23 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   fea_set_krylov_recycle_dim(kProductionRecycleDim);
   fea_set_krylov_recycle_wrap_multigrid(false);
   opts.krylov_recycle_reset_per_rung = false;
+
+  // Handoff 2026-07-29-geneo-arming — GENEO TWO-LEVEL DEFLATION, armed
+  // (maintainer decision, recorded verbatim in the handoff §"THE DECISION").
+  // The Jacobi-CG stagnation fallback gains the GenEO coarse-space correction
+  // M^-1 = D^-1 + V (V^T A V)^-1 V^T — the deflation form phase 2 measured
+  // winning (21.7x on the real stagnating rung, growing with size), fired only
+  // once a fallback solve proves stagnation by burning the trigger budget
+  // unconverged, with the basis reused (cheap coarse-operator refresh) across
+  // design iterations and rebuilt on DOF-set change or measured degradation.
+  // See the TRIPWIRE beside kProductionGeneoTwoLevel and the recipe tripwire in
+  // src/fea/geneo.hpp. The LIBRARY default stays OFF (THE ONE RULE): reference
+  // runs never call this function and are byte-for-byte unchanged. Exact
+  // accelerator: SPD-additive, changes iteration counts only — the certificate
+  // and every accept decision solve at the same tight tolerance as before.
+  // run_info.json echoes the armed posture and the per-run basis lifecycle
+  // (builds / refreshes / armed solves / dim / bytes).
+  fea_set_geneo_twolevel(kProductionGeneoTwoLevel);
 
   // Handoff 2026-07-26-ad-arming — ACTIVE DOMAIN, armed in AUTO (maintainer
   // decision, recorded verbatim in the handoff §"THE DECISION"). The band

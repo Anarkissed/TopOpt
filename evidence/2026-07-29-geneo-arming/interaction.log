@@ -1,0 +1,48 @@
+fixture: part 12x4x12 (252 solid) -> grid 24x8x24 (4608 elements), dilution=18.3x, spacing=2.00 mm; trigger=500
+
+===== FOUR-WAY INTERACTION (small stagnation fixture, natural termination) =====
+  [none            ] 14.8 s  CG=17605  outer=59  Jacobi-fallback=2/59
+  [rec             ] 16.8 s  CG=17661  outer=59  Jacobi-fallback=2/59
+      recycle: max_dim=11  applied on 1/2 Jacobi solves (rc_frac=0.500)  setup_mv=11
+  [rec+AD          ] 16.0 s  CG=18921  outer=57  Jacobi-fallback=3/57
+      recycle: max_dim=16  applied on 2/3 Jacobi solves (rc_frac=0.667)  setup_mv=26
+      AD: band k=3  f_bar=0.9913  latched=1@iter3  escapes=30  reason="escape detected: 30 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+  [rec+AD+draft    ] 11.8 s  CG=11574  outer=57  Jacobi-fallback=2/57
+      recycle: max_dim=11  applied on 1/2 Jacobi solves (rc_frac=0.500)  setup_mv=11
+      AD: band k=3  f_bar=0.9913  latched=1@iter3  escapes=30  reason="escape detected: 30 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+      draft: loose_tol=1e-03  compliance-gap=0.000022  escalated=0
+  [rec+AD+draft+GE ] 19.1 s  CG=10473  outer=57  Jacobi-fallback=2/57
+      recycle: max_dim=12  applied on 1/2 Jacobi solves (rc_frac=0.500)  setup_mv=12
+      geneo: deflated 2 traj steps (max Nt=48); run builds=1 refreshes=1 armed_solves=2 basis=1.6 MB; traj actions reuse/refresh/build/refused=0/1/1/0
+      AD: band k=3  f_bar=0.9913  latched=1@iter3  escapes=30  reason="escape detected: 30 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+      draft: loose_tol=1e-03  compliance-gap=0.000022  escalated=0
+  [GenEO alone     ] 18.9 s  CG=13515  outer=59  Jacobi-fallback=2/59
+      geneo: deflated 2 traj steps (max Nt=48); run builds=1 refreshes=1 armed_solves=2 basis=1.6 MB; traj actions reuse/refresh/build/refused=0/1/1/0
+  [GenEO+rec       ] 20.9 s  CG=13385  outer=59  Jacobi-fallback=2/59
+      recycle: max_dim=8  applied on 1/2 Jacobi solves (rc_frac=0.500)  setup_mv=8
+      geneo: deflated 2 traj steps (max Nt=48); run builds=1 refreshes=1 armed_solves=2 basis=1.6 MB; traj actions reuse/refresh/build/refused=0/1/1/0
+  [rec+AD+GenEO    ] 31.0 s  CG=16547  outer=57  Jacobi-fallback=3/57
+      recycle: max_dim=16  applied on 2/3 Jacobi solves (rc_frac=0.667)  setup_mv=27
+      geneo: deflated 3 traj steps (max Nt=48); run builds=1 refreshes=2 armed_solves=3 basis=1.6 MB; traj actions reuse/refresh/build/refused=0/2/1/0
+      AD: band k=3  f_bar=0.9913  latched=1@iter3  escapes=30  reason="escape detected: 30 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+
+===== DOES ANY FEATURE SILENTLY DEGRADE ANOTHER? =====
+  [recycling engaged] rec vs none: mean|drho|=8.053e-11 max=2.292e-08 (engaged correction => different iteration path, same 1e-8 basin; 133's bar is 1e-6 on u)
+  [GenEO engaged] GenEO-alone vs none: mean|drho|=6.953e-09 max=1.794e-06 (same 1e-8 basin; A4 charges this vs the negative control)
+  [production deterministic] rec+AD+draft+GenEO twice bit-identical (design+compliance+CG): YES
+  [recycling x GenEO] rc_frac: rec=0.500 rec+GenEO=0.500 | CG: GenEO alone=13515 GenEO+rec=13385 (marginal value of rec on top of GenEO: -130)
+  [AD latch] rec+AD: latched=1@3 esc=30 | rec+AD+GenEO: latched=1@3 esc=30
+  [draft x GenEO] Jacobi fallbacks: rec+AD=3, rec+AD+draft=2, rec+AD+draft+GE=2; GenEO builds with draft on=1 (0 means draft removed the stagnation before GenEO could see it HERE)
+
+===== CG-ITERATION LADDER =====
+  none             CG=17605    outer=59   (1.000x vs none)
+  rec              CG=17661    outer=59   (1.003x vs none)
+  rec+AD           CG=18921    outer=57   (1.075x vs none)
+  rec+AD+draft     CG=11574    outer=57   (0.657x vs none)
+  rec+AD+draft+GE  CG=10473    outer=57   (0.595x vs none)
+  GenEO alone      CG=13515    outer=59   (0.768x vs none)
+  GenEO+rec        CG=13385    outer=59   (0.760x vs none)
+  rec+AD+GenEO     CG=16547    outer=57   (0.940x vs none)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/manual-plane-length-width-a165d5/evidence/2026-07-29-geneo-arming/interaction.csv
+
+===== STACK VERDICT: no exactness/determinism regression =====

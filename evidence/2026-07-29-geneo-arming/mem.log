@@ -1,0 +1,13 @@
+===== A5 — MEMORY (armed big-fixture run) =====
+  RSS before: 2 MB
+  [prod armed      ] 23.1 s  CG=947  outer=12  Jacobi-fallback=0/12
+      recycle: max_dim=0  applied on 0/0 Jacobi solves (rc_frac=0.000)  setup_mv=0
+      geneo: deflated 0 traj steps (max Nt=0); run builds=0 refreshes=0 armed_solves=0 basis=0.0 MB; traj actions reuse/refresh/build/refused=0/0/0/0
+      AD: band k=4  f_bar=0.9427  latched=1@iter3  escapes=1008  reason="escape detected: 1008 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+      draft: loose_tol=1e-03  compliance-gap=0.792399  escalated=0
+  peak RSS after prod posture: 352 MB
+  [armed, draft off] 99.2 s  CG=4639  outer=12  Jacobi-fallback=2/12
+      recycle: max_dim=8  applied on 1/2 Jacobi solves (rc_frac=0.500)  setup_mv=8
+      geneo: deflated 2 traj steps (max Nt=864); run builds=1 refreshes=1 armed_solves=2 basis=35.4 MB; traj actions reuse/refresh/build/refused=0/1/1/0
+      AD: band k=4  f_bar=0.9427  latched=1@iter3  escapes=1008  reason="escape detected: 1008 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored"
+  peak RSS with basis resident: 418 MB (basis 35.4 MB, Nt=864) on the 16384 MB machine => 2.5% used, 15966 MB headroom
