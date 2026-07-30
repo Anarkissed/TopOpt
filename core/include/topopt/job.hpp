@@ -98,11 +98,48 @@ struct JobOutput {
 // radius/density FIELD is carried by the core generator (topopt/lattice_gen.hpp);
 // how that field is DERIVED from stress (the grading law) is a separate task, so
 // the job front-end ships uniform for now and records the density it implies.
+// One lattice ROLE region (task 2026-07-31-lattice-page-core-hookup) — a
+// `lattice.regions` entry, the schema PR 254's lattice page proposed. A
+// user-placed primitive (the same manual bolt-cylinder / bounded-slab geometry a
+// manual clearance carries — no second geometry concept) with a ROLE:
+//   "include" — material stays, LATTICED. When any include region exists, only
+//               material inside the include union is latticed; the REST of the
+//               part stays SOLID (certified solid + exported as a solid body).
+//   "exclude" — material stays, kept SOLID (certified solid, exported solid).
+// The third role, clearance (NO MATERIAL), is NOT spelled here — it is the
+// existing loads.clearances keep-out, unchanged. PRECEDENCE (tested):
+// clearance beats both; exclude beats include; include over optimizer void is a
+// NO-OP (lattice cannot conjure material) and is reported in the receipt.
+struct JobLatticeRegion {
+  std::string role;  // "include" | "exclude"
+  std::string kind;  // "bolt" (cylinder) | "face" (bounded slab)
+  // Bolt: a cylinder about axis_point + t·axis_dir, t in [-half_length, +half_length].
+  Vec3 axis_point{0.0, 0.0, 0.0};
+  Vec3 axis_dir{0.0, 0.0, 0.0};
+  double radius_mm = 0.0;
+  double half_length_mm = 0.0;
+  // Face: a bounded slab — origin + s·normal for s in [0, depth_mm], clipped to
+  // the centred in-plane rectangle 2·half_u_mm × 2·half_w_mm.
+  Vec3 origin{0.0, 0.0, 0.0};
+  Vec3 normal{0.0, 0.0, 0.0};
+  double half_u_mm = 0.0;
+  double half_w_mm = 0.0;
+  double depth_mm = 0.0;
+};
+
 struct JobLattice {
   bool present = false;
   std::string topology = "octet";  // only "octet" is implemented
+  // cell_mm / strut_radius_mm describe the UNIFORM lattice. Required when no
+  // "grading" block is present; REJECTED alongside one (a graded run derives the
+  // cell from grading.cell_mm raised to the printability floor and the strut
+  // radii from the run's own graded densities — a uniform cell/radius here would
+  // conflict, so the schema refuses it rather than silently ignore it).
   double cell_mm = 0.0;            // cell edge (mm), finite > 0
   double strut_radius_mm = 0.0;    // uniform strut radius (mm), finite > 0
+  // Lattice role regions (see JobLatticeRegion). Empty => whole-part lattice,
+  // byte-identical to the pre-regions schema.
+  std::vector<JobLatticeRegion> regions;
   bool emit_stl = true;            // write <prefix>_<vf>_lattice.stl
   bool emit_3mf = false;           // write <prefix>_<vf>_lattice.3mf (streaming)
 
@@ -136,12 +173,21 @@ struct JobLattice {
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the
-// stress-to-lattice grading law in the analyze/certification path. Absent =>
-// byte-identical run (bar L1). When present, the certification's von Mises field is
-// fed to grade_lattice (grading.hpp), which produces a per-voxel density + one uniform
-// cell size clamped to the certifiable band and the cells-per-member floor, and the
-// report is written to run_info's "grading" object. The law READS the band/floor from
-// core; only the knobs a job legitimately sets live here.
+// stress-to-lattice grading law. Absent => byte-identical run (bar L1). When
+// present, a von Mises field is fed to grade_lattice (grading.hpp), which produces
+// a per-voxel density + one uniform cell size clamped to the certifiable band and
+// the cells-per-member floor, and the report is written to run_info's "grading"
+// object. The law READS the band/floor from core; only the knobs a job
+// legitimately sets live here. TWO consumers:
+//   * analyze_job — grades the fixed design's certification field (the original
+//     path, unchanged);
+//   * run_job (task 2026-07-31-lattice-page-core-hookup, stage 4) — REQUIRES a
+//     "lattice" block (without one there is nothing to grade into — refused, never
+//     silently ignored) and, per accepted variant, grades that variant's OWN final
+//     certification von Mises field, then exports + certifies the GRADED lattice
+//     (per-voxel rho posture; strut radii from the graded densities). The
+//     per-variant receipt records the field's provenance (which variant, how many
+//     optimizer iterations produced it) and the band-clamp counts.
 struct JobGrading {
   bool present = false;
   std::string topology = "octet";       // only "octet" is implemented
@@ -248,7 +294,13 @@ struct JobDescription {
   // is the honest answer for a job that references the source file directly.
   std::string source_format;
   std::string material;  // key into materials.json (validated by run_job)
-  std::string mode;      // "minimize_plastic" (the only supported mode)
+  // "minimize_plastic" (the optimize ladder — run_job) or "analyze" (ONE
+  // fixed-design analysis solve — analyze_job; task lattice-page-core-hookup
+  // stage 3, so the LAN worker can route a RUN-SIM job). Anything else is
+  // refused at parse; run_job additionally refuses "analyze" (it never
+  // optimizes an analyze job), while analyze_job accepts BOTH (re-certifying an
+  // optimize job's model is the existing receipt flow).
+  std::string mode;
   int resolution = 0;    // voxelizer resolution along the longest axis, >= 1
   std::vector<JobFaceSelector> fixture_faces;  // self-weight path: all matches
                                                // tagged FIXTURE (may be empty

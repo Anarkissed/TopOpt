@@ -747,13 +747,12 @@ LatticeLimits lattice_limits(const std::string& topology);
 std::vector<std::string> lattice_certifiable_topologies();
 
 // The topology names the core GEOMETRY GENERATOR can emit (topopt::
-// LatticeGenTopology, named by topopt::lattice_gen_topology_name) — ["octet"]
-// today. Certifiability and generatability are INDEPENDENT properties: core
-// certifies seven topologies but can generate geometry for only this set, so a
-// picker must read BOTH and never infer one from the other. Names come from
-// core's own lattice_gen_topology_name; the case list mirrors core's enum (which
-// has no enumeration API yet — the reported gap; when core grows the enum this
-// forwarder needs the matching one-line case). Never throws.
+// LatticeGenTopology) — ["octet"] today. Certifiability and generatability are
+// INDEPENDENT properties: core certifies seven topologies but can generate
+// geometry for only this set, so a picker must read BOTH and never infer one
+// from the other. Read directly from core's own enumerator
+// (topopt::lattice_gen_topology_names) — no mirrored list remains app-side, so
+// core enum growth reaches the picker with zero app changes. Never throws.
 std::vector<std::string> lattice_generatable_topologies();
 
 }  // namespace topoptbridge

@@ -105,6 +105,21 @@ struct GradedField {
                                        //   (false by construction; a tripwire, not a mode)
   bool region_ungradeable = false;     // L4 at region scale: candidates existed but NONE
                                        //   could be graded — the whole region stayed solid
+
+  // ── band-clamp accounting (task lattice-page-core-hookup, H4b) ──────────────────
+  // How many LATTICED voxels the demand map placed OUTSIDE the certifiable band
+  // before requirement 1's clamp pulled them to an endpoint. A low clamp adds
+  // material relative to demand (conservative); a high clamp caps a voxel the
+  // demand wanted denser than the band allows — the honest count run_job's graded
+  // receipt reports per variant, with fractions and whether clamping decided the
+  // verdict. Additive fields: existing callers ignore them.
+  std::size_t clamped_lo_voxels = 0;   // raw rho < band_rho_min, clamped UP
+  std::size_t clamped_hi_voxels = 0;   // raw rho > band_rho_max, clamped DOWN
+  // Per-voxel clamp record (grid-indexed, grid.voxel_count()): 0 = not clamped,
+  // 1 = clamped up to rho_min, 2 = clamped down to rho_max. What the
+  // clamp-counterfactual certification (run_job) uses to know WHICH voxels to
+  // keep solid in the comparison solve.
+  std::vector<char> clamp_flags;
 };
 
 // Grade `density`'s printed set (optionally restricted to `region`) from the per-voxel

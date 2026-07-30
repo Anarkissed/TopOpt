@@ -1179,6 +1179,20 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME loadcase_analyze COMMAND test_loadcase_analyze)
 
+  # Task lattice-page-core-hookup: primitive ROLES in the job schema (stage 1),
+  # grading on the optimize path (stage 4) and the analyze mode (stage 3), end
+  # to end through run_job / analyze_job on the committed plate_bore fixture and
+  # a synthetic thick cylinder. Voxel-exact role precedence is unit-tested in
+  # lattice_boundary; this proves the schema -> run -> receipt plumbing.
+  add_executable(test_lattice_hookup tests/validation/test_lattice_hookup.cpp)
+  target_link_libraries(test_lattice_hookup PRIVATE topopt)
+  target_compile_definitions(test_lattice_hookup PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_hookup COMMAND test_lattice_hookup)
+
   add_executable(test_mesh_job tests/validation/test_mesh_job.cpp)
   target_link_libraries(test_mesh_job PRIVATE topopt)
   target_compile_definitions(test_mesh_job PRIVATE

@@ -12,6 +12,14 @@ produces (`configure_production_options` + `build_production_loadcase` in core),
 a worker that shells out to `topopt-cli` returns exactly what the app would have
 computed locally.
 
+The worker routes on the job's own `mode` (task lattice-page-core-hookup): a
+`"mode": "analyze"` job runs `topopt-cli analyze` — ONE fixed-design analysis
+solve, no optimization, no variant meshes; artifacts are `analysis_report.json`,
+`analysis.json` (labelled `field_scope: solid_part`) and `fields.bin` — and
+everything else runs `topopt-cli run` as before. The CLI stays the validator
+(`run` refuses an analyze job; the parser refuses unknown modes), so the routing
+cannot widen what executes. E2E: `e2e/analyze_route_e2e.py`.
+
 ## Requirements
 
 - Python 3.8+ (standard library only — no `pip install`).

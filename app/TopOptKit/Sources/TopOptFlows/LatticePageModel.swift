@@ -218,7 +218,8 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
     public static func compute(baseCanOptimize: Bool, baseSummary: String,
                                latticeEnabled: Bool, densityMode: LatticeDensityMode,
                                topologyDisplayName: String, cellMM: Double,
-                               bounds: LatticeBounds?, running: Bool) -> LatticeOptimizeSurface {
+                               bounds: LatticeBounds?, running: Bool,
+                               lineWidthMM: Double = 0) -> LatticeOptimizeSurface {
         if running {
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: "a job is already running")
         }
@@ -226,16 +227,24 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
             return LatticeOptimizeSurface(enabled: baseCanOptimize, label: "Optimize",
                                           sub: "topology only · \(baseSummary)")
         }
-        // Auto density cannot ride an optimize job yet (core grades only on the
-        // analyze path; the worker routes only `run`). Never silently uniform (B6).
-        if densityMode == .auto {
+        // AUTO density rides the optimize job now (task lattice-page-core-hookup
+        // stage 4: core's run_job grades each accepted variant from that
+        // variant's OWN final field). The one remaining requirement is the
+        // stated line width — core's grading schema requires it (the
+        // printability floor's input) — so ONLY that is gated, with the reason.
+        if densityMode == .auto && lineWidthMM <= 0 {
             return LatticeOptimizeSurface(
                 enabled: false, label: "Optimize",
-                sub: "auto density can't ride an optimize job yet — switch to uniform")
+                sub: "auto density needs your outer line width (the grading printability floor) — set it in print settings")
         }
         if let b = bounds, !b.runnableAsCertified {
             let why = b.generatableReason ?? b.topologyReason ?? b.cellReason ?? "settings not certifiable"
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
+        }
+        if densityMode == .auto {
+            return LatticeOptimizeSurface(
+                enabled: baseCanOptimize, label: "Optimize",
+                sub: "topology + graded \(topologyDisplayName.lowercased()) lattice (from this run's own field) · target \(String(format: "%.1f", cellMM)) mm")
         }
         return LatticeOptimizeSurface(
             enabled: baseCanOptimize, label: "Optimize",
