@@ -1,0 +1,38 @@
+=== d1: three-block decomposition exactness ===
+cases: 8696  integrator bit-match (informational): 8696/8696
+worst relative error: 8.514e-16 at C11=3.44612 C12=1.2748 C44=0.0372753 h=0.5
+d1: PASS (bar: worst rel err <= 1e-13)
+=== d2: matrix-free cubic apply vs assembled operator ===
+fixture: 24x12x12, solid 3352 (lattice 1152), ndof 12675
+worst apply rel diff: 7.371e-16 (bar <= 1e-12); thread determinism: bit-identical 1/4/8
+solve: production lattice CG 391 iters; probe matrix-free cubic CG 392 iters (converged=1); field rel L2 diff 1.465e-12
+d2: PASS
+=== d3: apply cost, cubic vs scalar kernel ===
+grid 64^3, 262144 elements, ndof 823875; iso list 262144, cubic list 262144
+combined-block vs 3-acc kernel: rel max diff 3.272e-16
+threads=1: production scalar 14.727 ms, probe scalar 14.687 ms (parity 1.00x), cubic(3-acc) 56.080 ms, cubic(combined) 39.650 ms -> 3.81x / 2.69x vs production scalar
+threads=10: production scalar 3.266 ms, probe scalar 3.326 ms (parity 1.02x), cubic(3-acc) 10.849 ms, cubic(combined) 7.845 ms -> 3.32x / 2.40x vs production scalar
+d3: measured (predicted ~3x; see handoff for interpretation)
+=== d4: SPD + accelerators on the cubic matrix-free path ===
+fixture: 24x12x12 ng=12039 (void pocket + octet band + soft 1e-9 shells)
+SPD: max |K-K^T| = 2.274e-13; LDLT pivots in [1.156e-06, 1.119e+04] (all > 0: yes)
+baseline Jacobi-CG: 1742 iters (converged=1)
+recycling (production RecycleSession), 4-solve sequence:
+  solve 0: off 1742  on 1742
+  solve 1: off 1736  on 1981
+  solve 2: off 1727  on 1409
+  solve 3: off 1738  on 1528
+Galerkin coarse: 1908 coarse DOFs, LDLT ok
+two-level Galerkin MG-CG: 21 iters (converged=1) vs 1742 Jacobi
+GenEO coarse space (production pencil): 12 subdomains, 48 modes below cut 0.05
+GenEO-style two-level (Nt=48): 443 iters (converged=1) vs 1742 Jacobi
+d4: PASS (SPD + every accelerator family engages and cuts iterations)
+=== d5: all-scalar bit-identity + memory budget ===
+apply, no cubic voxels: BIT-IDENTICAL vs fea_matfree_apply (5 trials)
+solve, no cubic voxels: probe CG 1573 iters vs production 1573; field BIT-IDENTICAL
+memory at 8.44M DOF (2.81M voxels):
+  three per-voxel coefficient arrays: 64.4 MB
+  element-table delta if ALL voxels cubic (+16 B/elem): 42.9 MB
+  two extra 24x24 reference blocks: 9.0 KB
+  (16 GB machine of record; GenEO basis cap alone is 2048 MB)
+d5: PASS

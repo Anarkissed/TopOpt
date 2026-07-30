@@ -1,0 +1,14 @@
+=== d4: SPD + accelerators on the cubic matrix-free path ===
+fixture: 24x12x12 ng=12039 (void pocket + octet band + soft 1e-9 shells)
+SPD: max |K-K^T| = 2.274e-13; LDLT pivots in [1.156e-06, 1.119e+04] (all > 0: yes)
+baseline Jacobi-CG: 1742 iters (converged=1)
+recycling (production RecycleSession), 4-solve sequence:
+  solve 0: off 1742  on 1742
+  solve 1: off 1736  on 1981
+  solve 2: off 1727  on 1409
+  solve 3: off 1738  on 1528
+Galerkin coarse: 1908 coarse DOFs, LDLT ok
+two-level Galerkin MG-CG: 21 iters (converged=1) vs 1742 Jacobi
+GenEO coarse space (production pencil): 54 subdomains, 156 modes below cut 0.05
+GenEO-style two-level (Nt=156): 1292 iters (converged=1) vs 1742 Jacobi
+d4: PASS (SPD + every accelerator family engages and cuts iterations)

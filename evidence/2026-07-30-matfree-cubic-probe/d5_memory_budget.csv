@@ -1,0 +1,4 @@
+item,bytes,mb
+coeff_arrays_per_voxel,67520000,64.4
+elem_table_delta_all_cubic,45013333,42.9
+extra_reference_blocks,9216,0.0088
