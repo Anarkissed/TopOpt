@@ -1,0 +1,84 @@
+LATTICE LAYER-ANISOTROPY PROBE — TI base, orientation sweep
+base: PLA-like E=3500 nu=0.33; k = materials.json z_knockdown (ASSUMPTION)
+
+===== SELF-CHECKS (all must pass) =====
+  A1 integrator vs production:  iso rel=0.00e+00  TI(k=.55) rel=0.00e+00  -> PASS
+  A2 rotate isotropic no-op:    rel=3.51e-16  -> PASS
+  A3 rotate TI z->y:            D'[yy]=2344.105 vs base[zz]=2344.105 rel=0.00e+00 -> PASS
+  A4 solid cell recovers base:  rel=2.84e-15 (cg=70) -> PASS
+
+===== ORIENTATION SWEEP (L=5.0 mm, vpc=28, target rho=0.30) =====
+  DECISION framing: lattice geometry + load FIXED in the part; build (layer-normal)
+  direction swept from part-z (0deg = printed flat) to part-x (90deg). Load = part-x.
+  E_x(load) = eff. modulus along the load; E_z = along part-z (BCCZ pillar axis).
+  r = max interlayer tension / max von Mises; margin k/r: interlayer vs in-plane
+  (<1 => interlayer governs, delamination before yield). k = z_knockdown (ASSUMED).
+  [writing /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/5-cell-direct-comparison-zeros-f2c28c/evidence/2026-07-29-layer-anisotropy-fea/anisotropy_sweep.csv]
+
+  --- PLA / octet  (L=5.0 vpc=28 rho=0.337 k=0.55) load=part-x ---
+  build    E_x(load) E_z       r=int/vm    margin k/r  gov?     
+  0        302.3     217.4     0.195       2.818       in-plane 
+  15       288.1     218.7     0.349       1.575       in-plane 
+  30       260.5     224.4     0.588       0.935       INTERLYR 
+  45       237.8     237.8     0.909       0.605       INTERLYR 
+  60       224.4     260.5     1.118       0.492       INTERLYR 
+  75       218.7     288.1     1.190       0.462       INTERLYR 
+  90       217.4     302.3     1.173       0.469       INTERLYR 
+  -> interlayer margin k/r: best 2.82 @0deg   worst 0.46 @75deg
+
+  --- PLA / bccz  (L=5.0 vpc=28 rho=0.318 k=0.55) load=part-x ---
+  build    E_x(load) E_z       r=int/vm    margin k/r  gov?     
+  0        92.0      213.2     0.365       1.507       in-plane 
+  15       90.4      211.2     0.354       1.555       in-plane 
+  30       86.9      210.8     0.534       1.030       in-plane 
+  45       83.3      223.2     0.805       0.683       INTERLYR 
+  60       80.6      257.2     0.969       0.567       INTERLYR 
+  75       78.9      308.5     1.036       0.531       INTERLYR 
+  90       78.3      338.5     1.032       0.533       INTERLYR 
+  -> interlayer margin k/r: best 1.55 @15deg   worst 0.53 @75deg
+
+  --- PETG / octet  (L=5.0 vpc=28 rho=0.337 k=0.70) load=part-x ---
+  build    E_x(load) E_z       r=int/vm    margin k/r  gov?     
+  0        328.0     269.9     0.231       3.035       in-plane 
+  15       319.7     270.9     0.385       1.819       in-plane 
+  30       301.9     275.4     0.619       1.131       in-plane 
+  45       285.5     285.5     0.913       0.767       INTERLYR 
+  60       275.4     301.9     1.118       0.626       INTERLYR 
+  75       270.9     319.7     1.198       0.584       INTERLYR 
+  90       269.9     328.0     1.174       0.596       INTERLYR 
+  -> interlayer margin k/r: best 3.04 @0deg   worst 0.58 @75deg
+
+  --- PETG / bccz  (L=5.0 vpc=28 rho=0.318 k=0.70) load=part-x ---
+  build    E_x(load) E_z       r=int/vm    margin k/r  gov?     
+  0        102.7     265.9     0.422       1.659       in-plane 
+  15       101.7     264.3     0.405       1.727       in-plane 
+  30       99.4      264.1     0.584       1.199       in-plane 
+  45       96.9      274.2     0.847       0.827       INTERLYR 
+  60       95.0      299.6     1.085       0.645       INTERLYR 
+  75       93.8      333.2     1.180       0.593       INTERLYR 
+  90       93.4      350.5     1.153       0.607       INTERLYR 
+  -> interlayer margin k/r: best 1.73 @15deg   worst 0.59 @75deg
+
+  --- ASA / octet  (L=5.0 vpc=28 rho=0.337 k=0.60) load=part-x ---
+  build    E_x(load) E_z       r=int/vm    margin k/r  gov?     
+  0        311.3     235.1     0.207       2.894       in-plane 
+  15       299.2     236.4     0.361       1.660       in-plane 
+  30       274.9     241.7     0.599       1.002       in-plane 
+  45       254.2     254.2     0.911       0.659       INTERLYR 
+  60       241.7     274.9     1.118       0.537       INTERLYR 
+  75       236.4     299.2     1.193       0.503       INTERLYR 
+  90       235.1     311.3     1.173       0.511       INTERLYR 
+  -> interlayer margin k/r: best 2.89 @0deg   worst 0.50 @75deg
+
+  --- ASA / bccz  (L=5.0 vpc=28 rho=0.318 k=0.60) load=part-x ---
+  build    E_x(load) E_z       r=int/vm    margin k/r  gov?     
+  0        95.7      230.9     0.385       1.560       in-plane 
+  15       94.4      229.0     0.371       1.615       in-plane 
+  30       91.2      228.6     0.551       1.089       in-plane 
+  45       88.0      240.5     0.820       0.732       INTERLYR 
+  60       85.5      272.0     1.035       0.580       INTERLYR 
+  75       84.0      317.4     1.109       0.541       INTERLYR 
+  90       83.5      342.7     1.102       0.545       INTERLYR 
+  -> interlayer margin k/r: best 1.62 @15deg   worst 0.54 @75deg
+
+DONE.
