@@ -243,6 +243,44 @@ int main() {
                 (unsigned long long)st.triangles, file_size(mf));
   }
 
+  // ---- 7. Generatable-topology ENUMERATION (task lattice-page-core-hookup) ---
+  // lattice_gen_topology_names() is the single source the app bridge reads (H2).
+  // The enum-probe tripwire: every enum value the name function can name must be
+  // enumerated, so a topology added to the enum + name switch but not the list
+  // FAILS here instead of silently vanishing from every picker built on it.
+  {
+    const std::vector<std::string> names = lattice_gen_topology_names();
+    CHECK(!names.empty(), "gen names: non-empty");
+    bool has_octet = false;
+    for (const std::string& n : names) has_octet = has_octet || n == "octet";
+    CHECK(has_octet, "gen names: contains octet");
+    // No duplicates.
+    bool dup = false;
+    for (std::size_t a = 0; a < names.size(); ++a)
+      for (std::size_t b = a + 1; b < names.size(); ++b)
+        if (names[a] == names[b]) dup = true;
+    CHECK(!dup, "gen names: no duplicate names");
+    // Probe a generous range of enum values: count how many the name function
+    // can name, and require each named one to be IN the list, and the list to
+    // contain nothing else. (A new enum case gets a name via the -Wswitch-guarded
+    // switch; forgetting the list then fails BOTH counts below.)
+    std::size_t named = 0;
+    for (int v = 0; v < 32; ++v) {
+      std::string n;
+      try {
+        n = lattice_gen_topology_name(static_cast<LatticeGenTopology>(v));
+      } catch (const std::logic_error&) {
+        continue;  // not an implemented case
+      }
+      ++named;
+      bool in_list = false;
+      for (const std::string& s : names) in_list = in_list || s == n;
+      CHECK(in_list, "gen names: every nameable enum value is enumerated");
+    }
+    CHECK(named == names.size(),
+          "gen names: the list has exactly one entry per nameable enum value");
+  }
+
   std::printf("\n%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

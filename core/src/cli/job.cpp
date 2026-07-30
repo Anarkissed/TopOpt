@@ -403,9 +403,12 @@ JobDescription parse_job(const std::string& json_text) {
       require_key(root, "material", "the job"), "material");
   job.mode =
       require_nonempty_string(require_key(root, "mode", "the job"), "mode");
-  if (job.mode != "minimize_plastic")
-    schema_fail("\"mode\" must be \"minimize_plastic\" (got \"" + job.mode +
-                "\")");
+  // Exactly two modes (task lattice-page-core-hookup stage 3 added "analyze" so
+  // the LAN worker can route a fixed-design analysis). The validation stays
+  // STRICT: anything else is refused here, before any work.
+  if (job.mode != "minimize_plastic" && job.mode != "analyze")
+    schema_fail("\"mode\" must be \"minimize_plastic\" or \"analyze\" (got \"" +
+                job.mode + "\")");
   job.resolution = require_positive_int(
       require_key(root, "resolution", "the job"), "resolution");
 
@@ -753,12 +756,15 @@ JobDescription parse_job(const std::string& json_text) {
 
   // Optional "lattice" block (handoff 2026-07-28-lattice-generation-production).
   // Absent => present stays false and the run is byte-identical (the P1 bar).
+  // A "grading" block changes what the lattice block may carry (see below), so
+  // its presence is looked up first.
+  const bool has_grading_block = find_key(root, "grading") != nullptr;
   if (const JsonValue* latv = find_key(root, "lattice")) {
     const JsonValue& lat = require_object(*latv, "lattice");
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish"},
+                         "outer_finish", "regions"},
                         "lattice");
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
@@ -767,14 +773,107 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("lattice \"topology\" must be \"octet\" (got \"" +
                     job.lattice.topology + "\")");
     }
-    job.lattice.cell_mm =
-        require_number(require_key(lat, "cell_mm", "lattice"), "lattice.cell_mm");
-    if (!(job.lattice.cell_mm > 0.0))
-      schema_fail("lattice \"cell_mm\" must be > 0");
-    job.lattice.strut_radius_mm = require_number(
-        require_key(lat, "strut_radius_mm", "lattice"), "lattice.strut_radius_mm");
-    if (!(job.lattice.strut_radius_mm > 0.0))
-      schema_fail("lattice \"strut_radius_mm\" must be > 0");
+    // Uniform geometry (cell_mm + strut_radius_mm): REQUIRED without a "grading"
+    // block, REJECTED with one — a graded run derives the cell from
+    // grading.cell_mm (raised to the printability floor) and the strut radii
+    // from the run's own graded densities, so a uniform cell/radius here would
+    // conflict and is refused rather than silently ignored (stage 4).
+    if (has_grading_block) {
+      for (const char* k : {"cell_mm", "strut_radius_mm"})
+        if (find_key(lat, k))
+          schema_fail(std::string("lattice \"") + k +
+                      "\" is not allowed with a \"grading\" block: a graded run "
+                      "derives the cell size from grading.cell_mm (raised to the "
+                      "printability floor) and the strut radii from the run's own "
+                      "graded densities");
+    } else {
+      job.lattice.cell_mm = require_number(
+          require_key(lat, "cell_mm", "lattice"), "lattice.cell_mm");
+      if (!(job.lattice.cell_mm > 0.0))
+        schema_fail("lattice \"cell_mm\" must be > 0");
+      job.lattice.strut_radius_mm =
+          require_number(require_key(lat, "strut_radius_mm", "lattice"),
+                         "lattice.strut_radius_mm");
+      if (!(job.lattice.strut_radius_mm > 0.0))
+        schema_fail("lattice \"strut_radius_mm\" must be > 0");
+    }
+    // Lattice ROLE regions (task lattice-page-core-hookup stage 1) — the
+    // lattice.regions schema PR 254 proposed. Absent/empty => whole-part
+    // lattice, byte-identical. Each entry is {role, kind, geometry} with the
+    // SAME manual-primitive geometry a manual clearance carries; a malformed
+    // role/kind is REFUSED, never defaulted (H1e).
+    if (const JsonValue* regs = find_key(lat, "regions")) {
+      if (regs->type != JsonValue::Type::Array)
+        schema_fail("\"lattice.regions\" must be an array");
+      for (const JsonValue& rv : regs->arr) {
+        require_object(rv, "a lattice region");
+        reject_unknown_keys(rv, {"role", "kind", "geometry"}, "a lattice region");
+        JobLatticeRegion reg;
+        reg.role = require_nonempty_string(
+            require_key(rv, "role", "a lattice region"), "lattice region role");
+        if (reg.role != "include" && reg.role != "exclude")
+          schema_fail("a lattice region \"role\" must be \"include\" or "
+                      "\"exclude\" (got \"" + reg.role + "\")");
+        reg.kind = require_nonempty_string(
+            require_key(rv, "kind", "a lattice region"), "lattice region kind");
+        if (reg.kind != "bolt" && reg.kind != "face")
+          schema_fail("a lattice region \"kind\" must be \"bolt\" or \"face\" "
+                      "(got \"" + reg.kind + "\")");
+        const JsonValue& gv = require_object(
+            require_key(rv, "geometry", "a lattice region"),
+            "lattice region geometry");
+        if (reg.kind == "bolt") {
+          reject_unknown_keys(
+              gv, {"axis_point", "axis_dir", "radius_mm", "half_length_mm"},
+              "a bolt lattice region geometry");
+          reg.axis_point = parse_vec3(
+              require_key(gv, "axis_point", "a bolt lattice region geometry"),
+              "lattice region axis_point");
+          reg.axis_dir = parse_vec3(
+              require_key(gv, "axis_dir", "a bolt lattice region geometry"),
+              "lattice region axis_dir");
+          reg.radius_mm = require_number(
+              require_key(gv, "radius_mm", "a bolt lattice region geometry"),
+              "lattice region radius_mm");
+          reg.half_length_mm = require_number(
+              require_key(gv, "half_length_mm", "a bolt lattice region geometry"),
+              "lattice region half_length_mm");
+          if (!(reg.radius_mm > 0.0) || !(reg.half_length_mm > 0.0))
+            schema_fail("a bolt lattice region radius_mm/half_length_mm must be "
+                        "> 0 (a zero-extent region marks nothing)");
+          const Vec3& ad = reg.axis_dir;
+          if (ad.x * ad.x + ad.y * ad.y + ad.z * ad.z <= 0.0)
+            schema_fail("a bolt lattice region \"axis_dir\" must be non-zero");
+        } else {  // face
+          reject_unknown_keys(
+              gv, {"origin", "normal", "half_u_mm", "half_w_mm", "depth_mm"},
+              "a face lattice region geometry");
+          reg.origin = parse_vec3(
+              require_key(gv, "origin", "a face lattice region geometry"),
+              "lattice region origin");
+          reg.normal = parse_vec3(
+              require_key(gv, "normal", "a face lattice region geometry"),
+              "lattice region normal");
+          reg.half_u_mm = require_number(
+              require_key(gv, "half_u_mm", "a face lattice region geometry"),
+              "lattice region half_u_mm");
+          reg.half_w_mm = require_number(
+              require_key(gv, "half_w_mm", "a face lattice region geometry"),
+              "lattice region half_w_mm");
+          reg.depth_mm = require_number(
+              require_key(gv, "depth_mm", "a face lattice region geometry"),
+              "lattice region depth_mm");
+          if (!(reg.half_u_mm > 0.0) || !(reg.half_w_mm > 0.0) ||
+              !(reg.depth_mm > 0.0))
+            schema_fail("a face lattice region half_u_mm/half_w_mm/depth_mm "
+                        "must be > 0 (a zero-extent region marks nothing)");
+          const Vec3& nn = reg.normal;
+          if (nn.x * nn.x + nn.y * nn.y + nn.z * nn.z <= 0.0)
+            schema_fail("a face lattice region \"normal\" must be non-zero");
+        }
+        job.lattice.regions.push_back(std::move(reg));
+      }
+    }
     if (const JsonValue* s = find_key(lat, "emit_stl")) {
       if (s->type != JsonValue::Type::Bool)
         schema_fail("lattice \"emit_stl\" must be a boolean");

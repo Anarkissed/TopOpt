@@ -1509,17 +1509,13 @@ std::vector<std::string> lattice_certifiable_topologies() {
 }
 
 std::vector<std::string> lattice_generatable_topologies() {
-  // The geometry generator's covered set. Core's LatticeGenTopology has no
-  // enumeration API (the gap reported in handoff 2026-07-30-lattice-page), so the
-  // case list is mirrored here — but every NAME comes from core's own
-  // lattice_gen_topology_name, and generate_lattice throws for anything outside
-  // this enum, so a drifted list fails loudly at the generator, never silently.
-  // When core grows the enum, add the matching case here (one line).
-  std::vector<std::string> out;
-  for (topopt::LatticeGenTopology t : {topopt::LatticeGenTopology::Octet}) {
-    out.push_back(topopt::lattice_gen_topology_name(t));
-  }
-  return out;
+  // The geometry generator's covered set, READ from core's own enumerator
+  // (topopt::lattice_gen_topology_names — added by task lattice-page-core-hookup,
+  // closing the gap handoff 2026-07-30-lattice-page reported). No mirrored case
+  // list remains here: when core grows the enum, this picks it up with zero app
+  // changes, and core's enum-probe test (test_lattice_gen) fails if the core list
+  // itself ever drifts from the enum.
+  return topopt::lattice_gen_topology_names();
 }
 
 }  // namespace topoptbridge

@@ -350,6 +350,128 @@ int main() {
           "B10: boundary + skin runs are byte-identical across runs");
   }
 
+  // ---- 8. LATTICE ROLES (task lattice-page-core-hookup, H1a/H1b) --------------
+  // include / exclude regions on the SAME shared predicate: precedence is
+  // explicit and tested for EVERY pair, and the generator's cell activation and
+  // the certification mask stay coherent (a masked voxel's owning cell is
+  // always active; a cell provably inside an exclude region never emits).
+  {
+    // An all-solid voxel slab 24 x 24 x 12 (spacing 1mm).
+    VoxelGrid grid;
+    grid.nx = grid.ny = 24;
+    grid.nz = 12;
+    grid.spacing = 1.0;
+    grid.origin = {0, 0, 0};
+    grid.tags.assign(static_cast<std::size_t>(grid.nx) * grid.ny * grid.nz,
+                     VoxelTag::Empty);
+    std::vector<double> dens(grid.voxel_count(), 1.0);
+    // ...except a void pocket at the far corner (include-over-void case).
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 20; j < 24; ++j)
+        for (int i = 0; i < 4; ++i) dens[grid.index(i, j, k)] = 0.0;
+
+    // An INCLUDE slab covering x in [0, 12] (full y/z extent): a bounded-slab
+    // ClearanceGeometry exactly as resolve_clearance_manual produces.
+    ClearanceGeometry incl;
+    incl.kind = ClearanceKind::Face;
+    incl.valid = true;
+    incl.origin = {0, 12, 6};
+    incl.normal = {1, 0, 0};
+    incl.u = {0, 1, 0};
+    incl.w = {0, 0, 1};
+    incl.u_lo = -50;
+    incl.u_hi = 50;
+    incl.w_lo = -50;
+    incl.w_hi = 50;
+    incl.depth = 12;
+    // An EXCLUDE bolt column inside the include region at (6, 6).
+    const ClearanceGeometry excl = bore({6, 6, -2}, {0, 0, 1}, 3.0, -2.0, 16.0);
+    // A CLEARANCE keep-out inside the include region at (6, 18).
+    const ClearanceGeometry ko = bore({6, 18, -2}, {0, 0, 1}, 3.0, -2.0, 16.0);
+
+    LatticeBoundary B;
+    B.set_voxel_base(&grid, &dens, 0.5, 2.0 * 4.0);
+    B.add_keep_out(ko, true);
+    B.add_include_region(incl);
+    B.add_exclude_region(excl);
+
+    // Membership predicates (the SAME point_in_clearance_region math as the
+    // keep-out / rasterizer membership).
+    CHECK(B.has_include_regions(), "roles: include region registered");
+    CHECK(B.in_include_region({3, 12, 6}, 0.0), "roles: point inside include");
+    CHECK(!B.in_include_region({18, 12, 6}, 0.0), "roles: point outside include");
+    CHECK(B.in_exclude_region({6, 6, 6}, 0.0), "roles: point inside exclude");
+    CHECK(!B.in_exclude_region({6, 18, 6}, 0.0),
+          "roles: clearance bore is NOT an exclude region (distinct stores)");
+
+    const double cell = 4.0;
+    const std::vector<char> mask =
+        lattice_certification_mask(B, grid, dens, 0.5, grid.origin, cell);
+    auto m = [&](int i, int j, int k) { return mask[grid.index(i, j, k)] != 0; };
+
+    // PRECEDENCE — every pair (H1a):
+    // include alone => latticed.
+    CHECK(m(3, 12, 6), "H1a: voxel in include (only) is latticed");
+    // outside the include union (no other role) => solid.
+    CHECK(!m(18, 12, 6), "H1a: voxel outside the include union stays solid");
+    // include ∧ exclude => exclude wins (solid).
+    CHECK(!m(6, 6, 6), "H1a: exclude beats include — overlap stays solid");
+    // include ∧ clearance => clearance wins (nothing to lattice).
+    CHECK(!m(6, 18, 6), "H1a: clearance beats include");
+    // include over optimizer VOID => no-op (no material, nothing marked).
+    CHECK(!m(2, 22, 6), "H1a: include over void marks nothing (no-op)");
+    // exclude ∧ clearance: still solid/nothing — and the clearance keeps its
+    // today's semantics (struts are CLIPPED there; the exclude alone does not
+    // clip). Prove via the sd: the keep-out subtracts from the allowed region,
+    // the exclude does not.
+    CHECK(B.signed_distance({6, 18, 6}) < 0.0,
+          "clearance subtracts from the allowed (clip) region");
+    CHECK(B.signed_distance({6, 6, 6}) > 0.0,
+          "exclude does NOT subtract from the clip region (solid material — "
+          "struts weld into it, they are not clipped short of it)");
+
+    // Coherence (H1b): every masked voxel's owning cell is generator-ACTIVE.
+    std::size_t masked = 0, masked_cell_inactive = 0;
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          if (!m(i, j, k)) continue;
+          ++masked;
+          const Vec3 c{(i + 0.5), (j + 0.5), (k + 0.5)};
+          const Vec3 cell_min{std::floor(c.x / cell) * cell,
+                              std::floor(c.y / cell) * cell,
+                              std::floor(c.z / cell) * cell};
+          if (!B.cell_may_overlap(cell_min, cell)) ++masked_cell_inactive;
+        }
+    CHECK(masked > 0, "roles fixture: some voxels are latticed");
+    CHECK(masked_cell_inactive == 0,
+          "H1b: every masked voxel's owning cell is active — silhouette and "
+          "mask cannot disagree");
+    // A cell provably inside the exclude column is INACTIVE (emits nothing)...
+    CHECK(!B.cell_may_overlap({5.5, 5.5, 5.5}, 1.0),
+          "a cell provably inside an exclude region is inactive");
+    // ...and a cell provably outside every include region is INACTIVE too.
+    CHECK(!B.cell_may_overlap({18, 18, 4}, 2.0),
+          "a cell provably outside the include union is inactive");
+    // Fewer active cells with roles than without (the roles really act).
+    LatticeBoundary B0;
+    B0.set_voxel_base(&grid, &dens, 0.5, 2.0 * 4.0);
+    B0.add_keep_out(ko, true);
+    LatticeRegion Rr;
+    Rr.nx = Rr.ny = 6;
+    Rr.nz = 3;
+    Rr.cell_mm = cell;
+    Rr.boundary = &B;
+    LatticeRegion R0 = Rr;
+    R0.boundary = &B0;
+    CHECK(latticed_cell_count(Rr) < latticed_cell_count(R0),
+          "roles reduce the active cell set");
+    // Determinism: the role-aware mask is reproducible bit-for-bit.
+    CHECK(lattice_certification_mask(B, grid, dens, 0.5, grid.origin, cell) ==
+              mask,
+          "role-aware mask is deterministic");
+  }
+
   std::printf("\n%s: %d checks, %d failures\n",
               g_failures == 0 ? "PASS" : "FAIL", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;

@@ -7,6 +7,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -282,6 +284,19 @@ struct LatticeExportOutcome {
   std::vector<std::string> paths;  // files written (STL and/or 3MF)
   LatticeGenStats stats;           // generator counts (identical across formats)
   long long region_voxels = 0;     // SOLID voxels inside the latticed cells
+  // SOLID COMPANION (task lattice-page-core-hookup, stages 1+4). When roles or
+  // grading leave printed voxels UN-latticed (exclude regions, everything
+  // outside the include union, the grading law's too-thin-stays-solid
+  // fallback), the exported file must honour "kept solid": those voxels are
+  // emitted as a closed marching-cubes body into the same interpenetrating
+  // soup, and their volume is accounted SEPARATELY from interior/skin/rim
+  // (H1c; voxel basis, count × spacing³, matching the mass accounting).
+  // Emitted ONLY when roles/grading are in play — a legacy uniform whole-part
+  // job writes byte-identical files.
+  bool solid_companion = false;
+  long long solid_region_voxels = 0;      // printed, non-keep-out, not latticed
+  double solid_region_volume_mm3 = 0.0;   // voxel basis: count × spacing³
+  std::uint64_t solid_region_triangles = 0;
 };
 
 std::string lattice_base_name(const std::string& prefix, double requested_vf) {
@@ -310,16 +325,60 @@ double mesh_enclosed_volume_mm3(const TriangleMesh& m);
 // object the gate certifies and the file the slicer opens are the SAME region
 // by construction — extended from the region to the boundary (bar B7).
 // `sg`/`dens` must outlive the returned boundary.
+// The job's lattice ROLE regions (task lattice-page-core-hookup stage 1),
+// resolved through the SAME manual-primitive machinery a hand-placed clearance
+// uses (resolve_clearance_manual) with ZERO margins — the primitive IS the
+// region, there is no keep-out growth. No second geometry concept.
+struct LatticeRoleRegions {
+  std::vector<ClearanceGeometry> includes;
+  std::vector<ClearanceGeometry> excludes;
+};
+
+LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job) {
+  LatticeRoleRegions rr;
+  for (const JobLatticeRegion& r : job.lattice.regions) {
+    ManualClearanceGeometry mg;
+    ClearanceParams p;  // all margins zero: the primitive is the region
+    if (r.kind == "bolt") {
+      mg.kind = ClearanceKind::Bolt;
+      p.kind = ClearanceKind::Bolt;
+      mg.axis_point = r.axis_point;
+      mg.axis_dir = r.axis_dir;
+      mg.radius_mm = r.radius_mm;
+      mg.half_length_mm = r.half_length_mm;
+    } else {  // "face" — a bounded slab; the region's own depth is the extent
+      mg.kind = ClearanceKind::Face;
+      p.kind = ClearanceKind::Face;
+      p.slab_depth_mm = r.depth_mm;
+      mg.origin = r.origin;
+      mg.normal = r.normal;
+      mg.half_u_mm = r.half_u_mm;
+      mg.half_w_mm = r.half_w_mm;
+    }
+    const ClearanceGeometry g = resolve_clearance_manual(mg, p);
+    if (!g.valid) continue;  // degenerate → the rasterizer's safe no-op
+                             // (parse_job already refused zero extents)
+    (r.role == "include" ? rr.includes : rr.excludes).push_back(g);
+  }
+  return rr;
+}
+
 LatticeBoundary lattice_boundary_for(const VoxelGrid& sg,
                                      const std::vector<double>& dens,
                                      double cell_mm,
-                                     const std::vector<ClearanceGeometry>& kos) {
+                                     const std::vector<ClearanceGeometry>& kos,
+                                     const LatticeRoleRegions& roles) {
   LatticeBoundary B;
   // Window: clipping needs exact distances only out to one cell of slack past
   // the largest erosion; two cells is comfortably conservative.
   B.set_voxel_base(&sg, &dens, 0.5, 2.0 * cell_mm);
   for (const ClearanceGeometry& g : kos)
     B.add_keep_out(g, /*collar=*/g.kind == ClearanceKind::Bolt);
+  // Lattice roles (stage 1): activation + certification-mask terms of the SAME
+  // shared predicate — never a second boundary object (H1b). Empty on a job
+  // with no lattice.regions => byte-identical behaviour.
+  for (const ClearanceGeometry& g : roles.includes) B.add_include_region(g);
+  for (const ClearanceGeometry& g : roles.excludes) B.add_exclude_region(g);
   return B;
 }
 
@@ -403,25 +462,33 @@ LatticeSkinSpec lattice_skin_for(const JobLattice& lat) {
   return S;
 }
 
-LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& variant,
-                                             const std::string& out_dir,
-                                             const JobOutput& out,
-                                             const JobLattice& lat,
-                                             const VoxelGrid& sg,
-                                             const LatticeBoundary& boundary) {
+// Export one accepted variant's latticed companion. `cell_mm` and `radius` are
+// caller-supplied (uniform: the job's cell/strut radius; graded: the law's cell
+// + a per-position radius field over the graded densities). `cert_mask` is THE
+// certification mask the posture will certify — passed in so the file and the
+// certified object derive from the SAME flags (H1b). `graded_cell_latticed`,
+// when non-null, restricts cell activation to cells holding at least one
+// masked voxel (derived from the same mask — the graded silhouette).
+// `emit_solid_companion` arms the solid-companion body (roles / grading only —
+// see LatticeExportOutcome; a legacy job passes false and writes identical
+// bytes).
+LatticeExportOutcome export_latticed_variant(
+    const MinimizePlasticVariant& variant, const std::string& out_dir,
+    const JobOutput& out, const JobLattice& lat, const VoxelGrid& sg,
+    const LatticeBoundary& boundary, double cell_mm,
+    const LatticeRadiusField& radius, const std::vector<char>& cert_mask,
+    const std::function<bool(int, int, int)>& graded_cell_latticed,
+    bool emit_solid_companion) {
   // Occupancy + boundary: the shared predicate (`boundary`, built by the caller
-  // from THIS variant's density + the declared clearance keep-outs). Cells
-  // activate by OVERLAP with it; strut solids are clipped against it; the skin
-  // and collar ride its analytic faces. It is the SAME object the certification
-  // posture is built from, so the sliced file and the certified object agree by
-  // construction (bar B7).
+  // from THIS variant's density + the declared clearance keep-outs + the job's
+  // lattice role regions). Cells activate by OVERLAP with it; strut solids are
+  // clipped against it; the skin and collar ride its analytic faces. It is the
+  // SAME object the certification posture is built from, so the sliced file and
+  // the certified object agree by construction (bar B7 / H1b).
   const std::vector<double>& dens = variant.optimization.physical_density;
-  const LatticeRegion R = lattice_region_for(sg, lat.cell_mm, &boundary);
+  LatticeRegion R = lattice_region_for(sg, cell_mm, &boundary);
+  R.latticed = graded_cell_latticed;  // null on the uniform path (unchanged)
   const LatticeSkinSpec skin = lattice_skin_for(lat);
-
-  LatticeRadiusField G;
-  G.uniform_mm = lat.strut_radius_mm;
-  G.nseg = 8;
 
   const TriangleMesh& shell = variant.v3.mesh;
   auto push_shell = [&shell](TriangleSink& sink) {
@@ -432,6 +499,43 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
   };
 
   LatticeExportOutcome oc;
+
+  // The SOLID COMPANION (stages 1+4): every printed voxel the certification
+  // mask leaves solid — outside a keep-out (clearances keep today's collar
+  // dressing and emit nothing, the H1a precedence) — becomes a closed
+  // marching-cubes body pushed into the same soup. All components are kept
+  // (several disjoint regions stay several bodies); no largest-component
+  // cleanup, deterministic.
+  TriangleMesh comp_mesh;
+  if (emit_solid_companion) {
+    oc.solid_companion = true;
+    std::vector<double> comp(sg.voxel_count(), 0.0);
+    for (int k = 0; k < sg.nz; ++k)
+      for (int j = 0; j < sg.ny; ++j)
+        for (int i = 0; i < sg.nx; ++i) {
+          const std::size_t e = sg.index(i, j, k);
+          if (!(dens[e] >= 0.5) || cert_mask[e]) continue;
+          const Vec3 c{sg.origin.x + (i + 0.5) * sg.spacing,
+                       sg.origin.y + (j + 0.5) * sg.spacing,
+                       sg.origin.z + (k + 0.5) * sg.spacing};
+          if (boundary.in_keep_out(c, 0.0)) continue;  // clearance beats roles
+          comp[e] = 1.0;
+          ++oc.solid_region_voxels;
+        }
+    oc.solid_region_volume_mm3 =
+        static_cast<double>(oc.solid_region_voxels) * sg.spacing * sg.spacing *
+        sg.spacing;
+    if (oc.solid_region_voxels > 0) comp_mesh = marching_cubes(sg, comp, 0.5);
+    oc.solid_region_triangles =
+        static_cast<std::uint64_t>(comp_mesh.triangles.size());
+  }
+  auto push_companion = [&comp_mesh](TriangleSink& sink) {
+    for (const auto& t : comp_mesh.triangles)
+      sink.add_triangle(comp_mesh.vertices[static_cast<std::size_t>(t[0])],
+                        comp_mesh.vertices[static_cast<std::size_t>(t[1])],
+                        comp_mesh.vertices[static_cast<std::size_t>(t[2])]);
+  };
+
   const std::string base =
       join_path(out_dir, lattice_base_name(out.mesh_prefix,
                                            variant.requested_volume_fraction));
@@ -443,7 +547,8 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
     const std::string path = base + ".stl";
     StreamingStlWriter w(path);
     if (with_shell) push_shell(w);  // solid shell first, then the streamed lattice
-    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w, skin);
+    push_companion(w);              // then the kept-solid regions (empty: no-op)
+    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, radius, w, skin);
     w.finish();
     oc.paths.push_back(path);
   }
@@ -451,7 +556,8 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
     const std::string path = base + ".3mf";
     StreamingThreeMfWriter w(path);
     if (with_shell) push_shell(w);
-    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, G, w, skin);
+    push_companion(w);
+    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, radius, w, skin);
     w.finish();
     oc.paths.push_back(path);
   }
@@ -477,29 +583,28 @@ LatticeExportOutcome export_latticed_variant(const MinimizePlasticVariant& varia
 // so the displacement field, the stiffness, and the SOLID-region strength margin
 // describe the composite object the slicer opens.
 
-// The certification posture matching the exported lattice geometry EXACTLY: the
-// SAME LatticeBoundary that activated cells and clipped struts decides, through
-// lattice_certification_mask, which solid voxels carry the octet tensor at the
-// printed relative density `rho` (bar B7 — one predicate, no third rule). Solid
-// voxels in inactive cells or inside a clearance keep-out stay solid — slightly
-// conservative, and faithful to the exported geometry. analyze gates on
-// solid+printed voxels, so a mask over solid voxels is exactly what it consumes.
-LatticePosture build_lattice_posture(const VoxelGrid& sg,
-                                     const std::vector<double>& dens,
-                                     const JobLattice& lat, double rho,
-                                     const LatticeBoundary& boundary) {
+// The certification posture matching the exported lattice geometry EXACTLY:
+// `mask` is THE certification mask (lattice_certification_mask over the SAME
+// LatticeBoundary that activated cells and clipped struts — bar B7 / H1b, one
+// predicate, no third rule; on a graded run additionally intersected with the
+// grading law's own mask). Solid voxels the mask leaves out — inactive cells, a
+// clearance keep-out, a role region, the law's too-thin fallback — stay solid,
+// faithful to the exported geometry (which now carries them as the solid
+// companion body). `graded_rho`, when non-null, supplies each voxel its OWN
+// relative density (stage 4); null => the uniform `rho`.
+LatticePosture build_lattice_posture(const VoxelGrid& sg, double cell_mm,
+                                     const std::vector<char>& mask, double rho,
+                                     const std::vector<double>* graded_rho) {
   LatticePosture post;
   post.topology = LatticeTopology::Octet;  // job schema restricts topology to octet
-  post.cell_size_mm = lat.cell_mm;
+  post.cell_size_mm = cell_mm;
   const std::size_t nv = sg.voxel_count();
   post.mask.assign(nv, 0);
   post.relative_density.assign(nv, 0.0);
-  const std::vector<char> mask = lattice_certification_mask(
-      boundary, sg, dens, 0.5, sg.origin, lat.cell_mm);
   for (std::size_t e = 0; e < nv; ++e) {
     if (!mask[e]) continue;
     post.mask[e] = 1;
-    post.relative_density[e] = rho;
+    post.relative_density[e] = graded_rho ? (*graded_rho)[e] : rho;
   }
   return post;
 }
@@ -507,6 +612,8 @@ LatticePosture build_lattice_posture(const VoxelGrid& sg,
 struct LatticeCertOutcome {
   bool ran = false;
   double rho = 0.0;                    // uniform relative density certified
+                                       // (graded runs: the receipt reports the
+                                       // achieved range from the grading law)
   FixedDesignAnalysis lattice;         // the LATTICED certification (tensor solve)
   StressMargin solid_margin;           // the variant's SOLID margin (report line)
   double solid_margin_effective = 0.0; // the variant's SOLID gated margin
@@ -514,59 +621,83 @@ struct LatticeCertOutcome {
   bool solid_reproduced = false;       // solid_margin_reproduced == solid_margin?
 };
 
-// Re-certify one accepted variant as the LATTICED composite. Reconstructs the exact
-// grid / params / loads / BCs / tolerance minimize_plastic certified the SOLID design
-// with (the single-source-of-truth guarantee, analyze.hpp: handed a variant's own
-// converged density with the same inputs, analyze_fixed_design reproduces its report
-// bit-for-bit), then runs it TWICE: once with a nullptr posture (must reproduce the
-// SOLID margin — a live proof the reconstruction is correct) and once with the octet
-// posture (the composite margin that describes the exported file). The two solves are
-// cheap certification-scale solves on the macro grid (zero added DOF).
+// The exact certification inputs minimize_plastic certified the SOLID design with
+// (the single-source-of-truth guarantee, analyze.hpp) — reconstructed once per
+// variant and shared by the null-posture reproduction solve, the composite solve
+// and (graded runs) the clamp-counterfactual solve, so all of them certify the
+// identical load case.
+struct LatticeCertContext {
+  SimpParams params;
+  Vec3 build_dir{0.0, 0.0, 1.0};
+  std::vector<NodalLoad> loads;
+  bool load_path_ok = false;
+  KnockdownSpec knockdown;
+  double part_solid = 0.0;
+  double cert_tol = 0.0;
+};
+
+LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
+                                        const VoxelGrid& sg,
+                                        const MinimizePlasticOptions& options,
+                                        const Material& material) {
+  LatticeCertContext cx;
+  cx.params.youngs_modulus = material.youngs_modulus_mpa;
+  cx.params.poisson = material.poisson;
+  cx.params.penalty = 3.0;  // ARCHITECTURE §4, matching minimize_plastic's cert solve
+  cx.build_dir = normalized(Vec3{-options.gravity_direction.x,
+                                 -options.gravity_direction.y,
+                                 -options.gravity_direction.z});
+  // The SAME load minimize_plastic certified this variant under: the declared
+  // external load, or self-weight recomputed on the solved grid. (A design box would
+  // remap BCs/loads onto an expanded grid — run_job refuses design-box + lattice, so
+  // no remap is needed here and this reconstruction is exact.)
+  cx.loads = options.external_loads.empty()
+                 ? self_weight_loads(sg, material.density_g_cm3, options.gravity,
+                                     options.gravity_direction)
+                 : options.external_loads;
+  cx.load_path_ok =
+      load_path_connected(sg, variant.optimization.physical_density, 0.5);
+  cx.knockdown = knockdown_spec_for(options);
+  cx.part_solid = static_cast<double>(sg.solid_count());
+  // E4 — the certification runs at the run's EXACT tight tolerance, asserted (not
+  // commented). options.simp.cg_tolerance is minimize_plastic's kCertTol; draft mode
+  // only ever loosens the TRAJECTORY (draft_loose_tol), never this cert solve, so if
+  // draft is armed the cert tolerance must be strictly tighter than the loose one.
+  cx.cert_tol = options.simp.cg_tolerance;
+  assert((!options.draft_quality || cx.cert_tol < options.draft_loose_tol) &&
+         "E4: latticed certification must run at the tight cert tolerance, never the "
+         "draft loose tolerance");
+  return cx;
+}
+
+FixedDesignAnalysis analyze_variant_with_posture(
+    const MinimizePlasticVariant& variant, const VoxelGrid& sg,
+    const MinimizePlasticOptions& options, const Material& material,
+    const std::vector<DirichletBC>& bcs, const LatticeCertContext& cx,
+    const LatticePosture* post) {
+  return analyze_fixed_design(sg, cx.params,
+                              variant.optimization.physical_density, bcs,
+                              cx.loads, material, cx.build_dir, cx.cert_tol,
+                              options.simp.cg_max_iterations, options.simp.solver,
+                              options.margin_stop, cx.knockdown, cx.load_path_ok,
+                              cx.part_solid, post);
+}
+
+// Re-certify one accepted variant as the LATTICED composite: once with a nullptr
+// posture (must reproduce the SOLID margin — a live proof the reconstruction is
+// correct) and once with `post` (the composite margin that describes the exported
+// file — uniform rho, or the graded per-voxel field on stage-4 runs). The solves
+// are cheap certification-scale solves on the macro grid (zero added DOF).
 LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& variant,
                                             const VoxelGrid& sg,
                                             const MinimizePlasticOptions& options,
                                             const Material& material,
                                             const std::vector<DirichletBC>& bcs,
-                                            const JobLattice& lat,
-                                            const LatticeBoundary& boundary) {
+                                            const LatticeCertContext& cx,
+                                            const LatticePosture& post,
+                                            double rho_uniform) {
   LatticeCertOutcome oc;
-  const std::vector<double>& density = variant.optimization.physical_density;
-
-  // rho the printed geometry (cell + uniform strut radius) implies, on the library
-  // basis. The certifiable BAND is enforced INSIDE analyze_fixed_design (bar E5): a
-  // rho outside [rho_min, rho_max] throws LatticeDensityOutOfBand rather than certify
-  // against a clamped tensor. (run_job also fast-fails on it before the solve.)
-  oc.rho = octet_relative_density(lat.cell_mm, lat.strut_radius_mm);
-
-  SimpParams params;
-  params.youngs_modulus = material.youngs_modulus_mpa;
-  params.poisson = material.poisson;
-  params.penalty = 3.0;  // ARCHITECTURE §4, matching minimize_plastic's cert solve
-
-  const Vec3 build_dir = normalized(Vec3{-options.gravity_direction.x,
-                                         -options.gravity_direction.y,
-                                         -options.gravity_direction.z});
-  // The SAME load minimize_plastic certified this variant under: the declared
-  // external load, or self-weight recomputed on the solved grid. (A design box would
-  // remap BCs/loads onto an expanded grid — run_job refuses design-box + lattice, so
-  // no remap is needed here and this reconstruction is exact.)
-  const std::vector<NodalLoad> loads =
-      options.external_loads.empty()
-          ? self_weight_loads(sg, material.density_g_cm3, options.gravity,
-                              options.gravity_direction)
-          : options.external_loads;
-  const bool load_path_ok = load_path_connected(sg, density, 0.5);
-  const KnockdownSpec knockdown = knockdown_spec_for(options);
-  const double part_solid = static_cast<double>(sg.solid_count());
-
-  // E4 — the certification runs at the run's EXACT tight tolerance, asserted (not
-  // commented). options.simp.cg_tolerance is minimize_plastic's kCertTol; draft mode
-  // only ever loosens the TRAJECTORY (draft_loose_tol), never this cert solve, so if
-  // draft is armed the cert tolerance must be strictly tighter than the loose one.
-  const double cert_tol = options.simp.cg_tolerance;
-  assert((!options.draft_quality || cert_tol < options.draft_loose_tol) &&
-         "E4: latticed certification must run at the tight cert tolerance, never the "
-         "draft loose tolerance");
+  oc.rho = rho_uniform;
 
   oc.solid_margin = variant.report.margin;
   oc.solid_margin_effective = variant.report.margin_effective;
@@ -574,40 +705,74 @@ LatticeCertOutcome certify_latticed_variant(const MinimizePlasticVariant& varian
   // (1) Null-posture re-cert — MUST reproduce the variant's SOLID margin. This is the
   // live proof that the reconstruction above is faithful (so the latticed margin that
   // shares it is trustworthy). Bit-for-bit by the single-source-of-truth contract.
-  const FixedDesignAnalysis solid_recert = analyze_fixed_design(
-      sg, params, density, bcs, loads, material, build_dir, cert_tol,
-      options.simp.cg_max_iterations, options.simp.solver, options.margin_stop,
-      knockdown, load_path_ok, part_solid, /*lattice=*/nullptr);
+  const FixedDesignAnalysis solid_recert = analyze_variant_with_posture(
+      variant, sg, options, material, bcs, cx, /*post=*/nullptr);
   oc.solid_margin_reproduced = solid_recert.margin.worst_case;
   oc.solid_reproduced =
       (solid_recert.margin.worst_case == variant.report.margin.worst_case);
 
   // (2) Latticed cert — the octet tensor on the shared occupancy. THIS margin
-  // describes the exported file.
-  LatticePosture post = build_lattice_posture(sg, density, lat, oc.rho, boundary);
-  oc.lattice = analyze_fixed_design(
-      sg, params, density, bcs, loads, material, build_dir, cert_tol,
-      options.simp.cg_max_iterations, options.simp.solver, options.margin_stop,
-      knockdown, load_path_ok, part_solid, &post);
+  // describes the exported file. The certifiable BAND is enforced INSIDE
+  // analyze_fixed_design PER VOXEL (bars E5 / H4b): any masked voxel whose rho
+  // sits outside [rho_min, rho_max] throws LatticeDensityOutOfBand rather than
+  // certify against a clamped tensor.
+  oc.lattice =
+      analyze_variant_with_posture(variant, sg, options, material, bcs, cx, &post);
   oc.ran = true;
   return oc;
 }
+
+// Per-variant receipt payloads for the two new capabilities (task
+// lattice-page-core-hookup). Both are emitted ONLY when their feature is in the
+// job, so a legacy receipt stays byte-identical.
+struct LatticeRoleReceipt {
+  bool present = false;             // job carried lattice.regions
+  std::size_t include_regions = 0;  // resolved (valid) include primitives
+  std::size_t exclude_regions = 0;  // resolved (valid) exclude primitives
+  long long include_void_voxels = 0;  // include-region voxels the OPTIMIZER left
+                                      // void — the H1a no-op, reported not errored
+};
+struct LatticeGradedReceipt {
+  bool present = false;
+  const GradedField* gf = nullptr;  // the law's full report for THIS variant
+  // Field provenance (H4a): the demand field is THIS variant's own final
+  // certification-recovery von Mises field — which variant, how many optimizer
+  // iterations produced its converged design.
+  double requested_vf = 0.0;
+  double achieved_vf = 0.0;
+  int iterations = 0;
+  long long mask_voxels_dropped_by_cell_overlap = 0;  // law-masked voxels the
+                                                      // shared predicate dropped
+  // Clamp counterfactual (H4b): one extra cert solve with the clamped voxels
+  // kept SOLID instead — did clamping decide the verdict?
+  bool clamp_counterfactual_ran = false;
+  bool counterfactual_accepted = false;
+  bool clamp_changed_verdict = false;
+};
 
 // The per-variant lattice certification RECEIPT written beside the exported mesh
 // (bar E1/E6): it states, for the file the maintainer slices, WHAT the margin
 // describes. Carries the solid margin (what the solid mesh certifies), the
 // null-posture reproduction proving the composite reconstruction, and the latticed
 // composite margin + posture + the honest "strut strength not certified" flag.
+// `cell_mm` is the exported cell (the job's on a uniform run, the grading law's on
+// a graded run); `roles`/`graded` append their sections only when present.
 std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      const JobLattice& lat,
                                      const LatticeCertOutcome& c,
-                                     const LatticeGenStats& gs) {
+                                     const LatticeExportOutcome& oc,
+                                     double cell_mm,
+                                     const LatticeRoleReceipt& roles,
+                                     const LatticeGradedReceipt& graded) {
+  const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
   s += "  \"topology\": \"" + std::string(lattice_topology_name(a.lattice_topology)) +
        "\",\n";
-  s += "  \"cell_mm\": " + json_num(lat.cell_mm) + ",\n";
-  s += "  \"strut_radius_mm\": " + json_num(lat.strut_radius_mm) + ",\n";
+  s += "  \"cell_mm\": " + json_num(cell_mm) + ",\n";
+  s += "  \"strut_radius_mm\": " +
+       (graded.present ? std::string("null") : json_num(lat.strut_radius_mm)) +
+       ",\n";
   // Boundary finish (bar B9 — the mass/volume accounting includes skin, rim and
   // collar; soup basis, overlaps not deducted).
   s += "  \"skin\": " + json_str(lat.skin) + ",\n";
@@ -640,6 +805,94 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   s += "  \"interior_volume_mm3\": " + json_num(gs.interior_volume_mm3) + ",\n";
   s += "  \"skin_volume_mm3\": " + json_num(gs.skin_volume_mm3) + ",\n";
   s += "  \"rim_volume_mm3\": " + json_num(gs.rim_volume_mm3) + ",\n";
+  // Solid-companion accounting (H1c) — the volume kept SOLID by roles / the
+  // grading law's fallback, reported SEPARATELY from interior/skin/rim (voxel
+  // basis, count × spacing³ — the mass-accounting basis, unlike the analytic
+  // soup sums above). Emitted only when the companion machinery was armed, so a
+  // legacy receipt is byte-identical.
+  if (oc.solid_companion) {
+    s += "  \"solid_region_voxels\": " + std::to_string(oc.solid_region_voxels) +
+         ",\n";
+    s += "  \"solid_region_volume_mm3\": " + json_num(oc.solid_region_volume_mm3) +
+         ",\n";
+    s += "  \"solid_region_triangles\": " +
+         std::to_string(oc.solid_region_triangles) + ",\n";
+  }
+  // Lattice role regions (stage 1, H1a) — what the roles did, and the tested
+  // precedence spelled out so the receipt cannot be misread.
+  if (roles.present) {
+    s += "  \"regions\": {\n";
+    s += "    \"include\": " + std::to_string(roles.include_regions) + ",\n";
+    s += "    \"exclude\": " + std::to_string(roles.exclude_regions) + ",\n";
+    s += "    \"include_void_voxels\": " +
+         std::to_string(roles.include_void_voxels) + ",\n";
+    s += "    \"include_void_note\": \"include-region voxels where the optimizer "
+         "left no material — a lattice cannot conjure material there, so the "
+         "include is a NO-OP on them (reported, not an error)\",\n";
+    s += "    \"precedence\": \"clearance beats include and exclude (no material "
+         "to lattice); exclude beats include (kept solid); solid-kept material "
+         "is certified SOLID and exported as the solid companion body\"\n";
+    s += "  },\n";
+  }
+  // Graded lattice (stage 4) — the grading law's full per-variant record with
+  // the field's provenance (H4a) and the band-clamp accounting (H4b).
+  if (graded.present && graded.gf != nullptr) {
+    const GradedField& gf = *graded.gf;
+    const double latticed = static_cast<double>(gf.latticed_voxels);
+    s += "  \"grading\": {\n";
+    s += "    \"graded_from\": {\n";
+    s += "      \"variant_vf\": " + json_num(graded.requested_vf) + ",\n";
+    s += "      \"achieved_vf\": " + json_num(graded.achieved_vf) + ",\n";
+    s += "      \"iterations\": " + std::to_string(graded.iterations) + ",\n";
+    s += "      \"field\": \"von Mises certification-recovery field of THIS "
+         "variant's own converged design (the run's final field for this rung — "
+         "never an earlier iteration, never another run)\"\n";
+    s += "    },\n";
+    s += "    \"cell_size_mm\": " + json_num(gf.cell_size_mm) + ",\n";
+    s += "    \"printability_floor_mm\": " + json_num(gf.printability_floor_mm) +
+         ",\n";
+    s += "    \"cell_size_floored\": " +
+         std::string(gf.cell_size_floored ? "true" : "false") + ",\n";
+    s += "    \"band\": [" + json_num(gf.band_rho_min) + ", " +
+         json_num(gf.band_rho_max) + "],\n";
+    s += "    \"rho_min_used\": " + json_num(gf.rho_min_used) + ",\n";
+    s += "    \"rho_max_used\": " + json_num(gf.rho_max_used) + ",\n";
+    s += "    \"region_voxels\": " + std::to_string(gf.region_voxels) + ",\n";
+    s += "    \"latticed_voxels\": " + std::to_string(gf.latticed_voxels) + ",\n";
+    s += "    \"solid_fallback_voxels\": " +
+         std::to_string(gf.solid_fallback_voxels) + ",\n";
+    s += "    \"mask_voxels_dropped_by_cell_overlap\": " +
+         std::to_string(graded.mask_voxels_dropped_by_cell_overlap) + ",\n";
+    s += "    \"clamped_lo_voxels\": " + std::to_string(gf.clamped_lo_voxels) +
+         ",\n";
+    s += "    \"clamped_hi_voxels\": " + std::to_string(gf.clamped_hi_voxels) +
+         ",\n";
+    s += "    \"clamped_lo_fraction\": " +
+         json_num(latticed > 0.0 ? gf.clamped_lo_voxels / latticed : 0.0) + ",\n";
+    s += "    \"clamped_hi_fraction\": " +
+         json_num(latticed > 0.0 ? gf.clamped_hi_voxels / latticed : 0.0) + ",\n";
+    s += "    \"clamp_counterfactual_ran\": " +
+         std::string(graded.clamp_counterfactual_ran ? "true" : "false") + ",\n";
+    if (graded.clamp_counterfactual_ran) {
+      s += "    \"counterfactual_solid_accepted\": " +
+           std::string(graded.counterfactual_accepted ? "true" : "false") + ",\n";
+      s += "    \"clamp_changed_verdict\": " +
+           std::string(graded.clamp_changed_verdict ? "true" : "false") + ",\n";
+      s += "    \"clamp_counterfactual_note\": \"one extra certification solve "
+           "with every band-clamped voxel kept SOLID instead of latticed; "
+           "clamp_changed_verdict is whether the accept verdict differs — i.e. "
+           "whether the clamping was decisive, not cosmetic\",\n";
+    }
+    s += "    \"min_strut_diameter_mm\": " + json_num(gf.min_strut_diameter_mm) +
+         ",\n";
+    s += "    \"max_strut_diameter_mm\": " + json_num(gf.max_strut_diameter_mm) +
+         ",\n";
+    s += "    \"any_strut_below_min\": " +
+         std::string(gf.any_strut_below_min ? "true" : "false") + ",\n";
+    s += "    \"region_ungradeable\": " +
+         std::string(gf.region_ungradeable ? "true" : "false") + "\n";
+    s += "  },\n";
+  }
   s += "  \"relative_density\": " + json_num(c.rho) + ",\n";
   s += "  \"certifiable_band\": [" +
        json_num(lattice_rho_min(a.lattice_topology)) + ", " +
@@ -1229,6 +1482,21 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   prov += "  \"provenance\": \"smoothed / re-analyzed\",\n";
   prov += "  \"analyzed\": true,\n";
   prov += "  \"optimization\": false,\n";
+  // Stage 3 (task lattice-page-core-hookup) — the analyze route's honest label
+  // (H3b/H3c): ONE linear analysis solve, no design loop, no variant meshes;
+  // and the field's SCOPE, so the "this is the SOLID part's field — optimizing
+  // invalidates it" statement travels WITH the result and cannot be lost in
+  // transit (the app's RUN SIM gate states the same thing UI-side).
+  prov += "  \"analysis_solves\": 1,\n";
+  prov += "  \"variant_meshes_written\": 0,\n";
+  prov += "  \"field_scope\": " +
+          json_str(result.analyzed_mesh ? "substitute_mesh" : "solid_part") +
+          ",\n";
+  if (!result.analyzed_mesh)
+    prov +=
+        "  \"field_scope_note\": \"this stress/displacement field describes the "
+        "SOLID part under the declared load case; a topology-optimized design "
+        "has different geometry, so optimization INVALIDATES this field\",\n";
   prov += "  \"source\": " +
           json_str(result.analyzed_mesh ? ("mesh:" + analyze_mesh_path)
                                         : "model_solid") +
@@ -1317,8 +1585,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const RunObservability& obs) {
   // Fail fast on everything checkable before heavy work: the mode, the
   // material, and whether this build can write the requested mesh format.
+  // MODE VALIDATION STAYS STRICT (H3a): run_job optimizes minimize_plastic jobs
+  // and NOTHING else — an "analyze" job is one fixed-design solve and must go
+  // through analyze_job (`topopt-cli analyze`; the LAN worker routes on the
+  // job's mode), never be optimized here.
   if (job.mode != "minimize_plastic")
-    throw JobError("unsupported mode: " + job.mode);
+    throw JobError(
+        job.mode == "analyze"
+            ? std::string(
+                  "unsupported mode for `run`: \"analyze\" is one fixed-design "
+                  "analysis solve, not an optimization — run it with "
+                  "`topopt-cli analyze <job.json>`")
+            : "unsupported mode: " + job.mode);
   const auto mat_it = materials.find(job.material);
   if (mat_it == materials.end())
     throw JobError("material \"" + job.material +
@@ -1341,25 +1619,41 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   //     not hardcoded). The band is a hard gate at certification (bar E5):
   //     analyze_fixed_design also throws LatticeDensityOutOfBand mid-run, but failing
   //     up front wastes no solve and names the band in the message.
+  // Stage 4 (task lattice-page-core-hookup): grading on the OPTIMIZE path
+  // requires a lattice block — without one there is nothing to grade into, and
+  // silently ignoring the block is exactly the reported gap this closes.
+  if (job.grading.present && !job.lattice.present)
+    throw JobError(
+        "a \"grading\" block on the optimize path requires a \"lattice\" block: "
+        "run_job grades each accepted variant's lattice from that variant's own "
+        "final stress field, so without a lattice there is nothing to grade "
+        "into. Add a \"lattice\" block (without cell_mm/strut_radius_mm — the "
+        "graded run derives those) or drop \"grading\".");
   if (job.lattice.present) {
     if (job.has_design_box)
       throw JobError(
           "lattice certification does not support a design box (add-material) run: "
           "the certification load case cannot be reconstructed under domain "
           "expansion. Run the lattice job without a design box.");
-    const double lat_rho =
-        octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
-    const double lo = lattice_rho_min(LatticeTopology::Octet);
-    const double hi = lattice_rho_max(LatticeTopology::Octet);
-    if (lat_rho < lo || lat_rho > hi)
-      throw JobError(
-          "lattice cell_mm " + std::to_string(job.lattice.cell_mm) +
-          " / strut_radius_mm " + std::to_string(job.lattice.strut_radius_mm) +
-          " implies octet relative density " + std::to_string(lat_rho) +
-          ", outside the certifiable band [" + std::to_string(lo) + ", " +
-          std::to_string(hi) +
-          "]. The gate refuses to certify against a clamped tensor (bar E5); choose a "
-          "strut radius whose density lands in the band.");
+    // The uniform-density band fast-fail. A GRADED run has no uniform
+    // cell/radius (the schema rejects them); its per-voxel densities are
+    // in-band by the grading law's construction (bar L2), and the band is
+    // still enforced per voxel inside analyze_fixed_design (E5 / H4b).
+    if (!job.grading.present) {
+      const double lat_rho =
+          octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
+      const double lo = lattice_rho_min(LatticeTopology::Octet);
+      const double hi = lattice_rho_max(LatticeTopology::Octet);
+      if (lat_rho < lo || lat_rho > hi)
+        throw JobError(
+            "lattice cell_mm " + std::to_string(job.lattice.cell_mm) +
+            " / strut_radius_mm " + std::to_string(job.lattice.strut_radius_mm) +
+            " implies octet relative density " + std::to_string(lat_rho) +
+            ", outside the certifiable band [" + std::to_string(lo) + ", " +
+            std::to_string(hi) +
+            "]. The gate refuses to certify against a clamped tensor (bar E5); choose a "
+            "strut radius whose density lands in the band.");
+    }
   }
 
   RunJobResult result;
@@ -1576,6 +1870,24 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     double lat_margin_min = 1e300, lat_margin_eff_min = 1e300;
     bool lat_accepted_all = true;
     bool strut_uncertified = false;
+    // Lattice roles + solid companion (task lattice-page-core-hookup stage 1),
+    // summed over variants like the counters above. All zero/false on a job
+    // with no lattice.regions and no grading — run_info stays byte-identical.
+    bool roles_present = false;
+    long long include_regions = 0, exclude_regions = 0;
+    long long solid_voxels = 0, solid_tris = 0, include_void = 0;
+    double solid_vol = 0.0;
+    // Graded run (stage 4): run_info's "grading" object records the LAST graded
+    // variant's law report (each variant's own full record — including field
+    // provenance and clamp counts — lives in its receipt). Scalars only.
+    bool graded = false;
+    double g_cell = 0.0, g_floor = 0.0;
+    bool g_floored = false;
+    double g_band_lo = 0.0, g_band_hi = 0.0, g_cpm_floor = 0.0;
+    double g_rho_lo = 0.0, g_rho_hi = 0.0;
+    long long g_region = 0, g_latticed = 0, g_fallback = 0;
+    double g_min_width = 0.0, g_min_cpm = 0.0, g_min_d = 0.0, g_max_d = 0.0;
+    bool g_below_min = false, g_ungradeable = false;
   } lat_agg;
   std::vector<std::string> lattice_paths;  // merged into result.mesh_paths at end
   // Emit ONE accepted variant's latticed companion: generate the mesh, RE-CERTIFY it
@@ -1590,31 +1902,284 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       job.lattice.present
           ? lattice_keep_outs_from_job(job, result.model)
           : std::vector<ClearanceGeometry>{};
+  // The job's lattice ROLE regions (stage 1), resolved once — empty on a job
+  // with no lattice.regions (byte-identical path).
+  const LatticeRoleRegions lattice_roles =
+      job.lattice.present ? lattice_role_regions_from_job(job)
+                          : LatticeRoleRegions{};
   auto emit_lattice = [&](const MinimizePlasticVariant& v, bool stream_lines) {
     if (!job.lattice.present) return;
-    // THE shared boundary for this variant: its solid density as the base, the
-    // resolved clearance keep-outs subtracted. Geometry (a) and certification
-    // (b) below both consume this ONE object (bar B7).
+    const std::vector<double>& dens = v.optimization.physical_density;
+    const bool graded = job.grading.present;
+    const bool roles_present = !job.lattice.regions.empty();
+
+    // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
+    // certification-recovery von Mises field (H4a — the run's own field, fresh:
+    // v.von_mises_field is produced by the recovery solve on the CONVERGED
+    // design of this rung, never an earlier iteration or another run). Its
+    // candidate set is the role-aware membership — the SAME membership tests the
+    // shared boundary predicate exposes, evaluated on a boundary view carrying
+    // only the membership primitives (the cell size, which the law itself
+    // chooses, plays no part in membership).
+    GradedField gf;
+    double cell = job.lattice.cell_mm;
+    if (graded) {
+      LatticeBoundary members;
+      for (const ClearanceGeometry& g : lattice_kos)
+        members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+      for (const ClearanceGeometry& g : lattice_roles.includes)
+        members.add_include_region(g);
+      for (const ClearanceGeometry& g : lattice_roles.excludes)
+        members.add_exclude_region(g);
+      std::vector<char> cand(solved_grid.voxel_count(), 0);
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!(dens[e] >= 0.5)) continue;
+            const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                         solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                         solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+            if (members.in_keep_out(c, 0.0)) continue;
+            if (members.in_exclude_region(c, 0.0)) continue;
+            if (members.has_include_regions() &&
+                !members.in_include_region(c, 0.0))
+              continue;
+            cand[e] = 1;
+          }
+      GradingLawParams gp;
+      gp.topology = LatticeTopology::Octet;  // job schema restricts to octet
+      gp.target_cell_size_mm = job.grading.cell_mm;
+      gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
+      gp.demand_exponent = job.grading.demand_exponent;
+      gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp);
+      cell = gf.cell_size_mm;  // the law's cell (target raised to the floor)
+    }
+
+    // ── THE shared boundary for this variant: its solid density as the base,
+    // the resolved clearance keep-outs subtracted, the role regions carried as
+    // activation/mask terms. Geometry (a) and certification (b) below both
+    // consume this ONE object (bar B7 / H1b).
     const LatticeBoundary boundary = lattice_boundary_for(
-        solved_grid, v.optimization.physical_density, job.lattice.cell_mm,
-        lattice_kos);
+        solved_grid, dens, cell, lattice_kos, lattice_roles);
+
+    // ── THE certification mask — shared by the export (companion + graded cell
+    // activation) and the posture. On a graded run it is intersected with the
+    // law's own mask (voxels the law kept solid drop out; law-masked voxels the
+    // shared predicate's cell-overlap proof rejects are counted, not hidden).
+    std::vector<char> mask = lattice_certification_mask(
+        boundary, solved_grid, dens, 0.5, solved_grid.origin, cell);
+    long long dropped_by_overlap = 0;
+    if (graded) {
+      for (std::size_t e = 0; e < mask.size(); ++e) {
+        if (mask[e] && !gf.posture.mask[e]) {
+          mask[e] = 0;  // the law left it solid (too-thin fallback / not a candidate)
+        } else if (!mask[e] && gf.posture.mask[e]) {
+          ++dropped_by_overlap;
+        }
+      }
+    }
+
+    // ── the radius field + graded cell activation.
+    LatticeRadiusField G;
+    G.nseg = 8;
+    double rho_uniform = 0.0;
+    const LatticeRegion Rdims = lattice_region_for(solved_grid, cell, &boundary);
+    std::vector<double> cell_rho_sum;
+    std::vector<long long> cell_rho_cnt;
+    double gmean = 0.0;
+    std::function<bool(int, int, int)> graded_cells;  // null on the uniform path
+    if (graded) {
+      const int ncx = Rdims.nx, ncy = Rdims.ny, ncz = Rdims.nz;
+      cell_rho_sum.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0.0);
+      cell_rho_cnt.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0);
+      auto cidx = [ncx, ncy](int ci, int cj, int ck) {
+        return (static_cast<std::size_t>(ck) * ncy + cj) * ncx + ci;
+      };
+      auto clampi = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+      double gsum = 0.0;
+      long long gcnt = 0;
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!mask[e]) continue;
+            const double rho = gf.posture.relative_density[e];
+            const double cx =
+                solved_grid.origin.x + (i + 0.5) * solved_grid.spacing;
+            const double cy =
+                solved_grid.origin.y + (j + 0.5) * solved_grid.spacing;
+            const double cz =
+                solved_grid.origin.z + (k + 0.5) * solved_grid.spacing;
+            const int ci = clampi(
+                static_cast<int>(std::floor((cx - Rdims.origin.x) / cell)), ncx - 1);
+            const int cj = clampi(
+                static_cast<int>(std::floor((cy - Rdims.origin.y) / cell)), ncy - 1);
+            const int ck = clampi(
+                static_cast<int>(std::floor((cz - Rdims.origin.z) / cell)), ncz - 1);
+            cell_rho_sum[cidx(ci, cj, ck)] += rho;
+            ++cell_rho_cnt[cidx(ci, cj, ck)];
+            gsum += rho;
+            ++gcnt;
+          }
+      gmean = gcnt > 0 ? gsum / static_cast<double>(gcnt) : gf.band_rho_min;
+      // Graded cell activation: a cell is latticed iff it holds >= 1 masked
+      // voxel — the graded silhouette DERIVES from the same mask the posture
+      // certifies, so file and certificate cannot disagree on where lattice is.
+      graded_cells = [&cell_rho_cnt, cidx](int ci, int cj, int ck) {
+        return cell_rho_cnt[cidx(ci, cj, ck)] > 0;
+      };
+      // Per-position radius: the owning voxel's graded rho (masked), else the
+      // owning cell's mean over its masked voxels (a strut midpoint can sit in
+      // a fallback/solid voxel of an active cell), else the global mean —
+      // deterministic fixed fallback chain, converted through core's own
+      // diameter law.
+      const VoxelGrid& sgr = solved_grid;
+      const std::vector<char>& mref = mask;
+      const std::vector<double>& rref = gf.posture.relative_density;
+      G.field = [&sgr, &mref, &rref, &cell_rho_sum, &cell_rho_cnt, cidx, clampi,
+                 cell, gmean, ncx, ncy, ncz, Rdims](Vec3 p) {
+        const int i = clampi(
+            static_cast<int>(std::floor((p.x - sgr.origin.x) / sgr.spacing)),
+            sgr.nx - 1);
+        const int j = clampi(
+            static_cast<int>(std::floor((p.y - sgr.origin.y) / sgr.spacing)),
+            sgr.ny - 1);
+        const int k = clampi(
+            static_cast<int>(std::floor((p.z - sgr.origin.z) / sgr.spacing)),
+            sgr.nz - 1);
+        const std::size_t e = sgr.index(i, j, k);
+        double rho;
+        if (mref[e]) {
+          rho = rref[e];
+        } else {
+          const int ci = clampi(
+              static_cast<int>(std::floor((p.x - Rdims.origin.x) / cell)), ncx - 1);
+          const int cj = clampi(
+              static_cast<int>(std::floor((p.y - Rdims.origin.y) / cell)), ncy - 1);
+          const int ck = clampi(
+              static_cast<int>(std::floor((p.z - Rdims.origin.z) / cell)), ncz - 1);
+          const std::size_t cc = cidx(ci, cj, ck);
+          rho = cell_rho_cnt[cc] > 0
+                    ? cell_rho_sum[cc] / static_cast<double>(cell_rho_cnt[cc])
+                    : gmean;
+        }
+        return 0.5 * octet_strut_diameter_mm(rho, cell);
+      };
+    } else {
+      G.uniform_mm = job.lattice.strut_radius_mm;
+      // rho the printed geometry (cell + uniform strut radius) implies, on the
+      // library basis (the E5 preflight already proved it in-band).
+      rho_uniform =
+          octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
+    }
+
+    // ── role receipt (H1a): counts + the include-over-void no-op accounting.
+    LatticeRoleReceipt role_rcpt;
+    if (roles_present) {
+      role_rcpt.present = true;
+      role_rcpt.include_regions = lattice_roles.includes.size();
+      role_rcpt.exclude_regions = lattice_roles.excludes.size();
+      if (boundary.has_include_regions()) {
+        for (int k = 0; k < solved_grid.nz; ++k)
+          for (int j = 0; j < solved_grid.ny; ++j)
+            for (int i = 0; i < solved_grid.nx; ++i) {
+              const std::size_t e = solved_grid.index(i, j, k);
+              if (dens[e] >= 0.5) continue;  // material exists — not the no-op case
+              const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                           solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                           solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+              if (boundary.in_include_region(c, 0.0))
+                ++role_rcpt.include_void_voxels;
+            }
+      }
+    }
+
     // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
     const double tg0 = wall_seconds();
     LatticeExportOutcome oc = export_latticed_variant(
-        v, out_dir, job.output, job.lattice, solved_grid, boundary);
+        v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
+        mask, graded_cells, /*emit_solid_companion=*/graded || roles_present);
     lat_agg.wall_s += wall_seconds() - tg0;
-    // (b) certification of the composite — the octet tensor on the SAME occupancy the
-    // geometry used. certify_latticed_variant refuses an out-of-band density (E5).
+    // (b) certification of the composite — the octet tensor on the SAME mask the
+    // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
+    const LatticeCertContext cx =
+        lattice_cert_context(v, solved_grid, options, material);
+    const LatticePosture post = build_lattice_posture(
+        solved_grid, cell, mask, rho_uniform,
+        graded ? &gf.posture.relative_density : nullptr);
     const LatticeCertOutcome cc = certify_latticed_variant(
-        v, solved_grid, options, material, bcs, job.lattice, boundary);
+        v, solved_grid, options, material, bcs, cx, post,
+        graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform);
+
+    // ── graded receipt + the clamp counterfactual (H4b): one extra cert solve
+    // with every band-clamped voxel kept SOLID — was the clamping decisive?
+    LatticeGradedReceipt grad_rcpt;
+    if (graded) {
+      grad_rcpt.present = true;
+      grad_rcpt.gf = &gf;
+      grad_rcpt.requested_vf = v.requested_volume_fraction;
+      grad_rcpt.achieved_vf = v.optimization.volume_fraction;
+      grad_rcpt.iterations = v.optimization.iterations;
+      grad_rcpt.mask_voxels_dropped_by_cell_overlap = dropped_by_overlap;
+      if (gf.clamped_lo_voxels + gf.clamped_hi_voxels > 0) {
+        LatticePosture cpost = post;
+        for (std::size_t e = 0; e < cpost.mask.size(); ++e)
+          if (gf.clamp_flags[e] && cpost.mask[e]) {
+            cpost.mask[e] = 0;
+            cpost.relative_density[e] = 0.0;
+          }
+        const FixedDesignAnalysis cf = analyze_variant_with_posture(
+            v, solved_grid, options, material, bcs, cx, &cpost);
+        grad_rcpt.clamp_counterfactual_ran = true;
+        grad_rcpt.counterfactual_accepted = cf.accepted;
+        grad_rcpt.clamp_changed_verdict = (cf.accepted != cc.lattice.accepted);
+      }
+    }
+
     const std::string rcpt_path =
         join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
                                              v.requested_volume_fraction) +
                                ".report.json");
-    write_text_file(rcpt_path,
-                    lattice_cert_report_json(v, job.lattice, cc, oc.stats));
+    write_text_file(rcpt_path, lattice_cert_report_json(v, job.lattice, cc, oc,
+                                                        cell, role_rcpt,
+                                                        grad_rcpt));
 
     lat_agg.any = true;
+    // Role / companion / grading aggregation (stages 1+4).
+    if (roles_present) {
+      lat_agg.roles_present = true;
+      lat_agg.include_regions =
+          static_cast<long long>(lattice_roles.includes.size());
+      lat_agg.exclude_regions =
+          static_cast<long long>(lattice_roles.excludes.size());
+      lat_agg.include_void += role_rcpt.include_void_voxels;
+    }
+    if (oc.solid_companion) {
+      lat_agg.solid_voxels += oc.solid_region_voxels;
+      lat_agg.solid_vol += oc.solid_region_volume_mm3;
+      lat_agg.solid_tris += static_cast<long long>(oc.solid_region_triangles);
+    }
+    if (graded) {
+      lat_agg.graded = true;
+      lat_agg.g_cell = gf.cell_size_mm;
+      lat_agg.g_floor = gf.printability_floor_mm;
+      lat_agg.g_floored = gf.cell_size_floored;
+      lat_agg.g_band_lo = gf.band_rho_min;
+      lat_agg.g_band_hi = gf.band_rho_max;
+      lat_agg.g_cpm_floor = gf.cells_per_member_floor;
+      lat_agg.g_rho_lo = gf.rho_min_used;
+      lat_agg.g_rho_hi = gf.rho_max_used;
+      lat_agg.g_region = static_cast<long long>(gf.region_voxels);
+      lat_agg.g_latticed = static_cast<long long>(gf.latticed_voxels);
+      lat_agg.g_fallback = static_cast<long long>(gf.solid_fallback_voxels);
+      lat_agg.g_min_width = gf.min_member_width_mm;
+      lat_agg.g_min_cpm = gf.min_cells_per_member;
+      lat_agg.g_min_d = gf.min_strut_diameter_mm;
+      lat_agg.g_max_d = gf.max_strut_diameter_mm;
+      lat_agg.g_below_min = gf.any_strut_below_min;
+      lat_agg.g_ungradeable = gf.region_ungradeable;
+    }
     lat_agg.cells += oc.stats.latticed_cells;
     lat_agg.voxels += oc.region_voxels;
     lat_agg.tris += static_cast<long long>(oc.stats.triangles);
@@ -1637,8 +2202,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     lat_agg.r_min = std::min(lat_agg.r_min, oc.stats.min_strut_diameter_mm / 2.0);
     lat_agg.r_max = std::max(lat_agg.r_max, oc.stats.max_strut_diameter_mm / 2.0);
     lat_agg.cert_ran = true;
-    lat_agg.rho_lo = std::min(lat_agg.rho_lo, cc.rho);
-    lat_agg.rho_hi = std::max(lat_agg.rho_hi, cc.rho);
+    // Graded runs have no uniform rho — the certified range is the law's
+    // achieved band; uniform runs keep the point value.
+    lat_agg.rho_lo =
+        std::min(lat_agg.rho_lo, graded ? gf.rho_min_used : cc.rho);
+    lat_agg.rho_hi =
+        std::max(lat_agg.rho_hi, graded ? gf.rho_max_used : cc.rho);
     lat_agg.cert_voxels += static_cast<long long>(cc.lattice.lattice_voxels);
     lat_agg.lat_margin_min =
         std::min(lat_agg.lat_margin_min, cc.lattice.margin.worst_case);
@@ -1654,15 +2223,31 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     lattice_paths.insert(lattice_paths.end(), oc.paths.begin(), oc.paths.end());
     if (stream_lines)
       for (const std::string& p : oc.paths) {
-        std::printf(
-            "LATTICE vf=%.6f topology=%s cell_mm=%.6g strut_r_mm=%.6g rho=%.6g "
-            "cells=%lld tris=%llu lattice_margin=%.6g lattice_accepted=%d "
-            "report=%s mesh=%s\n",
-            v.requested_volume_fraction, job.lattice.topology.c_str(),
-            job.lattice.cell_mm, job.lattice.strut_radius_mm, cc.rho,
-            oc.stats.latticed_cells, (unsigned long long)oc.stats.triangles,
-            cc.lattice.margin.worst_case, eff_accepted ? 1 : 0,
-            rcpt_path.c_str(), p.c_str());
+        if (graded) {
+          // Graded line (NEW with stage 4 — no pre-existing consumer): the
+          // uniform strut_r/rho keys would be lies here, so the line carries
+          // graded=1 + the achieved rho RANGE instead. Key=value tokens, same
+          // discipline as the uniform line.
+          std::printf(
+              "LATTICE vf=%.6f topology=%s cell_mm=%.6g graded=1 rho_min=%.6g "
+              "rho_max=%.6g cells=%lld tris=%llu lattice_margin=%.6g "
+              "lattice_accepted=%d report=%s mesh=%s\n",
+              v.requested_volume_fraction, job.lattice.topology.c_str(), cell,
+              gf.rho_min_used, gf.rho_max_used, oc.stats.latticed_cells,
+              (unsigned long long)oc.stats.triangles,
+              cc.lattice.margin.worst_case, eff_accepted ? 1 : 0,
+              rcpt_path.c_str(), p.c_str());
+        } else {
+          std::printf(
+              "LATTICE vf=%.6f topology=%s cell_mm=%.6g strut_r_mm=%.6g rho=%.6g "
+              "cells=%lld tris=%llu lattice_margin=%.6g lattice_accepted=%d "
+              "report=%s mesh=%s\n",
+              v.requested_volume_fraction, job.lattice.topology.c_str(),
+              job.lattice.cell_mm, job.lattice.strut_radius_mm, cc.rho,
+              oc.stats.latticed_cells, (unsigned long long)oc.stats.triangles,
+              cc.lattice.margin.worst_case, eff_accepted ? 1 : 0,
+              rcpt_path.c_str(), p.c_str());
+        }
         std::fflush(stdout);
       }
   };
@@ -1678,7 +2263,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // Geometry (handoff 2026-07-28-lattice-generation-production).
     run_info.lattice_export_present = true;
     run_info.lattice_export_topology = job.lattice.topology;
-    run_info.lattice_export_cell_mm = job.lattice.cell_mm;
+    // Graded runs: the cell is the LAW's (per the last graded variant; each
+    // variant's own cell is in its receipt). Uniform runs: the job's.
+    run_info.lattice_export_cell_mm =
+        lat_agg.graded ? lat_agg.g_cell : job.lattice.cell_mm;
     run_info.lattice_export_strut_radius_min_mm = lat_agg.r_min;
     run_info.lattice_export_strut_radius_max_mm = lat_agg.r_max;
     run_info.lattice_export_latticed_cells = lat_agg.cells;
@@ -1710,12 +2298,50 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.lattice_export_skin_chords_rejected_projection = lat_agg.chords_proj;
     run_info.lattice_export_skin_chords_clipped_away = lat_agg.chords_clipped;
     run_info.lattice_export_finish_certified = job.lattice.outer_finish != "skin";
+    // Lattice roles + solid companion (task lattice-page-core-hookup stage 1;
+    // keys emitted only when roles/companion were in play — byte-identity).
+    run_info.lattice_export_role_regions_present =
+        lat_agg.roles_present || lat_agg.solid_voxels > 0 ||
+        lat_agg.graded;  // graded runs emit the companion too
+    run_info.lattice_export_include_regions = lat_agg.include_regions;
+    run_info.lattice_export_exclude_regions = lat_agg.exclude_regions;
+    run_info.lattice_export_solid_region_voxels = lat_agg.solid_voxels;
+    run_info.lattice_export_solid_region_volume_mm3 = lat_agg.solid_vol;
+    run_info.lattice_export_solid_region_triangles = lat_agg.solid_tris;
+    run_info.lattice_export_include_void_voxels = lat_agg.include_void;
+    // Graded run (stage 4): the "grading" object — the same record the analyze
+    // path writes, filled from the LAST graded variant (per-variant records live
+    // in the receipts).
+    if (lat_agg.graded) {
+      run_info.grading_present = true;
+      run_info.grading_topology = job.lattice.topology;
+      run_info.grading_band_rho_min = lat_agg.g_band_lo;
+      run_info.grading_band_rho_max = lat_agg.g_band_hi;
+      run_info.grading_cells_per_member_floor = lat_agg.g_cpm_floor;
+      run_info.grading_cell_size_mm = lat_agg.g_cell;
+      run_info.grading_printability_floor_mm = lat_agg.g_floor;
+      run_info.grading_cell_size_floored = lat_agg.g_floored;
+      run_info.grading_min_extrudable_width_mm =
+          job.grading.min_extrudable_width_mm;
+      run_info.grading_rho_min_used = lat_agg.g_rho_lo;
+      run_info.grading_rho_max_used = lat_agg.g_rho_hi;
+      run_info.grading_region_voxels = lat_agg.g_region;
+      run_info.grading_latticed_voxels = lat_agg.g_latticed;
+      run_info.grading_solid_fallback_voxels = lat_agg.g_fallback;
+      run_info.grading_min_member_width_mm = lat_agg.g_min_width;
+      run_info.grading_min_cells_per_member = lat_agg.g_min_cpm;
+      run_info.grading_min_strut_diameter_mm = lat_agg.g_min_d;
+      run_info.grading_max_strut_diameter_mm = lat_agg.g_max_d;
+      run_info.grading_any_strut_below_min = lat_agg.g_below_min;
+      run_info.grading_region_ungradeable = lat_agg.g_ungradeable;
+    }
     // Certification (handoff 2026-07-29-lattice-certification-e2e, bars E1/E3) — WHAT
     // the composite gate certified, so a variant's provenance is recoverable.
     if (lat_agg.cert_ran) {
       run_info.lattice_present = true;
       run_info.lattice_topology = job.lattice.topology;
-      run_info.lattice_cell_size_mm = job.lattice.cell_mm;
+      run_info.lattice_cell_size_mm =
+          lat_agg.graded ? lat_agg.g_cell : job.lattice.cell_mm;
       run_info.lattice_rho_min = lat_agg.rho_lo;
       run_info.lattice_rho_max = lat_agg.rho_hi;
       run_info.lattice_region_voxels = lat_agg.cert_voxels;

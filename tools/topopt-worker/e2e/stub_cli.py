@@ -215,17 +215,52 @@ def run(out_dir, job_path=None):
                      [(0.70, 41.5, 120), (0.50, 29.5, 90)])
 
 
+def analyze(out_dir, job_path=None):
+    """Protocol-faithful `topopt-cli analyze` (task lattice-page-core-hookup
+    stage 3): ONE analysis, NO PROGRESS/VARIANT lines, NO variant meshes —
+    writes analysis_report.json + analysis.json (with the solid-part field
+    label the real CLI emits) + fields.bin, then a human summary line."""
+    os.makedirs(out_dir, exist_ok=True)
+    if job_path and os.path.isfile(job_path):
+        try:
+            with open(job_path) as jf:
+                received = jf.read()
+            with open(os.path.join(out_dir, "received_job.json"), "w") as rf:
+                rf.write(received)
+        except OSError:
+            pass
+    with open(os.path.join(out_dir, "analysis_report.json"), "w") as f:
+        json.dump({"variants": [report_variant(1.0, 3.10, 3.30, 3.10)]}, f)
+    with open(os.path.join(out_dir, "analysis.json"), "w") as f:
+        json.dump({
+            "provenance": "smoothed / re-analyzed",
+            "analyzed": True,
+            "optimization": False,
+            "analysis_solves": 1,
+            "variant_meshes_written": 0,
+            "field_scope": "solid_part",
+            "field_scope_note": "this stress/displacement field describes the "
+                                "SOLID part under the declared load case; a "
+                                "topology-optimized design has different "
+                                "geometry, so optimization INVALIDATES this "
+                                "field",
+        }, f)
+    write_fields_bin(os.path.join(out_dir, "fields.bin"), [(1.0, 55.0, 0)])
+    emit("analyze: model.step as solid part (fixed design, ONE analysis solve, "
+         "no optimization)")
+
+
 def main():
     args = sys.argv[1:]
     if args and args[0] == "--version":
         print("topopt-cli version=stub-101 fingerprint=%s" % FINGERPRINT)
         return
-    if args and args[0] == "run":
+    if args and args[0] in ("run", "analyze"):
         job_path = args[1] if len(args) > 1 and not args[1].startswith("--") else None
         out_dir = "."
         if "--out" in args:
             out_dir = args[args.index("--out") + 1]
-        run(out_dir, job_path)
+        (run if args[0] == "run" else analyze)(out_dir, job_path)
         return
     sys.stderr.write("stub_cli: unknown invocation %r\n" % (args,))
     sys.exit(2)

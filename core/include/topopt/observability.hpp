@@ -437,6 +437,20 @@ struct RunInfo {
   bool lattice_export_emit_stl = false;
   bool lattice_export_emit_3mf = false;
   bool lattice_export_interpenetrating_soup = true;
+  // Lattice ROLE regions + solid companion (task lattice-page-core-hookup,
+  // stage 1). Keys are serialized ONLY when role_regions_present, so a job with
+  // no lattice.regions (and no grading) writes a byte-identical lattice_export
+  // object. solid_region_* is the material kept SOLID by roles / the grading
+  // law's fallback, exported as a closed body and accounted separately from
+  // interior/skin/rim (H1c; voxel basis, count × spacing³).
+  bool lattice_export_role_regions_present = false;
+  long long lattice_export_include_regions = 0;
+  long long lattice_export_exclude_regions = 0;
+  long long lattice_export_solid_region_voxels = 0;
+  double lattice_export_solid_region_volume_mm3 = 0.0;
+  long long lattice_export_solid_region_triangles = 0;
+  long long lattice_export_include_void_voxels = 0;  // include over optimizer
+                                                     // void: the reported no-op
   double lattice_export_gen_seconds = 0.0;      // generation wall time
   double lattice_export_gen_fraction = 0.0;     // gen time / total job time (P6)
   // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): clip/skin
@@ -461,8 +475,10 @@ struct RunInfo {
   bool lattice_export_finish_certified = true;  // false: "skin" (shell dropped)
 
   // GRADING LAW posture (handoff 2026-07-29-lattice-grading-law) — what the stress-to-
-  // lattice grading law produced for a "grading" job block. Set only in the analyze/
-  // certification path when a grading block is present; the serializer emits a nested
+  // lattice grading law produced for a "grading" job block. Set by the analyze path
+  // AND, since task lattice-page-core-hookup stage 4, by run_job (filled from the
+  // LAST graded variant; each variant's full record — provenance, clamp counts —
+  // lives in its own lattice receipt); the serializer emits a nested
   // "grading" object ONLY then, so a run with no grading block writes no key and stays
   // byte-identical (bar L1). It records: the limits the law READ from core (the
   // certifiable band and the cells-per-member floor — provenance, so a stale limit is

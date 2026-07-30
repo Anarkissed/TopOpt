@@ -372,17 +372,37 @@ final class LatticePageTests: XCTestCase {
         XCTAssertTrue(gate.offered)
         XCTAssertTrue(gate.stale, "a stale field is marked — the 'Sim is out of date' surface")
 
-        // Auto selected ⇒ NO lattice block ever ships (it would fill uniform — the
-        // lie B6 forbids); Optimize is gated with the stated reason instead.
+        // Auto rides the optimize job now (task lattice-page-core-hookup stage 4:
+        // core's run_job grades from the run's OWN field) — but B6 stands: the
+        // spec it ships is GRADED, carrying NO uniform cell/radius at all, so
+        // auto still never silently means uniform. Core's grading schema
+        // requires the stated line width, so WITHOUT one the spec stays nil and
+        // Optimize is gated with exactly that reason.
         var s = LatticeSettings(enabled: true)
         s.densityMode = .auto
-        XCTAssertNil(s.runSpec(), "auto never silently means uniform")
-        let surface = LatticeOptimizeSurface.compute(
+        XCTAssertNil(s.runSpec(), "auto without a line width has no grading floor — no spec")
+        let gated = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
             latticeEnabled: true, densityMode: .auto,
-            topologyDisplayName: "Octet", cellMM: 6, bounds: nil, running: false)
-        XCTAssertFalse(surface.enabled)
-        XCTAssertTrue(surface.sub.contains("auto density can't ride an optimize job yet"))
+            topologyDisplayName: "Octet", cellMM: 6, bounds: nil, running: false,
+            lineWidthMM: 0)
+        XCTAssertFalse(gated.enabled)
+        XCTAssertTrue(gated.sub.contains("line width"), "the reason names the missing input")
+        // With a line width: the spec ships, GRADED, and Optimize opens (H4d).
+        let spec = s.runSpec(lineWidthMM: 0.42)
+        XCTAssertNotNil(spec, "H4d: auto + line width produces a run spec")
+        XCTAssertTrue(spec?.graded == true, "the spec is graded, not uniform")
+        XCTAssertEqual(spec?.strutRadiusMM, 0,
+                       "no fabricated uniform radius on a graded spec (B6)")
+        XCTAssertEqual(spec?.minExtrudableWidthMM, 0.42)
+        let open = LatticeOptimizeSurface.compute(
+            baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
+            latticeEnabled: true, densityMode: .auto,
+            topologyDisplayName: "Octet", cellMM: 6, bounds: nil, running: false,
+            lineWidthMM: 0.42)
+        XCTAssertTrue(open.enabled, "H4d: the auto gate OPENS")
+        XCTAssertTrue(open.sub.contains("graded"),
+                      "the sub-label says the lattice is graded from this run's own field")
     }
 
     // MARK: - B7 · no invalid boundary state

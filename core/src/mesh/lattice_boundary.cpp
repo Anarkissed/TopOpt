@@ -163,6 +163,28 @@ void LatticeBoundary::add_keep_out(const ClearanceGeometry& geom, bool collar) {
   }
 }
 
+void LatticeBoundary::add_include_region(const ClearanceGeometry& geom) {
+  if (!geom.valid) return;  // same safe no-op as the rasterizer / add_keep_out
+  includes_.push_back(geom);
+}
+
+void LatticeBoundary::add_exclude_region(const ClearanceGeometry& geom) {
+  if (!geom.valid) return;
+  excludes_.push_back(geom);
+}
+
+bool LatticeBoundary::in_include_region(const Vec3& p, double tol) const {
+  for (const ClearanceGeometry& g : includes_)
+    if (point_in_clearance_region(g, p, tol)) return true;
+  return false;
+}
+
+bool LatticeBoundary::in_exclude_region(const Vec3& p, double tol) const {
+  for (const ClearanceGeometry& g : excludes_)
+    if (point_in_clearance_region(g, p, tol)) return true;
+  return false;
+}
+
 // Distance from p to a solid voxel cube [i,i+1]x[j,j+1]x[k,k+1] (grid units,
 // converted to mm) — the exact point-to-axis-aligned-box distance.
 double LatticeBoundary::voxel_distance(const Vec3& p) const {
@@ -304,7 +326,28 @@ bool LatticeBoundary::cell_may_overlap(const Vec3& cell_min, double cell_mm) con
   const double half_diag = 0.5 * cell_mm * std::sqrt(3.0);
   // Lipschitz: sd(centre) <= -half_diag PROVES every point of the cell is
   // outside the allowed region. Anything else may overlap.
-  return signed_distance(c) > -half_diag;
+  if (signed_distance(c) <= -half_diag) return false;
+  // Lattice roles (task lattice-page-core-hookup) — the same proof discipline,
+  // on the SAME exact primitive distances (keep_out_signed_distance is the exact
+  // signed distance to a ClearanceGeometry, positive inside):
+  //   * include: when include regions exist, drop the cell only when it provably
+  //     misses EVERY one (max inside-signed-distance <= -half_diag => no point
+  //     of the cell is inside the union => no voxel there can certify latticed);
+  //   * exclude: drop the cell only when it provably sits entirely INSIDE one
+  //     (inside-signed-distance >= half_diag => every point — so every voxel
+  //     centre — is inside, and the certification mask marks them all solid).
+  // A cell dropped here therefore provably contains no certifiable-latticed
+  // voxel; a partially-overlapping cell stays active and its solid-role voxels
+  // are simply masked solid — activation and mask cannot disagree.
+  if (!includes_.empty()) {
+    double best = -1e30;
+    for (const ClearanceGeometry& g : includes_)
+      best = std::max(best, keep_out_signed_distance(g, c));
+    if (best <= -half_diag) return false;
+  }
+  for (const ClearanceGeometry& g : excludes_)
+    if (keep_out_signed_distance(g, c) >= half_diag) return false;
+  return true;
 }
 
 std::vector<LatticeClipSpan> LatticeBoundary::clip_segment(
@@ -350,6 +393,12 @@ std::vector<char> lattice_certification_mask(const LatticeBoundary& boundary,
                      grid.origin.y + (j + 0.5) * grid.spacing,
                      grid.origin.z + (k + 0.5) * grid.spacing};
         if (boundary.in_keep_out(c, 0.0)) continue;  // protected feature
+        // Lattice roles (task lattice-page-core-hookup). PRECEDENCE: clearance
+        // beat both above (keep-out first); exclude beats include here (a voxel
+        // inside both stays SOLID). Skipped voxels are certified solid.
+        if (boundary.in_exclude_region(c, 0.0)) continue;
+        if (boundary.has_include_regions() && !boundary.in_include_region(c, 0.0))
+          continue;
         // Owning lattice cell — the SAME activation the generator uses.
         const int ci = static_cast<int>(std::floor((c.x - region_origin.x) / cell_mm));
         const int cj = static_cast<int>(std::floor((c.y - region_origin.y) / cell_mm));

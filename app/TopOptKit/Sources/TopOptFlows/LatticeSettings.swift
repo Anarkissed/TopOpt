@@ -41,10 +41,11 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
 /// How the lattice density is chosen. `uniform` is the shipped run path (fills at
 /// the range's clamped dense end). `auto` grades the PREVIEW from a real von Mises
 /// field (a solid-part sim or a finished variant's own field) — it is OFFERED only
-/// when such a field exists, and it can NOT ride an optimize job yet (core's
-/// grading law runs only on the analyze path; the worker only routes `run`), so
-/// selecting it gates Optimize with a stated reason rather than silently filling
-/// uniform (bar B6: "auto must never silently mean uniform").
+/// when such a field exists — and, since task lattice-page-core-hookup stage 4,
+/// it RIDES the optimize job: the run carries a `grading` block and core grades
+/// each accepted variant from that variant's OWN final stress field (the receipt
+/// records the provenance). Bar B6 stands: auto still never silently means
+/// uniform — a graded job carries NO uniform cell/radius at all.
 public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
     case uniform
     case auto
@@ -83,13 +84,23 @@ public struct LatticeSpec: Equatable, Sendable {
     /// printability clamp (`lattice_skin_min_radius_mm`). nil ⇒ the key is omitted
     /// and core uses its default.
     public let minExtrudableWidthMM: Double?
+    /// GRADED run (task lattice-page-core-hookup stage 4: core's `run_job` now
+    /// honours a `grading` block, grading each accepted variant from that
+    /// variant's OWN final stress field). When true the job carries the lattice
+    /// block WITHOUT cell_mm/strut_radius_mm (the schema REJECTS uniform geometry
+    /// alongside grading) plus a top-level `grading` block — `cellMM` is then the
+    /// grading TARGET cell (core raises it to the printability floor) and
+    /// `strutRadiusMM`/`generateRelativeDensity` are 0 (the run derives them; a
+    /// uniform number here would be the fabrication bar B6 forbids).
+    public let graded: Bool
 
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
                 maxRelativeDensity: Double, emitSTL: Bool = true, emit3MF: Bool = false,
                 regionScoped: Bool = false,
                 skin: String = LatticeBoundaryTreatment.rim.jobSkinValue,
-                minExtrudableWidthMM: Double? = nil) {
+                minExtrudableWidthMM: Double? = nil,
+                graded: Bool = false) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.strutRadiusMM = strutRadiusMM
@@ -101,6 +112,7 @@ public struct LatticeSpec: Equatable, Sendable {
         self.regionScoped = regionScoped
         self.skin = skin
         self.minExtrudableWidthMM = minExtrudableWidthMM
+        self.graded = graded
     }
 }
 
@@ -261,14 +273,29 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
                         emit3MF: Bool = false) -> LatticeSpec? {
         guard enabled else { return nil }
-        // Auto density cannot ride an optimize job (core grades only on the analyze
-        // path) — the page gates Optimize with the reason; a silent uniform fill
-        // here would be exactly the lie bar B6 forbids.
-        guard densityMode == .uniform else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
                                       generatable: generatable,
                                       memberMM: memberMM, lineWidthMM: lineWidthMM)
         guard b.runnableAsCertified else { return nil }
+        // AUTO density (task lattice-page-core-hookup stage 4): core's run_job now
+        // grades each accepted variant from that variant's OWN final stress field,
+        // so the job ships a GRADED spec — a `grading` block, never a uniform
+        // fill (bar B6 intact: auto still never silently means uniform). Core's
+        // grading schema REQUIRES the stated minimum extrudable width (its
+        // printability floor), so without a line width the spec stays nil and
+        // Optimize is gated with that reason.
+        if densityMode == .auto {
+            guard lineWidthMM > 0 else { return nil }
+            return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
+                               generateRelativeDensity: 0,
+                               minRelativeDensity: b.densityLo,
+                               maxRelativeDensity: b.densityHi,
+                               emitSTL: emitSTL, emit3MF: emit3MF,
+                               regionScoped: region != nil,
+                               skin: boundary.jobSkinValue,
+                               minExtrudableWidthMM: lineWidthMM,
+                               graded: true)
+        }
         let genRho = b.generateRelativeDensity
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
         guard radius > 0 else { return nil }
