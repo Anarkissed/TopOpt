@@ -53,6 +53,9 @@ final class LatticeSDFEvidenceGen: XCTestCase {
     }
 
     private func threeQuarterView(_ r: LatticeSDFRenderer) {
+        // setScene no longer frames the renderer camera (ONE camera — the app frames
+        // the shared model); offscreen harnesses frame explicitly.
+        if let scene = r.scene { r.camera.frame(scene.bounds) }
         r.camera.setOrientation(azimuth: 0.7, elevation: 0.5)
     }
 

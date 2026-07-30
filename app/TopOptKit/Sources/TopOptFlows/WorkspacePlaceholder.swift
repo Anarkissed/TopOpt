@@ -298,10 +298,12 @@ public struct WorkspacePlaceholder: View {
                           // whenever gravity is set (edit phase) so the user can SEE and
                           // reason about every keep-out; the selected group's volume brightens.
                           clearanceVolumes: force.phase == .edit ? clearanceRenderItems : [],
-                          // Strut preview (2026-07-29): while the raymarched lattice layer
-                          // is up, thin the body to a glass shell so the TRUE struts inside
-                          // read clearly; 1 (opaque) otherwise — byte-identical when off.
-                          bodyAlpha: (showStrutPreview && strutScene != nil) ? 0.22 : 1,
+                          // Strut preview (2026-07-30 alignment handoff, bar A3): while the
+                          // raymarched lattice layer is up there is ONE visible object — the
+                          // body is not drawn at all (alpha 0), it only keeps serving the
+                          // pick/id pass; face markings read on the lattice instead (A4).
+                          // 1 (opaque) otherwise — byte-identical when off.
+                          bodyAlpha: (showStrutPreview && strutScene != nil) ? 0 : 1,
                           // Detent face-highlight pulse (item 2): flash the snapped part face.
                           detentPulse: detentPulse,
                           // Paint mode (handoff 2026-07-25): when on, a one-finger drag brushes
@@ -315,12 +317,18 @@ public struct WorkspacePlaceholder: View {
                 .ignoresSafeArea()
 
             // Strut preview: the raymarched true-strut layer, riding the SAME shared
-            // orbit camera as the mesh view (so the lattice sits exactly in the part).
-            // Non-interactive — orbit/tap gestures fall through to the mesh view.
+            // orbit camera AND the same settle model transform as the mesh view (one
+            // transform, one camera — the 2026-07-30 alignment fix), with the mesh
+            // view's own face tints so markings read on the lattice (the body is not
+            // drawn while this layer is up, bar A3). Non-interactive — orbit/tap
+            // gestures fall through to the mesh view, whose pick structure is intact.
             if showStrutPreview, let scene = strutScene {
                 LatticeSDFPreviewView(camera: cameraModel, scene: scene,
                                       params: latticeProxy.params,
-                                      sceneToken: strutSceneToken)
+                                      sceneToken: strutSceneToken,
+                                      modelRotation: settleQuat,
+                                      modelCenter: meshCenter,
+                                      faceTints: roleTints)
                     .ignoresSafeArea()
                     .allowsHitTesting(false)
             }

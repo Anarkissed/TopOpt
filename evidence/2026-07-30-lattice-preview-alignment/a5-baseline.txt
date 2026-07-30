@@ -1,0 +1,2 @@
+A5 baseline @ HEAD 11a4352 (preview-off mesh render, deterministic across runs):
+sha256=e5655c7e1a5202b60f941894ff4b155a8f05d5075db3b045da3f9a41f7a35142 pick(centre)=1

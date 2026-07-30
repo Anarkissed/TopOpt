@@ -37,8 +37,15 @@ import TopOptKit
 // MARK: - Uniforms (layout MUST match the MSL struct)
 
 struct LSDFUniforms {
-    var invVP: simd_float4x4                  // clip → world (ray reconstruction)
-    var eye: SIMD4<Float>                     // xyz camera world position
+    // Per-pixel ray basis in MODEL space, computed exactly on the CPU (no matrix
+    // inversion anywhere in the ray path): rd = normalize(rayDir + rayX·u + rayY·v).
+    // Unprojecting clip corners through inv(P·V·model) — the previous scheme — hits
+    // catastrophic cancellation in w at the far plane (terms of ~1 summing to ~1e-4
+    // in Float), which warped rays by 1–4 px and swam during orbit (bars A1/A2).
+    var rayX: SIMD4<Float>                    // camera right · tan(fovY/2)·aspect (model space)
+    var rayY: SIMD4<Float>                    // camera up · tan(fovY/2) (model space)
+    var rayDir: SIMD4<Float>                  // camera forward (unit, model space)
+    var eye: SIMD4<Float>                     // xyz camera position in MODEL space
     var bboxMin: SIMD4<Float>                 // part AABB (ray clip)
     var bboxMax: SIMD4<Float>
     var gridOrigin: SIMD4<Float>              // per-CELL field: cell-(0,0,0) centre (== part min)
@@ -50,8 +57,8 @@ struct LSDFUniforms {
     var latticeOrigin: SIMD4<Float>           // xyz cell origin; w = cell size (mm)
     var gradeParams: SIMD4<Float>             // rhoMin, rhoMax, gamma, K
     var shadeParams: SIMD4<Float>             // uniformRho, hasDemand, radiusFloorNorm, maxSteps
-    var stepParams: SIMD4<Float>              // stepScale, voxelCap(mm), epsMM, segCount
-    var lightDir: SIMD4<Float>                // xyz key light (world)
+    var stepParams: SIMD4<Float>              // stepScale, trimErosion(mm), hasTint, segCount
+    var lightDir: SIMD4<Float>                // xyz key light (model space — world light un-settled)
     var sparseColor: SIMD4<Float>            // rgb (sparse end of the indigo ramp)
     var denseColor: SIMD4<Float>             // rgb (dense end)
 }
@@ -67,6 +74,10 @@ public struct LatticeSDFScene {
     public var partSDF: LatticeVoxelGrid
     public var demand: LatticeVoxelGrid?
     public var bounds: MeshBounds
+    /// The part mesh the scene was baked from (COW — shares storage with the viewer's
+    /// copy). Kept so face-role tints can be re-baked onto the lattice whenever the
+    /// selection changes WITHOUT rebuilding the whole scene (bar A4).
+    public var mesh: ViewerMesh
 
     public init(mesh: ViewerMesh, field: StressField?, latticeID: String, maxDim: Int = 128) {
         self.preview = LatticeSDFPreview(latticeID: latticeID)
@@ -76,6 +87,7 @@ public struct LatticeSDFScene {
             positions: mesh.positions, indices: mesh.indices, like: occupancy)
         self.demand = LatticePreviewOccupancy.demand(like: occupancy, field: field)
         self.bounds = mesh.bounds
+        self.mesh = mesh
     }
 }
 
@@ -117,6 +129,12 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     private var cellTex: MTLTexture?
     private var cellGrid: LatticeVoxelGrid?
     private var sdfTex: MTLTexture?
+    // Face-role tints on the LATTICE (bar A4): an rgba8 volume on the part-SDF grid,
+    // baked from the SAME [FaceID: color] dictionary the mesh view tints the body
+    // with — one source of truth, no second colour table. nil = no marked faces
+    // (a 1×1×1 zero dummy is bound so the pipeline layout never changes).
+    private var tintTex: MTLTexture?
+    private lazy var dummyTintTex: MTLTexture? = makeDummyTintTexture()
     private var segBuffer: MTLBuffer?
     private var segCount: Int = 0
     private(set) var scene: LatticeSDFScene?
@@ -131,8 +149,28 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    /// Bumps every time a texture/segment buffer is (re)built. A test asserts this does
-    /// NOT change across draws — the P2 invariant that no bake happens per frame.
+    // THE ONE MODEL TRANSFORM (2026-07-30 alignment fix). The mesh view draws the
+    // body with mvp = P · V · T(centre) · R_settle · T(−centre) — the gravity settle
+    // rotation about the model centre (MeshRenderer.makeUniforms/modelMatrix). The
+    // lattice pass previously used P · V alone, so a settled part rendered its
+    // lattice in the UN-settled frame: offset on some parts, floating clear on
+    // others. These two fields carry the SAME (rotation, centre) the workspace hands
+    // the mesh view, and `modelViewProjection` composes the identical matrix — one
+    // transform, one camera, both derived from the shared workspace source.
+    var modelRotation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    var modelCenter = SIMD3<Float>.zero
+    /// The viewport aspect (SwiftUI points) the SHARED scene is projected at. The
+    /// lattice drawable is resolution-capped, so its own pixel dimensions round to
+    /// integers a hair off the true viewport ratio; using the viewport's ratio keeps
+    /// the lattice projection identical to the body's instead of scaled by ~1e-3.
+    /// nil (offscreen tests) falls back to the drawable ratio.
+    var viewportAspect: Float?
+
+    /// Bumps every time a texture/segment buffer is (re)built.
+    /// `LatticeSDFAlignmentTests.testNoBakeAcrossDrawsOrShadeParamChanges` asserts it
+    /// does NOT change across encoded frames or shade-only param changes (Release
+    /// builds strip `assert`, so the draw()-side assert alone proves nothing) — the
+    /// P2 invariant that no bake happens per frame.
     private(set) var bakeGeneration: Int = 0
 
     init?(device: MTLDevice) {
@@ -171,10 +209,33 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
 
     func setScene(_ scene: LatticeSDFScene) {
         self.scene = scene
-        camera.frame(scene.bounds)
+        // ONE camera: this renderer's `camera` is purely a mirror of the shared
+        // OrbitCameraModel (bound by the coordinator). It must NOT re-frame itself
+        // here — the mesh view frames the shared model when a mesh lands, and that
+        // framed camera is what both passes draw with. (Offscreen tests frame their
+        // local camera explicitly.)
         uploadSegments(scene.preview.segments)
         sdfTex = makeVolumeTexture(scene.partSDF)
+        tintTex = nil          // stale mesh/grid — the host re-applies tints after setScene
         rebakeCellField()
+    }
+
+    /// Bake (or clear) the face-role tint volume from the mesh view's OWN tint
+    /// dictionary (bar A4 — one source of truth for the colours). Called by the host
+    /// only when the tints or the scene actually change — never per frame (P2).
+    func setFaceTints(_ tints: [FaceID: SIMD4<Float>]) {
+        guard let scene else { return }
+        if tints.isEmpty {
+            if tintTex != nil { tintTex = nil; bakeGeneration &+= 1 }
+            return
+        }
+        guard let rgba = LatticeFaceTintVolume.bake(mesh: scene.mesh, tints: tints,
+                                                    like: scene.partSDF) else {
+            if tintTex != nil { tintTex = nil; bakeGeneration &+= 1 }
+            return
+        }
+        tintTex = makeTintTexture(rgba, like: scene.partSDF)
+        bakeGeneration &+= 1
     }
 
     /// Bake the per-cell activation+demand texture for the CURRENT cell size. Called
@@ -209,6 +270,41 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         return tex
     }
 
+    private func makeTintTexture(_ rgba: [UInt8], like grid: LatticeVoxelGrid) -> MTLTexture? {
+        guard rgba.count == grid.count * 4 else { return nil }
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rgba8Unorm
+        d.width = grid.nx; d.height = grid.ny; d.depth = grid.nz
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        rgba.withUnsafeBytes { raw in
+            tex.replace(region: MTLRegionMake3D(0, 0, 0, grid.nx, grid.ny, grid.nz),
+                        mipmapLevel: 0, slice: 0,
+                        withBytes: raw.baseAddress!,
+                        bytesPerRow: grid.nx * 4,
+                        bytesPerImage: grid.nx * grid.ny * 4)
+        }
+        return tex
+    }
+
+    /// A 1×1×1 transparent tint volume bound when no faces are marked, so the
+    /// fragment argument table is identical with and without tints.
+    private func makeDummyTintTexture() -> MTLTexture? {
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D
+        d.pixelFormat = .rgba8Unorm
+        d.width = 1; d.height = 1; d.depth = 1
+        d.usage = [.shaderRead]
+        d.storageMode = .shared
+        guard let tex = device.makeTexture(descriptor: d) else { return nil }
+        var zero: [UInt8] = [0, 0, 0, 0]
+        tex.replace(region: MTLRegionMake3D(0, 0, 0, 1, 1, 1), mipmapLevel: 0, slice: 0,
+                    withBytes: &zero, bytesPerRow: 4, bytesPerImage: 4)
+        return tex
+    }
+
     private func uploadSegments(_ segs: [LatticeSegment]) {
         segCount = segs.count
         guard segCount > 0 else { segBuffer = nil; return }
@@ -223,8 +319,43 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
 
     // MARK: uniforms
 
-    private func makeUniforms(aspect: Float) -> LSDFUniforms {
-        let vp = camera.projectionMatrix(aspect: aspect) * camera.viewMatrix()
+    /// The model matrix the BODY is drawn with: the settle rotation about the model
+    /// centre — the exact composition `MeshRenderer.modelMatrix()` uses (T·R·T⁻¹),
+    /// built from the same (rotation, centre) the workspace hands both views.
+    private func modelMatrix() -> simd_float4x4 {
+        var t = matrix_identity_float4x4
+        t.columns.3 = SIMD4<Float>(modelCenter, 1)
+        var tInv = matrix_identity_float4x4
+        tInv.columns.3 = SIMD4<Float>(-modelCenter, 1)
+        return t * simd_float4x4(modelRotation) * tInv
+    }
+
+    /// The SINGLE clip transform this pass consumes: P · V · model — the same
+    /// composition the mesh pipeline draws the body with. Internal (not private) so
+    /// the alignment tests measure the transform the shader actually receives (A1/A2).
+    func modelViewProjection(aspect: Float) -> simd_float4x4 {
+        camera.projectionMatrix(aspect: aspect) * camera.viewMatrix() * modelMatrix()
+    }
+
+    func makeUniforms(aspect: Float) -> LSDFUniforms {
+        // The march runs directly in MODEL (mesh) space — where every baked grid
+        // lives. The per-pixel ray is the EXACT geometric inverse of P·V·model,
+        // built from the camera basis with no matrix inversion (see LSDFUniforms):
+        // world-space look-at basis, un-settled into model space, with the frustum
+        // half-tangents folded into the right/up vectors. Eye and light are rotated
+        // into the same frame.
+        let invR = modelRotation.inverse
+        let eyeModel = modelCenter + invR.act(camera.eye - modelCenter)
+        let lightModel = invR.act(simd_normalize(SIMD3<Float>(0.4, 0.85, 0.55)))
+        // lookAt basis (exactly OrbitCamera.lookAt's x/y/z rows): z points from the
+        // target toward the eye, the camera looks along −z.
+        let zW = simd_normalize(camera.eye - camera.target)
+        let xW = simd_normalize(simd_cross(camera.up, zW))
+        let yW = simd_cross(zW, xW)
+        let tanHalf = tan(camera.fovY * 0.5)
+        let rayX = invR.act(xW) * tanHalf * aspect
+        let rayY = invR.act(yW) * tanHalf
+        let rayDir = invR.act(-zW)
         let bmin = scene?.bounds.min ?? .zero
         let bmax = scene?.bounds.max ?? .zero
         // Cell origin = part min corner, so cells tile from a stable anchor.
@@ -241,8 +372,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         let sparse = RGBA(158, 176, 236)
         let dense = RGBA(96, 52, 176)
         return LSDFUniforms(
-            invVP: vp.inverse,
-            eye: SIMD4(camera.eye, 1),
+            rayX: SIMD4(rayX, 0),
+            rayY: SIMD4(rayY, 0),
+            rayDir: SIMD4(rayDir, 0),
+            eye: SIMD4(eyeModel, 1),
             bboxMin: SIMD4(bmin, 0),
             bboxMax: SIMD4(bmax, 0),
             gridOrigin: SIMD4(cellGrid?.origin ?? .zero, 0),
@@ -261,8 +394,9 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // (round-4 feedback). Eroding by ~0.35 voxel dominates that error: flat
             // faces stay straight (a uniform offset), and nothing renders unless it is
             // genuinely interior.
-            stepParams: SIMD4(0.95, 0.35 * minSDFSpacing, 0, Float(segCount)),
-            lightDir: SIMD4(simd_normalize(SIMD3<Float>(0.4, 0.85, 0.55)), 0),
+            // stepParams.z = whether a face-tint volume is bound (A4).
+            stepParams: SIMD4(0.95, 0.35 * minSDFSpacing, tintTex != nil ? 1 : 0, Float(segCount)),
+            lightDir: SIMD4(lightModel, 0),
             sparseColor: SIMD4(Float(sparse.r), Float(sparse.g), Float(sparse.b), 1),
             denseColor: SIMD4(Float(dense.r), Float(dense.g), Float(dense.b), 1))
     }
@@ -276,6 +410,7 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         enc.setFragmentBuffer(segBuffer, offset: 0, index: 1)
         enc.setFragmentTexture(cellTex, index: 0)
         enc.setFragmentTexture(sdfTex, index: 1)
+        enc.setFragmentTexture(tintTex ?? dummyTintTex, index: 2)
         enc.setFragmentSamplerState(sampler, index: 0)
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         enc.endEncoding()
@@ -289,7 +424,10 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         guard let drawable = view.currentDrawable,
               let rpd = view.currentRenderPassDescriptor,
               let cmd = queue.makeCommandBuffer() else { return }
-        let aspect = Float(view.drawableSize.width / max(1, view.drawableSize.height))
+        // Project at the shared VIEWPORT ratio, not the capped drawable's integer-
+        // rounded ratio, so the lattice and the body scale identically (bar A1).
+        let aspect = viewportAspect
+            ?? Float(view.drawableSize.width / max(1, view.drawableSize.height))
         let before = bakeGeneration
         encode(into: rpd, aspect: aspect, cmd: cmd)
         assert(bakeGeneration == before, "P2 violated: a bake happened inside draw()")
@@ -339,13 +477,13 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
     using namespace metal;
 
     struct LSDFUniforms {
-        float4x4 invVP;
+        float4 rayX, rayY, rayDir;   // model-space ray basis (see the Swift struct)
         float4 eye, bboxMin, bboxMax, gridOrigin, gridSpacing, gridDims;
         float4 sdfOrigin, sdfSpacing, sdfDims;   // part signed-distance grid
         float4 latticeOrigin;   // xyz origin, w cell mm
         float4 gradeParams;     // rhoMin, rhoMax, gamma, K
         float4 shadeParams;     // uniformRho, hasDemand, radiusFloorNorm, maxSteps
-        float4 stepParams;      // stepScale, unused, unused, segCount
+        float4 stepParams;      // stepScale, trimErosion(mm), hasTint, segCount
         float4 lightDir, sparseColor, denseColor;
     };
     struct VOut { float4 pos [[position]]; float2 uv; };
@@ -375,12 +513,15 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
                                   const device float4* segs [[buffer(1)]],
                                   texture3d<float> cellTex [[texture(0)]],
                                   texture3d<float> sdfTex [[texture(1)]],
+                                  texture3d<float> tintTex [[texture(2)]],
                                   sampler samp [[sampler(0)]]) {
-        // World ray from the inverse view-projection.
-        float4 nc = U.invVP * float4(in.uv, 0.0, 1.0);
-        float4 fc = U.invVP * float4(in.uv, 1.0, 1.0);
-        float3 ro = nc.xyz / nc.w;
-        float3 rd = normalize(fc.xyz / fc.w - ro);
+        // MODEL-space ray — the exact geometric inverse of the ONE shared transform
+        // (P·V·settle), built from the CPU-exact camera basis: no matrix inversion,
+        // no far-plane w cancellation (which used to warp rays by pixels). The march
+        // runs in the mesh's own frame, where every baked grid lives, and lands on
+        // screen exactly where the body pass puts the same point.
+        float3 ro = U.eye.xyz;
+        float3 rd = normalize(U.rayDir.xyz + U.rayX.xyz * in.uv.x + U.rayY.xyz * in.uv.y);
 
         float cell = U.latticeOrigin.w;
         float3 lorigin = U.latticeOrigin.xyz;
@@ -418,6 +559,14 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         float t = max(tb.x, 0.0);
         float tEnd = tb.y;
         float3 hitPos = ro; float hitRho = uniformRho; bool hit = false;
+        // Previous sample along the ray, for the secant hit refinement (A2): the raw
+        // sphere-trace accepts a hit anywhere in {F < eps}, an eps-thick shell whose
+        // depth along the ray varies with view direction — the surface visibly
+        // "breathes" as the camera orbits. One secant step to the F = 0 root makes
+        // the rendered surface the true iso-surface from every angle, at zero extra
+        // field evaluations. This is the actual fix for the eps-side of the jitter
+        // bar — the constant itself is untouched.
+        float tPrev = t; float FPrev = 1e9;
 
         // Part signed distance (mm, negative inside): trilinear sample of the exact
         // narrow-band SDF. Distance-to-a-plane is affine, so the part's flat faces
@@ -485,7 +634,18 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
             // SDF, so full sphere-trace steps stay safe; struts are cut flush at the
             // part surface, like a machined section — the straight edge.
             float F = max(dn * cell, dClip);
-            if (F < eps) { hit = true; hitPos = p; hitRho = rhoNear; break; }
+            if (F < eps) {
+                // Secant refinement to the F = 0 root (see tPrev above): F is locally
+                // near-linear along the ray, so one step lands within O(eps²) of the
+                // true surface — view-independent, no crawl during orbit.
+                float tHit = t;
+                if (FPrev < 1e8 && FPrev > F) {
+                    float dt = t - tPrev;
+                    tHit = clamp(t + F * dt / (FPrev - F), t - dt, t + dt);
+                }
+                hit = true; hitPos = ro + rd * tHit; hitRho = rhoNear; break;
+            }
+            FPrev = F; tPrev = t;
 
             // Advance. Near the surface: sphere-trace F (capped at 0.7·cell so the
             // 3×3×3 strut neighbourhood is never skipped past). Far from the part:
@@ -536,6 +696,16 @@ final class LatticeSDFRenderer: NSObject, MTKViewDelegate {
         float amb = 0.30;
         float frac = clamp((hitRho - rhoMin) / max(1e-4, rhoMax - rhoMin), 0.0, 1.0);
         float3 baseC = mix(U.sparseColor.xyz, U.denseColor.xyz, frac);
+        // Face-role tint (A4): where the body would have been tinted (anchor / load /
+        // keep-clear / protect), the marked face's surface voxels carry that colour in
+        // the tint volume — baked from the mesh view's own tint dictionary. The
+        // trilinear alpha fades off-face; ×2.2 saturates ON the face so the flush-cut
+        // section reads as solidly marked as the body did.
+        if (U.stepParams.z > 0.5) {
+            float3 ttc = ((hitPos - U.sdfOrigin.xyz) / U.sdfSpacing.xyz + 0.5) / sdfDims;
+            float4 ft = tintTex.sample(samp, ttc);
+            baseC = mix(baseC, ft.rgb, clamp(ft.a * 2.2, 0.0, 1.0));
+        }
         float3 lit = baseC * (amb + 0.85 * ndlK + 0.30 * ndlF);
         float rim = pow(1.0 - clamp(dot(n, vdir), 0.0, 1.0), 2.5);
         lit += rim * 0.55 * mix(float3(0.72, 0.78, 0.98), float3(1.0), 0.35);
@@ -562,6 +732,15 @@ struct LatticeSDFPreviewView {
     /// A monotonically increasing token the workspace bumps when `scene` is rebuilt,
     /// so the coordinator re-uploads exactly once per bake (never per frame).
     var sceneToken: Int
+    /// THE model transform of the scene — the gravity settle rotation about the mesh
+    /// centre, the SAME values the workspace hands `MetalMeshView`. One transform,
+    /// one camera, both layers (the 2026-07-30 alignment fix). Identity = un-settled.
+    var modelRotation: simd_quatf = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+    var modelCenter: SIMD3<Float> = .zero
+    /// The mesh view's face-role tint dictionary (anchor / load / keep-clear /
+    /// protect), verbatim — baked onto the lattice so the marked faces read on the
+    /// preview now that the body is not drawn (bars A3/A4). Re-baked only on change.
+    var faceTints: [FaceID: SIMD4<Float>] = [:]
 
     /// Internal raymarch resolution cap (long side, pixels). ~1024 keeps the busy
     /// scene inside the 60 Hz budget on the measured M2 Pro profile.
@@ -571,6 +750,13 @@ struct LatticeSDFPreviewView {
     final class Coordinator: NSObject {
         var renderer: LatticeSDFRenderer?
         var sceneToken: Int = -1
+        /// The tint dictionary last baked, so the volume re-bakes only when the
+        /// selection actually changes — never on a camera tick (P2).
+        var appliedTints: [FaceID: SIMD4<Float>]? = nil
+        /// The drawable size last SET (macOS): MTKView may round what it stores, so
+        /// compare against what we asked for — re-setting the drawable every SwiftUI
+        /// update (every orbit tick) forces CAMetalLayer churn mid-orbit.
+        var lastDrawableTarget: CGSize = .zero
         private var cancellable: AnyCancellable?
 
         func bind(_ camera: OrbitCameraModel, to view: MTKView) {
@@ -621,20 +807,41 @@ struct LatticeSDFPreviewView {
         if coordinator.sceneToken != sceneToken {
             coordinator.sceneToken = sceneToken
             renderer.setScene(scene)
+            coordinator.appliedTints = nil     // new grid/mesh → tints must re-bake
         }
         renderer.params = params
         renderer.camera = camera.camera
-        // Cap the drawable so the per-pixel march stays inside the frame budget.
+        // The ONE model transform, straight from the workspace (same values the mesh
+        // view gets). Cheap uniforms — no bake.
+        renderer.modelRotation = modelRotation
+        renderer.modelCenter = modelCenter
+        // Face-role tints: bake ONLY when the selection actually changed (P2).
+        if coordinator.appliedTints != faceTints {
+            coordinator.appliedTints = faceTints
+            renderer.setFaceTints(faceTints)
+        }
+        // Cap the drawable so the per-pixel march stays inside the frame budget —
+        // but only TOUCH the drawable when the target actually changes: re-setting
+        // it every SwiftUI update (every orbit tick re-evaluates the workspace body)
+        // forces CAMetalLayer churn mid-orbit, which reads as frame-to-frame jitter.
         let side = max(view.bounds.width, view.bounds.height)
         if side > 0 {
+            // Project at the true viewport ratio, not the rounded drawable's (A1).
+            renderer.viewportAspect = Float(view.bounds.width / max(1, view.bounds.height))
             #if os(iOS)
-            view.contentScaleFactor = min(view.contentScaleFactor,
-                                          Self.maxRenderPixels / side)
+            let capScale = min(view.contentScaleFactor, Self.maxRenderPixels / side)
+            if abs(view.contentScaleFactor - capScale) > 0.001 {
+                view.contentScaleFactor = capScale
+            }
             #elseif os(macOS)
             let scale = min(view.window?.backingScaleFactor ?? 2,
                             Self.maxRenderPixels / side)
-            view.drawableSize = CGSize(width: view.bounds.width * scale,
-                                       height: view.bounds.height * scale)
+            let target = CGSize(width: view.bounds.width * scale,
+                                height: view.bounds.height * scale)
+            if coordinator.lastDrawableTarget != target {
+                coordinator.lastDrawableTarget = target
+                view.drawableSize = target
+            }
             #endif
         }
         // Static layer — no display link; redraw on demand (camera sink + this apply).

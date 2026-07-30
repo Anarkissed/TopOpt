@@ -53,6 +53,9 @@ final class LatticeSDFProfileTests: XCTestCase {
         let field = illustrativeField(mesh.bounds)
         let scene = LatticeSDFScene(mesh: mesh, field: field, latticeID: "octet")
         renderer.setScene(scene)
+        // setScene no longer frames the renderer camera (ONE camera — the app frames
+        // the shared model); offscreen harnesses frame explicitly.
+        renderer.camera.frame(scene.bounds)
         renderer.camera.setOrientation(azimuth: 0.7, elevation: 0.5)
 
         print("== LATTICE SDF PREVIEW PROFILE (handoff 2026-07-29) — GPU: "
