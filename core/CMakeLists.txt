@@ -245,6 +245,20 @@ add_executable(test_lattice_material_model
 target_link_libraries(test_lattice_material_model PRIVATE topopt)
 add_test(NAME lattice_material_model COMMAND test_lattice_material_model)
 
+# Harness-side surface stiffness numerics (surface-stiffness probe,
+# 2026-07-31). The model lives in tests/harness/surface_stiffness_model.hpp
+# (nothing in production consumes it); this test pins its integrator to the
+# production element bit-for-bit, the rod-Voigt smear and cubic projection to
+# their analytic values, the embedded-bar coupling to the pin-jointed bar, and
+# the harness assembled solver to the production fea_solve energy. Uses Eigen
+# directly (the harness solver), so it is gated like assembly.cpp.
+if(Eigen3_FOUND)
+  add_executable(test_surface_stiffness_model
+                 tests/unit/test_surface_stiffness_model.cpp)
+  target_link_libraries(test_surface_stiffness_model PRIVATE topopt Eigen3::Eigen)
+  add_test(NAME surface_stiffness_model COMMAND test_surface_stiffness_model)
+endif()
+
 # Pseudo-face segmentation + the STL/3MF import adapter (handoff 134). The
 # synthetic meshes are built in code; the determinism and refusal tests write
 # throwaway STLs, so they need a writable directory that is not the source tree.
