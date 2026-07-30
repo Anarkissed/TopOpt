@@ -219,6 +219,16 @@ target_compile_definitions(test_lattice_boundary PRIVATE
   LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
 add_test(NAME lattice_boundary COMMAND test_lattice_boundary)
 
+# The FREEFORM lattice skin (task 2026-07-30-lattice-skin-freeform): the diagrid
+# generalised to the arbitrary voxel-derived outer surface. Pins freeform-off ==
+# boundary-finish behaviour, and gates overshoot (0.05 mm), keep-out exactness,
+# skin connectivity, closed primitives, and determinism on a curved voxel part.
+add_executable(test_lattice_skin_freeform tests/unit/test_lattice_skin_freeform.cpp)
+target_link_libraries(test_lattice_skin_freeform PRIVATE topopt)
+target_compile_definitions(test_lattice_skin_freeform PRIVATE
+  LATTICE_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+add_test(NAME lattice_skin_freeform COMMAND test_lattice_skin_freeform)
+
 # The lattice grading law (handoff 2026-07-29-lattice-grading-law): stress -> a
 # certifiable (density, cell size) posture. Tests the bars L2/L4/L5 and read-from-core.
 add_executable(test_grading tests/unit/test_grading.cpp)

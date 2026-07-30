@@ -1,0 +1,3 @@
+connectivity: 2580 freeform landings -> 1322 skin nodes, largest CC 100.0%, isolated 0.00%
+stats: struts=9426 skin_struts=30165 chords=4322 rej_band=29 rej_proj=2 clipped_away=0 landings=3012 max_overshoot=0.034600 min_rad=2.500
+13 checks, 0 failures

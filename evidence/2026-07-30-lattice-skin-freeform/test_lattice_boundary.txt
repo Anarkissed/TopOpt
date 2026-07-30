@@ -1,0 +1,6 @@
+B3 oblique: real overshoot=-0.117227 mm, naive(centreline)=0.682756 mm (37008 vertices)
+B7 agreement: 199872 vertices, 0 outside the mask neighbourhood
+skin: landings=440 anchors=440 skin_struts=1650 rims=82 skin_tris=61600 rim_tris=3840
+skin B2: min radius=5.000000 (declared 5.000), inside=0
+
+PASS: 34 checks, 0 failures

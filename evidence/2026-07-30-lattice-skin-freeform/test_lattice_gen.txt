@@ -1,0 +1,6 @@
+GOLDEN 7^3@8mm: tris=316000 struts=8820 nodes=1688 strut_tris=282240 node_tris=33760 stl_bytes=15800084
+FIELD graded diam range: [1.000, 2.200] mm
+MANIFOLD 2x2x2: tris=8940 soup_verts=26820 welded_verts=3249 boundary_edges=0 non_manifold_edges=2238 components=78 watertight=0
+3MF 5^3@12mm: tris=118920 bytes=26857831
+
+PASS: 24 checks, 0 failures

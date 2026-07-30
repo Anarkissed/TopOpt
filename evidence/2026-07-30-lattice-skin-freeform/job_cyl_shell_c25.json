@@ -1,0 +1,36 @@
+{
+  "model": "cylinder_r9_h28.stl",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 32,
+  "loads": {
+    "anchor_face_ids": [
+      1
+    ],
+    "groups": [
+      {
+        "face_ids": [
+          2
+        ],
+        "force": [
+          0.0,
+          0.0,
+          -80.0
+        ]
+      }
+    ]
+  },
+  "output": {
+    "report": "report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  },
+  "lattice": {
+    "topology": "octet",
+    "cell_mm": 2.5,
+    "strut_radius_mm": 0.25,
+    "emit_stl": true,
+    "skin": "diagrid",
+    "min_extrudable_width_mm": 0.4
+  }
+}
