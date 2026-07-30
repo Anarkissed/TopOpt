@@ -36,6 +36,8 @@
 
 namespace topopt {
 
+class LatticeBoundary;  // topopt/lattice_boundary.hpp — the shared predicate
+
 // The strut-lattice topologies. Only Octet is implemented this task (the printed,
 // certified one); the enum leaves room for the rest exactly as lattice.hpp does.
 enum class LatticeGenTopology { Octet };
@@ -57,7 +59,45 @@ struct LatticeRegion {
   int nz = 0;
   double cell_mm = 0.0;
   std::function<bool(int, int, int)> latticed;  // null => all cells latticed
+
+  // The boundary finish (handoff 2026-07-29-lattice-boundary-finish). Null =>
+  // the legacy whole-strut behaviour, byte-identical to every pre-boundary run.
+  // Non-null => (a) a cell is ACTIVE iff `latticed` accepts it AND the boundary
+  // cannot prove the cell misses the allowed region (activation by OVERLAP, so
+  // partial boundary cells are generated rather than dropped whole), and (b)
+  // every strut centreline is CLIPPED to the allowed region eroded by that
+  // strut's own radius, so the swept SOLID stays inside the part — never just
+  // the centreline. Must outlive the generate_lattice call.
+  const LatticeBoundary* boundary = nullptr;
 };
+
+// Boundary SKIN (requirement (c)). None => interior lattice only (plus the
+// clipping above). Rim => just the edge loops where boundary faces meet (and
+// collar rim tori on protected bores). Diagrid => rim PLUS a 2D lattice on the
+// boundary faces whose nodes are ANCHORED at the exact points where clipped
+// interior struts meet the surface (their landings), linked into ring + both
+// diagonal families — so no clipped end is left floating (bar B6).
+enum class LatticeSkinMode { None, Rim, Diagrid };
+
+struct LatticeSkinSpec {
+  LatticeSkinMode mode = LatticeSkinMode::None;
+  // The skin's OWN printability clamp (radius, mm): the AUTO skin radius is
+  // max(local interior strut radius, min_radius_mm). Compute it with
+  // lattice_skin_min_radius_mm below — callers never hardcode the law.
+  double min_radius_mm = 0.0;
+};
+
+// The skin printability clamp law (bar (e)) — CORE owns this number, callers
+// read it. An interior strut's floor is one extrusion width of diameter
+// (grading.hpp's printability floor). A skin strut is boundary-exposed: it
+// prints as a partially supported perimeter that bridges the lattice openings
+// beneath it, so it gets half an extra width of headroom. TRIPWIRE: the factor
+// is a conservative engineering default, not yet print-validated; re-measure it
+// the way PR 201 validated the interior floor before relaxing it.
+inline constexpr double kLatticeSkinWidthFactor = 1.5;
+inline double lattice_skin_min_radius_mm(double min_extrudable_width_mm) {
+  return kLatticeSkinWidthFactor * 0.5 * min_extrudable_width_mm;
+}
 
 // The strut RADIUS field (mm). `field`, when set, is called at each strut/node
 // MIDPOINT (model mm) and its return is used as the radius; otherwise `uniform_mm`
@@ -84,11 +124,53 @@ struct LatticeGenStats {
   long long latticed_cells = 0;   // cells the predicate accepted
   double min_strut_diameter_mm = 0.0;
   double max_strut_diameter_mm = 0.0;
+
+  // ── boundary finish (all zero on the legacy null-boundary path) ────────────
+  std::uint64_t clipped_struts = 0;    // struts trimmed at the boundary
+  std::uint64_t dropped_struts = 0;    // struts entirely outside the eroded region
+  std::uint64_t strut_fragments = 0;   // kept sub-struts emitted from clipped struts
+  std::uint64_t landings = 0;          // cut ends (the skin's anchor sites)
+  std::uint64_t anchor_nodes = 0;      // anchor balls emitted at landings
+  std::uint64_t skin_struts = 0;       // diagrid edge fragments emitted
+  std::uint64_t rim_elements = 0;      // rim tori / rim line runs emitted
+  std::uint64_t skin_triangles = 0;    // diagrid edges + anchor balls
+  std::uint64_t rim_triangles = 0;     // rim loops (tori + plane-pair lines)
+  long long uncertified_spans_dropped = 0;  // clip slivers conservatively dropped
+  long long skipped_nonorthogonal_rims = 0; // face pairs the rim pass cannot dress
+  // Emitted-solid volume accounting (bar B9). Analytic per-primitive volumes of
+  // the interpenetrating soup; overlaps are NOT deducted (same basis as the
+  // triangle counts — state it wherever these are reported).
+  double interior_volume_mm3 = 0.0;
+  double skin_volume_mm3 = 0.0;   // diagrid edges + anchor balls
+  double rim_volume_mm3 = 0.0;    // rim tori + rim lines (the collar's rings)
 };
 
 // Count the cells the region's predicate accepts (the achieved latticed-cell
 // count; a discretised grid cannot hit an arbitrary target region exactly).
 long long latticed_cell_count(const LatticeRegion& region);
+
+// Optional generation observer — a pure read-only tap on what is emitted, in
+// the emission order (deterministic). This is how the boundary-finish bars are
+// MEASURED from the real generator rather than asserted (B6: every cut end vs
+// the skin), and what an app preview can consume without re-deriving geometry.
+// Null callbacks are skipped; observing never changes the emitted bytes.
+enum class LatticeGenElement {
+  InteriorStrut,  // a (possibly clipped) interior strut fragment: a -> b
+  Node,           // an interior node ball at a (b == a), radius r
+  AnchorNode,     // a skin anchor ball at a clipped strut end (b == a)
+  SkinStrut,      // a diagrid skin edge fragment: a -> b
+  RimStrut,       // a plane-pair rim line fragment: a -> b
+  RimTorusChord,  // one station chord of a rim torus run: a -> b, tube radius r
+};
+struct LatticeGenObserver {
+  // A clipped strut's cut end (landing): position, the strut's radius there,
+  // and the boundary face it landed on (-1: no analytic face).
+  std::function<void(const Vec3& pos, double r, int face)> on_landing;
+  // Every emitted solid, reduced to segment + radius (a ball reports a == b).
+  std::function<void(LatticeGenElement kind, const Vec3& a, const Vec3& b,
+                     double r)>
+      on_element;
+};
 
 // Generate `topo` over `region` with `radius`, pushing every triangle to `sink`
 // in a fixed traversal order, and return the emitted counts. Deterministic (no
@@ -100,6 +182,8 @@ long long latticed_cell_count(const LatticeRegion& region);
 LatticeGenStats generate_lattice(LatticeGenTopology topo,
                                  const LatticeRegion& region,
                                  const LatticeRadiusField& radius,
-                                 TriangleSink& sink);
+                                 TriangleSink& sink,
+                                 const LatticeSkinSpec& skin = LatticeSkinSpec{},
+                                 const LatticeGenObserver* observer = nullptr);
 
 }  // namespace topopt

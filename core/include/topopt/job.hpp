@@ -105,6 +105,19 @@ struct JobLattice {
   double strut_radius_mm = 0.0;    // uniform strut radius (mm), finite > 0
   bool emit_stl = true;            // write <prefix>_<vf>_lattice.stl
   bool emit_3mf = false;           // write <prefix>_<vf>_lattice.3mf (streaming)
+
+  // Boundary finish (handoff 2026-07-29-lattice-boundary-finish). "diagrid"
+  // (default): anchor balls at every clipped strut end + skin edges linking
+  // them + rim loops/collar tori — the full finish the maintainer asked for
+  // ("connect with the hole rim and skin"). "rim": just the edge loops.
+  // "none": clipping only. The clip itself is not optional: struts are always
+  // trimmed to the part and to declared clearance keep-outs.
+  std::string skin = "diagrid";
+  // Optional STATED minimum extrudable width (mm) — when > 0 the skin's own
+  // printability clamp is lattice_skin_min_radius_mm(this) (read from core,
+  // like grading.hpp's floor). 0 (absent) states no printability claim: the
+  // skin then simply tracks the local interior strut radius.
+  double min_extrudable_width_mm = 0.0;
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the

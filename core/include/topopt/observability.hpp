@@ -439,6 +439,17 @@ struct RunInfo {
   bool lattice_export_interpenetrating_soup = true;
   double lattice_export_gen_seconds = 0.0;      // generation wall time
   double lattice_export_gen_fraction = 0.0;     // gen time / total job time (P6)
+  // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): clip/skin
+  // record + B9 volume accounting (analytic per-primitive, soup basis).
+  std::string lattice_export_skin;              // "none" | "rim" | "diagrid"
+  long long lattice_export_clipped_struts = 0;
+  long long lattice_export_landings = 0;
+  long long lattice_export_anchor_nodes = 0;
+  long long lattice_export_skin_triangles = 0;
+  long long lattice_export_rim_triangles = 0;
+  double lattice_export_interior_volume_mm3 = 0.0;
+  double lattice_export_skin_volume_mm3 = 0.0;
+  double lattice_export_rim_volume_mm3 = 0.0;
 
   // GRADING LAW posture (handoff 2026-07-29-lattice-grading-law) — what the stress-to-
   // lattice grading law produced for a "grading" job block. Set only in the analyze/

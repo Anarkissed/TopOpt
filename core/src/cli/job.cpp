@@ -755,9 +755,10 @@ JobDescription parse_job(const std::string& json_text) {
   // Absent => present stays false and the run is byte-identical (the P1 bar).
   if (const JsonValue* latv = find_key(root, "lattice")) {
     const JsonValue& lat = require_object(*latv, "lattice");
-    reject_unknown_keys(
-        lat, {"topology", "cell_mm", "strut_radius_mm", "emit_stl", "emit_3mf"},
-        "lattice");
+    reject_unknown_keys(lat,
+                        {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
+                         "emit_3mf", "skin", "min_extrudable_width_mm"},
+                        "lattice");
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
       job.lattice.topology = require_nonempty_string(*t, "lattice.topology");
@@ -785,6 +786,21 @@ JobDescription parse_job(const std::string& json_text) {
     }
     if (!job.lattice.emit_stl && !job.lattice.emit_3mf)
       schema_fail("lattice block requests neither STL nor 3MF output");
+    // Boundary finish (handoff 2026-07-29-lattice-boundary-finish). "skin"
+    // picks the finish; the clip to part + clearance keep-outs is not optional.
+    if (const JsonValue* s = find_key(lat, "skin")) {
+      job.lattice.skin = require_nonempty_string(*s, "lattice.skin");
+      if (job.lattice.skin != "none" && job.lattice.skin != "rim" &&
+          job.lattice.skin != "diagrid")
+        schema_fail("lattice \"skin\" must be \"none\", \"rim\" or \"diagrid\" "
+                    "(got \"" + job.lattice.skin + "\")");
+    }
+    if (const JsonValue* w = find_key(lat, "min_extrudable_width_mm")) {
+      job.lattice.min_extrudable_width_mm =
+          require_number(*w, "lattice.min_extrudable_width_mm");
+      if (!(job.lattice.min_extrudable_width_mm > 0.0))
+        schema_fail("lattice \"min_extrudable_width_mm\" must be > 0");
+    }
   }
 
   // Optional "grading" block (handoff 2026-07-29-lattice-grading-law). Absent =>
