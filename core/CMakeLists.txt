@@ -235,6 +235,16 @@ add_executable(test_grading tests/unit/test_grading.cpp)
 target_link_libraries(test_grading PRIVATE topopt)
 add_test(NAME grading COMMAND test_grading)
 
+# Harness-side lattice material model C(rho) (multiscale-lattice-feasibility
+# probe, 2026-07-31). The model itself lives in tests/harness/
+# lattice_material_model.hpp (nothing in production consumes it); this test
+# pins its transcription to the production tensor library and its
+# admissibility/continuity/sensitivity contracts.
+add_executable(test_lattice_material_model
+               tests/unit/test_lattice_material_model.cpp)
+target_link_libraries(test_lattice_material_model PRIVATE topopt)
+add_test(NAME lattice_material_model COMMAND test_lattice_material_model)
+
 # Pseudo-face segmentation + the STL/3MF import adapter (handoff 134). The
 # synthetic meshes are built in code; the determinism and refusal tests write
 # throwaway STLs, so they need a writable directory that is not the source tree.
