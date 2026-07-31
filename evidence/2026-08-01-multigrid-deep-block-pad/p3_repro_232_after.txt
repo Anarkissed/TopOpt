@@ -4,3 +4,4 @@
   iter   3: cg=    16 mg=1 levels=5 hier_built=1 geneo_dim=0
   iter   4: cg=    15 mg=1 levels=5 hier_built=1 geneo_dim=0
   iter   5: cg=    21 mg=1 levels=5 hier_built=1 geneo_dim=0
+  iter   6: cg=    21 mg=1 levels=5 hier_built=1 geneo_dim=0
