@@ -1,0 +1,13 @@
+0
+82/88 Test #40: rmin .............................   Passed    1.11 sec
+      Start 79: mask_face
+83/88 Test #77: segment_vs_step ..................   Passed    1.09 sec
+84/88 Test #78: face_tag .........................   Passed    0.96 sec
+85/88 Test #85: loadcase_resolution ..............   Passed    1.06 sec
+86/88 Test #79: mask_face ........................   Passed    0.96 sec
+87/88 Test #83: face_protection_parity ...........   Passed  129.40 sec
+88/88 Test #80: cli_demo .........................   Passed  6313.05 sec
+
+100% tests passed out of 88
+
+Total Test time (real) = 6313.06 sec
