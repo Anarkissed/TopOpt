@@ -29,6 +29,7 @@
 #include "topopt/mesh.hpp"       // Vec3
 #include "topopt/report.hpp"     // StressMargin
 #include "topopt/simp.hpp"       // SimpParams, SolverKind
+#include "topopt/strut_strength.hpp"  // StrutStrengthReport (report-only)
 #include "topopt/voxel.hpp"      // VoxelGrid, V3Report
 
 namespace topopt {
@@ -149,6 +150,26 @@ struct FixedDesignAnalysis {
   double lattice_rho_max = 0.0;      // max relative density used over the region
   double lattice_max_effective_vm = 0.0;   // worst EFFECTIVE (macro) von Mises there
   bool lattice_strength_uncertified = false;  // strut strength not gated (Phase 2)
+
+  // --- Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report) ----
+  // REPORT ONLY. Filled AFTER the gate above from the SAME solve's stress tensor
+  // field; nothing here feeds `accepted`/`margin_effective` (bar L1) and
+  // `lattice_strength_uncertified` stays true — these are the measured NUMBERS the
+  // maintainer asked to see, not a gate. Present iff a lattice posture with >= 1
+  // latticed voxel was applied AND the topology carries a measured strut law
+  // (octet only — strut_strength.hpp; other topologies report nothing rather than
+  // borrow octet's law).
+  bool lattice_strut_report = false;
+  StrutStrengthReport lattice_strut;
+  // Cells-per-member regime guard (bar L4): the thinnest LATTICED member's span in
+  // cells (local_member_thickness_mm / cell) against the floor homogenization
+  // needs (lattice_cells_per_member_min). Below the floor the homogenized macro
+  // stress the strut law amplifies is itself outside the tensor's validated
+  // regime, so the strut numbers above must be labelled out-of-regime — reported,
+  // never trusted silently (and never gated on).
+  double lattice_min_cells_per_member = 0.0;  // +inf if every latticed member
+                                              // exceeds the thickness-EDT cap
+  bool lattice_strut_out_of_regime = false;   // min_cells_per_member < floor
 };
 
 // Run one certification analysis of `density` on `grid`.

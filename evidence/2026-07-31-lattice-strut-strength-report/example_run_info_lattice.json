@@ -1,0 +1,20 @@
+{
+ "topology": "octet",
+ "cell_size_mm": 5,
+ "rho_min": 0.2973090278,
+ "rho_max": 0.2973090278,
+ "region_voxels": 7652,
+ "margin_worst_case": 1e+300,
+ "margin_effective": 1e+300,
+ "accepted": true,
+ "strength_uncertified": true,
+ "strut_margin_in_plane": 75.9586374,
+ "strut_margin_interlayer": 46.82958798,
+ "strut_margin_worst_case": 46.82958798,
+ "strut_z_knockdown": 0.55,
+ "strut_z_knockdown_unsourced": true,
+ "strut_min_cells_per_member": 0.5,
+ "strut_out_of_regime": true,
+ "strut_rho_clamped_voxels": 0,
+ "strut_gated": false
+}

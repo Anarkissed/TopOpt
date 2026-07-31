@@ -211,6 +211,48 @@ final class LatticeModeTests: XCTestCase {
         XCTAssertTrue(notes[1].contains("987654"))
     }
 
+    // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report): the
+    // two margins survive the persist round-trip and surface SEPARATELY — never
+    // collapsed to one number (which one binds is the point) — with the
+    // unsourced-knockdown and out-of-regime caveats attached.
+    func testStrutStrengthReportRoundTripAndSeparateNotes() throws {
+        let report = LatticeReport(
+            topologyID: "octet", cellMM: 4, generateRelativeDensity: 0.32,
+            minRelativeDensity: 0.2, maxRelativeDensity: 0.5, regionScoped: false,
+            strut: .init(marginInPlane: 0.6164, marginInterlayer: 0.3936,
+                         zKnockdown: 0.55, minCellsPerMember: 1.5,
+                         outOfRegime: true))
+        let o = OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: false,
+                                acceptedCount: 0, latticeReport: report)
+        let back = try OutcomeCodec.decode(try OutcomeCodec.encode(OutcomeCodec.dto(from: o)))
+        XCTAssertEqual(back.latticeReport, report)
+
+        let notes = ResultsModel.latticeNotes(back.latticeReport)
+        // Base line + missing-export line + strut line + out-of-regime line.
+        let strutLines = notes.filter { $0.contains("Strut strength") }
+        XCTAssertEqual(strutLines.count, 1)
+        XCTAssertTrue(strutLines[0].contains("in-plane margin 0.62"))
+        XCTAssertTrue(strutLines[0].contains("interlayer margin 0.39"))
+        XCTAssertTrue(strutLines[0].contains("unsourced"))
+        XCTAssertTrue(notes.contains { $0.contains("Out of regime") && $0.contains("1.5 cells") })
+
+        // An unbounded margin (an unloaded failure mode) round-trips as +inf and
+        // renders honestly, not as a fake number.
+        let unbounded = LatticeReport(
+            topologyID: "octet", cellMM: 4, generateRelativeDensity: 0.32,
+            minRelativeDensity: 0.2, maxRelativeDensity: 0.5, regionScoped: false,
+            strut: .init(marginInPlane: 2.0, marginInterlayer: .infinity,
+                         zKnockdown: 0.55, minCellsPerMember: 6.0,
+                         outOfRegime: false))
+        let o2 = OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: false,
+                                 acceptedCount: 0, latticeReport: unbounded)
+        let back2 = try OutcomeCodec.decode(try OutcomeCodec.encode(OutcomeCodec.dto(from: o2)))
+        XCTAssertEqual(back2.latticeReport, unbounded)
+        let notes2 = ResultsModel.latticeNotes(back2.latticeReport)
+        XCTAssertTrue(notes2.contains { $0.contains("interlayer margin unbounded") })
+        XCTAssertFalse(notes2.contains { $0.contains("Out of regime") })
+    }
+
     func testPreLatticeOutcomeBlobDecodes() throws {
         // An outcome without a lattice report round-trips to nil (no lattice notes).
         let o = OptimizeOutcome(variants: [], stoppedOnMargin: false, cancelled: false, acceptedCount: 0)

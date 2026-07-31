@@ -88,6 +88,17 @@ enum OutcomeCodec {
         let genTriangles: Int?
         let genStrutRadiusMinMM: Double?
         let genStrutRadiusMaxMM: Double?
+        // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report) —
+        // mirrored so a reopened lattice run keeps BOTH margins and the
+        // out-of-regime caveat (the OutcomeStore honesty rule: the DTO mirrors
+        // every displayed fact, or a reopened result silently lies). All optional
+        // so pre-report blobs decode (→ nil → no strut lines). Infinite margins
+        // (an unloaded failure mode) are stored as nil and restored as +inf.
+        let strutMarginInPlane: Double?
+        let strutMarginInterlayer: Double?
+        let strutZKnockdown: Double?
+        let strutMinCellsPerMember: Double?
+        let strutOutOfRegime: Bool?
     }
 
     struct OutcomeDTO: Codable, Sendable {
@@ -181,7 +192,15 @@ enum OutcomeCodec {
                     genRegionVoxels: r.generated?.regionVoxels,
                     genTriangles: r.generated?.triangles,
                     genStrutRadiusMinMM: r.generated?.strutRadiusMinMM,
-                    genStrutRadiusMaxMM: r.generated?.strutRadiusMaxMM) })
+                    genStrutRadiusMaxMM: r.generated?.strutRadiusMaxMM,
+                    strutMarginInPlane: r.strut.flatMap {
+                        $0.marginInPlane.isFinite ? $0.marginInPlane : nil },
+                    strutMarginInterlayer: r.strut.flatMap {
+                        $0.marginInterlayer.isFinite ? $0.marginInterlayer : nil },
+                    strutZKnockdown: r.strut?.zKnockdown,
+                    strutMinCellsPerMember: r.strut.flatMap {
+                        $0.minCellsPerMember.isFinite ? $0.minCellsPerMember : nil },
+                    strutOutOfRegime: r.strut?.outOfRegime) })
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -244,7 +263,17 @@ enum OutcomeCodec {
                             regionVoxels: r.genRegionVoxels ?? 0,
                             triangles: tris,
                             strutRadiusMinMM: r.genStrutRadiusMinMM ?? 0,
-                            strutRadiusMaxMM: r.genStrutRadiusMaxMM ?? 0) }) })
+                            strutRadiusMaxMM: r.genStrutRadiusMaxMM ?? 0) },
+                    // A strut report exists iff the z_knockdown echo was stored
+                    // (it is always finite when the worker reported one); the
+                    // margins themselves may be +inf and round-trip via nil.
+                    strut: r.strutZKnockdown.map { zk in
+                        LatticeReport.StrutStrength(
+                            marginInPlane: r.strutMarginInPlane ?? .infinity,
+                            marginInterlayer: r.strutMarginInterlayer ?? .infinity,
+                            zKnockdown: zk,
+                            minCellsPerMember: r.strutMinCellsPerMember ?? .infinity,
+                            outOfRegime: r.strutOutOfRegime ?? false) }) })
     }
 
     // MARK: Encode / decode (binary plist)

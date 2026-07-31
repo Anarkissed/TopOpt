@@ -578,6 +578,32 @@ std::string run_info_json(const RunInfo& info) {
     lat += ", \"margin_effective\": " + fmt(info.lattice_margin_effective);
     lat += ", \"accepted\": " + bool_json(info.lattice_accepted);
     lat += ", \"strength_uncertified\": " + bool_json(info.lattice_strength_uncertified);
+    // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report):
+    // report-only de-homogenized strut margins (in-plane and interlayer kept
+    // SEPARATE — which one binds is the point). Keys appear only when the report
+    // ran, so pre-existing latticed records are byte-identical.
+    if (info.lattice_strut_report_present) {
+      // Unbounded margins (a mode nothing loads) and an over-cap member width are
+      // legitimate +inf — serialize as null (the run_info convention, cf. mnd).
+      auto fmt_or_null = [&](double v) {
+        return std::isfinite(v) ? fmt(v) : std::string("null");
+      };
+      lat += ", \"strut_margin_in_plane\": " +
+             fmt_or_null(info.lattice_strut_margin_in_plane);
+      lat += ", \"strut_margin_interlayer\": " +
+             fmt_or_null(info.lattice_strut_margin_interlayer);
+      lat += ", \"strut_margin_worst_case\": " +
+             fmt_or_null(info.lattice_strut_margin_worst_case);
+      lat += ", \"strut_z_knockdown\": " + fmt(info.lattice_strut_z_knockdown);
+      lat += ", \"strut_z_knockdown_unsourced\": true";
+      lat += ", \"strut_min_cells_per_member\": " +
+             fmt_or_null(info.lattice_strut_min_cells_per_member);
+      lat += ", \"strut_out_of_regime\": " +
+             bool_json(info.lattice_strut_out_of_regime);
+      lat += ", \"strut_rho_clamped_voxels\": " +
+             fmt_ll(info.lattice_strut_rho_clamped_voxels);
+      lat += ", \"strut_gated\": false";
+    }
     lat += "}";
     num("lattice", lat, /*comma=*/has_exp || has_grad);
   }
