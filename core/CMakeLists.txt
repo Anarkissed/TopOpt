@@ -312,6 +312,19 @@ add_executable(test_orient tests/unit/test_orient.cpp)
 target_link_libraries(test_orient PRIVATE topopt)
 add_test(NAME orientation COMMAND test_orient)
 
+# The ORIENTATION-SWEEP invariants (task 2026-08-01-orientation-scoring-probe,
+# bar S2). Scoring N build directions against ONE solved field is only sound
+# while a short list of structural facts holds: the strut IN-PLANE margin is
+# bit-identical in n, the six cube axes give an identical strut INTERLAYER
+# margin, no direction can improve it (the PR 263 cross term only ADDS), and the
+# octet strut population is the six <110> axes in equal measure (24n^3 + 12n^2
+# fragments — PR 201's 36 per cell), measured from the REAL generator. Pins them
+# so a future law/traversal change breaks here rather than silently turning an
+# orientation sweep into noise. Pure C++/std like test_orient; gates nothing.
+add_executable(test_orient_invariants tests/unit/test_orient_invariants.cpp)
+target_link_libraries(test_orient_invariants PRIVATE topopt)
+add_test(NAME orientation_invariants COMMAND test_orient_invariants)
+
 # Settings rule engine (M5.1). Pure C++/std (no OCCT, no Eigen): the engine
 # consumes settings/rules.json and maps material + stress margin + part size to
 # walls/top-bottom layers/infill + pattern (FDM) or a solid-print directive

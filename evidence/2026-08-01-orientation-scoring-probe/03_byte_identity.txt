@@ -1,0 +1,60 @@
+# S6 — BYTE IDENTITY: an ordinary run is bit-identical to the pre-change build
+
+changed build : core/build/topopt-cli on this branch
+                (+ 1 harness file, + 1 unit-test file, + 13 lines of CMake test wiring)
+baseline build: an INDEPENDENT git worktree at HEAD (2ebf6f0), configured and
+                built on its own — nothing stashed, the working tree never touched
+job           : plate_bore.stl @ res 32, PLA, minimize_plastic, ladder [0.6], 8 iters
+
+THREE runs so the comparison is honest: the changed build TWICE (new1, new2) and
+the baseline once (old). Two of the four output files carry WALL-CLOCK stamps
+(iterations.csv column 3 'wall_ms', run_info.json 'created_wall_ms'). Those differ
+between new1 and new2 — the SAME binary — so they are timestamp noise, not a build
+difference. Everything else is compared raw.
+
+## raw sha256 — the DESIGN and the REPORT
+
+file               sha256                                                             run
+report.json        0ef5336f61a804389b0c013a3f470f88bad880ddb2f560a9c1a0743394636c6d   out_new
+variant_060.stl    2f2432f7f7f2a2f4bdd63a30570e7309ef964bee9a0d65e222aec868492a20c1   out_new
+report.json        0ef5336f61a804389b0c013a3f470f88bad880ddb2f560a9c1a0743394636c6d   out_new2
+variant_060.stl    2f2432f7f7f2a2f4bdd63a30570e7309ef964bee9a0d65e222aec868492a20c1   out_new2
+report.json        0ef5336f61a804389b0c013a3f470f88bad880ddb2f560a9c1a0743394636c6d   out_old
+variant_060.stl    2f2432f7f7f2a2f4bdd63a30570e7309ef964bee9a0d65e222aec868492a20c1   out_old
+
+report.json     : IDENTICAL across all three runs
+variant_060.stl : IDENTICAL across all three runs
+
+## the two timestamp-bearing files
+
+raw sha256 (all three differ from each other — including new1 vs new2, same binary):
+  out_new    iterations.csv 2a34244671ab0422842a6c9cd359a8d791a182474af4a5f0affe841018cc43a1
+  out_new    run_info.json  e74e980965806b5b1216fece3cc06472c6d2d1bc6889db68a4f296c6d4105cb9
+  out_new2   iterations.csv 05e270e3c00d21851aff4be4a54ce274d10d0bed26f11af8e7737da93cc4ebcf
+  out_new2   run_info.json  4f9a0ab5305bd24d50e32c900ee10716ce942a4f0a004de90d4eb5c684a2a392
+  out_old    iterations.csv 5af090f35da5afbdef1093f727649f9371b1c6dfde422c2023aa872b84faf092
+  out_old    run_info.json  43a3800a836fe37a9cf5634ba447e561657b55c12b695ceaf175dba89e5e03c5
+
+with wall_ms / created_wall_ms stripped:
+  out_new    b754763c8112a3057002a315904eb3c6ab3084fef87873fbfed0d769ae946bc1
+  out_new2   b754763c8112a3057002a315904eb3c6ab3084fef87873fbfed0d769ae946bc1
+  out_old    b754763c8112a3057002a315904eb3c6ab3084fef87873fbfed0d769ae946bc1
+
+  => IDENTICAL across all three runs. Every physics column (compliance,
+     achieved_vf, cg_iters, beta, active_fraction, ...) matches to the byte;
+     the ONLY difference anywhere is the wall clock.
+
+## the tracked diff that produced the changed build
+$ git status --porcelain
+ M core/CMakeLists.txt
+?? core/tests/harness/orientation_scoring_probe.cpp
+?? core/tests/unit/test_orient_invariants.cpp
+?? evidence/2026-08-01-orientation-scoring-probe/
+
+$ git diff --stat HEAD
+ core/CMakeLists.txt | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+$ git diff --stat HEAD -- core/src/ core/include/     (production sources)
+  (no rows above: NO production source file was changed — the only tracked
+   edit is CMakeLists.txt, and it only ADDS a test target + add_test)

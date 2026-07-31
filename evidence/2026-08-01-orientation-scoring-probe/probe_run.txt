@@ -1,0 +1,189 @@
+=========================================================
+ ORIENTATION SCORING PROBE (2026-08-01) -- PROBE ONLY
+ nothing here is production; nothing here gates anything
+=========================================================
+
+material PLA: E=3500.0 MPa  yield=55.0 MPa  z_knockdown=0.550
+
+---- S-e INSTRUMENT: octet strut axes from the REAL generator --
+  2x2x2 cells: 240 interior strut fragments (30.00 per cell), 6 distinct axes  [24n^3+12n^2 = 240 MATCH]
+  3x3x3 cells: 756 interior strut fragments (28.00 per cell), 6 distinct axes  [24n^3+12n^2 = 756 MATCH]
+  4x4x4 cells: 1728 interior strut fragments (27.00 per cell), 6 distinct axes  [24n^3+12n^2 = 1728 MATCH]
+  6x6x6 cells: 5616 interior strut fragments (26.00 per cell), 6 distinct axes  [24n^3+12n^2 = 5616 MATCH]
+  8x8x8 cells: 13056 interior strut fragments (25.50 per cell), 6 distinct axes  [24n^3+12n^2 = 13056 MATCH]
+  the 8x8x8 population reduces to 6 axes:
+    (+0.7071,+0.7071,-0.0000)    2176 fragments   16.67% of length
+    (+0.7071,-0.7071,+0.0000)    2176 fragments   16.67% of length
+    (+0.7071,-0.0000,+0.7071)    2176 fragments   16.67% of length
+    (+0.7071,+0.0000,-0.7071)    2176 fragments   16.67% of length
+    (-0.0000,+0.7071,+0.7071)    2176 fragments   16.67% of length
+    (+0.0000,+0.7071,-0.7071)    2176 fragments   16.67% of length
+  vs PR 201 (+z build, 'no vertical struts, 12/36 horizontal'): horizontal length fraction 0.3333, fragment fraction 0.3333, flattest family 0.00 deg, steepest bin 0.6667 at 40-50 deg
+
+  EXHAUSTIVE (400000 directions over the whole sphere): the flattest strut family can be raised to at most 18.40 deg above the plate, at n = (+0.894,+0.000,+0.448)
+    at that n: horizontal(<=10 deg) length fraction 0.0000, mean strut elevation 34.23 deg, PR 263 cross factor 0.4627
+    (a cube axis leaves 0.00 deg / 0.3333 horizontal at cross factor 0; the 45-deg FDM self-support limit is NOT reachable in ANY orientation)
+
+=== CASE A: hook.stl @ res 32, load along axis 1, grid 20x32x6 (spacing 1.4375 mm), 1320 solid, 400 latticed (octet rho 0.30)
+    base solve build_dir = -gravity = (-0.000,+1.000,-0.000) | max_vm 27.3118 MPa | macro interlayer tension 28.1025 MPa | margin worst 1.0764
+    SWEEP COST: 26 candidates x 6 criteria in 0.0028 s (0.11 ms per candidate) against ONE solve costing 0.1260 s -> the whole sweep is 2.2% of a single certification
+    S2: S-c EXACT (0.51963178, 0 deviation) | S-d cube axes EXACT (0.32494866, 6 axes) | off-axis 20/20 strictly worse, 0 improved
+
+build_dir n              axis  S-a sup S-b il_tns S-b il_mgn  S-b worst   S-c ip   S-d il S-d xfac  S-e h% S-e min  S-f h S-f foot
+(-0.577,-0.577,-0.577)      -       79     9.0901     3.3278     2.0138   0.5196   0.1405   1.1547   0.500    0.00     22        5
+(+0.000,-0.707,-0.707)      -       15    15.8909     1.9036     1.9036   0.5196   0.1962   0.5774   0.167    0.00     27       12
+(+0.577,-0.577,-0.577)      -       79    20.4184     1.4815     1.4815   0.5196   0.1405   1.1547   0.500    0.00     30        4
+(-0.707,+0.000,-0.707)      -       34    10.7097     2.8246     2.0138   0.5196   0.1962   0.5774   0.167    0.00     18       38
+(+0.000,+0.000,-1.000)    yes        0     4.0419     7.4840     2.0138   0.5196   0.3249   0.0000   0.333    0.00      6      440
+(+0.707,+0.000,-0.707)      -       21    10.7097     2.8246     2.0138   0.5196   0.1962   0.5774   0.167    0.00     18       77
+(-0.577,+0.577,-0.577)      -       81    20.4184     1.4815     1.4815   0.5196   0.1405   1.1547   0.500    0.00     30       15
+(+0.000,+0.707,-0.707)      -       13    15.8909     1.9036     1.9036   0.5196   0.1962   0.5774   0.167    0.00     27       22
+(+0.577,+0.577,-0.577)      -       83     9.0901     3.3278     2.0138   0.5196   0.1405   1.1547   0.500    0.00     22        9
+(-0.707,-0.707,+0.000)      -       24    10.1955     2.9670     2.0138   0.5196   0.1962   0.5774   0.167    0.00     23       24
+(+0.000,-1.000,+0.000)    yes       42    28.1025     1.0764     1.0764   0.5196   0.3249   0.0000   0.333    0.00     32       48
+(+0.707,-0.707,+0.000)      -       24    27.6898     1.0925     1.0925   0.5196   0.1962   0.5774   0.167    0.00     33       18
+(-1.000,+0.000,+0.000)    yes      150    16.6212     1.8200     1.8200   0.5196   0.3249   0.0000   0.333    0.00     19      156
+(+1.000,+0.000,+0.000)    yes       72    16.6212     1.8200     1.8200   0.5196   0.3249   0.0000   0.333    0.00     19      312
+(-0.707,+0.707,+0.000)      -       12    27.6898     1.0925     1.0925   0.5196   0.1962   0.5774   0.167    0.00     33       66
+(+0.000,+1.000,+0.000)    yes       18    28.1025     1.0764     1.0764   0.5196   0.3249   0.0000   0.333    0.00     32       96
+(+0.707,+0.707,+0.000)      -       24    10.1955     2.9670     2.0138   0.5196   0.1962   0.5774   0.167    0.00     23       42
+(-0.577,-0.577,+0.577)      -       79     9.0901     3.3278     2.0138   0.5196   0.1405   1.1547   0.500    0.00     22        5
+(+0.000,-0.707,+0.707)      -       15    15.8909     1.9036     1.9036   0.5196   0.1962   0.5774   0.167    0.00     27       12
+(+0.577,-0.577,+0.577)      -       79    20.4184     1.4815     1.4815   0.5196   0.1405   1.1547   0.500    0.00     30        4
+(-0.707,+0.000,+0.707)      -       34    10.7097     2.8246     2.0138   0.5196   0.1962   0.5774   0.167    0.00     18       38
+(+0.000,+0.000,+1.000)    yes        0     4.0419     7.4840     2.0138   0.5196   0.3249   0.0000   0.333    0.00      6      440
+(+0.707,+0.000,+0.707)      -       21    10.7097     2.8246     2.0138   0.5196   0.1962   0.5774   0.167    0.00     18       77
+(-0.577,+0.577,+0.577)      -       81    20.4184     1.4815     1.4815   0.5196   0.1405   1.1547   0.500    0.00     30       15
+(+0.000,+0.707,+0.707)      -       13    15.8909     1.9036     1.9036   0.5196   0.1962   0.5774   0.167    0.00     27       22
+(+0.577,+0.577,+0.577)      -       83     9.0901     3.3278     2.0138   0.5196   0.1405   1.1547   0.500    0.00     22        9
+
+    BEST / WORST / -gravity / +z per criterion:
+      S-a support voxels         best (+0.000,+0.000,-1.000)       0.0000 | -grav    18.0000 (    infx) | +z     0.0000 (   1.00x) | worst   150.0000 (    infx)
+      S-b macro il margin        best (+0.000,+0.000,-1.000)       7.4840 | -grav     1.0764 (   6.95x) | +z     7.4840 (   1.00x) | worst     1.0764 (   6.95x)
+      S-b macro worst margin     best (-0.577,-0.577,-0.577)       2.0138 | -grav     1.0764 (   1.87x) | +z     2.0138 (   1.00x) | worst     1.0764 (   1.87x)
+      S-c strut in-plane         best (-0.577,-0.577,-0.577)       0.5196 | -grav     0.5196 (   1.00x) | +z     0.5196 (   1.00x) | worst     0.5196 (   1.00x)
+      S-d strut interlayer       best (+0.000,+0.000,-1.000)       0.3249 | -grav     0.3249 (   1.00x) | +z     0.3249 (   1.00x) | worst     0.1405 (   2.31x)
+      S-e horizontal strut %     best (+0.000,-0.707,-0.707)       0.1667 | -grav     0.3333 (   2.00x) | +z     0.3333 (   2.00x) | worst     0.5000 (   3.00x)
+      S-f build height           best (+0.000,+0.000,-1.000)       6.0000 | -grav    32.0000 (   5.33x) | +z     6.0000 (   1.00x) | worst    33.0000 (   5.50x)
+      S-f first-layer footprint  best (+0.000,+0.000,-1.000)     440.0000 | -grav    96.0000 (   4.58x) | +z   440.0000 (   1.00x) | worst     4.0000 ( 110.00x)
+    BEST COMPROMISE (maximin over the four MOVING criteria): (+0.000,+0.000,-1.000)  worst-standing 0.5000  [S-a 1.000 S-b 1.000 S-d 1.000 S-e 0.500]
+    AGREEMENT with the single-criterion optima (ties counted):
+      S-a support voxels         optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-b macro il margin        optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-b macro worst margin     optimum (-0.577,-0.577,-0.577)   (12 tied) compromise ATTAINS it
+      S-c strut in-plane         optimum (-0.577,-0.577,-0.577)   (26 tied) criterion does not move — no preference
+      S-d strut interlayer       optimum (+0.000,+0.000,-1.000)   ( 6 tied) compromise ATTAINS it
+      S-e horizontal strut %     optimum (+0.000,-0.707,-0.707)   (12 tied) compromise does NOT attain it  <-- DISAGREES
+      S-f build height           optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-f first-layer footprint  optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+    S-e vs S-d PRICED (directions scored on this case's field; the starred one is NOT in the candidate set):
+      direction                      n                         S-a sup S-b il_mgn   S-d il S-d xfac   S-e h%  S-e min
+      cube axis +z (candidate)       (+0.000,+0.000,+1.000)          0     7.4840   0.3249   0.0000    0.333     0.00
+      <110> edge (candidate)         (+0.000,+0.707,+0.707)         13     1.9036   0.1962   0.5774    0.167     0.00
+      body diagonal (candidate)      (+0.577,+0.577,+0.577)         83     3.3278   0.1405   1.1547    0.500     0.00
+      * flattest-strut maximizer     (+0.894,+0.000,+0.448)        181     2.0397   0.2129   0.4627    0.000    18.40
+
+=== CASE B: hook.stl @ res 32, load along axis 2, grid 20x32x6 (spacing 1.4375 mm), 1320 solid, 400 latticed (octet rho 0.30)
+    base solve build_dir = -gravity = (-0.000,-0.000,+1.000) | max_vm 34.2932 MPa | macro interlayer tension 4.9406 MPa | margin worst 1.6038
+    SWEEP COST: 26 candidates x 6 criteria in 0.0005 s (0.02 ms per candidate) against ONE solve costing 0.2315 s -> the whole sweep is 0.2% of a single certification
+    S2: S-c EXACT (0.75424995, 0 deviation) | S-d cube axes EXACT (0.47130131, 6 axes) | off-axis 20/20 strictly worse, 0 improved
+    BEST / WORST / -gravity / +z per criterion:
+      S-a support voxels         best (+0.000,+0.000,-1.000)       0.0000 | -grav     0.0000 (   1.00x) | +z     0.0000 (   1.00x) | worst   150.0000 (    infx)
+      S-b macro il margin        best (+0.000,+0.000,-1.000)       6.1227 | -grav     6.1227 (   1.00x) | +z     6.1227 (   1.00x) | worst     1.4317 (   4.28x)
+      S-b macro worst margin     best (-0.577,-0.577,-0.577)       1.6038 | -grav     1.6038 (   1.00x) | +z     1.6038 (   1.00x) | worst     1.4317 (   1.12x)
+      S-c strut in-plane         best (-0.577,-0.577,-0.577)       0.7542 | -grav     0.7542 (   1.00x) | +z     0.7542 (   1.00x) | worst     0.7542 (   1.00x)
+      S-d strut interlayer       best (+0.000,+0.000,-1.000)       0.4713 | -grav     0.4713 (   1.00x) | +z     0.4713 (   1.00x) | worst     0.2039 (   2.31x)
+      S-e horizontal strut %     best (+0.000,-0.707,-0.707)       0.1667 | -grav     0.3333 (   2.00x) | +z     0.3333 (   2.00x) | worst     0.5000 (   3.00x)
+      S-f build height           best (+0.000,+0.000,-1.000)       6.0000 | -grav     6.0000 (   1.00x) | +z     6.0000 (   1.00x) | worst    33.0000 (   5.50x)
+      S-f first-layer footprint  best (+0.000,+0.000,-1.000)     440.0000 | -grav   440.0000 (   1.00x) | +z   440.0000 (   1.00x) | worst     4.0000 ( 110.00x)
+    BEST COMPROMISE (maximin over the four MOVING criteria): (+0.000,+0.000,-1.000)  worst-standing 0.5000  [S-a 1.000 S-b 1.000 S-d 1.000 S-e 0.500]
+    AGREEMENT with the single-criterion optima (ties counted):
+      S-a support voxels         optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-b macro il margin        optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-b macro worst margin     optimum (-0.577,-0.577,-0.577)   (22 tied) compromise ATTAINS it
+      S-c strut in-plane         optimum (-0.577,-0.577,-0.577)   (26 tied) criterion does not move — no preference
+      S-d strut interlayer       optimum (+0.000,+0.000,-1.000)   ( 6 tied) compromise ATTAINS it
+      S-e horizontal strut %     optimum (+0.000,-0.707,-0.707)   (12 tied) compromise does NOT attain it  <-- DISAGREES
+      S-f build height           optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-f first-layer footprint  optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+    S-e vs S-d PRICED (directions scored on this case's field; the starred one is NOT in the candidate set):
+      direction                      n                         S-a sup S-b il_mgn   S-d il S-d xfac   S-e h%  S-e min
+      cube axis +z (candidate)       (+0.000,+0.000,+1.000)          0     6.1227   0.4713   0.0000    0.333     0.00
+      <110> edge (candidate)         (+0.000,+0.707,+0.707)         13     1.7112   0.2846   0.5774    0.167     0.00
+      body diagonal (candidate)      (+0.577,+0.577,+0.577)         83     2.2795   0.2039   1.1547    0.500     0.00
+      * flattest-strut maximizer     (+0.894,+0.000,+0.448)        181     2.3487   0.3089   0.4627    0.000    18.40
+
+=== CASE C: hook.stl @ res 48, load along axis 1, grid 30x48x9 (spacing 0.9583 mm), 4008 solid, 1830 latticed (octet rho 0.30)
+    base solve build_dir = -gravity = (-0.000,+1.000,-0.000) | max_vm 41.3991 MPa | macro interlayer tension 43.4151 MPa | margin worst 0.6968
+    SWEEP COST: 26 candidates x 6 criteria in 0.0016 s (0.06 ms per candidate) against ONE solve costing 1.1216 s -> the whole sweep is 0.1% of a single certification
+    S2: S-c EXACT (0.46164486, 0 deviation) | S-d cube axes EXACT (0.28850357, 6 axes) | off-axis 20/20 strictly worse, 0 improved
+    BEST / WORST / -gravity / +z per criterion:
+      S-a support voxels         best (+0.000,+0.000,-1.000)       0.0000 | -grav    48.0000 (    infx) | +z     0.0000 (   1.00x) | worst   304.0000 (    infx)
+      S-b macro il margin        best (+0.000,+0.000,-1.000)       6.3494 | -grav     0.6968 (   9.11x) | +z     6.3494 (   1.00x) | worst     0.6968 (   9.11x)
+      S-b macro worst margin     best (-0.577,-0.577,-0.577)       1.3285 | -grav     0.6968 (   1.91x) | +z     1.3285 (   1.00x) | worst     0.6968 (   1.91x)
+      S-c strut in-plane         best (-0.577,-0.577,-0.577)       0.4616 | -grav     0.4616 (   1.00x) | +z     0.4616 (   1.00x) | worst     0.4616 (   1.00x)
+      S-d strut interlayer       best (+0.000,+0.000,-1.000)       0.2885 | -grav     0.2885 (   1.00x) | +z     0.2885 (   1.00x) | worst     0.1248 (   2.31x)
+      S-e horizontal strut %     best (+0.000,-0.707,-0.707)       0.1667 | -grav     0.3333 (   2.00x) | +z     0.3333 (   2.00x) | worst     0.5000 (   3.00x)
+      S-f build height           best (+0.000,+0.000,-1.000)       8.0000 | -grav    48.0000 (   6.00x) | +z     8.0000 (   1.00x) | worst    49.0000 (   6.12x)
+      S-f first-layer footprint  best (+0.000,+0.000,-1.000)    1002.0000 | -grav   160.0000 (   6.26x) | +z  1002.0000 (   1.00x) | worst     4.0000 ( 250.50x)
+    BEST COMPROMISE (maximin over the four MOVING criteria): (+0.000,+0.000,-1.000)  worst-standing 0.5000  [S-a 1.000 S-b 1.000 S-d 1.000 S-e 0.500]
+    AGREEMENT with the single-criterion optima (ties counted):
+      S-a support voxels         optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-b macro il margin        optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-b macro worst margin     optimum (-0.577,-0.577,-0.577)   (12 tied) compromise ATTAINS it
+      S-c strut in-plane         optimum (-0.577,-0.577,-0.577)   (26 tied) criterion does not move — no preference
+      S-d strut interlayer       optimum (+0.000,+0.000,-1.000)   ( 6 tied) compromise ATTAINS it
+      S-e horizontal strut %     optimum (+0.000,-0.707,-0.707)   (12 tied) compromise does NOT attain it  <-- DISAGREES
+      S-f build height           optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+      S-f first-layer footprint  optimum (+0.000,+0.000,-1.000)   ( 2 tied) compromise ATTAINS it
+    S-e vs S-d PRICED (directions scored on this case's field; the starred one is NOT in the candidate set):
+      direction                      n                         S-a sup S-b il_mgn   S-d il S-d xfac   S-e h%  S-e min
+      cube axis +z (candidate)       (+0.000,+0.000,+1.000)          0     6.3494   0.2885   0.0000    0.333     0.00
+      <110> edge (candidate)         (+0.000,+0.707,+0.707)         22     1.2887   0.1742   0.5774    0.167     0.00
+      body diagonal (candidate)      (+0.577,+0.577,+0.577)        141     2.2739   0.1248   1.1547    0.500     0.00
+      * flattest-strut maximizer     (+0.894,+0.000,+0.448)        380     1.2710   0.1891   0.4627    0.000    18.40
+
+---- S1: CHEAP vs EXPENSIVE (a full re-solve per direction) ----
+  case A   (+0.000,+0.000,+1.000)  field BIT-IDENTICAL | S-a exact (0) | S-b exact (4.0419304168) | S-c exact (0.5196317840) | S-d exact (0.3249486551)
+  case A   (+0.000,+1.000,+0.000)  field BIT-IDENTICAL | S-a exact (18) | S-b exact (28.1024517300) | S-c exact (0.5196317840) | S-d exact (0.3249486551)
+  case A   (+1.000,+0.000,+0.000)  field BIT-IDENTICAL | S-a exact (72) | S-b exact (16.6211692389) | S-c exact (0.5196317840) | S-d exact (0.3249486551)
+  case A   (+0.707,+0.707,+0.000)  field BIT-IDENTICAL | S-a exact (24) | S-b exact (10.1955427311) | S-c exact (0.5196317840) | S-d exact (0.1961727878)
+  case A   (+0.577,+0.577,+0.577)  field BIT-IDENTICAL | S-a exact (83) | S-b exact (9.0900965121) | S-c exact (0.5196317840) | S-d exact (0.1404951252)
+  case B   (+0.000,+0.000,+1.000)  field BIT-IDENTICAL | S-a exact (0) | S-b exact (4.9405984773) | S-c exact (0.7542499476) | S-d exact (0.4713013102)
+  case B   (+0.000,+1.000,+0.000)  field BIT-IDENTICAL | S-a exact (18) | S-b exact (11.9128519159) | S-c exact (0.7542499476) | S-d exact (0.4713013102)
+  case B   (+1.000,+0.000,+0.000)  field BIT-IDENTICAL | S-a exact (72) | S-b exact (18.4117026599) | S-c exact (0.7542499476) | S-d exact (0.4713013102)
+  case B   (+0.707,+0.707,+0.000)  field BIT-IDENTICAL | S-a exact (24) | S-b exact (18.8141361542) | S-c exact (0.7542499476) | S-d exact (0.2846136101)
+  case B   (+0.577,+0.577,+0.577)  field BIT-IDENTICAL | S-a exact (83) | S-b exact (13.2706354891) | S-c exact (0.7542499476) | S-d exact (0.2038617138)
+  case C   (+0.000,+0.000,+1.000)  field BIT-IDENTICAL | S-a exact (0) | S-b exact (4.7641970997) | S-c exact (0.4616448555) | S-d exact (0.2885035710)
+  case C   (+0.000,+1.000,+0.000)  field BIT-IDENTICAL | S-a exact (48) | S-b exact (43.4151421874) | S-c exact (0.4616448555) | S-d exact (0.2885035710)
+  case C   (+1.000,+0.000,+0.000)  field BIT-IDENTICAL | S-a exact (144) | S-b exact (27.3762851094) | S-c exact (0.4616448555) | S-d exact (0.2885035710)
+  case C   (+0.707,+0.707,+0.000)  field BIT-IDENTICAL | S-a exact (32) | S-b exact (16.7259624717) | S-c exact (0.4616448555) | S-d exact (0.1742145839)
+  case C   (+0.577,+0.577,+0.577)  field BIT-IDENTICAL | S-a exact (141) | S-b exact (13.3032476133) | S-c exact (0.4616448555) | S-d exact (0.1247826668)
+
+  MECHANISM: build_dir enters analyze_fixed_design ONLY after the solve — at max_interlayer_tension, support_overhang_voxels and
+  evaluate_strut_strength. The element stiffness is isotropic (hex8_stiffness) or the lattice's cubic tensor; neither reads it.
+  hex8_stiffness_transverse (the layer-anisotropic element) exists in core and has ZERO production callers, so the solved field
+  cannot depend on n. Cheap scoring is therefore EXACT, not approximate — and would break the moment that element were armed.
+
+---- S3/S4 CROSS-CASE: does the winner depend on the LOAD? -----
+  criterion                  case A (load -y, res 32)   case B (load -z, res 32)   case C (load -y, res 48)  
+  S-a support voxels         (+0.000,+0.000,-1.000)     (+0.000,+0.000,-1.000)     (+0.000,+0.000,-1.000)    
+  S-b macro il margin        (+0.000,+0.000,-1.000)     (+0.000,+0.000,-1.000)     (+0.000,+0.000,-1.000)    
+  S-b macro worst margin     (-0.577,-0.577,-0.577)     (-0.577,-0.577,-0.577)     (-0.577,-0.577,-0.577)    
+  S-d strut interlayer       (+0.000,+0.000,-1.000)     (+0.000,+0.000,-1.000)     (+0.000,+0.000,-1.000)    
+  S-e horizontal strut %     (+0.000,-0.707,-0.707)     (+0.000,-0.707,-0.707)     (+0.000,-0.707,-0.707)    
+
+---- S5: GRAVITY vs BUILD (reported, NOT fixed) ----------------
+  THREE production sites derive the build direction from gravity, in TWO files (grep'd, evidence/01_call_graph.txt):
+    simp/minimize_plastic.cpp:270  const Vec3 build_dir = normalized(-options.gravity_direction)   <- the MAIN optimize path
+    cli/run_job.cpp:648            cx.build_dir = normalized(-options.gravity_direction)   <- lattice cert context
+    cli/run_job.cpp:1427           const Vec3 build_dir = normalized(-options.gravity_direction)   <- analyze / re-certify
+  'which way is down in service' and 'which way is up on the plate' are DIFFERENT questions. What the conflation costs, measured:
+    case A: gravity (+0.000,-1.000,+0.000) -> build (-0.000,+1.000,-0.000) | S-b il margin 1.0764 vs best 7.4840 (6.95x) | S-a support 18 vs best 0
+    case B: gravity (+0.000,+0.000,-1.000) -> build (-0.000,-0.000,+1.000) | S-b il margin 6.1227 vs best 6.1227 (1.00x) | S-a support 0 vs best 0
+    case C: gravity (+0.000,-1.000,+0.000) -> build (-0.000,+1.000,-0.000) | S-b il margin 0.6968 vs best 6.3494 (9.11x) | S-a support 48 vs best 0
+
+wrote ../evidence/2026-08-01-orientation-scoring-probe/orientation_scores.csv
+wrote ../evidence/2026-08-01-orientation-scoring-probe/strut_angle_histogram.csv
+
+86 self-checks, 0 failures
