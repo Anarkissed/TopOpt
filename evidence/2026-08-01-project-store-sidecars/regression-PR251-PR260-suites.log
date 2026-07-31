@@ -1,0 +1,160 @@
+[0/1] Planning build
+Building for debugging...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.26s)
+Test Suite 'Selected tests' started at 2026-07-30 23:03:07.962.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-07-30 23:03:07.966.
+Test Suite 'LatticePageRound2Tests' started at 2026-07-30 23:03:07.966.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testChromeSpacingIsOneConstant]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testChromeSpacingIsOneConstant]' passed (0.010 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testConvertingAnAutoClearanceListsExactlyOnePrimitive]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testConvertingAnAutoClearanceListsExactlyOnePrimitive]' passed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testCoreCLIParsesTheEmittedRegions]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testCoreCLIParsesTheEmittedRegions]' passed (0.477 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testDefaultWeightUnitIsLbs]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testDefaultWeightUnitIsLbs]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testGroupRolesRoundTripAndLegacyDecode]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testGroupRolesRoundTripAndLegacyDecode]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testIncludeAndExcludeRegionsReachTheEmittedJobJSON]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testIncludeAndExcludeRegionsReachTheEmittedJobJSON]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testLatticeEntryButtonGate]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testLatticeEntryButtonGate]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testLatticePageRendersFromTheSameGroupModelAsTheTOPage]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testLatticePageRendersFromTheSameGroupModelAsTheTOPage]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testLatticePageSourceHasNoSecondSelectionUI]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testLatticePageSourceHasNoSecondSelectionUI]' passed (0.009 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testNoLatticePageInteractionCanRemoveATOFaceOrGroup]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testNoLatticePageInteractionCanRemoveATOFaceOrGroup]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testOverlayMapsAVaryingFieldAndSelectionsDrawAbove]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testOverlayMapsAVaryingFieldAndSelectionsDrawAbove]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testRegionSpecMappingAndValidity]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testRegionSpecMappingAndValidity]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testRoleGroupPrimitivesLeaveClearancesAndJoinRegions]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testRoleGroupPrimitivesLeaveClearancesAndJoinRegions]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testTopologyListShowsOneFootnoteNotPerRowBadges]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testTopologyListShowsOneFootnoteNotPerRowBadges]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testTransientNoteLifecycle]' started.
+Test Case '-[TopOptFlowsTests.LatticePageRound2Tests testTransientNoteLifecycle]' passed (0.001 seconds).
+Test Suite 'LatticePageRound2Tests' passed at 2026-07-30 23:03:08.481.
+	 Executed 15 tests, with 0 failures (0 unexpected) in 0.514 (0.515) seconds
+Test Suite 'LatticePageTests' started at 2026-07-30 23:03:08.481.
+Test Case '-[TopOptFlowsTests.LatticePageTests testAutoAvailableFromVariantEntryWithNoSim]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testAutoAvailableFromVariantEntryWithNoSim]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testAutoNotOfferedWithoutAField]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testAutoNotOfferedWithoutAField]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testAutoShowsProvenanceAndAgeForASimField]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testAutoShowsProvenanceAndAgeForASimField]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testBadgeShowsBothPropertiesIndependently]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testBadgeShowsBothPropertiesIndependently]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testBannerForEveryPageState]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testBannerForEveryPageState]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testBoundaryIsAThreeWayAndSkinWithoutRimIsUnrepresentable]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testBoundaryIsAThreeWayAndSkinWithoutRimIsUnrepresentable]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testBoundaryReachesTheJob]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testBoundaryReachesTheJob]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testCertifiableButNotGeneratableCannotRun]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testCertifiableButNotGeneratableCannotRun]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testClearanceAndExcludeProduceDifferentJobs]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testClearanceAndExcludeProduceDifferentJobs]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testDefaultTopologyIsCertifiableAndGeneratable]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testDefaultTopologyIsCertifiableAndGeneratable]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testDensityBandChangesWithSelectionAndMatchesCore]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testDensityBandChangesWithSelectionAndMatchesCore]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testExactlyOneOptimizeEverFires]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testExactlyOneOptimizeEverFires]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testGateGovernsBothEntryPoints]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testGateGovernsBothEntryPoints]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testGateStatesWhatIsMissing]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testGateStatesWhatIsMissing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testLanesSayWhoHonoursASubVoxelSize]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testLanesSayWhoHonoursASubVoxelSize]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testLatticeJobCarriesPageOneInputs]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testLatticeJobCarriesPageOneInputs]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testLegacyRegionSnapshotMigratesIntoIncludeList]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testLegacyRegionSnapshotMigratesIntoIncludeList]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testPickerMatchesCoreExactly]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testPickerMatchesCoreExactly]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testRoleHelpersMapToDistinctStores]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testRoleHelpersMapToDistinctStores]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testSimGating]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testSimGating]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testSimModelDrivesRunCompleteStaleAndCancel]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testSimModelDrivesRunCompleteStaleAndCancel]' passed (0.330 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testSimModelSurfacesFailureAndNonConvergenceHonestly]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testSimModelSurfacesFailureAndNonConvergenceHonestly]' passed (0.049 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testStaleFieldIsFlaggedAndAutoNeverSilentlyUniform]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testStaleFieldIsFlaggedAndAutoNeverSilentlyUniform]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testTOOnlyJobByteIdenticalByHash]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testTOOnlyJobByteIdenticalByHash]' passed (0.002 seconds).
+Test Case '-[TopOptFlowsTests.LatticePageTests testVoxelMinimumIsLiveNotAConstant]' started.
+Test Case '-[TopOptFlowsTests.LatticePageTests testVoxelMinimumIsLiveNotAConstant]' passed (0.001 seconds).
+Test Suite 'LatticePageTests' passed at 2026-07-30 23:03:08.874.
+	 Executed 25 tests, with 0 failures (0 unexpected) in 0.391 (0.393) seconds
+Test Suite 'LatticeSDFAlignmentTests' started at 2026-07-30 23:03:08.874.
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testAlignmentExactAgainstBodyTransform]' started.
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testAlignmentExactAgainstBodyTransform]' passed (2.570 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testFaceTintVolumeLockstep]' started.
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testFaceTintVolumeLockstep]' passed (0.098 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testNoBakeAcrossDrawsOrShadeParamChanges]' started.
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testNoBakeAcrossDrawsOrShadeParamChanges]' passed (0.086 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testOrbitProjectionMonotone]' started.
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testOrbitProjectionMonotone]' passed (4.409 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testPickingUnchangedWithBodyInvisible]' started.
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testPickingUnchangedWithBodyInvisible]' passed (0.015 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testPreviewOffRenderAndPickHash]' started.
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testPreviewOffRenderAndPickHash]' passed (0.021 seconds).
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testRenderAlignmentEvidence]' started.
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-certification-e2e-8f1ce8/app/TopOptKit/Tests/TopOptFlowsTests/LatticeSDFAlignmentTests.swift:407: -[TopOptFlowsTests.LatticeSDFAlignmentTests testRenderAlignmentEvidence] : Test skipped - set TOPOPT_LATTICE_ALIGN_DIR to render evidence
+Test Case '-[TopOptFlowsTests.LatticeSDFAlignmentTests testRenderAlignmentEvidence]' skipped (0.001 seconds).
+Test Suite 'LatticeSDFAlignmentTests' passed at 2026-07-30 23:03:16.074.
+	 Executed 7 tests, with 1 test skipped and 0 failures (0 unexpected) in 7.199 (7.200) seconds
+Test Suite 'LatticeSDFProfileTests' started at 2026-07-30 23:03:16.074.
+Test Case '-[TopOptFlowsTests.LatticeSDFProfileTests testRaymarchCostOnMaintainerBracket]' started.
+Test Case '-[TopOptFlowsTests.LatticeSDFProfileTests testRaymarchCostOnMaintainerBracket]' passed (13.807 seconds).
+Test Suite 'LatticeSDFProfileTests' passed at 2026-07-30 23:03:29.881.
+	 Executed 1 test, with 0 failures (0 unexpected) in 13.807 (13.807) seconds
+Test Suite 'WorkspaceInteractionTests' started at 2026-07-30 23:03:29.881.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testMultiFaceLoopNeverPullsFacesFromASetGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testMultiFaceLoopNeverPullsFacesFromASetGroup]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testSelectedCommittedGroupGrowsOnTap]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testSelectedCommittedGroupGrowsOnTap]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAFaceInTheActiveGroupDeselectsIt]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAFaceInTheActiveGroupDeselectsIt]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAnotherGroupsFaceReselectsItWithoutStealing]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapAnotherGroupsFaceReselectsItWithoutStealing]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapDeselectDoesNotTouchInactiveGroups]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapDeselectDoesNotTouchInactiveGroups]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceAfterCommitStartsAFreshGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceAfterCommitStartsAFreshGroup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceGrowsAPendingSelection]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceGrowsAPendingSelection]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceWithNothingActiveStartsAGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapNewFaceWithNothingActiveStartsAGroup]' passed (0.000 seconds).
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapTheOnlyFaceInTheActiveGroupDropsTheGroup]' started.
+Test Case '-[TopOptFlowsTests.WorkspaceInteractionTests testTapTheOnlyFaceInTheActiveGroupDropsTheGroup]' passed (0.000 seconds).
+Test Suite 'WorkspaceInteractionTests' passed at 2026-07-30 23:03:29.884.
+	 Executed 9 tests, with 0 failures (0 unexpected) in 0.002 (0.003) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-07-30 23:03:29.884.
+	 Executed 57 tests, with 1 test skipped and 0 failures (0 unexpected) in 21.913 (21.917) seconds
+Test Suite 'Selected tests' passed at 2026-07-30 23:03:29.884.
+	 Executed 57 tests, with 1 test skipped and 0 failures (0 unexpected) in 21.913 (21.922) seconds
+A1 worst corner displacement: 0.0007 px (old P·V-only transform: 839.9 px) over 3 angles × 2 zooms
+A4 mean(G−R) facing the anchor-tinted face: plain -5.59 → tinted 48.96
+A2 transform track: worst frame delta 0.2993 px, worst reversal 0.0000 px (bar 0.25)
+A2 centroid series: 250.233 250.307 250.373 250.536 250.656 250.779 250.810 250.947 250.982 251.058 251.219 251.393 251.382 251.565 251.618 251.787 251.876 252.018 252.097 252.204 252.307 252.481 252.543 252.697 252.813 252.973 253.064 253.035 253.261 253.406 253.526 253.718 253.727 253.903 253.853 254.090 254.239 254.296 254.494 254.564
+A2 rendered-centroid track @512²: worst frame delta 0.2371 px, worst reversal 0.2371 px (bar 0.25)
+A5 preview-off pixels sha256=e5655c7e1a5202b60f941894ff4b155a8f05d5075db3b045da3f9a41f7a35142 pick(centre)=1
+== LATTICE SDF PREVIEW PROFILE (handoff 2026-07-29) — GPU: Apple M2 Pro ==
+part: WallMount_ShelfBracket  bbox=201×207×20 mm  occupancy grid=124×128×12 (0.4 MB f16)
+segments in shader soup: 132 capsules (octet)
+GEOMETRY: 0 triangles, 0 vertex buffers — a full-screen triangle + one uniform buffer, at EVERY cell.
+P3/V2  cell |  @1024²  |  @2048²   (proxy busy scene: 0.31 ms @1024²; 134 body: 0.436 ms)
+       8 mm | 12.729 ms | 38.393 ms
+       6 mm | 13.468 ms | 39.529 ms
+       4 mm | 14.779 ms | 44.651 ms
+       8→4 mm frame-time ratio: 1.16×  (a real MESH would be 8.0× the triangles)
+P4  busy strut-mode scene @1024²: mesh+stage+boxes 0.291 ms + raymarch 12.731 ms = 13.022 ms (60 Hz budget 16.6)
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.

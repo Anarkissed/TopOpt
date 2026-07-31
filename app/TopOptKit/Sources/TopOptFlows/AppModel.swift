@@ -734,6 +734,10 @@ public final class AppModel: ObservableObject {
         } else if let restored = restoreFromDisk(recent) {
             projectsById[recent.id] = restored
             project = restored
+            // Q2 (project-store-sidecars): a pre-sidecar save reopens with groups
+            // whose painted faces the re-import doesn't carry. Say so now, naming
+            // them, instead of a raw out-of-range at RUN SIM.
+            if let warning = restored.restoreWarning { toast = warning }
         } else {
             project = ProjectModel(id: recent.id, name: recent.name,
                                    material: recent.materialName, process: recent.process,

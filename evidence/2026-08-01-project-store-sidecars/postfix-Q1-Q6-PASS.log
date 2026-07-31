@@ -1,0 +1,41 @@
+Building for debugging...
+[0/3] Write sources
+[1/3] Write swift-version--58304C5D6DBC2206.txt
+[3/5] Emitting module TopOptFlowsTests
+[4/5] Compiling TopOptFlowsTests ProjectStoreSidecarTests.swift
+[4/6] Write Objects.LinkFileList
+[5/6] Linking TopOptKitPackageTests
+Build complete! (3.79s)
+Test Suite 'Selected tests' started at 2026-07-30 23:20:52.732.
+Test Suite 'TopOptKitPackageTests.xctest' started at 2026-07-30 23:20:52.734.
+Test Suite 'ProjectStoreSidecarTests' started at 2026-07-30 23:20:52.734.
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ1PaintedGroupsResolveToSameFacesAfterReopen]' started.
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ1PaintedGroupsResolveToSameFacesAfterReopen]' passed (0.102 seconds).
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ2LegacyProjectWithoutSidecarOpensWithNamedWarning]' started.
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ2LegacyProjectWithoutSidecarOpensWithNamedWarning]' passed (0.018 seconds).
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ2WarningNilWhenEveryGroupResolves]' started.
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ2WarningNilWhenEveryGroupResolves]' passed (0.001 seconds).
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ3RoundTripRunSimResolvesDeclaredLoad]' started.
+[loadcase] load-group 0: faces=1 |F|=58.8N voxels_tagged=1024 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] load-group 0: faces=1 |F|=58.8N voxels_tagged=1024 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ3RoundTripRunSimResolvesDeclaredLoad]' passed (0.710 seconds).
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ4BridgeRefusalNamesGroupAndReason]' started.
+[loadcase] load-group 0: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] warm_start_inherit=0 mode=self-weight
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ4BridgeRefusalNamesGroupAndReason]' passed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ6SaveSyncsSidecarsDeterministicallyAndDropsStaleOnes]' started.
+Test Case '-[TopOptFlowsTests.ProjectStoreSidecarTests testQ6SaveSyncsSidecarsDeterministicallyAndDropsStaleOnes]' passed (0.011 seconds).
+Test Suite 'ProjectStoreSidecarTests' passed at 2026-07-30 23:20:53.580.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.846 (0.846) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-07-30 23:20:53.580.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.846 (0.846) seconds
+Test Suite 'Selected tests' passed at 2026-07-30 23:20:53.580.
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.846 (0.849) seconds
+Q3 EVIDENCE: |F|=58.839900970458984 N, load voxels=1024, anchor voxels=1024, maxStress=1.3260046998687578 MPa, maxDisp=0.0021794815385106484 mm, accepted=true
+Q4 EVIDENCE: analyze: the declared load case produced NO external load — every declared load group contributed nothing at resolution 32: group 0 (face 0, |F|=0 N): zero force — set a non-zero force on this load — nothing to certify under
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+✔ Test run with 0 tests in 0 suites passed after 0.001 seconds.
