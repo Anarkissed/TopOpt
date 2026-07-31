@@ -1,0 +1,4 @@
+threads=1 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL
+threads=2 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL
+threads=4 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL
+threads=8 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL

@@ -1,0 +1,12 @@
+68/73 Test #16: report ...........................   Passed    0.00 sec
+      Start 26: traction_loads
+69/73 Test #15: settings .........................   Passed    0.00 sec
+      Start 14: orientation
+70/73 Test #18: fields ...........................   Passed    0.00 sec
+71/73 Test #26: traction_loads ...................   Passed    0.00 sec
+72/73 Test #14: orientation ......................   Passed    0.00 sec
+73/73 Test #30: fea_mgcg_matfree .................   Passed  597.04 sec
+
+100% tests passed, 0 tests failed out of 73
+
+Total Test time (real) = 822.05 sec

@@ -1,0 +1,15 @@
+[coarsen] d8 = 24x24x24  d16 = 32x32x32
+[coarsen] byte-identity: |dvf|=0.000e+00  max|drho|=0.000e+00  (compliance 2.5305083897e-05 vs 2.5305083897e-05)
+[coarsen] self-weight 32^3: used_multigrid=1 mg_levels=3
+[coarsen] self-weight 30^3 (pad off): used_multigrid=0 mg_levels=0
+[coarsen] self-weight 30^3 (pad auto): used_multigrid=1 mg_levels=3
+[coarsen] self-weight 31^3: used_multigrid=1 mg_levels=3
+[coarsen] pad neutrality 32^3: variants 1/1 max|drho|=0.000e+00
+[coarsen] deep-block neutrality 30^3: variants 1/1 max|drho|=0.000e+00
+[coarsen] deep-block flip 30^3 (Jacobi vs MG): max|drho|=4.267e-06
+[coarsen] stagnation guard: healthy used_mg=1, checker used_mg=0, latched after 3 stagnations
+coarsen_rule: all 59 checks passed
+=== MGCG_MATFREE ===
+memory 8^3: assembled hierarchy 138960 nnz, matrix-free (coarse-only) 16974 nnz -> avoids 121986 fine nnz (12.2% assembled), fine footprint 576 doubles
+memory 24^3: assembled hierarchy 3828168 nnz, matrix-free (coarse-only) 470898 nnz -> avoids 3357270 fine nnz (12.3% assembled), fine footprint 576 doubles
+fea mgcg matfree: all 61 checks passed

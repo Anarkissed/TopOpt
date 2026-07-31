@@ -42,9 +42,23 @@
 // inactive (the same treatment fixed/void DOFs already get), so the operator,
 // loads, mass, margins and every exported byte are untouched by construction.
 // This does NOT relax the all-axes-even rule: the padded extents halve cleanly.
-// Scope: the solver engages the pad only when a FINE axis is odd. All-even
-// grids that reject DEEP (e.g. 232x64x216, the withdrawn PR #151 regime in the
-// walk-back note above) keep today's behavior byte-for-byte.
+//
+// SCOPE (widened by task multigrid-deep-block-pad): the solver engages the pad
+// whenever the UNPADDED build would be REJECTED — an odd fine axis, OR an
+// all-even grid that blocks deep AND whose ACTUAL active-DOF count at the
+// unpadded walk stop exceeds the cap (e.g. a solid-ish 232x64x216 pads to
+// 240x64x224, the very shape the withdrawn PR #151 escalation produced). The
+// actual-count condition matters: the builder accepts on real active counts,
+// so a bound-rejected grid with a SPARSE active set (a thin part in a large
+// Empty design-box expanse) already builds today and is left byte-for-byte
+// alone — as is every grid that already coarsens. PR #151's harm finding was
+// re-tested before this widening: its own regime (sparse design-box fields)
+// turns out to build unpadded today and to CARRY under the 128 budget-300
+// raise, while the fields the pad genuinely rescues (dense active sets) are
+// exactly where the V-cycle works; the one dense-AND-non-contracting corner
+// (adversarial checkerboard contrast) pays kMgLatchThreshold stagnated
+// attempts and is then latched off, per 127. See the
+// 2026-08-01-multigrid-deep-block-pad handoff for the measurements.
 
 // Pure integer arithmetic (no Eigen, no allocation): safe to include from the
 // always-built OCCT-free voxel TU and from the Eigen-gated multigrid TU alike.
@@ -142,6 +156,27 @@ inline MgCoarsenPlan mg_coarsen_plan(int ex, int ey, int ez) {
   return p;
 }
 
+// The depth where the UNPADDED halving walk stops: the number of clean
+// halvings before an axis goes odd or would drop below kMgMinCoarseElems.
+// 0 = no halving possible (an odd fine axis, or a too-small grid). The
+// solver's deep-block pad decision (task: multigrid-deep-block-pad) counts
+// the ACTUAL active DOFs at this depth to predict whether the unpadded build
+// would succeed — the builder's own acceptance is `actual actives at the walk
+// stop <= kMgCoarseDofCap` (actives are monotone non-increasing in depth), so
+// grids that build today are left byte-identically alone.
+inline int mg_unpadded_stop_depth(int ex, int ey, int ez) {
+  if (ex < 1 || ey < 1 || ez < 1) return 0;
+  int d = 0;
+  while (!(ex & 1) && !(ey & 1) && !(ez & 1) && ex / 2 >= kMgMinCoarseElems &&
+         ey / 2 >= kMgMinCoarseElems && ez / 2 >= kMgMinCoarseElems) {
+    ex /= 2;
+    ey /= 2;
+    ez /= 2;
+    ++d;
+  }
+  return d;
+}
+
 // The parity-padding TARGET. Finds the shallowest halving depth L >= 1 such
 // that a hierarchy on index-space extents padded to multiples of 2^L reaches a
 // coarsest level under kMgCoarseDofCap — counting REAL nodes only
@@ -175,14 +210,20 @@ inline int mg_pad_target(int ex, int ey, int ez, int& px, int& py, int& pz) {
   return 0;
 }
 
-// The RUN-START banner (task: multigrid-odd-axis-cliff, O1/O2). Pure decision +
-// text for what the CLI should say about multigrid on this solve grid BEFORE
-// the first solve. Returns 0 = say nothing (grid coarsenable as-is), 1 = NOTE
-// (an odd axis blocks coarsening but the solver's parity pad fixes it — name
-// the axes and the padded shape), 2 = WARNING (the hierarchy WILL be rejected:
-// name the grid, the offending axes and where halving stops, the achievable
-// level count, and the concrete remedy shape). `pad_enabled` mirrors the
-// solver's parity-pad mode so the banner reports what will actually happen.
+// The RUN-START banner (task: multigrid-odd-axis-cliff, O1/O2; scope widened
+// by task multigrid-deep-block-pad). Pure decision + text for what the CLI
+// should say about multigrid on this solve grid BEFORE the first solve.
+// Returns 0 = say nothing (grid coarsenable as-is), 1 = NOTE (the unpadded
+// grid would be rejected — an odd fine axis or a deep block — but the solver's
+// index-space pad fixes it; name the block and the padded shape), 2 = WARNING
+// (the hierarchy WILL be rejected: name the grid, the offending axes and where
+// halving stops, the achievable level count, and the concrete remedy shape).
+// `pad_enabled` mirrors the solver's parity-pad mode so the banner reports
+// what will actually happen. One honest caveat: the banner is geometric (it
+// cannot see the void pattern), so on a deep-blocked grid whose ACTUAL active
+// set is sparse enough to fit the DOF cap at the walk stop, the solver builds
+// UNPADDED (mg_unpadded_stop_active, multigrid.cpp) — the NOTE's headline
+// (multigrid engages) still holds; only the padded-shape detail is moot.
 inline int mg_startup_banner(int ex, int ey, int ez, bool pad_enabled, char* buf,
                              std::size_t bufsize) {
   if (bufsize > 0) buf[0] = '\0';
@@ -203,13 +244,25 @@ inline int mg_startup_banner(int ex, int ey, int ez, bool pad_enabled, char* buf
                            "%s%s=%d", n ? "," : "", name[i], stop[i]);
     if (n == 0) std::snprintf(axes, sizeof(axes), "none");
   }
-  if (fine_odd && padL > 0 && pad_enabled) {
-    std::snprintf(buf, bufsize,
-                  "NOTE: solve grid %dx%dx%d has odd axis(es) [%s] - geometric "
-                  "multigrid pads its INDEX SPACE to %dx%dx%d (up to %d levels). "
-                  "The pad is inactive solver bookkeeping only: the design grid, "
-                  "loads, mass and margins are untouched.",
-                  ex, ey, ez, axes, px, py, pz, padL + 1);
+  if (padL > 0 && pad_enabled) {
+    // The pad rescues BOTH rejection modes (task: multigrid-deep-block-pad):
+    // an odd FINE axis, and an all-even grid whose halving blocks deep.
+    if (fine_odd)
+      std::snprintf(buf, bufsize,
+                    "NOTE: solve grid %dx%dx%d has odd axis(es) [%s] - geometric "
+                    "multigrid pads its INDEX SPACE to %dx%dx%d (up to %d levels). "
+                    "The pad is inactive solver bookkeeping only: the design grid, "
+                    "loads, mass and margins are untouched.",
+                    ex, ey, ez, axes, px, py, pz, padL + 1);
+    else
+      std::snprintf(buf, bufsize,
+                    "NOTE: solve grid %dx%dx%d blocks multigrid coarsening at "
+                    "%dx%dx%d (odd axis(es) [%s]) after %d level(s) - the solver "
+                    "pads its INDEX SPACE to %dx%dx%d (up to %d levels). The pad "
+                    "is inactive solver bookkeeping only: the design grid, loads, "
+                    "mass and margins are untouched.",
+                    ex, ey, ez, plan.stop_ex, plan.stop_ey, plan.stop_ez, axes,
+                    plan.levels, px, py, pz, padL + 1);
     return 1;
   }
   if (padL > 0)

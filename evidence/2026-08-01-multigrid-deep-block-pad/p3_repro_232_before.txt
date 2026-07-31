@@ -1,0 +1,1 @@
+=== repro 232x64x216 pad_mode=0 max_iters=3 ===

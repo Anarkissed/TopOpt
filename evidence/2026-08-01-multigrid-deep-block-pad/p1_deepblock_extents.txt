@@ -1,0 +1,15 @@
+box 232x64x216: coarsenable=0 pad_target=240x64x224 depth=4
+case                nsolid | pad=0: hier mg cyc it wall | pad=1: hier mg cyc it lvl wall
+occ1.0_nohole      3207168 | hier=0 mg=0 cyc=  0 it= 1416   502.7s | hier=1 mg=1 cyc= 30 it=   30 lvl=5   138.6s
+occ1.0_hole0.4     2832128 | hier=0 mg=0 cyc=  0 it= 1516   458.3s | hier=1 mg=1 cyc= 66 it=   66 lvl=5   173.8s
+occ0.7_hole0.4     1415392 | hier=0 mg=0 cyc=  0 it= 1320   213.3s | hier=1 mg=1 cyc=118 it=  118 lvl=5   119.4s
+occ0.5_hole0.4      754816 | hier=1 mg=1 cyc= 62 it=   62    44.1s | hier=1 mg=1 cyc= 62 it=   62 lvl=4    44.2s
+occ0.4_nohole       498800 | hier=1 mg=1 cyc=181 it=  181    65.0s | hier=1 mg=1 cyc=181 it=  181 lvl=4    68.0s
+occ0.4_hole0.4      475600 | hier=1 mg=1 cyc=193 it=  193    67.7s | hier=1 mg=1 cyc=193 it=  193 lvl=4    67.8s
+latch-tax checker 60^3 pad=0 reference: hier=0 mg=0 it=  740    17.7s
+latch-tax checker 60^3 pad=1, 5 consecutive solves:
+  solve 1: hier=1 mg=0 cyc=300 it=  740    49.7s latched=0
+  solve 2: hier=1 mg=0 cyc=300 it=  740    47.5s latched=0
+  solve 3: hier=1 mg=0 cyc=300 it=  740    50.4s latched=1
+  solve 4: hier=0 mg=0 cyc=  0 it=  740    12.4s latched=1
+  solve 5: hier=0 mg=0 cyc=  0 it=  740    12.7s latched=1

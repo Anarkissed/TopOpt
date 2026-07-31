@@ -201,13 +201,22 @@ int main() {
     CHECK(mg_startup_banner(128, 32, 120, /*pad_enabled=*/true, buf,
                             sizeof(buf)) == 0,
           "banner: fully coarsenable grid -> silent");
-    // The all-even deep-blocked regime (the withdrawn PR #151 escalation) is
-    // NOT padded — the banner reports the honest WARNING with the remedy.
-    CHECK(mg_startup_banner(232, 64, 216, /*pad_enabled=*/true, buf,
+    // The all-even deep-blocked regime (the withdrawn PR #151 escalation).
+    // With the pad OFF the banner reports the honest WARNING with the remedy —
+    // verbatim from the odd-axis-cliff task. With the pad ON (task:
+    // multigrid-deep-block-pad) the pad now engages here too, so the banner is
+    // a NOTE naming the block point and the padded index-space shape.
+    CHECK(mg_startup_banner(232, 64, 216, /*pad_enabled=*/false, buf,
                             sizeof(buf)) == 2,
-          "banner: all-even deep-blocked grid stays a WARNING (no pad engages)");
+          "banner: all-even deep-blocked grid with pad off -> WARNING");
     CHECK(std::strstr(buf, "240x64x224") != nullptr,
           "banner: deep-block warning still states the remedy shape");
+    CHECK(mg_startup_banner(232, 64, 216, /*pad_enabled=*/true, buf,
+                            sizeof(buf)) == 1,
+          "banner: all-even deep-blocked grid with pad on -> NOTE (pad engages)");
+    CHECK(std::strstr(buf, "240x64x224") != nullptr &&
+              std::strstr(buf, "29x8x27") != nullptr,
+          "banner: deep-block note names the block point and the padded shape");
     // Too small to host any hierarchy: pad target refuses, banner warns.
     CHECK(mg_pad_target(2, 1, 1, px, py, pz) == 0,
           "pad target(2x1x1) = none (kMgMinCoarseElems floor)");
@@ -365,17 +374,31 @@ int main() {
         "REPORT: a coarsenable run reports used_multigrid=true");
   CHECK(rc.mg_levels >= 2, "REPORT: mg_levels is the observed hierarchy depth");
 
-  // 30^3 is odd after one halving and the coarsest exceeds the cap -> MG can NEVER
-  // build; every solve falls back, and the run reports it (the honesty guarantee).
-  // The parity pad does NOT engage here: the FINE extents are all even, so this
-  // (the walk-back regime of PR #151) keeps today's behavior byte-for-byte.
+  // 30^3 is odd after one halving and the coarsest exceeds the cap -> unpadded,
+  // MG can NEVER build; every solve falls back, and the run reports it (the
+  // honesty guarantee). Under the LEGACY pad-OFF mode this regime still exists
+  // (the stagnation latch also routes here), so the original assertions run
+  // verbatim under pad OFF.
   CHECK(!mg_grid_coarsenable(30, 30, 30), "30^3 is NOT coarsenable");
+  topopt::fea_set_mg_parity_pad_mode(0);
   const MinimizePlasticResult rf = run_self_weight(30);
-  std::printf("[coarsen] self-weight 30^3: used_multigrid=%d mg_levels=%d\n",
+  topopt::fea_set_mg_parity_pad_mode(1);
+  std::printf("[coarsen] self-weight 30^3 (pad off): used_multigrid=%d mg_levels=%d\n",
               rf.used_multigrid, rf.mg_levels);
   CHECK(!rf.used_multigrid,
         "REPORT: a non-coarsenable run reports used_multigrid=false (loud fallback)");
   CHECK(rf.mg_levels == 0, "REPORT: mg_levels is 0 when MG never engaged");
+
+  // (4a) DEEP-BLOCK PAD at the run level (task: multigrid-deep-block-pad).
+  // Under the production default (pad AUTO) the same 30^3 run now engages
+  // multigrid through the index-space pad (30 -> 32 per axis): the all-even
+  // deep-blocked regime is no longer excluded from the pad's scope.
+  const MinimizePlasticResult rd = run_self_weight(30);
+  std::printf("[coarsen] self-weight 30^3 (pad auto): used_multigrid=%d mg_levels=%d\n",
+              rd.used_multigrid, rd.mg_levels);
+  CHECK(rd.used_multigrid,
+        "DEEP-BLOCK PAD: an all-even deep-blocked run now engages multigrid");
+  CHECK(rd.mg_levels >= 2, "DEEP-BLOCK PAD: a real >=2-level hierarchy carried it");
 
   // (4b) PARITY PAD at the run level (task: multigrid-odd-axis-cliff). 31^3 has
   // odd FINE extents — exactly the cliff of the real 128x31x118 run — and now
@@ -415,6 +438,65 @@ int main() {
                 base.evaluated.size(), padded.evaluated.size(), max_drho);
     CHECK(same && max_drho == 0.0,
           "PAD NEUTRALITY: FORCE-padded control run is BIT-IDENTICAL");
+  }
+
+  // (4d) DEEP-BLOCK PAD NEUTRALITY at the run level (task:
+  // multigrid-deep-block-pad, P2). 262's 4c bar, applied to the NEW scope: on
+  // the deep-blocked 30^3 grid the default AUTO pad already engages (index
+  // space 32^3), so the control is a FORCE pad that grows it by one further
+  // 2^L block (36^3). Same preconditioner family, same real active DOFs, more
+  // virtual pad — every physical_density byte of every variant must be
+  // IDENTICAL. Any drift would mean the pad's virtual nodes reach the physics.
+  {
+    const MinimizePlasticResult& padded_auto = rd;  // the (4a) pad-AUTO run
+    topopt::fea_set_mg_parity_pad_mode(2);  // FORCE: one more 2^L block per axis
+    const MinimizePlasticResult padded_more = run_self_weight(30);
+    topopt::fea_set_mg_parity_pad_mode(1);
+    CHECK(padded_auto.used_multigrid && padded_more.used_multigrid,
+          "DEEP-BLOCK NEUTRALITY: multigrid engaged on both padded runs");
+    bool same = padded_auto.evaluated.size() == padded_more.evaluated.size();
+    double max_drho = 0.0;
+    if (same) {
+      for (std::size_t v = 0; v < padded_auto.evaluated.size(); ++v) {
+        const auto& a = padded_auto.evaluated[v].optimization.physical_density;
+        const auto& b = padded_more.evaluated[v].optimization.physical_density;
+        if (a.size() != b.size()) { same = false; break; }
+        for (std::size_t i = 0; i < a.size(); ++i)
+          max_drho = std::max(max_drho, std::abs(a[i] - b[i]));
+      }
+    }
+    std::printf("[coarsen] deep-block neutrality 30^3: variants %zu/%zu "
+                "max|drho|=%.3e\n",
+                padded_auto.evaluated.size(), padded_more.evaluated.size(),
+                max_drho);
+    CHECK(same && max_drho == 0.0,
+          "DEEP-BLOCK NEUTRALITY: a further-padded deep-blocked run is "
+          "BIT-IDENTICAL over every physical_density byte");
+  }
+
+  // (4e) The preconditioner flip is HONEST: the pad-OFF (Jacobi, `rf`) and
+  // pad-AUTO (multigrid, `rd`) runs of the same deep-blocked 30^3 problem
+  // above are different ITERATIVE PATHS to the same system, so they agree to
+  // solver tolerance — NOT bit-for-bit (that claim belongs to 4d, where the
+  // preconditioner is held fixed). Reuses those two runs; costs no new solve.
+  {
+    double max_drho = 0.0;
+    const bool same = rf.evaluated.size() == rd.evaluated.size();
+    if (same)
+      for (std::size_t v = 0; v < rf.evaluated.size(); ++v) {
+        const auto& a = rf.evaluated[v].optimization.physical_density;
+        const auto& b = rd.evaluated[v].optimization.physical_density;
+        if (a.size() != b.size()) break;
+        for (std::size_t i = 0; i < a.size(); ++i)
+          max_drho = std::max(max_drho, std::abs(a[i] - b[i]));
+      }
+    // REPORTED, not bounded by a guessed constant: the size of this number is
+    // an empirical property of the MMA trajectory under two different Krylov
+    // paths, and the handoff records the measured value. Asserting a tolerance
+    // here would be inventing a threshold no measurement backs.
+    std::printf("[coarsen] deep-block flip 30^3 (Jacobi vs MG): max|drho|=%.3e\n",
+                max_drho);
+    CHECK(same, "DEEP-BLOCK FLIP: both runs produced the same variant count");
   }
 
   // ---------------------------------------------------------------------------

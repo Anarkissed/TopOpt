@@ -141,30 +141,85 @@ constexpr int kMgLatchThreshold = 3;  // consecutive stagnations -> latch MG off
 thread_local int g_mg_consecutive_stagnations = 0;
 thread_local bool g_mg_latched = false;
 
-// --- Parity padding of the MG index space (task: multigrid-odd-axis-cliff) ---
-// 0 = OFF (legacy: an odd fine axis rejects the hierarchy), 1 = AUTO (default:
-// pad the hierarchy's INDEX SPACE to mg_pad_target when a fine axis is odd;
-// all-even grids take the legacy path byte-identically), 2 = FORCE (tests only:
-// pad even a fully-coarsenable grid by one extra 2^L block per axis, to prove
-// the pad is bit-identical on a control grid). Thread-local like the latch:
-// the driver issues a run's solves on one thread.
+// --- Parity padding of the MG index space (task: multigrid-odd-axis-cliff;
+// scope widened by task multigrid-deep-block-pad) ---
+// 0 = OFF (legacy: any grid the coarsening rule rejects — odd fine axis OR
+// all-even deep-blocked — rejects the hierarchy), 1 = AUTO (default: pad the
+// hierarchy's INDEX SPACE to mg_pad_target whenever the UNPADDED grid would be
+// rejected; grids that already coarsen take the legacy path byte-identically),
+// 2 = FORCE (tests only: pad even a fully-coarsenable grid by one extra 2^L
+// block per axis, to prove the pad is bit-identical on a control grid).
+// Thread-local like the latch: the driver issues a run's solves on one thread.
 constexpr int kMgPadOff = 0, kMgPadAuto = 1, kMgPadForce = 2;
 thread_local int g_mg_parity_pad_mode = kMgPadAuto;
+
+// Actual active DOFs the UNPADDED halving walk would leave at its structural
+// stop depth (mg_unpadded_stop_depth): the kept fine DOFs whose node
+// coordinates are all multiples of 2^d — exactly the coincident-node injection
+// rule every level applies (see build_hierarchy / build_mf_hierarchy), applied
+// transitively. Active counts are monotone non-increasing in depth and the
+// builder walks until they fit kMgCoarseDofCap or the structure blocks, so
+// `this count <= kMgCoarseDofCap` predicts EXACTLY whether the unpadded build
+// succeeds — except the vanishing corner (actives hitting 0 at some level
+// makes the builder reject while the count reads 0 <= cap); there the
+// prediction errs toward NOT padding, i.e. today's rejection is preserved.
+// Returns -1 when the question does not arise (an odd fine axis, a grid the
+// conservative bound already accepts, or no halving possible). O(ng), no
+// allocation — run once per hierarchy build, only on the deep-block branch.
+template <class GetGdof>
+std::int64_t mg_unpadded_stop_active(int fex, int fey, int fez, int ng,
+                                     GetGdof&& gdof_of) {
+  if ((fex & 1) || (fey & 1) || (fez & 1)) return -1;
+  if (mg_grid_coarsenable(fex, fey, fez)) return -1;
+  const int d = mg_unpadded_stop_depth(fex, fey, fez);
+  if (d < 1) return -1;
+  const int nnx = fex + 1, nny = fey + 1;
+  const int step = 1 << d;
+  std::int64_t n = 0;
+  for (int r = 0; r < ng; ++r) {
+    const int node = gdof_of(r) / 3;
+    const int a = node % nnx;
+    const int b = (node / nnx) % nny;
+    const int c = node / (nnx * nny);
+    if (a % step == 0 && b % step == 0 && c % step == 0) ++n;
+  }
+  return n;
+}
 
 // The element extents the hierarchy is BUILT on: the real (fex,fey,fez), or the
 // padded index-space extents when the parity pad engages. The padded extents
 // only ever add virtual HIGH-side planes whose nodes stay inactive (-1), so the
 // operator, RHS and kept-DOF numbering are untouched; only the hierarchy's
 // geometric bookkeeping grows. Returns true when padding engaged.
+// `unpadded_stop_active` is mg_unpadded_stop_active for this solve's kept-DOF
+// map (or -1 when not applicable): the deep-block branch consults it so a
+// bound-rejected grid whose ACTUAL active set still fits the cap at the walk
+// stop — a build that succeeds today — is left byte-identically alone.
 bool mg_effective_extents(int fex, int fey, int fez, int& pex, int& pey,
-                          int& pez) {
+                          int& pez, std::int64_t unpadded_stop_active = -1) {
   pex = fex;
   pey = fey;
   pez = fez;
   const int mode = g_mg_parity_pad_mode;
   if (mode == kMgPadOff) return false;
-  const bool fine_odd = (fex & 1) || (fey & 1) || (fez & 1);
-  if (!fine_odd && mode != kMgPadForce) return false;  // walk-back regime: no pad
+  // Engage only when the UNPADDED grid would be rejected: an odd fine axis
+  // (structural — no halving is ever possible), or an all-even deep block
+  // whose actual actives at the walk stop exceed the cap. A grid that already
+  // coarsens — by the conservative bound or by its actual active count —
+  // keeps the legacy path byte-identically; the acceptance rule itself
+  // (all-axes-even + DOF cap) is never relaxed: padded extents halve cleanly
+  // at every level. Widening the scope to deep blocks re-tested PR #151's
+  // harm finding first (task: multigrid-deep-block-pad — see that handoff);
+  // the 127 stagnation latch and the 128 budget-300 raise stand unchanged
+  // and bound any field where the padded hierarchy cannot contract.
+  if (mode != kMgPadForce) {
+    const bool fine_odd = (fex & 1) || (fey & 1) || (fez & 1);
+    if (!fine_odd) {
+      if (mg_grid_coarsenable(fex, fey, fez)) return false;
+      if (unpadded_stop_active >= 0 && unpadded_stop_active <= kMgCoarseDofCap)
+        return false;  // the unpadded build succeeds today: leave it alone
+    }
+  }
   int px, py, pz;
   const int L = mg_pad_target(fex, fey, fez, px, py, pz);
   if (L == 0) return false;  // too small to host any hierarchy: legacy rejection
@@ -544,12 +599,17 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
     // Active-DOF map on the fine node grid: (node*3+comp) -> survivor id (== row
     // of Kgg). The survivor id r maps back to global DOF s.freedofs[kept[r]], from
     // which the node and component are recovered. The map lives on the parity-
-    // padded INDEX-SPACE node grid (identical to the real grid unless a fine
-    // axis is odd — task: multigrid-odd-axis-cliff); the virtual pad nodes stay
-    // -1, so the hierarchy involves exactly the real active DOFs.
+    // padded INDEX-SPACE node grid (identical to the real grid whenever the
+    // grid already coarsens — tasks multigrid-odd-axis-cliff /
+    // multigrid-deep-block-pad); the virtual pad nodes stay -1, so the
+    // hierarchy involves exactly the real active DOFs.
     const int nnx = grid.nx + 1, nny = grid.ny + 1, nnz = grid.nz + 1;
     int pex, pey, pez;
-    mg_effective_extents(grid.nx, grid.ny, grid.nz, pex, pey, pez);
+    mg_effective_extents(
+        grid.nx, grid.ny, grid.nz, pex, pey, pez,
+        mg_unpadded_stop_active(grid.nx, grid.ny, grid.nz, ng, [&](int r) {
+          return s.freedofs[static_cast<std::size_t>(kept[static_cast<std::size_t>(r)])];
+        }));
     const int pnnx = pex + 1, pnny = pey + 1, pnnz = pez + 1;
     std::vector<int> active(static_cast<std::size_t>(pnnx) * pnny * pnnz * 3, -1);
     for (int r = 0; r < ng; ++r) {
@@ -859,14 +919,19 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
 bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
                         MfHierarchy& out) {
   const int fex = nnx - 1, fey = nny - 1, fez = nnz - 1;  // fine element dims
-  // Parity pad (task: multigrid-odd-axis-cliff): an odd fine axis used to fail
-  // this gate outright — the whole run then rode Jacobi-CG. The hierarchy is
+  // Parity pad (task: multigrid-odd-axis-cliff / multigrid-deep-block-pad): a
+  // grid the coarsening rule rejects — odd fine axis or all-even deep block —
+  // used to fail this gate outright; the whole run then rode Jacobi-CG. The
+  // hierarchy is
   // instead built on the padded INDEX SPACE extents; the virtual high-side
   // nodes are inactive everywhere below, so P0's rows, A1 and every coarse
-  // operator involve exactly the real active DOFs. Unpadded grids leave
-  // (pex,pey,pez) == (fex,fey,fez) and this function byte-identical to before.
+  // operator involve exactly the real active DOFs. Grids that already coarsen
+  // leave (pex,pey,pez) == (fex,fey,fez) and this function byte-identical.
   int pex, pey, pez;
-  mg_effective_extents(fex, fey, fez, pex, pey, pez);
+  mg_effective_extents(fex, fey, fez, pex, pey, pez,
+                       mg_unpadded_stop_active(fex, fey, fez, m.ng, [&](int r) {
+                         return m.kept_global[static_cast<std::size_t>(r)];
+                       }));
   if ((pex & 1) || (pey & 1) || (pez & 1)) return false;
   const int cex = pex / 2, cey = pey / 2, cez = pez / 2;
   if (cex < kMinCoarseElems || cey < kMinCoarseElems || cez < kMinCoarseElems)
