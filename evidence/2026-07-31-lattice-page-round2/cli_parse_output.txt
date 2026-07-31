@@ -1,0 +1,10 @@
+The emitted job carries lattice.regions: 1 exclude bolt + 1 include face.
+Schema parse runs BEFORE model import; a *post-parse* failure proves the
+regions were accepted (real_cli_smoke.py discipline).
+
+== full representative job (design_box + lattice) (exit 1) ==
+topopt-cli: lattice certification does not support a design box (add-material) run: the certification load case cannot be reconstructed under domain expansion. Run the lattice job without a design box.
+
+== lattice job without design box (the valid combination) (exit 1) ==
+topopt-cli: cannot open STEP file: /var/folders/zl/sj5nw1m16b7d42wq9ly1kyqm0000gn/T/tmpz15_viat/m.step
+

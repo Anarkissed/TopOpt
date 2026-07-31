@@ -1,0 +1,1 @@
+topopt-cli: analyze: cannot build the declared load case against model "l-bracket.step": load group 0 face id 137 is out of range — the model carries 10 faces (valid ids 0..9). The load case appears to have been authored on a different model or import than the one being analyzed.

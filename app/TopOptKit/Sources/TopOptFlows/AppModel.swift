@@ -257,7 +257,10 @@ public final class AppModel: ObservableObject {
         let latticeSpec = project.lattice.runSpec(
             topology: project.lattice.topologyID,
             memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.wallLineWidthOuterMM)
+            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            // Round-2 (M3): the include/exclude regions — role groups' primitives +
+            // faces and the legacy include primitives — ride `lattice.regions`.
+            regions: project.latticeJobRegions().regions)
         return RunRequest(modelPath: file.path, material: project.material,
                           materialsPath: materialsPath, rulesPath: rulesPath,
                           resolution: project.quality.resolution,

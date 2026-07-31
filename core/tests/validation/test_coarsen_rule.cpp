@@ -25,9 +25,11 @@
 #include "topopt/simp.hpp"
 #include "topopt/voxel.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 using topopt::CgInfo;
@@ -141,6 +143,75 @@ int main() {
   CHECK(mg_grid_coarsenable(240, 64, 224),
         "240x64x224 (#151's escalated grid) IS coarsenable — yet MG stagnated there");
   CHECK(mg_grid_coarsenable(112, 112, 112), "112^3 is coarsenable");
+
+  // ---------------------------------------------------------------------------
+  // (1b) PARITY-CLIFF OBSERVABILITY + PAD TARGET (task: multigrid-odd-axis-cliff,
+  // O1-O3). mg_coarsen_plan is the same walk as mg_grid_coarsenable but names
+  // the offending axes; mg_pad_target is the shape the solver pads its index
+  // space to; mg_startup_banner is the run-start message the CLI prints.
+  // ---------------------------------------------------------------------------
+  {
+    using topopt::mg_coarsen_plan;
+    using topopt::mg_pad_target;
+    using topopt::mg_startup_banner;
+    using topopt::MgCoarsenPlan;
+
+    // The plan's accepted bit must agree with the rule EVERYWHERE (brute force).
+    bool agree = true;
+    for (int x = 1; x <= 40 && agree; ++x)
+      for (int y = 1; y <= 40 && agree; ++y)
+        for (int z = 1; z <= 40; ++z)
+          if (mg_coarsen_plan(x, y, z).accepted != mg_grid_coarsenable(x, y, z)) {
+            agree = false;
+            break;
+          }
+    CHECK(agree, "mg_coarsen_plan.accepted == mg_grid_coarsenable on 1..40^3");
+
+    // The REAL run: 128x31x118 (fields.bin of the six-hour Jacobi run). The
+    // plan names y as the odd axis; the pad target is 128x32x120 at depth 3.
+    const MgCoarsenPlan real = mg_coarsen_plan(128, 31, 118);
+    CHECK(!real.accepted && real.odd_stop && real.odd_axis_mask == 2 &&
+              real.levels == 1,
+          "plan(128x31x118): rejected at level 1 with y the odd axis");
+    int px = 0, py = 0, pz = 0;
+    CHECK(mg_pad_target(128, 31, 118, px, py, pz) == 3 && px == 128 &&
+              py == 32 && pz == 120,
+          "pad target(128x31x118) = 128x32x120 at depth 3");
+    // NOTE (the task's own example remedy 128x32x118 would NOT work: 118
+    // allows only one halving, leaving the coarsest far over the DOF cap).
+    CHECK(!mg_grid_coarsenable(128, 32, 118),
+          "128x32x118 is still not coarsenable (depth-1 z limiter)");
+    CHECK(mg_grid_coarsenable(128, 32, 120), "128x32x120 IS coarsenable");
+
+    // O3 — the banner FIRES for the odd-axis grid (WARNING when the pad is
+    // off, NOTE naming the pad when it is on) and stays SILENT for a fully
+    // coarsenable one.
+    char buf[512];
+    CHECK(mg_startup_banner(128, 31, 118, /*pad_enabled=*/false, buf,
+                            sizeof(buf)) == 2,
+          "banner: odd-axis grid with pad off -> WARNING");
+    CHECK(std::strstr(buf, "y=31") != nullptr &&
+              std::strstr(buf, "128x32x120") != nullptr,
+          "banner: warning names the odd axis and the concrete remedy shape");
+    CHECK(mg_startup_banner(128, 31, 118, /*pad_enabled=*/true, buf,
+                            sizeof(buf)) == 1,
+          "banner: odd-axis grid with pad on -> NOTE (solver pads, MG engages)");
+    CHECK(std::strstr(buf, "128x32x120") != nullptr,
+          "banner: note names the padded index-space shape");
+    CHECK(mg_startup_banner(128, 32, 120, /*pad_enabled=*/true, buf,
+                            sizeof(buf)) == 0,
+          "banner: fully coarsenable grid -> silent");
+    // The all-even deep-blocked regime (the withdrawn PR #151 escalation) is
+    // NOT padded — the banner reports the honest WARNING with the remedy.
+    CHECK(mg_startup_banner(232, 64, 216, /*pad_enabled=*/true, buf,
+                            sizeof(buf)) == 2,
+          "banner: all-even deep-blocked grid stays a WARNING (no pad engages)");
+    CHECK(std::strstr(buf, "240x64x224") != nullptr,
+          "banner: deep-block warning still states the remedy shape");
+    // Too small to host any hierarchy: pad target refuses, banner warns.
+    CHECK(mg_pad_target(2, 1, 1, px, py, pz) == 0,
+          "pad target(2x1x1) = none (kMgMinCoarseElems floor)");
+  }
 
   // ---------------------------------------------------------------------------
   // (2) BYTE-IDENTITY — the extra padding of a deeper alignment does not change
@@ -296,6 +367,8 @@ int main() {
 
   // 30^3 is odd after one halving and the coarsest exceeds the cap -> MG can NEVER
   // build; every solve falls back, and the run reports it (the honesty guarantee).
+  // The parity pad does NOT engage here: the FINE extents are all even, so this
+  // (the walk-back regime of PR #151) keeps today's behavior byte-for-byte.
   CHECK(!mg_grid_coarsenable(30, 30, 30), "30^3 is NOT coarsenable");
   const MinimizePlasticResult rf = run_self_weight(30);
   std::printf("[coarsen] self-weight 30^3: used_multigrid=%d mg_levels=%d\n",
@@ -303,6 +376,46 @@ int main() {
   CHECK(!rf.used_multigrid,
         "REPORT: a non-coarsenable run reports used_multigrid=false (loud fallback)");
   CHECK(rf.mg_levels == 0, "REPORT: mg_levels is 0 when MG never engaged");
+
+  // (4b) PARITY PAD at the run level (task: multigrid-odd-axis-cliff). 31^3 has
+  // odd FINE extents — exactly the cliff of the real 128x31x118 run — and now
+  // engages multigrid through the index-space pad (to 32^3, depth 2).
+  CHECK(!mg_grid_coarsenable(31, 31, 31), "31^3 is NOT coarsenable unpadded");
+  const MinimizePlasticResult rp = run_self_weight(31);
+  std::printf("[coarsen] self-weight 31^3: used_multigrid=%d mg_levels=%d\n",
+              rp.used_multigrid, rp.mg_levels);
+  CHECK(rp.used_multigrid,
+        "PARITY PAD: an odd-extent run now engages multigrid");
+  CHECK(rp.mg_levels >= 2, "PARITY PAD: a real >=2-level hierarchy carried it");
+
+  // (4c) PAD NEUTRALITY at the run level (O4): FORCE-padding the coarsenable
+  // 32^3 control run must leave EVERY optimizer output identical — the design
+  // bytes, the achieved vf, the mass and margins all flow from the solves, and
+  // the padded hierarchy is the same operator set, so the whole run is
+  // bit-identical. Any drift here would mean the pad touched the physics.
+  {
+    const MinimizePlasticResult base = run_self_weight(32);
+    topopt::fea_set_mg_parity_pad_mode(2);  // FORCE
+    const MinimizePlasticResult padded = run_self_weight(32);
+    topopt::fea_set_mg_parity_pad_mode(1);
+    CHECK(base.used_multigrid && padded.used_multigrid,
+          "PAD NEUTRALITY: multigrid engaged on both control runs");
+    bool same = base.evaluated.size() == padded.evaluated.size();
+    double max_drho = 0.0;
+    if (same) {
+      for (std::size_t v = 0; v < base.evaluated.size(); ++v) {
+        const auto& a = base.evaluated[v].optimization.physical_density;
+        const auto& b = padded.evaluated[v].optimization.physical_density;
+        if (a.size() != b.size()) { same = false; break; }
+        for (std::size_t i = 0; i < a.size(); ++i)
+          max_drho = std::max(max_drho, std::abs(a[i] - b[i]));
+      }
+    }
+    std::printf("[coarsen] pad neutrality 32^3: variants %zu/%zu max|drho|=%.3e\n",
+                base.evaluated.size(), padded.evaluated.size(), max_drho);
+    CHECK(same && max_drho == 0.0,
+          "PAD NEUTRALITY: FORCE-padded control run is BIT-IDENTICAL");
+  }
 
   // ---------------------------------------------------------------------------
   // (5) STAGNATION LATCH (Amendment 2) — a high-contrast checkerboard field on a

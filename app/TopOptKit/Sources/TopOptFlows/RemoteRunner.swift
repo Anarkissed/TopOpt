@@ -657,6 +657,31 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 // with the user's outer line width — the number stays core-owned.
                 block["min_extrudable_width_mm"] = w
             }
+            // Include/exclude regions (`lattice.regions`, PR 256's schema — round-2
+            // wired the emission the page copy wrongly said was impossible). The
+            // geometry mirrors the manual-clearance encoder below, plus the
+            // lattice-face-specific `depth_mm` the schema requires. Empty → key
+            // omitted → byte-identical to a pre-regions lattice job.
+            if !lat.regions.isEmpty {
+                block["regions"] = lat.regions.map { r -> [String: Any] in
+                    let geometry: [String: Any] = r.kind == .face
+                        ? [
+                            "origin": [r.origin.x, r.origin.y, r.origin.z],
+                            "normal": [r.normal.x, r.normal.y, r.normal.z],
+                            "half_u_mm": r.halfUMM,
+                            "half_w_mm": r.halfWMM,
+                            "depth_mm": r.depthMM,
+                        ]
+                        : [
+                            "axis_point": [r.axisPoint.x, r.axisPoint.y, r.axisPoint.z],
+                            "axis_dir": [r.axisDir.x, r.axisDir.y, r.axisDir.z],
+                            "radius_mm": r.radiusMM,
+                            "half_length_mm": r.halfLengthMM,
+                        ]
+                    return ["role": r.role.rawValue, "kind": r.kind.rawValue,
+                            "geometry": geometry]
+                }
+            }
             job["lattice"] = block
         }
         // The declared load case is emitted for EVERY model source — STEP B-rep

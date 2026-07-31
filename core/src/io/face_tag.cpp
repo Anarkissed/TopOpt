@@ -19,10 +19,28 @@
 
 #include <cmath>
 #include <stdexcept>
+#include <string>
 
 namespace topopt {
 
 namespace {
+
+// The one out-of-range diagnostic (task analyze-loadcase-resolution, N5): name
+// the id, the count available and the valid range — never the bare "face_id out
+// of range" the maintainer's device surfaced, which named none of them. A model
+// with NO faces at all (an exported variant mesh, or a model whose
+// face-overrides sidecar was not found) is called out as such: no id can ever
+// resolve against it, which is a different user problem than one bad id.
+std::string face_id_range_error(const char* what, int face_id, int face_count) {
+  if (face_count <= 0)
+    return std::string(what) + ": face_id " + std::to_string(face_id) +
+           " out of range — this model carries no face ids at all (0 faces): "
+           "an exported variant mesh, or a model whose face-overrides sidecar "
+           "was not found. Face selections cannot be resolved against it.";
+  return std::string(what) + ": face_id " + std::to_string(face_id) +
+         " out of range — the model carries " + std::to_string(face_count) +
+         " faces (valid ids 0.." + std::to_string(face_count - 1) + ")";
+}
 
 // Squared distance from point p to the triangle (a,b,c), via the closest point
 // on the triangle (Ericson, Real-Time Collision Detection, ClosestPtPointTri).
@@ -90,7 +108,8 @@ std::size_t tag_face_impl(VoxelGrid& grid, const StepModel& model, int face_id,
     throw std::invalid_argument(std::string(what) +
                                 ": tag must be Load or Fixture");
   if (face_id < 0 || face_id >= model.face_count)
-    throw std::invalid_argument(std::string(what) + ": face_id out of range");
+    throw std::invalid_argument(
+        face_id_range_error(what, face_id, model.face_count));
   if (model.triangle_face.size() != model.mesh.triangles.size())
     throw std::invalid_argument(
         std::string(what) + ": triangle_face is not parallel to mesh.triangles");
@@ -146,7 +165,8 @@ std::size_t mask_step_face(const VoxelGrid& grid, const StepModel& model,
   if (depth_voxels < 1)
     throw std::invalid_argument("mask_step_face: depth_voxels must be >= 1");
   if (face_id < 0 || face_id >= model.face_count)
-    throw std::invalid_argument("mask_step_face: face_id out of range");
+    throw std::invalid_argument(
+        face_id_range_error("mask_step_face", face_id, model.face_count));
   if (mask.size() != grid.voxel_count())
     throw std::invalid_argument("mask_step_face: mask size != voxel_count");
   if (model.triangle_face.size() != model.mesh.triangles.size())

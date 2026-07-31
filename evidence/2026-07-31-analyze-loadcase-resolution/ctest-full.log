@@ -1,0 +1,15 @@
+      Start 83: loadcase_resolution
+80/86 Test #83: loadcase_resolution ..............   Passed    0.26 sec
+      Start 84: loadcase_analyze
+81/86 Test #70: rung_infeasible ..................   Passed   45.67 sec
+      Start 85: lattice_hookup
+82/86 Test #84: loadcase_analyze .................   Passed    1.42 sec
+      Start 86: mesh_job
+83/86 Test #86: mesh_job .........................   Passed    8.03 sec
+84/86 Test #80: clearance_parity .................   Passed   17.09 sec
+85/86 Test #85: lattice_hookup ...................   Passed   14.72 sec
+86/86 Test #78: cli_demo .........................   Passed  269.94 sec
+
+100% tests passed out of 86
+
+Total Test time (real) = 571.17 sec

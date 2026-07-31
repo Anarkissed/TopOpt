@@ -1,0 +1,16 @@
+  [L1 self-weight] reproduction check
+[loadcase] load-group 0: faces=1 |F|=1.5e+03N voxels_tagged=16 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+  [L2 loadcase] reproduction check
+[loadcase] load-group 0: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] warm_start_inherit=0 mode=self-weight
+[loadcase] load-group 0: faces=1 |F|=800N voxels_tagged=384 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+FAIL (line 535): N5: the diagnostic names the offending id (999999)
+FAIL (line 538): N5: the diagnostic names the face count available on the model
+FAIL (line 540): N5: the diagnostic names the mesh the id was resolved against
+[loadcase] load-group 0: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] warm_start_inherit=0 mode=self-weight
+FAIL (line 564): N4: the refusal names the group that resolved to nothing
+FAIL (line 566): N4: the refusal says WHY (this group's force is zero)
+63 checks, 5 failures

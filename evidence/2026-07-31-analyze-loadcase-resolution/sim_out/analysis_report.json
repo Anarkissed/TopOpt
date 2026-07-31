@@ -1,0 +1,39 @@
+{
+  "material": "PLA",
+  "variants": [],
+  "rejected_variants": [
+    {
+      "volume_fraction": 1,
+      "printed_fraction": 1,
+      "volume_saved_fraction": 0,
+      "max_stress_mpa": 73.57964054,
+      "max_interlayer_tension_mpa": 25.86056594,
+      "margin": {
+        "in_plane": 0.7474893816,
+        "interlayer": 1.169734648,
+        "worst_case": 0.7474893816
+      },
+      "orientation": {
+        "x": 0,
+        "y": 0,
+        "z": 1
+      },
+      "settings": {
+        "family": "fdm",
+        "walls": 6,
+        "top_layers": 7,
+        "bottom_layers": 6,
+        "infill_percent": 60,
+        "infill_pattern": "gyroid",
+        "print_mode": "",
+        "warning": "Predicted stress margin is below 1.2x even at maximum reinforcement - this variant may fail under the specified load. Consider a higher volume fraction variant, a stronger material, or revised loads."
+      },
+      "min_feature_violations": 0,
+      "min_feature_warning": "",
+      "accepted": false,
+      "margin_required": 1.5,
+      "margin_effective": 0.7474893816,
+      "rejection_reason": "margin below required"
+    }
+  ]
+}

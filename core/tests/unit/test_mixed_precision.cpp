@@ -325,6 +325,10 @@ int main() {
   {
     const double E = 2100.0;
     VoxelGrid g = make_solid_grid(15, 6, 6, 1.0);  // 15 odd -> no coarsening
+    // Parity padding (task: multigrid-odd-axis-cliff) would now rescue this
+    // odd grid; switch it OFF so the block keeps exercising the mixed-ON
+    // fallback path it exists to prove.
+    topopt::fea_set_mg_parity_pad_mode(0);
     std::vector<DirichletBC> bcs = clamp_x0_face(g);
     std::vector<NodalLoad> loads = tip_load_z(g, -10.0);
 
@@ -338,6 +342,7 @@ int main() {
           "fallback: with mixed ON, an odd grid falls back to matrix-free Jacobi-CG");
     CHECK(max_rel_diff(direct, mf) <= 1e-6,
           "fallback: the Jacobi-CG fallback still matches the direct solve");
+    topopt::fea_set_mg_parity_pad_mode(1);
     (void)near;
   }
 

@@ -1,0 +1,1 @@
+version=1 grid=64x43x64 origin=(-30.000,-20.000,0.000) spacing=0.9375 variants=0

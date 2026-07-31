@@ -144,6 +144,38 @@ struct ProductionLoadCase {
 using LoadcaseLogFn = std::function<void(const std::string& line)>;
 LoadcaseLogFn set_loadcase_log_sink(LoadcaseLogFn sink);
 
+// Task analyze-loadcase-resolution — the STRUCTURED twin of the per-group log
+// line above. build_production_loadcase already knew, for every declared load
+// group, whether it contributed a traction and why not; but that knowledge only
+// reached a stderr log sink, so both front-ends refused an empty load case with
+// a message that named no group and no reason ("nothing to certify under").
+// These reports carry the same facts on ProductionRunSetup so a refusal can be
+// composed legibly (no_external_load_message below), and a front-end can show
+// per-group numbers without parsing log lines.
+struct LoadGroupReport {
+  enum class Status {
+    Ok,          // the group's faces tagged voxels; its traction is in external_loads
+    ZeroForce,   // |force| == 0 — the group was skipped before resolution
+    ZeroTagged,  // faces resolved but tagged NO solid voxels at this resolution
+  };
+  std::size_t index = 0;        // the group's position in lc.load_groups
+  std::vector<int> face_ids;    // the group's declared faces
+  double force_mag = 0.0;       // |force| in newtons
+  std::size_t voxels_tagged = 0;
+  Status status = Status::Ok;
+};
+
+struct ProductionRunSetup;  // below
+
+// Compose the legible half of an empty-load-case refusal from the per-group
+// reports: WHICH group resolved to nothing and WHY ("group 0 (faces [3], |F|=100
+// N): its faces tagged no voxels at resolution 64 — ..."; "group 1: zero force
+// — ..."). The caller prefixes its own framing (the CLI adds the self-weight
+// refusal sentence; the bridge its sim wording). The refusal itself stays as
+// loud as before — this only makes it actionable.
+std::string no_external_load_message(const ProductionRunSetup& setup,
+                                     int resolution);
+
 // The grid, Dirichlet BCs and fully-configured options a production load-case run
 // hands to minimize_plastic. `options` already has configure_production_options
 // applied (solver/projection/min-feature/Galerkin) PLUS the load case (external
@@ -190,6 +222,12 @@ struct ProductionRunSetup {
     bool thinner_than_depth = false; // the face's solid was shallower than depth
   };
   std::vector<FaceProtectionReport> face_protection_reports;
+
+  // Task analyze-loadcase-resolution — one report per DECLARED load group (in
+  // declaration order, always parallel to lc.load_groups), the structured twin
+  // of the per-group log line. When external_loads comes back empty these are
+  // what make the refusal legible (no_external_load_message).
+  std::vector<LoadGroupReport> load_group_reports;
 };
 
 // Build the production run setup for `lc` from the imported `model`, voxelized at

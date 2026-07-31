@@ -1,0 +1,32 @@
+{
+  "_comment": "negative: RAW face id 137 on a 10-face model (the device failure class)",
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "analyze",
+  "resolution": 64,
+  "loads": {
+    "anchors": [
+      {
+        "kind": "cylindrical",
+        "radius_mm": 2.5
+      }
+    ],
+    "groups": [
+      {
+        "face_ids": [
+          137
+        ],
+        "force": [
+          0.0,
+          0.0,
+          -800.0
+        ]
+      }
+    ]
+  },
+  "output": {
+    "report": "analysis_report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  }
+}

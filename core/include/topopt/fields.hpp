@@ -80,8 +80,19 @@ inline constexpr std::uint8_t kFieldsFormatVersion = 1;
 // disagree with the grid (a bug — better to fail loudly than ship a corrupt
 // container the app would misindex). Returns the number of accepted variants
 // written (0 writes a valid header with variant_count 0).
+//
+// `accepted_only = false` serialises EVERY evaluated variant that carries a
+// field, regardless of verdict. The ANALYZE route needs this (task
+// analyze-loadcase-resolution, N3): its one pseudo-variant mirrors the margin
+// verdict, and under the default filter a REJECTED analyze wrote an EMPTY
+// container — the field was computed and then dropped, so the app's Auto
+// density overlay went flat exactly when the part was overstressed (when the
+// field matters most). The field describes the design under the declared load
+// either way; the verdict travels separately in the receipt. The optimize
+// (`run`) path keeps the default — byte-identical behavior.
 int write_fields_file(const std::string& path,
                       const MinimizePlasticResult& result,
-                      const VoxelGrid& solved_grid);
+                      const VoxelGrid& solved_grid,
+                      bool accepted_only = true);
 
 }  // namespace topopt

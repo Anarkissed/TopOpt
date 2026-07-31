@@ -53,8 +53,11 @@
 
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -527,6 +530,17 @@ void test_analyze_job_integration() {
     CHECK(threw, "L5: a nonexistent load face makes analyze_job THROW");
     CHECK(what.find("out of range") != std::string::npos,
           "L5: the diagnostic names the out-of-range face");
+    // Task analyze-loadcase-resolution (N5): out-of-range must be LEGIBLE, not
+    // just loud — the id, the count available, and the mesh it was resolved
+    // against are all in the message (the maintainer's device surfaced the raw
+    // "tag_step_face: face_id out of range", which names none of them).
+    CHECK(what.find("999999") != std::string::npos,
+          "N5: the diagnostic names the offending id (999999)");
+    CHECK(what.find(std::to_string(model.face_count) + " faces") !=
+              std::string::npos,
+          "N5: the diagnostic names the face count available on the model");
+    CHECK(what.find("l-bracket.step") != std::string::npos,
+          "N5: the diagnostic names the mesh the id was resolved against");
   }
 
   // (L5-b) A zero-force load group produces NO external load; analyze_job REFUSES
@@ -546,6 +560,64 @@ void test_analyze_job_integration() {
     CHECK(what.find("SELF-WEIGHT") != std::string::npos ||
               what.find("self-weight") != std::string::npos,
           "L5: the diagnostic explicitly refuses the self-weight fallback");
+    // Task analyze-loadcase-resolution (N4): the refusal must say WHICH group
+    // resolved to nothing and WHY — "every group zero-force or tagged no
+    // voxels" tells the user nothing they can act on.
+    CHECK(what.find("group 0") != std::string::npos,
+          "N4: the refusal names the group that resolved to nothing");
+    CHECK(what.find("zero force") != std::string::npos,
+          "N4: the refusal says WHY (this group's force is zero)");
+  }
+
+  // (N3) A REJECTED loadcase analyze still SERVES its field. The analyze
+  // pseudo-variant mirrors the margin verdict, and the fields writer's
+  // accepted-only default therefore wrote an EMPTY fields.bin whenever the
+  // verdict was REJECTED — the field was computed, then dropped, and the app's
+  // Auto density overlay went flat exactly when the part was overstressed. A
+  // deliberately crushing force guarantees rejection; the container must still
+  // carry ONE variant with a non-zero von Mises field.
+  {
+    const JobDescription job =
+        lbracket_loadcase_job({load_face}, Vec3{0.0, 0.0, -80000.0});
+    AnalyzeJobResult r;
+    bool ok = true;
+    try {
+      r = analyze_job(job, dir, out, materials, rules);
+    } catch (const std::exception& e) {
+      ok = false;
+      std::fprintf(stderr, "  analyze_job(crushing load) threw: %s\n", e.what());
+    }
+    CHECK(ok, "N3: a crushing load analyzes (rejection is a verdict, not an error)");
+    if (ok) {
+      CHECK(!r.analysis.accepted,
+            "N3: the crushing load is REJECTED by the margin gate");
+      std::ifstream in(r.fields_path, std::ios::binary);
+      std::vector<char> bytes((std::istreambuf_iterator<char>(in)),
+                              std::istreambuf_iterator<char>());
+      bool fields_ok = bytes.size() > 64;
+      std::int32_t variant_count = 0;
+      if (fields_ok) {
+        std::memcpy(&variant_count, bytes.data() + 56, sizeof(variant_count));
+        fields_ok = variant_count == 1;
+      }
+      CHECK(fields_ok,
+            "N3: the REJECTED analyze's fields.bin still carries its ONE variant");
+      if (fields_ok) {
+        // First variant block starts at 64: 16 (vf+mass) + 8 (support+pad) +
+        // 24 (three i64 counts) then the f32 von Mises array.
+        std::int64_t vm_count = 0;
+        std::memcpy(&vm_count, bytes.data() + 64 + 24, sizeof(vm_count));
+        CHECK(vm_count > 0, "N3: the served variant carries a von Mises field");
+        float vm_max = 0.0f;
+        const char* vm0 = bytes.data() + 64 + 48;
+        for (std::int64_t i = 0; i < vm_count; ++i) {
+          float x;
+          std::memcpy(&x, vm0 + 4 * i, sizeof(x));
+          if (x > vm_max) vm_max = x;
+        }
+        CHECK(vm_max > 0.0f, "N3: the served von Mises field is non-zero");
+      }
+    }
   }
 
   // (L1 regression) A self-weight analyze_job (no loads block) still runs after the

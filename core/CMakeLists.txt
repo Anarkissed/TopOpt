@@ -1201,6 +1201,18 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   target_link_libraries(test_loadcase_small_face PRIVATE topopt)
   add_test(NAME loadcase_small_face COMMAND test_loadcase_small_face)
 
+  # Load-case face-id resolution legibility (task analyze-loadcase-resolution):
+  # an out-of-range anchor/load face id must fail naming the id, the count
+  # available and the valid range (N5); the empty-load-case refusal must name
+  # WHICH group resolved to nothing and WHY through the structured per-group
+  # reports + the shared no_external_load_message composer (N4); a face-id-less
+  # model (exported variant / lost sidecar) is called out as such. Synthetic
+  # in-code StepModel, no OCCT.
+  add_executable(test_loadcase_resolution
+    tests/validation/test_loadcase_resolution.cpp)
+  target_link_libraries(test_loadcase_resolution PRIVATE topopt)
+  add_test(NAME loadcase_resolution COMMAND test_loadcase_resolution)
+
   # Mesh-optimize path (handoff 2026-07-24-mesh-optimize-path): a MESH part
   # (STL/3MF) runs the SAME §5 pipeline run_job drives for a STEP part. Three
   # claims, all needing OCCT for the B-rep ground truth:

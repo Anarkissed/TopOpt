@@ -376,6 +376,13 @@ int main() {
   }
 
   // --- 4a. SOLVE PARITY, JACOBI REGIME (bar I4: iterations within 1) -------
+  // Blocks 4a and 5-7 use ODD grids as the routing device into the Jacobi /
+  // GenEO / recycling regimes they exist to test. The parity pad (task:
+  // multigrid-odd-axis-cliff) would now send those grids to multigrid, so it
+  // is switched OFF here (and restored after block 7) to keep each block in
+  // its intended regime with its assertions verbatim. The padded-odd behavior
+  // itself is asserted in test_mgcg_matfree / test_coarsen_rule.
+  fea_set_mg_parity_pad_mode(0);
   {
     Fixture f = make_fixture(23, 11, 11, /*with_void=*/true);  // odd: no MG
     CgInfo ia, im;
@@ -516,6 +523,7 @@ int main() {
           "recycled solve of the tensor-changed system matches recycling-off "
           "(SPD-additive exactness on the cubic operator)");
   }
+  fea_set_mg_parity_pad_mode(1);  // restore the production default
 
   std::printf("test_matfree_cubic: %d checks, %d failures\n", g_checks,
               g_failures);

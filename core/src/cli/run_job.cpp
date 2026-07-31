@@ -18,6 +18,7 @@
 
 #include "topopt/analyze.hpp"
 #include "topopt/clearance.hpp"
+#include "topopt/coarsen.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/fields.hpp"
 #include "topopt/grading.hpp"
@@ -1255,14 +1256,15 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     } catch (const JobError&) {
       throw;  // already a clean, loud job diagnostic (e.g. a selector match miss)
     } catch (const std::exception& e) {
-      // A raw anchor/load face id outside the model's face set reaches here as a
-      // tag_step_face "face_id out of range" — surface it as a loud analyze-level
-      // diagnostic (L5: a declared load referencing a face that does not exist
-      // must fail, never silently degrade).
-      throw JobError(
-          std::string("analyze: cannot build the declared load case — a load or "
-                      "anchor face id is out of range for this model: ") +
-          e.what());
+      // A raw anchor/load face id outside the model's face set reaches here as
+      // the builder's legible out-of-range diagnostic (validate_face_id names
+      // the id, the count and which selection it came from). The wrap adds the
+      // ONE fact the builder cannot know: WHICH mesh the ids were resolved
+      // against (L5 + N5: a declared load referencing a face that does not
+      // exist must fail loudly, naming id / count / mesh).
+      throw JobError(std::string("analyze: cannot build the declared load "
+                                 "case against model \"") +
+                     job.model + "\": " + e.what());
     }
     // L5 — NEVER silently fall back to self-weight. When the job declared load
     // groups but every one was zero-force or tagged no voxels at this resolution,
@@ -1272,13 +1274,15 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // of the declared load is exactly the silent-degradation bug (PR 178).
     if (setup.options.require_external_loads &&
         setup.options.external_loads.empty())
+      // The refusal stays as LOUD as before; the per-group reports make it
+      // legible — WHICH group resolved to nothing and WHY (N4), instead of the
+      // old "every force group was zero-force or tagged no voxels" that named
+      // neither.
       throw JobError(
-          "analyze: the declared load case produced NO external load — every "
-          "force group was zero-force or its faces tag no voxel at resolution " +
-          std::to_string(job.resolution) +
-          ". Refusing to analyze under SELF-WEIGHT instead of the declared load "
-          "(that silent fallback is the PR-178 param-drop bug). Fix the load "
-          "faces / forces or raise the resolution.");
+          "analyze: the declared load case produced NO external load — " +
+          no_external_load_message(setup, job.resolution) +
+          ". Refusing to analyze under SELF-WEIGHT instead of the declared "
+          "load (that silent fallback is the PR-178 param-drop bug).");
     model_grid = std::move(setup.grid);
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
@@ -1548,7 +1552,12 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   fv.report = vr;
   fields_result.evaluated.push_back(std::move(fv));
   result.fields_path = join_path(out_dir, "fields.bin");
-  write_fields_file(result.fields_path, fields_result, design_grid);
+  // accepted_only = false: the analyze field is served REGARDLESS of the margin
+  // verdict (task analyze-loadcase-resolution, N3). Under the default filter a
+  // REJECTED analyze wrote an empty container — the overlay went flat exactly
+  // when the part was overstressed. The verdict still travels in the receipt.
+  write_fields_file(result.fields_path, fields_result, design_grid,
+                    /*accepted_only=*/false);
 
   // ── analysis.json — the PROVENANCE record (task items 3–5) ───────────────────
   // "smoothed / re-analyzed": analyzed=true, the source, the resolution, BOTH mass
@@ -1795,8 +1804,29 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         production_loadcase_from_job(job, result.model);
     result.fixture_face_ids = lc.anchor_face_ids;
 
-    ProductionRunSetup setup =
-        build_production_loadcase(result.model, job.resolution, lc);
+    ProductionRunSetup setup;
+    try {
+      setup = build_production_loadcase(result.model, job.resolution, lc);
+    } catch (const JobError&) {
+      throw;
+    } catch (const std::exception& e) {
+      // The builder's diagnostics name the id / count / selection (N5); add
+      // the one fact it cannot know — which mesh the ids were resolved against.
+      throw JobError(std::string("run: cannot build the declared load case "
+                                 "against model \"") +
+                     job.model + "\": " + e.what());
+    }
+    // Legible twin of minimize_plastic's require_external_loads guard (which
+    // stays in place as the hard backstop): refuse HERE, where the per-group
+    // reports can say WHICH group resolved to nothing and WHY (N4), instead of
+    // the optimizer's generic "external_loads is empty".
+    if (setup.options.require_external_loads &&
+        setup.options.external_loads.empty())
+      throw JobError(
+          "run: the declared load case produced NO external load — " +
+          no_external_load_message(setup, job.resolution) +
+          ". Refusing to silently optimize under SELF-WEIGHT instead of the "
+          "declared load.");
     grid = std::move(setup.grid);
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
@@ -1873,6 +1903,26 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // The grid the run solves on (the expanded domain under a design box), needed
   // up front so a streamed variant's mesh is resampled on the right grid.
   const VoxelGrid solved_grid = minimize_plastic_solved_grid(grid, options);
+
+  // LOUD PARITY GATE (task: multigrid-odd-axis-cliff, O1/O2). Say at RUN START
+  // what geometric multigrid will do on this grid. The motivating run solved
+  // 128x31x118 — one odd axis — for six hours on Jacobi-CG, discoverable only
+  // in run_info.json afterwards. Now: a grid the solver's parity pad rescues
+  // gets a NOTE naming the odd axes and the padded shape; a grid that will
+  // still reject its hierarchy gets a WARNING naming the offending axes, the
+  // achievable level count and the concrete remedy shape. Coarsenable grids
+  // stay silent. Pure prediction from the same rule the solver enforces
+  // (topopt/coarsen.hpp); the post-run observed warning below is unchanged.
+  if (options.simp.solver == SolverKind::MultigridCG ||
+      options.simp.solver == SolverKind::MultigridCG_Matfree) {
+    char banner[512];
+    if (mg_startup_banner(solved_grid.nx, solved_grid.ny, solved_grid.nz,
+                          fea_mg_parity_pad_mode() != 0, banner,
+                          sizeof(banner)) != 0) {
+      std::fprintf(stderr, "%s\n", banner);
+      std::fflush(stderr);
+    }
+  }
 
   // Job wall clock start (lattice P6: generation time as a fraction of the whole
   // job). Captured here, after import/voxelize, so it spans the solve + export the

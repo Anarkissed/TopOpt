@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <random>
 #include <stdexcept>
@@ -376,7 +377,11 @@ int main() {
   //    hierarchy, so the matrix-free MG-CG must fall back to the EXACT
   //    matrix-free Jacobi-CG (used_multigrid == false) and still return the
   //    correct field (cross-checked against the direct solver).
+  //    Parity padding (task: multigrid-odd-axis-cliff) would now rescue this
+  //    grid, so it is switched OFF for 6 and 7 to keep exercising the fallback
+  //    path; 7b and 7c below assert the NEW padded behavior.
   // ==========================================================================
+  topopt::fea_set_mg_parity_pad_mode(0);
   {
     const double E = 2100.0, nu = 0.30;
     VoxelGrid g = make_solid_grid(15, 6, 6, 1.0);  // 15 odd -> no coarsening
@@ -411,6 +416,84 @@ int main() {
       threw = true;
     }
     CHECK(threw, "fallback: 1-iteration cap on a tight tolerance throws");
+  }
+  topopt::fea_set_mg_parity_pad_mode(1);
+
+  // ==========================================================================
+  // 7b. PARITY PAD (task: multigrid-odd-axis-cliff): with the default AUTO
+  //     pad, the odd 15x6x6 grid of part 6 now BUILDS a hierarchy (index space
+  //     padded to 16x6x6, physics untouched) and matrix-free MG-CG matches the
+  //     direct solver. This is the fix for the real 128x31x118 run that spent
+  //     six hours on Jacobi-CG because ny=31 is odd.
+  // ==========================================================================
+  {
+    const double E = 2100.0, nu = 0.30;
+    VoxelGrid g = make_solid_grid(15, 6, 6, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -10.0);
+
+    FeaSolution direct = topopt::fea_solve(g, E, nu, bcs, loads);
+    CgInfo info;
+    FeaSolution mf =
+        topopt::fea_solve_mgcg_matfree(g, E, nu, bcs, loads, 1e-10, 0, &info);
+    CHECK(info.converged, "parity pad: matrix-free MG-CG converged on odd grid");
+    CHECK(info.used_multigrid,
+          "parity pad: the odd grid now uses the multigrid path");
+    CHECK(info.mg_levels >= 2, "parity pad: a real >=2-level hierarchy built");
+    CHECK(max_rel_diff(direct, mf) <= 1e-6,
+          "parity pad: padded matrix-free MG-CG matches the direct solve");
+  }
+
+  // ==========================================================================
+  // 7c. PAD NEUTRALITY, BIT-FOR-BIT (O4 control): FORCE-padding a fully
+  //     coarsenable even grid (32^3, solid AND soft-void graded) must leave
+  //     the solve BIT-IDENTICAL to the unpadded default — same displacement
+  //     bytes, same iteration count, same level count. The padded index-space
+  //     nodes are inactive, so the hierarchy's operators are the same matrices;
+  //     any difference here would mean the padding touches the physics.
+  // ==========================================================================
+  {
+    const double E = 2100.0, nu = 0.30;
+    VoxelGrid g = make_solid_grid(32, 32, 32, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -10.0);
+
+    // Graded soft-void modulus field (the SIMP high-contrast regime).
+    std::vector<double> ey(g.voxel_count());
+    for (int k = 0; k < g.nz; ++k)
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i)
+          ey[g.index(i, j, k)] =
+              ((i * 7 + j * 3 + k) % 5 == 0) ? 1e-9 * E : E;
+
+    auto bit_identical = [](const FeaSolution& a, const FeaSolution& b) {
+      return a.u.size() == b.u.size() &&
+             std::memcmp(a.u.data(), b.u.data(),
+                         a.u.size() * sizeof(double)) == 0;
+    };
+
+    CgInfo s0, s1, g0, g1;
+    const FeaSolution sa =
+        topopt::fea_solve_mgcg_matfree(g, E, nu, bcs, loads, 1e-10, 0, &s0);
+    const FeaSolution ga =
+        topopt::fea_solve_mgcg_matfree(g, ey, nu, bcs, loads, 1e-10, 0, &g0);
+    topopt::fea_set_mg_parity_pad_mode(2);  // FORCE: pad the control grid
+    const FeaSolution sb =
+        topopt::fea_solve_mgcg_matfree(g, E, nu, bcs, loads, 1e-10, 0, &s1);
+    const FeaSolution gb =
+        topopt::fea_solve_mgcg_matfree(g, ey, nu, bcs, loads, 1e-10, 0, &g1);
+    topopt::fea_set_mg_parity_pad_mode(1);
+
+    CHECK(s0.used_multigrid && s1.used_multigrid,
+          "pad neutrality: MG engaged on both padded and unpadded solves");
+    CHECK(bit_identical(sa, sb),
+          "pad neutrality: solid control solve is BIT-IDENTICAL under FORCE pad");
+    CHECK(bit_identical(ga, gb),
+          "pad neutrality: graded soft-void control solve is BIT-IDENTICAL");
+    CHECK(s0.iterations == s1.iterations && g0.iterations == g1.iterations,
+          "pad neutrality: identical iteration counts (same preconditioner)");
+    CHECK(s0.mg_levels == s1.mg_levels && g0.mg_levels == g1.mg_levels,
+          "pad neutrality: identical level counts");
   }
 
   // ==========================================================================
