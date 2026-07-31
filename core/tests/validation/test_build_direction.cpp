@@ -45,6 +45,7 @@
 #include "topopt/stl.hpp"
 #include "topopt/voxel.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
@@ -52,7 +53,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <chrono>
 
 using namespace topopt;
 
