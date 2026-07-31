@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/build_orientation.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/orient.hpp"
 #include "topopt/report.hpp"
@@ -61,6 +62,43 @@ double infill_margin_knockdown(double infill_percent) {
   return std::max(std::pow(f, kKnockdownExponent), kKnockdownFloor);
 }
 
+double gate_margin_effective(double yield_strength_mpa, double z_knockdown,
+                             double max_von_mises,
+                             double max_von_mises_effective,
+                             double max_interlayer,
+                             const KnockdownSpec& knockdown) {
+  // THE ONE accept-gate expression. Lifted VERBATIM out of analyze_fixed_design
+  // (handoff 2026-08-01-build-direction-separation) so the orientation scorer
+  // prices a candidate's verdict with this exact arithmetic instead of a second
+  // copy. analyze_fixed_design now calls this, so the real gate and the
+  // counterfactual are the same code by construction.
+  if (knockdown.width_aware) {
+    // --- Width-aware posture (handoff 2026-07-26-width-aware-knockdown) --------
+    // In-plane: the worst SOLID-EQUIVALENT von Mises max(vm/k(W)) over the printed
+    // field already folds the per-voxel wall rescue in, so the in-plane effective
+    // margin is yield / max_von_mises_effective. Interlayer: 191/192 measured axial
+    // and bending only — NOT z-bonding — so the interlayer term keeps the UNMODIFIED
+    // f^1.5 (infill_knockdown); passing max_interlayer / infill_knockdown through
+    // compute_stress_margin reproduces margin.interlayer * infill_knockdown exactly,
+    // so the gate is never made LESS conservative than today on interlayer (bar K4).
+    // With no walls (wall_thickness_mm == 0) k(W) == f^1.5 for every voxel, so this
+    // collapses to margin.worst_case * infill_knockdown (the scalar path) to within
+    // floating point — the armed-but-unconfigured run matches the default posture.
+    const double il_scaled = knockdown.infill_knockdown > 0.0
+                                 ? max_interlayer / knockdown.infill_knockdown
+                                 : max_interlayer;
+    return compute_stress_margin(yield_strength_mpa, z_knockdown,
+                                 max_von_mises_effective, il_scaled)
+        .worst_case;
+  }
+  // Default posture: the pure scalar f^1.5 gate, byte-for-byte the pre-width gate
+  // (infill_knockdown == 1.0 for solid/unset infill → the pre-M7.infill gate).
+  return compute_stress_margin(yield_strength_mpa, z_knockdown, max_von_mises,
+                               max_interlayer)
+             .worst_case *
+         knockdown.infill_knockdown;
+}
+
 double wall_area_fraction(double member_width_mm, double wall_thickness_mm) {
   const double W = member_width_mm;
   // An unbounded/degenerate width (the "thicker than we measured" sentinel, or a
@@ -90,7 +128,8 @@ FixedDesignAnalysis analyze_fixed_design(
     const std::vector<NodalLoad>& loads, const Material& material,
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
-    bool load_path_ok, double part_solid, const LatticePosture* lattice) {
+    bool load_path_ok, double part_solid, const LatticePosture* lattice,
+    bool score_build_orientation, bool build_direction_inferred) {
   FixedDesignAnalysis out;
 
   // --- Lattice certification (handoff 2026-07-27-lattice-certification) --------
@@ -331,31 +370,10 @@ FixedDesignAnalysis analyze_fixed_design(
   // stays the SOLID margin; the knockdown scales ONLY what the acceptance test
   // compares). THE CONNECTIVITY BELT ACTS HERE: a severed design is rejected however
   // good its (meaningless, near-zero-stress) margin.
-  double margin_effective;
-  if (knockdown.width_aware) {
-    // --- Width-aware posture (handoff 2026-07-26-width-aware-knockdown) ----------
-    // In-plane: the worst SOLID-EQUIVALENT von Mises max(vm/k(W)) over the printed
-    // field already folds the per-voxel wall rescue in, so the in-plane effective
-    // margin is yield / max_von_mises_eff. Interlayer: 191/192 measured axial and
-    // bending only — NOT z-bonding — so the interlayer term keeps the UNMODIFIED
-    // f^1.5 (infill_knockdown); passing max_interlayer / infill_knockdown through
-    // compute_stress_margin reproduces margin.interlayer * infill_knockdown exactly,
-    // so the gate is never made LESS conservative than today on interlayer (bar K4).
-    // With no walls (wall_thickness_mm == 0) k(W) == f^1.5 for every voxel, so this
-    // collapses to margin.worst_case * infill_knockdown (the scalar path) to within
-    // floating point — the armed-but-unconfigured run matches the default posture.
-    const double il_scaled = knockdown.infill_knockdown > 0.0
-                                 ? max_interlayer / knockdown.infill_knockdown
-                                 : max_interlayer;
-    const StressMargin me =
-        compute_stress_margin(material.yield_strength_mpa, material.z_knockdown,
-                              max_von_mises_eff, il_scaled);
-    margin_effective = me.worst_case;
-  } else {
-    // Default posture: the pure scalar f^1.5 gate, byte-for-byte the pre-width gate
-    // (infill_knockdown == 1.0 for solid/unset infill → the pre-M7.infill gate).
-    margin_effective = margin.worst_case * knockdown.infill_knockdown;
-  }
+  const double margin_effective = gate_margin_effective(
+      material.yield_strength_mpa, material.z_knockdown, max_von_mises,
+      knockdown.width_aware ? max_von_mises_eff : max_von_mises, max_interlayer,
+      knockdown);
   const bool margin_ok = margin_effective >= margin_stop;
 
   out.printed_voxels = printed_voxels;
@@ -419,6 +437,45 @@ FixedDesignAnalysis analyze_fixed_design(
             min_cpm < lattice_cells_per_member_min(lattice->topology);
       }
     }
+  }
+
+  // --- BUILD-ORIENTATION RANKING (handoff 2026-08-01-build-direction-separation)
+  // A POST-PASS. It runs LAST, after `accepted` and `margin_effective` above were
+  // sealed from `build_dir` — the orientation ACTUALLY USED — and it writes only
+  // to `out.build_orientation`. That ordering is the whole safety property (bar
+  // U5): the verdict this analysis reports can never be the verdict of an
+  // orientation the caller did not choose.
+  //
+  // It re-reads what the solve already produced (`stress`, `printed_grid`,
+  // `out.stress_tensor_field`, `lat_mask`, `max_von_mises`, the V3 count) and
+  // re-solves nothing. PR 266 proved that exact: `build_dir` enters this function
+  // at three places, ALL after the solve, and the element stiffness never reads it.
+  if (score_build_orientation) {
+    // The candidate set is derived HERE, from the one function every path calls,
+    // so a run's report, its lattice receipt and a later re-analysis rank the
+    // identical set (PR 266's S5 inconsistency risk).
+    const std::vector<Vec3> candidates = build_orientation_candidates(build_dir);
+    const BuildOrientationSolveFacts facts{
+        grid,
+        printed_grid,
+        stress,
+        out.stress_tensor_field,
+        max_von_mises,
+        knockdown.width_aware ? max_von_mises_eff : max_von_mises,
+        out.v3.min_feature_violations,
+        lattice,
+        has_lattice ? &lat_mask : nullptr,
+        lattice_voxels};
+    out.build_orientation = score_build_orientations(
+        facts, candidates, build_dir, material, knockdown, margin_stop,
+        load_path_ok, build_direction_inferred);
+    // The gate is computed from the orientation ACTUALLY USED, never from the
+    // recommendation. Asserted, not merely commented (bar U5): the as-built row's
+    // priced verdict must agree with the verdict this analysis reports, because
+    // both come from gate_margin_effective on the same `build_dir`.
+    assert(out.build_orientation.candidates[out.build_orientation.as_built_index]
+                   .would_be_accepted == out.accepted &&
+           "U5: the reported verdict must be the as-built orientation's verdict");
   }
   return out;
 }

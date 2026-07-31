@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/build_orientation.hpp"  // BuildOrientationReport
 #include "topopt/fea.hpp"        // DirichletBC
 #include "topopt/materials.hpp"  // Material
 #include "topopt/mesh.hpp"       // Vec3
@@ -40,14 +41,20 @@ namespace topopt {
 //     original-solid weight (rather than each rung's reduced weight) is the
 //     simple, monotone first-order model for this milestone. A density-coupled
 //     self-weight iteration is intentionally out of scope here.
-//   * The PRINT / build orientation is an INPUT (options.gravity_direction is
-//     the direction gravity pulls, i.e. the build-plate normal's opposite; the
-//     reported build direction is its unit negation). The driver does not
-//     re-run the M4.4 orientation search — the app / M4.4 scorer chooses the
-//     orientation and feeds it here as the gravity direction, keeping the
-//     self-weight direction and the reported orientation consistent. The
-//     interlayer-tension term of the margin is evaluated for that build
-//     direction (max_interlayer_tension, M4.4).
+//   * The PRINT / build orientation is an INPUT, and since handoff
+//     2026-08-01-build-direction-separation it is ITS OWN input:
+//     `options.build_direction` (the build-plate normal, "which way is up on
+//     the plate"), resolved through resolve_build_direction. It is NOT
+//     `options.gravity_direction`, which answers the different question "which
+//     way is down in service" and drives self-weight. When no build direction
+//     is declared the documented fallback still derives it as
+//     unit(-gravity_direction) — today's behaviour to the byte — and the
+//     receipt says the direction was assumed. The driver does not search for an
+//     orientation; it CERTIFIES the one it was given, and (opt-in, via
+//     `options.build_orientation_report`) RANKS the alternatives as a
+//     recommendation that never moves the verdict. The interlayer-tension term
+//     of the margin is evaluated for the resolved build direction
+//     (max_interlayer_tension, M4.4).
 //   * Peak stresses are recovered from a final penalized solve on the converged
 //     physical density and taken over the PRINTED material only (voxels whose
 //     physical density > 0.5, the M3.5 iso), using the material's solid modulus
@@ -205,6 +212,43 @@ struct MinimizePlasticOptions {
   // crosses margin_stop.
   double gravity = 9.81;
   Vec3 gravity_direction{0.0, 0.0, -1.0};
+
+  // THE BUILD-PLATE NORMAL — "which way is up on the plate" (handoff
+  // 2026-08-01-build-direction-separation). DISTINCT from `gravity_direction`,
+  // which answers "which way is down in service". The two are different
+  // questions and were conflated at three call sites until this field existed;
+  // PR 266 measured the cost of that conflation on the V5 hook at 9.11x on the
+  // macro interlayer margin and a REJECT/ACCEPT flip at resolution 48.
+  //
+  // (0,0,0) — the DEFAULT — means UNSET, and the documented fallback applies:
+  // build = unit(-gravity_direction), exactly what every call site derived
+  // before this field existed. So an unset build direction is byte-identical to
+  // the pre-separation behaviour, and every existing caller/job/fixture keeps
+  // its output to the byte.
+  //
+  // NEVER read this field directly. Call resolve_build_direction(options)
+  // (production.hpp) — the ONE place the fallback lives, so no call site can
+  // re-derive it differently (the failure mode PR 266's S5 named: a run's
+  // report, its lattice receipt and a later re-analysis certifying against
+  // different orientations, each self-consistent).
+  Vec3 build_direction{0.0, 0.0, 0.0};
+
+  // Arm the ORIENTATION SCORER — a post-pass on the certification solve that
+  // already ran (handoff 2026-08-01-build-direction-separation). Ranks candidate
+  // build directions on six criteria against that ONE solved field; PR 266
+  // measured the whole sweep at 0.1-0.4% of the solve it rides on, and proved it
+  // EXACT (15 full re-solves returned bit-identical fields).
+  //
+  // IT IS A RECOMMENDATION, NEVER AN AUTO-APPLY. `accepted` / `margin_effective`
+  // are computed from resolve_build_direction(options) — the orientation
+  // ACTUALLY USED — strictly before the scorer runs, and the scorer cannot
+  // write to them. When the recommendation would gate differently, the receipt
+  // states both verdicts and the user chooses.
+  //
+  // false (the DEFAULT) => the scorer never runs and no report field is filled:
+  // byte-identical output, the same opt-in discipline as every other posture
+  // flag here.
+  bool build_orientation_report = false;
   // Shared SIMP loop options (filter radius, move limit, iteration cap, CG
   // tolerances). `volume_fraction` is overridden by each ladder rung and is
   // ignored here. `simp.progress` and `simp.cancel` are also overridden by
@@ -753,6 +797,13 @@ struct MinimizePlasticVariant {
   // geometry (voxels with density > 0.5): the count of printed voxels that would
   // need support material. Spacing-aware volume = value * grid.voxel_volume().
   int support_volume_voxels = 0;
+  // (c2) The BUILD-ORIENTATION RANKING for this variant (handoff
+  // 2026-08-01-build-direction-separation). Default-constructed (evaluated ==
+  // false) unless options.build_orientation_report armed the post-pass, so every
+  // existing run is byte-identical. A RECOMMENDATION ONLY: `accepted` and
+  // `margin_effective` above are this variant's verdict for report.orientation —
+  // the orientation ACTUALLY USED — and the ranking cannot move them.
+  BuildOrientationReport build_orientation;
   // (d) Printed mass in grams = material density (g/cm^3) * printed volume,
   // spacing-aware: (# printed voxels) * grid.voxel_volume() (mm^3) / 1000.
   double mass_grams = 0.0;

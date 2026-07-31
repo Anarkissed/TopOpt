@@ -73,6 +73,17 @@ public final class ProjectModel: ObservableObject {
     /// controls are bounded at USE by the core-read `TopOptKit.LatticeLimits`, never here.
     @Published public var lattice = LatticeSettings()
 
+    /// THE SECOND QUESTION (handoff 2026-08-01-build-direction-separation): which
+    /// way is UP ON THE PLATE, as its own project setting rather than an inference
+    /// from the gravity widget's "which way is down in service". Default = nothing
+    /// declared ⇒ the core's documented gravity fallback ⇒ exactly the job this
+    /// project produced before this setting existed.
+    @Published public var buildOrientation = BuildOrientation()
+
+    /// Cache for `orientationRanking`, keyed on the receipt bytes it was decoded
+    /// from, so the view body does not re-parse the JSON on every redraw.
+    private var orientationRankingCache: (Data, OrientationRanking?)?
+
     /// Round-6 item 4: the workspace undo/redo history over the edit slice (selection + force +
     /// design-box). Published so the header's Undo/Redo buttons enable/disable with `canUndo`/
     /// `canRedo`. Fed by a debounced auto-commit (`installUndoAutoCommit`) so a settled edit — a
@@ -113,6 +124,20 @@ public final class ProjectModel: ObservableObject {
     /// The M7.7 run state machine. One per project so a run (and its background
     /// state) survives leaving and returning to the workspace.
     public let run: RunModel
+
+    /// The ranking the last run's build-orientation receipt carried, or nil.
+    ///
+    /// DERIVED from the run's own outcome — never stored independently — so it can
+    /// never describe a different run from the results on screen. A RECOMMENDATION
+    /// the UI displays; it is never applied, and `run.outcome`'s per-variant
+    /// `accepted` remains the verdict of the orientation ACTUALLY certified.
+    public var orientationRanking: OrientationRanking? {
+        guard let data = run.outcome?.buildOrientationJSON else { return nil }
+        if let c = orientationRankingCache, c.0 == data { return c.1 }
+        let decoded = OrientationRanking.decode(data)
+        orientationRankingCache = (data, decoded)
+        return decoded
+    }
 
     /// Whether the project has usable optimize results (≥1 accepted variant) —
     /// drives the Library card's "Optimized" status and the persisted flag.
@@ -371,7 +396,8 @@ public final class ProjectModel: ObservableObject {
     /// (print up) is the negated gravity, or +Z if gravity is unset. Empty for an
     /// STL project (no face selection) — the run then falls back to self-weight.
     public func loadCase() -> (anchorFaceIDs: [Int], loadGroups: [TopOptKit.LoadGroupSpec],
-                               buildDirection: SIMD3<Double>) {
+                               buildDirection: SIMD3<Double>,
+                               plateDirection: SIMD3<Double>) {
         var anchors: [Int] = []
         var loads: [TopOptKit.LoadGroupSpec] = []
         for g in selection.groups {
@@ -387,8 +413,17 @@ public final class ProjectModel: ObservableObject {
                 }
             }
         }
+        // `buildDirection` keeps its LEGACY job: the core derives the service
+        // gravity as its unit negation, so this is the service side and must not
+        // move (changing it would change every existing project's self-weight).
         let up = force.gravity.map { -$0 } ?? SIMD3<Float>(0, 0, 1)
-        return (anchors, loads, SIMD3<Double>(up))
+        // `plateDirection` is the SEPARATED build-plate normal (handoff
+        // 2026-08-01-build-direction-separation). ZERO when the user declared
+        // none — the core then applies its documented gravity fallback and the
+        // job is byte-identical to what this project produced before. Non-zero
+        // only when the user actually answered the second question.
+        let plate = buildOrientation.plateUp.map { simd_normalize($0) } ?? SIMD3<Float>(0, 0, 0)
+        return (anchors, loads, SIMD3<Double>(up), SIMD3<Double>(plate))
     }
 
     /// The run's "Keep clear" clearances (handoff 100), derived from the selection +

@@ -45,6 +45,28 @@ std::vector<Vec3> flat_face_normals(const TriangleMesh& mesh,
 // align to).
 std::vector<Vec3> orientation_candidates(const TriangleMesh& mesh);
 
+// Candidate build directions for the PRODUCTION orientation scorer (handoff
+// 2026-08-01-build-direction-separation): `as_built` normalized FIRST, then the
+// same 26-direction sphere sample orientation_candidates uses (shared code, so
+// the two sets can never drift), deduplicated at the same ~1.8 deg threshold.
+//
+// MESH-FREE, and that is the point: all three certification paths must rank the
+// SAME candidate set or a run's report, its lattice receipt and a later
+// re-analysis of the same part would recommend different orientations while each
+// looked self-consistent (PR 266's S5). Two of the three sites have no
+// TriangleMesh in hand, so requiring one would have forced exactly that drift.
+//
+// The cost of dropping flat-face normals, stated rather than hidden: PR 266
+// measured every criterion's optimum, in all three cases, at one of the six cube
+// axes — the flat-face normals and the off-axis sphere directions earned
+// nothing, and the strut interlayer margin (S-d) strictly vetoes off-axis. That
+// was measured on an axis-aligned extruded part whose flat faces ARE cube axes;
+// a part with a large SLANTED face could put a genuine candidate outside this
+// set, and PR 266 did not test one. That residual is unchanged by this function.
+//
+// Throws std::invalid_argument if `as_built` is (near) zero length.
+std::vector<Vec3> build_orientation_candidates(const Vec3& as_built);
+
 // Support-volume proxy for building `grid` along `build_dir` (ROADMAP M4.3): the
 // number of solid voxels that would need support material — solid voxels with no
 // solid voxel within the downward 45-degree support cone below them and not

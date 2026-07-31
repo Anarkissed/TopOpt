@@ -1,5 +1,7 @@
 #include "topopt/production.hpp"
 
+#include <cmath>      // std::sqrt, std::fabs, std::isfinite
+#include <stdexcept>  // std::invalid_argument
 #include <thread>  // std::thread::hardware_concurrency (portable fallback)
 
 #include "topopt/analyze.hpp"  // KnockdownSpec, infill_margin_knockdown
@@ -328,6 +330,39 @@ KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
           ? outer_w + static_cast<double>(opts.wall_loops - 1) * inner_w
           : 0.0;
   return knockdown;
+}
+
+namespace {
+
+// True iff `v` carries any magnitude at all — the "was a build direction set?"
+// test. Uses the SAME |x|+|y|+|z| > 0 predicate the loadcase builder already
+// applies to ProductionLoadCase::build_dir, so "unset" means the same thing on
+// both sides of the schema.
+bool build_direction_is_set(const Vec3& v) {
+  return std::fabs(v.x) + std::fabs(v.y) + std::fabs(v.z) > 0.0;
+}
+
+}  // namespace
+
+bool resolve_build_direction_is_inferred(const MinimizePlasticOptions& opts) {
+  return !build_direction_is_set(opts.build_direction);
+}
+
+Vec3 resolve_build_direction(const MinimizePlasticOptions& opts) {
+  // ── THE ONE DERIVATION (handoff 2026-08-01-build-direction-separation) ──────
+  // Explicit wins verbatim; only an UNSET build direction falls back to gravity,
+  // and this is the single place in the codebase where that fallback is written.
+  const Vec3 raw = build_direction_is_set(opts.build_direction)
+                       ? opts.build_direction
+                       : Vec3{-opts.gravity_direction.x,
+                              -opts.gravity_direction.y,
+                              -opts.gravity_direction.z};
+  const double len = std::sqrt(raw.x * raw.x + raw.y * raw.y + raw.z * raw.z);
+  if (!(len > 0.0) || !std::isfinite(len))
+    throw std::invalid_argument(
+        "resolve_build_direction: the resolved build direction is zero length "
+        "or non-finite (an unset build_direction with a degenerate gravity_direction)");
+  return Vec3{raw.x / len, raw.y / len, raw.z / len};
 }
 
 void configure_production_options(MinimizePlasticOptions& opts) {

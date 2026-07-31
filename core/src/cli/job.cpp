@@ -390,7 +390,8 @@ JobDescription parse_job(const std::string& json_text) {
                       {"model", "source_format", "material", "mode",
                        "resolution", "fixture_faces", "gravity", "ladder",
                        "margin_stop", "simp", "draft", "output", "lattice",
-                       "grading", "loads", "design_box", "keep_outs"},
+                       "grading", "loads", "design_box", "keep_outs",
+                       "build_direction", "build_orientation_report"},
                       "the job");
 
   JobDescription job;
@@ -419,6 +420,24 @@ JobDescription parse_job(const std::string& json_text) {
   // ladder / fixed self-weight magnitude / default margin apply (exactly the app
   // path) — so the self-weight keys are MEANINGLESS and rejected rather than
   // silently ignored. In SELF-WEIGHT mode (no "loads") they are required as before.
+  // ── build_direction / build_orientation_report (handoff
+  // 2026-08-01-build-direction-separation) ────────────────────────────────────
+  // Parsed BEFORE the mode branch because both are mode-independent: the plate
+  // orientation is a property of the print, not of how the load was declared.
+  // Both optional; absent means the pre-separation behaviour to the byte.
+  if (const JsonValue* bd = find_key(root, "build_direction")) {
+    job.build_direction = parse_vec3(*bd, "build_direction");
+    const Vec3& b = job.build_direction;
+    if (b.x * b.x + b.y * b.y + b.z * b.z <= 0.0)
+      schema_fail("\"build_direction\" must be non-zero");
+    job.has_build_direction = true;
+  }
+  if (const JsonValue* br = find_key(root, "build_orientation_report")) {
+    if (br->type != JsonValue::Type::Bool)
+      schema_fail("\"build_orientation_report\" must be a boolean");
+    job.build_orientation_report = (br->num != 0.0);
+  }
+
   const JsonValue* loads_v = find_key(root, "loads");
   const bool loadcase = loads_v != nullptr;
 

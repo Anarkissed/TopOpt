@@ -726,6 +726,21 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         if !request.anchorFaceIDs.isEmpty {
             loads["anchor_face_ids"] = request.anchorFaceIDs
         }
+        // THE BUILD-PLATE NORMAL, at the job ROOT and not inside `loads` (handoff
+        // 2026-08-01-build-direction-separation): `loads.build_dir` above answers
+        // "which way is down in service" (the core negates it into gravity), and
+        // the root key answers the different question "which way is up on the
+        // plate". Emitted ONLY when the user declared one, so a project that never
+        // touched the control ships the identical job.json it always did — the
+        // load-bearing bar. The on-device bridge sends the same value through
+        // BridgeLoadCase.plate_dir_*, so both front-ends agree by construction.
+        if request.plateDirection != SIMD3<Double>(0, 0, 0) {
+            job["build_direction"] = [request.plateDirection.x, request.plateDirection.y,
+                                      request.plateDirection.z]
+        }
+        if request.wantsOrientationRanking {
+            job["build_orientation_report"] = true
+        }
         if !request.loadGroups.isEmpty {
             loads["groups"] = request.loadGroups.map { g -> [String: Any] in
                 ["face_ids": g.faceIDs,
@@ -983,6 +998,25 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             minRelativeDensity: lat.minRelativeDensity,
             maxRelativeDensity: lat.maxRelativeDensity,
             regionScoped: lat.regionScoped, generated: generated, strut: strut)
+    }
+
+    /// The BUILD-ORIENTATION RECEIPT a remote run wrote (handoff
+    /// 2026-08-01-build-direction-separation): `<out_dir>/build_orientation.json`,
+    /// the SAME document the on-device bridge returns as a string, from the SAME
+    /// core emitter. Fetched only when the run armed the ranking; a worker that
+    /// wrote none (or a transport error) leaves it nil and the app simply shows no
+    /// ranking rather than a half-parsed one.
+    private func fetchBuildOrientation() -> Data? {
+        guard request.wantsOrientationRanking, let id = jobID else { return nil }
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+            .appendingPathComponent("build_orientation.json")
+        guard let (data, resp) = try? syncGET(url),
+              (resp as? HTTPURLResponse)?.statusCode == 200, !data.isEmpty else {
+            diag("build_orientation.json unavailable — no orientation ranking shown")
+            return nil
+        }
+        return data
     }
 
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {
@@ -1246,6 +1280,9 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // The lattice the run carried (handoff 2026-07-29-lattice-mode-ui); nil for a
         // non-lattice run, so the outcome below is unchanged for every current run.
         let latticeReport = fetchLatticeReport()
+        // The orientation ranking this run produced — a RECOMMENDATION shown beside
+        // the results, never applied and never consulted for a verdict.
+        let buildOrientation = fetchBuildOrientation()
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 
@@ -1274,7 +1311,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                             fields: fields?.variant(forRequestedVF: s.requestedVF))
             }
             return remoteOutcome(variants: variants, acceptedCount: variants.count,
-                                 fields: fields, timing: timing, latticeReport: latticeReport)
+                                 fields: fields, timing: timing, latticeReport: latticeReport,
+                                 buildOrientationJSON: buildOrientation)
         }
 
         // No accepted variant streamed: report-only rows. They carry no mesh, so they
@@ -1293,7 +1331,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private func remoteOutcome(variants: [OptimizeVariant], acceptedCount: Int,
                                fields: RemoteFieldsContainer?,
                                timing: RunTiming? = nil,
-                               latticeReport: LatticeReport? = nil) -> OptimizeOutcome {
+                               latticeReport: LatticeReport? = nil,
+                               buildOrientationJSON: Data? = nil) -> OptimizeOutcome {
         OptimizeOutcome(variants: variants, stoppedOnMargin: false, cancelled: false,
                         acceptedCount: acceptedCount,
                         voxelVolumeMM3: fields?.voxelVolumeMM3 ?? 0,
@@ -1303,7 +1342,8 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                         spacing: fields?.spacing ?? 0,
                         computedRemotely: true,
                         timing: timing,
-                        latticeReport: latticeReport)
+                        latticeReport: latticeReport,
+                        buildOrientationJSON: buildOrientationJSON)
     }
 
     private func makeVariant(streamed s: StreamedVariant?,

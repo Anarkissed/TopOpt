@@ -110,16 +110,12 @@ void add_unique(std::vector<Vec3>& out, const Vec3& d) {
   out.push_back(d);
 }
 
-}  // namespace
-
-std::vector<Vec3> orientation_candidates(const TriangleMesh& mesh) {
-  // Validates the mesh (throws on empty) and gives the face-aligned directions.
-  const std::vector<Vec3> faces = flat_face_normals(mesh);
-
-  std::vector<Vec3> out;
-  // Coarse sphere sampling: the 26 lattice directions {-1,0,1}^3 \ {0}. This set
-  // already contains the 6 axis-aligned directions, so no separate step is needed
-  // for them; they are the six single-nonzero-component members.
+// The coarse sphere sampling shared by both candidate builders: the 26 lattice
+// directions {-1,0,1}^3 \ {0}. This set already contains the 6 axis-aligned
+// directions, so no separate step is needed for them; they are the six
+// single-nonzero-component members. ONE definition, so the mesh-aware and
+// mesh-free candidate sets can never sample the sphere differently.
+void append_sphere_sample(std::vector<Vec3>& out) {
   for (int dk = -1; dk <= 1; ++dk)
     for (int dj = -1; dj <= 1; ++dj)
       for (int di = -1; di <= 1; ++di) {
@@ -128,12 +124,38 @@ std::vector<Vec3> orientation_candidates(const TriangleMesh& mesh) {
                                         static_cast<double>(dj),
                                         static_cast<double>(dk)}));
       }
+}
+
+}  // namespace
+
+std::vector<Vec3> orientation_candidates(const TriangleMesh& mesh) {
+  // Validates the mesh (throws on empty) and gives the face-aligned directions.
+  const std::vector<Vec3> faces = flat_face_normals(mesh);
+
+  std::vector<Vec3> out;
+  append_sphere_sample(out);
 
   // Face-normal-aligned candidates: each significant flat face, either way up.
   for (const Vec3& f : faces) {
     add_unique(out, f);
     add_unique(out, Vec3{-f.x, -f.y, -f.z});
   }
+  return out;
+}
+
+std::vector<Vec3> build_orientation_candidates(const Vec3& as_built) {
+  const double len = length(as_built);
+  if (!(len > 0.0))
+    throw std::invalid_argument(
+        "build_orientation_candidates: as_built is zero length");
+  std::vector<Vec3> out;
+  // THE AS-BUILT DIRECTION GOES IN FIRST, deliberately. It is the orientation the
+  // gate's verdict actually describes, so it must be in the ranking (a ranking
+  // that omitted what was built could not state "as built X, as recommended Y"),
+  // and placing it first makes its row index 0 in the emitted report regardless
+  // of whether it happens to coincide with a sphere direction.
+  out.push_back(Vec3{as_built.x / len, as_built.y / len, as_built.z / len});
+  append_sphere_sample(out);
   return out;
 }
 

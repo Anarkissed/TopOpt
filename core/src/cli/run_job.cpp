@@ -704,9 +704,13 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
   cx.params.youngs_modulus = material.youngs_modulus_mpa;
   cx.params.poisson = material.poisson;
   cx.params.penalty = 3.0;  // ARCHITECTURE §4, matching minimize_plastic's cert solve
-  cx.build_dir = normalized(Vec3{-options.gravity_direction.x,
-                                 -options.gravity_direction.y,
-                                 -options.gravity_direction.z});
+  // THE ONE resolver (handoff 2026-08-01-build-direction-separation): the job's
+  // explicit build direction when set, else the documented gravity fallback.
+  // Sharing the resolver with minimize_plastic is what guarantees this lattice
+  // receipt certifies against the SAME orientation the run's own report did —
+  // PR 266's S5 named three independent derivations as the silent-inconsistency
+  // risk, and this is one of the three.
+  cx.build_dir = resolve_build_direction(options);
   // The SAME load minimize_plastic certified this variant under: the declared
   // external load, or self-weight recomputed on the solved grid. (A design box would
   // remap BCs/loads onto an expanded grid — run_job refuses design-box + lattice, so
@@ -740,7 +744,12 @@ FixedDesignAnalysis analyze_variant_with_posture(
                               cx.loads, material, cx.build_dir, cx.cert_tol,
                               options.simp.cg_max_iterations, options.simp.solver,
                               options.margin_stop, cx.knockdown, cx.load_path_ok,
-                              cx.part_solid, post);
+                              cx.part_solid, post,
+                              // The lattice receipt's own ranking, on its own
+                              // composite field — the latticed object's strut
+                              // criteria (S-c/S-d/S-e) are only measurable here.
+                              options.build_orientation_report,
+                              resolve_build_direction_is_inferred(options));
 }
 
 // Re-certify one accepted variant as the LATTICED composite: once with a nullptr
@@ -1162,6 +1171,28 @@ std::vector<ClearanceGeometry> freeze_regions_from_faces(
   return regions;
 }
 
+// Apply the job's optional BUILD-DIRECTION separation onto the options, for BOTH
+// modes and BOTH entry points (handoff 2026-08-01-build-direction-separation).
+// Called immediately after the mode branch has finished configuring `options`,
+// so it overrides whatever that branch implied:
+//
+//   * "build_direction" absent  -> options.build_direction stays as the mode
+//     branch left it (loadcase mode: the declared loads.build_dir; self-weight
+//     mode: unset), and resolve_build_direction applies the documented gravity
+//     fallback. BYTE-IDENTICAL to the pre-separation run — bar U1.
+//   * "build_direction" present -> that vector, verbatim. In loadcase mode this
+//     OVERRIDES loads.build_dir for the plate orientation while leaving the
+//     service gravity loads.build_dir implied. That override is the whole point:
+//     the two questions stop sharing one field.
+//
+// The scorer arming flag rides along here because it is the same decision — the
+// job either engages with build orientation or it does not.
+void apply_build_direction_options(MinimizePlasticOptions& options,
+                                   const JobDescription& job) {
+  if (job.has_build_direction) options.build_direction = job.build_direction;
+  options.build_orientation_report = job.build_orientation_report;
+}
+
 // Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
 // core builder (build_production_loadcase) consumes. This is the ONE mapping —
 // run_job's optimize path AND analyze_job's re-certification path both call it, so
@@ -1372,6 +1403,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
     options.gravity_direction = job.gravity.direction;
   }
+  // The build-plate normal, separated from gravity (handoff
+  // 2026-08-01-build-direction-separation). AFTER the mode branch so it governs
+  // both modes; absent key => byte-identical.
+  apply_build_direction_options(options, job);
   const double part_solid = static_cast<double>(model_grid.solid_count());
 
   // ── the FIXED design to analyse (its OWN occupancy grid) ─────────────────────
@@ -1483,9 +1518,11 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   params.poisson = material.poisson;
   params.penalty = 3.0;  // ARCHITECTURE §4 (density_min stays the 1e-3 default)
 
-  const Vec3 build_dir = normalized(Vec3{-options.gravity_direction.x,
-                                         -options.gravity_direction.y,
-                                         -options.gravity_direction.z});
+  // THE ONE resolver (handoff 2026-08-01-build-direction-separation) — the third
+  // and last of the sites that used to derive this from gravity independently.
+  // A standalone re-analysis of a part now certifies against the orientation the
+  // originating run used, because both ask the same function.
+  const Vec3 build_dir = resolve_build_direction(options);
   const std::vector<NodalLoad> loads =
       loadcase ? external_loads
                : self_weight_loads(design_grid, material.density_g_cm3,
@@ -1503,7 +1540,12 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       design_grid, params, density, bcs, loads, material, build_dir,
       options.simp.cg_tolerance, options.simp.cg_max_iterations,
       options.simp.solver, options.margin_stop, knockdown, load_path_ok,
-      part_solid);
+      part_solid, /*lattice=*/nullptr,
+      // The re-analysis ranks the SAME candidate set the originating run did
+      // (build_orientation_candidates is derived inside analyze_fixed_design),
+      // so a part's recommendation cannot change just because it was re-analysed.
+      options.build_orientation_report,
+      resolve_build_direction_is_inferred(options));
   const FixedDesignAnalysis& a = result.analysis;
   result.voxel_mass_grams = a.mass_grams;
 
@@ -1603,6 +1645,17 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   result.report_json = job_report_json(report);
   result.report_path = join_path(out_dir, "analysis_report.json");
   write_text_file(result.report_path, result.report_json);
+
+  // The BUILD-ORIENTATION RECEIPT for this re-analysis — the same document the
+  // optimize path writes, from the same emitter, so a part's ranking reads the
+  // same whether it was just optimized or merely re-certified. Only when armed.
+  if (a.build_orientation.evaluated) {
+    result.build_orientation_path = join_path(out_dir, "build_orientation.json");
+    result.build_orientation_json =
+        build_orientation_report_json(a.build_orientation, build_dir);
+    write_text_file(result.build_orientation_path,
+                    result.build_orientation_json);
+  }
 
   // ── fields.bin (one analysed "variant", so app overlays light up) ────────────
   MinimizePlasticResult fields_result;
@@ -1943,6 +1996,10 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         options.keep_out_boxes.push_back(to_design_box(ko));
     }
   }
+  // The build-plate normal, separated from gravity (handoff
+  // 2026-08-01-build-direction-separation). AFTER the mode branch so it governs
+  // both modes; absent key => byte-identical.
+  apply_build_direction_options(options, job);
 
   // Handoff 2026-07-25-draft-quality — map the optional "draft" block onto the
   // production options, for BOTH front-ends (loadcase options come from
@@ -2924,6 +2981,27 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   result.report_json = job_report_json(result.pipeline.report);
   result.report_path = join_path(out_dir, job.output.report);
   write_text_file(result.report_path, result.report_json);
+
+  // ──▶ the BUILD-ORIENTATION RECEIPT (handoff 2026-08-01-build-direction-
+  // separation). A SEPARATE document, written only when the scorer was armed, so
+  // report.json above and the meshes below are byte-identical whether it ran or
+  // not (bar U1). It carries the RECOMMENDATION for the rung the run itself
+  // recommends — the LIGHTEST ACCEPTED variant, i.e. the design the user is
+  // actually going to print. Ranking the heavier rungs too would publish
+  // recommendations for designs nobody exports.
+  {
+    const MinimizePlasticVariant* rec_variant = nullptr;
+    for (const MinimizePlasticVariant& v : result.pipeline.evaluated)
+      if (v.accepted && v.build_orientation.evaluated) rec_variant = &v;
+    if (rec_variant != nullptr) {
+      result.build_orientation_path =
+          join_path(out_dir, "build_orientation.json");
+      result.build_orientation_json = build_orientation_report_json(
+          rec_variant->build_orientation, rec_variant->report.orientation);
+      write_text_file(result.build_orientation_path,
+                      result.build_orientation_json);
+    }
+  }
 
   // ──▶ meshes: already written progressively when streaming; otherwise one
   // exported mesh per accepted variant now (byte-identical to the streamed files).

@@ -430,6 +430,16 @@ public struct OptimizeOutcome {
     /// don't generate lattices, so a local outcome leaves this nil.
     public let latticeReport: LatticeReport?
 
+    /// The BUILD-ORIENTATION RECEIPT this run produced (handoff
+    /// 2026-08-01-build-direction-separation) — the raw JSON of the core's ONE
+    /// emitter, identical whether the run was on-device (bridge) or on a LAN
+    /// worker (build_orientation.json). Decode with `OrientationRanking.decode`.
+    ///
+    /// A RECOMMENDATION. Every `variants[i].accepted` above is that rung's verdict
+    /// for the orientation ACTUALLY USED, and nothing in this string may change it.
+    /// nil unless the run armed the ranking.
+    public let buildOrientationJSON: Data?
+
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
@@ -438,7 +448,8 @@ public struct OptimizeOutcome {
                 appliedClearances: [AppliedClearance] = [],
                 appliedFaceProtections: [AppliedFaceProtection] = [],
                 timing: RunTiming? = nil,
-                latticeReport: LatticeReport? = nil) {
+                latticeReport: LatticeReport? = nil,
+                buildOrientationJSON: Data? = nil) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -454,6 +465,7 @@ public struct OptimizeOutcome {
         self.appliedFaceProtections = appliedFaceProtections
         self.timing = timing
         self.latticeReport = latticeReport
+        self.buildOrientationJSON = buildOrientationJSON
     }
 
     /// A copy carrying `timing` — how the run flow stamps a LOCAL run's measured
@@ -470,7 +482,8 @@ public struct OptimizeOutcome {
                         appliedClearances: appliedClearances,
                         appliedFaceProtections: appliedFaceProtections,
                         timing: timing ?? self.timing,
-                        latticeReport: latticeReport)
+                        latticeReport: latticeReport,
+                        buildOrientationJSON: buildOrientationJSON)
     }
 
     /// A copy carrying `latticeReport` — how the run flow stamps the run's lattice onto
@@ -486,7 +499,8 @@ public struct OptimizeOutcome {
                         appliedClearances: appliedClearances,
                         appliedFaceProtections: appliedFaceProtections,
                         timing: timing,
-                        latticeReport: self.latticeReport ?? report)
+                        latticeReport: self.latticeReport ?? report,
+                        buildOrientationJSON: buildOrientationJSON)
     }
 }
 
@@ -1086,6 +1100,8 @@ public enum TopOptKit {
         stepPath: String, material: String, materialsPath: String, rulesPath: String,
         resolution: Int, anchorFaceIDs: [Int], loadGroups: [LoadGroupSpec],
         minimizePlastic: Bool, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+        plateDirection: SIMD3<Double> = SIMD3(0, 0, 0),
+        wantsOrientationRanking: Bool = false,
         infillPercent: Int = -1, wallLoops: Int = 0,
         wallLineWidthInnerMM: Double = -1, wallLineWidthOuterMM: Double = -1,
         designBox: DesignBoxSpec? = nil, keepOutBoxes: [DesignBoxSpec] = [],
@@ -1135,6 +1151,13 @@ public enum TopOptKit {
         lc.build_dir_x = buildDirection.x
         lc.build_dir_y = buildDirection.y
         lc.build_dir_z = buildDirection.z
+        // The build-plate normal as its OWN input (handoff 2026-08-01-build-
+        // direction-separation). ZERO => nothing declared => the core's documented
+        // gravity fallback => byte-identical to before this field existed.
+        lc.plate_dir_x = plateDirection.x
+        lc.plate_dir_y = plateDirection.y
+        lc.plate_dir_z = plateDirection.z
+        lc.build_orientation_report = wantsOrientationRanking
         lc.infill_percent = Int32(infillPercent)
         // Width-aware knockdown wall metadata (handoff 2026-07-27-wall-loops-plumbing +
         // line-width-plumbing). The user's wall-loop count and inner/outer line widths,
@@ -1270,7 +1293,15 @@ public enum TopOptKit {
                                gridOrigin: SIMD3<Double>(raw.grid_origin_x, raw.grid_origin_y, raw.grid_origin_z),
                                spacing: raw.spacing,
                                appliedClearances: applied,
-                               appliedFaceProtections: protections)
+                               appliedFaceProtections: protections,
+                               // The build-orientation receipt the core emitted for
+                               // the recommended rung (handoff 2026-08-01-build-
+                               // direction-separation). Empty string => the ranking
+                               // was not armed => nil, and nothing changes.
+                               buildOrientationJSON: {
+                                   let s = String(raw.build_orientation_json)
+                                   return s.isEmpty ? nil : Data(s.utf8)
+                               }())
     }
 
     /// The M7.1 smoke summary shared by the app's smoke screen and the tests.

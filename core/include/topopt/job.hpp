@@ -321,6 +321,40 @@ struct JobDescription {
                                                // tagged FIXTURE (may be empty
                                                // when a "loads" block is given)
   JobGravity gravity;
+
+  // Optional "build_direction": [x, y, z] — THE BUILD-PLATE NORMAL (handoff
+  // 2026-08-01-build-direction-separation). "Which way is up on the plate", a
+  // DIFFERENT question from gravity's "which way is down in service"; the job
+  // schema had never asked the second one, so all three certification paths
+  // inferred it as -gravity. Allowed in BOTH modes (unlike "gravity", which
+  // loadcase mode forbids) — a load-case job has a service orientation too.
+  //
+  // ABSENT (has_build_direction == false) => today's behaviour EXACTLY: the core
+  // falls back to unit(-gravity_direction) inside resolve_build_direction. Every
+  // existing job stays byte-identical; that is the load-bearing bar (U1).
+  //
+  // In loadcase mode this key OVERRIDES "loads.build_dir" for the BUILD
+  // direction. "loads.build_dir" keeps its existing job: it sets the service
+  // gravity to its unit negation. That is the separation — the two keys stop
+  // being one field doing two jobs.
+  bool has_build_direction = false;
+  Vec3 build_direction{0.0, 0.0, 0.0};
+
+  // Optional "build_orientation_report": true — arm the ORIENTATION SCORER, a
+  // post-pass on the certification solve that already ran (handoff
+  // 2026-08-01-build-direction-separation; PR 266 measured it at 0.1-0.4% of
+  // that solve). Ranks candidate build directions on six criteria and names a
+  // recommendation on the receipt.
+  //
+  // IT NEVER AUTO-APPLIES AND NEVER MOVES A VERDICT. The gate is computed from
+  // the orientation ACTUALLY USED; when the recommendation would gate
+  // differently the receipt says so in both directions and the user chooses.
+  //
+  // FALSE (the default) => no scorer, no new report fields, byte-identical
+  // output. Deliberately independent of "build_direction": the user who has NOT
+  // chosen an orientation is exactly the one the ranking helps most.
+  bool build_orientation_report = false;
+
   std::vector<double> ladder;  // volume fractions, (0,1], strictly descending
   double margin_stop = 0.0;    // finite >= 0 (0 disables the stop)
   int simp_max_iterations = 0;  // optional "simp" block; 0 = SimpOptions default
@@ -400,6 +434,14 @@ struct RunJobResult {
   MinimizePlasticResult pipeline;      // the M5.3 driver's full result
   std::string report_path;             // <out_dir>/<output.report>
   std::string report_json;             // the bytes written to report_path
+  // The BUILD-ORIENTATION RECEIPT (handoff 2026-08-01-build-direction-separation):
+  // <out_dir>/build_orientation.json, the ranking + the recommendation + the U5
+  // both-verdicts statement for the recommended (lightest accepted) variant.
+  // EMPTY unless the job armed "build_orientation_report" — a separate document
+  // precisely so report.json / fields.bin / the meshes are byte-identical whether
+  // the scorer ran or not.
+  std::string build_orientation_path;
+  std::string build_orientation_json;
   std::vector<std::string> mesh_paths; // one exported mesh per accepted variant
   // Handoff 122 — the per-voxel result FIELDS container (<out_dir>/fields.bin):
   // one versioned block per accepted variant carrying the von Mises / displacement
@@ -467,6 +509,11 @@ struct AnalyzeJobResult {
                                        // mode, where the loads schema rejects a margin_stop key)
   std::string report_path;             // <out_dir>/analysis_report.json (VariantReport schema)
   std::string report_json;             // the bytes written to report_path
+  // The BUILD-ORIENTATION RECEIPT for a re-analysis (handoff
+  // 2026-08-01-build-direction-separation), same document as the optimize path's.
+  // EMPTY unless the job armed "build_orientation_report".
+  std::string build_orientation_path;
+  std::string build_orientation_json;
   std::string provenance_path;         // <out_dir>/analysis.json (provenance + BOTH masses)
   std::string fields_path;             // <out_dir>/fields.bin (one analysed "variant")
 
