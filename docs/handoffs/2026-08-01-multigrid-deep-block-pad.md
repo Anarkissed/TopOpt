@@ -138,7 +138,37 @@ headline (multigrid engages) holds either way.
 
 ## P2 — correctness, 262's standard
 
-TODO(p2)
+262's bar was: bit-identical displacement bytes by memcmp on a force-padded
+coarsenable control, and `max|drho| = 0.0` over every physical_density byte
+on a full production run. Both are held, and both are extended to the new
+scope (`p2_coarsen_rule.txt`):
+
+1. **Solver level, memcmp** — test_mgcg_matfree 7c (262's, unchanged):
+   FORCE-padding the coarsenable 32^3 control, solid and 1e-9-graded, gives
+   bit-identical displacement bytes, iteration counts and level counts.
+2. **Solver level, the NEW gate** — test_mgcg_matfree 7d(ii): a deep-blocked
+   30^3 grid with a SPARSE active set (only a 30x15x15 sub-block solid)
+   already builds unpadded; under pad AUTO the solve is **bit-identical**
+   (memcmp) to pad OFF, with identical iteration and level counts. This is
+   the invariant that keeps grids which build today untouched.
+3. **Run level, the NEW scope** — test_coarsen_rule 4d: on the deep-blocked
+   30^3 grid the default AUTO pad engages (index space 32^3); a FORCE pad
+   grows it one further 2^L block. Full production `minimize_plastic`:
+   identical variant count and **max|drho| = 0.000e+00** over every
+   physical_density byte.
+4. **Run level, 262's control** — test_coarsen_rule 4c (unchanged):
+   FORCE-padded 32^3, **max|drho| = 0.000e+00**.
+
+**One number stated plainly, because it is NOT zero.** Turning multigrid on
+for a deep-blocked grid changes the *preconditioner*, and a different Krylov
+path reaches the same solution by a different route. Over a 24-iteration MMA
+run at 30^3, the pad-OFF (Jacobi) and pad-AUTO (multigrid) designs differ by
+**max|drho| = 4.267e-06** (test_coarsen_rule 4e). That is a solver-tolerance
+difference, not a physics change — the same order as the trajectory motion
+110's warm start and 127's tolerance schedule already introduce — and it is
+reported rather than bounded by an invented constant. The bit-identity
+claims above are all made where the preconditioner is held FIXED, which is
+where bit-identity is a meaningful claim.
 
 ## P3/P4 — the win on real deep-blocked grids (expectations stated first)
 
@@ -163,6 +193,22 @@ story).
 6 solves:**
 
 TODO(p3big)
+
+### What could NOT be measured here, stated plainly
+
+The **before** column of the full production run at 232x64x216 was started
+and **abandoned after 70 minutes without completing its first solve**
+(`p3_repro_232_before.txt` holds only its header). That is not a tooling
+failure — it is the cost being measured: at 9.6M DOF the unpadded run falls
+back to Jacobi-CG, burns past GenEO's 500-iteration trigger, and begins a
+GenEO basis build whose cost grows far faster than the grid (262's whole
+10-solve run at 1.4M DOF took 41 minutes; this grid is 6.9x larger in DOF).
+Extrapolating a wall number from a run that did not produce one would be
+inventing evidence, so the before-side production counters at this grid are
+**not reported**. What IS measured at these exact extents is P1: the same
+production matrix-free solver, six coefficient fields, before and after,
+under clean conditions — 1416-1516 unpadded Jacobi iterations per solve
+(comfortably past GenEO's 500 trigger) against 30-118 padded MG cycles.
 
 ## P5 — the new residual
 
@@ -190,11 +236,56 @@ coefficient field is the latch's department (P1).
 
 ## P6 — no regression on grids that already build
 
-TODO(p6)
+Stash-rebuild checksum (`probes/even_checksum.cpp`), FNV-1a hashes of raw
+result bytes, baseline = this branch's parent `b2b6370` (262's head), built
+and run in the same tree (`p6_checksum_old.txt` vs `p6_checksum_new.txt`):
+
+| case | baseline (262) | after this change | |
+|---|---|---|---|
+| matrix-free MG, solid 32^3 | `fbfbd74b43de574b` | `fbfbd74b43de574b` | identical |
+| matrix-free MG, graded 1e-9 32^3 | `449b14b614b781b2` | `449b14b614b781b2` | identical |
+| assembled MG, solid 32^3 | `17dbdd35cb5376e8` | `17dbdd35cb5376e8` | identical |
+| production run, 32^3 | `f41b3655cb69fe70` | `f41b3655cb69fe70` | identical |
+| production run, **30^3 (deep-blocked)** | `e3f6653c038428cb`, used_mg=0 | `b344e0a79d144f9f`, used_mg=1, 3 levels | **changed by design** |
+
+Every grid that already built multigrid is bit-identical, on both solver
+paths and at the run level. The single changed row is the deep-blocked 30^3
+— the entire point of the task — and its design agrees with the old one to
+`max|drho| = 4.267e-06` (P2 above).
+
+**A methodology note worth keeping.** The first attempt at this comparison
+was WRONG and looked right: `git stash` was used to produce the "old"
+library, but the solver changes had already been committed, so the stash
+reverted only the uncommitted test edits and the "baseline" binary was the
+new gate. Every row matched — including the 30^3 row that *must* change —
+and that false pass is what exposed the error. The comparison here is
+against `git checkout b2b6370 -- <solver sources>`, and the 30^3 row now
+reads `used_mg=0`, matching 262's own recorded baseline. A checksum test
+that cannot fail is not evidence.
 
 ## P7 — determinism + tests
 
 TODO(p7)
+
+## Files touched
+
+- `core/include/topopt/coarsen.hpp` — `mg_unpadded_stop_depth` (new);
+  widened scope doc; `mg_startup_banner` now emits the NOTE for a
+  pad-rescued deep block (with the honest geometric-only caveat).
+- `core/include/topopt/fea.hpp` — pad-mode doc updated to the new scope.
+- `core/src/fea/multigrid.cpp` — `mg_unpadded_stop_active` (new);
+  `mg_effective_extents` gains the actual-count argument and the deep-block
+  branch; both call sites pass it.
+- `core/tests/unit/test_mgcg_matfree.cpp` — block 7d: deep-block pad on a
+  dense grid, and the actual-count gate's bit-identity on a sparse one.
+- `core/tests/validation/test_coarsen_rule.cpp` — banner assertions for both
+  pad states on 232x64x216; run-level 4a (deep-blocked engages), 4d
+  (neutrality, max|drho| = 0), 4e (the Jacobi/MG flip, reported).
+- `evidence/2026-08-01-multigrid-deep-block-pad/` — probes and raw output.
+
+Deliberately untouched: fixtures, materials.json, ARCHITECTURE.md,
+DECISIONS.md, the coarsening rule, the DOF cap, kMgIterBudget, the
+stagnation latch, GenEO.
 
 ## BLOCKED-STOP assessment
 
@@ -208,4 +299,49 @@ TODO(p7)
 
 ## Plain language
 
-TODO(plain)
+The solver has a fast mode and a slow mode. The fast mode (multigrid) works
+by repeatedly shrinking the problem — halving the voxel grid again and again
+until it is small enough to solve outright — so it needs a grid that can be
+halved several times over on all three axes. PR 262 fixed the obvious way to
+fail that test: a grid with an odd number of voxels on some axis, like 31,
+can't be halved even once. It taught the solver to *pretend* the grid is one
+voxel bigger — 31 becomes 32 — purely in its own internal bookkeeping, with
+the imagined slice containing nothing and affecting no result.
+
+But there is a second, quieter way to fail the same test, and 262 left it
+alone on purpose. A grid can be entirely even and still get stuck: 30 halves
+to 15, and 15 is odd, so the shrinking stops after one step — far too early.
+Roughly a quarter of realistic part shapes fail this way, and those runs were
+still crawling on the slow mode. This change extends the same pretending
+trick to them: 30 becomes 32, and now the grid shrinks five times instead of
+one.
+
+The reason 262 didn't just do this is that it had been tried once before, in
+an old change (PR 151), and measured as *harmful* — forcing the fast mode on
+these shapes made a real job slower, because the fast mode built all its
+machinery and then failed to actually converge, on every single step, for
+hours. So the first thing this task did was re-run that old experiment, and
+the honest result is that it no longer holds, for two reasons. One is that
+the solver has since gained a safety catch: if the fast mode fails to make
+progress three times in a row, it stops trying for the rest of the run. That
+turns an all-day tax into a few seconds, once. The other reason is a genuine
+surprise: the specific shapes PR 151 was worried about — a thin part floating
+in a big empty design box — turn out to *already* get the fast mode today,
+because the solver's real acceptance test is stricter than the rule of thumb
+we were reading. What PR 151's job actually lacked was patience, and a
+different change (raising the iteration budget) supplied it later.
+
+So the change is safe in the way that matters: every grid that gets the fast
+mode today is left alone, byte for byte — verified by checksum against the
+previous version. The grids that gain it run between 1.8 and 3.6 times
+faster per solve on the large realistic case, and on a small test case the
+total solver work dropped roughly eightfold. The proportion of realistic part
+shapes shut out of the fast mode goes from about a quarter to zero.
+
+One number is deliberately not zero, and it should be stated rather than
+buried: switching a run from the slow mode to the fast mode changes the
+answer by about four parts in a million. That is not the geometry moving —
+it is the ordinary difference between two routes to the same solution, the
+same size as differences the solver already accepts elsewhere. Where we
+claim a result is identical to the last bit, we compare like with like: the
+same mode, with and without the imagined padding. There it is exactly zero.

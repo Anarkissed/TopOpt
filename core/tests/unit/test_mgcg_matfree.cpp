@@ -21,6 +21,7 @@
 //      (coarse-only) nonzeros are a small, shrinking fraction of the assembled
 //      hierarchy's (which includes the fine A0).
 
+#include "topopt/coarsen.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/voxel.hpp"
 
@@ -494,6 +495,104 @@ int main() {
           "pad neutrality: identical iteration counts (same preconditioner)");
     CHECK(s0.mg_levels == s1.mg_levels && g0.mg_levels == g1.mg_levels,
           "pad neutrality: identical level counts");
+  }
+
+  // ==========================================================================
+  // 7d. DEEP-BLOCK PAD + the ACTUAL-COUNT gate (task: multigrid-deep-block-pad).
+  //     A grid can be ALL-EVEN and still be rejected: 30^3 halves once to 15^3,
+  //     where 15 is odd, and the coarse level is over kMgCoarseDofCap. 262 left
+  //     these alone; the pad now rescues them too. But the rescue must be
+  //     surgical: build_mf_hierarchy accepts on ACTUAL active-DOF counts, not
+  //     the conservative all-nodes bound mg_grid_coarsenable uses, so the SAME
+  //     30^3 extents with a SPARSE active set already build unpadded today.
+  //     The gate must pad the first and not touch the second.
+  // ==========================================================================
+  {
+    const double E = 2100.0, nu = 0.30;
+    CHECK(!topopt::mg_grid_coarsenable(30, 30, 30),
+          "deep block: 30^3 is all-even yet NOT coarsenable by the rule");
+    CHECK(topopt::mg_unpadded_stop_depth(30, 30, 30) == 1,
+          "deep block: the unpadded halving walk stops after one level (15 odd)");
+
+    auto bit_identical = [](const FeaSolution& a, const FeaSolution& b) {
+      return a.u.size() == b.u.size() &&
+             std::memcmp(a.u.data(), b.u.data(),
+                         a.u.size() * sizeof(double)) == 0;
+    };
+
+    // (i) DENSE active set (solid 30^3): 16^3 coarse nodes = 12288 DOF > the
+    //     6000 cap, so the unpadded build is genuinely rejected. Pad OFF keeps
+    //     262's behavior verbatim (Jacobi fallback); pad AUTO now builds on the
+    //     padded 32^3 index space and matches the direct solve.
+    {
+      VoxelGrid g = make_solid_grid(30, 30, 30, 1.0);
+      std::vector<DirichletBC> bcs = clamp_x0_face(g);
+      std::vector<NodalLoad> loads = tip_load_z(g, -10.0);
+
+      topopt::fea_set_mg_parity_pad_mode(0);
+      CgInfo off;
+      topopt::fea_solve_mgcg_matfree(g, E, nu, bcs, loads, 1e-10, 0, &off);
+      topopt::fea_set_mg_parity_pad_mode(1);
+      CgInfo on;
+      const FeaSolution mf =
+          topopt::fea_solve_mgcg_matfree(g, E, nu, bcs, loads, 1e-10, 0, &on);
+      const FeaSolution direct = topopt::fea_solve(g, E, nu, bcs, loads);
+
+      CHECK(!off.used_multigrid && !off.hier_built,
+            "deep block: pad OFF still rejects the dense deep-blocked hierarchy");
+      CHECK(on.used_multigrid && on.mg_levels >= 2,
+            "deep block: pad AUTO builds a real hierarchy on the dense grid");
+      CHECK(on.converged && max_rel_diff(direct, mf) <= 1e-6,
+            "deep block: the padded deep-blocked solve matches the direct solve");
+    }
+
+    // (ii) SPARSE active set (the same 30^3 extents, only a quarter solid):
+    //      the coarse level holds ~3k active DOF — under the cap — so the
+    //      UNPADDED hierarchy builds today. The actual-count gate must leave it
+    //      alone: pad AUTO has to be BIT-IDENTICAL to pad OFF, not merely close.
+    //      This is the invariant that keeps grids which already build untouched.
+    {
+      const int sy = 15, sz = 15;  // solid sub-block: j < sy, k < sz
+      VoxelGrid g = make_solid_grid(30, 30, 30, 1.0);
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = 0; i < g.nx; ++i)
+            if (j >= sy || k >= sz)
+              g.tags[g.index(i, j, k)] = VoxelTag::Empty;
+      // BCs and loads must live on nodes the SOLID sub-block actually touches;
+      // the Empty region carries no stiffness, so loading it is not a system.
+      std::vector<DirichletBC> bcs;
+      for (int c = 0; c <= sz; ++c)
+        for (int b = 0; b <= sy; ++b) {
+          const int n = topopt::fea_node_index(g, 0, b, c);
+          bcs.push_back({n, 0, 0.0});
+          bcs.push_back({n, 1, 0.0});
+          bcs.push_back({n, 2, 0.0});
+        }
+      std::vector<NodalLoad> loads;
+      const double per = -10.0 / ((sy + 1.0) * (sz + 1.0));
+      for (int c = 0; c <= sz; ++c)
+        for (int b = 0; b <= sy; ++b)
+          loads.push_back({topopt::fea_node_index(g, g.nx, b, c), 2, per});
+
+      topopt::fea_set_mg_parity_pad_mode(0);
+      CgInfo off;
+      const FeaSolution a =
+          topopt::fea_solve_mgcg_matfree(g, E, nu, bcs, loads, 1e-10, 0, &off);
+      topopt::fea_set_mg_parity_pad_mode(1);
+      CgInfo on;
+      const FeaSolution b =
+          topopt::fea_solve_mgcg_matfree(g, E, nu, bcs, loads, 1e-10, 0, &on);
+
+      CHECK(off.used_multigrid && off.hier_built,
+            "actual-count gate: the sparse deep-blocked grid ALREADY builds "
+            "unpadded (the builder accepts on real active counts)");
+      CHECK(bit_identical(a, b),
+            "actual-count gate: a grid that builds today is BIT-IDENTICAL "
+            "under pad AUTO (the gate refuses to pad it)");
+      CHECK(off.iterations == on.iterations && off.mg_levels == on.mg_levels,
+            "actual-count gate: identical iteration and level counts");
+    }
   }
 
   // ==========================================================================

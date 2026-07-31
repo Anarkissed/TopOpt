@@ -440,6 +440,65 @@ int main() {
           "PAD NEUTRALITY: FORCE-padded control run is BIT-IDENTICAL");
   }
 
+  // (4d) DEEP-BLOCK PAD NEUTRALITY at the run level (task:
+  // multigrid-deep-block-pad, P2). 262's 4c bar, applied to the NEW scope: on
+  // the deep-blocked 30^3 grid the default AUTO pad already engages (index
+  // space 32^3), so the control is a FORCE pad that grows it by one further
+  // 2^L block (36^3). Same preconditioner family, same real active DOFs, more
+  // virtual pad — every physical_density byte of every variant must be
+  // IDENTICAL. Any drift would mean the pad's virtual nodes reach the physics.
+  {
+    const MinimizePlasticResult padded_auto = run_self_weight(30);
+    topopt::fea_set_mg_parity_pad_mode(2);  // FORCE: one more 2^L block per axis
+    const MinimizePlasticResult padded_more = run_self_weight(30);
+    topopt::fea_set_mg_parity_pad_mode(1);
+    CHECK(padded_auto.used_multigrid && padded_more.used_multigrid,
+          "DEEP-BLOCK NEUTRALITY: multigrid engaged on both padded runs");
+    bool same = padded_auto.evaluated.size() == padded_more.evaluated.size();
+    double max_drho = 0.0;
+    if (same) {
+      for (std::size_t v = 0; v < padded_auto.evaluated.size(); ++v) {
+        const auto& a = padded_auto.evaluated[v].optimization.physical_density;
+        const auto& b = padded_more.evaluated[v].optimization.physical_density;
+        if (a.size() != b.size()) { same = false; break; }
+        for (std::size_t i = 0; i < a.size(); ++i)
+          max_drho = std::max(max_drho, std::abs(a[i] - b[i]));
+      }
+    }
+    std::printf("[coarsen] deep-block neutrality 30^3: variants %zu/%zu "
+                "max|drho|=%.3e\n",
+                padded_auto.evaluated.size(), padded_more.evaluated.size(),
+                max_drho);
+    CHECK(same && max_drho == 0.0,
+          "DEEP-BLOCK NEUTRALITY: a further-padded deep-blocked run is "
+          "BIT-IDENTICAL over every physical_density byte");
+  }
+
+  // (4e) The preconditioner flip is HONEST: the pad-OFF (Jacobi, `rf`) and
+  // pad-AUTO (multigrid, `rd`) runs of the same deep-blocked 30^3 problem
+  // above are different ITERATIVE PATHS to the same system, so they agree to
+  // solver tolerance — NOT bit-for-bit (that claim belongs to 4d, where the
+  // preconditioner is held fixed). Reuses those two runs; costs no new solve.
+  {
+    double max_drho = 0.0;
+    const bool same = rf.evaluated.size() == rd.evaluated.size();
+    if (same)
+      for (std::size_t v = 0; v < rf.evaluated.size(); ++v) {
+        const auto& a = rf.evaluated[v].optimization.physical_density;
+        const auto& b = rd.evaluated[v].optimization.physical_density;
+        if (a.size() != b.size()) break;
+        for (std::size_t i = 0; i < a.size(); ++i)
+          max_drho = std::max(max_drho, std::abs(a[i] - b[i]));
+      }
+    // REPORTED, not bounded by a guessed constant: the size of this number is
+    // an empirical property of the MMA trajectory under two different Krylov
+    // paths, and the handoff records the measured value. Asserting a tolerance
+    // here would be inventing a threshold no measurement backs.
+    std::printf("[coarsen] deep-block flip 30^3 (Jacobi vs MG): max|drho|=%.3e\n",
+                max_drho);
+    CHECK(same, "DEEP-BLOCK FLIP: both runs produced the same variant count");
+  }
+
   // ---------------------------------------------------------------------------
   // (5) STAGNATION LATCH (Amendment 2) — a high-contrast checkerboard field on a
   // COARSENABLE grid makes the matrix-free MG build a hierarchy then stagnate
