@@ -199,6 +199,11 @@ int main() {
   };
   CgInfo imf1, imf8;
   bool threw1 = false;
+  // The unpadded-odd contrast solve runs with the parity pad (task:
+  // multigrid-odd-axis-cliff) switched OFF: this block demonstrates what the
+  // odd grid does WITHOUT any padding — solver-side or design-box — and the
+  // parity pad would now rescue it, erasing the contrast this test documents.
+  topopt::fea_set_mg_parity_pad_mode(0);
   try {
     topopt::fea_solve_mgcg_matfree(d1.grid, to_youngs(soft1), params.poisson, b1,
                                    l1, 1e-8, 0, &imf1);
@@ -207,6 +212,7 @@ int main() {
                     // huge iteration count and hit the cap — that is the HANG the
                     // padding removes; not asserted, just informative.
   }
+  topopt::fea_set_mg_parity_pad_mode(1);  // restore the production default
   const topopt::FeaSolution smf8 = topopt::fea_solve_mgcg_matfree(
       d8.grid, to_youngs(soft8), params.poisson, b8, l8, 1e-8, 0, &imf8);
   std::printf("[pad] matfree: unpadded used_mg=%d (threw=%d) | padded used_mg=%d "

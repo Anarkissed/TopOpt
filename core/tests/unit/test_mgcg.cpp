@@ -323,7 +323,11 @@ int main() {
   // 7. FALLBACK on a non-2x-divisible grid: 15^3 elements cannot build a 2x
   //    hierarchy, so MG-CG must fall back to Jacobi-CG and still return the
   //    correct field (cross-checked against the direct solver).
+  //    Parity padding (task: multigrid-odd-axis-cliff) would now rescue this
+  //    grid, so the pad is switched OFF here to keep exercising the fallback
+  //    path; part 7b below asserts the NEW padded behavior on the same grid.
   // ==========================================================================
+  topopt::fea_set_mg_parity_pad_mode(0);
   {
     const double E = 2100.0, nu = 0.30;
     VoxelGrid g = make_solid_grid(15, 6, 6, 1.0);  // 15 odd -> no coarsening
@@ -361,6 +365,36 @@ int main() {
       threw = true;
     }
     CHECK(threw, "fallback: 1-iteration cap on a tight tolerance throws");
+  }
+  topopt::fea_set_mg_parity_pad_mode(1);
+
+  // ==========================================================================
+  // 7b. PARITY PAD (task: multigrid-odd-axis-cliff): with the default AUTO pad,
+  //     the same odd 15x6x6 grid now BUILDS a hierarchy (the index space is
+  //     padded to 16x6x6; the physics is untouched) and MG-CG matches the
+  //     direct solver — the cliff a single odd axis used to cause is gone.
+  // ==========================================================================
+  {
+    const double E = 2100.0, nu = 0.30;
+    VoxelGrid g = make_solid_grid(15, 6, 6, 1.0);
+    std::vector<DirichletBC> bcs = clamp_x0_face(g);
+    std::vector<NodalLoad> loads = tip_load_z(g, -10.0);
+
+    FeaSolution direct = topopt::fea_solve(g, E, nu, bcs, loads);
+    CgInfo info;
+    FeaSolution mg = topopt::fea_solve_mgcg(g, E, nu, bcs, loads, 1e-10, 0, &info);
+    CHECK(info.converged, "parity pad: MG-CG converged on the odd grid");
+    CHECK(info.used_multigrid,
+          "parity pad: the odd grid now uses the multigrid path");
+    CHECK(info.mg_levels >= 2, "parity pad: a real >=2-level hierarchy built");
+
+    double maxu = 0.0, maxdiff = 0.0;
+    for (std::size_t d = 0; d < direct.u.size(); ++d) {
+      maxu = std::max(maxu, std::fabs(direct.u[d]));
+      maxdiff = std::max(maxdiff, std::fabs(direct.u[d] - mg.u[d]));
+    }
+    CHECK(maxu > 0.0 && maxdiff <= 1e-6 * maxu,
+          "parity pad: padded MG-CG matches the direct solve");
   }
 
   // ==========================================================================

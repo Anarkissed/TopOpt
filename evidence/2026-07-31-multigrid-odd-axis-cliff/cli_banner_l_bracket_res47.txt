@@ -1,0 +1,1 @@
+NOTE: solve grid 47x32x47 has odd axis(es) [x=47,z=47] - geometric multigrid pads its INDEX SPACE to 48x32x48 (up to 3 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
