@@ -48,6 +48,7 @@ add_library(topopt
   src/voxel/clearance.cpp
   src/simp/warm_start.cpp
   src/simp/grading.cpp
+  src/simp/cell_plan.cpp
   src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/fea/lattice.cpp

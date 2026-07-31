@@ -707,6 +707,48 @@ std::string run_info_json(const RunInfo& info) {
     gr += ", \"any_strut_below_min\": " +
           bool_json(info.grading_any_strut_below_min);
     gr += ", \"region_ungradeable\": " + bool_json(info.grading_region_ungradeable);
+    // Cell-size mode + the swept plan. Present in every mode (a uniform run reports
+    // one level), so a reader never branches; `cell_levels` is the per-REGION
+    // cells-per-member report (bar R5).
+    if (!info.grading_cell_mode.empty()) {
+      gr += ", \"cell_mode\": \"" + info.grading_cell_mode + "\"";
+      gr += ", \"cell_base_mm\": " + fmt(info.grading_cell_base_mm);
+      gr += ", \"cell_max_level\": " +
+            std::to_string(info.grading_cell_max_level);
+      gr += ", \"cell_latticed_cells\": " +
+            std::to_string(info.grading_cell_latticed_cells);
+      gr += ", \"cells_raised_to_floor\": " +
+            std::to_string(info.grading_cells_raised_to_floor);
+      gr += ", \"cells_dropped_unprintable\": " +
+            std::to_string(info.grading_cells_dropped_unprintable);
+      gr += ", \"cells_split_by_balance\": " +
+            std::to_string(info.grading_cells_split_by_balance);
+      gr += ", \"cell_any_out_of_regime\": " +
+            bool_json(info.grading_cell_any_out_of_regime);
+      gr += ", \"cell_levels\": [";
+      for (std::size_t i = 0; i < info.grading_cell_levels.size(); ++i) {
+        const RunInfo::GradingCellLevel& L = info.grading_cell_levels[i];
+        if (i) gr += ", ";
+        gr += "{\"level\": " + std::to_string(L.level);
+        gr += ", \"cell_size_mm\": " + fmt(L.cell_size_mm);
+        gr += ", \"cells\": " + std::to_string(L.cells);
+        gr += ", \"voxels\": " + std::to_string(L.voxels);
+        // A negative value carries the +inf "thicker than the EDT cap" sentinel;
+        // JSON has no infinity, so it serializes as null like the fields above.
+        gr += ", \"min_member_width_mm\": " +
+              (L.min_member_width_mm >= 0.0 ? fmt(L.min_member_width_mm)
+                                            : std::string("null"));
+        gr += ", \"min_cells_per_member\": " +
+              (L.min_cells_per_member >= 0.0 ? fmt(L.min_cells_per_member)
+                                             : std::string("null"));
+        gr += ", \"min_strut_diameter_mm\": " + fmt(L.min_strut_diameter_mm);
+        gr += ", \"max_strut_diameter_mm\": " + fmt(L.max_strut_diameter_mm);
+        gr += ", \"out_of_regime\": " + bool_json(L.out_of_regime);
+        gr += ", \"any_strut_below_min\": " + bool_json(L.any_strut_below_min);
+        gr += "}";
+      }
+      gr += "]";
+    }
     gr += "}";
     num("grading", gr, /*comma=*/false);  // always last when present
   }

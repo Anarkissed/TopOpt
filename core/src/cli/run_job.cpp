@@ -364,6 +364,41 @@ LatticeRoleRegions lattice_role_regions_from_job(const JobDescription& job) {
   return rr;
 }
 
+// Copy the grading law's CELL-SIZE plan into the run_info record — ONE filler for
+// both call sites (analyze_job and run_job), so the two receipts can never disagree
+// about what the cell law did (handoff 2026-08-01-lattice-cell-size-sweep).
+// A +inf member width is the "thicker than the EDT cap" sentinel; it is carried as a
+// negative here and serialized as JSON null, matching the scalar fields above.
+void fill_grading_cell_plan(RunInfo& gi, const GradedField& gf) {
+  const CellSizePlan& P = gf.cell_plan;
+  gi.grading_cell_mode = cell_size_mode_name(gf.cell_mode);
+  gi.grading_cell_base_mm = P.base_cell_mm;
+  gi.grading_cell_max_level = P.max_level;
+  gi.grading_cell_latticed_cells = P.latticed_cells;
+  gi.grading_cells_raised_to_floor = P.cells_raised_to_floor;
+  gi.grading_cells_dropped_unprintable = P.cells_dropped_unprintable;
+  gi.grading_cells_split_by_balance = P.cells_split_by_balance;
+  gi.grading_cell_any_out_of_regime = P.any_out_of_regime;
+  gi.grading_cell_levels.clear();
+  for (const CellLevelReport& r : P.levels) {
+    RunInfo::GradingCellLevel L;
+    L.level = r.level;
+    L.cell_size_mm = r.cell_size_mm;
+    L.cells = r.cells;
+    L.voxels = r.voxels;
+    L.min_member_width_mm =
+        std::isfinite(r.min_member_width_mm) ? r.min_member_width_mm : -1.0;
+    L.min_cells_per_member =
+        std::isfinite(r.min_cells_per_member) ? r.min_cells_per_member : -1.0;
+    L.min_strut_diameter_mm =
+        std::isfinite(r.min_strut_diameter_mm) ? r.min_strut_diameter_mm : 0.0;
+    L.max_strut_diameter_mm = r.max_strut_diameter_mm;
+    L.out_of_regime = r.out_of_regime;
+    L.any_strut_below_min = r.any_strut_below_min;
+    gi.grading_cell_levels.push_back(L);
+  }
+}
+
 LatticeBoundary lattice_boundary_for(const VoxelGrid& sg,
                                      const std::vector<double>& dens,
                                      double cell_mm,
@@ -479,7 +514,15 @@ LatticeExportOutcome export_latticed_variant(
     const LatticeBoundary& boundary, double cell_mm,
     const LatticeRadiusField& radius, const std::vector<char>& cert_mask,
     const std::function<bool(int, int, int)>& graded_cell_latticed,
-    bool emit_solid_companion) {
+    bool emit_solid_companion,
+    // SWEPT cell size (handoff 2026-08-01-lattice-cell-size-sweep). Null / fewer
+    // than two levels => the single-cell path below, byte-identical to a pre-sweep
+    // run (bar R1). Non-null => one ordinary generator pass per dyadic level over
+    // the level-0 grid at `base_cell_mm`; the levels meet at SHARED NODES because
+    // the ladder is dyadic and aligned (cell_plan.hpp states why), so no bridging
+    // geometry exists to get wrong.
+    const std::vector<LatticeLevelSpec>* levels = nullptr,
+    double base_cell_mm = 0.0) {
   // Occupancy + boundary: the shared predicate (`boundary`, built by the caller
   // from THIS variant's density + the declared clearance keep-outs + the job's
   // lattice role regions). Cells activate by OVERLAP with it; strut solids are
@@ -544,12 +587,28 @@ LatticeExportOutcome export_latticed_variant(
   // solid shell with the freeform diagrid (open, see-through); "shell" and
   // "shell+skin" keep the shell exactly as before.
   const bool with_shell = lat.outer_finish != "skin";
+  // ONE emission routine for both writers, so STL and 3MF can never diverge on
+  // which path they took.
+  const bool swept = levels && levels->size() > 1 && base_cell_mm > 0.0;
+  LatticeRegion Rbase = R;
+  if (swept) {
+    // The multilevel pass wants the LEVEL-0 (finest) grid; it derives each coarser
+    // level as an aligned coarsening (nx >> L), which is what makes coarse nodes
+    // land on base-grid node positions.
+    Rbase = lattice_region_for(sg, base_cell_mm, &boundary);
+    Rbase.latticed = nullptr;  // each level carries its own predicate
+  }
+  auto emit_lattice = [&](TriangleSink& w) {
+    return swept ? generate_lattice_multilevel(LatticeGenTopology::Octet, Rbase,
+                                               *levels, w, skin)
+                 : generate_lattice(LatticeGenTopology::Octet, R, radius, w, skin);
+  };
   if (lat.emit_stl) {
     const std::string path = base + ".stl";
     StreamingStlWriter w(path);
     if (with_shell) push_shell(w);  // solid shell first, then the streamed lattice
     push_companion(w);              // then the kept-solid regions (empty: no-op)
-    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, radius, w, skin);
+    oc.stats = emit_lattice(w);
     w.finish();
     oc.paths.push_back(path);
   }
@@ -558,7 +617,7 @@ LatticeExportOutcome export_latticed_variant(
     StreamingThreeMfWriter w(path);
     if (with_shell) push_shell(w);
     push_companion(w);
-    oc.stats = generate_lattice(LatticeGenTopology::Octet, R, radius, w, skin);
+    oc.stats = emit_lattice(w);
     w.finish();
     oc.paths.push_back(path);
   }
@@ -1469,6 +1528,12 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gp.target_cell_size_mm = job.grading.cell_mm;
     gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
     gp.demand_exponent = job.grading.demand_exponent;
+    // Cell-size mode; an absent "cell_mode" parses as "fixed" — the pre-sweep path.
+    if (!cell_size_mode_from_name(job.grading.cell_mode.c_str(), gp.cell_mode))
+      throw JobError("analyze: unknown grading cell_mode \"" +
+                     job.grading.cell_mode + "\"");
+    gp.min_cell_size_mm = job.grading.cell_min_mm;
+    gp.max_cell_size_mm = job.grading.cell_max_mm;
     const GradedField gf =
         grade_lattice(design_grid, density, a.von_mises_field, nullptr, gp);
 
@@ -1494,6 +1559,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gi.grading_max_strut_diameter_mm = gf.max_strut_diameter_mm;
     gi.grading_any_strut_below_min = gf.any_strut_below_min;
     gi.grading_region_ungradeable = gf.region_ungradeable;
+    fill_grading_cell_plan(gi, gf);
 
     result.grading_run_info_path = join_path(out_dir, "run_info.json");
     write_run_info(result.grading_run_info_path, gi);
@@ -2024,6 +2090,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     long long g_region = 0, g_latticed = 0, g_fallback = 0;
     double g_min_width = 0.0, g_min_cpm = 0.0, g_min_d = 0.0, g_max_d = 0.0;
     bool g_below_min = false, g_ungradeable = false;
+    // The CELL-SIZE plan record, carried verbatim from the last graded variant
+    // (handoff 2026-08-01-lattice-cell-size-sweep). Held as a RunInfo so the ONE
+    // filler used by analyze_job serves this path too — the two receipts cannot
+    // drift.
+    RunInfo g_cell_ri;
   } lat_agg;
   std::vector<std::string> lattice_paths;  // merged into result.mesh_paths at end
   // Emit ONE accepted variant's latticed companion: generate the mesh, RE-CERTIFY it
@@ -2088,8 +2159,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       gp.target_cell_size_mm = job.grading.cell_mm;
       gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
       gp.demand_exponent = job.grading.demand_exponent;
+      // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). An absent
+      // "cell_mode" parses as "fixed", which is the pre-sweep path exactly.
+      if (!cell_size_mode_from_name(job.grading.cell_mode.c_str(), gp.cell_mode))
+        throw JobError("run_job: unknown grading cell_mode \"" +
+                       job.grading.cell_mode + "\"");
+      gp.min_cell_size_mm = job.grading.cell_min_mm;
+      gp.max_cell_size_mm = job.grading.cell_max_mm;
       gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp);
-      cell = gf.cell_size_mm;  // the law's cell (target raised to the floor)
+      cell = gf.cell_size_mm;
+      // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
+      // level the plan used, which is what the boundary window, the cell-overlap
+      // proof and the receipt's single scalar all want (the conservative end).
     }
 
     // ── THE shared boundary for this variant: its solid density as the base,
@@ -2231,11 +2312,60 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       }
     }
 
+    // ── SWEPT cell size: one level spec per dyadic level (handoff 2026-08-01-
+    //    lattice-cell-size-sweep). Each level carries (a) its own occupancy — the
+    //    octree cells assigned to it, keyed off the base cell at the block's min
+    //    corner, which is exactly where the aligned octree puts the level — and (b)
+    //    its OWN radius field, because the printed diameter is d(rho, cell): the same
+    //    relative density at a coarser cell is a proportionally fatter strut, which is
+    //    the whole printability payoff. Empty (fewer than two levels) on every
+    //    non-swept run, so the export takes the single-cell path unchanged.
+    std::vector<LatticeLevelSpec> levels;
+    if (graded && gf.cell_plan.max_level > 0 &&
+        !gf.posture.cell_size_field.empty()) {
+      const CellSizePlan* pl = &gf.cell_plan;
+      for (const CellLevelReport& lr : gf.cell_plan.levels) {
+        if (lr.cells == 0) continue;
+        LatticeLevelSpec sp;
+        sp.level = lr.level;
+        sp.cell_mm = lr.cell_size_mm;
+        const int LV = lr.level;
+        sp.latticed = [pl, LV](int ci, int cj, int ck) {
+          const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
+          if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
+          return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV;
+        };
+        // Same fallback chain as the uniform graded field (owning voxel's graded
+        // rho, else the level's own band floor) — evaluated at THIS level's cell.
+        const VoxelGrid& sgr = solved_grid;
+        const std::vector<char>& mref = mask;
+        const std::vector<double>& rref = gf.posture.relative_density;
+        const double lcell = lr.cell_size_mm;
+        const double rlo = gf.band_rho_min;
+        sp.radius.nseg = 8;
+        sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(rlo, lcell);
+        sp.radius.field = [&sgr, &mref, &rref, lcell, rlo](Vec3 p) {
+          auto cl = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
+          const int i = cl(static_cast<int>(
+              std::floor((p.x - sgr.origin.x) / sgr.spacing)), sgr.nx - 1);
+          const int j = cl(static_cast<int>(
+              std::floor((p.y - sgr.origin.y) / sgr.spacing)), sgr.ny - 1);
+          const int k = cl(static_cast<int>(
+              std::floor((p.z - sgr.origin.z) / sgr.spacing)), sgr.nz - 1);
+          const std::size_t e = sgr.index(i, j, k);
+          return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, lcell);
+        };
+        levels.push_back(std::move(sp));
+      }
+    }
+
     // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
     const double tg0 = wall_seconds();
     LatticeExportOutcome oc = export_latticed_variant(
         v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
-        mask, graded_cells, /*emit_solid_companion=*/graded || roles_present);
+        mask, graded_cells, /*emit_solid_companion=*/graded || roles_present,
+        levels.empty() ? nullptr : &levels,
+        levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm);
     lat_agg.wall_s += wall_seconds() - tg0;
     // (b) certification of the composite — the octet tensor on the SAME mask the
     // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
@@ -2315,6 +2445,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.g_max_d = gf.max_strut_diameter_mm;
       lat_agg.g_below_min = gf.any_strut_below_min;
       lat_agg.g_ungradeable = gf.region_ungradeable;
+      fill_grading_cell_plan(lat_agg.g_cell_ri, gf);
     }
     lat_agg.cells += oc.stats.latticed_cells;
     lat_agg.voxels += oc.region_voxels;
@@ -2486,6 +2617,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.grading_max_strut_diameter_mm = lat_agg.g_max_d;
       run_info.grading_any_strut_below_min = lat_agg.g_below_min;
       run_info.grading_region_ungradeable = lat_agg.g_ungradeable;
+      run_info.grading_cell_mode = lat_agg.g_cell_ri.grading_cell_mode;
+      run_info.grading_cell_base_mm = lat_agg.g_cell_ri.grading_cell_base_mm;
+      run_info.grading_cell_max_level = lat_agg.g_cell_ri.grading_cell_max_level;
+      run_info.grading_cell_latticed_cells =
+          lat_agg.g_cell_ri.grading_cell_latticed_cells;
+      run_info.grading_cells_raised_to_floor =
+          lat_agg.g_cell_ri.grading_cells_raised_to_floor;
+      run_info.grading_cells_dropped_unprintable =
+          lat_agg.g_cell_ri.grading_cells_dropped_unprintable;
+      run_info.grading_cells_split_by_balance =
+          lat_agg.g_cell_ri.grading_cells_split_by_balance;
+      run_info.grading_cell_any_out_of_regime =
+          lat_agg.g_cell_ri.grading_cell_any_out_of_regime;
+      run_info.grading_cell_levels = lat_agg.g_cell_ri.grading_cell_levels;
     }
     // Certification (handoff 2026-07-29-lattice-certification-e2e, bars E1/E3) — WHAT
     // the composite gate certified, so a variant's provenance is recoverable.

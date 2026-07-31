@@ -144,7 +144,8 @@ public struct LatticePage: View {
             cellMM: project.lattice.cellMM,
             bounds: project.lattice.enabled ? bounds : nil,
             running: optimizing,
-            lineWidthMM: project.printParams.wallLineWidthOuterMM)
+            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            cellSummary: cellSummaryText)
     }
 
     private var clearanceCount: Int { project.clearanceSpecs().count }
@@ -569,7 +570,7 @@ public struct LatticePage: View {
                       chevron: true) { EmptyView() } action: { page.go(.topology) }
             // 3 · Cell & density — ONE row (L9: both open the same pane)
             ladderRow(key: "Cell & density",
-                      value: "\(String(format: "%.1f mm", project.lattice.cellMM)) · \(densityRangeText)",
+                      value: "\(cellSummaryText) · \(densityRangeText)",
                       flag: nil, flagTint: nil, chevron: true) {
                 if limits.certifiable { miniBand }
             } action: { page.go(.cellDensity) }
@@ -736,22 +737,25 @@ public struct LatticePage: View {
 
     private var cellDensityPane: some View {
         VStack(spacing: DS.Space.sm) {
-            // Cell size card
+            // Cell size card — Auto / Fixed / Swept (bar R6). Fixed is today's single
+            // value + slider, unchanged; the slider's LOWER bound is now core's own
+            // printability floor (bounds.cellFloorMM) instead of the old app hardcode.
             card {
                 HStack(alignment: .firstTextBaseline) {
                     Text("Cell size").dsStyle(DS.TypeScale.body)
                     Spacer()
-                    tappableNumber(key: "cell",
-                                   text: String(format: "%.1f mm", project.lattice.cellMM),
-                                   title: "Cell size", unit: "mm",
-                                   seed: project.lattice.cellMM) { v in
-                        project.lattice.cellMM = Swift.min(20, Swift.max(2, (v * 2).rounded() / 2))
-                    }
                 }
-                Slider(value: Binding(get: { project.lattice.cellMM },
-                                      set: { project.lattice.cellMM = ($0 * 2).rounded() / 2 }),
-                       in: 2...20)
-                    .tint(DS.Color.accent.color)
+                segment(["Auto", "Fixed", "Swept"],
+                        selected: cellModeIndex, enabled: cellModeEnabled) { i in
+                    project.lattice.cellSizeMode = LatticePage.cellModes[i]
+                }
+                cellModeBody
+                if let note = cellModeGateNote {
+                    Text(note).dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle((project.lattice.cellSizeMode == .fixed
+                                          ? DS.Color.textQuaternary.color
+                                          : RGBA(hex: 0xFFCF7A).color))
+                }
                 if let reason = bounds.cellReason {
                     Text(reason).dsStyle(DS.TypeScale.caption)
                         .foregroundStyle((bounds.cellOverCeiling ? DS.Color.warning : DS.Color.textSecondary).color)
@@ -842,6 +846,133 @@ public struct LatticePage: View {
                     }
                 }
             }
+        }
+    }
+
+    // MARK: cell-size mode — Auto / Fixed / Swept, bounded BY CORE (bar R6)
+
+    /// Segment order: ONE source of truth for index ↔ mode, so the control and the
+    /// stored setting can never drift.
+    private static let cellModes: [LatticeCellSizeMode] = [.auto, .fixed, .swept]
+
+    /// The one-line cell summary the ladder row and the Review drawer both show, so
+    /// the mode is legible without opening the pane ("Auto 2.6 mm" / "8.0 mm" /
+    /// "Swept 4.0–8.0 mm"). Fixed reads exactly as it did before the mode existed.
+    private var cellSummaryText: String {
+        // A uniform run always uses the fixed cell whatever the stored mode says
+        // (runSpec resolves it) — the summary must not claim otherwise.
+        guard cellModeGraded else { return String(format: "%.1f mm", project.lattice.cellMM) }
+        switch project.lattice.cellSizeMode {
+        case .fixed:
+            return String(format: "%.1f mm", project.lattice.cellMM)
+        case .auto:
+            return bounds.cellFloorMM.map { String(format: "Auto %.1f mm", $0) } ?? "Auto (core)"
+        case .swept:
+            let lo = Swift.max(project.lattice.cellMinMM, bounds.cellFloorMM ?? 0)
+            let hi = Swift.max(project.lattice.cellMaxMM, lo)
+            return String(format: "Swept %.1f–%.1f mm", lo, hi)
+        }
+    }
+    /// The slider's top end (mm) — a UI convenience, unchanged from the shipped
+    /// control. The BOTTOM end is core's (`bounds.cellFloorMM`), never this file's.
+    private static let cellSliderMaxMM: Double = 20
+    /// Shown only when NO core floor exists (no line width set, or core carries no
+    /// tensor for the topology): the control's own start of range, explicitly not a
+    /// certifiable limit — the caption says so.
+    private static let cellFallbackFloorMM: Double = 2
+
+    private var cellModeIndex: Int {
+        LatticePage.cellModes.firstIndex(of: project.lattice.cellSizeMode) ?? 1
+    }
+
+    /// Auto and Swept hand the cell choice to CORE, which happens inside the GRADED
+    /// pass — so they are offered only when Density mode is Auto. Greyed with the
+    /// reason below rather than silently ignored.
+    private var cellModeGraded: Bool { project.lattice.densityMode == .auto }
+    private var cellModeEnabled: [Bool] { [cellModeGraded, true, cellModeGraded] }
+
+    private var cellModeGateNote: String? {
+        guard !cellModeGraded else { return nil }
+        if project.lattice.cellSizeMode != .fixed {
+            return "This run is uniform, so it will use the fixed cell — set Density mode to Auto for core to choose or sweep the cell."
+        }
+        return "Auto and Swept need Density mode = Auto: core picks the cell inside the graded pass."
+    }
+
+    /// Core's floor for the current topology at the user's own line width, or the
+    /// control's fallback start when core has no number to give.
+    private var cellFloorMM: Double { bounds.cellFloorMM ?? LatticePage.cellFallbackFloorMM }
+
+    private var cellSliderRange: ClosedRange<Double> {
+        let top = LatticePage.cellSliderMaxMM
+        let lo = Swift.max(0.5, Swift.min(cellFloorMM, top - 0.5))
+        return lo...top
+    }
+
+    private func clampCell(_ v: Double) -> Double {
+        let r = cellSliderRange
+        return Swift.min(r.upperBound, Swift.max(r.lowerBound, (v * 2).rounded() / 2))
+    }
+
+    @ViewBuilder private var cellModeBody: some View {
+        switch project.lattice.cellSizeMode {
+        case .auto:
+            HStack(alignment: .firstTextBaseline) {
+                Text("Core's cell").dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                Spacer()
+                Text(bounds.cellFloorMM.map { String(format: "%.1f mm", $0) } ?? "—")
+                    .dsStyle(DS.TypeScale.headline)
+                    .foregroundStyle((bounds.cellFloorMM == nil ? DS.Color.textTertiary
+                                                                : DS.Color.textPrimary).color)
+            }
+            Text(bounds.cellFloorMM == nil
+                 ? "Core has no cell for this topology at your print settings yet — set an outer line width to read it."
+                 : "Core picks the smallest cell whose struts still print at your line width; no cell is entered here.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+        case .fixed:
+            HStack(alignment: .firstTextBaseline) {
+                Spacer()
+                tappableNumber(key: "cell",
+                               text: String(format: "%.1f mm", project.lattice.cellMM),
+                               title: "Cell size", unit: "mm",
+                               seed: project.lattice.cellMM) { v in
+                    project.lattice.cellMM = clampCell(v)
+                }
+            }
+            Slider(value: Binding(get: { Swift.min(cellSliderRange.upperBound,
+                                                   Swift.max(cellSliderRange.lowerBound,
+                                                             project.lattice.cellMM)) },
+                                  set: { project.lattice.cellMM = clampCell($0) }),
+                   in: cellSliderRange)
+                .tint(DS.Color.accent.color)
+        case .swept:
+            HStack(alignment: .firstTextBaseline) {
+                Spacer()
+                tappableNumber(key: "cellMin",
+                               text: String(format: "%.1f mm", project.lattice.cellMinMM),
+                               title: "Smallest cell", unit: "mm",
+                               seed: project.lattice.cellMinMM) { v in
+                    let lo = clampCell(v)
+                    project.lattice.cellMinMM = lo
+                    if project.lattice.cellMaxMM < lo { project.lattice.cellMaxMM = lo }
+                }
+                Text("–").dsStyle(DS.TypeScale.headline)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                tappableNumber(key: "cellMax",
+                               text: String(format: "%.1f mm", project.lattice.cellMaxMM),
+                               title: "Largest cell", unit: "mm",
+                               seed: project.lattice.cellMaxMM) { v in
+                    project.lattice.cellMaxMM = Swift.max(clampCell(v), project.lattice.cellMinMM)
+                }
+            }
+            Text(bounds.cellFloorMM == nil
+                 ? "Core grades the cell across this window — fine where the stress is high, coarse where it is low."
+                 : String(format: "Core grades the cell across this window — fine where the stress is high, coarse where it is low. Neither end goes below core's %.1f mm floor.",
+                          cellFloorMM))
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
         }
     }
 
@@ -1002,7 +1133,7 @@ public struct LatticePage: View {
                 + (selectedRow.map { $0.certifiable && $0.generatable } == true ? "" : " (can't run)"),
                 warn: selectedRow.map { !($0.certifiable && $0.generatable) } ?? true)
             summaryRow("Cell / density",
-                       String(format: "%.1f mm · %@", project.lattice.cellMM, densityRangeText),
+                       "\(cellSummaryText) · \(densityRangeText)",
                        warn: bounds.cellOverCeiling)
             summaryRow("Density mode",
                        project.lattice.densityMode == .auto ? "Auto (graded from this run's field)" : "Uniform",

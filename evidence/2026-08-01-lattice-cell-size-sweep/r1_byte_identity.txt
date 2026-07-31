@@ -1,0 +1,18 @@
+R1 — stash-rebuild byte-identity, FIXED cell path
+job: r1_fixed_job.json (octet, cell_mm 3.0 -> floored to 4.383 mm, 18624 voxels latticed)
+
+BEFORE (feature changes stashed, core rebuilt):
+b763b4cc67bc6afd3392a86a3abd3d5b78033c09591d8d5a96a24726fbecd5b6  out_before/variant_100.stl
+4ead4fb9e112c6b912475f50a4defc3272e06e214bff35bfb06d3099418883b7  out_before/variant_100_lattice.stl
+9dd91b23c3c083ae285d9752c39e871cff823efcc74190ce637a88a787230967  out_before/report.json
+e4f518688cdf61988d772f9ab41352d8967cee7988d82b492930dd2379919bb3  out_before/fields.bin
+287e4694ed1a5c2c7c2826472355bcde3beb59594ba31b7518b0e334b3e1ede7  out_before/variant_100_lattice.report.json
+
+AFTER (feature restored, core rebuilt):
+b763b4cc67bc6afd3392a86a3abd3d5b78033c09591d8d5a96a24726fbecd5b6  out_after/variant_100.stl
+4ead4fb9e112c6b912475f50a4defc3272e06e214bff35bfb06d3099418883b7  out_after/variant_100_lattice.stl
+9dd91b23c3c083ae285d9752c39e871cff823efcc74190ce637a88a787230967  out_after/report.json
+e4f518688cdf61988d772f9ab41352d8967cee7988d82b492930dd2379919bb3  out_after/fields.bin
+287e4694ed1a5c2c7c2826472355bcde3beb59594ba31b7518b0e334b3e1ede7  out_after/variant_100_lattice.report.json
+
+RESULT: BYTE-IDENTICAL on all five outputs.

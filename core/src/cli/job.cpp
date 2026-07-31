@@ -1,5 +1,7 @@
 #include "topopt/job.hpp"
 
+#include "topopt/cell_plan.hpp"  // cell_size_mode_from_name (the ONE mode vocabulary)
+
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -925,7 +927,8 @@ JobDescription parse_job(const std::string& json_text) {
   if (const JsonValue* gradv = find_key(root, "grading")) {
     const JsonValue& gr = require_object(*gradv, "grading");
     reject_unknown_keys(
-        gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent"},
+        gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
+             "cell_mode", "cell_min_mm", "cell_max_mm"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -934,10 +937,51 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("grading \"topology\" must be \"octet\" (got \"" +
                     job.grading.topology + "\")");
     }
-    job.grading.cell_mm =
-        require_number(require_key(gr, "cell_mm", "grading"), "grading.cell_mm");
-    if (!(job.grading.cell_mm > 0.0))
-      schema_fail("grading \"cell_mm\" must be > 0");
+    // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). Absent => "fixed",
+    // which is the pre-sweep schema exactly: cell_mm required, no ladder keys.
+    if (const JsonValue* m = find_key(gr, "cell_mode")) {
+      job.grading.cell_mode = require_nonempty_string(*m, "grading.cell_mode");
+      CellSizeMode parsed;
+      if (!cell_size_mode_from_name(job.grading.cell_mode.c_str(), parsed))
+        schema_fail(
+            "grading \"cell_mode\" must be \"fixed\", \"auto\" or \"swept\" (got \"" +
+            job.grading.cell_mode + "\")");
+    }
+    const bool swept = job.grading.cell_mode == "swept";
+    const bool auto_cell = job.grading.cell_mode == "auto";
+    if (swept) {
+      // A target cell alongside a ladder is a CONFLICT, not a hint: refuse it rather
+      // than silently ignore one of the two.
+      if (find_key(gr, "cell_mm"))
+        schema_fail(
+            "grading \"cell_mm\" is not allowed with \"cell_mode\": \"swept\" — the "
+            "swept ladder is set by \"cell_min_mm\" and \"cell_max_mm\"");
+      job.grading.cell_min_mm = require_number(
+          require_key(gr, "cell_min_mm", "grading"), "grading.cell_min_mm");
+      job.grading.cell_max_mm = require_number(
+          require_key(gr, "cell_max_mm", "grading"), "grading.cell_max_mm");
+      if (!(job.grading.cell_min_mm > 0.0))
+        schema_fail("grading \"cell_min_mm\" must be > 0");
+      if (!(job.grading.cell_max_mm >= job.grading.cell_min_mm))
+        schema_fail("grading \"cell_max_mm\" must be >= \"cell_min_mm\"");
+    } else {
+      if (find_key(gr, "cell_min_mm") || find_key(gr, "cell_max_mm"))
+        schema_fail(
+            "grading \"cell_min_mm\" / \"cell_max_mm\" are only allowed with "
+            "\"cell_mode\": \"swept\"");
+      if (auto_cell) {
+        // Core picks the cell; a stated target would be ignored, so refuse it.
+        if (find_key(gr, "cell_mm"))
+          schema_fail(
+              "grading \"cell_mm\" is not allowed with \"cell_mode\": \"auto\" — "
+              "core chooses the cell from the printability floor");
+      } else {
+        job.grading.cell_mm =
+            require_number(require_key(gr, "cell_mm", "grading"), "grading.cell_mm");
+        if (!(job.grading.cell_mm > 0.0))
+          schema_fail("grading \"cell_mm\" must be > 0");
+      }
+    }
     job.grading.min_extrudable_width_mm = require_number(
         require_key(gr, "min_extrudable_width_mm", "grading"),
         "grading.min_extrudable_width_mm");

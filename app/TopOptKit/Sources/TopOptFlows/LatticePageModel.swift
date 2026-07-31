@@ -219,7 +219,14 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                                latticeEnabled: Bool, densityMode: LatticeDensityMode,
                                topologyDisplayName: String, cellMM: Double,
                                bounds: LatticeBounds?, running: Bool,
-                               lineWidthMM: Double = 0) -> LatticeOptimizeSurface {
+                               lineWidthMM: Double = 0,
+                               cellSummary: String? = nil) -> LatticeOptimizeSurface {
+        // The cell phrase the button claims. In AUTO / SWEPT cell mode there is no
+        // single target cell to name — the page passes the mode's own summary
+        // ("Auto 4.6 mm", "Swept 4.6–8.0 mm") so the button never states a target the
+        // job does not carry (core REFUSES cell_mm in those modes). Absent ⇒ the
+        // fixed-cell phrasing, exactly as before.
+        let cellText = cellSummary ?? String(format: "%.1f mm", cellMM)
         if running {
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: "a job is already running")
         }
@@ -244,11 +251,11 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         if densityMode == .auto {
             return LatticeOptimizeSurface(
                 enabled: baseCanOptimize, label: "Optimize",
-                sub: "topology + graded \(topologyDisplayName.lowercased()) lattice (from this run's own field) · target \(String(format: "%.1f", cellMM)) mm")
+                sub: "topology + graded \(topologyDisplayName.lowercased()) lattice (from this run's own field) · target \(cellText)")
         }
         return LatticeOptimizeSurface(
             enabled: baseCanOptimize, label: "Optimize",
-            sub: "topology + \(topologyDisplayName.lowercased()) lattice · \(String(format: "%.1f", cellMM)) mm")
+            sub: "topology + \(topologyDisplayName.lowercased()) lattice · \(cellText)")
     }
 }
 

@@ -672,6 +672,39 @@ public enum TopOptKit {
                              minCellsPerMember: lim.min_cells_per_member)
     }
 
+    /// The CELL-SIZE bounds the Auto / Fixed / Swept control must respect, BOTH read
+    /// from core (handoff 2026-08-01-lattice-cell-size-sweep, bar R6). The app
+    /// hardcodes neither number, so a re-measurement in core moves the control with
+    /// no app change.
+    /// - `printabilityFloorMM` — the smallest cell at which this topology's thinnest
+    ///   certifiable strut still prints at the stated extrusion width. It is the
+    ///   control's LOWER bound and the cell core picks in AUTO mode.
+    /// - `cellsPerMemberFloor` — N*, the scale-separation floor; on a member of width
+    ///   W the ceiling is W / N*.
+    /// - `valid == false` — core carries no tensor for the topology, or the width was
+    ///   non-positive; the UI then says it has no core number rather than guessing.
+    public struct LatticeCellBounds: Equatable, Sendable {
+        public let printabilityFloorMM: Double
+        public let cellsPerMemberFloor: Double
+        public let valid: Bool
+        public init(printabilityFloorMM: Double, cellsPerMemberFloor: Double, valid: Bool) {
+            self.printabilityFloorMM = printabilityFloorMM
+            self.cellsPerMemberFloor = cellsPerMemberFloor
+            self.valid = valid
+        }
+    }
+
+    /// Core's cell-size bounds for a topology named as the job schema names it
+    /// (`"octet"`) at the user's own minimum extrudable width (mm). Forwards
+    /// `topoptbridge::lattice_cell_bounds`; never throws.
+    public static func latticeCellBounds(topology: String,
+                                         minExtrudableWidthMM: Double) -> LatticeCellBounds {
+        let b = topoptbridge.lattice_cell_bounds(std.string(topology), minExtrudableWidthMM)
+        return LatticeCellBounds(printabilityFloorMM: b.printability_floor_mm,
+                                 cellsPerMemberFloor: b.cells_per_member_floor,
+                                 valid: b.valid)
+    }
+
     /// The topology names the core can RUN and certify today (the seven cubic
     /// topologies). The UI reads this to mark which picker entries are certifiable
     /// rather than assuming.

@@ -1,0 +1,25 @@
+      Start 82: clearance_parity
+75/88 Test #75: stress ...........................   Passed  521.96 sec
+      Start 83: face_protection_parity
+76/88 Test #81: production_parity ................   Passed  393.43 sec
+      Start 84: loadcase_small_face
+77/88 Test #84: loadcase_small_face ..............   Passed    0.56 sec
+      Start 85: loadcase_resolution
+78/88 Test #85: loadcase_resolution ..............   Passed    0.41 sec
+      Start 86: loadcase_analyze
+79/88 Test #86: loadcase_analyze .................   Passed   32.10 sec
+      Start 87: lattice_hookup
+80/88 Test #83: face_protection_parity ...........   Passed  161.63 sec
+      Start 88: mesh_job
+81/88 Test #72: rung_infeasible ..................   Passed  1148.83 sec
+82/88 Test #71: conditional_projection ...........   Passed  1236.63 sec
+83/88 Test #82: clearance_parity .................   Passed  383.17 sec
+84/88 Test #88: mesh_job .........................   Passed  204.41 sec
+85/88 Test #87: lattice_hookup ...................   Passed  330.75 sec
+86/88 Test #65: coarsen_rule .....................   Passed  2324.47 sec
+87/88 Test #67: mma ..............................   Passed  2317.99 sec
+88/88 Test #80: cli_demo .........................   Passed  3723.56 sec
+
+100% tests passed out of 88
+
+Total Test time (real) = 8710.82 sec

@@ -23,8 +23,17 @@ GradedField grade_lattice(const VoxelGrid& grid,
     throw std::invalid_argument("grade_lattice: demand.size() != voxel_count");
   if (region && region->size() != n)
     throw std::invalid_argument("grade_lattice: region->size() != voxel_count");
-  if (!(params.target_cell_size_mm > 0.0))
+  const bool swept = params.cell_mode == CellSizeMode::Swept;
+  if (params.cell_mode == CellSizeMode::Fixed && !(params.target_cell_size_mm > 0.0))
     throw std::invalid_argument("grade_lattice: target_cell_size_mm must be > 0");
+  if (swept) {
+    if (!(params.min_cell_size_mm > 0.0))
+      throw std::invalid_argument(
+          "grade_lattice: swept mode needs min_cell_size_mm > 0");
+    if (!(params.max_cell_size_mm >= params.min_cell_size_mm))
+      throw std::invalid_argument(
+          "grade_lattice: swept mode needs max_cell_size_mm >= min_cell_size_mm");
+  }
   if (!(params.min_extrudable_width_mm > 0.0))
     throw std::invalid_argument(
         "grade_lattice: min_extrudable_width_mm must be > 0");
@@ -49,12 +58,23 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // the floor is the cell that prints the rho_lo strut at exactly the stated minimum
   // width. Diameter is linear in cell, so phi_lo = diameter at a unit cell and the
   // floor is min_width / phi_lo.
-  const double phi_lo = octet_strut_diameter_mm(rho_lo, 1.0);
-  const double floor_mm = params.min_extrudable_width_mm / phi_lo;
-  const double cell = std::max(params.target_cell_size_mm, floor_mm);
+  const double floor_mm = lattice_cell_printability_floor_mm(
+      topo, params.min_extrudable_width_mm);
+  // AUTO takes the floor itself — the finest cell every strut still prints at, and
+  // therefore the uniform cell that leaves the most of the part latticed (the
+  // cells-per-member rule is an UPPER bound, so finer is always more latticed).
+  // FIXED takes the caller's target, raised to that same floor. SWEPT's cell is
+  // per-region and comes from the plan below; the scalar it reports is the coarsest
+  // level the plan actually used.
+  const double uniform_cell = params.cell_mode == CellSizeMode::Auto
+                                  ? floor_mm
+                                  : std::max(params.target_cell_size_mm, floor_mm);
+  const double cell = uniform_cell;
   out.printability_floor_mm = floor_mm;
-  out.cell_size_floored = params.target_cell_size_mm < floor_mm;
+  out.cell_size_floored =
+      params.cell_mode == CellSizeMode::Fixed && params.target_cell_size_mm < floor_mm;
   out.cell_size_mm = cell;
+  out.cell_mode = params.cell_mode;
 
   // ── the local member width field (PR 206) ───────────────────────────────────────
   const std::vector<double> width =
@@ -83,52 +103,139 @@ GradedField grade_lattice(const VoxelGrid& grid,
   double min_d = kInf, max_d = 0.0;
   const double gamma = params.demand_exponent;
 
-  for (std::size_t e = 0; e < n; ++e) {
-    const bool candidate =
-        density[e] > iso && (!region || (*region)[e] != 0);
-    if (!candidate) continue;
-    ++out.region_voxels;
-
-    // Cells-per-member ceiling (requirement 2): a +inf width (thicker than the EDT
-    // cap) yields +inf cells-across and always clears the floor.
-    const double cpm = width[e] / cell;
-    if (cpm < n_star) {
-      // L4 — no printable cell holds the floor in this member: it STAYS SOLID.
-      ++out.solid_fallback_voxels;
-      continue;
-    }
-
-    // Density map, clamped into the certifiable band (requirement 1 / L2).
+  // The demand -> density map (requirement 1 / L2), identical in every cell mode:
+  // density depends on DEMAND alone, never on cell size. That is exactly what lets
+  // the cell-size plan consume it without circularity.
+  auto rho_of = [&](std::size_t e) {
     const double frac =
         demand_max > 0.0 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
                          : 0.0;
-    double rho = rho_hi * std::pow(frac, gamma);
-    // Band-clamp accounting (H4b): count voxels the demand placed outside the
-    // certifiable band before the clamp. (rho > rho_hi is unreachable with the
-    // rho_hi * frac^gamma map, frac <= 1 — counted anyway so a future demand map
-    // cannot clamp silently.)
+    return rho_hi * std::pow(frac, gamma);
+  };
+  // Band-clamp accounting (H4b): count voxels the demand placed outside the
+  // certifiable band before the clamp. (rho > rho_hi is unreachable with the
+  // rho_hi * frac^gamma map, frac <= 1 — counted anyway so a future demand map
+  // cannot clamp silently.)
+  auto clamp_rho = [&](std::size_t e, double rho) {
     if (rho < rho_lo) {
       ++out.clamped_lo_voxels;
       out.clamp_flags[e] = 1;
-      rho = rho_lo;
-    } else if (rho > rho_hi) {
+      return rho_lo;
+    }
+    if (rho > rho_hi) {
       ++out.clamped_hi_voxels;
       out.clamp_flags[e] = 2;
-      rho = rho_hi;
+      return rho_hi;
+    }
+    return rho;
+  };
+  // The per-voxel cell each latticed voxel ended up with. Left EMPTY on the uniform
+  // paths, where the scalar `cell` is the whole truth — and an empty field is what
+  // keeps the posture byte-identical to a pre-sweep run (bar R1).
+  std::vector<double> voxel_cell;
+
+  if (!swept) {
+    // ── FIXED / AUTO: ONE cell for the part. Unchanged from the pre-sweep law. ────
+    for (std::size_t e = 0; e < n; ++e) {
+      const bool candidate =
+          density[e] > iso && (!region || (*region)[e] != 0);
+      if (!candidate) continue;
+      ++out.region_voxels;
+
+      // Cells-per-member ceiling (requirement 2): a +inf width (thicker than the EDT
+      // cap) yields +inf cells-across and always clears the floor.
+      const double cpm = width[e] / cell;
+      if (cpm < n_star) {
+        // L4 — no printable cell holds the floor in this member: it STAYS SOLID.
+        ++out.solid_fallback_voxels;
+        continue;
+      }
+
+      const double rho = clamp_rho(e, rho_of(e));
+
+      post.mask[e] = 1;
+      post.relative_density[e] = rho;
+      ++out.latticed_voxels;
+
+      if (rho < rho_min_used) rho_min_used = rho;
+      if (rho > rho_max_used) rho_max_used = rho;
+      if (width[e] < min_width) min_width = width[e];
+      if (cpm < min_cpm) min_cpm = cpm;
+      const double d = octet_strut_diameter_mm(rho, cell);
+      if (d < min_d) min_d = d;
+      if (d > max_d) max_d = d;
+      if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
+    }
+    // A trivial one-level plan, so every consumer reads the same report shape in all
+    // three modes and a receipt never has to branch on the mode.
+    out.cell_plan.mode = params.cell_mode;
+    out.cell_plan.origin = grid.origin;
+    out.cell_plan.base_cell_mm = cell;
+    out.cell_plan.max_level = 0;
+    out.cell_plan.cells_per_member_floor = n_star;
+    out.cell_plan.printability_floor_mm = floor_mm;
+  } else {
+    // ── SWEPT: cell size follows demand on a dyadic octree (cell_plan.hpp) ────────
+    // Pass 1 — the density grade over every candidate. No cell size is involved here,
+    // so this is the same map the uniform paths apply; the plan then reads it.
+    std::vector<char> cand(n, 0);
+    std::vector<double> rho_raw(n, 0.0);
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
+      cand[e] = 1;
+      ++out.region_voxels;
+      // The plan needs the BAND-CLAMPED density, because that is the density whose
+      // strut actually gets printed. Clamp COUNTS are taken in pass 2, over the
+      // voxels that end up latticed, so the accounting means what it means on the
+      // uniform paths.
+      rho_raw[e] = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
     }
 
-    post.mask[e] = 1;
-    post.relative_density[e] = rho;
-    ++out.latticed_voxels;
+    CellPlanParams pp;
+    pp.topology = topo;
+    pp.mode = CellSizeMode::Swept;
+    pp.min_cell_size_mm = params.min_cell_size_mm;
+    pp.max_cell_size_mm = params.max_cell_size_mm;
+    pp.min_extrudable_width_mm = params.min_extrudable_width_mm;
+    pp.thickness_cap_voxels = params.thickness_cap_voxels;
+    out.cell_plan = plan_cell_sizes(grid, rho_raw, cand, width, pp);
+    voxel_cell = cell_size_field(grid, out.cell_plan);
 
-    if (rho < rho_min_used) rho_min_used = rho;
-    if (rho > rho_max_used) rho_max_used = rho;
-    if (width[e] < min_width) min_width = width[e];
-    if (cpm < min_cpm) min_cpm = cpm;
-    const double d = octet_strut_diameter_mm(rho, cell);
-    if (d < min_d) min_d = d;
-    if (d > max_d) max_d = d;
-    if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
+    // Pass 2 — assign. A candidate whose base cell got no admissible level STAYS
+    // SOLID: the per-cell form of the L4 fallback the uniform law applies per part.
+    double coarsest = 0.0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!cand[e]) continue;
+      const double ce = voxel_cell[e];
+      if (!(ce > 0.0)) {
+        ++out.solid_fallback_voxels;
+        continue;
+      }
+      const double rho = clamp_rho(e, rho_of(e));
+      post.mask[e] = 1;
+      post.relative_density[e] = rho;
+      ++out.latticed_voxels;
+
+      const double cpm = width[e] / ce;
+      if (rho < rho_min_used) rho_min_used = rho;
+      if (rho > rho_max_used) rho_max_used = rho;
+      if (width[e] < min_width) min_width = width[e];
+      if (cpm < min_cpm) min_cpm = cpm;
+      const double d = octet_strut_diameter_mm(rho, ce);
+      if (d < min_d) min_d = d;
+      if (d > max_d) max_d = d;
+      if (d < params.min_extrudable_width_mm) out.any_strut_below_min = true;
+      if (ce > coarsest) coarsest = ce;
+    }
+    // The scalar a legacy reader sees is the COARSEST cell the plan used — the
+    // conservative one for a cells-per-member question asked at part scale. The
+    // honest per-region numbers are cell_plan.levels; the per-voxel truth is the
+    // field carried on the posture.
+    if (coarsest > 0.0) {
+      out.cell_size_mm = coarsest;
+      post.cell_size_mm = coarsest;
+    }
+    post.cell_size_field = voxel_cell;
   }
 
   if (out.latticed_voxels > 0) {
@@ -153,9 +260,18 @@ GradedField grade_lattice(const VoxelGrid& grid,
     if (!(rho >= rho_lo && rho <= rho_hi))
       throw std::logic_error(
           "grade_lattice: emitted density outside the certifiable band");
-    if (!(width[e] / cell >= n_star))
+    // The floor is checked at THIS voxel's OWN cell — per cell, never per part, which
+    // is the whole point of a swept posture (bar R3/R5). On the uniform paths
+    // voxel_cell is empty and this is the scalar test, unchanged.
+    const double ce = voxel_cell.empty() ? cell : voxel_cell[e];
+    if (!(width[e] / ce >= n_star))
       throw std::logic_error(
           "grade_lattice: emitted lattice below the cells-per-member floor");
+    if (!(octet_strut_diameter_mm(rho, ce) >= params.min_extrudable_width_mm) &&
+        swept)
+      throw std::logic_error(
+          "grade_lattice: swept plan emitted a strut under the stated minimum "
+          "extrudable width");
   }
 
   return out;

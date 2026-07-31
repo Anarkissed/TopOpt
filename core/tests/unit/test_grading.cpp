@@ -10,6 +10,7 @@
 //   ★   the limits are READ from core — the report's band/floor equal the library
 //       accessors, not any literal in the law.
 
+#include "topopt/cell_plan.hpp"
 #include "topopt/grading.hpp"
 #include "topopt/lattice.hpp"
 #include "topopt/voxel.hpp"
@@ -238,6 +239,145 @@ int main() {
     try { grade_lattice(thick, dens, wrong, nullptr, p); }
     catch (const std::invalid_argument&) { threw = true; }
     CHECK(threw, "size mismatch rejected");
+  }
+
+  // ---- 12. CELL-SIZE MODES (handoff 2026-08-01-lattice-cell-size-sweep) ----------
+  // A thick block with a demand ramp, so the density grade spans enough of the band
+  // for the printability floor to bind differently in different places.
+  {
+    VoxelGrid blk = solid_block(48, 48, 48, 1.0);
+    std::vector<double> bd = density_of(blk);
+    std::vector<double> bdem(blk.voxel_count(), 0.0);
+    for (int k = 0; k < blk.nz; ++k)
+      for (int j = 0; j < blk.ny; ++j)
+        for (int i = 0; i < blk.nx; ++i)
+          bdem[blk.index(i, j, k)] =
+              1.0 - 0.9 * static_cast<double>(i) / static_cast<double>(blk.nx);
+
+    GradingLawParams base;
+    base.topology = LatticeTopology::Octet;
+    base.min_extrudable_width_mm = 0.8;
+    base.demand_exponent = 1.0;
+
+    // R1 — the DEFAULT mode is Fixed, and a Fixed run is untouched by the feature:
+    // the mode field defaulting to Fixed is what makes every pre-sweep caller keep
+    // its exact behaviour, and the posture carries NO per-voxel cell field.
+    // The Fixed target is set ABOVE the printability floor on purpose, so Auto (which
+    // takes the floor) is genuinely FINER and the comparison below is not vacuous —
+    // a target under the floor is simply raised to it and the two modes coincide.
+    const double pfloor =
+        lattice_cell_printability_floor_mm(LatticeTopology::Octet, 0.8);
+    GradingLawParams fx = base;
+    fx.target_cell_size_mm = 2.0 * pfloor;
+    CHECK(base.cell_mode == CellSizeMode::Fixed, "Fixed is the default cell mode");
+    GradedField F = grade_lattice(blk, bd, bdem, nullptr, fx);
+    CHECK(F.posture.cell_size_field.empty(),
+          "R1: a Fixed posture carries no per-voxel cell field (the pre-sweep shape)");
+    CHECK(F.cell_plan.max_level == 0, "Fixed reports a single-level plan");
+    CHECK(F.cell_mode == CellSizeMode::Fixed, "Fixed mode echoed in the report");
+
+    // AUTO — core picks the printability floor itself, with no target consulted, and
+    // being the FINEST printable cell it can only lattice MORE than a coarser Fixed
+    // cell (the cells-per-member rule is an upper bound).
+    GradingLawParams au = base;
+    au.cell_mode = CellSizeMode::Auto;
+    au.target_cell_size_mm = 0.0;  // deliberately unset: Auto must not need it
+    GradedField A = grade_lattice(blk, bd, bdem, nullptr, au);
+    CHECK(std::fabs(A.cell_size_mm - A.printability_floor_mm) < 1e-12,
+          "Auto chooses exactly the printability floor");
+    CHECK(std::fabs(A.printability_floor_mm -
+                    lattice_cell_printability_floor_mm(LatticeTopology::Octet, 0.8)) <
+              1e-12,
+          "the floor is READ from core's one law, not recomputed here");
+    CHECK(A.posture.cell_size_field.empty(), "Auto is uniform: no per-voxel field");
+    CHECK(A.cell_size_mm < fx.target_cell_size_mm - 1e-12,
+          "Auto's cell is finer than this deliberately-coarse Fixed target");
+    CHECK(A.latticed_voxels >= F.latticed_voxels,
+          "Auto's finer cell lattices at least as much as the coarser Fixed cell");
+
+    // SWEPT — a dyadic ladder. Every guarantee is per CELL: inside the band, above
+    // the cells-per-member floor at ITS OWN cell, and printable at ITS OWN cell.
+    GradingLawParams sw = base;
+    sw.cell_mode = CellSizeMode::Swept;
+    sw.min_cell_size_mm = 3.0;
+    sw.max_cell_size_mm = 12.0;  // two doublings -> levels 0,1,2
+    GradedField S = grade_lattice(blk, bd, bdem, nullptr, sw);
+    CHECK(S.cell_plan.max_level == 2, "a 3->12 mm sweep is exactly two doublings");
+    CHECK(S.posture.cell_size_field.size() == blk.voxel_count(),
+          "a Swept posture carries a per-voxel cell field");
+    const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+    const std::vector<double> w =
+        local_member_thickness_mm(blk, bd, 0.5, sw.thickness_cap_voxels);
+    bool all_dyadic = true, all_regime = true, all_printable = true;
+    for (std::size_t e = 0; e < blk.voxel_count(); ++e) {
+      if (!S.posture.mask[e]) continue;
+      const double c = S.posture.cell_size_field[e];
+      // The cell must be min * 2^L for an integer L in range.
+      const double ratio = c / sw.min_cell_size_mm;
+      const double lg = std::log2(ratio);
+      if (std::fabs(lg - std::round(lg)) > 1e-9 || std::round(lg) < 0 ||
+          std::round(lg) > S.cell_plan.max_level)
+        all_dyadic = false;
+      if (!(w[e] / c >= n_star)) all_regime = false;
+      if (!(octet_strut_diameter_mm(S.posture.relative_density[e], c) >=
+            sw.min_extrudable_width_mm))
+        all_printable = false;
+    }
+    CHECK(all_dyadic, "every emitted cell is on the dyadic ladder min * 2^L");
+    CHECK(all_regime,
+          "R5: every latticed voxel clears the cells-per-member floor at ITS OWN cell");
+    CHECK(all_printable,
+          "R3: every latticed voxel's strut prints at ITS OWN cell (per cell, not per part)");
+    CHECK(!S.any_strut_below_min, "R3: the below-minimum tripwire never fires");
+    CHECK(!S.cell_plan.any_out_of_regime, "R5: no region is out of regime");
+    CHECK(S.min_strut_diameter_mm >= sw.min_extrudable_width_mm,
+          "R3: the reported minimum strut width is at or above the stated minimum");
+
+    // The report really is per REGION, and the regions are the cell sizes.
+    CHECK(S.cell_plan.levels.size() >= 2,
+          "the sweep produced more than one cell-size region on this part");
+    for (const CellLevelReport& r : S.cell_plan.levels) {
+      CHECK(r.cells > 0, "only OCCUPIED levels are reported");
+      CHECK(!r.out_of_regime, "R5: each reported region clears the floor");
+      CHECK(std::fabs(r.cell_size_mm -
+                      sw.min_cell_size_mm * std::pow(2.0, r.level)) < 1e-12,
+            "a region's cell size is its dyadic level");
+    }
+
+    // L5 — determinism, in the swept mode too.
+    GradedField S2 = grade_lattice(blk, bd, bdem, nullptr, sw);
+    CHECK(S.posture.mask == S2.posture.mask &&
+              S.posture.relative_density == S2.posture.relative_density &&
+              S.posture.cell_size_field == S2.posture.cell_size_field &&
+              S.cell_plan.level == S2.cell_plan.level,
+          "R7: the swept plan is deterministic (byte-identical twice)");
+
+    // A sweep with min == max is a legal degenerate ladder: one level, still swept.
+    GradingLawParams deg = sw;
+    deg.max_cell_size_mm = deg.min_cell_size_mm;
+    GradedField D = grade_lattice(blk, bd, bdem, nullptr, deg);
+    CHECK(D.cell_plan.max_level == 0, "min == max is a one-level ladder");
+
+    // Validation: a swept run without bounds is refused, never defaulted.
+    bool threw = false;
+    GradingLawParams bad = base;
+    bad.cell_mode = CellSizeMode::Swept;
+    try { grade_lattice(blk, bd, bdem, nullptr, bad); }
+    catch (const std::invalid_argument&) { threw = true; }
+    CHECK(threw, "a swept run with no ladder bounds is refused");
+  }
+
+  // ---- 13. the mode vocabulary is one round-trip ---------------------------------
+  {
+    for (CellSizeMode m : {CellSizeMode::Fixed, CellSizeMode::Auto,
+                           CellSizeMode::Swept}) {
+      CellSizeMode back{};
+      CHECK(cell_size_mode_from_name(cell_size_mode_name(m), back) && back == m,
+            "cell-size mode name round-trips");
+    }
+    CellSizeMode ignored{};
+    CHECK(!cell_size_mode_from_name("coarse", ignored),
+          "an unknown mode name is refused, never silently defaulted");
   }
 
   std::fprintf(stderr, "grading: %d checks, %d failures\n", g_checks, g_failures);

@@ -1,0 +1,158 @@
+=== SWEPT CELL SIZE — measurement harness ===
+
+===== R2 — the PRODUCTION lookup is cell-size invariant =====
+  TOLERANCE, stated first: relative deviation <= 1e-9 on rho and on each
+  of C11/C12/C44, across cell sizes at a fixed strut-to-cell RATIO.
+
+  [csv] /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/graded-cell-size-phase-0-124b12/evidence/2026-08-01-lattice-cell-size-sweep/r2_production_lookup.csv
+  r/L = 0.06
+    cell_mm   strut_r_mm  rho       C11         C12         C44        
+    2.0       0.1200      0.09505   78.1116     37.5962     33.7870    
+    4.0       0.2400      0.09505   78.1116     37.5962     33.7870    
+    8.0       0.4800      0.09505   78.1116     37.5962     33.7870    
+    16.0      0.9600      0.09505   78.1116     37.5962     33.7870    
+    32.0      1.9200      0.09505   78.1116     37.5962     33.7870    
+  r/L = 0.10
+    cell_mm   strut_r_mm  rho       C11         C12         C44        
+    2.0       0.2000      0.21173   226.4242    99.1202     87.3775    
+    4.0       0.4000      0.21173   226.4242    99.1202     87.3775    
+    8.0       0.8000      0.21173   226.4242    99.1202     87.3775    
+    16.0      1.6000      0.21173   226.4242    99.1202     87.3775    
+    32.0      3.2000      0.21173   226.4242    99.1202     87.3775    
+  r/L = 0.14
+    cell_mm   strut_r_mm  rho       C11         C12         C44        
+    2.0       0.2800      0.38071   571.0276    213.6384    192.2586   
+    4.0       0.5600      0.38071   571.0276    213.6384    192.2586   
+    8.0       1.1200      0.38071   571.0276    213.6384    192.2586   
+    16.0      2.2400      0.38071   571.0276    213.6384    192.2586   
+    32.0      4.4800      0.38071   571.0276    213.6384    192.2586   
+  r/L = 0.18
+    cell_mm   strut_r_mm  rho       C11         C12         C44        
+    2.0       0.3600      0.55751   1198.4087   398.2595    354.6626   
+    4.0       0.7200      0.55751   1198.4087   398.2595    354.6626   
+    8.0       1.4400      0.55751   1198.4087   398.2595    354.6626   
+    16.0      2.8800      0.55751   1198.4087   398.2595    354.6626   
+    32.0      5.7600      0.55751   1198.4087   398.2595    354.6626   
+
+  worst relative deviation across a 16x cell range = 0.000e+00
+    [PASS] R2: rho and C11/C12/C44 are cell-size invariant to 1e-9 on the shipped path
+  READ: the library is keyed on RELATIVE DENSITY, and relative density is a
+  RATIO of strut volume to cell volume, so it cannot see the cell size. A
+  swept cell therefore perturbs the certification solve by exactly nothing.
+
+===== R3 / R5 — per-cell printability and per-region regime =====
+  [csv] /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/graded-cell-size-phase-0-124b12/evidence/2026-08-01-lattice-cell-size-sweep/r3_r5_per_region.csv
+
+  --- sweep_4_8: sweep 4.0 -> 8.0 mm, min extrudable width 0.80 mm ---
+    candidates 212992, latticed 98304, solid fallback 114688
+    base cell 4.00 mm, levels 0..1, octree cells 864
+    rho used 0.1170 .. 0.8999;  cells-per-member floor N* = 5.0
+
+    R3 — printability across the swept part:
+      min strut width       = 1.1396 mm  (stated minimum 0.80 mm)
+      max strut width       = 1.5343 mm
+      cells raised to floor = 96 of 864 (11.1%)
+      cells dropped (no printable cell inside the ceiling) = 1600
+      cells split by 2:1 balance = 0
+    [PASS] R3: EVERY emitted strut is at or above the stated minimum extrudable width
+    [PASS] R3: the below-minimum tripwire never fired
+
+    R5 — cells-per-member per region (a region = one cell size):
+      level   cell_mm    cells      voxels      min_member_mm min_cells/mem min_strut   regime
+      0       4.00       768        49152       24.00000      6.00          1.5343      in regime
+      1       8.00       96         49152       40.00000      5.00          1.1396      in regime
+    [PASS] R5: every emitted region clears the cells-per-member floor
+    [PASS] R5: the part-level out-of-regime tripwire never fired
+
+  --- sweep_4_16: sweep 4.0 -> 16.0 mm, min extrudable width 0.80 mm ---
+    candidates 212992, latticed 98304, solid fallback 114688
+    base cell 4.00 mm, levels 0..2, octree cells 864
+    rho used 0.1170 .. 0.8999;  cells-per-member floor N* = 5.0
+
+    R3 — printability across the swept part:
+      min strut width       = 1.1396 mm  (stated minimum 0.80 mm)
+      max strut width       = 1.5343 mm
+      cells raised to floor = 96 of 864 (11.1%)
+      cells dropped (no printable cell inside the ceiling) = 1600
+      cells split by 2:1 balance = 0
+    [PASS] R3: EVERY emitted strut is at or above the stated minimum extrudable width
+    [PASS] R3: the below-minimum tripwire never fired
+
+    R5 — cells-per-member per region (a region = one cell size):
+      level   cell_mm    cells      voxels      min_member_mm min_cells/mem min_strut   regime
+      0       4.00       768        49152       24.00000      6.00          1.5343      in regime
+      1       8.00       96         49152       40.00000      5.00          1.1396      in regime
+    [PASS] R5: every emitted region clears the cells-per-member floor
+    [PASS] R5: the part-level out-of-regime tripwire never fired
+
+  --- sweep_2_8_wide: sweep 2.0 -> 8.0 mm, min extrudable width 0.60 mm ---
+    candidates 212992, latticed 90112, solid fallback 122880
+    base cell 2.00 mm, levels 0..2, octree cells 6224
+    rho used 0.1170 .. 0.8999;  cells-per-member floor N* = 5.0
+
+    R3 — printability across the swept part:
+      min strut width       = 0.7671 mm  (stated minimum 0.60 mm)
+      max strut width       = 1.1396 mm
+      cells raised to floor = 80 of 6224 (1.3%)
+      cells dropped (no printable cell inside the ceiling) = 15232
+      cells split by 2:1 balance = 128
+    [PASS] R3: EVERY emitted strut is at or above the stated minimum extrudable width
+    [PASS] R3: the below-minimum tripwire never fired
+
+    R5 — cells-per-member per region (a region = one cell size):
+      level   cell_mm    cells      voxels      min_member_mm min_cells/mem min_strut   regime
+      0       2.00       6144       49152       24.00000      12.00         0.7671      in regime
+      2       8.00       80         40960       40.00000      5.00          1.1396      in regime
+    [PASS] R5: every emitted region clears the cells-per-member floor
+    [PASS] R5: the part-level out-of-regime tripwire never fired
+
+===== R4 — the 4 -> 8 mm transition: connectivity + seam density =====
+  plan: base 4.0 mm, 2 occupied level(s), 864 octree cells
+    [PASS] R4: the fixture really does carry MORE THAN ONE cell size
+  emitted: 22128 struts, 4200 nodes, 792096 triangles across 2 levels
+  strut diameters 0.3650 .. 1.5343 mm
+    [PASS] R4: the multilevel pass emitted geometry
+
+  (a) connectivity across the transition:
+      strut endpoints checked = 44256
+      FLOATING ends           = 0
+    [PASS] R4: ZERO floating strut ends across the whole swept part (PR 250's bar)
+      endpoints on shared (coarse-node) positions = 15520
+    [PASS] R4: the check is not vacuous — endpoints really do land on shared nodes
+
+  (b) local density error at the seam (voxelized emitted solid):
+  [csv] /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/graded-cell-size-phase-0-124b12/evidence/2026-08-01-lattice-cell-size-sweep/r4_seam_density.csv
+      slab width = 8.0 mm (the coarsest cell), measured only over
+      LATTICED voxels; emitted density bracketed by the prism's in/circum radius
+
+      x span (mm)    cell     emitted rho (band)  claimed rho   rel err (band) 
+        0.0 - 8.0    4.0      0.7679 .. 0.8617     0.8999        4.2            
+        8.0 - 16.0   4.0      0.7679 .. 0.8617     0.8999        4.2            
+       16.0 - 24.0   4.0      0.7679 .. 0.8617     0.8999        4.2            
+       24.0 - 32.0   4.0      0.7556 .. 0.8495     0.8999        5.6            <- SEAM
+       32.0 - 40.0   8.0      0.1893 .. 0.2258     0.1170        61.8           <- SEAM
+       40.0 - 48.0   8.0      0.1841 .. 0.2186     0.1170        57.4           
+       48.0 - 56.0   8.0      0.1793 .. 0.2125     0.1170        53.3           
+       56.0 - 64.0   8.0      0.1721 .. 0.2032     0.1170        47.2           
+
+      seam slabs = 2;  slabs whose claim fell OUTSIDE the prism bracket = 8
+
+      emitted-vs-claimed offset per level (the documented legs-only
+      labelling gap of lattice.hpp, PRE-EXISTING and cell-size independent):
+        cell   4.0 mm: emitted 0.8117 vs claimed 0.8999  (-9.8%, over 4 slabs)
+        cell   8.0 mm: emitted 0.1981 vs claimed 0.1170  (+69.4%, over 4 slabs)
+
+      seam vs the bulk of its OWN cell size (the transition's own error):
+        cell   4.0 mm: seam 0.8026 vs same-size bulk 0.8148  -> 1.50%
+        cell   8.0 mm: seam 0.2076 vs same-size bulk 0.1950  -> 6.45%
+
+      worst seam deviation from its own level's bulk = 6.45%
+    [PASS] R4: the fixture produced a real seam to measure
+    [PASS] R4: at least one seam slab had a same-size bulk slab to judge against
+    [PASS] R4: the transition perturbs local density by <= 10% of its own level's bulk
+      READ: a shared-node dyadic transition should add no material and remove
+      none — the coarse and fine cells simply tile different volumes. What is
+      left is the ordinary sampling difference between a slab at a seam and a
+      slab in the bulk, which is what this number bounds.
+
+=== ALL CHECKS PASSED (0 failed checks) ===
