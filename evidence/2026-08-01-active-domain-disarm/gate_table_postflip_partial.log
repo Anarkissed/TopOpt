@@ -1,0 +1,11 @@
+ad_disarm_gate — mode=gate  evidence=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm
+  production_active_domain_band() = 0  (the constant this task flips)
+
+===== THE GATE TABLE — DISARMED (OFF) vs ARMED (ON) vs the 1e-9 NEGATIVE CONTROL =====
+  OFF = active_domain_band 0 (what ships AFTER the flip)
+  ON  = active_domain_band -1 AUTO (what ships BEFORE)
+  CTL = band 0, loads x (1 + 1e-9) — the noise floor
+
+  [off#1] grid 32x24x32  mg=carried  91.1 s wall, 97 iterations, 2384 CG, 0/97 Jacobi-fallback solves, geneo armed=0 builds=0, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759473614 printed=0.515152 compliance=4.63900268409  f_bar=1.0000  k=0
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423430743 printed=0.371212 compliance=8.71832620191  f_bar=1.0000  k=0

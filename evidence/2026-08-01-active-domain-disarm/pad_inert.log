@@ -1,0 +1,21 @@
+ad_disarm_gate — mode=padinert  evidence=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm
+  production_active_domain_band() = 0  (the constant this task flips)
+
+===== IS THE PARITY PAD INERT ON THE AD FIXTURE CLASS? =====
+  The arming gate fixture (design box -> align-8 -> all-even grid), pad 0 vs pad 1.
+  Rung 0, 10 iterations, identical in all four cells.
+
+  [pad0/AD-off] grid 32x24x32  mg=carried  17.7 s wall, 10 iterations, 212 CG, 0/10 Jacobi-fallback solves, geneo armed=0 builds=0, 1 rungs
+    rung 0 vf=0.68 iters= 10 REJECT margin=1.02963585 printed=0.409091 compliance=7.69154533526  f_bar=1.0000  k=0
+  [pad1/AD-off] grid 32x24x32  mg=carried  17.4 s wall, 10 iterations, 212 CG, 0/10 Jacobi-fallback solves, geneo armed=0 builds=0, 1 rungs
+    rung 0 vf=0.68 iters= 10 REJECT margin=1.02963585 printed=0.409091 compliance=7.69154533526  f_bar=1.0000  k=0
+  [pad0/AD-on ] grid 32x24x32  mg=carried  14.2 s wall, 10 iterations, 248 CG, 0/10 Jacobi-fallback solves, geneo armed=0 builds=0, 1 rungs
+    rung 0 vf=0.68 iters= 10 REJECT margin=1.031478656 printed=0.409091 compliance=7.67578091515  f_bar=0.5500  k=4
+  [pad1/AD-on ] grid 32x24x32  mg=carried  11.9 s wall, 10 iterations, 248 CG, 0/10 Jacobi-fallback solves, geneo armed=0 builds=0, 1 rungs
+    rung 0 vf=0.68 iters= 10 REJECT margin=1.031478656 printed=0.409091 compliance=7.67578091515  f_bar=0.5500  k=4
+
+  pad 0 vs pad 1, AD OFF: BIT-IDENTICAL   (CG 212 vs 212)
+  pad 0 vs pad 1, AD ON : BIT-IDENTICAL   (CG 248 vs 248)
+
+  => the parity pad is INERT on the AD fixture class.
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm/pad_inert.csv

@@ -1,0 +1,22 @@
+ad_disarm_gate — mode=dims  evidence=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm
+  production_active_domain_band() = -1  (the constant this task flips)
+
+===== FIXTURE GRIDS + MULTIGRID COARSEN PLANS =====
+  healthy      solved grid  32x 24x 32 = 24576 elements  coarsenable(legacy)=YES levels=3  |  padded index space  32x 24x 32 levels=2
+  stagnation   solved grid  48x 32x 48 = 73728 elements  coarsenable(legacy)=YES levels=3  |  padded index space  48x 32x 48 levels=2
+  odd-axis     solved grid  33x 25x 33 = 27225 elements  coarsenable(legacy)=NO  levels=1  |  padded index space  36x 28x 36 levels=2
+
+===== CAN A DESIGN-BOX GRID EVER BE ODD? (align = 8) =====
+  box y-extent (mm) -> solved grid
+   24              ->  32x 24x 32   all even
+   25              ->  32x 32x 32   all even
+   26              ->  32x 32x 32   all even
+   27              ->  32x 32x 32   all even
+   28              ->  32x 32x 32   all even
+   29              ->  32x 32x 32   all even
+   30              ->  32x 32x 32   all even
+   31              ->  32x 32x 32   all even
+   32              ->  32x 32x 32   all even
+   33              ->  32x 40x 32   all even
+
+  => a design-box grid carried an odd axis in NONE of the sweep.

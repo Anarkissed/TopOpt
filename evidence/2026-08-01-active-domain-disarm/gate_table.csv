@@ -1,0 +1,3 @@
+rung,vf,off_verdict,on_verdict,ctl_verdict,off_margin,on_margin,ctl_margin,dM_M_on,dM_M_ctl,off_compliance,on_compliance,off_printed,on_printed,off_iters,on_iters,on_f_bar,on_band_resolved,on_latched,on_latch_iter,on_escape_count
+0,0.6800,ACCEPT,ACCEPT,ACCEPT,1.75947361399,1.75937620829,1.75947361248,5.536071e-05,8.571815e-10,4.63900268409,4.63896056871,0.515152,0.515152,38,39,0.416955,4,0,0,0
+1,0.5200,REJECT,REJECT,REJECT,0.842343074324,0.841419043679,0.842343073639,1.096977e-03,8.128237e-10,8.71832620191,8.71819342373,0.371212,0.367424,59,59,0.991411,4,1,3,50

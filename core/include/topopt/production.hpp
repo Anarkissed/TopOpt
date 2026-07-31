@@ -44,23 +44,24 @@ namespace topopt {
 //     that go gray — never the tax on already-crisp parts PR 146's evidence
 //     surfaced. Library default 0 (gate off) keeps Gate-V2 / reference byte-
 //     identical; the threshold is echoed into run_info.json (+ per-rung fired).
-//   * simp.active_domain_band = -1 (AUTO) — ACTIVE DOMAIN (handoff
-//     2026-07-26-ad-arming). Restricts every TRAJECTORY penalized solve to the
-//     material + a derived growth band, shrinking the solved system on the
-//     ultra-dilute design-box class that dominates production. k is DERIVED per job
-//     (ceil(rmin) + 1), never pinned. UNLIKE every other setting here this is NOT
-//     bit-identical — it is an approximation (measured mean|drho| ~ 3.9e-6 on the
-//     shipped rung, identical gate verdicts), made safe to arm by the escape latch
-//     (2026-07-25-ad-escape-latch) and the degeneracy latch. Library default 0
-//     (OFF) keeps Gate-V2 / reference byte-identical; echoed into run_info.json
-//     (requested band + resolved per-rung k + both latch outcomes). See
-//     production.cpp for the TRIPWIRE.
+//   * simp.active_domain_band = 0 (OFF) — ACTIVE DOMAIN, DISARMED (handoff
+//     2026-08-01-active-domain-disarm, reversing 2026-07-26-ad-arming). The band
+//     restricts every TRAJECTORY penalized solve to the material + a derived
+//     growth band; armed, it was the one setting here that was NOT bit-identical.
+//     Disarmed, every trajectory solve runs the full domain and this axis is
+//     bit-identical again. The mechanism (AUTO derivation, escape latch,
+//     degeneracy latch) is untouched and still library-reachable — only the
+//     production request is withdrawn — and so is the OBSERVABILITY: run_info.json
+//     still carries the requested band, the resolved per-rung k, both latch
+//     outcomes and the active fraction, so a re-arming has a baseline to diff
+//     against. See production.cpp for the TRIPWIRE and the measured basis.
 //   * draft_quality = true, draft_loose_tol = 1e-3 (AUTO tightening) — DRAFT QUALITY
 //     (handoff 2026-07-26-draft-arming). Runs each rung's TRAJECTORY penalized solves
 //     on an adaptive loose->tight schedule while the FINAL certification + stress
 //     solves always run tight, cutting the Jacobi-CG grind on the early ultra-dilute
-//     iterations that dominate the design-box class. Like the active-domain band and
-//     UNLIKE every other setting here this is NOT bit-identical — the loose trajectory
+//     iterations that dominate the design-box class. UNLIKE every other setting here
+//     this is NOT bit-identical — since the active-domain band was disarmed
+//     (2026-08-01) draft is the only one left in that class — the loose trajectory
 //     drifts on some mid-ladder rungs (never the certificate). Library default
 //     draft_quality=false keeps Gate-V2 / reference byte-identical. The escalation
 //     trigger ships DISARMED (measured not to separate — 185/197); the ALWAYS-exact
@@ -167,23 +168,26 @@ int production_matfree_thread_count();
 // than a literal, exactly as production_matfree_thread_count does for the P-core pin.
 int production_krylov_recycle_dim();
 
-// Handoff 2026-07-26-ad-arming — the PRODUCTION active-domain band that
-// configure_production_options arms. -1 = AUTO: the actual band width k is DERIVED
-// per job downstream (resolve_active_domain_band -> active_domain_auto_band(filter_
-// radius) = ceil(rmin) + 1), never pinned. Exposed so the parity test asserts the
-// echo against this named sentinel rather than a bare -1, and so a front-end that
-// wants to name the production posture does not hard-code it. The library default
-// stays 0 (OFF), so the reference world is byte-identical (THE ONE RULE). See
-// production.cpp for the TRIPWIRE and the measured justification.
+// Handoff 2026-08-01-active-domain-disarm — the PRODUCTION active-domain band that
+// configure_production_options sets. 0 = OFF (DISARMED), reversing the
+// 2026-07-26 arming: every production trajectory solve runs the full domain, so
+// production now matches the library default on this axis and nothing about it is
+// an approximation. -1 would mean AUTO (k DERIVED per job downstream by
+// resolve_active_domain_band -> active_domain_auto_band(filter_radius) =
+// ceil(rmin) + 1, never pinned); that derivation still exists and is still tested.
+// Exposed so the parity test asserts the echo against this named constant rather
+// than a bare 0, and so a front-end that wants to name the production posture does
+// not hard-code it. See production.cpp for the TRIPWIRE and the measured basis.
 int production_active_domain_band();
 
 // Handoff 2026-07-26-draft-arming — the PRODUCTION draft-quality LOOSE trajectory
 // tolerance that configure_production_options arms (draft_loose_tol). Exposed so the
 // parity test and the measurement harnesses assert/read the armed value against the
 // named constant rather than a bare 1e-3 literal, exactly as
-// production_krylov_recycle_dim / production_active_domain_band do. Draft is the
-// second production dial that is NOT bit-identical when on (the trajectory drifts on
-// some mid-ladder rungs; the certificate never does); the library default leaves
+// production_krylov_recycle_dim / production_active_domain_band do. Draft is now the
+// ONLY production dial that is NOT bit-identical when on (the active-domain band was
+// the other and was disarmed on 2026-08-01): the trajectory drifts on some
+// mid-ladder rungs; the certificate never does; the library default leaves
 // draft_quality=false so the reference world stays byte-identical (THE ONE RULE). See
 // production.cpp for the TRIPWIRE and the derivation of 1e-3.
 double production_draft_loose_tol();
