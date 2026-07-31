@@ -132,9 +132,21 @@ public struct ProjectStore {
         try? Data(contentsOf: resultsURL(id: id))
     }
 
+    /// The sidecar files that travel WITH a model file (as `<path><suffix>`), and
+    /// that the store must therefore carry alongside its model copy: the core
+    /// face-overrides sidecar (`.faces` — the painted pseudo-faces the selection
+    /// groups reference; without it a reopened re-import has no painted id space
+    /// and RUN SIM/Optimize throw "face_id out of range") and the app clearance
+    /// sidecar (`.clearances.json` — deletions + manual primitives).
+    static let sidecarSuffixes = [".faces", ".clearances.json"]
+
     /// Save a snapshot. If `modelSource` is given and the copy isn't already in the
-    /// project folder, copy it in (once — the imported model is immutable). Throws
-    /// on a filesystem error so the caller can surface it.
+    /// project folder, copy it in (once — the imported model is immutable). Its
+    /// SIDECARS are re-synced on EVERY save — unlike the model they are mutable
+    /// (each paint stroke rewrites `.faces`), and the reopened re-import resolves
+    /// selections against the store copy, so a stale/missing sidecar here silently
+    /// invalidates the persisted groups' face ids. Throws on a filesystem error so
+    /// the caller can surface it.
     public func save(_ snapshot: ProjectSnapshot, modelSource: URL? = nil) throws {
         let dir = projectDir(snapshot.id)
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -143,11 +155,30 @@ public struct ProjectStore {
             if !fm.fileExists(atPath: dest.path) {
                 try fm.copyItem(at: modelSource, to: dest)
             }
+            try syncSidecars(from: modelSource, to: dest)
         }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(snapshot)
         try data.write(to: snapshotURL(snapshot.id), options: .atomic)
+    }
+
+    /// Mirror each sidecar of `src` next to `dest`: copy it when the source has
+    /// one, delete a leftover when it doesn't (a cleared paint overlay DELETES
+    /// its sidecar, and the store copy must say the same thing). A reopened
+    /// project's model source IS the store copy — nothing to sync then.
+    private func syncSidecars(from src: URL, to dest: URL) throws {
+        guard src.path != dest.path else { return }
+        for suffix in Self.sidecarSuffixes {
+            let s = src.path + suffix
+            let d = dest.path + suffix
+            if fm.fileExists(atPath: s) {
+                if fm.fileExists(atPath: d) { try fm.removeItem(atPath: d) }
+                try fm.copyItem(atPath: s, toPath: d)
+            } else if fm.fileExists(atPath: d) {
+                try fm.removeItem(atPath: d)
+            }
+        }
     }
 
     /// Load one snapshot (nil if absent, unreadable, or a newer schema).

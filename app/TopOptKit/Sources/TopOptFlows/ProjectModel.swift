@@ -36,6 +36,14 @@ public final class ProjectModel: ObservableObject {
     public let importedFile: ImportedFile?
     public let importedMesh: ImportedMesh?
 
+    /// Task project-store-sidecars (Q2): set by the `restoring:` init when the
+    /// re-imported model does not carry face ids the restored selection groups
+    /// reference — the fingerprint of a project saved before the store copied the
+    /// face-overrides sidecar. Names the affected groups and how to recover;
+    /// `AppModel.open` surfaces it. Nil when every group resolves (every project
+    /// saved by the fixed store).
+    public private(set) var restoreWarning: String?
+
     /// The working state that used to live in WorkspacePlaceholder. `@Published`
     /// value types: the workspace mutates them in place (via computed forwarders),
     /// which republishes and re-renders exactly as the old `@State` did.
@@ -169,6 +177,13 @@ public final class ProjectModel: ObservableObject {
                   process: snapshot.process, importedFile: importedFile,
                   importedMesh: importedMesh, run: run)
         self.selection = snapshot.selection
+        // Task project-store-sidecars (Q2): a project saved BEFORE the store
+        // carried the face-overrides sidecar re-imports without its painted
+        // pseudo-faces, while the restored groups still reference their ids. Say
+        // so plainly at open — naming the groups — instead of letting RUN SIM /
+        // Optimize throw a raw out-of-range later.
+        self.restoreWarning = Self.unresolvableGroupsWarning(
+            selection: snapshot.selection, faceCount: importedMesh.faceCount)
         self.force = snapshot.force
         self.minimizePlastic = snapshot.minimizePlastic ?? true
         self.quality = snapshot.quality ?? .fast
@@ -178,6 +193,24 @@ public final class ProjectModel: ObservableObject {
         // Re-seed AFTER restoring the slice: the persisted state is the undo floor, not the empty
         // state the designated init seeded. Runs synchronously before any debounce could fire.
         seedUndoBaseline()
+    }
+
+    /// The Q2 message: which restored groups reference face ids the re-imported
+    /// model (with `faceCount` faces) does not carry, and what to do about it.
+    /// Pure + static so it is unit-tested without disk IO. Nil when all resolve.
+    static func unresolvableGroupsWarning(selection: SelectionModel,
+                                          faceCount: Int) -> String? {
+        let broken = selection.groups.compactMap { g -> String? in
+            let missing = g.faces.filter { $0 >= FaceID(faceCount) }
+            guard !missing.isEmpty else { return nil }
+            return "“\(g.name)” (painted face \(missing.map(String.init).joined(separator: ", ")))"
+        }
+        guard !broken.isEmpty else { return nil }
+        return "This project was saved before painted selections were stored with it, "
+             + "so the reopened model doesn't carry the hand-painted faces that "
+             + broken.joined(separator: " and ")
+             + " selected. Those groups can't reach the solver. To recover: delete "
+             + "them, re-paint the faces, and save the project again."
     }
 
     // MARK: - Undo / redo (round-6 item 4)

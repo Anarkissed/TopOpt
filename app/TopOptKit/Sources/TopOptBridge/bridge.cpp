@@ -1109,9 +1109,13 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
         topopt::build_production_loadcase(model, resolution, lc);
     if (setup.options.external_loads.empty()) {
       err.ok = false;
-      err.message =
-          "analyze: the load case resolved to no external load (every group "
-          "zero-force or tagged no voxels) — nothing to certify under";
+      // Composed from the per-group reports (core, PR 261) so the refusal names
+      // WHICH group resolved to nothing and WHY (zero force / zero tagged /
+      // unresolvable), instead of the old generic one-liner. Same loudness,
+      // same condition — only the sim framing is the bridge's own.
+      err.message = "analyze: the declared load case produced NO external load — " +
+                    topopt::no_external_load_message(setup, resolution) +
+                    " — nothing to certify under";
       return AnalyzeResult{};
     }
     topopt::VoxelGrid& model_grid = setup.grid;

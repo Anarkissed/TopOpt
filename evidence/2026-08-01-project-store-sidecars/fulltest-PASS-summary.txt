@@ -1,0 +1,16 @@
+	 Executed 1015 tests, with 13 tests skipped and 0 failures (0 unexpected) in 244.968 (245.039) seconds
+
+Skipped (gated) tests:
+GravityDeviceSeed testSeedBracketIntoSimulatorIfRequested
+LatticeModeEvidenceGen testWriteEvidence
+LatticePageEvidenceGen testWriteScreenshots
+LatticePageEvidenceGen testWriteTopologyTruth
+LatticeProxyEvidenceGen testRenderProxyImages
+LatticeSDFAlignmentTests testRenderAlignmentEvidence
+LatticeSDFEvidenceGen testRenderRaymarchedLatticeImages
+RemoteRunnerE2ETests testEndToEnd
+RibbonRotationCaptureTests testEmitRibbonRotationFilmstrip
+ViewerProfileTests testFrameDrawCallCensus
+ViewerProfileTests testProfileRealBracketVariants
+ViewerRebuildProfileTests testCachedMeshIsGeometricallyIdentical
+ViewerRebuildProfileTests testSelectedMeshPerBodyEvalCost
