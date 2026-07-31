@@ -1,0 +1,148 @@
+diff --git a/core/src/cli/run_job.cpp b/core/src/cli/run_job.cpp
+index 686238f..361c4c3 100644
+--- a/core/src/cli/run_job.cpp
++++ b/core/src/cli/run_job.cpp
+@@ -947,6 +947,82 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
+        json_num(a.lattice_max_effective_vm) + ",\n";
+   s += "  \"strut_strength_uncertified\": " +
+        std::string(a.lattice_strength_uncertified ? "true" : "false") + ",\n";
++  // --- Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report) ----
++  // The measured PR 259 de-homogenization law evaluated on THIS variant's macro
++  // stress tensors. REPORT ONLY: none of these numbers feed `lattice_accepted`
++  // (its verdict logic above is untouched), and `strut_strength_uncertified`
++  // stays true — the maintainer asked for NUMBERS to test against, not a gate.
++  if (a.lattice_strut_report) {
++    const StrutStrengthReport& ss = a.lattice_strut;
++    s += "  \"strut_strength\": {\n";
++    s += "    \"law\": \"PR 259 kfit *_cert envelope (bulk/free-surface/cut "
++         "populations), evidence/2026-07-31-lattice-dehomogenization-probe/"
++         "kfit.csv; strut_vm <= Kd(rho)*vm(Sigma) + Kv(rho)*|p(Sigma)|, "
++         "interlayer analogue Kild/Kilv\",\n";
++    s += "    \"gated\": false,\n";
++    // MARGINS — in-plane and interlayer SEPARATELY (bar L6): which one binds is
++    // the point. The interlayer margin divides by the UNSOURCED z_knockdown.
++    s += "    \"margin_in_plane\": " + json_num(ss.margin_in_plane) + ",\n";
++    s += "    \"margin_interlayer\": " + json_num(ss.margin_interlayer) + ",\n";
++    s += "    \"margin_worst_case\": " + json_num(ss.margin_worst_case) + ",\n";
++    s += "    \"z_knockdown\": " + json_num(ss.z_knockdown_used) + ",\n";
++    s += "    \"z_knockdown_provenance\": \"UNSOURCED — assumed FDM layer-bond "
++         "knockdown (materials.json), never measured by coupon; the interlayer "
++         "margin divides by it and PR 259 showed the verdict turns on it "
++         "(0.377-0.394 at 0.55 vs 0.69-0.72 at 1.0). The bounds below are "
++         "z_knockdown-free and survive re-sourcing.\",\n";
++    // RATIOS — the z_knockdown-/yield-free part of the measurement (PR 259's
++    // deliberate split): bounds in MPa + amplification vs the macro field.
++    s += "    \"strut_vm_bound_max_mpa\": " + json_num(ss.vm_bound_max_mpa) +
++         ",\n";
++    s += "    \"strut_interlayer_bound_max_mpa\": " +
++         json_num(ss.il_bound_max_mpa) + ",\n";
++    s += "    \"max_lattice_macro_vm_mpa\": " + json_num(ss.max_macro_vm_mpa) +
++         ",\n";
++    s += "    \"amplification_vm\": " + json_num(ss.amplification_vm) + ",\n";
++    s += "    \"amplification_interlayer\": " + json_num(ss.amplification_il) +
++         ",\n";
++    // ARGMAX voxels — where each bound peaks, with the macro invariants there.
++    s += "    \"argmax_in_plane\": {\"rho\": " + json_num(ss.vm_argmax_rho) +
++         ", \"macro_vm_mpa\": " + json_num(ss.vm_argmax_macro_vm_mpa) +
++         ", \"macro_pressure_mpa\": " +
++         json_num(ss.vm_argmax_macro_pressure_mpa) + "},\n";
++    s += "    \"argmax_interlayer\": {\"rho\": " + json_num(ss.il_argmax_rho) +
++         ", \"macro_vm_mpa\": " + json_num(ss.il_argmax_macro_vm_mpa) +
++         ", \"macro_pressure_mpa\": " +
++         json_num(ss.il_argmax_macro_pressure_mpa) + "},\n";
++    // Build-direction resolution: on a lattice cube axis the interlayer bound is
++    // exactly the measured envelope; off-axis it carries the conservative strut-
++    // shear cross term (strut_strength.hpp).
++    s += "    \"build_dir_on_lattice_axis\": " +
++         std::string(ss.build_dir_on_lattice_axis ? "true" : "false") + ",\n";
++    s += "    \"interlayer_off_axis_cross_factor\": " +
++         json_num(ss.il_cross_factor) + ",\n";
++    // Out-of-band rho accounting (bar L5): law span vs certified band, clamped
++    // voxels COUNTED — never silently extrapolated.
++    s += "    \"law_rho_span\": [" + json_num(strut_law_rho_min()) + ", " +
++         json_num(strut_law_rho_max()) + "],\n";
++    s += "    \"rho_clamped_voxels\": " +
++         std::to_string(ss.rho_clamped_voxels) + ",\n";
++    // Cells-per-member regime guard (bar L4): below the floor the homogenized
++    // macro stress this law amplifies is itself outside the tensor's validated
++    // regime — the numbers above are then labelled out-of-regime, not trusted.
++    s += "    \"cells_per_member_min\": " +
++         json_num(a.lattice_min_cells_per_member) + ",\n";
++    s += "    \"cells_per_member_floor\": " +
++         json_num(lattice_cells_per_member_min(a.lattice_topology)) + ",\n";
++    s += "    \"out_of_regime\": " +
++         std::string(a.lattice_strut_out_of_regime ? "true" : "false") + ",\n";
++    if (a.lattice_strut_out_of_regime)
++      s += "    \"regime_note\": \"the thinnest latticed member spans fewer "
++           "cells than the measured homogenization floor, so the macro stress "
++           "field these strut numbers amplify is itself out of the tensor's "
++           "validated regime — treat them as indicative, not certified\",\n";
++    s += "    \"resolution_note\": \"joint-peak law rows are mesh-divergent "
++         "(~log in micro resolution, +10-18% per 32->48 step where measured); "
++         "the band-floor row is a still-rising lower bound\"\n";
++    s += "  },\n";
++  }
+   s += "  \"note\": \"stiffness and solid-region strength are certified against the "
+        "real composite; the lattice region's macro (effective) stress is recovered "
+        "but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. "
+@@ -1870,6 +1946,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
+     double lat_margin_min = 1e300, lat_margin_eff_min = 1e300;
+     bool lat_accepted_all = true;
+     bool strut_uncertified = false;
++    // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report):
++    // run-level worst (min over latticed variants) of the report-only margins —
++    // like the certified margins above, conservative summary here, exact numbers
++    // in each variant's receipt. NEVER a gate input.
++    bool strut_report = false;
++    double strut_in_plane_min = 1e300, strut_il_min = 1e300,
++           strut_worst_min = 1e300;
++    double strut_zk = 0.0, strut_cpm_min = 1e300;
++    bool strut_oor = false;  // any variant out of the cells-per-member regime
++    long long strut_clamped = 0;  // summed law-span rho clamps (bar L5)
+     // Lattice roles + solid companion (task lattice-page-core-hookup stage 1),
+     // summed over variants like the counters above. All zero/false on a job
+     // with no lattice.regions and no grading — run_info stays byte-identical.
+@@ -2220,6 +2306,22 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
+     lat_agg.lat_accepted_all = lat_agg.lat_accepted_all && eff_accepted;
+     lat_agg.strut_uncertified =
+         lat_agg.strut_uncertified || cc.lattice.lattice_strength_uncertified;
++    // Strut-strength report roll-up (report-only; min = worst variant).
++    if (cc.lattice.lattice_strut_report) {
++      const StrutStrengthReport& ss = cc.lattice.lattice_strut;
++      lat_agg.strut_report = true;
++      lat_agg.strut_in_plane_min =
++          std::min(lat_agg.strut_in_plane_min, ss.margin_in_plane);
++      lat_agg.strut_il_min = std::min(lat_agg.strut_il_min, ss.margin_interlayer);
++      lat_agg.strut_worst_min =
++          std::min(lat_agg.strut_worst_min, ss.margin_worst_case);
++      lat_agg.strut_zk = ss.z_knockdown_used;
++      lat_agg.strut_cpm_min = std::min(lat_agg.strut_cpm_min,
++                                       cc.lattice.lattice_min_cells_per_member);
++      lat_agg.strut_oor =
++          lat_agg.strut_oor || cc.lattice.lattice_strut_out_of_regime;
++      lat_agg.strut_clamped += static_cast<long long>(ss.rho_clamped_voxels);
++    }
+     lattice_paths.insert(lattice_paths.end(), oc.paths.begin(), oc.paths.end());
+     if (stream_lines)
+       for (const std::string& p : oc.paths) {
+@@ -2349,6 +2451,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
+       run_info.lattice_margin_effective = lat_agg.lat_margin_eff_min;
+       run_info.lattice_accepted = lat_agg.lat_accepted_all;
+       run_info.lattice_strength_uncertified = lat_agg.strut_uncertified;
++      // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report):
++      // the run-level worst of the report-only de-homogenized margins. Keys are
++      // emitted only when a report ran, so older latticed records (and every
++      // non-lattice record) stay byte-identical.
++      if (lat_agg.strut_report) {
++        run_info.lattice_strut_report_present = true;
++        run_info.lattice_strut_margin_in_plane = lat_agg.strut_in_plane_min;
++        run_info.lattice_strut_margin_interlayer = lat_agg.strut_il_min;
++        run_info.lattice_strut_margin_worst_case = lat_agg.strut_worst_min;
++        run_info.lattice_strut_z_knockdown = lat_agg.strut_zk;
++        run_info.lattice_strut_min_cells_per_member = lat_agg.strut_cpm_min;
++        run_info.lattice_strut_out_of_regime = lat_agg.strut_oor;
++        run_info.lattice_strut_rho_clamped_voxels = lat_agg.strut_clamped;
++      }
+     }
+   };
+ 

@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -378,6 +379,37 @@ FixedDesignAnalysis analyze_fixed_design(
     out.lattice_rho_max = lattice_voxels ? lat_rho_hi : 0.0;
     out.lattice_max_effective_vm = lat_max_vm;
     out.lattice_strength_uncertified = (lattice_voxels > 0);
+
+    // --- Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report).
+    // REPORT ONLY, evaluated strictly AFTER `accepted`/`margin_effective` were
+    // sealed above: the measured PR 259 law (strut_strength.hpp) applied to the
+    // latticed voxels' macro stress TENSORS from this same solve. Octet is the
+    // only topology with a measured law; others report nothing. The build
+    // direction is passed through EXPLICITLY (bar L8) — the evaluator never reads
+    // it from options, so an orientation scorer can re-call it per direction.
+    if (lattice_voxels > 0 && lattice->topology == LatticeTopology::Octet) {
+      out.lattice_strut = evaluate_strut_strength(
+          out.stress_tensor_field, lat_mask, lattice->relative_density,
+          build_dir, material.yield_strength_mpa, material.z_knockdown);
+      out.lattice_strut_report = out.lattice_strut.evaluated;
+      // Cells-per-member regime guard (bar L4): thinnest LATTICED member's span
+      // in cells vs the floor homogenization needs. Reuses the width-aware
+      // thickness field when that posture already measured it.
+      if (lattice->cell_size_mm > 0.0) {
+        if (member_width_mm.empty())
+          member_width_mm = local_member_thickness_mm(
+              grid, density, kIso, kWidthAwareThicknessCapVoxels);
+        double min_cpm = std::numeric_limits<double>::infinity();
+        for (std::size_t e = 0; e < lat_mask.size(); ++e) {
+          if (!lat_mask[e] || !(density[e] > kIso)) continue;
+          const double cpm = member_width_mm[e] / lattice->cell_size_mm;
+          if (cpm < min_cpm) min_cpm = cpm;
+        }
+        out.lattice_min_cells_per_member = min_cpm;
+        out.lattice_strut_out_of_regime =
+            min_cpm < lattice_cells_per_member_min(lattice->topology);
+      }
+    }
   }
   return out;
 }

@@ -894,12 +894,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private func fetchLatticeReport() -> LatticeReport? {
         guard let lat = request.lattice else { return nil }
         var generated: LatticeReport.Generated? = nil
+        var strut: LatticeReport.StrutStrength? = nil
         if let id = jobID {
             let url = config.baseURL.appendingPathComponent("jobs")
                 .appendingPathComponent(id).appendingPathComponent("files")
                 .appendingPathComponent("run_info.json")
-            if let info = try? getJSON(url),
-               let le = info["lattice_export"] as? [String: Any] {
+            let info = try? getJSON(url)
+            if let le = info?["lattice_export"] as? [String: Any] {
                 func d(_ k: String) -> Double { (le[k] as? Double) ?? 0 }
                 func i(_ k: String) -> Int { (le[k] as? Int) ?? Int((le[k] as? Double) ?? 0) }
                 func b(_ k: String) -> Bool { (le[k] as? Bool) ?? false }
@@ -912,13 +913,29 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             } else {
                 diag("run_info lattice_export unavailable — showing requested lattice only")
             }
+            // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report):
+            // the certification "lattice" object carries the report-only de-
+            // homogenized strut margins when the worker evaluated the measured law.
+            // Absent keys (older worker / non-octet lattice) leave `strut` nil —
+            // no numbers invented. A null margin (JSON null → not a Double) reads
+            // as +inf: that failure mode carries no load.
+            if let lc = info?["lattice"] as? [String: Any],
+               lc["strut_margin_in_plane"] != nil {
+                func m(_ k: String) -> Double { (lc[k] as? Double) ?? .infinity }
+                strut = LatticeReport.StrutStrength(
+                    marginInPlane: m("strut_margin_in_plane"),
+                    marginInterlayer: m("strut_margin_interlayer"),
+                    zKnockdown: (lc["strut_z_knockdown"] as? Double) ?? 0,
+                    minCellsPerMember: m("strut_min_cells_per_member"),
+                    outOfRegime: (lc["strut_out_of_regime"] as? Bool) ?? false)
+            }
         }
         return LatticeReport(
             topologyID: lat.topologyID, cellMM: lat.cellMM,
             generateRelativeDensity: lat.generateRelativeDensity,
             minRelativeDensity: lat.minRelativeDensity,
             maxRelativeDensity: lat.maxRelativeDensity,
-            regionScoped: lat.regionScoped, generated: generated)
+            regionScoped: lat.regionScoped, generated: generated, strut: strut)
     }
 
     private func postJob(model: Data, modelName: String, jobJSON: Data) throws -> String {

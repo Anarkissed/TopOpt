@@ -767,6 +767,26 @@ public final class ResultsModel: ObservableObject {
         } else {
             lines.append("Generated on the worker; the export record wasn't available to summarise here.")
         }
+        // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report):
+        // in-plane and interlayer SEPARATELY — the way solid parts show
+        // margin.in_plane and margin.interlayer — never collapsed to one number:
+        // WHICH one binds is what the maintainer needs to see. Report-only; the
+        // accept verdict never used these.
+        if let s = r.strut {
+            func f(_ x: Double) -> String {
+                x.isFinite ? String(format: "%.2f", x) : "unbounded"
+            }
+            lines.append("Strut strength (measured law, report only): "
+                + "in-plane margin \(f(s.marginInPlane)), "
+                + "interlayer margin \(f(s.marginInterlayer)) "
+                + "(÷ layer-bond knockdown \(String(format: "%.2f", s.zKnockdown)), an unsourced constant).")
+            if s.outOfRegime {
+                lines.append("Out of regime: the thinnest latticed member spans "
+                    + "\(String(format: "%.1f", s.minCellsPerMember)) cells — below the "
+                    + "floor the homogenized model needs, so treat the strut numbers "
+                    + "as indicative, not certified.")
+            }
+        }
         return lines
     }
 

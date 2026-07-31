@@ -1,0 +1,4 @@
+32 checks, 0 failures
+s0_plain: strut vm margin 0.6164 (probe 0.6164), interlayer 0.3936 (probe 0.3936), clamped 92, cells/member 0.50 -> OUT OF REGIME
+s2_gappen: strut vm margin 0.6320 (probe 0.6320), interlayer 0.3799 (probe 0.3799), clamped 100, cells/member 1.00 -> OUT OF REGIME
+s3_contin: strut vm margin 0.6266 (probe 0.6266), interlayer 0.3769 (probe 0.3769), clamped 100, cells/member 1.00 -> OUT OF REGIME
