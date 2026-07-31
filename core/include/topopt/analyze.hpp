@@ -23,6 +23,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "topopt/build_orientation.hpp"  // BuildOrientationReport (post-pass)
 #include "topopt/fea.hpp"        // DirichletBC, NodalLoad
 #include "topopt/lattice.hpp"    // LatticeTopology (lattice certification)
 #include "topopt/materials.hpp"  // Material
@@ -182,6 +183,13 @@ struct FixedDesignAnalysis {
   double lattice_min_cells_per_member = 0.0;  // +inf if every latticed member
                                               // exceeds the thickness-EDT cap
   bool lattice_strut_out_of_regime = false;   // min_cells_per_member < floor
+
+  // --- BUILD-ORIENTATION RANKING (handoff 2026-08-01-build-direction-separation)
+  // A RECOMMENDATION, filled strictly AFTER `accepted` / `margin_effective` were
+  // sealed above and unable to touch them. Default-constructed (evaluated ==
+  // false) unless the caller passed score_build_orientation = true, so every
+  // existing caller's output is byte-identical. See build_orientation.hpp.
+  BuildOrientationReport build_orientation;
 };
 
 // Run one certification analysis of `density` on `grid`.
@@ -207,6 +215,24 @@ struct FixedDesignAnalysis {
 //                         design measures ~zero stress → an enormous, meaningless
 //                         margin, so the gate rejects it however good it looks).
 //   part_solid          — the printed_fraction denominator (grid.solid_count()).
+//   score_build_orientation
+//                       — arm the BUILD-ORIENTATION post-pass (handoff
+//                         2026-08-01-build-direction-separation). false (the
+//                         DEFAULT) leaves `build_orientation` default-constructed
+//                         and the whole analysis byte-identical. true ranks
+//                         build_orientation_candidates(build_dir) on six criteria
+//                         against THIS solve's field — no re-solve — and names a
+//                         recommendation. IT CANNOT MOVE `accepted` /
+//                         `margin_effective`: those are sealed from `build_dir`
+//                         BEFORE the post-pass runs. If the recommendation would
+//                         gate differently the report says so and the caller
+//                         surfaces both verdicts; the one that stands is always
+//                         the one computed from `build_dir`.
+//   build_direction_inferred
+//                       — honesty flag forwarded onto the report:
+//                         resolve_build_direction_is_inferred(options), i.e.
+//                         "no build direction was declared, this one was assumed
+//                         from gravity". Reported, never acted on.
 //
 // Throws whatever simp_compliance throws for a MALFORMED problem (bad BC/load
 // index, non-physical params) and ReportError from compute_stress_margin. A CG
@@ -220,7 +246,35 @@ FixedDesignAnalysis analyze_fixed_design(
     const std::vector<NodalLoad>& loads, const Material& material,
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
-    bool load_path_ok, double part_solid, const LatticePosture* lattice = nullptr);
+    bool load_path_ok, double part_solid, const LatticePosture* lattice = nullptr,
+    bool score_build_orientation = false,
+    bool build_direction_inferred = false);
+
+// THE ONE accept-gate margin expression (handoff
+// 2026-08-01-build-direction-separation). Extracted verbatim from
+// analyze_fixed_design so the ORIENTATION SCORER can price a candidate
+// orientation's verdict with the identical arithmetic the real gate used, rather
+// than a second copy that could drift. analyze_fixed_design itself calls this, so
+// the two are the same code by construction, not by inspection.
+//
+//   * default posture  -> compute_stress_margin(...).worst_case * infill_knockdown
+//   * width-aware      -> the SHELL+CORE composite: in-plane from
+//                         `max_von_mises_effective` (the per-voxel wall rescue
+//                         already folded in), interlayer from the UNMODIFIED
+//                         f^1.5 (walls are never credited across layers).
+//
+// `max_von_mises_effective` must equal `max_von_mises` in the default posture
+// (it is unused there). Nothing here reads a build direction: the direction
+// enters through `max_interlayer` alone, which is exactly why one solved field
+// prices every orientation.
+//
+// THIS COMPUTES A NUMBER. It does not decide anything: the caller still applies
+// the load-path belt (`load_path_ok`) and the `margin_stop` comparison.
+double gate_margin_effective(double yield_strength_mpa, double z_knockdown,
+                             double max_von_mises,
+                             double max_von_mises_effective,
+                             double max_interlayer,
+                             const KnockdownSpec& knockdown);
 
 // The infill margin knockdown seed curve — effective/solid strength ~= f^1.5
 // (Gibson-Ashby), f = infill_percent/100, pinned to EXACTLY 1.0 for f >= 1

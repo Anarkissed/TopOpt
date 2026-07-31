@@ -268,6 +268,12 @@ public final class AppModel: ObservableObject {
                           anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
                           minimizePlastic: project.minimizePlastic,
                           buildDirection: lc.buildDirection,
+                          // The SECOND question, separated (handoff 2026-08-01-
+                          // build-direction-separation): zero unless the user
+                          // declared a plate orientation, so an untouched project
+                          // ships the identical request it always did.
+                          plateDirection: lc.plateDirection,
+                          wantsOrientationRanking: project.buildOrientation.wantsRanking,
                           infillPercent: project.printParams.infillPercent,
                           wallLoops: project.printParams.wallLoops,
                           wallLineWidthOuterMM: project.printParams.wallLineWidthOuterMM,

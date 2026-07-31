@@ -24,6 +24,11 @@ struct SettingsChipWidthKey: PreferenceKey {
 /// equal, so the layout is deterministic frame-to-frame.
 public enum SettingsChipID: Int, CaseIterable, Hashable, Sendable {
     case gravity, minimizePlastic, quality, designBox
+    /// THE SECOND QUESTION (handoff 2026-08-01-build-direction-separation): which
+    /// way is UP ON THE PLATE. Sits beside `gravity` deliberately — the two are
+    /// adjacent because they are DIFFERENT questions the app used to conflate, and
+    /// putting them side by side is how the user sees that they are different.
+    case buildOrientation
     /// The ONE global Face-protection depth (handoff 124). Only shown when ≥ 1 face
     /// is protected — the workspace filters it out of the cluster otherwise.
     case faceProtectDepth

@@ -64,7 +64,24 @@ struct ProductionLoadCase {
 
   // The print/build direction (the interlayer-margin orientation). (0,0,0)
   // defaults to +Z. gravity_direction is set to its unit negation.
+  //
+  // LEGACY, and honestly named only half-right (handoff
+  // 2026-08-01-build-direction-separation): because the builder derives the
+  // service gravity from it, this ONE field has always answered both "which way
+  // is up on the plate" and "which way is down in service". Keep setting it for
+  // the SERVICE side; declare `plate_dir` below when the two differ.
   Vec3 build_dir{0.0, 0.0, 1.0};
+
+  // THE BUILD-PLATE NORMAL, separated. When non-zero it becomes the run's build
+  // direction VERBATIM (MinimizePlasticOptions::build_direction), overriding what
+  // `build_dir` would have implied, while `build_dir` keeps setting the service
+  // gravity. (0,0,0) — the DEFAULT — declares nothing and leaves the pre-
+  // separation behaviour byte-identical.
+  Vec3 plate_dir{0.0, 0.0, 0.0};
+
+  // Arm the orientation RANKING post-pass (a recommendation on the receipt; it
+  // never moves a gate verdict). false = the default = no ranking, no new output.
+  bool build_orientation_report = false;
 
   // Sparse-infill override, percent in [0, 100]; < 0 means "no override" (use the
   // M5.1 recommendation, no knockdown). Only scales the ladder acceptance margin.

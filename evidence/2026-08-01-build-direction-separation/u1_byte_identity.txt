@@ -1,0 +1,76 @@
+# U1 — BYTE IDENTITY: an ordinary run is bit-identical to the pre-change build
+
+changed build : core/build/topopt-cli on this branch
+baseline build: an INDEPENDENT git worktree at origin/main eca04d6 (PR 269 merged),
+                configured and built on its own — nothing stashed, the working tree
+                never touched
+job           : plate_bore.stl @ res 32, PLA, minimize_plastic, ladder [0.6], 8 iters,
+                cylindrical fixture r = 3 mm, gravity (0,-1,0)
+
+THREE runs so the comparison is honest: the changed build TWICE (new, new2) and the
+baseline once (old). Two output files carry WALL-CLOCK stamps; those differ between
+new and new2 — the SAME binary — so they are timestamp noise, not a build difference.
+
+## raw sha256 — THE THREE FILES U1 NAMES
+
+file             run    sha256
+report.json      new    5dd287d66c0c46a98b67953f239e92ce67cc65e9c9ef7b415707fcb4495a3ef1
+report.json      new2   5dd287d66c0c46a98b67953f239e92ce67cc65e9c9ef7b415707fcb4495a3ef1
+report.json      old    5dd287d66c0c46a98b67953f239e92ce67cc65e9c9ef7b415707fcb4495a3ef1
+
+fields.bin       new    ab86b2448a3dbd1d44aa8a9dd394a5ff32fd6c6bb1002d55a8c2d8dba650aeb4
+fields.bin       new2   ab86b2448a3dbd1d44aa8a9dd394a5ff32fd6c6bb1002d55a8c2d8dba650aeb4
+fields.bin       old    ab86b2448a3dbd1d44aa8a9dd394a5ff32fd6c6bb1002d55a8c2d8dba650aeb4
+
+variant_060.stl  new    2b0be1f17f95882ea6d4357c55d1633a508b8ba619ba8c4f03121516897dbd41
+variant_060.stl  new2   2b0be1f17f95882ea6d4357c55d1633a508b8ba619ba8c4f03121516897dbd41
+variant_060.stl  old    2b0be1f17f95882ea6d4357c55d1633a508b8ba619ba8c4f03121516897dbd41
+
+report.json     : IDENTICAL across all three runs
+fields.bin      : IDENTICAL across all three runs
+variant_060.stl : IDENTICAL across all three runs
+
+## the two timestamp-bearing observability files — raw sha256.
+## All three differ, INCLUDING new vs new2, which is the same binary.
+
+iterations.csv   new    d802839138a77a263dc4f9b9aa05393af7d22eb891a92c28ed9030bf38627c2c
+iterations.csv   new2   8bad0e0fa8dedb60271a7ba8486a33cfc08d90a7be4856a020e899e4fae72e0f
+iterations.csv   old    f3cdc5f8a19a4cdc64e4bf93218491d933bf1a3bbb95aa00fdae4d94917af50a
+
+run_info.json    new    1bb978ada363361244d95e4a546a2abf5d8e9c5009ad5a6a76734e0d8a867171
+run_info.json    new2   8b8626bd1a59c10abd0ba990bcb158f8ba1d594d7cfea7a008d74e8163cde3ad
+run_info.json    old    2e683409a18901df09f75ae72695ef52ef61b3bcc56a475f02d78fabd7beb2a9
+
+## with the wall-clock stamps stripped (iterations.csv column 3, run_info created_wall_ms)
+
+new    b0fafc5aaf87af731b956fbf6a839b6887d495180efea4fbde1a8c309279fb2e
+new2   b0fafc5aaf87af731b956fbf6a839b6887d495180efea4fbde1a8c309279fb2e
+old    b0fafc5aaf87af731b956fbf6a839b6887d495180efea4fbde1a8c309279fb2e
+
+  -> all three hash IDENTICALLY. Every physics column is identical to the byte.
+
+## AND WITH THE SCORER ARMED, report.json / fields.bin / the mesh STILL DO NOT MOVE.
+## The ranking is a SEPARATE document (build_orientation.json) — that is exactly why.
+
+file             run                    sha256
+report.json      armed, no direction    5dd287d66c0c46a98b67953f239e92ce67cc65e9c9ef7b415707fcb4495a3ef1
+report.json      unarmed                5dd287d66c0c46a98b67953f239e92ce67cc65e9c9ef7b415707fcb4495a3ef1
+fields.bin       armed, no direction    ab86b2448a3dbd1d44aa8a9dd394a5ff32fd6c6bb1002d55a8c2d8dba650aeb4
+fields.bin       unarmed                ab86b2448a3dbd1d44aa8a9dd394a5ff32fd6c6bb1002d55a8c2d8dba650aeb4
+variant_060.stl  armed, no direction    2b0be1f17f95882ea6d4357c55d1633a508b8ba619ba8c4f03121516897dbd41
+variant_060.stl  unarmed                2b0be1f17f95882ea6d4357c55d1633a508b8ba619ba8c4f03121516897dbd41
+
+## THE KEY IS LIVE. Declaring build_direction [0,0,1] DOES change the certification —
+## a different orientation is a different interlayer margin — while the DESIGN stays
+## bit-identical. The build direction is a POST-SOLVE input, exactly as PR 266 measured.
+
+report.json      inferred (-gravity)    5dd287d66c0c46a98b67953f239e92ce67cc65e9c9ef7b415707fcb4495a3ef1
+report.json      declared +z            363ac7bdf0e6de492554ad51b3f9e28206c8d8db1c3420e81824bad24bec761c
+variant_060.stl  inferred (-gravity)    2b0be1f17f95882ea6d4357c55d1633a508b8ba619ba8c4f03121516897dbd41
+variant_060.stl  declared +z            2b0be1f17f95882ea6d4357c55d1633a508b8ba619ba8c4f03121516897dbd41
+
+  report.json     DIFFERS  (the certification moved — the key reached the gate's inputs)
+  variant_060.stl SAME     (the optimizer never saw it — orientation is post-solve)
+
+  inferred (-gravity)    orientation={'x': 0, 'y': 1, 'z': 0}  interlayer_margin=58655.7467  margin_effective=58655.7467  receipt source=assumed_from_gravity
+  declared +z            orientation={'x': 0, 'y': 0, 'z': 1}  interlayer_margin=258693.7044  margin_effective=72723.3868  receipt source=declared

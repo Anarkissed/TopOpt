@@ -48,7 +48,21 @@ public struct RunRequest: Equatable, Sendable {
     /// conservative variant that just handles the forces.
     public let minimizePlastic: Bool
     /// Print/build direction (model frame) for the interlayer-margin orientation.
+    /// LEGACY: the core derives the SERVICE gravity as its unit negation, so this
+    /// carries the service side. See `plateDirection` for the plate normal.
     public let buildDirection: SIMD3<Double>
+    /// THE BUILD-PLATE NORMAL, separated (handoff 2026-08-01-build-direction-
+    /// separation) — "which way is up on the printer", the question the app never
+    /// asked. ZERO means the user declared none and the core applies its
+    /// documented gravity fallback, i.e. the request is byte-identical to before
+    /// this field existed. Part of the request identity: changing how the part
+    /// sits on the plate changes the interlayer margin, so it must re-enable
+    /// Optimize.
+    public let plateDirection: SIMD3<Double>
+    /// Ask the core for the ORIENTATION RANKING on this run (a post-pass costing
+    /// 0.1-0.4% of the certification solve). A RECOMMENDATION only — it never
+    /// moves a gate verdict. Off => no ranking and no new output at all.
+    public let wantsOrientationRanking: Bool
     /// The M7.params user infill-density override (0–100 %), or < 0 for "no override".
     /// Threaded to the core through the bridge (`BridgeLoadCase.infill_percent`) for
     /// the M7.infill-margin ladder knockdown. Part of the request identity, so
@@ -124,6 +138,8 @@ public struct RunRequest: Equatable, Sendable {
                 rulesPath: String, resolution: Int, projectName: String,
                 anchorFaceIDs: [Int] = [], loadGroups: [TopOptKit.LoadGroupSpec] = [],
                 minimizePlastic: Bool = true, buildDirection: SIMD3<Double> = SIMD3(0, 0, 1),
+                plateDirection: SIMD3<Double> = SIMD3(0, 0, 0),
+                wantsOrientationRanking: Bool = false,
                 infillPercent: Int = -1,
                 wallLoops: Int = PrintParams.fdmDefault.wallLoops,
                 wallLineWidthOuterMM: Double = PrintParams.fdmDefault.wallLineWidthOuterMM,
@@ -145,6 +161,8 @@ public struct RunRequest: Equatable, Sendable {
         self.loadGroups = loadGroups
         self.minimizePlastic = minimizePlastic
         self.buildDirection = buildDirection
+        self.plateDirection = plateDirection
+        self.wantsOrientationRanking = wantsOrientationRanking
         self.infillPercent = infillPercent
         self.wallLoops = wallLoops
         self.wallLineWidthOuterMM = wallLineWidthOuterMM
@@ -809,7 +827,10 @@ public final class RunModel: ObservableObject {
                 materialsPath: request.materialsPath, rulesPath: request.rulesPath,
                 resolution: request.resolution, anchorFaceIDs: request.anchorFaceIDs,
                 loadGroups: request.loadGroups, minimizePlastic: request.minimizePlastic,
-                buildDirection: request.buildDirection, infillPercent: request.infillPercent,
+                buildDirection: request.buildDirection,
+                plateDirection: request.plateDirection,
+                wantsOrientationRanking: request.wantsOrientationRanking,
+                infillPercent: request.infillPercent,
                 wallLoops: request.wallLoops,
                 wallLineWidthInnerMM: request.wallLineWidthInnerMM,
                 wallLineWidthOuterMM: request.wallLineWidthOuterMM,

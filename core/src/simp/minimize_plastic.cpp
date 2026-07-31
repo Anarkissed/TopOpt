@@ -265,11 +265,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           : self_weight_loads(G, material.density_g_cm3, options.gravity,
                               options.gravity_direction);
 
-  // The reported / analysed build direction is the build-plate normal: gravity
-  // pulls toward the plate, so the build direction is the unit negation.
-  const Vec3 build_dir = normalized(Vec3{-options.gravity_direction.x,
-                                         -options.gravity_direction.y,
-                                         -options.gravity_direction.z});
+  // The reported / analysed build direction is the build-plate normal — "which
+  // way is up on the plate", a DIFFERENT question from "which way is down in
+  // service" (handoff 2026-08-01-build-direction-separation). Resolved through
+  // THE ONE resolver: the job's explicit build direction when it set one, else
+  // the documented gravity fallback (unit(-gravity), byte-identical to what this
+  // site derived inline before). Never re-derived here.
+  const Vec3 build_dir = resolve_build_direction(options);
 
   // Material -> SIMP params (penalty p = 3 per ARCHITECTURE §4).
   SimpParams params;
@@ -1116,7 +1118,16 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     FixedDesignAnalysis fda = analyze_fixed_design(
         G, params, rho, B, loads, material, build_dir, opt.cg_tolerance,
         opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
-        load_path_ok, part_solid);
+        load_path_ok, part_solid, /*lattice=*/nullptr,
+        // The orientation ranking rides on THIS rung's certification solve
+        // (handoff 2026-08-01-build-direction-separation). Per-rung, because
+        // each rung is a different design and so has its own overhangs and its
+        // own interlayer field — a ranking taken from one rung would not
+        // describe the others. PR 266 measured the sweep at 0.1-0.4% of the
+        // solve it rides on, so paying it per rung is a rounding error.
+        // Disarmed by default => byte-identical.
+        options.build_orientation_report,
+        resolve_build_direction_is_inferred(options));
 
     // --- Handoff 2026-07-27-nonconvergence-rejection: CERTIFICATION NON-CONVERGENT ─
     // The trajectory converged to a connected design, but the CERTIFICATION solve —
@@ -1180,6 +1191,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     variant.displacement_field = std::move(fda.displacement_field);
     variant.mass_grams = fda.mass_grams;
     variant.support_volume_voxels = fda.support_volume_voxels;
+    // The orientation RANKING for this rung (empty unless armed). Carried onto
+    // the variant beside the numbers it was measured with; it is a
+    // recommendation and nothing downstream may gate on it.
+    variant.build_orientation = std::move(fda.build_orientation);
     const std::size_t printed_voxels = fda.printed_voxels;
     const double max_von_mises = fda.max_von_mises;
     const double max_interlayer = fda.max_interlayer_tension;

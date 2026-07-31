@@ -61,6 +61,10 @@ public struct WorkspacePlaceholder: View {
     // layer. Off by default → the workspace draw is byte-identical. The scene (part
     // occupancy + exact narrow-band SDF + segment soup) bakes ONCE off-main when the
     // toggle turns on or the lattice type changes — never per frame (P2).
+    /// Whether the build-orientation panel is unfurled beneath its chip (handoff
+    /// 2026-08-01-build-direction-separation). Purely presentational — the panel's
+    /// state lives on the project, so closing it never discards a choice.
+    @State private var showBuildOrientation = false
     @State private var showStrutPreview = false
     @State private var strutScene: LatticeSDFScene? = nil
     @State private var strutSceneToken = 0
@@ -1410,6 +1414,14 @@ public struct WorkspacePlaceholder: View {
     @ViewBuilder private func settingsChipRow(_ id: SettingsChipID) -> some View {
         switch id {
         case .gravity: gravityChip.background(chipWidthReader(id))
+        case .buildOrientation:
+            VStack(alignment: .trailing, spacing: DS.Space.s) {
+                buildOrientationChip.background(chipWidthReader(id))
+                if showBuildOrientation {
+                    buildOrientationDrawer
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
         case .minimizePlastic: minimizePlasticChip.background(chipWidthReader(id))
         case .quality: qualityChip.background(chipWidthReader(id))
         case .faceProtectDepth: faceProtectDepthChip.background(chipWidthReader(id))
@@ -1446,6 +1458,51 @@ public struct WorkspacePlaceholder: View {
             default: return true
             }
         }
+    }
+
+    /// THE SECOND QUESTION as its own chip (handoff 2026-08-01-build-direction-
+    /// separation). Deliberately adjacent to the gravity chip: "down in service" and
+    /// "up on the plate" are DIFFERENT questions the pipeline used to answer with one
+    /// number, and on the test part that assumption picked the worst of 26
+    /// orientations. The chip states which way is up AND whether that was CHOSEN or
+    /// merely assumed — a fallback the UI does not label is a fallback the user will
+    /// mistake for a decision.
+    private var buildOrientationChip: some View {
+        Button {
+            withAnimation(DS.Motion.emphasized) { showBuildOrientation.toggle() }
+        } label: {
+            HStack(spacing: DS.Space.xs) {
+                Image(systemName: "square.3.layers.3d.top.filled")
+                    .font(.system(size: 12, weight: .bold))
+                Text("Plate up \(BuildOrientation.label(project.buildOrientation.resolved(gravity: force.gravity)))")
+                    .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+                if project.buildOrientation.isInferredFromGravity {
+                    Text("assumed")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.vertical, 2).padding(.horizontal, 5)
+                        .background(Capsule().fill(DS.Color.fillSubtle.color))
+                }
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
+            .background(Capsule().fill(DS.Surface.panel.color))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The panel itself: the two questions side by side, the six-axis picker, and the
+    /// last run's RANKING with the recommendation marked. It never applies the
+    /// recommendation — when the recommended orientation would gate differently from
+    /// the one certified, the panel states BOTH verdicts and the user chooses.
+    private var buildOrientationDrawer: some View {
+        BuildOrientationView(
+            orientation: Binding(get: { project.buildOrientation },
+                                 set: { project.buildOrientation = $0 }),
+            gravity: force.gravity,
+            ranking: project.orientationRanking)
+            .frame(width: 560)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
+                .fill(DS.Surface.panel.color))
     }
 
     /// The ONE global Face-protection depth chip (handoff 124), styled like the other

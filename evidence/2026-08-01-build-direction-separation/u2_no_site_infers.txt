@@ -1,0 +1,35 @@
+# U2 (structural) — no production site derives the build direction from gravity
+
+The three sites PR 266 named, after the change. Each consumes THE ONE resolver;
+the inline derivation is gone from all of them, and the fallback exists in exactly
+one place. test_build_direction asserts this by reading the sources, so a NEW site
+that re-derives it fails the build.
+
+$ grep -rn "resolve_build_direction(options)" core/src/
+core/src/simp/minimize_plastic.cpp:274:  const Vec3 build_dir = resolve_build_direction(options);
+core/src/cli/run_job.cpp:713:  cx.build_dir = resolve_build_direction(options);
+core/src/cli/run_job.cpp:1525:  const Vec3 build_dir = resolve_build_direction(options);
+
+$ grep -rn -- "-options.gravity_direction\|-opts.gravity_direction" core/src/ core/include/
+  (no matches — no site derives it inline)
+
+THE ONE FALLBACK, and the only place gravity may become a build direction:
+348:  return !build_direction_is_set(opts.build_direction);
+349-}
+350-
+351-Vec3 resolve_build_direction(const MinimizePlasticOptions& opts) {
+352-  // ── THE ONE DERIVATION (handoff 2026-08-01-build-direction-separation) ──────
+353-  // Explicit wins verbatim; only an UNSET build direction falls back to gravity,
+354-  // and this is the single place in the codebase where that fallback is written.
+355:  const Vec3 raw = build_direction_is_set(opts.build_direction)
+356-                       ? opts.build_direction
+357-                       : Vec3{-opts.gravity_direction.x,
+358-                              -opts.gravity_direction.y,
+359-                              -opts.gravity_direction.z};
+360-  const double len = std::sqrt(raw.x * raw.x + raw.y * raw.y + raw.z * raw.z);
+361-  if (!(len > 0.0) || !std::isfinite(len))
+
+The app's own copy of the same conflation, also removed — ProjectModel.loadCase()
+now returns a SEPARATE plateDirection (zero = nothing declared):
+400:                               plateDirection: SIMD3<Double>) {
+420:        // `plateDirection` is the SEPARATED build-plate normal (handoff

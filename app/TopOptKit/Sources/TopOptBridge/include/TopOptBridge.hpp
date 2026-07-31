@@ -311,6 +311,15 @@ struct OptimizeVariant {
 
 struct OptimizeResult {
   std::vector<OptimizeVariant> variants;  // every evaluated rung, ladder order
+  // The BUILD-ORIENTATION RECEIPT for the recommended (lightest accepted) rung —
+  // the SAME JSON document topopt-cli writes to build_orientation.json, produced
+  // by the SAME core emitter, so the iPad and a LAN run show the identical
+  // ranking through one decoder (handoff 2026-08-01-build-direction-separation).
+  // EMPTY unless BridgeLoadCase::build_orientation_report armed it.
+  //
+  // A RECOMMENDATION. `variants[i].accepted` above is each rung's verdict for the
+  // orientation ACTUALLY USED, and nothing in this string can change it.
+  std::string build_orientation_json;
   bool stopped_on_margin = false;
   bool cancelled = false;
   int32_t accepted_count = 0;  // report.variants.size()
@@ -533,6 +542,23 @@ struct BridgeLoadCase {
   double build_dir_x = 0.0;
   double build_dir_y = 0.0;
   double build_dir_z = 1.0;
+  // ── THE BUILD-PLATE NORMAL, SEPARATED (handoff 2026-08-01-build-direction-
+  // separation). `build_dir_*` above is the LEGACY field: the core sets the
+  // service gravity to its unit negation, so it has always answered "which way
+  // is down in service" as much as "which way is up on the plate". Those are
+  // different questions. `plate_dir_*` answers ONLY the second one.
+  //
+  // (0,0,0) — the DEFAULT — means the app declared no plate orientation, and the
+  // core applies the documented fallback (build = -gravity), i.e. exactly
+  // today's behaviour. Every existing caller keeps its result to the byte.
+  double plate_dir_x = 0.0;
+  double plate_dir_y = 0.0;
+  double plate_dir_z = 0.0;
+  // Arm the orientation RANKING (a post-pass on the certification solve that
+  // already runs — 0.1-0.4% of it, PR 266). A RECOMMENDATION: it never moves the
+  // gate verdict, which is always computed from the orientation actually used.
+  // false (the default) => no ranking, byte-identical output.
+  bool build_orientation_report = false;
   // M7.params — the user's infill-density override (0–100 %), or < 0 when the user
   // set no override (use the M5.1 recommendation). ADDITIVE + DEFAULTED so this is
   // source-compatible: `run_minimize_plastic_loadcase`'s signature is unchanged

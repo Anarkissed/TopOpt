@@ -283,8 +283,31 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // fragmenting the design. Surface it as a clear error instead. A load case
   // with NO groups declared keeps self-weight as a legitimate mode.
   opts.require_external_loads = !lc.load_groups.empty();
-  // gravity_direction defines the reported build orientation = its unit negation.
+  // The service gravity a load case implies: opposite the declared build
+  // direction. (Historically this was the ONLY plumbing — the build direction
+  // round-tripped through gravity and every certification path inferred it back
+  // out, which is the conflation handoff 2026-08-01-build-direction-separation
+  // measured. Kept exactly as-is so self-weight inside a load case is unchanged.)
   opts.gravity_direction = Vec3{-build_dir.x, -build_dir.y, -build_dir.z};
+  // ...and, since a load case DID declare a plate orientation, carry it as the
+  // build direction DIRECTLY rather than making resolve_build_direction infer it
+  // back from gravity. Numerically identical (the round trip is exact — that is
+  // why this stays byte-identical), but honest: this run's orientation is a
+  // stated input, not a guess, and the receipt can say so. Only a DECLARED
+  // direction is forwarded; lc.build_dir == (0,0,0) means "not declared" (the
+  // +Z default above), which is left for the documented gravity fallback.
+  if (std::fabs(lc.build_dir.x) + std::fabs(lc.build_dir.y) +
+          std::fabs(lc.build_dir.z) >
+      0.0)
+    opts.build_direction = build_dir;
+  // ...and a DECLARED plate normal overrides that: this is the front-end saying
+  // the two questions have different answers for this part. Zero declares
+  // nothing and leaves the line above (or the gravity fallback) in charge.
+  if (std::fabs(lc.plate_dir.x) + std::fabs(lc.plate_dir.y) +
+          std::fabs(lc.plate_dir.z) >
+      0.0)
+    opts.build_direction = lc.plate_dir;
+  opts.build_orientation_report = lc.build_orientation_report;
   opts.gravity = 9810.0 * 1e-9;  // self-weight magnitude, used only if external empty
   opts.volume_fraction_ladder =
       lc.minimize_plastic ? production_reduction_ladder() : std::vector<double>{0.9};

@@ -1,0 +1,23 @@
+=========================================================
+ BUILD DIRECTION SEPARATION -- bars U2 / U4 / U5 / U7
+=========================================================
+
+U2 -- resolve_build_direction is the ONE derivation
+U2 -- no production site re-derives build_dir from gravity
+
+U4 -- PR 266 case C (hook @ res 48, load -y) through production
+    build = -gravity (+y): gated 0.6968  interlayer 0.6968  support 48
+    best candidate  (+z):  gated 1.3285  interlayer 6.3494  support 0
+    interlayer ratio 9.11x (PR 266 measured 9.11x)
+
+U5 -- the verdict is computed from the orientation USED
+    as built: REJECTED; as recommended: ACCEPTED  (verdict stands: REJECTED)
+
+U7 -- PR 266's self-checks fire on the PRODUCTION path
+    S-c in-plane 0.46164486, 0 deviations over 26 candidates | S-d cube axes 0.28850357, 0 deviations over 6 axes
+
+U3 -- measured cost of the post-pass
+    res 32: solve 0.0551 s | sweep 0.0005 s (26 candidates, 0.018 ms each) | axes 0.0000 s | SWEEP IS 0.86% OF THE SOLVE | armed-vs-bare wall 0.0563 s vs 0.0551 s
+    res 48: solve 0.2375 s | sweep 0.0015 s (26 candidates, 0.058 ms each) | axes 0.0001 s | SWEEP IS 0.63% OF THE SOLVE | armed-vs-bare wall 0.2389 s vs 0.2375 s
+
+56 checks, 0 failures

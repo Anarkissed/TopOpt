@@ -237,6 +237,33 @@ bool production_width_aware_knockdown();
 // yields the pure f^1.5 scalar posture, byte-identical to the pre-width gate.
 KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts);
 
+// THE single resolver of a run's BUILD-PLATE NORMAL (handoff
+// 2026-08-01-build-direction-separation). Returns a unit vector.
+//
+//   * `opts.build_direction` non-zero  -> that direction, normalized, VERBATIM.
+//     The user said which way up the part prints; nothing infers over them.
+//   * `opts.build_direction` == (0,0,0) -> THE DOCUMENTED FALLBACK:
+//     unit(-opts.gravity_direction), i.e. "assume the part prints the opposite
+//     way up from service gravity". This is exactly what minimize_plastic.cpp,
+//     lattice_cert_context and analyze_job each derived independently before
+//     this function existed, so an unset build direction is byte-identical.
+//
+// THIS IS THE ONLY PLACE IN THE CODEBASE THAT MAY DERIVE A BUILD DIRECTION FROM
+// A GRAVITY DIRECTION. Every certification path calls it; a new site that writes
+// `-gravity_direction` itself is a bug (test_build_direction greps for exactly
+// that). The reason is PR 266's S5: three independent derivations meant a run's
+// report, its lattice receipt and a later re-analysis of the same part could
+// certify against different orientations while each looked self-consistent.
+//
+// `resolve_build_direction_is_inferred` is the honesty half: true when the
+// fallback fired, so a receipt can say "build direction assumed from gravity"
+// rather than presenting an inference as a user choice.
+//
+// Throws std::invalid_argument if the resolved direction is (near) zero length
+// or non-finite (i.e. an unset build direction with a degenerate gravity).
+Vec3 resolve_build_direction(const MinimizePlasticOptions& opts);
+bool resolve_build_direction_is_inferred(const MinimizePlasticOptions& opts);
+
 // The canonical recommendation-driven volume-fraction ladder for production runs
 // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic
 // walks the margin-SAFE prefix and stops at the first rung below margin_stop, so

@@ -21,6 +21,7 @@
 #endif
 
 #include "topopt/analyze.hpp"
+#include "topopt/build_orientation.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/face_overrides.hpp"
 #include "topopt/fea.hpp"
@@ -353,6 +354,16 @@ OptimizeResult to_optimize_result(const topopt::MinimizePlasticResult& mp,
   for (const auto& v : mp.evaluated)
     result.variants.push_back(
         to_optimize_variant(v, grid, kSmoothExportFactor));
+  // The BUILD-ORIENTATION RECEIPT (handoff 2026-08-01-build-direction-separation)
+  // for the rung the run itself recommends — the LIGHTEST ACCEPTED variant, i.e.
+  // the design the user is actually going to print. Produced by the CORE's ONE
+  // emitter, so the iPad shows exactly the document topopt-cli writes to disk.
+  // Empty (default) unless the load case armed the ranking, so an un-armed run
+  // returns byte-identically what it always did.
+  for (const auto& v : mp.evaluated)
+    if (v.accepted && v.build_orientation.evaluated)
+      result.build_orientation_json = topopt::build_orientation_report_json(
+          v.build_orientation, v.report.orientation);
   return result;
 }
 
@@ -405,6 +416,12 @@ topopt::ProductionLoadCase production_loadcase_from_bridge(
   lc.minimize_plastic = load_case.minimize_plastic;
   lc.build_dir = topopt::Vec3{load_case.build_dir_x, load_case.build_dir_y,
                               load_case.build_dir_z};
+  // The build-plate normal as its OWN input (handoff 2026-08-01-build-direction-
+  // separation). (0,0,0) => the app declared none => the core's documented
+  // gravity fallback => byte-identical to before this field existed.
+  lc.plate_dir = topopt::Vec3{load_case.plate_dir_x, load_case.plate_dir_y,
+                              load_case.plate_dir_z};
+  lc.build_orientation_report = load_case.build_orientation_report;
   lc.infill_percent = static_cast<double>(load_case.infill_percent);
   lc.wall_loops = load_case.wall_loops;
   if (load_case.wall_line_width_mm > 0.0)

@@ -54,6 +54,7 @@ add_library(topopt
   src/fea/lattice.cpp
   src/fea/strut_strength.cpp
   src/orient/orient.cpp
+  src/orient/build_orientation.cpp
   src/settings/settings.cpp
   src/settings/report.cpp
   src/cli/job.cpp)
@@ -573,6 +574,22 @@ if(Eigen3_FOUND)
   target_compile_definitions(test_v5 PRIVATE
     ORIENT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/orient")
   add_test(NAME gate_v5 COMMAND test_v5)
+
+  # BUILD DIRECTION SEPARATION (task 2026-08-01-build-direction-separation).
+  # Pins that the build-plate normal is its own input (resolve_build_direction is
+  # the ONE derivation, and no production site re-derives it), that PR 266's
+  # measured V5-hook numbers reproduce through the PRODUCTION post-pass, that the
+  # gate verdict is computed from the orientation ACTUALLY USED and never from
+  # the recommendation, and that PR 266's S2 invariants still fire in production.
+  # Needs the FEA solve (Eigen) and reads the same read-only hook fixture as
+  # test_v5; TOPOPT_SRC_DIR is injected for the structural grep-assert.
+  add_executable(test_build_direction tests/validation/test_build_direction.cpp)
+  target_link_libraries(test_build_direction PRIVATE topopt)
+  target_compile_definitions(test_build_direction PRIVATE
+    ORIENT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/orient"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    TOPOPT_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_test(NAME build_direction COMMAND test_build_direction)
 
   # SIMP compliance + sensitivity test (M3.2). Builds its tiny grids in code (no
   # fixture) and drives simp_compliance (density field, penalized stiffness,
