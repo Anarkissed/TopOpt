@@ -87,6 +87,11 @@ public struct WorkspacePlaceholder: View {
     // move detent snapped to.
     @State private var renamingGroup: UUID?
     @State private var addingPrimitiveGroup: UUID?
+    /// Round-2 T2: the group whose primitive CHIPS are revealed. Chips open only
+    /// after an explicit tap on the primitive (its knob), one of its faces on the
+    /// model, or its group row in the library — never as a side effect of a face
+    /// tap that merely grew a selection (the "too easy to hit by accident" report).
+    @State private var chipsRevealedGroup: UUID?
     @FocusState private var renameFieldFocused: Bool
 
     // DEFECT 2 — the manual-primitive TRANSFORM GIZMO. `gizmoTarget` is the primitive the
@@ -381,14 +386,31 @@ public struct WorkspacePlaceholder: View {
                 if force.gravityIsSet { bottomRightControls }
                 if viewerMesh != nil { selectionsPanel }
                 if viewerMesh != nil { latticePreviewOverlay }
+                // Round-2 T1: the big Lattice entry button — top right, LEFT of the
+                // position gizmo, Optimize's stature, and it SAYS what is missing.
+                if viewerMesh != nil { latticeEntryButtonOverlay }
             }
             if !showLatticePage { loadOverlays.ignoresSafeArea() }  // D3/D4/D5: tappable pills at each arrow
-            if viewerMesh != nil { orientationGizmo }           // orientation gizmo — top-right, always
+            // Round-2 L6 root cause: this was the ONE piece of workspace chrome not
+            // gated behind the lattice page, and its Metal-backed glass composited
+            // OVER the page's pure-SwiftUI chrome regardless of ZStack order — the
+            // page's RUN SIM button rendered BEHIND it. The fix is structural, not
+            // a z nudge: the page hides ALL workspace chrome (its own rule), the
+            // gizmo included.
+            if viewerMesh != nil, !showLatticePage { orientationGizmo }
             if !showLatticePage { bottomBar }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
             if showLatticePage { latticePageOverlay }
+            // Round-2 L18: the ONE Selections library, mounted OVER the lattice page
+            // when its Regions & faces row opens it — the SAME `selectionsPanel`
+            // view over the SAME `project.selection` the TO page uses. Never a
+            // second selection UX.
+            if showLatticePage, latticePageModel.libraryOpen,
+               force.phase == .edit, viewerMesh != nil {
+                selectionsPanel
+            }
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
                       resolution: runResolution,
@@ -569,9 +591,30 @@ public struct WorkspacePlaceholder: View {
         guard project.lattice.enabled, let mesh = viewerMesh else { return nil }
         // Derive the proxy params FRESH from the lattice settings (density range clamped
         // to the core band), so the surface shading always reflects the current controls
-        // with no stateful sync. Uniform pre-run (no demand field on device yet).
+        // with no stateful sync.
         let params = project.lattice.proxyParams(limits: latticeLimits)
-        return LatticeDensityProxy.tints(for: mesh, demand: nil, params: params)
+        // Round-2 L11: in AUTO density the overlay grades from the page's own
+        // demand field (the variant's field on the variants entry, else the
+        // sim's) — the same source the strut preview grades from. Before this,
+        // production always passed `demand: nil`, so the overlay was a constant
+        // violet under EVERY setting (the graded branch ran only in tests): the
+        // app HAD graded fields and never handed one over — an app-side bug, not
+        // core's. Uniform mode stays deliberately flat (its density IS uniform).
+        let field: StressField?
+        if project.lattice.densityMode == .auto,
+           let f = latticePageVariantField ?? latticeSim.field {
+            field = StressField(nx: f.nx, ny: f.ny, nz: f.nz,
+                                origin: SIMD3<Float>(f.origin), spacing: Float(f.spacingMM),
+                                values: f.vonMises)
+        } else {
+            field = nil
+        }
+        // Round-2 L5: the SELECTION tints ride ABOVE the overlay — the stress-tint
+        // channel replaces face highlights wholesale in the renderer, so the
+        // groups' colours must be composed into the per-vertex buffer here.
+        return LatticeDensityProxy.tints(for: mesh, demand: field, params: params,
+                                         selectionTints: roleTints,
+                                         effectiveFaceIDs: project.effectivePaintFaceIDs())
     }
 
     /// The certifiable limits for the current topology, READ FROM CORE at runtime (the
@@ -598,9 +641,51 @@ public struct WorkspacePlaceholder: View {
     /// resolved geometry the run freezes (`ProjectModel.clearanceVolumes`).
     private var clearanceRenderItems: [ClearanceRenderItem] {
         let active = selection.activeGroupID
-        return project.clearanceVolumes().map {
-            ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active)
+        var items = project.clearanceVolumes().map {
+            // Round-2: a lattice-role group's volumes are REGIONS, tinted the
+            // density ramp's indigo family instead of the keep-out red — include
+            // (latticed) mid-violet, exclude (kept solid) deep indigo.
+            ClearanceRenderItem(volume: $0.volume, selected: $0.groupID == active,
+                                tint: latticeRegionTint(project.lattice.enabled
+                                    ? project.lattice.groupRoles[$0.groupID] : nil))
         }
+        // Legacy lattice-include primitives (no owning group) — previously they had
+        // NO volume render path at all (part of the L21 "invisible primitives"
+        // finding). They draw through the same volume pass, region-tinted.
+        if project.lattice.enabled {
+            for p in project.lattice.includePrimitives {
+                items.append(ClearanceRenderItem(
+                    volume: latticeIncludeVolume(p), selected: false,
+                    tint: latticeRegionTint(.include)))
+            }
+        }
+        return items
+    }
+
+    /// The volume colour for a lattice role (nil → keep the clearance red).
+    private func latticeRegionTint(_ role: LatticeGroupRole?) -> SIMD3<Float>? {
+        switch role {
+        case .include: return SIMD3<Float>(124.0 / 255, 111.0 / 255, 214.0 / 255)  // ramp mid violet
+        case .exclude: return SIMD3<Float>(74.0 / 255, 52.0 / 255, 158.0 / 255)    // ramp deep indigo
+        case nil: return nil
+        }
+    }
+
+    /// A legacy include primitive's render volume: the primitive IS the region
+    /// (zero margins), through the same `ClearanceVolume` shapes the run freezes.
+    private func latticeIncludeVolume(_ p: ManualPrimitive) -> ClearanceVolume {
+        let key = ProjectModel.manualFaceKey(p.id)
+        if p.kind == .bolt {
+            return .bolt(faceID: key, geometry: p.syntheticGeometry,
+                         axialSpan: (Float(-p.halfLengthMM), Float(p.halfLengthMM)),
+                         marginMM: 0, axialMM: 0)
+        }
+        let n = SIMD3<Float>(p.axis)
+        let (u, v) = planeBasis(normal: n)
+        let outline = PlaneOutline(center: SIMD3<Float>(p.center), uAxis: u, vAxis: v,
+                                   halfU: Float(p.halfUMM), halfV: Float(p.halfWMM))
+        return .slab(faceID: key, geometry: p.syntheticGeometry, outline: outline,
+                     depthMM: p.resolvedDepthMM)
     }
 
     // MARK: tap routing (D1/D2)
@@ -626,18 +711,37 @@ public struct WorkspacePlaceholder: View {
             }
             return
         }
-        // Lattice page PAINT pane: a face tap toggles the face's paint role
-        // (include → LatticeSettings, exclude → the protect group) instead of the
-        // normal selection routing — the page owns the tap while its paint pane is up.
+        // Lattice page (round-2 L18/L23): while the ONE Selections library is
+        // open, taps route through the NON-DESTRUCTIVE lattice router — an owned
+        // face selects its group (nothing is ever toggled off or stolen; removal
+        // lives on the TO page only), a free face grows/starts a group. With the
+        // library closed the page owns the tap and the selection is untouched.
         if showLatticePage {
-            if latticePageModel.pane == .paint {
-                project.toggleLatticePaintFace(faceID, role: latticePageModel.paintRole)
+            if latticePageModel.libraryOpen {
+                let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
+                let gid = LatticeLibraryTap.route(faceID: faceID, loop: loop,
+                                                  selection: &selection)
+                // T2: a tap on one of the group's own cleared faces reveals its
+                // primitive chips (same rule as the TO page below).
+                if let gid, let g = selection.groups.first(where: { $0.id == gid }),
+                   groupClearanceFaces(g).contains(faceID) || !force.manualPrimitives(for: gid).isEmpty {
+                    chipsRevealedGroup = gid
+                }
                 force.sync(groups: selection.groups)
             }
-            return   // no selection edits from under the page's other panes
+            return
         }
         let loop = FaceTopology.loop(fromFace: faceID, in: mesh)
         WorkspaceTap.route(faceID: faceID, loop: loop, selection: &selection, force: force)
+        // Round-2 T2: primitive chips are reachable ONLY by tapping the primitive,
+        // one of its faces, or its group row in the library — a tap that merely
+        // grew a selection must NOT pop the chip editor open. Reveal only when
+        // the tapped face is one of the (now-active) group's own cleared faces.
+        if let g = selection.activeGroup, groupClearanceFaces(g).contains(faceID) {
+            chipsRevealedGroup = g.id
+        } else if chipsRevealedGroup != selection.activeGroupID {
+            chipsRevealedGroup = nil
+        }
         force.sync(groups: selection.groups)
     }
 
@@ -1065,7 +1169,8 @@ public struct WorkspacePlaceholder: View {
     private var latticePreviewOverlay: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             HStack(spacing: DS.Space.s) {
-                latticePreviewChip
+                // Round-2 T1: the Lattice chip that lived here became the big
+                // top-right entry button (`latticeEntryButtonOverlay`).
                 if project.lattice.enabled { strutPreviewChip }
             }
             // Honesty banner (bar P1): whenever the strut layer is up the user is told
@@ -1141,8 +1246,14 @@ public struct WorkspacePlaceholder: View {
                     baseCanOptimize: canOptimize,
                     baseSummary: force.optimizeSummary(in: selection.groups),
                     onOptimize: { startRun() },
-                    onClose: { showLatticePage = false },
-                    onBackToSetup: { showLatticePage = false })
+                    onClose: { showLatticePage = false; latticePageModel.libraryOpen = false },
+                    onBackToSetup: { showLatticePage = false; latticePageModel.libraryOpen = false },
+                    // L17: the page's Refresh re-runs the preview with the CURRENT
+                    // settings — a fresh strut-scene bake + proxy sync.
+                    onRefreshPreview: {
+                        syncLatticeProxy()
+                        buildStrutScene()
+                    })
             .ignoresSafeArea(.keyboard)
     }
 
@@ -1209,28 +1320,44 @@ public struct WorkspacePlaceholder: View {
         }
     }
 
-    /// The chip that opens the full-screen LATTICE PAGE (handoff 2026-07-30-lattice-
-    /// page; the page replaced the old side panel). Shows "· on" when lattice mode is
-    /// enabled, tinted the density ramp's indigo so it reads as its own tool.
-    private var latticePreviewChip: some View {
-        Button { openLatticePage(variantIndex: nil) } label: {
-            HStack(spacing: DS.Space.xs) {
-                Image(systemName: "square.grid.3x3.fill").font(.system(size: 12, weight: .bold))
-                Text(project.lattice.enabled ? "Lattice · on" : "Lattice")
-                    .dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
-                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .bold))
+    /// Round-2 T1: the big LATTICE entry button — Optimize's stature (height 64,
+    /// filled when ready), TOP RIGHT, LEFT of the position gizmo. Greyed until
+    /// gravity AND an anchor AND a load are all set, and the sub-line SAYS what
+    /// is missing instead of just disabling.
+    private var latticeEntryButtonOverlay: some View {
+        let entry = LatticeEntryButtonGate.compute(gravitySet: force.gravityIsSet,
+                                                   anchors: force.anchorCount(in: selection.groups),
+                                                   loads: force.loadCount(in: selection.groups))
+        return Button {
+            guard entry.enabled else { return }
+            openLatticePage(variantIndex: nil)
+        } label: {
+            VStack(spacing: 2) {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: "square.grid.3x3.fill").font(.system(size: 14, weight: .bold))
+                    Text(project.lattice.enabled ? "Lattice · on" : "Lattice")
+                        .dsStyle(DS.TypeScale.headline)
+                }
+                Text(entry.subtitle)
+                    .font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
+                    .lineLimit(1)
             }
-            .foregroundStyle(project.lattice.enabled
-                ? LatticeDensityProxy.densityColor(fraction: 0.75).color
-                : DS.Color.textSecondary.color)
-            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.m)
-            .background(Capsule().fill(DS.Surface.panel.color)
-                .overlay(Capsule().strokeBorder(
-                    (project.lattice.enabled ? LatticeDensityProxy.densityColor(fraction: 0.6).opacity(0.6)
-                                             : DS.Color.strokeSubtle).color, lineWidth: 1)))
+            .foregroundStyle((entry.enabled ? DS.Color.textPrimary : DS.Color.textDisabled).color)
+            .padding(.horizontal, DS.Space.xl5).frame(height: 64)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .fill(entry.enabled
+                    ? LatticeDensityProxy.densityColor(fraction: 0.75).opacity(0.85).color
+                    : DS.Color.fillDisabled.color))
+            .dsShadow(entry.enabled ? DS.Shadow.accentGlow : DS.Shadow.panel)
         }
         .buttonStyle(.plain)
-        .dsShadow(DS.Shadow.panel)
+        .disabled(!entry.enabled)
+        .accessibilityLabel(entry.enabled ? "Open lattice"
+                            : "Lattice — needs \(entry.missing.joined(separator: " and "))")
+        // Top-right, LEFT of the 210 pt orientation gizmo in the absolute corner.
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.trailing, OrientationGizmoView.standardSize + DS.Space.s * 2)
+        .padding(.top, DS.Space.s + (OrientationGizmoView.standardSize - 64) / 2)
         .help("Lattice mode — pick a topology, cell size and density range, bounded by what core certifies.")
     }
 
@@ -2152,11 +2279,17 @@ public struct WorkspacePlaceholder: View {
                     if gizmoTarget == GizmoTarget(group: gid, id: mp.id) {
                         gizmoHandles(proj, group: gid, mp: mp)
                     } else if let pt = proj.project(settledWorld(SIMD3<Float>(mp.center))) {
-                        gizmoCircleKnob(active: false, size: 26) {
-                            Image(systemName: "move.3d").font(.system(size: 11, weight: .bold))
+                        // Round-2 T6: the move knob is the ONLY way to grab a
+                        // primitive — enlarged (26 → 40 pt glass, ~64 pt hit
+                        // target with the knob's −12 pt inset) so it is easy to hit.
+                        gizmoCircleKnob(active: false, size: 40) {
+                            Image(systemName: "move.3d").font(.system(size: 16, weight: .bold))
                                 .foregroundStyle(.white)
                         }
-                        .onTapGesture { gizmoTarget = GizmoTarget(group: gid, id: mp.id) }
+                        .onTapGesture {
+                            gizmoTarget = GizmoTarget(group: gid, id: mp.id)
+                            chipsRevealedGroup = gid   // T2: tapping the primitive reveals chips
+                        }
                         .position(pt)
                         .accessibilityLabel("Select primitive to transform")
                     }
@@ -2475,6 +2608,7 @@ public struct WorkspacePlaceholder: View {
         addingPrimitiveGroup = nil
         guard let id else { return }
         gizmoTarget = GizmoTarget(group: gid, id: id)
+        chipsRevealedGroup = gid   // T2: an explicit primitive interaction reveals its chips
     }
 
     /// Turn a stage touch into a MODEL-space ray: the camera ray (settled world) inverse-settled
@@ -2942,14 +3076,19 @@ public struct WorkspacePlaceholder: View {
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 6) {
-                Button { removeGroup(g.id) } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(DS.Color.textPrimary.opacity(0.4).color)
+                // Round-2 L23/M2: NO destructive affordance in the lattice context —
+                // groups and faces can be removed only back on the TO page.
+                if !showLatticePage {
+                    Button { removeGroup(g.id) } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(DS.Color.textPrimary.opacity(0.4).color)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
-                // "+ a primitive" — under the trash icon, revealed once the group is
-                // LOCKED IN (active). Tapping asks CYLINDER or PLANE (handoff item 1).
+                // "+ a primitive" — revealed once the group is LOCKED IN (active).
+                // Tapping asks CYLINDER or PLANE (handoff item 1). In the lattice
+                // context (a role group) the primitive becomes a lattice REGION.
                 if active {
                     Button { addingPrimitiveGroup = g.id } label: {
                         Label("primitive", systemImage: "plus")
@@ -2962,6 +3101,10 @@ public struct WorkspacePlaceholder: View {
                 }
             }
           }
+          // Round-2 L22: in the lattice context every group row carries the ROLE
+          // control — "Lattice here" (include) / "No lattice" (exclude), tap the
+          // lit chip again to clear. An attribute on the ONE model's group.
+          if showLatticePage { latticeRoleControl(g) }
           // Item 4: the clearance chips (+ per-row Sync box) sit right-aligned to the row's
           // trailing edge, directly below the trash icon — not left-aligned in the name column.
           clearanceEditor(g)
@@ -2978,6 +3121,9 @@ public struct WorkspacePlaceholder: View {
         .onTapGesture {
             if renamingGroup != nil, renamingGroup != g.id { renamingGroup = nil }
             selection.setActive(g.id)
+            // T2: tapping the group IN THE LIBRARY is one of the three explicit
+            // paths that reveal its primitive chips.
+            chipsRevealedGroup = g.id
         }
         .confirmationDialog("Add a primitive", isPresented: Binding(
             get: { addingPrimitiveGroup == g.id },
@@ -3014,7 +3160,11 @@ public struct WorkspacePlaceholder: View {
                 .font(.system(size: DS.TypeScale.callout.size, weight: .semibold))
                 .foregroundStyle(DS.Color.textPrimary.color)
                 .contentShape(Rectangle())
-                .onTapGesture { selection.setActive(g.id); renamingGroup = g.id }
+                .onTapGesture {
+                    selection.setActive(g.id)
+                    renamingGroup = g.id
+                    chipsRevealedGroup = g.id   // T2: a name tap is a group tap too
+                }
                 .accessibilityIdentifier("group-name-\(g.id.uuidString)")
         }
     }
@@ -3027,9 +3177,8 @@ public struct WorkspacePlaceholder: View {
     /// A group's OWN keep-clear faces (bores + explicit slabs) — the WITHIN-group scope the Sync
     /// flag couples (round-4 item 3). ForceModel can't classify geometry, so the view supplies them.
     private func groupClearanceFaces(_ g: SelectionGroup) -> [FaceID] {
-        guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return [] }
-        let explicit = force.keepClearAffix(for: g.id) == .on
-        return g.faces.filter { FaceTopology.isFastenerBore($0, in: mesh) || explicit }
+        // T5: the ONE shared listing rule (suppression filter included).
+        project.listedClearanceFaces(g)
     }
 
     /// The PER-GROUP "Sync" checkbox (round-4 item 3), always enabled, default checked. Toggling
@@ -3056,12 +3205,15 @@ public struct WorkspacePlaceholder: View {
     /// explicit, since Auto affixes bores only). Empty when keep-clear is off or the
     /// part has no B-rep geometry.
     private func clearancePrimitives(_ g: SelectionGroup) -> [ClearancePrimitive] {
-        guard let mesh = viewerMesh, project.keepClearIsOn(g) else { return [] }
-        let explicit = force.keepClearAffix(for: g.id) == .on
-        return g.faces.compactMap { f in
+        guard let mesh = viewerMesh else { return [] }
+        // Round-2 T5 root cause: the RENDERER and the RUN both skip a suppressed
+        // face (`isClearanceFaceSuppressed`) — but this panel listing did not.
+        // Converting an auto clearance to a manual primitive (the row's move icon)
+        // suppresses the auto face AND adds the manual primitive, so the panel
+        // listed BOTH: a second primitive where only one exists. The listing now
+        // reads the ONE shared rule (`ProjectModel.listedClearanceFaces`).
+        return project.listedClearanceFaces(g).map { f in
             let bore = FaceTopology.isFastenerBore(f, in: mesh)
-            guard bore || explicit else { return nil }        // auto affixes only bores
-            guard mesh.faceGeometry(f) != nil else { return nil }  // STL / no B-rep
             // A fastener bore is always a fitted cylinder, so `faceBoreRadius` is
             // never nil for a bore row — no blank "— mm Auto" (C2, handoff 2026-07-29).
             return ClearancePrimitive(id: f, isBore: bore, radiusMM: bore ? faceBoreRadius(f) : nil)
@@ -3081,14 +3233,55 @@ public struct WorkspacePlaceholder: View {
     /// Sync ON the row collapses to the ONE shared chip set plus a "N primitives ·
     /// synced" count. A lone primitive keeps the old single-line look.
     @ViewBuilder private func clearanceEditor(_ g: SelectionGroup) -> some View {
-        // LOCKED IN (active): the full editor — every primitive on its own line with a
-        // "−" to delete it (auto OR manual), plus the manual primitives (handoff
-        // group-editing items 2 + 3). Unlocked: the existing compact summary.
-        if g.id == selection.activeGroupID {
+        // LOCKED IN (active) AND explicitly revealed (round-2 T2): the full editor —
+        // every primitive on its own line with a "−" to delete it (auto OR manual),
+        // plus the manual primitives (handoff group-editing items 2 + 3). The
+        // reveal requires a tap on the primitive, one of its faces, or the group
+        // row — a face tap that merely grew a selection no longer pops the chips
+        // open under the finger. Otherwise: the compact summary.
+        if g.id == selection.activeGroupID, chipsRevealedGroup == g.id {
             lockedClearanceEditor(g)
         } else {
             compactClearanceEditor(g)
         }
+    }
+
+    /// Round-2 L22: the per-group LATTICE ROLE control, shown only in the lattice
+    /// context. Roles live in `LatticeSettings.groupRoles` keyed by the group's id
+    /// — an attribute over the ONE selection model, never a second group store.
+    private func latticeRoleControl(_ g: SelectionGroup) -> some View {
+        let current = project.lattice.groupRoles[g.id]
+        return HStack(spacing: DS.Space.xs) {
+            latticeRoleChip(g, .include, label: "Lattice here", on: current == .include)
+            latticeRoleChip(g, .exclude, label: "No lattice", on: current == .exclude)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func latticeRoleChip(_ g: SelectionGroup, _ role: LatticeGroupRole,
+                                 label: String, on: Bool) -> some View {
+        let tint = role == .include
+            ? LatticeDensityProxy.densityColor(fraction: 0.5)
+            : LatticeDensityProxy.densityColor(fraction: 0.8)
+        return Button {
+            // Tap the lit chip again to CLEAR the role — always additive to the
+            // group itself (M2: nothing here touches faces or membership).
+            project.lattice.groupRoles[g.id] = on ? nil : role
+        } label: {
+            HStack(spacing: DS.Space.xs) {
+                Image(systemName: role == .include ? "square.grid.3x3.fill" : "square.fill")
+                    .font(.system(size: 10, weight: .bold))
+                Text(label).dsStyle(DS.TypeScale.footnote).fontWeight(.bold)
+            }
+            .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
+            .padding(.vertical, 5).padding(.horizontal, DS.Space.sm)
+            .background(Capsule().fill(on ? tint.opacity(0.55).color : DS.Color.fillSelected.color)
+                .overlay(Capsule().strokeBorder(on ? tint.color : DS.Color.strokeSubtle.color,
+                                                lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label)\(on ? " — on, tap to clear" : "")")
+        .accessibilityIdentifier("lattice-role-\(role.rawValue)-\(g.id.uuidString)")
     }
 
     /// The compact (unlocked) clearance summary — the pre-handoff layout, unchanged.
@@ -3143,11 +3336,18 @@ public struct WorkspacePlaceholder: View {
                     // G2: grab an AUTO-found clearance's gizmo → convert it to an explicit
                     // MANUAL primitive (its geometry becomes user-supplied) and select it.
                     if selection.activeGroupID == g.id {
+                        // Round-2 T6: the move icon is the ONLY way to grab a
+                        // primitive from the panel — a real 44 pt target now, not
+                        // a bare 12 pt glyph.
                         Button {
                             selectNewPrimitive(project.convertAutoClearanceToManual(face: p.id, in: g.id), in: g.id)
                         } label: {
-                            Image(systemName: "move.3d").font(.system(size: 12))
-                                .foregroundStyle(DS.Color.accent.color.opacity(0.8))
+                            Image(systemName: "move.3d").font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(DS.Color.accent.color.opacity(0.9))
+                                .frame(width: 34, height: 34)
+                                .background(RoundedRectangle(cornerRadius: DS.Radius.field)
+                                    .fill(DS.Color.accent.opacity(0.14).color))
+                                .contentShape(Rectangle().inset(by: -5))
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("grab-auto-\(p.id)")
@@ -3388,6 +3588,7 @@ public struct WorkspacePlaceholder: View {
     private func leaveGroupEditing() {
         renamingGroup = nil
         addingPrimitiveGroup = nil
+        chipsRevealedGroup = nil
         selection.clearActive()
     }
 

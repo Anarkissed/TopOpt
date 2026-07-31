@@ -373,7 +373,15 @@ public final class ProjectModel: ObservableObject {
             // emitted unconditionally (they are their own declaration, independent of
             // the group's auto/affix state). Their inline geometry crosses the bridge
             // as a manual `ClearanceSpec` (handoff group-editing).
-            for mp in force.manualPrimitives(for: g.id) { specs.append(mp.spec()) }
+            // Round-2: EXCEPT when the group carries a lattice role while lattice
+            // mode is on — its primitives are then lattice REGIONS (material kept,
+            // latticed or solid), the opposite of a keep-out (no material). They
+            // ride `lattice.regions` via `latticeJobRegions()` instead, never both.
+            // Only the PRIMITIVES re-purpose; the group's keep-clear FACES (an
+            // independent attribute) keep clearing below.
+            if !isLatticeRegionGroup(g.id) {
+                for mp in force.manualPrimitives(for: g.id) { specs.append(mp.spec()) }
+            }
 
             // Keep-clear v2: the attribute, not a role. A group clears if its keep-clear
             // is EFFECTIVELY on — either the anchored-bore auto rule, or an explicit
@@ -485,6 +493,10 @@ public final class ProjectModel: ObservableObject {
             // StepFaceGeometry, so the picture is built from the identical numbers the
             // run freezes. They carry a NEGATIVE sentinel faceID so they never collide
             // with a real face (handoff group-editing).
+            // Round-2: a lattice-role group's primitives render as REGIONS — the
+            // primitive IS the region (PR 256 resolves them with zero margins), so
+            // no clearance margin/axial inflation; the job emits the same numbers.
+            let asRegion = isLatticeRegionGroup(g.id)
             for mp in force.manualPrimitives(for: g.id) {
                 let key = Self.manualFaceKey(mp.id)
                 let geo = mp.syntheticGeometry
@@ -492,8 +504,10 @@ public final class ProjectModel: ObservableObject {
                     let span: (lo: Float, hi: Float) = (Float(-mp.halfLengthMM), Float(mp.halfLengthMM))
                     // Render/run distances come from the SAME `clearanceMetric` the chips
                     // read (DEFECT 1) — so the picture, the run and both chips are one value.
-                    let margin = clearanceMetric(groupID: g.id, faceID: key, role: .margin)?.resolved ?? mp.resolvedMarginMM
-                    let axial = clearanceMetric(groupID: g.id, faceID: key, role: .axial)?.resolved ?? mp.resolvedAxialMM
+                    let margin = asRegion ? 0
+                        : clearanceMetric(groupID: g.id, faceID: key, role: .margin)?.resolved ?? mp.resolvedMarginMM
+                    let axial = asRegion ? 0
+                        : clearanceMetric(groupID: g.id, faceID: key, role: .axial)?.resolved ?? mp.resolvedAxialMM
                     out.append(ResolvedClearance(
                         groupID: g.id, faceID: key,
                         volume: .bolt(faceID: key, geometry: geo, axialSpan: span,
@@ -602,12 +616,84 @@ public final class ProjectModel: ObservableObject {
         return result.labels
     }
 
+    /// The faces of `g` whose keep-clear primitives EXIST right now — the ONE
+    /// listing rule (round-2 T5): bore-or-explicit, NOT suppressed, with usable
+    /// B-rep geometry. The Selections panel's primitive rows, the renderer and
+    /// the run all apply this same filter; before the fix the panel skipped the
+    /// suppression check, so converting an auto clearance to a manual primitive
+    /// (which suppresses the auto face) listed BOTH — a second primitive where
+    /// only one exists.
+    public func listedClearanceFaces(_ g: SelectionGroup) -> [FaceID] {
+        guard let mesh = viewerMesh, keepClearIsOn(g) else { return [] }
+        let explicit = force.keepClearAffix(for: g.id) == .on
+        return g.faces.filter { f in
+            (FaceTopology.isFastenerBore(f, in: mesh) || explicit)
+                && !force.isClearanceFaceSuppressed(f)
+                && mesh.faceGeometry(f) != nil
+        }
+    }
+
+    // MARK: - lattice regions on the job (round-2, M3)
+
+    /// Whether `group` acts as a LATTICE REGION right now: it carries a lattice
+    /// role AND lattice mode is on. Gated on `lattice.enabled` so a TO-only job is
+    /// byte-identical whatever roles a project stores (bar U1/B8): with lattice
+    /// off, role groups' primitives stay ordinary keep-outs.
+    public func isLatticeRegionGroup(_ id: UUID) -> Bool {
+        lattice.enabled && lattice.groupRoles[id] != nil
+    }
+
+    /// The `lattice.regions` entries for the current project state (round-2, the
+    /// emission the stale page copy said was impossible — PR 256's schema). Role
+    /// groups' manual primitives + faces, plus the legacy include primitives.
+    /// Slab depths resolve through the SAME metric chain the chips/volumes read.
+    public func latticeJobRegions() -> LatticeRegionEmission.Result {
+        guard lattice.enabled else { return .init(regions: [], skippedFaces: 0) }
+        let resolvedPrims: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)] = { gid in
+            self.force.manualPrimitives(for: gid).map { mp in
+                let key = Self.manualFaceKey(mp.id)
+                let d = self.clearanceMetric(groupID: gid, faceID: key, role: .slabDepth)?.resolved
+                    ?? mp.resolvedDepthMM
+                return (mp, d)
+            }
+        }
+        return LatticeRegionEmission.regions(
+            groups: selection.groups,
+            roles: lattice.groupRoles,
+            primitives: resolvedPrims,
+            includePrimitives: lattice.includePrimitives.map { ($0, $0.resolvedDepthMM) },
+            faceDepthMM: lattice.paintDepthMM,
+            resolve: { [weak self] f in
+                guard let mesh = self?.viewerMesh, let geo = mesh.faceGeometry(f) else { return nil }
+                if geo.isCylinder {
+                    guard let span = mesh.faceAxialSpan(
+                        f, axisPoint: SIMD3<Float>(geo.axisPoint),
+                        axisDir: SIMD3<Float>(geo.axisDir)) else { return nil }
+                    return .cylinder(axisPoint: geo.axisPoint, axisDir: geo.axisDir,
+                                     radiusMM: geo.cylinderRadiusMM,
+                                     spanLoMM: Double(span.lo), spanHiMM: Double(span.hi))
+                }
+                if geo.isPlane {
+                    guard let o = mesh.facePlaneOutline(
+                        f, planeNormal: SIMD3<Float>(geo.planeNormal),
+                        planeOrigin: SIMD3<Float>(geo.planeOrigin)) else { return nil }
+                    return .plane(center: SIMD3<Double>(o.center), normal: geo.planeNormal,
+                                  halfUMM: Double(o.halfU), halfWMM: Double(o.halfV))
+                }
+                return nil
+            })
+    }
+
     // MARK: - lattice page role helpers (handoff 2026-07-30-lattice-page)
     //
     // The page's three region roles map onto three EXISTING, distinct concepts —
-    // never a new parallel one (bar B3):
+    // never a new parallel one (bar B3). Since round-2 the include/exclude
+    // carriers are the unified library's GROUP ROLES (`lattice.groupRoles` →
+    // `lattice.regions` on the job); the helpers below are the legacy stores,
+    // kept working for old snapshots and their pinned tests:
     //   clearance       → a keep-clear group + manual primitive (loads.clearances)
-    //   lattice-include → LatticeSettings.includePrimitives (preview scope)
+    //   lattice-include → LatticeSettings.includePrimitives (now emitted as
+    //                     role=include regions too)
     //   lattice-exclude → a protect group (loads.face_protections, FrozenSolid)
 
     /// Append a lattice-INCLUDE primitive, centred + sized off the model like the

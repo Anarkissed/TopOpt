@@ -85,6 +85,28 @@ def representative_job(with_project=False):
             "face_protections": [7, 8],
             "face_protection_depth_mm": 5.0,
         },
+        # Round-2 (lattice-page-round2, M3): the app now emits lattice.regions
+        # (PR 256's schema) — exercise an include AND an exclude entry exactly as
+        # RemoteRunner serializes them, so a schema drift on either side fails here.
+        "lattice": {
+            "topology": "octet",
+            "cell_mm": 8.0,
+            "strut_radius_mm": 1.2,
+            "emit_stl": True,
+            "emit_3mf": False,
+            "skin": "rim",
+            "regions": [
+                {"role": "exclude", "kind": "bolt",
+                 "geometry": {"axis_point": [0.0, 0.0, 5.0],
+                              "axis_dir": [0.0, 0.0, 1.0],
+                              "radius_mm": 2.5, "half_length_mm": 5.0}},
+                {"role": "include", "kind": "face",
+                 "geometry": {"origin": [0.0, 0.0, 10.0],
+                              "normal": [0.0, 0.0, -1.0],
+                              "half_u_mm": 4.0, "half_w_mm": 4.0,
+                              "depth_mm": 4.0}},
+            ],
+        },
     }
     if with_project:
         job["project"] = "Should Be Rejected"

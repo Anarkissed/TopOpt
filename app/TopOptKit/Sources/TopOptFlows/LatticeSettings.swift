@@ -38,6 +38,52 @@ public enum LatticeBoundaryTreatment: String, Codable, CaseIterable, Equatable, 
     }
 }
 
+/// The LATTICE ROLE a selection group can carry (round-2 item L22): "lattice
+/// here" (include) or "no lattice here" (exclude). This is an ATTRIBUTE on a
+/// TO-page group (the KeepClearAffix precedent) — the group itself stays in the
+/// ONE `SelectionModel`; the role never copies or moves it. Maps 1:1 onto the
+/// core job schema's `lattice.regions[].role` (job.cpp — PR 256).
+public enum LatticeGroupRole: String, Codable, Equatable, Sendable {
+    case include   // "lattice here" — material stays, LATTICED
+    case exclude   // "no lattice here" — material stays, SOLID
+}
+
+/// One `lattice.regions` entry, exactly the wire shape core's job.cpp accepts
+/// (role ∈ include|exclude, kind ∈ bolt|face, geometry with every extent > 0).
+/// Values are model-space mm, the same frame as a manual clearance.
+public struct LatticeRegionSpec: Equatable, Sendable {
+    public enum Kind: String, Equatable, Sendable { case bolt, face }
+    public let role: LatticeGroupRole
+    public let kind: Kind
+    // bolt: cylinder about axis_point + t·axis_dir, t ∈ [−half_length, +half_length]
+    public var axisPoint: SIMD3<Double> = .zero
+    public var axisDir: SIMD3<Double> = .zero
+    public var radiusMM: Double = 0
+    public var halfLengthMM: Double = 0
+    // face: slab origin + s·normal, s ∈ [0, depth], clipped to 2·half_u × 2·half_w
+    public var origin: SIMD3<Double> = .zero
+    public var normal: SIMD3<Double> = .zero
+    public var halfUMM: Double = 0
+    public var halfWMM: Double = 0
+    public var depthMM: Double = 0
+
+    public init(role: LatticeGroupRole, kind: Kind) {
+        self.role = role
+        self.kind = kind
+    }
+
+    /// Core rejects zero-extent regions ("a zero-extent region marks nothing") and
+    /// zero directions — mirror that check so the app never emits a refusable entry.
+    public var isValid: Bool {
+        switch kind {
+        case .bolt:
+            return radiusMM > 0 && halfLengthMM > 0 && simd_length(axisDir) > 1e-9
+        case .face:
+            return halfUMM > 0 && halfWMM > 0 && depthMM > 0 && simd_length(normal) > 1e-9
+        }
+    }
+}
+
 /// How the lattice density is chosen. `uniform` is the shipped run path (fills at
 /// the range's clamped dense end). `auto` grades the PREVIEW from a real von Mises
 /// field (a solid-part sim or a finished variant's own field) — it is OFFERED only
@@ -73,9 +119,9 @@ public struct LatticeSpec: Equatable, Sendable {
     public let maxRelativeDensity: Double
     public let emitSTL: Bool
     public let emit3MF: Bool
-    /// True iff a sub-region primitive scoped the preview (vs the whole part). Carried
-    /// for the run report's honesty note; the region itself does not reach the job (the
-    /// worker lattices the whole solid interior — core job carries no region yet).
+    /// True iff a region scopes this lattice (vs the whole part) — a legacy include
+    /// primitive or any `regions` entry. Carried for the run report's honesty note;
+    /// the regions themselves ride `regions` below (`lattice.regions`, PR 256).
     public let regionScoped: Bool
     /// The boundary treatment's core job value (`job.lattice.skin`): "none" | "rim" |
     /// "diagrid" (handoff 2026-07-29-lattice-boundary-finish).
@@ -93,6 +139,11 @@ public struct LatticeSpec: Equatable, Sendable {
     /// `strutRadiusMM`/`generateRelativeDensity` are 0 (the run derives them; a
     /// uniform number here would be the fabrication bar B6 forbids).
     public let graded: Bool
+    /// The include/exclude regions the job carries (`lattice.regions`, PR 256's
+    /// schema — round-2: the app now EMITS them; the old "core's schema carries no
+    /// region yet" copy was stale). Empty ⇒ the key is omitted ⇒ byte-identical to
+    /// a pre-regions job.
+    public let regions: [LatticeRegionSpec]
 
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
@@ -100,7 +151,8 @@ public struct LatticeSpec: Equatable, Sendable {
                 regionScoped: Bool = false,
                 skin: String = LatticeBoundaryTreatment.rim.jobSkinValue,
                 minExtrudableWidthMM: Double? = nil,
-                graded: Bool = false) {
+                graded: Bool = false,
+                regions: [LatticeRegionSpec] = []) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.strutRadiusMM = strutRadiusMM
@@ -113,6 +165,7 @@ public struct LatticeSpec: Equatable, Sendable {
         self.skin = skin
         self.minExtrudableWidthMM = minExtrudableWidthMM
         self.graded = graded
+        self.regions = regions
     }
 }
 
@@ -140,20 +193,29 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public var maxRelativeDensity: Double
     /// The lattice-INCLUDE region primitives ("Material, latticed"), reusing the
     /// manual-primitive value type + gizmo (bolt = cylinder region, face = slab
-    /// region). Empty ⇒ the whole solid part — which is exactly the extent the
-    /// worker generates today. These scope the PREVIEW + the report's honesty note;
-    /// the core job schema carries no region yet (the reported gap).
+    /// region). Empty ⇒ the whole solid part. Since round-2 these EMIT as
+    /// `lattice.regions` role=include entries (PR 256's schema); new region
+    /// primitives are added through the unified Selections library instead, so this
+    /// is the LEGACY store (kept for old snapshots + the region gizmo plumbing).
     public var includePrimitives: [ManualPrimitive]
     /// Boundary treatment (three-way; maps 1:1 onto `job.lattice.skin`, bar B7).
     public var boundary: LatticeBoundaryTreatment
     /// Density mode (uniform run fill vs field-graded preview, bar B6).
     public var densityMode: LatticeDensityMode
-    /// Faces painted "Material, latticed" (lattice-include). Preview-scope only —
-    /// no job carrier exists (the reported gap). The EXCLUDE paint role has a real
-    /// carrier and deliberately does NOT live here: it drives the existing protect
+    /// Faces painted "Material, latticed" (lattice-include). Preview-scope legacy
+    /// store (the unified library's group roles are the carrier now). The EXCLUDE
+    /// paint role deliberately does NOT live here: it drives the existing protect
     /// affix (`loads.face_protections`, FrozenSolid) so there is ONE protect concept.
     public var paintedIncludeFaces: [Int]
-    /// Depth (mm) the painted include faces reach into the part (preview-scope).
+    /// LATTICE ROLES on the TO page's selection groups (round-2 L22), keyed by
+    /// `SelectionGroup.id`. An attribute over the ONE `SelectionModel` — never a
+    /// second group store: the groups themselves stay in `ProjectModel.selection`,
+    /// and an entry whose group is gone is inert (lookup by id finds nothing).
+    /// Empty by default ⇒ absent from old snapshots ⇒ they decode unchanged.
+    public var groupRoles: [UUID: LatticeGroupRole]
+    /// Depth (mm) a face-role lattice region reaches into the part — the
+    /// `depth_mm` the emitted `lattice.regions` face entries carry (round-2),
+    /// and the legacy painted-include preview depth.
     public var paintDepthMM: Double
 
     /// The FIRST include primitive — the legacy single-region accessor the existing
@@ -180,7 +242,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 boundary: LatticeBoundaryTreatment = .rim,
                 densityMode: LatticeDensityMode = .uniform,
                 paintedIncludeFaces: [Int] = [],
-                paintDepthMM: Double = 4) {
+                paintDepthMM: Double = 4,
+                groupRoles: [UUID: LatticeGroupRole] = [:]) {
         self.enabled = enabled
         self.topologyID = topologyID
         self.cellMM = cellMM
@@ -191,6 +254,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.densityMode = densityMode
         self.paintedIncludeFaces = paintedIncludeFaces
         self.paintDepthMM = paintDepthMM
+        self.groupRoles = groupRoles
         if let r = region, includePrimitives.isEmpty { self.includePrimitives = [r] }
     }
 
@@ -203,6 +267,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case enabled, topologyID, cellMM, minRelativeDensity, maxRelativeDensity
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
+        case groupRoles
     }
 
     public init(from decoder: Decoder) throws {
@@ -223,6 +288,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         densityMode = try c.decodeIfPresent(LatticeDensityMode.self, forKey: .densityMode) ?? .uniform
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []
         paintDepthMM = try c.decodeIfPresent(Double.self, forKey: .paintDepthMM) ?? 4
+        groupRoles = try c.decodeIfPresent([UUID: LatticeGroupRole].self, forKey: .groupRoles) ?? [:]
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -237,6 +303,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(densityMode, forKey: .densityMode)
         try c.encode(paintedIncludeFaces, forKey: .paintedIncludeFaces)
         try c.encode(paintDepthMM, forKey: .paintDepthMM)
+        try c.encode(groupRoles, forKey: .groupRoles)
     }
 
     /// The starting cell size (mm): the octet cell PR-201 print-tested, reused from the
@@ -271,7 +338,8 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     public func runSpec(limits: TopOptKit.LatticeLimits, generatable: Bool,
                         memberMM: Double = 0,
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
-                        emit3MF: Bool = false) -> LatticeSpec? {
+                        emit3MF: Bool = false,
+                        regions: [LatticeRegionSpec] = []) -> LatticeSpec? {
         guard enabled else { return nil }
         let b = LatticeBounds.compute(settings: self, limits: limits,
                                       generatable: generatable,
@@ -291,10 +359,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                minRelativeDensity: b.densityLo,
                                maxRelativeDensity: b.densityHi,
                                emitSTL: emitSTL, emit3MF: emit3MF,
-                               regionScoped: region != nil,
+                               regionScoped: region != nil || !regions.isEmpty,
                                skin: boundary.jobSkinValue,
                                minExtrudableWidthMM: lineWidthMM,
-                               graded: true)
+                               graded: true,
+                               regions: regions)
         }
         let genRho = b.generateRelativeDensity
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
@@ -302,9 +371,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: radius,
                            generateRelativeDensity: genRho,
                            minRelativeDensity: b.densityLo, maxRelativeDensity: b.densityHi,
-                           emitSTL: emitSTL, emit3MF: emit3MF, regionScoped: region != nil,
+                           emitSTL: emitSTL, emit3MF: emit3MF,
+                           regionScoped: region != nil || !regions.isEmpty,
                            skin: boundary.jobSkinValue,
-                           minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil)
+                           minExtrudableWidthMM: lineWidthMM > 0 ? lineWidthMM : nil,
+                           regions: regions)
     }
 
     /// Convenience: read the certifiable limits AND the generatable set from core
@@ -313,12 +384,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// `topologyID`. Used by `AppModel.makeRunRequest`.
     public func runSpec(topology: String? = nil, memberMM: Double = 0,
                         lineWidthMM: Double = 0, emitSTL: Bool = true,
-                        emit3MF: Bool = false) -> LatticeSpec? {
+                        emit3MF: Bool = false,
+                        regions: [LatticeRegionSpec] = []) -> LatticeSpec? {
         let id = topology ?? topologyID
         let limits = TopOptKit.latticeLimits(topology: id)
         let generatable = TopOptKit.latticeGeneratableTopologies.contains(id)
         return runSpec(limits: limits, generatable: generatable, memberMM: memberMM,
-                       lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF)
+                       lineWidthMM: lineWidthMM, emitSTL: emitSTL, emit3MF: emit3MF,
+                       regions: regions)
     }
 
     /// The proxy grading parameters for the current settings, with the density range
