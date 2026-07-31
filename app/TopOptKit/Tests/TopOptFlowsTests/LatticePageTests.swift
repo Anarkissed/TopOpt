@@ -153,10 +153,15 @@ final class LatticePageTests: XCTestCase {
         let workspace = LatticePageModel(entry: .workspace)
         let variant = LatticePageModel(entry: .variant(runName: "Bracket", variantIndex: 2))
         for page in [workspace, variant] {
+            _ = page   // both entries construct the same model; the gate below is entry-blind
             let gate = LatticePageGate.compute(anchors: 0, loads: 0)
             XCTAssertFalse(gate.satisfied)
-            // While gated, the page's hint says why the page is unavailable.
-            XCTAssertTrue(page.hint(gated: true, previewOn: false).contains("at least one anchor and one load"))
+            // While gated, the page SAYS why it is unavailable. Round-2 deleted the
+            // persistent bottom-left hint bar (L2), so the statement lives on the
+            // gate overlay itself — title + CTA name exactly what is missing
+            // (a strictly stronger surface than the old generic hint line).
+            XCTAssertTrue(gate.title.contains("anchor") && gate.title.contains("load"))
+            XCTAssertTrue(gate.ctaLabel.contains("add an anchor and a load"))
         }
     }
 

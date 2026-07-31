@@ -107,29 +107,52 @@ public enum LatticeDensityProxy {
     /// GPU buffer. `demand` is the on-device von Mises field (graded shading); pass
     /// nil for a uniform (ungraded) preview, which paints every vertex the single
     /// colour of `uniformRelativeDensity` — still honest, just flat.
+    ///
+    /// `selectionTints` (round-2 L5): per-face SELECTION colours that must draw
+    /// ABOVE the density overlay. The stress-tint channel REPLACES face highlights
+    /// in the renderer, so before this parameter the purple proxy painted straight
+    /// over the TO page's selection groups; now every vertex of a selected face
+    /// keeps its group colour, whatever the density beneath.
+    /// `effectiveFaceIDs` (optional): the per-triangle face ids the highlight
+    /// pass uses — pass the paint-overridden ids so painted pseudo-faces keep
+    /// their selection colour too; nil → the mesh's native ids.
     public static func tints(for mesh: ViewerMesh, demand: StressField?,
-                             params: LatticeProxyParams) -> [SIMD4<Float>] {
+                             params: LatticeProxyParams,
+                             selectionTints: [FaceID: SIMD4<Float>] = [:],
+                             effectiveFaceIDs: [Int32]? = nil) -> [SIMD4<Float>] {
         let positions = mesh.flat.positions
         let count = mesh.flat.vertexCount
-        var out = [SIMD4<Float>]()
-        out.reserveCapacity(count)
+        var out: [SIMD4<Float>]
 
         // Uniform preview: no field, or an empty/flat field → one colour everywhere.
         let peak = demand?.peak()?.valueMPa ?? 0
-        guard let field = demand, !field.isEmpty, peak > 0 else {
+        if let field = demand, !field.isEmpty, peak > 0 {
+            out = []
+            out.reserveCapacity(count)
+            let inv = 1.0 / Double(peak)
+            for v in 0..<count {
+                let p = SIMD3<Float>(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2])
+                let d = Double(field.value(at: p)) * inv       // demand fraction 0…1
+                let rho = relativeDensity(demandFraction: d, params: params)
+                let c = densityColor(fraction: legendFraction(relativeDensity: rho, params: params))
+                out.append(SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1))
+            }
+        } else {
             let frac = legendFraction(relativeDensity: params.uniformRelativeDensity, params: params)
             let c = densityColor(fraction: frac)
             let rgba = SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1)
-            return [SIMD4<Float>](repeating: rgba, count: count)
+            out = [SIMD4<Float>](repeating: rgba, count: count)
         }
 
-        let inv = 1.0 / Double(peak)
-        for v in 0..<count {
-            let p = SIMD3<Float>(positions[v * 3], positions[v * 3 + 1], positions[v * 3 + 2])
-            let d = Double(field.value(at: p)) * inv       // demand fraction 0…1
-            let rho = relativeDensity(demandFraction: d, params: params)
-            let c = densityColor(fraction: legendFraction(relativeDensity: rho, params: params))
-            out.append(SIMD4<Float>(Float(c.r), Float(c.g), Float(c.b), 1))
+        // Selections draw ABOVE the overlay (L5): the flat soup is unshared, so
+        // vertex v belongs to triangle v/3, whose face id keys the override.
+        let ids = effectiveFaceIDs ?? mesh.faceIDs
+        if !selectionTints.isEmpty, !ids.isEmpty {
+            for v in 0..<count {
+                let tri = v / 3
+                guard tri < ids.count, let c = selectionTints[ids[tri]] else { continue }
+                out[v] = c
+            }
         }
         return out
     }

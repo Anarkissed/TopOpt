@@ -49,10 +49,14 @@ public enum WorkspaceTap {
         let fresh = loop.filter { selection.group(forFace: $0) == nil }
         guard !fresh.isEmpty else { return }
 
-        // Grow the active group only while it is still pending; once it is a
-        // committed Anchor/Load, start a fresh group instead of changing the set one.
-        let growActive = selection.activeGroup.map { force.kind(for: $0.id).isPending } ?? false
-        if !growActive { selection.clearActive() }
+        // Grow the ACTIVE group — pending or committed (round-2 T3). Committing a
+        // role clears the active selection (M7.6), so a committed group is active
+        // only when the user EXPLICITLY re-selected it (its row, or one of its
+        // faces) — and then adding an empty face to it is exactly what they asked
+        // for. Before this fix the only way to add a face to a committed group
+        // was to delete it and rebuild it (the reported functional gap): a tap
+        // silently started a FRESH group instead.
+        if selection.activeGroup == nil { selection.clearActive() }
         selection.pickFaces(fresh)
     }
 }

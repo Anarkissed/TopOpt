@@ -30,7 +30,8 @@ final class LatticePageEvidenceGen: XCTestCase {
     private static var outDir: URL {
         var dir = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { dir.deleteLastPathComponent() }   // → worktree root
-        dir.appendPathComponent("evidence/2026-07-30-lattice-page", isDirectory: true)
+        // Round-2 (2026-07-31): the captures document the reworked page.
+        dir.appendPathComponent("evidence/2026-07-31-lattice-page-round2", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -80,11 +81,13 @@ final class LatticePageEvidenceGen: XCTestCase {
     }
 
     private func makePage(project: ProjectModel, pane: LatticePageModel.Pane? = nil,
-                          latticeOn: Bool = true, gated: Bool = false) -> some View {
+                          latticeOn: Bool = true, gated: Bool = false,
+                          reviewOpen: Bool = false) -> some View {
         if latticeOn { project.lattice.enabled = true }
         let model = AppModel(materialsPath: nil)
         let page = LatticePageModel()
         page.pane = pane
+        page.reviewOpen = reviewOpen
         return LatticePage(model: model, project: project, run: RunModel(),
                            sim: LatticeSimModel(), page: page,
                            previewOn: .constant(false),
@@ -104,10 +107,10 @@ final class LatticePageEvidenceGen: XCTestCase {
         capture(makePage(project: project), name: "page_default_portrait.png", size: portrait)
         capture(makePage(project: project, pane: .topology), name: "page_topology_pane.png", size: landscape)
         capture(makePage(project: project, pane: .cellDensity), name: "page_cell_density_pane.png", size: landscape)
-        capture(makePage(project: project, pane: .regions), name: "page_regions_pane.png", size: landscape)
-        capture(makePage(project: project, pane: .boundary), name: "page_boundary_pane.png", size: landscape)
-        capture(makePage(project: project, pane: .review), name: "page_review_pane.png", size: landscape)
-        capture(makePage(project: project, pane: .paint), name: "page_paint_pane.png", size: landscape)
+        // Round-2: regions/paint became the ONE shared Selections library
+        // (workspace-mounted, not a pane), boundary moved inline onto the ladder,
+        // and review became the bottom-right drawer — captured via reviewOpen.
+        capture(makePage(project: project, reviewOpen: true), name: "page_review_drawer.png", size: landscape)
 
         let gatedProject = makeProject(gateSatisfied: false)
         capture(makePage(project: gatedProject, latticeOn: false, gated: true),

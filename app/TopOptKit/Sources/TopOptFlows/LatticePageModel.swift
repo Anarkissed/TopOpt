@@ -324,23 +324,96 @@ public enum LatticeRegionRole: String, CaseIterable, Equatable, Sendable {
 
 // MARK: - the page's navigation state
 
-/// The page's live state: which pane, which accordion role, which primitive,
-/// which chip drawer. Pure navigation — every derived surface lives in the pure
-/// types above so tests never need a view.
+// MARK: - the TO page's Lattice entry button (round-2 item T1)
+
+/// The workspace's big Lattice button (same stature as Optimize, top right, left
+/// of the position gizmo). Greyed until gravity AND an anchor AND a load are all
+/// set — and it SAYS what is missing rather than just disabling.
+public struct LatticeEntryButtonGate: Equatable, Sendable {
+    public let enabled: Bool
+    /// What still needs doing, in setup order ("gravity", "an anchor", "a load").
+    public let missing: [String]
+    /// The sub-line under the button title: the missing list, or the ready hint.
+    public let subtitle: String
+
+    public static func compute(gravitySet: Bool, anchors: Int, loads: Int) -> LatticeEntryButtonGate {
+        var missing: [String] = []
+        if !gravitySet { missing.append("gravity") }
+        if anchors < 1 { missing.append("an anchor") }
+        if loads < 1 { missing.append("a load") }
+        let subtitle = missing.isEmpty
+            ? "topology + infill setup"
+            : "needs \(missing.joined(separator: " and "))"
+        return LatticeEntryButtonGate(enabled: missing.isEmpty, missing: missing,
+                                      subtitle: subtitle)
+    }
+}
+
+// MARK: - chrome spacing (round-2 item L1 / bar M4)
+
+/// The ONE chrome spacing token. Every gap between adjacent chrome elements on
+/// the lattice page — button-to-button in the bottom-right cluster, the title
+/// row to the From-Setup bar, the RUN SIM column, the top-left row — uses
+/// `gap`, and the M4 test asserts every entry in `allGaps` IS `gap` (two
+/// adjacent chrome elements with different gaps cannot compile in silently).
+/// Chosen a little larger than the old chip stack's 9 pt and smaller than the
+/// old Preview→Optimize 16 pt, per the task.
+public enum LatticeChromeLayout {
+    public static let gap: CGFloat = 12
+
+    /// Named gaps, one per adjacent-element seam the chrome has. The view reads
+    /// THESE (not `gap` directly), so a one-off deviation would have to edit a
+    /// named constant the test pins.
+    public static let topLeftRowSpacing: CGFloat = gap
+    public static let titleToFromSetup: CGFloat = gap
+    public static let runSimColumnSpacing: CGFloat = gap
+    public static let bottomClusterSpacing: CGFloat = gap
+    public static let reviewDrawerToCluster: CGFloat = gap
+    public static let noteToBanner: CGFloat = gap
+
+    public static var allGaps: [CGFloat] {
+        [topLeftRowSpacing, titleToFromSetup, runSimColumnSpacing,
+         bottomClusterSpacing, reviewDrawerToCluster, noteToBanner]
+    }
+
+    /// Screen-edge margin (DS.Space.xl4's value) and the cluster button height —
+    /// so the portrait panel's clearance above the bottom cluster DERIVES from
+    /// the same token instead of a magic 104.
+    public static let edge: CGFloat = 24
+    public static let clusterHeight: CGFloat = 64
+    public static var panelBottomClearance: CGFloat { edge + clusterHeight + gap }
+}
+
+/// A transient NOTE (round-2 item L13): shown top-centre, dismissed by a tap, by
+/// a DIFFERENT note replacing it, or after `lifetime` seconds — never a caption
+/// that persists until something else overwrites it. Pure value + a tiny clock
+/// seam so the timeout rule is headlessly testable.
+public struct LatticeTransientNote: Equatable, Sendable {
+    public let text: String
+    public let postedAt: Date
+    public init(text: String, postedAt: Date) {
+        self.text = text
+        self.postedAt = postedAt
+    }
+    /// How long a note lives without interaction (task: 60 s).
+    public static let lifetime: TimeInterval = 60
+    public func expired(now: Date) -> Bool { now.timeIntervalSince(postedAt) >= Self.lifetime }
+}
+
+/// The page's live state: which pane, whether the shared Selections library /
+/// review drawer are up, the transient note. Pure navigation — every derived
+/// surface lives in the pure types above so tests never need a view.
 @MainActor
 public final class LatticePageModel: ObservableObject {
 
+    /// The panel's sub-panes. Round-2 pruned the ladder: regions/paint became the
+    /// ONE shared Selections library (L18 — not a pane, an overlay of the same
+    /// panel the TO page mounts), boundary was promoted inline (L15), and
+    /// review became the bottom-right drawer (L16).
     public enum Pane: Equatable, Sendable {
         case topology
         case cellDensity
-        case regions
-        case primitive(UUID)
-        case paint
-        case boundary
-        case review
     }
-
-    public enum Chip: String, Equatable, Sendable { case paint, regions, preview }
 
     /// Where the page was entered from — decides the demand-field source (B6's
     /// two paths) and where Back returns to.
@@ -350,10 +423,16 @@ public final class LatticePageModel: ObservableObject {
     }
 
     @Published public var pane: Pane?
-    @Published public var openRole: LatticeRegionRole = .clearance
-    @Published public var paintRole: LatticeRegionRole = .include
-    @Published public var openChip: Chip?
     @Published public var panelMinimized = false
+    /// The ONE Selections library (the TO page's own panel) shown over the page
+    /// (L18). While up, model taps route through the non-destructive lattice
+    /// router (`LatticeLibraryTap`) — nothing here can remove TO-page work (L23).
+    @Published public var libraryOpen = false
+    /// The bottom-right Review drawer (L16).
+    @Published public var reviewOpen = false
+    /// The transient top-centre note (L13). Post via `post(note:)`; the view
+    /// dismisses on tap; `tick(now:)` expires it after its lifetime.
+    @Published public private(set) var note: LatticeTransientNote?
     public let entry: Entry
 
     public init(entry: Entry = .workspace) {
@@ -362,29 +441,29 @@ public final class LatticePageModel: ObservableObject {
 
     public func go(_ p: Pane?) {
         pane = p
-        openChip = nil
     }
 
-    /// Back within the panel: a primitive pane returns to regions; any other
-    /// sub-pane returns to the root ladder.
+    /// Back within the panel: every sub-pane returns to the root ladder.
     public func back() {
-        switch pane {
-        case .primitive: pane = .regions
-        default: pane = nil
-        }
+        pane = nil
     }
 
-    /// The context-sensitive bottom-left hint (the prototype's `hint` cascade).
-    public func hint(gated: Bool, previewOn: Bool) -> String {
-        if gated { return "Lattice is unavailable until Setup has at least one anchor and one load." }
-        switch pane {
-        case .primitive:
-            return "Drag the primitive on the model · values are absolute mm"
-        case .paint:
-            return "Tap faces to paint · tap again to remove · depth applies to every painted face"
-        default:
-            if previewOn { return "Preview is indicative — the built lattice is generated at optimize time" }
-            return "Scrub sliders left–right · tap a value to type it"
-        }
+    // MARK: transient notes (L13)
+
+    /// Post a note. A different note REPLACES the current one (rule 2); posting
+    /// the same text refreshes its clock.
+    public func post(note text: String, now: Date = Date()) {
+        note = LatticeTransientNote(text: text, postedAt: now)
+    }
+
+    /// Tap-to-dismiss (rule 1).
+    public func dismissNote() {
+        note = nil
+    }
+
+    /// Expire the note after its lifetime (rule 3). The view calls this on a
+    /// timer; tests call it with an explicit clock.
+    public func tick(now: Date = Date()) {
+        if let n = note, n.expired(now: now) { note = nil }
     }
 }

@@ -621,6 +621,8 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     // they settle with the part. Same alpha-blended `groundPipeline` (position + rgba,
     // stride 7) under the MESH's mvp as the design box. A degenerate (no-op) region
     // draws edges only (hollow) — the picture must not promise what the run won't do.
+    private var clearanceXrayBuffer: MTLBuffer?
+    private var clearanceXrayCount = 0
     private var clearanceFaceBuffer: MTLBuffer?
     private var clearanceFaceCount = 0
     private var clearanceLineBuffer: MTLBuffer?
@@ -1222,13 +1224,21 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
     func setClearanceVolumes(_ items: [ClearanceRenderItem]) {
         clearanceFaceBuffer = nil; clearanceFaceCount = 0
         clearanceLineBuffer = nil; clearanceLineCount = 0
+        clearanceXrayBuffer = nil; clearanceXrayCount = 0
         guard !items.isEmpty else { return }
 
         // Base clearance red (matches the SwiftUI affix/label tint). ~50% fill (task),
         // brighter when the group is selected; edges near-opaque so the shape reads.
+        // An item may override the colour (round-2: lattice-role region volumes).
         let baseRGB = SIMD3<Float>(0.95, 0.38, 0.36)
         var faces: [Float] = []
         var lines: [Float] = []
+        // Round-2 L21 (the "invisible primitives" root cause): a fresh primitive
+        // spawns at the model CENTRE, and this pass is depth-tested — a volume
+        // buried inside the opaque body was fully occluded, so it rendered as
+        // NOTHING. The x-ray buffer re-draws the edges depth-ALWAYS at low alpha,
+        // so a buried primitive still reads as a ghost wireframe wherever it is.
+        var xray: [Float] = []
         func push(_ dst: inout [Float], _ p: SIMD3<Float>, _ c: SIMD4<Float>) {
             dst.append(p.x); dst.append(p.y); dst.append(p.z)
             dst.append(c.x); dst.append(c.y); dst.append(c.z); dst.append(c.w)
@@ -1240,17 +1250,21 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         func tri(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ col: SIMD4<Float>) {
             push(&faces, a, col); push(&faces, b, col); push(&faces, c, col)
         }
+        var xcol = SIMD4<Float>()
         func seg(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ col: SIMD4<Float>) {
             push(&lines, a, col); push(&lines, b, col)
+            push(&xray, a, xcol); push(&xray, b, xcol)
         }
 
         let ring = 28  // circle tessellation
         for item in items {
             let selected = item.selected
+            let rgb = item.tint ?? baseRGB
             let faceAlpha: Float = selected ? 0.60 : 0.42
             let edgeAlpha: Float = selected ? 0.98 : 0.80
-            let fcol = premul(baseRGB, faceAlpha)
-            let ecol = premul(baseRGB, edgeAlpha)
+            let fcol = premul(rgb, faceAlpha)
+            let ecol = premul(rgb, edgeAlpha)
+            xcol = premul(rgb, edgeAlpha * 0.35)
             switch item.volume.shape {
             case let .cylinder(axisPoint, axisDir, radius, tLo, tHi):
                 let dir = simd_length(axisDir) > 1e-6 ? simd_normalize(axisDir) : SIMD3<Float>(0, 0, 1)
@@ -1303,6 +1317,12 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
         clearanceLineCount = lines.count / 7
         if clearanceLineCount > 0 {
             clearanceLineBuffer = lines.withUnsafeBytes {
+                device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
+            }
+        }
+        clearanceXrayCount = xray.count / 7
+        if clearanceXrayCount > 0 {
+            clearanceXrayBuffer = xray.withUnsafeBytes {
                 device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: [])
             }
         }
@@ -1685,6 +1705,17 @@ final class MeshRenderer: NSObject, MTKViewDelegate {
                      faceBuffer: clearanceFaceBuffer, faceCount: clearanceFaceCount,
                      lineBuffer: clearanceLineBuffer, lineCount: clearanceLineCount,
                      sceneDepthTex: sceneDepthTex)
+        // Round-2 L21: the x-ray edge pass — depth-ALWAYS, low alpha — so a primitive
+        // buried inside the opaque body (fresh primitives spawn at the model centre)
+        // still reads as a ghost wireframe instead of rendering as nothing.
+        if clearanceXrayCount > 0, let xbuf = clearanceXrayBuffer, let gpipe = groundPipeline {
+            var m = uniforms.mvp
+            enc.setRenderPipelineState(gpipe)
+            enc.setDepthStencilState(lineOverlayDepthState)
+            enc.setVertexBuffer(xbuf, offset: 0, index: 0)
+            enc.setVertexBytes(&m, length: MemoryLayout<simd_float4x4>.stride, index: 1)
+            countedDraw(enc, .line, clearanceXrayCount)
+        }
 
         // Load-path overlay (M7.viz.4): principal-stress-direction glyphs drawn under
         // the MESH's model·view·proj (uniforms.mvp) so they lock to the part (the ground

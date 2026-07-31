@@ -221,9 +221,14 @@ public struct ClearanceVolume: Equatable, Sendable {
 public struct ClearanceRenderItem: Equatable, Sendable {
     public let volume: ClearanceVolume
     public let selected: Bool
-    public init(volume: ClearanceVolume, selected: Bool) {
+    /// Optional override colour (0–1 rgb). nil → the clearance red. Round-2: a
+    /// LATTICE-ROLE group's primitives render as regions (indigo family), not as
+    /// keep-outs, through the same volume path.
+    public let tint: SIMD3<Float>?
+    public init(volume: ClearanceVolume, selected: Bool, tint: SIMD3<Float>? = nil) {
         self.volume = volume
         self.selected = selected
+        self.tint = tint
     }
 }
 

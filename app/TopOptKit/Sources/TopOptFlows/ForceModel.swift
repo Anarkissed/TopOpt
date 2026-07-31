@@ -190,8 +190,10 @@ public struct ForceModel: Equatable, Sendable, Codable {
     public private(set) var gravityBaseModel: SIMD3<Float>?
     /// Setup (prompt) vs edit (proto `S.phase`).
     public private(set) var phase: GravityPhase = .setup
-    /// The global display unit (proto `S.unit`).
-    public var unit: WeightUnit = .kg
+    /// The global display unit (proto `S.unit`). Round-2 T4: the default is lbs.
+    /// Storage stays kgf everywhere — this is presentation only, so flipping the
+    /// default changes no stored weight and no job.
+    public var unit: WeightUnit = .lbs
 
     /// Per selection-group role/direction/weight, keyed by `SelectionGroup.id`.
     /// A group with no entry here is `.pending`.
@@ -845,7 +847,9 @@ extension ForceModel {
         gravity = try c.decodeIfPresent(SIMD3<Float>.self, forKey: .gravity)
         gravityFace = try c.decodeIfPresent(FaceID.self, forKey: .gravityFace)
         phase = try c.decodeIfPresent(GravityPhase.self, forKey: .phase) ?? .setup
-        unit = try c.decodeIfPresent(WeightUnit.self, forKey: .unit) ?? .kg
+        // Round-2 T4: lbs is the default — including for snapshots old enough to
+        // predate the stored unit (presentation only; storage is always kgf).
+        unit = try c.decodeIfPresent(WeightUnit.self, forKey: .unit) ?? .lbs
         var decodedKinds = try c.decodeIfPresent([UUID: GroupKind].self, forKey: .kinds) ?? [:]
         clearanceOverrides = try c.decodeIfPresent([UUID: ClearanceOverride].self, forKey: .clearanceOverrides)
         syncExcluded = try c.decodeIfPresent(Set<UUID>.self, forKey: .syncExcluded)

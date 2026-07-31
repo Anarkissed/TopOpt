@@ -33,7 +33,12 @@ final class WorkspaceInteractionTests: XCTestCase {
         var sel = SelectionModel()
         var force = ForceModel()
         tap(5, &sel, force)               // Group A, pending
-        force.makeLoad(sel.groups[0].id)  // commit A as a load
+        force.makeLoad(sel.groups[0].id)  // commit A as a load…
+        sel.clearActive()                 // …which DESELECTS in production (M7.6:
+        // every makeAnchor/makeLoad site clears the active selection). Round-2 T3
+        // made an ACTIVE committed group growable — an explicit re-selection is
+        // now the ONLY state that grows a committed group, so this fixture must
+        // mirror the production commit (deselected), as it always was on device.
         tap(6, &sel, force)               // a new face → a NEW group, A untouched
         XCTAssertEqual(sel.groups.count, 2)
         XCTAssertEqual(sel.groups[0].faces, [5], "the committed load is not grown")
@@ -41,10 +46,28 @@ final class WorkspaceInteractionTests: XCTestCase {
         XCTAssertEqual(sel.activeGroupID, sel.groups[1].id)
     }
 
+    // Round-2 T3: SELECTING an existing (committed) group then tapping an empty
+    // face ADDS the face to it. Before, the only way to add a face to a committed
+    // group was to delete the whole group and rebuild it — the reported gap.
+    func testSelectedCommittedGroupGrowsOnTap() {
+        var sel = SelectionModel()
+        var force = ForceModel()
+        tap(5, &sel, force)
+        force.makeLoad(sel.groups[0].id)  // commit A = load {5}
+        sel.clearActive()                 // the production deselect-on-commit
+        let a = sel.groups[0].id
+        sel.setActive(a)                  // the user EXPLICITLY selects A again
+        tap(6, &sel, force)               // an empty face joins the selected group
+        XCTAssertEqual(sel.groups.count, 1, "no fresh group — the selected one grows")
+        XCTAssertEqual(sel.groups[0].faces, [5, 6], "the empty face joined the committed group")
+        XCTAssertEqual(sel.activeGroupID, a)
+    }
+
     func testTapAnotherGroupsFaceReselectsItWithoutStealing() {
         var sel = SelectionModel()
         var force = ForceModel()
         tap(5, &sel, force); force.makeLoad(sel.groups[0].id)   // A = load {5}
+        sel.clearActive()   // production deselect-on-commit (M7.6; see T3 note above)
         tap(6, &sel, force); force.makeAnchor(sel.groups[1].id) // B = anchor {6}, active
         let a = sel.groups[0].id
         tap(5, &sel, force)               // tap A's face while B is active
@@ -81,6 +104,7 @@ final class WorkspaceInteractionTests: XCTestCase {
         var sel = SelectionModel()
         var force = ForceModel()
         tap(5, &sel, force); force.makeAnchor(sel.groups[0].id)  // A = anchor {5}
+        sel.clearActive()   // production deselect-on-commit (M7.6; see T3 note above)
         tap(6, &sel, force)                                      // B = pending {6}, active
         let a = sel.groups[0].id
         tap(5, &sel, force)               // A is INACTIVE → re-select it, don't deselect
@@ -93,6 +117,7 @@ final class WorkspaceInteractionTests: XCTestCase {
         var sel = SelectionModel()
         var force = ForceModel()
         tap(5, &sel, force); force.makeLoad(sel.groups[0].id)   // A = load {5}
+        sel.clearActive()   // the production deselect-on-commit (see above)
         // A new tap whose loop also mentions A's face 5: only the fresh face 7 is added.
         WorkspaceTap.route(faceID: 7, loop: [7, 5], selection: &sel, force: force)
         XCTAssertEqual(sel.groups[0].faces, [5], "A untouched")

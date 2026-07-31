@@ -1,0 +1,129 @@
+{
+  "design_box": {
+    "max": [
+      40.0,
+      40.0,
+      40.0
+    ],
+    "min": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "keep_outs": [
+    {
+      "max": [
+        10.0,
+        10.0,
+        10.0
+      ],
+      "min": [
+        5.0,
+        5.0,
+        5.0
+      ]
+    }
+  ],
+  "lattice": {
+    "cell_mm": 8.0,
+    "emit_3mf": false,
+    "emit_stl": true,
+    "regions": [
+      {
+        "geometry": {
+          "axis_dir": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "axis_point": [
+            0.0,
+            0.0,
+            5.0
+          ],
+          "half_length_mm": 5.0,
+          "radius_mm": 2.5
+        },
+        "kind": "bolt",
+        "role": "exclude"
+      },
+      {
+        "geometry": {
+          "depth_mm": 4.0,
+          "half_u_mm": 4.0,
+          "half_w_mm": 4.0,
+          "normal": [
+            0.0,
+            0.0,
+            -1.0
+          ],
+          "origin": [
+            0.0,
+            0.0,
+            10.0
+          ]
+        },
+        "kind": "face",
+        "role": "include"
+      }
+    ],
+    "skin": "rim",
+    "strut_radius_mm": 1.2,
+    "topology": "octet"
+  },
+  "loads": {
+    "anchor_face_ids": [
+      1,
+      2
+    ],
+    "build_dir": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "clearances": [
+      {
+        "axial_clearance_mm": 5.0,
+        "concentric_margin_mm": 3.0,
+        "face_id": 5,
+        "kind": "bolt"
+      },
+      {
+        "face_id": 6,
+        "kind": "face",
+        "slab_depth_mm": 4.0
+      }
+    ],
+    "face_protection_depth_mm": 5.0,
+    "face_protections": [
+      7,
+      8
+    ],
+    "groups": [
+      {
+        "face_ids": [
+          3,
+          4
+        ],
+        "force": [
+          0.0,
+          0.0,
+          -50.0
+        ]
+      }
+    ],
+    "infill_percent": 40,
+    "minimize_plastic": true
+  },
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "model": "m.step",
+  "output": {
+    "mesh_format": "stl",
+    "mesh_prefix": "variant",
+    "report": "report.json",
+    "smooth_factor": 2
+  },
+  "resolution": 32
+}
