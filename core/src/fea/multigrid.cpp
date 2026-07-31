@@ -169,7 +169,7 @@ thread_local int g_mg_parity_pad_mode = kMgPadAuto;
 template <class GetGdof>
 std::int64_t mg_unpadded_stop_active(int fex, int fey, int fez, int ng,
                                      GetGdof&& gdof_of) {
-  if ((fex | fey | fez) & 1) return -1;
+  if ((fex & 1) || (fey & 1) || (fez & 1)) return -1;
   if (mg_grid_coarsenable(fex, fey, fez)) return -1;
   const int d = mg_unpadded_stop_depth(fex, fey, fez);
   if (d < 1) return -1;

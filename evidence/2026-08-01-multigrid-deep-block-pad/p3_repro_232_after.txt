@@ -1,1 +1,2 @@
 === repro 232x64x216 pad_mode=1 max_iters=3 ===
+  iter   1: cg=    24 mg=1 levels=5 hier_built=1 geneo_dim=0

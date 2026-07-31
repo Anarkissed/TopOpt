@@ -448,7 +448,7 @@ int main() {
   // virtual pad — every physical_density byte of every variant must be
   // IDENTICAL. Any drift would mean the pad's virtual nodes reach the physics.
   {
-    const MinimizePlasticResult padded_auto = run_self_weight(30);
+    const MinimizePlasticResult& padded_auto = rd;  // the (4a) pad-AUTO run
     topopt::fea_set_mg_parity_pad_mode(2);  // FORCE: one more 2^L block per axis
     const MinimizePlasticResult padded_more = run_self_weight(30);
     topopt::fea_set_mg_parity_pad_mode(1);
