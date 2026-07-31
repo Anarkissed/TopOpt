@@ -190,9 +190,57 @@ story).
 | wall | 12.2 s | 7.2 s (1.7x — hierarchy build amortizes poorly on a 2 s solve) |
 
 **232x64x216 (3.2M elements, 9.6M DOF), same config, 3 MMA iterations =
-6 solves:**
+6 solves** (`p3_repro_232_after.txt`):
 
-TODO(p3big)
+| | before (pad off) | after (pad auto, the fix) |
+|---|---|---|
+| mg_mode | build-rejected (P1: `hier=0` on every field) | **carried, 5 levels, all 6 solves** |
+| CG per solve | 1416-1516 Jacobi (P1, tol 1e-6) | **24, 19, 16, 15, 21, 21** |
+| total recorded CG | — (run abandoned, see below) | **116** |
+| geneo armed_solves / basis_builds | arms by construction: every solve exceeds the 500-iteration trigger | **0 / 0** |
+| geneo basis_dim / memory | (basis build in progress when abandoned) | **0 / 0.0 MB** |
+| wall | **>70 min on solve 1 ALONE**, never finished | **15 min 29 s for all six** |
+
+The iteration counts are the healthy multigrid signature: 24 falling to 15
+as the design develops, essentially grid-independent, on a grid where the
+unpadded solver needs ~1400-1500 Jacobi iterations per solve. Six MG solves,
+zero Jacobi solves.
+
+**The wall comparison, stated at the strength the evidence supports.** The
+before-side production run did not complete its first solve in 70 minutes
+(next section), so no before-side total exists. What can be said without
+extrapolation: **solve 1 of six took over 70 minutes on the before side,
+while all six solves took 15 min 29 s on the after side** — a factor of
+>4.5x established by the first solve alone, with five still to go. That
+after-side wall is if anything an overestimate: it was measured with the
+test suite running concurrently on the same 4 cores.
+
+## P4 — GenEO goes quiet
+
+Yes, completely, and at production scale on the task's own example grid:
+`geneo_armed_solves = 0`, `basis_builds = 0`, `coarse_refreshes = 0`,
+`basis_dim = 0`, `basis_mb = 0.0` across all six solves at 232x64x216 —
+262's O6 result, reproduced in the deep-blocked regime.
+
+This is structural, not luck. GenEO arms only when a *fallback* solve burns
+500 unconverged iterations (`kGeneoTriggerIters`, geneo.hpp). After this
+change these grids do not fall back at all, so the code path GenEO lives on
+is never reached. Before the change the same grid's solves ran 1416-1516
+Jacobi iterations (P1) — three times past the trigger — which is exactly why
+the before-side run stalled: it armed GenEO and began building a basis on
+9.6M DOF.
+
+So the P4 question resolves in the affirmative direction: **multigrid is not
+merely building on these shapes, it is carrying them.** The alternative
+finding P4 asked to be reported if GenEO stayed busy — "multigrid is
+building but not helping" — does not apply here. The one regime where
+multigrid does build without helping is the adversarial-contrast corner
+measured in P1, and there the 127 latch stops it after three attempts.
+
+At 30^3 both sides report GenEO 0/0, but that proves nothing about
+displacement: the Jacobi fallback there runs only 77-213 iterations, never
+reaching the 500 trigger. The displacement claim rests on the 232x64x216
+run above.
 
 ### What could NOT be measured here, stated plainly
 
@@ -312,13 +360,33 @@ stagnation latch, GenEO.
 
 ## BLOCKED-STOP assessment
 
-- Grids that build today: untouched by construction (the actual-count gate)
-  and by measurement (P1's occ<=0.5 rows identical; P6 checksums).
-- Grids that do NOT build today: dense-active ones win 1.8-3.6x per solve
-  (P1, P3); the dense-AND-non-contracting corner pays a bounded 3-solve
-  latch tax (~+97 s once per run at 60^3-scale) and then runs at Jacobi
-  parity. No shape got worse than today by more than that bounded,
-  latch-terminated tax; this is a full lift, not a partial one.
+The instruction was: stop if lifting the gate degrades ANY grid that builds
+today, and a partial lift is acceptable if the boundary is measured. **No
+grid that builds today is degraded, so the lift is full, not partial** —
+but the boundary is measured anyway, because it is not where it was assumed
+to be:
+
+- **Grids that build today are untouched**, by construction (the
+  actual-count gate never pads them) and by three independent measurements:
+  P1's occ<=0.5 rows are identical cycle-for-cycle and second-for-second
+  with the pad on and off; P6's checksums are bit-identical on every
+  already-building case; test_mgcg_matfree 7d(ii) proves memcmp
+  bit-identity on a sparse deep-blocked grid.
+- **Grids that do not build today gain multigrid.** Dense-active ones win
+  1.8-3.6x per solve (P1) and carry a full production run at 5 levels with
+  116 total CG iterations and GenEO silent (P3/P4).
+- **The one regime that pays anything** is dense AND non-contracting
+  (adversarial 1e-9 checkerboard contrast). It pays 3 stagnated attempts —
+  ~+97 s once per run at 60^3 scale — then the 127 latch stops the build
+  and it runs at Jacobi parity for the rest of the run. That is the
+  measured worst case, it is bounded and self-terminating, and it is the
+  only case where this change costs anything at all.
+
+**The boundary, stated plainly:** it is NOT "odd axes vs even axes", and it
+is NOT "shallow vs deep blocks". It is **dense vs sparse active sets** —
+because that, not the grid's arithmetic, is what the hierarchy builder
+actually tests. Sparse deep-blocked grids were never in the rejected
+population to begin with; nobody had counted them.
 
 ## Plain language
 

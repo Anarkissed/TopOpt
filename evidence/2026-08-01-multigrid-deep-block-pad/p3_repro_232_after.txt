@@ -5,3 +5,10 @@
   iter   4: cg=    15 mg=1 levels=5 hier_built=1 geneo_dim=0
   iter   5: cg=    21 mg=1 levels=5 hier_built=1 geneo_dim=0
   iter   6: cg=    21 mg=1 levels=5 hier_built=1 geneo_dim=0
+RESULT pad_mode=1: used_multigrid=1 mg_levels=5 hier_ever_built=1
+  observer solves: mg=6 jacobi=0 total_cg_iters=116 max_levels=5
+  geneo: armed_solves=0 basis_builds=0 coarse_refreshes=0 basis_dim=0 basis_mb=0.0
+
+real	15m29.427s
+user	15m50.445s
+sys	2m54.295s
