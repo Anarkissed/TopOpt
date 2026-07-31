@@ -1,0 +1,10 @@
+variant_070.stl IDENTICAL
+variant_050.stl IDENTICAL
+variant_030.stl IDENTICAL
+report.json IDENTICAL
+fields.bin IDENTICAL
+run_info.json DIFFERS
+iterations.csv DIFFERS
+run_info.json differing keys: created_wall_ms only (wall-clock stamp)
+iterations.csv identical with the epoch-ms timestamp column stripped
+=> all DESIGN artifacts byte-identical parent vs fixed; only run-time stamps differ

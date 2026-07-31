@@ -1,0 +1,2 @@
+version=1 grid=64x43x64 origin=(-30.000,-20.000,0.000) spacing=0.9375 variants=1
+variant vf=1.00 mass=46.64g vm_count=176128 vm_nonzero=45495 vm_max=73.580MPa disp_max=0.3554mm

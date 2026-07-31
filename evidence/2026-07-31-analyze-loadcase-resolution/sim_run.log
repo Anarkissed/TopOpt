@@ -1,0 +1,11 @@
+[loadcase] load-group 0: faces=1 |F|=800N voxels_tagged=387 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+analyze: l-bracket.step as solid part (fixed design, ONE analysis solve, no optimization)
+  peak stress: 73.58 MPa   worst-case margin: 0.7475 (required 1.5)
+  load case: declared external load
+  verdict: REJECTED
+  voxel mass: 46.64 g
+  min-feature violations: 0
+report: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/evidence/2026-07-31-analyze-loadcase-resolution/sim_out/analysis_report.json
+provenance: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/evidence/2026-07-31-analyze-loadcase-resolution/sim_out/analysis.json
+fields: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/evidence/2026-07-31-analyze-loadcase-resolution/sim_out/fields.bin

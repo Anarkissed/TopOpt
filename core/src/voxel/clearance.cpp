@@ -127,7 +127,9 @@ ClearanceGeometry resolve_clearance_from_face(const StepModel& model, int face_i
                                               const ClearanceParams& params) {
   if (face_id < 0 || face_id >= model.face_count)
     throw std::invalid_argument(
-        "resolve_clearance_from_face: face_id out of range");
+        "resolve_clearance_from_face: face_id " + std::to_string(face_id) +
+        " out of range — the model carries " +
+        std::to_string(model.face_count) + " faces");
   if (model.triangle_face.size() != model.mesh.triangles.size())
     throw std::invalid_argument(
         "resolve_clearance_from_face: triangle_face is not parallel to "

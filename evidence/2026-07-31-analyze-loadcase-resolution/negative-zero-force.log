@@ -1,0 +1,3 @@
+[loadcase] load-group 0: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] warm_start_inherit=0 mode=self-weight
+topopt-cli: analyze: the declared load case produced NO external load — every declared load group contributed nothing at resolution 64: group 0 (face 4, |F|=0 N): zero force — set a non-zero force on this load. Refusing to analyze under SELF-WEIGHT instead of the declared load (that silent fallback is the PR-178 param-drop bug).

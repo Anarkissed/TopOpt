@@ -1,0 +1,32 @@
+{
+  "_comment": "RUN SIM twin (task analyze-loadcase-resolution, N3): the app's on-device sim as a CLI analyze job - ORIGINAL model, page-one anchors (two O5 bores) + one RAW-face-id load group, at the app's fast tier (64).",
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "analyze",
+  "resolution": 64,
+  "loads": {
+    "anchors": [
+      {
+        "kind": "cylindrical",
+        "radius_mm": 2.5
+      }
+    ],
+    "groups": [
+      {
+        "face_ids": [
+          4
+        ],
+        "force": [
+          0.0,
+          0.0,
+          -800.0
+        ]
+      }
+    ]
+  },
+  "output": {
+    "report": "analysis_report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  }
+}
