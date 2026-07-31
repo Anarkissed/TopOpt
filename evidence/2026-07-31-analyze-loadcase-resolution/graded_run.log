@@ -1,0 +1,14 @@
+PROGRESS rung=0 rungs=1 iter=1
+PROGRESS rung=0 rungs=1 iter=2
+PROGRESS rung=0 rungs=1 iter=3
+PROGRESS rung=0 rungs=1 iter=4
+VARIANT vf=1.000000 achieved=1.000000 printed=1.000000 margin=283019 accepted=1 mesh=../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/variant_100.stl
+LATTICE vf=1.000000 topology=octet cell_mm=4.38345 graded=1 rho_min=0.05047 rho_max=0.89988 cells=315 tris=257744 lattice_margin=inf lattice_accepted=1 report=../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/variant_100_lattice.report.json mesh=../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/variant_100_lattice.stl
+model: lat_hookup_cyl.stl (3 pseudo faces, 1 fixture faces matched)
+variants: 1 evaluated, 1 accepted
+  vf 1.00: margin 2.83e+05, accepted
+report: ../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/report.json
+mesh: ../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/variant_100.stl
+mesh: ../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/variant_100_lattice.stl
+run_info: ../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/run_info.json
+iterations: ../../evidence/2026-07-31-analyze-loadcase-resolution/graded_out/iterations.csv

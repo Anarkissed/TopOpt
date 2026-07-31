@@ -1,0 +1,8 @@
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:200:17: error: no member named 'load_group_reports' in 'topopt::ProductionRunSetup'
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:202:15: error: no member named 'load_group_reports' in 'topopt::ProductionRunSetup'
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:203:30: error: no member named 'load_group_reports' in 'topopt::ProductionRunSetup'
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:205:38: error: no member named 'LoadGroupReport' in namespace 'topopt'
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:210:30: error: no member named 'load_group_reports' in 'topopt::ProductionRunSetup'
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:212:38: error: no member named 'LoadGroupReport' in namespace 'topopt'
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:218:17: error: no member named 'no_external_load_message' in namespace 'topopt'
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/tensor-library-nine-topologies-16e4da/core/tests/validation/test_loadcase_resolution.cpp:243:17: error: no member named 'load_group_reports' in 'topopt::ProductionRunSetup'

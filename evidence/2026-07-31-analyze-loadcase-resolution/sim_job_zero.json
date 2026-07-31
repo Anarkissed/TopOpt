@@ -1,0 +1,32 @@
+{
+  "_comment": "negative: zero-force group (empty load case must refuse legibly)",
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "analyze",
+  "resolution": 64,
+  "loads": {
+    "anchors": [
+      {
+        "kind": "cylindrical",
+        "radius_mm": 2.5
+      }
+    ],
+    "groups": [
+      {
+        "face_ids": [
+          4
+        ],
+        "force": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ]
+  },
+  "output": {
+    "report": "analysis_report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  }
+}

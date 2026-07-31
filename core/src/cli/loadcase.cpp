@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -90,6 +91,34 @@ void log_warm_start_config(bool inherit, bool self_weight) {
   sink(std::string(buf));
 }
 
+// Task analyze-loadcase-resolution (N5) — validate a face id at the point it is
+// RESOLVED, with a message that names the id, the count available and the valid
+// range. `context` names where the id came from ("load case anchor",
+// "load group 2"), so the user knows which selection to fix. Before this, an
+// out-of-range id surfaced as tag_step_face's bare "face_id out of range" —
+// loud, but naming nothing the user could act on. A model that carries NO face
+// ids at all (an exported variant mesh, or a model whose face-overrides sidecar
+// was not found next to it) is called out as such: no selection can ever
+// resolve against it, which is a different problem than one bad id.
+void validate_face_id(int fid, const StepModel& model,
+                      const std::string& context) {
+  if (fid >= 0 && fid < model.face_count) return;
+  if (model.face_count <= 0)
+    throw std::invalid_argument(
+        context + " face id " + std::to_string(fid) +
+        " cannot be resolved — this model carries no face ids at all (an "
+        "exported variant mesh, or a model whose face-overrides sidecar was "
+        "not found). The load case was authored on a different model or "
+        "import than the one being analyzed.");
+  throw std::invalid_argument(
+      context + " face id " + std::to_string(fid) +
+      " is out of range — the model carries " +
+      std::to_string(model.face_count) + " faces (valid ids 0.." +
+      std::to_string(model.face_count - 1) +
+      "). The load case appears to have been authored on a different model "
+      "or import than the one being analyzed.");
+}
+
 // Count the voxels currently carrying `tag` in `grid`.
 std::size_t count_tagged(const VoxelGrid& grid, VoxelTag tag) {
   std::size_t n = 0;
@@ -118,6 +147,11 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // Anchors -> Fixture (clamped + retained). Snapshot the anchors-only grid as
   // the clean base for per-group traction, so each group's traction covers ONLY
   // its own faces (traction_loads spreads a force over every Load voxel it sees).
+  // Ids are validated here, at the point of resolution, so an out-of-range id
+  // fails naming the id / the count / which selection it came from (N5) — the
+  // same condition tag_step_face would have thrown on, made legible.
+  for (int fid : lc.anchor_face_ids)
+    validate_face_id(fid, model, "load case anchor");
   for (int fid : lc.anchor_face_ids)
     tag_step_face(grid, model, fid, VoxelTag::Fixture);
   const VoxelGrid base_grid = grid;
@@ -126,6 +160,7 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // The load faces actually retained on the main grid (the non-zero groups),
   // collected so their structural pad is frozen alongside the anchors' below.
   std::vector<int> retained_load_faces;
+  setup.load_group_reports.reserve(lc.load_groups.size());
   for (std::size_t gi = 0; gi < lc.load_groups.size(); ++gi) {
     const ProductionLoadCase::LoadGroup& group = lc.load_groups[gi];
     const Vec3 force = group.force;
@@ -133,10 +168,19 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
         std::sqrt(force.x * force.x + force.y * force.y + force.z * force.z);
     if (!(std::fabs(force.x) + std::fabs(force.y) + std::fabs(force.z) > 0.0)) {
       // A zero-force group contributes nothing (the user left it unset / the
-      // force was lost upstream). Log why, then skip.
+      // force was lost upstream). Log why, then skip — BEFORE resolving its
+      // face ids, exactly as before the resolution task (a dead group's ids
+      // are never validated, so pre-task jobs keep their behavior).
       log_load_group(gi, group.face_ids.size(), force_mag, 0, "zero-force");
+      setup.load_group_reports.push_back(
+          {gi, group.face_ids, force_mag, 0,
+           LoadGroupReport::Status::ZeroForce});
       continue;
     }
+    // Resolution point (N5): validate this live group's ids legibly — the same
+    // condition tag_step_face would throw on, now naming the group and the id.
+    for (int fid : group.face_ids)
+      validate_face_id(fid, model, "load group " + std::to_string(gi));
     VoxelGrid gg = base_grid;  // anchors only, no other group's Load
     for (int fid : group.face_ids)
       tag_step_face(gg, model, fid, VoxelTag::Load);
@@ -147,6 +191,9 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       // so it contributes nothing and `external` stays empty for this group. Log
       // the reason (this is what the require_external_loads guard then refuses on).
       log_load_group(gi, group.face_ids.size(), force_mag, 0, "zero-tagged");
+      setup.load_group_reports.push_back(
+          {gi, group.face_ids, force_mag, 0,
+           LoadGroupReport::Status::ZeroTagged});
       continue;
     }
     const std::vector<NodalLoad> tl = traction_loads(gg, VoxelTag::Load, force);
@@ -158,6 +205,8 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
       retained_load_faces.push_back(fid);
     }
     log_load_group(gi, group.face_ids.size(), force_mag, tagged, "ok");
+    setup.load_group_reports.push_back(
+        {gi, group.face_ids, force_mag, tagged, LoadGroupReport::Status::Ok});
   }
 
   // Dirichlet BCs from the Fixture voxels (clamp all 8 corner nodes, deduped).
@@ -370,6 +419,45 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   }
 
   return setup;
+}
+
+std::string no_external_load_message(const ProductionRunSetup& setup,
+                                     int resolution) {
+  std::string msg =
+      "every declared load group contributed nothing at resolution " +
+      std::to_string(resolution) + ": ";
+  bool first = true;
+  for (const LoadGroupReport& r : setup.load_group_reports) {
+    if (!first) msg += "; ";
+    first = false;
+    msg += "group " + std::to_string(r.index) + " (";
+    for (std::size_t i = 0; i < r.face_ids.size(); ++i)
+      msg += (i ? ", face " : "face ") + std::to_string(r.face_ids[i]);
+    {
+      char amt[32];
+      std::snprintf(amt, sizeof(amt), "%.3g", r.force_mag);
+      msg += std::string(", |F|=") + amt + " N): ";
+    }
+    switch (r.status) {
+      case LoadGroupReport::Status::ZeroForce:
+        msg += "zero force — set a non-zero force on this load";
+        break;
+      case LoadGroupReport::Status::ZeroTagged:
+        msg += "its faces tagged no voxels at resolution " +
+               std::to_string(resolution) +
+               " — each face is smaller than one voxel at this grid spacing; "
+               "raise the resolution or select a larger face";
+        break;
+      case LoadGroupReport::Status::Ok:
+        // Never expected when the external set is empty; state it honestly
+        // rather than hiding a contradiction.
+        msg += "ok (" + std::to_string(r.voxels_tagged) + " voxels tagged)";
+        break;
+    }
+  }
+  if (setup.load_group_reports.empty())
+    msg += "no load groups were declared";
+  return msg;
 }
 
 }  // namespace topopt

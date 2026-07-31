@@ -1,0 +1,9 @@
+[loadcase] load-group 0: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] load-group 1: faces=1 |F|=100N voxels_tagged=16 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] load-group 0: faces=1 |F|=100N voxels_tagged=0 SKIP=zero-tagged
+[loadcase] load-group 1: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] warm_start_inherit=0 mode=self-weight
+[loadcase] load-group 0: faces=1 |F|=100N voxels_tagged=16 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+PASS: loadcase_resolution (all checks)

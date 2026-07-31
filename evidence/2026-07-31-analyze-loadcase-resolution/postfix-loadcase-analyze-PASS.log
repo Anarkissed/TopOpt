@@ -1,0 +1,11 @@
+  [L1 self-weight] reproduction check
+[loadcase] load-group 0: faces=1 |F|=1.5e+03N voxels_tagged=16 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+  [L2 loadcase] reproduction check
+[loadcase] load-group 0: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] warm_start_inherit=0 mode=self-weight
+[loadcase] load-group 0: faces=1 |F|=800N voxels_tagged=384 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] load-group 0: faces=1 |F|=0N voxels_tagged=0 SKIP=zero-force
+[loadcase] warm_start_inherit=0 mode=self-weight
+63 checks, 0 failures

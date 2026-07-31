@@ -42,7 +42,8 @@ struct LEWriter {
 
 int write_fields_file(const std::string& path,
                       const MinimizePlasticResult& result,
-                      const VoxelGrid& solved_grid) {
+                      const VoxelGrid& solved_grid,
+                      bool accepted_only) {
   const std::size_t voxel_count = solved_grid.voxel_count();
   // Node count of the structured hex grid = (nx+1)(ny+1)(nz+1), the same value
   // fea_node_count returns (assembly.cpp). Computed inline so this always-built io
@@ -52,10 +53,13 @@ int write_fields_file(const std::string& path,
       static_cast<std::size_t>(solved_grid.ny + 1) *
       static_cast<std::size_t>(solved_grid.nz + 1);
 
-  // Count the accepted variants first (the header carries the count).
+  // Count the serialised variants first (the header carries the count). The
+  // analyze route passes accepted_only = false: its ONE pseudo-variant carries
+  // the margin verdict, and the field must be served either way (N3 — see the
+  // header comment).
   std::vector<const MinimizePlasticVariant*> accepted;
   for (const MinimizePlasticVariant& v : result.evaluated)
-    if (v.accepted) accepted.push_back(&v);
+    if (v.accepted || !accepted_only) accepted.push_back(&v);
 
   LEWriter w;
   // -- run header ------------------------------------------------------------
