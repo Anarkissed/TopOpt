@@ -1,0 +1,127 @@
+# WHO CALLS THE ORIENTATION CODE? (verified, not assumed)
+
+Run from core/ on the task branch. The task brief said the ONLY reference to
+orientation_candidates anywhere is its declaration in orient.hpp. That is not
+quite right and the difference matters, so here is the actual call graph.
+
+## $ grep -rn (core, app, bridge; build/ excluded)
+
+### orientation_candidates
+include/topopt/orient.hpp:46:std::vector<Vec3> orientation_candidates(const TriangleMesh& mesh);
+tests/unit/test_orient.cpp:22:using topopt::orientation_candidates;
+tests/unit/test_orient.cpp:174:// orientation_candidates
+tests/unit/test_orient.cpp:176:void test_orientation_candidates() {
+tests/unit/test_orient.cpp:180:  std::vector<Vec3> c = orientation_candidates(box);
+tests/unit/test_orient.cpp:217:    std::vector<Vec3> cc = orientation_candidates(m);
+tests/unit/test_orient.cpp:228:    orientation_candidates(TriangleMesh{});
+tests/unit/test_orient.cpp:232:  CHECK(threw, "orientation_candidates on an empty mesh throws");
+tests/unit/test_orient.cpp:482:  test_orientation_candidates();
+tests/unit/test_orient_invariants.cpp:127:// orientation_candidates returns the full sphere sampling.
+tests/unit/test_orient_invariants.cpp:347:  const std::vector<Vec3> cands = orientation_candidates(box_mesh());
+tests/harness/orientation_scoring_probe.cpp:534:  const std::vector<Vec3> candidates = orientation_candidates(f.mesh);
+tests/validation/test_v5.cpp:169:  const std::vector<Vec3> candidates = topopt::orientation_candidates(mesh);
+src/orient/orient.cpp:115:std::vector<Vec3> orientation_candidates(const TriangleMesh& mesh) {
+
+### score_orientations
+tests/unit/test_orient.cpp:24:using topopt::score_orientations;
+tests/unit/test_orient.cpp:394:void test_score_orientations() {
+tests/unit/test_orient.cpp:403:  std::vector<OrientationScore> r = score_orientations(g, s, cands, k);
+tests/unit/test_orient.cpp:436:  std::vector<OrientationScore> r1 = score_orientations(g, s, cands, 1.0);
+tests/unit/test_orient.cpp:452:      score_orientations(gs, zero, {Vec3{0, 0, 1}, Vec3{0, 0, -1}}, 0.55);
+tests/unit/test_orient.cpp:461:      score_orientations(g, st, cs, kk, sw, stw);
+tests/unit/test_orient.cpp:485:  test_score_orientations();
+include/topopt/orient.hpp:112:std::vector<OrientationScore> score_orientations(
+tests/validation/test_v5.cpp:177:      topopt::score_orientations(grid, stress, candidates, k_pla);
+tests/validation/test_v5.cpp:214:      topopt::score_orientations(grid, stress, candidates, 1.0);
+src/orient/orient.cpp:239:std::vector<OrientationScore> score_orientations(
+src/orient/orient.cpp:244:    throw std::invalid_argument("score_orientations: no candidates");
+src/orient/orient.cpp:247:        "score_orientations: z_knockdown must be in (0, 1]");
+src/orient/orient.cpp:249:    throw std::invalid_argument("score_orientations: weights must be >= 0");
+src/orient/orient.cpp:252:        "score_orientations: stress size must equal grid.voxel_count()");
+
+### support_overhang_voxels
+include/topopt/pipeline.hpp:751:  // (c) Support-volume proxy (M4.3 support_overhang_voxels) for the analysed
+include/topopt/orient.hpp:60:int support_overhang_voxels(const VoxelGrid& grid, const Vec3& build_dir);
+include/topopt/orient.hpp:85:  int support_voxels = 0;          // support proxy (support_overhang_voxels), M4.3
+include/topopt/orient.hpp:93://   * support term  = support_overhang_voxels(grid, dir)              (M4.3 proxy)
+tests/unit/test_orient.cpp:25:using topopt::support_overhang_voxels;
+tests/unit/test_orient.cpp:236:// support_overhang_voxels
+tests/unit/test_orient.cpp:246:      CHECK(support_overhang_voxels(g, d) == 0,
+tests/unit/test_orient.cpp:263:    CHECK(support_overhang_voxels(g, Vec3{0, 0, 1}) == 3,
+tests/unit/test_orient.cpp:265:    CHECK(support_overhang_voxels(g, Vec3{0, 0, -1}) == 0,
+tests/unit/test_orient.cpp:267:    CHECK(support_overhang_voxels(g, Vec3{1, 0, 0}) == 0,
+tests/unit/test_orient.cpp:271:    CHECK(support_overhang_voxels(g, Vec3{0, 0, 5}) == 3,
+tests/unit/test_orient.cpp:288:    CHECK(support_overhang_voxels(g, Vec3{0, 0, 1}) == 20,
+tests/unit/test_orient.cpp:291:    CHECK(support_overhang_voxels(g, Vec3{0, 0, -1}) == 0,
+tests/unit/test_orient.cpp:300:      support_overhang_voxels(g, Vec3{0, 0, 0});
+tests/unit/test_orient.cpp:306:    CHECK(support_overhang_voxels(empty_grid(2, 2, 2, 1.0), Vec3{0, 0, 1}) == 0,
+tests/unit/test_orient.cpp:395:  // Solid 2x2x2 box: support_overhang_voxels is 0 for every axis direction (M4.3),
+tests/harness/orientation_scoring_probe.cpp:32://   S-a support volume            support_overhang_voxels (M4.3 proxy)
+tests/harness/orientation_scoring_probe.cpp:515:    r.support_voxels = support_overhang_voxels(printed, n);
+tests/harness/orientation_scoring_probe.cpp:896:      "— at max_interlayer_tension, support_overhang_voxels and\n"
+tests/validation/test_minimize_plastic.cpp:279:        topopt::support_overhang_voxels(printed_grid, build_dir);
+src/orient/orient.cpp:140:int support_overhang_voxels(const VoxelGrid& grid, const Vec3& build_dir) {
+src/orient/orient.cpp:144:        "support_overhang_voxels: build_dir is zero length");
+src/orient/orient.cpp:266:    os.support_voxels = support_overhang_voxels(grid, dir);
+src/simp/analyze.cpp:315:  out.support_volume_voxels = support_overhang_voxels(printed_grid, build_dir);
+
+### max_interlayer_tension (declaration/definition sites only)
+tests/unit/test_orient.cpp:330:void test_max_interlayer_tension() {
+tests/unit/test_orient.cpp:337:  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, 0, 1}) - 1.0) < 1e-12,
+tests/unit/test_orient.cpp:339:  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, 1, 0}) - 10.0) < 1e-12,
+tests/unit/test_orient.cpp:341:  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{1, 0, 0}) - 0.0) < 1e-12,
+tests/unit/test_orient.cpp:344:  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, -1, 0}) - 10.0) < 1e-12,
+tests/unit/test_orient.cpp:347:  CHECK(std::fabs(max_interlayer_tension(g, s, Vec3{0, 5, 0}) - 10.0) < 1e-12,
+tests/unit/test_orient.cpp:353:  CHECK(max_interlayer_tension(g, comp, Vec3{0, 1, 0}) == 0.0,
+tests/unit/test_orient.cpp:360:  CHECK(std::fabs(max_interlayer_tension(g, sh, Vec3{1, 1, 0}) - 4.0) < 1e-12,
+tests/unit/test_orient.cpp:362:  CHECK(max_interlayer_tension(g, sh, Vec3{1, -1, 0}) == 0.0,
+tests/unit/test_orient.cpp:372:  CHECK(std::fabs(max_interlayer_tension(gp, mixed, Vec3{0, 1, 0}) - 2.0) < 1e-12,
+tests/unit/test_orient.cpp:378:    max_interlayer_tension(g, s, Vec3{0, 0, 0});
+tests/unit/test_orient.cpp:385:    max_interlayer_tension(g, uniform_stress(solid_grid(3, 1, 1, 1.0),
+tests/unit/test_orient.cpp:484:  test_max_interlayer_tension();
+include/topopt/orient.hpp:78:double max_interlayer_tension(const VoxelGrid& grid,
+include/topopt/orient.hpp:94://   * stress term   = max_interlayer_tension(grid, stress, dir) knocked down by
+tests/harness/orientation_scoring_probe.cpp:516:    r.macro_interlayer_tension = max_interlayer_tension(f.grid, stress, n);
+src/orient/orient.cpp:212:double max_interlayer_tension(const VoxelGrid& grid,
+src/orient/orient.cpp:267:    os.interlayer_tension = max_interlayer_tension(grid, stress, dir);
+src/simp/analyze.cpp:288:  const double max_interlayer = max_interlayer_tension(grid, stress, build_dir);
+
+### hex8_stiffness_transverse (the layer-anisotropic element)
+include/topopt/fea.hpp:66:Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
+tests/unit/test_fea.cpp:394:  // hex8_stiffness_transverse: transversely isotropic element (M4.1). Layer
+tests/unit/test_fea.cpp:406:    using topopt::hex8_stiffness_transverse;
+tests/unit/test_fea.cpp:479:      const Hex8Stiffness Kt = hex8_stiffness_transverse(E, nu, 1.0, 1.0);
+tests/unit/test_fea.cpp:496:      recover_D(hex8_stiffness_transverse(E, nu, 1.0, k), Dt);
+tests/unit/test_fea.cpp:535:      const Hex8Stiffness Ku = hex8_stiffness_transverse(1.0, nu, 1.0, k);
+tests/unit/test_fea.cpp:536:      const Hex8Stiffness Ks = hex8_stiffness_transverse(E2, nu, h2, k);
+tests/unit/test_fea.cpp:552:          hex8_stiffness_transverse(E_, nu_, h_, k_);
+tests/unit/test_fea.cpp:566:        hex8_stiffness_transverse(1.0, 0.3, 1.0, 1.0);
+tests/unit/test_fea.cpp:575:  // hex8_stiffness_transverse vs the independent golden fixture (M4.1). The
+tests/unit/test_fea.cpp:581:  // the one hex8_stiffness_transverse implements. Assert entrywise agreement for
+tests/unit/test_fea.cpp:587:    using topopt::hex8_stiffness_transverse;
+tests/unit/test_fea.cpp:621:      const Hex8Stiffness Ke = hex8_stiffness_transverse(ts.E, ts.nu, 1.0, ts.k);
+tests/unit/test_fea.cpp:640:      const Hex8Stiffness Kt = hex8_stiffness_transverse(1.0, 0.30, 1.0, 1.00);
+tests/harness/lattice_orientation_probe.cpp:20:// production element topopt::hex8_stiffness_transverse (fea.hpp): layer plane =
+tests/harness/lattice_orientation_probe.cpp:35://       ::hex8_stiffness_transverse (k<1) entrywise to ~1e-12.
+tests/harness/lattice_orientation_probe.cpp:149:// Transversely isotropic D, weak axis = +z (matches hex8_stiffness_transverse).
+tests/harness/lattice_orientation_probe.cpp:542:  double e2 = maxdiff(integrate_hex8_D(Dti, h), hex8_stiffness_transverse(kE, kNu, h, 0.55));
+tests/harness/lattice_anisotropy_probe.cpp:11:// local z, exactly hex8_stiffness_transverse's convention) and ROTATED so the layer
+tests/harness/lattice_anisotropy_probe.cpp:127:// Copied algebra from hex8_stiffness_transverse (hex_element.cpp): layer plane xy,
+tests/harness/orientation_scoring_probe.cpp:899:      "  hex8_stiffness_transverse (the layer-anisotropic element) exists in core "
+src/fea/hex_element.cpp:116:Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
+src/fea/hex_element.cpp:125:        "hex8_stiffness_transverse: youngs_modulus must be > 0");
+src/fea/hex_element.cpp:128:        "hex8_stiffness_transverse: element_size must be > 0");
+src/fea/hex_element.cpp:131:        "hex8_stiffness_transverse: poisson must be in (-1, 0.5)");
+src/fea/hex_element.cpp:134:        "hex8_stiffness_transverse: z_knockdown must be in (0, 1]");
+
+### the gravity -> build derivation
+src/cli/run_job.cpp:648:  cx.build_dir = normalized(Vec3{-options.gravity_direction.x,
+src/cli/run_job.cpp:649:                                 -options.gravity_direction.y,
+src/cli/run_job.cpp:650:                                 -options.gravity_direction.z});
+src/cli/run_job.cpp:657:                                     options.gravity_direction)
+src/cli/run_job.cpp:1314:    options.gravity_direction = job.gravity.direction;
+src/cli/run_job.cpp:1427:  const Vec3 build_dir = normalized(Vec3{-options.gravity_direction.x,
+src/cli/run_job.cpp:1428:                                         -options.gravity_direction.y,
+src/cli/run_job.cpp:1429:                                         -options.gravity_direction.z});
+src/cli/run_job.cpp:1433:                                   options.gravity, options.gravity_direction);
+src/cli/run_job.cpp:1870:    options.gravity_direction = job.gravity.direction;
