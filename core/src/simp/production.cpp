@@ -47,27 +47,52 @@ constexpr double kConditionalProjectionGrayThreshold = 0.07;
 constexpr int kProductionRecycleDim = 16;
 
 // ===========================================================================
-// TRIPWIRE — the ACTIVE DOMAIN production band (handoff 2026-07-26-ad-arming).
+// TRIPWIRE — the ACTIVE DOMAIN production band. DISARMED
+// (handoff 2026-08-01-active-domain-disarm; armed by 2026-07-26-ad-arming).
 // ===========================================================================
-// Do NOT change this value, and do NOT arm the band on the STRESS path or on any
-// solver but MultigridCG_Matfree, without re-running BOTH:
+// Do NOT change this value — in either direction — and do NOT arm the band on
+// the STRESS path or on any solver but MultigridCG_Matfree, without re-running
+// ALL of:
 //   * core/tests/harness/active_domain_gate.cpp  arm / stag / lowdil / recycle
 //   * core/tests/harness/active_domain_escape.cpp gate168 / healthy 250 / stag
+//   * core/tests/harness/ad_disarm_gate.cpp      gate / padinert / odd / stag
 // and landing a new before/after gate table. The band CHANGES THE DESIGN (it is
 // an approximation, not an exact accelerator: measured mean|drho| ~ 3.9e-6 on the
 // shipped rung, ~2.95e-4 on a rejected one), so every rung's verdict and margin is
 // re-gated when it moves — unlike the recycling / Galerkin / thread-pin dials,
 // which are bit-identical. The escape latch (2026-07-25-ad-escape-latch) is what
-// makes it safe to arm: it detects the first live band escape and reverts to the
-// full domain for the rest of the run. arm without a current escape-latch build.
+// made it safe to arm: it detects the first live band escape and reverts to the
+// full domain for the rest of the run. Never arm without a current escape-latch
+// build.
 //
-// -1 means AUTO: k is DERIVED PER JOB downstream in resolve_active_domain_band as
-// active_domain_auto_band(options.filter_radius) = ceil(rmin) + 1, where
-// options.filter_radius is physical_filter_radius(min_feature_mm, spacing). k is
-// therefore NEVER a literal here — it tracks the rung's real grid spacing (4 on a
-// 1.0 mm grid, 3 on a 2.5 mm grid), which is the whole point of AUTO. The parity
-// test asserts this resolution on a real production run.
-constexpr int kProductionActiveDomainBand = -1;  // AUTO
+// 0 = OFF. Every trajectory penalized solve runs the FULL domain, so production
+// is once again BIT-IDENTICAL to the library default on this axis and the band
+// is no longer a source of trajectory divergence. This is a MAINTAINER DECISION
+// (2026-08-01), taken on three independent measurements, not a bug fix — the
+// feature works as designed and breaks nothing:
+//   * PR 209's draft-arming tables and the 2026-07-27 arming review: in the
+//     STAGNATION regime AD was armed for, its effect is an uncontrolled
+//     coin-flip (-25% ... +26% CG), because the escape latch reverts it after
+//     ~2 restricted iterations so the dilution win never operates there.
+//   * PR 248's four-way interaction: net-negative again on the cubic operator.
+//   * The gate fixture itself: +9.8% CG and a rung-1 margin move of
+//     dM/M = 1.10e-3, over the 0.1% bar, for no reliable benefit.
+// The honest counterweight, recorded so a future re-arming is not re-litigating
+// from scratch: on that same healthy gate fixture AD is ~18% FASTER IN WALL
+// (30.0 s -> 24.7 s) even while running 9.8% more CG iterations, because each
+// restricted solve carries fewer DOFs. Disarming gives that back. The disarm
+// handoff's tables are the place to start from.
+//
+// -1 would mean AUTO: k DERIVED PER JOB downstream in resolve_active_domain_band
+// as active_domain_auto_band(options.filter_radius) = ceil(rmin) + 1, where
+// options.filter_radius is physical_filter_radius(min_feature_mm, spacing) — a
+// width that tracks the rung's real grid spacing (4 on a 1.0 mm grid, 3 on a
+// 2.5 mm grid). That derivation is UNTOUCHED and still library-reachable; only
+// the production request is withdrawn. So is the OBSERVABILITY: run_info.json
+// keeps writing every active_domain_* field (band, resolved per-rung k, both
+// latch outcomes, escape counts, active fraction) so a re-arming can be compared
+// against this posture rather than measured from nothing.
+constexpr int kProductionActiveDomainBand = 0;  // DISARMED (OFF)
 
 // ===========================================================================
 // TRIPWIRE — the DRAFT-QUALITY production loose trajectory tolerance
@@ -83,8 +108,9 @@ constexpr int kProductionActiveDomainBand = -1;  // AUTO
 //     be re-measured at scale, never assumed to transfer)
 // and land a new before/after gate table.
 //
-// Draft is the SECOND production dial that is NOT bit-identical when on (the active-
-// domain band is the other). The loose trajectory solves answer a slightly different
+// Draft is now the ONLY production dial that is NOT bit-identical when on (the
+// active-domain band was the other; it was DISARMED on 2026-08-01, so draft is
+// alone in this class). The loose trajectory solves answer a slightly different
 // question than the tight ones, so the mid-ladder TRAJECTORY drifts on some rungs
 // (185 measured non-terminal REJECT rungs flipping 0.05-0.15 of their solid voxels
 // under aggressive loose tolerances). What is NOT drifted is the shipped part: the
@@ -448,38 +474,53 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // after this call.
   fea_set_matfree_cubic_lattice(kProductionMatfreeCubicLattice);
 
-  // Handoff 2026-07-26-ad-arming — ACTIVE DOMAIN, armed in AUTO (maintainer
-  // decision, recorded verbatim in the handoff §"THE DECISION"). The band
-  // restricts every TRAJECTORY penalized solve to the material plus a derived
-  // growth band, shrinking the solved system on ultra-dilute design-box runs —
-  // the 46x-dilution / stagnating-multigrid class that dominates production. Phase
-  // 1 (168) measured 1.79x wall on the healthy-multigrid gate fixture at 46.5x
-  // dilution WITH the 1.33x CG-iteration penalty already charged; the design moved
-  // mean|drho| ~ 3.9e-6 on the shipped rung with identical gate verdicts.
+  // Handoff 2026-08-01-active-domain-disarm — ACTIVE DOMAIN, DISARMED
+  // (maintainer decision, recorded in the handoff §"THE DECISION"; it reverses
+  // the 2026-07-26 arming). Armed, the band restricted every TRAJECTORY penalized
+  // solve to the material plus a derived growth band, shrinking the solved system
+  // on ultra-dilute design-box runs. Disarmed, every trajectory solve runs the
+  // FULL domain.
   //
-  // Unlike every other dial this function sets, THIS ONE IS NOT BIT-IDENTICAL: the
-  // eliminated elements carry a real rho_min^p ~ 1e-9 stiffness, so the restricted
-  // solve answers a slightly different question and the trajectory (never the
-  // certificate — the FINAL compliance solve is always full-domain) drifts. That
-  // is why arming waited on the ESCAPE LATCH (2026-07-25-ad-escape-latch): the
-  // growth invariant that makes the mask sound is EMPIRICAL, not a theorem (168
-  // measured 6 979 escapes on a stagnating trajectory), and the latch detects the
-  // first live escape at O(N) cost and reverts to the full domain for the rest of
-  // the run. The DEGENERACY LATCH (kActiveDomainLatchFraction/Window) covers the
-  // other end: at low dilution the band covers the domain and buys nothing, so it
-  // turns the feature off and SAYS so rather than silently costing.
+  // WHY IT IS OFF, in one line each — the tables are in the disarm handoff:
+  //   * The arming's premise was that the fixture win (168's 1.79x wall at 46.5x
+  //     dilution) would cut the stagnating 128-class Jacobi grind. Measured false:
+  //     in the stagnation regime the ESCAPE LATCH reverts the band after ~2
+  //     restricted iterations, so the dilution win never operates and what is left
+  //     is uncontrolled trajectory divergence (-25% ... +26% CG, sign not
+  //     controlled by grid size or by anything knowable pre-run).
+  //   * It is not bit-identical, and it charges for that: on the gate fixture the
+  //     armed posture moves rung 1's margin dM/M = 1.10e-3, over the 0.1% bar,
+  //     and flips 2 of 24 576 voxels across the print threshold — six orders of
+  //     magnitude above the 1e-9 load-perturbation control floor (8.6e-10).
+  //     Verdicts were identical in every measurement, armed and disarmed.
+  //   * PR 248's four-way interaction found it net-negative again on the cubic
+  //     operator (+11.6% CG in the mild phase).
   //
-  //   -1 = AUTO. k is DERIVED PER JOB, never pinned here: resolve_active_domain_band
-  //     resolves it once per run to active_domain_auto_band(options.filter_radius) =
-  //     ceil(rmin) + 1, keyed to the rung's actual grid spacing. See the TRIPWIRE
-  //     above. The library default stays 0 (OFF) — Gate-V2 and every reference run
-  //     never call this function, so they are BYTE-FOR-BYTE unchanged (THE ONE RULE),
-  //     asserted in test_production_parity before AND after this call.
+  // WHAT DISARMING COSTS, recorded honestly rather than buried: on the healthy
+  // gate fixture the armed posture is ~18% FASTER IN WALL (30.0 s -> 24.7 s) even
+  // while running 9.8% MORE CG iterations, because each restricted solve carries
+  // fewer DOFs. That wall win is real and it is being given up. It was judged not
+  // to be worth a non-bit-identical trajectory whose sign is uncontrolled in the
+  // regime that dominates production.
   //
-  // Anyone changing this must re-run the harnesses named in the TRIPWIRE and land a
-  // new gate table; the parity test asserts the echo against production_active_
-  // domain_band() and asserts the DERIVED k on a real run. run_info.json echoes the
-  // requested band (-1), the resolved per-rung k, and both latch outcomes.
+  // The MECHANISM is untouched: the AUTO derivation
+  // (resolve_active_domain_band -> active_domain_auto_band(filter_radius) =
+  // ceil(rmin) + 1), the ESCAPE LATCH (2026-07-25-ad-escape-latch) and the
+  // DEGENERACY LATCH (kActiveDomainLatchFraction/Window) all still exist, are
+  // still tested, and still drive from the harnesses in the TRIPWIRE above. So is
+  // the OBSERVABILITY: a disarmed run still records band, resolved per-rung k
+  // (0), both latch outcomes, escape count and active_fraction_mean (1.0 — "the
+  // whole domain was active", a positive statement), so a re-arming diffs against
+  // this posture instead of measuring from nothing. Re-arming is ONE constant.
+  //
+  // THE ONE RULE is now trivially satisfied on this axis: production and the
+  // library default agree at 0, so Gate-V2, the property suite and every core
+  // reference run are byte-for-byte unchanged whether or not they call this
+  // function — asserted in test_production_parity before AND after this call.
+  //
+  // Anyone changing this must re-run the harnesses named in the TRIPWIRE and land
+  // a new gate table; the parity test asserts the echo against
+  // production_active_domain_band() and asserts band 0 on a real run.
   opts.simp.active_domain_band = kProductionActiveDomainBand;
 
   // Handoff 2026-07-26-draft-arming — DRAFT QUALITY, armed (maintainer decision,
@@ -492,8 +533,9 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // about to be overwritten — no longer grind Jacobi-CG at full tolerance; multigrid
   // carries the loose residual instead. See the TRIPWIRE beside kProductionDraftLooseTol.
   //
-  // Like the active-domain band, and UNLIKE every bit-identical dial this function
-  // sets, THIS ONE CHANGES THE PRODUCT slightly: the loose trajectory drifts on some
+  // UNLIKE every other dial this function sets — the active-domain band, the one
+  // other non-bit-identical dial, was disarmed on 2026-08-01 — THIS ONE CHANGES
+  // THE PRODUCT slightly: the loose trajectory drifts on some
   // mid-ladder rungs (never the certificate). THE ONE RULE still holds — the LIBRARY
   // default is draft_quality=false, so Gate-V2, the property suite and every core
   // reference run (none of which call this function) are BYTE-FOR-BYTE unchanged,

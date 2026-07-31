@@ -1,0 +1,5 @@
+cell,pad_mode,active_domain_band,grid,mg_carried,cg_total,wall_s,bit_identical_to_pad1
+pad0/AD-off,0,0,32x24x32,1,212,17.72,yes
+pad1/AD-off,1,0,32x24x32,1,212,17.43,-
+pad0/AD-on,0,-1,32x24x32,1,248,14.19,yes
+pad1/AD-on,1,-1,32x24x32,1,248,11.94,-

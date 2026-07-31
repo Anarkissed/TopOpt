@@ -1,0 +1,10 @@
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] warm_start_inherit=0 mode=self-weight
+[loadcase] load-group 0: faces=8 |F|=50N voxels_tagged=978 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+  [AD disarm] production band DISARMED: every rung ran band=0 (the AUTO derivation would have given k=3 at rmin=1.500 voxels, spacing=2.500 mm) on 4 rung(s)
+  [132 (C)] design bit-identical at 6 and 10 threads
+production parity (handoff 093): all checks passed

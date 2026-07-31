@@ -1,0 +1,61 @@
+ad_disarm_gate — mode=gate  evidence=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm
+  production_active_domain_band() = -1  (the constant this task flips)
+
+===== THE GATE TABLE — DISARMED (OFF) vs ARMED (ON) vs the 1e-9 NEGATIVE CONTROL =====
+  OFF = active_domain_band 0 (what ships AFTER the flip)
+  ON  = active_domain_band -1 AUTO (what ships BEFORE)
+  CTL = band 0, loads x (1 + 1e-9) — the noise floor
+
+  [off#1] grid 32x24x32  mg=carried  30.0 s wall, 97 iterations, 2384 CG, 0/97 Jacobi-fallback solves, geneo armed=0 builds=0, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759473614 printed=0.515152 compliance=4.63900268409  f_bar=1.0000  k=0
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423430743 printed=0.371212 compliance=8.71832620191  f_bar=1.0000  k=0
+  [off#2] grid 32x24x32  mg=carried  30.2 s wall, 97 iterations, 2384 CG, 0/97 Jacobi-fallback solves, geneo armed=0 builds=0, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759473614 printed=0.515152 compliance=4.63900268409  f_bar=1.0000  k=0
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423430743 printed=0.371212 compliance=8.71832620191  f_bar=1.0000  k=0
+  [on#1  AUTO] grid 32x24x32  mg=carried  24.7 s wall, 98 iterations, 2618 CG, 0/98 Jacobi-fallback solves, geneo armed=0 builds=0, 2 rungs
+    rung 0 vf=0.68 iters= 39 accept margin=1.759376208 printed=0.515152 compliance=4.63896056871  f_bar=0.4170  k=4
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8414190437 printed=0.367424 compliance=8.71819342373  f_bar=0.9914  k=4  LATCHED
+  [on#2  AUTO] grid 32x24x32  mg=carried  24.2 s wall, 98 iterations, 2618 CG, 0/98 Jacobi-fallback solves, geneo armed=0 builds=0, 2 rungs
+    rung 0 vf=0.68 iters= 39 accept margin=1.759376208 printed=0.515152 compliance=4.63896056871  f_bar=0.4170  k=4
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8414190437 printed=0.367424 compliance=8.71819342373  f_bar=0.9914  k=4  LATCHED
+  [ctl#1 1e-9] grid 32x24x32  mg=carried  29.8 s wall, 97 iterations, 2374 CG, 0/97 Jacobi-fallback solves, geneo armed=0 builds=0, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759473612 printed=0.515152 compliance=4.63900269575  f_bar=1.0000  k=0
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423430736 printed=0.371212 compliance=8.71832621844  f_bar=1.0000  k=0
+  [ctl#2 1e-9] grid 32x24x32  mg=carried  30.8 s wall, 97 iterations, 2374 CG, 0/97 Jacobi-fallback solves, geneo armed=0 builds=0, 2 rungs
+    rung 0 vf=0.68 iters= 38 accept margin=1.759473612 printed=0.515152 compliance=4.63900269575  f_bar=1.0000  k=0
+    rung 1 vf=0.52 iters= 59 REJECT margin=0.8423430736 printed=0.371212 compliance=8.71832621844  f_bar=1.0000  k=0
+
+===== DETERMINISM =====
+  twice-run bit-identical:  OFF YES   ON YES   CTL YES
+
+===== EVERY RUNG — VERDICT + MARGIN =====
+  rung   vf   verdict OFF->ON        margin OFF          margin ON           dM/M       | CTL margin         dM/M(ctl)
+   0    0.68  ACCEPT     -> ACCEPT     1.75947361399  1.75937620829  5.5361e-05 | 1.75947361248  8.5718e-10
+   1    0.52  REJECT     -> REJECT     0.842343074324  0.841419043679  1.0970e-03 | 0.842343073639  8.1282e-10
+
+===== EVERY RUNG — DESIGN MOTION vs THE CONTROL FLOOR =====
+  rung  elems | ON vs OFF: mean|drho|  max|drho|  class-flips  printed-flips | CTL vs OFF: mean|drho|  max|drho|  class-flips  printed-flips
+   0   24576 |            3.9400e-06  1.1883e-03           0              0 |             7.8769e-12  2.5786e-09           0              0
+   1   24576 |            6.8151e-06  1.3976e-03           0              2 |             2.7457e-12  1.1616e-09           0              0
+
+===== THE FLOOR TEST =====
+  gate verdicts   OFF vs ON : IDENTICAL
+  gate verdicts   OFF vs CTL: IDENTICAL
+  terminal recommendation OFF "fdm walls=4 top=5 bottom=4 infill=45%gyroid"
+                      ON  "fdm walls=4 top=5 bottom=4 infill=45%gyroid"
+                      CTL "fdm walls=4 top=5 bottom=4 infill=45%gyroid"
+  WORST dM/M        ON 1.0970e-03   vs control floor 8.5718e-10   -> ABOVE the floor
+  TOTAL class-flips ON 0    vs control floor 0           -> at/below the floor
+  TOTAL printed-flips ON 2  vs control floor 0           -> ABOVE the floor
+
+===== COST (this fixture, healthy multigrid) =====
+  CG iterations   OFF 2384 -> ON 2618  (1.0982x)
+  wall            OFF 30.0 s -> ON 24.7 s  (0.822x)
+  optimizer iters OFF 97 -> ON 98
+  Jacobi fallback OFF 0  ON 0   (of 97 / 98 solves)
+  GenEO           OFF armed=0 builds=0  ON armed=0 builds=0
+  ARMED latch     rung0 k=4 held@0 esc=0  rung1 k=4 LATCHED@3 esc=50  
+    rung 1 latch reason: escape detected: 50 element(s) took material outside the active band (growth invariant failed); mask disabled, full domain restored
+
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm/gate_table.csv
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm/flips.csv

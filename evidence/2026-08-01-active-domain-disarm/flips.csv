@@ -1,0 +1,5 @@
+rung,comparison,elements,n_class_flips,n_printed_flips,max_drho,mean_drho
+0,control_1e-9_vs_off,24576,0,0,2.579e-09,7.877e-12
+0,armed_on_vs_off,24576,0,0,1.188e-03,3.940e-06
+1,control_1e-9_vs_off,24576,0,0,1.162e-09,2.746e-12
+1,armed_on_vs_off,24576,0,2,1.398e-03,6.815e-06

@@ -1,0 +1,15 @@
+ad_disarm_gate — mode=odd  evidence=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-01-active-domain-disarm
+  production_active_domain_band() = 0  (the constant this task flips)
+
+===== THE ODD-AXIS CLASS — pad x AD =====
+  No design box, so the solved grid IS the part grid (odd axes survive).
+  pad 0 = the pre-262 world (hierarchy rejected, Jacobi-CG carries).
+  pad 1 = today (parity-padded index space, multigrid carries).
+  Rung 0, 25 iterations, identical in all four cells.
+
+  [pad0/AD-off] grid 33x25x33  mg=NOT-carried  75.1 s wall, 50 iterations, 5652 CG, 50/50 Jacobi-fallback solves, geneo armed=53 builds=1, 1 rungs
+    rung 0 vf=0.68 iters= 50 accept margin=2.709101995 printed=0.786623 compliance=48.2214482481  f_bar=1.0000  k=0
+  [pad0/AD-on ] grid 33x25x33  mg=NOT-carried  69.7 s wall, 50 iterations, 5652 CG, 50/50 Jacobi-fallback solves, geneo armed=53 builds=1, 1 rungs
+    rung 0 vf=0.68 iters= 50 accept margin=2.709101995 printed=0.786623 compliance=48.2214482481  f_bar=1.0000  k=4  LATCHED
+  [pad1/AD-off] grid 33x25x33  mg=NOT-carried  99.3 s wall, 50 iterations, 5898 CG, 48/50 Jacobi-fallback solves, geneo armed=51 builds=1, 1 rungs
+    rung 0 vf=0.68 iters= 50 accept margin=2.709105284 printed=0.786623 compliance=48.2214521814  f_bar=1.0000  k=0

@@ -380,20 +380,22 @@ int main() {
     CHECK(topopt::production_matfree_cubic_lattice(),
           "the production cubic-lattice posture is ARMED "
           "(2026-08-01 multiscale production wiring)");
-    // Handoff 2026-07-26-ad-arming — the ARMED active-domain band. AUTO (-1), NOT
-    // a pinned width: k is derived per job downstream (asserted concretely on the
-    // real run below). Asserted against the named sentinel, not a bare -1, so a
-    // drift fails here. This is the ONE production dial that is NOT bit-identical,
-    // so the tripwire is real: changing it requires re-running the gate harnesses
+    // Handoff 2026-08-01-active-domain-disarm — the active-domain band is
+    // DISARMED (0), reversing the 2026-07-26 arming. Asserted against the named
+    // constant, not a bare 0, so a drift fails here. With the band at 0 every
+    // production trajectory solve runs the FULL domain, so production is once
+    // again bit-identical to the library default on this axis. The tripwire is
+    // real in BOTH directions: re-arming requires re-running the gate harnesses
     // named in production.cpp and landing a new before/after gate table.
     CHECK(opts.simp.active_domain_band == topopt::production_active_domain_band(),
-          "production config arms the active-domain band to the named sentinel");
-    CHECK(topopt::production_active_domain_band() == -1,
-          "the production active-domain band is AUTO (-1): k is derived per job, "
-          "never pinned (2026-07-26-ad-arming bar A2)");
+          "production config sets the active-domain band to the named constant");
+    CHECK(topopt::production_active_domain_band() == 0,
+          "the production active-domain band is DISARMED (0) "
+          "(2026-08-01-active-domain-disarm)");
 
-    // Handoff 2026-07-26-draft-arming — the ARMED draft posture (bar A1). Draft is the
-    // SECOND production dial that is NOT bit-identical when on (the trajectory drifts
+    // Handoff 2026-07-26-draft-arming — the ARMED draft posture (bar A1). Draft is
+    // now the ONLY production dial that is NOT bit-identical when on — the
+    // active-domain band was the other, disarmed 2026-08-01 (the trajectory drifts
     // on some mid-ladder rungs; the certificate never does). Asserted against the
     // NAMED loose tolerance, not a bare 1e-3, so a silent drift fails here. The
     // escalation trigger stays DISARMED — 185 (compliance gap) and 197 (design-space
@@ -517,27 +519,50 @@ int main() {
       topopt::minimize_plastic(s2.grid, material, "PLA", s2.bcs, rules, s2.options);
   check_designs_identical(r1, r2);
 
-  // Handoff 2026-07-26-ad-arming bar A2 — k IS DERIVED, NEVER HARDCODED. The
-  // production config armed the band to AUTO (-1); prove that the run RESOLVED it
-  // to a concrete positive width equal to active_domain_auto_band(filter_radius) =
-  // ceil(rmin) + 1 for the grid it actually solved on, and that it is NOT the -1
-  // sentinel and NOT 0. This is the CI half of the "derived per job" bar — the
-  // harness measures it across three resolutions, this pins it on the real
-  // production driver at the resolution the parity gate runs.
+  // Handoff 2026-08-01-active-domain-disarm — THE DISARM, PINNED ON A REAL RUN.
+  // The arming's bar A2 asserted here that AUTO resolved to a derived positive
+  // width; the disarm asserts the reverse on the same real production ladder:
+  // every rung ran with band 0, i.e. the FULL domain, so no trajectory solve is
+  // restricted and nothing in the run is an approximation on this axis.
+  //
+  // What is DELIBERATELY still asserted is the DERIVATION ITSELF. Disarming
+  // withdrew the production REQUEST, not the mechanism: active_domain_auto_band
+  // still resolves ceil(rmin)+1 for the grid this ladder solved on, and the
+  // harnesses named in production.cpp's tripwire still drive it. Keeping the
+  // derivation pinned here means a future re-arming flips ONE constant and finds
+  // this bar already standing, rather than rebuilding it from scratch.
   {
     const double spacing = s1.solved_grid.spacing;
     const double rmin =
         topopt::physical_filter_radius(s1.options.min_feature_mm, spacing);
     const int expected_k = topopt::active_domain_auto_band(rmin);
-    CHECK(expected_k > 0, "the derived auto band is a positive width");
+    CHECK(expected_k > 0,
+          "the auto-band derivation still yields a positive width (the mechanism "
+          "survives the disarm; only the production request is withdrawn)");
     CHECK(!r1.evaluated.empty(), "the production run evaluated at least one rung");
     for (const auto& v : r1.evaluated) {
-      CHECK(v.optimization.active_domain_band == expected_k,
-            "each rung resolved the AUTO band to the DERIVED ceil(rmin)+1 width, "
-            "not the -1 sentinel and not a hardcoded literal");
+      CHECK(v.optimization.active_domain_band == 0,
+            "each rung ran with the band DISARMED (0) — every trajectory solve on "
+            "the full domain (2026-08-01-active-domain-disarm)");
+      CHECK(!v.optimization.active_domain_latched,
+            "a disarmed run has no latch to fire");
+      CHECK(v.optimization.active_domain_escape_count == 0,
+            "a disarmed run has no band to escape");
+      // THE OBSERVABILITY SURVIVES THE DISARM (the disarm handoff's T4). Every
+      // active_domain_* field is still computed and still finalized onto the
+      // variant — run_job.cpp copies them into run_info.json unconditionally —
+      // so a disarmed run records "the whole domain was active" as a POSITIVE
+      // statement, and a future re-arming has a like-for-like baseline to diff
+      // against instead of an absent field.
+      CHECK(v.optimization.active_fraction_mean == 1.0,
+            "a disarmed run reports active_fraction_mean = 1.0 (the whole domain "
+            "was active) — the observability is still written, not dropped");
+      CHECK(v.optimization.active_domain_latch_reason.empty(),
+            "a disarmed run carries no latch reason");
     }
-    std::printf("  [AD arming] AUTO band resolved to k=%d "
-                "(rmin=%.3f voxels, spacing=%.3f mm) on %d rung(s)\n",
+    std::printf("  [AD disarm] production band DISARMED: every rung ran band=0 "
+                "(the AUTO derivation would have given k=%d at rmin=%.3f voxels, "
+                "spacing=%.3f mm) on %d rung(s)\n",
                 expected_k, rmin, spacing, (int)r1.evaluated.size());
   }
 
