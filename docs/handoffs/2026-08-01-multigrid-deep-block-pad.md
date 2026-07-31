@@ -265,7 +265,30 @@ that cannot fail is not evidence.
 
 ## P7 — determinism + tests
 
-TODO(p7)
+**Determinism** (`p7_determinism.txt`) — a pad-rescued deep-blocked solve
+(30^3: every axis even, 15 odd one level down and over the DOF cap; graded
+1e-9 contrast) is bit-identical run-to-run and across 1/2/4/8 matvec
+threads, with multigrid carrying at 3 levels:
+
+```
+threads=1 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL
+threads=2 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL
+threads=4 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL
+threads=8 mg=1 levels=3 it=55/55 hash=e9b61e711bada666 repeat=IDENTICAL
+```
+
+**Full ctest: 73/73 green, 0 failures** (`p7_ctest.txt`) — the same count
+as the pre-change baseline measured on this container before any edit, so
+nothing was skipped or dropped. (73 rather than 262's 85: this container has
+no OCCT, so the OCCT-gated tests are not configured. The delta is the
+environment, not the change.) The slowest test is fea_mgcg_matfree at 597 s,
+which now includes the two new deep-block blocks.
+
+No assertion was weakened or deleted. The legacy deep-blocked fallback
+assertions in test_coarsen_rule run **verbatim** under pad mode OFF (that
+regime still exists — the stagnation latch routes there), with the new AUTO
+assertions added beside them; test_mgcg_matfree's odd-grid fallback blocks
+are untouched from 262.
 
 ## Files touched
 
