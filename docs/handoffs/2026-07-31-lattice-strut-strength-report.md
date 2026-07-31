@@ -137,7 +137,11 @@ interlayer binds).
   bit-identity is asserted in the unit test, and a full lattice job run twice
   produces byte-identical receipts/report/meshes —
   `evidence/determinism_receipts.sha256`.
-* Full ctest: <<CTEST_COUNT>> — see `evidence/ctest_summary.txt`.
+* Full ctest: **87/87 pass (100%)**, including the two new tests
+  (`strut_strength`, `strut_report_j6`) — `evidence/ctest_summary.txt`. (A first
+  suite pass showed 8 "Not Run" entries — stale binaries from building targets
+  concurrently in the same build dir, not test failures; a clean rebuild + rerun
+  is the recorded result.)
 
 ### L8 — THE EVALUATOR IS CALLABLE, NOT WELDED TO THE RECEIPT
 

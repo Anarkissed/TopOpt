@@ -1,0 +1,8 @@
+84/87 Test #26: traction_loads ...................   Passed    0.90 sec
+85/87 Test #13: hex_element ......................   Passed    0.75 sec
+86/87 Test #24: observability ....................   Passed    0.89 sec
+87/87 Test #19: job_schema .......................   Passed    0.97 sec
+
+100% tests passed out of 87
+
+Total Test time (real) = 6550.65 sec

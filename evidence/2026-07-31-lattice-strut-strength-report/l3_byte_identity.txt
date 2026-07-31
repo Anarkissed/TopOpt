@@ -1,0 +1,22 @@
+L3 — ABSENT LATTICE IS BYTE-IDENTICAL (stash/checkout-rebuild)
+baseline = 4b53386 (main after PR 259); changed = this task's tree
+job: demo l-bracket, NO lattice block (see the handoff)
+
+IDENTICAL report.json
+IDENTICAL variant_050.stl
+IDENTICAL fields.bin
+DIFFER iterations.csv
+run_info.json (timing fields excluded):
+DIFFER run_info.json:
+3c3
+<   "fingerprint": "4b53386ed503",
+---
+>   "fingerprint": "3809240140b6",
+
+4f8df53601e72c009fae6602bb3bbe7e73f9d83a6b34f9f1b09b4aceb404ec7a  out_changed/report.json
+4f8df53601e72c009fae6602bb3bbe7e73f9d83a6b34f9f1b09b4aceb404ec7a  out_base/report.json
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  out_changed/variant_050.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  out_base/variant_050.stl
+5877ce154b68919732d10460660bffd0daf0f58ab1f120d481cc40b7c423ef2e  out_changed/fields.bin
+5877ce154b68919732d10460660bffd0daf0f58ab1f120d481cc40b7c423ef2e  out_base/fields.bin
+iterations.csv IDENTICAL modulo wall_ms column
