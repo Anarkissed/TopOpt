@@ -1,0 +1,7 @@
+193:    assert(out.accepted == false &&
+334:  double margin_effective;
+353:    margin_effective = me.worst_case;
+357:    margin_effective = margin.worst_case * knockdown.infill_knockdown;
+359:  const bool margin_ok = margin_effective >= margin_stop;
+366:  out.margin_effective = margin_effective;
+367:  out.accepted = load_path_ok && margin_ok;

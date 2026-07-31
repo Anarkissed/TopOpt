@@ -507,6 +507,36 @@ public struct LatticeReport: Equatable, Sendable {
     /// (a local run, or the run_info couldn't be read) — then only the settings echo
     /// shows, honestly labelled "requested".
     public let generated: Generated?
+    /// Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report),
+    /// parsed from run_info's certification `lattice` object when the worker
+    /// evaluated PR 259's measured de-homogenization law. REPORT ONLY — these
+    /// numbers never fed the accept verdict. In-plane and interlayer are kept
+    /// SEPARATE deliberately (which one binds is the point, exactly like a solid
+    /// part's margin.in_plane / margin.interlayer); the interlayer margin divides
+    /// by the UNSOURCED z_knockdown echoed here. nil when the worker reported no
+    /// strut numbers (older worker, non-octet lattice, or run_info unreadable).
+    public let strut: StrutStrength?
+
+    public struct StrutStrength: Equatable, Sendable {
+        public let marginInPlane: Double
+        public let marginInterlayer: Double
+        /// The interlayer divisor, echoed because its provenance is UNSOURCED —
+        /// the bound survives re-sourcing, this margin does not.
+        public let zKnockdown: Double
+        /// Thinnest latticed member's span in cells vs the homogenization floor;
+        /// below the floor the numbers are indicative, not certified.
+        public let minCellsPerMember: Double
+        public let outOfRegime: Bool
+        public init(marginInPlane: Double, marginInterlayer: Double,
+                    zKnockdown: Double, minCellsPerMember: Double,
+                    outOfRegime: Bool) {
+            self.marginInPlane = marginInPlane
+            self.marginInterlayer = marginInterlayer
+            self.zKnockdown = zKnockdown
+            self.minCellsPerMember = minCellsPerMember
+            self.outOfRegime = outOfRegime
+        }
+    }
 
     public struct Generated: Equatable, Sendable {
         public let emitSTL: Bool
@@ -530,7 +560,8 @@ public struct LatticeReport: Equatable, Sendable {
 
     public init(topologyID: String, cellMM: Double, generateRelativeDensity: Double,
                 minRelativeDensity: Double, maxRelativeDensity: Double,
-                regionScoped: Bool, generated: Generated? = nil) {
+                regionScoped: Bool, generated: Generated? = nil,
+                strut: StrutStrength? = nil) {
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.generateRelativeDensity = generateRelativeDensity
@@ -538,6 +569,7 @@ public struct LatticeReport: Equatable, Sendable {
         self.maxRelativeDensity = maxRelativeDensity
         self.regionScoped = regionScoped
         self.generated = generated
+        self.strut = strut
     }
 }
 

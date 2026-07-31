@@ -413,6 +413,22 @@ struct RunInfo {
   double lattice_margin_worst_case = 0.0;
   double lattice_margin_effective = 0.0;
   bool lattice_accepted = false;
+  // Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report) — the
+  // run-level worst (min over latticed variants) of the REPORT-ONLY de-homogenized
+  // strut margins (PR 259's measured law; see strut_strength.hpp). Emitted inside
+  // the "lattice" object ONLY when `lattice_strut_report_present` (octet law
+  // applied to >= 1 variant), so pre-existing records are unchanged. These numbers
+  // do NOT feed `lattice_accepted` — the verdict logic is untouched; the app shows
+  // in-plane and interlayer SEPARATELY (the interlayer margin divides by the
+  // UNSOURCED z_knockdown recorded here; the receipts carry the z-free bounds).
+  bool lattice_strut_report_present = false;
+  double lattice_strut_margin_in_plane = 0.0;
+  double lattice_strut_margin_interlayer = 0.0;
+  double lattice_strut_margin_worst_case = 0.0;
+  double lattice_strut_z_knockdown = 0.0;
+  double lattice_strut_min_cells_per_member = 0.0;  // vs the homogenization floor
+  bool lattice_strut_out_of_regime = false;  // below the cells-per-member floor
+  long long lattice_strut_rho_clamped_voxels = 0;   // law-span clamps (bar L5)
 
   // Lattice EXPORT posture (handoff 2026-07-28-lattice-generation-production) — the
   // printable GEOMETRY generator, distinct from the certification posture above.

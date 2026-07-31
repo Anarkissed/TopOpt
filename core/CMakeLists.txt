@@ -51,6 +51,7 @@ add_library(topopt
   src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/fea/lattice.cpp
+  src/fea/strut_strength.cpp
   src/orient/orient.cpp
   src/settings/settings.cpp
   src/settings/report.cpp
@@ -748,6 +749,27 @@ if(Eigen3_FOUND)
   add_executable(test_lattice_certification tests/validation/test_lattice_certification.cpp)
   target_link_libraries(test_lattice_certification PRIVATE topopt)
   add_test(NAME lattice_certification COMMAND test_lattice_certification)
+
+  # Strut-strength REPORT (task 2026-07-31-lattice-strut-strength-report): the
+  # embedded PR 259 kfit *_cert law reproduces its anchors exactly, out-of-span
+  # rho is clamped-and-counted (L5), a hydrostatic state produces a nonzero bound
+  # (the scalar-vm impossibility), the build direction is an explicit resolved
+  # parameter (L8: axis builds coincide by cubic symmetry, off-axis moves ONLY
+  # the interlayer margin), and — through analyze_fixed_design — a strut margin
+  # below 0.5 leaves today's verdict untouched (L1) while the cells-per-member
+  # regime guard flags thin domains (L4). Drives analyze.cpp (Eigen), so gated.
+  add_executable(test_strut_strength tests/unit/test_strut_strength.cpp)
+  target_link_libraries(test_strut_strength PRIVATE topopt)
+  add_test(NAME strut_strength COMMAND test_strut_strength)
+
+  # Bar L2 of the same task: the PRODUCTION strut report reproduces PR 259's J6
+  # table on PR 255's three certified designs, rebuilt from the repo's evidence
+  # fields (SKIPs loudly when the evidence tree is absent). Same Eigen gate.
+  add_executable(test_strut_report_j6 tests/validation/test_strut_report_j6.cpp)
+  target_link_libraries(test_strut_report_j6 PRIVATE topopt)
+  target_compile_definitions(test_strut_report_j6 PRIVATE
+    PR255_FIELD_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-07-31-multiscale-lattice-feasibility")
+  add_test(NAME strut_report_j6 COMMAND test_strut_report_j6)
 
   # Width-aware accept-gate knockdown (handoff 2026-07-26-width-aware-knockdown):
   # the SHELL+CORE composite width_aware_knockdown() reproduces 191/192's member-scale
