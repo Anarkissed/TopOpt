@@ -141,6 +141,47 @@ constexpr int kMgLatchThreshold = 3;  // consecutive stagnations -> latch MG off
 thread_local int g_mg_consecutive_stagnations = 0;
 thread_local bool g_mg_latched = false;
 
+// --- Parity padding of the MG index space (task: multigrid-odd-axis-cliff) ---
+// 0 = OFF (legacy: an odd fine axis rejects the hierarchy), 1 = AUTO (default:
+// pad the hierarchy's INDEX SPACE to mg_pad_target when a fine axis is odd;
+// all-even grids take the legacy path byte-identically), 2 = FORCE (tests only:
+// pad even a fully-coarsenable grid by one extra 2^L block per axis, to prove
+// the pad is bit-identical on a control grid). Thread-local like the latch:
+// the driver issues a run's solves on one thread.
+constexpr int kMgPadOff = 0, kMgPadAuto = 1, kMgPadForce = 2;
+thread_local int g_mg_parity_pad_mode = kMgPadAuto;
+
+// The element extents the hierarchy is BUILT on: the real (fex,fey,fez), or the
+// padded index-space extents when the parity pad engages. The padded extents
+// only ever add virtual HIGH-side planes whose nodes stay inactive (-1), so the
+// operator, RHS and kept-DOF numbering are untouched; only the hierarchy's
+// geometric bookkeeping grows. Returns true when padding engaged.
+bool mg_effective_extents(int fex, int fey, int fez, int& pex, int& pey,
+                          int& pez) {
+  pex = fex;
+  pey = fey;
+  pez = fez;
+  const int mode = g_mg_parity_pad_mode;
+  if (mode == kMgPadOff) return false;
+  const bool fine_odd = (fex & 1) || (fey & 1) || (fez & 1);
+  if (!fine_odd && mode != kMgPadForce) return false;  // walk-back regime: no pad
+  int px, py, pz;
+  const int L = mg_pad_target(fex, fey, fez, px, py, pz);
+  if (L == 0) return false;  // too small to host any hierarchy: legacy rejection
+  if (mode == kMgPadForce) {
+    // Grow every axis by a full 2^L block so the pad is genuinely exercised
+    // even when the real extents are already multiples of 2^L.
+    const int step = 1 << L;
+    px += step;
+    py += step;
+    pz += step;
+  }
+  pex = px;
+  pey = py;
+  pez = pz;
+  return pex != fex || pey != fey || pez != fez;
+}
+
 // Wall-clock deadline for a single MG-CG attempt (handoff 128). steady_clock is
 // monotone (unaffected by wall-clock adjustments). Returns time_point::max() when
 // the guard is disabled (guard_sec <= 0) so the comparison in the loop is a cheap
@@ -502,21 +543,32 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
 
     // Active-DOF map on the fine node grid: (node*3+comp) -> survivor id (== row
     // of Kgg). The survivor id r maps back to global DOF s.freedofs[kept[r]], from
-    // which the node and component are recovered.
+    // which the node and component are recovered. The map lives on the parity-
+    // padded INDEX-SPACE node grid (identical to the real grid unless a fine
+    // axis is odd — task: multigrid-odd-axis-cliff); the virtual pad nodes stay
+    // -1, so the hierarchy involves exactly the real active DOFs.
     const int nnx = grid.nx + 1, nny = grid.ny + 1, nnz = grid.nz + 1;
-    std::vector<int> active(static_cast<std::size_t>(nnx) * nny * nnz * 3, -1);
+    int pex, pey, pez;
+    mg_effective_extents(grid.nx, grid.ny, grid.nz, pex, pey, pez);
+    const int pnnx = pex + 1, pnny = pey + 1, pnnz = pez + 1;
+    std::vector<int> active(static_cast<std::size_t>(pnnx) * pnny * pnnz * 3, -1);
     for (int r = 0; r < ng; ++r) {
       const int gdof = s.freedofs[static_cast<std::size_t>(kept[r])];
       const int node = gdof / 3;
       const int comp = gdof % 3;
-      active[static_cast<std::size_t>(node) * 3 + comp] = r;
+      const int a = node % nnx;
+      const int b = (node / nnx) % nny;
+      const int c = node / (nnx * nny);
+      const std::size_t pnode =
+          (static_cast<std::size_t>(c) * pnny + b) * pnnx + a;
+      active[pnode * 3 + comp] = r;
     }
 
     const int cap = max_iterations > 0 ? max_iterations
                                        : std::max(1000, 2 * ng);
 
     std::vector<Level> levels =
-        build_hierarchy(Kgg, nnx, nny, nnz, std::move(active));
+        build_hierarchy(Kgg, pnnx, pnny, pnnz, std::move(active));
     diag.hier_built = !levels.empty();  // fallback-mode diagnostics (handoff 128)
 
     bool solved = false;
@@ -807,8 +859,16 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
 bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
                         MfHierarchy& out) {
   const int fex = nnx - 1, fey = nny - 1, fez = nnz - 1;  // fine element dims
-  if ((fex & 1) || (fey & 1) || (fez & 1)) return false;
-  const int cex = fex / 2, cey = fey / 2, cez = fez / 2;
+  // Parity pad (task: multigrid-odd-axis-cliff): an odd fine axis used to fail
+  // this gate outright — the whole run then rode Jacobi-CG. The hierarchy is
+  // instead built on the padded INDEX SPACE extents; the virtual high-side
+  // nodes are inactive everywhere below, so P0's rows, A1 and every coarse
+  // operator involve exactly the real active DOFs. Unpadded grids leave
+  // (pex,pey,pez) == (fex,fey,fez) and this function byte-identical to before.
+  int pex, pey, pez;
+  mg_effective_extents(fex, fey, fez, pex, pey, pez);
+  if ((pex & 1) || (pey & 1) || (pez & 1)) return false;
+  const int cex = pex / 2, cey = pey / 2, cez = pez / 2;
   if (cex < kMinCoarseElems || cey < kMinCoarseElems || cez < kMinCoarseElems)
     return false;
   const int cnx = cex + 1, cny = cey + 1, cnz = cez + 1;
@@ -822,11 +882,15 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   auto fnode_index = [&](int a, int b, int c) { return (c * nny + b) * nnx + a; };
 
   // Coarse (level-1) active DOFs: active iff the coincident fine node-DOF is.
+  // A coarse node whose coincident fine node lies in the virtual pad (beyond
+  // the real node grid) has no fine DOF and stays inactive; on an unpadded
+  // grid the bounds test never fires and the enumeration is byte-identical.
   std::vector<int> cactive(static_cast<std::size_t>(cnx) * cny * cnz * 3, -1);
   int nc = 0;
   for (int c = 0; c < cnz; ++c)
     for (int b = 0; b < cny; ++b)
       for (int a = 0; a < cnx; ++a) {
+        if (2 * a >= nnx || 2 * b >= nny || 2 * c >= nnz) continue;  // pad node
         const int fnode = fnode_index(2 * a, 2 * b, 2 * c);
         const int cnode = (c * cny + b) * cnx + a;
         for (int comp = 0; comp < 3; ++comp)
@@ -1463,6 +1527,17 @@ void fea_matfree_reset_mg_stagnation_latch() {
 }
 
 bool fea_matfree_mg_stagnation_latched() { return g_mg_latched; }
+
+// Parity-pad mode (task: multigrid-odd-axis-cliff). Production never calls the
+// setter (AUTO is the default); tests use OFF to exercise the legacy rejection
+// path with its assertions intact, and FORCE to prove on a fully-coarsenable
+// control grid that the pad is bit-identical. Thread-local like the latch.
+void fea_set_mg_parity_pad_mode(int mode) {
+  g_mg_parity_pad_mode =
+      (mode == kMgPadOff || mode == kMgPadForce) ? mode : kMgPadAuto;
+}
+
+int fea_mg_parity_pad_mode() { return g_mg_parity_pad_mode; }
 
 FeaSolution fea_solve_mgcg(const VoxelGrid& grid, double youngs_modulus,
                            double poisson, const std::vector<DirichletBC>& bcs,

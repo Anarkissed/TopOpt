@@ -32,10 +32,28 @@
 // guards stagnation directly (multigrid.cpp fast-fail + latch). The rule/predicate
 // stay here as documentation and a future gate, but they no longer size the pad.
 //
+// PARITY PADDING (task: multigrid-odd-axis-cliff). A grid whose FINE extents
+// contain a single odd axis (e.g. the real 128x31x118 run) used to fail the
+// very first halving, silently costing the whole run its multigrid. The solver
+// now pads its INDEX SPACE — never the design grid, the physics, or any
+// accounting — to the mg_pad_target below: each axis rounded up to a multiple
+// of 2^L, where L is the shallowest depth whose coarsest level fits
+// kMgCoarseDofCap counting REAL nodes only. The padded nodes are permanently
+// inactive (the same treatment fixed/void DOFs already get), so the operator,
+// loads, mass, margins and every exported byte are untouched by construction.
+// This does NOT relax the all-axes-even rule: the padded extents halve cleanly.
+// Scope: the solver engages the pad only when a FINE axis is odd. All-even
+// grids that reject DEEP (e.g. 232x64x216, the withdrawn PR #151 regime in the
+// walk-back note above) keep today's behavior byte-for-byte.
+
 // Pure integer arithmetic (no Eigen, no allocation): safe to include from the
 // always-built OCCT-free voxel TU and from the Eigen-gated multigrid TU alike.
+// (mg_startup_banner formats into a caller buffer via <cstdio>; still no
+// allocation.)
 
+#include <cstddef>
 #include <cstdint>
+#include <cstdio>
 
 namespace topopt {
 
@@ -75,6 +93,144 @@ inline bool mg_grid_coarsenable(int ex, int ey, int ez) {
                              static_cast<std::int64_t>(ny + 1) *
                              static_cast<std::int64_t>(nz + 1);
   return levels >= kMgMinLevels && 3 * nodes <= kMgCoarseDofCap;
+}
+
+// The coarsening PLAN for a grid of element dims (ex,ey,ez): how many levels
+// the halving loop achieves, where it stops and why, and whether the solver
+// would accept the hierarchy. Same walk as mg_grid_coarsenable (whose boolean
+// it must always agree with — asserted by test_coarsen_rule), but it names the
+// offending axes so a rejection can be reported LOUDLY at run start instead of
+// being discovered in run_info.json six hours later.
+struct MgCoarsenPlan {
+  int levels = 1;             // hierarchy levels achievable (1 = no coarsening)
+  bool accepted = false;      // levels >= kMgMinLevels and bound <= kMgCoarseDofCap
+  bool odd_stop = false;      // coarsening stopped at an odd axis (vs min-elems)
+  int odd_axis_mask = 0;      // bit0=x, bit1=y, bit2=z odd at the stop level
+  int stop_ex = 0, stop_ey = 0, stop_ez = 0;  // element dims where halving stopped
+  std::int64_t coarse_dof_bound = 0;          // 3 * nodes at the stop level
+};
+
+inline MgCoarsenPlan mg_coarsen_plan(int ex, int ey, int ez) {
+  MgCoarsenPlan p;
+  if (ex < 1 || ey < 1 || ez < 1) return p;
+  auto bound = [](int a, int b, int c) {
+    return 3 * static_cast<std::int64_t>(a + 1) * static_cast<std::int64_t>(b + 1) *
+           static_cast<std::int64_t>(c + 1);
+  };
+  int nx = ex, ny = ey, nz = ez;
+  while (true) {
+    const bool odd = (nx & 1) || (ny & 1) || (nz & 1);
+    if (odd || nx / 2 < kMgMinCoarseElems || ny / 2 < kMgMinCoarseElems ||
+        nz / 2 < kMgMinCoarseElems) {
+      p.odd_stop = odd;
+      if (odd)
+        p.odd_axis_mask =
+            ((nx & 1) ? 1 : 0) | ((ny & 1) ? 2 : 0) | ((nz & 1) ? 4 : 0);
+      break;
+    }
+    nx /= 2;
+    ny /= 2;
+    nz /= 2;
+    ++p.levels;
+    if (bound(nx, ny, nz) <= kMgCoarseDofCap) break;
+  }
+  p.stop_ex = nx;
+  p.stop_ey = ny;
+  p.stop_ez = nz;
+  p.coarse_dof_bound = bound(nx, ny, nz);
+  p.accepted = p.levels >= kMgMinLevels && p.coarse_dof_bound <= kMgCoarseDofCap;
+  return p;
+}
+
+// The parity-padding TARGET. Finds the shallowest halving depth L >= 1 such
+// that a hierarchy on index-space extents padded to multiples of 2^L reaches a
+// coarsest level under kMgCoarseDofCap — counting REAL nodes only
+// (floor(e/2^L)+1 per axis), because the padded index-space nodes are inactive
+// and contribute no DOF. Fills (px,py,pz) = the padded extents and returns L;
+// returns 0 when no depth works (an axis too small to keep kMgMinCoarseElems
+// coarse elements at the depth the cap requires — e.g. a 2x1x1 grid), in which
+// case the caller keeps today's rejection. The padded extents halve cleanly L
+// times (px = ceil(ex/2^L) * 2^L with ceil(...) >= kMgMinCoarseElems), so the
+// all-axes-even rule is satisfied at every level, never relaxed.
+inline int mg_pad_target(int ex, int ey, int ez, int& px, int& py, int& pz) {
+  if (ex < 1 || ey < 1 || ez < 1) return 0;
+  for (int L = 1; L <= 24; ++L) {
+    const int step = 1 << L;
+    const int cx = (ex + step - 1) / step;
+    const int cy = (ey + step - 1) / step;
+    const int cz = (ez + step - 1) / step;
+    if (cx < kMgMinCoarseElems || cy < kMgMinCoarseElems ||
+        cz < kMgMinCoarseElems)
+      return 0;  // deeper only shrinks further: no feasible depth exists
+    const std::int64_t real_nodes = static_cast<std::int64_t>((ex >> L) + 1) *
+                                    static_cast<std::int64_t>((ey >> L) + 1) *
+                                    static_cast<std::int64_t>((ez >> L) + 1);
+    if (3 * real_nodes <= kMgCoarseDofCap) {
+      px = cx * step;
+      py = cy * step;
+      pz = cz * step;
+      return L;
+    }
+  }
+  return 0;
+}
+
+// The RUN-START banner (task: multigrid-odd-axis-cliff, O1/O2). Pure decision +
+// text for what the CLI should say about multigrid on this solve grid BEFORE
+// the first solve. Returns 0 = say nothing (grid coarsenable as-is), 1 = NOTE
+// (an odd axis blocks coarsening but the solver's parity pad fixes it — name
+// the axes and the padded shape), 2 = WARNING (the hierarchy WILL be rejected:
+// name the grid, the offending axes and where halving stops, the achievable
+// level count, and the concrete remedy shape). `pad_enabled` mirrors the
+// solver's parity-pad mode so the banner reports what will actually happen.
+inline int mg_startup_banner(int ex, int ey, int ez, bool pad_enabled, char* buf,
+                             std::size_t bufsize) {
+  if (bufsize > 0) buf[0] = '\0';
+  const MgCoarsenPlan plan = mg_coarsen_plan(ex, ey, ez);
+  if (plan.accepted) return 0;
+  const bool fine_odd = (ex & 1) || (ey & 1) || (ez & 1);
+  int px = 0, py = 0, pz = 0;
+  const int padL = mg_pad_target(ex, ey, ez, px, py, pz);
+  // Odd axes at the level halving stopped, named with their extents there.
+  char axes[64];
+  {
+    int n = 0;
+    const int stop[3] = {plan.stop_ex, plan.stop_ey, plan.stop_ez};
+    const char* name[3] = {"x", "y", "z"};
+    for (int i = 0; i < 3; ++i)
+      if (plan.odd_axis_mask & (1 << i))
+        n += std::snprintf(axes + n, sizeof(axes) - static_cast<std::size_t>(n),
+                           "%s%s=%d", n ? "," : "", name[i], stop[i]);
+    if (n == 0) std::snprintf(axes, sizeof(axes), "none");
+  }
+  if (fine_odd && padL > 0 && pad_enabled) {
+    std::snprintf(buf, bufsize,
+                  "NOTE: solve grid %dx%dx%d has odd axis(es) [%s] - geometric "
+                  "multigrid pads its INDEX SPACE to %dx%dx%d (up to %d levels). "
+                  "The pad is inactive solver bookkeeping only: the design grid, "
+                  "loads, mass and margins are untouched.",
+                  ex, ey, ez, axes, px, py, pz, padL + 1);
+    return 1;
+  }
+  if (padL > 0)
+    std::snprintf(
+        buf, bufsize,
+        "WARNING: geometric multigrid will REJECT its hierarchy on the "
+        "%dx%dx%d solve grid - coarsening stops at %dx%dx%d (odd axis(es) "
+        "[%s]) after %d level(s), coarsest ~%lld DOF > cap %d. Every linear "
+        "solve will fall back to Jacobi-CG (a large slowdown for the whole "
+        "run). Remedy: a %dx%dx%d grid would allow %d levels.",
+        ex, ey, ez, plan.stop_ex, plan.stop_ey, plan.stop_ez, axes, plan.levels,
+        static_cast<long long>(plan.coarse_dof_bound), kMgCoarseDofCap, px, py,
+        pz, padL + 1);
+  else
+    std::snprintf(
+        buf, bufsize,
+        "WARNING: geometric multigrid will REJECT its hierarchy on the "
+        "%dx%dx%d solve grid - too small to host a %d-level hierarchy under "
+        "the coarse-DOF cap. Every linear solve will fall back to Jacobi-CG.",
+        ex, ey, ez, kMgMinLevels);
+  return 2;
 }
 
 // Round `v` up to the next multiple of `align` (align a power of two, >= 1).

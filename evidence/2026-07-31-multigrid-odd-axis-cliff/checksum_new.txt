@@ -1,0 +1,5 @@
+mf_solid_32   mg=1 it=18 hash=fa47966171f3c4fa
+mf_graded_32  mg=1 it=29 hash=bdab3fee63a22a08
+asm_solid_32  mg=1 it=18 hash=d2024d41b0bd2882
+mp_32  used_mg=1 levels=3 variants=1 hash=eff1bd2b331a11ba
+mp_30  used_mg=0 levels=0 variants=1 hash=5bb065dad7f1ef63

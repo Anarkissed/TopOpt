@@ -18,6 +18,7 @@
 
 #include "topopt/analyze.hpp"
 #include "topopt/clearance.hpp"
+#include "topopt/coarsen.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/fields.hpp"
 #include "topopt/grading.hpp"
@@ -1797,6 +1798,26 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // The grid the run solves on (the expanded domain under a design box), needed
   // up front so a streamed variant's mesh is resampled on the right grid.
   const VoxelGrid solved_grid = minimize_plastic_solved_grid(grid, options);
+
+  // LOUD PARITY GATE (task: multigrid-odd-axis-cliff, O1/O2). Say at RUN START
+  // what geometric multigrid will do on this grid. The motivating run solved
+  // 128x31x118 — one odd axis — for six hours on Jacobi-CG, discoverable only
+  // in run_info.json afterwards. Now: a grid the solver's parity pad rescues
+  // gets a NOTE naming the odd axes and the padded shape; a grid that will
+  // still reject its hierarchy gets a WARNING naming the offending axes, the
+  // achievable level count and the concrete remedy shape. Coarsenable grids
+  // stay silent. Pure prediction from the same rule the solver enforces
+  // (topopt/coarsen.hpp); the post-run observed warning below is unchanged.
+  if (options.simp.solver == SolverKind::MultigridCG ||
+      options.simp.solver == SolverKind::MultigridCG_Matfree) {
+    char banner[512];
+    if (mg_startup_banner(solved_grid.nx, solved_grid.ny, solved_grid.nz,
+                          fea_mg_parity_pad_mode() != 0, banner,
+                          sizeof(banner)) != 0) {
+      std::fprintf(stderr, "%s\n", banner);
+      std::fflush(stderr);
+    }
+  }
 
   // Job wall clock start (lattice P6: generation time as a fraction of the whole
   // job). Captured here, after import/voxelize, so it spans the solve + export the
