@@ -1,0 +1,18 @@
+=== repro 30x30x30 pad_mode=0 max_iters=5 ===
+  iter   1: cg=   105 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   2: cg=    80 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   3: cg=    77 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   4: cg=    92 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   5: cg=    81 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   6: cg=    98 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   7: cg=   182 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   8: cg=   101 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter   9: cg=   144 mg=0 levels=0 hier_built=0 geneo_dim=0
+  iter  10: cg=   213 mg=0 levels=0 hier_built=0 geneo_dim=0
+RESULT pad_mode=0: used_multigrid=0 mg_levels=0 hier_ever_built=0
+  observer solves: mg=0 jacobi=10 total_cg_iters=1173 max_levels=0
+  geneo: armed_solves=0 basis_builds=0 coarse_refreshes=0 basis_dim=0 basis_mb=0.0
+
+real	0m12.152s
+user	0m17.602s
+sys	0m1.314s

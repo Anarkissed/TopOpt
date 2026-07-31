@@ -1,0 +1,81 @@
+EXPECTATIONS — stated BEFORE running (task: multigrid-deep-block-pad).
+Basis: handoff 125's measurements (occ x hole factorial at 192x112x128,
+budget-100), handoff 127's latch, handoff 128's budget-300, 262's O5.
+
+P1 — deepblock_extents at 232x64x216 (pads to 240x64x224, depth 4, 5 levels):
+  occ1.0_nohole   pad=1: MG carries, ~11-25 cycles (125: solid is
+                  grid-independent ~11); wall well under the pad=0 Jacobi wall.
+  occ1.0_hole0.4  pad=1: MG carries, ~40-70 cycles (125: 40 at 192-grid).
+  occ0.5_hole0.4  pad=1: MG carries, ~74-250 cycles — the band the budget-300
+                  raise exists to rescue (125 measured 74 at budget-100).
+  occ0.4_nohole   pad=1: MG carries, ~37-100 cycles.
+  occ0.4_hole0.4  pad=1: STAGNATES (125: no convergence even at 2000 cycles):
+                  hier=1 mg=0 cyc=300, falls back to Jacobi; wall roughly
+                  2-3x the pad=0 wall for THIS solve (build + 300 wasted
+                  cycles on top of the same Jacobi solve).
+  Latch tax block (occ0.4_hole0.4, 5 consecutive solves, pad=1):
+                  solves 1-3 stagnate (hier=1, full budget), latch arms at
+                  solve 3; solves 4-5 skip the build (hier=0), wall ~= the
+                  pad=0 Jacobi wall. Per-run overhead of lifting the gate on
+                  the pathological field = 3 x (build + 300 cycles), amortized
+                  to a few percent of a 158-iteration production run.
+
+P1 verdict expected: PR 151's per-solve harm REPRODUCES on the pathological
+field (MG still cannot contract there — no budget fixes it), but the latch
+now bounds it per run, and every other deep-blocked field flips to a win.
+If the latch does NOT bound it, or the benign fields do NOT carry: STOP.
+
+ADDENDUM (before the first full P1 run; the initial run was killed at case 1
+after a design flaw was found in the gate). Reading the builder showed that
+build_hierarchy / build_mf_hierarchy accept on ACTUAL active-DOF counts at
+the walk stop, not on the conservative full-node bound mg_grid_coarsenable
+uses — so an all-even bound-rejected grid with a SPARSE active set (a thin
+part in a design-box expanse: exactly 125's occ<=0.5 rows) can already build
+today. The gate was refined to count actual actives at the stop depth
+(mg_unpadded_stop_active) and pad only when that count exceeds the cap.
+Revised expectations for the factorial at 232x64x216:
+  occ1.0 rows (dense: actual ~22.7k > 6000 at depth-3 stop): pad ENGAGES,
+      MG carries ~11-70 cycles; these were truly build-blocked before.
+  occ0.7_hole0.4 (actual ~10-12k > cap): pad ENGAGES, MG carries but this is
+      the hardest carried row (125 measured 85 cycles at the 192-grid).
+  occ0.5/0.4 rows (actual under ~6k at the stop): pad=0 side shows hier=1
+      ALREADY (they build today, 4 levels, coarsest = actual count); pad=1
+      side must be BYTE-IDENTICAL to pad=0 (the actual-count gate refuses to
+      touch them). If pad=1 differs on these rows: the gate is wrong, STOP.
+  latch-tax block moved to a 60^3 1e-9 checkerboard (dense AND stagnating,
+      the only regime where the pad engages and MG cannot contract):
+      pad=0 reference = straight Jacobi; pad=1 solves 1-3 stagnate (hier=1,
+      cyc=300), latch arms at 3, solves 4-5 hier=0 with wall ~= reference.
+
+P3 PROTOCOL AMENDMENT (before running P3, after P1 completed): the 30^3 runs
+use 262's exact 5-iteration protocol. The 232x64x216 runs use 3 MMA
+iterations (6 solves), not 5: P1 measured the before-side Jacobi at
+~500 s/solve at tol 1e-6, and the before side additionally pays GenEO's
+LOBPCG basis build on 9.6M DOF — 5 iterations would put the before side in
+the many-hour range without changing the story. Revised big-grid
+predictions: before = 6 Jacobi solves, several hundred to ~1500 iters each,
+GenEO arms + builds a basis (hundreds of MB at this size), wall 1-3 h;
+after = 6 MG-carried solves at 5 levels, ~30 cycles each (P1's occ1.0 row),
+plus one hierarchy build per solve, wall 10-25 min; GenEO fully quiet.
+
+P3 — deepblock_repro (production config, solid block self-weight):
+  30^3   before: build-rejected, Jacobi; after: MG carried, 3 levels
+         (30->32, depth 2 pad target; builder walks to its own cap break),
+         total CG cut several-fold, wall cut modestly (small grid).
+  232x64x216 (3.2M elem) before: build-rejected, Jacobi + GenEO arming
+         (like 262's O5 before column: hundreds of iters/solve, GenEO basis
+         hundreds of MB); after: MG carried, 5 levels, per-solve CG in the
+         tens-to-low-hundreds, GenEO armed_solves=0 basis_builds=0, wall cut
+         ~5-10x (262 measured 10.2x on 128x31x118 for the same flip).
+
+P4 expected: GenEO goes fully quiet on both after-runs (armed_solves=0,
+basis_builds=0, basis_dim=0).
+
+P5 — sweep after this change: rejection 23.7% -> ~0-2% at res 128; the only
+shapes still rejected are those where mg_pad_target finds no feasible depth
+(an axis too small to keep >=2 coarse elements at the depth the DOF cap
+requires — extreme pancake/needle aspect ratios, if any at 15%+ aspect).
+
+P6 expected: 32^3 rows bit-identical; 30^3 row flips used_mg 0->1 by design.
+P7 expected: bit-identical across 1/2/4/8 threads and run-to-run; ctest
+73/73 green (73 = this container's OCCT-less test count; baseline confirmed).

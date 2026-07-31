@@ -201,13 +201,22 @@ int main() {
     CHECK(mg_startup_banner(128, 32, 120, /*pad_enabled=*/true, buf,
                             sizeof(buf)) == 0,
           "banner: fully coarsenable grid -> silent");
-    // The all-even deep-blocked regime (the withdrawn PR #151 escalation) is
-    // NOT padded — the banner reports the honest WARNING with the remedy.
-    CHECK(mg_startup_banner(232, 64, 216, /*pad_enabled=*/true, buf,
+    // The all-even deep-blocked regime (the withdrawn PR #151 escalation).
+    // With the pad OFF the banner reports the honest WARNING with the remedy —
+    // verbatim from the odd-axis-cliff task. With the pad ON (task:
+    // multigrid-deep-block-pad) the pad now engages here too, so the banner is
+    // a NOTE naming the block point and the padded index-space shape.
+    CHECK(mg_startup_banner(232, 64, 216, /*pad_enabled=*/false, buf,
                             sizeof(buf)) == 2,
-          "banner: all-even deep-blocked grid stays a WARNING (no pad engages)");
+          "banner: all-even deep-blocked grid with pad off -> WARNING");
     CHECK(std::strstr(buf, "240x64x224") != nullptr,
           "banner: deep-block warning still states the remedy shape");
+    CHECK(mg_startup_banner(232, 64, 216, /*pad_enabled=*/true, buf,
+                            sizeof(buf)) == 1,
+          "banner: all-even deep-blocked grid with pad on -> NOTE (pad engages)");
+    CHECK(std::strstr(buf, "240x64x224") != nullptr &&
+              std::strstr(buf, "29x8x27") != nullptr,
+          "banner: deep-block note names the block point and the padded shape");
     // Too small to host any hierarchy: pad target refuses, banner warns.
     CHECK(mg_pad_target(2, 1, 1, px, py, pz) == 0,
           "pad target(2x1x1) = none (kMgMinCoarseElems floor)");
@@ -365,17 +374,31 @@ int main() {
         "REPORT: a coarsenable run reports used_multigrid=true");
   CHECK(rc.mg_levels >= 2, "REPORT: mg_levels is the observed hierarchy depth");
 
-  // 30^3 is odd after one halving and the coarsest exceeds the cap -> MG can NEVER
-  // build; every solve falls back, and the run reports it (the honesty guarantee).
-  // The parity pad does NOT engage here: the FINE extents are all even, so this
-  // (the walk-back regime of PR #151) keeps today's behavior byte-for-byte.
+  // 30^3 is odd after one halving and the coarsest exceeds the cap -> unpadded,
+  // MG can NEVER build; every solve falls back, and the run reports it (the
+  // honesty guarantee). Under the LEGACY pad-OFF mode this regime still exists
+  // (the stagnation latch also routes here), so the original assertions run
+  // verbatim under pad OFF.
   CHECK(!mg_grid_coarsenable(30, 30, 30), "30^3 is NOT coarsenable");
+  topopt::fea_set_mg_parity_pad_mode(0);
   const MinimizePlasticResult rf = run_self_weight(30);
-  std::printf("[coarsen] self-weight 30^3: used_multigrid=%d mg_levels=%d\n",
+  topopt::fea_set_mg_parity_pad_mode(1);
+  std::printf("[coarsen] self-weight 30^3 (pad off): used_multigrid=%d mg_levels=%d\n",
               rf.used_multigrid, rf.mg_levels);
   CHECK(!rf.used_multigrid,
         "REPORT: a non-coarsenable run reports used_multigrid=false (loud fallback)");
   CHECK(rf.mg_levels == 0, "REPORT: mg_levels is 0 when MG never engaged");
+
+  // (4a) DEEP-BLOCK PAD at the run level (task: multigrid-deep-block-pad).
+  // Under the production default (pad AUTO) the same 30^3 run now engages
+  // multigrid through the index-space pad (30 -> 32 per axis): the all-even
+  // deep-blocked regime is no longer excluded from the pad's scope.
+  const MinimizePlasticResult rd = run_self_weight(30);
+  std::printf("[coarsen] self-weight 30^3 (pad auto): used_multigrid=%d mg_levels=%d\n",
+              rd.used_multigrid, rd.mg_levels);
+  CHECK(rd.used_multigrid,
+        "DEEP-BLOCK PAD: an all-even deep-blocked run now engages multigrid");
+  CHECK(rd.mg_levels >= 2, "DEEP-BLOCK PAD: a real >=2-level hierarchy carried it");
 
   // (4b) PARITY PAD at the run level (task: multigrid-odd-axis-cliff). 31^3 has
   // odd FINE extents — exactly the cliff of the real 128x31x118 run — and now

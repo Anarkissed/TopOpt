@@ -883,17 +883,19 @@ double fea_geneo_rebuild_factor();
 void fea_matfree_reset_mg_stagnation_latch();
 bool fea_matfree_mg_stagnation_latched();
 
-// PARITY PADDING of the multigrid index space (task: multigrid-odd-axis-cliff).
-// A single odd fine axis (e.g. the real 128x31x118 run) used to reject the
-// multigrid hierarchy outright — the whole run silently rode Jacobi-CG. Both
+// PARITY PADDING of the multigrid index space (task: multigrid-odd-axis-cliff;
+// scope widened by task multigrid-deep-block-pad). A grid the coarsening rule
+// rejects — a single odd fine axis (e.g. the real 128x31x118 run) or an
+// all-even grid that blocks deep (e.g. 232x64x216) — used to reject the
+// multigrid hierarchy outright: the whole run silently rode Jacobi-CG. Both
 // multigrid solvers now pad the hierarchy's INDEX SPACE (never the design
 // grid, loads, mass or any accounting: the padded nodes are permanently
-// inactive) to the mg_pad_target shape (topopt/coarsen.hpp) when a fine axis
-// is odd. Mode: 1 = AUTO (the default; all-even grids are byte-identical to
-// before), 0 = OFF (legacy rejection — tests use this to keep exercising the
-// Jacobi fallback), 2 = FORCE (tests only: pad even a coarsenable control grid
-// to prove the pad leaves the solve bit-identical). Thread-local, like the
-// stagnation latch.
+// inactive) to the mg_pad_target shape (topopt/coarsen.hpp) whenever the
+// unpadded grid would be rejected. Mode: 1 = AUTO (the default; grids that
+// already coarsen are byte-identical to before), 0 = OFF (legacy rejection —
+// tests use this to keep exercising the Jacobi fallback), 2 = FORCE (tests
+// only: pad even a coarsenable control grid to prove the pad leaves the solve
+// bit-identical). Thread-local, like the stagnation latch.
 void fea_set_mg_parity_pad_mode(int mode);
 int fea_mg_parity_pad_mode();
 
