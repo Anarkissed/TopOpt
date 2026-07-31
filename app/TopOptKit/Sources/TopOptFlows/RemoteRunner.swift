@@ -642,12 +642,34 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                 // and the strut radii from the run's OWN final stress field, and
                 // writes the provenance + clamp accounting into each variant's
                 // lattice receipt.
-                job["grading"] = [
+                var grading: [String: Any] = [
                     "topology": lat.topologyID,
-                    "cell_mm": lat.cellMM,
                     // Required by the grading schema: the printability floor's input.
                     "min_extrudable_width_mm": lat.minExtrudableWidthMM ?? 0,
-                ] as [String: Any]
+                ]
+                // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep, bar R6).
+                // These keys live in `grading` ONLY — the schema rejects cell geometry
+                // inside `lattice` whenever a grading block is present. Core does NOT
+                // merely ignore a stated cell in auto/swept: `job.cpp` REFUSES
+                // `cell_mm` alongside either mode ("a target cell alongside a ladder is
+                // a CONFLICT, not a hint"), and refuses the ladder keys outside swept.
+                // So the three shapes are exclusive, mirrored exactly:
+                //   fixed  → cell_mm, no mode key   (an absent cell_mode IS "fixed")
+                //   auto   → cell_mode only         (core picks from its own floor)
+                //   swept  → cell_mode + min + max  (no cell_mm)
+                // Nothing new is emitted for FIXED, so a fixed-cell job's JSON is
+                // byte-identical to the one this serializer produced before (bar R1).
+                switch lat.cellSizeMode {
+                case LatticeCellSizeMode.auto.rawValue:
+                    grading["cell_mode"] = lat.cellSizeMode
+                case LatticeCellSizeMode.swept.rawValue:
+                    grading["cell_mode"] = lat.cellSizeMode
+                    grading["cell_min_mm"] = lat.cellMinMM
+                    grading["cell_max_mm"] = lat.cellMaxMM
+                default:
+                    grading["cell_mm"] = lat.cellMM
+                }
+                job["grading"] = grading
             } else {
                 block["cell_mm"] = lat.cellMM
                 block["strut_radius_mm"] = lat.strutRadiusMM

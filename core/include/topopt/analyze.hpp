@@ -56,6 +56,18 @@ struct LatticePosture {
   // valid range; clamped otherwise). Meaningful only where mask[e] != 0. A uniform
   // region fills this with one value; the grading law (separate task) fills it graded.
   std::vector<double> relative_density;
+  // OPTIONAL per-voxel cell size (mm), grid-indexed, for a SWEPT posture (handoff
+  // 2026-08-01-lattice-cell-size-sweep). EMPTY (the default) => every latticed voxel
+  // uses the scalar cell_size_mm above, which is the pre-sweep path byte-for-byte.
+  //
+  // It does NOT enter the certification math and cannot: the homogenized tensor is a
+  // function of relative density alone, and relative density is a ratio, so the tensor
+  // is cell-size invariant (measured at 0.000e+00 relative deviation on C11/C12/C44
+  // across a 4x cell range — evidence/2026-08-01-lattice-cell-size-sweep). What it
+  // changes is the CELLS-PER-MEMBER regime guard, which becomes a per-voxel test at
+  // each voxel's OWN cell instead of one number for the whole part — the honest
+  // question for a part whose cell size varies.
+  std::vector<double> cell_size_field;
 };
 
 // How the acceptance gate knocks the worst-case stress margin down for a sparse

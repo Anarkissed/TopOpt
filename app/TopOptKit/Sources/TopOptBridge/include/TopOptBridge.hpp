@@ -744,6 +744,23 @@ LatticeLimits lattice_limits(const std::string& topology);
 // certified), in the core's own order — the seven cubic topologies today. The UI
 // reads this to know which picker entries are certifiable rather than assuming a
 // set. Never throws.
+// The CELL-SIZE bounds the app's Auto / Fixed / Swept control must respect, both read
+// from CORE (handoff 2026-08-01-lattice-cell-size-sweep, bar R6):
+//   printability_floor_mm — the SMALLEST cell at which this topology's thinnest
+//     certifiable strut still prints at `min_extrudable_width_mm`. It is the lower
+//     bound of the cell-size control AND the value core picks in AUTO mode.
+//   cells_per_member_floor — N*, the scale-separation floor; the control's upper
+//     bound on a member of width W is W / N*.
+// `valid` is false for a topology the certification library does not carry, or a
+// non-positive width — the UI then states it has no core number rather than guessing.
+struct LatticeCellBounds {
+  double printability_floor_mm = 0.0;
+  double cells_per_member_floor = 0.0;
+  bool valid = false;
+};
+LatticeCellBounds lattice_cell_bounds(const std::string& topology,
+                                      double min_extrudable_width_mm);
+
 std::vector<std::string> lattice_certifiable_topologies();
 
 // The topology names the core GEOMETRY GENERATOR can emit (topopt::

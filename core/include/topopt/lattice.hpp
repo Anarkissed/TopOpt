@@ -130,6 +130,21 @@ double lattice_cells_per_member_min(LatticeTopology topo);
 // ±quantization the handoff logs; a diameter quoted to microns is false precision.
 double octet_strut_diameter_mm(double rho, double cell_size_mm);
 
+// ★ THE PRINTABILITY FLOOR — the SMALLEST cell edge (mm) at which `topo`'s thinnest
+// certifiable strut (the one at lattice_rho_min) still prints at the stated minimum
+// extrudable width. Below it the lowest-density struts come out under one bead.
+//
+// ONE LAW, read by everyone: the grading law (grading.hpp) raises a Fixed target to
+// it and takes it verbatim as the Auto cell, the dyadic plan (cell_plan.hpp) reports
+// it, and the APP BRIDGE serves it to the UI so the cell-size control's lower bound is
+// core's number rather than an app-side literal (handoff 2026-08-01-lattice-cell-size-
+// sweep, bar R6). Because the strut diameter is exactly linear in cell size, the floor
+// is just min_extrudable_width / (diameter at a unit cell).
+//
+// Throws std::invalid_argument if min_extrudable_width_mm is not finite and > 0.
+double lattice_cell_printability_floor_mm(LatticeTopology topo,
+                                          double min_extrudable_width_mm);
+
 // The homogenized effective cubic tensor of `topo` at relative density `rho`, scaled
 // to solid Young's modulus `youngs_modulus_solid` (the library is measured at PLA
 // Es = 3500 MPa and effective stiffness is exactly linear in Es, so this multiplies

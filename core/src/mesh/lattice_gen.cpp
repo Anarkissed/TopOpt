@@ -1096,4 +1096,85 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo, const LatticeRegion& R
   return st;
 }
 
+// ── swept cell size: one ordinary pass per dyadic level ─────────────────────
+LatticeGenStats generate_lattice_multilevel(
+    LatticeGenTopology topo, const LatticeRegion& base,
+    const std::vector<LatticeLevelSpec>& levels, TriangleSink& sink,
+    const LatticeSkinSpec& skin, const LatticeGenObserver* observer) {
+  if (levels.empty())
+    throw std::invalid_argument("generate_lattice_multilevel: no levels");
+
+  // Ascending level (fine first) — a FIXED emission order, so the streamed file is
+  // byte-identical for identical inputs even though the caller may hand the levels
+  // over in any order.
+  std::vector<const LatticeLevelSpec*> order;
+  order.reserve(levels.size());
+  for (const LatticeLevelSpec& L : levels) order.push_back(&L);
+  std::stable_sort(order.begin(), order.end(),
+                   [](const LatticeLevelSpec* a, const LatticeLevelSpec* b) {
+                     return a->level < b->level;
+                   });
+
+  LatticeGenStats total;
+  total.min_strut_diameter_mm = 1e30;
+  bool any = false;
+  for (const LatticeLevelSpec* spec : order) {
+    if (spec->level < 0)
+      throw std::invalid_argument("generate_lattice_multilevel: level < 0");
+    if (!(spec->cell_mm > 0.0))
+      throw std::invalid_argument(
+          "generate_lattice_multilevel: level cell_mm must be > 0");
+    // This level's grid is the ALIGNED coarsening of the base grid — the property
+    // that makes the coarse nodes land on base-grid node positions, which is the
+    // whole transition rule. A level whose stride does not fit is simply empty.
+    LatticeRegion R = base;
+    R.cell_mm = spec->cell_mm;
+    R.nx = base.nx >> spec->level;
+    R.ny = base.ny >> spec->level;
+    R.nz = base.nz >> spec->level;
+    R.latticed = spec->latticed;
+    if (R.nx < 1 || R.ny < 1 || R.nz < 1) continue;
+
+    const LatticeGenStats st =
+        generate_lattice(topo, R, spec->radius, sink, skin, observer);
+
+    total.triangles += st.triangles;
+    total.strut_triangles += st.strut_triangles;
+    total.node_triangles += st.node_triangles;
+    total.struts += st.struts;
+    total.nodes += st.nodes;
+    total.latticed_cells += st.latticed_cells;
+    total.clipped_struts += st.clipped_struts;
+    total.dropped_struts += st.dropped_struts;
+    total.strut_fragments += st.strut_fragments;
+    total.landings += st.landings;
+    total.anchor_nodes += st.anchor_nodes;
+    total.skin_struts += st.skin_struts;
+    total.rim_elements += st.rim_elements;
+    total.skin_triangles += st.skin_triangles;
+    total.rim_triangles += st.rim_triangles;
+    total.uncertified_spans_dropped += st.uncertified_spans_dropped;
+    total.skipped_nonorthogonal_rims += st.skipped_nonorthogonal_rims;
+    total.skin_chords += st.skin_chords;
+    total.skin_chords_rejected_band += st.skin_chords_rejected_band;
+    total.skin_chords_rejected_projection += st.skin_chords_rejected_projection;
+    total.skin_chords_clipped_away += st.skin_chords_clipped_away;
+    total.interior_volume_mm3 += st.interior_volume_mm3;
+    total.skin_volume_mm3 += st.skin_volume_mm3;
+    total.rim_volume_mm3 += st.rim_volume_mm3;
+    if (st.max_strut_diameter_mm > 0.0) {
+      any = true;
+      total.min_strut_diameter_mm =
+          std::min(total.min_strut_diameter_mm, st.min_strut_diameter_mm);
+      total.max_strut_diameter_mm =
+          std::max(total.max_strut_diameter_mm, st.max_strut_diameter_mm);
+    }
+  }
+  if (!any) {
+    total.min_strut_diameter_mm = 0.0;
+    total.max_strut_diameter_mm = 0.0;
+  }
+  return total;
+}
+
 }  // namespace topopt

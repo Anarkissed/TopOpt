@@ -24,10 +24,25 @@
 //   3. STRUT DIAMETER is checked against the stated minimum extrudable width and
 //      REPORTED (min_strut_diameter_mm, any_strut_below_min) — never silently violated.
 //
-// UNIFORM CELL SIZE PER REGION. This law emits ONE cell size for the whole region
-// (the smallest that keeps the lowest-density strut printable, but never below the
-// caller's target). Building a cell-size TRANSITION (dyadic vs conformal — PR 235
-// compared them) is a SEPARATE task and is deliberately NOT done here.
+// CELL SIZE: AUTO / FIXED / SWEPT (handoff 2026-08-01-lattice-cell-size-sweep).
+//   FIXED (default) — ONE cell for the whole part: the caller's target raised to the
+//     printability floor. Exactly the pre-sweep law, byte-for-byte.
+//   AUTO — ONE cell, chosen by core with no user number: the printability floor
+//     itself, the finest cell every strut still prints at (and therefore the uniform
+//     cell that leaves the MOST of the part latticed, since the cells-per-member rule
+//     is an upper bound).
+//   SWEPT — cell size VARIES with demand across the part, on a dyadic octree between
+//     min_cell_size_mm and max_cell_size_mm. cell_plan.hpp owns that law and states
+//     why dyadic is the only transition rule that meets at shared nodes; the density
+//     grade above is unchanged and the two compose without circularity (density
+//     depends on demand alone; cell size depends on density + local member width).
+//
+// The homogenized tensor is a function of RELATIVE DENSITY, which is a ratio, so it
+// is cell-size invariant — measured for this task at 0.000e+00 relative deviation on
+// C11/C12/C44 across a 4x cell range (evidence/2026-08-01-lattice-cell-size-sweep/
+// c1_scale_invariance.csv). A varying cell therefore costs NOTHING in certification;
+// what it changes is which voxels clear the cells-per-member regime, reported per
+// level (bar R5).
 //
 // DETERMINISTIC. Pure arithmetic in a fixed voxel order, no RNG/threads/atomics: the
 // same (grid, density, demand, params) always produce a byte-identical field (bar L5).
@@ -35,9 +50,10 @@
 #include <cstddef>
 #include <vector>
 
-#include "topopt/analyze.hpp"   // LatticePosture
-#include "topopt/lattice.hpp"   // LatticeTopology
-#include "topopt/voxel.hpp"     // VoxelGrid
+#include "topopt/analyze.hpp"    // LatticePosture
+#include "topopt/cell_plan.hpp"  // CellSizeMode, CellSizePlan
+#include "topopt/lattice.hpp"    // LatticeTopology
+#include "topopt/voxel.hpp"      // VoxelGrid
 
 namespace topopt {
 
@@ -48,8 +64,20 @@ struct GradingLawParams {
 
   // The requested uniform cell edge (mm). The chosen cell is max(this, printability
   // floor) — a target below the floor is raised (and cell_size_floored is set), never
-  // used as-is, because it would make the lowest-density strut unprintable. Must be > 0.
+  // used as-is, because it would make the lowest-density strut unprintable. Must be > 0
+  // in Fixed mode; IGNORED by Auto (core picks the cell) and by Swept (the ladder ends
+  // below do).
   double target_cell_size_mm = 0.0;
+
+  // How the cell size is chosen. Fixed (the default) is the pre-sweep law and the
+  // path a legacy caller keeps, byte-for-byte.
+  CellSizeMode cell_mode = CellSizeMode::Fixed;
+
+  // SWEPT only: the ends of the dyadic ladder (mm), min > 0 and max >= min. The
+  // admissible cells are min * 2^L up to max; a 4 -> 8 mm sweep is two levels. Both
+  // ignored in Fixed / Auto mode.
+  double min_cell_size_mm = 0.0;
+  double max_cell_size_mm = 0.0;
 
   // The STATED minimum extrudable strut width (mm) — requirement 3, an INPUT the law
   // honours and reports against, not a magic number. The printability floor is set so
@@ -83,10 +111,20 @@ struct GradedField {
   double band_rho_max = 0.0;           // lattice_rho_max(topology)
   double cells_per_member_floor = 0.0; // lattice_cells_per_member_min(topology)
 
-  // ── the chosen uniform cell ─────────────────────────────────────────────────────
-  double cell_size_mm = 0.0;           // = posture.cell_size_mm = max(target, floor)
+  // ── the chosen cell ─────────────────────────────────────────────────────────────
+  // In Fixed / Auto mode this is THE cell for the whole part. In Swept mode it is the
+  // COARSEST cell the plan actually used (posture.cell_size_mm carries the same, as
+  // the single scalar a legacy reader sees) — the honest per-region numbers are in
+  // `cell_plan.levels`, and the per-voxel truth is `posture.cell_size_field`.
+  double cell_size_mm = 0.0;
   double printability_floor_mm = 0.0;  // smallest cell that prints the rho_min strut
   bool cell_size_floored = false;      // target was below the floor and got raised
+  CellSizeMode cell_mode = CellSizeMode::Fixed;
+
+  // The SWEPT plan (bar R4/R5). In Fixed / Auto mode this is a trivial one-level
+  // record of the uniform cell, so every consumer reads the same shape in all three
+  // modes and a receipt never has to branch.
+  CellSizePlan cell_plan;
 
   // ── what was produced (L3) ──────────────────────────────────────────────────────
   std::size_t region_voxels = 0;          // candidate voxels (printed AND in region)

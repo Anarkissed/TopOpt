@@ -346,6 +346,19 @@ double octet_strut_diameter_mm(double rho, double cell_size_mm) {
   return d4 * (cell_size_mm / kOctetDiaCellMm);
 }
 
+double lattice_cell_printability_floor_mm(LatticeTopology topo,
+                                          double min_extrudable_width_mm) {
+  if (!(std::isfinite(min_extrudable_width_mm) && min_extrudable_width_mm > 0.0))
+    throw std::invalid_argument(
+        "lattice_cell_printability_floor_mm: min_extrudable_width_mm must be "
+        "finite and > 0");
+  // The thinnest strut at any cell size occurs at the band's LOW end (diameter is
+  // monotone in rho), and diameter is exactly linear in cell size, so the floor is
+  // the stated width divided by the diameter at a UNIT cell.
+  const double phi_lo = octet_strut_diameter_mm(lattice_rho_min(topo), 1.0);
+  return min_extrudable_width_mm / phi_lo;
+}
+
 CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,
                                  double youngs_modulus_solid, bool* rho_clamped) {
   if (!(youngs_modulus_solid > 0.0))

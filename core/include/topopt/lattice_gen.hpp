@@ -233,4 +233,53 @@ LatticeGenStats generate_lattice(LatticeGenTopology topo,
                                  const LatticeSkinSpec& skin = LatticeSkinSpec{},
                                  const LatticeGenObserver* observer = nullptr);
 
+// ── SWEPT CELL SIZE: one pass per dyadic level (handoff 2026-08-01-lattice-cell-
+//    size-sweep) ──────────────────────────────────────────────────────────────
+// A swept part carries cells of several sizes on a DYADIC OCTREE (cell_plan.hpp
+// picks the levels). This needs NO new generator architecture and no bridging
+// geometry: because the admissible cells are S0 * 2^L on an ALIGNED octree, every
+// node of a level-L cell sits at a multiple of S0 * 2^(L-1), i.e. it is also a node
+// position of the base grid — coarse nodes NEST in the fine grid, so the levels meet
+// at SHARED nodes. The generation is therefore just ONE ORDINARY PASS PER LEVEL over
+// the existing generator, each with its own (coarser) cell grid, streamed into the
+// same sink. PR 235's C4 measured the same nesting on resolved geometry: zero bridge
+// struts, zero extra transition triangles.
+//
+// Why that leaves no floating end: within a level, ownership already guarantees a
+// node ball at every strut endpoint of an active cell (the lex-smallest-active-sharer
+// fallback). Across a seam a coarse cell simply sees no active neighbour on the fine
+// side of its own grid, so it owns and emits its own boundary legs, and the fine
+// cells own theirs. Both sides' solids interpenetrate at the shared node — the same
+// union discipline the whole soup rests on. This task MEASURES that rather than
+// asserting it (bar R4): the observer taps every emitted primitive, and the seam test
+// checks that every strut endpoint is covered by another primitive's solid.
+//
+// COST: coincident node balls at a seam are emitted once per level (no cross-level
+// dedup — a global set would break the streaming/flat-RSS property). They are counted
+// in `nodes` and reported honestly, never silently removed.
+struct LatticeLevelSpec {
+  int level = 0;         // L; the region's cell is base_cell_mm * 2^L
+  double cell_mm = 0.0;  // that cell edge (mm), > 0
+  // Which cells of THIS level's grid are latticed. Indices are the level's own
+  // coarse indices (base index >> level). Null => every cell of the level.
+  std::function<bool(int, int, int)> latticed;
+  // This level's own radius field. Each level needs its own because the printed
+  // strut diameter is d(rho, cell) — the same relative density at a coarser cell is
+  // a proportionally fatter strut, which is exactly the printability payoff.
+  LatticeRadiusField radius;
+};
+
+// Generate every level of a dyadic plan into `sink`, in ASCENDING level order (fine
+// first) — a fixed order, so the file stays byte-identical for identical inputs.
+// `base` supplies the origin, the base cell grid extent (nx/ny/nz at level 0) and the
+// shared boundary; each level's grid is the aligned coarsening (nx >> L). Returns the
+// SUMMED stats across levels (diameters combine as min/max). Throws
+// std::invalid_argument if `levels` is empty, if a level's cell_mm is not > 0, or if
+// a level's coarsening leaves no cells.
+LatticeGenStats generate_lattice_multilevel(
+    LatticeGenTopology topo, const LatticeRegion& base,
+    const std::vector<LatticeLevelSpec>& levels, TriangleSink& sink,
+    const LatticeSkinSpec& skin = LatticeSkinSpec{},
+    const LatticeGenObserver* observer = nullptr);
+
 }  // namespace topopt

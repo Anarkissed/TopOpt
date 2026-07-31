@@ -97,6 +97,18 @@ public enum LatticeDensityMode: String, Codable, Equatable, Sendable {
     case auto
 }
 
+/// How the CELL SIZE is chosen (handoff 2026-08-01-lattice-cell-size-sweep, bar R6).
+/// `fixed` is the shipped legacy path: one user-typed cell, byte-identical job. `auto`
+/// hands the choice to core — it uses its OWN printability floor for the topology at
+/// the user's extrusion width, so the app states that number rather than inventing one.
+/// `swept` gives core a min…max window to grade the cell across (coarse where the
+/// stress is low, fine where it is high), both ends still bounded by core's floor.
+public enum LatticeCellSizeMode: String, Codable, Equatable, Sendable {
+    case auto
+    case fixed
+    case swept
+}
+
 /// The lattice block the run carries — the exact fields the core job schema's
 /// `lattice` object accepts (topology / cell_mm / strut_radius_mm / emit_stl /
 /// emit_3mf / skin / min_extrudable_width_mm), plus the density facts the run
@@ -144,6 +156,14 @@ public struct LatticeSpec: Equatable, Sendable {
     /// region yet" copy was stale). Empty ⇒ the key is omitted ⇒ byte-identical to
     /// a pre-regions job.
     public let regions: [LatticeRegionSpec]
+    /// The EFFECTIVE cell-size mode this job carries, as the job schema names it:
+    /// "fixed" | "auto" | "swept". Only a GRADED job can carry anything but "fixed"
+    /// (core chooses/sweeps the cell inside its grading pass), so `runSpec` resolves
+    /// a non-graded run to "fixed" — the spec never claims a mode the job can't emit.
+    public let cellSizeMode: String
+    /// The sweep window (mm), meaningful only when `cellSizeMode == "swept"`.
+    public let cellMinMM: Double
+    public let cellMaxMM: Double
 
     public init(topologyID: String, cellMM: Double, strutRadiusMM: Double,
                 generateRelativeDensity: Double, minRelativeDensity: Double,
@@ -152,7 +172,12 @@ public struct LatticeSpec: Equatable, Sendable {
                 skin: String = LatticeBoundaryTreatment.rim.jobSkinValue,
                 minExtrudableWidthMM: Double? = nil,
                 graded: Bool = false,
-                regions: [LatticeRegionSpec] = []) {
+                regions: [LatticeRegionSpec] = [],
+                cellSizeMode: String = LatticeCellSizeMode.fixed.rawValue,
+                cellMinMM: Double = 0, cellMaxMM: Double = 0) {
+        self.cellSizeMode = cellSizeMode
+        self.cellMinMM = cellMinMM
+        self.cellMaxMM = cellMaxMM
         self.topologyID = topologyID
         self.cellMM = cellMM
         self.strutRadiusMM = strutRadiusMM
@@ -186,6 +211,14 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// member) is read from core at use, never stored here. The starting value is the
     /// print-tested octet cell reused from the proxy default — a start, not a limit.
     public var cellMM: Double
+    /// How the cell size is chosen (bar R6). `.fixed` is the DEFAULT — the shipped
+    /// legacy path, so an untouched project emits exactly today's job.
+    public var cellSizeMode: LatticeCellSizeMode
+    /// The sweep window's ends (mm), used only in `.swept`. Stored as the user's raw
+    /// pick; the lower end is clamped to CORE's printability floor at use
+    /// (`LatticeBounds.cellFloorMM`), never to a number written here.
+    public var cellMinMM: Double
+    public var cellMaxMM: Double
     /// The density RANGE the lattice grades between (relative density, dimensionless).
     /// Stored as the user's raw pick; CLAMPED to the core band [rhoMin, rhoMax] at use
     /// (`LatticeBounds`). The neutral open defaults (0…1) carry no band number.
@@ -236,6 +269,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
 
     public init(enabled: Bool = false, topologyID: String = LatticeType.octet.id,
                 cellMM: Double = LatticeSettings.defaultCellMM,
+                cellSizeMode: LatticeCellSizeMode = .fixed,
+                cellMinMM: Double = LatticeSettings.defaultCellMinMM,
+                cellMaxMM: Double = LatticeSettings.defaultCellMaxMM,
                 minRelativeDensity: Double = 0, maxRelativeDensity: Double = 1,
                 region: ManualPrimitive? = nil,
                 includePrimitives: [ManualPrimitive] = [],
@@ -247,6 +283,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         self.enabled = enabled
         self.topologyID = topologyID
         self.cellMM = cellMM
+        self.cellSizeMode = cellSizeMode
+        self.cellMinMM = cellMinMM
+        self.cellMaxMM = cellMaxMM
         self.minRelativeDensity = minRelativeDensity
         self.maxRelativeDensity = maxRelativeDensity
         self.includePrimitives = includePrimitives
@@ -268,6 +307,7 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         case region                     // legacy single-region snapshots
         case includePrimitives, boundary, densityMode, paintedIncludeFaces, paintDepthMM
         case groupRoles
+        case cellSizeMode, cellMinMM, cellMaxMM   // cell-size sweep (bar R6)
     }
 
     public init(from decoder: Decoder) throws {
@@ -275,6 +315,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
         topologyID = try c.decodeIfPresent(String.self, forKey: .topologyID) ?? LatticeType.octet.id
         cellMM = try c.decodeIfPresent(Double.self, forKey: .cellMM) ?? LatticeSettings.defaultCellMM
+        // Absent from every pre-R6 snapshot ⇒ `.fixed` ⇒ those projects keep emitting
+        // exactly the job they emitted before (bar R1).
+        cellSizeMode = try c.decodeIfPresent(LatticeCellSizeMode.self, forKey: .cellSizeMode) ?? .fixed
+        cellMinMM = try c.decodeIfPresent(Double.self, forKey: .cellMinMM) ?? LatticeSettings.defaultCellMinMM
+        cellMaxMM = try c.decodeIfPresent(Double.self, forKey: .cellMaxMM) ?? LatticeSettings.defaultCellMaxMM
         minRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .minRelativeDensity) ?? 0
         maxRelativeDensity = try c.decodeIfPresent(Double.self, forKey: .maxRelativeDensity) ?? 1
         if let list = try c.decodeIfPresent([ManualPrimitive].self, forKey: .includePrimitives) {
@@ -296,6 +341,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         try c.encode(enabled, forKey: .enabled)
         try c.encode(topologyID, forKey: .topologyID)
         try c.encode(cellMM, forKey: .cellMM)
+        try c.encode(cellSizeMode, forKey: .cellSizeMode)
+        try c.encode(cellMinMM, forKey: .cellMinMM)
+        try c.encode(cellMaxMM, forKey: .cellMaxMM)
         try c.encode(minRelativeDensity, forKey: .minRelativeDensity)
         try c.encode(maxRelativeDensity, forKey: .maxRelativeDensity)
         try c.encode(includePrimitives, forKey: .includePrimitives)
@@ -310,6 +358,12 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
     /// viewer proxy's own default so the preview is continuous. A default START value
     /// the user edits — deliberately NOT a certifiable limit (limits come from core).
     public static let defaultCellMM: Double = LatticeProxyParams().cellMM
+
+    /// Starting ends of the SWEPT window (mm). Like `defaultCellMM` these are START
+    /// values the user edits, not limits: the real lower bound is core's printability
+    /// floor, applied by `LatticeBounds.compute` (`cellFloorMM`).
+    public static let defaultCellMinMM: Double = 4
+    public static let defaultCellMaxMM: Double = 8
 
     /// The resolved topology (never nil — an unknown id falls back to octet, matching
     /// `LatticeType.named`).
@@ -354,6 +408,16 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         // Optimize is gated with that reason.
         if densityMode == .auto {
             guard lineWidthMM > 0 else { return nil }
+            // Cell-size mode (bar R6). Only the GRADED job can carry a mode other than
+            // fixed, and both sweep ends are pushed up onto CORE's printability floor —
+            // the app never states a cell core would refuse.
+            let floor = b.cellFloorMM ?? 0
+            let lo = Swift.max(cellMinMM, floor)
+            let hi = Swift.max(cellMaxMM, lo)
+            // Core refuses a non-positive ladder end, so a snapshot carrying one falls
+            // back to the fixed cell rather than shipping a job the schema rejects.
+            let mode: LatticeCellSizeMode = (cellSizeMode == .swept && !(lo > 0))
+                ? .fixed : cellSizeMode
             return LatticeSpec(topologyID: topologyID, cellMM: cellMM, strutRadiusMM: 0,
                                generateRelativeDensity: 0,
                                minRelativeDensity: b.densityLo,
@@ -363,7 +427,9 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                                skin: boundary.jobSkinValue,
                                minExtrudableWidthMM: lineWidthMM,
                                graded: true,
-                               regions: regions)
+                               regions: regions,
+                               cellSizeMode: mode.rawValue,
+                               cellMinMM: lo, cellMaxMM: hi)
         }
         let genRho = b.generateRelativeDensity
         let radius = lattice.strutRadiusMM(relativeDensity: genRho, cellMM: cellMM)
@@ -443,6 +509,14 @@ public struct LatticeBounds: Equatable, Sendable {
     /// The certifiable cell CEILING (mm) for the current member width, or nil when core
     /// does not yet certify a cells-per-member value (then the readout is ADVISORY).
     public let cellCeilingMM: Double?
+    /// The cell-size FLOOR (mm) — core's printability floor for this topology at the
+    /// user's own extrusion width (`TopOptKit.latticeCellBounds`), i.e. the smallest
+    /// cell whose thinnest certifiable strut still prints. nil ⇒ no line width is
+    /// known (or core carries no tensor for the topology), and the control then falls
+    /// back to its own start value rather than inventing a floor. This is the LOWER
+    /// bound of the cell-size control, the partner of `cellCeilingMM` above, and the
+    /// cell core picks in AUTO mode (bar R6).
+    public let cellFloorMM: Double?
     /// How many cells span the governing member at the current cell size (the readout).
     public let cellsAcrossMember: Double
     /// True iff `cellMM` exceeds a real (non-advisory) ceiling — a genuine clamp.
@@ -531,6 +605,25 @@ public struct LatticeBounds: Equatable, Sendable {
             cellReason = "cells-per-member ceiling not yet certified by core — shown as a guide, not a limit"
         }
 
+        // Cell FLOOR — core's printability floor for this topology at the user's own
+        // line width, read through the bridge (bar R6). Never computed here: the app
+        // hardcodes no cell number, so a core re-measurement moves the control. Only
+        // meaningful with a line width AND a topology core carries a tensor for.
+        var cellFloor: Double? = nil
+        // `certifiable` is the honest gate: core's floor is derived from the topology's
+        // certifiable band, so a preview-only topology has no floor to state (the bridge
+        // returns a band-of-zero number there rather than refusing).
+        if lineWidthMM > 0 && limits.certifiable {
+            let cb = TopOptKit.latticeCellBounds(topology: settings.topologyID,
+                                                 minExtrudableWidthMM: lineWidthMM)
+            if cb.valid && cb.printabilityFloorMM > 0 { cellFloor = cb.printabilityFloorMM }
+        }
+        // A cell UNDER the floor is its own honest clamp — but never overwrite the
+        // ceiling's message, which is the harder failure.
+        if cellReason == nil, let f = cellFloor, settings.cellMM < f - 1e-9 {
+            cellReason = "below core's printability floor for \(name) at this line width — cell ≥ \(mm(f))"
+        }
+
         // Strut printability from the user's own line width. The densest grading end
         // makes the thinnest… no: the densest end makes the THICKEST strut; the
         // printability risk is at the SPARSE end, so check the low density's radius.
@@ -546,7 +639,8 @@ public struct LatticeBounds: Equatable, Sendable {
             densityLoReason: loReason, densityHiReason: hiReason,
             certifiable: limits.certifiable, topologyReason: topoReason,
             generatable: generatable, generatableReason: genReason,
-            cellCeilingMM: ceiling, cellsAcrossMember: cells, cellOverCeiling: overCeiling,
+            cellCeilingMM: ceiling, cellFloorMM: cellFloor,
+            cellsAcrossMember: cells, cellOverCeiling: overCeiling,
             cellReason: cellReason,
             strutRadiusMM: strutR, strutFloorMM: floor, strutTooThin: tooThin,
             strutReason: strutReason)

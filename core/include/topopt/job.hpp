@@ -196,6 +196,21 @@ struct JobGrading {
   double min_extrudable_width_mm = 0.0; // stated minimum strut width (mm), finite > 0
   double demand_exponent = 1.0;         // rho = rho_max*(demand/max)^exp; 1.0 = fully-
                                         // stressed on von Mises. finite > 0
+
+  // Cell-size MODE (handoff 2026-08-01-lattice-cell-size-sweep):
+  //   "fixed" (DEFAULT, and what an absent key means) — cell_mm for the whole part,
+  //     raised to the printability floor. Byte-identical to a pre-sweep run (bar R1).
+  //   "auto"  — core picks ONE cell (the printability floor: the finest cell every
+  //     strut still prints at, and so the uniform cell that leaves the most of the
+  //     part latticed). cell_mm is then ignored and may be omitted.
+  //   "swept" — the cell VARIES across the part on a dyadic octree between
+  //     cell_min_mm and cell_max_mm, following demand the way strut radius already
+  //     does. REQUIRES both bounds; cell_mm is refused alongside it (a target cell
+  //     would conflict with the ladder rather than add to it, so the schema says so
+  //     instead of silently ignoring one).
+  std::string cell_mode = "fixed";
+  double cell_min_mm = 0.0;             // swept only; finite > 0
+  double cell_max_mm = 0.0;             // swept only; finite >= cell_min_mm
 };
 
 // One load group of a declared load case (handoff 093): its faces are chosen

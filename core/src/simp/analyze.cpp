@@ -399,10 +399,19 @@ FixedDesignAnalysis analyze_fixed_design(
         if (member_width_mm.empty())
           member_width_mm = local_member_thickness_mm(
               grid, density, kIso, kWidthAwareThicknessCapVoxels);
+        // SWEPT postures (handoff 2026-08-01-lattice-cell-size-sweep) carry a
+        // per-voxel cell size, and then the honest question is each voxel's span at
+        // ITS OWN cell rather than one number for the part. An EMPTY field is the
+        // uniform posture and this is the scalar test, byte-for-byte as before.
+        const bool per_voxel_cell =
+            lattice->cell_size_field.size() == lat_mask.size();
         double min_cpm = std::numeric_limits<double>::infinity();
         for (std::size_t e = 0; e < lat_mask.size(); ++e) {
           if (!lat_mask[e] || !(density[e] > kIso)) continue;
-          const double cpm = member_width_mm[e] / lattice->cell_size_mm;
+          const double ce = per_voxel_cell ? lattice->cell_size_field[e]
+                                           : lattice->cell_size_mm;
+          if (!(ce > 0.0)) continue;
+          const double cpm = member_width_mm[e] / ce;
           if (cpm < min_cpm) min_cpm = cpm;
         }
         out.lattice_min_cells_per_member = min_cpm;

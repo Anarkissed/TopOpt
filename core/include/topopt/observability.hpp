@@ -524,6 +524,34 @@ struct RunInfo {
   double grading_max_strut_diameter_mm = 0.0;
   bool grading_any_strut_below_min = false; // requirement 3 honesty flag
   bool grading_region_ungradeable = false;  // L4 at region scale
+
+  // ── CELL-SIZE MODE + the swept plan (handoff 2026-08-01-lattice-cell-size-sweep).
+  // On a Fixed / Auto run this is a one-entry record of the uniform cell, so a reader
+  // never has to branch on the mode. On a SWEPT run `grading_cell_levels` is the
+  // per-REGION report (bar R5): one entry per dyadic cell size, each with the
+  // thinnest member it spans and whether that member clears the cells-per-member
+  // floor — flagged the way lattice_strut_out_of_regime flags a strut margin.
+  std::string grading_cell_mode;              // "fixed" | "auto" | "swept"
+  double grading_cell_base_mm = 0.0;          // the level-0 (finest) cell
+  int grading_cell_max_level = 0;             // levels 0..this; 0 on a uniform run
+  long long grading_cell_latticed_cells = 0;  // octree cells emitted
+  long long grading_cells_raised_to_floor = 0;      // bar R3
+  long long grading_cells_dropped_unprintable = 0;  // bounds crossed -> stayed solid
+  long long grading_cells_split_by_balance = 0;     // split to hold the 2:1 balance
+  bool grading_cell_any_out_of_regime = false;      // any level's tripwire fired
+  struct GradingCellLevel {
+    int level = 0;
+    double cell_size_mm = 0.0;
+    long long cells = 0;
+    long long voxels = 0;
+    double min_member_width_mm = 0.0;   // negative => thicker than the EDT cap
+    double min_cells_per_member = 0.0;  // negative => likewise
+    double min_strut_diameter_mm = 0.0;
+    double max_strut_diameter_mm = 0.0;
+    bool out_of_regime = false;
+    bool any_strut_below_min = false;
+  };
+  std::vector<GradingCellLevel> grading_cell_levels;
 };
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's

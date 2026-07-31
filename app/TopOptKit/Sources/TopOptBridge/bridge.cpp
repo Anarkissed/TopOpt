@@ -1504,6 +1504,25 @@ LatticeLimits lattice_limits(const std::string& topology) {
   return lim;
 }
 
+LatticeCellBounds lattice_cell_bounds(const std::string& topology,
+                                      double min_extrudable_width_mm) {
+  LatticeCellBounds b;
+  topopt::LatticeTopology topo;
+  if (!lattice_topology_from_name(topology, topo)) return b;  // valid stays false
+  if (!(min_extrudable_width_mm > 0.0)) return b;
+  // BOTH numbers are core's, never invented here (bar R6): the printability floor is
+  // core's own one law (topopt::lattice_cell_printability_floor_mm — the same
+  // function the grading law and the dyadic cell plan call), and the cells-per-member
+  // floor is core's scale-separation number. The app's cell-size control reads its
+  // lower bound and its per-member ceiling from these, so a re-measurement in core
+  // moves the UI with no app change.
+  b.printability_floor_mm =
+      topopt::lattice_cell_printability_floor_mm(topo, min_extrudable_width_mm);
+  b.cells_per_member_floor = topopt::lattice_cells_per_member_min(topo);
+  b.valid = true;
+  return b;
+}
+
 std::vector<std::string> lattice_certifiable_topologies() {
   // The core certification library's covered set, in core order — mirrored directly
   // from core so it can never drift from the enum (handoff
