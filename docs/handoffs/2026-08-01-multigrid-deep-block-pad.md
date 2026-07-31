@@ -186,7 +186,7 @@ story).
 | mg_mode | build-rejected, all 10 solves | carried, **3 levels**, all 10 solves |
 | CG iterations/solve | 77-213 | **12-21** |
 | total CG iterations | 1173 | **149** (7.9x cut) |
-| geneo | never armed (run too short) | never armed |
+| geneo | never armed (solves stay under the 500-iteration trigger) | never armed |
 | wall | 12.2 s | 7.2 s (1.7x — hierarchy build amortizes poorly on a 2 s solve) |
 
 **232x64x216 (3.2M elements, 9.6M DOF), same config, 3 MMA iterations =
