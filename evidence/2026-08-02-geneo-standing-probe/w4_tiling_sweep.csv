@@ -1,0 +1,5 @@
+config,lambda_cut,core_cells,block_m,weighting,Nt,cg_total,cg_mean,basis_mb,build_s,refresh_s,apply_s,wall_s,coarse_matvecs,builds,design_iters,steady_s_per_iter,ok
+plain_jacobi,,,,,0,8428,842.8,0,0,0,0,32.04,0,0,10,3.2039,1
+core=4^3,0.05,4,20,0,2376,974,97.4,23.77,44.81,105.68,5.75,158.26,23760,1,10,11.3449,1
+core=8^3,0.05,8,20,0,290,2223,222.3,10.12,5.08,5.08,3.50,16.61,2900,1,10,1.1528,1
+core=16^3,0.05,16,20,0,37,4464,446.4,5.10,25.00,0.46,3.68,34.89,370,1,10,0.9888,1

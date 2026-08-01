@@ -1,0 +1,5 @@
+plain: 628 iterations
+armed#1: 591 iterations, action=3, Nt=288, burn=500
+armed#2: 248 iterations, action=1
+armed#3 (moduli moved): 248 iterations, action=2
+test_geneo: 24 checks, 0 failures

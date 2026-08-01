@@ -1,0 +1,8 @@
+check,value,bar,pass
+rel_u_diff,4.022989e-07,1e-5,1
+deterministic,1,1,1
+plain_iters,906,,
+geneo_iters,243,,
+geneo_Nt,313,,
+plain_wall_s,1.3487,,
+geneo_wall_s,12.5945,,

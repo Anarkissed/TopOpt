@@ -1,0 +1,29 @@
+probe defaults == shipped recipe: YES (trigger=500 core=8 ov=1 block_m=20 cut=0.050)
+
+===== W6 — CORRECTNESS AND DETERMINISM — OC bracket 40x16x41 (26240 voxels) vf=0.50, 4 bolt clearances =====
+  developed system after 8 OC iterations; modulus contrast E_max/E_min = 1e+09
+  plain Jacobi-CG : 906 iters, converged=1, rel.res=9.417e-09, 1.35 s
+  standing GenEO  : 243 iters, converged=1, rel.res=9.147e-09, 12.59 s, N_t=313 (action 3)
+  max|u_geneo - u_plain| / max|u_plain| = 4.023e-07   (bar 1e-5 at cg_tolerance=1e-08)   PASS
+  rerun bit-identical (u, iterations, N_t): YES
+  wrote evidence/2026-08-02-geneo-standing-probe/w6_correctness.csv
+
+===== W6 VERDICT: coarse correction SPD and exact; deterministic =====
+===W6DONE===
+probe defaults == shipped recipe: YES (trigger=500 core=8 ov=1 block_m=20 cut=0.050)
+
+===== W7 — HEALTHY MULTIGRID, FOR SCALE — OC bracket 40x16x41 (26240 voxels) vf=0.50, 4 bolt clearances =====
+      it 1   cg=52     mg=1 levels=3  cycles=52     0.49 s
+      it 2   cg=47     mg=1 levels=3  cycles=47     0.47 s
+      it 3   cg=41     mg=1 levels=3  cycles=41     0.49 s
+      it 4   cg=38     mg=1 levels=3  cycles=38     0.43 s
+      it 5   cg=38     mg=1 levels=3  cycles=38     0.43 s
+      it 6   cg=37     mg=1 levels=3  cycles=37     0.43 s
+      it 7   cg=37     mg=1 levels=3  cycles=37     0.47 s
+      it 8   cg=37     mg=1 levels=3  cycles=37     0.43 s
+      it 9   cg=37     mg=1 levels=3  cycles=37     0.45 s
+      it 10  cg=35     mg=1 levels=3  cycles=35     0.41 s
+
+  multigrid carried on 10/10 solves; CG total 399 (mean 40); solve wall 4.5 s; total wall 4.6 s
+  wrote evidence/2026-08-02-geneo-standing-probe/w7_healthy_mg_iters.csv
+===W7DONE===

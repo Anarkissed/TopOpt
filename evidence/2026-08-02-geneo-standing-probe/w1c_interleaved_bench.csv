@@ -1,0 +1,3 @@
+core_cells,lambda_cut,Nt,basis_mb,reps,plain_median_s,geneo_median_s,wall_ratio,plain_iters,geneo_iters,iter_ratio,refresh_matvecs_per_it,build_s,refresh_s,apply_s
+8,0.05,313,10.9,8,1.1120,1.3890,1.2491,906.0,241.0,0.2660,313.0,12.40,5.26,3.68
+16,0.05,47,6.9,8,1.0380,1.0750,1.0356,906.0,443.0,0.4889,47.0,27.60,0.58,4.34

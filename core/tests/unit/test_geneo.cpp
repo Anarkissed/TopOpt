@@ -131,6 +131,19 @@ int main() {
   CHECK(!fea_geneo_twolevel_enabled(), "library default is OFF");
   CHECK(kGeneoTwoLevelLibraryDefaultOff,
         "the header default-off tripwire constant holds");
+  // The standing-preconditioner PROBE (task geneo-standing-preconditioner-probe,
+  // handoff 2026-08-02-geneo-standing-probe) added a harness-only override
+  // surface for the recipe constants, and fea_geneo_trigger_iters() now reports
+  // the EFFECTIVE trigger rather than the constant directly. Nothing in
+  // production sets an override, so the effective value must still BE the
+  // shipped recipe — asserted here so a stray override, or a probe default that
+  // drifts from the tripwire, fails a test instead of silently changing what
+  // production runs. (The probe measured that arming every solve LOSES 1.25x on
+  // wall at this operating point, so 500 is the value that belongs here.)
+  CHECK(fea_geneo_trigger_iters() == 500,
+        "effective GenEO trigger is the shipped 500 at library default");
+  CHECK(fea_geneo_rebuild_factor() == 2.0,
+        "effective GenEO rebuild factor is the shipped 2.0");
   const Solve plain = solve(f);
   CHECK(plain.info.converged, "plain Jacobi-CG converges");
   CHECK(plain.info.geneo_action == 0 && plain.info.geneo_dim == 0,

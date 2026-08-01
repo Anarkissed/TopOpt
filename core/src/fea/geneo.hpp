@@ -98,6 +98,64 @@ constexpr int kGeneoTriggerIters = 500;
 constexpr double kGeneoRebuildFactor = 2.0;
 constexpr int kGeneoMaxBasisMB = 2048;
 
+// =========================================================================
+// PROBE OVERRIDE SURFACE — task geneo-standing-preconditioner-probe.
+// =========================================================================
+// MEASUREMENT ONLY. Nothing in the production build touches any of this: the
+// defaults below ARE the tripwire constants above (asserted at first use by
+// geneo_probe_defaults_match_tripwire(), and by test_geneo), the setter is
+// never called outside core/tests/, and the getter is a plain read of a
+// zero-initialised static. So the shipped recipe, the arming decision and the
+// byte-identity evidence are all unchanged by its presence.
+//
+// WHY IT EXISTS. The standing-preconditioner question ("does GenEO pay as an
+// ALWAYS-ON accelerator rather than an emergency rescue?") is a question about
+// the SHIPPED machinery under different CONSTANTS — the reuse policy, the
+// rebuild policy, the fingerprints, the amortisation across design iterations.
+// A harness copy of the eigensolve (geneo_twolevel_probe.cpp) cannot answer it,
+// because the whole economics live in the lifecycle, not the eigensolve. So the
+// probe drives the real provider and overrides the constants from outside.
+//
+//   trigger_iters  kGeneoTriggerIters. 0 => the deflation arms on the FIRST
+//                  fallback solve of a run (the standing posture under test).
+//   core_cells     kGeneoCoreCells — the agglomerate tiling (W4).
+//   overlap        kGeneoOverlap.
+//   block_m        kGeneoBlockM — the LOBPCG block size (caps modes/subdomain).
+//   lambda_cut     kGeneoLambdaCut — the GenEO eigenvalue cut, i.e. N_t (W3).
+//   eig_weighting  the local eigenproblem's B operator:
+//                    0 = D A^Neu D, the shipped GenEO pencil;
+//                    1 = diag(D A^Neu D) = D_i^2 diag(K_agglomerate) — the
+//                        Alexandersen & Lazarov (arXiv 1411.3923) cheap
+//                        weighting (W5a). Spectrally equivalent in their
+//                        report; here it is MEASURED, not assumed.
+struct GeneoProbeConfig {
+  int trigger_iters = kGeneoTriggerIters;
+  int core_cells = kGeneoCoreCells;
+  int overlap = kGeneoOverlap;
+  int block_m = kGeneoBlockM;
+  double lambda_cut = kGeneoLambdaCut;
+  int eig_weighting = 0;
+};
+const GeneoProbeConfig& geneo_probe_config();
+void geneo_set_probe_config(const GeneoProbeConfig& cfg);  // tests/harness only
+bool geneo_probe_defaults_match_tripwire();  // the shipped recipe is the default
+
+// W5b: force a full basis rebuild at the next geneo_solve_begin (the harness
+// calls this at a CONTINUATION-parameter change, the paper's forced-rebuild
+// point). Inert unless a basis is held; the shipped degradation policy is
+// untouched, this only ADDS a rebuild the harness asked for.
+void geneo_request_rebuild();
+
+// Cost instrumentation (cumulative since geneo_reset). The refresh/rebuild
+// economics are the whole question, and CG iteration counts do not price them:
+// each coarse-operator (re)build costs N_t FULL matvecs on the production
+// operator, which at the operating point under test can exceed an entire
+// baseline solve.
+long long geneo_probe_coarse_matvecs();
+double geneo_probe_build_seconds();    // eigensolve + first coarse operator
+double geneo_probe_refresh_seconds();  // coarse-operator refreshes only
+double geneo_probe_apply_seconds();    // in-CG deflation applies
+
 // What the GenEO preconditioner did on ONE solve (forwarded into CgInfo).
 //   action: 0 = off / never engaged (plain solve, or trigger never reached)
 //           1 = REUSED the held basis + coarse operator unchanged (same system)

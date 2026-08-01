@@ -1,0 +1,57 @@
+### core=8 (shipped tiling)
+probe defaults == shipped recipe: YES (trigger=500 core=8 ov=1 block_m=20 cut=0.050)
+
+===== W1c — INTERLEAVED A/B BENCHMARK — OC bracket 40x16x41 (26240 voxels) vf=0.50, 4 bolt clearances =====
+  core=8^3 cut=0.050, 9 reps, developed 8 OC iterations
+
+  rep   plain s     geneo s     k_plain   k_geneo   geneo act
+  1     1.035       13.092      906       242       3  (BUILD — excluded from medians)
+  2     1.147       1.347       906       241       2
+  3     1.146       1.391       906       241       2
+  4     1.095       1.428       906       241       2
+  5     1.085       1.398       906       241       2
+  6     1.129       1.366       906       241       2
+  7     1.079       1.452       906       241       2
+  8     1.170       1.387       906       241       2
+  9     1.082       1.330       906       241       2
+
+===== W1c RESULT (medians over 8 steady-state reps) =====
+  plain Jacobi-CG : 1.112 s   906 iterations
+  standing GenEO  : 1.389 s   241 iterations   N_t=313, basis 10.9 MB
+  ITERATIONS: 0.266x   WALL: 1.249x   => standing GenEO DOES NOT PAY
+
+  deterministic accounting (matvec-equivalents per design iteration — load-independent):
+    plain          : 906 matvecs (one per CG iteration)
+    standing       : 313 refresh matvecs + 241 CG matvecs = 554, plus 241 deflation applies
+    one-off build  : 12.4 s total (amortised over the run)
+    refresh wall 5.26 s / apply wall 3.68 s across all reps
+  wrote evidence/2026-08-02-geneo-standing-probe/w1c_interleaved_bench.csv
+### core=16 (best from W4)
+probe defaults == shipped recipe: YES (trigger=500 core=8 ov=1 block_m=20 cut=0.050)
+
+===== W1c — INTERLEAVED A/B BENCHMARK — OC bracket 40x16x41 (26240 voxels) vf=0.50, 4 bolt clearances =====
+  core=16^3 cut=0.050, 9 reps, developed 8 OC iterations
+
+  rep   plain s     geneo s     k_plain   k_geneo   geneo act
+  1     1.011       28.704      906       444       3  (BUILD — excluded from medians)
+  2     1.045       1.081       906       443       2
+  3     1.044       1.069       906       444       2
+  4     1.036       1.052       906       443       2
+  5     1.039       1.044       906       443       2
+  6     1.036       1.065       906       444       2
+  7     0.989       1.161       906       444       2
+  8     0.981       1.080       906       443       2
+  9     1.321       1.159       906       443       2
+
+===== W1c RESULT (medians over 8 steady-state reps) =====
+  plain Jacobi-CG : 1.038 s   906 iterations
+  standing GenEO  : 1.075 s   443 iterations   N_t=47, basis 6.9 MB
+  ITERATIONS: 0.489x   WALL: 1.036x   => standing GenEO DOES NOT PAY
+
+  deterministic accounting (matvec-equivalents per design iteration — load-independent):
+    plain          : 906 matvecs (one per CG iteration)
+    standing       : 47 refresh matvecs + 443 CG matvecs = 490, plus 443 deflation applies
+    one-off build  : 27.6 s total (amortised over the run)
+    refresh wall 0.58 s / apply wall 4.34 s across all reps
+  wrote evidence/2026-08-02-geneo-standing-probe/w1c_interleaved_bench.csv
+BENCHDONE

@@ -1,0 +1,281 @@
+probe defaults == shipped recipe: YES (trigger=500 core=8 ov=1 block_m=20 cut=0.050)
+
+===== W1 — LATCHED JACOBI vs STANDING GENEO — OC bracket 40x16x41 (26240 voxels) vf=0.50, 4 bolt clearances =====
+
+  -- baseline: PLAIN latched Jacobi-CG (GenEO off) --
+      it 1   p=3 cg=707    mg=0 geneo(N_t=0     act=0)   0.83 s
+      it 2   p=3 cg=750    mg=0 geneo(N_t=0     act=0)   1.00 s
+      it 3   p=3 cg=778    mg=0 geneo(N_t=0     act=0)   1.16 s
+      it 4   p=3 cg=849    mg=0 geneo(N_t=0     act=0)   1.06 s
+      it 5   p=3 cg=879    mg=0 geneo(N_t=0     act=0)   1.30 s
+      it 6   p=3 cg=866    mg=0 geneo(N_t=0     act=0)   1.25 s
+      it 7   p=3 cg=881    mg=0 geneo(N_t=0     act=0)   1.23 s
+      it 8   p=3 cg=897    mg=0 geneo(N_t=0     act=0)   1.09 s
+      it 9   p=3 cg=906    mg=0 geneo(N_t=0     act=0)   1.13 s
+      it 10  p=3 cg=915    mg=0 geneo(N_t=0     act=0)   1.11 s
+      it 11  p=3 cg=929    mg=0 geneo(N_t=0     act=0)   1.27 s
+      it 12  p=3 cg=930    mg=0 geneo(N_t=0     act=0)   1.17 s
+      it 13  p=3 cg=931    mg=0 geneo(N_t=0     act=0)   1.14 s
+      it 14  p=3 cg=931    mg=0 geneo(N_t=0     act=0)   1.13 s
+      it 15  p=3 cg=933    mg=0 geneo(N_t=0     act=0)   1.11 s
+      it 16  p=3 cg=934    mg=0 geneo(N_t=0     act=0)   1.26 s
+  [plain Jacobi (GenEO off)  ] wall=   18.5 s (solve    18.2 s)  CG=14016   mean=876  iters=16
+      geneo: builds=0 refreshes=0 armed=0  N_t=0 basis=0.0 MB  coarse_matvecs=0
+      geneo wall: build=0.0 s  refresh=0.0 s  apply=0.0 s  (0% of run)  peak RSS=30 MB
+
+  -- shipped: GenEO armed at the trigger (500) --
+      it 1   p=3 cg=578    mg=0 geneo(N_t=290   act=3)   7.09 s
+      it 2   p=3 cg=193    mg=0 geneo(N_t=290   act=2)   1.46 s
+      it 3   p=3 cg=210    mg=0 geneo(N_t=290   act=2)   1.55 s
+      it 4   p=3 cg=213    mg=0 geneo(N_t=290   act=2)   1.57 s
+      it 5   p=3 cg=227    mg=0 geneo(N_t=290   act=2)   1.60 s
+      it 6   p=3 cg=241    mg=0 geneo(N_t=290   act=2)   1.76 s
+      it 7   p=3 cg=230    mg=0 geneo(N_t=290   act=2)   1.79 s
+      it 8   p=3 cg=235    mg=0 geneo(N_t=290   act=2)   1.66 s
+      it 9   p=3 cg=245    mg=0 geneo(N_t=290   act=2)   1.65 s
+      it 10  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.61 s
+      it 11  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.76 s
+      it 12  p=3 cg=244    mg=0 geneo(N_t=290   act=2)   1.69 s
+      it 13  p=3 cg=244    mg=0 geneo(N_t=290   act=2)   1.68 s
+      it 14  p=3 cg=229    mg=0 geneo(N_t=290   act=2)   1.63 s
+      it 15  p=3 cg=238    mg=0 geneo(N_t=290   act=2)   1.63 s
+      it 16  p=3 cg=238    mg=0 geneo(N_t=290   act=2)   1.57 s
+  [shipped (trigger 500)     ] wall=   31.9 s (solve    31.7 s)  CG=4051    mean=253  iters=16
+      geneo: builds=1 refreshes=15 armed=16  N_t=290 basis=10.1 MB  coarse_matvecs=4640
+      geneo wall: build=6.2 s  refresh=11.9 s  apply=6.1 s  (76% of run)  peak RSS=242 MB
+  wrote evidence/2026-08-02-geneo-standing-probe/w1_shipped_iters.csv
+
+  -- standing: GenEO armed on the FIRST solve (trigger 0) --
+      it 1   p=3 cg=188    mg=0 geneo(N_t=290   act=3)   6.28 s
+      it 2   p=3 cg=193    mg=0 geneo(N_t=290   act=2)   1.22 s
+      it 3   p=3 cg=209    mg=0 geneo(N_t=290   act=2)   1.31 s
+      it 4   p=3 cg=213    mg=0 geneo(N_t=290   act=2)   1.38 s
+      it 5   p=3 cg=227    mg=0 geneo(N_t=290   act=2)   1.50 s
+      it 6   p=3 cg=240    mg=0 geneo(N_t=290   act=2)   1.48 s
+      it 7   p=3 cg=230    mg=0 geneo(N_t=290   act=2)   1.36 s
+      it 8   p=3 cg=235    mg=0 geneo(N_t=290   act=2)   1.51 s
+      it 9   p=3 cg=245    mg=0 geneo(N_t=290   act=2)   1.41 s
+      it 10  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.43 s
+      it 11  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.40 s
+      it 12  p=3 cg=244    mg=0 geneo(N_t=290   act=2)   1.53 s
+      it 13  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.41 s
+      it 14  p=3 cg=229    mg=0 geneo(N_t=290   act=2)   1.41 s
+      it 15  p=3 cg=238    mg=0 geneo(N_t=290   act=2)   1.45 s
+      it 16  p=3 cg=238    mg=0 geneo(N_t=290   act=2)   1.33 s
+  [standing (trigger 0)      ] wall=   27.7 s (solve    27.4 s)  CG=3658    mean=229  iters=16
+      geneo: builds=1 refreshes=15 armed=16  N_t=290 basis=10.1 MB  coarse_matvecs=4640
+      geneo wall: build=5.7 s  refresh=10.0 s  apply=6.3 s  (80% of run)  peak RSS=251 MB
+  wrote evidence/2026-08-02-geneo-standing-probe/w1_baseline_iters.csv
+  wrote evidence/2026-08-02-geneo-standing-probe/w1_standing_iters.csv
+
+===== W1 TABLE =====
+  posture                  CG total   CG mean    solve wall  total wall  builds   
+  plain Jacobi (base)      14016      876        18.2        18.5        0        
+  shipped (trigger 500)    4051       253        31.7        31.9        1        
+  standing GenEO           3658       229        27.4        27.7        1        
+  ratio (standing / baseline): CG 0.261x    WALL 1.497x
+
+===== W2 AMORTISATION =====
+  basis builds          : 1
+  design iterations     : 16
+  design iters per build: 16.0   (DTU: 7 builds / 200 design iterations = 28.6)
+  coarse refreshes      : 15 — one per solve whose moduli moved, EACH costing N_t full matvecs
+  coarse matvecs total  : 4640   vs the entire baseline run's 14016 CG iterations (ratio 0.33x)
+  GenEO wall split      : build 5.7 s + refresh 10.0 s + apply 6.3 s = 22.0 s of 27.7 s (80%)
+  N_t=290, basis 10.1 MB, peak RSS 251 MB
+
+===== W1 VERDICT: standing GenEO DOES NOT BEAT latched Jacobi-CG on WALL (27.7 s vs 18.5 s) =====
+  wrote evidence/2026-08-02-geneo-standing-probe/w1_summary.csv
+=====W1 DONE=====
+probe defaults == shipped recipe: YES (trigger=500 core=8 ov=1 block_m=20 cut=0.050)
+
+===== W4 — AGGLOMERATE TILING SWEEP — OC bracket 40x16x41 (26240 voxels) vf=0.50, 4 bolt clearances =====
+      it 1   p=3 cg=707    mg=0 geneo(N_t=0     act=0)   0.95 s
+      it 2   p=3 cg=750    mg=0 geneo(N_t=0     act=0)   1.05 s
+      it 3   p=3 cg=778    mg=0 geneo(N_t=0     act=0)   0.92 s
+      it 4   p=3 cg=849    mg=0 geneo(N_t=0     act=0)   1.66 s
+      it 5   p=3 cg=879    mg=0 geneo(N_t=0     act=0)   3.62 s
+      it 6   p=3 cg=866    mg=0 geneo(N_t=0     act=0)   5.94 s
+      it 7   p=3 cg=881    mg=0 geneo(N_t=0     act=0)   3.27 s
+      it 8   p=3 cg=897    mg=0 geneo(N_t=0     act=0)   2.29 s
+      it 9   p=3 cg=906    mg=0 geneo(N_t=0     act=0)   6.06 s
+      it 10  p=3 cg=915    mg=0 geneo(N_t=0     act=0)   6.08 s
+  [plain Jacobi              ] wall=   32.0 s (solve    31.9 s)  CG=8428    mean=843  iters=10
+      geneo: builds=0 refreshes=0 armed=0  N_t=0 basis=0.0 MB  coarse_matvecs=0
+      geneo wall: build=0.0 s  refresh=0.0 s  apply=0.0 s  (0% of run)  peak RSS=30 MB
+
+  -- core=4^3 --
+      it 1   p=3 cg=85     mg=0 geneo(N_t=2376  act=3)  45.56 s
+      it 2   p=3 cg=87     mg=0 geneo(N_t=2376  act=2)  10.84 s
+      it 3   p=3 cg=93     mg=0 geneo(N_t=2376  act=2)  10.46 s
+      it 4   p=3 cg=95     mg=0 geneo(N_t=2376  act=2)  22.27 s
+      it 5   p=3 cg=104    mg=0 geneo(N_t=2376  act=2)  11.24 s
+      it 6   p=3 cg=107    mg=0 geneo(N_t=2376  act=2)   9.59 s
+      it 7   p=3 cg=102    mg=0 geneo(N_t=2376  act=2)  10.25 s
+      it 8   p=3 cg=100    mg=0 geneo(N_t=2376  act=2)   9.26 s
+      it 9   p=3 cg=100    mg=0 geneo(N_t=2376  act=2)  13.29 s
+      it 10  p=3 cg=101    mg=0 geneo(N_t=2376  act=2)  15.34 s
+  [core=4^3                  ] wall=  158.3 s (solve   158.1 s)  CG=974     mean=97  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=2376 basis=23.8 MB  coarse_matvecs=23760
+      geneo wall: build=44.8 s  refresh=105.7 s  apply=5.7 s  (99% of run)  peak RSS=195 MB
+
+  -- core=8^3 --
+      it 1   p=3 cg=188    mg=0 geneo(N_t=290   act=3)   5.60 s
+      it 2   p=3 cg=193    mg=0 geneo(N_t=290   act=2)   1.19 s
+      it 3   p=3 cg=209    mg=0 geneo(N_t=290   act=2)   1.16 s
+      it 4   p=3 cg=213    mg=0 geneo(N_t=290   act=2)   1.16 s
+      it 5   p=3 cg=227    mg=0 geneo(N_t=290   act=2)   1.25 s
+      it 6   p=3 cg=240    mg=0 geneo(N_t=290   act=2)   1.25 s
+      it 7   p=3 cg=230    mg=0 geneo(N_t=290   act=2)   1.20 s
+      it 8   p=3 cg=235    mg=0 geneo(N_t=290   act=2)   1.19 s
+      it 9   p=3 cg=245    mg=0 geneo(N_t=290   act=2)   1.23 s
+      it 10  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.23 s
+  [core=8^3                  ] wall=   16.6 s (solve    16.5 s)  CG=2223    mean=222  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=290 basis=10.1 MB  coarse_matvecs=2900
+      geneo wall: build=5.1 s  refresh=5.1 s  apply=3.5 s  (82% of run)  peak RSS=356 MB
+
+  -- core=16^3 --
+      it 1   p=3 cg=371    mg=0 geneo(N_t=37    act=3)  25.90 s
+      it 2   p=3 cg=386    mg=0 geneo(N_t=37    act=2)   0.84 s
+      it 3   p=3 cg=385    mg=0 geneo(N_t=37    act=2)   0.92 s
+      it 4   p=3 cg=426    mg=0 geneo(N_t=37    act=2)   0.90 s
+      it 5   p=3 cg=452    mg=0 geneo(N_t=37    act=2)   0.95 s
+      it 6   p=3 cg=467    mg=0 geneo(N_t=37    act=2)   0.99 s
+      it 7   p=3 cg=477    mg=0 geneo(N_t=37    act=2)   1.00 s
+      it 8   p=3 cg=494    mg=0 geneo(N_t=37    act=2)   1.08 s
+      it 9   p=3 cg=501    mg=0 geneo(N_t=37    act=2)   1.08 s
+      it 10  p=3 cg=505    mg=0 geneo(N_t=37    act=2)   1.08 s
+  [core=16^3                 ] wall=   34.9 s (solve    34.7 s)  CG=4464    mean=446  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=37 basis=5.1 MB  coarse_matvecs=370
+      geneo wall: build=25.0 s  refresh=0.5 s  apply=3.7 s  (84% of run)  peak RSS=748 MB
+
+===== W4 TABLE — tiling =====
+  config             N_t     CG total  CG mean   basis MB  build s   refresh/it steady s/it vs base 
+  plain Jacobi       -       8428      843       -         -         -          3.20        1.00x   
+  core=4^3           2376    974       97        23.8      44.8      10.57      11.34       3.54    x
+  core=8^3           290     2223      222       10.1      5.1       0.51       1.15        0.36    x
+  core=16^3          37      4464      446       5.1       25.0      0.05       0.99        0.31    x
+  (steady s/it = (trajectory wall - one-off eigensolve) / design iterations: the price once the basis is fully amortised.
+   'vs base' < 1.00x means standing GenEO pays at this size. Iteration count alone does NOT price this.)
+  wrote evidence/2026-08-02-geneo-standing-probe/w4_tiling_sweep.csv
+=====W4 DONE=====
+probe defaults == shipped recipe: YES (trigger=500 core=8 ov=1 block_m=20 cut=0.050)
+
+===== W3 — EIGENVALUE CUT / BASIS DIMENSION SWEEP — OC bracket 40x16x41 (26240 voxels) vf=0.50, 4 bolt clearances =====
+      it 1   p=3 cg=707    mg=0 geneo(N_t=0     act=0)   0.81 s
+      it 2   p=3 cg=750    mg=0 geneo(N_t=0     act=0)   0.85 s
+      it 3   p=3 cg=778    mg=0 geneo(N_t=0     act=0)   0.80 s
+      it 4   p=3 cg=849    mg=0 geneo(N_t=0     act=0)   0.86 s
+      it 5   p=3 cg=879    mg=0 geneo(N_t=0     act=0)   0.90 s
+      it 6   p=3 cg=866    mg=0 geneo(N_t=0     act=0)   0.91 s
+      it 7   p=3 cg=881    mg=0 geneo(N_t=0     act=0)   0.89 s
+      it 8   p=3 cg=897    mg=0 geneo(N_t=0     act=0)   0.94 s
+      it 9   p=3 cg=906    mg=0 geneo(N_t=0     act=0)   0.94 s
+      it 10  p=3 cg=915    mg=0 geneo(N_t=0     act=0)   1.04 s
+  [plain Jacobi              ] wall=    9.1 s (solve     8.9 s)  CG=8428    mean=843  iters=10
+      geneo: builds=0 refreshes=0 armed=0  N_t=0 basis=0.0 MB  coarse_matvecs=0
+      geneo wall: build=0.0 s  refresh=0.0 s  apply=0.0 s  (0% of run)  peak RSS=29 MB
+
+  -- cut=0.002 --
+      it 1   p=3 cg=182    mg=0 geneo(N_t=288   act=3)   6.18 s
+      it 2   p=3 cg=196    mg=0 geneo(N_t=288   act=2)   1.19 s
+      it 3   p=3 cg=209    mg=0 geneo(N_t=288   act=2)   1.19 s
+      it 4   p=3 cg=217    mg=0 geneo(N_t=288   act=2)   1.58 s
+      it 5   p=3 cg=226    mg=0 geneo(N_t=288   act=2)   1.28 s
+      it 6   p=3 cg=231    mg=0 geneo(N_t=288   act=2)   1.36 s
+      it 7   p=3 cg=238    mg=0 geneo(N_t=288   act=2)   1.27 s
+      it 8   p=3 cg=234    mg=0 geneo(N_t=288   act=2)   1.19 s
+      it 9   p=3 cg=237    mg=0 geneo(N_t=288   act=2)   1.23 s
+      it 10  p=3 cg=246    mg=0 geneo(N_t=288   act=2)   1.22 s
+  [cut=0.002                 ] wall=   17.8 s (solve    17.7 s)  CG=2216    mean=222  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=288 basis=10.1 MB  coarse_matvecs=2880
+      geneo wall: build=5.7 s  refresh=5.4 s  apply=3.6 s  (82% of run)  peak RSS=243 MB
+
+  -- cut=0.005 --
+      it 1   p=3 cg=185    mg=0 geneo(N_t=288   act=3)   6.36 s
+      it 2   p=3 cg=194    mg=0 geneo(N_t=288   act=2)   1.36 s
+      it 3   p=3 cg=207    mg=0 geneo(N_t=288   act=2)   1.32 s
+      it 4   p=3 cg=217    mg=0 geneo(N_t=288   act=2)   1.34 s
+      it 5   p=3 cg=226    mg=0 geneo(N_t=288   act=2)   1.36 s
+      it 6   p=3 cg=231    mg=0 geneo(N_t=288   act=2)   1.43 s
+      it 7   p=3 cg=239    mg=0 geneo(N_t=288   act=2)   1.64 s
+      it 8   p=3 cg=234    mg=0 geneo(N_t=288   act=2)   1.29 s
+      it 9   p=3 cg=237    mg=0 geneo(N_t=288   act=2)   1.37 s
+      it 10  p=3 cg=246    mg=0 geneo(N_t=288   act=2)   1.44 s
+  [cut=0.005                 ] wall=   19.0 s (solve    18.9 s)  CG=2216    mean=222  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=288 basis=10.1 MB  coarse_matvecs=2880
+      geneo wall: build=5.8 s  refresh=6.1 s  apply=3.6 s  (81% of run)  peak RSS=246 MB
+
+  -- cut=0.010 --
+      it 1   p=3 cg=188    mg=0 geneo(N_t=288   act=3)   6.00 s
+      it 2   p=3 cg=194    mg=0 geneo(N_t=288   act=2)   1.78 s
+      it 3   p=3 cg=209    mg=0 geneo(N_t=288   act=2)   4.20 s
+      it 4   p=3 cg=217    mg=0 geneo(N_t=288   act=2)   3.51 s
+      it 5   p=3 cg=226    mg=0 geneo(N_t=288   act=2)   1.81 s
+      it 6   p=3 cg=231    mg=0 geneo(N_t=288   act=2)   1.27 s
+      it 7   p=3 cg=238    mg=0 geneo(N_t=288   act=2)   1.35 s
+      it 8   p=3 cg=234    mg=0 geneo(N_t=288   act=2)   1.50 s
+      it 9   p=3 cg=237    mg=0 geneo(N_t=288   act=2)   1.63 s
+      it 10  p=3 cg=246    mg=0 geneo(N_t=288   act=2)   1.68 s
+  [cut=0.010                 ] wall=   24.9 s (solve    24.8 s)  CG=2220    mean=222  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=288 basis=10.1 MB  coarse_matvecs=2880
+      geneo wall: build=5.5 s  refresh=8.9 s  apply=4.4 s  (75% of run)  peak RSS=261 MB
+
+  -- cut=0.020 --
+      it 1   p=3 cg=184    mg=0 geneo(N_t=288   act=3)   7.16 s
+      it 2   p=3 cg=193    mg=0 geneo(N_t=288   act=2)   1.35 s
+      it 3   p=3 cg=208    mg=0 geneo(N_t=288   act=2)   1.77 s
+      it 4   p=3 cg=217    mg=0 geneo(N_t=288   act=2)   1.50 s
+      it 5   p=3 cg=226    mg=0 geneo(N_t=288   act=2)   1.46 s
+      it 6   p=3 cg=231    mg=0 geneo(N_t=288   act=2)   1.32 s
+      it 7   p=3 cg=239    mg=0 geneo(N_t=288   act=2)   1.50 s
+      it 8   p=3 cg=234    mg=0 geneo(N_t=288   act=2)   1.62 s
+      it 9   p=3 cg=237    mg=0 geneo(N_t=288   act=2)   2.00 s
+      it 10  p=3 cg=246    mg=0 geneo(N_t=288   act=2)   1.71 s
+  [cut=0.020                 ] wall=   21.5 s (solve    21.4 s)  CG=2215    mean=222  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=288 basis=10.1 MB  coarse_matvecs=2880
+      geneo wall: build=6.6 s  refresh=7.2 s  apply=3.6 s  (81% of run)  peak RSS=261 MB
+
+  -- cut=0.050 --
+      it 1   p=3 cg=188    mg=0 geneo(N_t=290   act=3)   8.14 s
+      it 2   p=3 cg=193    mg=0 geneo(N_t=290   act=2)   1.28 s
+      it 3   p=3 cg=209    mg=0 geneo(N_t=290   act=2)   1.32 s
+      it 4   p=3 cg=213    mg=0 geneo(N_t=290   act=2)   1.52 s
+      it 5   p=3 cg=227    mg=0 geneo(N_t=290   act=2)   1.28 s
+      it 6   p=3 cg=240    mg=0 geneo(N_t=290   act=2)   1.37 s
+      it 7   p=3 cg=230    mg=0 geneo(N_t=290   act=2)   1.24 s
+      it 8   p=3 cg=235    mg=0 geneo(N_t=290   act=2)   1.27 s
+      it 9   p=3 cg=245    mg=0 geneo(N_t=290   act=2)   1.39 s
+      it 10  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.30 s
+  [cut=0.050                 ] wall=   20.2 s (solve    20.1 s)  CG=2223    mean=222  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=290 basis=10.1 MB  coarse_matvecs=2900
+      geneo wall: build=7.6 s  refresh=5.9 s  apply=3.5 s  (84% of run)  peak RSS=275 MB
+
+  -- cut=0.100 --
+      it 1   p=3 cg=187    mg=0 geneo(N_t=290   act=3)  12.14 s
+      it 2   p=3 cg=193    mg=0 geneo(N_t=290   act=2)   1.10 s
+      it 3   p=3 cg=210    mg=0 geneo(N_t=290   act=2)   1.15 s
+      it 4   p=3 cg=213    mg=0 geneo(N_t=290   act=2)   1.19 s
+      it 5   p=3 cg=227    mg=0 geneo(N_t=290   act=2)   1.34 s
+      it 6   p=3 cg=242    mg=0 geneo(N_t=290   act=2)   1.29 s
+      it 7   p=3 cg=211    mg=0 geneo(N_t=290   act=2)   1.22 s
+      it 8   p=3 cg=235    mg=0 geneo(N_t=290   act=2)   1.34 s
+      it 9   p=3 cg=245    mg=0 geneo(N_t=290   act=2)   1.29 s
+      it 10  p=3 cg=243    mg=0 geneo(N_t=290   act=2)   1.40 s
+  [cut=0.100                 ] wall=   23.6 s (solve    23.5 s)  CG=2206    mean=221  iters=10
+      geneo: builds=1 refreshes=9 armed=10  N_t=290 basis=10.1 MB  coarse_matvecs=2900
+      geneo wall: build=11.6 s  refresh=5.3 s  apply=3.6 s  (87% of run)  peak RSS=275 MB
+
+===== W3 TABLE — total wall vs basis dimension =====
+  config             N_t     CG total  CG mean   basis MB  build s   refresh/it steady s/it vs base 
+  plain Jacobi       -       8428      843       -         -         -          0.91        1.00x   
+  cut=0.002          288     2216      222       10.1      5.7       0.54       1.22        1.34    x
+  cut=0.005          288     2216      222       10.1      5.8       0.61       1.32        1.46    x
+  cut=0.010          288     2220      222       10.1      5.5       0.89       1.94        2.14    x
+  cut=0.020          288     2215      222       10.1      6.6       0.72       1.49        1.65    x
+  cut=0.050          290     2223      222       10.1      7.6       0.59       1.27        1.40    x
+  cut=0.100          290     2206      221       10.1      11.6      0.53       1.20        1.32    x
+  (steady s/it = (trajectory wall - one-off eigensolve) / design iterations: the price once the basis is fully amortised.
+   'vs base' < 1.00x means standing GenEO pays at this size. Iteration count alone does NOT price this.)
+  wrote evidence/2026-08-02-geneo-standing-probe/w3_lambda_cut_sweep.csv
+=====W3 DONE=====
