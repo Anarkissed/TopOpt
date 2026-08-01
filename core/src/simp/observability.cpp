@@ -527,6 +527,16 @@ std::string run_info_json(const RunInfo& info) {
   }
   num("warm_start_inherit", bool_json(info.warm_start_inherit));
   num("warm_start_coarse", bool_json(info.warm_start_coarse));
+  num("warm_start_coarse_iterations", fmt_i(info.warm_start_coarse_iterations));
+  num("warm_start_coarse_ms", fmt(info.warm_start_coarse_ms));
+  num("warm_start_coarse_matvecs",
+      fmt_i(static_cast<int>(info.warm_start_coarse_matvecs)));
+  // DOF-touches can exceed 2^31 on a production grid (matvecs x ~1e6 DOFs), so
+  // these three go out through the 64-bit formatter, not fmt_i.
+  num("warm_start_coarse_dof_touches",
+      fmt_ll(info.warm_start_coarse_dof_touches));
+  num("warm_start_coarse_grid_dofs", fmt_ll(info.warm_start_coarse_grid_dofs));
+  num("solved_grid_dofs", fmt_ll(info.solved_grid_dofs));
   num("projection", bool_json(info.projection));
   // Handoff 123 — conditional MMA-projection echo: the armed threshold plus the
   // per-rung fired flags and measured grayscale Mnd (the honest cost readout).

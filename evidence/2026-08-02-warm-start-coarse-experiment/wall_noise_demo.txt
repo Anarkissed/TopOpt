@@ -1,0 +1,35 @@
+
+===== FIXTURE stag : warm_start_coarse OFF vs ON, with a 1e-9 NEGATIVE CONTROL =====
+  OFF = warm_start_coarse false (shipped default)
+  ON  = warm_start_coarse true  (handoff 110 Part B)
+  CTL = OFF, loads x (1 + 1e-9) — the noise floor
+
+  [off#1         ] grid 48x32x48  mg=carried  1255.7 s TOTAL wall  (fine 1238.7 s / 394 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=1
+    rung 0 vf=0.68 ACCEPT iters=128 wall=   469.3 s | STAGNATING  1 it /    97.5 s ( 20.8%) | latched  0 | GenEO   72.9 s | settle@43 | margin=3.211602857 compliance=9.57926613849
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   350.0 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.96357599 compliance=17.0369024164
+    rung 2 vf=0.38 REJECT iters=161 wall=   419.4 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937094 compliance=38.2858941914
+  [off#2         ] grid 48x32x48  mg=carried  1034.9 s TOTAL wall  (fine 1019.2 s / 394 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=1
+    rung 0 vf=0.68 ACCEPT iters=128 wall=   326.3 s | STAGNATING  1 it /    85.1 s ( 26.1%) | latched  0 | GenEO   65.5 s | settle@43 | margin=3.211602857 compliance=9.57926613849
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   295.4 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.96357599 compliance=17.0369024164
+    rung 2 vf=0.38 REJECT iters=161 wall=   397.5 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937094 compliance=38.2858941914
+
+=== WALL NOISE: three samples of the IDENTICAL OFF posture, stag fixture ===
+Same fixture, same posture, deterministic solver. Iteration count identical in
+all three (394), which is the proof they did the SAME WORK.
+
+  off#1 (pre-DOF-instrument binary)   394 iters   1255.7 s
+  off#2 (pre-DOF-instrument binary)   394 iters   1034.9 s
+  off#1 (DOF-instrument binary)       394 iters   1200.7 s
+
+  spread: 220.8 s = 21.3% of the fastest, on IDENTICAL deterministic work.
+
+TWO CONCLUSIONS, both used in the handoff:
+
+(1) No wall ratio smaller than ~21% is distinguishable from host contention on
+    this machine during this window. Hence: wall is INDICATIVE ONLY here, and
+    the primary unit is DOF-touches. (PR 273 / geneo-arming discipline.)
+
+(2) The added instrumentation is INERT on the trajectory: the pre-instrument and
+    post-instrument binaries produce the SAME 394 iterations on the same input.
+    The new counters (warm_start_coarse_ms / _matvecs / _dof_touches /
+    _grid_dofs / solved_grid_dofs) observe; they do not perturb.

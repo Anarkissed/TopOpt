@@ -593,6 +593,45 @@ static void test_grading_block() {
                 "grading: rejects missing min_extrudable_width_mm");
 }
 
+// --- The optional "warm_start" block ---------------------------------------
+// Task warm-start-coarse-experiment. Handoff 110 BUILT the res/2 coarse-to-fine
+// pre-solve and left it off; nothing ever set it, so no production entry point
+// could reach it and it had never been measured at production scale. This block
+// is the per-run ARMING switch that makes it reachable. It is NOT a default
+// change: absent block => has_warm_start false => the driver keeps its own OFF
+// default and the run is byte-identical, which is what the first case pins.
+static void test_warm_start_block() {
+  // Absent => not present, and the flag reads false (the byte-identical path).
+  {
+    const JobDescription j = parse_job(valid_job());
+    CHECK(!j.has_warm_start, "warm_start: absent block => not present");
+    CHECK(!j.warm_start_coarse, "warm_start: absent block => coarse false");
+  }
+  auto ws = [](const std::string& body) {
+    return mutate("\"mesh_prefix\": \"variant\" }",
+                  "\"mesh_prefix\": \"variant\" },\n  \"warm_start\": " + body);
+  };
+  // Armed.
+  {
+    const JobDescription j = parse_job(ws("{ \"coarse\": true }"));
+    CHECK(j.has_warm_start, "warm_start: present");
+    CHECK(j.warm_start_coarse, "warm_start: coarse true");
+  }
+  // Explicitly disarmed is a DIFFERENT fact from absent, and both must parse:
+  // a job may want to say "I considered it and chose off" in its own bytes.
+  {
+    const JobDescription j = parse_job(ws("{ \"coarse\": false }"));
+    CHECK(j.has_warm_start, "warm_start: present when explicitly false");
+    CHECK(!j.warm_start_coarse, "warm_start: coarse false");
+  }
+  check_rejects(ws("{ \"coarse\": 1 }"),
+                "warm_start: rejects non-boolean coarse");
+  check_rejects(ws("{ }"), "warm_start: rejects missing coarse");
+  check_rejects(ws("{ \"coarse\": true, \"bogus\": 1 }"),
+                "warm_start: rejects unknown key");
+  check_rejects(ws("true"), "warm_start: rejects non-object block");
+}
+
 // --- Mode "analyze" (task lattice-page-core-hookup stage 3, H3a) ------------
 static void test_mode_analyze() {
   // "analyze" is a valid mode...
@@ -732,6 +771,7 @@ int main() {
   test_wall_loops();
   test_lattice_block();
   test_grading_block();
+  test_warm_start_block();
   test_mode_analyze();
   test_lattice_regions();
   test_lattice_grading_coupling();

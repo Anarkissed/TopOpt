@@ -356,6 +356,26 @@ struct RunInfo {
   long long geneo_decisions_dropped = 0;
   bool warm_start_inherit = false;
   bool warm_start_coarse = false;
+  // Handoff 2026-08-02-warm-start-coarse-experiment — the coarse pre-solve's OWN
+  // COST, both currencies. CONFIG above (warm_start_coarse) says it was armed;
+  // these two say what it charged. OUTCOME, so filled post-run from
+  // MinimizePlasticResult with the same finalize-only discipline as
+  // cg_multigrid — an unfinished run asserts nothing. Both 0 when the feature is
+  // off. They are reported SEPARATELY and never folded into a rung total: a
+  // cascade that saves fine-grid wall must save more than it spends here, and
+  // handoff 2026-08-02-iteration-phase-timing is the standing proof that an
+  // iteration count alone cannot settle that.
+  int warm_start_coarse_iterations = 0;
+  double warm_start_coarse_ms = 0.0;
+  long long warm_start_coarse_matvecs = 0;
+  // The DOF-WEIGHTED cost — THE PRIMARY UNIT. Raw matvecs above are NOT
+  // comparable across the pre-solve's res/2 grid and the ladder's fine grid; a
+  // coarse apply touches ~1/8 the DOFs. `..._grid_dofs` and `solved_grid_dofs`
+  // are the two denominators, recorded so the weighting can be re-derived from
+  // the run record rather than trusted.
+  long long warm_start_coarse_dof_touches = 0;
+  long long warm_start_coarse_grid_dofs = 0;
+  long long solved_grid_dofs = 0;
   bool projection = false;
   // Handoff 123 — CONDITIONAL MMA Heaviside projection echo. `..._threshold` is
   // the armed grayness gate threshold (0 = disabled). The two per-rung vectors are

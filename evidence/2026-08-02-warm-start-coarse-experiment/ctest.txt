@@ -1,0 +1,30 @@
+      Start 81: segment_vs_step
+81/93 Test #81: segment_vs_step ..................   Passed    0.27 sec
+      Start 82: face_tag
+82/93 Test #82: face_tag .........................   Passed    0.25 sec
+      Start 83: mask_face
+83/93 Test #83: mask_face ........................   Passed    0.25 sec
+      Start 84: cli_demo
+84/93 Test #84: cli_demo .........................   Passed  152.95 sec
+      Start 85: production_parity
+85/93 Test #85: production_parity ................   Passed   18.12 sec
+      Start 86: clearance_parity
+86/93 Test #86: clearance_parity .................   Passed   18.06 sec
+      Start 87: face_protection_parity
+87/93 Test #87: face_protection_parity ...........   Passed    3.81 sec
+      Start 88: loadcase_small_face
+88/93 Test #88: loadcase_small_face ..............   Passed    0.30 sec
+      Start 89: loadcase_resolution
+89/93 Test #89: loadcase_resolution ..............   Passed    0.28 sec
+      Start 90: loadcase_analyze
+90/93 Test #90: loadcase_analyze .................   Passed    1.38 sec
+      Start 91: lattice_hookup
+91/93 Test #91: lattice_hookup ...................   Passed   11.66 sec
+      Start 92: lattice_variant
+92/93 Test #92: lattice_variant ..................   Passed   12.43 sec
+      Start 93: mesh_job
+93/93 Test #93: mesh_job .........................   Passed    6.30 sec
+
+100% tests passed out of 93
+
+Total Test time (real) = 1131.27 sec

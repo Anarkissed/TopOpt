@@ -1,0 +1,227 @@
+
+===== FIXTURE stag : warm_start_coarse OFF vs ON, with a 1e-9 NEGATIVE CONTROL =====
+  OFF = warm_start_coarse false (shipped default)
+  ON  = warm_start_coarse true  (handoff 110 Part B)
+  CTL = OFF, loads x (1 + 1e-9) — the noise floor
+
+  [off#1         ] grid 48x32x48  mg=carried  1200.7 s TOTAL wall  (fine 1181.8 s / 394 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=1
+    rung 0 vf=0.68 ACCEPT iters=128 wall=   413.6 s | STAGNATING  1 it /    75.9 s ( 18.3%) | latched  0 | GenEO   57.0 s | settle@43 | margin=3.211602857 compliance=9.57926613849
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   283.9 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.96357599 compliance=17.0369024164
+    rung 2 vf=0.38 REJECT iters=161 wall=   484.2 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937094 compliance=38.2858941914
+  [off#2         ] grid 48x32x48  mg=carried  1359.7 s TOTAL wall  (fine 1339.6 s / 394 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=1
+    rung 0 vf=0.68 ACCEPT iters=128 wall=   614.9 s | STAGNATING  1 it /   143.5 s ( 23.3%) | latched  0 | GenEO  108.1 s | settle@43 | margin=3.211602857 compliance=9.57926613849
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   364.8 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.96357599 compliance=17.0369024164
+    rung 2 vf=0.38 REJECT iters=161 wall=   359.9 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937094 compliance=38.2858941914
+  [on#1          ] grid 48x32x48  mg=carried  895.0 s TOTAL wall  (fine 742.4 s / 324 iters ; PRE-SOLVE 102 iters 137.2 s)  geneo builds=1 armed=3
+    rung 0 vf=0.68 ACCEPT iters= 58 wall=   129.7 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@ 9 | margin=2.998993601 compliance=9.76645185792
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   276.4 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.96357599 compliance=17.0369024164
+    rung 2 vf=0.38 REJECT iters=161 wall=   336.4 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937094 compliance=38.2858941914
+  [on#2          ] grid 48x32x48  mg=carried  775.7 s TOTAL wall  (fine 637.4 s / 324 iters ; PRE-SOLVE 102 iters 122.7 s)  geneo builds=1 armed=3
+    rung 0 vf=0.68 ACCEPT iters= 58 wall=   102.0 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@ 9 | margin=2.998993601 compliance=9.76645185792
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   237.6 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.96357599 compliance=17.0369024164
+    rung 2 vf=0.38 REJECT iters=161 wall=   297.9 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937094 compliance=38.2858941914
+  [ctl#1 1e-9    ] grid 48x32x48  mg=carried  631.7 s TOTAL wall  (fine 619.5 s / 394 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=1
+    rung 0 vf=0.68 ACCEPT iters=128 wall=   266.3 s | STAGNATING  1 it /    70.8 s ( 26.6%) | latched  0 | GenEO   54.3 s | settle@43 | margin=3.211644739 compliance=9.57922631798
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   148.6 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.963423828 compliance=17.0367135451
+    rung 2 vf=0.38 REJECT iters=161 wall=   204.6 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937053 compliance=38.2858952751
+  [ctl#2 1e-9    ] grid 48x32x48  mg=carried  482.2 s TOTAL wall  (fine 475.0 s / 394 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=1
+    rung 0 vf=0.68 ACCEPT iters=128 wall=   178.1 s | STAGNATING  1 it /    45.9 s ( 25.8%) | latched  0 | GenEO   37.0 s | settle@43 | margin=3.211644739 compliance=9.57922631798
+    rung 1 vf=0.52 ACCEPT iters=105 wall=   120.2 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@69 | margin=1.963423828 compliance=17.0367135451
+    rung 2 vf=0.38 REJECT iters=161 wall=   176.8 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@53 | margin=1.110937053 compliance=38.2858952751
+
+  --- AC7 DETERMINISM (byte-identical rerun in each posture) ---
+    OFF twice : IDENTICAL
+    ON  twice : IDENTICAL
+    CTL twice : IDENTICAL
+
+  --- AC2/AC3 ITERATIONS AND WALL, BOTH (pre-solve CHARGED) ---
+                                  OFF         ON     change
+    fine iterations               394        324     -17.8%
+    pre-solve iterations            -        102           
+    CHARGED iterations            394        426      +8.1%
+    fine wall (s)              1181.8      742.4     -37.2%
+    pre-solve wall (s)              -      137.2           
+    CHARGED wall (s)           1181.8      879.6     -25.6%   <== THE ANSWER
+    stagnating iterations           1          0    -100.0%
+    wall IN stagnation (s)       75.9        0.0    -100.0%
+
+    grid DOFs: fine 237699, coarse (pre-solve) 31875  => coarse apply = 1/7.46 of a fine apply
+    fine matvecs                  55287        43656     -21.0%   (raw, NOT cross-resolution)
+    pre-solve matvecs                 -        32795              (raw, NOT cross-resolution)
+    fine DOF-touches        13141664613  10376987544     -21.0%
+    pre-solve DOF-touches             -   1045340625           
+    CHARGED DOF-touches     13141664613  11422328169     -13.1%   <== THE ANSWER (DOF-weighted, deterministic)
+
+  --- AC4/AC5 FULL GATE TABLE, EVERY RUNG, vs the 1e-9 FLOOR ---
+    rung vf     verdict OFF -> ON   margin OFF  margin ON   | ON vs OFF mean|drho| max | CTL floor mean|drho| max
+    0    0.68   ACCEPT   -> ACCEPT          3.2116      2.99899     |  6.468e-03  6.487e-01 |  1.687e-06  8.607e-04
+    1    0.52   ACCEPT   -> ACCEPT          1.96358     1.96358     |  0.000e+00  0.000e+00 |  3.322e-06  2.269e-03
+    2    0.38   REJECT   -> REJECT          1.11094     1.11094     |  0.000e+00  0.000e+00 |  1.768e-08  1.496e-05
+
+    class/printed flips, and the floor's own count on the same rung:
+    rung 0 (73728 elements): ON class 1833 printed 535 | CTL class 0 printed 1  => ABOVE THE FLOOR (real)
+    rung 1 (73728 elements): ON class 0 printed 0 | CTL class 1 printed 0  => AT/BELOW THE FLOOR (noise)
+    rung 2 (73728 elements): ON class 0 printed 0 | CTL class 0 printed 0  => AT/BELOW THE FLOOR (noise)
+
+    --- AC5 CONVERGED COMPLIANCE PER RUNG (a faster run that lands on a worse design is not a win) ---
+    rung 0 vf=0.68 : OFF 9.57926613849 -> ON 9.76645185792  (+1.954%)  | settle iter OFF 43 -> ON 9 | rung iters OFF 128 -> ON 58
+    rung 1 vf=0.52 : OFF 17.0369024164 -> ON 17.0369024164  (+0.000%)  | settle iter OFF 69 -> ON 69 | rung iters OFF 105 -> ON 105
+    rung 2 vf=0.38 : OFF 38.2858941914 -> ON 38.2858941914  (+0.000%)  | settle iter OFF 53 -> ON 53 | rung iters OFF 161 -> ON 161
+
+  VERDICT FLIPS ON THIS FIXTURE: 0 (none)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-02-warm-start-coarse-experiment/stag_gate.csv
+
+===== FIXTURE healthy : warm_start_coarse OFF vs ON, with a 1e-9 NEGATIVE CONTROL =====
+  OFF = warm_start_coarse false (shipped default)
+  ON  = warm_start_coarse true  (handoff 110 Part B)
+  CTL = OFF, loads x (1 + 1e-9) — the noise floor
+
+  [off#1         ] grid 32x24x32  mg=carried  53.1 s TOTAL wall  (fine 50.9 s / 162 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=0 armed=0
+    rung 0 vf=0.68 ACCEPT iters= 38 wall=    11.2 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@16 | margin=2.727407026 compliance=4.63900268409
+    rung 1 vf=0.52 ACCEPT iters= 59 wall=    18.5 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@25 | margin=1.63290971 compliance=8.71832620191
+    rung 2 vf=0.38 REJECT iters= 65 wall=    21.2 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@38 | margin=0.8233523238 compliance=21.8335979204
+  [off#2         ] grid 32x24x32  mg=carried  53.3 s TOTAL wall  (fine 51.2 s / 162 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=0 armed=0
+    rung 0 vf=0.68 ACCEPT iters= 38 wall=    11.3 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@16 | margin=2.727407026 compliance=4.63900268409
+    rung 1 vf=0.52 ACCEPT iters= 59 wall=    18.6 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@25 | margin=1.63290971 compliance=8.71832620191
+    rung 2 vf=0.38 REJECT iters= 65 wall=    21.3 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@38 | margin=0.8233523238 compliance=21.8335979204
+  [on#1          ] grid 32x24x32  mg=carried  53.2 s TOTAL wall  (fine 49.2 s / 160 iters ; PRE-SOLVE 31 iters 1.9 s)  geneo builds=0 armed=0
+    rung 0 vf=0.68 ACCEPT iters= 36 wall=    10.4 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@ 8 | margin=2.6479335 compliance=4.64099993964
+    rung 1 vf=0.52 ACCEPT iters= 59 wall=    18.2 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@25 | margin=1.63290971 compliance=8.71832620191
+    rung 2 vf=0.38 REJECT iters= 65 wall=    20.6 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@38 | margin=0.8233523238 compliance=21.8335979204
+  [on#2          ] grid 32x24x32  mg=carried  53.5 s TOTAL wall  (fine 49.5 s / 160 iters ; PRE-SOLVE 31 iters 1.9 s)  geneo builds=0 armed=0
+    rung 0 vf=0.68 ACCEPT iters= 36 wall=    10.5 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@ 8 | margin=2.6479335 compliance=4.64099993964
+    rung 1 vf=0.52 ACCEPT iters= 59 wall=    18.1 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@25 | margin=1.63290971 compliance=8.71832620191
+    rung 2 vf=0.38 REJECT iters= 65 wall=    20.9 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@38 | margin=0.8233523238 compliance=21.8335979204
+  [ctl#1 1e-9    ] grid 32x24x32  mg=carried  52.6 s TOTAL wall  (fine 50.5 s / 162 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=0 armed=0
+    rung 0 vf=0.68 ACCEPT iters= 38 wall=    11.1 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@16 | margin=2.727407023 compliance=4.63900269575
+    rung 1 vf=0.52 ACCEPT iters= 59 wall=    18.5 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@25 | margin=1.632909708 compliance=8.71832621844
+    rung 2 vf=0.38 REJECT iters= 65 wall=    21.0 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@38 | margin=0.8233523247 compliance=21.833597985
+  [ctl#2 1e-9    ] grid 32x24x32  mg=carried  51.9 s TOTAL wall  (fine 49.8 s / 162 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=0 armed=0
+    rung 0 vf=0.68 ACCEPT iters= 38 wall=    10.9 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@16 | margin=2.727407023 compliance=4.63900269575
+    rung 1 vf=0.52 ACCEPT iters= 59 wall=    18.1 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@25 | margin=1.632909708 compliance=8.71832621844
+    rung 2 vf=0.38 REJECT iters= 65 wall=    20.8 s | STAGNATING  0 it /     0.0 s (  0.0%) | latched  0 | GenEO    0.0 s | settle@38 | margin=0.8233523247 compliance=21.833597985
+
+  --- AC7 DETERMINISM (byte-identical rerun in each posture) ---
+    OFF twice : IDENTICAL
+    ON  twice : IDENTICAL
+    CTL twice : IDENTICAL
+
+  --- AC2/AC3 ITERATIONS AND WALL, BOTH (pre-solve CHARGED) ---
+                                  OFF         ON     change
+    fine iterations               162        160      -1.2%
+    pre-solve iterations            -         31           
+    CHARGED iterations            162        191     +17.9%
+    fine wall (s)                50.9       49.2      -3.4%
+    pre-solve wall (s)              -        1.9           
+    CHARGED wall (s)             50.9       51.1      +0.4%   <== THE ANSWER
+    stagnating iterations           0          0      +0.0%
+    wall IN stagnation (s)        0.0        0.0      +0.0%
+
+    grid DOFs: fine 81675, coarse (pre-solve) 11271  => coarse apply = 1/7.25 of a fine apply
+    fine matvecs                  16800        16528      -1.6%   (raw, NOT cross-resolution)
+    pre-solve matvecs                 -         5200              (raw, NOT cross-resolution)
+    fine DOF-touches         1372140000   1349924400      -1.6%
+    pre-solve DOF-touches             -     58609200           
+    CHARGED DOF-touches      1372140000   1408533600      +2.7%   <== THE ANSWER (DOF-weighted, deterministic)
+
+  --- AC4/AC5 FULL GATE TABLE, EVERY RUNG, vs the 1e-9 FLOOR ---
+    rung vf     verdict OFF -> ON   margin OFF  margin ON   | ON vs OFF mean|drho| max | CTL floor mean|drho| max
+    0    0.68   ACCEPT   -> ACCEPT          2.72741     2.64793     |  5.865e-04  1.316e-01 |  7.877e-12  2.579e-09
+    1    0.52   ACCEPT   -> ACCEPT          1.63291     1.63291     |  0.000e+00  0.000e+00 |  2.746e-12  1.162e-09
+    2    0.38   REJECT   -> REJECT          0.823352    0.823352    |  0.000e+00  0.000e+00 |  2.179e-11  1.753e-08
+
+    class/printed flips, and the floor's own count on the same rung:
+    rung 0 (24576 elements): ON class 54 printed 17 | CTL class 0 printed 0  => ABOVE THE FLOOR (real)
+    rung 1 (24576 elements): ON class 0 printed 0 | CTL class 0 printed 0  => AT/BELOW THE FLOOR (noise)
+    rung 2 (24576 elements): ON class 0 printed 0 | CTL class 0 printed 0  => AT/BELOW THE FLOOR (noise)
+
+    --- AC5 CONVERGED COMPLIANCE PER RUNG (a faster run that lands on a worse design is not a win) ---
+    rung 0 vf=0.68 : OFF 4.63900268409 -> ON 4.64099993964  (+0.043%)  | settle iter OFF 16 -> ON 8 | rung iters OFF 38 -> ON 36
+    rung 1 vf=0.52 : OFF 8.71832620191 -> ON 8.71832620191  (+0.000%)  | settle iter OFF 25 -> ON 25 | rung iters OFF 59 -> ON 59
+    rung 2 vf=0.38 : OFF 21.8335979204 -> ON 21.8335979204  (+0.000%)  | settle iter OFF 38 -> ON 38 | rung iters OFF 65 -> ON 65
+
+  VERDICT FLIPS ON THIS FIXTURE: 0 (none)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-02-warm-start-coarse-experiment/healthy_gate.csv
+
+===== FIXTURE nobox : warm_start_coarse OFF vs ON, with a 1e-9 NEGATIVE CONTROL =====
+  OFF = warm_start_coarse false (shipped default)
+  ON  = warm_start_coarse true  (handoff 110 Part B)
+  CTL = OFF, loads x (1 + 1e-9) — the noise floor
+
+  [off#1         ] grid 33x25x33  mg=NOT-carried  489.8 s TOTAL wall  (fine 481.3 s / 944 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=954
+    rung 0 vf=0.68 ACCEPT iters=172 wall=    80.5 s | STAGNATING 170 it /    79.1 s ( 98.3%) | latched 167 | GenEO   41.2 s | settle@128 | margin=7.41745183 compliance=36.6751700709
+    rung 1 vf=0.52 ACCEPT iters=244 wall=   126.0 s | STAGNATING 244 it /   126.0 s (100.0%) | latched 244 | GenEO   60.1 s | settle@191 | margin=5.499539743 compliance=42.6290499212
+    rung 2 vf=0.38 ACCEPT iters=265 wall=   146.3 s | STAGNATING 265 it /   146.3 s (100.0%) | latched 265 | GenEO   69.2 s | settle@213 | margin=4.784007769 compliance=52.299730612
+    rung 3 vf=0.26 ACCEPT iters=263 wall=   128.6 s | STAGNATING 263 it /   128.6 s (100.0%) | latched 263 | GenEO   63.0 s | settle@245 | margin=2.976248416 compliance=80.9377902736
+  [off#2         ] grid 33x25x33  mg=NOT-carried  484.1 s TOTAL wall  (fine 475.6 s / 944 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=954
+    rung 0 vf=0.68 ACCEPT iters=172 wall=    81.8 s | STAGNATING 170 it /    80.5 s ( 98.4%) | latched 167 | GenEO   41.7 s | settle@128 | margin=7.41745183 compliance=36.6751700709
+    rung 1 vf=0.52 ACCEPT iters=244 wall=   131.5 s | STAGNATING 244 it /   131.5 s (100.0%) | latched 244 | GenEO   62.7 s | settle@191 | margin=5.499539743 compliance=42.6290499212
+    rung 2 vf=0.38 ACCEPT iters=265 wall=   140.2 s | STAGNATING 265 it /   140.2 s (100.0%) | latched 265 | GenEO   66.5 s | settle@213 | margin=4.784007769 compliance=52.299730612
+    rung 3 vf=0.26 ACCEPT iters=263 wall=   122.1 s | STAGNATING 263 it /   122.1 s (100.0%) | latched 263 | GenEO   59.6 s | settle@245 | margin=2.976248416 compliance=80.9377902736
+  [on#1          ] grid 33x25x33  mg=NOT-carried  540.1 s TOTAL wall  (fine 524.0 s / 1000 iters ; PRE-SOLVE 75 iters 7.2 s)  geneo builds=2 armed=1077
+    rung 0 vf=0.68 ACCEPT iters=210 wall=   106.0 s | STAGNATING 210 it /   106.0 s (100.0%) | latched 210 | GenEO   57.9 s | settle@133 | margin=7.299348719 compliance=36.5134366411
+    rung 1 vf=0.52 ACCEPT iters=262 wall=   150.0 s | STAGNATING 262 it /   150.0 s (100.0%) | latched 262 | GenEO   71.9 s | settle@192 | margin=5.55192945 compliance=42.6939713487
+    rung 2 vf=0.38 ACCEPT iters=265 wall=   135.1 s | STAGNATING 265 it /   135.1 s (100.0%) | latched 265 | GenEO   66.8 s | settle@147 | margin=4.058218838 compliance=65.8789674182
+    rung 3 vf=0.26 ACCEPT iters=263 wall=   132.9 s | STAGNATING 263 it /   132.9 s (100.0%) | latched 263 | GenEO   65.8 s | settle@236 | margin=2.885414992 compliance=80.63629765
+  [on#2          ] grid 33x25x33  mg=NOT-carried  535.8 s TOTAL wall  (fine 519.7 s / 1000 iters ; PRE-SOLVE 75 iters 7.2 s)  geneo builds=2 armed=1077
+    rung 0 vf=0.68 ACCEPT iters=210 wall=   105.0 s | STAGNATING 210 it /   105.0 s (100.0%) | latched 210 | GenEO   57.4 s | settle@133 | margin=7.299348719 compliance=36.5134366411
+    rung 1 vf=0.52 ACCEPT iters=262 wall=   149.2 s | STAGNATING 262 it /   149.2 s (100.0%) | latched 262 | GenEO   71.7 s | settle@192 | margin=5.55192945 compliance=42.6939713487
+    rung 2 vf=0.38 ACCEPT iters=265 wall=   134.6 s | STAGNATING 265 it /   134.6 s (100.0%) | latched 265 | GenEO   66.4 s | settle@147 | margin=4.058218838 compliance=65.8789674182
+    rung 3 vf=0.26 ACCEPT iters=263 wall=   130.9 s | STAGNATING 263 it /   130.9 s (100.0%) | latched 263 | GenEO   64.9 s | settle@236 | margin=2.885414992 compliance=80.63629765
+  [ctl#1 1e-9    ] grid 33x25x33  mg=NOT-carried  481.5 s TOTAL wall  (fine 472.8 s / 935 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=945
+    rung 0 vf=0.68 ACCEPT iters=173 wall=    78.9 s | STAGNATING 171 it /    77.7 s ( 98.5%) | latched 168 | GenEO   40.3 s | settle@128 | margin=7.416025211 compliance=36.6745601128
+    rung 1 vf=0.52 ACCEPT iters=234 wall=   122.0 s | STAGNATING 234 it /   122.0 s (100.0%) | latched 234 | GenEO   58.2 s | settle@191 | margin=5.619039852 compliance=42.6379457546
+    rung 2 vf=0.38 ACCEPT iters=265 wall=   143.7 s | STAGNATING 265 it /   143.7 s (100.0%) | latched 265 | GenEO   68.2 s | settle@227 | margin=4.713370659 compliance=52.3469307962
+    rung 3 vf=0.26 ACCEPT iters=263 wall=   128.1 s | STAGNATING 263 it /   128.1 s (100.0%) | latched 263 | GenEO   62.4 s | settle@241 | margin=2.916469278 compliance=80.7156489127
+  [ctl#2 1e-9    ] grid 33x25x33  mg=NOT-carried  482.6 s TOTAL wall  (fine 473.8 s / 935 iters ; PRE-SOLVE 0 iters 0.0 s)  geneo builds=1 armed=945
+    rung 0 vf=0.68 ACCEPT iters=173 wall=    80.8 s | STAGNATING 171 it /    79.5 s ( 98.4%) | latched 168 | GenEO   41.1 s | settle@128 | margin=7.416025211 compliance=36.6745601128
+    rung 1 vf=0.52 ACCEPT iters=234 wall=   122.3 s | STAGNATING 234 it /   122.3 s (100.0%) | latched 234 | GenEO   58.5 s | settle@191 | margin=5.619039852 compliance=42.6379457546
+    rung 2 vf=0.38 ACCEPT iters=265 wall=   143.4 s | STAGNATING 265 it /   143.4 s (100.0%) | latched 265 | GenEO   67.9 s | settle@227 | margin=4.713370659 compliance=52.3469307962
+    rung 3 vf=0.26 ACCEPT iters=263 wall=   127.3 s | STAGNATING 263 it /   127.3 s (100.0%) | latched 263 | GenEO   62.1 s | settle@241 | margin=2.916469278 compliance=80.7156489127
+
+  --- AC7 DETERMINISM (byte-identical rerun in each posture) ---
+    OFF twice : IDENTICAL
+    ON  twice : IDENTICAL
+    CTL twice : IDENTICAL
+
+  --- AC2/AC3 ITERATIONS AND WALL, BOTH (pre-solve CHARGED) ---
+                                  OFF         ON     change
+    fine iterations               944       1000      +5.9%
+    pre-solve iterations            -         75           
+    CHARGED iterations            944       1075     +13.9%
+    fine wall (s)               481.3      524.0      +8.9%
+    pre-solve wall (s)              -        7.2           
+    CHARGED wall (s)            481.3      531.2     +10.4%   <== THE ANSWER
+    stagnating iterations         942       1000      +6.2%
+    wall IN stagnation (s)      480.0      524.0      +9.2%
+
+    grid DOFs: fine 90168, coarse (pre-solve) 13608  => coarse apply = 1/6.63 of a fine apply
+    fine matvecs                 392416       415169      +5.8%   (raw, NOT cross-resolution)
+    pre-solve matvecs                 -        35707              (raw, NOT cross-resolution)
+    fine DOF-touches        35383365888  37434958392      +5.8%
+    pre-solve DOF-touches             -    485900856           
+    CHARGED DOF-touches     35383365888  37920859248      +7.2%   <== THE ANSWER (DOF-weighted, deterministic)
+
+  --- AC4/AC5 FULL GATE TABLE, EVERY RUNG, vs the 1e-9 FLOOR ---
+    rung vf     verdict OFF -> ON   margin OFF  margin ON   | ON vs OFF mean|drho| max | CTL floor mean|drho| max
+    0    0.68   ACCEPT   -> ACCEPT          7.41745     7.29935     |  3.808e-02  1.000e+00 |  1.257e-03  9.697e-01
+    1    0.52   ACCEPT   -> ACCEPT          5.49954     5.55193     |  4.906e-03  1.000e+00 |  8.539e-03  1.000e+00
+    2    0.38   ACCEPT   -> ACCEPT          4.78401     4.05822     |  2.379e-02  9.849e-01 |  2.281e-03  9.891e-01
+    3    0.26   ACCEPT   -> ACCEPT          2.97625     2.88541     |  1.600e-03  8.490e-01 |  1.231e-03  8.709e-01
+
+    class/printed flips, and the floor's own count on the same rung:
+    rung 0 (27225 elements): ON class 1616 printed 1035 | CTL class 186 printed 30  => ABOVE THE FLOOR (real)
+    rung 1 (27225 elements): ON class 379 printed 130 | CTL class 493 printed 229  => ABOVE THE FLOOR (real)
+    rung 2 (27225 elements): ON class 4989 printed 229 | CTL class 259 printed 49  => AT/BELOW THE FLOOR (noise)
+    rung 3 (27225 elements): ON class 240 printed 40 | CTL class 200 printed 25  => AT/BELOW THE FLOOR (noise)
+
+    --- AC5 CONVERGED COMPLIANCE PER RUNG (a faster run that lands on a worse design is not a win) ---
+    rung 0 vf=0.68 : OFF 36.6751700709 -> ON 36.5134366411  (-0.441%)  | settle iter OFF 128 -> ON 133 | rung iters OFF 172 -> ON 210
+    rung 1 vf=0.52 : OFF 42.6290499212 -> ON 42.6939713487  (+0.152%)  | settle iter OFF 191 -> ON 192 | rung iters OFF 244 -> ON 262
+    rung 2 vf=0.38 : OFF 52.299730612 -> ON 65.8789674182  (+25.964%)  | settle iter OFF 213 -> ON 147 | rung iters OFF 265 -> ON 265
+    rung 3 vf=0.26 : OFF 80.9377902736 -> ON 80.63629765  (-0.372%)  | settle iter OFF 245 -> ON 236 | rung iters OFF 263 -> ON 263
+
+  VERDICT FLIPS ON THIS FIXTURE: 0 (none)
+  wrote /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/evidence/2026-08-02-warm-start-coarse-experiment/nobox_gate.csv
+
+==== TOTAL VERDICT FLIPS ACROSS EVERY FIXTURE RUN: 0 ====
