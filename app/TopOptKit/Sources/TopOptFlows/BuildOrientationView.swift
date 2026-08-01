@@ -40,6 +40,10 @@ public struct BuildOrientationView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            // *** FIRST, ABOVE EVERYTHING: the orientation was CHOSEN and the
+            // exported file was rotated onto it. A reader who stops after one
+            // block must still learn that. ***
+            if let r = ranking, r.autoApplied { autoAppliedBanner(r) }
             twoQuestions
             axisPicker
             if let r = ranking {
@@ -139,6 +143,83 @@ public struct BuildOrientationView: View {
         let rec = SIMD3<Float>(Float(r.recommended.x), Float(r.recommended.y),
                                Float(r.recommended.z))
         return simd_dot(simd_normalize(rec), d) > 0.999_9
+    }
+
+    // MARK: - the AUTO-APPLIED banner (handoff 2026-08-01-bake-build-orientation, V7)
+
+    /// *** AN AUTO-APPLY IS NEVER SILENT. ***
+    ///
+    /// When the user declared no orientation the run CHOOSES one, certifies THAT
+    /// one, and rotates the exported geometry so it is +Z in the file. That is a
+    /// decision made on the user's behalf which can change the verdict, so it
+    /// gets the loudest block in the panel, above the two questions, and it says
+    /// three things in order: that it was chosen, WHICH one, and — when true —
+    /// that it is the reason the part passes.
+    ///
+    /// PR 271's rule was "a recommendation never SILENTLY changes a verdict".
+    /// The word doing the work was *silently*. This banner is the payment for
+    /// being allowed to change it at all.
+    /// The counterfactual sentence, built OUTSIDE the view builder. Kept a plain
+    /// static function for two reasons: the SwiftUI type-checker cannot handle a
+    /// six-term string concatenation inside a `Text` in reasonable time, and a
+    /// pure function is testable without standing up a view.
+    static func counterfactualSentence(_ r: OrientationRanking,
+                                       inferred: SIMD3<Double>) -> String {
+        let assumed = BuildOrientation.label(inferred)
+        let thenVerdict = r.asInferredAccepted ? "ACCEPTED" : "REJECTED"
+        let nowVerdict = r.asBuiltAccepted ? "ACCEPTED" : "REJECTED"
+        var s = "Printed the way this run would otherwise have assumed ("
+        s += assumed
+        s += ", the opposite of gravity) the same part is "
+        s += thenVerdict
+        s += "; printed the chosen way it is "
+        s += nowVerdict
+        s += "."
+        return s
+    }
+
+    @ViewBuilder private func autoAppliedBanner(_ r: OrientationRanking) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(r.autoApplyRescued
+                    ? "This part passes because of the orientation we chose."
+                    : "We chose the build orientation for you.",
+                  systemImage: r.autoApplyRescued
+                    ? "exclamationmark.triangle.fill" : "wand.and.stars")
+                .font(.subheadline).bold()
+
+            Text("You didn't say which way up to print it, so this run picked "
+                 + "\(BuildOrientation.label(r.asBuilt)) and certified that. "
+                 + (r.exportBaked
+                    ? "The exported file is rotated to match, so the slicer gets "
+                      + "the part the right way up whatever it does with it."
+                    : "The exported file was NOT rotated."))
+                .font(.caption)
+
+            // The MEASURED counterfactual — never an adjective.
+            if r.autoApplyChangedVerdict, let inferred = r.asInferred {
+                Text(Self.counterfactualSentence(r, inferred: inferred))
+                    .font(.caption).bold()
+            }
+
+            // The gate constraint, when it bit: the six-criteria favourite was
+            // NOT applied because it would have failed. Shown so the trade-off
+            // is visible rather than resolved in silence.
+            if r.autoApplyConstrainedByGate {
+                Text("A different orientation scores better on the criteria "
+                     + "below, but it fails the strength check — so it was not "
+                     + "applied. Choose it explicitly if you want it anyway.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            Text("Pick an axis below to take the choice back; the run then uses "
+                 + "yours verbatim and rotates nothing.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(r.autoApplyRescued ? Color.orange.opacity(0.18)
+                                       : Color.accentColor.opacity(0.13),
+                    in: RoundedRectangle(cornerRadius: 10))
     }
 
     // MARK: - the verdict banner (U5)

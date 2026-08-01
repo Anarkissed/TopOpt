@@ -1,0 +1,26 @@
+NOTE: no build_direction was declared, so this run CHOSE one (-0, -0, 1) and ROTATED the exported geometry onto it — in the file the build direction is +Z. The verdict describes that orientation. Declare "build_direction" to use your own instead (the export is then left in model coordinates). See build_orientation.json.
+NOTE: no build_direction was declared, so this run CHOSE one (-0, -0, 1) and ROTATED the exported geometry onto it — in the file the build direction is +Z. The verdict describes that orientation. Declare "build_direction" to use your own instead (the export is then left in model coordinates). See build_orientation.json.
+test_bake_build_orientation — the exported file IS the certified object
+
+-- V4/V5: the rotation primitive --
+  off-axis candidates: 20 | worst |R*d - (0,0,1)| = 9.466e-16 at (-0.5774, -0.5774, -0.5774) | worst |det-1| = 1.110e-15
+
+-- V1/V4/V5: the file is the certified object --
+  V4: 8640 vertices compared through the file, 0 drifted
+  V5: boundary 0/0  non-manifold 0/0  components 1/1  volume -726.7837872 / -726.7837872 mm^3
+  V1: height model=35 file=35 | overhang faces 274/274 | overhang area 70.2703249087 / 70.2703249087 mm^2 (rel dev 0.000e+00)
+
+-- V2/V3: a declared direction is untouched --
+
+-- V7/V9: auto-apply is announced, and never sinks a part --
+  hook @48, load -y: as-inferred (+y) margin 0.9576 -> REJECTED | applied (0, 0, -1) margin 1.9440 -> ACCEPTED
+  V9: inferred REJECT | applied ACCEPT | unconstrained recommendation ACCEPT (gate-constrained: no)
+
+-- V6: the lattice comes with it --
+  V6: 117636 lattice vertices compared, 0 drifted
+  V6: out-of-part lattice vertices model=0 file=0
+  V6: exclude-region occupancy model=1402 file=1402
+
+-- V8: determinism --
+
+166 checks, 0 failures

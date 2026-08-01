@@ -181,6 +181,13 @@ void StreamingThreeMfWriter::finish() {
         b, b + 1, b + 2);
     put(buf, static_cast<std::size_t>(n));
   }
+  // The build item carries NO transform, which 3MF reads as the identity —
+  // deliberately and permanently (handoff 2026-08-01-bake-build-orientation). A
+  // build transform is ADVICE that "place on bed" / "auto-orient" / "arrange"
+  // reset, so an orientation living here is one the slicer may discard. The
+  // certified orientation is baked into the VERTICES upstream (run_job wraps
+  // this sink in a RotatingTriangleSink), and this stays identity as belt and
+  // braces. Do NOT add a transform attribute here.
   put("    </triangles>\r\n   </mesh>\r\n  </object>\r\n </resources>\r\n"
       " <build>\r\n  <item objectid=\"1\"/>\r\n </build>\r\n</model>\r\n");
   model_.flush();

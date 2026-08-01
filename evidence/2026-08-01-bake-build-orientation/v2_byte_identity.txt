@@ -1,0 +1,31 @@
+V2 — EXPLICIT ORIENTATION IS BYTE-IDENTICAL
+==========================================
+
+A job that DECLARES "build_direction": [0,1,0], run twice:
+  new = this branch
+  old = an INDEPENDENTLY BUILT PR 271 binary (git worktree at 9f67387,
+        its own cmake configure + build; the working tree never touched)
+
+  report.json        raw sha256 IDENTICAL
+     6a682f623e112a5b323aa953b3f66b537d67333afd847181ea838f5003d6985a
+  variant_060.stl    raw sha256 IDENTICAL
+     2f2432f7f7f2a2f4bdd63a30570e7309ef964bee9a0d65e222aec868492a20c1
+  fields.bin         raw sha256 IDENTICAL
+     c0d7904b986a7daaa2450c73a0de6e2e78b9019636ad3e6eaea7faefa2ddb29a
+
+Auto-apply did NOT leak into the case where the user chose. The same
+statement is asserted structurally in test_bake_build_orientation:
+apply_recommended_orientation THROWS if handed a declared direction.
+
+--- and the key is LIVE: the same job with NO build_direction ---
+  report.json        DIFFERS (the orientation was chosen)
+  variant_060.stl    identical
+
+  (variant_060.stl is identical here because on THIS fixture the chosen
+   orientation IS +Z — the same direction the gravity fallback gives — so the
+   rotation is the IDENTITY and no coordinate moves. report.json still differs:
+   it now names the frame its `orientation` vector is in and carries
+   `orientation_model` beside it. That is the honest reading of the pair: the
+   bake is live and reported, and it moved nothing because there was nothing to
+   move. The rotation is exercised on a NON-identity axis by
+   test_bake_build_orientation's V1/V4/V6 sections, which declare [0,1,0].)

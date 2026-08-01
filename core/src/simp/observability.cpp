@@ -566,8 +566,12 @@ std::string run_info_json(const RunInfo& info) {
   const bool has_cert = info.lattice_present;
   const bool has_exp = info.lattice_export_present;
   const bool has_grad = info.grading_present;
+  // THE EXPORTED GEOMETRY'S FRAME (handoff 2026-08-01-bake-build-orientation).
+  // Emitted only when the export was rotated, so a run that writes model-space
+  // coordinates keeps its run_info byte-identical.
+  const bool has_frame = info.export_baked;
   num("snapshot_cap", fmt_i(info.snapshot_cap),
-      /*comma=*/has_cert || has_exp || has_grad);
+      /*comma=*/has_cert || has_exp || has_grad || has_frame);
   if (has_cert) {
     std::string lat = "{\"topology\": \"" + info.lattice_topology + "\"";
     lat += ", \"cell_size_mm\": " + fmt(info.lattice_cell_size_mm);
@@ -605,7 +609,7 @@ std::string run_info_json(const RunInfo& info) {
       lat += ", \"strut_gated\": false";
     }
     lat += "}";
-    num("lattice", lat, /*comma=*/has_exp || has_grad);
+    num("lattice", lat, /*comma=*/has_exp || has_grad || has_frame);
   }
   if (has_exp) {
     std::string le = "{\"topology\": \"" + info.lattice_export_topology + "\"";
@@ -668,7 +672,7 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.lattice_export_include_void_voxels);
     }
     le += "}";
-    num("lattice_export", le, /*comma=*/has_grad);
+    num("lattice_export", le, /*comma=*/has_grad || has_frame);
   }
   if (has_grad) {
     // The grading-law report (handoff 2026-07-29-lattice-grading-law). `band_*` and
@@ -750,7 +754,28 @@ std::string run_info_json(const RunInfo& info) {
       gr += "]";
     }
     gr += "}";
-    num("grading", gr, /*comma=*/false);  // always last when present
+    num("grading", gr, /*comma=*/has_frame);
+  }
+
+  if (has_frame) {
+    // WHICH FRAME THE EXPORTED MESH IS IN — the one question a reader of the
+    // exported file cannot answer from the file itself. `applied_build_dir` is
+    // in the MODEL frame; in the FILE the build direction is +Z by construction.
+    std::string ef = "{\"baked\": true";
+    ef += ", \"build_direction_in_file\": [0, 0, 1]";
+    ef += ", \"applied_build_dir_model\": [" + fmt(info.applied_build_dir_x) +
+          ", " + fmt(info.applied_build_dir_y) + ", " +
+          fmt(info.applied_build_dir_z) + "]";
+    ef += ", \"auto_applied\": " +
+          bool_json(info.export_build_direction_auto_applied);
+    ef += ", \"rotation_exact\": " + bool_json(info.export_rotation_exact);
+    ef += ", \"note\": \"the exported mesh was ROTATED so the certified build "
+          "direction is +Z in the file. fields.bin, the voxel grid, the loads, "
+          "the fixtures and the clearances are all in the MODEL frame and did "
+          "NOT move. Every direction-bearing NUMBER in the report is a "
+          "rigid-motion invariant and reads the same in both frames.\"";
+    ef += "}";
+    num("export_frame", ef, /*comma=*/false);  // last when present
   }
 
   s += "}\n";

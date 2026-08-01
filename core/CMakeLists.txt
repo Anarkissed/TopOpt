@@ -55,6 +55,7 @@ add_library(topopt
   src/fea/strut_strength.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
+  src/orient/build_frame.cpp
   src/settings/settings.cpp
   src/settings/report.cpp
   src/cli/job.cpp)
@@ -590,6 +591,26 @@ if(Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     TOPOPT_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME build_direction COMMAND test_build_direction)
+
+  # BAKE THE BUILD ORIENTATION INTO THE EXPORTED GEOMETRY (task
+  # 2026-08-01-bake-build-orientation). Pins that the exported FILE is the object
+  # the certificate describes: the rotation is exact on the cube axes, winding
+  # and manifoldness survive, a DECLARED direction is byte-identical to the
+  # pre-bake pipeline, the latticed export moves by the same rigid motion with
+  # PR 250/253's bars intact, an auto-applied orientation is announced and can
+  # never sink a part, and the whole thing is deterministic. Drives run_job end
+  # to end (needs Eigen + the mesh fixtures) and reuses test_v5's hook fixture
+  # for PR 266's rescue case.
+  add_executable(test_bake_build_orientation
+    tests/validation/test_bake_build_orientation.cpp)
+  target_link_libraries(test_bake_build_orientation PRIVATE topopt)
+  target_compile_definitions(test_bake_build_orientation PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    ORIENT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/orient"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME bake_build_orientation COMMAND test_bake_build_orientation)
 
   # SIMP compliance + sensitivity test (M3.2). Builds its tiny grids in code (no
   # fixture) and drives simp_compliance (density field, penalized stiffness,

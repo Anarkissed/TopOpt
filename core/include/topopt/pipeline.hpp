@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/build_frame.hpp"        // BakeBuildOrientation
 #include "topopt/build_orientation.hpp"  // BuildOrientationReport
 #include "topopt/fea.hpp"        // DirichletBC
 #include "topopt/materials.hpp"  // Material
@@ -248,7 +249,25 @@ struct MinimizePlasticOptions {
   // false (the DEFAULT) => the scorer never runs and no report field is filled:
   // byte-identical output, the same opt-in discipline as every other posture
   // flag here.
+  //
+  // NOTE (handoff 2026-08-01-bake-build-orientation): the AUTO-BAKE path below
+  // arms the scorer on its own when it needs a recommendation, because it cannot
+  // choose an orientation without one. Setting this flag remains the way to get
+  // the RANKING RECEIPT written on a run that is not auto-baking.
   bool build_orientation_report = false;
+
+  // ── BAKING THE CERTIFIED ORIENTATION INTO THE EXPORTED GEOMETRY ─────────────
+  // (handoff 2026-08-01-bake-build-orientation.) A certified build direction that
+  // exists only as a number in report.json is a certificate for an object the
+  // slicer is not obliged to produce: the export was never reoriented, and a 3MF
+  // build transform is advice any "place on bed" resets. This setting governs
+  // whether the exported VERTICES are rotated so the certified build direction
+  // IS +Z in the file.
+  //
+  // NEVER read this field directly. Call resolve_bake_plan(options, ...)
+  // (production.hpp) — the ONE place the decision is made, for the same reason
+  // resolve_build_direction is the one place the fallback lives.
+  BakeBuildOrientation bake_build_orientation = BakeBuildOrientation::Auto;
   // Shared SIMP loop options (filter radius, move limit, iteration cap, CG
   // tolerances). `volume_fraction` is overridden by each ladder rung and is
   // ignored here. `simp.progress` and `simp.cancel` are also overridden by
@@ -804,6 +823,30 @@ struct MinimizePlasticVariant {
   // `margin_effective` above are this variant's verdict for report.orientation —
   // the orientation ACTUALLY USED — and the ranking cannot move them.
   BuildOrientationReport build_orientation;
+  // (c3) THE ORIENTATION THIS VARIANT IS CERTIFIED AND EXPORTED IN (handoff
+  // 2026-08-01-bake-build-orientation).
+  //
+  //   `applied_build_dir` — the MODEL-frame build direction every
+  //       direction-bearing number on this variant was computed at. Equal to
+  //       resolve_build_direction(options) unless the orientation was chosen for
+  //       the user, in which case it is the chosen one.
+  //   `build_direction_auto_applied` — the orientation was CHOSEN because none
+  //       was declared. Only ever true then. When true the receipt and the app
+  //       must say so; a silent auto-apply is the failure this feature exists to
+  //       avoid, not a convenience.
+  //   `export_baked` — the exported mesh (solid and latticed) is this variant's
+  //       geometry ROTATED so `applied_build_dir` is +Z in the file. When true,
+  //       `report.orientation` is (0,0,1) — the build direction IN THE FILE —
+  //       and `applied_build_dir` is the same direction in the model frame.
+  //
+  // Per-variant, not per-run: each rung is a different design with its own
+  // overhangs and its own interlayer field, so each may be certified in its own
+  // best orientation, and each exported file carries its own rotation. The run's
+  // published receipt describes the rung the user actually exports (the lightest
+  // accepted one).
+  Vec3 applied_build_dir{0.0, 0.0, 1.0};
+  bool build_direction_auto_applied = false;
+  bool export_baked = false;
   // (d) Printed mass in grams = material density (g/cm^3) * printed volume,
   // spacing-aware: (# printed voxels) * grid.voxel_volume() (mm^3) / 1000.
   double mass_grams = 0.0;

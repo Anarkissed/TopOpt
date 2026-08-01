@@ -355,6 +355,30 @@ struct JobDescription {
   // chosen an orientation is exactly the one the ranking helps most.
   bool build_orientation_report = false;
 
+  // Optional "bake_build_orientation": "auto" | "always" | "off" (handoff
+  // 2026-08-01-bake-build-orientation). Governs whether the EXPORTED VERTICES
+  // are rotated so the certified build direction is +Z in the file.
+  //
+  // The export was never reoriented before this key existed: the certified
+  // orientation lived only as a number in report.json, the slicer placed the
+  // part however it liked, and the certificate described a different object from
+  // the one being sliced.
+  //
+  //   "auto" (THE DEFAULT) — bake only when no "build_direction" was declared,
+  //       and then also CHOOSE the orientation (the scorer's best candidate) and
+  //       certify THAT one. A job that declares a direction is untouched and
+  //       bit-identical.
+  //   "always" — bake whatever direction is resolved, declared or not. The
+  //       opt-in for a user who wants their DECLARED orientation carried by the
+  //       geometry instead of by a transform the slicer may reset.
+  //   "off" — never bake, never choose: the pre-bake pipeline, byte for byte.
+  //
+  // ABSENT => "auto". This is the one place in the schema where an absent key
+  // does NOT mean "the older behaviour", and it is deliberate: a certificate for
+  // an orientation the file does not carry is the defect, and defaulting it off
+  // would leave the defect in place for every job that never heard of the key.
+  std::string bake_build_orientation;  // "" => "auto"
+
   std::vector<double> ladder;  // volume fractions, (0,1], strictly descending
   double margin_stop = 0.0;    // finite >= 0 (0 disables the stop)
   int simp_max_iterations = 0;  // optional "simp" block; 0 = SimpOptions default

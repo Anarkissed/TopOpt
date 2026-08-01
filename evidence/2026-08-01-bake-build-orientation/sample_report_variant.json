@@ -1,0 +1,40 @@
+{
+  "volume_fraction": 0.5997594791,
+  "printed_fraction": 0.5903536977,
+  "volume_saved_fraction": 0.4096463023,
+  "max_stress_mpa": 0.001923274151,
+  "max_interlayer_tension_mpa": 0.0006791942556,
+  "margin": {
+    "in_plane": 28597.06713,
+    "interlayer": 44538.06809,
+    "worst_case": 28597.06713
+  },
+  "orientation": {
+    "x": 0,
+    "y": 0,
+    "z": 1
+  },
+  "orientation_frame": "export",
+  "orientation_model": {
+    "x": 0,
+    "y": 0,
+    "z": 1
+  },
+  "export_baked_note": "the exported mesh was ROTATED so the certified build direction is +Z in the file; `orientation` is that direction in the FILE, `orientation_model` is the same direction in the input model's coordinates. Every other number on this line (stresses, both margins, min-feature) is a rigid-motion invariant and reads the same in either frame.",
+  "settings": {
+    "family": "fdm",
+    "walls": 2,
+    "top_layers": 4,
+    "bottom_layers": 3,
+    "infill_percent": 20,
+    "infill_pattern": "grid",
+    "print_mode": "",
+    "warning": ""
+  },
+  "min_feature_violations": 20,
+  "min_feature_warning": "20 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
+  "accepted": true,
+  "margin_required": 0,
+  "margin_effective": 28597.06713,
+  "rejection_reason": ""
+}

@@ -741,6 +741,35 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         if request.wantsOrientationRanking {
             job["build_orientation_report"] = true
         }
+        // ── BAKING IS OFF ON THE APP PATH, DELIBERATELY, AND THIS IS WHY ───────
+        // (handoff 2026-08-01-bake-build-orientation.)
+        //
+        // The core's default is "auto": with no declared build direction it
+        // CHOOSES one and ROTATES the exported mesh so that direction is +Z in
+        // the file. That is right for a file handed to a slicer, and wrong for
+        // this app TODAY, because of what this app does with that same file:
+        // `fetchMesh` downloads the EXPORTED mesh and the viewer draws it under
+        // the MODEL-frame gravity arrow, the MODEL-frame design box, clearances
+        // and load groups, and the MODEL-frame per-voxel overlays spliced from
+        // fields.bin. Rotate the mesh alone and every one of those lands on the
+        // wrong geometry — a frame mix, which is a worse defect than the one
+        // baking fixes.
+        //
+        // So the app asks for the pre-bake pipeline explicitly rather than
+        // inheriting a default that would break its viewer. The consequence is
+        // stated plainly and is NOT hidden: an app run still certifies the
+        // gravity-inferred orientation and still surfaces the recommendation
+        // through BuildOrientationView, exactly as it did before — no better, no
+        // worse. The CLI / worker-direct path gets the baked file.
+        //
+        // THE FIX, when it is taken: make the viewer frame-aware — map the
+        // fetched mesh back through `export_frame.rotation_row_major` (already
+        // published in build_orientation.json, so no second derivation) before
+        // display, or render the model-frame mesh the bridge already holds. Then
+        // this key comes out and the app inherits "auto" like everything else.
+        // The decoder and the announcement banner are ALREADY built and tested
+        // for that day; only this line is in the way.
+        job["bake_build_orientation"] = "off"
         if !request.loadGroups.isEmpty {
             loads["groups"] = request.loadGroups.map { g -> [String: Any] in
                 ["face_ids": g.faceIDs,

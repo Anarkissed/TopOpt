@@ -1,0 +1,30 @@
+V8 — DETERMINISM AND TESTS
+==========================
+
+CORE — full ctest, run TWICE on the same build:
+  run 1: 100% tests passed out of 91
+  run 1: Total Test time (real) = 447.87 sec
+  run 2: 100% tests passed out of 91
+  run 2: Total Test time (real) = 420.80 sec
+  (90 before this task; the +1 is bake_build_orientation.)
+
+  test_bake_build_orientation on its own: 166 checks, 0 failures.
+
+APP — swift test on the full TopOptKit package:
+  	 Executed 1028 tests, with 14 tests skipped and 8 failures (0 unexpected) in 95.829 (95.902) seconds
+
+  The 8 are ASSERTION failures inside exactly THREE test cases, all of
+  them the pre-existing 3MF-import tests that need lib3mf provisioned in
+  the checkout (this worktree has the 3MF-free macOS slice; the run says
+  so itself: "3MF import requires lib3mf, which is not available in this
+  build"). They are PR 271's own three, unchanged:
+    AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+    AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+    AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd
+
+  This change adds ZERO app test failures. The BuildOrientation suite is
+  13/13 (PR 271's 9 + 4 new).
+
+NOTE on counting: PR 271's handoff reported "1024 tests, 3 failures" —
+that was the TEST count for the same three tests. swift test reports the
+ASSERTION count in the summary line, hence 8 here for the same three.

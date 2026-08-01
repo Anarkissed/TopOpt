@@ -82,8 +82,27 @@ struct VariantReport {
   double max_interlayer_tension_mpa = 0.0;
   // Worst-case stress margin (compute_stress_margin).
   StressMargin margin;
-  // The chosen build orientation (unit build direction, the M4.4 winner).
+  // The build orientation this line's numbers describe, EXPRESSED IN THE FRAME
+  // OF THE EXPORTED MESH (handoff 2026-08-01-bake-build-orientation).
+  //
+  //   * `export_baked` false (the default, and every pre-bake run) — the mesh is
+  //     exported in model-space coordinates, so this IS the model-frame build
+  //     direction, exactly as before, and `orientation_model` is unused.
+  //   * `export_baked` true — the exported vertices were ROTATED so the certified
+  //     build direction is +Z in the file, so this reads (0,0,1) and
+  //     `orientation_model` carries the same direction in the input model's own
+  //     coordinates.
+  //
+  // The field means "which way is up in the object this report describes", and
+  // the object this report describes is the exported file. Everything else on
+  // this line — the stresses, both margins, the min-feature count — is a
+  // rigid-motion invariant and reads the same in either frame.
   Vec3 orientation{0.0, 0.0, 0.0};
+  // The exported geometry was rotated into the build frame. Emitted into
+  // report.json (with `orientation_model`) ONLY when true, so an un-baked run's
+  // document keeps its exact bytes and every existing reader is unaffected.
+  bool export_baked = false;
+  Vec3 orientation_model{0.0, 0.0, 0.0};
   // Recommended slicer settings for this variant (M5.1 engine output).
   SlicerSettings settings;
   // M5.2b — print-reliability warning. `min_feature_violations` is the variant's

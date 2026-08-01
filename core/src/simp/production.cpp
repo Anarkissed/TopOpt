@@ -365,6 +365,54 @@ Vec3 resolve_build_direction(const MinimizePlasticOptions& opts) {
   return Vec3{raw.x / len, raw.y / len, raw.z / len};
 }
 
+BuildOrientationBakePlan resolve_bake_plan(const MinimizePlasticOptions& opts) {
+  // ── THE ONE BAKE DECISION (handoff 2026-08-01-bake-build-orientation) ────────
+  BuildOrientationBakePlan p;
+  p.mode = opts.bake_build_orientation;
+  // Asks the SAME question resolve_build_direction_is_inferred asks, through the
+  // same predicate, so "declared" means one thing across the codebase.
+  p.direction_declared = !resolve_build_direction_is_inferred(opts);
+
+  switch (p.mode) {
+    case BakeBuildOrientation::Off:
+      p.reason =
+          "bake_build_orientation is off: the export is written in model-space "
+          "coordinates and the certified build direction lives only in the "
+          "report (the pre-bake behaviour)";
+      return p;
+    case BakeBuildOrientation::Always:
+      p.bake = true;
+      p.auto_apply = !p.direction_declared;
+      p.needs_scorer = p.auto_apply;
+      p.reason = p.direction_declared
+                     ? "bake_build_orientation is always: the DECLARED build "
+                       "direction was baked into the exported geometry; nothing "
+                       "was chosen for you"
+                     : "bake_build_orientation is always and no build direction "
+                       "was declared, so one was CHOSEN and baked";
+      return p;
+    case BakeBuildOrientation::Auto:
+      break;
+  }
+  if (p.direction_declared) {
+    // *** AUTO-APPLY MUST NOT LEAK INTO THE CASE WHERE THE USER CHOSE (bar V2).
+    // A declared direction is respected verbatim and the file is left alone, so
+    // this run is bit-identical to the pre-bake pipeline. ***
+    p.reason =
+        "a build direction was DECLARED, so it was used verbatim and the export "
+        "was NOT rotated: a declared orientation may exist to put a face down "
+        "for finish, a bore round, or a part into existing fixturing";
+    return p;
+  }
+  p.auto_apply = true;
+  p.bake = true;
+  p.needs_scorer = true;
+  p.reason =
+      "no build direction was declared, so the best-scoring orientation was "
+      "CHOSEN, certified, and baked into the exported geometry";
+  return p;
+}
+
 void configure_production_options(MinimizePlasticOptions& opts) {
   // Matrix-free geometric-multigrid solver (handoff 079/091). Never assembles
   // the fine stiffness K; solves the identical system to the same tolerance,

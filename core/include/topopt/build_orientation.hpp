@@ -42,6 +42,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/build_frame.hpp"  // BuildFrameRotation (the baked export frame)
 #include "topopt/materials.hpp" // Material
 #include "topopt/mesh.hpp"      // Vec3
 #include "topopt/voxel.hpp"     // VoxelGrid
@@ -120,6 +121,62 @@ struct BuildOrientationReport {
   // presenting an inference as a user choice — PR 266's S5 point 3.
   bool build_direction_inferred = false;
 
+  // ── AUTO-APPLY (handoff 2026-08-01-bake-build-orientation) ─────────────────
+  // *** WHEN THIS IS TRUE THE RECOMMENDATION WAS APPLIED, AND IT MAY HAVE MOVED
+  // THE VERDICT. *** It can only ever be true when NO build direction was
+  // declared — `build_direction_inferred` above is then necessarily true — so it
+  // never overrides a choice the user made. `as_built_index` points at the
+  // APPLIED orientation (the one the verdict and the exported file both
+  // describe), which keeps the U5 invariant "the reported verdict is the
+  // as-built row's verdict" exactly as it was.
+  //
+  // PR 271's U5 discipline is not weakened here, it is INVERTED: a silent
+  // auto-apply would be the same failure as a silent verdict flip, so the
+  // receipt is REQUIRED to name the orientation, say it was chosen
+  // automatically, and — when `auto_apply_changed_verdict` — say that the
+  // orientation the run would otherwise have used gates differently.
+  bool auto_applied = false;
+  // The row auto-apply WOULD take / DID take. It is NOT always
+  // `recommended_index`, and the difference is the single most important thing
+  // to understand about this feature.
+  //
+  // *** THE GATE IS A CONSTRAINT; THE SIX CRITERIA ARE THE OBJECTIVE. ***
+  // `recommended_index` is PR 271's pure maximin over the six criteria, and it
+  // is deliberately NOT the margin-maximiser — the criteria genuinely disagree,
+  // and support material and print height are real costs worth trading margin
+  // for. That is the right rule for a RECOMMENDATION a human reads. It is the
+  // wrong rule for a CHOICE MADE ON THE USER'S BEHALF, because it can pick an
+  // orientation that FAILS the gate on a part that would have passed — measured,
+  // not hypothetical: on the design-box fixture the unconstrained pick cost a
+  // whole accepted ladder rung (2 rungs -> 1).
+  //
+  // So auto-apply maximins over the candidates that WOULD BE ACCEPTED, and falls
+  // back to the unconstrained pick only when NO candidate passes (there is then
+  // no verdict to protect). The as-inferred direction is always candidate 0, so
+  // if the inferred orientation passes, at least one candidate passes — which
+  // gives the property the whole design rests on:
+  //
+  //   AUTO-APPLY IS VERDICT-MONOTONE. It can never turn an orientation that
+  //   WOULD HAVE BEEN ACCEPTED into a REJECTED one. Asserted in
+  //   analyze_fixed_design, not merely intended.
+  //
+  // Nothing about `recommended_index` changes: it is still published, still the
+  // pure maximin, and when the two differ the receipt says so and prints both.
+  std::size_t auto_applied_index = 0;
+  // The gate constraint BOUND: the accepted-subset maximin is a different row
+  // from the unconstrained recommendation. Reported so the trade-off is visible
+  // rather than resolved in silence.
+  bool auto_apply_constrained_by_gate = false;
+  // The row the DOCUMENTED GRAVITY FALLBACK pointed at: what this run would have
+  // certified and exported had the orientation not been chosen. Equal to
+  // `as_built_index` when nothing was applied. Kept so the receipt can state the
+  // counterfactual with a measured number rather than an adjective.
+  std::size_t as_inferred_index = 0;
+  // The applied orientation gates DIFFERENTLY from the as-inferred one. When the
+  // applied one ACCEPTS and the as-inferred one REJECTS, the auto-apply is the
+  // reason the part passes, and the receipt says exactly that.
+  bool auto_apply_changed_verdict = false;
+
   // The recommendation is a different direction from the one built.
   bool recommendation_differs = false;
   // *** The recommendation would gate DIFFERENTLY from what was built. When this
@@ -187,6 +244,20 @@ BuildOrientationReport score_build_orientations(
     const Material& material, const KnockdownSpec& knockdown, double margin_stop,
     bool load_path_ok, bool inferred);
 
+// APPLY the recommendation (handoff 2026-08-01-bake-build-orientation). Moves
+// `as_built_index` onto `recommended_index`, records where the gravity fallback
+// pointed in `as_inferred_index`, and sets the two auto-apply flags. Nothing is
+// recomputed: every candidate row was already priced by the SAME gate expression
+// the real verdict uses, so "the verdict at the applied orientation" is a row
+// that already exists, not a second opinion.
+//
+// THE CALLER STILL OWNS THE VERDICT. This function does not touch any analysis
+// output; analyze_fixed_design re-seals its own direction-dependent fields from
+// the applied row immediately afterwards, and asserts they agree. Calling this
+// on a report whose `build_direction_inferred` is false is a programming error
+// (auto-apply may never override a declared direction) and throws.
+void apply_recommended_orientation(BuildOrientationReport* r);
+
 // THE receipt document — the ranking, the recommendation, and the U5 both-verdicts
 // statement, as JSON. ONE emitter, shared by the CLI (which writes it to
 // <out_dir>/build_orientation.json) and the on-device bridge (which returns the
@@ -202,9 +273,19 @@ BuildOrientationReport score_build_orientations(
 // one at `r.as_built_index`; it is passed separately so the receipt reports the
 // caller's own vector rather than a re-normalized copy).
 //
+// `baked` (handoff 2026-08-01-bake-build-orientation) is the rotation that was
+// applied to the EXPORTED GEOMETRY, or nullptr when the export was written in
+// model-space coordinates. It is what lets this document name the FRAME of every
+// vector it prints instead of leaving the reader to guess: with a rotation, the
+// exported file's own build direction is +Z and every candidate direction below
+// is a MODEL-frame vector. Passing it also makes the receipt state, in words,
+// that the orientation was applied automatically and — when true — that it is
+// why the part passes (bar V7).
+//
 // Throws std::invalid_argument if `r` was never evaluated.
 std::string build_orientation_report_json(const BuildOrientationReport& r,
-                                          const Vec3& as_built_dir);
+                                          const Vec3& as_built_dir,
+                                          const BuildFrameRotation* baked = nullptr);
 
 }  // namespace topopt
 

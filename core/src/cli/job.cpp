@@ -391,7 +391,8 @@ JobDescription parse_job(const std::string& json_text) {
                        "resolution", "fixture_faces", "gravity", "ladder",
                        "margin_stop", "simp", "draft", "output", "lattice",
                        "grading", "loads", "design_box", "keep_outs",
-                       "build_direction", "build_orientation_report"},
+                       "build_direction", "build_orientation_report",
+                       "bake_build_orientation"},
                       "the job");
 
   JobDescription job;
@@ -436,6 +437,20 @@ JobDescription parse_job(const std::string& json_text) {
     if (br->type != JsonValue::Type::Bool)
       schema_fail("\"build_orientation_report\" must be a boolean");
     job.build_orientation_report = (br->num != 0.0);
+  }
+  // "bake_build_orientation" (handoff 2026-08-01-bake-build-orientation) — three
+  // spellings, validated STRICTLY here so a typo is refused before any work
+  // rather than silently falling back to the default and exporting an
+  // unreoriented file the report claims is reoriented.
+  if (const JsonValue* bb = find_key(root, "bake_build_orientation")) {
+    job.bake_build_orientation = require_string(*bb, "bake_build_orientation");
+    if (job.bake_build_orientation != "auto" &&
+        job.bake_build_orientation != "always" &&
+        job.bake_build_orientation != "off")
+      schema_fail(
+          "\"bake_build_orientation\" must be \"auto\", \"always\" or \"off\" "
+          "(got \"" +
+          job.bake_build_orientation + "\")");
   }
 
   const JsonValue* loads_v = find_key(root, "loads");

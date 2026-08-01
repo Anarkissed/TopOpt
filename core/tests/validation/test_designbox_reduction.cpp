@@ -120,6 +120,18 @@ MinimizePlasticOptions prod_options(const std::vector<NodalLoad>& loads) {
   o.gravity_direction = Vec3{0.0, 0.0, -1.0};
   o.updater = topopt::SimpUpdater::MMA;
   o.infill_percent = 100.0;
+  // ORIENTATION BAKING OFF — this fixture measures DESIGN-BOX REDUCTION, and it
+  // arms `margin_floor_multiple = 2.0`, a comfort floor PRODUCTION HAS WITHDRAWN
+  // (its default is +infinity; see test_ladder_rung_count). Those two interact:
+  // choosing a better build orientation makes rung 0 genuinely stronger, and a
+  // stronger rung 0 clears that withdrawn floor immediately, so the ladder stops
+  // at one rung and check (c) below compares two ladders that halted for a
+  // reason this fixture is not about. Measured, on this fixture: no-box 2 -> 3
+  // rungs, box 2 -> 1. Pinning the orientation posture keeps every assertion
+  // below testing exactly what it was written to test, unchanged. The
+  // auto-apply/ladder interaction has its own coverage in
+  // test_bake_build_orientation (handoff 2026-08-01-bake-build-orientation).
+  o.bake_build_orientation = topopt::BakeBuildOrientation::Off;
   return o;
 }
 
