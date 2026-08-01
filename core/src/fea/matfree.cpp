@@ -987,7 +987,10 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     // with the deflated preconditioner: CG's conjugacy assumes a fixed M, and a
     // restart from the current x is a warm start — exactness untouched. The
     // iteration counter keeps running (the burned iterations are charged).
-    if (geneo_pending && i + 1 >= kGeneoTriggerIters) {
+    // (The trigger is read through the probe config, whose DEFAULT is
+    // kGeneoTriggerIters — see geneo.hpp. Production reads the shipped constant;
+    // only the standing-preconditioner harness overrides it.)
+    if (geneo_pending && i + 1 >= geneo_probe_config().trigger_iters) {
       geneo_pending = false;
       bool built = false;
       span(t_geneo_setup, [&] { built = geneo_build_now(m, *ctx, i + 1); });
@@ -1262,7 +1265,12 @@ long long fea_geneo_coarse_refreshes() {
   return fea_detail::geneo_coarse_refreshes();
 }
 long long fea_geneo_armed_solves() { return fea_detail::geneo_armed_solves(); }
-int fea_geneo_trigger_iters() { return fea_detail::kGeneoTriggerIters; }
+// The EFFECTIVE trigger (the 114/132 discipline: run_info must echo what the
+// run ACTUALLY executed under, never the constant it usually equals). Production
+// never sets a probe config, so this returns kGeneoTriggerIters verbatim.
+int fea_geneo_trigger_iters() {
+  return fea_detail::geneo_probe_config().trigger_iters;
+}
 double fea_geneo_rebuild_factor() { return fea_detail::kGeneoRebuildFactor; }
 
 // Handoff 114 — read-only accessors for the run version record. Pure reads.

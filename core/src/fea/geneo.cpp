@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -134,7 +135,17 @@ struct LocalOp {
     applyNeu(x.data(), y.data());
     return y;
   }
+  // The GenEO pencil's B operator. weighting 0 (shipped) = D A^Neu D; weighting
+  // 1 (probe W5a) = its DIAGONAL, D_i^2 diag(K_agglomerate) — the paper's cheap
+  // weighting: no element pass at all, so the LOBPCG B-applies collapse to a
+  // scale. `diag_weight` is set at build time from the probe config.
+  bool diag_weight = false;
   VectorXd applyDadV(const VectorXd& x) const {
+    if (diag_weight) {
+      VectorXd y(n);
+      for (int i = 0; i < n; ++i) y(i) = D[i] * D[i] * diagNeu[i] * x(i);
+      return y;
+    }
     VectorXd dx(n);
     for (int i = 0; i < n; ++i) dx(i) = D[i] * x(i);
     VectorXd y = applyNeuV(dx);
@@ -527,6 +538,21 @@ struct GeneoState {
 
 GeneoState g_geneo;
 
+// PROBE OVERRIDE STATE (see geneo.hpp). Default-constructed => every field IS
+// the shipped tripwire constant, so a production run reads the recipe it always
+// read. Deliberately NOT part of GeneoState: geneo_reset() drops the basis
+// between runs and must not silently restore the shipped constants under a
+// harness that set them.
+GeneoProbeConfig g_probe_cfg;
+long long g_probe_coarse_matvecs = 0;
+double g_probe_build_s = 0.0, g_probe_refresh_s = 0.0, g_probe_apply_s = 0.0;
+
+inline double now_s() {
+  return std::chrono::duration<double>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+
 std::uint64_t structure_fingerprint(const MatfreeReduced& m,
                                     const MfSolveContext& ctx) {
   Fnv f;
@@ -586,6 +612,7 @@ void build_coarse_operator(GeneoState& S, const MatfreeReduced& m) {
     const CoarseCol& cq = S.cols[q];
     for (std::size_t t = 0; t < cq.idx.size(); ++t) vq[cq.idx[t]] = cq.val[t];
     m.apply_kgg_raw(vq.data(), Avq.data());
+    ++g_probe_coarse_matvecs;  // the refresh price, in the operator's own currency
     for (int p = 0; p < Nt; ++p) {
       const CoarseCol& cp = S.cols[p];
       double dot = 0;
@@ -631,6 +658,11 @@ VectorXd coarse_inner_cg(const GeneoState& S, const VectorXd& b) {
 // (the caller stays plain Jacobi-CG — exact, just slower).
 bool build_basis(GeneoState& S, const MatfreeReduced& m,
                  const MfSolveContext& ctx) {
+  const double t_build0 = now_s();
+  struct BuildTimer {
+    double t0;
+    ~BuildTimer() { g_probe_build_s += now_s() - t0; }
+  } build_timer{t_build0};
   const VoxelGrid& g = *ctx.grid;
   std::vector<double> mod_scratch;
   const std::vector<double>& emod = modulus_vector(ctx, mod_scratch);
@@ -672,8 +704,9 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
   for (std::size_t gd = 0; gd < kept_of_gdof.size(); ++gd)
     if (kept_of_gdof[gd] < 0) fixed[gd] = 1;
 
-  const std::vector<Block> cores = tile_cores(g, kGeneoCoreCells);
-  const std::vector<double> W = build_pou_normaliser(g, cores, kGeneoOverlap);
+  const GeneoProbeConfig cfg = g_probe_cfg;  // == the tripwire recipe in production
+  const std::vector<Block> cores = tile_cores(g, cfg.core_cells);
+  const std::vector<double> W = build_pou_normaliser(g, cores, cfg.overlap);
 
   // Independent subdomains, threaded on the SHARED persistent matrix-free pool
   // (132's P-core pin governs), merged in fixed core order (deterministic).
@@ -685,15 +718,16 @@ bool build_basis(GeneoState& S, const MatfreeReduced& m,
   mf_parallel_ranges(
       0, static_cast<int>(cores.size()), 1, [&](int lo, int hi) {
         for (int si = lo; si < hi; ++si) {
-          LocalOp L = build_local(g, emod, cores[si], kGeneoOverlap, K0, fixed,
+          LocalOp L = build_local(g, emod, cores[si], cfg.overlap, K0, fixed,
                                   W, ctx.lattice, KAp, KBp, KCp);
           if (L.n < 24) continue;
-          const int mm = std::min(kGeneoBlockM, L.n);
-          LobpcgResult lob = lobpcg(L, mm, kGeneoLambdaCut, 800,
+          L.diag_weight = (cfg.eig_weighting == 1);
+          const int mm = std::min(cfg.block_m, L.n);
+          LobpcgResult lob = lobpcg(L, mm, cfg.lambda_cut, 800,
                                     20260729u + static_cast<unsigned>(si));
           int kept = 0;
           for (int c = 0; c < lob.lambda.size(); ++c) {
-            if (lob.lambda(c) < kGeneoLambdaCut)
+            if (lob.lambda(c) < cfg.lambda_cut)
               ++kept;
             else
               break;
@@ -754,7 +788,33 @@ void geneo_reset() {
   const bool en = g_geneo.enabled;
   g_geneo = GeneoState{};
   g_geneo.enabled = en;
+  // Probe cost counters follow the basis they price. The probe CONFIG does not:
+  // it is set by a harness around a run and must survive the driver's run-start
+  // reset (fea_reset_geneo_basis) the way the enable flag does.
+  g_probe_coarse_matvecs = 0;
+  g_probe_build_s = 0.0;
+  g_probe_refresh_s = 0.0;
+  g_probe_apply_s = 0.0;
 }
+
+const GeneoProbeConfig& geneo_probe_config() { return g_probe_cfg; }
+void geneo_set_probe_config(const GeneoProbeConfig& cfg) { g_probe_cfg = cfg; }
+
+bool geneo_probe_defaults_match_tripwire() {
+  const GeneoProbeConfig d;
+  return d.trigger_iters == kGeneoTriggerIters && d.core_cells == kGeneoCoreCells &&
+         d.overlap == kGeneoOverlap && d.block_m == kGeneoBlockM &&
+         d.lambda_cut == kGeneoLambdaCut && d.eig_weighting == 0;
+}
+
+void geneo_request_rebuild() {
+  if (g_geneo.have_basis) g_geneo.rebuild_scheduled = true;
+}
+
+long long geneo_probe_coarse_matvecs() { return g_probe_coarse_matvecs; }
+double geneo_probe_build_seconds() { return g_probe_build_s; }
+double geneo_probe_refresh_seconds() { return g_probe_refresh_s; }
+double geneo_probe_apply_seconds() { return g_probe_apply_s; }
 
 bool geneo_solve_begin(const MatfreeReduced& m, const MfSolveContext& ctx) {
   GeneoState& S = g_geneo;
@@ -794,7 +854,9 @@ bool geneo_solve_begin(const MatfreeReduced& m, const MfSolveContext& ctx) {
   if (mfp != S.moduli_fp) {
     // Same DOF set, moved moduli: REFRESH the cheap coarse operator so the
     // deflation is consistent with the current A (mandatory — phase 2 §P6).
+    const double t0 = now_s();
     build_coarse_operator(S, m);
+    g_probe_refresh_s += now_s() - t0;
     S.moduli_fp = mfp;
     ++S.refreshes;
     S.last.action = 2;
@@ -828,6 +890,11 @@ void geneo_apply(const double* r, double* z) {
   GeneoState& S = g_geneo;
   const int Nt = S.Nt;
   if (!S.active || Nt == 0) return;
+  const double t_apply0 = now_s();
+  struct ApplyTimer {
+    double t0;
+    ~ApplyTimer() { g_probe_apply_s += now_s() - t0; }
+  } apply_timer{t_apply0};
   for (int p = 0; p < Nt; ++p) {
     const CoarseCol& cp = S.cols[p];
     double s = 0;
