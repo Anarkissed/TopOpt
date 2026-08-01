@@ -44,12 +44,21 @@ public struct LatticePage: View {
     /// The variants-entry demand field (that run's own von Mises), nil from the
     /// workspace entry. When set, Auto density is available with no sim (B6).
     let variantField: LatticeDemandField?
+    /// WHICH FINISHED VARIANT this page is working on (task
+    /// 2026-08-02-lattice-a-variant). Non-nil ⇒ the page names it, the stage
+    /// under the page is showing THAT variant's geometry, face tapping is off
+    /// (it has no selectable faces), and the action row offers two clearly
+    /// different jobs instead of one that would silently do the surprising one.
+    let variantContext: LatticeVariantContext?
     /// The strut-preview toggle, owned by the workspace (the stage layer is its).
     @Binding var previewOn: Bool
     /// Base Optimize enablement + summary from the workspace (same rules as page one).
     let baseCanOptimize: Bool
     let baseSummary: String
     let onOptimize: () -> Void
+    /// LATTICE THIS VARIANT — the `lattice_variant` job. Distinct from
+    /// `onOptimize`, which re-runs the whole ladder.
+    let onRelattice: () -> Void
     let onClose: () -> Void
     /// Back to Setup (closes the page; the workspace is the setup surface).
     let onBackToSetup: () -> Void
@@ -63,9 +72,11 @@ public struct LatticePage: View {
     public init(model: AppModel, project: ProjectModel, run: RunModel,
                 sim: LatticeSimModel, page: LatticePageModel,
                 variantField: LatticeDemandField? = nil,
+                variantContext: LatticeVariantContext? = nil,
                 previewOn: Binding<Bool>,
                 baseCanOptimize: Bool, baseSummary: String,
                 onOptimize: @escaping () -> Void,
+                onRelattice: @escaping () -> Void = {},
                 onClose: @escaping () -> Void,
                 onBackToSetup: @escaping () -> Void,
                 onRefreshPreview: @escaping () -> Void = {},
@@ -76,10 +87,12 @@ public struct LatticePage: View {
         self.sim = sim
         self.page = page
         self.variantField = variantField
+        self.variantContext = variantContext
         self._previewOn = previewOn
         self.baseCanOptimize = baseCanOptimize
         self.baseSummary = baseSummary
         self.onOptimize = onOptimize
+        self.onRelattice = onRelattice
         self.onClose = onClose
         self.onBackToSetup = onBackToSetup
         self.onRefreshPreview = onRefreshPreview
@@ -207,6 +220,7 @@ public struct LatticePage: View {
                 circleButton(system: "arrow.uturn.backward", label: "Undo") { project.performUndo() }
                 circleButton(system: "arrow.uturn.forward", label: "Redo") { project.performRedo() }
             }
+            workingOnBar
             fromSetupBar
         }
         .padding(.leading, DS.Space.xl4).padding(.top, DS.Space.xl3)
@@ -222,6 +236,42 @@ public struct LatticePage: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+
+    // MARK: which VARIANT this page is working on (bar Z7/Z9)
+
+    /// The identity bar. When the page was entered from a finished variant it
+    /// says WHICH ONE, and it sits directly above the "From Setup" row so the
+    /// subject of every control below it is stated before the controls are.
+    /// Absent from the workspace entry, where the subject is the whole part.
+    @ViewBuilder private var workingOnBar: some View {
+        if let v = variantContext {
+            HStack(spacing: DS.Space.sm) {
+                Image(systemName: "cube.transparent.fill")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(DS.Color.accent.color)
+                Text("Working on").dsStyle(DS.TypeScale.caption2).fontWeight(.semibold)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                Text(v.title).dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                divider
+                Text(v.subtitle).dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                if !LatticeVariantAuthoring.compute(variant: v).faceTapEnabled {
+                    divider
+                    Text("no selectable faces — place regions instead")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                }
+            }
+            .padding(.horizontal, DS.Space.ml).frame(height: 40)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                .fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
+                    .strokeBorder(DS.Color.accent.opacity(0.45).color, lineWidth: 1)))
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Working on \(v.title), \(v.subtitle)")
+        }
     }
 
     // MARK: "From Setup" read-only inherited bar
@@ -1173,26 +1223,56 @@ public struct LatticePage: View {
         .frame(minHeight: 34)
     }
 
+    /// The action row. BAR Z7: entered from a variant there are TWO genuinely
+    /// different jobs here — lattice THIS variant (minutes, no ladder) and re-run
+    /// the whole ladder from the original part (hours) — and they get two
+    /// buttons that each say which one they are. Entered from the workspace
+    /// there is only Optimize, exactly as before.
+    private var actions: LatticePageActions {
+        LatticePageActions.compute(variant: variantContext,
+                                   optimizeSurface: optimizeSurface,
+                                   running: optimizing)
+    }
+
     private var optimizeButton: some View {
-        let s = optimizeSurface
+        let a = actions
+        return HStack(spacing: DS.Space.m) {
+            if let re = a.relattice {
+                actionButton(re, action: onRelattice)
+            }
+            actionButton(a.optimize, action: onOptimize)
+        }
+    }
+
+    private func actionButton(_ a: LatticePageActions.Action,
+                              action: @escaping () -> Void) -> some View {
+        // The PRIMARY action wears the accent; a secondary one is a bordered
+        // panel. Two visibly different weights, so the destructive-of-time
+        // choice (re-running the whole ladder) is never the one a thumb lands on
+        // by default.
+        let tint: RGBA = a.primary ? DS.Color.accent : DS.Surface.panel
         return Button {
-            guard s.enabled else { return }
-            onOptimize()
+            guard a.enabled else { return }
+            action()
         } label: {
             VStack(spacing: 2) {
-                Text(s.label).dsStyle(DS.TypeScale.headline)
-                Text(s.sub).font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
-                    .lineLimit(1)
+                Text(a.label).dsStyle(DS.TypeScale.headline)
+                Text(a.sub).font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
+                    .lineLimit(2).multilineTextAlignment(.center)
             }
-            .foregroundStyle((s.enabled ? DS.Color.textPrimary : DS.Color.textDisabled).color)
-            .padding(.horizontal, DS.Space.xl5).frame(height: 64)
+            .foregroundStyle((a.enabled ? DS.Color.textPrimary : DS.Color.textDisabled).color)
+            .padding(.horizontal, DS.Space.xl4).frame(height: 64)
             .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
-                .fill(s.enabled ? DS.Color.accent.color : DS.Color.fillDisabled.color))
-            .dsShadow(s.enabled ? DS.Shadow.accentGlow : DS.Shadow.panel)
+                .fill(a.enabled ? tint.color : DS.Color.fillDisabled.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokeSubtle.color,
+                                  lineWidth: a.primary ? 0 : 1)))
+            .dsShadow(a.enabled && a.primary ? DS.Shadow.accentGlow : DS.Shadow.panel)
         }
         .buttonStyle(.plain)
-        .disabled(!s.enabled)
-        .accessibilityLabel("Optimize")
+        .disabled(!a.enabled)
+        .accessibilityLabel(a.label)
+        .accessibilityHint(a.sub)
     }
 
     // MARK: entry gate (B1)

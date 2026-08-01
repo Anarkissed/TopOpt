@@ -21,6 +21,7 @@
 #include "topopt/build_frame.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/coarsen.hpp"
+#include "topopt/design_store.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/fields.hpp"
 #include "topopt/grading.hpp"
@@ -1183,6 +1184,352 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
   return s;
 }
 
+// --- THE per-variant lattice pipeline, ONCE (task 2026-08-02-lattice-a-variant)
+//
+// Everything one variant needs to become a latticed, certified, exported object:
+// grade (when armed) from THAT variant's own von Mises field, build the ONE
+// shared boundary, derive the certification mask, emit the geometry, certify the
+// composite against the SAME mask, and write the receipt.
+//
+// WHY IT IS A FUNCTION NOW. It was the body of run_job's `emit_lattice` lambda.
+// The re-lattice entry point (lattice_variant_job) has to do exactly this, to a
+// variant it read back from design.bin instead of one the optimizer just
+// produced — and "exactly this" has to mean the same code, not a second copy
+// that agrees today. Bars Z3 and Z5 are both properties of this body: the mesh
+// and the certification consume ONE `mask` and ONE density, and the strut report
+// rides the composite solve. A duplicate would put both bars one edit away from
+// silently diverging. The extraction is mechanical — the body is unchanged and
+// the caller's aggregation is unchanged, which is what the byte-identity bar
+// (Z6) checks.
+struct LatticeVariantOutcome {
+  LatticeExportOutcome oc;
+  LatticeCertOutcome cc;
+  std::string receipt_path;
+  std::string receipt_json;
+  double cell_mm = 0.0;
+  double gen_seconds = 0.0;
+  bool graded = false;
+  GradedField gf;                 // meaningful iff `graded`
+  LatticeRoleReceipt role_rcpt;
+  LatticeGradedReceipt grad_rcpt;  // `gf` pointer NOT retained (see below)
+  // The DESIGN the mesh was built from and the certification solved on — one
+  // number, so "the certified object is the exported one" is checkable rather
+  // than merely argued (bar Z3). Both consumers read the SAME `dens` reference
+  // below; this fingerprints it once, at the single point they share.
+  std::uint64_t design_fingerprint = 0;
+};
+
+LatticeVariantOutcome lattice_one_variant(
+    const MinimizePlasticVariant& v, const JobDescription& job,
+    const VoxelGrid& solved_grid, const MinimizePlasticOptions& options,
+    const Material& material, const std::vector<DirichletBC>& bcs,
+    const std::vector<ClearanceGeometry>& lattice_kos,
+    const LatticeRoleRegions& lattice_roles, const std::string& out_dir) {
+  LatticeVariantOutcome R;
+  const std::vector<double>& dens = v.optimization.physical_density;
+  R.design_fingerprint = design_fingerprint(dens);
+  const bool graded = job.grading.present;
+  R.graded = graded;
+  const bool roles_present = !job.lattice.regions.empty();
+
+  // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
+  // certification-recovery von Mises field (H4a — the run's own field, fresh:
+  // v.von_mises_field is produced by the recovery solve on the CONVERGED
+  // design of this rung, never an earlier iteration or another run). Its
+  // candidate set is the role-aware membership — the SAME membership tests the
+  // shared boundary predicate exposes, evaluated on a boundary view carrying
+  // only the membership primitives (the cell size, which the law itself
+  // chooses, plays no part in membership).
+  GradedField& gf = R.gf;
+  double cell = job.lattice.cell_mm;
+  if (graded) {
+    LatticeBoundary members;
+    for (const ClearanceGeometry& g : lattice_kos)
+      members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+    for (const ClearanceGeometry& g : lattice_roles.includes)
+      members.add_include_region(g);
+    for (const ClearanceGeometry& g : lattice_roles.excludes)
+      members.add_exclude_region(g);
+    std::vector<char> cand(solved_grid.voxel_count(), 0);
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!(dens[e] >= 0.5)) continue;
+          const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                       solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          if (members.in_keep_out(c, 0.0)) continue;
+          if (members.in_exclude_region(c, 0.0)) continue;
+          if (members.has_include_regions() &&
+              !members.in_include_region(c, 0.0))
+            continue;
+          cand[e] = 1;
+        }
+    GradingLawParams gp;
+    gp.topology = LatticeTopology::Octet;  // job schema restricts to octet
+    gp.target_cell_size_mm = job.grading.cell_mm;
+    gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
+    gp.demand_exponent = job.grading.demand_exponent;
+    // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). An absent
+    // "cell_mode" parses as "fixed", which is the pre-sweep path exactly.
+    if (!cell_size_mode_from_name(job.grading.cell_mode.c_str(), gp.cell_mode))
+      throw JobError("run_job: unknown grading cell_mode \"" +
+                     job.grading.cell_mode + "\"");
+    gp.min_cell_size_mm = job.grading.cell_min_mm;
+    gp.max_cell_size_mm = job.grading.cell_max_mm;
+    gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp);
+    cell = gf.cell_size_mm;
+    // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
+    // level the plan used, which is what the boundary window, the cell-overlap
+    // proof and the receipt's single scalar all want (the conservative end).
+  }
+  R.cell_mm = cell;
+
+  // ── THE shared boundary for this variant: its solid density as the base,
+  // the resolved clearance keep-outs subtracted, the role regions carried as
+  // activation/mask terms. Geometry (a) and certification (b) below both
+  // consume this ONE object (bar B7 / H1b).
+  const LatticeBoundary boundary = lattice_boundary_for(
+      solved_grid, dens, cell, lattice_kos, lattice_roles);
+
+  // ── THE certification mask — shared by the export (companion + graded cell
+  // activation) and the posture. On a graded run it is intersected with the
+  // law's own mask (voxels the law kept solid drop out; law-masked voxels the
+  // shared predicate's cell-overlap proof rejects are counted, not hidden).
+  std::vector<char> mask = lattice_certification_mask(
+      boundary, solved_grid, dens, 0.5, solved_grid.origin, cell);
+  long long dropped_by_overlap = 0;
+  if (graded) {
+    for (std::size_t e = 0; e < mask.size(); ++e) {
+      if (mask[e] && !gf.posture.mask[e]) {
+        mask[e] = 0;  // the law left it solid (too-thin fallback / not a candidate)
+      } else if (!mask[e] && gf.posture.mask[e]) {
+        ++dropped_by_overlap;
+      }
+    }
+  }
+
+  // ── the radius field + graded cell activation.
+  LatticeRadiusField G;
+  G.nseg = 8;
+  double rho_uniform = 0.0;
+  const LatticeRegion Rdims = lattice_region_for(solved_grid, cell, &boundary);
+  std::vector<double> cell_rho_sum;
+  std::vector<long long> cell_rho_cnt;
+  double gmean = 0.0;
+  std::function<bool(int, int, int)> graded_cells;  // null on the uniform path
+  if (graded) {
+    const int ncx = Rdims.nx, ncy = Rdims.ny, ncz = Rdims.nz;
+    cell_rho_sum.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0.0);
+    cell_rho_cnt.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0);
+    auto cidx = [ncx, ncy](int ci, int cj, int ck) {
+      return (static_cast<std::size_t>(ck) * ncy + cj) * ncx + ci;
+    };
+    auto clampi = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+    double gsum = 0.0;
+    long long gcnt = 0;
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!mask[e]) continue;
+          const double rho = gf.posture.relative_density[e];
+          const double cx =
+              solved_grid.origin.x + (i + 0.5) * solved_grid.spacing;
+          const double cy =
+              solved_grid.origin.y + (j + 0.5) * solved_grid.spacing;
+          const double cz =
+              solved_grid.origin.z + (k + 0.5) * solved_grid.spacing;
+          const int ci = clampi(
+              static_cast<int>(std::floor((cx - Rdims.origin.x) / cell)), ncx - 1);
+          const int cj = clampi(
+              static_cast<int>(std::floor((cy - Rdims.origin.y) / cell)), ncy - 1);
+          const int ck = clampi(
+              static_cast<int>(std::floor((cz - Rdims.origin.z) / cell)), ncz - 1);
+          cell_rho_sum[cidx(ci, cj, ck)] += rho;
+          ++cell_rho_cnt[cidx(ci, cj, ck)];
+          gsum += rho;
+          ++gcnt;
+        }
+    gmean = gcnt > 0 ? gsum / static_cast<double>(gcnt) : gf.band_rho_min;
+    // Graded cell activation: a cell is latticed iff it holds >= 1 masked
+    // voxel — the graded silhouette DERIVES from the same mask the posture
+    // certifies, so file and certificate cannot disagree on where lattice is.
+    graded_cells = [&cell_rho_cnt, cidx](int ci, int cj, int ck) {
+      return cell_rho_cnt[cidx(ci, cj, ck)] > 0;
+    };
+    // Per-position radius: the owning voxel's graded rho (masked), else the
+    // owning cell's mean over its masked voxels (a strut midpoint can sit in
+    // a fallback/solid voxel of an active cell), else the global mean —
+    // deterministic fixed fallback chain, converted through core's own
+    // diameter law.
+    const VoxelGrid& sgr = solved_grid;
+    const std::vector<char>& mref = mask;
+    const std::vector<double>& rref = gf.posture.relative_density;
+    G.field = [&sgr, &mref, &rref, &cell_rho_sum, &cell_rho_cnt, cidx, clampi,
+               cell, gmean, ncx, ncy, ncz, Rdims](Vec3 p) {
+      const int i = clampi(
+          static_cast<int>(std::floor((p.x - sgr.origin.x) / sgr.spacing)),
+          sgr.nx - 1);
+      const int j = clampi(
+          static_cast<int>(std::floor((p.y - sgr.origin.y) / sgr.spacing)),
+          sgr.ny - 1);
+      const int k = clampi(
+          static_cast<int>(std::floor((p.z - sgr.origin.z) / sgr.spacing)),
+          sgr.nz - 1);
+      const std::size_t e = sgr.index(i, j, k);
+      double rho;
+      if (mref[e]) {
+        rho = rref[e];
+      } else {
+        const int ci = clampi(
+            static_cast<int>(std::floor((p.x - Rdims.origin.x) / cell)), ncx - 1);
+        const int cj = clampi(
+            static_cast<int>(std::floor((p.y - Rdims.origin.y) / cell)), ncy - 1);
+        const int ck = clampi(
+            static_cast<int>(std::floor((p.z - Rdims.origin.z) / cell)), ncz - 1);
+        const std::size_t cc = cidx(ci, cj, ck);
+        rho = cell_rho_cnt[cc] > 0
+                  ? cell_rho_sum[cc] / static_cast<double>(cell_rho_cnt[cc])
+                  : gmean;
+      }
+      return 0.5 * octet_strut_diameter_mm(rho, cell);
+    };
+  } else {
+    G.uniform_mm = job.lattice.strut_radius_mm;
+    // rho the printed geometry (cell + uniform strut radius) implies, on the
+    // library basis (the E5 preflight already proved it in-band).
+    rho_uniform =
+        octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
+  }
+
+  // ── role receipt (H1a): counts + the include-over-void no-op accounting.
+  LatticeRoleReceipt& role_rcpt = R.role_rcpt;
+  if (roles_present) {
+    role_rcpt.present = true;
+    role_rcpt.include_regions = lattice_roles.includes.size();
+    role_rcpt.exclude_regions = lattice_roles.excludes.size();
+    if (boundary.has_include_regions()) {
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (dens[e] >= 0.5) continue;  // material exists — not the no-op case
+            const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                         solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                         solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+            if (boundary.in_include_region(c, 0.0))
+              ++role_rcpt.include_void_voxels;
+          }
+    }
+  }
+
+  // ── SWEPT cell size: one level spec per dyadic level (handoff 2026-08-01-
+  //    lattice-cell-size-sweep). Each level carries (a) its own occupancy — the
+  //    octree cells assigned to it, keyed off the base cell at the block's min
+  //    corner, which is exactly where the aligned octree puts the level — and (b)
+  //    its OWN radius field, because the printed diameter is d(rho, cell): the same
+  //    relative density at a coarser cell is a proportionally fatter strut, which is
+  //    the whole printability payoff. Empty (fewer than two levels) on every
+  //    non-swept run, so the export takes the single-cell path unchanged.
+  std::vector<LatticeLevelSpec> levels;
+  if (graded && gf.cell_plan.max_level > 0 &&
+      !gf.posture.cell_size_field.empty()) {
+    const CellSizePlan* pl = &gf.cell_plan;
+    for (const CellLevelReport& lr : gf.cell_plan.levels) {
+      if (lr.cells == 0) continue;
+      LatticeLevelSpec sp;
+      sp.level = lr.level;
+      sp.cell_mm = lr.cell_size_mm;
+      const int LV = lr.level;
+      sp.latticed = [pl, LV](int ci, int cj, int ck) {
+        const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
+        if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
+        return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV;
+      };
+      // Same fallback chain as the uniform graded field (owning voxel's graded
+      // rho, else the level's own band floor) — evaluated at THIS level's cell.
+      const VoxelGrid& sgr = solved_grid;
+      const std::vector<char>& mref = mask;
+      const std::vector<double>& rref = gf.posture.relative_density;
+      const double lcell = lr.cell_size_mm;
+      const double rlo = gf.band_rho_min;
+      sp.radius.nseg = 8;
+      sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(rlo, lcell);
+      sp.radius.field = [&sgr, &mref, &rref, lcell, rlo](Vec3 p) {
+        auto cl = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+        const int i = cl(static_cast<int>(
+            std::floor((p.x - sgr.origin.x) / sgr.spacing)), sgr.nx - 1);
+        const int j = cl(static_cast<int>(
+            std::floor((p.y - sgr.origin.y) / sgr.spacing)), sgr.ny - 1);
+        const int k = cl(static_cast<int>(
+            std::floor((p.z - sgr.origin.z) / sgr.spacing)), sgr.nz - 1);
+        const std::size_t e = sgr.index(i, j, k);
+        return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, lcell);
+      };
+      levels.push_back(std::move(sp));
+    }
+  }
+
+  // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
+  const double tg0 = wall_seconds();
+  R.oc = export_latticed_variant(
+      v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
+      mask, graded_cells, /*emit_solid_companion=*/graded || roles_present,
+      levels.empty() ? nullptr : &levels,
+      levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm);
+  R.gen_seconds = wall_seconds() - tg0;
+  // (b) certification of the composite — the octet tensor on the SAME mask the
+  // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
+  const LatticeCertContext cx =
+      lattice_cert_context(v, solved_grid, options, material);
+  const LatticePosture post = build_lattice_posture(
+      solved_grid, cell, mask, rho_uniform,
+      graded ? &gf.posture.relative_density : nullptr);
+  R.cc = certify_latticed_variant(
+      v, solved_grid, options, material, bcs, cx, post,
+      graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform);
+
+  // ── graded receipt + the clamp counterfactual (H4b): one extra cert solve
+  // with every band-clamped voxel kept SOLID — was the clamping decisive?
+  LatticeGradedReceipt& grad_rcpt = R.grad_rcpt;
+  if (graded) {
+    grad_rcpt.present = true;
+    grad_rcpt.gf = &gf;
+    grad_rcpt.requested_vf = v.requested_volume_fraction;
+    grad_rcpt.achieved_vf = v.optimization.volume_fraction;
+    grad_rcpt.iterations = v.optimization.iterations;
+    grad_rcpt.mask_voxels_dropped_by_cell_overlap = dropped_by_overlap;
+    if (gf.clamped_lo_voxels + gf.clamped_hi_voxels > 0) {
+      LatticePosture cpost = post;
+      for (std::size_t e = 0; e < cpost.mask.size(); ++e)
+        if (gf.clamp_flags[e] && cpost.mask[e]) {
+          cpost.mask[e] = 0;
+          cpost.relative_density[e] = 0.0;
+        }
+      const FixedDesignAnalysis cf = analyze_variant_with_posture(
+          v, solved_grid, options, material, bcs, cx, &cpost);
+      grad_rcpt.clamp_counterfactual_ran = true;
+      grad_rcpt.counterfactual_accepted = cf.accepted;
+      grad_rcpt.clamp_changed_verdict = (cf.accepted != R.cc.lattice.accepted);
+    }
+  }
+
+  R.receipt_path =
+      join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
+                                           v.requested_volume_fraction) +
+                             ".report.json");
+  R.receipt_json = lattice_cert_report_json(v, job.lattice, R.cc, R.oc, cell,
+                                            role_rcpt, grad_rcpt);
+  write_text_file(R.receipt_path, R.receipt_json);
+  // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
+  // already rendered, so nothing may follow that pointer after the return. Null
+  // it rather than leave a dangling-looking field on a returned value.
+  grad_rcpt.gf = nullptr;
+  return R;
+}
+
 // --- analyze_job helpers (handoff 2026-07-26-constrained-smooth) -------------
 
 Vec3 normalized(const Vec3& v) {
@@ -1374,6 +1721,116 @@ ProductionLoadCase production_loadcase_from_job(const JobDescription& job,
       lc.keep_out_boxes.push_back(to_design_box(ko));
   }
   return lc;
+}
+
+// --- THE load-case RECEIPT (task 2026-08-02-lattice-a-variant, bar Z2) -------
+//
+// WHAT IT IS FOR. Re-lattice takes a finished variant and certifies it again.
+// That is only honest if the load case it certifies under is THE SAME ONE the
+// variant was optimized under — not "a load case", not "a non-zero load case",
+// the same one. PR 261's lesson is that a selector resolved against the wrong
+// geometry tags nothing and says nothing, so "non-zero" is not evidence.
+//
+// This is the evidence. It records the facts that determine the load: which
+// faces anchor, how many DOF they clamp, and for every declared force group its
+// resolved magnitude and the number of voxels its faces actually tagged (the
+// LoadGroupReport the builder already produces). ONE emitter, written by the
+// optimize run and by the re-lattice run into their own output directories, so
+// the two documents are comparable BYTE FOR BYTE. Equal receipts mean the two
+// runs resolved the identical load case; unequal receipts name the difference.
+//
+// Deliberately carries nothing environmental (no paths, no timings, no out
+// dir): every field is a property of the load case itself, or the comparison
+// would fail for reasons that have nothing to do with the physics.
+std::string loadcase_receipt_json(const JobDescription& job,
+                                  const ProductionRunSetup* setup,
+                                  const std::vector<int>& face_ids,
+                                  std::size_t self_weight_tagged_voxels,
+                                  const std::vector<DirichletBC>& bcs) {
+  std::string s = "{\n";
+  s += "  \"resolution\": " + std::to_string(job.resolution) + ",\n";
+  s += "  \"model\": " + json_str(job.model) + ",\n";
+  s += "  \"material\": " + json_str(job.material) + ",\n";
+  s += "  \"anchor_bc_dofs\": " + std::to_string(bcs.size()) + ",\n";
+  if (setup != nullptr) {
+    Vec3 resultant{0.0, 0.0, 0.0};
+    for (const JobLoadGroup& g : job.loads.groups) {
+      resultant.x += g.force.x;
+      resultant.y += g.force.y;
+      resultant.z += g.force.z;
+    }
+    s += "  \"load_source\": \"loadcase\",\n";
+    s += "  \"anchor_face_ids\": [";
+    for (std::size_t i = 0; i < face_ids.size(); ++i)
+      s += (i ? ", " : "") + std::to_string(face_ids[i]);
+    s += "],\n";
+    s += "  \"external_load_nodes\": " +
+         std::to_string(setup->options.external_loads.size()) + ",\n";
+    s += "  \"declared_force_resultant_n\": " +
+         json_num(std::sqrt(resultant.x * resultant.x +
+                            resultant.y * resultant.y +
+                            resultant.z * resultant.z)) +
+         ",\n";
+    s += "  \"build_dir\": [" + json_num(job.loads.build_dir.x) + ", " +
+         json_num(job.loads.build_dir.y) + ", " +
+         json_num(job.loads.build_dir.z) + "],\n";
+    s += "  \"groups\": [\n";
+    for (std::size_t i = 0; i < setup->load_group_reports.size(); ++i) {
+      const LoadGroupReport& g = setup->load_group_reports[i];
+      s += "    {\"index\": " + std::to_string(g.index) + ", \"face_ids\": [";
+      for (std::size_t f = 0; f < g.face_ids.size(); ++f)
+        s += (f ? ", " : "") + std::to_string(g.face_ids[f]);
+      s += "], \"force_mag_n\": " + json_num(g.force_mag) +
+           ", \"voxels_tagged\": " + std::to_string(g.voxels_tagged) +
+           ", \"status\": \"" +
+           (g.status == LoadGroupReport::Status::Ok
+                ? "ok"
+                : (g.status == LoadGroupReport::Status::ZeroForce
+                       ? "zero_force"
+                       : "zero_tagged")) +
+           "\"}";
+      s += (i + 1 < setup->load_group_reports.size()) ? ",\n" : "\n";
+    }
+    s += "  ],\n";
+    s += "  \"clearances\": [\n";
+    for (std::size_t i = 0; i < setup->clearance_reports.size(); ++i) {
+      const ProductionRunSetup::ClearanceReport& c = setup->clearance_reports[i];
+      s += "    {\"face_id\": " + std::to_string(c.face_id) +
+           ", \"kind\": \"" +
+           (c.kind == ClearanceKind::Bolt ? "bolt" : "face") +
+           "\", \"voxels_frozen\": " + std::to_string(c.voxels_frozen) +
+           ", \"in_grid\": " + (c.in_grid ? "true" : "false") + "}";
+      s += (i + 1 < setup->clearance_reports.size()) ? ",\n" : "\n";
+    }
+    s += "  ],\n";
+    s += "  \"face_protections\": [\n";
+    for (std::size_t i = 0; i < setup->face_protection_reports.size(); ++i) {
+      const ProductionRunSetup::FaceProtectionReport& f =
+          setup->face_protection_reports[i];
+      s += "    {\"face_id\": " + std::to_string(f.face_id) +
+           ", \"voxels_frozen\": " + std::to_string(f.voxels_frozen) +
+           ", \"depth_voxels\": " + std::to_string(f.depth_voxels) +
+           ", \"thinner_than_depth\": " +
+           (f.thinner_than_depth ? "true" : "false") + "}";
+      s += (i + 1 < setup->face_protection_reports.size()) ? ",\n" : "\n";
+    }
+    s += "  ]\n";
+  } else {
+    s += "  \"load_source\": \"self_weight\",\n";
+    s += "  \"fixture_face_ids\": [";
+    for (std::size_t i = 0; i < face_ids.size(); ++i)
+      s += (i ? ", " : "") + std::to_string(face_ids[i]);
+    s += "],\n";
+    s += "  \"fixture_voxels_tagged\": " +
+         std::to_string(self_weight_tagged_voxels) + ",\n";
+    s += "  \"gravity_direction\": [" + json_num(job.gravity.direction.x) +
+         ", " + json_num(job.gravity.direction.y) + ", " +
+         json_num(job.gravity.direction.z) + "],\n";
+    s += "  \"gravity_magnitude_mm_s2\": " +
+         json_num(job.gravity.magnitude_mm_s2) + "\n";
+  }
+  s += "}\n";
+  return s;
 }
 
 }  // namespace
@@ -1917,6 +2374,550 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// lattice_variant_job — LATTICE A FINISHED VARIANT (task
+// 2026-08-02-lattice-a-variant). See job.hpp for the contract.
+LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
+                                            const std::string& job_dir,
+                                            const std::string& out_dir,
+                                            const MaterialLibrary& materials,
+                                            const SettingsRules& rules) {
+  const double t_start = wall_seconds();
+  if (job.mode != "lattice_variant")
+    throw JobError(
+        "lattice_variant_job: mode must be \"lattice_variant\" (got \"" +
+        job.mode + "\")");
+  if (!job.variant.present)
+    throw JobError("lattice_variant_job: the job carries no \"variant\" block");
+  if (!job.lattice.present)
+    throw JobError("lattice_variant_job: the job carries no \"lattice\" block");
+  // The SAME pre-flight refusals the optimize path applies to a lattice job,
+  // for the same reasons (E5 / design box). Stated here too rather than
+  // inherited by accident: this entry point never calls run_job.
+  if (job.has_design_box)
+    throw JobError(
+        "lattice_variant_job: a design box (add-material) run cannot be "
+        "re-latticed: the certification load case would have to be remapped "
+        "onto the expanded grid, and certifying against a mismatched load case "
+        "is exactly what this job exists to prevent.");
+  if (!job.grading.present) {
+    const double lat_rho =
+        octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
+    const double lo = lattice_rho_min(LatticeTopology::Octet);
+    const double hi = lattice_rho_max(LatticeTopology::Octet);
+    if (lat_rho < lo || lat_rho > hi)
+      throw JobError(
+          "lattice cell_mm " + std::to_string(job.lattice.cell_mm) +
+          " / strut_radius_mm " + std::to_string(job.lattice.strut_radius_mm) +
+          " implies octet relative density " + std::to_string(lat_rho) +
+          ", outside the certifiable band [" + std::to_string(lo) + ", " +
+          std::to_string(hi) + "].");
+  }
+  const auto mat_it = materials.find(job.material);
+  if (mat_it == materials.end())
+    throw JobError("material \"" + job.material +
+                   "\" is not in the material library");
+  const Material& material = mat_it->second;
+#ifndef TOPOPT_HAVE_3MF
+  if (job.lattice.emit_3mf)
+    throw JobError(
+        "this build has no 3MF support (lib3mf was not available): "
+        "lattice.emit_3mf cannot be written, use emit_stl");
+#endif
+
+  LatticeVariantJobResult result;
+
+  // ── import the ORIGINAL model. The BCs are keyed on ITS faces — which is the
+  // whole reason this job takes the original model plus a stored design rather
+  // than the variant's exported mesh (a TO surface has no faces to select).
+  const std::string model_path = join_path(job_dir, job.model);
+  const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
+  try {
+    result.model = import_part_file_resolved(model_path);
+  } catch (const std::exception& e) {
+    throw JobError(std::string("lattice_variant: cannot import model: ") +
+                   e.what());
+  }
+  if (!check_watertight(result.model.mesh).watertight)
+    throw JobError("lattice_variant: model tessellation is not watertight: " +
+                   job.model);
+
+  // ── the load case, rebuilt from THIS JOB — which is the original run's job
+  // (the schema requires the variant block to live in it). Same mapping, same
+  // core builder, same receipt emitter as the optimize path.
+  VoxelGrid model_grid;
+  std::vector<DirichletBC> bcs;
+  MinimizePlasticOptions options;
+  const bool loadcase = job.loads.present;
+  std::vector<NodalLoad> external_loads;
+  std::string loadcase_receipt;
+
+  if (loadcase) {
+    const ProductionLoadCase lc = production_loadcase_from_job(job, result.model);
+    result.fixture_face_ids = lc.anchor_face_ids;
+    ProductionRunSetup setup;
+    try {
+      setup = build_production_loadcase(result.model, job.resolution, lc);
+    } catch (const JobError&) {
+      throw;
+    } catch (const std::exception& e) {
+      throw JobError(std::string("lattice_variant: cannot build the declared "
+                                 "load case against model \"") +
+                     job.model + "\": " + e.what());
+    }
+    if (setup.options.require_external_loads &&
+        setup.options.external_loads.empty())
+      throw JobError(
+          "lattice_variant: the declared load case produced NO external load — " +
+          no_external_load_message(setup, job.resolution) +
+          ". Refusing to lattice under SELF-WEIGHT instead of the declared "
+          "load (that silent fallback is the PR-178 param-drop bug).");
+    model_grid = setup.grid;
+    bcs = setup.bcs;
+    options = setup.options;
+    external_loads = options.external_loads;
+    loadcase_receipt =
+        loadcase_receipt_json(job, &setup, result.fixture_face_ids, 0, bcs);
+  } else {
+    model_grid = voxelize(result.model.mesh, job.resolution);
+    result.fixture_face_ids =
+        resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
+    std::size_t tagged = 0;
+    for (const int f : result.fixture_face_ids)
+      tagged += model_is_mesh
+                    ? tag_mesh_face(model_grid, result.model, f, VoxelTag::Fixture)
+                    : tag_step_face(model_grid, result.model, f, VoxelTag::Fixture);
+    if (tagged == 0)
+      throw JobError(
+          "lattice_variant: fixture faces tagged no voxels (resolution too "
+          "coarse for the selected faces?)");
+    for (const int n : fea_tagged_nodes(model_grid, VoxelTag::Fixture))
+      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+    configure_production_options(options);
+    options.margin_stop = job.margin_stop;
+    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
+    options.gravity_direction = job.gravity.direction;
+    loadcase_receipt =
+        loadcase_receipt_json(job, nullptr, result.fixture_face_ids, tagged, bcs);
+  }
+  apply_build_direction_options(options, job);
+
+  // ── the STORED DESIGN. Read before any solve, so a bad reference costs
+  // nothing.
+  const std::string design_path = join_path(job_dir, job.variant.design);
+  DesignStore store;
+  try {
+    store = read_design_file(design_path);
+  } catch (const std::exception& e) {
+    throw JobError(std::string("lattice_variant: cannot read the stored design "
+                               "\"") +
+                   job.variant.design + "\": " + e.what());
+  }
+  if (store.variants.empty())
+    throw JobError("lattice_variant: \"" + job.variant.design +
+                   "\" contains no variant designs");
+  // The stored design must index to THIS job's grid, or every voxel-indexed
+  // thing below (the BCs, the tags, the mask, the field) refers to a different
+  // geometry. Compared exactly — a grid that is merely close is a different
+  // grid.
+  if (store.nx != model_grid.nx || store.ny != model_grid.ny ||
+      store.nz != model_grid.nz || store.spacing != model_grid.spacing ||
+      store.origin.x != model_grid.origin.x ||
+      store.origin.y != model_grid.origin.y ||
+      store.origin.z != model_grid.origin.z)
+    throw JobError(
+        "lattice_variant: the stored design's grid does not match this job's. "
+        "Stored " + std::to_string(store.nx) + "x" + std::to_string(store.ny) +
+        "x" + std::to_string(store.nz) + " @ spacing " +
+        std::to_string(store.spacing) + "; this job builds " +
+        std::to_string(model_grid.nx) + "x" + std::to_string(model_grid.ny) +
+        "x" + std::to_string(model_grid.nz) + " @ spacing " +
+        std::to_string(model_grid.spacing) +
+        ". The model and resolution must be the ones the design was produced "
+        "from.");
+
+  // Select the variant. NO nearest-rung matching: latticing a rung the user did
+  // not name is exactly the silent surprise this whole job exists to remove.
+  int pick = -1;
+  if (job.variant.has_index) {
+    if (job.variant.index >= static_cast<int>(store.variants.size()))
+      throw JobError("lattice_variant: variant index " +
+                     std::to_string(job.variant.index) + " but \"" +
+                     job.variant.design + "\" holds only " +
+                     std::to_string(store.variants.size()) + " design(s)");
+    pick = job.variant.index;
+  } else {
+    for (std::size_t i = 0; i < store.variants.size(); ++i)
+      if (store.variants[i].requested_volume_fraction ==
+          job.variant.volume_fraction) {
+        pick = static_cast<int>(i);
+        break;
+      }
+    if (pick < 0) {
+      std::string have;
+      for (std::size_t i = 0; i < store.variants.size(); ++i)
+        have += (i ? ", " : "") +
+                json_num(store.variants[i].requested_volume_fraction);
+      throw JobError("lattice_variant: no stored design at volume fraction " +
+                     json_num(job.variant.volume_fraction) + " in \"" +
+                     job.variant.design + "\" (it holds: " + have + ")");
+    }
+  }
+  const StoredDesign& sd = store.variants[static_cast<std::size_t>(pick)];
+  result.variant_index = pick;
+  result.requested_volume_fraction = sd.requested_volume_fraction;
+  result.achieved_volume_fraction = sd.achieved_volume_fraction;
+  result.optimizer_iterations = sd.iterations;
+  result.design_fingerprint = sd.fingerprint;
+  result.recorded_margin_worst_case = sd.margin_worst_case;
+
+  SimpParams params;
+  params.youngs_modulus = material.youngs_modulus_mpa;
+  params.poisson = material.poisson;
+  params.penalty = 3.0;  // ARCHITECTURE §4, matching the run's cert solve
+
+  // The certification grid is the MODEL grid — the same grid the run's own
+  // per-rung certification used, with the design carried entirely by the
+  // density field (analyze_fixed_design's printed set is density > 0.5). Using
+  // a re-tagged occupancy grid instead would change the part-solid denominator
+  // and the self-weight assembly, i.e. would not reproduce the run.
+  //
+  // The orientation is the one the run APPLIED to this variant, read from the
+  // store rather than re-derived: the recorded margin is a margin AT an
+  // orientation (see design_store.hpp).
+  const Vec3 build_dir = sd.applied_build_dir;
+  const std::vector<NodalLoad> loads =
+      loadcase ? external_loads
+               : self_weight_loads(model_grid, material.density_g_cm3,
+                                   options.gravity, options.gravity_direction);
+  const bool load_path_ok = load_path_connected(model_grid, sd.density, 0.5);
+  const KnockdownSpec knockdown = knockdown_spec_for(options);
+  const double part_solid = static_cast<double>(model_grid.solid_count());
+
+  {
+    std::error_code ec;
+    std::filesystem::create_directories(out_dir, ec);
+    if (ec)
+      throw JobError("lattice_variant: cannot create output directory " +
+                     out_dir + ": " + ec.message());
+  }
+  result.loadcase_receipt_path = join_path(out_dir, "loadcase.json");
+  result.loadcase_receipt_json = loadcase_receipt;
+  write_text_file(result.loadcase_receipt_path, loadcase_receipt);
+
+  // ── SOLVE 1: the null-posture (SOLID) certification of the restored design.
+  //
+  // This is the reproduction PROOF. analyze_fixed_design is the same function
+  // minimize_plastic's per-rung certification calls (analyze.hpp's
+  // single-source-of-truth contract), so handed this variant's OWN density on
+  // the SAME grid, BCs, loads, params and solver, it must return the margin the
+  // run RECORDED. If it does not, something in the chain — the load case, the
+  // grid, the material, the stored field — is not the one that produced the
+  // variant, and every number after this point would describe a different
+  // object. So this is ENFORCED, not reported.
+  result.solid = analyze_fixed_design(
+      model_grid, params, sd.density, bcs, loads, material, build_dir,
+      options.simp.cg_tolerance, options.simp.cg_max_iterations,
+      options.simp.solver, options.margin_stop, knockdown, load_path_ok,
+      part_solid, /*lattice=*/nullptr, options.build_orientation_report,
+      resolve_build_direction_is_inferred(options),
+      /*auto_apply_build_orientation=*/false);
+  ++result.analysis_solves;
+  result.reproduced_margin_worst_case = result.solid.margin.worst_case;
+  result.reproduction_exact =
+      (result.solid.margin.worst_case == sd.margin_worst_case);
+  if (result.solid.non_convergent)
+    throw JobError(
+        "lattice_variant: the certification solve of the stored design did not "
+        "converge (iteration " +
+        std::to_string(result.solid.non_convergent_iteration) + ", residual " +
+        json_num(result.solid.non_convergent_residual) +
+        "). A design whose certification solve the CG cannot resolve is never "
+        "certified, and so is never latticed.");
+  if (!result.reproduction_exact)
+    throw JobError(
+        "lattice_variant: the restored design does NOT reproduce the margin the "
+        "run recorded for this variant (recorded " +
+        json_num(sd.margin_worst_case) + ", reproduced " +
+        json_num(result.solid.margin.worst_case) +
+        "). That means the load case, the grid or the design is not the one "
+        "that produced this variant — refusing to lattice it, because the "
+        "certificate would describe a different object than the run's.");
+
+  // ── the synthetic variant the shared pipeline consumes. Every field is
+  // either the STORED design's own record or the reproduction solve's output —
+  // nothing invented. The shell mesh the export pushes is `v3.mesh`, which the
+  // reproduction solve extracted from this very density field, so the solid
+  // shell in the latticed file is this design's own iso-surface.
+  MinimizePlasticVariant v;
+  v.requested_volume_fraction = sd.requested_volume_fraction;
+  v.optimization.physical_density = sd.density;
+  v.optimization.volume_fraction = sd.achieved_volume_fraction;
+  v.optimization.iterations = sd.iterations;
+  v.v3 = result.solid.v3;
+  v.accepted = result.solid.accepted;
+  v.von_mises_field = result.solid.von_mises_field;
+  v.stress_tensor_field = result.solid.stress_tensor_field;
+  v.displacement_field = result.solid.displacement_field;
+  v.mass_grams = result.solid.mass_grams;
+  v.support_volume_voxels = result.solid.support_volume_voxels;
+  // The orientation and the export frame are the RUN's, carried in the store —
+  // so the latticed file this job writes is placed exactly the way the run
+  // placed that variant's solid mesh, and the two describe the same object.
+  v.applied_build_dir = sd.applied_build_dir;
+  v.build_direction_auto_applied = sd.build_direction_auto_applied;
+  v.export_baked = sd.export_baked;
+
+  const double part_dim_mm =
+      std::max({static_cast<double>(model_grid.nx),
+                static_cast<double>(model_grid.ny),
+                static_cast<double>(model_grid.nz)}) *
+      model_grid.spacing;
+  VariantReport vr;
+  vr.volume_fraction = result.solid.printed_fraction;
+  vr.printed_fraction = result.solid.printed_fraction;
+  vr.max_stress_mpa = result.solid.max_von_mises;
+  vr.max_interlayer_tension_mpa = result.solid.max_interlayer_tension;
+  vr.margin = result.solid.margin;
+  // The build direction IN THE FRAME OF THE EXPORTED MESH (the same convention
+  // the optimize and analyze paths use): +Z when the file is baked, the model
+  // direction otherwise.
+  vr.export_baked = sd.export_baked;
+  vr.orientation_model = sd.applied_build_dir;
+  vr.orientation = sd.export_baked ? Vec3{0.0, 0.0, 1.0} : sd.applied_build_dir;
+  vr.settings = recommend_settings(rules, material.family,
+                                   result.solid.margin.worst_case, part_dim_mm);
+  vr.min_feature_violations = result.solid.v3.min_feature_violations;
+  vr.min_feature_warning =
+      min_feature_warning_text(rules, result.solid.v3.min_feature_violations);
+  vr.accepted = result.solid.accepted;
+  vr.margin_required = options.margin_stop;
+  vr.margin_effective = result.solid.margin_effective;
+  if (!result.solid.accepted)
+    vr.rejection_reason =
+        load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+  v.report = vr;
+
+  // ── the SHARED per-variant lattice pipeline. Same body the optimize path
+  // runs, so the mask that certifies and the mask that emits are the same
+  // object (Z3) and the strut-strength report rides the composite solve (Z5).
+  const std::vector<ClearanceGeometry> lattice_kos =
+      lattice_keep_outs_from_job(job, result.model);
+  const LatticeRoleRegions lattice_roles = lattice_role_regions_from_job(job);
+  const LatticeVariantOutcome R =
+      lattice_one_variant(v, job, model_grid, options, material, bcs,
+                          lattice_kos, lattice_roles, out_dir);
+  // The pipeline's own solve count: the null-posture reproduction it runs as
+  // its internal proof, the composite, and (when band clamping happened) the
+  // clamp counterfactual. Counted, never assumed.
+  result.analysis_solves += 2;
+  if (R.grad_rcpt.clamp_counterfactual_ran) ++result.analysis_solves;
+  result.lattice = R.cc.lattice;
+  result.mesh_paths = R.oc.paths;
+  result.lattice_receipt_path = R.receipt_path;
+  result.lattice_receipt_json = R.receipt_json;
+  result.cell_size_mm = R.cell_mm;
+  result.graded = R.graded;
+  result.latticed_voxels = static_cast<long long>(R.cc.lattice.lattice_voxels);
+  if (R.graded) {
+    result.rho_min_used = R.gf.rho_min_used;
+    result.rho_max_used = R.gf.rho_max_used;
+  } else {
+    result.rho_min_used = R.cc.rho;
+    result.rho_max_used = R.cc.rho;
+  }
+
+  // THE DESIGN IDENTITY CHECK (bar Z3), stated as an equation rather than an
+  // argument: the field the pipeline fingerprinted — the one it built the mesh
+  // from AND handed to the composite certification — is the field that was
+  // stored, which is the field the null-posture solve above reproduced the
+  // recorded margin from. One number, three roles.
+  if (R.design_fingerprint != sd.fingerprint)
+    throw JobError(
+        "lattice_variant: internal inconsistency — the design the lattice "
+        "pipeline exported and certified does not hash to the stored design. "
+        "Refusing to write a certificate for an object that is not the one on "
+        "record.");
+
+  // ── run_info.json carrying the grading record, from the SAME filler the
+  // analyze path uses so the two receipts cannot drift.
+  {
+    RunInfo gi = build_run_info(job, options, RunObservability{});
+    if (R.graded) {
+      gi.grading_present = true;
+      gi.grading_topology = lattice_topology_name(R.gf.posture.topology);
+      gi.grading_band_rho_min = R.gf.band_rho_min;
+      gi.grading_band_rho_max = R.gf.band_rho_max;
+      gi.grading_cells_per_member_floor = R.gf.cells_per_member_floor;
+      gi.grading_cell_size_mm = R.gf.cell_size_mm;
+      gi.grading_printability_floor_mm = R.gf.printability_floor_mm;
+      gi.grading_cell_size_floored = R.gf.cell_size_floored;
+      gi.grading_min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
+      gi.grading_rho_min_used = R.gf.rho_min_used;
+      gi.grading_rho_max_used = R.gf.rho_max_used;
+      gi.grading_region_voxels = static_cast<long long>(R.gf.region_voxels);
+      gi.grading_latticed_voxels = static_cast<long long>(R.gf.latticed_voxels);
+      gi.grading_solid_fallback_voxels =
+          static_cast<long long>(R.gf.solid_fallback_voxels);
+      gi.grading_min_member_width_mm = R.gf.min_member_width_mm;
+      gi.grading_min_cells_per_member = R.gf.min_cells_per_member;
+      gi.grading_min_strut_diameter_mm = R.gf.min_strut_diameter_mm;
+      gi.grading_max_strut_diameter_mm = R.gf.max_strut_diameter_mm;
+      gi.grading_any_strut_below_min = R.gf.any_strut_below_min;
+      gi.grading_region_ungradeable = R.gf.region_ungradeable;
+      fill_grading_cell_plan(gi, R.gf);
+    }
+    result.run_info_path = join_path(out_dir, "run_info.json");
+    write_run_info(result.run_info_path, gi);
+  }
+
+  // ── the report line: the LATTICED composite's numbers, never the solid
+  // design's. The file this job writes is the latticed one, so the report
+  // describes that one (the honesty rule).
+  {
+    VariantReport lvr = vr;
+    lvr.volume_fraction = result.lattice.printed_fraction;
+    lvr.printed_fraction = result.lattice.printed_fraction;
+    lvr.max_stress_mpa = result.lattice.max_von_mises;
+    lvr.max_interlayer_tension_mpa = result.lattice.max_interlayer_tension;
+    lvr.margin = result.lattice.margin;
+    lvr.margin_effective = result.lattice.margin_effective;
+    lvr.accepted =
+        result.lattice.accepted && job.lattice.outer_finish != "skin";
+    lvr.min_feature_violations = result.lattice.v3.min_feature_violations;
+    lvr.min_feature_warning = min_feature_warning_text(
+        rules, result.lattice.v3.min_feature_violations);
+    if (!lvr.accepted)
+      lvr.rejection_reason = load_path_ok ? kMarginBelowRequiredReason
+                                          : kLoadPathNotConnectedReason;
+    JobReport report;
+    report.material = job.material;
+    (lvr.accepted ? report.variants : report.rejected).push_back(lvr);
+    result.report_json = job_report_json(report);
+    result.report_path = join_path(out_dir, "lattice_variant_report.json");
+    write_text_file(result.report_path, result.report_json);
+  }
+
+  // ── fields.bin — the COMPOSITE solve's fields, so an app overlay drawn over
+  // the latticed result describes the latticed object.
+  {
+    MinimizePlasticResult fr;
+    fr.report.material = job.material;
+    MinimizePlasticVariant fv;
+    fv.requested_volume_fraction = sd.requested_volume_fraction;
+    fv.accepted = result.lattice.accepted;
+    fv.von_mises_field = result.lattice.von_mises_field;
+    fv.stress_tensor_field = result.lattice.stress_tensor_field;
+    fv.displacement_field = result.lattice.displacement_field;
+    fv.mass_grams = result.lattice.mass_grams;
+    fv.support_volume_voxels = result.lattice.support_volume_voxels;
+    fr.evaluated.push_back(std::move(fv));
+    result.fields_path = join_path(out_dir, "fields.bin");
+    // accepted_only = false, for the reason the analyze route documents: the
+    // field describes the object either way, and withholding it when the
+    // verdict is REJECTED blanks the overlay exactly when it matters.
+    write_fields_file(result.fields_path, fr, model_grid,
+                      /*accepted_only=*/false);
+  }
+
+  result.wall_seconds = wall_seconds() - t_start;
+
+  // ── the PROVENANCE record: what was latticed, from where, and — the bar this
+  // job is measured against — that NO LADDER RAN.
+  std::string prov = "{\n";
+  prov += "  \"provenance\": \"latticed a finished variant\",\n";
+  prov += "  \"optimization\": false,\n";
+  prov += "  \"design_iterations\": 0,\n";
+  prov += "  \"optimizer_iterations_run\": 0,\n";
+  prov += "  \"variant_meshes_written\": 0,\n";
+  prov += "  \"analysis_solves\": " + std::to_string(result.analysis_solves) +
+          ",\n";
+  prov +=
+      "  \"analysis_solves_note\": \"certification solves only, no design "
+      "loop: (1) the null-posture solve that reproduces this variant's RECORDED "
+      "margin — the proof the load case and design are the originals; (2) the "
+      "lattice pipeline's own null-posture reproduction; (3) the COMPOSITE "
+      "certification; plus (4) the band-clamp counterfactual when any voxel "
+      "was clamped\",\n";
+  // The WALL TIME is deliberately NOT in this file. It is on the result and on
+  // the CLI's own summary line, where it belongs; putting a measured duration
+  // in a written artifact would make every output of this job differ between
+  // two identical runs, and every file this job writes being byte-identical on
+  // a rerun is the determinism bar (Z8).
+  prov += "  \"source\": {\n";
+  prov += "    \"design\": " + json_str(job.variant.design) + ",\n";
+  prov += "    \"variant_index\": " + std::to_string(result.variant_index) +
+          ",\n";
+  prov += "    \"requested_volume_fraction\": " +
+          json_num(result.requested_volume_fraction) + ",\n";
+  prov += "    \"achieved_volume_fraction\": " +
+          json_num(result.achieved_volume_fraction) + ",\n";
+  prov += "    \"optimizer_iterations_originally\": " +
+          std::to_string(result.optimizer_iterations) + ",\n";
+  prov += "    \"design_fingerprint\": \"" +
+          std::to_string(result.design_fingerprint) + "\",\n";
+  prov +=
+      "    \"field_provenance\": \"the demand field this lattice is graded "
+      "from is THIS variant's own certification von Mises field, recovered by "
+      "the reproduction solve below from the stored design — not a simulation "
+      "of the solid part, and not another run's field\"\n";
+  prov += "  },\n";
+  prov += "  \"reproduction\": {\n";
+  prov += "    \"recorded_margin_worst_case\": " +
+          json_num(result.recorded_margin_worst_case) + ",\n";
+  prov += "    \"reproduced_margin_worst_case\": " +
+          json_num(result.reproduced_margin_worst_case) + ",\n";
+  prov += "    \"exact\": true,\n";
+  prov +=
+      "    \"note\": \"ENFORCED, not reported: an inexact reproduction throws "
+      "and nothing is written\"\n";
+  prov += "  },\n";
+  prov += "  \"model\": " + json_str(job.model) + ",\n";
+  prov += "  \"resolution\": " + std::to_string(job.resolution) + ",\n";
+  prov += "  \"load_source\": " +
+          json_str(loadcase ? "loadcase" : "self_weight") + ",\n";
+  prov += "  \"loadcase_receipt\": \"loadcase.json\",\n";
+  prov += "  \"lattice\": {\n";
+  prov += "    \"topology\": " + json_str(job.lattice.topology) + ",\n";
+  prov += "    \"graded\": " + std::string(result.graded ? "true" : "false") +
+          ",\n";
+  prov += "    \"cell_mm\": " + json_num(result.cell_size_mm) + ",\n";
+  prov += "    \"rho_min_used\": " + json_num(result.rho_min_used) + ",\n";
+  prov += "    \"rho_max_used\": " + json_num(result.rho_max_used) + ",\n";
+  prov += "    \"latticed_voxels\": " + std::to_string(result.latticed_voxels) +
+          ",\n";
+  prov += "    \"solid_margin_worst_case\": " +
+          json_num(result.solid.margin.worst_case) + ",\n";
+  prov += "    \"lattice_margin_worst_case\": " +
+          json_num(result.lattice.margin.worst_case) + ",\n";
+  prov += "    \"lattice_margin_effective\": " +
+          json_num(result.lattice.margin_effective) + ",\n";
+  prov += "    \"lattice_accepted\": " +
+          std::string((result.lattice.accepted &&
+                       job.lattice.outer_finish != "skin")
+                          ? "true"
+                          : "false") +
+          ",\n";
+  // File names, NOT paths: every artifact named here is a sibling of this file,
+  // and an absolute path would make two identical runs into two different
+  // documents purely because they were told to write somewhere else.
+  auto base_name = [](const std::string& p) {
+    return std::filesystem::path(p).filename().string();
+  };
+  prov += "    \"receipt\": " + json_str(base_name(result.lattice_receipt_path)) +
+          "\n";
+  prov += "  },\n";
+  prov += "  \"meshes\": [";
+  for (std::size_t i = 0; i < result.mesh_paths.size(); ++i)
+    prov += (i ? ", " : "") + json_str(base_name(result.mesh_paths[i]));
+  prov += "]\n";
+  prov += "}\n";
+  result.provenance_path = join_path(out_dir, "lattice_variant.json");
+  write_text_file(result.provenance_path, prov);
+
+  return result;
+}
+
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
                      const MaterialLibrary& materials,
@@ -2048,6 +3049,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   VoxelGrid grid;
   std::vector<DirichletBC> bcs;
   MinimizePlasticOptions options;
+  // The load-case RECEIPT (bar Z2) — built here, where the resolution facts are
+  // still in scope, and written once the output directory exists. See
+  // loadcase_receipt_json: this is the document a later re-lattice run is
+  // compared against to prove it certified under the SAME load case.
+  std::string loadcase_receipt;
 
   if (job.loads.present) {
     // ── LOADCASE mode: resolve the geometric selectors to face ids, build the
@@ -2084,6 +3090,17 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     grid = std::move(setup.grid);
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
+    // Before `setup.options` is consumed: external_loads is still readable off
+    // the moved-to `options`, and the reports were not moved.
+    {
+      ProductionRunSetup echo;
+      echo.options.external_loads = options.external_loads;
+      echo.load_group_reports = setup.load_group_reports;
+      echo.clearance_reports = setup.clearance_reports;
+      echo.face_protection_reports = setup.face_protection_reports;
+      loadcase_receipt = loadcase_receipt_json(job, &echo,
+                                               result.fixture_face_ids, 0, bcs);
+    }
     // The CLI exports meshes, not playback: keyframe_count stays 0 (the app sets
     // 12). This is viz only and does not change the design.
   } else {
@@ -2112,6 +3129,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     bcs.reserve(fixture_nodes.size() * 3);
     for (const int n : fixture_nodes)
       for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+    loadcase_receipt = loadcase_receipt_json(
+        job, nullptr, result.fixture_face_ids, tagged, bcs);
 
     // ──▶ FEA + SIMP ladder + report assembly (the M5.3 driver). The production
     // solver config (matrix-free multigrid + Galerkin cache + physical
@@ -2157,6 +3176,11 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       throw JobError("cannot create output directory " + out_dir + ": " +
                      ec.message());
   }
+  // The load-case receipt (bar Z2), beside the artifacts it describes. A new,
+  // separate document — report.json / fields.bin / the meshes are untouched.
+  result.loadcase_receipt_path = join_path(out_dir, "loadcase.json");
+  result.loadcase_receipt_json = loadcase_receipt;
+  write_text_file(result.loadcase_receipt_path, loadcase_receipt);
 
   // The grid the run solves on (the expanded domain under a design box), needed
   // up front so a streamed variant's mesh is resampled on the right grid.
@@ -2308,300 +3332,23 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                           : LatticeRoleRegions{};
   auto emit_lattice = [&](const MinimizePlasticVariant& v, bool stream_lines) {
     if (!job.lattice.present) return;
-    const std::vector<double>& dens = v.optimization.physical_density;
-    const bool graded = job.grading.present;
     const bool roles_present = !job.lattice.regions.empty();
-
-    // ── Stage 4: the grading law runs FIRST, on THIS variant's own final
-    // certification-recovery von Mises field (H4a — the run's own field, fresh:
-    // v.von_mises_field is produced by the recovery solve on the CONVERGED
-    // design of this rung, never an earlier iteration or another run). Its
-    // candidate set is the role-aware membership — the SAME membership tests the
-    // shared boundary predicate exposes, evaluated on a boundary view carrying
-    // only the membership primitives (the cell size, which the law itself
-    // chooses, plays no part in membership).
-    GradedField gf;
-    double cell = job.lattice.cell_mm;
-    if (graded) {
-      LatticeBoundary members;
-      for (const ClearanceGeometry& g : lattice_kos)
-        members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
-      for (const ClearanceGeometry& g : lattice_roles.includes)
-        members.add_include_region(g);
-      for (const ClearanceGeometry& g : lattice_roles.excludes)
-        members.add_exclude_region(g);
-      std::vector<char> cand(solved_grid.voxel_count(), 0);
-      for (int k = 0; k < solved_grid.nz; ++k)
-        for (int j = 0; j < solved_grid.ny; ++j)
-          for (int i = 0; i < solved_grid.nx; ++i) {
-            const std::size_t e = solved_grid.index(i, j, k);
-            if (!(dens[e] >= 0.5)) continue;
-            const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
-                         solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
-                         solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-            if (members.in_keep_out(c, 0.0)) continue;
-            if (members.in_exclude_region(c, 0.0)) continue;
-            if (members.has_include_regions() &&
-                !members.in_include_region(c, 0.0))
-              continue;
-            cand[e] = 1;
-          }
-      GradingLawParams gp;
-      gp.topology = LatticeTopology::Octet;  // job schema restricts to octet
-      gp.target_cell_size_mm = job.grading.cell_mm;
-      gp.min_extrudable_width_mm = job.grading.min_extrudable_width_mm;
-      gp.demand_exponent = job.grading.demand_exponent;
-      // Cell-size mode (handoff 2026-08-01-lattice-cell-size-sweep). An absent
-      // "cell_mode" parses as "fixed", which is the pre-sweep path exactly.
-      if (!cell_size_mode_from_name(job.grading.cell_mode.c_str(), gp.cell_mode))
-        throw JobError("run_job: unknown grading cell_mode \"" +
-                       job.grading.cell_mode + "\"");
-      gp.min_cell_size_mm = job.grading.cell_min_mm;
-      gp.max_cell_size_mm = job.grading.cell_max_mm;
-      gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp);
-      cell = gf.cell_size_mm;
-      // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
-      // level the plan used, which is what the boundary window, the cell-overlap
-      // proof and the receipt's single scalar all want (the conservative end).
-    }
-
-    // ── THE shared boundary for this variant: its solid density as the base,
-    // the resolved clearance keep-outs subtracted, the role regions carried as
-    // activation/mask terms. Geometry (a) and certification (b) below both
-    // consume this ONE object (bar B7 / H1b).
-    const LatticeBoundary boundary = lattice_boundary_for(
-        solved_grid, dens, cell, lattice_kos, lattice_roles);
-
-    // ── THE certification mask — shared by the export (companion + graded cell
-    // activation) and the posture. On a graded run it is intersected with the
-    // law's own mask (voxels the law kept solid drop out; law-masked voxels the
-    // shared predicate's cell-overlap proof rejects are counted, not hidden).
-    std::vector<char> mask = lattice_certification_mask(
-        boundary, solved_grid, dens, 0.5, solved_grid.origin, cell);
-    long long dropped_by_overlap = 0;
-    if (graded) {
-      for (std::size_t e = 0; e < mask.size(); ++e) {
-        if (mask[e] && !gf.posture.mask[e]) {
-          mask[e] = 0;  // the law left it solid (too-thin fallback / not a candidate)
-        } else if (!mask[e] && gf.posture.mask[e]) {
-          ++dropped_by_overlap;
-        }
-      }
-    }
-
-    // ── the radius field + graded cell activation.
-    LatticeRadiusField G;
-    G.nseg = 8;
-    double rho_uniform = 0.0;
-    const LatticeRegion Rdims = lattice_region_for(solved_grid, cell, &boundary);
-    std::vector<double> cell_rho_sum;
-    std::vector<long long> cell_rho_cnt;
-    double gmean = 0.0;
-    std::function<bool(int, int, int)> graded_cells;  // null on the uniform path
-    if (graded) {
-      const int ncx = Rdims.nx, ncy = Rdims.ny, ncz = Rdims.nz;
-      cell_rho_sum.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0.0);
-      cell_rho_cnt.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0);
-      auto cidx = [ncx, ncy](int ci, int cj, int ck) {
-        return (static_cast<std::size_t>(ck) * ncy + cj) * ncx + ci;
-      };
-      auto clampi = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
-      double gsum = 0.0;
-      long long gcnt = 0;
-      for (int k = 0; k < solved_grid.nz; ++k)
-        for (int j = 0; j < solved_grid.ny; ++j)
-          for (int i = 0; i < solved_grid.nx; ++i) {
-            const std::size_t e = solved_grid.index(i, j, k);
-            if (!mask[e]) continue;
-            const double rho = gf.posture.relative_density[e];
-            const double cx =
-                solved_grid.origin.x + (i + 0.5) * solved_grid.spacing;
-            const double cy =
-                solved_grid.origin.y + (j + 0.5) * solved_grid.spacing;
-            const double cz =
-                solved_grid.origin.z + (k + 0.5) * solved_grid.spacing;
-            const int ci = clampi(
-                static_cast<int>(std::floor((cx - Rdims.origin.x) / cell)), ncx - 1);
-            const int cj = clampi(
-                static_cast<int>(std::floor((cy - Rdims.origin.y) / cell)), ncy - 1);
-            const int ck = clampi(
-                static_cast<int>(std::floor((cz - Rdims.origin.z) / cell)), ncz - 1);
-            cell_rho_sum[cidx(ci, cj, ck)] += rho;
-            ++cell_rho_cnt[cidx(ci, cj, ck)];
-            gsum += rho;
-            ++gcnt;
-          }
-      gmean = gcnt > 0 ? gsum / static_cast<double>(gcnt) : gf.band_rho_min;
-      // Graded cell activation: a cell is latticed iff it holds >= 1 masked
-      // voxel — the graded silhouette DERIVES from the same mask the posture
-      // certifies, so file and certificate cannot disagree on where lattice is.
-      graded_cells = [&cell_rho_cnt, cidx](int ci, int cj, int ck) {
-        return cell_rho_cnt[cidx(ci, cj, ck)] > 0;
-      };
-      // Per-position radius: the owning voxel's graded rho (masked), else the
-      // owning cell's mean over its masked voxels (a strut midpoint can sit in
-      // a fallback/solid voxel of an active cell), else the global mean —
-      // deterministic fixed fallback chain, converted through core's own
-      // diameter law.
-      const VoxelGrid& sgr = solved_grid;
-      const std::vector<char>& mref = mask;
-      const std::vector<double>& rref = gf.posture.relative_density;
-      G.field = [&sgr, &mref, &rref, &cell_rho_sum, &cell_rho_cnt, cidx, clampi,
-                 cell, gmean, ncx, ncy, ncz, Rdims](Vec3 p) {
-        const int i = clampi(
-            static_cast<int>(std::floor((p.x - sgr.origin.x) / sgr.spacing)),
-            sgr.nx - 1);
-        const int j = clampi(
-            static_cast<int>(std::floor((p.y - sgr.origin.y) / sgr.spacing)),
-            sgr.ny - 1);
-        const int k = clampi(
-            static_cast<int>(std::floor((p.z - sgr.origin.z) / sgr.spacing)),
-            sgr.nz - 1);
-        const std::size_t e = sgr.index(i, j, k);
-        double rho;
-        if (mref[e]) {
-          rho = rref[e];
-        } else {
-          const int ci = clampi(
-              static_cast<int>(std::floor((p.x - Rdims.origin.x) / cell)), ncx - 1);
-          const int cj = clampi(
-              static_cast<int>(std::floor((p.y - Rdims.origin.y) / cell)), ncy - 1);
-          const int ck = clampi(
-              static_cast<int>(std::floor((p.z - Rdims.origin.z) / cell)), ncz - 1);
-          const std::size_t cc = cidx(ci, cj, ck);
-          rho = cell_rho_cnt[cc] > 0
-                    ? cell_rho_sum[cc] / static_cast<double>(cell_rho_cnt[cc])
-                    : gmean;
-        }
-        return 0.5 * octet_strut_diameter_mm(rho, cell);
-      };
-    } else {
-      G.uniform_mm = job.lattice.strut_radius_mm;
-      // rho the printed geometry (cell + uniform strut radius) implies, on the
-      // library basis (the E5 preflight already proved it in-band).
-      rho_uniform =
-          octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
-    }
-
-    // ── role receipt (H1a): counts + the include-over-void no-op accounting.
-    LatticeRoleReceipt role_rcpt;
-    if (roles_present) {
-      role_rcpt.present = true;
-      role_rcpt.include_regions = lattice_roles.includes.size();
-      role_rcpt.exclude_regions = lattice_roles.excludes.size();
-      if (boundary.has_include_regions()) {
-        for (int k = 0; k < solved_grid.nz; ++k)
-          for (int j = 0; j < solved_grid.ny; ++j)
-            for (int i = 0; i < solved_grid.nx; ++i) {
-              const std::size_t e = solved_grid.index(i, j, k);
-              if (dens[e] >= 0.5) continue;  // material exists — not the no-op case
-              const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
-                           solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
-                           solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-              if (boundary.in_include_region(c, 0.0))
-                ++role_rcpt.include_void_voxels;
-            }
-      }
-    }
-
-    // ── SWEPT cell size: one level spec per dyadic level (handoff 2026-08-01-
-    //    lattice-cell-size-sweep). Each level carries (a) its own occupancy — the
-    //    octree cells assigned to it, keyed off the base cell at the block's min
-    //    corner, which is exactly where the aligned octree puts the level — and (b)
-    //    its OWN radius field, because the printed diameter is d(rho, cell): the same
-    //    relative density at a coarser cell is a proportionally fatter strut, which is
-    //    the whole printability payoff. Empty (fewer than two levels) on every
-    //    non-swept run, so the export takes the single-cell path unchanged.
-    std::vector<LatticeLevelSpec> levels;
-    if (graded && gf.cell_plan.max_level > 0 &&
-        !gf.posture.cell_size_field.empty()) {
-      const CellSizePlan* pl = &gf.cell_plan;
-      for (const CellLevelReport& lr : gf.cell_plan.levels) {
-        if (lr.cells == 0) continue;
-        LatticeLevelSpec sp;
-        sp.level = lr.level;
-        sp.cell_mm = lr.cell_size_mm;
-        const int LV = lr.level;
-        sp.latticed = [pl, LV](int ci, int cj, int ck) {
-          const int bi = ci << LV, bj = cj << LV, bk = ck << LV;
-          if (bi >= pl->nx || bj >= pl->ny || bk >= pl->nz) return false;
-          return static_cast<int>(pl->level[pl->index(bi, bj, bk)]) == LV;
-        };
-        // Same fallback chain as the uniform graded field (owning voxel's graded
-        // rho, else the level's own band floor) — evaluated at THIS level's cell.
-        const VoxelGrid& sgr = solved_grid;
-        const std::vector<char>& mref = mask;
-        const std::vector<double>& rref = gf.posture.relative_density;
-        const double lcell = lr.cell_size_mm;
-        const double rlo = gf.band_rho_min;
-        sp.radius.nseg = 8;
-        sp.radius.uniform_mm = 0.5 * octet_strut_diameter_mm(rlo, lcell);
-        sp.radius.field = [&sgr, &mref, &rref, lcell, rlo](Vec3 p) {
-          auto cl = [](int v, int hi) { return v < 0 ? 0 : (v > hi ? hi : v); };
-          const int i = cl(static_cast<int>(
-              std::floor((p.x - sgr.origin.x) / sgr.spacing)), sgr.nx - 1);
-          const int j = cl(static_cast<int>(
-              std::floor((p.y - sgr.origin.y) / sgr.spacing)), sgr.ny - 1);
-          const int k = cl(static_cast<int>(
-              std::floor((p.z - sgr.origin.z) / sgr.spacing)), sgr.nz - 1);
-          const std::size_t e = sgr.index(i, j, k);
-          return 0.5 * octet_strut_diameter_mm(mref[e] ? rref[e] : rlo, lcell);
-        };
-        levels.push_back(std::move(sp));
-      }
-    }
-
-    // (a) geometry — timed alone, so gen_fraction (P6) stays generation-only.
-    const double tg0 = wall_seconds();
-    LatticeExportOutcome oc = export_latticed_variant(
-        v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
-        mask, graded_cells, /*emit_solid_companion=*/graded || roles_present,
-        levels.empty() ? nullptr : &levels,
-        levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm);
-    lat_agg.wall_s += wall_seconds() - tg0;
-    // (b) certification of the composite — the octet tensor on the SAME mask the
-    // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
-    const LatticeCertContext cx =
-        lattice_cert_context(v, solved_grid, options, material);
-    const LatticePosture post = build_lattice_posture(
-        solved_grid, cell, mask, rho_uniform,
-        graded ? &gf.posture.relative_density : nullptr);
-    const LatticeCertOutcome cc = certify_latticed_variant(
-        v, solved_grid, options, material, bcs, cx, post,
-        graded ? std::numeric_limits<double>::quiet_NaN() : rho_uniform);
-
-    // ── graded receipt + the clamp counterfactual (H4b): one extra cert solve
-    // with every band-clamped voxel kept SOLID — was the clamping decisive?
-    LatticeGradedReceipt grad_rcpt;
-    if (graded) {
-      grad_rcpt.present = true;
-      grad_rcpt.gf = &gf;
-      grad_rcpt.requested_vf = v.requested_volume_fraction;
-      grad_rcpt.achieved_vf = v.optimization.volume_fraction;
-      grad_rcpt.iterations = v.optimization.iterations;
-      grad_rcpt.mask_voxels_dropped_by_cell_overlap = dropped_by_overlap;
-      if (gf.clamped_lo_voxels + gf.clamped_hi_voxels > 0) {
-        LatticePosture cpost = post;
-        for (std::size_t e = 0; e < cpost.mask.size(); ++e)
-          if (gf.clamp_flags[e] && cpost.mask[e]) {
-            cpost.mask[e] = 0;
-            cpost.relative_density[e] = 0.0;
-          }
-        const FixedDesignAnalysis cf = analyze_variant_with_posture(
-            v, solved_grid, options, material, bcs, cx, &cpost);
-        grad_rcpt.clamp_counterfactual_ran = true;
-        grad_rcpt.counterfactual_accepted = cf.accepted;
-        grad_rcpt.clamp_changed_verdict = (cf.accepted != cc.lattice.accepted);
-      }
-    }
-
-    const std::string rcpt_path =
-        join_path(out_dir, lattice_base_name(job.output.mesh_prefix,
-                                             v.requested_volume_fraction) +
-                               ".report.json");
-    write_text_file(rcpt_path, lattice_cert_report_json(v, job.lattice, cc, oc,
-                                                        cell, role_rcpt,
-                                                        grad_rcpt));
+    // THE per-variant lattice pipeline — grade, boundary, mask, geometry,
+    // composite certification, receipt — lives in ONE function (see
+    // lattice_one_variant), shared with the re-lattice entry point so a variant
+    // latticed later goes through the identical body. This lambda is now only
+    // the run-level AGGREGATION and the streaming checkpoint line.
+    const LatticeVariantOutcome R =
+        lattice_one_variant(v, job, solved_grid, options, material, bcs,
+                            lattice_kos, lattice_roles, out_dir);
+    lat_agg.wall_s += R.gen_seconds;
+    const LatticeExportOutcome& oc = R.oc;
+    const LatticeCertOutcome& cc = R.cc;
+    const GradedField& gf = R.gf;
+    const bool graded = R.graded;
+    const double cell = R.cell_mm;
+    const LatticeRoleReceipt& role_rcpt = R.role_rcpt;
+    const std::string& rcpt_path = R.receipt_path;
 
     lat_agg.any = true;
     // Role / companion / grading aggregation (stages 1+4).
@@ -3242,6 +3989,18 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   result.fields_path = join_path(out_dir, "fields.bin");
   result.fields_variant_count =
       write_fields_file(result.fields_path, result.pipeline,
+                        result.pipeline.solved_grid);
+
+  // ──▶ the DESIGN container (task 2026-08-02-lattice-a-variant): each evaluated
+  // variant's own density field, the thing "lattice this variant" needs and the
+  // one artifact a run never kept. A SEPARATE file, deliberately: report.json,
+  // fields.bin and every mesh above stay byte-for-byte what they were, so the
+  // whole existing optimize path is unchanged (bar Z6) and this is purely
+  // additive. Older readers ignore it. See design_store.hpp for why the field is
+  // stored at full double precision.
+  result.design_path = join_path(out_dir, "design.bin");
+  result.design_variant_count =
+      write_design_file(result.design_path, result.pipeline,
                         result.pipeline.solved_grid);
 
   return result;

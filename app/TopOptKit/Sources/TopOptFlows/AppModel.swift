@@ -922,6 +922,21 @@ public final class AppModel: ObservableObject {
                 try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
                 try? data.write(to: url, options: .atomic)
             }
+            // The RE-LATTICE artifacts, beside the results they describe (task
+            // 2026-08-02-lattice-a-variant): the exact job document submitted and
+            // that run's design.bin. Written together, cleared together — a
+            // design belonging to a different run than these results must never
+            // be latticeable against them.
+            if let art = project.relatticeArtifacts {
+                let id = project.id
+                let s = store
+                Self.resultsQueue.async {
+                    try? s.saveRelatticeArtifacts(jobJSON: art.jobJSON,
+                                                  designBin: art.designBin, id: id)
+                }
+            } else {
+                store.clearRelatticeArtifacts(id: project.id)
+            }
         }
     }
 
@@ -944,10 +959,17 @@ public final class AppModel: ObservableObject {
         // off-main and drop them into the idle run so results reopen instantly.
         if snap.optimized == true {
             let url = store.resultsURL(id: snap.id)
+            let artifacts = store.loadRelatticeArtifacts(id: snap.id)
             Self.resultsQueue.async {
                 guard let data = try? Data(contentsOf: url),
                       let outcome = try? OutcomeCodec.decode(data) else { return }
-                DispatchQueue.main.async { pm.run.restoreOutcome(outcome) }
+                DispatchQueue.main.async {
+                    pm.run.restoreOutcome(outcome)
+                    // Restored together with the results, so a reopened project
+                    // can lattice its variants exactly as the live one could —
+                    // and, when they did not survive, honestly cannot.
+                    pm.relatticeArtifacts = artifacts
+                }
             }
         }
         return pm

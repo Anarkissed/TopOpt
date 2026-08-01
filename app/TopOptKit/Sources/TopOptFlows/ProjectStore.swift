@@ -132,6 +132,50 @@ public struct ProjectStore {
         try? Data(contentsOf: resultsURL(id: id))
     }
 
+    // MARK: the re-lattice artifacts (task 2026-08-02-lattice-a-variant)
+
+    /// The EXACT job document that produced the persisted results.
+    public func runJobURL(id: UUID) -> URL {
+        projectDir(id).appendingPathComponent("run_job.json")
+    }
+    /// That run's `design.bin` — each variant's own density field.
+    public func runDesignURL(id: UUID) -> URL {
+        projectDir(id).appendingPathComponent("run_design.bin")
+    }
+
+    /// Persist the two artifacts a re-lattice needs, BESIDE the results they
+    /// describe. Kept as their own files rather than folded into the results
+    /// blob: `design.bin` is a core-format container the CLI reads back verbatim,
+    /// and re-encoding it through a DTO would be a second representation of the
+    /// same bytes — one more place for the design that gets certified and the
+    /// design that was stored to drift apart.
+    public func saveRelatticeArtifacts(jobJSON: Data, designBin: Data,
+                                       id: UUID) throws {
+        try fm.createDirectory(at: projectDir(id), withIntermediateDirectories: true)
+        try jobJSON.write(to: runJobURL(id: id), options: .atomic)
+        try designBin.write(to: runDesignURL(id: id), options: .atomic)
+    }
+
+    /// Read them back. Returns nil unless BOTH survive: a design without the job
+    /// that produced it cannot be certified under the right load case, and a job
+    /// without the design has nothing to lattice. Half an answer here would
+    /// become a run that certified under a re-authored load case, which is the
+    /// whole failure this pair exists to prevent.
+    public func loadRelatticeArtifacts(id: UUID) -> RelatticeArtifacts? {
+        guard let job = try? Data(contentsOf: runJobURL(id: id)),
+              let design = try? Data(contentsOf: runDesignURL(id: id)),
+              !job.isEmpty, !design.isEmpty else { return nil }
+        return RelatticeArtifacts(jobJSON: job, designBin: design)
+    }
+
+    /// Drop them — called when a project's results are replaced by a run that
+    /// produced no design container, so a stale design can never be latticed
+    /// against a newer run's results.
+    public func clearRelatticeArtifacts(id: UUID) {
+        try? fm.removeItem(at: runJobURL(id: id))
+        try? fm.removeItem(at: runDesignURL(id: id))
+    }
+
     /// The sidecar files that travel WITH a model file (as `<path><suffix>`), and
     /// that the store must therefore carry alongside its model copy: the core
     /// face-overrides sidecar (`.faces` — the painted pseudo-faces the selection

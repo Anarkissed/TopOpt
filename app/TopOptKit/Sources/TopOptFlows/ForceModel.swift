@@ -758,10 +758,28 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// Any group still awaiting a decision: a bare pending group with NO keep-clear
     /// affix AND no Protect affix (a keep-clear-only OR protect-only selection is a
     /// complete declaration and never blocks Optimize — keep-clear v2 / handoff 124).
-    public func hasPending(in groups: [SelectionGroup]) -> Bool {
+    ///
+    /// `latticeRoleGroups` (task 2026-08-02-lattice-a-variant, bar Z10) are the
+    /// groups carrying a LATTICE role — "lattice here" / "no lattice here"
+    /// (`LatticeSettings.groupRoles`). A lattice role is a COMPLETE declaration
+    /// in exactly the sense keep-clear and Protect are: the group says what it is
+    /// for, it just is not an anchor or a load. Before this, marking a group
+    /// "lattice here" left it PENDING and Optimize stayed refused with "finish
+    /// the pending group" — the user had declared something and the app insisted
+    /// they had not. Defaults to EMPTY, so every existing caller and every
+    /// existing test is unchanged.
+    public func hasPending(in groups: [SelectionGroup],
+                           latticeRoleGroups: Set<UUID> = []) -> Bool {
         groups.contains {
-            kind(for: $0.id).isPending && !isKeepClearOnly($0.id) && !isProtectOnly($0.id)
+            kind(for: $0.id).isPending && !isKeepClearOnly($0.id)
+                && !isProtectOnly($0.id) && !latticeRoleGroups.contains($0.id)
         }
+    }
+
+    /// Whether a group is a lattice-role-ONLY selection: no anchor/load role, but
+    /// a lattice role declared. The keep-clear-only / protect-only sibling.
+    public func isLatticeRoleOnly(_ id: UUID, latticeRoleGroups: Set<UUID>) -> Bool {
+        kind(for: id).isPending && latticeRoleGroups.contains(id)
     }
     /// Total load weight across all load groups, in kgf.
     public func totalLoadKg(in groups: [SelectionGroup]) -> Double {
@@ -781,16 +799,22 @@ public struct ForceModel: Equatable, Sendable, Codable {
     /// (edit phase), no group left pending, AND either minimize-plastic is on (a
     /// self-weight or force-driven REMOVAL run is always possible) or a full force
     /// load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
-    public func canOptimize(in groups: [SelectionGroup], minimizePlastic: Bool) -> Bool {
-        guard phase == .edit, !hasPending(in: groups) else { return false }
+    public func canOptimize(in groups: [SelectionGroup], minimizePlastic: Bool,
+                            latticeRoleGroups: Set<UUID> = []) -> Bool {
+        guard phase == .edit,
+              !hasPending(in: groups, latticeRoleGroups: latticeRoleGroups)
+        else { return false }
         if minimizePlastic { return true }
         return anchorCount(in: groups) > 0 && loadCount(in: groups) > 0
     }
 
     /// The Optimize button's sub-label (proto `opt.innerHTML` sub cascade).
-    public func optimizeSummary(in groups: [SelectionGroup]) -> String {
+    public func optimizeSummary(in groups: [SelectionGroup],
+                                latticeRoleGroups: Set<UUID> = []) -> String {
         if phase == .setup { return "set gravity first" }
-        if hasPending(in: groups) { return "finish the pending group" }
+        if hasPending(in: groups, latticeRoleGroups: latticeRoleGroups) {
+            return "finish the pending group"
+        }
         let a = anchorCount(in: groups), l = loadCount(in: groups)
         if a == 0 && l == 0 { return "needs an anchor and a load" }
         if a == 0 { return "needs an anchor" }
@@ -815,6 +839,17 @@ public struct ForceModel: Equatable, Sendable, Codable {
             if faceProtect?[id] == true { return "Protect" }
             return "Pending…"
         }
+    }
+
+    /// The panel label with LATTICE ROLES folded in (bar Z10) — a group whose only
+    /// declaration is a lattice role must read as that role, not "Pending…", for
+    /// the same reason it must not block Optimize. Anchor/load/keep-clear/protect
+    /// all keep precedence; this only replaces the bare "Pending…".
+    public func panelKindLabel(for id: UUID,
+                               latticeRole: LatticeGroupRole?) -> String {
+        let base = panelKindLabel(for: id)
+        guard base == "Pending…", let role = latticeRole else { return base }
+        return role == .include ? "Lattice here" : "No lattice here"
     }
 
     /// The tint a group's faces should render with in the viewer: anchor green for

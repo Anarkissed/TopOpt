@@ -127,6 +127,16 @@ public struct WorkspacePlaceholder: View {
     /// The variants-entry demand field (that run's own von Mises); nil from the
     /// workspace entry (bar B6's two paths).
     @State private var latticePageVariantField: LatticeDemandField?
+    /// The finished VARIANT the lattice page is working on (task
+    /// 2026-08-02-lattice-a-variant, bars Z7/Z9/Z11). Non-nil ONLY when the page
+    /// was entered from the variants list. When it is set the stage renders THAT
+    /// VARIANT'S geometry, face tapping is off (a TO surface has no selectable
+    /// faces), and the page offers "Lattice this variant" as a job distinct from
+    /// re-running the ladder.
+    @State private var latticeVariantContext: LatticeVariantContext?
+    /// The variant's own render-ready mesh, built once when the page opens so the
+    /// stage does not rebuild it per frame (the viewer-lag lesson).
+    @State private var latticeVariantMesh: ViewerMesh?
     @StateObject private var latticeSim = LatticeSimModel()
     @StateObject private var latticePageModel = LatticePageModel()
     @State private var latticeRegionDrag: PrimitiveGizmo.Drag?
@@ -284,7 +294,7 @@ public struct WorkspacePlaceholder: View {
     public var body: some View {
         ZStack(alignment: .topLeading) {
             DS.Color.background.color.ignoresSafeArea()
-            MetalMeshView(mesh: viewerMesh,
+            MetalMeshView(mesh: stageMesh,
                           camera: cameraModel,
                           selection: selection,
                           faceTints: roleTints,                 // D3/D5: anchor faces tint green
@@ -699,6 +709,17 @@ public struct WorkspacePlaceholder: View {
     /// via `WorkspaceTap` — re-selecting a set group, or growing/starting one — and
     /// never removes anything (removal is the panel trash only).
     private func handlePick(_ faceID: FaceID) {
+        // BAR Z11. On a finished variant there is nothing to pick: the stage is
+        // showing a marching-cubes iso-surface with no segmentation, and the
+        // ORIGINAL model's face ids describe surfaces this design no longer has.
+        // Resolving a selector against the wrong geometry is the PR-261 failure —
+        // it tags nothing and says nothing — so the tap is refused with the
+        // reason instead of accepted into a selection that would mean nothing.
+        if latticeVariantContext != nil {
+            latticePageModel.post(note: LatticeVariantAuthoring
+                .compute(variant: latticeVariantContext).note)
+            return
+        }
         guard let mesh = viewerMesh else { return }
         if force.phase == .setup {
             if let n = mesh.faceNormal(faceID) {
@@ -1219,28 +1240,147 @@ public struct WorkspacePlaceholder: View {
 
     // MARK: the lattice page (handoff 2026-07-30-lattice-page)
 
+    /// THE MESH THE STAGE DRAWS (bar Z9). When the lattice page was entered from
+    /// a finished variant, that is THAT VARIANT'S geometry — not the original
+    /// part with a label claiming otherwise. Everything drawn over the stage
+    /// (the preview overlay, the region volumes, the picker) reads the same
+    /// mesh through this one property, so the page cannot show one object and
+    /// operate on another.
+    private var stageMesh: ViewerMesh? { latticeVariantMesh ?? viewerMesh }
+
     /// Open the full-screen lattice page. `variantIndex` non-nil = the variants
-    /// entry: that variant's own von Mises field becomes the demand field, so Auto
-    /// density is available with NO sim (bar B6's second path).
+    /// entry: the page then WORKS ON THAT VARIANT — its geometry is what the
+    /// stage renders, its own von Mises field is the demand field (so Auto
+    /// density is available with NO sim, bar B6's second path), and the action
+    /// row offers "Lattice this variant" as a job distinct from re-running the
+    /// ladder (bar Z7).
     private func openLatticePage(variantIndex: Int?) {
+        latticeVariantContext = nil
+        latticeVariantMesh = nil
         if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
            !o.variants[idx].vonMisesField.isEmpty {
-            latticePageVariantField = LatticeDemandField(
-                vonMises: o.variants[idx].vonMisesField,
+            let v = o.variants[idx]
+            let field = LatticeDemandField(
+                vonMises: v.vonMisesField,
                 nx: o.gridNx, ny: o.gridNy, nz: o.gridNz,
                 origin: o.gridOrigin, spacingMM: o.spacing,
                 provenance: .variant(runName: project.name, variantIndex: idx,
                                      date: nil))
+            latticePageVariantField = field
+            // Whether this variant can actually be re-latticed is a question
+            // about what the RUN kept, and it is answered here rather than at
+            // the button, so the page can say WHY when the answer is no.
+            let artifacts = project.relatticeArtifacts
+            let why: RelatticeUnavailable? = artifacts != nil
+                ? nil
+                : (o.computedRemotely ? .runPredatesDesignStore : .computedOnDevice)
+            latticeVariantContext = LatticeVariantContext(
+                runName: project.name, variantIndex: idx,
+                requestedVolumeFraction: v.requestedVolumeFraction,
+                massGrams: v.massGrams, worstCaseMargin: v.worstCaseMargin,
+                accepted: v.accepted,
+                meshVertices: v.meshVertices, meshIndices: v.meshIndices,
+                field: field, artifacts: artifacts, unavailable: why)
+            // The variant's own render mesh. `faceIDs` is deliberately EMPTY: an
+            // optimized result has no B-rep and no pseudo-faces, and claiming
+            // otherwise is what would let a tap resolve to a face that is not
+            // there. Smooth-shaded, like the results screen draws it.
+            if !v.meshVertices.isEmpty, !v.meshIndices.isEmpty {
+                latticeVariantMesh = ViewerMesh(vertices: v.meshVertices,
+                                                indices: v.meshIndices,
+                                                faceIDs: [], faceGeometry: [],
+                                                pseudoFaces: false,
+                                                smoothShaded: true)
+            }
         } else {
             latticePageVariantField = nil
         }
         showLatticePage = true
     }
 
+    /// Close the lattice page and DROP the variant context — the stage goes back
+    /// to the original part, face tapping comes back, and no later action can
+    /// still be pointing at a variant the user has left.
+    private func closeLatticePage() {
+        showLatticePage = false
+        latticePageModel.libraryOpen = false
+        latticeVariantContext = nil
+        latticeVariantMesh = nil
+    }
+
+    /// LATTICE THIS VARIANT (bar Z7). Submits the `lattice_variant` job against
+    /// the RETAINED design + the RETAINED job document — no ladder runs. Refused
+    /// (with the reason already on the button) when the run kept neither, and
+    /// refused when there is no worker: the certification solves run where the
+    /// core runs, and the on-device bridge has no lattice path at all.
+    private func startRelatticeRun() {
+        guard let ctx = latticeVariantContext, let art = ctx.artifacts else {
+            if let why = latticeVariantContext?.unavailable { model.toast = why.reason }
+            return
+        }
+        guard run.phase != .running else { return }
+        guard let config = compute.activeRemote else {
+            model.toast = "Latticing a variant runs on a Mac worker — pick one in Compute."
+            return
+        }
+        guard let file = project.importedFile else {
+            model.toast = "Can’t re-lattice — the model file is missing."
+            return
+        }
+        // The regions the page authored, as EXPLICIT GEOMETRY PREDICATES (bar
+        // Z11): on a variant only placed primitives are emitted, because a face
+        // id would resolve against the ORIGINAL part's surface, which this design
+        // no longer has.
+        let emission = project.variantLatticeJobRegions()
+        if emission.skippedFaces > 0 {
+            latticePageModel.post(
+                note: "\(emission.skippedFaces) face selection(s) were not carried "
+                    + "onto this variant — an optimized surface has no faces to "
+                    + "resolve them against. Place a region instead.")
+        }
+        // The SAME spec builder the optimize request uses — only the regions
+        // differ, and they differ for the Z11 reason above.
+        let spec = project.lattice.runSpec(
+            topology: project.lattice.topologyID,
+            memberMM: project.lattice.regionMemberMM ?? 0,
+            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            regions: emission.regions)
+        let jobJSON: Data
+        do {
+            jobJSON = try RelatticeJobBuilder.build(
+                original: art.jobJSON,
+                variantVolumeFraction: ctx.requestedVolumeFraction,
+                designFileName: "design.bin", lattice: spec)
+        } catch {
+            model.toast = "Can’t build the re-lattice job: \(error)"
+            return
+        }
+        // BAR Z2, app side: the document about to be submitted must differ from
+        // the one that produced this variant ONLY in the lattice question. If any
+        // load-case key moved, refuse HERE — before the worker spends solves
+        // certifying under a load case the variant was never optimized under.
+        let moved = RelatticeJobBuilder.loadCaseDifferences(art.jobJSON, jobJSON)
+        guard moved.isEmpty else {
+            model.toast = "Can’t re-lattice: the load case changed (\(moved.joined(separator: ", "))). "
+                + "This job must certify under the load case the variant was optimized under."
+            return
+        }
+        viewOriginal = false
+        let inputs = RelatticeRun.Inputs(
+            config: config, modelPath: file.path, jobJSON: jobJSON,
+            designBin: art.designBin, projectName: project.name,
+            requestedVolumeFraction: ctx.requestedVolumeFraction)
+        run.runner = { _, _, _ in try RelatticeRun.run(inputs).outcome }
+        guard let request = model.makeRunRequest() else { return }
+        closeLatticePage()
+        run.start(request, remote: true)
+    }
+
     private var latticePageOverlay: some View {
         LatticePage(model: model, project: project, run: run,
                     sim: latticeSim, page: latticePageModel,
                     variantField: latticePageVariantField,
+                    variantContext: latticeVariantContext,
                     previewOn: Binding(
                         get: { showStrutPreview },
                         set: { on in
@@ -1248,10 +1388,13 @@ public struct WorkspacePlaceholder: View {
                             if on, strutScene == nil { buildStrutScene() }
                         }),
                     baseCanOptimize: canOptimize,
-                    baseSummary: force.optimizeSummary(in: selection.groups),
+                    baseSummary: force.optimizeSummary(
+                        in: selection.groups,
+                        latticeRoleGroups: latticeRoleGroupIDs),
                     onOptimize: { startRun() },
-                    onClose: { showLatticePage = false; latticePageModel.libraryOpen = false },
-                    onBackToSetup: { showLatticePage = false; latticePageModel.libraryOpen = false },
+                    onRelattice: { startRelatticeRun() },
+                    onClose: { closeLatticePage() },
+                    onBackToSetup: { closeLatticePage() },
                     // L17: the page's Refresh re-runs the preview with the CURRENT
                     // settings — a fresh strut-scene bake + proxy sync.
                     onRefreshPreview: {
@@ -3930,12 +4073,21 @@ public struct WorkspacePlaceholder: View {
         return "Tap a face to select · tap a set arrow to edit its load · drag to orbit"
     }
 
+    /// The groups carrying a LATTICE role (bar Z10). A group set to "lattice here"
+    /// or "no lattice here" is a COMPLETE declaration, like keep-clear and
+    /// Protect — it must not leave the group PENDING and refuse Optimize.
+    private var latticeRoleGroupIDs: Set<UUID> {
+        Set(project.lattice.groupRoles.keys)
+    }
+
     /// Optimize is enabled once gravity is set and no group is pending, AND either
     /// "Minimize plastic" is on (self-weight or force-driven removal) OR a full
     /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
     private var canOptimize: Bool {
         guard run.phase != .running else { return false }   // not while a run is in flight
-        guard force.canOptimize(in: selection.groups, minimizePlastic: project.minimizePlastic)
+        guard force.canOptimize(in: selection.groups,
+                                minimizePlastic: project.minimizePlastic,
+                                latticeRoleGroups: latticeRoleGroupIDs)
         else { return false }
         // Grey out until the inputs change from the last optimized run.
         if let last = lastRunRequest, model.makeRunRequest() == last { return false }
@@ -3945,7 +4097,10 @@ public struct WorkspacePlaceholder: View {
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
     private var optimizeSummary: String {
         if force.phase == .setup { return "set gravity first" }
-        if force.hasPending(in: selection.groups) { return "finish the pending group" }
+        if force.hasPending(in: selection.groups,
+                            latticeRoleGroups: latticeRoleGroupIDs) {
+            return "finish the pending group"
+        }
         let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
         if a > 0 && l > 0 {
             let base = "\(a) anchor\(a > 1 ? "s" : "") · \(l) load\(l > 1 ? "s" : "")"

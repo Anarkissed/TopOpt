@@ -40,6 +40,7 @@ add_library(topopt
   src/io/face_tag.cpp
   src/io/face_overrides.cpp
   src/io/fields.cpp
+  src/io/design_store.cpp
   src/mesh/mesh.cpp
   src/mesh/smooth.cpp
   src/mesh/lattice_gen.cpp
@@ -1312,6 +1313,21 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_hookup COMMAND test_lattice_hookup)
+
+  # Task 2026-08-02-lattice-a-variant: LATTICE A FINISHED VARIANT — the job that
+  # did not exist. Drives run_job (which now stores each variant's design) and
+  # then lattice_variant_job on the stored design, asserting the no-ladder,
+  # same-load-case, same-object, graded-with-no-sim, strut-report and
+  # determinism bars end to end on the committed plate_bore fixture and a
+  # synthetic thick cylinder.
+  add_executable(test_lattice_variant tests/validation/test_lattice_variant.cpp)
+  target_link_libraries(test_lattice_variant PRIVATE topopt)
+  target_compile_definitions(test_lattice_variant PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME lattice_variant COMMAND test_lattice_variant)
 
   add_executable(test_mesh_job tests/validation/test_mesh_job.cpp)
   target_link_libraries(test_mesh_job PRIVATE topopt)

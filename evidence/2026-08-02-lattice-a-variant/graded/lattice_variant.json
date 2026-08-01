@@ -1,0 +1,42 @@
+{
+  "provenance": "latticed a finished variant",
+  "optimization": false,
+  "design_iterations": 0,
+  "optimizer_iterations_run": 0,
+  "variant_meshes_written": 0,
+  "analysis_solves": 4,
+  "analysis_solves_note": "certification solves only, no design loop: (1) the null-posture solve that reproduces this variant's RECORDED margin — the proof the load case and design are the originals; (2) the lattice pipeline's own null-posture reproduction; (3) the COMPOSITE certification; plus (4) the band-clamp counterfactual when any voxel was clamped",
+  "source": {
+    "design": "/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/surface-stiffness-probe-7fc0a8/core/build/lv_g_run/design.bin",
+    "variant_index": 0,
+    "requested_volume_fraction": 0.7,
+    "achieved_volume_fraction": 0.6982054277,
+    "optimizer_iterations_originally": 16,
+    "design_fingerprint": "7036914728578388207",
+    "field_provenance": "the demand field this lattice is graded from is THIS variant's own certification von Mises field, recovered by the reproduction solve below from the stored design — not a simulation of the solid part, and not another run's field"
+  },
+  "reproduction": {
+    "recorded_margin_worst_case": 46931.8415,
+    "reproduced_margin_worst_case": 46931.8415,
+    "exact": true,
+    "note": "ENFORCED, not reported: an inexact reproduction throws and nothing is written"
+  },
+  "model": "lv_cyl.stl",
+  "resolution": 32,
+  "load_source": "self_weight",
+  "loadcase_receipt": "loadcase.json",
+  "lattice": {
+    "topology": "octet",
+    "graded": true,
+    "cell_mm": 4.602619932,
+    "rho_min_used": 0.05047,
+    "rho_max_used": 0.7352054755,
+    "latticed_voxels": 6080,
+    "solid_margin_worst_case": 46931.8415,
+    "lattice_margin_worst_case": 47653.42249,
+    "lattice_margin_effective": 47653.42249,
+    "lattice_accepted": true,
+    "receipt": "variant_070_lattice.report.json"
+  },
+  "meshes": ["variant_070_lattice.stl"]
+}

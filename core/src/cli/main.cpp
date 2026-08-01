@@ -43,6 +43,8 @@ int usage(const char* argv0) {
                "       %s analyze <job.json> [--mesh PATH] [--smooth S] "
                "[--no-min-feature] [--out DIR]\n"
                "              [--materials PATH] [--rules PATH]\n"
+               "       %s lattice-variant <job.json> [--out DIR] "
+               "[--materials PATH] [--rules PATH]\n"
                "       %s --version\n"
                "\n"
                "run      optimize the job's ladder and export accepted variants\n"
@@ -60,6 +62,17 @@ int usage(const char* argv0) {
                "         input first (bores/pads frozen, min-feature enforced), writes\n"
                "         <mesh>_smoothed.stl, and re-certifies THAT; --no-min-feature\n"
                "         disables the thinning constraint (for the S2 demo).\n"
+               "lattice-variant\n"
+               "         LATTICE A FINISHED VARIANT of a completed run (mode\n"
+               "         \"lattice_variant\"). NO optimization ladder runs: the job's\n"
+               "         \"variant\" block names that run's design.bin + which rung,\n"
+               "         the design is restored from it, re-certified (its RECORDED\n"
+               "         margin must reproduce exactly or the job refuses), graded from\n"
+               "         its own recovered stress field, emitted as a latticed mesh and\n"
+               "         certified as the composite. Writes the latticed mesh(es),\n"
+               "         <prefix>_<vf>_lattice.report.json, lattice_variant_report.json,\n"
+               "         lattice_variant.json (provenance), loadcase.json, run_info.json\n"
+               "         and fields.bin to --out.\n"
                "\n"
                "Observability (handoff 114), written to --out by `run`:\n"
                "  run_info.json      version + config record (always)\n"
@@ -154,6 +167,84 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
   }
 }
 
+// `lattice-variant` subcommand — LATTICE A FINISHED VARIANT (task
+// 2026-08-02-lattice-a-variant). Returns the process exit code.
+int run_lattice_variant(int argc, char** argv,
+                        const std::string& materials_default,
+                        const std::string& rules_default) {
+  if (argc < 3) return usage(argv[0]);
+  const std::string job_path = argv[2];
+  std::string out_dir = ".";
+  std::string materials_path = materials_default;
+  std::string rules_path = rules_default;
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    if (arg == "--out") {
+      out_dir = argv[++i];
+    } else if (arg == "--materials") {
+      materials_path = argv[++i];
+    } else if (arg == "--rules") {
+      rules_path = argv[++i];
+    } else {
+      return usage(argv[0]);
+    }
+  }
+
+  try {
+    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    const topopt::MaterialLibrary materials =
+        topopt::load_materials_file(materials_path);
+    const topopt::SettingsRules rules =
+        topopt::load_settings_rules_file(rules_path);
+
+    const topopt::LatticeVariantJobResult r = topopt::lattice_variant_job(
+        job, dirname_of(job_path), out_dir, materials, rules);
+
+    std::printf(
+        "lattice-variant: rung vf=%.4g (index %d of %s) — NO ladder ran\n",
+        r.requested_volume_fraction, r.variant_index, job.variant.design.c_str());
+    std::printf("  design: fingerprint %llu, %d optimizer iterations originally\n",
+                static_cast<unsigned long long>(r.design_fingerprint),
+                r.optimizer_iterations);
+    std::printf("  reproduction: recorded margin %.6g == reproduced %.6g "
+                "(enforced)\n",
+                r.recorded_margin_worst_case, r.reproduced_margin_worst_case);
+    std::printf("  solves: %d certification (design iterations %d, variant "
+                "meshes %d)\n",
+                r.analysis_solves, r.design_iterations,
+                r.variant_meshes_written);
+    std::printf("  lattice: %s cell %.4g mm, rho %.4g..%.4g over %lld voxels\n",
+                r.graded ? "graded" : "uniform", r.cell_size_mm, r.rho_min_used,
+                r.rho_max_used, r.latticed_voxels);
+    std::printf("  solid margin %.4g -> latticed margin %.4g (effective %.4g)\n",
+                r.solid.margin.worst_case, r.lattice.margin.worst_case,
+                r.lattice.margin_effective);
+    if (r.lattice.lattice_strut_report) {
+      const topopt::StrutStrengthReport& ss = r.lattice.lattice_strut;
+      std::printf("  strut strength (REPORT, not gated): in-plane %.4g   "
+                  "interlayer %.4g%s\n",
+                  ss.margin_in_plane, ss.margin_interlayer,
+                  r.lattice.lattice_strut_out_of_regime ? "   [OUT OF REGIME]"
+                                                        : "");
+    }
+    std::printf("  verdict: %s\n",
+                r.lattice.accepted ? "ACCEPTED" : "REJECTED");
+    for (const std::string& m : r.mesh_paths)
+      std::printf("mesh: %s\n", m.c_str());
+    std::printf("receipt: %s\n", r.lattice_receipt_path.c_str());
+    std::printf("report: %s\n", r.report_path.c_str());
+    std::printf("provenance: %s\n", r.provenance_path.c_str());
+    std::printf("loadcase: %s\n", r.loadcase_receipt_path.c_str());
+    std::printf("fields: %s\n", r.fields_path.c_str());
+    std::printf("wall: %.2f s\n", r.wall_seconds);
+    return 0;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "topopt-cli: %s\n", e.what());
+    return 1;
+  }
+}
+
 std::string dirname_of(const std::string& path) {
   const std::string::size_type slash = path.find_last_of('/');
   if (slash == std::string::npos) return ".";
@@ -175,6 +266,10 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "analyze")
     return run_analyze(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS,
                        TOPOPT_CLI_DEFAULT_RULES);
+  // `lattice-variant` — lattice a FINISHED variant, no optimization at all.
+  if (argc >= 2 && std::string(argv[1]) == "lattice-variant")
+    return run_lattice_variant(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS,
+                               TOPOPT_CLI_DEFAULT_RULES);
   if (argc < 3 || std::string(argv[1]) != "run") return usage(argv[0]);
   const std::string job_path = argv[2];
   std::string out_dir = ".";
