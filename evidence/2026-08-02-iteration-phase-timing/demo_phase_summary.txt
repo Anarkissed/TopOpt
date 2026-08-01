@@ -1,0 +1,80 @@
+== rung 0 : 60 iters, 21.4 s wall, MG carried 60/60, hierarchy-build skipped (latched) 0 ==
+   filter_ms               0.0 s    0.19%
+   project_ms              0.0 s    0.02%
+   solve_ms               21.1 s   98.63%
+   update_ms               0.2 s    1.10%
+   analysis_ms             0.0 s    0.05%
+   observe_ms              0.0 s    0.00%
+   residual_ms             0.0 s    0.01%
+   -- solve_ms splits (sub-split; not extra terms) --
+   fea_ms                 21.0 s   98.11%
+   sens_ms                 0.1 s    0.52%
+   solver_build_ms         0.1 s    0.46%
+   mg_build_ms             6.1 s   28.62%
+   mg_ms                  14.8 s   68.97%
+   cg_ms                   0.0 s    0.00%
+   geneo_setup_ms          0.0 s    0.00%
+   geneo_apply_ms          0.0 s    0.00%
+   recycle_ms              0.0 s    0.00%
+   memory: peak RSS 121 MB, min available 4566 MB, major faults 517->517, swapins 0->0
+
+== rung 1 : 60 iters, 22.4 s wall, MG carried 60/60, hierarchy-build skipped (latched) 0 ==
+   filter_ms               0.0 s    0.18%
+   project_ms              0.0 s    0.02%
+   solve_ms               22.1 s   98.69%
+   update_ms               0.2 s    1.06%
+   analysis_ms             0.0 s    0.04%
+   observe_ms              0.0 s    0.00%
+   residual_ms             0.0 s    0.01%
+   -- solve_ms splits (sub-split; not extra terms) --
+   fea_ms                 22.0 s   98.18%
+   sens_ms                 0.1 s    0.51%
+   solver_build_ms         0.1 s    0.43%
+   mg_build_ms             6.1 s   27.47%
+   mg_ms                  15.7 s   70.22%
+   cg_ms                   0.0 s    0.00%
+   geneo_setup_ms          0.0 s    0.00%
+   geneo_apply_ms          0.0 s    0.00%
+   recycle_ms              0.0 s    0.00%
+   memory: peak RSS 129 MB, min available 4315 MB, major faults 521->521, swapins 0->0
+
+== rung 2 : 60 iters, 25.8 s wall, MG carried 60/60, hierarchy-build skipped (latched) 0 ==
+   filter_ms               0.0 s    0.15%
+   project_ms              0.0 s    0.02%
+   solve_ms               25.5 s   98.89%
+   update_ms               0.2 s    0.89%
+   analysis_ms             0.0 s    0.04%
+   observe_ms              0.0 s    0.00%
+   residual_ms             0.0 s    0.01%
+   -- solve_ms splits (sub-split; not extra terms) --
+   fea_ms                 25.4 s   98.45%
+   sens_ms                 0.1 s    0.44%
+   solver_build_ms         0.1 s    0.37%
+   mg_build_ms             6.1 s   23.65%
+   mg_ms                  19.2 s   74.37%
+   cg_ms                   0.0 s    0.00%
+   geneo_setup_ms          0.0 s    0.00%
+   geneo_apply_ms          0.0 s    0.00%
+   recycle_ms              0.0 s    0.00%
+   memory: peak RSS 142 MB, min available 4526 MB, major faults 521->521, swapins 0->0
+
+== rung ALL : 180 iters, 69.6 s wall, MG carried 180/180, hierarchy-build skipped (latched) 0 ==
+   filter_ms               0.1 s    0.17%
+   project_ms              0.0 s    0.02%
+   solve_ms               68.7 s   98.75%
+   update_ms               0.7 s    1.01%
+   analysis_ms             0.0 s    0.04%
+   observe_ms              0.0 s    0.00%
+   residual_ms             0.0 s    0.01%
+   -- solve_ms splits (sub-split; not extra terms) --
+   fea_ms                 68.4 s   98.26%
+   sens_ms                 0.3 s    0.49%
+   solver_build_ms         0.3 s    0.41%
+   mg_build_ms            18.4 s   26.41%
+   mg_ms                  49.7 s   71.37%
+   cg_ms                   0.0 s    0.00%
+   geneo_setup_ms          0.0 s    0.00%
+   geneo_apply_ms          0.0 s    0.00%
+   recycle_ms              0.0 s    0.00%
+   memory: peak RSS 142 MB, min available 4315 MB, major faults 517->521, swapins 0->0
+

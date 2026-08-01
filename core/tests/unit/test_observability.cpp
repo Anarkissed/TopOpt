@@ -105,6 +105,44 @@ int main() {
       // active-domain phase 1: row a leaves active_fraction at its default 1.0
       // (the full domain ran); row b is a restricted solve at 18.8% active.
       b.active_fraction = 0.188;
+      // Task 2026-08-02-iteration-phase-timing: row b also carries a PHASE
+      // breakdown, pinned here so the accounting the CSV promises is a golden
+      // fact and not a comment. The numbers are the anomaly's shape in miniature
+      // — a 500 ms iteration whose linear solve is 480 ms, of which 400 ms is the
+      // GenEO coarse-operator refresh that the 4390 cg_iters above cannot see —
+      // with residual_ms = total - (filter+project+solve+update+analysis+observe)
+      // = 500 - (5+2+480+8+1+1) = 3 ms, and the solver_* columns SUB-SPLITTING
+      // solve_ms rather than adding to it. Row a leaves `phases` default, which
+      // is how a run with no timing (or a platform that cannot answer the memory
+      // question) reads: zeros for the spans, NEGATIVE for the memory columns.
+      b.cg_geneo_dim = 2048;
+      b.cg_geneo_action = 2;  // coarse operator REFRESHED for this system
+      b.phases.total_ms = 500.0;
+      b.phases.tail_prev_ms = 4.0;
+      b.phases.filter_ms = 5.0;
+      b.phases.project_ms = 2.0;
+      b.phases.solve_ms = 480.0;
+      b.phases.fea_ms = 478.0;
+      b.phases.sens_ms = 2.0;
+      b.phases.update_ms = 8.0;
+      b.phases.analysis_ms = 1.0;
+      b.phases.observe_ms = 1.0;
+      b.phases.residual_ms = 3.0;
+      b.phases.solver_build_ms = 12.0;
+      b.phases.solver_mg_build_ms = 0.0;  // latched: the build never ran
+      b.phases.solver_mg_ms = 0.0;
+      b.phases.solver_cg_ms = 60.0;
+      b.phases.solver_geneo_setup_ms = 400.0;
+      b.phases.solver_geneo_apply_ms = 6.0;
+      b.phases.solver_recycle_ms = 0.5;
+      b.phases.fea_solves = 1;
+      b.phases.matvecs = 6438;
+      b.phases.rss_mb = 1234.5;
+      b.phases.peak_rss_mb = 1300.25;
+      b.phases.compressed_mb = 0.0;
+      b.phases.available_mb = 8192.0;
+      b.phases.major_faults = 0;
+      b.phases.swapins = 0;
       w.append_at(0, b, 1050);
       check(w.rows() == 2, "CSV writer counted 2 rows");
     }
@@ -116,17 +154,32 @@ int main() {
     // handoff 133's recycle_dim=16 (a Jacobi solve the recycle basis preconditioned);
     // row a leaves both at their default 0 — and note row a is the MG-carried solve,
     // where the armed Jacobi-only posture means recycle_dim is 0 BY DESIGN.
-    const std::string expected =
+    const std::string kHeader =
         "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,"
-        "beta,hier_built,mg_cycles_attempted,infeasible,recycle_dim,active_fraction\n"
-        "0,1,1000,12.5,0.680000,0,14,1,0,1,14,0,0,1.000000\n"
-        "0,2,1050,9.25,0.680100,1,4390,0,8,1,300,1,16,0.188000\n";
+        "beta,hier_built,mg_cycles_attempted,infeasible,recycle_dim,"
+        "active_fraction,"
+        "total_ms,tail_prev_ms,filter_ms,project_ms,solve_ms,fea_ms,sens_ms,"
+        "update_ms,analysis_ms,observe_ms,residual_ms,"
+        "solver_build_ms,mg_build_ms,mg_ms,cg_ms,geneo_setup_ms,geneo_apply_ms,"
+        "recycle_ms,"
+        "fea_solves,matvecs,geneo_dim,geneo_action,"
+        "rss_mb,peak_rss_mb,compressed_mb,available_mb,major_faults,swapins";
+    const std::string expected =
+        kHeader + "\n" +
+        "0,1,1000,12.5,0.680000,0,14,1,0,1,14,0,0,1.000000,"
+        "0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,"
+        "0.000,0.000,0.000,0.000,0.000,0.000,0.000,"
+        "0,0,0,0,"
+        "-1.00,-1.00,-1.00,-1.00,-1,-1\n"
+        "0,2,1050,9.25,0.680100,1,4390,0,8,1,300,1,16,0.188000,"
+        "500.000,4.000,5.000,2.000,480.000,478.000,2.000,8.000,1.000,1.000,"
+        "3.000,"
+        "12.000,0.000,0.000,60.000,400.000,6.000,0.500,"
+        "1,6438,2048,2,"
+        "1234.50,1300.25,0.00,8192.00,0,0\n";
     check(body == expected, "CSV golden: header + rows are byte-exact");
     // Schema string is the documented one.
-    check(std::string(kIterationCsvHeader) ==
-              "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
-              "cg_multigrid,beta,hier_built,mg_cycles_attempted,infeasible,"
-              "recycle_dim,active_fraction",
+    check(std::string(kIterationCsvHeader) == kHeader,
           "CSV header constant matches documented schema");
   }
 

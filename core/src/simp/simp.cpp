@@ -20,6 +20,11 @@
 #include <utility>
 #include <vector>
 
+// Task 2026-08-02-iteration-phase-timing: the steady clock and the process-memory
+// sampler the per-iteration phase record is built from. Both live in the
+// always-built base library, so this adds no dependency to the Eigen-gated TU.
+#include "topopt/observability.hpp"
+
 namespace topopt {
 
 namespace {
@@ -400,6 +405,18 @@ long long active_domain_escape_count(const VoxelGrid& grid,
   return escapes;
 }
 
+// Penalized-solve counter (task 2026-08-02-iteration-phase-timing). Bumped on
+// EVERY simp_compliance call — trajectory, certification and recovery alike —
+// so "how many FEA solves did this design iteration run?" is a subtraction of
+// two samples rather than a reading of the call graph. Not atomic, for the same
+// reason as the matvec counter: one production run drives its solves from one
+// thread, and the instrument must not tax what it measures.
+namespace {
+long long g_simp_compliance_calls = 0;
+}  // namespace
+
+long long simp_compliance_call_count() { return g_simp_compliance_calls; }
+
 SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                const std::vector<double>& density,
                                const std::vector<DirichletBC>& bcs,
@@ -409,6 +426,7 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                PenalizedSolver* solver,
                                SolverKind solver_kind,
                                const std::vector<char>* active_mask) {
+  ++g_simp_compliance_calls;
   validate_params(params);
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
@@ -422,6 +440,11 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
           "simp_compliance: active_mask requires SolverKind::MultigridCG_Matfree "
           "(the active domain is a matrix-free-operator feature)");
   }
+
+  // Split this call into LINEAR SOLVE and SENSITIVITY SWEEP (task 2026-08-02-
+  // iteration-phase-timing). The per-voxel modulus fill below is charged to the
+  // solve — it exists only to feed it — so the two spans partition the call.
+  const double t_solve0 = steady_clock_ms();
 
   // Per-voxel penalized Young's modulus E(rho_e) for the graded FEA solve. Empty
   // voxels contribute no element, so their entry is ignored by fea_solve_cg; we
@@ -468,6 +491,9 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                                 initial_guess);
   }
 
+  const double t_sens0 = steady_clock_ms();
+  out.t_solve_ms = t_sens0 - t_solve0;
+
   // Compliance c = sum_e E(rho_e) * (u_e^T K_unit u_e) and the self-adjoint
   // sensitivity dc/drho_e = -p * rho_e^(p-1) * E0 * (u_e^T K_unit u_e). K_unit is
   // the unit-modulus element (the isotropic Hex8 is exactly linear in E), so the
@@ -513,6 +539,7 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
                              params.youngs_modulus * q;
       }
   out.compliance = compliance;
+  out.t_sensitivity_ms = steady_clock_ms() - t_sens0;
   return out;
 }
 
@@ -1527,6 +1554,86 @@ SimpCompliance active_domain_solve(ActiveDomainRun& ad, const VoxelGrid& grid,
   }
 }
 
+// ---------------------------------------------------------------------------
+// PER-ITERATION PHASE TIMING (task 2026-08-02-iteration-phase-timing).
+//
+// `IterSpans` is the running accumulator one iteration of an optimize loop fills
+// as it walks its phases; `finish_phases` turns it into the read-only record the
+// observe hook carries. Shared by both simp_optimize overloads so the two loops
+// cannot drift into reporting different things under the same column names.
+//
+// THE INSTRUMENT MUST NOT PERTURB WHAT IT MEASURES. Nothing here is read back by
+// a solver or updater decision, no phase is hoisted or reordered to make it
+// easier to time, and the spans are taken with explicit start/stop marks rather
+// than a rolling "lap" — so code BETWEEN two phases is left unattributed and
+// lands in `residual_ms`, which is the whole point. A rolling lap would have
+// silently folded those gaps into whichever phase happened to end next.
+struct IterSpans {
+  double t0 = 0.0;        // top of the iteration body
+  double stamp = 0.0;     // scratch mark for the span currently open
+  double filter = 0.0;    // every filter_density call this iteration
+  double project = 0.0;   // Heaviside projection + mask pins
+  double solve = 0.0;     // the penalized solve call
+  double update = 0.0;    // the OC/MMA update (sensitivity filter + bisection)
+  double analysis = 0.0;  // change, achieved vf, plateau + infeasibility tests
+  double observe = 0.0;   // progress hook + building the observation record
+  long long solves0 = 0;  // simp_compliance_call_count at the top of the body
+  long long matvecs0 = 0;  // fea_matvec_count at the top of the body
+
+  void begin() {
+    t0 = stamp = steady_clock_ms();
+    solves0 = simp_compliance_call_count();
+    matvecs0 = fea_matvec_count();
+  }
+  void mark() { stamp = steady_clock_ms(); }
+  void charge(double& acc) { acc += steady_clock_ms() - stamp; }
+};
+
+IterationPhaseTimes finish_phases(const IterSpans& s, double tail_prev_ms,
+                                  const SimpCompliance& c) {
+  IterationPhaseTimes p;
+  p.tail_prev_ms = tail_prev_ms;
+  p.filter_ms = s.filter;
+  p.project_ms = s.project;
+  p.solve_ms = s.solve;
+  p.update_ms = s.update;
+  p.analysis_ms = s.analysis;
+  p.observe_ms = s.observe;
+  // The solve's own two-way split, and the solver's internal split beneath it.
+  // These SUB-DIVIDE solve_ms and are deliberately NOT part of the residual sum.
+  p.fea_ms = c.t_solve_ms;
+  p.sens_ms = c.t_sensitivity_ms;
+  p.solver_build_ms = c.cg.t_build_ms;
+  p.solver_mg_build_ms = c.cg.t_mg_build_ms;
+  p.solver_mg_ms = c.cg.t_mg_ms;
+  p.solver_cg_ms = c.cg.t_cg_ms;
+  p.solver_geneo_setup_ms = c.cg.t_geneo_setup_ms;
+  p.solver_geneo_apply_ms = c.cg.t_geneo_apply_ms;
+  p.solver_recycle_ms = c.cg.t_recycle_ms;
+  p.fea_solves = simp_compliance_call_count() - s.solves0;
+  p.matvecs = fea_matvec_count() - s.matvecs0;
+  const ProcessMemory pm = process_memory();
+  p.rss_mb = pm.rss_mb;
+  p.peak_rss_mb = pm.peak_rss_mb;
+  p.compressed_mb = pm.compressed_mb;
+  p.available_mb = pm.available_mb;
+  p.major_faults = pm.major_faults;
+  p.swapins = pm.swapins;
+  // total_ms is stamped LAST, so it covers the memory sample this function just
+  // took. That sample is the instrument's own most expensive act (~1.7 us) and
+  // it belongs in the residual like any other unnamed work — charging the
+  // instrument to the iteration it instruments is the only honest accounting,
+  // and it keeps `sum(total_ms + tail_prev_ms)` equal to the rung's wall with
+  // no hole between the two.
+  p.total_ms = steady_clock_ms() - s.t0;
+  // THE COLUMN THIS INSTRUMENT EXISTS FOR: wall this iteration spent that no
+  // named phase claimed. It can be negative only by clock granularity (each term
+  // is a difference of two reads of the same steady clock), never structurally.
+  p.residual_ms = p.total_ms - (p.filter_ms + p.project_ms + p.solve_ms +
+                                p.update_ms + p.analysis_ms + p.observe_ms);
+  return p;
+}
+
 // Copy the run's active-domain outcome into the result (called once, at the end
 // of each overload — finalize-only, never streamed).
 void finalize_active_domain(const ActiveDomainRun& ad, SimpOptimizeResult& r) {
@@ -1686,6 +1793,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   std::vector<int> cg_history;
   cg_history.reserve(total_stage_iterations(plan));
 
+  // Task 2026-08-02-iteration-phase-timing — when the previous iteration's
+  // observe hook returned; see the masked overload for what tail_prev_ms means.
+  double last_observe_end_ms = 0.0;
+
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
@@ -1698,6 +1809,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // The projecting branches (OC `projection` schedule OR the MMA
       // continuation stage) use the analysis density rho_bar = project(filter);
       // for the MMA stage the sharpness is the dynamic `mma_beta`.
+      // PHASE TIMING (task 2026-08-02-iteration-phase-timing) — the same
+      // accumulator the masked overload uses, so both loops report one schema.
+      // Read-only: nothing below is consulted by a solver or updater decision.
+      IterSpans sp;
+      sp.begin();
       const bool projecting = st.project || st.mma_continuation;
       const double cur_beta = st.mma_continuation ? mma_beta : st.beta;
       // Fixed reference move (β-damped on the continuation stage). The default
@@ -1720,8 +1836,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         }
         cur_move = adaptive_move_val;
       }
+      sp.mark();
       std::vector<double> xphys = filter.filter_density(x);
+      sp.charge(sp.filter);
+      sp.mark();
       if (projecting) project_solid(grid, xphys, cur_beta, eta);
+      sp.charge(sp.project);
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
       // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
       const double traj_tol = adaptive_traj_cg_tol(options, last_change);
@@ -1730,12 +1850,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // the full domain ran.
       double af = 1.0;
       SimpCompliance c;
+      sp.mark();
       try {
         c = active_domain_solve(
             active_domain, grid, params, xphys, bcs, loads, traj_tol,
             options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
+        sp.charge(sp.solve);
       } catch (const SolverNonConvergence& e) {
         // Handoff 2026-07-27-nonconvergence-rejection — a TRAJECTORY solve did not
         // converge. End the run here, honestly labelled, WITHOUT throwing out of
@@ -1761,31 +1883,46 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       }
 
       std::vector<double> x_new;
+      // The xtilde recompute is a DENSITY FILTER call and is charged as one;
+      // only the updater itself lands in update_ms.
       if (st.mma_continuation) {
         // MMA + Heaviside projection (handoff 114): the projection-aware MMA
         // subproblem at the current continuation sharpness.
+        sp.mark();
         const std::vector<double> xtilde = filter.filter_density(x);
+        sp.charge(sp.filter);
+        sp.mark();
         x_new = mma_update_projected(mma_state, ++mma_iter, grid, filter, x,
                                      xtilde, c.dcompliance, cur_beta, eta,
                                      options.volume_fraction, cur_move,
                                      params.density_min);
+        sp.charge(sp.update);
       } else if (st.project) {
         // dproj needs the UNprojected filtered field: recompute it (xphys was
         // projected in place above).
+        sp.mark();
         const std::vector<double> xtilde = filter.filter_density(x);
+        sp.charge(sp.filter);
+        sp.mark();
         x_new = oc_update_projected(grid, filter, x, xtilde, c.dcompliance,
                                     st.beta, eta, options.volume_fraction,
                                     st.move, params.density_min);
+        sp.charge(sp.update);
       } else if (options.updater == SimpUpdater::MMA) {
         // Plain (unprojected) MMA stage.
+        sp.mark();
         x_new = mma_update(mma_state, ++mma_iter, grid, filter, x, c.dcompliance,
                            options.volume_fraction, st.move, params.density_min);
+        sp.charge(sp.update);
       } else {
+        sp.mark();
         x_new = oc_update(grid, filter, x, c.dcompliance,
                           options.volume_fraction, st.move,
                           params.density_min);
+        sp.charge(sp.update);
       }
 
+      sp.mark();
       double change = 0.0;
       for (std::size_t e = 0; e < x.size(); ++e)
         change = std::max(change, std::fabs(x_new[e] - x[e]));
@@ -1794,8 +1931,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       x = x_new;
       if (result.iterations == 0) result.initial_compliance = c.compliance;
       ++result.iterations;
+      sp.charge(sp.analysis);
+      sp.mark();
       std::vector<double> xafter = filter.filter_density(x);
+      sp.charge(sp.filter);
+      sp.mark();
       if (st.project) project_solid(grid, xafter, st.beta, eta);
+      sp.charge(sp.project);
+      sp.mark();
       const double vf_now = phys_volfrac(xafter);
       result.history.push_back({c.compliance, change, vf_now});
       cg_history.push_back(c.cg.iterations);  // handoff 131 (index-aligned)
@@ -1805,11 +1948,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // reported (it is the rung's last row).
       const bool infeasible_now =
           observe_infeasible(options, result.history, cg_history);
+      sp.charge(sp.analysis);
+      sp.mark();
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
+      sp.charge(sp.observe);
       // Handoff 114 — per-iteration observability (read-only). The richer record
       // (achieved vf, CG iters, plateau verdict) the CLI iteration CSV needs.
       if (options.observe) {
+        sp.mark();
         SimpIterationObservation obs;
         obs.iteration = result.iterations;
         obs.compliance = c.compliance;
@@ -1833,8 +1980,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.move = cur_move;         // adaptive move: the limit this step used
         obs.osc_fraction = cur_osc;  // -1 unless the adaptive rule ran
         obs.infeasible = infeasible_now;  // handoff 131
+        sp.charge(sp.observe);
+        // Task 2026-08-02-iteration-phase-timing — see the masked overload.
+        obs.phases = finish_phases(sp, last_observe_end_ms > 0.0
+                                           ? sp.t0 - last_observe_end_ms
+                                           : 0.0,
+                                   c);
         options.observe(obs);
       }
+      last_observe_end_ms = steady_clock_ms();
       // Playback keyframe: the analysis density as the shape evolves (read-only).
       if (options.keyframe && options.keyframe_stride > 0 &&
           (result.iterations == 1 ||
@@ -2571,6 +2725,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   std::vector<int> cg_history;
   cg_history.reserve(total_stage_iterations(plan));
 
+  // Task 2026-08-02-iteration-phase-timing — when the PREVIOUS iteration's
+  // observe hook returned. Everything after that point (keyframe, density
+  // snapshot, plateau/continuation logic, and the caller's own CSV write) is the
+  // previous iteration's TAIL, and it is reported on this row because the
+  // previous row was already on disk when it was spent. 0 before the first
+  // observation, which reports tail_prev_ms 0 rather than a bogus span.
+  double last_observe_end_ms = 0.0;
+
   for (const StagePlan& st : plan) {
     bool stage_converged = false;
     for (int it = 0; it < st.iterations; ++it) {
@@ -2580,6 +2742,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         result.cancelled = true;
         break;
       }
+      // PHASE TIMING (task 2026-08-02-iteration-phase-timing). Read-only: every
+      // accumulator is written and never consulted, so the trajectory is
+      // bit-identical to an untimed build. The named spans are subtracted from
+      // this body's wall at the observation point; what is left is residual_ms.
+      IterSpans sp;
+      sp.begin();
+
       const bool projecting = st.project || st.mma_continuation;
       const double cur_beta = st.mma_continuation ? mma_beta : st.beta;
       // Fixed reference move (β-damped on the continuation stage); the default
@@ -2600,9 +2769,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         }
         cur_move = adaptive_move_val;
       }
+      sp.mark();
       std::vector<double> xphys = filter.filter_density(x);
+      sp.charge(sp.filter);
+      sp.mark();
       if (projecting) project_active(eff, xphys, cur_beta, eta);
       apply_mask_pins(eff, xphys);  // FrozenSolid -> 1, FrozenVoid -> 0
+      sp.charge(sp.project);
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
       // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
       const double traj_tol = adaptive_traj_cg_tol(options, last_change);
@@ -2610,12 +2783,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // the grid the dilution lives on and the one this feature exists for.
       double af = 1.0;
       SimpCompliance c;
+      sp.mark();
       try {
         c = active_domain_solve(
             active_domain, analysis, params, xphys, bcs, loads, traj_tol,
             options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
+        sp.charge(sp.solve);
       } catch (const SolverNonConvergence& e) {
         // Handoff 2026-07-27-nonconvergence-rejection — a TRAJECTORY solve did not
         // converge (masked/passive-region overload). End the run WITHOUT throwing, as
@@ -2635,33 +2810,49 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       }
 
       std::vector<double> x_new;
+      // The xtilde recompute below is a DENSITY FILTER call, so it is charged to
+      // filter_ms; only the updater itself (sensitivity filter + the volume
+      // bisection inside it) is charged to update_ms.
       if (st.mma_continuation) {
         // MMA + Heaviside projection (handoff 114), restricted to Active voxels.
+        sp.mark();
         const std::vector<double> xtilde = filter.filter_density(x);
+        sp.charge(sp.filter);
+        sp.mark();
         x_new = mma_update_masked_projected(
             mma_state, ++mma_iter, grid, filter, eff, x, xtilde, c.dcompliance,
             cur_beta, eta, options.volume_fraction, cur_move,
             params.density_min);
+        sp.charge(sp.update);
       } else if (st.project) {
         // dproj needs the UNprojected filtered field: recompute it (xphys was
         // projected + pinned in place above).
+        sp.mark();
         const std::vector<double> xtilde = filter.filter_density(x);
+        sp.charge(sp.filter);
+        sp.mark();
         x_new = oc_update_masked_projected(grid, filter, eff, x, xtilde,
                                            c.dcompliance, st.beta, eta,
                                            options.volume_fraction, st.move,
                                            params.density_min);
+        sp.charge(sp.update);
       } else if (options.updater == SimpUpdater::MMA) {
         // Passive-region MMA (M7.mma.4): the same single-volume-constraint MMA
         // subproblem as the plain overload, restricted to Active voxels.
+        sp.mark();
         x_new = mma_update_masked(mma_state, ++mma_iter, grid, filter, eff, x,
                                   c.dcompliance, options.volume_fraction,
                                   st.move, params.density_min);
+        sp.charge(sp.update);
       } else {
+        sp.mark();
         x_new = oc_update_masked(grid, filter, eff, x, c.dcompliance,
                                  options.volume_fraction, st.move,
                                  params.density_min);
+        sp.charge(sp.update);
       }
 
+      sp.mark();
       double change = 0.0;
       for (std::size_t e = 0; e < x.size(); ++e)
         change = std::max(change, std::fabs(x_new[e] - x[e]));
@@ -2670,8 +2861,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       x = x_new;
       if (result.iterations == 0) result.initial_compliance = c.compliance;
       ++result.iterations;
+      sp.charge(sp.analysis);
+      sp.mark();
       std::vector<double> xafter = filter.filter_density(x);
+      sp.charge(sp.filter);
+      sp.mark();
       if (st.project) project_active(eff, xafter, st.beta, eta);
+      sp.charge(sp.project);
+      sp.mark();
       const double vf_now = active_volfrac(xafter);
       result.history.push_back({c.compliance, change, vf_now});
       cg_history.push_back(c.cg.iterations);  // handoff 131 (index-aligned)
@@ -2679,12 +2876,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // unconstrained overload for the ordering rationale).
       const bool infeasible_now =
           observe_infeasible(options, result.history, cg_history);
+      sp.charge(sp.analysis);
+      sp.mark();
       if (options.progress)
         options.progress(result.iterations, c.compliance, change);
+      sp.charge(sp.observe);
       // Handoff 114 — per-iteration observability (read-only), as in the
       // unconstrained overload. `active_volfrac` is the achieved fraction over
       // the Active voxels — the same value recorded in history.
       if (options.observe) {
+        sp.mark();
         SimpIterationObservation obs;
         obs.iteration = result.iterations;
         obs.compliance = c.compliance;
@@ -2708,8 +2909,20 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.move = cur_move;         // adaptive move: the limit this step used
         obs.osc_fraction = cur_osc;  // -1 unless the adaptive rule ran
         obs.infeasible = infeasible_now;  // handoff 131
+        sp.charge(sp.observe);
+        // Task 2026-08-02-iteration-phase-timing — where this iteration's wall
+        // went. Built LAST so total_ms covers the whole body up to the hand-off,
+        // and the caller's own sink (the CSV write) falls in the tail instead of
+        // being charged to the row it is writing.
+        obs.phases = finish_phases(sp, last_observe_end_ms > 0.0
+                                           ? sp.t0 - last_observe_end_ms
+                                           : 0.0,
+                                   c);
         options.observe(obs);
       }
+      // Close the previous-tail window here — after the observe hook, whether or
+      // not one is attached — so tail_prev_ms means the same span on every run.
+      last_observe_end_ms = steady_clock_ms();
       // Playback keyframe: the printed-shape density (mask pins applied) as it
       // evolves. Read-only — a pinned COPY, so `x` and the optimization are
       // untouched.

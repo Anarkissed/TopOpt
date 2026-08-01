@@ -1,0 +1,12 @@
+85/91 Test #18: export_stl .......................   Passed    1.22 sec
+      Start 25: observability
+86/91 Test  #4: lattice_boundary .................   Passed    1.48 sec
+87/91 Test #20: job_schema .......................   Passed    1.38 sec
+88/91 Test #88: loadcase_resolution ..............   Passed    1.34 sec
+89/91 Test #25: observability ....................   Passed    1.29 sec
+90/91 Test #50: observability_capture ............   Passed    2.52 sec
+91/91 Test #83: cli_demo .........................   Passed  1360.56 sec
+
+100% tests passed out of 91
+
+Total Test time (real) = 1360.57 sec

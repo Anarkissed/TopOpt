@@ -37,6 +37,36 @@ std::uint16_t float_to_half(float value);
 float half_to_float(std::uint16_t half);
 
 // ---------------------------------------------------------------------------
+// PROCESS MEMORY (task 2026-08-02-iteration-phase-timing).
+//
+// WHY: the leading hypothesis for the maintainer's 449 s/iteration rung was
+// memory pressure — a 14x slowdown at identical measured arithmetic is what
+// swapping looks like. An argument cannot settle that; a number can. So a run
+// samples its own footprint once per design iteration and the CSV carries it,
+// next to the phase times, on the SAME row.
+//
+// Fields that a platform cannot answer are NEGATIVE, never 0 — "unavailable"
+// and "measured zero" are different facts and the CSV must not conflate them.
+struct ProcessMemory {
+  double rss_mb = -1.0;         // resident now (macOS: phys_footprint)
+  double peak_rss_mb = -1.0;    // process high-water resident (getrusage)
+  double compressed_mb = -1.0;  // macOS memory compressor holdings
+  long long major_faults = -1;  // getrusage ru_majflt — faults that hit DISK
+  long long swapins = -1;       // task-level swapins (macOS task_vm_info)
+  double available_mb = -1.0;   // host free + inactive + speculative
+};
+
+// Sample this process's memory. Cheap (two syscalls); safe to call per design
+// iteration. Pure observation — nothing reads it back.
+ProcessMemory process_memory();
+
+// Monotonic wall clock in milliseconds (steady_clock). The phase-timing source:
+// a phase duration must not be perturbable by an NTP step, and only differences
+// of two samples are ever read. Distinct from wall_clock_ms() below, which is
+// the CSV's absolute epoch timestamp and is deliberately system_clock.
+double steady_clock_ms();
+
+// ---------------------------------------------------------------------------
 // Deliverable 1 — the per-iteration CSV.
 //
 // The schema (documented here, in the handoff, and pinned by the golden test):
@@ -84,7 +114,57 @@ float half_to_float(std::uint16_t half);
 //                 With cycle == 1 (the production value) the setup matvecs charged
 //                 to this solve equal this column.
 //
-// A row is ~60-95 bytes, so a full 4-rung production run (~800 rows) is < 80 KB.
+// ── PER-PHASE WALL TIMING (task 2026-08-02-iteration-phase-timing) ──────────
+// Everything above describes WHAT the iteration did; nothing described HOW LONG
+// any part of it took. `wall_ms` is an epoch TIMESTAMP, not a duration — a name
+// that predates any duration on this row — so a run whose iterations took 449 s
+// each while reporting 215 CG iterations could not be diagnosed from this file
+// at all. These columns are that missing measurement (see IterationPhaseTimes
+// in simp.hpp for the full contract):
+//
+//   total_ms       this iteration's DURATION: top of the optimizer's loop body
+//                  to the moment this row's record was handed to the sink.
+//   tail_prev_ms   the PREVIOUS iteration's post-observation tail (keyframe,
+//                  density snapshot, plateau/continuation logic, and the write
+//                  of the previous row). Carried here because the previous row
+//                  was already on disk when it was spent; sum(total_ms +
+//                  tail_prev_ms) over a rung is that rung's wall.
+//   filter_ms      every density-filter call this iteration
+//   project_ms     Heaviside projection + the mask pins
+//   solve_ms       the penalized solve call, entry to exit
+//   fea_ms/sens_ms solve_ms split into the LINEAR SOLVE and the self-adjoint
+//                  SENSITIVITY sweep (a SUB-split: do not add to the sum)
+//   update_ms      the OC/MMA update: sensitivity filter + volume bisection
+//   analysis_ms    change, achieved vf, plateau + infeasibility detectors
+//   observe_ms     the progress hook + building this record
+//   residual_ms    total_ms MINUS (filter+project+solve+update+analysis+observe)
+//                  — the UNATTRIBUTED time. This column is the point: time going
+//                  somewhere unnamed is visible rather than inferred.
+//   solver_build_ms / mg_build_ms / mg_ms / cg_ms / geneo_setup_ms /
+//   geneo_apply_ms / recycle_ms
+//                  a SUB-SPLIT of solve_ms from CgInfo (again, not extra terms):
+//                  the reduced-system build, the multigrid hierarchy build, the
+//                  V-cycle loop, the Jacobi-CG recurrence, the GenEO basis build
+//                  + coarse-operator refresh, the GenEO correction summed over
+//                  iterations, and the Krylov recycle overhead. geneo_setup_ms is
+//                  the one that answers the 128³ anomaly: it costs N_t operator
+//                  applies and moves NO iteration counter.
+//   fea_solves     penalized FEA solves this design iteration. It is 1 on every
+//                  trajectory iteration; anything else is itself a finding.
+//   matvecs        matrix-free operator applies charged to this iteration — the
+//                  honest work unit when cg_iters is not.
+//   geneo_dim      N_t, the GenEO coarse-space dimension that preconditioned the
+//                  solve (0 = the deflation never applied)
+//   geneo_action   0 none / 1 reused / 2 coarse operator REFRESHED / 3 basis
+//                  (re)BUILT / 4 build refused by the memory cap
+//   rss_mb, peak_rss_mb, compressed_mb, available_mb, major_faults, swapins
+//                  the process's memory at this iteration. NEGATIVE means the
+//                  platform could not answer — never a fabricated zero, because
+//                  "unavailable" and "no swapping" are different facts and the
+//                  paging question turns on exactly that distinction.
+//
+// A row is ~330-380 bytes, so a full 4-rung production run (~800 rows) is
+// < 300 KB — the append-and-flush cost stays a rounding error against a solve.
 extern const char kIterationCsvHeader[];
 
 // Streams per-iteration rows to a file, one header + one row per call, FLUSHING

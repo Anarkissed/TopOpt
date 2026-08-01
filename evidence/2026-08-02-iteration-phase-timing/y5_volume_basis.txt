@@ -1,0 +1,24 @@
+part grid   : 32x22x32, spacing 1.8750 mm, solid P = 4992 voxels
+solved grid : 48x32x40, spacing 1.8750 mm
+active A    = 46107 voxels   frozen F = 32 voxels
+A / P       = 9.236   (the design box is this many part-volumes)
+F / P       = 0.0064
+
+rung   ladder vf  effective target (vf*P-F)/A ratio vf / effective
+0      0.68       0.072929               9.3
+1      0.52       0.055606               9.4
+2      0.38       0.040449               9.4
+3      0.26       0.027456               9.5
+
+The CSV column `achieved_vf` measures sum(rho over Active) / A on the
+SOLVED grid; the ladder's vf is a fraction OF THE PART. The right-hand
+ratio is the whole apparent 'miss'. It is NOT constant across the ladder
+because the frozen term F is subtracted before dividing, so the two bases
+diverge further as vf shrinks.
+
+--- the ladder's own rows (last GRAYSCALE iteration of each rung; the
+    conditional-projection phase reports the UNprojected fraction, so it
+    is excluded) ---
+rung   ladder vf  effective target last gray achieved gray iters
+0      0.68       0.072929         0.054453         16
+1      0.52       0.055606         0.038459         16

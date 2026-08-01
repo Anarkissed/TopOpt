@@ -294,7 +294,61 @@ struct CgInfo {
   int geneo_dim = 0;
   int geneo_action = 0;
   int geneo_trigger_burn = 0;
+  // ── PER-SOLVE WALL TIMING (task 2026-08-02-iteration-phase-timing) ─────────
+  // Milliseconds of wall time this ONE solve spent in each of its internal
+  // phases, measured with a steady clock. They exist because `iterations` is NOT
+  // a cost: an accelerator that runs BEFORE or BESIDE the CG recurrence (the
+  // GenEO coarse-operator refresh, the multigrid hierarchy build, the Krylov
+  // recycle setup) does real work that the iteration counter cannot see, and the
+  // maintainer's 128³ run hit exactly that — 215 CG iterations taking 449 s.
+  // Every field is a pure OBSERVATION: nothing here is read back by any solver
+  // decision, so a build that records them converges to the identical field.
+  //
+  //   t_build_ms        building the reduced, void-gated matrix-free system
+  //   t_mg_build_ms     building the multigrid hierarchy (0 when not attempted,
+  //                     including when the 127 latch skipped the build)
+  //   t_mg_ms           the MG-CG V-cycle loop (0 when MG never ran)
+  //   t_cg_ms           the Jacobi-CG recurrence: matvecs + vector ops, EXCLUDING
+  //                     the GenEO/recycle corrections timed separately below
+  //   t_geneo_setup_ms  GenEO basis (re)build + coarse-operator refresh, i.e.
+  //                     geneo_solve_begin plus any in-solve trigger build. This
+  //                     is the phase that costs N_t operator applies and never
+  //                     appears in `iterations`.
+  //   t_geneo_apply_ms  the GenEO coarse correction summed over CG iterations
+  //   t_recycle_ms      Krylov recycle setup + per-iteration augmentation
+  //   t_total_ms        the whole solve entry point, wall
+  // Zero on any path that does not run the phase, so a reader never has to
+  // branch on the solver kind to sum them.
+  double t_build_ms = 0.0;
+  double t_mg_build_ms = 0.0;
+  double t_mg_ms = 0.0;
+  double t_cg_ms = 0.0;
+  double t_geneo_setup_ms = 0.0;
+  double t_geneo_apply_ms = 0.0;
+  double t_recycle_ms = 0.0;
+  double t_total_ms = 0.0;
+  // Operator applies (matvecs) CHARGED to this solve — the honest work unit when
+  // the iteration count is not. A healthy MG-CG solve runs ~1 fine apply per
+  // V-cycle plus the smoother's; a GenEO refresh runs N_t of them with the CG
+  // counter standing still. 0 on the assembled (non-matrix-free) paths, which do
+  // not route through the counted apply.
+  long long matvecs = 0;
 };
+
+// ── Process-global operator-apply counter (task 2026-08-02-iteration-phase-
+// timing). Incremented once per matrix-free reduced-operator apply
+// (MatfreeReduced::apply_kgg_raw and its FP32 twin), from EVERY caller: the CG
+// recurrence, the V-cycle smoother, the Krylov recycle setup and the GenEO
+// coarse-operator refresh. It is the one number that makes "the arithmetic this
+// iteration actually paid for" visible when `cg_iterations` does not.
+//
+// Pure observation: nothing reads it back, so a run that samples it is
+// byte-identical to one that does not. Not thread-safe across concurrent solves
+// (a production run drives its solves from one thread, like the Krylov recycle
+// space and the GenEO basis); the matrix-free apply's own internal threading is
+// unaffected because the counter is bumped once per apply, outside the kernel.
+long long fea_matvec_count();
+void fea_matvec_count_reset();
 
 // Thrown by the CG solvers (fea_solve_cg, fea_solve_mgcg, fea_solve_cg_matfree,
 // fea_solve_mgcg_matfree) on the ONE failure that is a property of the LINEAR

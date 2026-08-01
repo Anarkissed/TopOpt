@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <functional>
 #include <vector>
 
@@ -24,6 +25,18 @@
 
 namespace topopt {
 namespace fea_detail {
+
+// Monotonic wall clock in milliseconds, for the per-solve phase timing the
+// CgInfo t_*_ms fields carry (task 2026-08-02-iteration-phase-timing). STEADY,
+// not system_clock: a phase duration must never be perturbed by an NTP step, and
+// the difference of two samples is the only thing anyone reads. Pure
+// observation — no solver decision consults it, so a timed build converges to
+// the identical field as an untimed one.
+inline double mf_steady_ms() {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
 
 // Number of element colours: a 2x2x2 (parity of i,j,k) partition of the regular
 // voxel grid. Two elements of the same colour differ by an even offset on at least
@@ -345,10 +358,24 @@ bool mf_precond_hook_installed();
 // needs; it is consulted ONLY when a hook is installed (mf_set_precond_hook). With
 // no hook installed `ctx` is never read, so the solve is byte-identical whether or
 // not a context is supplied.
+// Per-phase wall timing of ONE matrix-free Jacobi-CG solve, in milliseconds
+// (task 2026-08-02-iteration-phase-timing). Optional out-param: null (the
+// default) skips every clock read, so an untimed caller is byte-for-byte the
+// pre-timing path. The split exists because `iters_out` is not a cost — the
+// GenEO coarse-operator refresh runs N_t operator applies BEFORE the recurrence
+// starts and never moves the iteration counter.
+struct MfCgTimes {
+  double geneo_setup_ms = 0.0;  // geneo_solve_begin + any in-solve trigger build
+  double geneo_apply_ms = 0.0;  // the coarse correction, summed over iterations
+  double recycle_ms = 0.0;      // recycle session setup + per-iteration augment
+  double cg_ms = 0.0;           // the recurrence itself (matvecs + vector ops)
+};
+
 void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
                  std::vector<double>& x, int& iters_out, double& error_out,
                  bool& converged_out, RecycleReport* rec = nullptr,
-                 const MfSolveContext* ctx = nullptr);
+                 const MfSolveContext* ctx = nullptr,
+                 MfCgTimes* times = nullptr);
 
 }  // namespace fea_detail
 }  // namespace topopt

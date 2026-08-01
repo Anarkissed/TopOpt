@@ -1373,14 +1373,22 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
   // `lattice` (multiscale production wiring) selects the composite
   // isotropic-or-cubic operator; every stage below is operator-agnostic and
   // needs no per-stage lattice handling beyond the mixed-precision guard.
+  // Per-solve phase timing (task 2026-08-02-iteration-phase-timing): the reduced
+  // build, the HIERARCHY build (the expensive part the 127 latch exists to skip),
+  // the V-cycle loop and the Jacobi fallback are timed separately, because a
+  // solve's `iterations` count describes only the last of those.
+  const double t_entry = fea_detail::mf_steady_ms();
+  const long long mv_entry = fea_matvec_count();
   MatfreeReduced m = fea_detail::mf_build_reduced(
       grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
       lattice != nullptr ? "fea_solve_cg_lattice_matfree"
                          : "fea_solve_mgcg_matfree",
       info, active_mask, lattice);
+  const double t_built = fea_detail::mf_steady_ms();
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
+  diag.t_build_ms = t_built - t_entry;
 
   std::vector<double> u = m.up;
   if (m.ng > 0) {
@@ -1394,7 +1402,11 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // latch is reset per run by the driver; a converging solve clears it below.
     MfHierarchy H;
     const bool try_mg = !g_mg_latched;
+    const double t_h0 = fea_detail::mf_steady_ms();
     const bool have_h = try_mg && build_mf_hierarchy(m, nnx, nny, nnz, H);
+    // 0 when the latch short-circuited the build — which is exactly the reading
+    // a latched rung needs: the hierarchy cost is NOT where its wall time went.
+    diag.t_mg_build_ms = try_mg ? fea_detail::mf_steady_ms() - t_h0 : 0.0;
     // Fallback-mode diagnostics (handoff 128): whether a hierarchy built this
     // solve, and how many MG-CG cycles it attempted. hier_built==false when the
     // grid is not coarsenable (build-rejection) OR the 127 latch skipped the build.
@@ -1406,6 +1418,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
     // twice; the report ACCUMULATES them so the charged cost is honest.
     fea_detail::RecycleReport rec;
     bool solved = false;
+    const double t_mg0 = fea_detail::mf_steady_ms();
     if (have_h) {
       Vec rgv = Eigen::Map<const Vec>(m.rg.data(),
                                       static_cast<Eigen::Index>(m.ng));
@@ -1445,6 +1458,9 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       }
       // MG did not converge / broke down -> fall through to the exact fallback.
     }
+    // The V-cycle loop's wall, whether it carried or stagnated (0 when no
+    // hierarchy was attempted at all).
+    diag.t_mg_ms = have_h ? fea_detail::mf_steady_ms() - t_mg0 : 0.0;
 
     // Latch bookkeeping (handoff 127): only when a hierarchy was actually built
     // and attempted. A converging solve clears the counter (so a healthy run never
@@ -1476,12 +1492,17 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       // fingerprint on these — a tensor-only design change must refresh the
       // held coarse operator, never silently reuse it.
       if (lattice != nullptr) pc.lattice = *lattice;
+      fea_detail::MfCgTimes tm;
       fea_detail::mf_cg_solve(m, tolerance, cap, xkept, diag.iterations,
-                              diag.residual, diag.converged, &rec, &pc);
+                              diag.residual, diag.converged, &rec, &pc, &tm);
       diag.used_multigrid = false;
       diag.mg_levels = 0;
       diag.recycle_dim = rec.dim;
       diag.recycle_setup_matvecs = rec.setup_matvecs;
+      diag.t_cg_ms = tm.cg_ms;
+      diag.t_geneo_setup_ms = tm.geneo_setup_ms;
+      diag.t_geneo_apply_ms = tm.geneo_apply_ms;
+      diag.t_recycle_ms = tm.recycle_ms;
       {
         // GenEO two-level diagnostics for THIS fallback solve (all 0 when the
         // deflation is off or never engaged — the library default).
@@ -1490,6 +1511,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
         diag.geneo_action = gr.action;
         diag.geneo_trigger_burn = gr.trigger_burn;
       }
+      diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
+      diag.matvecs = fea_matvec_count() - mv_entry;
       if (info) *info = diag;
       if (!diag.converged)
         throw SolverNonConvergence(
@@ -1506,6 +1529,8 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
           xkept[static_cast<std::size_t>(k)];
   }
 
+  diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
+  diag.matvecs = fea_matvec_count() - mv_entry;
   if (info) *info = diag;
 
   FeaSolution sol;
