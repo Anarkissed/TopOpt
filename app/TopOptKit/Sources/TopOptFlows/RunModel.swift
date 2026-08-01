@@ -405,10 +405,23 @@ public enum RunFailure: Equatable, Sendable {
     /// No variant met the strength-margin gate (`acceptedCount == 0`). Acceptance
     /// is strength-margin ONLY (core policy: `variant.accepted = worst_case >=
     /// margin_stop`; min-feature is report-only, DECISIONS 2026-07-06), so a
-    /// genuine all-rejected is always a strength failure. Carries the strongest
-    /// (terminal) rung's worst-case margin and its advisory thin-feature count so
-    /// the sheet can name the failing check and the numbers.
-    case allRejectedOnMargin(worstMargin: Double, minFeatureViolations: Int)
+    /// genuine all-rejected is always a strength failure.
+    ///
+    /// *** TWO NUMBERS, NOT ONE (handoff 2026-08-02-gate-diagnosis-
+    /// recommendations). *** `worstMargin` is the design's OWN worst case;
+    /// `effectiveMargin` is what the gate actually compared, after the sparse-infill
+    /// knockdown. On the motivating run they were 2.7814 and 0.5759 - a factor of
+    /// 4.8 apart - and only the second explains the refusal, so a sheet that shows
+    /// one of them is showing the wrong one half the time. (`effectiveMargin`
+    /// equals `worstMargin` on a solid print, where the knockdown is exactly 1.0.)
+    ///
+    /// `diagnosis` is the CORE's structured explanation: which term bound the
+    /// verdict, and which settings were PRICED THROUGH THE REAL GATE and pass. nil
+    /// on a run that did not arm it, and the copy then degrades to naming both
+    /// numbers without claiming a cause.
+    case allRejectedOnMargin(worstMargin: Double, effectiveMargin: Double,
+                             minFeatureViolations: Int,
+                             diagnosis: GateDiagnosis?)
 
     /// The strength-margin minimum every accepted variant must clear (core
     /// `MinimizePlasticOptions.margin_stop` default / ROADMAP M5.3).
@@ -468,17 +481,130 @@ public enum RunFailure: Equatable, Sendable {
         switch self {
         case .solver(let diagnostic):
             return diagnostic
-        case .allRejectedOnMargin(let worstMargin, let violations):
-            let margin = String(format: "%.2f", worstMargin)
-            var body = "The strongest variant’s worst-case stress margin was "
-                     + "\(margin)× — below the \(String(format: "%.1f", Self.marginStop))× "
-                     + "safety minimum, so it isn’t strong enough to print. "
-                     + "Try a stronger material, a coarser resolution, or a lighter load."
-            if violations > 0 {
-                body += " (The \(violations) thin-feature warning"
-                      + "\(violations == 1 ? "" : "s") are advisory and did not cause this.)"
+        case .allRejectedOnMargin(let worstMargin, let effectiveMargin,
+                                  let violations, let diagnosis):
+            return Self.rejectionBody(worstMargin: worstMargin,
+                                      effectiveMargin: effectiveMargin,
+                                      violations: violations,
+                                      diagnosis: diagnosis)
+        }
+    }
+
+    /// The sheet body for an all-rejected run.
+    ///
+    /// EVERY NUMBER HERE IS THE CORE'S. Nothing is re-derived app-side, and no
+    /// setting is suggested that the core did not price through the real gate
+    /// (`gate_margin_effective`) and confirm passes — which is exactly what the
+    /// string this replaces did not do. It named a margin it had never seen (0.00×,
+    /// a max over an empty array) and offered three fixes, two of which were wrong
+    /// for the run it was shown on.
+    static func rejectionBody(worstMargin: Double, effectiveMargin: Double,
+                              violations: Int,
+                              diagnosis: GateDiagnosis?) -> String {
+        func x(_ v: Double) -> String { String(format: "%.2f", v) + "×" }
+        let need = String(format: "%.1f", Self.marginStop) + "×"
+
+        // A severed load path is not a strength verdict at all, and its numbers are
+        // measurements of a structure that carries nothing. Say that first, and say
+        // it INSTEAD of a margin sentence.
+        if diagnosis?.binding == .loadPath {
+            var severed = "This design has no connected path of printed material "
+                        + "from the anchor to the load, so it carries nothing. The "
+                        + "stresses and margins reported for it are measurements of "
+                        + "a severed structure, not a strength result."
+            if let reason = diagnosis?.noFixReason, !reason.isEmpty {
+                severed += "\n\n" + reason.prefix(1).uppercased() + reason.dropFirst()
             }
-            return body
+            return severed
+        }
+
+        // BOTH numbers, always — they differ by the infill knockdown and only one
+        // of them explains the refusal.
+        var body: String
+        if effectiveMargin < worstMargin - 1e-9 {
+            body = "This design's own worst-case stress margin is \(x(worstMargin)). "
+                 + "What the gate compared is \(x(effectiveMargin)) — the same margin "
+                 + "after the sparse-infill knockdown"
+            if let d = diagnosis, d.infillPercent < 100 {
+                body += " at \(Int(d.infillPercent.rounded()))% infill"
+            }
+            body += " — and that is below the \(need) minimum."
+        } else {
+            body = "This design's worst-case stress margin is \(x(worstMargin)) — "
+                 + "below the \(need) minimum, so it isn't strong enough to print."
+        }
+
+        if let d = diagnosis {
+            // WHAT BOUND IT.
+            switch d.binding {
+            case .knockdown:
+                body += " The part itself is strong enough; the infill is what "
+                      + "rejected it."
+            case .interlayer:
+                body += " The binding failure mode is tension across the printed "
+                      + "layers, not in-plane stress."
+            case .inPlane:
+                body += " The binding failure mode is in-plane (von Mises) stress."
+            case .loadPath, .minFeature, .none:
+                break
+            }
+
+            // WHAT WOULD FIX IT — only settings the core PRICED and confirmed.
+            if d.noSettingFixesThis {
+                body += "\n\n" + d.noFixReason.prefix(1).uppercased()
+                      + d.noFixReason.dropFirst()
+            } else if !d.recommendations.isEmpty {
+                body += "\n\nWhat would fix it (each checked against the same gate "
+                      + "that rejected this run):"
+                for r in d.recommendations {
+                    body += "\n• " + Self.recommendationLine(r)
+                }
+            }
+
+            // PROVENANCE TRAVELS WITH THE ADVICE.
+            let unsourced = d.inheritsUnsourcedZKnockdown
+                || d.recommendations.contains { $0.inheritsUnsourcedZKnockdown }
+            if unsourced {
+                body += "\n\nNote: these figures divide by the material's "
+                      + "layer-bond factor (z_knockdown), a conservative hand-tuned "
+                      + "constant with no measured source for any material. Treat "
+                      + "them as an ordering, not a calibration."
+            }
+        }
+
+        if violations > 0 && diagnosis?.binding != GateDiagnosis.Term.minFeature {
+            body += "\n\n(The \(violations) thin-feature warning"
+                  + "\(violations == 1 ? " is" : "s are") advisory and did not "
+                  + "cause this.)"
+        }
+        return body
+    }
+
+    /// One recommendation line. It always states the setting AND the margin the
+    /// core measured under it, because "raise infill to 67%" is a suggestion and
+    /// "raise infill to 67% → 1.53× at the gate" is a result.
+    static func recommendationLine(_ r: GateDiagnosis.Recommendation) -> String {
+        let at = String(format: "%.2f", r.marginAtProposal) + "×"
+        switch r.lever {
+        case "infill":
+            return "Raise infill to \(r.proposedLabel) → \(at) at the gate."
+        case "wall_loops":
+            return "Use \(r.proposedLabel) → \(at) at the gate."
+        case "build_orientation":
+            return "Print it in a different orientation, build direction "
+                 + "\(r.proposedLabel) → \(at) at the gate."
+        case "volume_fraction":
+            return "Keep more material (volume fraction \(r.proposedLabel)) → "
+                 + "\(at) at the gate — that rung was solved in this run."
+        case "material":
+            return "Print it in \(r.proposedLabel) → \(at) at the gate."
+        case "resolution":
+            return "Re-run at a voxel size of \(r.proposedLabel)."
+        case "load":
+            return "Declare a lighter load (\(r.proposedLabel)) → \(at) at the "
+                 + "gate. This changes the requirement, not the part."
+        default:
+            return "\(r.parameter): \(r.proposedLabel) → \(at) at the gate."
         }
     }
 }
@@ -1125,11 +1251,24 @@ public final class RunModel: ObservableObject {
                 }
             } else if o.acceptedCount == 0 {
                 // Nothing strong enough: the terminal rung failed the margin gate.
+                //
+                // `o.variants` carries EVERY evaluated rung, accepted or not — the
+                // bridge pushes all of mp.evaluated, and the remote assembler now
+                // reads `rejected_variants` too. That second half is the fix for the
+                // "0.00×" the motivating run showed: the reader used to look only at
+                // report.json's accepted array, so an all-rejected run left this
+                // `last` nil and the sheet reported a max over nothing.
                 outcome = stamp(o)
                 let terminal = o.variants.last
+                // BOTH margins. `marginEffective` is what the gate compared; the
+                // diagnosis is the only source that has it, and on a solid print (or
+                // a run with no diagnosis) it is the worst case itself.
+                let worst = terminal?.worstCaseMargin ?? 0
                 failure = .allRejectedOnMargin(
-                    worstMargin: terminal?.worstCaseMargin ?? 0,
-                    minFeatureViolations: terminal?.minFeatureViolations ?? 0)
+                    worstMargin: worst,
+                    effectiveMargin: terminal?.diagnosis?.marginEffective ?? worst,
+                    minFeatureViolations: terminal?.minFeatureViolations ?? 0,
+                    diagnosis: terminal?.diagnosis)
                 phase = .failed
             } else {
                 outcome = stamp(o)                         // authoritative final

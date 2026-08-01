@@ -307,6 +307,16 @@ struct OptimizeVariant {
   std::vector<int32_t> keyframe_vertex_counts;
   std::vector<int32_t> keyframe_indices;
   std::vector<int32_t> keyframe_index_counts;
+  // WHY this rung's verdict is what it is (handoff 2026-08-02-gate-diagnosis-
+  // recommendations): the CORE's own report.json "diagnosis" object for this
+  // variant, as JSON. The SAME document a LAN run's report.json carries, from the
+  // same emitter, so the app decodes one shape whichever front-end ran the job.
+  //
+  // EMPTY unless the run armed the diagnosis (production does). It EXPLAINS
+  // `accepted` / `worst_case_margin` above and can never contradict them — every
+  // recommendation inside was priced by gate_margin_effective, the expression the
+  // verdict itself came from.
+  std::string diagnosis_json;
 };
 
 struct OptimizeResult {

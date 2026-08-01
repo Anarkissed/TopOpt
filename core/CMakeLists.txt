@@ -58,6 +58,12 @@ add_library(topopt
   src/orient/build_frame.cpp
   src/settings/settings.cpp
   src/settings/report.cpp
+  # The gate-diagnosis REPORT half (handoff 2026-08-02-gate-diagnosis-
+  # recommendations): stable term/lever names + the JSON emitter. It renders a
+  # struct and computes nothing, so it is Eigen-free and belongs here beside
+  # report.cpp, which calls it. The EVALUATOR (diagnose_gate) calls
+  # gate_margin_effective and is gated on Eigen with analyze.cpp below.
+  src/settings/gate_diagnosis_report.cpp
   src/cli/job.cpp)
 target_include_directories(topopt PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -162,6 +168,11 @@ if(Eigen3_FOUND)
   # on an edited mesh's voxelization. Drives simp_compliance, so Eigen-gated like
   # minimize_plastic.cpp. CI has Eigen (DEPS=ON), so it always builds in CI.
   target_sources(topopt PRIVATE src/simp/analyze.cpp)
+  # diagnose_gate (handoff 2026-08-02-gate-diagnosis-recommendations): EXPLAIN a
+  # gate verdict and price every recommendation through gate_margin_effective —
+  # analyze.cpp's symbol — so it is Eigen-gated with it. It never solves and never
+  # moves a verdict; see topopt/gate_diagnosis.hpp.
+  target_sources(topopt PRIVATE src/simp/gate_diagnosis.cpp)
   # Shared production-run configuration (handoff 093 / LAN-offload STEP 0): the
   # single source of truth for the solver + projection + min-feature + Galerkin
   # cache settings both the app (TopOptBridge) and topopt-cli apply. It only uses
@@ -591,6 +602,25 @@ if(Eigen3_FOUND)
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
     TOPOPT_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   add_test(NAME build_direction COMMAND test_build_direction)
+
+  # GATE REJECTIONS EXPLAIN THEMSELVES (task
+  # 2026-08-02-gate-diagnosis-recommendations). Pins that the diagnosis never
+  # moves a verdict (numerically AND structurally), that the motivating WallMount
+  # run reproduces (knockdown-bound, 2.7814 raw / 0.5759 effective, infill 67%),
+  # that no recommendation survives without being priced through
+  # gate_margin_effective, that resolution advice is routed to the min-feature
+  # term only, and that orientation advice is PR 271's own ranking row. Needs the
+  # FEA solve (Eigen) and reads the same read-only hook fixture as test_v5;
+  # TOPOPT_SRC_DIR is injected for the structural grep-assert.
+  add_executable(test_gate_diagnosis tests/validation/test_gate_diagnosis.cpp)
+  target_link_libraries(test_gate_diagnosis PRIVATE topopt)
+  target_compile_definitions(test_gate_diagnosis PRIVATE
+    ORIENT_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/orient"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TOPOPT_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    TOPOPT_EVIDENCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../evidence/2026-08-02-gate-diagnosis-recommendations")
+  add_test(NAME gate_diagnosis COMMAND test_gate_diagnosis)
 
   # BAKE THE BUILD ORIENTATION INTO THE EXPORTED GEOMETRY (task
   # 2026-08-01-bake-build-orientation). Pins that the exported FILE is the object

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/gate_diagnosis.hpp"  // GateDiagnosis (value types only)
 #include "topopt/mesh.hpp"      // Vec3
 #include "topopt/settings.hpp"  // SlicerSettings
 
@@ -152,6 +153,18 @@ struct VariantReport {
   // motivating run's severed rung measured margin 680.9 and was ACCEPTED and
   // shipped on that basis — handoff 131 §evidence.)
   std::string rejection_reason;
+  // WHY the verdict above is what it is, and what would change it (handoff
+  // 2026-08-02-gate-diagnosis-recommendations). Structured, not prose: which term
+  // BINDS, its value against the value it had to reach, and recommendations that
+  // were each VERIFIED by evaluating gate_margin_effective under the proposed
+  // change. Default-constructed (`evaluated == false`) unless the caller ran
+  // diagnose_gate, and then omitted from the JSON entirely — so a run without a
+  // diagnosis keeps its document byte-for-byte.
+  //
+  // IT EXPLAINS THE VERDICT; IT NEVER MOVES ONE. `accepted`, `margin_required`
+  // and `margin_effective` above are the gate's, and the diagnosis is written
+  // FROM them.
+  GateDiagnosis diagnosis;
 };
 
 // The whole run's report: the material used and one entry per requested variant.

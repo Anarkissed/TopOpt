@@ -421,6 +421,27 @@ struct MinimizePlasticOptions {
   // read when width_aware_knockdown is armed AND wall_loops > 0. Must be finite.
   double wall_line_width_outer_mm = -1.0;
 
+  // --- GATE DIAGNOSIS (handoff 2026-08-02-gate-diagnosis-recommendations) ------
+  // Arm the per-rung explanation of the acceptance verdict: which term BINDS, its
+  // value against the value it had to reach, and recommendations EACH VERIFIED by
+  // evaluating gate_margin_effective under the proposed change (topopt/
+  // gate_diagnosis.hpp). It runs strictly AFTER `accepted` / `margin_effective`
+  // are sealed, writes only to VariantReport::diagnosis, and CANNOT MOVE A
+  // VERDICT — the same discipline as the build-orientation post-pass.
+  //
+  // false (the DEFAULT) leaves every VariantReport::diagnosis default-constructed
+  // and the emitted report.json byte-for-byte what it was, so every existing
+  // caller, fixture and golden document is unaffected. PRODUCTION ARMS IT
+  // (configure_production_options), because the whole point is that a real user's
+  // rejection explains itself.
+  bool gate_diagnosis = false;
+  // The material catalog the diagnosis prices the MATERIAL lever against. READ
+  // ONLY — the diagnosis never writes materials.json and never mutates a Material.
+  // nullptr (the DEFAULT) reports the material lever as NOT EVALUABLE with that
+  // reason rather than guessing. The pointee must outlive the minimize_plastic
+  // call. Only read when `gate_diagnosis` is true.
+  const MaterialLibrary* material_catalog = nullptr;
+
   // Handoff 100 — "Keep clear" clearance keep-out overlay. A SOLVED-grid-indexed
   // mask (size == the grid minimize_plastic solves on, i.e.
   // minimize_plastic_solved_grid(grid, *this)) carrying MaskValue::FrozenVoid on

@@ -1,0 +1,13 @@
+BEFORE (shipped, fingerprint 9f6738726016)
+
+The strongest variant’s worst-case stress margin was 0.00× — below the 1.5× safety minimum, so it isn’t strong enough to print. Try a stronger material, a coarser resolution, or a lighter load.
+
+
+AFTER
+
+This design's own worst-case stress margin is 2.78×. What the gate compared is 0.58× — the same margin after the sparse-infill knockdown at 35% infill — and that is below the 1.5× minimum. The part itself is strong enough; the infill is what rejected it.
+
+What would fix it (each checked against the same gate that rejected this run):
+• Raise infill to 67% → 1.53× at the gate.
+
+Note: these figures divide by the material's layer-bond factor (z_knockdown), a conservative hand-tuned constant with no measured source for any material. Treat them as an ordering, not a calibration.

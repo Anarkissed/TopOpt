@@ -321,6 +321,13 @@ FixedDesignAnalysis analyze_fixed_design(
                 knockdown.wall_thickness_mm);
             const double vm_eff = st.von_mises / k_v;
             if (vm_eff > max_von_mises_eff) max_von_mises_eff = vm_eff;
+            // Record the pair this max was taken over, so a diagnosis can reprice
+            // the SAME population at a candidate infill / wall ring without a
+            // re-solve (handoff 2026-08-02-gate-diagnosis-recommendations). This
+            // branch only ever runs in the width-aware posture, so the default
+            // path is untouched and the vectors stay empty there.
+            out.gate_printed_von_mises.push_back(st.von_mises);
+            out.gate_printed_member_width_mm.push_back(member_width_mm[idx]);
           }
           for (int c = 0; c < 6; ++c)
             out.stress_tensor_field[base + static_cast<std::size_t>(c)] =

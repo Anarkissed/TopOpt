@@ -154,15 +154,162 @@ final class RunModelTests: XCTestCase {
     func testFailureMessages() {
         XCTAssertEqual(RunFailure.solver("CG did not converge").message, "CG did not converge")
         XCTAssertEqual(RunFailure.solver("x").title, "Optimization couldn’t finish")
-        let f = RunFailure.allRejectedOnMargin(worstMargin: 0.90, minFeatureViolations: 952)
+        let f = RunFailure.allRejectedOnMargin(worstMargin: 0.90, effectiveMargin: 0.90,
+                                               minFeatureViolations: 952, diagnosis: nil)
         XCTAssertEqual(f.title, "Not strong enough to print")
         XCTAssertTrue(f.message.contains("0.90×"), "names the worst-case margin")
         XCTAssertTrue(f.message.contains("1.5×"), "names the safety minimum")
         XCTAssertTrue(f.message.contains("952"), "names the advisory violation count")
         XCTAssertTrue(f.message.contains("advisory"))
         // With no violations the advisory clause is omitted.
-        XCTAssertFalse(RunFailure.allRejectedOnMargin(worstMargin: 1.2, minFeatureViolations: 0)
+        XCTAssertFalse(RunFailure.allRejectedOnMargin(worstMargin: 1.2, effectiveMargin: 1.2,
+                                                      minFeatureViolations: 0, diagnosis: nil)
                         .message.contains("advisory"))
+    }
+
+    // MARK: - the motivating run's dialog (handoff 2026-08-02-gate-diagnosis)
+
+    /// The WallMount bracket, fingerprint 9f6738726016, as the CORE diagnosed it.
+    private func wallMountDiagnosis() -> GateDiagnosis {
+        GateDiagnosis(
+            binding: .knockdown, bindingValue: 0.2070, requiredValue: 0.5393,
+            ratio: 0.3839, marginWorstCaseRaw: 2.7814, marginInPlaneRaw: 3.8038,
+            marginInterlayerRaw: 2.7814, marginEffective: 0.5759,
+            knockdownFactor: 0.2070, infillPercent: 35, minFeatureViolations: 0,
+            inheritsUnsourcedZKnockdown: true,
+            provenance: "divides by z_knockdown", noSettingFixesThis: false,
+            noFixReason: "", headroomMinInfillPercent: nil,
+            recommendations: [
+                .init(lever: "infill", parameter: "infill_percent",
+                      currentValue: 35, proposedValue: 67, proposedLabel: "67%",
+                      marginAtProposal: 1.5253, marginRequired: 1.5,
+                      verifiedThroughGate: true,
+                      inheritsUnsourcedZKnockdown: true,
+                      provenance: "divides by z_knockdown", note: ""),
+            ])
+    }
+
+    /// *** THE TWO FAULTS IN THE MOTIVATING DIALOG. *** It said "0.00×" (a max over
+    /// an EMPTY array) and offered a stronger material, a coarser resolution and a
+    /// lighter load — for a part whose own margin was 2.78×, nearly 2× the
+    /// requirement, held under only by the 35% infill knockdown.
+    func testMotivatingRunDialogNamesBothMarginsAndTheRealFix() {
+        let f = RunFailure.allRejectedOnMargin(
+            worstMargin: 2.7814, effectiveMargin: 0.5759,
+            minFeatureViolations: 0, diagnosis: wallMountDiagnosis())
+        let m = f.message
+        // (a) BOTH numbers, and never 0.00.
+        XCTAssertTrue(m.contains("2.78×"), "names the design's OWN worst case")
+        XCTAssertTrue(m.contains("0.58×"), "names what the gate actually compared")
+        XCTAssertFalse(m.contains("0.00×"), "*** never the empty-array 0.00 ***")
+        XCTAssertTrue(m.contains("35% infill"), "names the knockdown's cause")
+        // (b) the advice is the MEASURED one, with its measured margin.
+        XCTAssertTrue(m.contains("Raise infill to 67%"), "the real fix")
+        XCTAssertTrue(m.contains("1.53× at the gate"),
+                      "and the margin the CORE measured under it")
+        XCTAssertFalse(m.lowercased().contains("stronger material"),
+                       "*** no canned material advice on a knockdown-bound run ***")
+        XCTAssertFalse(m.lowercased().contains("coarser resolution"),
+                       "*** no resolution advice on a stress-margin rejection ***")
+        // (c) provenance travels WITH the number.
+        XCTAssertTrue(m.contains("z_knockdown"),
+                      "the unsourced layer-bond constant is disclosed")
+
+        // EVIDENCE: the dialog the maintainer saw, beside the one this ships.
+        let before = "The strongest variant’s worst-case stress margin was 0.00× "
+                   + "— below the 1.5× safety minimum, so it isn’t strong enough "
+                   + "to print. Try a stronger material, a coarser resolution, or "
+                   + "a lighter load."
+        let text = "BEFORE (shipped, fingerprint 9f6738726016)\n\n" + before
+                 + "\n\n\nAFTER\n\n" + m + "\n"
+        let dir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("evidence")
+            .appendingPathComponent("2026-08-02-gate-diagnosis-recommendations")
+        try? FileManager.default.createDirectory(at: dir,
+                                                 withIntermediateDirectories: true)
+        let out = dir.appendingPathComponent("wallmount_dialog_before_after.txt")
+        try? text.write(to: out, atomically: true, encoding: .utf8)
+        print("GATE-DIAGNOSIS-EVIDENCE wrote \(out.path)")
+    }
+
+    /// When the core says nothing fixes it, the sheet says that — and does not fall
+    /// back to a list of things to try.
+    func testNoSettingFixesThisIsStatedPlainly() {
+        let d = GateDiagnosis(
+            binding: .interlayer, bindingValue: 0.504, requiredValue: 1.5, ratio: 0.34,
+            marginWorstCaseRaw: 0.504, marginInPlaneRaw: 2.75,
+            marginInterlayerRaw: 0.504, marginEffective: 0.504, knockdownFactor: 1,
+            infillPercent: 100, minFeatureViolations: 0,
+            inheritsUnsourcedZKnockdown: true, provenance: "",
+            noSettingFixesThis: true,
+            noFixReason: "no print setting fixes this: even at 100% infill the raw "
+                       + "worst-case margin is 0.5042x, below the required 1.50x.",
+            headroomMinInfillPercent: nil, recommendations: [])
+        let m = RunFailure.allRejectedOnMargin(worstMargin: 0.504, effectiveMargin: 0.504,
+                                               minFeatureViolations: 0,
+                                               diagnosis: d).message
+        XCTAssertTrue(m.contains("No print setting fixes this"),
+                      "says so plainly, capitalised into the sentence")
+        XCTAssertFalse(m.contains("What would fix it"),
+                       "and offers no list when nothing passes")
+    }
+
+    /// A severed load path is not a strength verdict, and the sheet must not present
+    /// its (enormous, meaningless) margins as one.
+    func testSeveredLoadPathIsNotReportedAsAMarginNumber() {
+        let d = GateDiagnosis(
+            binding: .loadPath, bindingValue: 0, requiredValue: 1, ratio: 0,
+            marginWorstCaseRaw: 680.9, marginInPlaneRaw: 680.9,
+            marginInterlayerRaw: 900, marginEffective: 680.9, knockdownFactor: 1,
+            infillPercent: 100, minFeatureViolations: 0,
+            inheritsUnsourcedZKnockdown: false, provenance: "",
+            noSettingFixesThis: true,
+            noFixReason: "the design has no connected path of printed material.",
+            headroomMinInfillPercent: nil, recommendations: [])
+        let m = RunFailure.allRejectedOnMargin(worstMargin: 680.9, effectiveMargin: 680.9,
+                                               minFeatureViolations: 0,
+                                               diagnosis: d).message
+        XCTAssertTrue(m.contains("carries nothing"),
+                      "names the severance, not the margin")
+        XCTAssertFalse(m.contains("680.90×"),
+                       "*** an enormous margin on a severed structure is never "
+                       + "presented as a strength number ***")
+    }
+
+    /// ONE decoder for both sources (a LAN run's report.json and the bridge's
+    /// per-variant JSON string) — the core's own emitter output either way.
+    func testGateDiagnosisDecodesTheCoreDocument() {
+        let json = """
+        {"binding_term":"knockdown","binding_value":0.2071,"required_value":0.5393,
+         "ratio":0.384,"margin_worst_case_raw":2.7814,"margin_in_plane_raw":3.8038,
+         "margin_interlayer_raw":2.7814,"margin_effective":0.5759,
+         "knockdown_factor":0.2071,"infill_percent":35,"min_feature_violations":0,
+         "inherits_unsourced_z_knockdown":true,"provenance":"p",
+         "no_setting_fixes_this":false,"no_fix_reason":"",
+         "recommendations":[{"lever":"infill","parameter":"infill_percent",
+           "current_value":35,"proposed_value":67,"proposed_label":"67%",
+           "margin_effective_at_proposal":1.5253,"margin_required":1.5,
+           "verified_through_gate":true,"inherits_unsourced_z_knockdown":true,
+           "provenance":"p","note":"n"}],
+         "levers":[]}
+        """
+        guard let d = GateDiagnosis.decode(json: json) else {
+            return XCTFail("the core's own document must decode")
+        }
+        XCTAssertEqual(d.binding, .knockdown)
+        XCTAssertEqual(d.marginWorstCaseRaw, 2.7814, accuracy: 1e-9)
+        XCTAssertEqual(d.marginEffective, 0.5759, accuracy: 1e-9)
+        XCTAssertEqual(d.recommendations.count, 1)
+        XCTAssertTrue(d.recommendations[0].verifiedThroughGate,
+                      "every emitted recommendation is flagged VERIFIED")
+        XCTAssertGreaterThanOrEqual(d.recommendations[0].marginAtProposal,
+                                    d.recommendations[0].marginRequired,
+                                    "...and really does clear the gate")
+        XCTAssertNil(GateDiagnosis.decode(json: ""), "an unarmed run decodes to nil")
+        XCTAssertNil(GateDiagnosis.decode(json: "not json"))
     }
 
     // MARK: - orchestration (synchronous scheduler + stub runner)
@@ -243,7 +390,9 @@ final class RunModelTests: XCTestCase {
         }
         model.start(request())
         XCTAssertEqual(model.phase, .failed)
-        XCTAssertEqual(model.failure, .allRejectedOnMargin(worstMargin: 0.9, minFeatureViolations: 952))
+        XCTAssertEqual(model.failure,
+                       .allRejectedOnMargin(worstMargin: 0.9, effectiveMargin: 0.9,
+                                            minFeatureViolations: 952, diagnosis: nil))
     }
 
     func testMinFeatureViolationsDoNotBlockAcceptance() {

@@ -204,6 +204,178 @@ public struct KeyframeMesh: Equatable, Sendable {
     }
 }
 
+
+/// The core's STRUCTURED explanation of one variant's gate verdict — report.json's
+/// `"diagnosis"` object (handoff 2026-08-02-gate-diagnosis-recommendations).
+///
+/// *** IT EXPLAINS A VERDICT; IT NEVER CARRIES ONE. *** `OptimizeVariant.accepted`
+/// and `worstCaseMargin` are the gate's, and this was written from them.
+///
+/// WHY IT EXISTS. A real run (fingerprint 9f6738726016, WallMount bracket) told the
+/// user "the strongest variant's worst-case stress margin was 0.00× — try a stronger
+/// material, a coarser resolution, or a lighter load." The 0.00 was a max over an
+/// EMPTY array; the part's own worst case was 2.78× — nearly 2× the 1.5 requirement —
+/// and what rejected it was the f^1.5 infill knockdown at 35% infill (2.78 × 0.35^1.5
+/// = 0.58). The material was fine and the resolution was irrelevant.
+public struct GateDiagnosis: Equatable, Sendable {
+    /// Which term BINDS. Exactly one, decided by the core from the gate's own
+    /// arithmetic. `.knockdown` is the motivating case: the part clears the
+    /// requirement and the sparse-infill knockdown takes it under.
+    public enum Term: String, Sendable {
+        case none, loadPath = "load_path", inPlane = "in_plane"
+        case interlayer, knockdown, minFeature = "min_feature"
+    }
+
+    /// One change the core PRICED THROUGH THE REAL GATE and confirmed passes.
+    /// A candidate that did not pass was dropped, never emitted — so anything
+    /// here is a measurement, not a suggestion.
+    public struct Recommendation: Equatable, Sendable {
+        public let lever: String          // "infill", "material", "build_orientation", ...
+        public let parameter: String      // "infill_percent"
+        public let currentValue: Double
+        public let proposedValue: Double
+        public let proposedLabel: String  // "67%", "PA12", "(0.000, 0.000, 1.000)"
+        /// The gate's OWN number under this proposal, against the SAME requirement
+        /// the verdict used. `marginAtProposal >= marginRequired` on every emitted row.
+        public let marginAtProposal: Double
+        public let marginRequired: Double
+        /// True on every gate-priced row. The one lever that sets it false is
+        /// `resolution`, whose quantity is the §7 V3 min-feature count rather than
+        /// the stress margin; it states its own criterion in `note`.
+        public let verifiedThroughGate: Bool
+        /// This number divides by the material's z_knockdown, which is a seeded,
+        /// human-tuned constant with no measured source. When true, `provenance`
+        /// must be shown WITH the number.
+        public let inheritsUnsourcedZKnockdown: Bool
+        public let provenance: String
+        public let note: String
+
+        public init(lever: String, parameter: String, currentValue: Double,
+                    proposedValue: Double, proposedLabel: String,
+                    marginAtProposal: Double, marginRequired: Double,
+                    verifiedThroughGate: Bool,
+                    inheritsUnsourcedZKnockdown: Bool, provenance: String,
+                    note: String) {
+            self.lever = lever
+            self.parameter = parameter
+            self.currentValue = currentValue
+            self.proposedValue = proposedValue
+            self.proposedLabel = proposedLabel
+            self.marginAtProposal = marginAtProposal
+            self.marginRequired = marginRequired
+            self.verifiedThroughGate = verifiedThroughGate
+            self.inheritsUnsourcedZKnockdown = inheritsUnsourcedZKnockdown
+            self.provenance = provenance
+            self.note = note
+        }
+    }
+
+    public let binding: Term
+    public let bindingValue: Double
+    public let requiredValue: Double
+    public let ratio: Double
+    /// The part's OWN worst-case margin, before the sparse-infill knockdown.
+    public let marginWorstCaseRaw: Double
+    public let marginInPlaneRaw: Double
+    public let marginInterlayerRaw: Double
+    /// What the gate actually compared. Differs from `marginWorstCaseRaw` by the
+    /// knockdown — 4.8× on the motivating run — and only one of them explains a
+    /// refusal, which is why both are always carried.
+    public let marginEffective: Double
+    public let knockdownFactor: Double
+    public let infillPercent: Double
+    public let minFeatureViolations: Int
+    public let inheritsUnsourcedZKnockdown: Bool
+    public let provenance: String
+    /// No admissible print setting clears the gate. `noFixReason` then names the
+    /// BINDING PHYSICAL QUANTITY instead of listing things to try.
+    public let noSettingFixesThis: Bool
+    public let noFixReason: String
+    /// On an ACCEPTED part: the lowest infill that still passes ("passes at 35%;
+    /// would still pass at 22%"). nil when it was not computed.
+    public let headroomMinInfillPercent: Double?
+    public let recommendations: [Recommendation]
+
+    public init(binding: Term, bindingValue: Double, requiredValue: Double,
+                ratio: Double, marginWorstCaseRaw: Double, marginInPlaneRaw: Double,
+                marginInterlayerRaw: Double, marginEffective: Double,
+                knockdownFactor: Double, infillPercent: Double,
+                minFeatureViolations: Int, inheritsUnsourcedZKnockdown: Bool,
+                provenance: String, noSettingFixesThis: Bool, noFixReason: String,
+                headroomMinInfillPercent: Double?,
+                recommendations: [Recommendation]) {
+        self.binding = binding
+        self.bindingValue = bindingValue
+        self.requiredValue = requiredValue
+        self.ratio = ratio
+        self.marginWorstCaseRaw = marginWorstCaseRaw
+        self.marginInPlaneRaw = marginInPlaneRaw
+        self.marginInterlayerRaw = marginInterlayerRaw
+        self.marginEffective = marginEffective
+        self.knockdownFactor = knockdownFactor
+        self.infillPercent = infillPercent
+        self.minFeatureViolations = minFeatureViolations
+        self.inheritsUnsourcedZKnockdown = inheritsUnsourcedZKnockdown
+        self.provenance = provenance
+        self.noSettingFixesThis = noSettingFixesThis
+        self.noFixReason = noFixReason
+        self.headroomMinInfillPercent = headroomMinInfillPercent
+        self.recommendations = recommendations
+    }
+
+    /// THE ONE decoder, for both sources: a LAN run's report.json variant object and
+    /// the on-device bridge's per-variant `diagnosis_json`. Both are the core's own
+    /// emitter output, so one shape and one reader.
+    public static func decode(_ o: [String: Any]) -> GateDiagnosis? {
+        guard let term = o["binding_term"] as? String,
+              let binding = Term(rawValue: term) else { return nil }
+        func num(_ k: String) -> Double { (o[k] as? Double) ?? 0 }
+        let recs: [Recommendation] = (o["recommendations"] as? [[String: Any]] ?? [])
+            .map { r in
+                Recommendation(
+                    lever: r["lever"] as? String ?? "",
+                    parameter: r["parameter"] as? String ?? "",
+                    currentValue: r["current_value"] as? Double ?? 0,
+                    proposedValue: r["proposed_value"] as? Double ?? 0,
+                    proposedLabel: r["proposed_label"] as? String ?? "",
+                    marginAtProposal: r["margin_effective_at_proposal"] as? Double ?? 0,
+                    marginRequired: r["margin_required"] as? Double ?? 0,
+                    verifiedThroughGate: r["verified_through_gate"] as? Bool ?? false,
+                    inheritsUnsourcedZKnockdown:
+                        r["inherits_unsourced_z_knockdown"] as? Bool ?? false,
+                    provenance: r["provenance"] as? String ?? "",
+                    note: r["note"] as? String ?? "")
+            }
+        return GateDiagnosis(
+            binding: binding,
+            bindingValue: num("binding_value"),
+            requiredValue: num("required_value"),
+            ratio: num("ratio"),
+            marginWorstCaseRaw: num("margin_worst_case_raw"),
+            marginInPlaneRaw: num("margin_in_plane_raw"),
+            marginInterlayerRaw: num("margin_interlayer_raw"),
+            marginEffective: num("margin_effective"),
+            knockdownFactor: num("knockdown_factor"),
+            infillPercent: num("infill_percent"),
+            minFeatureViolations: o["min_feature_violations"] as? Int ?? 0,
+            inheritsUnsourcedZKnockdown:
+                o["inherits_unsourced_z_knockdown"] as? Bool ?? false,
+            provenance: o["provenance"] as? String ?? "",
+            noSettingFixesThis: o["no_setting_fixes_this"] as? Bool ?? false,
+            noFixReason: o["no_fix_reason"] as? String ?? "",
+            headroomMinInfillPercent: o["headroom_min_infill_percent"] as? Double,
+            recommendations: recs)
+    }
+
+    /// Decode from the bridge's raw JSON string (empty / malformed -> nil).
+    public static func decode(json: String) -> GateDiagnosis? {
+        guard !json.isEmpty, let data = json.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data),
+              let dict = obj as? [String: Any] else { return nil }
+        return decode(dict)
+    }
+}
+
 /// One evaluated volume-fraction rung of a minimize_plastic run.
 public struct OptimizeVariant {
     public let requestedVolumeFraction: Double
@@ -264,6 +436,10 @@ public struct OptimizeVariant {
     /// Optimization-history keyframes (playback): the isosurface from ~solid (first)
     /// to optimized (last). Empty when playback capture is off.
     public let keyframeMeshes: [KeyframeMesh]
+    /// WHY this rung's verdict is what it is (handoff 2026-08-02-gate-diagnosis-
+    /// recommendations). nil when the run did not arm the diagnosis. It EXPLAINS
+    /// `accepted` / `worstCaseMargin` above and never contradicts them.
+    public let diagnosis: GateDiagnosis?
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 printedFraction: Double? = nil,
@@ -275,7 +451,8 @@ public struct OptimizeVariant {
                 interlayerMargin: Double = 0, meshVertices: [Float] = [],
                 meshIndices: [Int32] = [], vonMisesField: [Float] = [],
                 displacementField: [Float] = [], stressTensorField: [Float] = [],
-                keyframeMeshes: [KeyframeMesh] = []) {
+                keyframeMeshes: [KeyframeMesh] = [],
+                diagnosis: GateDiagnosis? = nil) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         // printedFraction defaults to achievedVolumeFraction: on the app the two are
@@ -301,6 +478,7 @@ public struct OptimizeVariant {
         self.displacementField = displacementField
         self.stressTensorField = stressTensorField
         self.keyframeMeshes = keyframeMeshes
+        self.diagnosis = diagnosis
     }
 }
 
@@ -1255,7 +1433,11 @@ public enum TopOptKit {
                 vonMisesField: Array(v.von_mises_field),
                 displacementField: Array(v.displacement_field),
                 stressTensorField: Array(v.stress_tensor_field),
-                keyframeMeshes: reconstructKeyframes(v)))
+                keyframeMeshes: reconstructKeyframes(v),
+                // WHY this rung gated as it did — the core's own diagnosis object
+                // (handoff 2026-08-02-gate-diagnosis-recommendations). nil when the
+                // run did not arm it, which is every pre-diagnosis run.
+                diagnosis: GateDiagnosis.decode(json: String(v.diagnosis_json))))
         }
         // Handoff 100 — the clearance diagnostics (parallel arrays), for honest results.
         let cFaces = Array(raw.clearance_face_ids)

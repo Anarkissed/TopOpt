@@ -21,6 +21,7 @@
 
 #include "topopt/analyze.hpp"
 #include "topopt/fea.hpp"
+#include "topopt/gate_diagnosis_eval.hpp"  // diagnose_gate (post-pass, verdict-free)
 #include "topopt/orient.hpp"
 #include "topopt/production.hpp"  // knockdown_spec_for
 #include "topopt/warm_start.hpp"
@@ -1323,6 +1324,83 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     if (!variant.accepted)
       vr.rejection_reason =
           load_path_ok ? kMarginBelowRequiredReason : kLoadPathNotConnectedReason;
+
+    // ── WHY (handoff 2026-08-02-gate-diagnosis-recommendations) ───────────────
+    // A POST-PASS, exactly like the build-orientation ranking: it runs AFTER
+    // `variant.accepted` / `vr.margin_effective` above were sealed, it reads
+    // them as INPUTS, and it writes ONLY to `vr.diagnosis`. It cannot move a
+    // verdict — there is no assignment back to any gate field below this line.
+    //
+    // Every recommendation it emits was priced by gate_margin_effective, the
+    // same expression the verdict came from. Off by default; production arms it
+    // (configure_production_options), and with it off `vr.diagnosis.evaluated`
+    // stays false and report.json is byte-for-byte what it was.
+    if (options.gate_diagnosis) {
+      GateDiagnosisInputs gd;
+      gd.accepted = variant.accepted;
+      gd.load_path_ok = load_path_ok;
+      gd.margin_stop = options.margin_stop;
+      gd.margin_effective = margin_effective;
+      gd.margin = margin;
+      gd.material = material;
+      gd.material_name = material_name;
+      gd.knockdown = knockdown;
+      gd.max_von_mises = max_von_mises;
+      gd.max_von_mises_effective = max_von_mises;  // default posture: unused
+      gd.max_interlayer = max_interlayer;
+      gd.infill_percent = options.infill_percent;
+      gd.wall_loops = options.wall_loops;
+      gd.wall_line_width_mm = options.wall_line_width_mm;
+      gd.wall_line_width_outer_mm = options.wall_line_width_outer_mm;
+      gd.min_feature_violations = vr.min_feature_violations;
+      // 0 disables the min-feature binding entirely, which is the right reading
+      // of an absent rules section ("no warning is configured").
+      gd.min_feature_warning_threshold =
+          rules.min_feature_warning.message_template.empty()
+              ? 0
+              : rules.min_feature_warning.threshold;
+      gd.voxel_spacing_mm = G.spacing;
+      gd.orientation = variant.build_orientation.evaluated
+                           ? &variant.build_orientation
+                           : nullptr;
+      gd.materials = options.material_catalog;
+      // A material swap only leaves the solved stress field alone when the
+      // modulus is the ONLY thing that moves — true for a FORCE-driven linear
+      // solve. A prescribed NON-ZERO displacement breaks that cancellation, so
+      // the diagnosis is told and refuses to recommend a material swap.
+      gd.poisson_locked = true;
+      for (const DirichletBC& bc : bcs)
+        if (bc.value != 0.0) { gd.poisson_locked = false; break; }
+      gd.this_volume_fraction = vr.volume_fraction;
+      for (const MinimizePlasticVariant& ev : result.evaluated) {
+        GateSolvedRung r;
+        r.volume_fraction = ev.report.volume_fraction;
+        r.margin_effective = ev.report.margin_effective;
+        r.accepted = ev.accepted;
+        gd.solved_rungs.push_back(r);
+      }
+      // The width-aware posture's per-voxel population, so a candidate infill /
+      // wall ring can be repriced exactly. Empty on the default (production)
+      // path — analyze_fixed_design only fills them when width_aware is armed.
+      gd.printed_von_mises = std::move(fda.gate_printed_von_mises);
+      gd.printed_member_width_mm = std::move(fda.gate_printed_member_width_mm);
+      // The RESOLUTION lever's one input. Measured only when the min-feature term
+      // can actually bind (the strength gate passed and a warning is configured
+      // and tripped) — the distance transform is O(cap · voxels) and no other
+      // lever reads it, so no run pays for it speculatively.
+      if (variant.accepted && gd.min_feature_warning_threshold > 0 &&
+          vr.min_feature_violations >= gd.min_feature_warning_threshold) {
+        const std::vector<double> thick =
+            local_member_thickness_mm(G, rho, kIso, 32);
+        double thinnest = std::numeric_limits<double>::infinity();
+        for (std::size_t e = 0; e < thick.size(); ++e)
+          if (rho[e] > kIso && thick[e] > 0.0 && thick[e] < thinnest)
+            thinnest = thick[e];
+        if (std::isfinite(thinnest)) gd.min_member_thickness_mm = thinnest;
+      }
+      vr.diagnosis = diagnose_gate(gd);
+    }
+
     result.evaluated.push_back(std::move(variant));
     result.rung_infeasible.push_back(0);  // handoff 131 (aligned with `evaluated`)
     record_rung_convergence(false, 0, 0.0);  // analysed rung: solves converged
