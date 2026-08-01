@@ -1,0 +1,52 @@
+## STAG — does the SHIPPED configuration stagnate on this fixture?
+   fixture: arm=24 span=24 ny=6 t=6 vf=0.15 develop_iters=40 hole=0.35
+   [cache hit /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/matrix-free-gene-phase-1-e249cd/evidence/2026-08-02-multigrid-component-sweep/mg_stag_a24_s24_n6_t6_vf0.150_i40_h0.350.bin: 40 trajectory snapshots]
+   solved grid 48x32x48 (73728 vox, 73728 solid), 40 trajectory snapshots, develop wall 0.0 s
+
+  iter  built  lvls   cycles  carried   build_s   cycle_s  fallbk_s   total_s  latched
+------------------------------------------------------------------------------------------
+     0      1     3       66      YES      1.05      2.39      0.00      3.45         
+     1      1     3       72      YES      1.12      2.00      0.00      3.13         
+     2      1     3       65      YES      0.91      1.34      0.00      2.25         
+     3      1     3       73      YES      0.96      1.50      0.00      2.47         
+     4      1     3       65      YES      0.89      1.27      0.00      2.16         
+     5      1     3       69      YES      1.02      3.26      0.00      4.29         
+     6      1     3       69      YES      1.42      2.54      0.00      3.96         
+     7      1     3       65      YES      1.59      2.67      0.00      4.26         
+     8      1     3       72      YES      1.05      2.01      0.00      3.06         
+     9      1     3       66      YES      0.84      1.39      0.00      2.23         
+    10      1     3       65      YES      1.01      1.29      0.00      2.31         
+    11      1     3       73      YES      0.87      1.56      0.00      2.43         
+    12      1     3       65      YES      0.91      1.32      0.00      2.24         
+    13      1     3       66      YES      0.91      1.46      0.00      2.38         
+    14      1     3       73      YES      0.93      1.55      0.00      2.48         
+    15      1     3       65      YES      0.87      1.31      0.00      2.19         
+    16      1     3       72      YES      0.90      1.48      0.00      2.39         
+    17      1     3       69      YES      0.92      1.50      0.00      2.43         
+    18      1     3       72      YES      0.96      1.47      0.00      2.43         
+    19      1     3       69      YES      0.94      1.44      0.00      2.38         
+    20      1     3       69      YES      0.90      1.44      0.00      2.35         
+    21      1     3       72      YES      0.94      1.60      0.00      2.55         
+    22      1     3       69      YES      0.93      1.41      0.00      2.35         
+    23      1     3       72      YES      0.92      1.56      0.00      2.48         
+    24      1     3       64      YES      0.94      1.34      0.00      2.28         
+    25      1     3       65      YES      0.86      1.44      0.00      2.30         
+    26      1     3       69      YES      0.93      1.36      0.00      2.29         
+    27      1     3       65      YES      0.86      1.36      0.00      2.22         
+    28      1     3       72      YES      0.87      1.51      0.00      2.38         
+    29      1     3       69      YES      0.85      1.34      0.00      2.20         
+    30      1     3       79      YES      0.90      1.61      0.00      2.52         
+    31      1     3       65      YES      0.85      1.35      0.00      2.21         
+    32      1     3       66      YES      0.86      1.40      0.00      2.26         
+    33      1     3       72      YES      0.88      1.56      0.00      2.45         
+    34      1     3       66      YES      0.94      2.18      0.00      3.12         
+    35      1     3       66      YES      0.88      1.53      0.00      2.41         
+    36      1     3       69      YES      0.91      1.50      0.00      2.42         
+    37      1     3       65      YES      0.96      1.55      0.00      2.52         
+    38      1     3       72      YES      0.93      1.59      0.00      2.52         
+    39      1     3       72      YES      0.86      1.51      0.00      2.37         
+
+   SHIPPED over 40 design iterations: carried 40, STAGNATED 0, latch never fired
+   wall: hierarchy build 38.0 s | V-cycle loop 64.9 s | Jacobi fallback 0.0 s | TOTAL 103.1 s
+   stagnations per 50 design iterations: 0.0
+   => does NOT stagnate on this fixture (wrong fixture for the sweep)

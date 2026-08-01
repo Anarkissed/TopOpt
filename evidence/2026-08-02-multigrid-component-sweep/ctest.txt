@@ -1,0 +1,35 @@
+      Start 82: segment_vs_step
+81/94 Test #82: segment_vs_step ..................   Passed    0.35 sec
+      Start 83: face_tag
+82/94 Test #83: face_tag .........................   Passed    0.42 sec
+      Start 84: mask_face
+83/94 Test #84: mask_face ........................   Passed    0.27 sec
+      Start 85: cli_demo
+84/94 Test #80: stress ...........................   Passed   42.77 sec
+      Start 86: production_parity
+85/94 Test #86: production_parity ................   Passed   55.00 sec
+      Start 87: clearance_parity
+86/94 Test #87: clearance_parity .................   Passed   54.30 sec
+      Start 88: face_protection_parity
+87/94 Test #88: face_protection_parity ...........   Passed    7.68 sec
+      Start 89: loadcase_small_face
+88/94 Test #89: loadcase_small_face ..............   Passed    0.31 sec
+      Start 90: loadcase_resolution
+89/94 Test #90: loadcase_resolution ..............   Passed    0.31 sec
+      Start 91: loadcase_analyze
+90/94 Test #91: loadcase_analyze .................   Passed    2.13 sec
+      Start 92: lattice_hookup
+91/94 Test #92: lattice_hookup ...................   Passed   20.99 sec
+      Start 93: lattice_variant
+92/94 Test #93: lattice_variant ..................   Passed   25.32 sec
+      Start 94: mesh_job
+93/94 Test #94: mesh_job .........................   Passed   13.11 sec
+94/94 Test #85: cli_demo .........................   Passed  617.68 sec
+
+99% tests passed, 1 tests failed out of 94
+
+Total Test time (real) = 1502.57 sec
+
+The following tests FAILED:
+	 41 - build_direction (Failed)
+Errors while running CTest

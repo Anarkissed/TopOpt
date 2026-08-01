@@ -1,0 +1,38 @@
+   fixture: PR 273's ladder32 reproduction — /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/matrix-free-gene-phase-1-e249cd/core/tests/fixtures/demo/l-bracket.step @ resolution 32
+   [cache hit /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/matrix-free-gene-phase-1-e249cd/evidence/2026-08-02-multigrid-component-sweep/mg_stepbox_r32.bin: 80 trajectory snapshots]
+## SWEEP on the stagnating fixture: grid 48x32x40 (61440 vox)
+   hierarchy geometry (upper-bound DOFs = 3 x nodes; the actual
+   active count is lower where DOFs are fixed or void):
+      level 0:  48x 32x 40 elems, <= 198891 DOFs  (matrix-free; never factored)
+      level 1:  24x 16x 20 elems, <= 26775 DOFs
+      level 2:  12x  8x 10 elems, <= 3861 DOFs
+      level 3:   6x  4x  5 elems, <= 630 DOFs
+   harness direct-solve budget: 40000 DOFs (MG_MAX_DIRECT)
+   sweeping design-iteration snapshot 2 of 80
+   building the EXACT reference field (matrix-free Jacobi-CG)...
+   reference: 3636 Jacobi-CG iterations, 16.31 s, max|u| = 4.4905e+04
+   [sweep start host load average: 29.04 50.67 82.28]
+   2 repeats, ROUND-ROBIN across the grid (shared host: the minimum wall is the least-contaminated sample)
+   [round 1/2]
+   [round 2/2]
+
+configuration                                  lvls  cycles  carried    matvecs  build_s  cycle_s  TOTAL_s   spread  rel |du|
+----------------------------------------------------------------------------------------------------------------------------
+SHIPPED (4-ish lvl, V, 1+1, scalar w0.6)          0     300     stag       4841    0.545    6.568   27.449       5%  0.00e+00
+A: levels=2                                       0     300     stag       4841   10.128   15.013   42.705      24%  0.00e+00  0.64x LOSS
+A: levels=3                                       0     300     stag       4841    0.605    5.788   25.991       6%  0.00e+00  1.06x 
+A: levels=4                                       0     300     stag       4841    0.463    6.081   23.056      30%  0.00e+00  1.19x 
+A: levels=5                                       0     300     stag       4841    0.489    5.470   27.004       5%  0.00e+00  1.02x 
+A: levels=MAX (coarsen until an axis blocks)      0     300     stag       4841    0.501    5.885   23.267       3%  0.00e+00  1.18x 
+B: sweeps=2+2 uniform                             0     300     stag       5443    0.524    8.311   30.050      10%  0.00e+00  0.91x LOSS
+B: sweeps=3+3 uniform                             0     300     stag       6045    0.741   12.487   31.638      23%  0.00e+00  0.87x LOSS
+B: sweeps=1+1 fine, +1 COARSE-ONLY                0     300     stag       4841    0.503    5.491   21.140      20%  0.00e+00  1.30x 
+B: sweeps=1+1 fine, +2 COARSE-ONLY                0     300     stag       4841    0.536    7.989   27.259      19%  0.00e+00  1.01x 
+C: W-cycle (gamma=2)                              0     300     stag       5142    0.504    8.363   30.628      22%  0.00e+00  0.90x LOSS
+D: POINT-BLOCK Jacobi w0.5 (Peetz & Elbanna)      0     300     stag       4841    0.662    5.915   21.682      37%  0.00e+00  1.27x 
+D: point-block w0.6 (weight held at shipped)      0     300     stag       4841    0.745    4.970   21.515      12%  0.00e+00  1.28x 
+
+   E. OMEGA skipped: NO configuration carried multigrid on this fixture, so there is no A-D winner to refine.
+   [sweep end host load average: 31.70 34.91 52.71]
+
+   AB7 EXACTNESS: worst relative displacement deviation across every CARRYING cell = 0.000e+00 (bar: solver tolerance 1.0e-08)
