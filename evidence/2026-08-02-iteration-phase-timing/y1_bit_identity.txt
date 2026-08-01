@@ -1,0 +1,30 @@
+== Y1 (behaviour unchanged) + Y6 (determinism) ==
+
+Job: core/tests/fixtures/demo/job.json with mesh_format stl (the 48-scale
+gate fixture, 3 rungs, 180 optimizer iterations, multigrid carried).
+
+  OFF  = topopt-cli built from the stashed (pre-instrumentation) tree in a
+         separate build dir, same compiler and CMAKE_BUILD_TYPE=Release.
+  ON   = topopt-cli built from this branch.
+  ON2  = a second run of the SAME instrumented binary (determinism).
+
+file                     OFF                ON                 ON2                ON==OFF      ON==ON2
+report.json              02e16398e40b4507   02e16398e40b4507   02e16398e40b4507   IDENTICAL    IDENTICAL
+fields.bin               a5841ecf74b584bb   a5841ecf74b584bb   a5841ecf74b584bb   IDENTICAL    IDENTICAL
+build_orientation.json   593a815b3f6feb8a   018d074914875ea6   cdeeab48195a1279   DIFFERS      DIFFERS
+variant_070.stl          88bf4e6297b415a2   88bf4e6297b415a2   88bf4e6297b415a2   IDENTICAL    IDENTICAL
+variant_050.stl          c021eba366651005   c021eba366651005   c021eba366651005   IDENTICAL    IDENTICAL
+variant_030.stl          cd93581751a1eade   cd93581751a1eade   cd93581751a1eade   IDENTICAL    IDENTICAL
+
+report.json, fields.bin and all three exported meshes are BIT-IDENTICAL
+with the instrumentation on, and identical again on a rerun.
+
+build_orientation.json differs on EVERY pair, including ON vs ON2. It is
+PRE-EXISTING non-determinism unrelated to this change: the file records the
+orientation sweep's own wall time. The only differing keys:
+80,81c80,81
+<     "sweep_seconds": 0.004721584,
+<     "strut_axis_measure_seconds": 0,
+---
+>     "sweep_seconds": 0.004478417,
+>     "strut_axis_measure_seconds": 4.2e-08,

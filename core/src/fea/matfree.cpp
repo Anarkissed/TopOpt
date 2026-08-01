@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <condition_variable>
 #include <cstddef>
@@ -581,7 +582,18 @@ void mf_apply_cubic_add(const std::vector<MfCubElem>& elems,
   }
 }
 
+// Process-global operator-apply counter (task 2026-08-02-iteration-phase-
+// timing). Defined here, beside the ONE apply every matrix-free caller routes
+// through, so no caller can add work the counter misses. Plain long long, not
+// atomic: a production run drives its solves from one thread (the same
+// assumption the Krylov recycle space and the GenEO basis already make) and an
+// atomic increment on the hot apply would be a cost the instrument imposes on
+// what it measures. The apply's own worker pool is unaffected — the bump happens
+// once per apply, outside the threaded kernel.
+long long g_mf_matvecs = 0;
+
 void MatfreeReduced::apply_kgg_raw(const double* xg, double* yg) const {
+  ++g_mf_matvecs;
   std::fill(xfull.begin(), xfull.end(), 0.0);
   for (int k = 0; k < ng; ++k)
     xfull[static_cast<std::size_t>(kept_global[static_cast<std::size_t>(k)])] =
@@ -630,6 +642,7 @@ void MatfreeReduced::apply_kgg_raw_f32(const float* xg, float* yg) const {
   if (has_cubic)
     throw std::logic_error(
         "MatfreeReduced::apply_kgg_raw_f32: FP32 apply has no cubic pass");
+  ++g_mf_matvecs;  // the FP32 V-cycle apply is real operator work too
   if (xfull_f.size() != static_cast<std::size_t>(ndof)) {
     xfull_f.assign(static_cast<std::size_t>(ndof), 0.0f);
     yfull_f.assign(static_cast<std::size_t>(ndof), 0.0f);
@@ -827,7 +840,18 @@ MatfreeReduced mf_build_reduced(const VoxelGrid& grid, double youngs_modulus,
 // zero) and holds the solution on the kept DOFs.
 void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
                  std::vector<double>& x, int& iters_out, double& error_out,
-                 bool& converged_out, RecycleReport* rec, const MfSolveContext* ctx) {
+                 bool& converged_out, RecycleReport* rec, const MfSolveContext* ctx,
+                 MfCgTimes* times) {
+  // Phase timing (task 2026-08-02-iteration-phase-timing). `times == nullptr`
+  // (every pre-existing caller) skips every clock read. `t_cg0` marks where the
+  // recurrence's own clock starts; the GenEO / recycle helpers below SUBTRACT
+  // their measured spans from it so the phases partition the solve rather than
+  // double-counting it.
+  const bool timed = times != nullptr;
+  auto now_ms = [&]() { return timed ? mf_steady_ms() : 0.0; };
+  const double t_solve0 = now_ms();
+  double t_geneo_setup = 0.0, t_geneo_apply = 0.0, t_recycle = 0.0;
+
   const int n = m.ng;
   const double tol = tolerance;
   const int maxIters = (max_iterations > 0) ? max_iterations : 2 * n;
@@ -852,10 +876,34 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   // unconverged pays the eigensolve (so a healthy fallback never does). Like
   // recycling and the hook, the correction is SPD-additive: it changes the
   // ITERATION COUNT, never the converged field or the stopping test.
+  // Charge one span to a phase accumulator. Untimed (`times == nullptr`) it is
+  // exactly the bare call — same order, same arithmetic, no clock read.
+  auto span = [&](double& acc, auto&& fn) {
+    if (!timed) {
+      fn();
+      return;
+    }
+    const double t0 = mf_steady_ms();
+    fn();
+    acc += mf_steady_ms() - t0;
+  };
+  // Write the phase split at EVERY exit (this function has three early returns).
+  // `cg_ms` is the residue: the whole solve minus the spans charged elsewhere,
+  // so the four fields partition the solve's wall time by construction and no
+  // phase can be silently dropped by a future edit adding another return.
+  auto write_times = [&]() {
+    if (!timed) return;
+    times->geneo_setup_ms = t_geneo_setup;
+    times->geneo_apply_ms = t_geneo_apply;
+    times->recycle_ms = t_recycle;
+    times->cg_ms = (mf_steady_ms() - t_solve0) - t_geneo_setup - t_geneo_apply -
+                   t_recycle;
+  };
+
   bool geneo_active = false;
   bool geneo_pending = false;
   if (ctx != nullptr && geneo_enabled()) {
-    geneo_active = geneo_solve_begin(m, *ctx);
+    span(t_geneo_setup, [&] { geneo_active = geneo_solve_begin(m, *ctx); });
     geneo_pending = !geneo_active;
   }
 
@@ -872,6 +920,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     iters_out = 0;
     error_out = 0.0;
     converged_out = true;
+    write_times();
     return;
   }
   const double considerAsZero = std::numeric_limits<double>::min();
@@ -880,6 +929,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
 
   // Krylov recycling (handoff 133): the SPD additive coarse correction wrapping
   // the Jacobi preconditioner. Inert (and allocation-free) when recycling is off.
+  const double t_rec0 = now_ms();
   RecycleSession recycle(n, m.invdiag.data(),
                          [&m](const double* xin, double* yout) {
                            m.apply_kgg_raw(xin, yout);
@@ -888,6 +938,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     rec->dim = recycle.dim();
     rec->setup_matvecs += recycle.setup_matvecs();
   }
+  if (timed) t_recycle += mf_steady_ms() - t_rec0;
 
   std::vector<double> residual(static_cast<std::size_t>(n));
   std::vector<double> tmp(static_cast<std::size_t>(n));
@@ -901,6 +952,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     iters_out = 0;
     error_out = std::sqrt(residualNorm2 / rhsNorm2);
     converged_out = (error_out <= tol);
+    write_times();
     return;
   }
 
@@ -909,8 +961,10 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   for (int i = 0; i < n; ++i)  // p = M^-1 residual
     p[static_cast<std::size_t>(i)] =
         m.invdiag[static_cast<std::size_t>(i)] * residual[static_cast<std::size_t>(i)];
-  recycle.augment(residual.data(), p.data());  // + U E^-1 U^T residual
-  if (geneo_active) geneo_apply(residual.data(), p.data());  // + V (V^T A V)^-1 V^T r
+  span(t_recycle, [&] { recycle.augment(residual.data(), p.data()); });  // + U E^-1 U^T r
+  if (geneo_active)
+    span(t_geneo_apply,
+         [&] { geneo_apply(residual.data(), p.data()); });  // + V (V^T A V)^-1 V^T r
   if (hook) hook(m, *ctx, residual.data(), p.data());  // + two-level GenEO correction
   double absNew = dot(residual, p);
 
@@ -919,7 +973,7 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     m.apply_kgg(p, tmp);  // tmp = K p
     // Hand CG's own direction and its ALREADY-computed operator image to the
     // recycler's decimating sample. No extra matvec; no-op off a harvest solve.
-    recycle.observe(i, p.data(), tmp.data());
+    span(t_recycle, [&] { recycle.observe(i, p.data(), tmp.data()); });
     const double alpha = absNew / dot(p, tmp);
     for (int q = 0; q < n; ++q) {
       x[static_cast<std::size_t>(q)] += alpha * p[static_cast<std::size_t>(q)];
@@ -935,13 +989,15 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     // iteration counter keeps running (the burned iterations are charged).
     if (geneo_pending && i + 1 >= kGeneoTriggerIters) {
       geneo_pending = false;
-      if (geneo_build_now(m, *ctx, i + 1)) {
+      bool built = false;
+      span(t_geneo_setup, [&] { built = geneo_build_now(m, *ctx, i + 1); });
+      if (built) {
         geneo_active = true;
         for (int q = 0; q < n; ++q)
           z[static_cast<std::size_t>(q)] = m.invdiag[static_cast<std::size_t>(q)] *
                                            residual[static_cast<std::size_t>(q)];
-        recycle.augment(residual.data(), z.data());
-        geneo_apply(residual.data(), z.data());
+        span(t_recycle, [&] { recycle.augment(residual.data(), z.data()); });
+        span(t_geneo_apply, [&] { geneo_apply(residual.data(), z.data()); });
         if (hook) hook(m, *ctx, residual.data(), z.data());
         absNew = dot(residual, z);
         for (int q = 0; q < n; ++q)
@@ -953,8 +1009,10 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     for (int q = 0; q < n; ++q)
       z[static_cast<std::size_t>(q)] =
           m.invdiag[static_cast<std::size_t>(q)] * residual[static_cast<std::size_t>(q)];
-    recycle.augment(residual.data(), z.data());  // + U E^-1 U^T residual
-    if (geneo_active) geneo_apply(residual.data(), z.data());  // + V (V^T A V)^-1 V^T r
+    span(t_recycle, [&] { recycle.augment(residual.data(), z.data()); });  // + U E^-1 U^T r
+    if (geneo_active)
+      span(t_geneo_apply,
+           [&] { geneo_apply(residual.data(), z.data()); });  // + V (V^T A V)^-1 V^T r
     if (hook) hook(m, *ctx, residual.data(), z.data());  // + two-level GenEO correction
     const double absOld = absNew;
     absNew = dot(residual, z);
@@ -971,11 +1029,13 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     if (!std::isfinite(x[static_cast<std::size_t>(q)])) { finite = false; break; }
   converged_out = (error_out <= tol) && finite;
   // GenEO degradation bookkeeping (inert when the deflation never engaged).
-  if (ctx != nullptr && geneo_enabled()) geneo_solve_end(i, converged_out);
+  if (ctx != nullptr && geneo_enabled())
+    span(t_geneo_setup, [&] { geneo_solve_end(i, converged_out); });
   // Rebuild the carried basis ONLY from a solve that actually reached tolerance:
   // a stagnated or broken-down solve's directions are not evidence about the
   // operator's slow modes.
-  if (converged_out) recycle.commit();
+  if (converged_out) span(t_recycle, [&] { recycle.commit(); });
+  write_times();
 }
 
 }  // namespace fea_detail
@@ -1015,12 +1075,19 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
                                   const std::vector<double>* elem_youngs,
                                   const FeaSolution* initial_guess,
                                   const std::vector<char>* active_mask) {
+  // Per-solve phase timing (task 2026-08-02-iteration-phase-timing). The
+  // reduced-system build is a real phase of the solve — on this stateless path
+  // it is paid on EVERY call — so it is timed separately from the recurrence.
+  const double t_entry = fea_detail::mf_steady_ms();
+  const long long mv_entry = fea_matvec_count();
   MatfreeReduced m = fea_detail::mf_build_reduced(
       grid, youngs_modulus, poisson, bcs, loads, elem_youngs,
       "fea_solve_cg_matfree", info, active_mask);
+  const double t_built = fea_detail::mf_steady_ms();
 
   CgInfo diag;
   diag.converged = true;  // no free DOFs -> trivially converged
+  diag.t_build_ms = t_built - t_entry;
 
   std::vector<double> u = m.up;  // full field seeded with prescribed values
   if (m.ng > 0) {
@@ -1039,14 +1106,21 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
     pc.elem_youngs = elem_youngs;
     pc.youngs_modulus = youngs_modulus;
     pc.poisson = poisson;
+    fea_detail::MfCgTimes tm;
     fea_detail::mf_cg_solve(m, tolerance, max_iterations, x, diag.iterations,
-                            diag.residual, diag.converged, &rec, &pc);
+                            diag.residual, diag.converged, &rec, &pc, &tm);
     diag.recycle_dim = rec.dim;
     diag.recycle_setup_matvecs = rec.setup_matvecs;
+    diag.t_cg_ms = tm.cg_ms;
+    diag.t_geneo_setup_ms = tm.geneo_setup_ms;
+    diag.t_geneo_apply_ms = tm.geneo_apply_ms;
+    diag.t_recycle_ms = tm.recycle_ms;
     const fea_detail::GeneoReport gr = fea_detail::geneo_last_report();
     diag.geneo_dim = gr.dim;
     diag.geneo_action = gr.action;
     diag.geneo_trigger_burn = gr.trigger_burn;
+    diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
+    diag.matvecs = fea_matvec_count() - mv_entry;
     if (info) *info = diag;
     if (!diag.converged)
       throw SolverNonConvergence(
@@ -1057,6 +1131,8 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
       u[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(k)])] =
           x[static_cast<std::size_t>(k)];
   } else if (info) {
+    diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
+    diag.matvecs = fea_matvec_count() - mv_entry;
     *info = diag;
   }
 
@@ -1066,6 +1142,10 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
 }
 
 }  // namespace
+
+// Operator-apply counter (task 2026-08-02-iteration-phase-timing).
+long long fea_matvec_count() { return fea_detail::g_mf_matvecs; }
+void fea_matvec_count_reset() { fea_detail::g_mf_matvecs = 0; }
 
 std::vector<double> fea_matfree_apply(const VoxelGrid& grid,
                                       double youngs_modulus, double poisson,

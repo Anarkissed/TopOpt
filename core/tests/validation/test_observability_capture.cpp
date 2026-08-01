@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -162,9 +163,7 @@ int main() {
   std::istringstream ss(body);
   std::string header;
   std::getline(ss, header);
-  check(header ==
-            "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,"
-            "cg_multigrid,beta,hier_built,mg_cycles_attempted,infeasible,recycle_dim,active_fraction",
+  check(header == std::string(kIterationCsvHeader),
         "CSV header matches the documented schema");
   std::size_t data_rows = 0;
   int prev_rung = -1, prev_iter = 0;
@@ -200,6 +199,57 @@ int main() {
   }
   check(rows_ok, "every CSV row parses to 12 typed, in-range fields");
   check(data_rows == total_iters, "CSV data row count == total iterations");
+
+  // --- PHASE ACCOUNTING (task 2026-08-02-iteration-phase-timing) -------------
+  // The point of the residual column is that the accounting CLOSES: a reader
+  // must be able to trust that total_ms minus the named phases IS residual_ms,
+  // on real rows produced by a real run, not just in the golden fixture. Also
+  // pinned here: EXACTLY ONE penalized FEA solve per design iteration — the
+  // question "does more than one solve run while only one cg_iters is reported?"
+  // answered on live data, since a second solve would be the whole finding.
+  {
+    std::istringstream ps(body);
+    std::string skip;
+    std::getline(ps, skip);  // header
+    bool acct_ok = true, solves_ok = true, mem_ok = true;
+    std::size_t checked = 0;
+    for (std::string line; std::getline(ps, line);) {
+      if (line.empty()) continue;
+      // Split on commas; the phase block starts at column index 14.
+      std::vector<std::string> f;
+      for (std::size_t b = 0, e; b <= line.size(); b = e + 1) {
+        e = line.find(',', b);
+        if (e == std::string::npos) e = line.size();
+        f.push_back(line.substr(b, e - b));
+      }
+      // 14 legacy + 11 phase + 7 solver-split + 4 counters + 6 memory = 42.
+      if (f.size() != 42) {
+        acct_ok = false;
+        break;
+      }
+      auto d = [&](std::size_t i) { return std::atof(f[i].c_str()); };
+      const double total = d(14), filter = d(16), project = d(17), solve = d(18),
+                   update = d(21), analysis = d(22), observe = d(23),
+                   residual = d(24);
+      const double sum =
+          filter + project + solve + update + analysis + observe + residual;
+      // Every term is a difference of two reads of the SAME steady clock, so
+      // the identity is exact up to the %.3f the CSV prints (7 terms x 0.0005).
+      if (std::fabs(total - sum) > 0.005) acct_ok = false;
+      if (std::atoll(f[32].c_str()) != 1) solves_ok = false;  // fea_solves
+      // Memory columns are either a real measurement (>= 0) or the explicit
+      // "unavailable" sentinel (< 0) — never a fabricated zero from a failed
+      // syscall. peak >= current whenever both were answered.
+      const double rss = d(36), peak = d(37);
+      if (rss >= 0.0 && peak >= 0.0 && peak + 1e-9 < rss) mem_ok = false;
+      ++checked;
+    }
+    check(checked == data_rows && acct_ok,
+          "every row's total_ms == filter+project+solve+update+analysis+"
+          "observe+residual (the accounting closes)");
+    check(solves_ok, "exactly ONE penalized FEA solve per design iteration");
+    check(mem_ok, "peak RSS >= current RSS on every row that answered both");
+  }
 
   // --- snapshots: a boundary per evaluated rung, round-trips within f16 ------
   check(boundaries == static_cast<int>(off.evaluated.size()),

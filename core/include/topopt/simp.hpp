@@ -85,7 +85,25 @@ struct SimpCompliance {
   double compliance = 0.0;          // c = f^T u  (= sum_e E(rho_e) u_e^T K_unit u_e)
   std::vector<double> dcompliance;  // dc/drho_e per voxel, 0 on Empty voxels
   CgInfo cg;                        // solver diagnostics from the penalized solve
+  // Wall milliseconds this call spent in its two phases (task 2026-08-02-
+  // iteration-phase-timing): the LINEAR SOLVE, and the self-adjoint SENSITIVITY
+  // sweep that follows it (compliance + dc/drho over every solid voxel). They
+  // are separated because "the FEA solve" and "the adjoint work" are different
+  // answers to "where did the iteration go", and on this path the adjoint is
+  // free (compliance is self-adjoint) — a fact the CSV should state rather than
+  // leave to be assumed. `cg.t_*_ms` splits the solve further. Pure observation.
+  double t_solve_ms = 0.0;
+  double t_sensitivity_ms = 0.0;
 };
+
+// Count of simp_compliance calls since process start (task 2026-08-02-
+// iteration-phase-timing). Every penalized FEA solve the optimizer, the
+// certification and the recovery paths run passes through simp_compliance
+// exactly once, so the DELTA of this counter across one design iteration IS the
+// number of FEA solves that iteration ran — the question "does more than one
+// solve happen while only one cg_iters is reported?" answered by construction
+// rather than by reading the call graph. Pure observation; nothing reads it back.
+long long simp_compliance_call_count();
 
 // Solve the SIMP-penalized linear-elastic system for the design field `density`
 // (size grid.voxel_count(); Empty-voxel entries are ignored, solid entries are
@@ -594,6 +612,74 @@ double design_discreteness_mnd(const VoxelGrid& grid,
                                const std::vector<double>& density,
                                const DesignMask& mask);
 
+// ── PER-PHASE WALL TIMING of ONE design iteration (task 2026-08-02-iteration-
+// phase-timing). Every field is milliseconds measured with a STEADY clock,
+// except the counters at the bottom.
+//
+// WHY IT EXISTS. iterations.csv carried one wall_ms per iteration — an epoch
+// TIMESTAMP, not a duration — and no breakdown at all. So when a real 128³ run
+// produced twenty consecutive iterations of 407-563 s each whose measured CG
+// work accounted for ~30 s, the question "where does the other ~410 s go?" could
+// not be answered from any artifact on disk. It had to be MEASURED, and this is
+// the measurement.
+//
+// THE POINT IS `residual_ms`. The named phases below are subtracted from the
+// iteration's own wall, and whatever is left is reported as residual. Time going
+// somewhere unnamed is then VISIBLE in the CSV rather than inferred from a
+// subtraction someone has to think of doing.
+//
+// ACCOUNTING, stated exactly, because a partition that quietly leaks is worse
+// than no partition:
+//   total_ms      top of the loop body -> the moment the observe hook is called.
+//   tail_prev_ms  the PREVIOUS iteration's post-observe tail (keyframe, density
+//                 snapshot, plateau/continuation logic, and the caller's own CSV
+//                 write) measured up to the top of THIS body. It is carried on
+//                 this row because the previous row was already written when it
+//                 was spent. Sum(total_ms + tail_prev_ms) is the rung's wall.
+//   residual_ms   total_ms minus filter+project+solve+update+analysis+observe.
+// The solver_* fields are a SUB-split of solve_ms (from CgInfo), not extra terms
+// — adding them to the sum would double-count.
+//
+// Pure observation: no field is read back by any optimizer decision, so a build
+// that fills them converges to a bit-identical design (THE ONE RULE).
+struct IterationPhaseTimes {
+  double total_ms = 0.0;
+  double tail_prev_ms = 0.0;
+  double filter_ms = 0.0;    // density filter (every filter_density call)
+  double project_ms = 0.0;   // Heaviside projection + mask pins
+  double solve_ms = 0.0;     // the penalized solve call, entry to exit
+  double fea_ms = 0.0;       //   ... of which the linear solve
+  double sens_ms = 0.0;      //   ... of which the self-adjoint sensitivity sweep
+  double update_ms = 0.0;    // OC/MMA update: sensitivity filter + volume bisection
+  double analysis_ms = 0.0;  // change, achieved vf, plateau + infeasibility tests
+  double observe_ms = 0.0;   // the progress hook (the observe hook is in the tail)
+  double residual_ms = 0.0;  // UNATTRIBUTED — the column this instrument is for
+  // Sub-split of solve_ms, forwarded from CgInfo (0 on paths that do not run the
+  // phase). geneo_setup_ms is the one that answers the 128³ anomaly: the coarse
+  // operator refresh costs N_t operator applies and moves no iteration counter.
+  double solver_build_ms = 0.0;
+  double solver_mg_build_ms = 0.0;
+  double solver_mg_ms = 0.0;
+  double solver_cg_ms = 0.0;
+  double solver_geneo_setup_ms = 0.0;
+  double solver_geneo_apply_ms = 0.0;
+  double solver_recycle_ms = 0.0;
+  // WORK COUNTERS for this design iteration: penalized FEA solves (the delta of
+  // simp_compliance_call_count — 1 on every trajectory iteration; anything else
+  // is itself the finding) and matrix-free operator applies (fea_matvec_count).
+  // The apply count is the honest work unit when the CG iteration count is not.
+  long long fea_solves = 0;
+  long long matvecs = 0;
+  // PROCESS MEMORY sampled at the observe hook (topopt::process_memory()).
+  // Negative = the platform could not answer, never "measured zero".
+  double rss_mb = -1.0;
+  double peak_rss_mb = -1.0;
+  double compressed_mb = -1.0;
+  double available_mb = -1.0;
+  long long major_faults = -1;
+  long long swapins = -1;
+};
+
 // Handoff 114 — per-iteration OBSERVABILITY record. A read-only snapshot of one
 // completed optimizer iteration, handed to SimpOptions::observe (below) once per
 // iteration alongside the lighter `progress` callback. It carries exactly the
@@ -690,6 +776,10 @@ struct SimpIterationObservation {
   // of every healthy rung and whenever the detector is disarmed
   // (SimpOptions::infeasible_window <= 0).
   bool infeasible = false;
+  // Task 2026-08-02-iteration-phase-timing — where this iteration's WALL went,
+  // with an explicit unattributed residual, plus its work counters and the
+  // process's memory footprint. See IterationPhaseTimes above for the accounting.
+  IterationPhaseTimes phases;
 };
 
 struct SimpOptions {

@@ -8,6 +8,23 @@
 #include <stdexcept>
 #include <system_error>
 
+// Process-memory sampling (task 2026-08-02-iteration-phase-timing). getrusage is
+// POSIX; the mach task/host calls are macOS-only and give the two numbers that
+// actually decide the paging question there — phys_footprint (what the kernel
+// charges this process, the number Activity Monitor shows) and the memory
+// COMPRESSOR's holdings, which on Apple silicon absorb pressure long before any
+// swap file is touched. Everything is #if-guarded so a platform without them
+// reports "unavailable" (negative) rather than a fabricated zero.
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_host.h>
+#include <mach/task.h>
+#endif
+
 namespace topopt {
 
 // ---------------------------------------------------------------------------
@@ -87,12 +104,120 @@ long long wall_clock_ms() {
       .count();
 }
 
+double steady_clock_ms() {
+  using namespace std::chrono;
+  return duration<double, std::milli>(steady_clock::now().time_since_epoch())
+      .count();
+}
+
+// ---------------------------------------------------------------------------
+// Process memory (task 2026-08-02-iteration-phase-timing).
+
+ProcessMemory process_memory() {
+  ProcessMemory pm;  // every field starts NEGATIVE = "not answered"
+  constexpr double kMb = 1024.0 * 1024.0;
+
+#if defined(__unix__) || defined(__APPLE__)
+  {
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) == 0) {
+      // ru_maxrss is BYTES on macOS/BSD and KILOBYTES on Linux — the one
+      // portability trap in this function, and getting it wrong would be a
+      // 1024x error in the exact number the paging question turns on.
+#if defined(__APPLE__)
+      pm.peak_rss_mb = static_cast<double>(ru.ru_maxrss) / kMb;
+#else
+      pm.peak_rss_mb = static_cast<double>(ru.ru_maxrss) / 1024.0;
+#endif
+      // Major faults = faults the kernel had to satisfy from BACKING STORE.
+      // A machine that is genuinely paging shows this climbing; a machine that
+      // is merely large does not. It is the direct test, so it is recorded even
+      // where richer counters exist.
+      pm.major_faults = static_cast<long long>(ru.ru_majflt);
+    }
+  }
+#endif
+
+#if defined(__APPLE__)
+  {
+    // phys_footprint is what the kernel charges this process (compressed pages
+    // included) — the number that decides whether the machine is under pressure.
+    task_vm_info_data_t vmi;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO,
+                  reinterpret_cast<task_info_t>(&vmi), &count) == KERN_SUCCESS) {
+      // phys_footprint arrived in REV1; `compressed` predates every revision.
+      pm.compressed_mb = static_cast<double>(vmi.compressed) / kMb;
+      pm.rss_mb = count >= TASK_VM_INFO_REV1_COUNT
+                      ? static_cast<double>(vmi.phys_footprint) / kMb
+                      : static_cast<double>(vmi.resident_size) / kMb;
+      // The per-task SWAPIN ledger arrived in REV6; a shorter reply means the
+      // running kernel does not report it, so it stays -1 ("not answered")
+      // rather than 0 ("measured no swapping") — the distinction the whole
+      // memory-pressure question turns on.
+      if (count >= TASK_VM_INFO_REV6_COUNT)
+        pm.swapins = static_cast<long long>(vmi.ledger_swapins);
+    }
+  }
+  {
+    // Host-wide availability: free + inactive + speculative pages. "Peak RSS
+    // against available RAM" needs a denominator, and a total-RAM denominator
+    // would overstate the headroom a running machine actually has.
+    vm_statistics64_data_t vms;
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    vm_size_t page = 0;
+    if (host_page_size(mach_host_self(), &page) == KERN_SUCCESS &&
+        host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                          reinterpret_cast<host_info64_t>(&vms),
+                          &count) == KERN_SUCCESS) {
+      const double pages = static_cast<double>(vms.free_count) +
+                           static_cast<double>(vms.inactive_count) +
+                           static_cast<double>(vms.speculative_count);
+      pm.available_mb = pages * static_cast<double>(page) / kMb;
+    }
+  }
+#elif defined(__linux__)
+  {
+    // /proc/self/statm: field 2 is resident pages.
+    if (std::FILE* f = std::fopen("/proc/self/statm", "r")) {
+      long long total = 0, resident = 0;
+      if (std::fscanf(f, "%lld %lld", &total, &resident) == 2) {
+        const double page = static_cast<double>(sysconf(_SC_PAGESIZE));
+        pm.rss_mb = static_cast<double>(resident) * page / kMb;
+      }
+      std::fclose(f);
+    }
+    if (std::FILE* f = std::fopen("/proc/meminfo", "r")) {
+      char key[64];
+      long long kb = 0;
+      while (std::fscanf(f, "%63s %lld kB\n", key, &kb) == 2)
+        if (std::strcmp(key, "MemAvailable:") == 0) {
+          pm.available_mb = static_cast<double>(kb) / 1024.0;
+          break;
+        }
+      std::fclose(f);
+    }
+  }
+#endif
+  return pm;
+}
+
 // ---------------------------------------------------------------------------
 // Per-iteration CSV.
 
 const char kIterationCsvHeader[] =
     "rung,iter,wall_ms,compliance,achieved_vf,plateau,cg_iters,cg_multigrid,beta,"
-    "hier_built,mg_cycles_attempted,infeasible,recycle_dim,active_fraction";
+    "hier_built,mg_cycles_attempted,infeasible,recycle_dim,active_fraction,"
+    // ── PHASE TIMING (task 2026-08-02-iteration-phase-timing) ──────────────
+    "total_ms,tail_prev_ms,filter_ms,project_ms,solve_ms,fea_ms,sens_ms,"
+    "update_ms,analysis_ms,observe_ms,residual_ms,"
+    // ── the solve's own split (a SUB-split of solve_ms, not extra terms) ───
+    "solver_build_ms,mg_build_ms,mg_ms,cg_ms,geneo_setup_ms,geneo_apply_ms,"
+    "recycle_ms,"
+    // ── work counters + the GenEO lifecycle that explains them ────────────
+    "fea_solves,matvecs,geneo_dim,geneo_action,"
+    // ── process memory (negative = the platform could not answer) ─────────
+    "rss_mb,peak_rss_mb,compressed_mb,available_mb,major_faults,swapins";
 
 IterationCsvWriter::IterationCsvWriter(const std::string& path) : path_(path) {
   out_.open(path, std::ios::binary | std::ios::trunc);
@@ -127,14 +252,36 @@ void IterationCsvWriter::append_at(std::size_t rung,
   // grid's solid elements this iteration's trajectory solve actually assembled:
   // exactly 1.000000 when the active domain is off, has latched off, or the solve
   // fell back to the full domain — so the column is comparable across every run.
-  char buf[280];
-  std::snprintf(buf, sizeof(buf),
-                "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d,%d,%.6f\n",
-                rung, obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
-                obs.plateau ? 1 : 0, obs.cg_iterations,
-                obs.cg_used_multigrid ? 1 : 0, obs.beta,
-                obs.cg_hier_built ? 1 : 0, obs.cg_mg_cycles_attempted,
-                obs.infeasible ? 1 : 0, obs.cg_recycle_dim, obs.active_fraction);
+  //
+  // Task 2026-08-02-iteration-phase-timing appends the PHASE columns. `wall_ms`
+  // above is unchanged and still an epoch TIMESTAMP (it always was — the name
+  // predates any duration on this row); `total_ms` is this iteration's measured
+  // DURATION and `residual_ms` is the part of it no named phase claimed. The
+  // solver_* columns SUB-SPLIT solve_ms and must not be added to the sum. A
+  // negative memory column means the platform could not answer, never zero.
+  char buf[720];
+  std::snprintf(
+      buf, sizeof(buf),
+      "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d,%d,%.6f,"
+      "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+      "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+      "%lld,%lld,%d,%d,"
+      "%.2f,%.2f,%.2f,%.2f,%lld,%lld\n",
+      rung, obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
+      obs.plateau ? 1 : 0, obs.cg_iterations, obs.cg_used_multigrid ? 1 : 0,
+      obs.beta, obs.cg_hier_built ? 1 : 0, obs.cg_mg_cycles_attempted,
+      obs.infeasible ? 1 : 0, obs.cg_recycle_dim, obs.active_fraction,
+      obs.phases.total_ms, obs.phases.tail_prev_ms, obs.phases.filter_ms,
+      obs.phases.project_ms, obs.phases.solve_ms, obs.phases.fea_ms,
+      obs.phases.sens_ms, obs.phases.update_ms, obs.phases.analysis_ms,
+      obs.phases.observe_ms, obs.phases.residual_ms, obs.phases.solver_build_ms,
+      obs.phases.solver_mg_build_ms, obs.phases.solver_mg_ms,
+      obs.phases.solver_cg_ms, obs.phases.solver_geneo_setup_ms,
+      obs.phases.solver_geneo_apply_ms, obs.phases.solver_recycle_ms,
+      obs.phases.fea_solves, obs.phases.matvecs, obs.cg_geneo_dim,
+      obs.cg_geneo_action, obs.phases.rss_mb, obs.phases.peak_rss_mb,
+      obs.phases.compressed_mb, obs.phases.available_mb,
+      obs.phases.major_faults, obs.phases.swapins);
   out_ << buf;
   out_.flush();
   if (!out_)
