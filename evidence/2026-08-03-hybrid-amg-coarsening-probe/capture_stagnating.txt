@@ -1,0 +1,42 @@
+   fixture: PR 280's ladder32 reproduction, 80 trajectory snapshots, grid 48x32x40
+
+## stagnating(ladder32) — snapshot 2 of 80, grid 48x32x40, achieved_vf 0.0368
+   [start host load average: 57.62 39.03 25.55]
+
+   AF1 step 1 — the EXACT reference solve (matrix-free Jacobi-CG, production tolerance 1e-08):
+      ng = 150075 reduced DOFs, 3636 iterations, converged YES, residual 9.137e-09, max|u| = 4.4905e+04, wall 7.2 s
+      exact energy u.b = 5.80424180e+04
+   [seam capture solve reported: fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations]
+
+   AF1 step 2 — the seam, as the PRODUCTION builder formed it:
+      P0: 150075 x 18738 (478137 nnz)   A1: 18738 x 18738 (1351836 nnz)   level-1 grid 25x17x21 nodes   capture wall 0.5 s
+      A1 == P0^T A0 P0 check: z^T A1 z = 3.3970289219e+04 vs (P0 z)^T A0 (P0 z) = 3.3970289219e+04   rel 1.29e-15 OK
+
+coarse space                                 kind        dim   captured E    setup s
+--------------------------------------------------------------------------------------
+geometric level 1 (range P0)                  geo      18738      1.5954%      4.882
+geometric level 2 (13x9x11 nodes)             geo       2364      0.4402%      0.050
+geometric level 3 (7x5x6 nodes)               geo        285      0.0700%      0.003
+
+   AF2 — algebraic aggregation from A1 (6246 level-1 nodes, 18738 DOFs). Sweeping theta so the comparison lands at MATCHED coarse dimension.
+algebraic level 2  theta 0.02  smoothed P     alg       1948      0.6335%      0.215
+algebraic level 2  theta 0.04  smoothed P     alg       2351      0.7661%      0.297
+algebraic level 2  theta 0.08  smoothed P     alg       3049      0.9434%      0.623
+algebraic level 2  theta 0.12  smoothed P     alg       4671      1.1224%      1.669
+algebraic level 2  theta 0.20  smoothed P     alg      14813      1.5562%     31.582
+algebraic level 2  theta 0.30  smoothed P     alg      18688      1.5952%     64.313
+algebraic level 2  theta 0.02  P = T (unsmoothed)    alg       1948      0.5789%      0.057
+algebraic level 2  theta 0.04  P = T (unsmoothed)    alg       2351      0.7154%      0.069
+algebraic level 2  theta 0.08  P = T (unsmoothed)    alg       3049      0.8979%      0.121
+algebraic level 2  theta 0.12  P = T (unsmoothed)    alg       4671      1.0831%      0.328
+algebraic level 2  theta 0.20  P = T (unsmoothed)    alg      14813      1.5463%      3.388
+algebraic level 2  theta 0.30  P = T (unsmoothed)    alg      18688      1.5952%      5.295
+
+   the level-1 GEOMETRIC space captured only 1.5954%, which CAPS every space below it. Pointing the same instrument one level up: an ALGEBRAIC level 1, aggregated from the FINE operator matrix-free (amg_lean.hpp; A0 is never assembled).
+ALGEBRAIC level 1  theta 0.02  P = T (unsmoothed) alg-L1      13140     56.3293%      3.784
+ALGEBRAIC level 1  theta 0.08  P = T (unsmoothed) alg-L1      21252     61.7518%     10.517
+      [algebraic level 1, theta 0.20, P = T: SKIPPED — the sweep has spent 14 s of its 10 s budget]
+      [algebraic level 1, theta 0.02, smoothed P: SKIPPED — the sweep has spent 14 s of its 10 s budget]
+      [algebraic level 1, theta 0.08, smoothed P: SKIPPED — the sweep has spent 14 s of its 10 s budget]
+      [algebraic level 1, theta 0.20, smoothed P: SKIPPED — the sweep has spent 14 s of its 10 s budget]
+   [end host load average: 17.10 29.66 23.77]

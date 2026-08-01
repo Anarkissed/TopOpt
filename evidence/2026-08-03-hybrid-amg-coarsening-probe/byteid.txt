@@ -1,0 +1,86 @@
+AF8 — BIT-IDENTITY OF AN ORDINARY RUN (stash-rebuild)
+
+BEFORE = the tree at HEAD (b06da24) extracted with 'git archive HEAD' into
+/tmp/hamg/before and configured/built INDEPENDENTLY (Release, OCCT on, same
+compiler).
+AFTER  = this branch (the coarse-space seam + its tripwire test + the probe).
+Same job for both:
+  evidence/2026-08-03-hybrid-amg-coarsening-probe/byteid_job.json
+  = the COMMITTED demo fixture (core/tests/fixtures/demo/job.json) verbatim,
+    with only output.mesh_format switched 3mf->stl (this build has no lib3mf)
+    and the model path absolutised. The fixture itself was NOT modified.
+  resolution 48, ladder [0.7, 0.5, 0.3], simp.max_iterations 30 -> 180 iterations.
+
+The seam this task added is INERT here by construction: no production path calls
+mg_set_coarse_space_hook, so mg_coarse_space_hook_installed() is false and
+build_mf_hierarchy takes the geometric branch it always has. This run is the
+end-to-end proof of that; tests/unit/test_mg_coarse_hook.cpp is the per-solve one.
+
+== SHA-256, BEFORE ==
+01f1a2f2d1408b1f5bb4f16040e9a2a99c54673cf570074e1c7ae682daf3a6cc  build_orientation.json
+bed76e9c6472fbada97b30498aae9f7899308c6d50834b55a487715602eb294e  design.bin
+a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc  fields.bin
+18ceb45bfc36009cc82aeba30c8c00e968a432053ad6602aaf2b489cf3659ee6  iterations.csv
+f07d334632e7fe6c6fbb93da2b7f2d595e86063e93b1e1fb74de719838495929  loadcase.json
+acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6  report.json
+a1495ae349f44c115cf9d7435f774ce10b1f42345c93c4fbde1b72ca7dcf169d  run_info.json
+cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace  variant_030.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  variant_050.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  variant_070.stl
+
+== SHA-256, AFTER ==
+399cee9059d6ec9ecf475ecf3af1196f82068fdfc82fba96e6dfc6c2d533c7f7  build_orientation.json
+bed76e9c6472fbada97b30498aae9f7899308c6d50834b55a487715602eb294e  design.bin
+a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc  fields.bin
+e47153afa8cc394125e49c14c078272d7c5f0ae118db1cb2e672555d8eb4897a  iterations.csv
+f07d334632e7fe6c6fbb93da2b7f2d595e86063e93b1e1fb74de719838495929  loadcase.json
+acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6  report.json
+815979e499e51a00a837ca8832fd71b123e22abeeecfdc521635a67d2a4f2fd3  run_info.json
+cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace  variant_030.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  variant_050.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  variant_070.stl
+
+== VERDICT ==
+IDENTICAL: design.bin, fields.bin, report.json, loadcase.json,
+           variant_030.stl, variant_050.stl, variant_070.stl
+
+DIFFER, and why each is NOT a behaviour change:
+
+  iterations.csv   — 181 rows (header + 180), header IDENTICAL. Compared COLUMN
+                     BY COLUMN rather than by file hash, which says something
+                     much stronger than "the file changed":
+
+                     IDENTICAL on all 180 rows:
+                       rung, iter, compliance, achieved_vf, plateau, cg_iters,
+                       cg_multigrid, beta, hier_built, mg_cycles_attempted,
+                       infeasible, recycle_dim, active_fraction, cg_ms,
+                       geneo_setup_ms, geneo_apply_ms, recycle_ms, fea_solves,
+                       matvecs, geneo_dim, geneo_action, geneo_burn,
+                       geneo_threshold, swapins
+
+                     DIFFER (every one a stopwatch or a host-memory reading):
+                       analysis_ms, available_mb, compressed_mb, fea_ms,
+                       filter_ms, major_faults, mg_build_ms, mg_ms, observe_ms,
+                       peak_rss_mb, project_ms, residual_ms, rss_mb, sens_ms,
+                       solve_ms, solver_build_ms, tail_prev_ms, total_ms,
+                       update_ms, wall_ms
+
+                     cg_iters, cg_multigrid, hier_built, mg_cycles_attempted and
+                     matvecs identical on all 180 rows is the direct statement
+                     that the solver did the SAME WORK: the seam changed no
+                     hierarchy, no cycle count and no operator apply.
+
+  build_orientation.json — ONE key differs: sweep_seconds
+                     (0.005034208 -> 0.00524125), a stopwatch reading.
+                     Pre-existing: PR 273 recorded this file differing on every
+                     pair it compared, including ON-vs-ON2.
+
+  run_info.json    — TWO keys differ: `fingerprint` (the build fingerprint,
+                     which MUST differ — the binaries are different) and
+                     `created_wall_ms` (a clock reading).
+
+== HOST ==
+The two runs were NOT taken on a quiet machine: three other campaigns ran
+concurrently and the 1-minute load average reached 66 on 10 logical cores. That
+is precisely why the timing columns are excluded from the verdict and why the
+verdict rests only on exact byte and column equality, which is load-independent.

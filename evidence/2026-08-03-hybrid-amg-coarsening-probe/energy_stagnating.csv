@@ -1,0 +1,9 @@
+field,bin,elements,energy,share
+stagnating(ladder32),"rho < 0.0015 (the void floor)",30043,4.1934286073e+04,0.72247656
+stagnating(ladder32),"0.0015 <= rho < 0.005",1638,6.8759922554e+03,0.11846495
+stagnating(ladder32),"0.005  <= rho < 0.02",1911,6.5808344619e+03,0.11337974
+stagnating(ladder32),"0.02   <= rho < 0.05",2062,2.6046544281e+03,0.04487502
+stagnating(ladder32),"0.05   <= rho < 0.10",1918,4.3926340844e+01,0.00075680
+stagnating(ladder32),"0.10   <= rho < 0.30",8535,2.7240698676e+00,0.00004693
+stagnating(ladder32),"0.30   <= rho < 0.60",0,0.0000000000e+00,0.00000000
+stagnating(ladder32),"rho >= 0.60 (solid)",32,0.0000000000e+00,0.00000000

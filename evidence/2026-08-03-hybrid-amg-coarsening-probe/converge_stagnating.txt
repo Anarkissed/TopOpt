@@ -1,0 +1,42 @@
+   fixture: PR 280's ladder32 reproduction, 80 trajectory snapshots, grid 48x32x40
+
+## AF3/AF4/AF7 — stagnating(ladder32), snapshot 2, grid 48x32x40, achieved_vf 0.0368
+   [start host load average: 12.05 20.34 20.95]
+
+   the exact reference field (matrix-free Jacobi-CG at the production tolerance):
+      3636 iterations, converged YES, max|u| = 4.4905e+04, wall 10.7 s
+   [seam capture solve reported: fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations]
+
+configuration                                   lvls   cycles   carried     DOF-wtd     nnz-wtd  build_s   aggr_s  cycle_s  TOTAL_s  rel |du|
+--------------------------------------------------------------------------------------------------------------------------------------------
+SHIPPED (geometric, V, 1+1, scalar w0.6)           0      300      stag      1017.1      1003.8    0.522    0.000    6.629   15.626  0.00e+00
+hybrid: algebraic below 1, theta 0.02, smoothed P     0      300      stag      1016.3      1012.3    0.801    0.163    3.679   23.814  0.00e+00
+hybrid: algebraic below 1, theta 0.08, smoothed P     0      300      stag      1018.5      1027.5    1.468    0.252    4.411   17.134  0.00e+00
+hybrid: algebraic below 1, theta 0.20, smoothed P     0      300      stag      1042.0      1270.8    2.396    1.191    3.260   16.912  0.00e+00  [chain REFUSED -> geometric]
+hybrid: algebraic below 1, theta 0.02, P = T       0      300      stag      1016.3      1004.7    0.540    0.043    3.243   13.032  0.00e+00
+hybrid: algebraic below 1, theta 0.08, P = T       0      300      stag      1018.5      1007.6    0.718    0.043    5.279   14.727  0.00e+00
+hybrid: algebraic below 1, theta 0.20, P = T       0      300      stag      1121.8      1116.7    0.691    0.094    6.240   15.521  0.00e+00  [chain REFUSED -> geometric]
+
+   DOF-wtd / nnz-wtd are FINE-LEVEL-APPLY EQUIVALENTS: one V-cycle's work summed over levels, weighted by each level's DOF count (resp. nonzeros, against the 12156075-entry assembled equivalent of the matrix-free fine operator), times the cycles actually run.
+
+   hierarchy shape below level 0 — n (nnz) per level:
+      SHIPPED (geometric, V, 1+1, scalar w0.6)        L1 18738 (1351836)  L2 2364 (151902)
+      hybrid: algebraic below 1, theta 0.02, smoothed P  L1 18738 (1351836)  L2 1948 (495373)
+      hybrid: algebraic below 1, theta 0.08, smoothed P  L1 18738 (1351836)  L2 3049 (1111896)
+      hybrid: algebraic below 1, theta 0.20, smoothed P  L1 18738 (1351836)  L2 14813 (10968402)
+      hybrid: algebraic below 1, theta 0.02, P = T    L1 18738 (1351836)  L2 1948 (184957)
+      hybrid: algebraic below 1, theta 0.08, P = T    L1 18738 (1351836)  L2 3049 (304598)
+      hybrid: algebraic below 1, theta 0.20, P = T    L1 18738 (1351836)  L2 14813 (1290782)  L3 10322 (852153)
+
+   AF5 — memory. Bytes BELOW level 1 (what the hybrid adds; level 1 itself is production's cost either way):
+      SHIPPED (geometric, V, 1+1, scalar w0.6)        L1   15.54 MB   below-L1    1.75 MB   -> at 8.44M DOF: L1   0.85 GB, below-L1   0.10 GB
+      hybrid: algebraic below 1, theta 0.02, smoothed P  L1   15.54 MB   below-L1    5.68 MB   -> at 8.44M DOF: L1   0.85 GB, below-L1   0.31 GB
+      hybrid: algebraic below 1, theta 0.08, smoothed P  L1   15.54 MB   below-L1   12.74 MB   -> at 8.44M DOF: L1   0.85 GB, below-L1   0.70 GB
+      hybrid: algebraic below 1, theta 0.20, smoothed P  L1   15.54 MB   below-L1  125.58 MB   -> at 8.44M DOF: L1   0.85 GB, below-L1   6.90 GB
+      hybrid: algebraic below 1, theta 0.02, P = T    L1   15.54 MB   below-L1    2.12 MB   -> at 8.44M DOF: L1   0.85 GB, below-L1   0.12 GB
+      hybrid: algebraic below 1, theta 0.08, P = T    L1   15.54 MB   below-L1    3.50 MB   -> at 8.44M DOF: L1   0.85 GB, below-L1   0.19 GB
+      hybrid: algebraic below 1, theta 0.20, P = T    L1   15.54 MB   below-L1   24.62 MB   -> at 8.44M DOF: L1   0.85 GB, below-L1   1.35 GB
+      PR 230 priced PURE AMG (an assembled FINE level) at 20-35 GB at 8.44M DOF. Nothing above assembles level 0.
+   [end host load average: 14.73 18.37 20.07]
+
+   peak RSS this process: 0.96 GB

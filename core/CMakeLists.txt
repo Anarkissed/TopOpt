@@ -525,6 +525,19 @@ if(Eigen3_FOUND)
   target_include_directories(test_mg_tuning PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME fea_mg_tuning COMMAND test_mg_tuning)
 
+  # Multigrid COARSE-SPACE SEAM tripwire (task: hybrid-amg-coarsening-probe).
+  # That task let a measurement harness supply the prolongators for levels 2..
+  # (algebraic aggregation from A1 instead of halving the grid). This asserts the
+  # seam is UNINSTALLED by default, that an installed-then-cleared hook leaves the
+  # solve BIT-IDENTICAL, that the solver rejects every malformed prolongator
+  # rather than trusting it, and that a valid non-geometric coarse space changes
+  # the hierarchy while reaching the same field. Uses the internal fea_matfree.hpp
+  # (src/ on the include path) because the seam is deliberately NOT public API.
+  add_executable(test_mg_coarse_hook tests/unit/test_mg_coarse_hook.cpp)
+  target_link_libraries(test_mg_coarse_hook PRIVATE topopt)
+  target_include_directories(test_mg_coarse_hook PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_mg_coarse_hook COMMAND test_mg_coarse_hook)
+
   # Matrix-free THREADING determinism guard (matrix-free speed task). The element
   # apply is threaded over a deterministic 8-colour (2x2x2) partition; this proves
   # the result is BIT-IDENTICAL across thread counts (1/2/4/8) and run-to-run, that
