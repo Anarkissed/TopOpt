@@ -1,0 +1,19 @@
+## STAG — does the SHIPPED configuration stagnate on this fixture?
+   fixture: PR 273's ladder32 reproduction — /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/matrix-free-gene-phase-1-e249cd/core/tests/fixtures/demo/l-bracket.step @ resolution 32
+   fixture_faces: 2 cylindrical r=2.5 faces matched, 32 voxels tagged FIXTURE
+   [ladder ended early: recommend_settings: worst_case_stress_margin must be finite and >= 0]
+   solved grid 48x32x40 (61440 vox, 46139 solid), 80 trajectory snapshots, develop wall 4148.4 s
+
+  iter  built  lvls   cycles  carried   build_s   cycle_s  fallbk_s   total_s  latched
+------------------------------------------------------------------------------------------
+     0      1     3       83      YES      1.69      2.87      0.00      4.57         
+     1      1     0      300       no      1.62     10.16     38.78     50.57         
+     2      1     0      300       no      0.35      7.05     27.90     35.30         
+     3      1     0      300       no      1.32      9.95     21.79     33.07  LATCHED
+     4      0     0        0       no      0.00      0.00    433.66    433.69  LATCHED
+     5      0     0        0       no      0.00      0.00     19.11     19.12  LATCHED
+     6      0     0        0       no      0.00      0.00     42.62     42.63  LATCHED
+     7      0     0        0       no      0.00      0.00     20.70     20.70  LATCHED
+     8      0     0        0       no      0.00      0.00     13.65     13.66  LATCHED
+     9      0     0        0       no      0.00      0.00    266.18    266.19  LATCHED
+    10      0     0        0       no      0.00      0.00     55.14     55.15  LATCHED

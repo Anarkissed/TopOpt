@@ -1,0 +1,6 @@
+   fixture: occ0.4+hole whole-domain design box 64x32x64, production ladder, max_iterations 25
+   [cache hit /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/matrix-free-gene-phase-1-e249cd/evidence/2026-08-02-multigrid-component-sweep/mg_occhole_64x32x64_i25.bin: 100 trajectory snapshots]
+## DET at configuration: D: point-block w0.6 (weight held at shipped)
+   run 1: fnv=61ecf001b163ade7 cycles=104 carried=1
+   run 2: fnv=61ecf001b163ade7 cycles=104 carried=1
+   => BYTE-IDENTICAL

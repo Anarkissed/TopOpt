@@ -514,6 +514,17 @@ if(Eigen3_FOUND)
   target_link_libraries(test_mgcg_matfree PRIVATE topopt)
   add_test(NAME fea_mgcg_matfree COMMAND test_mgcg_matfree)
 
+  # Multigrid COMPONENT TUNING tripwire (task: multigrid-component-sweep). That
+  # task parameterised the V-cycle recipe so it could be swept; this asserts
+  # every effective default still equals its shipped LITERAL, that the override
+  # surface bites, and that mg_reset_tuning leaves the solve bit-identical. Uses
+  # the internal fea_matfree.hpp (src/ on the include path) because the tuning
+  # surface is deliberately NOT public API.
+  add_executable(test_mg_tuning tests/unit/test_mg_tuning.cpp)
+  target_link_libraries(test_mg_tuning PRIVATE topopt)
+  target_include_directories(test_mg_tuning PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  add_test(NAME fea_mg_tuning COMMAND test_mg_tuning)
+
   # Matrix-free THREADING determinism guard (matrix-free speed task). The element
   # apply is threaded over a deterministic 8-colour (2x2x2) partition; this proves
   # the result is BIT-IDENTICAL across thread counts (1/2/4/8) and run-to-run, that

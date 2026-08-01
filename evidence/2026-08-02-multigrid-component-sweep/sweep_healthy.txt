@@ -1,0 +1,41 @@
+## SWEEP on the healthy fixture: grid 32x16x32 (16384 vox)
+   hierarchy geometry (upper-bound DOFs = 3 x nodes; the actual
+   active count is lower where DOFs are fixed or void):
+      level 0:  32x 16x 32 elems, <= 55539 DOFs  (matrix-free; never factored)
+      level 1:  16x  8x 16 elems, <= 7803 DOFs
+      level 2:   8x  4x  8 elems, <= 1215 DOFs
+      level 3:   4x  2x  4 elems, <= 225 DOFs
+   harness direct-solve budget: 60000 DOFs (MG_MAX_DIRECT)
+   building the EXACT reference field (matrix-free Jacobi-CG)...
+   reference: 327 Jacobi-CG iterations, 2.25 s, max|u| = 1.4281e-01
+   [sweep start host load average: 26.09 51.57 70.51]
+   3 repeats, ROUND-ROBIN across the grid (shared host: the minimum wall is the least-contaminated sample)
+   [round 1/3]
+   [round 2/3]
+   [round 3/3]
+
+configuration                                  lvls  cycles  carried    matvecs  build_s  cycle_s  TOTAL_s   spread  rel |du|
+----------------------------------------------------------------------------------------------------------------------------
+SHIPPED (4-ish lvl, V, 1+1, scalar w0.6)          3      18      YES         72    0.167    0.228    0.396      54%  5.83e-10
+A: levels=2                                       2      17      YES         68    0.909    0.314    1.224     107%  5.76e-10  0.32x LOSS
+A: levels=3                                       3      18      YES         72    0.237    0.275    0.513     168%  5.83e-10  0.77x LOSS
+A: levels=4                                       4      20      YES         80    0.160    0.315    0.476     149%  5.72e-10  0.83x LOSS
+A: levels=5                                       4      20      YES         80    0.178    0.305    0.484      70%  5.72e-10  0.82x LOSS
+A: levels=MAX (coarsen until an axis blocks)      4      20      YES         80    0.205    0.368    0.574      72%  5.72e-10  0.69x LOSS
+B: sweeps=2+2 uniform                             3      13      YES         78    0.184    0.343    0.529     116%  6.70e-10  0.75x LOSS
+B: sweeps=3+3 uniform                             3      11      YES         88    0.208    0.337    0.546     100%  6.77e-10  0.73x LOSS
+B: sweeps=1+1 fine, +1 COARSE-ONLY                3      18      YES         72    0.177    0.406    0.585      42%  5.88e-10  0.68x LOSS
+B: sweeps=1+1 fine, +2 COARSE-ONLY                3      17      YES         68    0.302    0.334    0.637      85%  5.79e-10  0.62x LOSS
+C: W-cycle (gamma=2)                              3      17      YES         85    0.169    0.436    0.606      75%  5.65e-10  0.65x LOSS
+D: POINT-BLOCK Jacobi w0.5 (Peetz & Elbanna)      3      16      YES         64    0.243    0.201    0.445     146%  6.04e-10  0.89x LOSS
+D: point-block w0.6 (weight held at shipped)      3      15      YES         60    0.214    0.174    0.389     201%  5.84e-10  1.02x 
+
+   E. OMEGA on the A-D winner (D: point-block w0.6 (weight held at shipped)):
+
+configuration                                  lvls  cycles  carried    matvecs  build_s  cycle_s  TOTAL_s   spread  rel |du|
+----------------------------------------------------------------------------------------------------------------------------
+E: winner @ omega=0.60                            3      15      YES         60    0.436    0.380    0.818      71%  5.84e-10  0.48x LOSS
+E: winner @ omega=0.50                            3      16      YES         64    0.402    0.338    0.741      90%  6.04e-10  0.53x LOSS
+   [sweep end host load average: 29.67 49.21 68.77]
+
+   AB7 EXACTNESS: worst relative displacement deviation across every CARRYING cell = 6.766e-10 (bar: solver tolerance 1.0e-08)

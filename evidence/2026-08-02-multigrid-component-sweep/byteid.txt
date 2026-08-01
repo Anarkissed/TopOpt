@@ -1,0 +1,54 @@
+AB5 — BIT-IDENTITY OF AN ORDINARY RUN (stash-rebuild)
+
+BEFORE = the tree at HEAD (c7194b4) extracted with 'git archive HEAD' into a
+separate directory and configured/built independently (Release, same compiler).
+AFTER  = this branch. Same job, same output directory layout:
+  evidence/2026-08-02-multigrid-component-sweep/byteid_job.json
+  = the COMMITTED demo fixture (core/tests/fixtures/demo/job.json) verbatim,
+    with only output.mesh_format switched 3mf->stl (this build has no lib3mf)
+    and the model path absolutised. The fixture itself was NOT modified.
+  resolution 48, ladder [0.7, 0.5, 0.3], simp.max_iterations 30 -> 180 iterations.
+
+== SHA-256, BEFORE ==
+3b494f7cd88daee9df1e1bf0ef5232b625127da9eb64aeda705529a77ee7494e  build_orientation.json
+bed76e9c6472fbada97b30498aae9f7899308c6d50834b55a487715602eb294e  design.bin
+a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc  fields.bin
+e99a5933eb782f48c1f75c0efee856ddf3549c1b3114bb8c145744791342b567  iterations.csv
+8bf92a3ebbba7f44caa630fe1e54be536de6388fcdb0bc2169c44177df044879  loadcase.json
+acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6  report.json
+eafdb3eda1de9a4bd27e31ca585e4799c65b98998075d7b96ee5c0a2e223c77c  run_info.json
+cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace  variant_030.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  variant_050.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  variant_070.stl
+
+== SHA-256, AFTER ==
+d3e5731657b78e7f910e5f954f48f07cfdfd6674df9e9bcc6a52ed900fe78985  build_orientation.json
+bed76e9c6472fbada97b30498aae9f7899308c6d50834b55a487715602eb294e  design.bin
+a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc  fields.bin
+7ce90e100c1fd43417982cbe7b1300e6afb8653bf5f663dd154be86cd0af8d19  iterations.csv
+8bf92a3ebbba7f44caa630fe1e54be536de6388fcdb0bc2169c44177df044879  loadcase.json
+acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6  report.json
+7ef48e5d0fc2fd8ed3753320ab26fcdb2756f26edea29f74391513734e3a5fed  run_info.json
+cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace  variant_030.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  variant_050.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  variant_070.stl
+
+== VERDICT ==
+IDENTICAL: design.bin, fields.bin, report.json, loadcase.json,
+           variant_030.stl, variant_050.stl, variant_070.stl
+
+DIFFER, and why each is NOT a behaviour change:
+  build_orientation.json - only sweep_seconds and strut_axis_measure_seconds,
+    i.e. the orientation sweep's own wall time. PR 273 recorded that this file
+    differs on EVERY pair including ON-vs-ON2, for exactly this reason.
+  run_info.json - only the build fingerprint ('dev' for the git-archive tree,
+    which carries no git metadata, vs c7194b4883c3) and created_wall_ms.
+  iterations.csv - 180 rows, identical header. Every column that differs is a
+    wall-time or process-memory column; ZERO non-timing columns differ. Checked
+    column by column (see below), so cg_iters, cg_multigrid, hier_built,
+    achieved_vf and compliance are identical on all 180 rows.
+
+iterations.csv headers identical: True
+rows compared: 180
+columns that differ: analysis_ms, available_mb, compressed_mb, fea_ms, filter_ms, major_faults, mg_build_ms, mg_ms, observe_ms, peak_rss_mb, project_ms, residual_ms, rss_mb, sens_ms, solve_ms, solver_build_ms, swapins, tail_prev_ms, total_ms, update_ms, wall_ms
+NON-timing columns that differ: NONE

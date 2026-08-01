@@ -377,5 +377,74 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
                  const MfSolveContext* ctx = nullptr,
                  MfCgTimes* times = nullptr);
 
+// ---------------------------------------------------------------------------
+// MULTIGRID COMPONENT TUNING (task: multigrid-component-sweep) — a HARNESS-ONLY
+// override surface for the V-cycle's shipped recipe. PARAMETERISED, NOT
+// RE-TUNED: every field below defaults to the constant production has always
+// run, so an unset process is byte-for-byte the pre-task solver. The tripwire
+// in tests/unit/test_mg_tuning.cpp asserts each effective default against the
+// shipped LITERAL, so neither a stray override left installed by a probe nor a
+// drifting constant can change what production runs without failing a test.
+//
+// The recipe these override (multigrid.cpp, unchanged):
+//   omega 0.6 damped SCALAR Jacobi, 1 pre + 1 post sweep, V-cycle only, no
+//   extra coarse-level smoothing, hierarchy depth set by the DOF cap.
+//
+// WHY these knobs. A 2025 SMO study (doi 10.1007/s00158-025-04102-y) reports
+// iteration counts exploding when a topology-optimisation multigrid goes from
+// two grids to four, and names extra coarse-level smoothing or a W-cycle as the
+// fix; Peetz & Elbanna (SMO 63:835-853) use weighted POINT-BLOCK Jacobi (one
+// 3x3 nodal block per node, weight 0.5) rather than the scalar diagonal this
+// codebase smooths with. Each is a hypothesis about why this project's
+// high-contrast design-box fields stagnate; each needs to be MEASURED here, on
+// a fixture that actually stagnates, before anything is proposed.
+//
+// SYMMETRY IS PRESERVED BY CONSTRUCTION for every combination. The cycle stays
+// a valid CG preconditioner as long as (a) the smoother is A-self-adjoint —
+// both the scalar diagonal and the symmetric 3x3 nodal-block inverse are — and
+// (b) pre and post sweep counts are equal at every level. `coarse_extra_smooth`
+// adds to BOTH, and the gamma-cycle's error propagator S^k T^gamma S^k is
+// A-self-adjoint whenever T = I - P B P^T A is (a repeated factor commutes with
+// itself). CG's existing pAp<=0 breakdown guard remains the backstop.
+enum class MgSmoother {
+  ScalarJacobi = 0,      // x <- x + omega*Dinv.*(b - A x)  (SHIPPED)
+  PointBlockJacobi = 1,  // per-node 3x3 block inverse (Peetz & Elbanna)
+};
+
+struct MgTuning {
+  // Smoother weight. 0.6 is the shipped damped-Jacobi omega; Peetz & Elbanna's
+  // point-block recipe uses 0.5. ONE field, so sweep E moves one number.
+  double omega = 0.6;
+  // Pre- and post-smoothing sweeps at the FINE level. Kept equal by the caller;
+  // the sweep never sets them apart (unequal counts break V-cycle symmetry).
+  int pre_smooth = 1;
+  int post_smooth = 1;
+  // Extra sweeps added to BOTH pre and post on every level BELOW the finest —
+  // the SMO paper's specific fix, distinct from raising the uniform count.
+  int coarse_extra_smooth = 0;
+  // Coarse-grid correction repetitions per level: 1 = V-cycle, 2 = W-cycle.
+  int cycle_gamma = 1;
+  // Total hierarchy levels (fine included). 0 = whatever the builder's DOF cap
+  // produces, which is what production runs.
+  int max_levels = 0;
+  // Keep coarsening past the DOF cap until an axis blocks — the DEEPEST
+  // hierarchy the builder can express. Off = stop at the first level under the
+  // cap, as shipped.
+  bool deepest = false;
+  // Direct-solve size cap for the coarsest level. Sweeping DOWN to 2 or 3
+  // levels leaves a much larger coarsest operator, which the shipped cap would
+  // reject outright; raising it is what makes those cells measurable at all.
+  int coarse_dof_cap = 6000;  // == kMgCoarseDofCap
+  MgSmoother smoother = MgSmoother::ScalarJacobi;
+};
+
+// The tuning in force on THIS thread. Thread-local, like the stagnation latch
+// and the parity-pad mode, because the driver issues a run's solves on one
+// thread. Production never calls the setter, so this always returns the
+// defaults above.
+const MgTuning& mg_tuning();
+void mg_set_tuning(const MgTuning& t);  // tests/harness only
+void mg_reset_tuning();                 // restore the shipped recipe
+
 }  // namespace fea_detail
 }  // namespace topopt

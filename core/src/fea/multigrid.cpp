@@ -14,10 +14,13 @@
 //     less robust under the SIMP soft-void modulus contrast rho_min^p; Galerkin
 //     inherits the density-graded stiffness automatically, which is why it is
 //     the standard robust choice and the one the task calls for).
-//   * Smoother — damped Jacobi (omega=0.6, 2 pre + 2 post sweeps). Symmetric
-//     smoother + equal pre/post sweeps + R=P^T + SPD coarse solve => the V-cycle
-//     is a symmetric positive-definite operator, so it is a valid CG
-//     preconditioner.
+//   * Smoother — damped Jacobi (omega=0.6, kPreSmooth pre + kPostSmooth post
+//     sweeps; 1+1 today). Symmetric smoother + equal pre/post sweeps + R=P^T +
+//     SPD coarse solve => the V-cycle is a symmetric positive-definite operator,
+//     so it is a valid CG preconditioner. (This line read "2 pre + 2 post" until
+//     the multigrid-component-sweep task; the constants below have been 1+1
+//     since, and the comment had drifted. It now names them rather than
+//     restating a number that can go stale again.)
 //   * Dirichlet BCs and void DOFs — the hierarchy is built on the SAME BC-reduced,
 //     void-gated operator the Jacobi-CG path solves (fea_detail::assemble_reduced
 //     + void_dof_survivors). A coarse node-DOF is active iff its coincident fine
@@ -44,6 +47,7 @@
 
 #include "topopt/coarsen.hpp"
 
+#include <Eigen/Dense>
 #include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
@@ -66,6 +70,8 @@ using Trip = Eigen::Triplet<double>;
 constexpr double kJacobiOmega = 0.6;   // damped-Jacobi smoother weight
 constexpr int kPreSmooth = 1;          // pre-smoothing sweeps (== post: SPD V-cycle)
 constexpr int kPostSmooth = 1;         // 1+1 is the most wall-efficient on these grids
+constexpr int kCoarseExtraSmooth = 0;  // extra sweeps below the finest level: none
+constexpr int kCycleGamma = 1;         // 1 = V-cycle (the only cycle shipped)
 // The coarsenability constants live in topopt/coarsen.hpp so the SEAM that pads
 // the grid (expand_design_domain) and this SOLVER that enforces the rule cannot
 // drift (handoff: multigrid-coarsenability-padding). Local aliases keep the hot
@@ -152,6 +158,156 @@ thread_local bool g_mg_latched = false;
 // Thread-local like the latch: the driver issues a run's solves on one thread.
 constexpr int kMgPadOff = 0, kMgPadAuto = 1, kMgPadForce = 2;
 thread_local int g_mg_parity_pad_mode = kMgPadAuto;
+
+// --- Component tuning (task: multigrid-component-sweep) ----------------------
+// The V-cycle's recipe, overridable by a measurement harness and by NOTHING
+// else. Thread-local for the same reason the latch and the pad mode are: the
+// driver issues a run's solves on one thread. The static_asserts below BIND the
+// header's defaults to the constants above, so a change to either that does not
+// change the other fails the build rather than silently re-tuning production.
+thread_local fea_detail::MgTuning g_mg_tuning;
+
+static_assert(fea_detail::MgTuning{}.omega == kJacobiOmega,
+              "MgTuning default omega must be the shipped kJacobiOmega");
+static_assert(fea_detail::MgTuning{}.pre_smooth == kPreSmooth,
+              "MgTuning default pre_smooth must be the shipped kPreSmooth");
+static_assert(fea_detail::MgTuning{}.post_smooth == kPostSmooth,
+              "MgTuning default post_smooth must be the shipped kPostSmooth");
+static_assert(fea_detail::MgTuning{}.coarse_extra_smooth == kCoarseExtraSmooth,
+              "MgTuning default coarse_extra_smooth must be the shipped 0");
+static_assert(fea_detail::MgTuning{}.cycle_gamma == kCycleGamma,
+              "MgTuning default cycle_gamma must be the shipped V-cycle");
+static_assert(fea_detail::MgTuning{}.max_levels == 0,
+              "MgTuning default max_levels must defer to the builder");
+static_assert(!fea_detail::MgTuning{}.deepest,
+              "MgTuning default must stop at the shipped DOF cap");
+static_assert(fea_detail::MgTuning{}.coarse_dof_cap == kMgCoarseDofCap,
+              "MgTuning default coarse_dof_cap must be the shipped kMgCoarseDofCap");
+static_assert(fea_detail::MgTuning{}.smoother == fea_detail::MgSmoother::ScalarJacobi,
+              "MgTuning default smoother must be the shipped scalar damped Jacobi");
+
+// The tuning RESOLVED once per solve, so the smoother's inner loop reads plain
+// locals rather than a thread-local on every sweep. Snapshotting also means a
+// single V-cycle can never see a half-changed recipe.
+struct MgOpts {
+  double omega = kJacobiOmega;
+  int pre = kPreSmooth;
+  int post = kPostSmooth;
+  int coarse_extra = kCoarseExtraSmooth;
+  int gamma = kCycleGamma;
+  bool point_block = false;
+};
+
+MgOpts mg_opts_now() {
+  const fea_detail::MgTuning& t = g_mg_tuning;
+  MgOpts o;
+  o.omega = t.omega;
+  o.pre = t.pre_smooth;
+  o.post = t.post_smooth;
+  o.coarse_extra = t.coarse_extra_smooth;
+  o.gamma = t.cycle_gamma;
+  o.point_block = (t.smoother == fea_detail::MgSmoother::PointBlockJacobi);
+  return o;
+}
+
+// Sweeps to run at GLOBAL level `level` (0 == finest). The extra sweeps land on
+// the coarse levels only — the SMO paper's fix — and land on pre and post
+// equally, which is what keeps the cycle symmetric.
+inline int sweeps_at(int base, const MgOpts& o, int level) {
+  return level == 0 ? base : base + o.coarse_extra;
+}
+
+// --- Point-block (3x3 nodal) Jacobi data -------------------------------------
+// One entry per node that owns at least one active DOF: the (up to three) local
+// DOF ids of that node, and the INVERSE of the 3x3 diagonal block of A over
+// them. A component the level does not carry (fixed, void, or coarsened away)
+// gets dof == -1 and a zero row/column in the inverse, so the sweep simply does
+// not relax it — the same treatment inverse_diagonal gives a guarded diagonal.
+//
+// Empty unless the point-block smoother is selected, so the shipped scalar path
+// builds none of this and pays nothing.
+struct BlockDiag {
+  std::vector<int> dof;     // 3 per block, -1 where the component is absent
+  std::vector<double> inv;  // 9 per block, row-major
+  bool empty() const { return dof.empty(); }
+};
+
+// Invert one node's 3x3 block. `present[c]` selects the components this node
+// actually carries; absent rows/columns are identity-padded before the inverse
+// and zeroed after, so the result is exactly the inverse of the PRESENT
+// sub-block embedded in a 3x3. The block is a principal submatrix of an SPD
+// operator, hence SPD, so LLT is the right factorisation; if it nonetheless
+// fails (or produces a non-finite entry), fall back to the reciprocal diagonal
+// — i.e. degrade to the scalar smoother for that node rather than poison it.
+void invert_node_block(const double blk[9], const bool present[3], double out[9]) {
+  Eigen::Matrix3d M = Eigen::Matrix3d::Identity();
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j)
+      if (present[i] && present[j]) M(i, j) = blk[i * 3 + j];
+  Eigen::LLT<Eigen::Matrix3d> llt(M);
+  Eigen::Matrix3d Minv = Eigen::Matrix3d::Zero();
+  bool ok = (llt.info() == Eigen::Success);
+  if (ok) {
+    Minv = llt.solve(Eigen::Matrix3d::Identity());
+    ok = Minv.allFinite();
+  }
+  if (!ok) {  // scalar degrade for this node only
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) out[i * 3 + j] = 0.0;
+    for (int i = 0; i < 3; ++i) {
+      const double d = present[i] ? blk[i * 3 + i] : 0.0;
+      out[i * 3 + i] = (d > 0.0) ? 1.0 / d : 0.0;
+    }
+    return;
+  }
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j)
+      out[i * 3 + j] = (present[i] && present[j]) ? Minv(i, j) : 0.0;
+}
+
+// Point-block data for an ASSEMBLED level, read straight off A via its active
+// map (node*3+comp -> local dof id).
+BlockDiag build_block_diag(const SpMat& A, const std::vector<int>& active) {
+  BlockDiag B;
+  const std::size_t nnodes = active.size() / 3;
+  for (std::size_t nd = 0; nd < nnodes; ++nd) {
+    int d[3];
+    bool present[3];
+    bool any = false;
+    for (int c = 0; c < 3; ++c) {
+      d[c] = active[nd * 3 + static_cast<std::size_t>(c)];
+      present[c] = d[c] >= 0;
+      any = any || present[c];
+    }
+    if (!any) continue;
+    double blk[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j)
+        if (present[i] && present[j]) blk[i * 3 + j] = A.coeff(d[i], d[j]);
+    double inv[9];
+    invert_node_block(blk, present, inv);
+    for (int c = 0; c < 3; ++c) B.dof.push_back(d[c]);
+    for (int k = 0; k < 9; ++k) B.inv.push_back(inv[k]);
+  }
+  return B;
+}
+
+// One point-block Jacobi sweep given a precomputed residual r:
+//   x[node] <- x[node] + omega * Binv[node] * r[node].
+inline void block_apply(const BlockDiag& B, double omega, const Vec& r, Vec& x) {
+  const std::size_t nb = B.dof.size() / 3;
+  for (std::size_t b = 0; b < nb; ++b) {
+    const int* d = &B.dof[b * 3];
+    const double* M = &B.inv[b * 9];
+    double rv[3];
+    for (int i = 0; i < 3; ++i) rv[i] = d[i] >= 0 ? r[d[i]] : 0.0;
+    for (int i = 0; i < 3; ++i) {
+      if (d[i] < 0) continue;
+      x[d[i]] += omega * (M[i * 3 + 0] * rv[0] + M[i * 3 + 1] * rv[1] +
+                          M[i * 3 + 2] * rv[2]);
+    }
+  }
+}
 
 // Actual active DOFs the UNPADDED halving walk would leave at its structural
 // stop depth (mg_unpadded_stop_depth): the kept fine DOFs whose node
@@ -257,6 +413,7 @@ struct Level {
   Vec Dinv;                    // 1/diag(A) for the Jacobi smoother (0 where guarded)
   SpMat P;                     // prolongation coarse(level+1) -> this (n x n_coarse)
   std::vector<int> active;     // (node*3+comp) -> local dof id, or -1
+  BlockDiag pbd;               // point-block smoother data; EMPTY on the shipped path
   bool coarsest = false;
   // coarsest-level exact solve; held by pointer so Level stays movable in a
   // std::vector (Eigen's factorisation objects are not moveable).
@@ -326,8 +483,23 @@ SpMat galerkin_pt_a_p_frugal(const SpMat& A, const SpMat& P) {
 // back to Jacobi-CG. `frugal` selects the column-blocked coarse Galerkin product
 // (matrix-free path, lower peak); default false keeps the plain product the
 // assembled path has always used, byte-for-byte.
+//
+// `max_levels_here` caps the number of levels in THIS vector (0 = uncapped, the
+// shipped behaviour); `global_level0` is the depth the first of them sits at in
+// the whole hierarchy, which the point-block build and the caller's level
+// accounting need. Both default to the production values, so the shipped call
+// is unchanged.
 std::vector<Level> build_hierarchy(const SpMat& A0, int nx0, int ny0, int nz0,
-                                   std::vector<int> active0, bool frugal = false) {
+                                   std::vector<int> active0, bool frugal = false,
+                                   int max_levels_here = 0,
+                                   int global_level0 = 0) {
+  const fea_detail::MgTuning& t = g_mg_tuning;
+  const int dof_cap = t.coarse_dof_cap;
+  const bool point_block = (t.smoother == fea_detail::MgSmoother::PointBlockJacobi);
+  // A single-level request cannot seed a hierarchy at all; the caller's
+  // coarsest-alone path is what expresses it.
+  if (max_levels_here == 1) return {};
+  (void)global_level0;
   std::vector<Level> levels;
   Level fine;
   fine.nx = nx0;
@@ -340,6 +512,10 @@ std::vector<Level> build_hierarchy(const SpMat& A0, int nx0, int ny0, int nz0,
   levels.push_back(std::move(fine));
 
   while (true) {
+    // Depth cap (sweep A): stop before the level that would exceed it.
+    if (max_levels_here > 0 &&
+        static_cast<int>(levels.size()) >= max_levels_here)
+      break;
     const Level& f = levels.back();
     const int fex = f.nx - 1, fey = f.ny - 1, fez = f.nz - 1;  // fine element dims
     // Coarsen only while every axis is even and stays >= kMinCoarseElems.
@@ -428,13 +604,23 @@ std::vector<Level> build_hierarchy(const SpMat& A0, int nx0, int ny0, int nz0,
     coarse.active = std::move(cactive);
     levels.push_back(std::move(coarse));
 
-    if (nc <= kCoarseDofCap) break;  // small enough for a direct coarse solve
+    // Small enough for a direct coarse solve. `deepest` (sweep A's "maximum the
+    // builder allows") suppresses this stop so coarsening continues until an
+    // axis structurally blocks — a smaller, cheaper bottom solve, more levels.
+    if (nc <= dof_cap && !t.deepest) break;
   }
 
   // Reject a hierarchy too shallow to help, or whose coarsest level is still too
   // big for a direct factorisation (the caller falls back to Jacobi-CG).
   if (static_cast<int>(levels.size()) < kMinLevels) return {};
-  if (levels.back().n > kCoarseDofCap) return {};
+  if (levels.back().n > dof_cap) return {};
+
+  // Point-block smoother data, built only when that smoother is selected (so
+  // the shipped path allocates none of it). The coarsest level is solved
+  // directly and never smoothed, hence is skipped.
+  if (point_block)
+    for (std::size_t i = 0; i + 1 < levels.size(); ++i)
+      levels[i].pbd = build_block_diag(levels[i].A, levels[i].active);
 
   // Factor the coarsest operator for the exact bottom solve.
   Level& bottom = levels.back();
@@ -445,29 +631,45 @@ std::vector<Level> build_hierarchy(const SpMat& A0, int nx0, int ny0, int nz0,
   return levels;
 }
 
-// One damped-Jacobi sweep: x <- x + omega * Dinv .* (b - A x).
-inline void jacobi_sweep(const Level& L, const Vec& b, Vec& x) {
+// One smoother sweep. SCALAR damped Jacobi — x <- x + omega * Dinv .* (b - A x)
+// — is the shipped path and the only one a default-tuned process takes; the
+// point-block branch applies the per-node 3x3 inverse to the same residual.
+inline void jacobi_sweep(const Level& L, const Vec& b, Vec& x, const MgOpts& o) {
   const Vec r = b - L.A * x;
-  x += kJacobiOmega * (L.Dinv.array() * r.array()).matrix();
+  if (o.point_block && !L.pbd.empty()) {
+    block_apply(L.pbd, o.omega, r, x);
+    return;
+  }
+  x += o.omega * (L.Dinv.array() * r.array()).matrix();
 }
 
-// Recursive symmetric V-cycle: return an approximate solution of A_l x = b.
-// Equal pre/post damped-Jacobi (a self-adjoint smoother) + R = P^T + an SPD
-// coarse solve make the cycle a symmetric positive-definite operator — a valid
-// CG preconditioner.
-Vec v_cycle(const std::vector<Level>& levels, int l, const Vec& b) {
+// Recursive symmetric gamma-cycle: return an approximate solution of A_l x = b.
+// gamma == 1 is the V-cycle (shipped); gamma == 2 the W-cycle, which repeats the
+// coarse-grid correction — recomputing the residual between repetitions — before
+// post-smoothing. Equal pre/post smoothing (a self-adjoint smoother) + R = P^T +
+// an SPD coarse solve keep the cycle a symmetric positive-definite operator at
+// every gamma, so it stays a valid CG preconditioner. `global_level` is this
+// level's depth in the WHOLE hierarchy (the matrix-free path's coarse vector
+// starts at global level 1), which is what decides whether the extra coarse
+// smoothing applies.
+Vec v_cycle(const std::vector<Level>& levels, int l, const Vec& b,
+            const MgOpts& o, int global_level) {
   const Level& L = levels[static_cast<std::size_t>(l)];
   if (L.coarsest) return L.chol->solve(b);
 
   Vec x = Vec::Zero(L.n);
-  for (int s = 0; s < kPreSmooth; ++s) jacobi_sweep(L, b, x);
+  const int npre = sweeps_at(o.pre, o, global_level);
+  const int npost = sweeps_at(o.post, o, global_level);
+  for (int s = 0; s < npre; ++s) jacobi_sweep(L, b, x, o);
 
-  const Vec r = b - L.A * x;
-  const Vec bc = L.P.transpose() * r;              // restrict residual (R = P^T)
-  const Vec ec = v_cycle(levels, l + 1, bc);       // coarse-grid correction
-  x += L.P * ec;                                    // prolongate + correct
+  for (int g = 0; g < o.gamma; ++g) {
+    const Vec r = b - L.A * x;
+    const Vec bc = L.P.transpose() * r;            // restrict residual (R = P^T)
+    const Vec ec = v_cycle(levels, l + 1, bc, o, global_level + 1);
+    x += L.P * ec;                                  // prolongate + correct
+  }
 
-  for (int s = 0; s < kPostSmooth; ++s) jacobi_sweep(L, b, x);
+  for (int s = 0; s < npost; ++s) jacobi_sweep(L, b, x, o);
   return x;
 }
 
@@ -487,9 +689,10 @@ bool mgpcg(const std::vector<Level>& levels, const Vec& b, double tol,
   }
   const double threshold = tol * bnorm;
 
+  const MgOpts opts = mg_opts_now();
   x = Vec::Zero(A.cols());
   Vec r = b;                              // r = b - A*0
-  Vec z = v_cycle(levels, 0, r);          // z = M^{-1} r
+  Vec z = v_cycle(levels, 0, r, opts, 0);  // z = M^{-1} r
   Vec p = z;
   double rz = r.dot(z);
   if (!std::isfinite(rz)) return false;
@@ -510,7 +713,7 @@ bool mgpcg(const std::vector<Level>& levels, const Vec& b, double tol,
     const double rn = r.norm();
     resid = rn / bnorm;
     if (rn <= threshold) return x.allFinite();
-    Vec znew = v_cycle(levels, 0, r);
+    Vec znew = v_cycle(levels, 0, r, opts, 0);
     const double rznew = r.dot(znew);
     if (!std::isfinite(rznew)) return false;
     const double beta = rznew / rz;
@@ -627,8 +830,13 @@ FeaSolution solve_reduced_mgcg(const ReducedSystem& s, const VoxelGrid& grid,
     const int cap = max_iterations > 0 ? max_iterations
                                        : std::max(1000, 2 * ng);
 
+    // The assembled hierarchy IS the whole hierarchy (level 0 is A0 itself), so
+    // the tuning's total depth request passes straight through. 0 — the shipped
+    // value — is the cap-driven depth this call has always produced.
     std::vector<Level> levels =
-        build_hierarchy(Kgg, pnnx, pnny, pnnz, std::move(active));
+        build_hierarchy(Kgg, pnnx, pnny, pnnz, std::move(active),
+                        /*frugal=*/false, g_mg_tuning.max_levels,
+                        /*global_level0=*/0);
     diag.hier_built = !levels.empty();  // fallback-mode diagnostics (handoff 128)
 
     bool solved = false;
@@ -720,6 +928,9 @@ struct MfHierarchy {
   // single precision, so these mirror just the fine-level operators.
   SpMatF P0f;                         // FP32 prolongation for restrict/prolong
   VecF fine_dinv_f;                   // FP32 fine Jacobi inverse diagonal
+  // Point-block smoother data for the FINE (matrix-free) level: EMPTY on the
+  // shipped scalar path. Coarse levels carry their own on Level::pbd.
+  BlockDiag fine_pbd;
   int levels() const { return 1 + static_cast<int>(coarse.size()); }
 };
 
@@ -767,29 +978,42 @@ inline void mf_fine_matvec(const MfHierarchy& H, const Vec& x, Vec& y) {
   H.m->apply_kgg_raw(x.data(), y.data());
 }
 
-// One fine-level damped-Jacobi sweep, matrix-free: x <- x + omega*Dinv.*(b-A0 x).
+// One fine-level smoother sweep, matrix-free: x <- x + omega*Dinv.*(b-A0 x) on
+// the shipped scalar path, or the per-node 3x3 block inverse applied to the same
+// residual when the point-block smoother is selected. Either way exactly ONE
+// operator apply per sweep — the sweep count is the honest cost currency.
 inline void mf_jacobi_sweep(const MfHierarchy& H, MfScratch& S, const Vec& b,
-                            Vec& x) {
+                            Vec& x, const MgOpts& o) {
   mf_fine_matvec(H, x, S.Ax);
-  x += kJacobiOmega * (H.fine_dinv.array() * (b - S.Ax).array()).matrix();
+  if (o.point_block && !H.fine_pbd.empty()) {
+    S.vr = b - S.Ax;
+    block_apply(H.fine_pbd, o.omega, S.vr, x);
+    return;
+  }
+  x += o.omega * (H.fine_dinv.array() * (b - S.Ax).array()).matrix();
 }
 
 // Symmetric V-cycle with a matrix-free finest level, writing the result into the
 // caller-owned `x` (reused). The coarse-grid correction reuses the assembled
 // v_cycle on the coarse hierarchy, so this is a valid SPD preconditioner (equal
 // pre/post smoothing, R = P0^T, exact coarse solve).
-void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x) {
+void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
+                const MgOpts& o) {
   x.setZero(H.m->ng);
-  for (int s = 0; s < kPreSmooth; ++s) mf_jacobi_sweep(H, S, b, x);
+  for (int s = 0; s < o.pre; ++s) mf_jacobi_sweep(H, S, b, x, o);
 
-  mf_fine_matvec(H, x, S.Ax);
-  S.vr = b - S.Ax;                            // fine residual
-  S.bc.noalias() = H.P0.transpose() * S.vr;   // restrict (R = P0^T)
-  S.ec = v_cycle(H.coarse, 0, S.bc);          // coarse-grid correction
-  S.prol.noalias() = H.P0 * S.ec;             // prolongate + correct
-  x += S.prol;
+  // gamma == 1 is the shipped V-cycle: one coarse-grid correction. gamma == 2
+  // repeats it against a freshly recomputed fine residual (the W-cycle).
+  for (int g = 0; g < o.gamma; ++g) {
+    mf_fine_matvec(H, x, S.Ax);
+    S.vr = b - S.Ax;                            // fine residual
+    S.bc.noalias() = H.P0.transpose() * S.vr;   // restrict (R = P0^T)
+    S.ec = v_cycle(H.coarse, 0, S.bc, o, 1);    // coarse-grid correction
+    S.prol.noalias() = H.P0 * S.ec;             // prolongate + correct
+    x += S.prol;
+  }
 
-  for (int s = 0; s < kPostSmooth; ++s) mf_jacobi_sweep(H, S, b, x);
+  for (int s = 0; s < o.post; ++s) mf_jacobi_sweep(H, S, b, x, o);
 }
 
 // MIXED-PRECISION V-cycle (handoff 092). Same symmetric structure as mf_v_cycle
@@ -804,24 +1028,32 @@ void mf_v_cycle(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x) {
 // apply keeps the 8-colour fixed-order accumulation (bit-identical across threads),
 // and the SpMV/coarse solve are single-threaded, so the whole cycle is
 // reproducible run-to-run.
-void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x) {
+//
+// The component tuning reaches this path too (same sweep counts, same gamma,
+// same weight) so the two V-cycles cannot drift apart, but its FINE smoother
+// stays SCALAR: no FP32 point-block data is built, and mixed precision is
+// production-blocked anyway (handoff 132 D) and unused by the component sweep.
+void mf_v_cycle_mixed(const MfHierarchy& H, MfScratch& S, const Vec& b, Vec& x,
+                      const MgOpts& o) {
   const int ng = H.m->ng;
-  const float omega = static_cast<float>(kJacobiOmega);
+  const float omega = static_cast<float>(o.omega);
   S.bf = b.cast<float>();                       // convert on entry
   S.xf.setZero(ng);
-  for (int s = 0; s < kPreSmooth; ++s) {
+  for (int s = 0; s < o.pre; ++s) {
     H.m->apply_kgg_raw_f32(S.xf.data(), S.Axf.data());
     S.xf += omega * (H.fine_dinv_f.array() * (S.bf - S.Axf).array()).matrix();
   }
-  H.m->apply_kgg_raw_f32(S.xf.data(), S.Axf.data());
-  S.vrf = S.bf - S.Axf;                          // fine residual (FP32)
-  S.bcf.noalias() = H.P0f.transpose() * S.vrf;   // restrict (R = P0^T), FP32 SpMV
-  S.bc = S.bcf.cast<double>();                   // hand off to the FP64 coarse solve
-  S.ec = v_cycle(H.coarse, 0, S.bc);             // coarse-grid correction (FP64)
-  S.ecf = S.ec.cast<float>();
-  S.prolf.noalias() = H.P0f * S.ecf;             // prolongate (FP32 SpMV) + correct
-  S.xf += S.prolf;
-  for (int s = 0; s < kPostSmooth; ++s) {
+  for (int g = 0; g < o.gamma; ++g) {
+    H.m->apply_kgg_raw_f32(S.xf.data(), S.Axf.data());
+    S.vrf = S.bf - S.Axf;                          // fine residual (FP32)
+    S.bcf.noalias() = H.P0f.transpose() * S.vrf;   // restrict (R = P0^T), FP32 SpMV
+    S.bc = S.bcf.cast<double>();                   // hand off to the FP64 coarse solve
+    S.ec = v_cycle(H.coarse, 0, S.bc, o, 1);       // coarse-grid correction (FP64)
+    S.ecf = S.ec.cast<float>();
+    S.prolf.noalias() = H.P0f * S.ecf;             // prolongate (FP32 SpMV) + correct
+    S.xf += S.prolf;
+  }
+  for (int s = 0; s < o.post; ++s) {
     H.m->apply_kgg_raw_f32(S.xf.data(), S.Axf.data());
     S.xf += omega * (H.fine_dinv_f.array() * (S.bf - S.Axf).array()).matrix();
   }
@@ -841,9 +1073,10 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
   // convergence — r, x, p, rz, alpha, beta, the residual norm and the stopping
   // test below — is FP64 regardless. A sloppier preconditioner costs iterations,
   // not accuracy; this outer FP64 loop is the correctness guarantee.
+  const MgOpts opts = mg_opts_now();
   auto precondition = [&](const Vec& rr, Vec& zz) {
-    if (mixed) mf_v_cycle_mixed(H, S, rr, zz);
-    else mf_v_cycle(H, S, rr, zz);
+    if (mixed) mf_v_cycle_mixed(H, S, rr, zz, opts);
+    else mf_v_cycle(H, S, rr, zz, opts);
   };
   const int n = H.m->ng;
   const double bnorm = b.norm();
@@ -918,6 +1151,7 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
 // by an element-local Galerkin triple product, all coarser levels by build_hierarchy.
 bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
                         MfHierarchy& out) {
+  const fea_detail::MgTuning& tune = g_mg_tuning;
   const int fex = nnx - 1, fey = nny - 1, fez = nnz - 1;  // fine element dims
   // Parity pad (task: multigrid-odd-axis-cliff / multigrid-deep-block-pad): a
   // grid the coarsening rule rejects — odd fine axis or all-even deep block —
@@ -1312,13 +1546,17 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
 
   // Coarser levels 2.. via the shared assembled Galerkin builder, seeded at A1.
   // Frugal (column-blocked) coarse products keep the design-box peak in budget.
-  std::vector<Level> coarse =
-      build_hierarchy(A1, cnx, cny, cnz, cactive, /*frugal=*/true);
+  // A TOTAL depth cap of N leaves N-1 levels for this sub-hierarchy (level 0 is
+  // the matrix-free fine one); 0 keeps the shipped, cap-driven depth.
+  const int sub_cap = tune.max_levels > 0 ? tune.max_levels - 1 : 0;
+  std::vector<Level> coarse = build_hierarchy(A1, cnx, cny, cnz, cactive,
+                                              /*frugal=*/true, sub_cap,
+                                              /*global_level0=*/1);
   if (coarse.empty()) {
     // A1 alone could not seed a >=2-level sub-hierarchy. Use A1 as the sole
     // (directly factored) coarse level if small enough, giving a 2-level
     // matrix-free cycle (fine matrix-free + A1 direct); else no usable hierarchy.
-    if (static_cast<int>(A1.cols()) > kCoarseDofCap) return false;
+    if (static_cast<int>(A1.cols()) > tune.coarse_dof_cap) return false;
     Level only;
     only.nx = cnx;
     only.ny = cny;
@@ -1339,6 +1577,53 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
                                         static_cast<Eigen::Index>(m.invdiag.size()));
   out.P0 = std::move(P0);
   out.coarse = std::move(coarse);
+
+  // FINE-level point-block smoother data, built only when that smoother is
+  // selected (the shipped path skips this block entirely). Same element sweep
+  // mf_build_reduced runs for the scalar diagonal, but keeping the whole 3x3
+  // NODAL block instead of just Ke(r,r): a local index r carries component r%3
+  // of node edof[r]/3, so two local indices sharing a node contribute to that
+  // node's block at (r%3, c%3). Summed over elements this is exactly the 3x3
+  // diagonal block of A0 — the fine operator is never assembled to get it.
+  if (tune.smoother == fea_detail::MgSmoother::PointBlockJacobi) {
+    constexpr int kDofL = Hex8Stiffness::kDof;
+    const std::size_t nnodes_full = static_cast<std::size_t>(m.ndof) / 3;
+    std::vector<double> blockfull(nnodes_full * 9, 0.0);
+    for (const MfElem& el : m.elems)
+      for (int r = 0; r < kDofL; ++r)
+        for (int c = 0; c < kDofL; ++c) {
+          if (el.edof[r] / 3 != el.edof[c] / 3) continue;
+          blockfull[static_cast<std::size_t>(el.edof[r] / 3) * 9 +
+                    static_cast<std::size_t>(r % 3) * 3 +
+                    static_cast<std::size_t>(c % 3)] += el.factor * m.Ke(r, c);
+        }
+    for (const MfCubElem& el : m.cub_elems)
+      for (int r = 0; r < kDofL; ++r)
+        for (int c = 0; c < kDofL; ++c) {
+          if (el.edof[r] / 3 != el.edof[c] / 3) continue;
+          blockfull[static_cast<std::size_t>(el.edof[r] / 3) * 9 +
+                    static_cast<std::size_t>(r % 3) * 3 +
+                    static_cast<std::size_t>(c % 3)] +=
+              el.a * m.KA(r, c) + el.b * m.KB(r, c) + el.c * m.KC(r, c);
+        }
+    // Compress to one entry per node that owns at least one KEPT DOF, using the
+    // same active map the prolongation was built from.
+    for (std::size_t nd = 0; nd < nnodes_full; ++nd) {
+      int d[3];
+      bool present[3];
+      bool any = false;
+      for (int c = 0; c < 3; ++c) {
+        d[c] = active[nd * 3 + static_cast<std::size_t>(c)];
+        present[c] = d[c] >= 0;
+        any = any || present[c];
+      }
+      if (!any) continue;
+      double inv[9];
+      invert_node_block(&blockfull[nd * 9], present, inv);
+      for (int c = 0; c < 3; ++c) out.fine_pbd.dof.push_back(d[c]);
+      for (int k = 0; k < 9; ++k) out.fine_pbd.inv.push_back(inv[k]);
+    }
+  }
 
   // FP32 copies for the mixed-precision V-cycle, built only when enabled (handoff
   // 092). This composes cleanly with the Galerkin block cache (090): that cache
@@ -1575,7 +1860,9 @@ std::size_t assembled_hierarchy_nonzeros(const VoxelGrid& grid,
     const int gdof = s.freedofs[static_cast<std::size_t>(kept[r])];
     active[static_cast<std::size_t>(gdof)] = r;
   }
-  std::vector<Level> levels = build_hierarchy(Kgg, nnx, nny, nnz, active);
+  std::vector<Level> levels =
+      build_hierarchy(Kgg, nnx, nny, nnz, active, /*frugal=*/false,
+                      g_mg_tuning.max_levels, /*global_level0=*/0);
   if (levels.empty())
     return static_cast<std::size_t>(Kgg.nonZeros());  // fallback: only Kgg
   std::size_t total = 0;
@@ -1602,6 +1889,20 @@ std::size_t matfree_hierarchy_nonzeros(const VoxelGrid& grid,
 }
 
 }  // namespace
+
+// --- Component tuning accessors (task: multigrid-component-sweep) ------------
+// Production never calls the setter, so mg_tuning() returns the shipped recipe
+// and every solve above takes exactly the path it took before this task. The
+// static_asserts near g_mg_tuning bind the header's defaults to the constants
+// this file's V-cycle is documented against; tests/unit/test_mg_tuning.cpp
+// re-asserts them against literals so a coordinated drift still fails.
+namespace fea_detail {
+
+const MgTuning& mg_tuning() { return g_mg_tuning; }
+void mg_set_tuning(const MgTuning& t) { g_mg_tuning = t; }
+void mg_reset_tuning() { g_mg_tuning = MgTuning{}; }
+
+}  // namespace fea_detail
 
 // Per-run multigrid stagnation latch (handoff 127, Amendment 2). The driver
 // calls the reset once at the start of a run so consecutive-stagnation counting

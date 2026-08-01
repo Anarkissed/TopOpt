@@ -1,0 +1,30 @@
+   fixture: PR 273's ladder32 reproduction — /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/matrix-free-gene-phase-1-e249cd/core/tests/fixtures/demo/l-bracket.step @ resolution 32
+   [cache hit /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/matrix-free-gene-phase-1-e249cd/evidence/2026-08-02-multigrid-component-sweep/mg_stepbox_r32.bin: 80 trajectory snapshots]
+## RESCUE — can any lever save a STAGNATING configuration?
+   hierarchy geometry (upper-bound DOFs = 3 x nodes; the actual
+   active count is lower where DOFs are fixed or void):
+      level 0:  48x 32x 40 elems, <= 198891 DOFs  (matrix-free; never factored)
+      level 1:  24x 16x 20 elems, <= 26775 DOFs
+      level 2:  12x  8x 10 elems, <= 3861 DOFs
+      level 3:   6x  4x  5 elems, <= 630 DOFs
+   harness direct-solve budget: 40000 DOFs (MG_MAX_DIRECT)
+   sweeping design-iteration snapshot 2 of 80
+   reference: 3636 Jacobi-CG iterations, 15.27 s, max|u| = 4.4905e+04
+
+configuration                                  lvls  cycles  carried    matvecs  build_s  cycle_s  TOTAL_s   spread  rel |du|
+----------------------------------------------------------------------------------------------------------------------------
+STAGNATING BASELINE (deepest hierarchy)           0     300     stag       4841    0.567    5.256   19.842       0%  0.00e+00
++ 2+2 uniform smoothing                           0     300     stag       5443    0.464    7.554   21.529       0%  0.00e+00
++ 3+3 uniform smoothing                           0     300     stag       6045    0.605    9.689   24.213       0%  0.00e+00
++ 1 extra COARSE-ONLY sweep                       0     300     stag       4841    0.449    8.018   29.805       0%  0.00e+00
++ 2 extra COARSE-ONLY sweeps                      0     300     stag       4841    0.523    9.288   36.210       0%  0.00e+00
++ W-cycle                                         0     300     stag       5142    0.518    8.483   24.234       0%  0.00e+00
++ POINT-BLOCK Jacobi w0.5                         0     300     stag       4841    0.569    6.592   23.899       0%  0.00e+00
++ point-block w0.6                                0     300     stag       4841    0.523    4.689   18.595       0%  0.00e+00
++ omega 0.5                                       0     300     stag       4841    0.450    4.804   18.306       0%  0.00e+00
++ W-cycle AND point-block w0.5                    0     300     stag       5142    0.512    8.034   21.387       0%  0.00e+00
++ W-cycle AND point-block AND coarse sweep        0     300     stag       5142    0.486    8.557   22.590       0%  0.00e+00
+CONTROL: one level SHALLOWER (levels=3)           0     300     stag       4841    0.519    6.480   27.751       0%  0.00e+00
+
+   READ: 'carried YES' = the lever RESCUED the stagnating configuration.
+   'stag' = it did not.
