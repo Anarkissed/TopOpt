@@ -145,6 +145,39 @@ void validate_adaptive_move_options(const SimpOptions& o) {
         "0 < min <= max < 1");
 }
 
+// Validate a SimpOptions penalization-continuation schedule (task 2026-08-02-
+// simp-penalization-continuation). EMPTY = the feature is OFF and nothing here
+// fires, so the default path is untouched. A non-empty schedule must be
+// well-formed stage by stage; nothing about its SHAPE is prescribed here (a
+// schedule may fall as well as rise, and may end anywhere), because the shape is
+// the caller's experiment — what is refused is a stage that could not define a
+// material law at all.
+void validate_penalty_continuation_options(const SimpOptions& o) {
+  if (o.penalty_continuation.empty()) return;
+  for (const PenaltyStage& st : o.penalty_continuation) {
+    if (!(std::isfinite(st.penalty) && st.penalty > 0.0))
+      throw std::invalid_argument(
+          "simp_optimize: penalty_continuation stage penalty must be finite "
+          "and > 0");
+    if (st.iterations < 1)
+      throw std::invalid_argument(
+          "simp_optimize: penalty_continuation stage iterations must be >= 1");
+  }
+}
+
+// The SimpParams a given 1-based design iteration's TRAJECTORY solve runs with.
+// With the schedule EMPTY (the default) this returns a COPY of `params` whose
+// every field is the caller's, so the forwarded law is bit-for-bit the shipped
+// one and the run is byte-identical. With a schedule it substitutes the stage
+// penalty and NOTHING else — E0, nu and the density floor are never touched.
+SimpParams penalty_for_iteration(const SimpParams& params,
+                                 const SimpOptions& o, int iteration) {
+  SimpParams out = params;
+  if (!o.penalty_continuation.empty())
+    out.penalty = penalty_at_iteration(o.penalty_continuation, iteration);
+  return out;
+}
+
 // Whether the MMA Heaviside-projection continuation path is active for this run.
 // The default (mma_projection == false) is false, so every existing MMA run
 // takes the unchanged grayscale branch.
@@ -283,6 +316,66 @@ std::vector<ProjectionStage> heaviside_continuation_schedule() {
   // sharpest stages. beta = 64 is excluded (measured: destroys the structure).
   return {{1.0, 0.2, 50},  {2.0, 0.2, 50}, {4.0, 0.2, 50},
           {8.0, 0.2, 50},  {16.0, 0.1, 50}, {32.0, 0.05, 50}};
+}
+
+// ---------------------------------------------------------------------------
+// SIMP PENALIZATION CONTINUATION (task 2026-08-02-simp-penalization-
+// continuation). Contract, rationale and the byte-identity clause live in
+// topopt/simp.hpp (PenaltyStage). These are PURE — no clock, no state, no
+// reduction — so a re-run returns the identical double for the identical input.
+
+double penalty_at_iteration(const std::vector<PenaltyStage>& schedule,
+                            int iteration) {
+  if (schedule.empty())
+    throw std::invalid_argument(
+        "penalty_at_iteration: schedule must be non-empty (an EMPTY schedule "
+        "means penalty continuation is OFF; the caller gates on that)");
+  if (iteration < 1)
+    throw std::invalid_argument(
+        "penalty_at_iteration: iteration must be >= 1 (1-based design "
+        "iteration)");
+  // Stages are consumed cumulatively in order. Past the last stage the last
+  // stage's penalty is HELD — so a schedule ending at params.penalty spends its
+  // tail running exactly the shipped law.
+  long long remaining = iteration;
+  for (const PenaltyStage& st : schedule) {
+    remaining -= static_cast<long long>(st.iterations);
+    if (remaining <= 0) return st.penalty;
+  }
+  return schedule.back().penalty;
+}
+
+std::vector<PenaltyStage> penalty_continuation_ramp(double p0, double p1,
+                                                    double step,
+                                                    int iterations_per_stage) {
+  if (!(std::isfinite(p0) && p0 > 0.0))
+    throw std::invalid_argument(
+        "penalty_continuation_ramp: p0 must be finite and > 0");
+  if (!(std::isfinite(p1) && p1 >= p0))
+    throw std::invalid_argument(
+        "penalty_continuation_ramp: p1 must be finite and >= p0");
+  if (!(std::isfinite(step) && step > 0.0))
+    throw std::invalid_argument(
+        "penalty_continuation_ramp: step must be finite and > 0");
+  if (iterations_per_stage < 1)
+    throw std::invalid_argument(
+        "penalty_continuation_ramp: iterations_per_stage must be >= 1");
+  // Count the stages from the ARITHMETIC, then synthesise each value as
+  // p0 + k*step, so the sequence never accumulates a running-sum rounding drift
+  // and 1.0 -> 3.0 by 0.25 ends exactly on 3.00 (the 1e-9 slack absorbs the one
+  // representation error in the division, not a growing one).
+  const long long n = static_cast<long long>((p1 - p0) / step + 1e-9);
+  std::vector<PenaltyStage> out;
+  out.reserve(static_cast<std::size_t>(n) + 1);
+  for (long long k = 0; k <= n; ++k)
+    out.push_back({p0 + static_cast<double>(k) * step, iterations_per_stage});
+  return out;
+}
+
+std::vector<PenaltyStage> penalty_continuation_peetz() {
+  // Peetz & Elbanna (SMO 63:835-853) verbatim: increments of 0.25 from 1 to 4,
+  // 20 optimization iterations per penalty value. 13 stages / 260 iterations.
+  return penalty_continuation_ramp(1.0, 4.0, 0.25, 20);
 }
 
 // ---------------------------------------------------------------------------
@@ -1690,6 +1783,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   validate_updater_options(options);  // MMA + projection rejected (M7.mma.1)
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
   validate_adaptive_move_options(options);   // adaptive move opt-in (MMA-only)
+  validate_penalty_continuation_options(options);  // p-continuation opt-in
 
   // ACTIVE DOMAIN (active-domain phase 1): resolve the band ONCE per run (an
   // AUTO request reads the filter radius this run uses) and reject a non-zero
@@ -1845,6 +1939,13 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
       // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
       const double traj_tol = adaptive_traj_cg_tol(options, last_change);
+      // PENALIZATION CONTINUATION (task 2026-08-02-simp-penalization-
+      // continuation): the material law THIS trajectory solve is posed with.
+      // With the schedule empty (the default) this is a copy of `params` — the
+      // shipped constant p — so the forwarded law is bit-for-bit unchanged. The
+      // FINAL / certified solve below always uses `params` itself.
+      const SimpParams traj_params =
+          penalty_for_iteration(params, options, result.iterations + 1);
       // ACTIVE DOMAIN: the mask is applied to the TRAJECTORY solve only (the
       // final/certified solve below is always full-domain). `af` is 1.0 whenever
       // the full domain ran.
@@ -1853,7 +1954,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       sp.mark();
       try {
         c = active_domain_solve(
-            active_domain, grid, params, xphys, bcs, loads, traj_tol,
+            active_domain, grid, traj_params, xphys, bcs, loads, traj_tol,
             options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
@@ -1979,6 +2080,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_trajectory_tol = traj_tol;  // draft-quality: this iter's loose→tight tol
         obs.move = cur_move;         // adaptive move: the limit this step used
         obs.osc_fraction = cur_osc;  // -1 unless the adaptive rule ran
+        obs.penalty = traj_params.penalty;  // p this trajectory solve ran at
         obs.infeasible = infeasible_now;  // handoff 131
         sp.charge(sp.observe);
         // Task 2026-08-02-iteration-phase-timing — see the masked overload.
@@ -2617,6 +2719,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   validate_updater_options(options);
   validate_mma_projection_options(options);  // MMA Heaviside opt-in (handoff 114)
   validate_adaptive_move_options(options);   // adaptive move opt-in (MMA-only)
+  validate_penalty_continuation_options(options);  // p-continuation opt-in
 
   // ACTIVE DOMAIN (active-domain phase 1): resolved once per run, exactly as in
   // the unconstrained overload. This is the overload the production design-box
@@ -2779,6 +2882,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // Trajectory solve: adaptive (loose→tight) tolerance when enabled, else the
       // tight cg_tolerance (byte-identical). The FINAL solve below stays tight.
       const double traj_tol = adaptive_traj_cg_tol(options, last_change);
+      // PENALIZATION CONTINUATION (task 2026-08-02-simp-penalization-
+      // continuation): as in the unconstrained overload — the stage penalty
+      // drives the TRAJECTORY solve, the certified solve below never does.
+      const SimpParams traj_params =
+          penalty_for_iteration(params, options, result.iterations + 1);
       // ACTIVE DOMAIN: trajectory-only, on the ANALYSIS grid (the design box) —
       // the grid the dilution lives on and the one this feature exists for.
       double af = 1.0;
@@ -2786,7 +2894,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       sp.mark();
       try {
         c = active_domain_solve(
-            active_domain, analysis, params, xphys, bcs, loads, traj_tol,
+            active_domain, analysis, traj_params, xphys, bcs, loads, traj_tol,
             options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
@@ -2908,6 +3016,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         obs.cg_trajectory_tol = traj_tol;  // draft-quality: this iter's loose→tight tol
         obs.move = cur_move;         // adaptive move: the limit this step used
         obs.osc_fraction = cur_osc;  // -1 unless the adaptive rule ran
+        obs.penalty = traj_params.penalty;  // p this trajectory solve ran at
         obs.infeasible = infeasible_now;  // handoff 131
         sp.charge(sp.observe);
         // Task 2026-08-02-iteration-phase-timing — where this iteration's wall
@@ -3521,6 +3630,12 @@ SimpOptimizeResult simp_optimize_stress(const VoxelGrid& grid,
     throw std::invalid_argument(
         "simp_optimize_stress: adaptive_move is not supported on the "
         "stress path (handoff 2026-07-26-adaptive-move)");
+  if (!options.penalty_continuation.empty())
+    throw std::invalid_argument(
+        "simp_optimize_stress: penalty_continuation is not supported on the "
+        "stress path — the qp relaxation requires 0 < relaxation_q < penalty at "
+        "every step, an invariant a moving penalty would have to re-establish "
+        "per stage (task 2026-08-02-simp-penalization-continuation)");
   if (!(stress.stress_cap > 0.0))
     throw std::invalid_argument("simp_optimize_stress: stress_cap must be > 0");
   if (!(stress.p_norm > 1.0))

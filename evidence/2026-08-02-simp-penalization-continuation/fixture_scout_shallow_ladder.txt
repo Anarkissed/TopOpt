@@ -1,0 +1,29 @@
+SIMP penalization-continuation probe — big stagnation fixture, 20-iteration rung budget, margin_stop 1.5, ladder 0.68 0.60 0.52
+part 24x6x24 @ 1.00 mm; design box [-4.2 -4.5 -4.2]-[28.2 10.6 28.2] (pad scale 0.35) gives the dilute regime the V-cycle stagnates on.
+EXPECTED, stated before the numbers: with p ramped from 1, the early high-contrast solves are softer, so the multigrid V-cycle should carry MORE early iterations -> FEWER stagnating iterations and (if the CG saved exceeds the ramp's cost) less wall. The design WILL differ; the certified compliance is the test of whether it is better.
+
+### S0 OFF (shipped p=3) — schedule: (empty = OFF, constant p = 3)
+
+---- AD2/AD3: stagnation, iterations, CG and wall (per rung) ----
+ posture                    | rung |  vf  | iters | stagnating | latched |      CG
+ S0 OFF (shipped p=3)       |    0 | 0.68 |    40 |          3 |       0 |    6368
+                            |    1 | 0.60 |    40 |          3 |       0 |    7340
+                            |    2 | 0.52 |    40 |          3 |       0 |    6691
+                            | ALL  |      |   120 |          9 |       0 |   20399   wall 438.0 s
+
+---- AD4/AD5: gate table (every evaluated rung) ----
+ posture                    | rung |  vf  | verdict |        margin |     margin_eff |    compliance | achieved vf | minfeat | comps | reason
+ S0 OFF (shipped p=3)       |    0 | 0.68 | ACCEPT  |       3.59568 |        3.59568 |       8.04077 |    0.593915 |      60 |     1 | 
+                            |    1 | 0.60 | ACCEPT  |       2.83365 |        2.83365 |       10.6098 |    0.496032 |     132 |     1 | 
+                            |    2 | 0.52 | ACCEPT  |       2.16164 |        2.16164 |       14.5512 |    0.387566 |      80 |     1 | 
+
+---- AD4 BLOCKED-STOP check: verdict flips vs the OFF baseline ----
+
+---- AD5: final compliance per rung, OFF vs each schedule ----
+
+---- AD6: p-continuation vs beta-continuation overlap ----
+   S0 OFF (shipped p=3)
+     p RAMPING & beta off :    0 iterations
+     p RAMPING & beta on  :    0 iterations   <- the OVERLAP
+     p held    & beta off :   60 iterations
+     p held    & beta on  :   60 iterations

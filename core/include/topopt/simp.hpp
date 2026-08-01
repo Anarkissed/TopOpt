@@ -413,6 +413,81 @@ struct ProjectionStage {
 std::vector<ProjectionStage> heaviside_continuation_schedule();
 
 // ---------------------------------------------------------------------------
+// SIMP PENALIZATION CONTINUATION (task 2026-08-02-simp-penalization-continuation).
+// OPT-IN, EMPTY BY DEFAULT — the shipped formulation is CONSTANT p = 3.
+//
+// WHAT IT IS. SimpParams::penalty is fixed at 3 (ARCHITECTURE §4 / SimpParams),
+// so the very first design iteration already applies the law's MAXIMUM contrast:
+// a voxel at rho = 0.1 is 1000x softer than solid at p = 3 against 10x at p = 1.
+// The uniform start is exactly where the design has no structure yet, the
+// element moduli span the widest range they ever will, and the geometric
+// V-cycle is at its most fragile — measured on a res-24 design-box rung, the
+// multigrid preconditioner stagnated (burned kMgIterBudget and fell back to
+// Jacobi) on design iterations 3, 5, 6 and 7, and the 127 latch then took MG
+// off for the remaining 25 iterations of that rung and all 32 of the next.
+// Continuation RAMPS p from a soft value up to the target across the early
+// iterations instead.
+//
+// A SCHEDULE IS A LIST OF (penalty, iterations) STAGES consumed in order against
+// this simp_optimize CALL's own 1-based design-iteration counter. Past the end
+// of the schedule the LAST stage's penalty is HELD for the rest of the run — so
+// a schedule that ends at 3.0 spends its tail running exactly the shipped law,
+// which is what makes the certificate below meaningful.
+//
+// TRAJECTORY-ONLY, by the same discipline as warm starts (110), the draft CG
+// tolerance (128) and the active domain: every TRAJECTORY solve runs at the
+// stage penalty, and the FINAL / CERTIFIED compliance solve ALWAYS runs at
+// `params.penalty` — the documented p = 3. A schedule whose last stage is not
+// `params.penalty` therefore optimizes under one law and certifies under
+// another; that is legal here (the published Peetz schedule ends at 4.0) but it
+// is a real mismatch and a caller choosing such a schedule is choosing it.
+//
+// PER CALL, NOT PER RUNG. The counter is this call's `result.iterations`. A
+// driver that runs a rung as TWO simp_optimize calls (the handoff-123
+// conditional-projection path: a grayscale phase, then a projection phase
+// seeded from it) therefore REPLAYS the schedule from stage 1 in the second
+// call. That is a real consequence, not an accident — see the handoff.
+//
+// EMPTY (the DEFAULT) => not one line of the penalty path changes: `params` is
+// forwarded to every solve exactly as before and the run is BYTE-FOR-BYTE what
+// it was (THE ONE RULE — the opt-in discipline of min_feature_mm == 0,
+// cg_tolerance_loose == 0 and active_domain_band == 0).
+struct PenaltyStage {
+  double penalty = 1.0;  // p for this stage (finite, > 0)
+  int iterations = 20;   // design iterations held at this p (>= 1)
+};
+
+// The penalization exponent for the 1-based design `iteration` under `schedule`.
+// PURE: no clock, no state, no floating-point reduction — the same (schedule,
+// iteration) always yields the same double, so a re-run is bit-identical.
+// Stages are consumed cumulatively in order; once every stage is spent the LAST
+// stage's penalty is returned for every further iteration. Throws
+// std::invalid_argument if `schedule` is empty or `iteration` < 1 (callers gate
+// on emptiness; an empty schedule means the feature is off, not "p = 0").
+double penalty_at_iteration(const std::vector<PenaltyStage>& schedule,
+                            int iteration);
+
+// A linear penalty ramp: the values p0, p0 + step, ... up to and including p1
+// (inclusive within a 1e-9 tolerance so 1.0 -> 3.0 by 0.25 ends exactly on
+// 3.00), each held for `iterations_per_stage` design iterations. This is the
+// shape both published schedules have; the named builder below is one
+// instantiation of it. Throws std::invalid_argument unless p0 and p1 are finite
+// and > 0 with p1 >= p0, step is finite and > 0, and iterations_per_stage >= 1.
+std::vector<PenaltyStage> penalty_continuation_ramp(double p0, double p1,
+                                                    double step,
+                                                    int iterations_per_stage);
+
+// Peetz & Elbanna (Struct Multidisc Optim 63:835-853; arXiv 2001.01655) VERBATIM:
+// "20 optimization iterations per penalty value, penalty increased in increments
+// of 0.25 from 1 to 4" — i.e. penalty_continuation_ramp(1.0, 4.0, 0.25, 20):
+// 13 stages, 260 iterations before the schedule is spent, ending at p = 4.0.
+// NOTE, because it decides whether the schedule does anything at all here: this
+// project's production rungs run a 16-30 iteration budget, so the LITERAL
+// schedule never leaves its FIRST stage — the whole rung optimizes at p = 1.0
+// and is then certified at p = 3. That is measured, not feared; see the handoff.
+std::vector<PenaltyStage> penalty_continuation_peetz();
+
+// ---------------------------------------------------------------------------
 // Full volume-fraction-targeted SIMP optimization loop (ROADMAP M3.4).
 //
 // Ties the M3.2 penalized compliance/sensitivities together with the M3.3
@@ -769,6 +844,15 @@ struct SimpIterationObservation {
   // exist). Pure observation — never touches the design.
   double move = 0.0;
   double osc_fraction = -1.0;
+  // Task 2026-08-02-simp-penalization-continuation — the SIMP penalization
+  // exponent p this iteration's TRAJECTORY solve actually ran at. With
+  // `penalty_continuation` empty (the default) this is the constant
+  // `params.penalty` on every row, so the column reads 3 on the shipped
+  // formulation; with a schedule it is the stage value the ramp was at. It is
+  // the direct answer to "which material law produced this row's compliance and
+  // CG count", which cannot otherwise be recovered from the trace. Pure
+  // observation — never touches the design.
+  double penalty = 0.0;
   // Handoff 131 — the RUNG-INFEASIBILITY detector's verdict AT this iteration
   // (the exact predicate `rung_infeasible` the loop consults). The iteration it
   // first reads true is the iteration the rung was ENDED on as infeasible ("load
@@ -1004,6 +1088,26 @@ struct SimpOptions {
   // the design at beta >= 32).
   std::vector<ProjectionStage> projection;
   double projection_eta = 0.5;  // projection threshold, in (0, 1)
+
+  // SIMP PENALIZATION CONTINUATION (task 2026-08-02-simp-penalization-
+  // continuation). EMPTY (the DEFAULT) = OFF = the shipped constant p =
+  // `params.penalty` (3, ARCHITECTURE §4), byte-for-byte. NON-EMPTY = ramp the
+  // penalization exponent across this call's design iterations per the schedule
+  // (see PenaltyStage / penalty_at_iteration above for the full contract: pure,
+  // per-CALL, last stage HELD past the end, and TRAJECTORY-ONLY — the certified
+  // final solve always runs at `params.penalty`).
+  //
+  // COMPOSES WITH EVERY OTHER STAGE MECHANISM RATHER THAN JOINING IT. The
+  // penalty is a pure function of the global design-iteration counter, so it is
+  // independent of the OC `projection` stage plan, the MMA beta-continuation
+  // stage, and the updater. It never adds or removes an iteration; it changes
+  // only the material law each trajectory solve is posed with.
+  //
+  // REFUSED on the STRESS path (simp_optimize_stress), which is not silently
+  // ignoring it: that path's qp relaxation requires 0 < relaxation_q <
+  // params.penalty at every step, an invariant a moving p would have to
+  // re-establish per stage. Out of scope must mean refused (125 §0).
+  std::vector<PenaltyStage> penalty_continuation;
 
   // Heaviside projection + beta continuation for the MMA path (handoff 114 —
   // "finish the design"). This is the MMA-CORRECT analogue of the OC-locked

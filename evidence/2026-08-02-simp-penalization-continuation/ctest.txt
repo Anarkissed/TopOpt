@@ -1,0 +1,69 @@
+AD7 — FULL CTEST AFTER THE CHANGE
+=================================
+
+cmake -S core -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
+ctest --test-dir build --output-on-failure
+
+94/94 passed. Test 73 (penalty_continuation) is the one this task adds;
+the other 93 are the pre-existing suite, unchanged.
+
+      Start 67: face_protection
+67/94 Test #67: face_protection ..................   Passed    3.65 sec
+      Start 68: designbox_padding
+68/94 Test #68: designbox_padding ................   Passed    0.43 sec
+      Start 69: coarsen_rule
+69/94 Test #69: coarsen_rule .....................   Passed  164.40 sec
+      Start 70: designbox_grid_report
+70/94 Test #70: designbox_grid_report ............   Passed    0.65 sec
+      Start 71: mma
+71/94 Test #71: mma ..............................   Passed   89.04 sec
+      Start 72: adaptive_move
+72/94 Test #72: adaptive_move ....................   Passed   15.78 sec
+      Start 73: penalty_continuation
+73/94 Test #73: penalty_continuation .............   Passed    7.01 sec
+      Start 74: mma_projection_gate
+74/94 Test #74: mma_projection_gate ..............   Passed    1.15 sec
+      Start 75: mma_projection
+75/94 Test #75: mma_projection ...................   Passed   44.33 sec
+      Start 76: conditional_projection
+76/94 Test #76: conditional_projection ...........   Passed   44.52 sec
+      Start 77: rung_infeasible
+77/94 Test #77: rung_infeasible ..................   Passed   43.82 sec
+      Start 78: nonconvergence_rejection
+78/94 Test #78: nonconvergence_rejection .........   Passed    9.83 sec
+      Start 79: active_domain
+79/94 Test #79: active_domain ....................   Passed    9.16 sec
+      Start 80: stress
+80/94 Test #80: stress ...........................   Passed   21.66 sec
+      Start 81: step_import
+81/94 Test #81: step_import ......................   Passed    0.30 sec
+      Start 82: segment_vs_step
+82/94 Test #82: segment_vs_step ..................   Passed    0.39 sec
+      Start 83: face_tag
+83/94 Test #83: face_tag .........................   Passed    0.25 sec
+      Start 84: mask_face
+84/94 Test #84: mask_face ........................   Passed    0.34 sec
+      Start 85: cli_demo
+85/94 Test #85: cli_demo .........................   Passed  206.30 sec
+      Start 86: production_parity
+86/94 Test #86: production_parity ................   Passed   21.39 sec
+      Start 87: clearance_parity
+87/94 Test #87: clearance_parity .................   Passed   20.13 sec
+      Start 88: face_protection_parity
+88/94 Test #88: face_protection_parity ...........   Passed    4.01 sec
+      Start 89: loadcase_small_face
+89/94 Test #89: loadcase_small_face ..............   Passed    0.37 sec
+      Start 90: loadcase_resolution
+90/94 Test #90: loadcase_resolution ..............   Passed    0.25 sec
+      Start 91: loadcase_analyze
+91/94 Test #91: loadcase_analyze .................   Passed    1.30 sec
+      Start 92: lattice_hookup
+92/94 Test #92: lattice_hookup ...................   Passed   12.12 sec
+      Start 93: lattice_variant
+93/94 Test #93: lattice_variant ..................   Passed   13.14 sec
+      Start 94: mesh_job
+94/94 Test #94: mesh_job .........................   Passed    6.78 sec
+
+100% tests passed out of 94
+
+Total Test time (real) = 1681.52 sec

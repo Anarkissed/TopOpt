@@ -1,0 +1,38 @@
+AD1, SECOND WITNESS — THE DESIGN-BOX (STAGNATING) PATH
+======================================================
+
+The demo fixture in ad1_byte_identity.txt is a healthy, no-design-box run:
+its multigrid carries every solve, so it does NOT exercise the path this
+task is actually about. This witness does.
+
+THE JOB (evidence-local copy: designbox_job.json). l-bracket at resolution 24
+inside a 9.24x design box, ladder 0.68/0.52/0.38, 16-iteration rung budget.
+It reproduces the stagnation signature and it ends on a PRE-EXISTING
+non-finite-margin refusal in recommend_settings -- identically on both
+binaries, at the same rung, after the same number of iterations. That abort
+predates this task and is untouched by it.
+
+  PRE  binary: HEAD c7194b4, stashed before this task.
+  POST binary: same tree + this change, penalty_continuation left empty.
+
+COMPARED: every DETERMINISTIC column of iterations.csv, row by row.
+  columns: rung, iter, compliance, achieved_vf, plateau, cg_iters,
+           cg_multigrid, beta, hier_built, mg_cycles_attempted, infeasible,
+           recycle_dim, active_fraction, fea_solves, matvecs, geneo_dim,
+           geneo_action
+  (wall_ms and the per-phase *_ms columns are wall clocks and are excluded --
+   they are the only columns permitted to move.)
+
+RESULT
+  PRE rows: 64      POST rows: 64
+  64 rows x 17 deterministic columns = 1088 values compared.
+  DIFFERING: 0.
+
+The stagnating iterations are present and identical on both binaries:
+    rung 0 iter  3  cg_iters   773  mg_cycles_attempted 300
+    rung 0 iter  5  cg_iters   280  mg_cycles_attempted 300
+    rung 0 iter  6  cg_iters  3899  mg_cycles_attempted 300
+    rung 0 iter  7  cg_iters   603  mg_cycles_attempted 300
+
+Both runs also end on the identical message:
+  topopt-cli: recommend_settings: worst_case_stress_margin must be finite and >= 0
