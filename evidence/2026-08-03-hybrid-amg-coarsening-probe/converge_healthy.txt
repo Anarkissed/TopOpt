@@ -1,0 +1,41 @@
+
+## AF3/AF4/AF7 — healthy(rho 0.6, 64x32x64), snapshot 0, grid 64x32x64, achieved_vf 0.6000
+   [start host load average: 14.72 18.24 20.00]
+
+   the exact reference field (matrix-free Jacobi-CG at the production tolerance):
+      486 iterations, converged YES, max|u| = 9.1995e-03, wall 2.4 s
+   [seam capture solve reported: fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations]
+
+configuration                                   lvls   cycles   carried     DOF-wtd     nnz-wtd  build_s   aggr_s  cycle_s  TOTAL_s  rel |du|
+--------------------------------------------------------------------------------------------------------------------------------------------
+SHIPPED (geometric, V, 1+1, scalar w0.6)           4       18       YES        62.1        61.4    1.292    0.000    0.427    1.727  1.79e-10
+hybrid: algebraic below 1, theta 0.02, smoothed P     3       22       YES        74.9        74.3    2.111    0.358    0.620    2.738  2.41e-10
+hybrid: algebraic below 1, theta 0.08, smoothed P     3       22       YES        74.9        74.7    2.603    0.506    1.561    4.173  1.93e-10
+hybrid: algebraic below 1, theta 0.20, smoothed P     4       18       YES        56.4        56.2    2.019    0.111    0.678    2.705  1.79e-10  [chain REFUSED -> geometric]
+hybrid: algebraic below 1, theta 0.02, P = T       3       26       YES        88.5        87.8    1.581    0.094    0.664    2.252  1.87e-10
+hybrid: algebraic below 1, theta 0.08, P = T       3       24       YES        81.7        81.1    1.568    0.089    0.670    2.244  2.11e-10
+hybrid: algebraic below 1, theta 0.20, P = T       4       18       YES        56.4        56.2    1.397    0.031    0.456    1.860  1.79e-10  [chain REFUSED -> geometric]
+
+   DOF-wtd / nnz-wtd are FINE-LEVEL-APPLY EQUIVALENTS: one V-cycle's work summed over levels, weighted by each level's DOF count (resp. nonzeros, against the 33359040-entry assembled equivalent of the matrix-free fine operator), times the cycles actually run.
+
+   hierarchy shape below level 0 — n (nnz) per level:
+      SHIPPED (geometric, V, 1+1, scalar w0.6)        L1 53856 (4021038)  L2 7344 (507150)  L3 1080 (64350)
+      hybrid: algebraic below 1, theta 0.02, smoothed P  L1 53856 (4021038)  L2 4356 (575424)
+      hybrid: algebraic below 1, theta 0.08, smoothed P  L1 53856 (4021038)  L2 4356 (1174903)
+      hybrid: algebraic below 1, theta 0.20, smoothed P  L1 53856 (4021038)
+      hybrid: algebraic below 1, theta 0.02, P = T    L1 53856 (4021038)  L2 4356 (546973)
+      hybrid: algebraic below 1, theta 0.08, P = T    L1 53856 (4021038)  L2 4356 (551681)
+      hybrid: algebraic below 1, theta 0.20, P = T    L1 53856 (4021038)
+
+   AF5 — memory. Bytes BELOW level 1 (what the hybrid adds; level 1 itself is production's cost either way):
+      SHIPPED (geometric, V, 1+1, scalar w0.6)        L1   46.22 MB   below-L1    6.57 MB   -> at 8.44M DOF: L1   0.93 GB, below-L1   0.13 GB
+      hybrid: algebraic below 1, theta 0.02, smoothed P  L1   46.22 MB   below-L1    6.60 MB   -> at 8.44M DOF: L1   0.93 GB, below-L1   0.13 GB
+      hybrid: algebraic below 1, theta 0.08, smoothed P  L1   46.22 MB   below-L1   13.46 MB   -> at 8.44M DOF: L1   0.93 GB, below-L1   0.27 GB
+      hybrid: algebraic below 1, theta 0.20, smoothed P  L1   46.22 MB   below-L1    0.00 MB   -> at 8.44M DOF: L1   0.93 GB, below-L1   0.00 GB
+      hybrid: algebraic below 1, theta 0.02, P = T    L1   46.22 MB   below-L1    6.28 MB   -> at 8.44M DOF: L1   0.93 GB, below-L1   0.13 GB
+      hybrid: algebraic below 1, theta 0.08, P = T    L1   46.22 MB   below-L1    6.33 MB   -> at 8.44M DOF: L1   0.93 GB, below-L1   0.13 GB
+      hybrid: algebraic below 1, theta 0.20, P = T    L1   46.22 MB   below-L1    0.00 MB   -> at 8.44M DOF: L1   0.93 GB, below-L1   0.00 GB
+      PR 230 priced PURE AMG (an assembled FINE level) at 20-35 GB at 8.44M DOF. Nothing above assembles level 0.
+   [end host load average: 13.53 17.68 19.75]
+
+   peak RSS this process: 0.74 GB

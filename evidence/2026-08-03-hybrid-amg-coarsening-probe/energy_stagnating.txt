@@ -1,0 +1,19 @@
+   fixture: PR 280's ladder32 reproduction, 80 trajectory snapshots, grid 48x32x40
+
+## WHERE THE ENERGY IS — stagnating(ladder32), snapshot 2, grid 48x32x40, achieved_vf 0.0368
+   [start host load average: 25.63 18.50 15.85]
+   reference: 3636 iterations, converged YES, max|u| = 4.4905e+04, energy u.b = 5.80424180e+04
+
+   element-energy identity check: sum_e factor_e u_e^T Ke u_e = 5.80424176e+04 vs u.b = 5.80424180e+04   rel 5.78e-09
+
+density bin                            elements         energy        share
+----------------------------------------------------------------------------
+rho < 0.0015 (the void floor)             30043    4.19343e+04     72.2477%
+0.0015 <= rho < 0.005                      1638    6.87599e+03     11.8465%
+0.005  <= rho < 0.02                       1911    6.58083e+03     11.3380%
+0.02   <= rho < 0.05                       2062    2.60465e+03      4.4875%
+0.05   <= rho < 0.10                       1918    4.39263e+01      0.0757%
+0.10   <= rho < 0.30                       8535    2.72407e+00      0.0047%
+0.30   <= rho < 0.60                          0    0.00000e+00      0.0000%
+rho >= 0.60 (solid)                          32    0.00000e+00      0.0000%
+   [end host load average: 26.36 19.20 16.17]

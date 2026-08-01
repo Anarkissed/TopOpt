@@ -1,0 +1,8 @@
+field,configuration,levels,cycles,carried,fine_applies,dof_weighted_work,nnz_weighted_work,build_s,aggr_s,cycle_s,total_s,rel_du,residual
+stagnating(ladder32),"SHIPPED (geometric, V, 1+1, scalar w0.6)",0,300,0,4841,1017.0975,1003.8347,0.5216,0.0000,6.6290,15.6256,0.000000e+00,9.136969e-09
+stagnating(ladder32),"hybrid: algebraic below 1, theta 0.02, smoothed P",0,300,0,4841,1016.2659,1012.3113,0.8008,0.1629,3.6794,23.8140,0.000000e+00,9.136969e-09
+stagnating(ladder32),"hybrid: algebraic below 1, theta 0.08, smoothed P",0,300,0,4841,1018.4668,1027.5265,1.4677,0.2521,4.4106,17.1343,0.000000e+00,9.136969e-09
+stagnating(ladder32),"hybrid: algebraic below 1, theta 0.20, smoothed P",0,300,0,4841,1041.9830,1270.7754,2.3957,1.1911,3.2596,16.9116,0.000000e+00,9.136969e-09
+stagnating(ladder32),"hybrid: algebraic below 1, theta 0.02, P = T",0,300,0,4841,1016.2659,1004.6505,0.5400,0.0429,3.2431,13.0321,0.000000e+00,9.136969e-09
+stagnating(ladder32),"hybrid: algebraic below 1, theta 0.08, P = T",0,300,0,4841,1018.4668,1007.6031,0.7175,0.0429,5.2794,14.7272,0.000000e+00,9.136969e-09
+stagnating(ladder32),"hybrid: algebraic below 1, theta 0.20, P = T",0,300,0,4841,1121.8391,1116.6820,0.6913,0.0937,6.2396,15.5207,0.000000e+00,9.136969e-09

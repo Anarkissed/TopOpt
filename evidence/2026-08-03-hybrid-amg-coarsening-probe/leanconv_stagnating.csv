@@ -1,0 +1,4 @@
+field,configuration,levels,pcg_iters,converged,setup_s,solve_s,rel_du,amg_mb,final_rel
+stagnating(ladder32),"amg_lean L1 algebraic  theta 0.02  P = T",4,86,1,0.6064,2.9747,6.325106e-09,45.606,9.664307e-09
+stagnating(ladder32),"amg_lean L1 algebraic  theta 0.08  P = T",3,292,1,0.7328,19.8114,2.825780e-09,61.318,8.221796e-09
+stagnating(ladder32),"amg_lean L1 algebraic  theta 0.02  smoothed",2,243,1,7.7135,40.0125,2.795145e-09,149.830,6.240313e-09

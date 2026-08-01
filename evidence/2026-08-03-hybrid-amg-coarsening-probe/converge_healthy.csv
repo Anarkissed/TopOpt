@@ -1,0 +1,8 @@
+field,configuration,levels,cycles,carried,fine_applies,dof_weighted_work,nnz_weighted_work,build_s,aggr_s,cycle_s,total_s,rel_du,residual
+healthy(rho 0.6, 64x32x64),"SHIPPED (geometric, V, 1+1, scalar w0.6)",4,18,1,72,62.0717,61.3647,1.2922,0.0000,0.4273,1.7268,1.787840e-10,6.665799e-09
+healthy(rho 0.6, 64x32x64),"hybrid: algebraic below 1, theta 0.02, smoothed P",3,22,1,88,74.8635,74.3350,2.1115,0.3578,0.6199,2.7384,2.411222e-10,8.337591e-09
+healthy(rho 0.6, 64x32x64),"hybrid: algebraic below 1, theta 0.08, smoothed P",3,22,1,88,74.8635,74.7304,2.6032,0.5063,1.5610,4.1728,1.925504e-10,5.095687e-09
+healthy(rho 0.6, 64x32x64),"hybrid: algebraic below 1, theta 0.20, smoothed P",4,18,1,72,56.3538,56.1697,2.0189,0.1110,0.6776,2.7047,1.787840e-10,6.665799e-09
+healthy(rho 0.6, 64x32x64),"hybrid: algebraic below 1, theta 0.02, P = T",3,26,1,104,88.4750,87.8283,1.5815,0.0941,0.6642,2.2524,1.873975e-10,3.442846e-09
+healthy(rho 0.6, 64x32x64),"hybrid: algebraic below 1, theta 0.08, P = T",3,24,1,96,81.6692,81.0757,1.5675,0.0888,0.6704,2.2444,2.111839e-10,8.171714e-09
+healthy(rho 0.6, 64x32x64),"hybrid: algebraic below 1, theta 0.20, P = T",4,18,1,72,56.3538,56.1697,1.3973,0.0307,0.4556,1.8601,1.787840e-10,6.665799e-09

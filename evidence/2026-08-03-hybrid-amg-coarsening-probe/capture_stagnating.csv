@@ -1,0 +1,18 @@
+field,space,kind,dim,captured_energy,setup_s
+stagnating(ladder32),"geometric level 1 (range P0)",geo,18738,0.0159535792,4.8820
+stagnating(ladder32),"geometric level 2 (13x9x11 nodes)",geo,2364,0.0044017074,0.0495
+stagnating(ladder32),"geometric level 3 (7x5x6 nodes)",geo,285,0.0007001690,0.0027
+stagnating(ladder32),"algebraic level 2  theta 0.02  smoothed P",alg,1948,0.0063348022,0.2153
+stagnating(ladder32),"algebraic level 2  theta 0.04  smoothed P",alg,2351,0.0076609124,0.2966
+stagnating(ladder32),"algebraic level 2  theta 0.08  smoothed P",alg,3049,0.0094340087,0.6227
+stagnating(ladder32),"algebraic level 2  theta 0.12  smoothed P",alg,4671,0.0112237393,1.6695
+stagnating(ladder32),"algebraic level 2  theta 0.20  smoothed P",alg,14813,0.0155624645,31.5815
+stagnating(ladder32),"algebraic level 2  theta 0.30  smoothed P",alg,18688,0.0159519409,64.3128
+stagnating(ladder32),"algebraic level 2  theta 0.02  P = T (unsmoothed)",alg,1948,0.0057886730,0.0566
+stagnating(ladder32),"algebraic level 2  theta 0.04  P = T (unsmoothed)",alg,2351,0.0071543619,0.0693
+stagnating(ladder32),"algebraic level 2  theta 0.08  P = T (unsmoothed)",alg,3049,0.0089792090,0.1206
+stagnating(ladder32),"algebraic level 2  theta 0.12  P = T (unsmoothed)",alg,4671,0.0108305635,0.3281
+stagnating(ladder32),"algebraic level 2  theta 0.20  P = T (unsmoothed)",alg,14813,0.0154629035,3.3885
+stagnating(ladder32),"algebraic level 2  theta 0.30  P = T (unsmoothed)",alg,18688,0.0159517993,5.2951
+stagnating(ladder32),"ALGEBRAIC level 1  theta 0.02  P = T (unsmoothed)",alg-L1,13140,0.5632927046,3.7843
+stagnating(ladder32),"ALGEBRAIC level 1  theta 0.08  P = T (unsmoothed)",alg-L1,21252,0.6175184203,10.5169

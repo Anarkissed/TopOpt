@@ -1,0 +1,14 @@
+field,space,kind,dim,captured_energy,setup_s
+healthy(rho 0.6, 32x16x32),"geometric level 1 (range P0)",geo,7344,0.9929592856,0.4588
+healthy(rho 0.6, 32x16x32),"geometric level 2 (9x5x9 nodes)",geo,1080,0.9728977939,0.0114
+healthy(rho 0.6, 32x16x32),"geometric level 3 (5x3x5 nodes)",geo,180,0.9184931951,0.0012
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.02  smoothed P",alg,648,0.6012293536,0.0325
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.04  smoothed P",alg,648,0.6012293536,0.0331
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.08  smoothed P",alg,714,0.5770156526,0.0455
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.12  smoothed P",alg,1296,0.6675366545,0.1497
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.20  smoothed P",alg,6151,0.9811555243,4.2121
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.02  P = T (unsmoothed)",alg,648,0.4098265616,0.0117
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.04  P = T (unsmoothed)",alg,648,0.4098265616,0.0124
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.08  P = T (unsmoothed)",alg,714,0.3923851290,0.0135
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.12  P = T (unsmoothed)",alg,1296,0.4848374236,0.0276
+healthy(rho 0.6, 32x16x32),"algebraic level 2  theta 0.20  P = T (unsmoothed)",alg,6151,0.9390971361,0.2762

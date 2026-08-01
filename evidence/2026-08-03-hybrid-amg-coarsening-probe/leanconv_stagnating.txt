@@ -1,0 +1,21 @@
+   fixture: PR 280's ladder32 reproduction, 80 trajectory snapshots, grid 48x32x40
+
+## ALGEBRAIC LEVEL 1, SOLVED — stagnating(ladder32), snapshot 2, grid 48x32x40, achieved_vf 0.0368
+   [start host load average: 48.79 27.82 19.98]
+   reference: 3636 Jacobi-CG iterations, converged YES, max|u| = 4.4905e+04, wall 15.3 s
+
+configuration                            lvls  PCG its converged    setup_s    solve_s   rel |du|
+----------------------------------------------------------------------------------------------------
+amg_lean L1 algebraic  theta 0.02  P = T      4       86       YES      0.606      2.975   6.33e-09
+      levels: L0 150075 (matrix-free)  L1 13140 (1408464 nnz)  L2 1830 (165235 nnz)  L3 690 (41272 nnz)   AMG adds 45.6 MB, final rel resid 9.66e-09
+amg_lean L1 algebraic  theta 0.08  P = T      3      292       YES      0.733     19.811   2.83e-09
+      levels: L0 150075 (matrix-free)  L1 21252 (2304986 nnz)  L2 8544 (849878 nnz)   AMG adds 61.3 MB, final rel resid 8.22e-09
+      note: level 3 REJECTED by coarsening control: coarsening ratio 1.275414 < 2.000000
+      note: bottom level n=8544 > dense cap: smoothed, not solved exactly
+amg_lean L1 algebraic  theta 0.02  smoothed      2      243       YES      7.713     40.013   2.80e-09
+      levels: L0 150075 (matrix-free)  L1 13140 (3865608 nnz)   AMG adds 149.8 MB, final rel resid 6.24e-09
+      note: level 2 REJECTED by coarsening control: stencil 1116.249307 nnz/row > 400.000000
+      note: bottom level n=13140 > dense cap: smoothed, not solved exactly
+amg_lean L1 algebraic  theta 0.08  smoothed      -        -   NOBUILD     11.373          -          -
+      note: level 1 REJECTED by coarsening control: stencil 444.153680 nnz/row > 400.000000
+   [end host load average: 66.35 38.34 24.83]

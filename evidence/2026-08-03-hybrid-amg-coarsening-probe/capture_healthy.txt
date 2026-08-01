@@ -1,0 +1,31 @@
+
+## healthy(rho 0.6, 32x16x32) — snapshot 0 of 1, grid 32x16x32, achieved_vf 0.6000
+   [start host load average: 13.76 15.68 13.55]
+
+   AF1 step 1 — the EXACT reference solve (matrix-free Jacobi-CG, production tolerance 1e-08):
+      ng = 53856 reduced DOFs, 244 iterations, converged YES, residual 8.732e-09, max|u| = 1.8444e-02, wall 0.3 s
+      exact energy u.b = 5.15866169e-01
+   [seam capture solve reported: fea_solve_mgcg_matfree: CG did not reach the requested tolerance within max_iterations]
+
+   AF1 step 2 — the seam, as the PRODUCTION builder formed it:
+      P0: 53856 x 7344 (172725 nnz)   A1: 7344 x 7344 (507150 nnz)   level-1 grid 17x9x17 nodes   capture wall 0.2 s
+      A1 == P0^T A0 P0 check: z^T A1 z = 1.5069506607e+06 vs (P0 z)^T A0 (P0 z) = 1.5069506607e+06   rel 3.09e-16 OK
+
+   AF2 — algebraic aggregation from A1 (2448 level-1 nodes, 7344 DOFs). Sweeping theta so the comparison lands at MATCHED coarse dimension.
+
+coarse space                                 kind        dim   captured E    setup s
+--------------------------------------------------------------------------------------
+geometric level 1 (range P0)                  geo       7344     99.2959%      0.459
+geometric level 2 (9x5x9 nodes)               geo       1080     97.2898%      0.011
+geometric level 3 (5x3x5 nodes)               geo        180     91.8493%      0.001
+algebraic level 2  theta 0.02  smoothed P     alg        648     60.1229%      0.032
+algebraic level 2  theta 0.04  smoothed P     alg        648     60.1229%      0.033
+algebraic level 2  theta 0.08  smoothed P     alg        714     57.7016%      0.046
+algebraic level 2  theta 0.12  smoothed P     alg       1296     66.7537%      0.150
+algebraic level 2  theta 0.20  smoothed P     alg       6151     98.1156%      4.212
+algebraic level 2  theta 0.02  P = T (unsmoothed)    alg        648     40.9827%      0.012
+algebraic level 2  theta 0.04  P = T (unsmoothed)    alg        648     40.9827%      0.012
+algebraic level 2  theta 0.08  P = T (unsmoothed)    alg        714     39.2385%      0.013
+algebraic level 2  theta 0.12  P = T (unsmoothed)    alg       1296     48.4837%      0.028
+algebraic level 2  theta 0.20  P = T (unsmoothed)    alg       6151     93.9097%      0.276
+   [end host load average: 13.46 15.58 13.53]
