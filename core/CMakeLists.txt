@@ -1026,6 +1026,19 @@ if(Eigen3_FOUND)
   target_link_libraries(test_adaptive_move PRIVATE topopt)
   add_test(NAME adaptive_move COMMAND test_adaptive_move)
 
+  # SIMP penalization continuation (task 2026-08-02-simp-penalization-
+  # continuation): the opt-in p-ramp. Pins OFF byte-identity (plain + masked)
+  # AND the stronger constant-p-schedule identity, the pure schedule->penalty
+  # map, the two published schedules verbatim (including that the literal Peetz
+  # dwell never leaves p = 1 inside a production-length rung), that a real
+  # schedule moves the design and is reported per iteration, that the CERTIFIED
+  # compliance is always computed at params.penalty, and the refusals. Drives
+  # simp_optimize, so Eigen-gated like the other optimizer tests.
+  add_executable(test_penalty_continuation
+                 tests/validation/test_penalty_continuation.cpp)
+  target_link_libraries(test_penalty_continuation PRIVATE topopt)
+  add_test(NAME penalty_continuation COMMAND test_penalty_continuation)
+
   # MMA projection-gate (Option B): after the M7.mma.4 switchover the run path
   # must NOT enable a Heaviside projection schedule under MMA (simp_optimize
   # rejects it). Pins the pure gate predicate (projection_supported) and both

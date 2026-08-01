@@ -1,0 +1,99 @@
+SIMP penalization-continuation probe — big stagnation fixture, 20-iteration rung budget, margin_stop 1.5, ladder 0.68 0.52
+part 24x6x24 @ 1.00 mm; design box [-4.2 -4.5 -4.2]-[28.2 10.6 28.2] (pad scale 0.35) gives the dilute regime the V-cycle stagnates on.
+EXPECTED, stated before the numbers: with p ramped from 1, the early high-contrast solves are softer, so the multigrid V-cycle should carry MORE early iterations -> FEWER stagnating iterations and (if the CG saved exceeds the ramp's cost) less wall. The design WILL differ; the certified compliance is the test of whether it is better.
+
+### S0 OFF (shipped p=3) — schedule: (empty = OFF, constant p = 3)
+
+### S1 Peetz literal 20it-per-val — schedule: 1.00x20 1.25x20 1.50x20 1.75x20 2.00x20 2.25x20 2.50x20 2.75x20 3.00x20 3.25x20 3.50x20 3.75x20 4.00x20  (last value HELD past the end)
+
+### S2 Peetz values 1it-per-val — schedule: 1.00x1 1.25x1 1.50x1 1.75x1 2.00x1 2.25x1 2.50x1 2.75x1 3.00x1 3.25x1 3.50x1 3.75x1 4.00x1  (last value HELD past the end)
+
+### S3 Amir-Sigmund 1to3 1it-per-val — schedule: 1.00x1 1.25x1 1.50x1 1.75x1 2.00x1 2.25x1 2.50x1 2.75x1 3.00x1  (last value HELD past the end)
+
+### S4 stagnation-window 1to3 — schedule: 1.00x2 1.50x2 2.00x2 2.50x2 3.00x2  (last value HELD past the end)
+
+---- AD2/AD3: stagnation, iterations, CG and wall (per rung) ----
+ posture                    | rung |  vf  | iters | stagnating | latched |      CG
+ S0 OFF (shipped p=3)       |    0 | 0.68 |    40 |          3 |       0 |    6368
+                            |    1 | 0.52 |    40 |          3 |       0 |    7094
+                            | ALL  |      |    80 |          6 |       0 |   13462   wall 454.3 s
+ S1 Peetz literal 20it-per-val    |    0 | 0.68 |    40 |          0 |       0 |    1745
+                            |    1 | 0.52 |    40 |          0 |       0 |    1963
+                            | ALL  |      |    80 |          0 |       0 |    3708   wall 120.9 s
+ S2 Peetz values 1it-per-val  |    0 | 0.68 |    40 |          2 |       0 |    3861
+                            |    1 | 0.52 |    40 |          1 |       0 |    3730
+                            | ALL  |      |    80 |          3 |       0 |    7591   wall 241.4 s
+ S3 Amir-Sigmund 1to3 1it-per-val |    0 | 0.68 |    40 |          1 |       0 |    3068
+                            |    1 | 0.52 |    40 |          1 |       0 |    3350
+                            | ALL  |      |    80 |          2 |       0 |    6418   wall 158.4 s
+ S4 stagnation-window 1to3  |    0 | 0.68 |    40 |          0 |       0 |    2559
+                            |    1 | 0.52 |    40 |          0 |       0 |    3476
+                            | ALL  |      |    80 |          0 |       0 |    6035   wall 100.5 s
+
+---- AD4/AD5: gate table (every evaluated rung) ----
+ posture                    | rung |  vf  | verdict |        margin |     margin_eff |    compliance | achieved vf | minfeat | comps | reason
+ S0 OFF (shipped p=3)       |    0 | 0.68 | ACCEPT  |       3.59568 |        3.59568 |       8.04077 |    0.593915 |      60 |     1 | 
+                            |    1 | 0.52 | ACCEPT  |       2.16165 |        2.16165 |       14.5512 |    0.387566 |      80 |     1 | 
+ S1 Peetz literal 20it-per-val    |    0 | 0.68 | REJECT  |       1.98261 |        1.98261 |       188.414 |    0.240741 |      46 |     1 | load path not connected
+                            |    1 | 0.52 | REJECT  |       1.26008 |        1.26008 |       1257.12 |    0.088624 |      56 |     1 | load path not connected
+ S2 Peetz values 1it-per-val  |    0 | 0.68 | ACCEPT  |       3.24069 |        3.24069 |       8.13292 |    0.583333 |      52 |     1 | 
+                            |    1 | 0.52 | REJECT  |      0.875992 |       0.875992 |       51.3431 |    0.108466 |      64 |     1 | load path not connected
+ S3 Amir-Sigmund 1to3 1it-per-val |    0 | 0.68 | ACCEPT  |       3.73718 |        3.73718 |       8.27326 |    0.582011 |      50 |     1 | 
+                            |    1 | 0.52 | REJECT  |       1.27694 |        1.27694 |       55.5314 |    0.130952 |      58 |     1 | load path not connected
+ S4 stagnation-window 1to3  |    0 | 0.68 | ACCEPT  |       4.11089 |        4.11089 |       7.56857 |    0.595238 |      72 |     1 | 
+                            |    1 | 0.52 | REJECT  |       1.42819 |        1.42819 |       35.9709 |    0.181217 |      74 |     1 | load path not connected
+
+---- AD4 BLOCKED-STOP check: verdict flips vs the OFF baseline ----
+   FLIP  rung 0 (vf 0.68): ACCEPT -> REJECT   [S1 Peetz literal 20it-per-val]
+   FLIP  rung 1 (vf 0.52): ACCEPT -> REJECT   [S1 Peetz literal 20it-per-val]
+   S1 Peetz literal 20it-per-val    verdict flips: 2
+   FLIP  rung 1 (vf 0.52): ACCEPT -> REJECT   [S2 Peetz values 1it-per-val]
+   S2 Peetz values 1it-per-val  verdict flips: 1
+   FLIP  rung 1 (vf 0.52): ACCEPT -> REJECT   [S3 Amir-Sigmund 1to3 1it-per-val]
+   S3 Amir-Sigmund 1to3 1it-per-val verdict flips: 1
+   FLIP  rung 1 (vf 0.52): ACCEPT -> REJECT   [S4 stagnation-window 1to3]
+   S4 stagnation-window 1to3  verdict flips: 1
+
+---- AD5: final compliance per rung, OFF vs each schedule ----
+   S1 Peetz literal 20it-per-val
+     rung 0 vf 0.68 : OFF 8.04077 -> ON 188.414  (+2243.23%  OFF wins)
+     rung 1 vf 0.52 : OFF 14.5512 -> ON 1257.12  (+8539.32%  OFF wins)
+   S2 Peetz values 1it-per-val
+     rung 0 vf 0.68 : OFF 8.04077 -> ON 8.13292  (+1.15%  OFF wins)
+     rung 1 vf 0.52 : OFF 14.5512 -> ON 51.3431  (+252.84%  OFF wins)
+   S3 Amir-Sigmund 1to3 1it-per-val
+     rung 0 vf 0.68 : OFF 8.04077 -> ON 8.27326  (+2.89%  OFF wins)
+     rung 1 vf 0.52 : OFF 14.5512 -> ON 55.5314  (+281.63%  OFF wins)
+   S4 stagnation-window 1to3
+     rung 0 vf 0.68 : OFF 8.04077 -> ON 7.56857  (-5.87%  continuation WINS)
+     rung 1 vf 0.52 : OFF 14.5512 -> ON 35.9709  (+147.20%  OFF wins)
+
+---- AD6: p-continuation vs beta-continuation overlap ----
+   S0 OFF (shipped p=3)
+     p RAMPING & beta off :    0 iterations
+     p RAMPING & beta on  :    0 iterations   <- the OVERLAP
+     p held    & beta off :   40 iterations
+     p held    & beta on  :   40 iterations
+   S1 Peetz literal 20it-per-val
+     p RAMPING & beta off :   40 iterations
+     p RAMPING & beta on  :   40 iterations   <- the OVERLAP
+     p held    & beta off :    0 iterations
+     p held    & beta on  :    0 iterations
+   S2 Peetz values 1it-per-val
+     p RAMPING & beta off :   24 iterations
+     p RAMPING & beta on  :   24 iterations   <- the OVERLAP
+     p held    & beta off :   16 iterations
+     p held    & beta on  :   16 iterations
+   S3 Amir-Sigmund 1to3 1it-per-val
+     p RAMPING & beta off :   16 iterations
+     p RAMPING & beta on  :   16 iterations   <- the OVERLAP
+     p held    & beta off :   24 iterations
+     p held    & beta on  :   24 iterations
+   S4 stagnation-window 1to3
+     p RAMPING & beta off :   16 iterations
+     p RAMPING & beta on  :   16 iterations   <- the OVERLAP
+     p held    & beta off :   24 iterations
+     p held    & beta on  :   24 iterations
+
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-simp-penalty-continuation-a819b9/d63b844a-989d-4fa0-8840-9cd9a4ea4733/scratchpad/run2/iterations.csv
+wrote /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-simp-penalty-continuation-a819b9/d63b844a-989d-4fa0-8840-9cd9a4ea4733/scratchpad/run2/rungs.csv

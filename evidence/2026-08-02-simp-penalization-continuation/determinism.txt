@@ -1,0 +1,27 @@
+AD7 — DETERMINISM IN EACH POSTURE
+=================================
+
+Two INDEPENDENT process invocations of the probe on the same fixture:
+  run 1: ladder 0.68 / 0.52 / 0.38   (rungs.csv)
+  run 2: ladder 0.68 / 0.52          (rungs_matched_ladder.csv)
+Rungs 0 and 1 are the same computation in both, so every deterministic
+per-rung field must agree exactly. Wall seconds are excluded (they are the
+only field that is allowed to move).
+
+  S0 OFF (shipped p=3)             rung 0  ACCEPT  margin 3.595681  compliance 8.040774  cg 6368  stagnating 3
+  S0 OFF (shipped p=3)             rung 1  ACCEPT  margin 2.161648  compliance 14.551200  cg 7094  stagnating 3
+  S1 Peetz literal 20it-per-val    rung 0  REJECT  margin 1.982609  compliance 188.414194  cg 1745  stagnating 0
+  S1 Peetz literal 20it-per-val    rung 1  REJECT  margin 1.260081  compliance 1257.124768  cg 1963  stagnating 0
+  S2 Peetz values 1it-per-val      rung 0  ACCEPT  margin 3.240694  compliance 8.132924  cg 3861  stagnating 2
+  S2 Peetz values 1it-per-val      rung 1  REJECT  margin 0.875992  compliance 51.343095  cg 3730  stagnating 1
+  S3 Amir-Sigmund 1to3 1it-per-val rung 0  ACCEPT  margin 3.737181  compliance 8.273258  cg 3068  stagnating 1
+  S3 Amir-Sigmund 1to3 1it-per-val rung 1  REJECT  margin 1.276943  compliance 55.531407  cg 3350  stagnating 1
+  S4 stagnation-window 1to3        rung 0  ACCEPT  margin 4.110886  compliance 7.568567  cg 2559  stagnating 0
+  S4 stagnation-window 1to3        rung 1  REJECT  margin 1.428193  compliance 35.970865  cg 3476  stagnating 0
+
+COMPARED: 10 rung records x 13 deterministic fields = 130 values.
+DIFFERING: 0.
+
+Every posture — the OFF baseline and all four schedules — reproduces its
+verdict, margin, compliance, achieved volume fraction, CG count, stagnating-
+iteration count and min-feature count to the last recorded digit.

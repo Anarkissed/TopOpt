@@ -1,0 +1,55 @@
+AD1 — OFF IS BYTE-IDENTICAL
+==========================
+
+Bar: with penalty_continuation empty (the default), the shipped formulation is
+untouched. Stash-rebuild checksum on the gate demo fixture
+(core/tests/fixtures/demo/job.json, mesh_format forced to stl because this
+build has no lib3mf; ladder 0.70/0.50/0.30 at resolution 48, 3 rungs x 60
+design iterations).
+
+BINARIES
+  PRE  = topopt-cli built at HEAD c7194b4 (main, after PR 273), stashed before
+         a single line of this task was written.
+  POST = topopt-cli built from the same tree PLUS this task's simp.hpp/simp.cpp
+         change, with penalty_continuation left at its empty default.
+
+RUN 1 (PRE binary)
+acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6  report.json
+a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc  fields.bin
+cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace  variant_030.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  variant_050.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  variant_070.stl
+7b9076ce9d73233cf1bb2bbd7af7a4459146c4360e45180748bac9e1c8439e1f  build_orientation.json
+
+RUN 2 (PRE binary, again — the run-to-run control)
+acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6  report.json
+a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc  fields.bin
+cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace  variant_030.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  variant_050.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  variant_070.stl
+3db7914371823cdee558ffa291c1a58e72a5bd177bf06066d3e0a66fbb51cfd2  build_orientation.json
+
+RUN 3 (POST binary, option OFF)
+acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6  report.json
+a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc  fields.bin
+cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace  variant_030.stl
+c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87  variant_050.stl
+88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1  variant_070.stl
+008375d85ac22f1a9257c9133b9431050ed306fd9d8add38f4d152620350f40c  build_orientation.json
+
+VERDICT
+  report.json, fields.bin, variant_030.stl, variant_050.stl, variant_070.stl:
+  IDENTICAL across all three runs.
+
+  build_orientation.json differs on EVERY pair, including PRE-vs-PRE (runs 1 and
+  2, the same binary). Its only differing byte range is a wall-clock field:
+
+    80,81c80,81
+    <     "sweep_seconds": 0.004481791,
+    <     "strut_axis_measure_seconds": 4.2e-08,
+    ---
+    >     "sweep_seconds": 0.004938459,
+    >     "strut_axis_measure_seconds": 0,
+
+  so that file is clock noise on an unchanged binary, not a change of behaviour.
+  Every deterministic artifact is bit-identical PRE vs POST.
