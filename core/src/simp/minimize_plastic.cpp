@@ -22,6 +22,7 @@
 #include "topopt/analyze.hpp"
 #include "topopt/fea.hpp"
 #include "topopt/gate_diagnosis_eval.hpp"  // diagnose_gate (post-pass, verdict-free)
+#include "topopt/observability.hpp"        // steady_clock_ms (pre-solve wall)
 #include "topopt/orient.hpp"
 #include "topopt/production.hpp"  // knockdown_spec_for
 #include "topopt/warm_start.hpp"
@@ -435,6 +436,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // smaller but the fine rungs still each pay the full iteration-0 build (091).
   std::vector<double> warm_seed;
   if (options.warm_start_coarse) {
+    // The pre-solve's own wall, charged as a separate line (AC3 of handoff
+    // 2026-08-02-warm-start-coarse-experiment). The span covers EVERYTHING the
+    // cascade costs — coarsening the effective problem, the res/2 solve, and the
+    // prolongation — so no part of the price can hide outside it. Same steady
+    // clock as the per-iteration phase instrument (handoff 2026-08-02-iteration-
+    // phase-timing), so the two numbers are comparable without conversion.
+    const double warm_t0 = steady_clock_ms();
+    const long long warm_mv0 = fea_matvec_count();
     const VoxelGrid Gc = coarsen_grid(G);
     const std::vector<DirichletBC> Bc = coarsen_bcs(G, Gc, B);
     const std::vector<NodalLoad> loads_c =
@@ -466,6 +475,8 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // ladder's own cancel poll stops it immediately).
     if (!coarse.cancelled)
       warm_seed = prolong_density(Gc, G, coarse.physical_density);
+    result.warm_start_coarse_ms = steady_clock_ms() - warm_t0;
+    result.warm_start_coarse_matvecs = fea_matvec_count() - warm_mv0;
   }
 
   // --- Multigrid-usage tally (loud-fallback honesty) -----------------------

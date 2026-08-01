@@ -3175,6 +3175,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     options.draft_probe_iters = job.draft_probe_iters;
   }
 
+  // Handoff 110 Part B — map the optional "warm_start" block onto the production
+  // options, for BOTH front-ends, exactly like the "draft" block above. Absent
+  // (has_warm_start == false, the default) => options.warm_start_coarse keeps
+  // its OFF default and the run is byte-identical. run_info already echoes the
+  // resolved value (info.warm_start_coarse), so an armed run SAYS it was armed.
+  // NOTE this arms only Part B; warm_start_inherit (Part A) is resolved by
+  // build_production_loadcase's own measured rule (handoff 113: load-case runs
+  // warm, self-weight runs cold) and is NOT touched here.
+  if (job.has_warm_start) options.warm_start_coarse = job.warm_start_coarse;
+
   // ──▶ output dir (created before the run so streamed artifacts can land in it).
   {
     std::error_code ec;
@@ -3693,6 +3703,15 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                                                          : "build-rejected");
       run_info.mg_mode_observed = true;
     }
+    // Handoff 2026-08-02-warm-start-coarse-experiment — finalize the coarse
+    // pre-solve's own cost (0/0 when it was never armed), so the run record
+    // carries the price beside the posture and no speedup read off this run can
+    // omit it.
+    run_info.warm_start_coarse_iterations =
+        result.pipeline.warm_start_coarse_iterations;
+    run_info.warm_start_coarse_ms = result.pipeline.warm_start_coarse_ms;
+    run_info.warm_start_coarse_matvecs =
+        result.pipeline.warm_start_coarse_matvecs;
     // Handoff 123 — finalize the conditional-projection outcome: which rungs fired
     // and the grayscale Mnd measured on each (empty when the gate was disarmed).
     run_info.conditional_projection_fired.assign(

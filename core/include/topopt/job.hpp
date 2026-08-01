@@ -436,6 +436,14 @@ struct JobDescription {
   double draft_escalation_design_flip = 0.0;   // threshold (0 = the noise floor)
   int draft_probe_iters = 1;
 
+  // Optional "warm_start" block (handoff 110 Part B). Absent (has_warm_start ==
+  // false, the DEFAULT) => the field below is ignored and the run keeps the
+  // driver's OFF default (byte-identical). When present, mapped onto
+  // MinimizePlasticOptions::warm_start_coarse in run_job. This is a per-run
+  // ARMING switch, not a default change: the driver default stays false.
+  bool has_warm_start = false;
+  bool warm_start_coarse = false;
+
   // Optional declared load case (the "loads" block). When present the run uses
   // build_production_loadcase (anchors + forces) instead of self-weight.
   JobLoadCase loads;

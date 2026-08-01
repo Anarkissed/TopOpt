@@ -496,6 +496,10 @@ std::string run_info_json(const RunInfo& info) {
   num("geneo_basis_mb", fmt(info.geneo_basis_mb));
   num("warm_start_inherit", bool_json(info.warm_start_inherit));
   num("warm_start_coarse", bool_json(info.warm_start_coarse));
+  num("warm_start_coarse_iterations", fmt_i(info.warm_start_coarse_iterations));
+  num("warm_start_coarse_ms", fmt(info.warm_start_coarse_ms));
+  num("warm_start_coarse_matvecs",
+      fmt_i(static_cast<int>(info.warm_start_coarse_matvecs)));
   num("projection", bool_json(info.projection));
   // Handoff 123 — conditional MMA-projection echo: the armed threshold plus the
   // per-rung fired flags and measured grayscale Mnd (the honest cost readout).

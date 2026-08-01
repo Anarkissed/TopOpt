@@ -966,6 +966,28 @@ struct MinimizePlasticResult {
   // evaluated[i].optimization.iterations as usual.
   int warm_start_coarse_iterations = 0;
 
+  // The pre-solve's own WALL, in milliseconds — the companion the iteration count
+  // alone cannot supply. Handoff 2026-08-02-warm-start-coarse-experiment: the
+  // whole point of the coarse cascade is that its iterations are ~1/8-DOF CHEAP,
+  // so an iteration count is not a cost and a speedup claim priced in iterations
+  // is the exact mistake handoff 2026-08-02-iteration-phase-timing measured on
+  // the GenEO path. Charged as a SEPARATE line: a net win must be net OF this.
+  // 0.0 when warm_start_coarse is off (its default). Measured on the same steady
+  // clock as the per-iteration phase instrument, around the whole pre-solve
+  // (coarsen + simp_optimize + prolong), so nothing about it is unattributed.
+  double warm_start_coarse_ms = 0.0;
+
+  // The pre-solve's OPERATOR APPLIES — the pre-solve's cost in the one unit
+  // that is DETERMINISTIC and machine-independent. Handoff 2026-08-02-
+  // iteration-phase-timing named `matvecs` the honest work unit when `cg_iters`
+  // is not (the GenEO refresh runs N_t applies that move no CG counter), and it
+  // has the further property that a contended host cannot change it. The wall
+  // above is the number the maintainer feels; this is the number a second
+  // machine can reproduce. Both are reported, neither alone. 0 when the feature
+  // is off. Measured as the delta of the process-global fea_matvec_count()
+  // across the whole pre-solve.
+  long long warm_start_coarse_matvecs = 0;
+
   // Whether the run's linear solves ACTUALLY used the geometric-multigrid
   // accelerator, and its hierarchy depth — captured from the per-rung recovery
   // solve (representative: coarsenability is grid-determined, so every solve of a

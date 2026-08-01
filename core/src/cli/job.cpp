@@ -389,8 +389,8 @@ JobDescription parse_job(const std::string& json_text) {
   reject_unknown_keys(root,
                       {"model", "source_format", "material", "mode",
                        "resolution", "fixture_faces", "gravity", "ladder",
-                       "margin_stop", "simp", "draft", "output", "lattice",
-                       "grading", "loads", "design_box", "keep_outs",
+                       "margin_stop", "simp", "draft", "warm_start", "output",
+                       "lattice", "grading", "loads", "design_box", "keep_outs",
                        "build_direction", "build_orientation_report",
                        "bake_build_orientation", "variant"},
                       "the job");
@@ -767,6 +767,23 @@ JobDescription parse_job(const std::string& json_text) {
       if (v < 1.0) schema_fail("\"draft.probe_iters\" must be >= 1");
       job.draft_probe_iters = static_cast<int>(v);
     }
+  }
+
+  // Optional "warm_start" block (handoff 110 Part B; measured by handoff
+  // 2026-08-02-warm-start-coarse-experiment). ABSENT (has_warm_start == false,
+  // the DEFAULT) => the driver keeps its OFF default and the run is
+  // byte-identical. The block exists so the res/2 coarse pre-solve — built by
+  // 110 but never reachable from any production entry point, which is WHY it
+  // had never been measured at production scale — can be armed per run without
+  // changing any default.
+  if (const JsonValue* ws = find_key(root, "warm_start")) {
+    require_object(*ws, "warm_start");
+    reject_unknown_keys(*ws, {"coarse"}, "warm_start");
+    job.has_warm_start = true;
+    const JsonValue& c = require_key(*ws, "coarse", "warm_start");
+    if (c.type != JsonValue::Type::Bool)
+      schema_fail("\"warm_start.coarse\" must be a boolean");
+    job.warm_start_coarse = (c.num != 0.0);
   }
 
   // output block.
