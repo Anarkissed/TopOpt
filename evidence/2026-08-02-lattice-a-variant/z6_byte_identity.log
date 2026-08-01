@@ -1,0 +1,18 @@
+== building HEAD (pre-change) in a throwaway worktree ==
+== building the working tree (post-change) ==
+NOTE: no build_direction was declared, so this run CHOSE one (0, 0, 1) and ROTATED the exported geometry onto it — in the file the build direction is +Z. The verdict describes that orientation. Declare "build_direction" to use your own instead (the export is then left in model coordinates). See build_orientation.json.
+NOTE: no build_direction was declared, so this run CHOSE one (0, 0, 1) and ROTATED the exported geometry onto it — in the file the build direction is +Z. The verdict describes that orientation. Declare "build_direction" to use your own instead (the export is then left in model coordinates). See build_orientation.json.
+
+== PRE-EXISTING ARTIFACTS (must be identical) ==
+  IDENTICAL opt/report.json                    667f205fd5d32366
+  IDENTICAL opt/fields.bin                     bad3cce4d3c1cf79
+  IDENTICAL opt/variant_060.stl                2f2432f7f7f2a2f4
+  IDENTICAL ana/analysis_report.json           05d62030e68b37af
+  IDENTICAL ana/analysis.json                  b068791367c58cae
+  IDENTICAL ana/fields.bin                     54d409d763fe14b7
+
+== NEW, ADDITIVE ARTIFACTS (absent at HEAD, present now) ==
+  design.bin     HEAD:absent  now:present
+  loadcase.json  HEAD:absent  now:present
+
+Z6: PASS — every pre-existing artifact is byte-identical.

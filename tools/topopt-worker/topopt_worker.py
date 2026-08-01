@@ -613,7 +613,9 @@ def _signal_child(job, sig):
 
 # ---------------------------------------------------------------------------
 # Minimal multipart/form-data parser (stdlib `cgi` was removed in 3.13). Handles
-# the two fields this API needs: `step` (a file) and `job` (the job.json text).
+# the fields this API needs: `step` (a file), `job` (the job.json text), the
+# optional `project` label, and the optional `design` blob (a previous run's
+# design.bin, for a lattice_variant job).
 
 
 def parse_multipart(body, content_type):
@@ -791,6 +793,23 @@ class Handler(BaseHTTPRequestHandler):
             shutil.rmtree(tmpdir, ignore_errors=True)
             return self._json(400, {"error": f"job.json is not valid JSON: {e}"})
         job_doc["model"] = step_name
+        # The STORED DESIGN for a "lattice_variant" job (task
+        # 2026-08-02-lattice-a-variant): the originating run's design.bin,
+        # uploaded as its own multipart field. Saved beside the model and
+        # pointed at the same way `model` is, so the CLI's relative-path
+        # resolution finds it whatever the client called it. A job that names a
+        # design but ships none is REFUSED here rather than left to fail deep in
+        # the CLI with a path the client never chose.
+        if "design" in fields:
+            with open(os.path.join(tmpdir, "design.bin"), "wb") as f:
+                f.write(fields["design"]["data"])
+            if isinstance(job_doc.get("variant"), dict):
+                job_doc["variant"]["design"] = "design.bin"
+        elif job_doc.get("mode") == "lattice_variant":
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            return self._json(400, {
+                "error": "a lattice_variant job must upload the originating "
+                         "run's design.bin as the multipart 'design' field"})
         job_path = os.path.join(tmpdir, "job.json")
         with open(job_path, "w") as f:
             json.dump(job_doc, f)
@@ -821,11 +840,15 @@ class Handler(BaseHTTPRequestHandler):
         # Route on the job's own mode (task lattice-page-core-hookup stage 3):
         # an "analyze" job is ONE fixed-design analysis solve (`topopt-cli
         # analyze` — writes analysis_report.json / analysis.json / fields.bin,
-        # NO variant meshes), everything else is the optimize ladder (`run`).
-        # The CLI stays the validator: `run` REFUSES an analyze job and the
-        # parser refuses any unknown mode, so this routing can never widen what
-        # actually executes.
-        subcmd = "analyze" if job_doc.get("mode") == "analyze" else "run"
+        # NO variant meshes); a "lattice_variant" job LATTICES A FINISHED
+        # VARIANT of an earlier run (`topopt-cli lattice-variant` — task
+        # 2026-08-02-lattice-a-variant: no optimization ladder, certification
+        # solves only); everything else is the optimize ladder (`run`).
+        # The CLI stays the validator: `run` REFUSES anything but a
+        # minimize_plastic job and the parser refuses any unknown mode, so this
+        # routing can never widen what actually executes.
+        _MODE_SUBCMD = {"analyze": "analyze", "lattice_variant": "lattice-variant"}
+        subcmd = _MODE_SUBCMD.get(job_doc.get("mode"), "run")
         cmd = [CFG.cli, subcmd, job_path, "--out", out_dir]
         if CFG.materials:
             cmd += ["--materials", CFG.materials]

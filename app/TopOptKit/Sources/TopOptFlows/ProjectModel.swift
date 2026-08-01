@@ -73,6 +73,26 @@ public final class ProjectModel: ObservableObject {
     /// controls are bounded at USE by the core-read `TopOptKit.LatticeLimits`, never here.
     @Published public var lattice = LatticeSettings()
 
+    /// THE ARTIFACTS A RE-LATTICE NEEDS (task 2026-08-02-lattice-a-variant): the
+    /// EXACT job document that produced this project's current results, and that
+    /// run's `design.bin` (each variant's own density field).
+    ///
+    /// WHY THEY ARE RETAINED RATHER THAN REBUILT. "Lattice this variant" has to
+    /// certify under the load case the variant was OPTIMIZED under. The project's
+    /// live state is not that: the user may have moved an anchor, retagged a
+    /// face, or changed the resolution since the run. Re-deriving the job from
+    /// the current state would produce a load case that merely looks similar,
+    /// and a selector resolved against changed geometry silently tags nothing
+    /// (the PR-261 failure). So the submitted document is kept verbatim, beside
+    /// the results it produced, and the re-lattice job is that document with its
+    /// mode swapped.
+    ///
+    /// nil when the run kept neither — a solve on this device (the bridge writes
+    /// no job document and no design container) or a result restored from a blob
+    /// written before this existed. The lattice page then says so rather than
+    /// offering an action that would quietly do something else.
+    @Published public var relatticeArtifacts: RelatticeArtifacts?
+
     /// THE SECOND QUESTION (handoff 2026-08-01-build-direction-separation): which
     /// way is UP ON THE PLATE, as its own project setting rather than an inference
     /// from the gravity widget's "which way is down in service". Default = nothing
@@ -715,6 +735,40 @@ public final class ProjectModel: ObservableObject {
     /// emission the stale page copy said was impossible — PR 256's schema). Role
     /// groups' manual primitives + faces, plus the legacy include primitives.
     /// Slab depths resolve through the SAME metric chain the chips/volumes read.
+    /// The `lattice.regions` entries for a job that lattices a FINISHED VARIANT
+    /// (task 2026-08-02-lattice-a-variant, bar Z11).
+    ///
+    /// ONLY explicit geometry predicates. A variant is a marching-cubes
+    /// iso-surface with no segmentation, so a face selection carried over from
+    /// the setup page describes the ORIGINAL part's surface — geometry this
+    /// design no longer has. Synthesising a region from it would place a keep-out
+    /// or an include the user has never seen against the geometry it will
+    /// actually affect: PR 261's resolve-against-the-wrong-geometry failure. Such
+    /// faces are COUNTED (`skippedFaces`) so the page can say so, never emitted.
+    public func variantLatticeJobRegions() -> LatticeRegionEmission.Result {
+        guard lattice.enabled else { return .init(regions: [], skippedFaces: 0) }
+        return LatticeRegionEmission.variantRegions(
+            groups: selection.groups,
+            roles: lattice.groupRoles,
+            primitives: resolvedLatticePrimitives,
+            includePrimitives: lattice.includePrimitives.map {
+                ($0, $0.resolvedDepthMM) })
+    }
+
+    /// A role group's manual primitives with their slab depths resolved through
+    /// the SAME metric chain the chips and the rendered volumes read — so run,
+    /// picture and chips agree. Shared by the whole-part and variant emissions.
+    private var resolvedLatticePrimitives: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)] {
+        { gid in
+            self.force.manualPrimitives(for: gid).map { mp in
+                let key = Self.manualFaceKey(mp.id)
+                let d = self.clearanceMetric(groupID: gid, faceID: key, role: .slabDepth)?.resolved
+                    ?? mp.resolvedDepthMM
+                return (mp, d)
+            }
+        }
+    }
+
     public func latticeJobRegions() -> LatticeRegionEmission.Result {
         guard lattice.enabled else { return .init(regions: [], skippedFaces: 0) }
         let resolvedPrims: (UUID) -> [(prim: ManualPrimitive, depthMM: Double)] = { gid in

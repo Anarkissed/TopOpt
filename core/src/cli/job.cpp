@@ -392,7 +392,7 @@ JobDescription parse_job(const std::string& json_text) {
                        "margin_stop", "simp", "draft", "output", "lattice",
                        "grading", "loads", "design_box", "keep_outs",
                        "build_direction", "build_orientation_report",
-                       "bake_build_orientation"},
+                       "bake_build_orientation", "variant"},
                       "the job");
 
   JobDescription job;
@@ -407,12 +407,17 @@ JobDescription parse_job(const std::string& json_text) {
       require_key(root, "material", "the job"), "material");
   job.mode =
       require_nonempty_string(require_key(root, "mode", "the job"), "mode");
-  // Exactly two modes (task lattice-page-core-hookup stage 3 added "analyze" so
-  // the LAN worker can route a fixed-design analysis). The validation stays
-  // STRICT: anything else is refused here, before any work.
-  if (job.mode != "minimize_plastic" && job.mode != "analyze")
-    schema_fail("\"mode\" must be \"minimize_plastic\" or \"analyze\" (got \"" +
-                job.mode + "\")");
+  // Exactly three modes (task lattice-page-core-hookup stage 3 added "analyze"
+  // so the LAN worker can route a fixed-design analysis; task
+  // 2026-08-02-lattice-a-variant added "lattice_variant", which lattices a
+  // FINISHED variant of a completed run with NO optimization). The validation
+  // stays STRICT: anything else is refused here, before any work.
+  if (job.mode != "minimize_plastic" && job.mode != "analyze" &&
+      job.mode != "lattice_variant")
+    schema_fail(
+        "\"mode\" must be \"minimize_plastic\", \"analyze\" or "
+        "\"lattice_variant\" (got \"" +
+        job.mode + "\")");
   job.resolution = require_positive_int(
       require_key(root, "resolution", "the job"), "resolution");
 
@@ -1027,6 +1032,60 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("grading \"demand_exponent\" must be > 0");
     }
   }
+
+  // ── "variant": the finished design to lattice (task
+  // 2026-08-02-lattice-a-variant). THE CONTRACT is that a lattice_variant job is
+  // the ORIGINAL RUN'S JOB with `mode` changed and `variant` + a lattice/grading
+  // block added — the load case is not re-authored, it is re-used. That is what
+  // makes bar Z2 ("the load case is the SAME one") a property of the document
+  // rather than of a reconstruction: the anchors, the force groups, the
+  // clearances, the protections, the resolution and the material are the same
+  // bytes that produced the variant. `ladder` keeps its self-weight-mode
+  // requirement and is UNUSED here (no ladder runs) — required rather than
+  // rejected precisely so the original job can be reused verbatim.
+  if (const JsonValue* vv = find_key(root, "variant")) {
+    if (job.mode != "lattice_variant")
+      schema_fail(
+          "\"variant\" is only allowed with \"mode\": \"lattice_variant\" (got "
+          "mode \"" +
+          job.mode + "\")");
+    const JsonValue& v = require_object(*vv, "variant");
+    reject_unknown_keys(v, {"design", "index", "volume_fraction"}, "variant");
+    job.variant.present = true;
+    job.variant.design = require_nonempty_string(
+        require_key(v, "design", "variant"), "variant.design");
+    const JsonValue* iv = find_key(v, "index");
+    const JsonValue* fv = find_key(v, "volume_fraction");
+    if ((iv == nullptr) == (fv == nullptr))
+      schema_fail(
+          "a \"variant\" must give EXACTLY ONE of \"index\" or "
+          "\"volume_fraction\"");
+    if (iv != nullptr) {
+      const double d = require_number(*iv, "variant.index");
+      if (d < 0.0 || d != std::floor(d))
+        schema_fail("\"variant.index\" must be a non-negative integer");
+      job.variant.has_index = true;
+      job.variant.index = static_cast<int>(d);
+    } else {
+      job.variant.volume_fraction =
+          require_number(*fv, "variant.volume_fraction");
+      if (!(job.variant.volume_fraction > 0.0) ||
+          job.variant.volume_fraction > 1.0)
+        schema_fail("\"variant.volume_fraction\" must be in (0, 1]");
+      job.variant.has_volume_fraction = true;
+    }
+  } else if (job.mode == "lattice_variant") {
+    schema_fail(
+        "\"mode\": \"lattice_variant\" requires a \"variant\" block naming the "
+        "finished design to lattice (its run's design.bin + which rung)");
+  }
+  // A lattice_variant job with no lattice work to do is a mistake, not a no-op:
+  // refuse it here rather than run three certification solves and write a file
+  // identical to one the run already produced.
+  if (job.mode == "lattice_variant" && !job.lattice.present)
+    schema_fail(
+        "\"mode\": \"lattice_variant\" requires a \"lattice\" block — there is "
+        "nothing to lattice without one");
 
   return job;
 }

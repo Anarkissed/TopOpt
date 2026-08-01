@@ -256,6 +256,39 @@ struct JobClearance {
   double half_w_mm = 0.0;          // face: in-plane half-extent (w)
 };
 
+// Optional "variant" block — REQUIRED by, and allowed ONLY in, mode
+// "lattice_variant" (task 2026-08-02-lattice-a-variant). It names the finished
+// design this job is to lattice: a variant of a COMPLETED run, read back from
+// that run's design.bin (design_store.hpp).
+//
+// WHY A STORED DESIGN AND NOT A MESH. The obvious workaround — export the
+// variant's STL and re-import it as the model — fails three ways, all
+// correctly: a topology-optimized surface has no clean pseudo-faces so the
+// anchors and loads cannot be re-selected; the min-feature check refuses its
+// thin tendrils; and a fresh import carries no stress field to grade from. It
+// is also LOSSY in the way that matters most: the mesh is the 0.5 iso-surface
+// of a grayscale field, so its re-voxelization is a DIFFERENT design, and the
+// certificate would describe that different object. This block points at the
+// FIELD instead, which is the same object the gate already certified.
+struct JobVariantRef {
+  bool present = false;
+  // Path to the originating run's design.bin. Relative paths resolve against
+  // the job file's directory, exactly like "model".
+  std::string design;
+  // Which variant. EXACTLY ONE of the two forms, validated at parse:
+  //   index            — position in the container (0-based), the form a
+  //                      front-end listing variants in order produces;
+  //   volume_fraction  — the ladder rung, the join key fields.bin already
+  //                      documents. Matched exactly; no nearest-rung guessing,
+  //                      because latticing a rung the user did not pick is
+  //                      precisely the silent-surprise failure this job exists
+  //                      to avoid.
+  bool has_index = false;
+  int index = 0;
+  bool has_volume_fraction = false;
+  double volume_fraction = 0.0;
+};
+
 // A declared load case (ARCHITECTURE §1 mode (a)) — the CLI counterpart of the
 // app's BridgeLoadCase. Optional in job.json (the "loads" block). When present,
 // the run optimizes under these anchors + forces instead of self-weight; when
@@ -309,12 +342,15 @@ struct JobDescription {
   // is the honest answer for a job that references the source file directly.
   std::string source_format;
   std::string material;  // key into materials.json (validated by run_job)
-  // "minimize_plastic" (the optimize ladder — run_job) or "analyze" (ONE
+  // "minimize_plastic" (the optimize ladder — run_job), "analyze" (ONE
   // fixed-design analysis solve — analyze_job; task lattice-page-core-hookup
-  // stage 3, so the LAN worker can route a RUN-SIM job). Anything else is
-  // refused at parse; run_job additionally refuses "analyze" (it never
-  // optimizes an analyze job), while analyze_job accepts BOTH (re-certifying an
-  // optimize job's model is the existing receipt flow).
+  // stage 3, so the LAN worker can route a RUN-SIM job), or "lattice_variant"
+  // (LATTICE A FINISHED VARIANT — lattice_variant_job; task
+  // 2026-08-02-lattice-a-variant: no optimization ladder, no design
+  // iterations). Anything else is refused at parse; run_job refuses everything
+  // but "minimize_plastic" (it never optimizes a job that did not ask to be
+  // optimized), while analyze_job accepts "minimize_plastic" and "analyze"
+  // (re-certifying an optimize job's model is the existing receipt flow).
   std::string mode;
   int resolution = 0;    // voxelizer resolution along the longest axis, >= 1
   std::vector<JobFaceSelector> fixture_faces;  // self-weight path: all matches
@@ -404,6 +440,10 @@ struct JobDescription {
   // build_production_loadcase (anchors + forces) instead of self-weight.
   JobLoadCase loads;
 
+  // The finished variant to lattice — mode "lattice_variant" only. See
+  // JobVariantRef.
+  JobVariantRef variant;
+
   // Optional design-domain expansion (the "add material" feature, handoff 093):
   // the optimizer may grow material into this box beyond the imported part, with
   // keep_out_boxes left void. Absent => the run stays on the imported grid.
@@ -474,6 +514,21 @@ struct RunJobResult {
   // topopt/fields.hpp for the format. Empty only if the run produced no output dir.
   std::string fields_path;             // <out_dir>/fields.bin
   int fields_variant_count = 0;        // accepted-variant blocks written
+  // Task 2026-08-02-lattice-a-variant — the per-variant DESIGN container
+  // (<out_dir>/design.bin): each evaluated variant's own density field, so a
+  // finished variant can be latticed later WITHOUT re-running the ladder and
+  // WITHOUT the lossy export-and-re-import round trip. See design_store.hpp.
+  std::string design_path;             // <out_dir>/design.bin
+  int design_variant_count = 0;        // variant blocks written
+  // Task 2026-08-02-lattice-a-variant, bar Z2 — the LOAD-CASE RECEIPT
+  // (<out_dir>/loadcase.json): every fact that determines the load this run
+  // resolved (anchor faces + clamped DOF; per force group the resolved
+  // magnitude and the voxels its faces actually tagged; clearances and
+  // protections). A later re-lattice run writes the SAME document from the SAME
+  // emitter, so "it certified under the same load case" is a byte comparison
+  // rather than an argument.
+  std::string loadcase_receipt_path;   // <out_dir>/loadcase.json
+  std::string loadcase_receipt_json;
   // Handoff 114 — observability artifacts written to out_dir (empty when not
   // written, e.g. in-process callers with emit_progress=false).
   std::string run_info_path;           // <out_dir>/run_info.json (CLI path)
@@ -609,5 +664,94 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                              const SettingsRules& rules,
                              const std::string& analyze_mesh_path = "",
                              const SmoothRequest& smooth = SmoothRequest{});
+
+// ---------------------------------------------------------------------------
+// lattice_variant_job — LATTICE A FINISHED VARIANT (task
+// 2026-08-02-lattice-a-variant). Mode "lattice_variant".
+//
+// THE JOB THAT DID NOT EXIST. "Pick a variant, lattice it" had no
+// implementation. The lattice page could be opened from a variant, but that
+// only borrowed the variant's stress field as a grading demand: Optimize there
+// re-ran the WHOLE LADDER from the ORIGINAL model, merely graded by a previous
+// run's field. This entry point is the missing one — it takes a design the
+// optimizer already produced and turns it into a latticed, graded, certified,
+// exported object with NO optimization at all.
+//
+// WHAT IT DOES, IN ORDER:
+//   1. Rebuild the load case from the job — which IS the original run's job
+//      (the schema requires the `variant` block to sit in it, `mode` swapped),
+//      so the anchors / forces / clearances / protections are not re-authored
+//      but re-used. Writes the same loadcase.json receipt the optimize run
+//      wrote; the two are byte-comparable (bar Z2).
+//   2. Read the named variant's DENSITY FIELD back from the originating run's
+//      design.bin, fingerprint-checked (design_store.hpp).
+//   3. ONE null-posture certification solve on that density. Its margin MUST
+//      equal the margin the original run RECORDED for this variant, or the job
+//      REFUSES: an unequal margin means the load case, the grid or the design
+//      is not the one that produced the variant, and everything after it would
+//      be a certificate for a different object. This solve also recovers the
+//      variant's own von Mises field, which is what the grading law then
+//      consumes — so Auto density needs no separate simulation (bar Z4).
+//   4. The shared per-variant lattice pipeline: grade, mask, EMIT the latticed
+//      mesh, and certify the composite against the SAME mask and the SAME
+//      density (bars Z3 and Z5 — the strut-strength report rides that solve).
+//
+// NO LADDER RUNS. Zero design iterations, zero variant meshes; the only solves
+// are certification solves, and the count is recorded on the result and in the
+// provenance file rather than asserted in a comment.
+struct LatticeVariantJobResult {
+  StepModel model;
+  std::vector<int> fixture_face_ids;
+
+  // WHICH design was latticed.
+  int variant_index = 0;                     // position in design.bin
+  double requested_volume_fraction = 0.0;    // its ladder rung
+  double achieved_volume_fraction = 0.0;
+  int optimizer_iterations = 0;              // that produced it, ORIGINALLY
+  unsigned long long design_fingerprint = 0; // the stored field's hash
+
+  // THE REPRODUCTION PROOF (step 3 above).
+  double recorded_margin_worst_case = 0.0;   // as the original run recorded it
+  double reproduced_margin_worst_case = 0.0; // as this job re-derived it
+  bool reproduction_exact = false;           // enforced: false never returns
+
+  FixedDesignAnalysis solid;    // the null-posture (SOLID) certification
+  FixedDesignAnalysis lattice;  // the composite (LATTICED) certification
+
+  // NO-LADDER accounting (bar Z1) — reported, not claimed.
+  int analysis_solves = 0;        // certification solves actually run
+  int design_iterations = 0;      // always 0
+  int variant_meshes_written = 0; // always 0 (only the latticed file is written)
+  double wall_seconds = 0.0;      // the whole job, end to end
+
+  // Grading readout (bar Z4) — the achieved per-voxel density RANGE.
+  bool graded = false;
+  double cell_size_mm = 0.0;
+  double rho_min_used = 0.0;
+  double rho_max_used = 0.0;
+  long long latticed_voxels = 0;
+
+  std::vector<std::string> mesh_paths;  // the latticed file(s)
+  std::string lattice_receipt_path;     // <prefix>_<vf>_lattice.report.json
+  std::string lattice_receipt_json;
+  std::string report_path;              // <out_dir>/lattice_variant_report.json
+  std::string report_json;
+  std::string provenance_path;          // <out_dir>/lattice_variant.json
+  std::string loadcase_receipt_path;    // <out_dir>/loadcase.json
+  std::string loadcase_receipt_json;
+  std::string run_info_path;            // <out_dir>/run_info.json (grading record)
+  std::string fields_path;              // <out_dir>/fields.bin
+};
+
+// Lattice the variant named by `job.variant`. Throws JobError for a bad
+// material / model / selector, a design.bin that cannot be read or does not
+// match this job's grid, a variant reference that names no stored design, a
+// declared load that resolves to nothing, a reproduction mismatch (see above),
+// or an unwritable output. NEVER optimizes.
+LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
+                                            const std::string& job_dir,
+                                            const std::string& out_dir,
+                                            const MaterialLibrary& materials,
+                                            const SettingsRules& rules);
 
 }  // namespace topopt
