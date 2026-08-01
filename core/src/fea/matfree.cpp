@@ -868,12 +868,15 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     hook = g_mf_precond_hook;
   }
 
-  // GenEO two-level deflation (handoff 2026-07-29-geneo-arming). LIBRARY default
-  // OFF (fea_set_geneo_twolevel; production arms it) => both branches below are
-  // dead and the loop is byte-identical. When armed, a held basis is refreshed
-  // and applied from iteration 0; with no basis yet the solve runs plain up to
-  // the stagnation trigger, and only a solve that burns kGeneoTriggerIters
-  // unconverged pays the eigensolve (so a healthy fallback never does). Like
+  // GenEO two-level deflation (handoff 2026-07-29-geneo-arming; the ENGAGEMENT
+  // GATE from 2026-08-02-geneo-disarm). LIBRARY default OFF
+  // (fea_set_geneo_twolevel; production arms it) => both branches below are dead
+  // and the loop is byte-identical. When armed, EVERY solve starts plain and must
+  // burn geneo_engage_threshold() iterations unconverged before the deflation may
+  // engage: kGeneoTriggerIters when no basis is held (PR 248's stagnation
+  // trigger, governing the first build), and the cost-model threshold
+  // 2*N_t + 2*N_defl once one is (see geneo.hpp). A held basis therefore no
+  // longer carries the arming decision from one solve to the next. Like
   // recycling and the hook, the correction is SPD-additive: it changes the
   // ITERATION COUNT, never the converged field or the stopping test.
   // Charge one span to a phase accumulator. Untimed (`times == nullptr`) it is
@@ -902,9 +905,16 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
 
   bool geneo_active = false;
   bool geneo_pending = false;
+  int geneo_engage_at = -1;
   if (ctx != nullptr && geneo_enabled()) {
-    span(t_geneo_setup, [&] { geneo_active = geneo_solve_begin(m, *ctx); });
-    geneo_pending = !geneo_active;
+    span(t_geneo_setup, [&] { geneo_solve_begin(m, *ctx); });
+    geneo_engage_at = geneo_engage_threshold();
+    // A threshold of zero (the standing-preconditioner harness posture, or a
+    // held basis whose cost model prices engagement at nothing) engages before
+    // the first iteration, exactly as the pre-gate lifecycle did.
+    if (geneo_engage_at == 0)
+      span(t_geneo_setup, [&] { geneo_active = geneo_engage_now(m, *ctx, 0); });
+    geneo_pending = !geneo_active && geneo_engage_at >= 0;
   }
 
   auto dot = [n](const std::vector<double>& a, const std::vector<double>& b) {
@@ -981,19 +991,24 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
     }
     residualNorm2 = dot(residual, residual);
     if (residualNorm2 < threshold) break;
-    // GenEO stagnation trigger: this solve has burned the trigger budget of plain
-    // iterations without converging — it IS the stagnation regime, so pay the
-    // basis build now, then RESTART the PCG recurrence (p = M^-1 r, beta = 0)
-    // with the deflated preconditioner: CG's conjugacy assumes a fixed M, and a
-    // restart from the current x is a warm start — exactness untouched. The
-    // iteration counter keeps running (the burned iterations are charged).
-    // (The trigger is read through the probe config, whose DEFAULT is
-    // kGeneoTriggerIters — see geneo.hpp. Production reads the shipped constant;
-    // only the standing-preconditioner harness overrides it.)
-    if (geneo_pending && i + 1 >= geneo_probe_config().trigger_iters) {
+    // GenEO ENGAGEMENT GATE: this solve has burned its whole threshold of plain
+    // iterations without converging, so the deflated alternative is now the
+    // cheaper way to finish. Engage — build the basis if none is held, else
+    // refresh the coarse operator — then RESTART the PCG recurrence
+    // (p = M^-1 r, beta = 0) with the deflated preconditioner: CG's conjugacy
+    // assumes a fixed M, and a restart from the current x is a warm start —
+    // exactness untouched. The iteration counter keeps running (the burned
+    // iterations are charged).
+    // `geneo_engage_at` is the threshold computed at solve begin: with no basis
+    // held it is the probe config's trigger, whose DEFAULT is kGeneoTriggerIters
+    // (production reads the shipped constant; only the standing-preconditioner
+    // harness overrides it); with a basis held it is the cost model. Either way
+    // the quantity compared against it is THIS solve's PLAIN burn — never the
+    // deflated count, which PR 275 measured to be flat and therefore blind.
+    if (geneo_pending && i + 1 >= geneo_engage_at) {
       geneo_pending = false;
       bool built = false;
-      span(t_geneo_setup, [&] { built = geneo_build_now(m, *ctx, i + 1); });
+      span(t_geneo_setup, [&] { built = geneo_engage_now(m, *ctx, i + 1); });
       if (built) {
         geneo_active = true;
         for (int q = 0; q < n; ++q)
@@ -1118,10 +1133,7 @@ FeaSolution solve_cg_matfree_impl(const VoxelGrid& grid, double youngs_modulus,
     diag.t_geneo_setup_ms = tm.geneo_setup_ms;
     diag.t_geneo_apply_ms = tm.geneo_apply_ms;
     diag.t_recycle_ms = tm.recycle_ms;
-    const fea_detail::GeneoReport gr = fea_detail::geneo_last_report();
-    diag.geneo_dim = gr.dim;
-    diag.geneo_action = gr.action;
-    diag.geneo_trigger_burn = gr.trigger_burn;
+    fea_detail::geneo_fill_cg_info(diag, fea_detail::geneo_last_report());
     diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
     diag.matvecs = fea_matvec_count() - mv_entry;
     if (info) *info = diag;
@@ -1268,6 +1280,33 @@ long long fea_geneo_armed_solves() { return fea_detail::geneo_armed_solves(); }
 // The EFFECTIVE trigger (the 114/132 discipline: run_info must echo what the
 // run ACTUALLY executed under, never the constant it usually equals). Production
 // never sets a probe config, so this returns kGeneoTriggerIters verbatim.
+long long fea_geneo_declined_solves() {
+  return fea_detail::geneo_declined_solves();
+}
+double fea_geneo_refresh_cost_per_column() {
+  return fea_detail::kGeneoRefreshCostPerColumn;
+}
+double fea_geneo_deflated_iter_cost() {
+  return fea_detail::kGeneoDeflatedIterCost;
+}
+int fea_geneo_decision_count() { return fea_detail::geneo_decision_count(); }
+GeneoDecisionRecord fea_geneo_decision_at(int i) {
+  const fea_detail::GeneoDecision d = fea_detail::geneo_decision_at(i);
+  GeneoDecisionRecord r;
+  r.solve = d.solve;
+  r.action = d.action;
+  r.burn = d.burn;
+  r.threshold = d.threshold;
+  r.dim = d.dim;
+  r.engaged_burn = d.engaged_burn;
+  r.engaged_tail = d.engaged_tail;
+  r.iterations = d.iterations;
+  r.converged = d.converged;
+  return r;
+}
+long long fea_geneo_decisions_dropped() {
+  return fea_detail::geneo_decisions_dropped();
+}
 int fea_geneo_trigger_iters() {
   return fea_detail::geneo_probe_config().trigger_iters;
 }

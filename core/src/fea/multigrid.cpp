@@ -1506,10 +1506,7 @@ FeaSolution solve_mgcg_matfree(const VoxelGrid& grid, double youngs_modulus,
       {
         // GenEO two-level diagnostics for THIS fallback solve (all 0 when the
         // deflation is off or never engaged — the library default).
-        const fea_detail::GeneoReport gr = fea_detail::geneo_last_report();
-        diag.geneo_dim = gr.dim;
-        diag.geneo_action = gr.action;
-        diag.geneo_trigger_burn = gr.trigger_burn;
+        fea_detail::geneo_fill_cg_info(diag, fea_detail::geneo_last_report());
       }
       diag.t_total_ms = fea_detail::mf_steady_ms() - t_entry;
       diag.matvecs = fea_matvec_count() - mv_entry;

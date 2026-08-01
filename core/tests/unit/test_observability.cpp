@@ -117,6 +117,14 @@ int main() {
       // question) reads: zeros for the spans, NEGATIVE for the memory columns.
       b.cg_geneo_dim = 2048;
       b.cg_geneo_action = 2;  // coarse operator REFRESHED for this system
+      // The ENGAGEMENT GATE's decision on this row (handoff
+      // 2026-08-02-geneo-disarm): the solve burned 4200 plain iterations against
+      // a threshold of 4160 = 2*2048 + 0 + 2*32, i.e. it cleared the measured
+      // price of the armed alternative and only then engaged. The pair (burn,
+      // threshold) IS the decision, so pinning it here makes the CSV's promise
+      // that a later reader can GRADE the decision a test rather than a comment.
+      b.cg_geneo_burn = 4200;
+      b.cg_geneo_threshold = 4160;
       b.phases.total_ms = 500.0;
       b.phases.tail_prev_ms = 4.0;
       b.phases.filter_ms = 5.0;
@@ -162,20 +170,20 @@ int main() {
         "update_ms,analysis_ms,observe_ms,residual_ms,"
         "solver_build_ms,mg_build_ms,mg_ms,cg_ms,geneo_setup_ms,geneo_apply_ms,"
         "recycle_ms,"
-        "fea_solves,matvecs,geneo_dim,geneo_action,"
+        "fea_solves,matvecs,geneo_dim,geneo_action,geneo_burn,geneo_threshold,"
         "rss_mb,peak_rss_mb,compressed_mb,available_mb,major_faults,swapins";
     const std::string expected =
         kHeader + "\n" +
         "0,1,1000,12.5,0.680000,0,14,1,0,1,14,0,0,1.000000,"
         "0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,0.000,"
         "0.000,0.000,0.000,0.000,0.000,0.000,0.000,"
-        "0,0,0,0,"
+        "0,0,0,0,0,0,"
         "-1.00,-1.00,-1.00,-1.00,-1,-1\n"
         "0,2,1050,9.25,0.680100,1,4390,0,8,1,300,1,16,0.188000,"
         "500.000,4.000,5.000,2.000,480.000,478.000,2.000,8.000,1.000,1.000,"
         "3.000,"
         "12.000,0.000,0.000,60.000,400.000,6.000,0.500,"
-        "1,6438,2048,2,"
+        "1,6438,2048,2,4200,4160,"
         "1234.50,1300.25,0.00,8192.00,0,0\n";
     check(body == expected, "CSV golden: header + rows are byte-exact");
     // Schema string is the documented one.

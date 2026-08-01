@@ -366,6 +366,20 @@ int main() {
     CHECK(topopt::fea_geneo_rebuild_factor() == 2.0,
           "the degradation rebuild factor is 2.0 (phase 2 §P6: healthy reuse "
           "stays within 1.42x of a fresh rebuild)");
+    // Handoff 2026-08-02-geneo-disarm — the ENGAGEMENT GATE's two cost-model
+    // constants, echoed into run_info beside the trigger. They set the price at
+    // which a HELD basis is allowed to engage: a coarse refresh costs ~2 plain
+    // iterations per basis column (N_t matvecs + the N_t^2 Galerkin assembly)
+    // and a deflated CG iteration costs ~2 plain ones (PR 275 timed one apply at
+    // 1.22 ms against a 1.15 ms matvec; PR 273's medians give 4.70/2.05 = 2.29).
+    // 2.0 is the low end of both measurements, deliberately — under-pricing
+    // GenEO makes the gate MORE willing to engage, which protects the rescue.
+    CHECK(topopt::fea_geneo_refresh_cost_per_column() == 2.0,
+          "a coarse refresh is priced at 2 plain iterations per basis column");
+    CHECK(topopt::fea_geneo_deflated_iter_cost() == 2.0,
+          "a deflated CG iteration is priced at 2 plain ones");
+    CHECK(topopt::fea_geneo_declined_solves() >= 0,
+          "the gate's decline counter is exposed for the run_info echo");
     // Handoff 2026-08-01-multiscale-production-wiring — the ARMED matrix-free
     // cubic lattice route: every lattice certification solve now rides the
     // matrix-free multigrid + GenEO + recycling stack on the exact three-block

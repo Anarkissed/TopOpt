@@ -544,6 +544,10 @@ if(Eigen3_FOUND)
   # checkerboard high-contrast composite. Eigen-gated like the solver group.
   add_executable(test_geneo tests/unit/test_geneo.cpp)
   target_link_libraries(test_geneo PRIVATE topopt)
+  # src/ on the include path for fea/geneo.hpp's harness-only probe override
+  # surface: the engagement-gate test (handoff 2026-08-02-geneo-disarm) opens the
+  # threshold from outside to pin the ENGAGE branch as well as the DECLINE one.
+  target_include_directories(test_geneo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME geneo_twolevel COMMAND test_geneo)
 
   # Matrix-free cubic lattice path guards (handoff 2026-08-01-multiscale-
@@ -554,6 +558,11 @@ if(Eigen3_FOUND)
   # change. Eigen-gated like the solver group.
   add_executable(test_matfree_cubic tests/unit/test_matfree_cubic.cpp)
   target_link_libraries(test_matfree_cubic PRIVATE topopt)
+  # src/ for fea/geneo.hpp's harness-only probe surface: bar 6 opens the
+  # ENGAGEMENT GATE (handoff 2026-08-02-geneo-disarm) so the moduli
+  # fingerprint's refresh is OBSERVABLE, and asserts the closed-gate branch too.
+  target_include_directories(test_matfree_cubic PRIVATE
+                             ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME matfree_cubic_lattice COMMAND test_matfree_cubic)
 
   # V1 validation gate (M2.4): cantilever + simply-supported beams vs

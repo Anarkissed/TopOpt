@@ -215,7 +215,7 @@ const char kIterationCsvHeader[] =
     "solver_build_ms,mg_build_ms,mg_ms,cg_ms,geneo_setup_ms,geneo_apply_ms,"
     "recycle_ms,"
     // ── work counters + the GenEO lifecycle that explains them ────────────
-    "fea_solves,matvecs,geneo_dim,geneo_action,"
+    "fea_solves,matvecs,geneo_dim,geneo_action,geneo_burn,geneo_threshold,"
     // ── process memory (negative = the platform could not answer) ─────────
     "rss_mb,peak_rss_mb,compressed_mb,available_mb,major_faults,swapins";
 
@@ -259,13 +259,13 @@ void IterationCsvWriter::append_at(std::size_t rung,
   // DURATION and `residual_ms` is the part of it no named phase claimed. The
   // solver_* columns SUB-SPLIT solve_ms and must not be added to the sum. A
   // negative memory column means the platform could not answer, never zero.
-  char buf[720];
+  char buf[768];
   std::snprintf(
       buf, sizeof(buf),
       "%zu,%d,%lld,%.10g,%.6f,%d,%d,%d,%.6g,%d,%d,%d,%d,%.6f,"
       "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
       "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,"
-      "%lld,%lld,%d,%d,"
+      "%lld,%lld,%d,%d,%d,%d,"
       "%.2f,%.2f,%.2f,%.2f,%lld,%lld\n",
       rung, obs.iteration, wall_ms, obs.compliance, obs.volume_fraction,
       obs.plateau ? 1 : 0, obs.cg_iterations, obs.cg_used_multigrid ? 1 : 0,
@@ -279,7 +279,8 @@ void IterationCsvWriter::append_at(std::size_t rung,
       obs.phases.solver_cg_ms, obs.phases.solver_geneo_setup_ms,
       obs.phases.solver_geneo_apply_ms, obs.phases.solver_recycle_ms,
       obs.phases.fea_solves, obs.phases.matvecs, obs.cg_geneo_dim,
-      obs.cg_geneo_action, obs.phases.rss_mb, obs.phases.peak_rss_mb,
+      obs.cg_geneo_action, obs.cg_geneo_burn, obs.cg_geneo_threshold,
+      obs.phases.rss_mb, obs.phases.peak_rss_mb,
       obs.phases.compressed_mb, obs.phases.available_mb,
       obs.phases.major_faults, obs.phases.swapins);
   out_ << buf;
@@ -494,6 +495,36 @@ std::string run_info_json(const RunInfo& info) {
   num("geneo_armed_solves", fmt_i(static_cast<int>(info.geneo_armed_solves)));
   num("geneo_basis_dim", fmt_i(info.geneo_basis_dim));
   num("geneo_basis_mb", fmt(info.geneo_basis_mb));
+  // Handoff 2026-08-02-geneo-disarm — THE ENGAGEMENT GATE. `declined` is the
+  // count of fallback solves a held basis was offered to and the gate kept
+  // plain; the two cost constants are the recipe echo; `geneo_decisions` is the
+  // arm/disarm event log, one object per TRANSITION plus every build/rebuild/
+  // refusal, each carrying the numbers its decision fired on so the next
+  // investigation reads them instead of re-instrumenting for them.
+  num("geneo_declined_solves",
+      fmt_i(static_cast<int>(info.geneo_declined_solves)));
+  num("geneo_refresh_cost_per_column", fmt(info.geneo_refresh_cost_per_column));
+  num("geneo_deflated_iter_cost", fmt(info.geneo_deflated_iter_cost));
+  num("geneo_decisions_dropped",
+      fmt_i(static_cast<int>(info.geneo_decisions_dropped)));
+  {
+    std::string gd = "[";
+    for (std::size_t i = 0; i < info.geneo_decisions.size(); ++i) {
+      const GeneoDecisionRecord& d = info.geneo_decisions[i];
+      if (i) gd += ", ";
+      gd += "{\"solve\": " + fmt_i(static_cast<int>(d.solve)) +
+            ", \"action\": " + fmt_i(d.action) +
+            ", \"burn\": " + fmt_i(d.burn) +
+            ", \"threshold\": " + fmt_i(d.threshold) +
+            ", \"basis_dim\": " + fmt_i(d.dim) +
+            ", \"engaged_burn\": " + fmt_i(d.engaged_burn) +
+            ", \"engaged_tail\": " + fmt_i(d.engaged_tail) +
+            ", \"iterations\": " + fmt_i(d.iterations) +
+            ", \"converged\": " + (d.converged ? "true" : "false") + "}";
+    }
+    gd += "]";
+    num("geneo_decisions", gd);
+  }
   num("warm_start_inherit", bool_json(info.warm_start_inherit));
   num("warm_start_coarse", bool_json(info.warm_start_coarse));
   num("projection", bool_json(info.projection));

@@ -1,0 +1,19 @@
+plain: 628 iterations
+armed#1: 591 iterations, action=3, Nt=288, burn=500
+armed#2: 628 iterations, action=5, burn=628, threshold=1258 (expected 1258)
+armed#3 (moduli moved, gate opened): 248 iterations, action=2
+via multigrid entry: #1 638 iters action=3 dim=288 burn=500 thr=0 | #2 795 iters action=5 dim=288 burn=795 thr=1352
+test_geneo: 42 checks, 0 failures
+
+# 42 checks (was 24 before this task), 0 failures.
+# Reading the last line: the MULTIGRID entry point — the one production runs —
+# now reports the gate's real threshold. #1 builds at the 500 trigger and runs
+# 638 iterations (tail 138); #2 is then decided against
+#   2*288 + 500 + 2*138 = 576 + 500 + 276 = 1352
+# and declines at 795 < 1352, finishing plain and exact. That 1352 is the cost
+# model's own arithmetic on this run's measured numbers, asserted in the test.
+#
+# BEFORE the fix this same row read thr=0: the multigrid site copied the GenEO
+# report field-by-field and silently dropped geneo_threshold, so every row of a
+# real production ladder wrote a zero while the unit test — which used the OTHER
+# entry point — read it correctly. Both now go through one geneo_fill_cg_info.

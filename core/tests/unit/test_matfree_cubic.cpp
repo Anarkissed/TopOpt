@@ -32,11 +32,19 @@
 //
 //   6. THE GENEO MODULI FINGERPRINT INVALIDATES ON A TENSOR-ONLY CHANGE
 //      (bar I5). Two designs sharing the SAME scalar-modulus field but
-//      DIFFERENT cubic tensors: the second solve must REFRESH the held coarse
-//      operator (geneo_action == 2), never silently reuse it (action == 1).
-//      Against the pre-fix fingerprint (blind to the cubic fields) this test
-//      FAILS — verified by reverting the fingerprint hunk during development;
-//      see the handoff's negative-control note.
+//      DIFFERENT cubic tensors: when the deflation ENGAGES, the second solve
+//      must REFRESH the held coarse operator (geneo_action == 2), never
+//      silently reuse it (action == 1). Against the pre-fix fingerprint (blind
+//      to the cubic fields) this test FAILS — verified by reverting the
+//      fingerprint hunk during development; see the handoff's negative-control
+//      note.
+//      Since handoff 2026-08-02-geneo-disarm a held basis must clear the
+//      ENGAGEMENT GATE before it may deflate at all, and on this fixture the
+//      gate DECLINES — correctly, the solve is cheaper finished plain. Both
+//      branches are asserted: the closed gate keeps the solve plain and exact,
+//      and with the gate opened through the harness-only probe surface the
+//      fingerprint behaviour above is exercised unchanged. The gate decides
+//      WHEN the coarse operator is used, never WHETHER it may be stale.
 //
 //   7. RECYCLING EXACTNESS ACROSS A TENSOR CHANGE. A carried recycle basis
 //      applied to a tensor-changed system still converges to the same field as
@@ -54,6 +62,8 @@
 
 #include "topopt/fea.hpp"
 #include "topopt/lattice.hpp"
+
+#include "fea/geneo.hpp"  // harness-only probe surface: the engagement gate
 #include "topopt/voxel.hpp"
 
 using namespace topopt;
@@ -478,10 +488,32 @@ int main() {
     CHECK(a1.info.converged, "A#1 converges");
     CHECK(a1.info.geneo_action == 3,
           "A#1 stagnates past the trigger and BUILDS the basis (action 3)");
+    // CLOSED GATE (the shipped default). The held basis is offered to this
+    // solve and the gate declines it — the solve is cheaper finished plain.
+    const Solve a2_gated = solve_lat(A);
+    std::printf("geneo fp: A#2 gated %d iters action=%d thr=%d\n",
+                a2_gated.info.iterations, a2_gated.info.geneo_action,
+                a2_gated.info.geneo_threshold);
+    CHECK(a2_gated.info.geneo_action == 5,
+          "A#2 under the shipped gate: a held basis that cannot pay is "
+          "DECLINED (action 5), and the solve stays plain and exact");
+    CHECK(a2_gated.info.geneo_threshold > 0 && a2_gated.info.geneo_dim > 0,
+          "and the decision is REPORTED — the threshold it was graded on and "
+          "the basis it declined to engage");
+
+    // OPEN GATE (harness-only override). Everything below is the ORIGINAL bar:
+    // the gate changes when the coarse operator is used, never whether it may
+    // be stale, so the fingerprint must still invalidate on a tensor-only move.
+    {
+      fea_detail::GeneoProbeConfig cfg;
+      cfg.engage_threshold = 0;
+      fea_detail::geneo_set_probe_config(cfg);
+    }
     const Solve a2 = solve_lat(A);
     CHECK(a2.info.geneo_action == 1,
           "A#2 (identical system) REUSES basis + coarse operator (action 1)");
     const Solve b1 = solve_lat(B);
+    fea_detail::geneo_set_probe_config(fea_detail::GeneoProbeConfig{});
     std::printf("geneo fp: B#1 %d iters action=%d (2 = refresh — the "
                 "fingerprint saw the tensor change)\n",
                 b1.info.iterations, b1.info.geneo_action);

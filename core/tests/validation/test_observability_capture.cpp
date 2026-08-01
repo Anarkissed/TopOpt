@@ -208,40 +208,85 @@ int main() {
   // question "does more than one solve run while only one cg_iters is reported?"
   // answered on live data, since a second solve would be the whole finding.
   {
-    std::istringstream ps(body);
-    std::string skip;
-    std::getline(ps, skip);  // header
-    bool acct_ok = true, solves_ok = true, mem_ok = true;
-    std::size_t checked = 0;
-    for (std::string line; std::getline(ps, line);) {
-      if (line.empty()) continue;
-      // Split on commas; the phase block starts at column index 14.
+    auto split = [](const std::string& line) {
       std::vector<std::string> f;
       for (std::size_t b = 0, e; b <= line.size(); b = e + 1) {
         e = line.find(',', b);
         if (e == std::string::npos) e = line.size();
         f.push_back(line.substr(b, e - b));
       }
-      // 14 legacy + 11 phase + 7 solver-split + 4 counters + 6 memory = 42.
-      if (f.size() != 42) {
+      return f;
+    };
+    // Columns are resolved BY NAME from kIterationCsvHeader, never by a
+    // hard-coded index or count. The previous version pinned "42 columns" and
+    // indices 14/32/36/37 in a comment; the moment a column was appended
+    // (geneo_burn / geneo_threshold, handoff 2026-08-02-geneo-disarm) the row
+    // count check tripped and reported it as the ACCOUNTING failing, which is a
+    // different and much more alarming fact than "the schema grew". Resolving by
+    // name means a new column cannot make this test lie about what broke.
+    const std::vector<std::string> hdr = split(std::string(kIterationCsvHeader));
+    auto col = [&](const char* name) {
+      for (std::size_t i = 0; i < hdr.size(); ++i)
+        if (hdr[i] == name) return i;
+      return std::string::npos;
+    };
+    const std::size_t c_total = col("total_ms"), c_filter = col("filter_ms"),
+                      c_project = col("project_ms"), c_solve = col("solve_ms"),
+                      c_update = col("update_ms"),
+                      c_analysis = col("analysis_ms"),
+                      c_observe = col("observe_ms"),
+                      c_residual = col("residual_ms"),
+                      c_fea = col("fea_solves"), c_rss = col("rss_mb"),
+                      c_peak = col("peak_rss_mb"), c_cg = col("cg_iters"),
+                      c_gact = col("geneo_action"), c_gburn = col("geneo_burn"),
+                      c_gthr = col("geneo_threshold");
+    bool cols_ok = true;
+    for (std::size_t c : {c_total, c_filter, c_project, c_solve, c_update,
+                          c_analysis, c_observe, c_residual, c_fea, c_rss,
+                          c_peak, c_cg, c_gact, c_gburn, c_gthr})
+      if (c == std::string::npos) cols_ok = false;
+    check(cols_ok, "every column this test reads is present in the schema");
+
+    std::istringstream ps(body);
+    std::string skip;
+    std::getline(ps, skip);  // header
+    bool acct_ok = true, solves_ok = true, mem_ok = true, gate_ok = true;
+    std::size_t checked = 0;
+    for (std::string line; std::getline(ps, line);) {
+      if (line.empty()) continue;
+      const std::vector<std::string> f = split(line);
+      if (f.size() != hdr.size()) {
         acct_ok = false;
         break;
       }
       auto d = [&](std::size_t i) { return std::atof(f[i].c_str()); };
-      const double total = d(14), filter = d(16), project = d(17), solve = d(18),
-                   update = d(21), analysis = d(22), observe = d(23),
-                   residual = d(24);
+      const double total = d(c_total), filter = d(c_filter),
+                   project = d(c_project), solve = d(c_solve),
+                   update = d(c_update), analysis = d(c_analysis),
+                   observe = d(c_observe), residual = d(c_residual);
       const double sum =
           filter + project + solve + update + analysis + observe + residual;
       // Every term is a difference of two reads of the SAME steady clock, so
       // the identity is exact up to the %.3f the CSV prints (7 terms x 0.0005).
       if (std::fabs(total - sum) > 0.005) acct_ok = false;
-      if (std::atoll(f[32].c_str()) != 1) solves_ok = false;  // fea_solves
+      if (std::atoll(f[c_fea].c_str()) != 1) solves_ok = false;
       // Memory columns are either a real measurement (>= 0) or the explicit
       // "unavailable" sentinel (< 0) — never a fabricated zero from a failed
       // syscall. peak >= current whenever both were answered.
-      const double rss = d(36), peak = d(37);
+      const double rss = d(c_rss), peak = d(c_peak);
       if (rss >= 0.0 && peak >= 0.0 && peak + 1e-9 < rss) mem_ok = false;
+      // THE ENGAGEMENT GATE's decision must be legible on a LIVE row (handoff
+      // 2026-08-02-geneo-disarm, bar AA5): a DECLINED solve (action 5) reports
+      // the whole solve as its burn and a real, positive threshold it was graded
+      // against. Vacuous on a run where GenEO never holds a basis — which is the
+      // point: it costs nothing until there is a decision to check, and then it
+      // catches a zero the way the multigrid entry point once reported one.
+      const long long act = std::atoll(f[c_gact].c_str());
+      if (act == 5) {
+        if (std::atoll(f[c_gthr].c_str()) <= 0) gate_ok = false;
+        if (std::atoll(f[c_gburn].c_str()) != std::atoll(f[c_cg].c_str()))
+          gate_ok = false;
+      }
       ++checked;
     }
     check(checked == data_rows && acct_ok,
@@ -249,6 +294,9 @@ int main() {
           "observe+residual (the accounting closes)");
     check(solves_ok, "exactly ONE penalized FEA solve per design iteration");
     check(mem_ok, "peak RSS >= current RSS on every row that answered both");
+    check(gate_ok,
+          "every DECLINED solve reports a positive gate threshold and a burn "
+          "equal to its own iteration count");
   }
 
   // --- snapshots: a boundary per evaluated rung, round-trips within f16 ------

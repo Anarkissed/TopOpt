@@ -1,0 +1,44 @@
+{
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 32,
+  "fixture_faces": [
+    {
+      "kind": "cylindrical",
+      "radius_mm": 2.5
+    }
+  ],
+  "gravity": {
+    "direction": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "magnitude_mm_s2": 9810.0
+  },
+  "ladder": [
+    0.68
+  ],
+  "margin_stop": 1.5,
+  "design_box": {
+    "min": [
+      -35.0,
+      -27.5,
+      -6.0
+    ],
+    "max": [
+      45.0,
+      27.5,
+      64.0
+    ]
+  },
+  "simp": {
+    "max_iterations": 16
+  },
+  "output": {
+    "report": "report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  }
+}

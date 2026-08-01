@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "topopt/fea.hpp"    // GeneoDecisionRecord
 #include "topopt/simp.hpp"   // SimpIterationObservation
 #include "topopt/voxel.hpp"  // VoxelGrid
 
@@ -154,9 +155,21 @@ double steady_clock_ms();
 //   matvecs        matrix-free operator applies charged to this iteration — the
 //                  honest work unit when cg_iters is not.
 //   geneo_dim      N_t, the GenEO coarse-space dimension that preconditioned the
-//                  solve (0 = the deflation never applied)
+//                  solve. 0 = no basis existed; on geneo_action 5 it is non-zero
+//                  and names the basis the gate chose NOT to engage, so
+//                  geneo_action is what says whether the deflation applied
 //   geneo_action   0 none / 1 reused / 2 coarse operator REFRESHED / 3 basis
-//                  (re)BUILT / 4 build refused by the memory cap
+//                  (re)BUILT / 4 build refused by the memory cap / 5 DECLINED
+//                  by the ENGAGEMENT GATE (a basis was held and this solve was
+//                  cheaper to finish plain — handoff 2026-08-02-geneo-disarm)
+//   geneo_burn     plain iterations this solve burned before the gate decided.
+//                  On action 5 it is the whole solve; on 1/2/3 it is the burn
+//                  that preceded engagement.
+//   geneo_threshold what that burn had to reach for the deflation to engage, in
+//                  plain-iteration equivalents. 0 when no basis was held, i.e.
+//                  when the kGeneoTriggerIters stagnation trigger governed. The
+//                  pair (geneo_burn, geneo_threshold) IS the decision, so a
+//                  later reader grades it without re-instrumenting for it.
 //   rss_mb, peak_rss_mb, compressed_mb, available_mb, major_faults, swapins
 //                  the process's memory at this iteration. NEGATIVE means the
 //                  platform could not answer — never a fabricated zero, because
@@ -327,6 +340,20 @@ struct RunInfo {
   long long geneo_armed_solves = 0;
   int geneo_basis_dim = 0;
   double geneo_basis_mb = 0.0;
+  // THE ENGAGEMENT GATE (handoff 2026-08-02-geneo-disarm). `geneo_declined_solves`
+  // counts fallback solves a HELD basis was offered to and the gate kept plain,
+  // so `geneo_armed_solves + geneo_declined_solves` is how many decisions were
+  // taken and their ratio is how often the accelerator was worth its price. The
+  // two cost constants are echoed like the trigger and rebuild factor (the
+  // 114/132 discipline: run_info states what the run executed under). The
+  // decision log records every arm/disarm TRANSITION with the numbers it fired
+  // on — bar AA5 — and `geneo_decisions_dropped` reports what the log cap
+  // swallowed rather than letting the array lie by omission.
+  long long geneo_declined_solves = 0;
+  double geneo_refresh_cost_per_column = 0.0;
+  double geneo_deflated_iter_cost = 0.0;
+  std::vector<GeneoDecisionRecord> geneo_decisions;
+  long long geneo_decisions_dropped = 0;
   bool warm_start_inherit = false;
   bool warm_start_coarse = false;
   bool projection = false;
