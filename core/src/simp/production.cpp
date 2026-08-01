@@ -456,6 +456,23 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // drift. See production.hpp for why this is a global rather than an opts field.
   fea_set_matfree_galerkin_block_cache(true);
 
+  // Handoff 2026-08-02-gate-diagnosis-recommendations — the GATE DIAGNOSIS,
+  // armed here and nowhere else, exactly like the settings above: the library
+  // default stays false so Gate-V2 and every core reference run (which never
+  // call this function) keep their report.json bytes, and every PRODUCTION
+  // front-end gets an explanation of its own verdict.
+  //
+  // It is a REPORT-ONLY post-pass. It runs after `accepted` / `margin_effective`
+  // are sealed, writes only VariantReport::diagnosis, and every recommendation it
+  // carries was priced by gate_margin_effective — the verdict's own expression.
+  // Arming it cannot change one design, one margin or one verdict.
+  //
+  // `material_catalog` is NOT set here: this function takes only the options
+  // struct, and the catalog belongs to the front-end that loaded materials.json
+  // (run_job.cpp / bridge.cpp both set it right after this call). With it unset
+  // the MATERIAL lever reports itself NOT EVALUABLE, which is the honest state.
+  opts.gate_diagnosis = true;
+
   // Handoff 132 (D) — the MIXED-PRECISION production flip is DELIBERATELY NOT MADE
   // HERE. It was implemented, gated, and BLOCKED BY ITS OWN GATE. Do not "finish"
   // this by adding fea_set_matfree_mixed_precision(true) without re-measuring.

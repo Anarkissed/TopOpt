@@ -141,7 +141,20 @@ void emit_variant(std::string& out, const VariantReport& v,
   // "" on accepted rungs and on ordinary too-weak rejections; non-empty means the
   // rung never reached the gate (see report.hpp: the analysis fields on such a line
   // are "not measured" placeholders).
-  out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason) + "\n";
+  out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason);
+  // WHY the verdict is what it is (handoff 2026-08-02-gate-diagnosis-
+  // recommendations). Emitted ONLY when a diagnosis was actually run, so every
+  // pre-diagnosis document keeps its exact bytes and every existing reader is
+  // unaffected. It EXPLAINS the fields above and never contradicts them: the
+  // verdict, margin_required and margin_effective on this line are the gate's,
+  // and the diagnosis was written from them.
+  if (v.diagnosis.evaluated) {
+    out += ",\n" + in2 + "\"diagnosis\": ";
+    emit_gate_diagnosis(out, v.diagnosis, in2);
+    out += "\n";
+  } else {
+    out += "\n";
+  }
   out += indent + "}";
 }
 

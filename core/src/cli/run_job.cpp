@@ -1951,6 +1951,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     for (const int n : fea_tagged_nodes(model_grid, VoxelTag::Fixture))
       for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
     configure_production_options(options);
+    options.material_catalog = &materials;  // gate diagnosis, READ ONLY (see above)
     options.margin_stop = job.margin_stop;
     options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
     options.gravity_direction = job.gravity.direction;
@@ -3137,6 +3138,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // min-feature) is applied here so the CLI matches the app; the job supplies
     // the self-weight load case (ladder, margin, gravity).
     configure_production_options(options);
+    // The material catalog the GATE DIAGNOSIS prices its material lever against
+    // (handoff 2026-08-02-gate-diagnosis-recommendations). READ ONLY — nothing
+    // downstream writes materials.json — and `materials` outlives this call, so
+    // the pointer is valid for the whole run. Without it the material lever
+    // reports itself NOT EVALUABLE instead of guessing.
+    options.material_catalog = &materials;
     options.volume_fraction_ladder = job.ladder;
     options.margin_stop = job.margin_stop;
     options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;

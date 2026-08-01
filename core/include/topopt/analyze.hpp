@@ -208,6 +208,25 @@ struct FixedDesignAnalysis {
   // true when no build direction was declared. When it is true the caller MUST
   // surface the choice — see BuildOrientationReport::auto_applied.
   bool build_direction_auto_applied = false;
+
+  // --- THE WIDTH-AWARE GATE'S OWN INPUT PAIRS (handoff
+  // 2026-08-02-gate-diagnosis-recommendations) ---------------------------------
+  // The (von Mises, local member width) pairs over the SOLID PRINTED voxels the
+  // width-aware in-plane term maxed over — i.e. exactly the population
+  // `max_von_mises_effective` is the max of. EMPTY unless the WIDTH-AWARE posture
+  // was armed (`knockdown.width_aware`), so the default posture — every current
+  // production run — is byte-for-byte unchanged and pays nothing.
+  //
+  // WHY THEY LEAVE THE FUNCTION. In the width-aware posture the in-plane term is
+  // a per-voxel max, so a counterfactual "what would the gate say at 60% infill"
+  // cannot be answered by scaling one scalar. With these pairs it is answered
+  // EXACTLY, by re-running the same width_aware_knockdown per voxel — no
+  // re-solve, because the stress field does not depend on infill or wall count
+  // (infill never enters the solver, ARCHITECTURE §2). Without them a diagnosis
+  // must report the infill/wall levers NOT EVALUABLE rather than price them with
+  // the wrong (default-posture) law.
+  std::vector<double> gate_printed_von_mises;
+  std::vector<double> gate_printed_member_width_mm;
 };
 
 // Run one certification analysis of `density` on `grid`.

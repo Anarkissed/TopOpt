@@ -28,6 +28,7 @@
 #include "topopt/lattice.hpp"
 #include "topopt/lattice_gen.hpp"
 #include "topopt/loadcase.hpp"
+#include "topopt/gate_diagnosis.hpp"
 #include "topopt/materials.hpp"
 #include "topopt/mesh.hpp"
 #include "topopt/part.hpp"
@@ -283,6 +284,12 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v,
   ov.orientation_x = v.report.orientation.x;
   ov.orientation_y = v.report.orientation.y;
   ov.orientation_z = v.report.orientation.z;
+  // WHY the verdict is what it is (handoff 2026-08-02-gate-diagnosis-
+  // recommendations). Emitted through the CORE's ONE emitter, so the on-device
+  // dialog and a LAN run's report.json carry the identical document. Empty when
+  // the run did not arm the diagnosis.
+  if (v.report.diagnosis.evaluated)
+    topopt::emit_gate_diagnosis(ov.diagnosis_json, v.report.diagnosis, "");
   ov.max_stress_mpa = v.report.max_stress_mpa;
   ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
   ov.in_plane_margin = v.report.margin.in_plane;
@@ -839,6 +846,8 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     };
 
     set_variant_stream(opts, grid, variant_fn, variant_ctx);  // progressive results
+    // Gate diagnosis material lever (READ ONLY); `lib` outlives the call below.
+    opts.material_catalog = &lib;
 
     bridge_log("selfweight: entering minimize_plastic (solver=MultigridCG_Matfree) " +
                grid_summary(grid) + " dirichlet_bcs=" + std::to_string(bcs.size()));
@@ -1455,6 +1464,11 @@ OptimizeResult run_minimize_plastic_loadcase(
       return OptimizeResult{};
     }
     topopt::SettingsRules rules = topopt::load_settings_rules_file(rules_path);
+    // The material catalog the GATE DIAGNOSIS prices its material lever against
+    // (handoff 2026-08-02-gate-diagnosis-recommendations). READ ONLY, and `lib`
+    // outlives the minimize_plastic call below. Without it the material lever
+    // reports itself NOT EVALUABLE instead of guessing.
+    setup.options.material_catalog = &lib;
 
     // The last checkpoint before the solve: if the device log stops here, the
     // stall is INSIDE minimize_plastic. Report the grid the solver actually runs

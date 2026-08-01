@@ -1296,6 +1296,16 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             .appendingPathComponent(id).appendingPathComponent("files")
         let report = try getJSON(base.appendingPathComponent("report.json"))
         let reportVariants = report["variants"] as? [[String: Any]] ?? []
+        // *** THE 0.00x FAULT (handoff 2026-08-02-gate-diagnosis-recommendations). ***
+        // report.json carries TWO arrays: `variants` (accepted) and
+        // `rejected_variants` (evaluated-but-rejected, the honesty rider). This
+        // reader only ever looked at the first, so a run where EVERY rung was
+        // rejected produced an EMPTY variant list — and the failure sheet, taking a
+        // max over it, told the user "the strongest variant's worst-case stress
+        // margin was 0.00x". The real numbers were sitting in the array it never
+        // opened (2.7814 raw / 0.5759 effective, fingerprint 9f6738726016).
+        let rejectedReportVariants =
+            report["rejected_variants"] as? [[String: Any]] ?? []
 
         // Per-voxel fields (best-effort; nil leaves the overlays gated).
         // BOTH the live-completion path and the RE-ATTACH path reach here — this is
@@ -1348,9 +1358,14 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // are joined to the fields by the report's own requested VF when it has one —
         // a rejected rung has no overlay to light up, but the run's grid + duration
         // still ride along on the outcome below.
-        let rejected = reportVariants.map { makeVariant(streamed: nil, report: $0, fields: nil) }
+        // Ladder order: any evaluated-but-not-streamed rung from `variants`, then the
+        // REJECTED rungs — so `variants.last` is the terminal rung the ladder stopped
+        // on, which is what the failure sheet reads.
+        let rejected = (reportVariants + rejectedReportVariants)
+            .map { makeVariant(streamed: nil, report: $0, fields: nil) }
         return remoteOutcome(variants: rejected, acceptedCount: 0, fields: fields,
-                             timing: timing, latticeReport: latticeReport)
+                             timing: timing, latticeReport: latticeReport,
+                             buildOrientationJSON: buildOrientation)
     }
 
     /// Wrap remote variants in an OptimizeOutcome, carrying the run's grid metadata
@@ -1416,7 +1431,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             // anchor flow sub-mode stays Mac-only; stress/flex/load-path light up.
             vonMisesField: f?.vonMises ?? [],
             displacementField: f?.displacement ?? [],
-            stressTensorField: f?.stressTensor ?? [])
+            stressTensorField: f?.stressTensor ?? [],
+            keyframeMeshes: [],
+            // WHY this rung gated as it did (handoff 2026-08-02-gate-diagnosis-
+            // recommendations). The SAME object the on-device bridge returns, from
+            // the same core emitter, through the same decoder.
+            diagnosis: (rv?["diagnosis"] as? [String: Any]).flatMap(GateDiagnosis.decode))
     }
 
     /// Minimal binary-STL reader → (interleaved xyz floats, triangle-soup indices).
