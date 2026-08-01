@@ -1,0 +1,83 @@
+== SPECIMEN ==
+core/tests/fixtures/mesh/WallMount_ShelfBracket.stl
+bbox  201.2 x 207.4 x 20.0 mm   tris=2224  pseudo-faces=31
+
+== THE 12 LARGEST PSEUDO-FACES (the load case is chosen from these, by geometry) ==
+  face  30  tris= 279  area= 10359.0 mm^2  centroid=(  26.98  -39.53   20.00)  n=( 0.00  0.00  1.00)
+  face   2  tris= 279  area= 10359.0 mm^2  centroid=(  27.00  -39.53    0.00)  n=( 0.00  0.00 -1.00)
+  face   6  tris=  80  area=  4542.2 mm^2  centroid=(  15.15  -95.85    9.89)  n=(-0.70 -0.72 -0.00)
+  face   0  tris=  32  area=  3960.7 mm^2  centroid=(  24.71   10.29   10.00)  n=( 0.00  1.00  0.00)
+  face   8  tris=  99  area=  3678.2 mm^2  centroid=( 101.28 -118.72    9.96)  n=( 1.00  0.00  0.00)
+  face  21  tris= 162  area=  3561.0 mm^2  centroid=(  40.66  -81.22    9.94)  n=( 1.00  0.09  0.00)
+  face  22  tris= 126  area=  3194.1 mm^2  centroid=( -21.07  -26.45   10.00)  n=( 0.00  0.00  1.00)
+  face  27  tris=  92  area=  2388.5 mm^2  centroid=(  30.00  -32.39   10.00)  n=(-0.03  1.00  0.00)
+  face  17  tris=  92  area=  2053.6 mm^2  centroid=(  88.15  -82.80    9.97)  n=(-1.00 -0.10  0.00)
+  face  26  tris=  32  area=   946.3 mm^2  centroid=(  38.03   -6.97   10.00)  n=( 0.03 -1.00  0.00)
+  face  25  tris=  64  area=   667.2 mm^2  centroid=(  86.63  -18.98   10.00)  n=( 0.10  0.99  0.00)
+  face  28  tris=  36  area=   540.8 mm^2  centroid=(  98.12   -5.41   10.00)  n=( 0.12 -0.99  0.00)
+
+== LOAD CASE (chosen by geometry) ==
+  anchor: 5 face(s) at max-x : 1 8 14 18 28
+  load  : 4 face(s) at min-y : 7 13 14 15
+[loadcase] load-group 0: faces=4 |F|=100N voxels_tagged=222 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+
+== CALIBRATION ==
+  100 N on the CAD solid: worst-case margin 31.4253, effective 6.5070 (the number the gate compares)
+  posture A (as reported): 1129.8 N -> worst-case ~2.7814, the maintainer's own number. Starts REJECTED at 35% infill, as their run did.
+  posture B is calibrated below, from posture A's own reading of the DESIGN UNDER TEST (calibrating on the CAD solid would aim at a different object than the one being smoothed).
+[loadcase] load-group 0: faces=4 |F|=1.13e+03N voxels_tagged=222 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+
+== DESIGN UNDER TEST ==
+  iso-surface of the 125x128x13 voxelization: 20526 verts, 41072 tris (spacing 1.620 mm)
+  frozen (anchor + load faces): 3013 of 20526 vertices
+
+== AE4 · POSTURE A · AS THE MAINTAINER'S RUN WAS (worst-case 2.7814, 35% infill) ==
+  material PLA · resolution 128 · traction 1129.8 N · infill 35% · required margin 1.50
+
+  strength  pairs  frozen  vm(MPa)  in-plane  interlayer  worst   effective  minfeat  mass(g)  verdict
+  0.00          0    3013   16.192    3.3968      7.5481  3.3968     0.7033       17   246.93  REJECTED
+  0.10          2    3013   15.953    3.4475      7.7592  3.4475     0.7139       13   243.84  REJECTED
+  0.25          5    3013   19.476    2.8240      7.7967  2.8240     0.5847       36   244.29  REJECTED
+  0.50         10    3013   18.461    2.9793      7.7826  2.9793     0.6169       43   244.39  REJECTED
+  0.75         15    3013   18.477    2.9766      7.8435  2.9766     0.6163       43   244.34  REJECTED
+  1.00         20    3013   17.789    3.0918      7.8011  3.0918     0.6402       50   244.39  REJECTED
+
+  ANSWER: the specimen starts REJECTED, so no verdict CAN drop here — the reading is the SIZE OF THE MOVE: worst-case 3.3968 -> 2.8240 (-16.9%), effective 0.7033 -> 0.5847.
+
+  posture B force: 1129.8 N x 0.7033 / 1.6500 = 481.6 N (the design under test starts at effective ~1.6500)
+[loadcase] load-group 0: faces=4 |F|=482N voxels_tagged=222 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+
+== AE4 · POSTURE B · CALIBRATED TO SIT JUST ABOVE THE GATE ==
+  material PLA · resolution 128 · traction 481.6 N · infill 35% · required margin 1.50
+
+  strength  pairs  frozen  vm(MPa)  in-plane  interlayer  worst   effective  minfeat  mass(g)  verdict
+  0.00          0    3013    6.902    7.9686     17.7073  7.9686     1.6500       17   246.93  ACCEPTED
+  0.10          2    3013    6.800    8.0877     18.2026  8.0877     1.6747       13   243.84  ACCEPTED
+  0.25          5    3013    8.302    6.6249     18.2906  6.6249     1.3718       36   244.29  REJECTED
+  0.50         10    3013    7.869    6.9892     18.2576  6.9892     1.4472       43   244.39  REJECTED
+  0.75         15    3013    7.876    6.9830     18.4005  6.9830     1.4459       43   244.34  REJECTED
+  1.00         20    3013    7.583    7.2531     18.3010  7.2531     1.5018       50   244.39  ACCEPTED
+
+  ANSWER: *** THE VERDICT DROPS. *** The unsmoothed iso-surface is ACCEPTED and smoothing takes it to REJECTED; the effective margin falls 1.6500 -> 1.3718 (-16.9%) through the 1.50 stop.
+
+== H2 · MIN-FEATURE, BOTH DIRECTIONS ==
+  unsmoothed 17 violations -> strongest smoothing 50 violations (ROSE — smoothing thinned something below the floor)
+
+== H3 · THE CERTIFIED OBJECT IS THE RE-VOXELIZATION ==
+  unsmoothed : mesh volume fraction 0.22168  voxel 0.22517  gap +1.57%
+  smoothed   : mesh volume fraction 0.22213  voxel 0.22286  gap +0.33%
+  The mesh is the deliverable; the margin describes the voxel proxy. Both numbers are on the app's receipt for the same reason.
+
+== THE BRUSH · LOCAL vs GLOBAL AT THE SAME STRENGTH ==
+  brushed vertices: global 17513 of 20526 · local 15332 of 20526 (the far half from the anchor)
+
+  brush     brushed  unbrushed  worst    effective  minfeat  drift%  bound%  verdict
+  global      17513          0  3.0918     0.6402       50   0.202   0.565  REJECTED
+  local       13344       4169  2.8573     0.5916       25   0.142   0.565  REJECTED
+
+  Local smoothing costs 0.5395 of margin against the global 0.3050 — on this specimen the local brush is not cheaper.
+
+wrote evidence/2026-08-02-smoothing-page/wallmount_sweep.txt

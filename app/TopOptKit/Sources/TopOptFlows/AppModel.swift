@@ -243,6 +243,15 @@ public final class AppModel: ObservableObject {
             buildDirection: lc.buildDirection)
     }
 
+    /// The materials / rules files the certification engine needs (handoff
+    /// 2026-08-02-smoothing-page). Deliberately JUST the config paths: the
+    /// smoothing page's load case comes from the variant's RETAINED JOB DOCUMENT,
+    /// not from the project, so there is nothing else for this to hand over.
+    public func certificationConfigPaths() -> (materials: String, rules: String)? {
+        guard let materialsPath, let rulesPath else { return nil }
+        return (materialsPath, rulesPath)
+    }
+
     public func makeRunRequest() -> RunRequest? {
         guard let project, let file = project.importedFile,
               let materialsPath, let rulesPath else { return nil }

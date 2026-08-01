@@ -428,6 +428,19 @@ add_executable(test_smooth tests/unit/test_smooth.cpp)
 target_link_libraries(test_smooth PRIVATE topopt)
 add_test(NAME smooth COMMAND test_smooth)
 
+# The BRUSH — per-region smoothing strength (handoff 2026-08-02-smoothing-page).
+# Bar AE1 at PR 200's own standard and on PR 200's own specimen: the committed
+# REAL ladder variant (variant_030.stl, 4344 verts) from the constrained-smooth
+# evidence, frozen against the same resolved bolt-bore predicate, compared with
+# std::memcmp on the raw doubles at every brush strength. Also pins BR4 — an empty
+# weight vector is the pre-brush smoother byte for byte, so every shipped uniform
+# caller is untouched. Pure C++/std like test_smooth, so it runs in every config.
+add_executable(test_smooth_brush tests/validation/test_smooth_brush.cpp)
+target_link_libraries(test_smooth_brush PRIVATE topopt)
+target_compile_definitions(test_smooth_brush PRIVATE
+  SMOOTH_VARIANT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../docs/handoffs/evidence/2026-07-26-constrained-smooth-ui/run")
+add_test(NAME smooth_brush COMMAND test_smooth_brush)
+
 # Observability primitives (handoff 114): the float16 codec, the per-iteration
 # CSV schema (GOLDEN), density-snapshot write/read round-trip, SnapshotCapture
 # cadence + cap eviction, and the run version record. All live in the always-built
@@ -1134,6 +1147,20 @@ if(OpenCASCADE_FOUND)
   # Phase 2 mesh-repair evidence: before/after reports on real broken brackets.
   add_executable(repair_evidence EXCLUDE_FROM_ALL tests/tools/repair_evidence.cpp)
   target_link_libraries(repair_evidence PRIVATE topopt)
+
+  # Bar AE4 (handoff 2026-08-02-smoothing-page): does aggressive smoothing move a
+  # verdict on the maintainer's WallMount bracket, and what does brushing LOCALLY
+  # cost against brushing everything? A harness, not a ctest — it prints a table
+  # and writes evidence. Needs OCCT (part import) and Eigen (the cert solves), so
+  # it lives in the same guarded block as the rest of the full-pipeline targets:
+  #   cmake --build build --target smooth_brush_probe
+  #   ./build/smooth_brush_probe [mesh] [res] [force_N] [infill%] [evidence_dir]
+  add_executable(smooth_brush_probe EXCLUDE_FROM_ALL
+    tests/harness/smooth_brush_probe.cpp)
+  target_link_libraries(smooth_brush_probe PRIVATE topopt)
+  target_compile_definitions(smooth_brush_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
 
   # STEP face -> voxel tagging test (M1.6). Drives the STEP cube fixture, so it
   # needs OCCT to import the solid and read its per-face triangulation.

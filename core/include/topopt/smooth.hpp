@@ -74,12 +74,49 @@ TaubinParams taubin_params_for_strength(double strength, int max_pairs = 20);
 // volume shrinks monotonically toward 0.) Measured drift is reported against this.
 double taubin_volume_drift_bound(const TaubinParams& params);
 
+// The same bound when a BRUSH scales the pair per vertex by w ∈ [0, max_weight]
+// (see SmoothConstraints::vertex_weight). The peak is taken over the whole
+// (k, w) rectangle, so the returned bound covers EVERY weight the brush could
+// have applied — not only the strongest one. `max_weight >= 1` reproduces
+// `taubin_volume_drift_bound(params)` exactly; `max_weight <= 0` returns 0
+// (nothing moved).
+double taubin_volume_drift_bound_weighted(const TaubinParams& params,
+                                          double max_weight);
+
 // The constraints applied during smoothing.
 struct SmoothConstraints {
   // Freeze regions (resolved once from ClearanceGeometry): a vertex within
   // `freeze_tol_mm` of ANY region is frozen for the whole run (bit-identical).
   std::vector<ClearanceGeometry> freeze_regions;
   double freeze_tol_mm = 0.0;  // ≤ 0 → default (0.75 × ref grid spacing)
+
+  // PER-VERTEX BRUSH WEIGHT (handoff 2026-08-02-smoothing-page). Empty ⇒ every
+  // vertex carries weight 1 and this struct behaves EXACTLY as it did before —
+  // `constrained_taubin_smooth` is byte-identical to its pre-brush self on an
+  // empty weight vector, which is what keeps every shipped caller unchanged.
+  //
+  // When non-empty it must have one entry per mesh vertex (size mismatch throws).
+  // Entry v scales BOTH passes of every λ|μ pair at vertex v: the vertex moves by
+  // w·λ then w·μ instead of λ then μ. So:
+  //   w == 0  → the vertex is copied VERBATIM (bit-identical), same code path as
+  //             frozen — a branch, never `p + 0*lap`, because 0.0·x on a −0.0
+  //             coordinate would flip the sign bit and defeat memcmp;
+  //   w == 1  → the classic uniform Taubin update;
+  //   0<w<1   → a weaker local melt.
+  // Values are clamped into [0,1]; a non-finite entry is treated as 0.
+  //
+  // FROZEN OUTRANKS THE BRUSH, ALWAYS. The freeze mask is computed from the
+  // geometric predicates FIRST and tested FIRST in the update, so a weight the
+  // caller put on a frozen vertex cannot move it. The brush is a way to smooth
+  // LESS, never a way to smooth something the freeze predicates protect.
+  //
+  // NOTE ON THE SHRINK COMPENSATION. μ = −λ/(1−λ·k_PB) makes f(k_PB) = 1 for the
+  // UNIFORM pair. At w < 1 the scaled pair (wλ, wμ) no longer has its pass-band
+  // zero at exactly k_PB, so the compensation is approximate there. It is still a
+  // low-pass with f(0) = 1 (no bulk shrink) and the volume-drift bound below is
+  // computed over the whole weight range actually present, so the receipt never
+  // quotes a bound that only holds at w = 1.
+  std::vector<double> vertex_weight;
 
   // Min-feature hard constraint. When `min_feature_grid` is non-null AND
   // `enforce_min_feature` is true, each λ|μ pair is accepted only if the smoothed
@@ -97,6 +134,12 @@ struct SmoothStats {
   int applied_pairs = 0;          // pairs actually kept (≤ requested)
   std::size_t total_vertices = 0;
   std::size_t frozen_vertices = 0;  // vertices held bit-identical
+
+  // The brush (handoff 2026-08-02-smoothing-page). All zero on the uniform path.
+  bool brush_weighted = false;         // a per-vertex weight vector was supplied
+  std::size_t brushed_vertices = 0;    // free vertices with weight > 0 (movable)
+  std::size_t unbrushed_vertices = 0;  // free vertices with weight == 0 (verbatim)
+  double max_vertex_weight = 0.0;      // the strongest weight actually applied
 
   // Min-feature constraint (bar S2).
   bool min_feature_evaluated = false;  // a reference grid was supplied

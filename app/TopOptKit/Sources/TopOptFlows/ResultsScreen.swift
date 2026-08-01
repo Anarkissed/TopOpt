@@ -57,6 +57,12 @@ public struct ResultsScreen: View {
     /// (auto density with no sim — bar B6's variants entry). Invoked with the
     /// selected variant's index. nil hides the affordance.
     var onLattice: ((Int) -> Void)?
+    /// "Smooth" on the selected variant (handoff 2026-08-02-smoothing-page): opens
+    /// the SMOOTHING page on that variant — brush locally, re-certify, keep or
+    /// discard. Invoked with the selected variant's index; nil hides the
+    /// affordance. Distinct from `smoothing` below, which is the older global
+    /// strength control on this screen.
+    var onSmooth: ((Int) -> Void)?
     /// Constrained smoothing + re-certification (handoff 2026-07-28-constrained-
     /// smooth-ui). nil (a self-weight run, or a caller that has not wired it) hides
     /// the Smooth chip — data-gated exactly like the other viz chips. When set, the
@@ -104,6 +110,7 @@ public struct ResultsScreen: View {
                 onClose: @escaping () -> Void = {}, onExport: @escaping () -> Void = {},
                 onSeeOriginal: @escaping () -> Void = {},
                 onLattice: ((Int) -> Void)? = nil,
+                onSmooth: ((Int) -> Void)? = nil,
                 smoothing: SmoothingModel? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
@@ -126,6 +133,7 @@ public struct ResultsScreen: View {
         self.onExport = onExport
         self.onSeeOriginal = onSeeOriginal
         self.onLattice = onLattice
+        self.onSmooth = onSmooth
         self.smoothing = smoothing
     }
 
@@ -989,6 +997,26 @@ public struct ResultsScreen: View {
                 // Per-variant lattice entry (handoff 2026-07-30-lattice-page): opens
                 // the lattice page with the SELECTED variant's field as the demand
                 // field. Hidden when the caller wired nothing.
+                // Per-variant SMOOTHING entry (handoff 2026-08-02-smoothing-page).
+                // Placed BEFORE Lattice because the pipeline order is
+                // smooth-then-lattice: a smoothed variant may go on to the lattice
+                // page, and smoothing a latticed export would round the struts.
+                if let onSmooth {
+                    Button { onSmooth(model.selectedIndex) } label: {
+                        HStack(spacing: DS.Space.s) {
+                            Image(systemName: "scribble.variable")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("Smooth").dsStyle(DS.TypeScale.callout)
+                        }
+                        .foregroundStyle(DS.Color.textPrimary.color)
+                        .fixedSize()
+                        .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                        .background(Capsule().fill(DS.Surface.bar.color)
+                            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 if let onLattice {
                     Button { onLattice(model.selectedIndex) } label: {
                         HStack(spacing: DS.Space.s) {

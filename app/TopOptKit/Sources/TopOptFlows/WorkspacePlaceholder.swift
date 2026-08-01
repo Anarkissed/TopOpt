@@ -143,6 +143,23 @@ public struct WorkspacePlaceholder: View {
     @State private var latticeRegionActiveId: Float = -1
     @State private var latticeRegionOrbiting = false
 
+    // The SMOOTHING page (handoff 2026-08-02-smoothing-page) — the third page,
+    // entered from a finished variant. Like the lattice page it is CHROME over the
+    // same live stage, and while it is open the stage renders THAT variant (or its
+    // smoothed twin, per `smoothingPageModel.currentGeometry`).
+    @State private var showSmoothingPage = false
+    @State private var smoothingPageModel: SmoothingPageModel?
+    /// The brush. Owned here so a stroke on the stage and the panel's region list
+    /// are one value.
+    @State private var smoothBrush = SmoothBrushModel(indices: [], vertexCount: 0,
+                                                      freeze: .unavailable)
+    /// The variant's own render mesh, and the smoothed twin once one has been
+    /// certified. Built once when they change (the viewer-lag lesson).
+    @State private var smoothVariantMesh: ViewerMesh?
+    @State private var smoothedVariantMesh: ViewerMesh?
+    /// Where the variant's mesh was written for the certification engine to read.
+    @State private var smoothVariantMeshPath = ""
+
     // Gravity DIRECTION widget (2026-07-26 — "set gravity by pointing, not by hunting for a
     // clean face"). During setup the user drags an arrow to point which way is down instead
     // of tapping a face (the STL pseudo-face segmentation makes a face tap unreliable);
@@ -314,7 +331,13 @@ public struct WorkspacePlaceholder: View {
                           // demand field in the workspace pre-run → a uniform preview;
                           // graded shading engages when a result's von Mises field is
                           // present (proven in LatticeProxyTests + the evidence render).
-                          stressTints: latticeProxyTints,
+                          // On the smoothing page this channel carries the BRUSH:
+                          // painted regions in their own colour at their own
+                          // strength, and every FROZEN vertex flatly tinted, so
+                          // what the brush will refuse is visible before it is
+                          // tried (handoff 2026-08-02-smoothing-page).
+                          stressTints: showSmoothingPage ? smoothBrush.vertexTints()
+                                                         : latticeProxyTints,
                           // M7.dom-app: the translucent design box + keep-outs (model
                           // space); nil when the tool is off → nothing drawn.
                           designBox: showDesignGizmo ? project.designBox.box : nil,
@@ -411,8 +434,8 @@ public struct WorkspacePlaceholder: View {
             // page's RUN SIM button rendered BEHIND it. The fix is structural, not
             // a z nudge: the page hides ALL workspace chrome (its own rule), the
             // gizmo included.
-            if viewerMesh != nil, !showLatticePage { orientationGizmo }
-            if !showLatticePage { bottomBar }
+            if viewerMesh != nil, !showLatticePage, !showSmoothingPage { orientationGizmo }
+            if !showLatticePage, !showSmoothingPage { bottomBar }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
@@ -425,6 +448,21 @@ public struct WorkspacePlaceholder: View {
                force.phase == .edit, viewerMesh != nil {
                 selectionsPanel
             }
+            // The SMOOTHING page (handoff 2026-08-02-smoothing-page) — chrome over
+            // the same stage, mounted like the lattice page.
+            if showSmoothingPage { smoothingPageOverlay }
+            // AE6: the SAME Selections library, over the SAME model. One view, one
+            // selection system — never a second selection UX for a third page.
+            if showSmoothingPage, smoothingPageModel?.libraryOpen == true,
+               force.phase == .edit, viewerMesh != nil {
+                selectionsPanel
+            }
+            // AE7: the position gizmo sits in the SAME corner on every page. On the
+            // lattice page it is hidden for the L6 compositing reason (its
+            // Metal-backed glass composited over that page's pure-SwiftUI chrome);
+            // here it is mounted ABOVE the page instead, so it keeps its shared
+            // `PageChrome` corner without landing under anything.
+            if showSmoothingPage, viewerMesh != nil { orientationGizmo }
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
                       resolution: runResolution,
@@ -479,6 +517,13 @@ public struct WorkspacePlaceholder: View {
                               onLattice: { idx in
                                   viewOriginal = true
                                   openLatticePage(variantIndex: idx)
+                              },
+                              // Per-variant SMOOTHING entry (handoff
+                              // 2026-08-02-smoothing-page): brush locally,
+                              // re-certify, keep or discard.
+                              onSmooth: { idx in
+                                  viewOriginal = true
+                                  openSmoothingPage(variantIndex: idx)
                               })
                     .ignoresSafeArea()
             }
@@ -778,6 +823,28 @@ public struct WorkspacePlaceholder: View {
     /// `.add`/`.erase` mode follows the erase modifier; `force.sync` keeps the load case aligned
     /// with the group the stroke may have created.
     private func handleBrush(_ center: CGPoint, _ phase: BrushPhase) {
+        // On the SMOOTHING page the same gesture paints SMOOTHING strength onto the
+        // variant's own surface (handoff 2026-08-02-smoothing-page). It is routed
+        // here rather than given its own gesture so the brush feels identical on
+        // both pages — and it hit-tests the VARIANT mesh, which is what the stage
+        // is showing, so a stroke can never land on the original part's geometry.
+        if showSmoothingPage {
+            guard let mesh = smoothVariantMesh, let proj = projection else { return }
+            switch phase {
+            case .began, .moved:
+                let tris = BrushHitTest.triangles(under: center,
+                                                  radiusPoints: brushRadiusPoints,
+                                                  mesh: mesh, projection: proj,
+                                                  modelRotation: settleQuat,
+                                                  modelCenter: meshCenter)
+                guard !tris.isEmpty else { return }
+                smoothBrush.paint(paintErasing ? .erase : .add,
+                                  triangles: tris.map { Int32($0) })
+            case .ended:
+                break
+            }
+            return
+        }
         guard force.phase == .edit, let mesh = viewerMesh, let proj = projection else { return }
         switch phase {
         case .began, .moved:
@@ -1246,7 +1313,17 @@ public struct WorkspacePlaceholder: View {
     /// (the preview overlay, the region volumes, the picker) reads the same
     /// mesh through this one property, so the page cannot show one object and
     /// operate on another.
-    private var stageMesh: ViewerMesh? { latticeVariantMesh ?? viewerMesh }
+    private var stageMesh: ViewerMesh? {
+        // The smoothing page's stage shows what its model says is current — the
+        // smoothed twin only when there IS one and the user is looking at it.
+        // `currentGeometry` is the single decision; nothing here second-guesses it.
+        if showSmoothingPage, let page = smoothingPageModel {
+            return page.currentGeometry.smoothed
+                ? (smoothedVariantMesh ?? smoothVariantMesh)
+                : smoothVariantMesh
+        }
+        return latticeVariantMesh ?? viewerMesh
+    }
 
     /// Open the full-screen lattice page. `variantIndex` non-nil = the variants
     /// entry: the page then WORKS ON THAT VARIANT — its geometry is what the
@@ -1254,12 +1331,21 @@ public struct WorkspacePlaceholder: View {
     /// density is available with NO sim, bar B6's second path), and the action
     /// row offers "Lattice this variant" as a job distinct from re-running the
     /// ladder (bar Z7).
-    private func openLatticePage(variantIndex: Int?) {
+    private func openLatticePage(variantIndex: Int?,
+                                 smoothed: SmoothKeptResult? = nil) {
         latticeVariantContext = nil
         latticeVariantMesh = nil
         if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
            !o.variants[idx].vonMisesField.isEmpty {
-            let v = o.variants[idx]
+            var v = o.variants[idx]
+            // AE8, forward: a KEPT smoothing hands its own geometry on, so the
+            // lattice is generated on the SMOOTHED shape and not on the original
+            // under a label that says smoothed. The field, the rung and the
+            // retained artifacts are the variant's own and travel unchanged — only
+            // the geometry differs, which is exactly what smoothing changed.
+            if let k = smoothed {
+                v = v.withGeometry(vertices: k.meshVertices, indices: k.meshIndices)
+            }
             let field = LatticeDemandField(
                 vonMises: v.vonMisesField,
                 nx: o.gridNx, ny: o.gridNy, nz: o.gridNz,
@@ -1296,6 +1382,214 @@ public struct WorkspacePlaceholder: View {
             latticePageVariantField = nil
         }
         showLatticePage = true
+    }
+
+    // MARK: the smoothing page (handoff 2026-08-02-smoothing-page)
+
+    /// The scratch directory the page's meshes live in: the variant as the run
+    /// made it, and the smoothed twin core writes.
+    private var smoothScratchDir: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("topopt-smoothing", isDirectory: true)
+    }
+
+    /// Open the SMOOTHING page on a finished variant. The load case comes from the
+    /// variant's RETAINED JOB DOCUMENT (bar AE3) — never from `project.force` /
+    /// `project.selection`, which the user may have edited since the run. Nothing
+    /// in this function reads either.
+    private func openSmoothingPage(variantIndex: Int) {
+        guard let o = run.outcome, o.variants.indices.contains(variantIndex) else { return }
+        let v = o.variants[variantIndex]
+        let ctx = SmoothPageEntry.context(
+            runName: project.name, variantIndex: variantIndex,
+            requestedVolumeFraction: v.requestedVolumeFraction,
+            massGrams: v.massGrams, reportedMargin: v.worstCaseMargin,
+            accepted: v.accepted, meshVertices: v.meshVertices,
+            meshIndices: v.meshIndices,
+            // The RUN's own record of whether it generated a lattice — not the
+            // project's current lattice settings (AE8, reverse).
+            latticed: o.latticeReport != nil,
+            retainedJob: project.relatticeArtifacts?.jobJSON,
+            modelPath: project.importedFile?.path)
+
+        smoothVariantMesh = ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices,
+                                       faceIDs: [], faceGeometry: [],
+                                       pseudoFaces: false, smoothShaded: true)
+        smoothedVariantMesh = nil
+
+        // Write the variant's own mesh out once: the certification engine reads
+        // meshes from disk, and BOTH columns of the receipt are measured on this
+        // exact file (the before directly, the after after smoothing it).
+        try? FileManager.default.createDirectory(at: smoothScratchDir,
+                                                 withIntermediateDirectories: true)
+        let inPath = smoothScratchDir
+            .appendingPathComponent("variant_\(variantIndex).stl").path
+        let outPath = smoothScratchDir
+            .appendingPathComponent("variant_\(variantIndex)_smoothed.stl").path
+        smoothVariantMeshPath = inPath
+        try? TopOptKit.exportSTL(
+            mesh: ImportedMesh(
+                vertices: v.meshVertices, indices: v.meshIndices, faceIDs: [],
+                vertexCount: v.meshVertices.count / 3,
+                triangleCount: v.meshIndices.count / 3, faceCount: 0,
+                watertight: true),
+            to: inPath)
+
+        guard let cfg = model.certificationConfigPaths() else { return }
+        let materials = cfg.materials, rules = cfg.rules
+        smoothingPageModel = SmoothingPageModel(
+            context: ctx, variantMeshPath: inPath, smoothedMeshPath: outPath,
+            runner: { request in
+                try await Task.detached(priority: .userInitiated) {
+                    let lc = request.loadCase
+                    switch request.subject {
+                    case .originalVariant:
+                        // THE BEFORE COLUMN IS MEASURED (bar AE2): a real
+                        // analyze_fixed_design pass over the UNSMOOTHED variant,
+                        // through the same seam the after column uses.
+                        let c = try TopOptKit.certifyMeshLoadCase(
+                            modelPath: request.modelPath,
+                            meshPath: request.inputMeshPath,
+                            material: lc.material, materialsPath: materials,
+                            rulesPath: rules, resolution: lc.resolution,
+                            anchorFaceIDs: lc.anchorFaceIDs,
+                            loadGroups: lc.loadGroups,
+                            buildDirection: lc.buildDirection,
+                            infillPercent: lc.infillPercent)
+                        return SmoothingPageModel.CertifyOutcome(
+                            certification: SmoothCertification(subject: .originalVariant, c),
+                            smoothing: nil)
+                    case .smoothedVariant:
+                        let r = try TopOptKit.smoothBrushAndRecertifyLoadCase(
+                            modelPath: request.modelPath,
+                            inputMeshPath: request.inputMeshPath,
+                            smoothedOutPath: request.outputMeshPath,
+                            material: lc.material, materialsPath: materials,
+                            rulesPath: rules, resolution: lc.resolution,
+                            strength: request.strength, weights: request.weights,
+                            enforceMinFeature: true,
+                            anchorFaceIDs: lc.anchorFaceIDs,
+                            loadGroups: lc.loadGroups,
+                            buildDirection: lc.buildDirection,
+                            infillPercent: lc.infillPercent, freeze: lc.freeze)
+                        let mesh = try TopOptKit.importMesh(
+                            path: r.smoothing.smoothedMeshPath)
+                        return SmoothingPageModel.CertifyOutcome(
+                            certification: SmoothCertification(subject: .smoothedVariant,
+                                                               r.certification),
+                            smoothing: SmoothingApplied(
+                                maxStrength: request.strength,
+                                pairsRequested: r.smoothing.pairsRequested,
+                                pairsApplied: r.smoothing.pairsApplied,
+                                totalVertices: r.smoothing.totalVertices,
+                                frozenVertices: r.smoothing.frozenVertices,
+                                brushedVertices: r.smoothing.brushedVertices,
+                                unbrushedVertices: r.smoothing.unbrushedVertices,
+                                volumeDriftFraction: r.smoothing.volumeDriftFraction,
+                                volumeDriftBound: r.smoothing.volumeDriftBound,
+                                minFeatureLimited: r.smoothing.minFeatureLimited,
+                                regionLines: []),
+                            meshVertices: mesh.vertices, meshIndices: mesh.indices)
+                    }
+                }.value
+            })
+
+        // The freeze mask, from CORE's own predicate resolution. Until it arrives
+        // the brush is inert and the page says so — it must not paint into the
+        // unknown.
+        smoothBrush = SmoothBrushModel(indices: v.meshIndices,
+                                       vertexCount: v.meshVertices.count / 3,
+                                       freeze: .unavailable)
+        showSmoothingPage = true
+        if let lc = ctx.loadCase {
+            let modelPath = ctx.modelPath
+            Task {
+                let mask = try? await Task.detached(priority: .userInitiated) {
+                    try TopOptKit.smoothFreezeMask(
+                        modelPath: modelPath, meshPath: inPath,
+                        resolution: lc.resolution,
+                        anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
+                        buildDirection: lc.buildDirection,
+                        infillPercent: lc.infillPercent, freeze: lc.freeze)
+                }.value
+                guard let mask else { return }
+                smoothBrush = SmoothBrushModel(
+                    indices: v.meshIndices, vertexCount: v.meshVertices.count / 3,
+                    freeze: SmoothFreezeMask(frozen: mask.frozen,
+                                             toleranceMM: mask.toleranceMM))
+            }
+        }
+    }
+
+    private func closeSmoothingPage() {
+        showSmoothingPage = false
+        smoothingPageModel = nil
+        smoothVariantMesh = nil
+        smoothedVariantMesh = nil
+        smoothBrush = SmoothBrushModel(indices: [], vertexCount: 0, freeze: .unavailable)
+    }
+
+    private var smoothingPageOverlay: some View {
+        Group {
+            if let page = smoothingPageModel {
+                SmoothingPage(
+                    project: project, page: page,
+                    brush: $smoothBrush,
+                    showingSmoothed: Binding(
+                        get: { page.showingSmoothed },
+                        set: { page.showingSmoothed = $0 }),
+                    onRecertify: {
+                        let brush = smoothBrush
+                        Task {
+                            await page.recertify(brush: brush)
+                            // Render the smoothed twin only once it CERTIFIED —
+                            // an uncertified shape never becomes the stage's
+                            // "smoothed" view (the honesty rule, on the stage).
+                            if page.receipt != nil {
+                                let g = page.currentGeometry
+                                smoothedVariantMesh = g.smoothed
+                                    ? ViewerMesh(vertices: g.vertices, indices: g.indices,
+                                                 faceIDs: [], faceGeometry: [],
+                                                 pseudoFaces: false, smoothShaded: true)
+                                    : nil
+                            }
+                        }
+                    },
+                    onKeep: {
+                        let lines = smoothBrush.summaries()
+                            .filter { !$0.inert }
+                            .map { String(format: "%@ %.2f (%d tri)", $0.name,
+                                          $0.strength, $0.triangles) }
+                        if !page.keep(regionLines: lines) {
+                            model.toast = "Nothing to keep — re-certify first."
+                        }
+                    },
+                    onDiscard: {
+                        // AE9: the original is never mutated, so discarding is a
+                        // state reset and the stage goes straight back to the
+                        // variant the run produced.
+                        page.discard()
+                        smoothBrush.clearStrokes()
+                        smoothedVariantMesh = nil
+                    },
+                    onSendToLattice: {
+                        guard let kept = page.kept else {
+                            model.toast = "Keep the smoothing first — a lattice needs "
+                                + "certified geometry."
+                            return
+                        }
+                        let idx = page.context.variantIndex
+                        closeSmoothingPage()
+                        openLatticePage(variantIndex: idx, smoothed: kept)
+                    },
+                    // AE6: open the SAME `selectionsPanel` the TO page and the
+                    // lattice page mount, over the SAME `project.selection`. This
+                    // page has no selection UX of its own to open.
+                    onOpenLibrary: { page.libraryOpen.toggle() },
+                    onClose: { closeSmoothingPage() })
+                    .ignoresSafeArea(.keyboard)
+            }
+        }
     }
 
     /// Close the lattice page and DROP the variant context — the stage goes back

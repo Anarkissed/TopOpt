@@ -431,6 +431,13 @@ struct AnalyzeResult {
   // than emitting a false receipt (the honesty rule at the solver boundary).
   bool non_convergent = false;
   double margin_worst_case = 0.0;      // the SOLID margin (displayed value)
+  // The two components the worst case is the MIN of (report.hpp StressMargin,
+  // the locked margin definition). Surfaced for the smoothing page's before/after
+  // table, which must show WHICH failure mode moved — a worst case that fell
+  // because the interlayer term fell is a different story from one that fell
+  // because the in-plane term did.
+  double margin_in_plane = 0.0;        // yield / max von Mises
+  double margin_interlayer = 0.0;      // (z_knockdown * yield) / interlayer tension
   double margin_effective = 0.0;       // infill-adjusted margin the gate compares
   double margin_required = 0.0;
   double max_stress_mpa = 0.0;
@@ -447,6 +454,10 @@ struct AnalyzeResult {
   double grid_origin_x = 0.0, grid_origin_y = 0.0, grid_origin_z = 0.0;
   double spacing = 0.0;
   double voxel_volume_mm3 = 0.0;
+  // The number of voxels the certification actually solved on — the size of the
+  // RE-VOXELIZED design, which is not the mesh (H3). Reported so a caller can
+  // state the analyzed-vs-printed gap rather than assume it away.
+  int64_t solid_voxels = 0;
   std::vector<float> von_mises_field;    // grid-indexed, MPa (0 off the printed set)
   std::vector<float> displacement_field; // DOF-ordered (3*node), mm
 
@@ -469,6 +480,21 @@ struct AnalyzeResult {
   int32_t min_feature_baseline = -1;
   bool min_feature_limited = false;      // the constraint stopped smoothing early
   std::string smoothed_mesh_path;        // the exported smoothed STL (task item 5)
+
+  // The BRUSH receipt (handoff 2026-08-02-smoothing-page). All zero / false on the
+  // uniform path, so a page that never paints reads exactly as it did before.
+  bool brush_weighted = false;           // a per-vertex weight vector was supplied
+  int64_t brushed_vertices = 0;          // free vertices the brush could move
+  int64_t unbrushed_vertices = 0;        // free vertices left bit-identical
+  double max_vertex_weight = 0.0;        // the strongest region strength applied
+  // THE H3 DISCLOSURE. The certified object is the RE-VOXELIZATION of the smoothed
+  // mesh, not the mesh: the mesh is the 0.5 iso-surface of a grayscale field and
+  // the two are NOT identical (PR 274). Both volume fractions are reported so the
+  // size of that gap is visible rather than assumed — `mesh_volume_fraction` is the
+  // smoothed mesh's own enclosed volume over the grid's bounding volume, and
+  // `voxel_volume_fraction` is what the certification actually solved on.
+  double mesh_volume_fraction = 0.0;
+  double voxel_volume_fraction = 0.0;
 };
 
 // Freeze regions for the constrained smoother, supplied by the app as the SAME
@@ -724,6 +750,62 @@ AnalyzeResult smooth_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     BridgeError& err);
+
+// ---------------------------------------------------------------------------
+// THE BRUSH — per-region smoothing strength (handoff 2026-08-02-smoothing-page).
+//
+// The maintainer's reason for wanting a smoothing page at all: "smoothing to not
+// be on the entire model and only on parts that need it". So strength stops being
+// one global knob and becomes a PER-VERTEX weight the page paints.
+
+// One weight per mesh vertex of `input_mesh_path`, in vertex order, each in [0,1]:
+// 0 = untouched (returned bit-identical), 1 = the full uniform melt. EMPTY means
+// "no brush" and the call is byte-identical to the uniform seam above — that is
+// what keeps every shipped caller unchanged. A non-empty vector whose length is
+// not the mesh's vertex count is REFUSED (it would weight the wrong vertices).
+struct BridgeVertexWeights {
+  std::vector<double> weight;
+};
+
+// The per-vertex FREEZE MASK the smoother will apply to `mesh_path`, computed from
+// EXACTLY the regions `smooth_brush_and_recertify_loadcase` freezes: the load
+// case's anchor + load faces, plus every app-supplied bore/pad primitive. The page
+// asks for this BEFORE the user paints, so the brush can refuse a frozen vertex at
+// the geometry level instead of moving it and putting it back. One predicate, one
+// answer — the mask here and the mask inside the smoother come from the same
+// `compute_freeze_mask` call on the same resolved `ClearanceGeometry` list.
+struct BridgeFreezeMask {
+  // `frozen[v] != 0` iff vertex v of the mesh lies within the smoother's tolerance
+  // of a freeze region. Size == the mesh's vertex count.
+  std::vector<int32_t> frozen;
+  int64_t frozen_count = 0;
+  int64_t total_vertices = 0;
+  // The tolerance actually used (mm) — 0.75 × the analysis grid spacing, the same
+  // value the smoother derives — so the page can state it.
+  double freeze_tol_mm = 0.0;
+};
+
+BridgeFreezeMask smooth_freeze_mask(const std::string& model_path,
+                                    const std::string& mesh_path,
+                                    int resolution,
+                                    const BridgeLoadCase& load_case,
+                                    const BridgeFreezeRegions& freeze,
+                                    BridgeError& err);
+
+// The brush twin of `smooth_and_recertify_loadcase`. Identical in every respect
+// except that each vertex melts by `strength * brush.weight[v]` instead of
+// `strength`. An empty `brush` reproduces the uniform call byte for byte.
+//
+// FROZEN OUTRANKS THE BRUSH: a weight on a vertex the freeze predicates claim is
+// discarded inside the smoother, which recomputes the mask itself and tests it
+// first. There is no ordering of these arguments that lets a caller melt a bore.
+AnalyzeResult smooth_brush_and_recertify_loadcase(
+    const std::string& model_path, const std::string& input_mesh_path,
+    const std::string& smoothed_out_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, double strength, bool enforce_min_feature,
+    const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
+    const BridgeVertexWeights& brush, BridgeError& err);
 
 // ---------------------------------------------------------------------------
 // Bridge smoke summary — the M7.1 deliverable "material count + imported-mesh
