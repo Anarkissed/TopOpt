@@ -190,6 +190,24 @@ struct FixedDesignAnalysis {
   // false) unless the caller passed score_build_orientation = true, so every
   // existing caller's output is byte-identical. See build_orientation.hpp.
   BuildOrientationReport build_orientation;
+
+  // --- THE ORIENTATION THIS ANALYSIS DESCRIBES (handoff
+  // 2026-08-01-bake-build-orientation) -----------------------------------------
+  // `applied_build_dir` is the MODEL-frame build direction every
+  // direction-bearing field above was computed at, and the direction the
+  // EXPORTED geometry is rotated onto +Z from. It equals the `build_dir`
+  // argument unless `build_direction_auto_applied` is true, in which case it is
+  // the orientation the scorer CHOSE.
+  //
+  // READ THIS, NOT THE `build_dir` ARGUMENT, when reporting or exporting. They
+  // differ exactly when the caller armed auto-apply and the recommendation was
+  // not the inferred direction — precisely the case where using the argument
+  // would make the report describe a different object than the file.
+  Vec3 applied_build_dir{0.0, 0.0, 1.0};
+  // The orientation was CHOSEN by the scorer rather than supplied. Only ever
+  // true when no build direction was declared. When it is true the caller MUST
+  // surface the choice — see BuildOrientationReport::auto_applied.
+  bool build_direction_auto_applied = false;
 };
 
 // Run one certification analysis of `density` on `grid`.
@@ -233,6 +251,32 @@ struct FixedDesignAnalysis {
 //                         resolve_build_direction_is_inferred(options), i.e.
 //                         "no build direction was declared, this one was assumed
 //                         from gravity". Reported, never acted on.
+//   auto_apply_build_orientation
+//                       — *** THE ONE PLACE A RECOMMENDATION MAY BECOME A
+//                         DECISION *** (handoff 2026-08-01-bake-build-
+//                         orientation). false (the DEFAULT) is PR 271's
+//                         behaviour to the byte. true makes the scorer's
+//                         recommendation the orientation this analysis
+//                         CERTIFIES: the direction-dependent outputs
+//                         (`max_interlayer_tension`, `margin`,
+//                         `margin_effective`, `accepted`, `support_volume_voxels`
+//                         and the strut report) are re-sealed at that direction —
+//                         from the SAME candidate row the scorer already priced
+//                         with the SAME gate expression, so nothing is computed
+//                         a second way — `applied_build_dir` records it, and
+//                         `build_orientation.auto_applied` makes the choice
+//                         impossible to miss on the receipt.
+//                         REQUIRES `score_build_orientation` AND
+//                         `build_direction_inferred`: a recommendation may never
+//                         override a DECLARED direction, and
+//                         apply_recommended_orientation throws if asked to. The
+//                         caller then rotates the EXPORTED geometry onto
+//                         `applied_build_dir`, so the verdict and the file
+//                         describe the same object.
+//                         NOTHING ELSE MOVES. The solve, the fields, the mass and
+//                         the V3 suite do not depend on the build direction (PR
+//                         266 measured that exactly), so re-sealing is a re-read
+//                         of one solve, not a second one.
 //
 // Throws whatever simp_compliance throws for a MALFORMED problem (bad BC/load
 // index, non-physical params) and ReportError from compute_stress_margin. A CG
@@ -248,7 +292,8 @@ FixedDesignAnalysis analyze_fixed_design(
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
     bool load_path_ok, double part_solid, const LatticePosture* lattice = nullptr,
     bool score_build_orientation = false,
-    bool build_direction_inferred = false);
+    bool build_direction_inferred = false,
+    bool auto_apply_build_orientation = false);
 
 // THE ONE accept-gate margin expression (handoff
 // 2026-08-01-build-direction-separation). Extracted verbatim from

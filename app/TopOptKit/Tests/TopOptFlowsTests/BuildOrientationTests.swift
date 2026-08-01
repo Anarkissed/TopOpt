@@ -201,6 +201,132 @@ final class BuildOrientationTests: XCTestCase {
         """.utf8)), "a receipt with no candidates is not a ranking")
     }
 
+    // MARK: - V7: an AUTO-APPLIED orientation is never silent
+    // (docs/handoffs/2026-08-01-bake-build-orientation.md)
+
+    /// The receipt the core emits when the user declared NO orientation, so the
+    /// run CHOSE one, certified it, and rotated the exported geometry onto it —
+    /// on the case that matters: the assumed orientation FAILS and the chosen
+    /// one PASSES. This is PR 271's flipping receipt with the roles reversed:
+    /// there the recommendation was refused; here it was applied, which is
+    /// exactly why the app has to shout about it.
+    private var autoAppliedReceipt: Data {
+        Data("""
+        {
+          "_note": "THE BUILD ORIENTATION WAS CHOSEN AUTOMATICALLY.",
+          "export_frame": {"baked": true, "vector_frame": "model",
+                           "rotation_row_major": [1,0,0,0,0,-1,0,1,0],
+                           "exact_axis_permutation": true, "identity": false,
+                           "build_direction_in_file": [0, 0, 1]},
+          "as_built": {"build_direction": [0, 0, 1], "source": "chosen_automatically",
+                       "margin_effective": 1.3285, "verdict": "ACCEPTED"},
+          "recommended": {"build_direction": [0, 0, 1], "differs_from_as_built": false,
+                          "margin_effective": 1.3285, "verdict": "ACCEPTED"},
+          "auto_applied": {
+            "chosen": true, "build_direction": [0, 0, 1], "verdict": "ACCEPTED",
+            "margin_effective": 1.3285,
+            "as_inferred": {"build_direction": [0, 1, 0],
+                            "source": "the documented fallback, unit(-gravity)",
+                            "margin_effective": 0.6968, "verdict": "REJECTED"},
+            "changed_verdict": true, "rescued": true,
+            "constrained_by_gate": false,
+            "statement": "*** THIS PART PASSES BECAUSE OF THE CHOSEN ORIENTATION. ***"
+          },
+          "verdict_would_change": false,
+          "statement": "the build direction was CHOSEN AUTOMATICALLY (none was declared)",
+          "self_checks": {"strut_in_plane_invariant": true,
+                          "cube_axes_strut_interlayer_identical": true,
+                          "cube_axes_scored": 6},
+          "sweep_seconds": 0.0015,
+          "candidates": [
+            {"build_direction": [0, 0, 1], "on_cube_axis": true, "is_as_built": true,
+             "is_recommended": true, "is_as_inferred": false, "support_voxels": 0,
+             "macro_interlayer_margin": 6.3494, "margin_effective": 1.3285,
+             "would_be_accepted": true, "min_feature_violations": 0,
+             "build_height_layers": 8, "first_layer_footprint_voxels": 440},
+            {"build_direction": [0, 1, 0], "on_cube_axis": true, "is_as_built": false,
+             "is_recommended": false, "is_as_inferred": true, "support_voxels": 48,
+             "macro_interlayer_margin": 0.6968, "margin_effective": 0.6968,
+             "would_be_accepted": false, "min_feature_violations": 0,
+             "build_height_layers": 48, "first_layer_footprint_voxels": 96}
+          ]
+        }
+        """.utf8)
+    }
+
+    func testAnAutoAppliedOrientationDecodesAsAChoiceThatWasMadeForYou() throws {
+        let r = try XCTUnwrap(OrientationRanking.decode(autoAppliedReceipt))
+
+        // *** THE BAR. Every fact the banner needs must survive decoding, because
+        // a fact the app cannot read is a fact the app will not show. ***
+        XCTAssertTrue(r.autoApplied,
+                      "the app must know the orientation was chosen FOR the user")
+        XCTAssertTrue(r.exportBaked,
+                      "and that the exported geometry was rotated onto it")
+        XCTAssertEqual(r.asBuilt, SIMD3(0, 0, 1))
+        XCTAssertTrue(r.asBuiltAccepted)
+
+        // The MEASURED counterfactual — what the run would otherwise have done.
+        XCTAssertEqual(r.asInferred, SIMD3(0, 1, 0))
+        XCTAssertFalse(r.asInferredAccepted)
+        XCTAssertTrue(r.autoApplyChangedVerdict)
+        XCTAssertTrue(r.autoApplyRescued,
+                      "*** the part passes BECAUSE of the chosen orientation, and "
+                      + "the app is told so in one flag it cannot miss ***")
+        XCTAssertFalse(r.autoApplyConstrainedByGate)
+
+        // `asBuiltWasAssumed` must be FALSE: the direction was neither declared
+        // NOR assumed from gravity — it was chosen. Reporting it as "assumed"
+        // would put the old, weaker sentence on a much stronger event.
+        XCTAssertFalse(r.asBuiltWasAssumed,
+                       "a CHOSEN orientation is not an ASSUMED one")
+    }
+
+    func testAPreBakeReceiptStillDecodesAndClaimsNothingWasApplied() throws {
+        // PR 271's own receipt, unchanged. It must still read, and it must read
+        // as "nothing was chosen, nothing was rotated" — an old document cannot
+        // be allowed to imply a new behaviour.
+        let r = try XCTUnwrap(OrientationRanking.decode(flippingReceipt))
+        XCTAssertFalse(r.autoApplied)
+        XCTAssertFalse(r.exportBaked)
+        XCTAssertNil(r.asInferred)
+        XCTAssertFalse(r.autoApplyRescued)
+        XCTAssertFalse(r.autoApplyChangedVerdict)
+        XCTAssertFalse(r.autoApplyConstrainedByGate)
+        // ... and PR 271's own bar still holds on it, unweakened.
+        XCTAssertTrue(r.verdictWouldChange)
+        XCTAssertFalse(r.asBuiltAccepted)
+    }
+
+    func testTheGateConstraintIsCarriedSoTheTradeOffIsVisible() throws {
+        // The auto-apply pick is the six-criteria maximin CONSTRAINED to
+        // orientations that pass the gate. When that constraint bites, the app
+        // must be able to say the favourite was not applied and why — otherwise
+        // the ranking table would show a starred row that was silently ignored.
+        var text = String(decoding: autoAppliedReceipt, as: UTF8.self)
+        text = text.replacingOccurrences(of: "\"constrained_by_gate\": false",
+                                         with: "\"constrained_by_gate\": true")
+        let r = try XCTUnwrap(OrientationRanking.decode(Data(text.utf8)))
+        XCTAssertTrue(r.autoApplyConstrainedByGate,
+                      "the app must know the gate overruled the six criteria")
+    }
+
+    /// *** The app asks for the PRE-BAKE pipeline, on purpose. ***
+    ///
+    /// The core's default rotates the exported mesh onto the certified build
+    /// direction. This app downloads that exported mesh and draws it under the
+    /// MODEL-frame gravity arrow, design box, load groups and fields.bin
+    /// overlays — so a rotated mesh would mix frames, which is a worse defect
+    /// than the one baking fixes. The key must therefore be present and "off"
+    /// until the viewer is frame-aware; a future change that removes it must
+    /// fail here first and be forced to deal with the viewer.
+    func testTheAppAsksForThePreBakePipelineUntilTheViewerIsFrameAware() throws {
+        let job = try jobDict(plate: SIMD3(0, 0, 0), wantsRanking: true)
+        XCTAssertEqual(job["bake_build_orientation"] as? String, "off",
+                       "the app must NOT inherit the core's baking default while "
+                       + "its viewer overlays model-frame fields on the exported mesh")
+    }
+
     // MARK: - helper
 
     private func jobDict(plate: SIMD3<Double>, wantsRanking: Bool) throws -> [String: Any] {

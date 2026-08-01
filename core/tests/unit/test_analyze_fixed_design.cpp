@@ -171,9 +171,24 @@ int main() {
   params.youngs_modulus = material.youngs_modulus_mpa;
   params.poisson = material.poisson;
   params.penalty = 3.0;  // ARCHITECTURE §4 (density_min stays the 1e-3 default)
-  const Vec3 build_dir = normalized(Vec3{-o.gravity_direction.x,
-                                         -o.gravity_direction.y,
-                                         -o.gravity_direction.z});
+  // THE ORIENTATION THE RECOVERY BLOCK ACTUALLY USED. Since handoff
+  // 2026-08-01-bake-build-orientation a run with no declared build direction
+  // CHOOSES one (and rotates its export onto it), so the certification numbers
+  // describe `applied_build_dir` — not the old unit(-gravity) inference. Feeding
+  // this in is what makes the reconstruction below EXACT inputs rather than
+  // nearly-the-same inputs; the bar itself is untouched.
+  const Vec3 build_dir = v.applied_build_dir;
+  // ... and it is genuinely load-bearing on this fixture: the run chose an
+  // orientation, and the naive inference is a DIFFERENT vector. If these ever
+  // coincide the checks below would pass vacuously, so say which case we are in.
+  const Vec3 inferred = normalized(Vec3{-o.gravity_direction.x,
+                                        -o.gravity_direction.y,
+                                        -o.gravity_direction.z});
+  std::printf(
+      "[analyze] run certified at (%.3g, %.3g, %.3g); gravity inference was "
+      "(%.3g, %.3g, %.3g); auto-applied=%s\n",
+      build_dir.x, build_dir.y, build_dir.z, inferred.x, inferred.y, inferred.z,
+      v.build_direction_auto_applied ? "yes" : "no");
   topopt::KnockdownSpec knockdown;
   knockdown.infill_knockdown = topopt::infill_margin_knockdown(o.infill_percent);
   const bool load_path_ok =

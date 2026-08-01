@@ -19,6 +19,18 @@ namespace topopt {
 // lights up the same overlays a local run does. It is an ADDITIVE artifact: the
 // CLI writes it after a run alongside the meshes; older readers ignore it.
 //
+// *** WHICH FRAME THIS FILE IS IN (handoff 2026-08-01-bake-build-orientation).
+// EVERYTHING HERE IS IN THE MODEL FRAME — the input geometry's own coordinates.
+// The voxel grid, the per-voxel scalars and the per-node DISPLACEMENT VECTORS
+// are all indexed to and expressed in the grid the solve ran on, and that grid
+// never moves. The exported MESH may be rotated so the certified build direction
+// is +Z in the file; this container is NOT, and must not be read as though it
+// were. A viewer that draws fields.bin over the EXPORTED mesh would be mixing
+// two frames — draw them over the model-frame mesh, or rotate the fields by
+// run_info.json's `export_frame.rotation` first. run_info records the rotation
+// precisely so this can be done; the container carries no orientation of its own
+// because it has none to carry. ***
+//
 // FORMAT (fields.bin v1). All integers/floats little-endian. The VERSION BYTE is
 // first so the schema can evolve; a reader MUST check it before anything else.
 // The container is ONE run-level header (the solved grid the fields index to)

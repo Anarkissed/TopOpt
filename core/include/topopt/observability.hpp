@@ -552,6 +552,26 @@ struct RunInfo {
     bool any_strut_below_min = false;
   };
   std::vector<GradingCellLevel> grading_cell_levels;
+
+  // ── THE EXPORTED GEOMETRY'S FRAME (handoff 2026-08-01-bake-build-orientation)
+  // Provenance for the one question a reader of an exported file cannot answer
+  // from the file itself: is this mesh in the input model's coordinates, or has
+  // it been rotated so the certified build direction is +Z?
+  //
+  // The serializer emits an "export_frame" object ONLY when `export_baked` is
+  // true, so a run that writes model-space coordinates — a declared build
+  // direction, or bake mode "off" — keeps its run_info byte-identical.
+  //
+  // `applied_build_dir_*` is in the MODEL frame; in the FILE the build direction
+  // is +Z by construction. `auto_applied` records that the orientation was
+  // CHOSEN because none was declared, which is the fact a reader most needs and
+  // the one a file cannot carry.
+  bool export_baked = false;
+  bool export_build_direction_auto_applied = false;
+  bool export_rotation_exact = false;  // a signed axis permutation: lossless
+  double applied_build_dir_x = 0.0;
+  double applied_build_dir_y = 0.0;
+  double applied_build_dir_z = 0.0;
 };
 
 // Serialize / write the version record as JSON (hand-rolled, matching the repo's

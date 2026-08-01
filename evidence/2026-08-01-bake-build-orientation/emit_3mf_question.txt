@@ -1,0 +1,49 @@
+emit_3mf — THE QUESTION ASKED, ANSWERED, NOT FLIPPED
+====================================================
+
+The task asked: "emit_3mf is false in production runs. PR 201 measured 3MF at
+~45% of STL size and PR 194 made lib3mf work on both platforms. Report whether
+turning it on is a one-line default change; do NOT flip it."
+
+IS IT ONE LINE?  Yes: core/include/topopt/job.hpp:144,
+                 `bool emit_3mf = false;` -> `true`.
+
+BUT THE SIZE PREMISE IS WRONG FOR THIS KEY, AND IT POINTS THE OTHER WAY.
+
+`emit_3mf` is LATTICE-ONLY. The lattice 3MF is written by StreamingThreeMfWriter,
+whose own header states the trade-off:
+
+    "a STORED zip is uncompressed, so a streaming .3mf is LARGER on disk than a
+     lib3mf-deflated one. That is the price of not holding the mesh in RAM; the
+     STL is the primary, most compact streaming artifact."
+
+PR 201's ~45% was measured on the lib3mf-DEFLATED writer (write_3mf_file), which
+serves the SOLID variant export — a different key entirely (output.mesh_format).
+
+MEASURED, on the committed plate_bore fixture at resolution 32, octet cell 3.0 mm,
+strut radius 0.45 mm, both formats emitted from ONE generator pass:
+
+    variant_060_lattice.stl      1,942,484 bytes
+    variant_060_lattice.3mf      8,510,037 bytes      <-- 4.38x LARGER
+
+    (variant_060.stl, the solid export, 144,084 bytes — a different path.)
+
+So flipping this default would add a file 4.4x the size of the one already being
+written, not one 45% of it.
+
+TWO SMALLER POINTS
+  * The app is unaffected either way: RemoteRunner always sends emit_3mf
+    explicitly from the user's toggle, so the core default governs only CLI jobs
+    that omit the key.
+  * It IS safe to flip mechanically — StreamingThreeMfWriter depends on nothing
+    but the C++ stdlib, so it works on the lib3mf-free build too. One app-side
+    fixture (LatticeModeTests.swift:137) asserts the app's own `false`.
+
+RECOMMENDATION
+  Do not flip on the size argument. If 3MF-by-default is wanted for FORMAT
+  reasons (metadata, colour, a slicer that prefers it), that is a separate and
+  legitimate case — but it costs disk rather than saving it, and the honest
+  version of "make the lattice 3MF small" is to teach StreamingThreeMfWriter to
+  DEFLATE, which is its own piece of work.
+
+NOTHING WAS CHANGED. The default is still false.

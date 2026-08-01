@@ -138,6 +138,36 @@ public struct OrientationRanking: Codable, Equatable, Sendable {
     /// The core's own pre-composed sentence, so the app cannot phrase it
     /// differently from the receipt on disk.
     public let statement: String
+
+    // MARK: - the orientation was CHOSEN (handoff 2026-08-01-bake-build-orientation)
+
+    /// *** THE ORIENTATION WAS CHOSEN FOR THE USER, AND THE EXPORTED GEOMETRY
+    /// WAS ROTATED ONTO IT. *** Only ever true when the user declared none. When
+    /// this is set the UI MUST say so before it says anything else: PR 271's
+    /// rule was "a recommendation never SILENTLY changes a verdict", and the
+    /// word carrying it was *silently*. Applying a choice the user did not make
+    /// and not saying so is the same failure wearing a helpful face.
+    public let autoApplied: Bool
+    /// What the run WOULD have used — the documented `-gravity` fallback — with
+    /// its measured verdict. The counterfactual, not an adjective.
+    public let asInferred: SIMD3<Double>?
+    public let asInferredAccepted: Bool
+    /// The chosen orientation gates DIFFERENTLY from the assumed one.
+    public let autoApplyChangedVerdict: Bool
+    /// *** The part PASSES because of the chosen orientation: printed the way
+    /// the run would otherwise have assumed, it FAILS. *** The single most
+    /// important sentence this app can show about a run, when it is true.
+    public let autoApplyRescued: Bool
+    /// The gate CONSTRAINED the choice: the unconstrained six-criteria
+    /// recommendation would have failed, so the best PASSING orientation was
+    /// applied instead. Shown so the trade-off is visible rather than resolved
+    /// in silence.
+    public let autoApplyConstrainedByGate: Bool
+    /// The exported mesh was rotated so the certified build direction is +Z in
+    /// the file. Every `SIMD3` on this type stays in the MODEL frame; this flag
+    /// is what tells the UI there are two frames and which one it is showing.
+    public let exportBaked: Bool
+
     public let candidates: [OrientationCandidate]
     /// PR 266's S2 invariants, checked in production. False here means the
     /// wiring is wrong and the columns below should not be trusted.
@@ -196,6 +226,11 @@ public struct OrientationRanking: Codable, Equatable, Sendable {
         else { return nil }
 
         let checks = root["self_checks"] as? [String: Any] ?? [:]
+        // The auto-apply block, present only when the orientation was CHOSEN.
+        // Absent on every PR 271 receipt, which decodes with autoApplied false
+        // and every field below inert — so an old document still reads.
+        let auto = root["auto_applied"] as? [String: Any]
+        let inferredBlock = auto?["as_inferred"] as? [String: Any]
         let candidates: [OrientationCandidate] = rows.compactMap { r in
             guard let d = vec(r["build_direction"]) else { return nil }
             func num(_ k: String) -> Double? { (r[k] as? NSNumber)?.doubleValue }
@@ -228,6 +263,16 @@ public struct OrientationRanking: Codable, Equatable, Sendable {
             recommendationDiffers: (rec["differs_from_as_built"] as? NSNumber)?.boolValue ?? false,
             verdictWouldChange: (root["verdict_would_change"] as? NSNumber)?.boolValue ?? false,
             statement: (root["statement"] as? String) ?? "",
+            autoApplied: (auto?["chosen"] as? NSNumber)?.boolValue ?? false,
+            asInferred: vec(inferredBlock?["build_direction"]),
+            asInferredAccepted: (inferredBlock?["verdict"] as? String) == "ACCEPTED",
+            autoApplyChangedVerdict:
+                (auto?["changed_verdict"] as? NSNumber)?.boolValue ?? false,
+            autoApplyRescued: (auto?["rescued"] as? NSNumber)?.boolValue ?? false,
+            autoApplyConstrainedByGate:
+                (auto?["constrained_by_gate"] as? NSNumber)?.boolValue ?? false,
+            exportBaked: ((root["export_frame"] as? [String: Any])?["baked"]
+                as? NSNumber)?.boolValue ?? false,
             candidates: candidates,
             strutInPlaneInvariant: (checks["strut_in_plane_invariant"] as? NSNumber)?.boolValue ?? true,
             cubeAxesStrutInterlayerIdentical:

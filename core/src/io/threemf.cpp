@@ -43,8 +43,18 @@ void write_3mf_file(const std::string& path, const TriangleMesh& mesh) {
 
     mesh_object->SetGeometry(vertices, triangles);
 
-    // A mesh object is only written if a build item references it. Identity
-    // transform: the mesh is exported in its own model-space coordinates.
+    // A mesh object is only written if a build item references it. The transform
+    // is the IDENTITY, deliberately and permanently.
+    //
+    // A 3MF build transform is ADVICE (handoff 2026-08-01-bake-build-
+    // orientation): "place on bed", "auto-orient" and "arrange" all reset it,
+    // and slicers do that routinely, sometimes on import. So an orientation that
+    // lived here would be an orientation the slicer is free to discard, and the
+    // certificate would describe an object it never produces. The certified
+    // orientation is therefore baked into the VERTICES upstream of this function
+    // (run_job rotates the mesh before handing it over) and this transform stays
+    // identity as belt and braces: whatever the slicer does with it, the
+    // geometry is already the right way up. Do NOT put a rotation here.
     Lib3MF::sTransform identity = wrapper->GetUniformScaleTransform(1.0f);
     model->AddBuildItem(mesh_object.get(), identity);
 

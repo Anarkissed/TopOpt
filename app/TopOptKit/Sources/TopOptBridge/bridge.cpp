@@ -798,6 +798,21 @@ OptimizeResult run_minimize_plastic(const std::string& stl_path,
     // both call, so they cannot drift into producing different parts (handoff
     // 093). The self-weight LOAD CASE (gravity, ladder, keyframes) is set below.
     topopt::configure_production_options(opts);
+    // ── BAKING IS OFF ON THE ON-DEVICE PATH, DELIBERATELY (handoff
+    // 2026-08-01-bake-build-orientation) ────────────────────────────────────
+    // The core's default is "auto": with no declared build direction it CHOOSES
+    // one and rotates the EXPORTED geometry onto it. This bridge does not write
+    // an exported file — it hands `variant.v3.mesh` back to Swift in MODEL
+    // coordinates, to be drawn under the model-frame gravity arrow, design box,
+    // clearances and field overlays. Inheriting "auto" here would certify an
+    // orientation while returning geometry that does not carry it: the exact
+    // "the number describes a different object than the file" failure this
+    // project has spent weeks eliminating, reintroduced from the other side.
+    // So the on-device path asks for the pre-bake pipeline explicitly and stays
+    // byte-identical to PR 271. It matches what RemoteRunner sends, so the iPad
+    // and the LAN worker still agree by construction. The fix is the same one:
+    // make the viewer frame-aware, then drop this line in both places at once.
+    opts.bake_build_orientation = topopt::BakeBuildOrientation::Off;
     // Self-weight body load in mm-MPa-consistent units. The material density from
     // materials.json is g/cm^3 and lengths are mm, so density*gravity must be in
     // N/mm^3: fold the g/cm^3 -> t/mm^3 factor (1e-9) into standard gravity in
@@ -921,6 +936,21 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
     params.penalty = 3.0;
     topopt::MinimizePlasticOptions opts;
     topopt::configure_production_options(opts);
+    // ── BAKING IS OFF ON THE ON-DEVICE PATH, DELIBERATELY (handoff
+    // 2026-08-01-bake-build-orientation) ────────────────────────────────────
+    // The core's default is "auto": with no declared build direction it CHOOSES
+    // one and rotates the EXPORTED geometry onto it. This bridge does not write
+    // an exported file — it hands `variant.v3.mesh` back to Swift in MODEL
+    // coordinates, to be drawn under the model-frame gravity arrow, design box,
+    // clearances and field overlays. Inheriting "auto" here would certify an
+    // orientation while returning geometry that does not carry it: the exact
+    // "the number describes a different object than the file" failure this
+    // project has spent weeks eliminating, reintroduced from the other side.
+    // So the on-device path asks for the pre-bake pipeline explicitly and stays
+    // byte-identical to PR 271. It matches what RemoteRunner sends, so the iPad
+    // and the LAN worker still agree by construction. The fix is the same one:
+    // make the viewer frame-aware, then drop this line in both places at once.
+    opts.bake_build_orientation = topopt::BakeBuildOrientation::Off;
     // The gate knockdown posture (handoff 2026-07-26-post-merge-build-fix), built by
     // THE ONE builder (knockdown_spec_for) the CLI/worker uses (run_job.cpp) off the
     // SAME configure_production_options object, so the iPad and the Mac certify a part
@@ -1124,6 +1154,11 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
         production_loadcase_from_bridge(load_case, model);
     topopt::ProductionRunSetup setup =
         topopt::build_production_loadcase(model, resolution, lc);
+    // Baking OFF on the on-device path, for the reason stated at the optimize
+    // site above: this bridge returns MODEL-frame geometry and writes no
+    // exported file, so a chosen-and-baked orientation would certify something
+    // the returned mesh does not carry (handoff 2026-08-01-bake-build-orientation).
+    setup.options.bake_build_orientation = topopt::BakeBuildOrientation::Off;
     if (setup.options.external_loads.empty()) {
       err.ok = false;
       // Composed from the per-group reports (core, PR 261) so the refusal names
@@ -1253,6 +1288,11 @@ AnalyzeResult smooth_and_recertify_loadcase(
         production_loadcase_from_bridge(load_case, model);
     topopt::ProductionRunSetup setup =
         topopt::build_production_loadcase(model, resolution, lc);
+    // Baking OFF on the on-device path, for the reason stated at the optimize
+    // site above: this bridge returns MODEL-frame geometry and writes no
+    // exported file, so a chosen-and-baked orientation would certify something
+    // the returned mesh does not carry (handoff 2026-08-01-bake-build-orientation).
+    setup.options.bake_build_orientation = topopt::BakeBuildOrientation::Off;
     topopt::VoxelGrid& grid = setup.grid;
 
     // Freeze regions: the anchors and the load faces (structural — keep the clamp
@@ -1377,6 +1417,11 @@ OptimizeResult run_minimize_plastic_loadcase(
 
     topopt::ProductionRunSetup setup =
         topopt::build_production_loadcase(model, resolution, lc);
+    // Baking OFF on the on-device path, for the reason stated at the optimize
+    // site above: this bridge returns MODEL-frame geometry and writes no
+    // exported file, so a chosen-and-baked orientation would certify something
+    // the returned mesh does not carry (handoff 2026-08-01-bake-build-orientation).
+    setup.options.bake_build_orientation = topopt::BakeBuildOrientation::Off;
     for (const auto& pr : setup.face_protection_reports)
       bridge_log("loadcase: face-protection face=" + std::to_string(pr.face_id) +
                  " voxels_frozen=" + std::to_string(pr.voxels_frozen) +

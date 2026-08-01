@@ -129,8 +129,13 @@ FixedDesignAnalysis analyze_fixed_design(
     const Vec3& build_dir, double cg_tolerance, int cg_max_iterations,
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
     bool load_path_ok, double part_solid, const LatticePosture* lattice,
-    bool score_build_orientation, bool build_direction_inferred) {
+    bool score_build_orientation, bool build_direction_inferred,
+    bool auto_apply_build_orientation) {
   FixedDesignAnalysis out;
+  // The orientation this analysis describes. Reassigned at the very end IF the
+  // caller armed auto-apply and the scorer chose a different direction; until
+  // then, and on every existing caller's path, it is the direction passed in.
+  out.applied_build_dir = build_dir;
 
   // --- Lattice certification (handoff 2026-07-27-lattice-certification) --------
   // When a LatticePosture is supplied, the certification solve carries each latticed
@@ -476,6 +481,67 @@ FixedDesignAnalysis analyze_fixed_design(
     assert(out.build_orientation.candidates[out.build_orientation.as_built_index]
                    .would_be_accepted == out.accepted &&
            "U5: the reported verdict must be the as-built orientation's verdict");
+
+    // ── AUTO-APPLY: THE RECOMMENDATION BECOMES THE ORIENTATION ────────────────
+    // (handoff 2026-08-01-bake-build-orientation.) Armed ONLY when the caller's
+    // bake plan says so, which in turn requires that NO build direction was
+    // declared. PR 271's U5 rule — "a recommendation never silently changes a
+    // verdict" — is intact in the word that carries it: SILENTLY. Here the
+    // orientation is applied, the verdict is recomputed FOR THE ORIENTATION THE
+    // FILE WILL BE IN, and the receipt is required to say so (bar V7).
+    //
+    // What re-seals: exactly the fields that depend on the build direction. They
+    // are taken from the candidate row the scorer ALREADY priced, so there is no
+    // second arithmetic path to drift from the gate — the row's number IS the
+    // gate's number, by construction (gate_margin_effective).
+    if (auto_apply_build_orientation) {
+      if (!build_direction_inferred)
+        throw std::invalid_argument(
+            "analyze_fixed_design: auto_apply_build_orientation requires an "
+            "UNDECLARED build direction — a recommendation may never override a "
+            "direction the user chose");
+      apply_recommended_orientation(&out.build_orientation);
+      const OrientationCriteria& applied =
+          out.build_orientation.candidates[out.build_orientation.as_built_index];
+      out.applied_build_dir = applied.build_dir;
+      out.build_direction_auto_applied = true;
+
+      // The direction-dependent gate outputs, re-sealed at the applied
+      // orientation. `margin` is recomputed through compute_stress_margin so the
+      // ONE margin definition still owns it; the assert below pins it against
+      // the scorer's independently-carried copy of the same numbers.
+      out.max_interlayer_tension = applied.macro_interlayer_tension_mpa;
+      out.margin = compute_stress_margin(material.yield_strength_mpa,
+                                         material.z_knockdown, max_von_mises,
+                                         out.max_interlayer_tension);
+      out.margin_effective = applied.margin_effective;
+      out.accepted = applied.would_be_accepted;
+      out.support_volume_voxels = applied.support_voxels;
+      assert(out.margin.interlayer == applied.macro_interlayer_margin &&
+             out.margin.worst_case == applied.macro_worst_case_margin &&
+             "the re-sealed margin must equal the row the scorer priced");
+      assert(out.build_orientation.candidates[out.build_orientation.as_built_index]
+                     .would_be_accepted == out.accepted &&
+             "U5 still holds after auto-apply: the reported verdict is the "
+             "as-built (now: the APPLIED) orientation's verdict");
+
+      // The strut REPORT is direction-bearing too (its interlayer term is), so
+      // it is re-evaluated at the applied direction by the SAME evaluator. The
+      // in-plane term is invariant and comes back identical — U7's own check.
+      if (out.lattice_strut_report) {
+        out.lattice_strut = evaluate_strut_strength(
+            out.stress_tensor_field, lat_mask, lattice->relative_density,
+            out.applied_build_dir, material.yield_strength_mpa,
+            material.z_knockdown);
+        out.lattice_strut_report = out.lattice_strut.evaluated;
+      }
+      // NOTHING ELSE MOVES. von_mises_field, stress_tensor_field,
+      // displacement_field, mass_grams, printed_voxels/fraction, max_von_mises,
+      // v3, the lattice rho/cells-per-member accounting and the non-convergence
+      // flags are all independent of the build direction — PR 266 measured that
+      // over 15 full re-solves — so they are already correct for the applied
+      // orientation and are deliberately left alone.
+    }
   }
   return out;
 }

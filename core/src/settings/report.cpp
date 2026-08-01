@@ -101,6 +101,29 @@ void emit_variant(std::string& out, const VariantReport& v,
   out += in2 + "  \"y\": " + num_json(v.orientation.y) + ",\n";
   out += in2 + "  \"z\": " + num_json(v.orientation.z) + "\n";
   out += in2 + "},\n";
+  // ── THE FRAME OF `orientation`, when there is more than one frame ───────────
+  // (handoff 2026-08-01-bake-build-orientation.) Emitted ONLY on a baked run, so
+  // every existing document keeps its exact bytes and every existing reader is
+  // unaffected. On a baked run `orientation` is the build direction IN THE
+  // EXPORTED FILE — (0,0,1) by construction — and this block carries the same
+  // direction in the input model's own coordinates plus a sentence saying which
+  // is which, because a vector without a frame is the failure this feature
+  // exists to close.
+  if (v.export_baked) {
+    out += in2 + "\"orientation_frame\": \"export\",\n";
+    out += in2 + "\"orientation_model\": {\n";
+    out += in2 + "  \"x\": " + num_json(v.orientation_model.x) + ",\n";
+    out += in2 + "  \"y\": " + num_json(v.orientation_model.y) + ",\n";
+    out += in2 + "  \"z\": " + num_json(v.orientation_model.z) + "\n";
+    out += in2 + "},\n";
+    out += in2 +
+           "\"export_baked_note\": \"the exported mesh was ROTATED so the "
+           "certified build direction is +Z in the file; `orientation` is that "
+           "direction in the FILE, `orientation_model` is the same direction in "
+           "the input model's coordinates. Every other number on this line "
+           "(stresses, both margins, min-feature) is a rigid-motion invariant "
+           "and reads the same in either frame.\",\n";
+  }
   out += in2 + "\"settings\": ";
   emit_settings(out, v.settings, in2);
   out += ",\n";

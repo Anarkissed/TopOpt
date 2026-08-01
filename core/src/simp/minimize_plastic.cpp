@@ -273,6 +273,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // site derived inline before). Never re-derived here.
   const Vec3 build_dir = resolve_build_direction(options);
 
+  // THE ONE BAKE DECISION (handoff 2026-08-01-bake-build-orientation): does this
+  // run get to CHOOSE the orientation, and is the export rotated onto it? Read
+  // once here, never re-derived per rung, so every rung of one run is governed by
+  // the same plan.
+  const BuildOrientationBakePlan bake_plan = resolve_bake_plan(options);
+  // The scorer is armed when the ranking was ASKED FOR, or when the plan needs a
+  // recommendation to act on — it cannot choose an orientation without one. This
+  // is the only implicit arming in the codebase, and it is warranted: the
+  // alternative is auto-apply silently doing nothing on an ordinary job.
+  const bool score_orientations =
+      options.build_orientation_report || bake_plan.needs_scorer;
+
   // Material -> SIMP params (penalty p = 3 per ARCHITECTURE §4).
   SimpParams params;
   params.youngs_modulus = material.youngs_modulus_mpa;
@@ -1126,8 +1138,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         // describe the others. PR 266 measured the sweep at 0.1-0.4% of the
         // solve it rides on, so paying it per rung is a rounding error.
         // Disarmed by default => byte-identical.
-        options.build_orientation_report,
-        resolve_build_direction_is_inferred(options));
+        score_orientations, resolve_build_direction_is_inferred(options),
+        // AUTO-APPLY (handoff 2026-08-01-bake-build-orientation): when no build
+        // direction was declared, the recommendation BECOMES this rung's
+        // certified orientation and the export below is rotated onto it. Never
+        // when the user declared one — resolve_bake_plan is what guarantees that.
+        bake_plan.auto_apply);
 
     // --- Handoff 2026-07-27-nonconvergence-rejection: CERTIFICATION NON-CONVERGENT ─
     // The trajectory converged to a connected design, but the CERTIFICATION solve —
@@ -1195,6 +1211,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // the variant beside the numbers it was measured with; it is a
     // recommendation and nothing downstream may gate on it.
     variant.build_orientation = std::move(fda.build_orientation);
+    // The orientation this rung is CERTIFIED in, and whether its exported mesh
+    // carries it (handoff 2026-08-01-bake-build-orientation). `applied_build_dir`
+    // is `build_dir` unless the orientation was chosen for the user; `bake`
+    // comes from the ONE plan, so the file and this record cannot disagree.
+    variant.applied_build_dir = fda.applied_build_dir;
+    variant.build_direction_auto_applied = fda.build_direction_auto_applied;
+    variant.export_baked = bake_plan.bake;
     const std::size_t printed_voxels = fda.printed_voxels;
     const double max_von_mises = fda.max_von_mises;
     const double max_interlayer = fda.max_interlayer_tension;
@@ -1260,7 +1283,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     vr.max_stress_mpa = max_von_mises;
     vr.max_interlayer_tension_mpa = max_interlayer;
     vr.margin = margin;
-    vr.orientation = build_dir;
+    // `orientation` is the build direction IN THE FRAME OF THE EXPORTED MESH
+    // (handoff 2026-08-01-bake-build-orientation). Un-baked: the model-frame
+    // direction, exactly as before. Baked: +Z, because the exported vertices
+    // were rotated so that is true of the file — and the model-frame direction
+    // travels beside it so nothing is lost.
+    vr.export_baked = variant.export_baked;
+    vr.orientation_model = variant.applied_build_dir;
+    vr.orientation = variant.export_baked ? Vec3{0.0, 0.0, 1.0}
+                                          : variant.applied_build_dir;
     vr.settings = recommend_settings(rules, material.family, margin.worst_case,
                                      part_dim_mm);
     // Report-honesty (handoff: multigrid-coarsenability-padding): when the job

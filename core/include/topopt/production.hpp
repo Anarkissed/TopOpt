@@ -264,6 +264,35 @@ KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts);
 Vec3 resolve_build_direction(const MinimizePlasticOptions& opts);
 bool resolve_build_direction_is_inferred(const MinimizePlasticOptions& opts);
 
+// THE single decision about BAKING the certified orientation into the exported
+// geometry (handoff 2026-08-01-bake-build-orientation). One function, for the
+// same reason resolve_build_direction is one function: three paths export
+// meshes, and three copies of "should this be rotated?" would drift.
+struct BuildOrientationBakePlan {
+  // The requested posture, echoed so the receipt can state it.
+  BakeBuildOrientation mode = BakeBuildOrientation::Auto;
+  // The user declared a build direction (the key was present and non-zero).
+  bool direction_declared = false;
+  // The orientation is CHOSEN for the user: the scorer runs, its recommendation
+  // becomes the certified build direction, and the verdict describes THAT
+  // orientation. Only ever true when the direction was NOT declared — auto-apply
+  // must not leak into the case where the user chose (bar V2).
+  bool auto_apply = false;
+  // The exported VERTICES are rotated so the certified direction is +Z.
+  bool bake = false;
+  // Whether the orientation SCORER is needed for this plan. When it is needed
+  // and unavailable, the caller falls back to `resolve_build_direction` with no
+  // rotation — today's behaviour exactly — and says so (bar V3).
+  bool needs_scorer = false;
+  // ONE pre-composed sentence naming why, so the CLI receipt, the bridge and the
+  // app cannot phrase the same decision three different ways.
+  const char* reason = "";
+};
+
+// Resolve the bake plan from a run's options. Pure, deterministic, and the only
+// place `opts.bake_build_orientation` may be read.
+BuildOrientationBakePlan resolve_bake_plan(const MinimizePlasticOptions& opts);
+
 // The canonical recommendation-driven volume-fraction ladder for production runs
 // (finer + lighter than the historical fixed {0.7, 0.5, 0.3}). minimize_plastic
 // walks the margin-SAFE prefix and stops at the first rung below margin_stop, so

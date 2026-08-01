@@ -390,6 +390,41 @@ BuildOrientationReport score_build_orientations(
     }
   }
 
+  // ── THE AUTO-APPLY PICK: the same maximin, CONSTRAINED BY THE GATE ──────────
+  // (handoff 2026-08-01-bake-build-orientation.) The recommendation above is the
+  // right rule for a human to read and the WRONG rule to apply unasked: the six
+  // criteria trade margin for support material and print height, so the pure
+  // maximin can land on an orientation that FAILS the gate on a part that would
+  // have passed. Measured on the design-box fixture: it cost an accepted ladder
+  // rung outright. A user who declared no orientation has no preference being
+  // honoured by that trade — they simply lose a part they could have printed.
+  //
+  // So the accepted candidates are the feasible set, and the criteria choose
+  // within it. When nothing passes there is no verdict to protect and the
+  // unconstrained pick stands. Candidate 0 is the as-inferred direction, so a
+  // passing inferred orientation guarantees a non-empty feasible set — that is
+  // what makes auto-apply VERDICT-MONOTONE.
+  rep.auto_applied_index = rep.recommended_index;
+  bool any_accepted = false;
+  for (const OrientationCriteria& r : rep.candidates)
+    if (r.would_be_accepted) any_accepted = true;
+  if (any_accepted) {
+    bool have = false;
+    double best_ok = 0.0;
+    for (std::size_t i = 0; i < rep.candidates.size(); ++i) {
+      if (!rep.candidates[i].would_be_accepted) continue;
+      const double v = standing(rep.candidates[i]);
+      if (!have || v > best_ok) {  // strict: ties keep the earlier candidate, so
+        have = true;               // a tie never displaces the as-inferred row
+        best_ok = v;
+        rep.auto_applied_index = i;
+      }
+    }
+  }
+  rep.auto_apply_constrained_by_gate =
+      rep.auto_applied_index != rep.recommended_index;
+
+  rep.as_inferred_index = rep.as_built_index;
   rep.recommendation_differs = rep.recommended_index != rep.as_built_index;
   // *** U5: the recommendation is priced against the verdict that actually
   // stands. This FLAG is the receipt's trigger to print both. ***
@@ -397,6 +432,49 @@ BuildOrientationReport score_build_orientations(
       rep.candidates[rep.recommended_index].would_be_accepted !=
       rep.candidates[rep.as_built_index].would_be_accepted;
   return rep;
+}
+
+void apply_recommended_orientation(BuildOrientationReport* r) {
+  if (r == nullptr || !r->evaluated || r->candidates.empty())
+    throw std::invalid_argument(
+        "apply_recommended_orientation: the report was never evaluated");
+  if (!r->build_direction_inferred)
+    throw std::invalid_argument(
+        "apply_recommended_orientation: refusing to apply a recommendation over "
+        "a DECLARED build direction — auto-apply exists only for the case where "
+        "the user made no choice");
+
+  // `as_inferred_index` is set by score_build_orientations to the as-built row,
+  // i.e. the row the documented gravity fallback produced. Applying moves what
+  // is BUILT; it never moves what was INFERRED, so the counterfactual survives.
+  const bool inferred_verdict =
+      r->candidates[r->as_inferred_index].would_be_accepted;
+  const bool applied_verdict =
+      r->candidates[r->auto_applied_index].would_be_accepted;
+
+  // *** VERDICT MONOTONICITY. The as-inferred row is candidate 0 and is
+  // therefore in the feasible set whenever it passes, so the gate-constrained
+  // pick passes whenever the inferred one would have. Auto-apply can rescue a
+  // part; it can never sink one. ***
+  if (inferred_verdict && !applied_verdict)
+    throw std::logic_error(
+        "apply_recommended_orientation: the auto-applied orientation REJECTS a "
+        "design the inferred orientation would have ACCEPTED — auto-apply must "
+        "be verdict-monotone and the gate-constrained pick makes it so, so this "
+        "is a bug in the pick, not a legitimate outcome");
+
+  r->as_built_index = r->auto_applied_index;
+  r->auto_applied = true;
+  r->auto_apply_changed_verdict = applied_verdict != inferred_verdict;
+
+  // The pair that now matters is "as applied vs as would-have-been-inferred",
+  // which the flags above carry. The PR 271 pair keeps its exact meaning — the
+  // unconstrained recommendation against what was built — which is how the
+  // receipt still shows the gate constraint biting when it does.
+  r->recommendation_differs = r->recommended_index != r->as_built_index;
+  r->verdict_would_change =
+      r->candidates[r->recommended_index].would_be_accepted !=
+      r->candidates[r->as_built_index].would_be_accepted;
 }
 
 // ── THE BUILD-ORIENTATION RECEIPT (handoff 2026-08-01-build-direction-separation)
@@ -409,7 +487,8 @@ BuildOrientationReport score_build_orientations(
 // two would gate differently — BOTH verdicts side by side. It does not choose.
 // Nothing downstream reads this to decide anything; a human does.
 std::string build_orientation_report_json(const BuildOrientationReport& r,
-                                          const Vec3& as_built_dir) {
+                                          const Vec3& as_built_dir,
+                                          const BuildFrameRotation* baked) {
   if (!r.evaluated || r.candidates.empty())
     throw std::invalid_argument(
         "build_orientation_report_json: the report was never evaluated");
@@ -419,18 +498,71 @@ std::string build_orientation_report_json(const BuildOrientationReport& r,
   };
   const OrientationCriteria& built = r.candidates[r.as_built_index];
   const OrientationCriteria& rec = r.candidates[r.recommended_index];
+  const OrientationCriteria& inferred = r.candidates[r.as_inferred_index];
 
   std::string s = "{\n";
-  s += "  \"_note\": \"A RECOMMENDATION. The verdict in report.json is computed "
-       "from the orientation ACTUALLY USED (as_built below) and is never "
-       "recomputed from the recommendation. If they disagree, both are stated "
-       "and the choice is yours.\",\n";
+  if (r.auto_applied) {
+    // *** BAR V7: AN AUTO-APPLY IS NEVER SILENT. This is the first key in the
+    // document, before any number, because a reader who stops after one line
+    // must still learn that the orientation was chosen for them. ***
+    s += "  \"_note\": \"THE BUILD ORIENTATION WAS CHOSEN AUTOMATICALLY. You "
+         "declared none, so the best-scoring candidate below was selected, the "
+         "verdict was computed for THAT orientation, and the exported geometry "
+         "was ROTATED so it is +Z in the file. Declare \\\"build_direction\\\" "
+         "to take the choice back; the run then uses yours verbatim and does "
+         "not rotate anything.\",\n";
+  } else {
+    s += "  \"_note\": \"A RECOMMENDATION. The verdict in report.json is computed "
+         "from the orientation ACTUALLY USED (as_built below) and is never "
+         "recomputed from the recommendation. If they disagree, both are stated "
+         "and the choice is yours.\",\n";
+  }
+  // ── THE FRAME OF EVERY VECTOR IN THIS DOCUMENT ─────────────────────────────
+  // Emitted only when the export was baked, so an un-baked run's receipt is
+  // byte-identical to PR 271's. Without a rotation there is one frame and
+  // nothing to disambiguate; with one there are two, and leaving the reader to
+  // infer which is which is exactly the failure this task exists to close.
+  if (baked != nullptr) {
+    s += "  \"export_frame\": {\n";
+    s += "    \"baked\": true,\n";
+    s += "    \"vector_frame\": \"model\",\n";
+    s += "    \"note\": \"EVERY build_direction vector in this document is in "
+         "the MODEL frame (the input geometry's own coordinates). The EXPORTED "
+         "MESH is the model frame rotated by `rotation` below, so in the file "
+         "the certified build direction is exactly +Z. Every direction-bearing "
+         "NUMBER here (support voxels, interlayer tension and margin, strut "
+         "margins, build height, footprint, min-feature) is a rigid-motion "
+         "invariant and is therefore the SAME value in both frames — it "
+         "describes the file and the model equally.\",\n";
+    s += "    \"rotation_row_major\": [" + json_num(baked->m[0]) + ", " +
+         json_num(baked->m[1]) + ", " + json_num(baked->m[2]) + ", " +
+         json_num(baked->m[3]) + ", " + json_num(baked->m[4]) + ", " +
+         json_num(baked->m[5]) + ", " + json_num(baked->m[6]) + ", " +
+         json_num(baked->m[7]) + ", " + json_num(baked->m[8]) + "],\n";
+    s += "    \"exact_axis_permutation\": " +
+         std::string(baked->axis_permutation ? "true" : "false") + ",\n";
+    s += "    \"identity\": " + std::string(baked->identity ? "true" : "false") +
+         ",\n";
+    s += "    \"build_direction_in_file\": [0, 0, 1],\n";
+    s += "    \"exactness_note\": \"" +
+         std::string(baked->axis_permutation
+                         ? "the rotation is a signed axis permutation: exported "
+                           "coordinates are the model coordinates bit-for-bit "
+                           "up to permutation and sign, with no rounding"
+                         : "the rotation is off-axis: exported coordinates are "
+                           "rounded dot products, not a relabelling of the "
+                           "input coordinates") +
+         "\"\n";
+    s += "  },\n";
+  }
   s += "  \"as_built\": {\n";
   s += "    \"build_direction\": " + dir_json(as_built_dir) + ",\n";
   // PR 266's S5 point 3: a fallback that is not reported is a lie by omission.
   s += "    \"source\": \"" +
-       std::string(r.build_direction_inferred ? "assumed_from_gravity"
-                                              : "declared") +
+       std::string(r.auto_applied
+                       ? "chosen_automatically"
+                       : (r.build_direction_inferred ? "assumed_from_gravity"
+                                                     : "declared")) +
        "\",\n";
   s += "    \"margin_effective\": " + json_num(built.margin_effective) + ",\n";
   s += "    \"verdict\": \"" +
@@ -447,12 +579,90 @@ std::string build_orientation_report_json(const BuildOrientationReport& r,
        "the candidate set. Deliberately not a weighted sum: the criteria "
        "genuinely disagree and one collapsed number would hide where.\"\n";
   s += "  },\n";
+  // ── AUTO-APPLY, STATED IN FULL (bar V7) ────────────────────────────────────
+  // Emitted only when the orientation was CHOSEN, so an ordinary run's receipt
+  // is unchanged. It names the orientation, says the choice was automatic, and
+  // carries the MEASURED counterfactual — what this run would have certified and
+  // exported had the documented gravity fallback stood.
+  if (r.auto_applied) {
+    s += "  \"auto_applied\": {\n";
+    s += "    \"chosen\": true,\n";
+    s += "    \"build_direction\": " + dir_json(built.build_dir) + ",\n";
+    s += "    \"verdict\": \"" +
+         std::string(built.would_be_accepted ? "ACCEPTED" : "REJECTED") + "\",\n";
+    s += "    \"margin_effective\": " + json_num(built.margin_effective) + ",\n";
+    s += "    \"as_inferred\": {\n";
+    s += "      \"build_direction\": " + dir_json(inferred.build_dir) + ",\n";
+    s += "      \"source\": \"the documented fallback, unit(-gravity)\",\n";
+    s += "      \"margin_effective\": " + json_num(inferred.margin_effective) +
+         ",\n";
+    s += "      \"verdict\": \"" +
+         std::string(inferred.would_be_accepted ? "ACCEPTED" : "REJECTED") +
+         "\"\n";
+    s += "    },\n";
+    s += "    \"changed_verdict\": " +
+         std::string(r.auto_apply_changed_verdict ? "true" : "false") + ",\n";
+    // The gate constraint, and what it cost. `recommended` above is the
+    // UNCONSTRAINED maximin; when it would have failed the gate, auto-apply took
+    // the best PASSING orientation instead and says so here rather than quietly
+    // presenting a different pick as "the recommendation".
+    s += "    \"rule\": \"maximin over the six criteria, CONSTRAINED to "
+         "orientations that pass the gate. The unconstrained recommendation "
+         "trades margin for support material and print height, which is right "
+         "for advice and wrong for a choice made on your behalf: it can reject "
+         "a part that would have passed. Auto-apply is therefore "
+         "VERDICT-MONOTONE — it can rescue a part, never sink one.\",\n";
+    s += "    \"constrained_by_gate\": " +
+         std::string(r.auto_apply_constrained_by_gate ? "true" : "false") + ",\n";
+    if (r.auto_apply_constrained_by_gate) {
+      const OrientationCriteria& unc = r.candidates[r.recommended_index];
+      s += "    \"unconstrained_pick\": {\"build_direction\": " +
+           dir_json(unc.build_dir) +
+           ", \"margin_effective\": " + json_num(unc.margin_effective) +
+           ", \"verdict\": \"" +
+           std::string(unc.would_be_accepted ? "ACCEPTED" : "REJECTED") +
+           "\", \"note\": \"scores better on the six criteria but was NOT "
+           "applied, because the gate is a constraint on a choice you did not "
+           "make. Declare it as build_direction to use it anyway.\"},\n";
+    }
+    s += "    \"rescued\": " +
+         std::string((r.auto_apply_changed_verdict && built.would_be_accepted)
+                         ? "true"
+                         : "false") +
+         ",\n";
+    s += "    \"statement\": \"";
+    if (r.auto_apply_changed_verdict && built.would_be_accepted) {
+      // *** THE SENTENCE THE TASK ASKS FOR: when the as-inferred orientation
+      // would have FAILED, say so explicitly and unmissably. ***
+      s += "*** THIS PART PASSES BECAUSE OF THE CHOSEN ORIENTATION. *** Printed "
+           "the way this run would otherwise have assumed (the opposite of "
+           "gravity) it is REJECTED; printed the chosen way it is ACCEPTED, and "
+           "the exported file is rotated so it prints the chosen way. The "
+           "verdict describes the file.";
+    } else if (r.auto_apply_changed_verdict) {
+      s += "the chosen orientation gates DIFFERENTLY from the one this run would "
+           "otherwise have assumed, and it is the CHOSEN one that was certified "
+           "and exported.";
+    } else {
+      s += "the orientation was chosen automatically; the gate verdict is the "
+           "same as it would have been under the assumed orientation.";
+    }
+    s += "\"\n";
+    s += "  },\n";
+  }
   // *** The sentence U5 asks for, pre-composed so no front-end has to compose
   // it and risk composing it differently. ***
   s += "  \"verdict_would_change\": " +
        std::string(r.verdict_would_change ? "true" : "false") + ",\n";
   s += "  \"statement\": \"";
-  if (r.verdict_would_change) {
+  if (r.auto_applied) {
+    s += std::string(
+             "the build direction was CHOSEN AUTOMATICALLY (none was declared); "
+             "this run certified and exported it, with the verdict ") +
+         (built.would_be_accepted ? "ACCEPTED" : "REJECTED") +
+         ". See auto_applied above for what the assumed orientation would have "
+         "given.";
+  } else if (r.verdict_would_change) {
     s += std::string("as built: ") +
          (built.would_be_accepted ? "ACCEPTED" : "REJECTED") +
          "; as recommended: " +
@@ -491,6 +701,11 @@ std::string build_orientation_report_json(const BuildOrientationReport& r,
          std::string(i == r.as_built_index ? "true" : "false");
     s += ", \"is_recommended\": " +
          std::string(i == r.recommended_index ? "true" : "false");
+    // Only on an auto-applied run: which row the gravity fallback would have
+    // used. Conditional so an ordinary receipt keeps its exact bytes.
+    if (r.auto_applied)
+      s += ", \"is_as_inferred\": " +
+           std::string(i == r.as_inferred_index ? "true" : "false");
     s += ", \"support_voxels\": " + std::to_string(c.support_voxels);
     s += ", \"macro_interlayer_tension_mpa\": " +
          json_num(c.macro_interlayer_tension_mpa);

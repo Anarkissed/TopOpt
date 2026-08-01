@@ -10,6 +10,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "topopt/analyze.hpp"
+#include "topopt/build_frame.hpp"
 #include "topopt/clearance.hpp"
 #include "topopt/coarsen.hpp"
 #include "topopt/fea.hpp"
@@ -239,11 +241,28 @@ DesignBox to_design_box(const JobBox& b) {
   return d;
 }
 
+// THE rotation this variant's exported geometry is baked with, or a null option
+// when the export stays in model-space coordinates (handoff
+// 2026-08-01-bake-build-orientation). ONE helper, shared by the solid export, the
+// latticed export and the receipt, so the file, the companion and the document
+// can never be built from three different rotations.
+std::optional<BuildFrameRotation> variant_bake_rotation(
+    const MinimizePlasticVariant& variant) {
+  if (!variant.export_baked) return std::nullopt;
+  return build_frame_rotation(variant.applied_build_dir);
+}
+
 // Write one accepted variant's mesh into out_dir and return its path. Smooth-
 // export (handoff 086): factor 1 writes v3.mesh verbatim; factor > 1 re-extracts
 // the SAME iso-surface from the SAME physical density resampled finer on `sg` (the
 // solved grid). Shared by the batch export loop and the streaming on_variant
 // callback so both write byte-identical files.
+//
+// BAKED ORIENTATION (handoff 2026-08-01-bake-build-orientation): when this
+// variant's orientation was chosen for the user, the vertices written here are
+// ROTATED so the certified build direction is +Z in the file. Rotated vertices,
+// not a build transform — a 3MF transform is advice that "place on bed" resets,
+// and then the certificate would describe an object the slicer never produces.
 std::string export_variant_mesh(const MinimizePlasticVariant& variant,
                                 const std::string& out_dir, const JobOutput& out,
                                 const VoxelGrid& sg) {
@@ -259,7 +278,11 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
         ResampleInterp::Tricubic);
     smooth = keep_largest_component(raw);
   }
-  const TriangleMesh& export_mesh = (sf > 1) ? smooth : variant.v3.mesh;
+  const TriangleMesh& model_mesh = (sf > 1) ? smooth : variant.v3.mesh;
+  const std::optional<BuildFrameRotation> R = variant_bake_rotation(variant);
+  TriangleMesh baked;
+  if (R) baked = rotate_mesh(model_mesh, *R);
+  const TriangleMesh& export_mesh = R ? baked : model_mesh;
   if (out.mesh_format == "3mf") {
 #ifdef TOPOPT_HAVE_3MF
     write_3mf_file(path, export_mesh);
@@ -603,21 +626,44 @@ LatticeExportOutcome export_latticed_variant(
                                                *levels, w, skin)
                  : generate_lattice(LatticeGenTopology::Octet, R, radius, w, skin);
   };
+  // ── THE BAKED BUILD FRAME, ON THE STREAM (handoff
+  // 2026-08-01-bake-build-orientation). When this variant's orientation was
+  // chosen for the user, every triangle — the solid shell, the kept-solid
+  // companion bodies and the strut soup alike — is rotated on its way to the
+  // writer by ONE sink wrapper. Three consequences worth stating:
+  //   * the whole latticed file is rotated by the SAME rigid motion as the solid
+  //     export, so the two describe the same placement;
+  //   * peak memory stays FLAT in the output size — the wrapper is a per-triangle
+  //     map, so a gigabyte of struts is still a disk cost, not a memory cost;
+  //   * PR 250's zero-floating-ends and PR 253's containment are properties of
+  //     the strut graph and of "inside the boundary", and a rigid motion moves
+  //     the geometry and the boundary together, so both survive by construction
+  //     (asserted, not assumed — test_bake_build_orientation bar V6).
+  const std::optional<BuildFrameRotation> bake = variant_bake_rotation(variant);
+  auto emit_all = [&](TriangleSink& out_sink) {
+    if (with_shell) push_shell(out_sink);  // solid shell first, then the lattice
+    push_companion(out_sink);              // then the kept-solid regions
+    oc.stats = emit_lattice(out_sink);
+  };
+  auto write_with = [&](TriangleSink& writer) {
+    if (bake) {
+      RotatingTriangleSink rot(writer, *bake);
+      emit_all(rot);
+    } else {
+      emit_all(writer);
+    }
+  };
   if (lat.emit_stl) {
     const std::string path = base + ".stl";
     StreamingStlWriter w(path);
-    if (with_shell) push_shell(w);  // solid shell first, then the streamed lattice
-    push_companion(w);              // then the kept-solid regions (empty: no-op)
-    oc.stats = emit_lattice(w);
+    write_with(w);
     w.finish();
     oc.paths.push_back(path);
   }
   if (lat.emit_3mf) {
     const std::string path = base + ".3mf";
     StreamingThreeMfWriter w(path);
-    if (with_shell) push_shell(w);
-    push_companion(w);
-    oc.stats = emit_lattice(w);
+    write_with(w);
     w.finish();
     oc.paths.push_back(path);
   }
@@ -710,7 +756,19 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
   // receipt certifies against the SAME orientation the run's own report did —
   // PR 266's S5 named three independent derivations as the silent-inconsistency
   // risk, and this is one of the three.
-  cx.build_dir = resolve_build_direction(options);
+  //
+  // ONE EXCEPTION, and it is the same principle (handoff
+  // 2026-08-01-bake-build-orientation): when this variant's orientation was
+  // CHOSEN — no direction was declared, so the scorer picked one, the run's
+  // report certifies it and the exported mesh is rotated onto it — the lattice
+  // receipt must certify THAT orientation too, or the composite margin would
+  // describe a differently-placed object than the latticed file beside it. The
+  // variant carries the applied direction precisely so this site cannot guess.
+  // Off that path `applied_build_dir` IS resolve_build_direction(options), so
+  // this is byte-identical for every existing run.
+  cx.build_dir = variant.build_direction_auto_applied
+                     ? variant.applied_build_dir
+                     : resolve_build_direction(options);
   // The SAME load minimize_plastic certified this variant under: the declared
   // external load, or self-weight recomputed on the solved grid. (A design box would
   // remap BCs/loads onto an expanded grid — run_job refuses design-box + lattice, so
@@ -1092,6 +1150,31 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          "the band-floor row is a still-rising lower bound\"\n";
     s += "  },\n";
   }
+  // WHICH FRAME THIS RECEIPT'S DIRECTION-BEARING NUMBERS ARE IN (handoff
+  // 2026-08-01-bake-build-orientation). Emitted only when the latticed file was
+  // rotated, so a model-space run's receipt keeps its exact bytes.
+  //
+  // Every number above is a rigid-motion INVARIANT and so describes both frames:
+  // the interlayer bound and its margin are scalars evaluated at the build
+  // direction, and `build_dir_on_lattice_axis` compares the build direction with
+  // the LATTICE's own axes — and the lattice is generated on the model grid and
+  // rotated with the part, so that relation travels with the geometry. Nothing
+  // here needed re-deriving in the build frame; this key says so explicitly
+  // rather than leaving a reader to work it out.
+  if (variant.export_baked) {
+    s += "  \"export_frame\": {\"baked\": true, \"build_direction_in_file\": "
+         "[0, 0, 1], \"applied_build_dir_model\": [" +
+         json_num(variant.applied_build_dir.x) + ", " +
+         json_num(variant.applied_build_dir.y) + ", " +
+         json_num(variant.applied_build_dir.z) +
+         "], \"note\": \"the latticed mesh beside this receipt was ROTATED so "
+         "the certified build direction is +Z in the file. Every number in this "
+         "receipt is a rigid-motion invariant and reads the same in the model "
+         "frame and in the file's frame, including "
+         "build_dir_on_lattice_axis — the lattice is generated on the model grid "
+         "and rotated WITH the part, so its relation to the build direction "
+         "travels with the geometry.\"},\n";
+  }
   s += "  \"note\": \"stiffness and solid-region strength are certified against the "
        "real composite; the lattice region's macro (effective) stress is recovered "
        "but strut-level strength needs de-homogenization (Phase 2) and is NOT gated. "
@@ -1187,10 +1270,22 @@ std::vector<ClearanceGeometry> freeze_regions_from_faces(
 //
 // The scorer arming flag rides along here because it is the same decision — the
 // job either engages with build orientation or it does not.
+//
+// "bake_build_orientation" rides along for the same reason (handoff
+// 2026-08-01-bake-build-orientation): it is the third part of one question —
+// which way up, who decides, and does the FILE carry the answer. An absent key
+// is "auto", which is the enum's default, so this is a no-op for every job that
+// does not mention it.
 void apply_build_direction_options(MinimizePlasticOptions& options,
                                    const JobDescription& job) {
   if (job.has_build_direction) options.build_direction = job.build_direction;
   options.build_orientation_report = job.build_orientation_report;
+  if (job.bake_build_orientation == "always")
+    options.bake_build_orientation = BakeBuildOrientation::Always;
+  else if (job.bake_build_orientation == "off")
+    options.bake_build_orientation = BakeBuildOrientation::Off;
+  else
+    options.bake_build_orientation = BakeBuildOrientation::Auto;
 }
 
 // Map a job.json "loads" block onto the front-end-neutral ProductionLoadCase the
@@ -1418,6 +1513,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     throw JobError("analyze: --smooth requires a --mesh input to smooth");
 
   VoxelGrid design_grid = model_grid;
+  // The smoothed mesh, held until the applied build orientation is known (see
+  // below). Empty unless --smooth ran.
+  TriangleMesh pending_smoothed_mesh;
   if (!analyze_mesh_path.empty()) {
     StepModel edited;
     try {
@@ -1466,7 +1564,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       const std::string stem =
           std::filesystem::path(analyze_mesh_path).stem().string();
       result.smoothed_mesh_path = join_path(out_dir, stem + "_smoothed.stl");
-      write_stl_file(result.smoothed_mesh_path, design_mesh);
+      // DEFERRED (handoff 2026-08-01-bake-build-orientation). This file is the
+      // geometry this run certifies, so it is an EXPORT and must carry the
+      // certified orientation like every other one — and the applied orientation
+      // is not known until the analysis below has run. The mesh is held and
+      // written after it; the path and (off the bake path) the bytes are
+      // unchanged.
+      pending_smoothed_mesh = design_mesh;
     }
 
     // Re-voxelize the (smoothed) mesh onto the MODEL's grid geometry, then carry the
@@ -1523,6 +1627,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // A standalone re-analysis of a part now certifies against the orientation the
   // originating run used, because both ask the same function.
   const Vec3 build_dir = resolve_build_direction(options);
+  // THE ONE BAKE DECISION for this re-analysis (handoff
+  // 2026-08-01-bake-build-orientation) — the same function the optimize path
+  // asks, so a part re-certified later is placed the same way the run that
+  // produced it placed it.
+  const BuildOrientationBakePlan bake_plan = resolve_bake_plan(options);
+  const bool score_orientations =
+      options.build_orientation_report || bake_plan.needs_scorer;
   const std::vector<NodalLoad> loads =
       loadcase ? external_loads
                : self_weight_loads(design_grid, material.density_g_cm3,
@@ -1544,9 +1655,14 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       // The re-analysis ranks the SAME candidate set the originating run did
       // (build_orientation_candidates is derived inside analyze_fixed_design),
       // so a part's recommendation cannot change just because it was re-analysed.
-      options.build_orientation_report,
-      resolve_build_direction_is_inferred(options));
+      score_orientations, resolve_build_direction_is_inferred(options),
+      bake_plan.auto_apply);
   const FixedDesignAnalysis& a = result.analysis;
+  // The orientation this re-analysis certifies, and the rotation the exported
+  // geometry carries (empty when the export stays in model coordinates).
+  const Vec3 applied_build_dir = a.applied_build_dir;
+  std::optional<BuildFrameRotation> analyze_bake;
+  if (bake_plan.bake) analyze_bake = build_frame_rotation(applied_build_dir);
   result.voxel_mass_grams = a.mass_grams;
 
   {
@@ -1556,6 +1672,15 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
       throw JobError("analyze: cannot create output directory " + out_dir + ": " +
                      ec.message());
   }
+
+  // ── the SMOOTHED mesh export, now that the certified orientation is known ────
+  // (handoff 2026-08-01-bake-build-orientation.) This is the geometry the run
+  // certifies, so it is baked exactly like the optimize path's variant meshes.
+  // Off the bake path the bytes are what write_stl_file produced before.
+  if (!result.smoothed_mesh_path.empty())
+    write_stl_file(result.smoothed_mesh_path,
+                   analyze_bake ? rotate_mesh(pending_smoothed_mesh, *analyze_bake)
+                                : pending_smoothed_mesh);
 
   // ── the LATTICE GRADING LAW (handoff 2026-07-29-lattice-grading-law) ─────────────
   // When a "grading" block is present, feed the certification's von Mises field to the
@@ -1620,7 +1745,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   vr.max_stress_mpa = a.max_von_mises;
   vr.max_interlayer_tension_mpa = a.max_interlayer_tension;
   vr.margin = a.margin;
-  vr.orientation = build_dir;
+  // The build direction IN THE FRAME OF THE EXPORTED MESH (handoff
+  // 2026-08-01-bake-build-orientation) — see VariantReport::orientation. Off the
+  // bake path this is `applied_build_dir` == `build_dir`, byte-identical.
+  vr.export_baked = analyze_bake.has_value();
+  vr.orientation_model = applied_build_dir;
+  vr.orientation =
+      vr.export_baked ? Vec3{0.0, 0.0, 1.0} : applied_build_dir;
   vr.settings =
       recommend_settings(rules, material.family, a.margin.worst_case, part_dim_mm);
   vr.min_feature_violations = a.v3.min_feature_violations;
@@ -1651,8 +1782,12 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // same whether it was just optimized or merely re-certified. Only when armed.
   if (a.build_orientation.evaluated) {
     result.build_orientation_path = join_path(out_dir, "build_orientation.json");
-    result.build_orientation_json =
-        build_orientation_report_json(a.build_orientation, build_dir);
+    // The receipt reports the APPLIED direction (the one the verdict and the
+    // file both describe) and carries the export rotation, so every vector in
+    // the document names its frame.
+    result.build_orientation_json = build_orientation_report_json(
+        a.build_orientation, applied_build_dir,
+        analyze_bake ? &*analyze_bake : nullptr);
     write_text_file(result.build_orientation_path,
                     result.build_orientation_json);
   }
@@ -2597,6 +2732,25 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // the batch export loop (batch path generates the lattice later). Idempotent — a
   // no-lattice run (lat_agg.any == false) touches nothing, so run_info.json stays
   // byte-for-byte the pre-lattice record (bar E2).
+  // THE EXPORTED GEOMETRY'S FRAME (handoff 2026-08-01-bake-build-orientation).
+  // Recorded from the rung the user actually exports — the lightest ACCEPTED
+  // one, the same rung the build-orientation receipt describes — so run_info and
+  // that receipt can never name different orientations. A run that writes
+  // model-space coordinates sets nothing and its run_info stays byte-identical.
+  auto finalize_export_frame_run_info = [&]() {
+    const MinimizePlasticVariant* v = nullptr;
+    for (const MinimizePlasticVariant& c : result.pipeline.evaluated)
+      if (c.accepted) v = &c;
+    if (v == nullptr || !v->export_baked) return;
+    run_info.export_baked = true;
+    run_info.export_build_direction_auto_applied = v->build_direction_auto_applied;
+    run_info.export_rotation_exact =
+        build_frame_rotation(v->applied_build_dir).axis_permutation;
+    run_info.applied_build_dir_x = v->applied_build_dir.x;
+    run_info.applied_build_dir_y = v->applied_build_dir.y;
+    run_info.applied_build_dir_z = v->applied_build_dir.z;
+  };
+
   auto finalize_lattice_run_info = [&]() {
     if (!lat_agg.any) return;
     const double job_wall = std::max(1e-9, wall_seconds() - job_t0);
@@ -2859,6 +3013,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // On the batch path lat_agg is still empty here (emit_lattice runs after the mesh
     // loop below); the post-export re-write catches it.
     finalize_lattice_run_info();
+    finalize_export_frame_run_info();
     write_run_info(result.run_info_path, run_info);
   }
   // A recovery solve (which sets used_multigrid) runs only for a non-cancelled
@@ -2996,8 +3151,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     if (rec_variant != nullptr) {
       result.build_orientation_path =
           join_path(out_dir, "build_orientation.json");
+      // The receipt reports the direction in the MODEL frame (every candidate
+      // vector in the document is a model-frame vector) and carries the export
+      // rotation beside it, so the reader is told which frame is which rather
+      // than left to infer it. Off the bake path the rotation is absent and the
+      // document is byte-identical to PR 271's.
+      const std::optional<BuildFrameRotation> R =
+          variant_bake_rotation(*rec_variant);
       result.build_orientation_json = build_orientation_report_json(
-          rec_variant->build_orientation, rec_variant->report.orientation);
+          rec_variant->build_orientation, rec_variant->applied_build_dir,
+          R ? &*R : nullptr);
       write_text_file(result.build_orientation_path,
                       result.build_orientation_json);
     }
@@ -3030,7 +3193,45 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   // no-lattice run never touches run_info here (byte-identical, bar E2).
   if (wrote_run_info && !emit_progress && lat_agg.any) {
     finalize_lattice_run_info();
+    finalize_export_frame_run_info();
     write_run_info(result.run_info_path, run_info);
+  }
+
+  // ──▶ *** THE ORIENTATION WAS CHOSEN FOR YOU — SAID OUT LOUD ***
+  // (handoff 2026-08-01-bake-build-orientation, bar V7.) A run that picks the
+  // orientation and rotates the exported geometry onto it has made a decision
+  // the user did not make, and one that can change the verdict. The receipt says
+  // so and the app says so; a CLI user who reads neither still gets told here,
+  // on stderr, beside the other WARNINGs — the same channel that already
+  // announces a rejected rung. Silence is the one thing this must never be.
+  {
+    // The rung the user actually exports — the LIGHTEST accepted one, the same
+    // rung build_orientation.json describes, so the two cannot name different
+    // orientations.
+    const MinimizePlasticVariant* v = nullptr;
+    for (const MinimizePlasticVariant& c : result.pipeline.evaluated)
+      if (c.accepted && c.build_direction_auto_applied) v = &c;
+    if (v != nullptr) {
+    const bool rescued = v->build_orientation.auto_apply_changed_verdict;
+    std::fprintf(
+        stderr,
+        "%s: no build_direction was declared, so this run CHOSE one "
+        "(%.4g, %.4g, %.4g) and ROTATED the exported geometry onto it — in the "
+        "file the build direction is +Z. The verdict describes that "
+        "orientation.%s Declare \"build_direction\" to use your own instead "
+        "(the export is then left in model coordinates). See "
+        "build_orientation.json.\n",
+        // `+ 0.0` clears NEGATIVE ZEROS before printing: unit(-gravity) of
+        // (0,0,-1) is (-0,-0,1), and "(-0, -0, 1)" reads like a bug in a line
+        // whose whole job is to be trusted at a glance.
+        rescued ? "*** IMPORTANT" : "NOTE", v->applied_build_dir.x + 0.0,
+        v->applied_build_dir.y + 0.0, v->applied_build_dir.z + 0.0,
+        rescued ? " *** THIS PART PASSES BECAUSE OF THAT CHOICE: printed the "
+                  "way this run would otherwise have assumed (the opposite of "
+                  "gravity) it FAILS its strength check. ***"
+                : "");
+    std::fflush(stderr);
+    }
   }
 
   // ──▶ per-voxel result fields (handoff 122): one versioned container for the
