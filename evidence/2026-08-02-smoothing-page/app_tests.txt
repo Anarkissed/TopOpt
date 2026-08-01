@@ -1,0 +1,38 @@
+# App suite — swift test on app/TopOptKit
+
+	 Executed 1079 tests, with 14 tests skipped and 8 failures (0 unexpected) in 167.791 (167.907) seconds
+
+## The 8 failures, all in 3 tests:
+Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (0.964 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.003 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.001 seconds).
+
+Tests/TopOptFlowsTests/AppModelTests.swift:205: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTAssertNil failed: "ImportRefusal(id: 3017FAD5-3F56-4311-94A5-4E95A62F4B6E, fileName: "plate_bore.3mf", diagnostics: nil, rawMessage: "3MF import requires lib3mf, which is not available in this build; export the part as STL and import that instead")" - 3MF should parse; refusal means the slice has no lib3mf
+Tests/TopOptFlowsTests/AppModelTests.swift:206: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTAssertNotNil failed
+Tests/TopOptFlowsTests/AppModelTests.swift:208: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/AppModelTests.swift:209: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTUnwrap failed: expected non-nil value of type "ImportedFile"
+Tests/TopOptFlowsTests/AppModelTests.swift:235: error: -[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/AppModelTests.swift:237: error: -[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy] : XCTUnwrap failed: expected non-nil value of type "UUID"
+Tests/TopOptFlowsTests/AppModelTests.swift:267: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd] : XCTAssertTrue failed
+Tests/TopOptFlowsTests/AppModelTests.swift:268: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd] : XCTUnwrap failed: expected non-nil value of type "ImportedFile"
+
+## Why these are PRE-EXISTING, not a regression
+
+This worktree's app/TopOptKit/vendor/ contains TopOptCore.xcframework and occt-lib
+but NO lib3mf-lib, so 3MF import refuses with the message the test itself prints:
+
+  "3MF import requires lib3mf, which is not available in this build; export the part
+   as STL and import that instead"
+
+Nothing in the smoothing-page task touches 3MF import. (Recorded previously as the
+known worktree lib3mf gap: provisioning lib3mf here breaks the whole test bundle's
+link, which is why it is absent.)
+
+## The suites bar AE10 names, re-run
+
+SmoothingPageTests (new) ............ 31 tests, 0 failures
+LatticeSDFAlignmentTests (PR 251) ...  7 tests, 1 skipped, 0 failures
+LatticeVariantTests (PR 274) ........ 16 tests, 0 failures
+LatticePageRound2Tests (M4 chrome) .. 15 tests, 1 skipped, 0 failures
+LatticePageTests .................... 25 tests, 0 failures
+SelectionModelTests ................. 18 tests, 0 failures

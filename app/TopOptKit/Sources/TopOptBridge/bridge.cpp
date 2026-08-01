@@ -980,6 +980,8 @@ AnalyzeResult analyze_selfweight(const std::string& model_path,
     result.accepted = a.accepted;
     result.non_convergent = a.non_convergent;
     result.margin_worst_case = a.margin.worst_case;
+    result.margin_in_plane = a.margin.in_plane;
+    result.margin_interlayer = a.margin.interlayer;
     result.margin_effective = a.margin_effective;
     result.margin_required = margin_stop;
     result.max_stress_mpa = a.max_von_mises;
@@ -1146,6 +1148,57 @@ std::vector<topopt::ClearanceGeometry> freeze_regions_from_model_faces(
   }
   return regions;
 }
+
+// THE ONE freeze-region set for the loadcase smoothing path (handoff
+// 2026-08-02-smoothing-page). Factored out of smooth_and_recertify_loadcase so
+// that the mask the page asks for BEFORE painting and the mask the smoother
+// applies WHILE smoothing are literally the same list, resolved by the same code
+// — not two implementations that agree today. The structural regions (the load
+// case's anchors and load faces) come first, then every app-supplied
+// bore/pad/protect primitive, all as exact predicates that survive re-meshing.
+std::vector<topopt::ClearanceGeometry> loadcase_freeze_regions(
+    const topopt::StepModel& model, const topopt::ProductionLoadCase& lc,
+    const BridgeFreezeRegions& freeze, double spacing) {
+  std::vector<topopt::ClearanceGeometry> regions;
+  {
+    std::vector<int> structural = lc.anchor_face_ids;
+    for (const auto& g : lc.load_groups)
+      for (const int fid : g.face_ids) structural.push_back(fid);
+    for (auto& r : freeze_regions_from_model_faces(model, structural, spacing))
+      regions.push_back(std::move(r));
+  }
+  for (std::size_t g = 0; g < freeze.kind.size(); ++g) {
+    topopt::ManualClearanceGeometry mgeo;
+    topopt::ClearanceParams p;  // zero margins: freeze the true bore / pad
+    const bool bolt = freeze.kind[g] == 0;
+    mgeo.kind = p.kind =
+        bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
+    auto tri = [&](const std::vector<double>& v) {
+      return topopt::Vec3{v[3 * g], v[3 * g + 1], v[3 * g + 2]};
+    };
+    if (bolt) {
+      mgeo.axis_point = tri(freeze.axis_point);
+      mgeo.axis_dir = tri(freeze.axis_dir);
+      mgeo.radius_mm = freeze.radius_mm[g];
+      mgeo.half_length_mm = freeze.half_length_mm[g];
+    } else {
+      mgeo.origin = tri(freeze.origin);
+      mgeo.normal = tri(freeze.normal);
+      mgeo.half_u_mm = freeze.half_u_mm[g];
+      mgeo.half_w_mm = freeze.half_w_mm[g];
+      p.slab_depth_mm = spacing;
+    }
+    const topopt::ClearanceGeometry cg =
+        topopt::resolve_clearance_manual(mgeo, p);
+    if (cg.valid) regions.push_back(cg);
+  }
+  return regions;
+}
+
+// The freeze tolerance the smoother itself derives (smooth.cpp): 0.75 × the
+// reference grid spacing. Named here so the mask the page shows and the mask the
+// smoother applies cannot drift apart.
+double smoother_freeze_tol(double spacing) { return 0.75 * spacing; }
 }  // namespace
 
 AnalyzeResult analyze_loadcase(const std::string& model_path,
@@ -1218,8 +1271,13 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
           material.density_g_cm3 * (std::fabs(v6) / 6.0) / 1000.0;
     }
     std::vector<double> density(design_grid.voxel_count(), 0.0);
+    int64_t solid_voxels = 0;
     for (std::size_t i = 0; i < density.size(); ++i)
-      if (design_grid.tags[i] != topopt::VoxelTag::Empty) density[i] = 1.0;
+      if (design_grid.tags[i] != topopt::VoxelTag::Empty) {
+        density[i] = 1.0;
+        ++solid_voxels;
+      }
+    result.solid_voxels = solid_voxels;
 
     topopt::SimpParams params;
     params.youngs_modulus = material.youngs_modulus_mpa;
@@ -1245,6 +1303,8 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
     result.accepted = a.accepted;
     result.non_convergent = a.non_convergent;
     result.margin_worst_case = a.margin.worst_case;
+    result.margin_in_plane = a.margin.in_plane;
+    result.margin_interlayer = a.margin.interlayer;
     result.margin_effective = a.margin_effective;
     result.margin_required = setup.options.margin_stop;
     result.max_stress_mpa = a.max_von_mises;
@@ -1278,6 +1338,47 @@ AnalyzeResult analyze_loadcase(const std::string& model_path,
   return result;
 }
 
+BridgeFreezeMask smooth_freeze_mask(const std::string& model_path,
+                                    const std::string& mesh_path,
+                                    int resolution,
+                                    const BridgeLoadCase& load_case,
+                                    const BridgeFreezeRegions& freeze,
+                                    BridgeError& err) {
+  BridgeFreezeMask out;
+  try {
+    topopt::StepModel model = topopt::import_part_file_resolved(model_path);
+    const topopt::ProductionLoadCase lc =
+        production_loadcase_from_bridge(load_case, model);
+    topopt::ProductionRunSetup setup =
+        topopt::build_production_loadcase(model, resolution, lc);
+    setup.options.bake_build_orientation = topopt::BakeBuildOrientation::Off;
+    const double spacing = setup.grid.spacing;
+
+    const std::vector<topopt::ClearanceGeometry> regions =
+        loadcase_freeze_regions(model, lc, freeze, spacing);
+    const topopt::TriangleMesh mesh = import_any(mesh_path);
+    out.freeze_tol_mm = smoother_freeze_tol(spacing);
+    // THE SAME CALL the smoother makes on the same regions and the same tolerance.
+    const std::vector<char> frozen =
+        topopt::compute_freeze_mask(mesh, regions, out.freeze_tol_mm);
+    out.frozen.reserve(frozen.size());
+    for (const char f : frozen) {
+      out.frozen.push_back(f ? 1 : 0);
+      if (f) ++out.frozen_count;
+    }
+    out.total_vertices = static_cast<int64_t>(mesh.vertices.size());
+    bridge_log("smooth freeze mask: " + std::to_string(out.frozen_count) + "/" +
+               std::to_string(out.total_vertices) + " frozen, tol=" +
+               std::to_string(out.freeze_tol_mm));
+  } catch (const std::exception& e) {
+    err.ok = false;
+    err.message = e.what();
+    bridge_log(std::string("smooth freeze mask: THREW: ") + e.what());
+    return BridgeFreezeMask{};
+  }
+  return out;
+}
+
 AnalyzeResult smooth_and_recertify_loadcase(
     const std::string& model_path, const std::string& input_mesh_path,
     const std::string& smoothed_out_path, const std::string& material_name,
@@ -1285,9 +1386,25 @@ AnalyzeResult smooth_and_recertify_loadcase(
     int resolution, double strength, bool enforce_min_feature,
     const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
     BridgeError& err) {
+  // The uniform seam IS the brush seam with no brush — one implementation, so the
+  // two can never diverge (and PR 200's callers stay byte-identical).
+  return smooth_brush_and_recertify_loadcase(
+      model_path, input_mesh_path, smoothed_out_path, material_name,
+      materials_path, rules_path, resolution, strength, enforce_min_feature,
+      load_case, freeze, BridgeVertexWeights{}, err);
+}
+
+AnalyzeResult smooth_brush_and_recertify_loadcase(
+    const std::string& model_path, const std::string& input_mesh_path,
+    const std::string& smoothed_out_path, const std::string& material_name,
+    const std::string& materials_path, const std::string& rules_path,
+    int resolution, double strength, bool enforce_min_feature,
+    const BridgeLoadCase& load_case, const BridgeFreezeRegions& freeze,
+    const BridgeVertexWeights& brush, BridgeError& err) {
   try {
     bridge_log("smooth+recertify(loadcase): ENTER strength=" +
-               std::to_string(strength) + " mesh='" + input_mesh_path + "'");
+               std::to_string(strength) + " mesh='" + input_mesh_path +
+               "' brush=" + std::to_string(brush.weight.size()));
     // The reference grid the min-feature constraint voxelizes against — the SAME
     // grid analyze_loadcase re-certifies on. Build it through build_production_
     // loadcase so the anchors/load faces are tagged and their B-rep geometry is
@@ -1306,48 +1423,27 @@ AnalyzeResult smooth_and_recertify_loadcase(
 
     // Freeze regions: the anchors and the load faces (structural — keep the clamp
     // and the traction attached), PLUS every app-supplied bore/pad/protect
-    // primitive. All resolve to the exact predicate that survives re-meshing.
-    std::vector<topopt::ClearanceGeometry> regions;
-    {
-      std::vector<int> structural = lc.anchor_face_ids;
-      for (const auto& g : lc.load_groups)
-        for (const int fid : g.face_ids) structural.push_back(fid);
-      for (auto& r :
-           freeze_regions_from_model_faces(model, structural, grid.spacing))
-        regions.push_back(std::move(r));
-    }
-    for (std::size_t g = 0; g < freeze.kind.size(); ++g) {
-      topopt::ManualClearanceGeometry mgeo;
-      topopt::ClearanceParams p;  // zero margins: freeze the true bore / pad
-      const bool bolt = freeze.kind[g] == 0;
-      mgeo.kind = p.kind =
-          bolt ? topopt::ClearanceKind::Bolt : topopt::ClearanceKind::Face;
-      auto tri = [&](const std::vector<double>& v) {
-        return topopt::Vec3{v[3 * g], v[3 * g + 1], v[3 * g + 2]};
-      };
-      if (bolt) {
-        mgeo.axis_point = tri(freeze.axis_point);
-        mgeo.axis_dir = tri(freeze.axis_dir);
-        mgeo.radius_mm = freeze.radius_mm[g];
-        mgeo.half_length_mm = freeze.half_length_mm[g];
-      } else {
-        mgeo.origin = tri(freeze.origin);
-        mgeo.normal = tri(freeze.normal);
-        mgeo.half_u_mm = freeze.half_u_mm[g];
-        mgeo.half_w_mm = freeze.half_w_mm[g];
-        p.slab_depth_mm = grid.spacing;
-      }
-      const topopt::ClearanceGeometry cg =
-          topopt::resolve_clearance_manual(mgeo, p);
-      if (cg.valid) regions.push_back(cg);
-    }
+    // primitive. All resolve to the exact predicate that survives re-meshing —
+    // and through the SAME helper `smooth_freeze_mask` answers from, so what the
+    // page paints against and what the smoother protects are one list.
+    std::vector<topopt::ClearanceGeometry> regions =
+        loadcase_freeze_regions(model, lc, freeze, grid.spacing);
 
     topopt::TriangleMesh input = import_any(input_mesh_path);
+    if (!brush.weight.empty() && brush.weight.size() != input.vertices.size()) {
+      err.ok = false;
+      err.message =
+          "smooth: the brush has " + std::to_string(brush.weight.size()) +
+          " weights but the mesh has " + std::to_string(input.vertices.size()) +
+          " vertices — refusing rather than weighting the wrong vertices";
+      return AnalyzeResult{};
+    }
     topopt::TaubinParams params = topopt::taubin_params_for_strength(strength);
     topopt::SmoothConstraints c;
     c.freeze_regions = std::move(regions);
     c.min_feature_grid = &grid;
     c.enforce_min_feature = enforce_min_feature;
+    c.vertex_weight = brush.weight;
     const topopt::SmoothResult sr =
         topopt::constrained_taubin_smooth(input, params, c);
     topopt::write_stl_file(smoothed_out_path, sr.mesh);
@@ -1374,6 +1470,26 @@ AnalyzeResult smooth_and_recertify_loadcase(
     result.min_feature_baseline = s.min_feature_baseline;
     result.min_feature_limited = s.min_feature_limited;
     result.smoothed_mesh_path = smoothed_out_path;
+    result.brush_weighted = s.brush_weighted;
+    result.brushed_vertices = static_cast<int64_t>(s.brushed_vertices);
+    result.unbrushed_vertices = static_cast<int64_t>(s.unbrushed_vertices);
+    result.max_vertex_weight = s.max_vertex_weight;
+    // H3 — the certified object is the RE-VOXELIZATION, not the mesh. Report both
+    // volume fractions against the SAME denominator (the analysis grid's bounding
+    // volume) so the gap between what was printed and what was certified is a
+    // number on the receipt instead of an assumption.
+    {
+      const double grid_volume =
+          static_cast<double>(result.grid_nx) *
+          static_cast<double>(result.grid_ny) *
+          static_cast<double>(result.grid_nz) * result.voxel_volume_mm3;
+      if (grid_volume > 0.0) {
+        result.mesh_volume_fraction = s.volume_after_mm3 / grid_volume;
+        result.voxel_volume_fraction =
+            static_cast<double>(result.solid_voxels) * result.voxel_volume_mm3 /
+            grid_volume;
+      }
+    }
     bridge_log("smooth+recertify(loadcase): pairs=" +
                std::to_string(s.applied_pairs) + "/" +
                std::to_string(s.requested_pairs) + " frozen=" +

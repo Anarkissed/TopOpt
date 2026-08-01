@@ -1,0 +1,15 @@
+[BRUSH] specimen: 4344 verts, 8700 tris; frozen bore = 228 verts
+[BRUSH] AE1  strength  pairs  frozen_changed  moved  max_shift(mm)
+[BRUSH]      0.10       20         0          4116    0.0119
+[BRUSH]      0.25       20         0          4116    0.1098
+[BRUSH]      0.50       20         0          4116    0.3933
+[BRUSH]      0.75       20         0          4116    0.6254
+[BRUSH]      1.00       20         0          4116    0.7489
+[BRUSH] BR2  painted=1144  frozen_changed=0  unbrushed_moved=0  brushed_moved=1004
+[BRUSH] BR5  weight 0.10  max_shift 0.0119 mm
+[BRUSH] BR5  weight 0.30  max_shift 0.1610 mm
+[BRUSH] BR5  weight 0.60  max_shift 0.5015 mm
+[BRUSH] BR5  weight 1.00  max_shift 0.7489 mm
+
+test_smooth_brush: 54 checks, 0 failures
+PASS: smooth_brush

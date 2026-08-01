@@ -365,8 +365,13 @@ public struct LatticeEntryButtonGate: Equatable, Sendable {
 /// adjacent chrome elements with different gaps cannot compile in silently).
 /// Chosen a little larger than the old chip stack's 9 pt and smaller than the
 /// old Preview→Optimize 16 pt, per the task.
+///
+/// SINCE 2026-08-02-smoothing-page these numbers live in `PageChrome`, the one
+/// chrome geometry all three full-screen pages share, and this enum is a NAMED
+/// VIEW onto them rather than a second copy — a third page cannot invent a third
+/// look without editing a constant every page reads (bar AE7).
 public enum LatticeChromeLayout {
-    public static let gap: CGFloat = 12
+    public static let gap: CGFloat = PageChrome.gap
 
     /// Named gaps, one per adjacent-element seam the chrome has. The view reads
     /// THESE (not `gap` directly), so a one-off deviation would have to edit a
@@ -386,9 +391,9 @@ public enum LatticeChromeLayout {
     /// Screen-edge margin (DS.Space.xl4's value) and the cluster button height —
     /// so the portrait panel's clearance above the bottom cluster DERIVES from
     /// the same token instead of a magic 104.
-    public static let edge: CGFloat = 24
-    public static let clusterHeight: CGFloat = 64
-    public static var panelBottomClearance: CGFloat { edge + clusterHeight + gap }
+    public static let edge: CGFloat = PageChrome.edge
+    public static let clusterHeight: CGFloat = PageChrome.actionButton
+    public static var panelBottomClearance: CGFloat { PageChrome.panelBottomClearance }
 }
 
 /// A transient NOTE (round-2 item L13): shown top-centre, dismissed by a tap, by

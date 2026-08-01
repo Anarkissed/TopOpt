@@ -1,0 +1,8 @@
+WallMount bracket · smoothing sweep (AE4)
+specimen: core/tests/fixtures/mesh/WallMount_ShelfBracket.stl
+resolution: 128  traction: 1129.84 N  infill: 35%
+posture A (as reported): solid worst-case 3.39676 effective 0.703343 verdict REJECTED -> strongest worst-case 2.82399 effective 0.584743
+posture B (at the gate): solid effective 1.65 verdict ACCEPTED -> strongest effective 1.37177
+verdict dropped (posture B): YES
+min-feature: 17 -> 50
+global brush margin: 3.09177  local brush margin: 2.85729

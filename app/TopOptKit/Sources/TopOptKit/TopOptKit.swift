@@ -480,6 +480,32 @@ public struct OptimizeVariant {
         self.keyframeMeshes = keyframeMeshes
         self.diagnosis = diagnosis
     }
+
+    /// The same variant with DIFFERENT GEOMETRY — the smooth-then-lattice handoff
+    /// (handoff 2026-08-02-smoothing-page, bar AE8). A kept smoothing replaces the
+    /// mesh and NOTHING else: the rung, the field, the margins and the run's own
+    /// record travel unchanged, because smoothing changed the surface and not which
+    /// variant this is. The margins deliberately stay the RUN's — the smoothing
+    /// page's own receipt carries the smoothed geometry's certification, and
+    /// copying it in here would silently restate one solver's answer as another's.
+    public func withGeometry(vertices: [Float], indices: [Int32]) -> OptimizeVariant {
+        OptimizeVariant(
+            requestedVolumeFraction: requestedVolumeFraction,
+            achievedVolumeFraction: achievedVolumeFraction,
+            printedFraction: printedFraction, massGrams: massGrams,
+            supportVolumeVoxels: supportVolumeVoxels,
+            meshTriangleCount: indices.count / 3,
+            worstCaseMargin: worstCaseMargin, accepted: accepted,
+            v3Passes: v3Passes, minFeatureViolations: minFeatureViolations,
+            minFeatureWarning: minFeatureWarning, orientation: orientation,
+            maxStressMPa: maxStressMPa,
+            maxInterlayerTensionMPa: maxInterlayerTensionMPa,
+            inPlaneMargin: inPlaneMargin, interlayerMargin: interlayerMargin,
+            meshVertices: vertices, meshIndices: indices,
+            vonMisesField: vonMisesField, displacementField: displacementField,
+            stressTensorField: stressTensorField, keyframeMeshes: keyframeMeshes,
+            diagnosis: diagnosis)
+    }
 }
 
 /// How long a run actually took, in the run's OWN frame of reference — never the
