@@ -277,23 +277,41 @@ struct CgInfo {
   // without re-deriving it. Both stay 0 on every path when recycling is off.
   int recycle_dim = 0;
   int recycle_setup_matvecs = 0;
-  // GenEO two-level deflation diagnostics (handoff 2026-07-29-geneo-arming).
-  // All 0 on every path when the feature is off (the library default) or when
-  // the solve never engaged it (multigrid carried, or the fallback converged
+  // GenEO two-level deflation diagnostics (handoff 2026-07-29-geneo-arming;
+  // the ENGAGEMENT GATE from 2026-08-02-geneo-disarm). All 0 on every path when
+  // the feature is off (the library default) or when the solve never engaged it
+  // AND no basis was held (multigrid carried, or a first fallback that converged
   // under the stagnation trigger).
   //   geneo_dim           N_t, the coarse-space dimension that preconditioned
-  //                       this solve (0 = deflation never applied)
-  //   geneo_action        0 = never engaged; 1 = held basis REUSED as-is;
-  //                       2 = coarse operator REFRESHED for this system;
-  //                       3 = basis (RE)BUILT — first build via the stagnation
-  //                       trigger, or a scheduled degradation/DOF-set rebuild;
-  //                       4 = build REFUSED by the memory cap (solve stayed
-  //                       plain Jacobi-CG — exact, just slower)
-  //   geneo_trigger_burn  plain Jacobi-CG iterations burned before an in-solve
-  //                       trigger build (action 3); 0 when the basis pre-existed
+  //                       this solve. 0 = no basis existed. On action 5 it is
+  //                       NON-zero and names the basis the gate chose NOT to
+  //                       engage — so `geneo_action`, not `geneo_dim`, is what
+  //                       says whether the deflation actually applied.
+  //   geneo_action        0 = never engaged and no basis held; 1 = held basis
+  //                       REUSED as-is; 2 = coarse operator REFRESHED for this
+  //                       system; 3 = basis (RE)BUILT — first build via the
+  //                       stagnation trigger, or a scheduled degradation /
+  //                       DOF-set rebuild; 4 = build REFUSED by the memory cap
+  //                       (solve stayed plain Jacobi-CG — exact, just slower);
+  //                       5 = DECLINED by the ENGAGEMENT GATE (handoff
+  //                       2026-08-02-geneo-disarm): a basis WAS held and this
+  //                       solve converged inside geneo_threshold plain
+  //                       iterations, so deflating it would have cost more than
+  //                       finishing plain. Exact, and cheaper.
+  //   geneo_trigger_burn  plain Jacobi-CG iterations burned before the deflation
+  //                       engaged. On action 5 it is the solve's whole iteration
+  //                       count — the number the gate's decision is graded on.
+  //   geneo_threshold     the engagement gate's burn requirement for this solve,
+  //                       in plain-iteration equivalents
+  //                       (kGeneoRefreshCostPerColumn * N_t +
+  //                        engaged_burn + kGeneoDeflatedIterCost *
+  //                        engaged_tail — the MEASURED all-in price of the armed
+  //                       alternative). 0 when no basis was held, i.e. when
+  //                       fea_geneo_trigger_iters() governed instead.
   int geneo_dim = 0;
   int geneo_action = 0;
   int geneo_trigger_burn = 0;
+  int geneo_threshold = 0;
   // ── PER-SOLVE WALL TIMING (task 2026-08-02-iteration-phase-timing) ─────────
   // Milliseconds of wall time this ONE solve spent in each of its internal
   // phases, measured with a steady clock. They exist because `iterations` is NOT
@@ -924,6 +942,38 @@ long long fea_geneo_coarse_refreshes();
 long long fea_geneo_armed_solves();
 int fea_geneo_trigger_iters();
 double fea_geneo_rebuild_factor();
+
+// THE ENGAGEMENT GATE (handoff 2026-08-02-geneo-disarm). A held basis no longer
+// carries the arming decision: every fallback solve starts plain and must burn
+// past the measured cost of the deflated alternative before engaging.
+//   fea_geneo_declined_solves  — fallback solves the gate kept plain BECAUSE a
+//     held basis was not worth engaging. Distinct from "never armed at all":
+//     this counts decisions, and armed + declined is the number of fallback
+//     solves a held basis was offered to.
+//   fea_geneo_refresh_cost_per_column / fea_geneo_deflated_iter_cost — the two
+//     cost-model constants the threshold is built from, echoed for run_info the
+//     way the trigger and rebuild factor are (the 114/132 discipline).
+//   fea_geneo_decision_* — the arm/disarm event log: one entry per TRANSITION
+//     plus every build/rebuild/refusal, so a run records WHY the accelerator
+//     engaged or stood down and on what numbers. `dropped` reports what the cap
+//     swallowed rather than letting the log lie by omission.
+long long fea_geneo_declined_solves();
+double fea_geneo_refresh_cost_per_column();
+double fea_geneo_deflated_iter_cost();
+struct GeneoDecisionRecord {
+  long long solve = 0;
+  int action = 0;      // CgInfo::geneo_action — see above
+  int burn = 0;        // plain iterations burned before the decision
+  int threshold = 0;   // the gate's requirement, plain-iteration equivalents
+  int dim = 0;         // N_t the threshold was computed from (0 = no basis)
+  int engaged_burn = 0;  // plain leg of the measured armed cost behind it
+  int engaged_tail = 0;  // deflated leg of that same measured armed cost
+  int iterations = 0;  // the solve's total iteration count
+  int converged = 0;
+};
+int fea_geneo_decision_count();
+GeneoDecisionRecord fea_geneo_decision_at(int i);
+long long fea_geneo_decisions_dropped();
 
 // Per-run multigrid stagnation latch (handoff 127). When the matrix-free MG-CG
 // stagnates (builds a hierarchy but never contracts — the high-contrast

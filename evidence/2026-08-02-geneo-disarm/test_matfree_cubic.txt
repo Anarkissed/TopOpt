@@ -1,0 +1,8 @@
+apply vs assembled: worst rel diff 3.116e-16
+jacobi parity: assembled 371 iters, matfree 371 iters, field rel L2 8.563e-14
+mg engage: assembled 363 Jacobi iters; matfree used_mg=1 levels=3 iters=26; field rel L2 3.718e-11
+geneo fp: A#1 651 iters action=3 Nt=608 burn=500
+geneo fp: A#2 gated 975 iters action=5 thr=2018
+geneo fp: B#1 229 iters action=2 (2 = refresh — the fingerprint saw the tensor change)
+recycle across tensors: A 975 iters (dim 0), B 697 iters (dim 16), B-off 933 iters, field rel L2 1.547e-10
+test_matfree_cubic: 31 checks, 0 failures

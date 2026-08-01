@@ -1,0 +1,27 @@
+probe defaults == shipped recipe: YES  (trigger=500 refresh_cost/col=2.00 defl_iter_cost=2.00 rebuild=2.0)
+
+===== AA1 — THE RESCUE CASE — STAGNATION L-bracket 36x18x37 (23976 voxels), part 1512 solid (15.9x dilution), box vf=0.020 =====
+      it 1   cg=491    act=0 N_t=0     burn=0      thr=0        8.770 s  (cg   8762  geneo       0+     0  rec     3 ms)
+      it 2   cg=478    act=0 N_t=0     burn=0      thr=0       12.947 s  (cg  12936  geneo       0+     0  rec     0 ms)
+      it 3   cg=457    act=0 N_t=0     burn=0      thr=0        5.048 s  (cg   5041  geneo       0+     0  rec     0 ms)
+      it 4   cg=457    act=0 N_t=0     burn=0      thr=0        3.857 s  (cg   3850  geneo       0+     0  rec     0 ms)
+  [plain (GenEO off)                             ] CG=1883     mean=471     wall=   32.1 s
+      it 1   cg=491    act=0 N_t=0     burn=0      thr=0        3.923 s  (cg   3915  geneo       0+     0  rec     0 ms)
+      it 2   cg=478    act=0 N_t=0     burn=0      thr=0        4.233 s  (cg   4227  geneo       0+     0  rec     0 ms)
+      it 3   cg=457    act=0 N_t=0     burn=0      thr=0        3.277 s  (cg   3270  geneo       0+     0  rec     0 ms)
+      it 4   cg=457    act=0 N_t=0     burn=0      thr=0        3.049 s  (cg   3042  geneo       0+     0  rec     0 ms)
+  [ARMED (pre-change: deflate from iteration 0)  ] CG=1883     mean=471     wall=   15.5 s  builds=0 refresh=0 armed=0 declined=0
+      it 1   cg=491    act=0 N_t=0     burn=0      thr=0        4.200 s  (cg   4194  geneo       0+     0  rec     0 ms)
+      it 2   cg=478    act=0 N_t=0     burn=0      thr=0        5.251 s  (cg   5245  geneo       0+     0  rec     0 ms)
+      it 3   cg=457    act=0 N_t=0     burn=0      thr=0        3.451 s  (cg   3441  geneo       0+     0  rec     0 ms)
+      it 4   cg=457    act=0 N_t=0     burn=0      thr=0        2.886 s  (cg   2881  geneo       0+     0  rec     0 ms)
+  [GATED (this task's engagement gate)           ] CG=1883     mean=471     wall=   17.8 s  builds=0 refresh=0 armed=0 declined=0
+  wrote evidence/2026-08-02-geneo-disarm/aa1_plain.csv
+  wrote evidence/2026-08-02-geneo-disarm/aa1_armed.csv
+  wrote evidence/2026-08-02-geneo-disarm/aa1_gated.csv
+
+  median s/solve : plain 8.770 | armed 3.923 (0.45x) | gated 4.200 (0.48x)
+
+  gated engaged on 0/4 solves; still arms: NO; beats plain in WALL: YES (4.200 vs 8.770 s)
+
+===== AA1 FAIL — the gate killed the rescue case; the rule is wrong =====

@@ -1,0 +1,24 @@
+# The measurement that decided the RULE (before any change on this branch),
+# run on the PRE-change binary via core/tests/harness/geneo_standing_probe w1
+# at TOPOPT_GSP_N=32 DIL=0.25 VF=0.50 ITERS=10 — the latched Jacobi fallback.
+#
+# THE POINT: the PLAIN count is 843, ABOVE the 500 stagnation trigger. So the
+# ~215/275 counts in the maintainer's iterations.csv are N_defl, not N_plain,
+# and a bare "re-require kGeneoTriggerIters per solve" would re-arm on exactly
+# these solves. (The 1.85x wall ratio below is from separately-run postures on a
+# LOADED host and is directional only; the load-bearing wall comparison is the
+# interleaved ABBA bench in aa2_bench.txt, which puts armed at 1.24x slower on
+# the mean. The DECIDING number here is the deterministic count: 843 > 500.)
+
+  posture                  CG total   CG mean    solve wall  total wall  builds
+  plain Jacobi (base)      8428       843        8.2         8.3         0
+  shipped (trigger 500)    2615       262        15.3        15.4        1
+  standing GenEO           2223       222        15.0        15.2        1
+
+  geneo (shipped trigger): builds=1 refreshes=9 armed=10  N_t=290
+  geneo wall: build=4.2 s  refresh=4.9 s  apply=3.2 s  (79% of run)
+
+# AFTER the engagement gate, same harness, same settings (w1_after_shipped_iters.csv):
+#   shipped (trigger 500): builds=1 refreshes=0 armed=1 declined=9,
+#   per-solve action 5 on iterations 2..10, CG back to the plain 749..914 band,
+#   GenEO wall share 79% -> 30% (and that 30% is the ONE one-off basis build).

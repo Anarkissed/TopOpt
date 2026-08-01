@@ -1,0 +1,23 @@
+probe defaults == shipped recipe: YES  (trigger=500 refresh_cost/col=2.00 defl_iter_cost=2.00 rebuild=2.0)
+
+===== AA1prod — THE RESCUE CASE ON THE PRODUCTION PATH =====
+  big-stagnation design box, 12 capped iterations, 2 ABBA blocks
+  block 1 plain : wall   317.0 s  CG total 15349     max/solve 8004     fallback rows 2/12  builds=0 refresh=0 armed=0 declined=0
+  block 1 armed : wall   295.0 s  CG total 3049      max/solve 865      fallback rows 2/12  builds=1 refresh=1 armed=2 declined=0
+  block 1 gated : wall   335.0 s  CG total 5955      max/solve 3511     fallback rows 2/12  builds=1 refresh=1 armed=2 declined=0
+  block 2 plain : wall   303.0 s  CG total 15349     max/solve 8004     fallback rows 2/12  builds=0 refresh=0 armed=0 declined=0
+  block 2 gated : wall   256.9 s  CG total 5955      max/solve 3511     fallback rows 2/12  builds=1 refresh=1 armed=2 declined=0
+  block 2 armed : wall   206.7 s  CG total 3049      max/solve 865      fallback rows 2/12  builds=1 refresh=1 armed=2 declined=0
+  wrote evidence/2026-08-02-geneo-disarm/aa1prod.csv
+
+  POOLED OVER 2 BLOCKS (fallback solves only — a multigrid solve never enters GenEO):
+  plain  fallback solves 4/24  median CG   8004 (max   8004)  median solve 153294.3 ms  [cg  8004.0  geneo      0.0+    0.0  rec 35059.8]  engaged 0  builds=0 refresh=0 declined=0
+  ARMED  fallback solves 4/24  median CG    865 (max    865)  median solve 105434.1 ms  [cg   865.0  geneo  84733.5+ 4367.3  rec 1709.0]  engaged 4  builds=2 refresh=2 declined=0
+  GATED  fallback solves 4/24  median CG   3511 (max   3511)  median solve  99140.3 ms  [cg  3511.0  geneo  77457.0+ 3782.5  rec 12322.9]  engaged 4  builds=2 refresh=2 declined=0
+
+  median wall per FALLBACK solve: plain 153294.3 ms | ARMED 105434.1 ms (0.69x) | GATED 99140.3 ms (0.65x)
+
+  GATED still engages: YES (4 engaged rows, 4 armed solves)
+  GATED beats plain in WALL: YES
+
+===== AA1prod the rescue SURVIVES the gate =====

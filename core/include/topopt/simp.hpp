@@ -717,10 +717,16 @@ struct SimpIterationObservation {
   // forwarded from CgInfo. `cg_geneo_dim` is N_t (the coarse-space dimension
   // that preconditioned this step's solve; 0 = off or never engaged);
   // `cg_geneo_action` is the per-solve lifecycle verdict (0 none / 1 reused /
-  // 2 refreshed / 3 built / 4 memory-refused — see CgInfo::geneo_action). Both
-  // stay 0 on every path when the feature is off (the library default).
+  // 2 refreshed / 3 built / 4 memory-refused / 5 DECLINED by the engagement gate
+  // — see CgInfo::geneo_action). `cg_geneo_burn` is the plain-iteration burn the
+  // gate's decision was taken on and `cg_geneo_threshold` is what it needed to
+  // reach, so the per-iteration record carries the DECISION and its numbers, not
+  // only its outcome (handoff 2026-08-02-geneo-disarm, bar AA5). All stay 0 on
+  // every path when the feature is off (the library default).
   int cg_geneo_dim = 0;
   int cg_geneo_action = 0;
+  int cg_geneo_burn = 0;
+  int cg_geneo_threshold = 0;
   // The MMA objective-plateau detector's verdict AT this iteration (the exact
   // predicate stage_should_stop consults for MMA — see mma_objective_plateau).
   // False for the OC / projected path (plateau termination is MMA-only) and until

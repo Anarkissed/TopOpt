@@ -184,6 +184,10 @@ RunInfo build_run_info(const JobDescription& job,
   info.geneo_twolevel = fea_geneo_twolevel_enabled();
   info.geneo_trigger_iters = fea_geneo_trigger_iters();
   info.geneo_rebuild_factor = fea_geneo_rebuild_factor();
+  // Handoff 2026-08-02-geneo-disarm — the ENGAGEMENT GATE's two cost constants,
+  // echoed beside the trigger they now govern alongside.
+  info.geneo_refresh_cost_per_column = fea_geneo_refresh_cost_per_column();
+  info.geneo_deflated_iter_cost = fea_geneo_deflated_iter_cost();
   info.warm_start_inherit = options.warm_start_inherit;
   info.warm_start_coarse = options.warm_start_coarse;
   info.projection = !options.simp.projection.empty();
@@ -3762,6 +3766,14 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.geneo_basis_dim = fea_geneo_basis_dim();
     run_info.geneo_basis_mb =
         static_cast<double>(fea_geneo_basis_bytes()) / (1024.0 * 1024.0);
+    // Handoff 2026-08-02-geneo-disarm — the engagement gate's decisions: how many
+    // fallback solves a held basis was offered to and declined, and the event log
+    // of every arm/disarm transition with the numbers it fired on (bar AA5).
+    run_info.geneo_declined_solves = fea_geneo_declined_solves();
+    run_info.geneo_decisions_dropped = fea_geneo_decisions_dropped();
+    run_info.geneo_decisions.clear();
+    for (int gi = 0; gi < fea_geneo_decision_count(); ++gi)
+      run_info.geneo_decisions.push_back(fea_geneo_decision_at(gi));
     // Lattice EXPORT + CERTIFICATION posture — finalized via the shared lambda so the
     // streaming and batch paths agree; a no-lattice run writes NO key (P1 / bar E2).
     // On the batch path lat_agg is still empty here (emit_lattice runs after the mesh

@@ -521,16 +521,46 @@ struct GeneoState {
 
   // Reuse policy (see geneo.hpp tripwire).
   bool rebuild_scheduled = false;
-  int ref_iters = -1;      // post-rebuild reference iteration count
+  int ref_iters = -1;      // post-rebuild reference DEFLATED iteration count
   bool ref_pending = false;
   std::uint64_t mem_refused_fp = 0;  // structure whose build busted the cap
+
+  // ENGAGEMENT GATE state (handoff 2026-08-02-geneo-disarm). What the ARMED
+  // alternative last actually cost, split into the two legs the cost model
+  // prices differently: `engaged_burn` plain iterations (1 equivalent each) and
+  // `engaged_tail` deflated ones (kGeneoDeflatedIterCost each). Recorded ONLY
+  // from a solve that BUILT or REBUILT the basis, and never from a solve the
+  // gate let through later.
+  //
+  // WHY ONLY FROM A BUILD. Two reasons, both measured. (1) A gated engagement
+  // starts from a warm iterate the plain burn already produced, so its tail
+  // systematically UNDER-states what deflating that system costs — on the
+  // reproduction fixture the build solve's tail is 78 iterations against a cold
+  // deflated count of 187, and pricing the threshold off 78 makes the gate
+  // engage on solves it then loses 1.9x on. (2) Updating from gated engagements
+  // makes the estimator feed on its own output: each engagement's total contains
+  // the previous threshold, so the threshold ratchets upward geometrically and
+  // the accelerator switches itself off for good. Pinning the estimate to the
+  // basis it describes is both more honest and stable, and it is re-measured
+  // exactly when the basis changes.
+  //
+  // -1 means "no engagement recorded yet": the deflated leg is then priced at
+  // zero, which makes the gate MORE willing to engage — the safe direction while
+  // nothing is known, and the direction that protects the rescue case.
+  int engaged_burn = -1;
+  int engaged_tail = 0;
+  int threshold = 0;  // the threshold this solve was decided against
 
   // Per-solve.
   bool active = false;
   GeneoReport last;
 
   // Cumulative since reset.
-  long long builds = 0, refreshes = 0, armed_solves = 0;
+  long long builds = 0, refreshes = 0, armed_solves = 0, declined_solves = 0;
+  long long solve_index = 0;
+  int last_logged_action = -1;
+  std::vector<GeneoDecision> decisions;
+  long long decisions_dropped = 0;
 
   // Apply scratch.
   std::vector<double> ccoarse;
@@ -804,7 +834,8 @@ bool geneo_probe_defaults_match_tripwire() {
   const GeneoProbeConfig d;
   return d.trigger_iters == kGeneoTriggerIters && d.core_cells == kGeneoCoreCells &&
          d.overlap == kGeneoOverlap && d.block_m == kGeneoBlockM &&
-         d.lambda_cut == kGeneoLambdaCut && d.eig_weighting == 0;
+         d.lambda_cut == kGeneoLambdaCut && d.eig_weighting == 0 &&
+         d.engage_threshold < 0;  // -1 == "use the measured cost model"
 }
 
 void geneo_request_rebuild() {
@@ -816,11 +847,13 @@ double geneo_probe_build_seconds() { return g_probe_build_s; }
 double geneo_probe_refresh_seconds() { return g_probe_refresh_s; }
 double geneo_probe_apply_seconds() { return g_probe_apply_s; }
 
-bool geneo_solve_begin(const MatfreeReduced& m, const MfSolveContext& ctx) {
+void geneo_solve_begin(const MatfreeReduced& m, const MfSolveContext& ctx) {
   GeneoState& S = g_geneo;
   S.active = false;
   S.last = GeneoReport{};
-  if (!S.enabled || ctx.grid == nullptr) return false;
+  S.threshold = 0;
+  if (!S.enabled || ctx.grid == nullptr) return;
+  ++S.solve_index;
 
   const std::uint64_t sfp = structure_fingerprint(m, ctx);
   if (S.have_basis && sfp != S.structure_fp) {
@@ -834,49 +867,104 @@ bool geneo_solve_begin(const MatfreeReduced& m, const MfSolveContext& ctx) {
     S.rebuild_scheduled = false;
     S.ref_iters = -1;
     S.ref_pending = false;
+    S.engaged_burn = -1;
+    S.engaged_tail = 0;
   }
-  if (!S.have_basis) return false;
 
-  if (S.rebuild_scheduled) {
-    // Degradation trigger fired on a previous solve: pay the full eigensolve now.
-    if (!build_basis(S, m, ctx)) {
-      S.mem_refused_fp = sfp;
-      S.last.action = 4;
-      return false;
+  // THE ENGAGEMENT GATE. A held basis no longer carries the arming decision:
+  // this solve starts plain like every other, and must burn its way past the
+  // measured cost of the deflated alternative before it may engage. With no
+  // basis held, N_t is unknown and PR 248's stagnation trigger governs the first
+  // build, unchanged.
+  if (!S.have_basis) {
+    S.threshold = geneo_probe_config().trigger_iters;
+    S.last.threshold = 0;  // 0 == "no basis; the kGeneoTriggerIters policy"
+    return;
+  }
+  // The threshold IS the measured all-in price of the armed alternative, in
+  // plain-iteration equivalents:
+  //     refresh          kGeneoRefreshCostPerColumn * N_t   (N_t matvecs + the
+  //                                                          N_t^2 Galerkin
+  //                                                          assembly + factor)
+  //   + the plain leg    engaged_burn                       (1 each)
+  //   + the deflated leg kGeneoDeflatedIterCost * tail      (~2 plain each)
+  // so "engage once this solve's plain burn exceeds the threshold" reads
+  // literally as: engage only once finishing plain has already cost more than
+  // the whole armed alternative did the last time we ran it. That is the
+  // ski-rental rule, and it is within a factor of 2 of the offline optimum in
+  // both directions — it cannot lose more than 2x by waiting, and it cannot
+  // lose more than 2x by switching.
+  double cost = kGeneoRefreshCostPerColumn * static_cast<double>(S.Nt) +
+                (S.engaged_burn > 0 ? static_cast<double>(S.engaged_burn) : 0.0) +
+                kGeneoDeflatedIterCost * static_cast<double>(S.engaged_tail);
+  // A SCHEDULED REBUILD is an eigensolve, not a refresh — PR 273 measured it at
+  // 38.4 s against a 3.6 s refresh, and the cost model above prices only the
+  // refresh. "When may a solve pay an eigensolve" is exactly the question
+  // kGeneoTriggerIters was derived to answer, so a rebuild solve must clear BOTH
+  // bars: the refresh economics AND PR 248's stagnation trigger. Neither is
+  // weakened; they compose.
+  if (S.rebuild_scheduled)
+    cost += static_cast<double>(geneo_probe_config().trigger_iters);
+  S.threshold = static_cast<int>(std::ceil(cost));
+  if (S.threshold < 0) S.threshold = 0;
+  // Harness-only override (default -1 = the cost model; see GeneoProbeConfig).
+  if (geneo_probe_config().engage_threshold >= 0)
+    S.threshold = geneo_probe_config().engage_threshold;
+  S.last.threshold = S.threshold;
+  S.last.dim = S.Nt;
+}
+
+int geneo_engage_threshold() {
+  const GeneoState& S = g_geneo;
+  if (!S.enabled) return -1;
+  return S.threshold;
+}
+
+bool geneo_engage_now(const MatfreeReduced& m, const MfSolveContext& ctx,
+                      int iterations_burned) {
+  GeneoState& S = g_geneo;
+  if (!S.enabled || ctx.grid == nullptr) return false;
+  const std::uint64_t sfp = structure_fingerprint(m, ctx);
+
+  // A held basis for THIS structure: refresh-and-reuse, or pay a scheduled
+  // degradation rebuild. The rebuild is charged HERE rather than at solve begin
+  // so a solve the gate declines never pays one — a rebuild is 38.4 s (PR 273
+  // median) and there is no sense spending it on a solve that will not deflate.
+  if (S.have_basis && sfp == S.structure_fp) {
+    if (S.rebuild_scheduled) {
+      if (!build_basis(S, m, ctx)) {
+        S.mem_refused_fp = sfp;
+        S.last.action = 4;
+        S.last.trigger_burn = iterations_burned;
+        return false;
+      }
+      S.last.action = 3;
+    } else {
+      const std::uint64_t mfp = moduli_fingerprint(ctx);
+      if (mfp != S.moduli_fp) {
+        // Same DOF set, moved moduli: REFRESH the coarse operator so the
+        // deflation is consistent with the current A (mandatory — phase 2 §P6).
+        const double t0 = now_s();
+        build_coarse_operator(S, m);
+        g_probe_refresh_s += now_s() - t0;
+        S.moduli_fp = mfp;
+        ++S.refreshes;
+        S.last.action = 2;
+      } else {
+        S.last.action = 1;
+      }
     }
-    S.last.action = 3;
     S.last.dim = S.Nt;
+    S.last.trigger_burn = iterations_burned;
     S.active = true;
     return true;
   }
 
-  const std::uint64_t mfp = moduli_fingerprint(ctx);
-  if (mfp != S.moduli_fp) {
-    // Same DOF set, moved moduli: REFRESH the cheap coarse operator so the
-    // deflation is consistent with the current A (mandatory — phase 2 §P6).
-    const double t0 = now_s();
-    build_coarse_operator(S, m);
-    g_probe_refresh_s += now_s() - t0;
-    S.moduli_fp = mfp;
-    ++S.refreshes;
-    S.last.action = 2;
-  } else {
-    S.last.action = 1;
-  }
-  S.last.dim = S.Nt;
-  S.active = true;
-  return true;
-}
-
-bool geneo_build_now(const MatfreeReduced& m, const MfSolveContext& ctx,
-                     int iterations_burned) {
-  GeneoState& S = g_geneo;
-  if (!S.enabled || ctx.grid == nullptr) return false;
-  const std::uint64_t sfp = structure_fingerprint(m, ctx);
   if (S.mem_refused_fp != 0 && sfp == S.mem_refused_fp) return false;
   if (!build_basis(S, m, ctx)) {
     S.mem_refused_fp = sfp;  // pay the wasted build at most once per structure
     S.last.action = 4;
+    S.last.trigger_burn = iterations_burned;
     return false;
   }
   S.last.action = 3;
@@ -914,24 +1002,77 @@ void geneo_apply(const double* r, double* z) {
   }
 }
 
+// Record one decision. Runs of identical consecutive decisions collapse to their
+// first entry; a build, a rebuild and a memory refusal are ALWAYS recorded (they
+// are events, not states). Capped — what the cap swallows is counted, not hidden.
+void log_decision(GeneoState& S, int iterations, bool converged) {
+  const int a = S.last.action;
+  const bool always = (a == 3 || a == 4);
+  if (!always && a == S.last_logged_action) return;
+  S.last_logged_action = a;
+  if (static_cast<int>(S.decisions.size()) >= kGeneoDecisionLogCap) {
+    ++S.decisions_dropped;
+    return;
+  }
+  GeneoDecision d;
+  d.solve = S.solve_index;
+  d.action = a;
+  d.burn = S.last.trigger_burn;
+  d.threshold = S.threshold;
+  d.dim = S.last.dim;
+  d.engaged_burn = S.engaged_burn;
+  d.engaged_tail = S.engaged_tail;
+  d.iterations = iterations;
+  d.converged = converged ? 1 : 0;
+  S.decisions.push_back(d);
+}
+
 void geneo_solve_end(int iterations, bool converged) {
   GeneoState& S = g_geneo;
-  if (!S.enabled || !S.active) return;
+  if (!S.enabled) return;
+  if (!S.active) {
+    // The deflation never engaged on this solve. If a basis was HELD, that is
+    // the ENGAGEMENT GATE declining — a decision, with a reason and numbers —
+    // and not the same fact as "there is nothing to engage". Distinguish them,
+    // because the whole point of this gate is that its choices are legible.
+    if (S.have_basis && S.last.action == 0) {
+      S.last.action = 5;
+      S.last.trigger_burn = iterations;
+      ++S.declined_solves;
+    }
+    log_decision(S, iterations, converged);
+    return;
+  }
   ++S.armed_solves;
+  // The DEFLATED iteration count: the whole solve minus the plain burn that
+  // preceded engagement. Before the engagement gate a reused-basis solve had a
+  // zero burn, so this is the identical quantity the degradation policy always
+  // compared — it just stays correct now that every solve burns first.
+  const int deflated = iterations - S.last.trigger_burn;
   if (S.ref_pending) {
     // First (or freshly-rebuilt) deflated solve: its count is the degradation
     // reference. Only a CONVERGED solve is evidence (the recycle discipline).
     if (converged) {
-      S.ref_iters = iterations;
+      S.ref_iters = deflated;
       S.ref_pending = false;
     }
   } else if (S.ref_iters > 0 && S.last.action != 3 &&
-             static_cast<double>(iterations) >
+             static_cast<double>(deflated) >
                  kGeneoRebuildFactor * static_cast<double>(S.ref_iters)) {
     // The design moved faster than the held basis can represent: this solve was
     // still EXACT (only slower); rebuild before the next one.
     S.rebuild_scheduled = true;
   }
+  // The cost side of the engagement gate: what the ARMED alternative cost on
+  // this basis, recorded only from the solve that BUILT it (see GeneoState —
+  // a gated engagement's tail under-states the price and its total ratchets).
+  // Only a CONVERGED solve is evidence, the same discipline the degradation
+  // reference follows.
+  if (converged && S.last.action == 3 && deflated > 0) {
+    S.engaged_burn = S.last.trigger_burn;
+    S.engaged_tail = deflated;
+  }
+  log_decision(S, iterations, converged);
   S.active = false;
 }
 
@@ -940,6 +1081,17 @@ GeneoReport geneo_last_report() { return g_geneo.last; }
 long long geneo_basis_builds() { return g_geneo.builds; }
 long long geneo_coarse_refreshes() { return g_geneo.refreshes; }
 long long geneo_armed_solves() { return g_geneo.armed_solves; }
+long long geneo_declined_solves() { return g_geneo.declined_solves; }
+
+int geneo_decision_count() {
+  return static_cast<int>(g_geneo.decisions.size());
+}
+GeneoDecision geneo_decision_at(int i) {
+  if (i < 0 || i >= static_cast<int>(g_geneo.decisions.size()))
+    return GeneoDecision{};
+  return g_geneo.decisions[static_cast<std::size_t>(i)];
+}
+long long geneo_decisions_dropped() { return g_geneo.decisions_dropped; }
 int geneo_basis_dim() { return g_geneo.Nt; }
 std::size_t geneo_basis_bytes() {
   return static_cast<std::size_t>(g_geneo.basis_bytes);

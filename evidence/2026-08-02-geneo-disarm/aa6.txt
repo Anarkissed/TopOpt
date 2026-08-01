@@ -1,0 +1,8 @@
+probe defaults == shipped recipe: YES  (trigger=500 refresh_cost/col=2.00 defl_iter_cost=2.00 rebuild=2.0)
+
+===== AA6 — RECYCLING UNAFFECTED — bracket 40x16x41 (26240 voxels) dil=0.25 vf=0.50, 4 clearances =====
+  wrote evidence/2026-08-02-geneo-disarm/aa6_armed.csv
+  wrote evidence/2026-08-02-geneo-disarm/aa6_gated.csv
+  recycle setup matvecs : ARMED 80  ->  GATED 80  (IDENTICAL)
+  recycle wall/solve    : ARMED 538.6 ms  ->  GATED 1170.9 ms
+  recycle SHARE of solve: ARMED 5.7%  ->  GATED 16.0%   (the share rises because GenEO left the denominator; the absolute cost is the number that must not move)
