@@ -32,6 +32,36 @@ std::atomic<bool> g_rc_metric_diag{true};
 // topopt/fea.hpp for the measured justification.
 std::atomic<bool> g_rc_wrap_mg{false};
 
+// --- Phase timing (the instrument; see recycle.hpp) ---------------------------
+// OFF by default. The flag is process-global like every other dial here; the
+// ACCUMULATOR is thread-local, because the carried space is thread-local and a
+// shared accumulator would need atomics on the per-iteration path.
+std::atomic<bool> g_rc_phase_on{false};
+thread_local RcPhaseTimes g_rc_phase;
+
+inline bool phase_on() { return g_rc_phase_on.load(std::memory_order_relaxed); }
+
+// RAII span. When timing is off the constructor stores a null pointer after one
+// relaxed load and the destructor does nothing — no clock read on either end.
+// Inlined inside this TU, so the per-CG-iteration guards cost a predictable
+// branch and nothing else.
+class Span {
+ public:
+  explicit Span(double RcPhaseTimes::*field)
+      : acc_(phase_on() ? &(g_rc_phase.*field) : nullptr) {
+    if (acc_ != nullptr) t0_ = mf_steady_ms();
+  }
+  ~Span() {
+    if (acc_ != nullptr) *acc_ += mf_steady_ms() - t0_;
+  }
+  Span(const Span&) = delete;
+  Span& operator=(const Span&) = delete;
+
+ private:
+  double* acc_ = nullptr;
+  double t0_ = 0.0;
+};
+
 // --- Carried state (thread-local, like the 127 multigrid stagnation latch) ----
 struct RcSpace {
   int n = 0;
@@ -245,6 +275,24 @@ bool rc_metric_diagonal() { return g_rc_metric_diag.load(); }
 bool rc_set_wrap_multigrid(bool enable) { return g_rc_wrap_mg.exchange(enable); }
 bool rc_wrap_multigrid() { return g_rc_wrap_mg.load(); }
 
+bool rc_set_phase_timing(bool on) { return g_rc_phase_on.exchange(on); }
+bool rc_phase_timing() { return phase_on(); }
+RcPhaseTimes rc_phase_times() { return g_rc_phase; }
+void rc_phase_reset() { g_rc_phase = RcPhaseTimes{}; }
+
+double rc_phase_mark() { return phase_on() ? mf_steady_ms() : 0.0; }
+void rc_phase_charge(RcPhaseId id, double t0) {
+  if (!phase_on()) return;
+  const double dt = mf_steady_ms() - t0;
+  switch (id) {
+    case RcPhaseId::SetupMatvec:
+      g_rc_phase.setup_matvec_ms += dt;
+      ++g_rc_phase.setup_matvecs;
+      break;
+    case RcPhaseId::SetupOther: g_rc_phase.setup_other_ms += dt; break;
+  }
+}
+
 void rc_reset_space() {
   g_space.n = 0;
   g_space.k = 0;
@@ -267,10 +315,12 @@ std::size_t rc_space_bytes() {
 RecycleSession::~RecycleSession() = default;
 
 void RecycleSession::begin(int n, const double* invdiag) {
+  const Span sp(&RcPhaseTimes::begin_ms);
   want_setup_ = false;
   harvesting_ = false;
   active_ = false;
   if (!rc_enabled() || n <= 0) return;
+  if (phase_on()) ++g_rc_phase.sessions;
 
   const int want_k = rc_dim();
   // A resolution change (different free-DOF count) or a RECONFIGURED k makes the
@@ -291,6 +341,7 @@ void RecycleSession::begin(int n, const double* invdiag) {
   // yet (bootstrap).
   const long long seq = g_solve_counter++;
   harvesting_ = (g_space.k == 0) || (rc_cycle() <= 1) || (seq % rc_cycle() == 0);
+  if (phase_on() && harvesting_) ++g_rc_phase.harvest_sessions;
 
   if (g_space.k == 0) return;  // bootstrap: nothing to apply, only to harvest.
 
@@ -310,9 +361,11 @@ void RecycleSession::begin(int n, const double* invdiag) {
                        static_cast<std::size_t>(k_),
                    0.0);
   active_ = true;
+  if (phase_on()) ++g_rc_phase.active_sessions;
 }
 
 bool RecycleSession::setup_finish(std::vector<double>& e) {
+  const Span sp(&RcPhaseTimes::setup_other_ms);
   const int k = k_;
   // Enforce exact symmetry before factorising (E is symmetric in exact
   // arithmetic; the two triangles differ only by rounding).
@@ -338,6 +391,7 @@ bool RecycleSession::setup_finish(std::vector<double>& e) {
   partials_.assign(static_cast<std::size_t>((n_ + kChunk - 1) / kChunk) *
                        static_cast<std::size_t>(k),
                    0.0);
+  if (phase_on()) ++g_rc_phase.active_sessions;
   return true;
 }
 
@@ -374,6 +428,8 @@ double RecycleSession::column_dot(int j, const double* v) const {
 // entirely by that z traffic) rather than the ~1.4x the column reads alone cost.
 void RecycleSession::augment(const double* r, double* z) const {
   if (!active_) return;
+  const Span sp(&RcPhaseTimes::augment_ms);
+  if (phase_on()) ++g_rc_phase.augment_calls;
   const int k = k_;
   const int n = n_;
   const float* const U = g_space.U.data();
@@ -427,7 +483,10 @@ void RecycleSession::augment(const double* r, double* z) const {
 
 void RecycleSession::observe(int it, const double* p, const double* ap) {
   if (!harvesting_ || m_ <= 0) return;
+  const Span sp(&RcPhaseTimes::observe_ms);
+  if (phase_on()) ++g_rc_phase.observe_calls;
   if (it % stride_ != 0) return;
+  if (phase_on()) ++g_rc_phase.observe_stores;
   const std::size_t span = static_cast<std::size_t>(n_) *
                            static_cast<std::size_t>(m_);
   if (hp_.empty()) {
@@ -450,6 +509,8 @@ void RecycleSession::observe(int it, const double* p, const double* ap) {
 
 void RecycleSession::commit() {
   if (!harvesting_) return;
+  const Span sp(&RcPhaseTimes::commit_ms);
+  if (phase_on()) ++g_rc_phase.commit_calls;
   const int n = n_;
   const int ku = active_ ? k_ : 0;
   const int c = ku + filled_;

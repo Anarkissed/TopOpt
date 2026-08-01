@@ -1,0 +1,9 @@
+    rep 2  k=0 (off)  wall   22.04 s  CG 7550     setup_mv 0      load 57.62
+
+  setting      CG total   setup_mv      DOF-work  vs base wall/solve    vs base   recycle rec share
+  k=0 (off)       13944          0    1.1947e+09   1.000x     1.850 s   1.000x      0.2 ms     0.0%
+  k=4             11874         56    1.0222e+09   0.856x     2.850 s   1.541x    463.1 ms    17.0%
+  k=8             10064        112    8.7188e+08   0.730x     2.222 s   1.201x    505.3 ms    22.6%
+  k=16             7864        224    6.9298e+08   0.580x     2.230 s   1.205x    764.7 ms    34.5%
+  k=32             7340        448    6.6728e+08   0.559x     3.138 s   1.696x   1674.9 ms    54.3%
+  host 1-min load average at end: 57.62

@@ -1,0 +1,16 @@
+recycle_reassess — mode=regime  evidence=evidence/2026-08-03-krylov-recycle-reassessment
+host 1-min load average at start: 12.52
+shipped defaults: dim=16 cycle=1 wrap_multigrid=0 phase_timing=0
+
+===== REGIME — the three fixture classes =====
+
+  (a) LATCHED    LATCHED bracket 40x16x41 (26240 voxels, 85680 free DOFs) dil=0.25 vf=0.50, 4 clearances
+    recycling OFF : CG total 2929     (min 578    max 835   )  used_mg 0/4  hier_built 0/4  setup_mv 0     wall   16.74 s  DOF-work 2.510e+08
+    recycling ON  : CG total 2140     (min 520    max 578   )  used_mg 0/4  hier_built 0/4  setup_mv 48    wall    9.68 s  DOF-work 1.875e+08
+
+  (b) HEALTHY MG  HEALTHY bracket 40x16x40 (25600 voxels, 83640 free DOFs) dil=0.25 vf=0.50, 4 clearances
+    recycling OFF : CG total 118      (min 27     max 33    )  used_mg 4/4  hier_built 4/4  setup_mv 0     wall    1.74 s  DOF-work 9.870e+06
+    recycling ON  : CG total 118      (min 27     max 33    )  used_mg 4/4  hier_built 4/4  setup_mv 0     wall    1.77 s  DOF-work 9.870e+06
+
+  (c) CERTIFICATION — measured in mode `cert` (one tight solve on a FIXED design,
+      warm-basis as production leaves it and cold-basis as an analyze job runs it).

@@ -1,0 +1,4 @@
+setting,cg_total,setup_matvecs,dofwork,wall_median_s,cg_ms_median,recycle_ms_median,recycle_share_pct
+off,660,0,5.520240e+07,0.46679,0.000,0.000,0.00
+wrap=0,660,0,5.520240e+07,0.45001,0.000,0.000,0.00
+wrap=1,690,333,8.556372e+07,0.69672,0.000,0.000,0.00
