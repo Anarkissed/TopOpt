@@ -341,6 +341,14 @@ struct RunInfo {
   int warm_start_coarse_iterations = 0;
   double warm_start_coarse_ms = 0.0;
   long long warm_start_coarse_matvecs = 0;
+  // The DOF-WEIGHTED cost — THE PRIMARY UNIT. Raw matvecs above are NOT
+  // comparable across the pre-solve's res/2 grid and the ladder's fine grid; a
+  // coarse apply touches ~1/8 the DOFs. `..._grid_dofs` and `solved_grid_dofs`
+  // are the two denominators, recorded so the weighting can be re-derived from
+  // the run record rather than trusted.
+  long long warm_start_coarse_dof_touches = 0;
+  long long warm_start_coarse_grid_dofs = 0;
+  long long solved_grid_dofs = 0;
   bool projection = false;
   // Handoff 123 — CONDITIONAL MMA Heaviside projection echo. `..._threshold` is
   // the armed grayness gate threshold (0 = disabled). The two per-rung vectors are

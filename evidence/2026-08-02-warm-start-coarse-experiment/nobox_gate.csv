@@ -1,0 +1,17 @@
+rung,vf,verdict_off,verdict_on,margin_off,margin_on,compliance_off,compliance_on,iters_off,iters_on,wall_s_off,wall_s_on,stag_iters_off,stag_iters_on,stag_wall_s_off,stag_wall_s_on,settle_off,settle_on,on_mean_drho,on_max_drho,ctl_mean_drho,ctl_max_drho,on_printed_flips,ctl_printed_flips
+0,0.6800,ACCEPT,ACCEPT,7.41745183007,7.29934871929,36.6751700709,36.5134366411,172,210,80.482,106.041,170,210,79.109,106.041,128,133,3.808304e-02,9.999998e-01,1.257387e-03,9.696997e-01,1035,30
+1,0.5200,ACCEPT,ACCEPT,5.4995397428,5.55192944959,42.6290499212,42.6939713487,244,262,126.006,149.957,244,262,126.006,149.957,191,192,4.906286e-03,9.999909e-01,8.539422e-03,9.999839e-01,130,229
+2,0.3800,ACCEPT,ACCEPT,4.78400776933,4.05821883791,52.299730612,65.8789674182,265,265,146.282,135.074,265,265,146.282,135.074,213,147,2.379074e-02,9.849306e-01,2.281399e-03,9.891247e-01,229,49
+3,0.2600,ACCEPT,ACCEPT,2.97624841568,2.88541499171,80.9377902736,80.63629765,263,263,128.579,132.909,263,263,128.579,132.909,245,236,1.599985e-03,8.489889e-01,1.231418e-03,8.708519e-01,40,25
+# pre_solve_iterations,75
+# pre_solve_wall_s,7.201
+# pre_solve_matvecs,35707
+# charged_matvecs_off,392416
+# charged_matvecs_on,450876
+# fine_grid_dofs,90168
+# coarse_grid_dofs,13608
+# pre_solve_dof_touches,485900856
+# charged_dof_touches_off,35383365888
+# charged_dof_touches_on,37920859248
+# charged_wall_s_off,481.349
+# charged_wall_s_on,531.182

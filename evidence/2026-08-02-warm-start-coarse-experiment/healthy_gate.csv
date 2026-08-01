@@ -1,0 +1,16 @@
+rung,vf,verdict_off,verdict_on,margin_off,margin_on,compliance_off,compliance_on,iters_off,iters_on,wall_s_off,wall_s_on,stag_iters_off,stag_iters_on,stag_wall_s_off,stag_wall_s_on,settle_off,settle_on,on_mean_drho,on_max_drho,ctl_mean_drho,ctl_max_drho,on_printed_flips,ctl_printed_flips
+0,0.6800,ACCEPT,ACCEPT,2.72740702596,2.64793349994,4.63900268409,4.64099993964,38,36,11.163,10.391,0,0,0.000,0.000,16,8,5.864729e-04,1.315864e-01,7.876931e-12,2.578619e-09,17,0
+1,0.5200,ACCEPT,ACCEPT,1.63290970976,1.63290970976,8.71832620191,8.71832620191,59,59,18.495,18.168,0,0,0.000,0.000,25,25,0.000000e+00,0.000000e+00,2.745682e-12,1.161610e-09,0,0
+2,0.3800,REJECT,REJECT,0.823352323821,0.823352323821,21.8335979204,21.8335979204,65,65,21.234,20.621,0,0,0.000,0.000,38,38,0.000000e+00,0.000000e+00,2.179426e-11,1.752857e-08,0,0
+# pre_solve_iterations,31
+# pre_solve_wall_s,1.921
+# pre_solve_matvecs,5200
+# charged_matvecs_off,16800
+# charged_matvecs_on,21728
+# fine_grid_dofs,81675
+# coarse_grid_dofs,11271
+# pre_solve_dof_touches,58609200
+# charged_dof_touches_off,1372140000
+# charged_dof_touches_on,1408533600
+# charged_wall_s_off,50.892
+# charged_wall_s_on,51.101

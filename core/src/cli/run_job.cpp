@@ -3712,6 +3712,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.warm_start_coarse_ms = result.pipeline.warm_start_coarse_ms;
     run_info.warm_start_coarse_matvecs =
         result.pipeline.warm_start_coarse_matvecs;
+    // The DOF-weighted cost and BOTH its denominators. solved_grid_dofs is
+    // filled even when the cascade was never armed: it is the denominator any
+    // DOF-weighted reading of this run needs, and a record that only carries it
+    // when a feature fired cannot be used to compare against a run where it
+    // didn't.
+    run_info.warm_start_coarse_dof_touches =
+        result.pipeline.warm_start_coarse_dof_touches;
+    run_info.warm_start_coarse_grid_dofs =
+        result.pipeline.warm_start_coarse_grid_dofs;
+    run_info.solved_grid_dofs = result.pipeline.solved_grid_dofs;
     // Handoff 123 — finalize the conditional-projection outcome: which rungs fired
     // and the grayscale Mnd measured on each (empty when the gate was disarmed).
     run_info.conditional_projection_fired.assign(

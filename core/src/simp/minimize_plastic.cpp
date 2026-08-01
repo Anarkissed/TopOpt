@@ -399,6 +399,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // from it samples the von-Mises/displacement fields at the correct voxels. It
   // equals minimize_plastic_solved_grid(grid, options) voxel-for-voxel.
   result.solved_grid = G;
+  // The fine grid's DOF count, by the ONE definition documented on
+  // MinimizePlasticResult::warm_start_coarse_dof_touches. Recorded always (not
+  // only when the cascade is armed) so the denominator of any DOF-weighted
+  // comparison is in the run record either way.
+  result.solved_grid_dofs = grid_nodal_dofs(G);
 
   // Reserve result.evaluated to the ladder length (its known maximum: at most one
   // entry per rung, and the walk stops early on the first rejected/cancelled rung)
@@ -477,6 +482,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       warm_seed = prolong_density(Gc, G, coarse.physical_density);
     result.warm_start_coarse_ms = steady_clock_ms() - warm_t0;
     result.warm_start_coarse_matvecs = fea_matvec_count() - warm_mv0;
+    // DOF-WEIGHT the pre-solve's applies at the COARSE grid's DOF count — the
+    // unit that is valid ACROSS the two resolutions. Every apply counted in the
+    // span above ran on Gc.
+    result.warm_start_coarse_grid_dofs = grid_nodal_dofs(Gc);
+    result.warm_start_coarse_dof_touches =
+        result.warm_start_coarse_matvecs * result.warm_start_coarse_grid_dofs;
   }
 
   // --- Multigrid-usage tally (loud-fallback honesty) -----------------------

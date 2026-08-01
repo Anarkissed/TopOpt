@@ -1,0 +1,30 @@
+=== pre-change vs post-change (THE ONE RULE: must be identical) ===
+  OK        report.json  acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6
+  OK        design.bin  bed76e9c6472fbada97b30498aae9f7899308c6d50834b55a487715602eb294e
+  OK        fields.bin  a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc
+  OK        variant_030.stl  cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace
+  OK        variant_050.stl  c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87
+  OK        variant_070.stl  88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1
+=== post-change run twice (AC7 determinism) ===
+  OK        report.json
+  OK        design.bin
+  OK        fields.bin
+=== the new run_info keys the armed run must report ===
+  warm_start_coarse                False
+  warm_start_coarse_iterations     0
+  warm_start_coarse_ms             0
+  warm_start_coarse_matvecs        0
+  warm_start_coarse_dof_touches    0
+  warm_start_coarse_grid_dofs      0
+  solved_grid_dofs                 237699
+RESULT: THE ONE RULE HOLDS
+=== ARMED run (warm_start.coarse = true) ===
+  warm_start_coarse                True
+  warm_start_coarse_iterations     30
+  warm_start_coarse_ms             3428.262833
+  warm_start_coarse_matvecs        17928
+  warm_start_coarse_dof_touches    571455000
+  warm_start_coarse_grid_dofs      31875
+  solved_grid_dofs                 237699
+  re-derivation check: matvecs*grid_dofs = 571455000 == dof_touches: True
+  coarse apply = 1/7.46 of a fine apply

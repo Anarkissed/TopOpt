@@ -900,6 +900,21 @@ struct MinimizePlasticVariant {
   std::vector<TriangleMesh> keyframe_meshes;
 };
 
+// THE ONE definition of "how many DOFs does a solve on this grid touch" — the
+// weight that makes operator applies at DIFFERENT RESOLUTIONS commensurable
+// (handoff 2026-08-02-warm-start-coarse-experiment). Trilinear hex elements put
+// 3 DOFs on each node of an (nx+1) x (ny+1) x (nz+1) nodal lattice.
+//
+// It is a property of the GRID ALONE, deliberately: the reduced operator acts on
+// the FREE DOFs, which depend on the BC set and the active-domain mask and so
+// could not be re-derived from a run record. Anything comparing a res/2 pre-solve
+// against a fine ladder must weight by THIS, never count raw applies — a coarse
+// apply is ~1/8 of a fine one, so an unweighted sum is not a comparison at all.
+inline long long grid_nodal_dofs(const VoxelGrid& g) {
+  return 3LL * static_cast<long long>(g.nx + 1) *
+         static_cast<long long>(g.ny + 1) * static_cast<long long>(g.nz + 1);
+}
+
 // The result of a minimize_plastic run.
 struct MinimizePlasticResult {
   // Every rung the driver actually ran, in ladder order: accepted rungs (each
@@ -987,6 +1002,35 @@ struct MinimizePlasticResult {
   // is off. Measured as the delta of the process-global fea_matvec_count()
   // across the whole pre-solve.
   long long warm_start_coarse_matvecs = 0;
+
+  // The pre-solve's DOF-TOUCHES — matvecs WEIGHTED BY THE DOF COUNT OF THE GRID
+  // EACH APPLY RAN ON. *** THIS IS THE PRIMARY COST UNIT, and raw matvecs above
+  // must NOT be compared across the two resolutions. *** The whole point of the
+  // cascade is that it works at res/2, where one operator apply touches ~1/8 the
+  // DOFs of a fine one; adding a coarse apply to a fine apply as if they cost
+  // the same is not an accounting error of degree but of kind. Weighting makes
+  // the two levels commensurable, and it removes a bias that runs AGAINST the
+  // pre-solve (an unweighted sum charges each cheap coarse apply at full fine
+  // price). Deterministic and contention-immune, so unlike wall it is evidence
+  // on a shared host.
+  //
+  // DEFINITION, stated so it can be re-derived: dof_touches = sum over applies
+  // of 3*(nx+1)*(ny+1)*(nz+1) for that apply's grid — the full nodal DOF count
+  // of the grid the solve ran on. (The reduced operator acts on the FREE DOFs, a
+  // mask-dependent subset; the full nodal count is used because it is a property
+  // of the grid alone and therefore reproducible from the run record.) Every
+  // apply the counter sees within one solve is at that solve's own resolution:
+  // fea_matvec_count() is bumped in MatfreeReduced::apply_kgg_raw, and a
+  // V-cycle's coarse levels use Galerkin operators that do not route through it
+  // (handoff 2026-08-02-iteration-phase-timing §1c). 0 when the feature is off.
+  long long warm_start_coarse_dof_touches = 0;
+
+  // The DOF count of the COARSE grid the pre-solve ran on, and of the FINE grid
+  // the ladder ran on — both by the definition above. Recorded so a reader can
+  // re-derive the weighting from the run record instead of trusting it, and so
+  // the actual coarse/fine ratio is visible rather than assumed to be 8.
+  long long warm_start_coarse_grid_dofs = 0;
+  long long solved_grid_dofs = 0;
 
   // Whether the run's linear solves ACTUALLY used the geometric-multigrid
   // accelerator, and its hierarchy depth — captured from the per-rung recovery

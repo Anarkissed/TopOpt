@@ -1,3 +1,11 @@
 Sat Aug  1 05:27:32 EDT 2026
  5:27  up 22 days, 12:05, 2 users, load averages: 123.37 124.02 80.78
 concurrent topopt-cli (other agents): 19
+--- RESTART with DOF-weighted instrument ---
+Sat Aug  1 05:51:04 EDT 2026
+ 5:51  up 22 days, 12:28, 2 users, load averages: 46.49 45.90 62.48
+other topopt-cli: 9
+
+--- AFTER measurement completed ---
+Sat Aug  1 16:53:57 EDT 2026
+16:53  up 22 days, 23:31, 2 users, load averages: 4.34 4.33 4.39

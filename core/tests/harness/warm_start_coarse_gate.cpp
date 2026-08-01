@@ -232,6 +232,11 @@ struct RunRecord {
   int pre_iterations = 0;
   double pre_ms = 0.0;
   long long pre_matvecs = 0;
+  // The two DOF denominators (pipeline.hpp grid_nodal_dofs). Recorded so every
+  // weighted number below can be re-derived from this transcript.
+  long long fine_dofs = 0;
+  long long pre_dofs = 0;
+  long long pre_dof_touches = 0;
   std::vector<RungRecord> rungs;
 
   long long fine_matvecs() const {
@@ -239,6 +244,11 @@ struct RunRecord {
     for (const RungRecord& r : rungs) s += r.matvecs;
     return s;
   }
+  // *** THE PRIMARY COST UNIT. *** Raw matvecs are NOT comparable across the
+  // pre-solve's res/2 grid and the fine ladder — a coarse apply touches ~1/8 the
+  // DOFs — so every headline comparison is weighted by the DOF count of the grid
+  // each apply actually ran on.
+  long long fine_dof_touches() const { return fine_matvecs() * fine_dofs; }
 
   double fine_wall_ms() const {
     double s = 0.0;
@@ -319,6 +329,9 @@ RunRecord run_ladder(const char* label, const Fixture& f, bool warm_coarse,
   r.pre_iterations = res.warm_start_coarse_iterations;
   r.pre_ms = res.warm_start_coarse_ms;
   r.pre_matvecs = res.warm_start_coarse_matvecs;
+  r.fine_dofs = res.solved_grid_dofs;
+  r.pre_dofs = res.warm_start_coarse_grid_dofs;
+  r.pre_dof_touches = res.warm_start_coarse_dof_touches;
 
   for (std::size_t i = 0; i < res.evaluated.size(); ++i) {
     const MinimizePlasticVariant& v = res.evaluated[i];
@@ -473,17 +486,37 @@ int measure(const std::string& name, const Fixture& f, const std::string& dir,
   // wall on a quiet host — that is exactly the discipline handoff
   // 2026-07-29-geneo-arming got wrong in the other direction (it trusted an
   // iteration count and never priced the wall at all).
-  std::printf("    %-22s %10lld %10lld %+9.1f%%   <== DETERMINISTIC\n",
+  // --- THE PRIMARY EVIDENCE: DOF-WEIGHTED WORK -----------------------------
+  // Raw applies are printed for traceability ONLY. They must not be compared
+  // across resolutions: the pre-solve runs on a grid with pre_dofs DOFs against
+  // the ladder's fine_dofs, and charging a coarse apply at fine price biases the
+  // comparison AGAINST the cascade by exactly that ratio. The weighted rows are
+  // the ones the recommendation rests on — deterministic, contention-immune, and
+  // valid across the two resolutions, unlike wall on this shared host.
+  std::printf("\n    grid DOFs: fine %lld, coarse (pre-solve) %lld  "
+              "=> coarse apply = 1/%.2f of a fine apply\n",
+              off1.fine_dofs, on1.pre_dofs,
+              on1.pre_dofs ? static_cast<double>(on1.fine_dofs) /
+                                 static_cast<double>(on1.pre_dofs) : 0.0);
+  std::printf("    %-22s %12lld %12lld %+9.1f%%   (raw, NOT cross-resolution)\n",
               "fine matvecs", off1.fine_matvecs(), on1.fine_matvecs(),
               pct(static_cast<double>(off1.fine_matvecs()),
                   static_cast<double>(on1.fine_matvecs())));
-  std::printf("    %-22s %10s %10lld %10s\n", "pre-solve matvecs", "-",
-              on1.pre_matvecs, "");
-  std::printf("    %-22s %10lld %10lld %+9.1f%%   <== THE ANSWER (det.)\n",
-              "CHARGED matvecs", off1.fine_matvecs(),
-              on1.fine_matvecs() + on1.pre_matvecs,
-              pct(static_cast<double>(off1.fine_matvecs()),
-                  static_cast<double>(on1.fine_matvecs() + on1.pre_matvecs)));
+  std::printf("    %-22s %12s %12lld %10s   (raw, NOT cross-resolution)\n",
+              "pre-solve matvecs", "-", on1.pre_matvecs, "");
+  std::printf("    %-22s %12lld %12lld %+9.1f%%\n", "fine DOF-touches",
+              off1.fine_dof_touches(), on1.fine_dof_touches(),
+              pct(static_cast<double>(off1.fine_dof_touches()),
+                  static_cast<double>(on1.fine_dof_touches())));
+  std::printf("    %-22s %12s %12lld %10s\n", "pre-solve DOF-touches", "-",
+              on1.pre_dof_touches, "");
+  std::printf("    %-22s %12lld %12lld %+9.1f%%   <== THE ANSWER "
+              "(DOF-weighted, deterministic)\n",
+              "CHARGED DOF-touches", off1.fine_dof_touches(),
+              on1.fine_dof_touches() + on1.pre_dof_touches,
+              pct(static_cast<double>(off1.fine_dof_touches()),
+                  static_cast<double>(on1.fine_dof_touches() +
+                                      on1.pre_dof_touches)));
 
   // AC4/AC5 — the full gate table against the control floor.
   std::printf("\n  --- AC4/AC5 FULL GATE TABLE, EVERY RUNG, vs the 1e-9 FLOOR ---\n");
@@ -520,12 +553,23 @@ int measure(const std::string& name, const Fixture& f, const std::string& dir,
     const Delta d_ctl = (i < ctl1.rungs.size())
                             ? compare(off1.rungs[i].density, ctl1.rungs[i].density)
                             : Delta();
+    // The floor test uses BOTH moments, deliberately. max|drho| ALONE is a weak
+    // discriminator: in a stagnating regime both the change and the control
+    // saturate near 1.0 (a single voxel swinging void<->solid pins the max), so
+    // a max-only test reports "noise" for a rung whose MEAN motion is an order
+    // of magnitude above the control. A rung is called real if EITHER moment
+    // exceeds the control's, and both ratios are printed so the reader sees
+    // which one fired rather than taking the label on trust.
+    const double mean_ratio =
+        d_ctl.mean_abs > 0.0 ? d_on.mean_abs / d_ctl.mean_abs : 0.0;
+    const double max_ratio =
+        d_ctl.max_abs > 0.0 ? d_on.max_abs / d_ctl.max_abs : 0.0;
+    const bool real = d_on.mean_abs > d_ctl.mean_abs || d_on.max_abs > d_ctl.max_abs;
     std::printf("    rung %zu (%zu elements): ON class %zu printed %zu | "
-                "CTL class %zu printed %zu  => %s\n",
+                "CTL class %zu printed %zu | mean x%.2f max x%.2f  => %s\n",
                 i, d_on.n, d_on.class_flips, d_on.printed_flips,
-                d_ctl.class_flips, d_ctl.printed_flips,
-                (d_on.max_abs <= d_ctl.max_abs) ? "AT/BELOW THE FLOOR (noise)"
-                                                : "ABOVE THE FLOOR (real)");
+                d_ctl.class_flips, d_ctl.printed_flips, mean_ratio, max_ratio,
+                real ? "ABOVE THE FLOOR (real)" : "AT/BELOW THE FLOOR (noise)");
   }
 
   std::printf("\n    --- AC5 CONVERGED COMPLIANCE PER RUNG (a faster run that "
@@ -577,6 +621,13 @@ int measure(const std::string& name, const Fixture& f, const std::string& dir,
                  on1.pre_iterations, on1.pre_ms / 1000.0, on1.pre_matvecs);
     std::fprintf(fp, "# charged_matvecs_off,%lld\n# charged_matvecs_on,%lld\n",
                  off1.fine_matvecs(), on1.fine_matvecs() + on1.pre_matvecs);
+    std::fprintf(fp, "# fine_grid_dofs,%lld\n# coarse_grid_dofs,%lld\n",
+                 off1.fine_dofs, on1.pre_dofs);
+    std::fprintf(fp, "# pre_solve_dof_touches,%lld\n"
+                     "# charged_dof_touches_off,%lld\n"
+                     "# charged_dof_touches_on,%lld\n",
+                 on1.pre_dof_touches, off1.fine_dof_touches(),
+                 on1.fine_dof_touches() + on1.pre_dof_touches);
     std::fprintf(fp, "# charged_wall_s_off,%.3f\n# charged_wall_s_on,%.3f\n",
                  off_fine / 1000.0, on_charged / 1000.0);
     std::fclose(fp);
