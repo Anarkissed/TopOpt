@@ -19,7 +19,14 @@
     "outside_fraction": 0,
     "outside_volume_mm3": 0,
     "outside_kept_solid_voxels": 0,
-    "note": "material the optimizer grew OUTSIDE the imported part's envelope, under the design box. Policy \"keep_solid\" drops it from the lattice mask, so it is certified SOLID and exported as the solid companion body — the conservative default, and a PLACEHOLDER: whether added material should be latticed instead is a design decision the maintainer has not made."
+    "kept_solid_voxels": 0,
+    "kept_solid_volume_mm3": 0,
+    "certified_lattice_cells": 62,
+    "emitted_lattice_cells": 62,
+    "voxels_strut_and_solid": 0,
+    "audit_note": "certified_lattice_cells is the cell set the certification mask implies; emitted_lattice_cells is the generator's own count of the cells it wrote. On a uniform run they are EQUAL and voxels_strut_and_solid is 0 — the exported lattice and the certified lattice are the same set of cells, and no voxel carries both a strut and companion solid.",
+    "kept_solid_fraction": 0,
+    "note": "material the optimizer grew OUTSIDE the imported part's envelope, under the design box. Policy \"keep_solid\" drops it from the lattice mask, so it is certified SOLID and exported as the solid companion body — the conservative default, and a PLACEHOLDER: whether added material should be latticed instead is a design decision the maintainer has not made. The policy acts on WHOLE LATTICE CELLS (a cell holding any added material is kept solid entire), because a cell is the atom the generator emits — so kept_solid_voxels exceeds outside_original_part by the part voxels sharing those cells, and no voxel ever receives both a strut and companion solid."
   },
   "relative_density": 0.4095775463,
   "certifiable_band": [0.05047, 0.89988],

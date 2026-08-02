@@ -1,6 +1,7 @@
 #include "topopt/job.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -530,9 +531,11 @@ LatticeSkinSpec lattice_skin_for(const JobLattice& lat) {
 // caller-supplied (uniform: the job's cell/strut radius; graded: the law's cell
 // + a per-position radius field over the graded densities). `cert_mask` is THE
 // certification mask the posture will certify — passed in so the file and the
-// certified object derive from the SAME flags (H1b). `graded_cell_latticed`,
-// when non-null, restricts cell activation to cells holding at least one
-// masked voxel (derived from the same mask — the graded silhouette).
+// certified object derive from the SAME flags (H1b). `cell_latticed`, when
+// non-null, restricts cell activation to cells holding at least one masked voxel
+// (derived from the same mask — the graded silhouette, and, under a design box,
+// the uniform one; see the caller). NULL keeps the legacy uniform behaviour:
+// every cell the boundary cannot prove empty.
 // `emit_solid_companion` arms the solid-companion body (roles / grading only —
 // see LatticeExportOutcome; a legacy job passes false and writes identical
 // bytes).
@@ -541,7 +544,7 @@ LatticeExportOutcome export_latticed_variant(
     const JobOutput& out, const JobLattice& lat, const VoxelGrid& sg,
     const LatticeBoundary& boundary, double cell_mm,
     const LatticeRadiusField& radius, const std::vector<char>& cert_mask,
-    const std::function<bool(int, int, int)>& graded_cell_latticed,
+    const std::function<bool(int, int, int)>& cell_latticed,
     bool emit_solid_companion,
     // SWEPT cell size (handoff 2026-08-01-lattice-cell-size-sweep). Null / fewer
     // than two levels => the single-cell path below, byte-identical to a pre-sweep
@@ -559,7 +562,7 @@ LatticeExportOutcome export_latticed_variant(
   // the certified object agree by construction (bar B7 / H1b).
   const std::vector<double>& dens = variant.optimization.physical_density;
   LatticeRegion R = lattice_region_for(sg, cell_mm, &boundary);
-  R.latticed = graded_cell_latticed;  // null on the uniform path (unchanged)
+  R.latticed = cell_latticed;  // null => every cell (the legacy uniform path)
   const LatticeSkinSpec skin = lattice_skin_for(lat);
 
   const TriangleMesh& shell = variant.v3.mesh;
@@ -923,7 +926,26 @@ struct LatticeAddedMaterialReceipt {
   long long inside_part = 0;        //   ... inside the ORIGINAL part envelope
   long long outside_part = 0;       //   ... OUTSIDE it (the material grown)
   long long outside_kept_solid = 0; // of those, dropped from the lattice mask
-  double outside_volume_mm3 = 0.0;  // voxel basis (count x spacing^3)
+  // EVERY voxel the policy dropped from the mask — the added material PLUS the
+  // part voxels that share a lattice cell with it. The policy acts on whole
+  // cells (see kDesignBoxAddedMaterialKeptSolid), so this is the honest "how
+  // much of the object is solid because of this rule" number and it is always
+  // >= outside_kept_solid.
+  long long kept_solid_voxels = 0;
+  double outside_volume_mm3 = 0.0;    // voxel basis (count x spacing^3)
+  double kept_solid_volume_mm3 = 0.0; // same basis, for kept_solid_voxels
+  // ── THE AUDIT (the bar that "certified == exported" is checkable by, not
+  // argued for). All three are measured AFTER the geometry is written:
+  //   certified_lattice_cells — cells the certification mask implies
+  //                             (|{owning cell of a masked voxel}|);
+  //   emitted_lattice_cells   — cells the GENERATOR actually emitted
+  //                             (LatticeGenStats::latticed_cells, its own count);
+  //   voxels_strut_and_solid  — printed voxels that are BOTH inside an emitted
+  //                             lattice cell AND written as companion solid.
+  // On a uniform design-box run the first two must be EQUAL and the third ZERO.
+  long long certified_lattice_cells = 0;
+  long long emitted_lattice_cells = 0;
+  long long voxels_strut_and_solid = 0;
 };
 
 struct LatticeGradedReceipt {
@@ -1055,12 +1077,42 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          ",\n";
     s += "    \"outside_kept_solid_voxels\": " +
          std::to_string(added.outside_kept_solid) + ",\n";
+    // The WHOLE-CELL cost of the policy: the added material plus the part
+    // voxels that share a lattice cell with it. Reported separately because it
+    // is the number that actually describes how much of the file is solid.
+    s += "    \"kept_solid_voxels\": " + std::to_string(added.kept_solid_voxels) +
+         ",\n";
+    s += "    \"kept_solid_volume_mm3\": " +
+         json_num(added.kept_solid_volume_mm3) + ",\n";
+    s += "    \"certified_lattice_cells\": " +
+         std::to_string(added.certified_lattice_cells) + ",\n";
+    s += "    \"emitted_lattice_cells\": " +
+         std::to_string(added.emitted_lattice_cells) + ",\n";
+    s += "    \"voxels_strut_and_solid\": " +
+         std::to_string(added.voxels_strut_and_solid) + ",\n";
+    s += "    \"audit_note\": \"certified_lattice_cells is the cell set the "
+         "certification mask implies; emitted_lattice_cells is the generator's "
+         "own count of the cells it wrote. On a uniform run they are EQUAL and "
+         "voxels_strut_and_solid is 0 — the exported lattice and the certified "
+         "lattice are the same set of cells, and no voxel carries both a strut "
+         "and companion solid.\",\n";
+    s += "    \"kept_solid_fraction\": " +
+         json_num(added.printed_voxels > 0
+                      ? static_cast<double>(added.kept_solid_voxels) /
+                            static_cast<double>(added.printed_voxels)
+                      : 0.0) +
+         ",\n";
     s += "    \"note\": \"material the optimizer grew OUTSIDE the imported "
          "part's envelope, under the design box. Policy \\\"keep_solid\\\" "
          "drops it from the lattice mask, so it is certified SOLID and exported "
          "as the solid companion body — the conservative default, and a "
          "PLACEHOLDER: whether added material should be latticed instead is a "
-         "design decision the maintainer has not made.\"\n";
+         "design decision the maintainer has not made. The policy acts on WHOLE "
+         "LATTICE CELLS (a cell holding any added material is kept solid "
+         "entire), because a cell is the atom the generator emits — so "
+         "kept_solid_voxels exceeds outside_original_part by the part voxels "
+         "sharing those cells, and no voxel ever receives both a strut and "
+         "companion solid.\"\n";
     s += "  },\n";
   }
   // Graded lattice (stage 4) — the grading law's full per-variant record with
@@ -1419,54 +1471,114 @@ LatticeVariantOutcome lattice_one_variant(
     }
   }
 
+  // The lattice REGION's cell dimensions — pure geometry, derived here (rather
+  // than below with the radius field) because the added-material policy has to
+  // speak in CELLS, for the reason spelled out immediately after.
+  const LatticeRegion Rdims = lattice_region_for(solved_grid, cell, &boundary);
+  const int ncx = Rdims.nx, ncy = Rdims.ny, ncz = Rdims.nz;
+  const std::size_t ncells = static_cast<std::size_t>(ncx) * ncy * ncz;
+  auto cidx = [ncx, ncy](int ci, int cj, int ck) {
+    return (static_cast<std::size_t>(ck) * ncy + cj) * ncx + ci;
+  };
+  auto clampi = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+  // The owning lattice cell of voxel (i,j,k) — the SAME keying
+  // lattice_certification_mask uses (floor over `Rdims.origin`, which IS
+  // solved_grid.origin), so "the cell that certifies this voxel" and "the cell
+  // that emits it" are the same integer triple by construction.
+  auto owner_ijk = [&](int i, int j, int k) {
+    const double cx = solved_grid.origin.x + (i + 0.5) * solved_grid.spacing;
+    const double cy = solved_grid.origin.y + (j + 0.5) * solved_grid.spacing;
+    const double cz = solved_grid.origin.z + (k + 0.5) * solved_grid.spacing;
+    return std::array<int, 3>{
+        clampi(static_cast<int>(std::floor((cx - Rdims.origin.x) / cell)), ncx - 1),
+        clampi(static_cast<int>(std::floor((cy - Rdims.origin.y) / cell)), ncy - 1),
+        clampi(static_cast<int>(std::floor((cz - Rdims.origin.z) / cell)), ncz - 1)};
+  };
+  auto owner_cell = [&](int i, int j, int k) {
+    const std::array<int, 3> c = owner_ijk(i, j, k);
+    return cidx(c[0], c[1], c[2]);
+  };
+
   // ── ADDED MATERIAL (task 2026-08-03-design-box-recertification). On a design-box
   // run, count this variant's printed voxels inside vs OUTSIDE the imported part's
-  // envelope, and apply the declared policy to the ones outside. `keep_solid`
-  // (the conservative default) clears them from the certification mask, which by
-  // construction sends them BOTH to the composite posture as solid AND to the
-  // solid companion body the export writes — one flag, so the certified object
-  // and the exported file agree here exactly as they do everywhere else (H1b).
+  // envelope, and apply the declared policy to the ones outside.
+  //
+  // *** WHY THE POLICY ACTS ON WHOLE CELLS, NOT ON VOXELS. *** A lattice CELL is
+  // the atom the generator emits: a cell is either latticed (its struts are
+  // written) or it is not. Clearing a cell's added voxels from the certification
+  // mask while leaving its part voxels masked would leave the cell latticed —
+  // struts written straight through material the receipt calls "kept solid",
+  // which is the certified-object-is-not-the-exported-object failure this whole
+  // pipeline exists to prevent. So a cell that holds ANY added material is kept
+  // solid WHOLE: every voxel it owns leaves the mask, the cell is not latticed,
+  // and every one of those voxels is picked up by the solid companion body. That
+  // is strictly more conservative than the voxel-wise rule (more solid, never
+  // less), which is the direction this policy already leans, and it makes two
+  // properties exact rather than approximate — asserted in
+  // test_designbox_lattice_recert:
+  //   * the cell set the generator lattices EQUALS the cell set the
+  //     certification mask implies, cell for cell;
+  //   * no voxel receives both a strut and companion solid.
+  // The receipt reports BOTH counts: the added material itself, and the total
+  // kept solid including the part voxels that share a cell with it.
+  //
   // Off the box path `domain.expanded` is false and this whole block is skipped,
   // so the mask, the geometry and the receipt are byte-identical.
   LatticeAddedMaterialReceipt& added_rcpt = R.added_rcpt;
   if (domain.expanded) {
     const std::vector<char> in_part = original_part_voxels(part_grid, domain);
     added_rcpt.present = true;
-    for (std::size_t e = 0; e < mask.size(); ++e) {
-      if (!(dens[e] >= 0.5)) continue;
-      ++added_rcpt.printed_voxels;
-      if (in_part[e]) {
-        ++added_rcpt.inside_part;
-        continue;
-      }
-      ++added_rcpt.outside_part;
-      if (kDesignBoxAddedMaterialKeptSolid && mask[e]) {
-        mask[e] = 0;
-        ++added_rcpt.outside_kept_solid;
-      }
-    }
-    added_rcpt.outside_volume_mm3 = static_cast<double>(added_rcpt.outside_part) *
-                                    solved_grid.spacing * solved_grid.spacing *
-                                    solved_grid.spacing;
+    // Pass 1 — the counts, and WHICH CELLS hold added material.
+    std::vector<char> cell_has_added(ncells, 0);
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!(dens[e] >= 0.5)) continue;
+          ++added_rcpt.printed_voxels;
+          if (in_part[e]) {
+            ++added_rcpt.inside_part;
+            continue;
+          }
+          ++added_rcpt.outside_part;
+          if (kDesignBoxAddedMaterialKeptSolid) cell_has_added[owner_cell(i, j, k)] = 1;
+        }
+    // Pass 2 — clear those cells WHOLE.
+    if (kDesignBoxAddedMaterialKeptSolid)
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i) {
+            const std::size_t e = solved_grid.index(i, j, k);
+            if (!mask[e] || !cell_has_added[owner_cell(i, j, k)]) continue;
+            mask[e] = 0;
+            ++added_rcpt.kept_solid_voxels;
+            if (!in_part[e]) ++added_rcpt.outside_kept_solid;
+          }
+    const double vv =
+        solved_grid.spacing * solved_grid.spacing * solved_grid.spacing;
+    added_rcpt.outside_volume_mm3 =
+        static_cast<double>(added_rcpt.outside_part) * vv;
+    added_rcpt.kept_solid_volume_mm3 =
+        static_cast<double>(added_rcpt.kept_solid_voxels) * vv;
   }
 
-  // ── the radius field + graded cell activation.
+  // ── the radius field + cell activation.
   LatticeRadiusField G;
   G.nseg = 8;
   double rho_uniform = 0.0;
-  const LatticeRegion Rdims = lattice_region_for(solved_grid, cell, &boundary);
   std::vector<double> cell_rho_sum;
   std::vector<long long> cell_rho_cnt;
   double gmean = 0.0;
-  std::function<bool(int, int, int)> graded_cells;  // null on the uniform path
+  // Which cells the generator lattices. NULL means "every cell the boundary
+  // cannot prove empty" — the legacy uniform behaviour, byte-identical on every
+  // run without a design box. Non-null on a graded run (below) and on a
+  // design-box run (further below), where it is DERIVED FROM THE FINAL MASK so
+  // the emitted silhouette and the certified mask are the same set.
+  std::function<bool(int, int, int)> cell_latticed;
+  std::vector<char> uniform_cells;  // backing store for the design-box predicate
   if (graded) {
-    const int ncx = Rdims.nx, ncy = Rdims.ny, ncz = Rdims.nz;
-    cell_rho_sum.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0.0);
-    cell_rho_cnt.assign(static_cast<std::size_t>(ncx) * ncy * ncz, 0);
-    auto cidx = [ncx, ncy](int ci, int cj, int ck) {
-      return (static_cast<std::size_t>(ck) * ncy + cj) * ncx + ci;
-    };
-    auto clampi = [](int val, int hi) { return val < 0 ? 0 : (val > hi ? hi : val); };
+    cell_rho_sum.assign(ncells, 0.0);
+    cell_rho_cnt.assign(ncells, 0);
     double gsum = 0.0;
     long long gcnt = 0;
     for (int k = 0; k < solved_grid.nz; ++k)
@@ -1481,14 +1593,10 @@ LatticeVariantOutcome lattice_one_variant(
               solved_grid.origin.y + (j + 0.5) * solved_grid.spacing;
           const double cz =
               solved_grid.origin.z + (k + 0.5) * solved_grid.spacing;
-          const int ci = clampi(
-              static_cast<int>(std::floor((cx - Rdims.origin.x) / cell)), ncx - 1);
-          const int cj = clampi(
-              static_cast<int>(std::floor((cy - Rdims.origin.y) / cell)), ncy - 1);
-          const int ck = clampi(
-              static_cast<int>(std::floor((cz - Rdims.origin.z) / cell)), ncz - 1);
-          cell_rho_sum[cidx(ci, cj, ck)] += rho;
-          ++cell_rho_cnt[cidx(ci, cj, ck)];
+          (void)cx; (void)cy; (void)cz;
+          const std::size_t ce = owner_cell(i, j, k);
+          cell_rho_sum[ce] += rho;
+          ++cell_rho_cnt[ce];
           gsum += rho;
           ++gcnt;
         }
@@ -1496,7 +1604,7 @@ LatticeVariantOutcome lattice_one_variant(
     // Graded cell activation: a cell is latticed iff it holds >= 1 masked
     // voxel — the graded silhouette DERIVES from the same mask the posture
     // certifies, so file and certificate cannot disagree on where lattice is.
-    graded_cells = [&cell_rho_cnt, cidx](int ci, int cj, int ck) {
+    cell_latticed = [&cell_rho_cnt, cidx](int ci, int cj, int ck) {
       return cell_rho_cnt[cidx(ci, cj, ck)] > 0;
     };
     // Per-position radius: the owning voxel's graded rho (masked), else the
@@ -1542,6 +1650,33 @@ LatticeVariantOutcome lattice_one_variant(
     // library basis (the E5 preflight already proved it in-band).
     rho_uniform =
         octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
+    // UNIFORM cell activation under a DESIGN BOX (task
+    // 2026-08-03-design-box-recertification). The uniform path has always passed a
+    // NULL predicate, which means "lattice every cell the boundary cannot prove
+    // empty" — and the boundary's voxel base is the whole solved design, added
+    // material included. That was correct while the mask WAS the boundary's own
+    // silhouette. It stops being correct the moment the added-material policy
+    // clears voxels the boundary still considers material: the certificate would
+    // say solid and the generator would still write struts there. So under an
+    // expanded domain the uniform path derives its cell set FROM THE FINAL MASK,
+    // exactly as the graded path above does — a cell is latticed iff it holds at
+    // least one masked voxel.
+    //
+    // Off the box path this stays NULL and the emitted geometry is byte-identical
+    // to every pre-task run (bar AI3). It is armed on `domain.expanded` rather
+    // than on "did the policy clear anything", so the design-box path has ONE
+    // rule whichever way kDesignBoxAddedMaterialKeptSolid is set.
+    if (domain.expanded) {
+      uniform_cells.assign(ncells, 0);
+      for (int k = 0; k < solved_grid.nz; ++k)
+        for (int j = 0; j < solved_grid.ny; ++j)
+          for (int i = 0; i < solved_grid.nx; ++i)
+            if (mask[solved_grid.index(i, j, k)])
+              uniform_cells[owner_cell(i, j, k)] = 1;
+      cell_latticed = [&uniform_cells, cidx](int ci, int cj, int ck) {
+        return uniform_cells[cidx(ci, cj, ck)] != 0;
+      };
+    }
   }
 
   // ── role receipt (H1a): counts + the include-over-void no-op accounting.
@@ -1616,15 +1751,55 @@ LatticeVariantOutcome lattice_one_variant(
   const double tg0 = wall_seconds();
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
-      mask, graded_cells,
+      mask, cell_latticed,
       // The companion body must also be armed when the added-material policy
       // kept voxels solid — otherwise that material would be certified solid but
       // never written, and the file would not be the certified object.
       /*emit_solid_companion=*/graded || roles_present ||
-          added_rcpt.outside_kept_solid > 0,
+          added_rcpt.kept_solid_voxels > 0,
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm);
   R.gen_seconds = wall_seconds() - tg0;
+
+  // ── THE AUDIT (design-box runs only, so no existing receipt changes). Measure,
+  // against the geometry that was just written, the two things the whole H1b
+  // discipline claims: that the cell set the generator EMITTED is the cell set
+  // the certification mask implies, and that no voxel got both a strut and
+  // companion solid. `emitted_lattice_cells` is the GENERATOR's own count
+  // (LatticeGenStats::latticed_cells — cells that passed both the predicate and
+  // the boundary-overlap test), not a re-derivation of it.
+  if (added_rcpt.present) {
+    std::vector<char> certified_cells(ncells, 0);
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i)
+          if (mask[solved_grid.index(i, j, k)])
+            certified_cells[owner_cell(i, j, k)] = 1;
+    for (const char c : certified_cells)
+      added_rcpt.certified_lattice_cells += (c ? 1 : 0);
+    added_rcpt.emitted_lattice_cells = R.oc.stats.latticed_cells;
+    // A voxel is "companion solid" on exactly the export's own rule: printed,
+    // NOT masked, and not inside a clearance keep-out (export_latticed_variant).
+    // It is "inside a strut cell" iff its owning cell is one the generator
+    // emitted — the same cell_active test, asked here with the same inputs.
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!(dens[e] >= 0.5) || mask[e]) continue;
+          const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+          if (boundary.in_keep_out(vc, 0.0)) continue;  // no companion emitted
+          const std::array<int, 3> c = owner_ijk(i, j, k);
+          if (cell_latticed && !cell_latticed(c[0], c[1], c[2])) continue;
+          const Vec3 cmin{Rdims.origin.x + c[0] * cell,
+                          Rdims.origin.y + c[1] * cell,
+                          Rdims.origin.z + c[2] * cell};
+          if (!boundary.cell_may_overlap(cmin, cell)) continue;
+          ++added_rcpt.voxels_strut_and_solid;
+        }
+  }
   // (b) certification of the composite — the octet tensor on the SAME mask the
   // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
   const LatticeCertContext cx =
@@ -2120,10 +2295,24 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // THE domain the originating run solved on — the SAME core call it used, so a
   // smoothed design-box variant is re-certified on the grid it was produced on
   // and under the load case that produced it, rather than clipped back onto the
-  // part grid. Without a design box `cert_grid` IS `model_grid` and
+  // part grid. Without a design box `domain.grid` IS `model_grid` and
   // `domain.bcs` IS `bcs`, so every existing analyze run is byte-identical.
   const SolvedDesignDomain domain = resolve_design_domain(model_grid, bcs, options);
-  const VoxelGrid& cert_grid = domain.grid;
+  // *** THE EXPANSION IS ONLY FOR A SUBSTITUTE MESH. *** The expanded grid exists
+  // to hold a DESIGN that grew outside the imported part. A `--mesh` analyze is
+  // handed such a design and must be voxelized onto it, or the material outside
+  // the part is silently clipped away. A NO-MESH analyze is not: it certifies
+  // the imported part AS DRAWN, and its occupancy comes from the grid's own tags
+  // — and expand_design_domain tags the whole in-box Active region `Interior`,
+  // i.e. SOLID. Certifying on the expanded grid there would certify a FILLED
+  // BOX rather than the part, which is what RUN SIM and every non-smoothing
+  // re-certification ask for. So the no-mesh path keeps the model grid, exactly
+  // as it did before this task. Asserted, not argued: a design-box no-mesh
+  // analyze must report the same solid count and mass as the same analyze with
+  // no design box (test_designbox_lattice_recert, section E).
+  const bool expand_for_mesh = domain.expanded && !analyze_mesh_path.empty();
+  const VoxelGrid& cert_grid = expand_for_mesh ? domain.grid : model_grid;
+  const std::vector<DirichletBC>& cert_bcs = expand_for_mesh ? domain.bcs : bcs;
   // The PART's solid count — the part-relative denominator, which under
   // expansion is NOT the solved grid's solid count (handoff 080).
   const double part_solid = static_cast<double>(model_grid.solid_count());
@@ -2275,7 +2464,16 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // is why this branch is not design_domain_loads — that would weigh the run's
   // occupancy, not this design's.
   const std::vector<NodalLoad> loads =
-      loadcase ? design_domain_loads(domain, options, material.density_g_cm3)
+      loadcase ? (expand_for_mesh
+                      // the declared tractions REMAPPED onto the expanded grid
+                      // the substitute mesh was voxelized onto
+                      ? design_domain_loads(domain, options,
+                                            material.density_g_cm3)
+                      // no mesh (or no box): the analysis runs on the MODEL grid,
+                      // where the declared tractions are already correctly
+                      // indexed — remapping them here would point them at nodes
+                      // of a grid this branch never uses
+                      : options.external_loads)
                : self_weight_loads(design_grid, material.density_g_cm3,
                                    options.gravity, options.gravity_direction);
   const bool load_path_ok = load_path_connected(design_grid, density, 0.5);
@@ -2288,7 +2486,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
   result.analysis = analyze_fixed_design(
-      design_grid, params, density, domain.bcs, loads, material, build_dir,
+      design_grid, params, density, cert_bcs, loads, material, build_dir,
       options.simp.cg_tolerance, options.simp.cg_max_iterations,
       options.simp.solver, options.margin_stop, knockdown, load_path_ok,
       part_solid, /*lattice=*/nullptr,
@@ -2488,7 +2686,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // solved grid" are different objects here and a reader must not have to guess:
   // a smoothed design-box variant is re-certified on the EXPANDED grid, so the
   // material the optimizer grew outside the part is certified, not clipped away.
-  if (domain.expanded) {
+  if (expand_for_mesh) {
     prov += "  \"design_box\": {\n";
     prov += "    \"expanded\": true,\n";
     prov += "    \"part_grid\": [" + std::to_string(model_grid.nx) + ", " +
@@ -2598,12 +2796,19 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     throw JobError("lattice_variant_job: the job carries no \"variant\" block");
   if (!job.lattice.present)
     throw JobError("lattice_variant_job: the job carries no \"lattice\" block");
-  // The SAME pre-flight refusal the optimize path applies to a lattice job, for
-  // the same reason (E5). Stated here too rather than inherited by accident:
-  // this entry point never calls run_job. The design-box refusal that used to
-  // sit here is gone — the remap it named now exists, ONCE, in core
-  // (resolve_design_domain), and this entry point calls it below like every
-  // other site (task 2026-08-03-design-box-recertification).
+  // The SAME pre-flight refusals the optimize path applies to a lattice job, for
+  // the same reasons (E5, and grading-with-a-box). Stated here too rather than
+  // inherited by accident: this entry point never calls run_job. The blanket
+  // design-box refusal that used to sit here is gone — the remap it named now
+  // exists, ONCE, in core (resolve_design_domain), and this entry point calls it
+  // below like every other site (task 2026-08-03-design-box-recertification).
+  if (job.grading.present && job.has_design_box)
+    throw JobError(
+        "lattice_variant: a \"grading\" block is not yet supported together with "
+        "a \"design_box\" — the grading law chooses its cell plan before the "
+        "added-material policy runs, so a graded design-box run could emit struts "
+        "into cells the certificate calls solid. Re-lattice with a uniform cell + "
+        "strut radius instead.");
   if (!job.grading.present) {
     const double lat_rho =
         octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
@@ -3209,6 +3414,26 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         "final stress field, so without a lattice there is nothing to grade "
         "into. Add a \"lattice\" block (without cell_mm/strut_radius_mm — the "
         "graded run derives those) or drop \"grading\".");
+  // GRADING + a DESIGN BOX is refused, and this is a NARROWER refusal than the
+  // one that stood before this task (which refused the whole design-box + lattice
+  // combination). Reason, precisely: a graded run's cell PLAN comes from
+  // grade_lattice, which runs before the added-material policy can speak, and the
+  // SWEPT multilevel emission takes its per-level cell occupancy from that plan
+  // rather than from the final certification mask. So on a graded design-box run
+  // the generator could still write struts into cells the certificate calls
+  // solid — the exact certified-object-is-not-the-exported-object failure the
+  // uniform path just closed. Rather than ship a second shape of it, refuse until
+  // the law's candidate set is made added-material-aware. Uniform lattice + a
+  // design box is supported and tested.
+  if (job.grading.present && job.has_design_box)
+    throw JobError(
+        "a \"grading\" block is not yet supported together with a \"design_box\": "
+        "the grading law chooses its cell plan before the added-material policy "
+        "runs, and the swept multilevel emission takes its cell occupancy from "
+        "that plan rather than from the final certification mask — so a graded "
+        "design-box run could emit struts into cells the certificate calls "
+        "solid. Run the design-box lattice job WITHOUT grading (uniform cell + "
+        "strut radius), or run the graded job without a design box.");
   if (job.lattice.present) {
     // A DESIGN BOX no longer refuses (task 2026-08-03-design-box-recertification).
     // The refusal existed because the latticed re-certification reconstructed the

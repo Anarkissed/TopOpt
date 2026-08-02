@@ -5,7 +5,7 @@
   "analysis_solves": 1,
   "variant_meshes_written": 0,
   "field_scope": "substitute_mesh",
-  "source": "mesh:/tmp/ev_post/D_box_selfweight_lattice/variant_080.stl",
+  "source": "mesh:/tmp/ev2_post/D_box_selfweight_lattice/variant_080.stl",
   "model": "plate_bore.stl",
   "resolution": 32,
   "design_box": {
@@ -30,7 +30,7 @@
   "min_feature_baseline": 292,
   "min_feature_after": 110,
   "min_feature_limited": false,
-  "smoothed_mesh": "/tmp/ev_post/F_analyze_smooth/variant_080_smoothed.stl",
+  "smoothed_mesh": "/tmp/ev2_post/F_analyze_smooth/variant_080_smoothed.stl",
   "max_stress_mpa": 0.0008637110699,
   "margin_worst_case": 63678.70219,
   "margin_required": 0,

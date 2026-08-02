@@ -28,6 +28,57 @@ The refusal was protecting the codebase from its own second reconstruction.
 
 ---
 
+## Review round (PR 285) — two confirmed defects, both mine, both fixed
+
+Two findings from the PR review were confirmed by reading and are fixed in this
+branch. Both were introduced by this task, not inherited.
+
+**P1 — the certified object was not the exported object.** `export_latticed_variant`
+takes a cell predicate; the uniform path had always passed NULL, which the
+generator reads as "lattice every cell the boundary cannot prove empty". That was
+correct while the certification mask WAS the boundary's own silhouette. The
+added-material policy broke that invariant the moment it cleared voxels the
+boundary still considers material: the mask said solid, the generator kept writing
+struts, and the solid companion wrote the *same voxels* solid. On specimen D that
+was most of the file, not an edge — the run emitted 110 latticed cells against a
+mask implying 16.
+
+Fixed two ways at once, because one alone is not enough:
+
+* the uniform path now derives its cell set FROM THE FINAL MASK under a design
+  box, exactly as the graded path already did (`cell_latticed`);
+* the policy now acts on WHOLE LATTICE CELLS. A cell is the atom the generator
+  emits, so clearing a cell's added voxels while leaving its part voxels masked
+  would leave the cell latticed. A cell holding any added material is kept solid
+  entire. Strictly more conservative — more solid, never less — and it makes both
+  properties exact rather than approximate.
+
+That second decision costs mass and the receipt says so: on specimen D the policy
+now keeps **892 voxels (69.4% of the printed object)** solid, not 716 (55.7%). The
+extra 176 are part voxels sharing a cell with added material. Both numbers are in
+every receipt (`outside_original_part`, `kept_solid_voxels`).
+
+**P2 — a no-mesh analyze certified a filled box.** `VoxelGrid design_grid =
+cert_grid;` used the expanded domain for *every* analyze job, but
+`expand_design_domain` tags the in-box Active region `Interior` — SOLID — and the
+no-mesh path takes its occupancy from the grid's tags. So a design-box analyze
+with no `--mesh` certified the box filled rather than the part as drawn. That is
+RUN SIM and every non-smoothing re-certification.
+
+Fixed: the expansion is used only when there IS a substitute mesh
+(`expand_for_mesh`), which is the only case that needs it. The no-mesh path keeps
+the model grid, the part-indexed BCs and the part-indexed tractions — byte-identical
+to HEAD, verified below.
+
+**A third gap the P1 fix exposed, and how it is handled.** A GRADED run takes its
+swept multilevel cell occupancy from `grade_lattice`'s cell plan, which is built
+before the added-material policy can speak — so a graded design-box run could emit
+struts into cells the certificate calls solid, the same failure in another shape.
+Rather than ship it unverified, `grading` + `design_box` is now REFUSED with a
+message naming exactly that reason. This is strictly NARROWER than the refusal that
+stood before this task, which rejected the whole design-box + lattice combination.
+Uniform lattice + a design box is supported and tested.
+
 ## What shipped
 
 **ONE remap, in core, with four callers.** `topopt/pipeline.hpp` now declares:
@@ -59,7 +110,7 @@ untouched.
 |---|---|---|
 | `lattice_cert_context` part-solid denominator | `solved_grid.solid_count()` | the PART grid's — what `minimize_plastic`'s ladder normalises to (handoff 080) |
 | `lattice_variant_job` `fields.bin` | written against the part grid | the solved grid (it threw `size 12288 != 4224` under a box) |
-| `analyze_job` design grid | `voxelize_onto_grid(mesh, model_grid)` | onto the SOLVED grid — it was silently CLIPPING a design-box mesh at the part's bounding box |
+| `analyze_job` design grid (SUBSTITUTE MESH ONLY — see P2) | `voxelize_onto_grid(mesh, model_grid)` | onto the SOLVED grid — it was silently CLIPPING a design-box mesh at the part's bounding box |
 
 The last one is measured below and matters.
 
@@ -70,16 +121,19 @@ The last one is measured below and matters.
 With a design box the optimizer grows material where the original part was not.
 Nothing in the generator or the gate has an opinion about what should happen to
 that material when the variant is latticed. **On the specimen below it is 55.7% of
-the printed object.** The three answers are different objects:
+the printed object — and 69.4% once the whole-cell rule the P1 fix requires is
+counted.** The three answers are different objects:
 
-**KEEP SOLID — what ships today, as a placeholder.** The added voxels are dropped
-from the certification mask, so they are certified SOLID and exported as the solid
-companion body. Most conservative: solid is stiffer and stronger than lattice at
-the same geometry, so no margin here is optimistic, and the certified object is
-exactly the exported file (one mask governs both, as everywhere else). Cost: mass
-— you get a lattice inside the part you imported and solid everywhere the
-optimizer added. On the specimen that means **302 mm³ / 716 voxels of solid you
-may not have wanted**, and the lattice covers only 44% of the object.
+**KEEP SOLID — what ships today, as a placeholder.** Every lattice cell holding
+added material is dropped from the certification mask WHOLE, so those cells are
+certified SOLID, are not latticed, and are exported as the solid companion body.
+Most conservative: solid is stiffer and stronger than lattice at the same
+geometry, so no margin here is optimistic, and the certified object is exactly the
+exported file (one mask governs both — asserted, see P1). Cost: mass — you get a
+lattice inside the part you imported and solid everywhere the optimizer added,
+*plus* the part material sharing those cells. On the specimen that is **892 voxels
+/ 376 mm³, 69.4% of the printed object**, and the lattice covers 16 cells where
+the un-fixed code emitted 110.
 
 **LATTICE IT.** Lightest, and arguably what someone asking for a lattice meant.
 Certified honestly either way — the composite solve carries the octet tensor over
@@ -111,8 +165,10 @@ placeholder.
   `recorded 16013.15016 == reproduced 16013.15016`, `==`, enforced (the job throws
   otherwise), not reported.
 * The composite margin agrees across both entry points for the same design:
-  `12121.61941` from the optimize path and from `lattice_variant_job`, compared as
+  `12044.85937` from the optimize path and from `lattice_variant_job`, compared as
   the two receipts render it (same emitter, same precision — a textual identity).
+  (It was `12121.61941` before the P1 fix; the fix keeps whole cells solid, which
+  is a different — and now actually exported — composite.)
 
 **How I confirmed the test FAILS against a no-remap reconstruction** (section C, a
 live negative control in the test, not an argument): the same stored design is
@@ -150,7 +206,7 @@ its own refusal) also works:
 design: fingerprint 4361396442930156187, 16 optimizer iterations originally
 reproduction: recorded margin 16013.2 == reproduced 16013.2 (enforced)
 solves: 3 certification (design iterations 0, variant meshes 0)
-solid margin 1.601e+04 -> latticed margin 1.212e+04
+solid margin 1.601e+04 -> latticed margin 1.204e+04
 verdict: ACCEPTED                                        wall: 0.57 s
 ```
 
@@ -173,26 +229,59 @@ stiff and does contribute weight), which is a verdict-flip risk on an existing
 path and therefore not mine to take under this task's bars. Flagged as separate
 work.
 
+### P1 / P2 — the two review fixes, measured
+
+`evidence/.../p1_p2_audit.txt`. Every design-box receipt now carries the audit;
+`emitted_lattice_cells` is `LatticeGenStats::latticed_cells`, the generator's own
+count of the cells it wrote (predicate AND boundary-overlap), not a re-derivation.
+
+| variant | printed | outside part | kept solid | certified cells | emitted cells | strut+solid |
+|---|---|---|---|---|---|---|
+| C vf 0.68 | 2064 | 0 | 0 | 62 | 62 | **0** |
+| D vf 0.80 | 1286 | 716 | 892 | 16 | 16 | **0** |
+| D vf 0.70 | 726 | 266 | 394 | 22 | 22 | **0** |
+| D vf 0.60 | 360 | 42 | 88 | 16 | 16 | **0** |
+| E (D re-latticed) | 1286 | 716 | 892 | 16 | 16 | **0** |
+
+Note C: outside-part material is zero there, so the policy clears nothing — yet
+the emitted cell count still fell from 96 to 62. That is the SAME P1 bug in its
+other form: the old NULL predicate latticed 34 cells that held no masked voxel at
+all, so the certificate described no lattice there while the file had struts.
+
+P2, the same analyze run three ways:
+
+| | voxel mass | printed fr | margin | claims an expansion |
+|---|---|---|---|---|
+| design box, no `--mesh` (fixed) | 1.62691875 g | 1.0 | 34550.69196 | no |
+| NO design box, no `--mesh` | 1.62691875 g | 1.0 | 34550.69196 | no |
+| HEAD, design box, no `--mesh` | 1.62691875 g | 1.0 | 34550.69196 | no |
+
+Equal to the last digit, and equal to HEAD — the no-mesh path is restored exactly.
+Asserted in `test_designbox_lattice_recert` section E.
+
 ### AI3 — no-design-box paths byte-identical
 
 Stash-rebuild: `git stash` → build HEAD → save the binary → restore → build →
 run both binaries over the same jobs. `evidence/.../byte_identity.txt`.
 
-Every artifact of the **no-design-box + lattice** run and of the **design-box,
-no-lattice** run is byte-identical: `design.bin`, `fields.bin`, `report.json`,
-`loadcase.json`, every `variant_*.stl`, every `*_lattice.stl`, every
-`*_lattice.report.json`. So is the no-box `analyze --smooth` run
-(`analysis_report.json`, `fields.bin`, the smoothed STL). `iterations.csv` matches
+Re-run after the P1/P2 fixes. Every artifact of the **no-design-box + lattice**
+run and of the **design-box, no-lattice** run is byte-identical — 20 artifacts, 0
+differ: `design.bin`, `fields.bin`, `report.json`, `loadcase.json`, every
+`variant_*.stl`, every `*_lattice.stl`, every `*_lattice.report.json`. So is the
+no-box `analyze --smooth` run (`analysis_report.json`, `fields.bin`, the smoothed
+STL), and — new since the P2 fix — the **design-box no-mesh analyze**
+(`analysis_report.json`, `fields.bin`). `iterations.csv` matches
 on every physics column (the differing columns are `wall_ms` and the `*_ms`
 timings); `build_orientation.json` differs only in `sweep_seconds`;
 `run_info.json` carries its documented wall-clock stamp. `analysis.json` differs
 only in the output-directory path it echoes back.
 
-**ctest: 97/97 passing** (96 before; +1 for the new test).
+**ctest: 97/97 passing** (96 before; +1 for the new test). The new test is 54
+checks, 0 failures.
 
 ### AI4 — full gate table, before and after, every rung
 
-`evidence/.../gate_tables.txt`. Condensed:
+`evidence/.../gate_tables.txt`, **re-run after the P1/P2 fixes**. Condensed:
 
 | job | rung (printed fr) | HEAD | NEW |
 |---|---|---|---|
@@ -202,7 +291,7 @@ only in the output-directory path it echoes back.
 | B design box, no lattice | 0.4135048 | ACCEPTED 16013.15016 | ACCEPTED 16013.15016 |
 | | 0.2334405 | ACCEPTED 10180.36257 | ACCEPTED 10180.36257 |
 | | 0.1157556 | ACCEPTED 7475.920599 | ACCEPTED 7475.920599 |
-| C box + 4 keep-clears + lattice | all 4 | **REFUSED** | ACCEPTED 7.2386 / 8.0254 ×3 (required 1.5) |
+| C box + 4 keep-clears + lattice | all 4 | **REFUSED** | ACCEPTED 7.238580468 / 8.025392377 ×3 (required 1.5) |
 | D box + self-weight + lattice | 3 rungs | **REFUSED** | identical to B, rung for rung |
 
 **No verdict flips and no margin drift on any existing path.** D's ladder being
@@ -220,7 +309,8 @@ B_box_nolattice   HEAD vs NEW: max |d rho| = 0.000e+00   classification flips = 
 ```
 
 Zero drift, and the comparator demonstrably sees a 1e-9 move — the zero is a
-measurement, not a blind spot.
+measurement, not a blind spot. Unchanged by the P1/P2 fixes: neither touches the
+optimizer, and the design-box ladder (job D) is still digit-for-digit job B's.
 
 ### AI5 — smoothing too
 
@@ -256,16 +346,21 @@ re-certification ran on.
 Every latticed receipt on a design-box run carries an `added_material` section.
 Measured:
 
-| specimen | printed | inside part | outside | outside % | kept solid | volume |
+| specimen | printed | inside part | outside | outside % | kept solid (whole-cell) | % |
 |---|---|---|---|---|---|---|
-| D box + self-weight, vf 0.80 | 1286 | 570 | **716** | **55.7%** | 716 | 302.06 mm³ |
-| E the same design re-latticed | 1286 | 570 | 716 | 55.7% | 716 | 302.06 mm³ |
-| C box + keep-clears + declared load, vf 0.68 | 2064 | 2064 | 0 | 0.0% | 0 | 0.00 mm³ |
+| D box + self-weight, vf 0.80 | 1286 | 570 | **716** | **55.7%** | **892** | **69.4%** |
+| D vf 0.70 | 726 | 460 | 266 | 36.6% | 394 | 54.3% |
+| D vf 0.60 | 360 | 318 | 42 | 11.7% | 88 | 24.4% |
+| E the same design re-latticed | 1286 | 570 | 716 | 55.7% | 892 | 69.4% |
+| C box + keep-clears + declared load, vf 0.68 | 2064 | 2064 | 0 | 0.0% | 0 | 0.0% |
 
 The counts partition the printed set exactly (`inside + outside == printed`,
-asserted). Under the shipped policy every outside voxel is dropped from the
-lattice mask and picked up by the solid companion body — asserted too, so material
-can never be certified solid and then omitted from the file. C growing nothing
+asserted), and `kept_solid_voxels >= outside_original_part` is asserted too — the
+whole-cell rule's cost is reported, never absorbed. Every kept-solid voxel is
+picked up by the solid companion body, so material can never be certified solid
+and then omitted from the file. Each receipt also carries the **P1 audit**:
+`certified_lattice_cells`, `emitted_lattice_cells` (the generator's own count) and
+`voxels_strut_and_solid`. C growing nothing
 outside the part is a real result, not a null: with a declared load the optimizer
 had no reason to leave the plate, which is exactly why the D specimen exists.
 
@@ -285,6 +380,10 @@ Rerun of the design-box lattice **optimize** job: 16 artifacts (job C) and 13
   callers; the block was moved out of `minimize_plastic`, not copied. The optimize
   path additionally asserts that the domain it resolves is the grid
   `minimize_plastic_solved_grid` names.
+* **Known gap, refused rather than shipped**: `grading` + `design_box`. The graded
+  cell plan is chosen before the added-material policy runs, so the swept
+  multilevel emission could reproduce P1 in another shape. Refused with that
+  reason named — strictly narrower than the refusal that stood before this task.
 * **"If the retained job document does not carry enough to rebuild the expanded
   grid exactly, report the storage gap."** No gap. The job carries `design_box`
   and `keep_outs`, which is everything `expand_design_domain` needs, and
@@ -337,11 +436,29 @@ byte for byte, down to the meshes.
 outside your original part, should that new material be latticed, or stay solid?
 Right now it stays solid, because that is the safe answer — solid is always
 stronger than lattice, so the strength number can't be flattering. But on the test
-part, that new material is **56% of the object**. So you would be getting a lattice
-inside your original plate and solid metal-thick plastic everywhere the optimizer
-grew, which may be the opposite of why you asked for a lattice. Every certificate
-now prints that percentage so you can see what it is costing on your own parts.
-Changing the answer is one line; I have left it where it is until you say.
+part, that new material is **56% of the object, and 69% once you count the rule
+that keeps whole lattice cells solid** (a cell is the smallest thing the generator
+can place, so a cell that is part new material has to be all-or-nothing). So you
+would be getting a lattice inside your original plate and solid plastic everywhere
+the optimizer grew, which may be the opposite of why you asked for a lattice.
+Every certificate now prints both percentages so you can see what it is costing on
+your own parts. Changing the answer is one line; I have left it where it is until
+you say.
+
+**Two bugs the review caught, both mine, both fixed.** The first was the worse
+one: the certificate was quietly describing a different object than the file. It
+said "this material is kept solid", but the strut generator had never been told,
+so it filled those places with struts *and* the solid was written on top — the two
+were laid over each other. On the test part that was most of the file. It is fixed,
+and there is now a check in every certificate that counts the cells the generator
+actually wrote and the cells the certificate says are latticed, and refuses to
+agree unless the two numbers match. On the test part: 16 and 16, and zero places
+where both a strut and solid were written.
+
+The second: asking for a plain re-check of a part (no smoothed mesh handed in)
+while a design box was set would have measured the *whole box filled with plastic*
+instead of your part. Also fixed, and now checked by asserting that the answer with
+a design box and the answer without one are identical to the last digit.
 
 Two other things you should know:
 

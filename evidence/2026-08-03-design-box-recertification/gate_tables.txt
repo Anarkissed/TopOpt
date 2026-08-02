@@ -1,4 +1,4 @@
-# AI4 — FULL GATE TABLE, before and after, every rung
+# AI4 — FULL GATE TABLE, before and after, every rung (RE-RUN after the P1/P2 fixes)
 
 A  no design box + lattice   HEAD
     printed_fr   verdict     margin_worst_case    margin_effective   required   max_stress_mpa

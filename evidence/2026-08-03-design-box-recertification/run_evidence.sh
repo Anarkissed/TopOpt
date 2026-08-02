@@ -27,6 +27,9 @@ print(json.dumps(j,indent=2))
 PYEOF
 "$CLI" lattice-variant "$J/.E_resolved.json" --out "$OUT/E_lattice_variant" 2>&1 | tail -3 || echo "REFUSED/FAILED: E"
 rm -f "$J/.E_resolved.json"
+echo "=== analyze NO MESH, design box (H) vs no design box (I) — P2 ==="
+"$CLI" analyze "$J/F_box_analyze_smooth.json"  --out "$OUT/H_analyze_nomesh_box"   2>&1 | tail -2 || echo "FAILED: H"
+"$CLI" analyze "$J/G_nobox_analyze_smooth.json" --out "$OUT/I_analyze_nomesh_nobox" 2>&1 | tail -2 || echo "FAILED: I"
 echo "=== analyze --smooth F (on D's variant_080.stl) ==="
 "$CLI" analyze "$J/F_box_analyze_smooth.json" \
   --mesh "$OUT/D_box_selfweight_lattice/variant_080.stl" --smooth 0.4 \

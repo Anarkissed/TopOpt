@@ -27,6 +27,8 @@ python3 evidence/2026-08-03-design-box-recertification/design_cmp.py  <head>/des
 | `E_box_lattice_variant` | `lattice_variant` on D's `design.bin` | REFUSED | runs, reproduction exact |
 | `F_box_analyze_smooth` | `analyze --smooth` on D's variant (AI5) | clipped to the part grid | certifies the whole object |
 | `G_nobox_analyze_smooth` | the same with no design box | runs | byte-identical |
+| `H_analyze_nomesh_box` | analyze, design box, NO `--mesh` (P2's bar) | runs | byte-identical to HEAD **and** to I |
+| `I_analyze_nomesh_nobox` | the same with no design box | runs | byte-identical |
 | `X_preexisting_selfweight_clearance_crash` | **not this task's**: keep-clear into the add-region + self-weight, no lattice block | throws | throws identically |
 
 ## Records
@@ -35,5 +37,8 @@ python3 evidence/2026-08-03-design-box-recertification/design_cmp.py  <head>/des
   voxel-classification comparison against a 1e-9 negative-control floor.
 * `byte_identity.txt` — AI3: stash-rebuild checksums, per artifact.
 * `preexisting_selfweight_clearance_crash.txt` — the pre-existing blocker, on both binaries.
+* `p1_p2_audit.txt` — the two PR-285 review fixes, measured: the certified vs
+  EMITTED lattice cell sets per variant, the strut-and-solid overlap count, the
+  P2 no-mesh analyze triple, and the determinism re-run.
 * `receipts/` — the certification receipts the design-box runs produced,
-  including the `added_material` section AI6 asks for.
+  including the `added_material` section AI6 asks for and the P1 audit counters.

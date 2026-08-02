@@ -5,12 +5,12 @@
       "volume_fraction": 0.4135048232,
       "printed_fraction": 0.4135048232,
       "volume_saved_fraction": 0.5864951768,
-      "max_stress_mpa": 0.004537347539,
-      "max_interlayer_tension_mpa": 0.000266755255,
+      "max_stress_mpa": 0.004566230047,
+      "max_interlayer_tension_mpa": 0.0002780615432,
       "margin": {
-        "in_plane": 12121.61941,
-        "interlayer": 113399.8279,
-        "worst_case": 12121.61941
+        "in_plane": 12044.94724,
+        "interlayer": 108788.8661,
+        "worst_case": 12044.94724
       },
       "orientation": {
         "x": 0,
@@ -31,7 +31,7 @@
       "min_feature_warning": "146 region(s) of this variant may be thinner than 2 voxels (~reliably printable width at this resolution). Consider a higher volume fraction variant, finer voxel resolution, or a smaller nozzle.",
       "accepted": true,
       "margin_required": 0,
-      "margin_effective": 12121.61941,
+      "margin_effective": 12044.94724,
       "rejection_reason": ""
     }
   ],

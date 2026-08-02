@@ -42,6 +42,22 @@
 //   AI7 DETERMINISM. Every artifact the design-box lattice job writes is
 //       byte-identical on a rerun.
 //
+//   P1  THE CERTIFIED OBJECT IS THE EXPORTED OBJECT, CELL FOR CELL (review of
+//       PR 285). The uniform export path passed a NULL cell predicate — "lattice
+//       every cell the boundary cannot prove empty" — so the added-material
+//       policy cleared voxels from the certification mask while the generator
+//       kept writing struts through them AND the companion wrote them solid.
+//       Section A now asserts the generator's OWN emitted-cell count equals the
+//       cell set the certification mask implies, and that no voxel receives both
+//       a strut and companion solid.
+//
+//   P2  A NO-MESH ANALYZE MUST NOT CERTIFY A FILLED BOX (review of PR 285).
+//       expand_design_domain tags the in-box Active region Interior (SOLID), and
+//       the no-mesh analyze path takes its occupancy from the grid's tags — so
+//       running it on the expanded grid certifies the box filled, not the part
+//       as drawn. Section E asserts a design-box no-mesh analyze reports the
+//       same solid count, mass and margin as the same analyze with no box.
+//
 // Self-contained CHECK harness (ARCHITECTURE §4), like the other tests.
 
 #include "topopt/analyze.hpp"
@@ -244,10 +260,43 @@ static void section_optimize_with_box() {
   CHECK(json_number(rcpt, "solid_region_voxels") >= kept_solid,
         "AI6: the solid companion body carries at least the kept-solid voxels — "
         "certified solid AND exported, never certified and then omitted");
+  const double kept_total = json_number(rcpt, "kept_solid_voxels");
+  CHECK(kept_total >= kept_solid,
+        "AI6: the WHOLE-CELL cost is reported and is at least the added material "
+        "itself (the policy keeps a cell holding any added material solid entire, "
+        "so part voxels sharing those cells are kept solid too)");
   std::printf("[AI6] printed %.0f voxels: %.0f inside the part, %.0f outside "
-              "(%.1f%%), %.0f kept solid, %.3f mm^3\n",
-              printed, inside, outside, 100.0 * outside / printed, kept_solid,
-              json_number(rcpt, "outside_volume_mm3"));
+              "(%.1f%%), %.0f kept solid whole-cell (%.1f%%), %.3f mm^3\n",
+              printed, inside, outside, 100.0 * outside / printed, kept_total,
+              100.0 * kept_total / printed,
+              json_number(rcpt, "kept_solid_volume_mm3"));
+
+  // ── P1: THE CERTIFIED OBJECT IS THE EXPORTED OBJECT, CELL FOR CELL.
+  //
+  // The uniform export path used to pass a NULL cell predicate, which means
+  // "lattice every cell the boundary cannot prove empty" — so the added-material
+  // policy cleared voxels from the certification mask while the generator went on
+  // writing struts through them, and the solid companion wrote the same voxels
+  // SOLID. Struts and companion solid in the same place, and a receipt claiming
+  // "kept solid". These two numbers are what makes that unrepresentable:
+  //   * the cell set the generator EMITTED (its own LatticeGenStats count) equals
+  //     the cell set the certification mask implies, cell for cell;
+  //   * no printed voxel is both inside an emitted lattice cell and written as
+  //     companion solid.
+  const double certified_cells = json_number(rcpt, "certified_lattice_cells");
+  const double emitted_cells = json_number(rcpt, "emitted_lattice_cells");
+  CHECK(certified_cells > 0.0,
+        "P1: the run latticed something (an all-solid variant would make the "
+        "equality below vacuous)");
+  CHECK(certified_cells == emitted_cells,
+        "P1: the cell set the GENERATOR emitted equals the cell set the "
+        "CERTIFICATION mask implies, cell for cell");
+  CHECK(json_number(rcpt, "voxels_strut_and_solid") == 0.0,
+        "P1: no voxel receives both a strut and companion solid");
+  std::printf("[P1] certified cells %.0f == emitted cells %.0f; voxels with both "
+              "a strut and companion solid: %.0f\n",
+              certified_cells, emitted_cells,
+              json_number(rcpt, "voxels_strut_and_solid"));
 
   g_run_receipt = rcpt;
   g_fixture_face_ids = run.fixture_face_ids;
@@ -499,12 +548,74 @@ static void section_no_box_identity() {
         "voxels, so 'material outside the part' is empty by construction");
 }
 
+// ---------------------------------------------------------------------------
+// E. P2 — A NO-MESH ANALYZE MUST NOT CERTIFY A FILLED BOX.
+//
+// analyze_job resolves the design domain so that a SUBSTITUTE mesh (a smoothed
+// design-box variant) is voxelized onto the grid it was produced on instead of
+// being clipped at the part's bounding box. The expanded grid must NOT be used
+// when there is no substitute mesh: expand_design_domain tags the whole in-box
+// Active region Interior, i.e. SOLID, and the no-mesh path takes its occupancy
+// from the grid's own tags — so certifying there would certify the design box
+// FILLED rather than the part as drawn. That is RUN SIM and every non-smoothing
+// re-certification.
+//
+// The bar: a design-box analyze with no --mesh reports the SAME solid count and
+// the SAME mass as the same analyze with NO design box.
+static void section_no_mesh_analyze_is_the_part() {
+  const std::string fixture_dir = std::string(MESH_FIXTURE_DIR);
+  const MaterialLibrary materials = load_materials_file(MATERIALS_JSON_PATH);
+  const SettingsRules rules = load_settings_rules_file(SETTINGS_RULES_PATH);
+  const std::string tmp = std::string(CLI_TMP_DIR);
+
+  JobDescription with_box = box_job();
+  with_box.mode = "analyze";
+  JobDescription without_box = with_box;
+  without_box.has_design_box = false;
+
+  const std::string out_a = tmp + "/dbx_analyze_box";
+  const std::string out_b = tmp + "/dbx_analyze_nobox";
+  std::filesystem::remove_all(out_a);
+  std::filesystem::remove_all(out_b);
+  const AnalyzeJobResult a =
+      analyze_job(with_box, fixture_dir, out_a, materials, rules);
+  const AnalyzeJobResult b =
+      analyze_job(without_box, fixture_dir, out_b, materials, rules);
+
+  CHECK(!a.analyzed_mesh && !b.analyzed_mesh,
+        "P2: both are the no-mesh path (the solid part as drawn)");
+  CHECK(a.analysis.printed_voxels == b.analysis.printed_voxels,
+        "P2: a design-box analyze with no --mesh certifies the SAME solid voxel "
+        "count as the same analyze with no design box — not the filled box");
+  CHECK(a.voxel_mass_grams == b.voxel_mass_grams,
+        "P2: ... and the same mass, exactly");
+  CHECK(a.analysis.margin.worst_case == b.analysis.margin.worst_case,
+        "P2: ... and the same margin, so no verdict can turn on the box being "
+        "present");
+  CHECK(a.analysis.max_von_mises == b.analysis.max_von_mises,
+        "P2: ... and the same peak stress");
+  CHECK(!contains(read_file(a.provenance_path), "\"design_box\""),
+        "P2: and the provenance does NOT claim an expansion it did not use");
+  std::printf("[P2] no-mesh analyze: box %d voxels / %.9g g / margin %.10g == "
+              "no-box %d voxels / %.9g g / margin %.10g\n",
+              a.analysis.printed_voxels, a.voxel_mass_grams,
+              a.analysis.margin.worst_case, b.analysis.printed_voxels,
+              b.voxel_mass_grams, b.analysis.margin.worst_case);
+
+  // The counterpart the fix must NOT break: WITH a substitute mesh the expansion
+  // IS used, and the provenance says so. (That the expanded analysis is the
+  // right one is measured in the handoff — voxel mass against the mesh's own
+  // enclosed-volume mass; here we only assert the two paths are distinguished.)
+  CHECK(a.analysis.printed_voxels > 0, "P2: the no-mesh analyze certified a part");
+}
+
 int main() {
   std::printf("=== design-box lattice re-certification ===\n");
   section_optimize_with_box();
   section_relattice_with_box();
   section_no_remap_negative_control();
   section_no_box_identity();
+  section_no_mesh_analyze_is_the_part();
   std::printf("%d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }
