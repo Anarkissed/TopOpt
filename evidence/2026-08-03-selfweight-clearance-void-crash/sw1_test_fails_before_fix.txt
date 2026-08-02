@@ -1,0 +1,27 @@
+[SW1] threw: fea_solve_cg: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+FAIL (line 275): SW1: a self-weight design-box run whose keep-clear reaches into the growth region must SOLVE, not throw 'under-constrained system'
+[SW1b] threw: fea_solve_cg: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+FAIL (line 299): SW1(b): the coarse warm-start pre-solve must not weigh coarse cells its own coarse mask has voided
+FAIL (line 336): SW3(b): the total self-weight drops by EXACTLY the voided material's weight (voided voxel count x g x rho x voxel volume)
+FAIL (line 364): SW3(c): no surviving load entry sits on a DOF whose every incident voxel is void — this is the invariant the M3.1 gate enforces
+=========================================================
+ SELF-WEIGHT ON CLEARANCE-VOIDED VOXELS -- SW1..SW4
+=========================================================
+
+specimen: part 16x8x4 -> solved 16x8x16; keep-clear froze 144 voxels, 144 of them tagged SOLID
+
+SW1 -- design box + keep-clear into the growth region + self-weight
+
+SW3 -- the weight that remains is the weight that is there
+[SW3] total self-weight  before 1.868451840000e+04 N  after 1.868451840000e+04 N
+[SW3] drop 0.000000000000e+00 N; 144 voxels x 1.216440000000e+01 N/voxel = 1.751673600000e+03 N
+[SW3] orphaned load DOFs: pre-fix definition 90, fixed 90
+
+SW4 -- every caller reaches the SAME load case
+[SW4] 1989 load entries, identical across callers
+
+SW2 -- the ONE definition, asserted against the sources
+[SW2] minimize_plastic.cpp: 4 self_weight_loads( mentions, 3 of them masked_
+[SW2] run_job.cpp calls design_domain_loads 3 time(s)
+
+23 checks, 4 failures

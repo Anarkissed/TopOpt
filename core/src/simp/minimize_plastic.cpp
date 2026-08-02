@@ -47,6 +47,39 @@ Vec3 normalized(const Vec3& v) {
 // topopt/analyze.hpp so the ladder gate and a standalone re-analysis share ONE
 // definition; element_dofs lives with the stress loop it feeds, inside analyze.cpp.
 
+// THE ONE self-weight-under-a-mask derivation (task 2026-08-03-selfweight-
+// clearance-void-crash). Self-weight is the weight of the material that is
+// THERE: `self_weight_loads` keys on the grid's TAGS, but a design mask can
+// remove material the tags still call solid — `expand_design_domain` tags every
+// in-box Active voxel `Interior`, and the "Keep clear" overlay (handoff 100)
+// then pins some of those FrozenVoid. A FrozenVoid voxel is driven to rho_min
+// and its DOFs are eliminated by the M3.1 void gate, so weighing it puts body
+// force on a DOF with no stiffness path and the solver refuses the whole run
+// ("under-constrained system"). Voiding the tag first is exactly what
+// expand_design_domain already does for a keep-out box ("Tag Empty so it
+// carries no FEA element and no self-weight"); a clearance arrives later, as a
+// mask, and could not.
+//
+// Every self-weight load case in this file goes through here — the design load
+// (design_domain_loads) and the coarse warm-start pre-solve's own — so the two
+// cannot drift, and neither can weigh material its mask has removed.
+//
+// A mask with no FrozenVoid entry over a solid voxel writes nothing (Empty over
+// Empty), so this is bit-identical to weighing `grid` unmasked on every
+// clearance-free run: THE ONE RULE.
+std::vector<NodalLoad> masked_self_weight_loads(const VoxelGrid& grid,
+                                                const DesignMask& mask,
+                                                double density, double gravity,
+                                                Vec3 direction) {
+  if (mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "masked_self_weight_loads: mask size != grid.voxel_count()");
+  VoxelGrid weighed = grid;
+  for (std::size_t idx = 0; idx < mask.size(); ++idx)
+    if (mask[idx] == MaskValue::FrozenVoid) weighed.tags[idx] = VoxelTag::Empty;
+  return self_weight_loads(weighed, density, gravity, direction);
+}
+
 }  // namespace
 
 // --- THE ONE design-domain resolution (pipeline.hpp) -------------------------
@@ -146,19 +179,77 @@ SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
   return out;
 }
 
+// --- THE ONE effective design mask (pipeline.hpp) ----------------------------
+// The base classification plus the "Keep clear" overlay, composed in one place
+// so the mask a run OPTIMISES under and the load it SOLVES under are derived
+// from the same object. minimize_plastic below consumes it; design_domain_loads
+// consumes it to decide which voxels still hold material to weigh.
+DesignMask design_domain_mask(const SolvedDesignDomain& domain,
+                              const MinimizePlasticOptions& options) {
+  const VoxelGrid& G = domain.grid;
+  // Mask-aware optimize. With a design box the effective mask is built by
+  // expand_design_domain (imported part FrozenSolid, keep-out FrozenVoid, the
+  // rest of the design volume Active). Otherwise: an all-Active mask — Fixture
+  // voxels are implicitly FrozenSolid (M3.7), so the §7 V3 retention gate holds
+  // structurally. M7.anchor-integrity (FIX 1): when the caller supplies a design
+  // mask (no design box) it REPLACES the all-Active default, letting the
+  // anchor/load faces freeze an N-voxel structural pad (FrozenSolid) rather than
+  // only the 1-voxel BC skin (diagnosis 064). Load/Fixture tags are still forced
+  // FrozenSolid on top of it by the mask-aware simp path (effective_mask), so the
+  // mask only ADDS keep-in pad voxels; it never un-freezes a tagged BC voxel.
+  if (!domain.expanded && !options.design_mask.empty() &&
+      options.design_mask.size() != G.voxel_count())
+    throw std::invalid_argument(
+        "minimize_plastic: design_mask size != grid.voxel_count()");
+  DesignMask mask =
+      domain.expanded ? domain.mask
+                      : (options.design_mask.empty() ? make_active_mask(G)
+                                                     : options.design_mask);
+
+  // Handoff 100 — OR the "Keep clear" clearance overlay into the effective mask.
+  // `clearance_void` is SOLVED-grid-indexed: each FrozenVoid entry forbids
+  // NEW growth into a declared clearance region (a swept bolt cylinder / a slab
+  // in front of a mounting face), EXCEPT where the effective mask already pins
+  // the voxel FrozenSolid — the imported part / anchor pad WINS (design 095
+  // STEP 1c; the rasterizer already excluded part material, this guards the pad
+  // + frozen box too). EMPTY (the default) → no clearance → this is skipped and
+  // the run is byte-for-byte identical to before (THE ONE RULE).
+  if (!options.clearance_void.empty()) {
+    if (options.clearance_void.size() != G.voxel_count())
+      throw std::invalid_argument(
+          "minimize_plastic: clearance_void size != solved grid voxel_count()");
+    for (std::size_t idx = 0; idx < mask.size(); ++idx)
+      if (options.clearance_void[idx] == MaskValue::FrozenVoid &&
+          mask[idx] != MaskValue::FrozenSolid)
+        mask[idx] = MaskValue::FrozenVoid;
+  }
+  return mask;
+}
+
 std::vector<NodalLoad> design_domain_loads(const SolvedDesignDomain& domain,
                                            const MinimizePlasticOptions& options,
                                            double material_density_g_cm3) {
   // The design load (pipeline.hpp modeling note). Mode (a): a caller-supplied
   // external load case (the user's tagged Load faces via traction_loads, already
   // remapped onto the expanded grid by resolve_design_domain) takes precedence.
+  // A declared traction is a SURFACE load on the part's own faces, so the
+  // clearance below has nothing to say about it.
+  if (!options.external_loads.empty()) return domain.external_loads;
+
   // Mode (b): self-weight on the effective solid grid (self_weight_loads
   // validates density/gravity/direction and normalizes the direction
   // internally; with a design box the weight covers the frozen part plus the
   // Active design envelope).
-  if (!options.external_loads.empty()) return domain.external_loads;
-  return self_weight_loads(domain.grid, material_density_g_cm3, options.gravity,
-                           options.gravity_direction);
+  //
+  // ...MINUS the material the effective mask has removed — see
+  // masked_self_weight_loads above for why weighing a FrozenVoid voxel refuses
+  // the run, and pipeline.hpp for the modeling statement. With no clearance
+  // nothing in `mask` is FrozenVoid over a voxel the grid does not already tag
+  // Empty, so this is bit-identical to weighing `domain.grid` itself — THE ONE
+  // RULE, asserted in test_selfweight_clearance_void SW3(a).
+  return masked_self_weight_loads(domain.grid, design_domain_mask(domain, options),
+                                  material_density_g_cm3, options.gravity,
+                                  options.gravity_direction);
 }
 
 std::vector<char> original_part_voxels(const VoxelGrid& part_grid,
@@ -349,42 +440,14 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   params.poisson = material.poisson;
   params.penalty = 3.0;
 
-  // Mask-aware optimize. With a design box the effective mask is built by
-  // expand_design_domain (imported part FrozenSolid, keep-out FrozenVoid, the
-  // rest of the design volume Active). Otherwise: an all-Active mask — Fixture
-  // voxels are implicitly FrozenSolid (M3.7), so the §7 V3 retention gate holds
-  // structurally. M7.anchor-integrity (FIX 1): when the caller supplies a design
-  // mask (no design box) it REPLACES the all-Active default, letting the
-  // anchor/load faces freeze an N-voxel structural pad (FrozenSolid) rather than
-  // only the 1-voxel BC skin (diagnosis 064). Load/Fixture tags are still forced
-  // FrozenSolid on top of it by the mask-aware simp path (effective_mask), so the
-  // mask only ADDS keep-in pad voxels; it never un-freezes a tagged BC voxel.
-  if (!expanded && !options.design_mask.empty() &&
-      options.design_mask.size() != grid.voxel_count())
-    throw std::invalid_argument(
-        "minimize_plastic: design_mask size != grid.voxel_count()");
-  DesignMask mask =
-      expanded ? domain.mask
-               : (options.design_mask.empty() ? make_active_mask(G)
-                                              : options.design_mask);
-
-  // Handoff 100 — OR the "Keep clear" clearance overlay into the effective mask.
-  // `clearance_void` is SOLVED-grid-indexed (G): each FrozenVoid entry forbids
-  // NEW growth into a declared clearance region (a swept bolt cylinder / a slab
-  // in front of a mounting face), EXCEPT where the effective mask already pins
-  // the voxel FrozenSolid — the imported part / anchor pad WINS (design 095
-  // STEP 1c; the rasterizer already excluded part material, this guards the pad
-  // + frozen box too). EMPTY (the default) → no clearance → this is skipped and
-  // the run is byte-for-byte identical to before (THE ONE RULE).
-  if (!options.clearance_void.empty()) {
-    if (options.clearance_void.size() != G.voxel_count())
-      throw std::invalid_argument(
-          "minimize_plastic: clearance_void size != solved grid voxel_count()");
-    for (std::size_t idx = 0; idx < mask.size(); ++idx)
-      if (options.clearance_void[idx] == MaskValue::FrozenVoid &&
-          mask[idx] != MaskValue::FrozenSolid)
-        mask[idx] = MaskValue::FrozenVoid;
-  }
+  // The effective mask, from THE ONE definition (design_domain_mask,
+  // pipeline.hpp) — the base classification plus the "Keep clear" overlay,
+  // composed exactly as this site used to compose it inline. It is shared with
+  // design_domain_loads above precisely so the mask this run optimises under and
+  // the load it solves under cannot describe different material: weighing a
+  // voxel this mask has voided is the under-constrained system the M3.1 void
+  // gate refuses (task 2026-08-03-selfweight-clearance-void-crash).
+  DesignMask mask = design_domain_mask(domain, options);
 
   // Handoff 080 (Option 2 — "whole-domain optimize"): on a design-box run that does
   // NOT freeze the imported part, the part is an Active design region the optimizer
@@ -507,12 +570,23 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     const long long warm_mv0 = fea_matvec_count();
     const VoxelGrid Gc = coarsen_grid(G);
     const std::vector<DirichletBC> Bc = coarsen_bcs(G, Gc, B);
+    const DesignMask mask_c = coarsen_mask(G, Gc, mask);
+    // Self-weight through THE ONE masked derivation, on the COARSE pair — the
+    // pre-solve has the same exposure the fine load did, one level up.
+    // coarsen_grid tags a coarse cell solid if ANY child is solid, while
+    // coarsen_mask votes it FrozenVoid when every solid child is FrozenVoid, so
+    // a clearance-voided region produces coarse cells that are tag-solid and
+    // mask-void — exactly the mismatch that refuses the run (task 2026-08-03-
+    // selfweight-clearance-void-crash). A keep-out box never reached this
+    // because its voxels are tagged Empty and coarsen_mask skips non-solid
+    // children, which is also why this is byte-identical with no clearance
+    // declared.
     const std::vector<NodalLoad> loads_c =
         !options.external_loads.empty()
             ? restrict_loads(G, Gc, loads)
-            : self_weight_loads(Gc, material.density_g_cm3, options.gravity,
-                                options.gravity_direction);
-    const DesignMask mask_c = coarsen_mask(G, Gc, mask);
+            : masked_self_weight_loads(Gc, mask_c, material.density_g_cm3,
+                                       options.gravity,
+                                       options.gravity_direction);
 
     SimpOptions opt_c = options.simp;
     opt_c.updater = options.updater;

@@ -1,0 +1,39 @@
+=== run A_nobox_lattice ===
+mesh: /tmp/swc_new/A_nobox_lattice/variant_060_lattice.stl
+run_info: /tmp/swc_new/A_nobox_lattice/run_info.json
+iterations: /tmp/swc_new/A_nobox_lattice/iterations.csv
+=== run B_box_nolattice ===
+mesh: /tmp/swc_new/B_box_nolattice/variant_060.stl
+run_info: /tmp/swc_new/B_box_nolattice/run_info.json
+iterations: /tmp/swc_new/B_box_nolattice/iterations.csv
+=== run C_box_keepclear_lattice ===
+mesh: /tmp/swc_new/C_box_keepclear_lattice/variant_026_lattice.stl
+run_info: /tmp/swc_new/C_box_keepclear_lattice/run_info.json
+iterations: /tmp/swc_new/C_box_keepclear_lattice/iterations.csv
+=== run D_box_selfweight_lattice ===
+mesh: /tmp/swc_new/D_box_selfweight_lattice/variant_060_lattice.stl
+run_info: /tmp/swc_new/D_box_selfweight_lattice/run_info.json
+iterations: /tmp/swc_new/D_box_selfweight_lattice/iterations.csv
+=== run Y_nobox_clearance_selfweight ===
+mesh: /tmp/swc_new/Y_nobox_clearance_selfweight/variant_026.stl
+run_info: /tmp/swc_new/Y_nobox_clearance_selfweight/run_info.json
+iterations: /tmp/swc_new/Y_nobox_clearance_selfweight/iterations.csv
+=== run X_preexisting_selfweight_clearance_crash ===
+mesh: /tmp/swc_new/X_preexisting_selfweight_clearance_crash/variant_026.stl
+run_info: /tmp/swc_new/X_preexisting_selfweight_clearance_crash/run_info.json
+iterations: /tmp/swc_new/X_preexisting_selfweight_clearance_crash/iterations.csv
+=== run Z_box_clearance_selfweight_lattice ===
+mesh: /tmp/swc_new/Z_box_clearance_selfweight_lattice/variant_026_lattice.stl
+run_info: /tmp/swc_new/Z_box_clearance_selfweight_lattice/run_info.json
+iterations: /tmp/swc_new/Z_box_clearance_selfweight_lattice/iterations.csv
+=== lattice-variant ZV (on Z's design.bin) ===
+loadcase: /tmp/swc_new/ZV_lattice_variant/loadcase.json
+fields: /tmp/swc_new/ZV_lattice_variant/fields.bin
+wall: 0.89 s
+=== analyze ZA (self-weight form, on Z's variant mesh) ===
+report: /tmp/swc_new/ZA_analyze_on_Z_mesh/analysis_report.json
+provenance: /tmp/swc_new/ZA_analyze_on_Z_mesh/analysis.json
+fields: /tmp/swc_new/ZA_analyze_on_Z_mesh/fields.bin
+=== analyze ZQ (loadcase form, anchors + ZERO force groups) ===
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+topopt-cli: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)

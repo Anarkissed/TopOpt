@@ -1,0 +1,12 @@
+SW6 DETERMINISM — the fixed binary, same job twice, on this machine
+==================================================================
+
+unit test (test_selfweight_clearance_void), run twice:
+  IDENTICAL output, both runs
+29 checks, 0 failures
+
+JOB                                      RUN-1              RUN-2              VERDICT
+D                                        341fb509eeaf2623   341fb509eeaf2623   IDENTICAL
+Y                                        48687b9a1a600e41   48687b9a1a600e41   IDENTICAL
+ZV                                       1f9db01075f5035e   1f9db01075f5035e   IDENTICAL
+ZA                                       d8705509cc102b23   d8705509cc102b23   IDENTICAL

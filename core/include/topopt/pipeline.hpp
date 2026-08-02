@@ -1206,12 +1206,57 @@ SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
                                          const std::vector<DirichletBC>& bcs,
                                          const MinimizePlasticOptions& options);
 
+// THE effective design mask `domain` is optimised under, before the mask-aware
+// SIMP path applies its own Load/Fixture/Empty reclassification (effective_mask,
+// simp.hpp). Composed in one place from the two things that build it:
+//
+//   * the BASE — `domain.mask` under a design box (expand_design_domain's
+//     FrozenSolid part / FrozenVoid keep-out / Active design volume, with any
+//     caller anchor pad already merged), else the caller's own `design_mask`,
+//     else an all-Active mask;
+//   * the "Keep clear" OVERLAY (`options.clearance_void`, handoff 100) OR'd on
+//     top: each FrozenVoid entry forbids NEW growth into a declared clearance
+//     region, EXCEPT where the base already pins the voxel FrozenSolid — the
+//     imported part / anchor pad WINS (design 095 STEP 1c).
+//
+// EMPTY `clearance_void` (the default) => the overlay step is skipped and the
+// result is the base verbatim, so a clearance-free caller is byte-identical to
+// what it was before this existed (THE ONE RULE).
+//
+// It is public because `design_domain_loads` must void the same voxels this
+// masks — a load that lands where the mask has removed the material is exactly
+// the under-constrained system the M3.1 void-DOF gate refuses. Deriving both
+// from ONE mask is what makes that impossible rather than merely unlikely.
+//
+// Throws std::invalid_argument if a no-box `options.design_mask` or a
+// non-empty `options.clearance_void` is not sized `domain.grid.voxel_count()`.
+DesignMask design_domain_mask(const SolvedDesignDomain& domain,
+                              const MinimizePlasticOptions& options);
+
 // THE load case that domain is solved under: the caller's declared external
 // loads REMAPPED onto `domain.grid` when it declared any, else self-weight
 // computed on `domain.grid` (which, expanded, covers the part plus the Active
 // design envelope — exactly what the driver's ladder carries). ONE definition,
 // so "the load the run certified under" is the same object at every site that
 // has to reconstruct it.
+//
+// SELF-WEIGHT IS THE WEIGHT OF THE MATERIAL THAT IS THERE. `self_weight_loads`
+// keys on the grid's TAGS, and `expand_design_domain` tags every in-box Active
+// voxel `Interior` — so on the box path the raw grid weighs the whole growth
+// region, including any part of it a keep-clear has removed. This function
+// therefore weighs `domain.grid` MINUS every voxel `design_domain_mask` pins
+// FrozenVoid, which is the same thing expand_design_domain already does for a
+// keep-out box ("Tag Empty so it carries no FEA element and no self-weight").
+// Without it, a design-box run whose clearance reaches into the growth region
+// and which declares no load puts body force on DOFs the void gate then
+// eliminates, and the solver refuses the run outright:
+//
+//     under-constrained system (load applied to a void DOF with no stiffness)
+//
+// The subtraction is EXACTLY the voided material's weight — g * rho * V per
+// voxel — never an approximation or a scaling (test_selfweight_clearance_void,
+// bar SW3). With no clearance nothing is voided and the result is bit-identical
+// to `self_weight_loads(domain.grid, ...)`, the definition this replaced.
 std::vector<NodalLoad> design_domain_loads(const SolvedDesignDomain& domain,
                                            const MinimizePlasticOptions& options,
                                            double material_density_g_cm3);

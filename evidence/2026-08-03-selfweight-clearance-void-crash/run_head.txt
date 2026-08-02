@@ -1,0 +1,35 @@
+=== run A_nobox_lattice ===
+mesh: /tmp/swc_head/A_nobox_lattice/variant_060_lattice.stl
+run_info: /tmp/swc_head/A_nobox_lattice/run_info.json
+iterations: /tmp/swc_head/A_nobox_lattice/iterations.csv
+=== run B_box_nolattice ===
+mesh: /tmp/swc_head/B_box_nolattice/variant_060.stl
+run_info: /tmp/swc_head/B_box_nolattice/run_info.json
+iterations: /tmp/swc_head/B_box_nolattice/iterations.csv
+=== run C_box_keepclear_lattice ===
+mesh: /tmp/swc_head/C_box_keepclear_lattice/variant_026_lattice.stl
+run_info: /tmp/swc_head/C_box_keepclear_lattice/run_info.json
+iterations: /tmp/swc_head/C_box_keepclear_lattice/iterations.csv
+=== run D_box_selfweight_lattice ===
+mesh: /tmp/swc_head/D_box_selfweight_lattice/variant_060_lattice.stl
+run_info: /tmp/swc_head/D_box_selfweight_lattice/run_info.json
+iterations: /tmp/swc_head/D_box_selfweight_lattice/iterations.csv
+=== run Y_nobox_clearance_selfweight ===
+mesh: /tmp/swc_head/Y_nobox_clearance_selfweight/variant_026.stl
+run_info: /tmp/swc_head/Y_nobox_clearance_selfweight/run_info.json
+iterations: /tmp/swc_head/Y_nobox_clearance_selfweight/iterations.csv
+=== run X_preexisting_selfweight_clearance_crash ===
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+topopt-cli: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+=== run Z_box_clearance_selfweight_lattice ===
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+topopt-cli: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+=== lattice-variant ZV (on Z's design.bin) ===
+SKIPPED ZV: Z produced no design.bin (Z itself refused)
+=== analyze ZA (self-weight form, on Z's variant mesh) ===
+SKIPPED ZA: Z produced no variant mesh (Z itself refused)
+=== analyze ZQ (loadcase form, anchors + ZERO force groups) ===
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+topopt-cli: recommend_settings: worst_case_stress_margin must be finite and >= 0
