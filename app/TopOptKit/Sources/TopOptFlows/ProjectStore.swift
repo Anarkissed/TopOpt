@@ -132,6 +132,17 @@ public struct ProjectStore {
         try? Data(contentsOf: resultsURL(id: id))
     }
 
+    /// Whether a results blob EXISTS for this project — asked without reading it
+    /// (the blob carries every variant's mesh and fields, so a presence question
+    /// must not cost a decode). `AppModel.persist` uses it so the snapshot's
+    /// `optimized` flag can never be downgraded below what is actually on disk:
+    /// the flag is the only thing that decides whether the blob is ever read back,
+    /// and a false written over a live results file orphans it forever (task
+    /// 2026-08-03-variant-entry-gating-and-retention, bar AJ1).
+    public func hasPersistedResults(id: UUID) -> Bool {
+        fm.fileExists(atPath: resultsURL(id: id).path)
+    }
+
     // MARK: the re-lattice artifacts (task 2026-08-02-lattice-a-variant)
 
     /// The EXACT job document that produced the persisted results.

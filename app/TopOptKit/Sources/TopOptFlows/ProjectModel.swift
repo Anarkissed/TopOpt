@@ -91,7 +91,17 @@ public final class ProjectModel: ObservableObject {
     /// no job document and no design container) or a result restored from a blob
     /// written before this existed. The lattice page then says so rather than
     /// offering an action that would quietly do something else.
-    @Published public var relatticeArtifacts: RelatticeArtifacts?
+    ///
+    /// THE STORAGE LIVES ON THE RUN (task 2026-08-03-variant-entry-gating-and-
+    /// retention). It used to be its own `@Published` here, and the two could then
+    /// disagree: a failed run restores the previous variants (bar AJ1) while a pair
+    /// cleared independently on the project left those variants claiming to have
+    /// kept no design. The pair describes ONE run's results, so it moves with them
+    /// or not at all. This stays as the property every reader already uses.
+    public var relatticeArtifacts: RelatticeArtifacts? {
+        get { run.retainedArtifacts }
+        set { run.restoreArtifacts(newValue) }
+    }
 
     /// THE SECOND QUESTION (handoff 2026-08-01-build-direction-separation): which
     /// way is UP ON THE PLATE, as its own project setting rather than an inference
@@ -199,9 +209,12 @@ public final class ProjectModel: ObservableObject {
         self.run = run ?? ProjectModel.makeRun()
         // The two initial value-replays fire here during init, before any view
         // observes this object, so they're harmless no-ops.
-        self.runForwarding = Publishers.Merge(
+        self.runForwarding = Publishers.Merge3(
             self.run.$outcome.map { _ in () },
-            self.run.$phase.map { _ in () }
+            self.run.$phase.map { _ in () },
+            // The retention pair now lives on the run too, and the entry controls
+            // read it — so its changes must reach the workspace body as well.
+            self.run.$retainedArtifacts.map { _ in () }
         )
         .sink { [weak self] in self?.objectWillChange.send() }
         // Round-6 item 4: seed the undo baseline with the just-built state (so undo can never go

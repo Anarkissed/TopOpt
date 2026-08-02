@@ -148,6 +148,20 @@ public final class ComputeLocationModel: ObservableObject {
         }
     }
 
+    /// The name of the machine a run dispatched NOW would land on, or nil for a
+    /// local run (task 2026-08-03-variant-entry-gating-and-retention, bar AJ5). It
+    /// is stamped onto the finished outcome so a result can always say which
+    /// machine solved it — the fact the maintainer could not read off the screen
+    /// when a refusal told him to "re-run it on a Mac worker".
+    public var selectedWorkerName: String? {
+        guard activeRemote != nil else { return nil }
+        switch choice {
+        case .local: return nil
+        case .worker(let name): return name
+        case .manual(let host, let port): return "\(host):\(port)"
+        }
+    }
+
     /// Resolve a Bonjour service endpoint to a concrete host:port for URLSession by
     /// opening a throwaway NWConnection and reading its resolved path. LAN-typical
     /// IPv4 works directly; an IPv6 link-local address keeps its %zone (URLSession
