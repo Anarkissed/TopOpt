@@ -4519,10 +4519,12 @@ public struct WorkspacePlaceholder: View {
     /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
     private var canOptimize: Bool {
         guard run.phase != .running else { return false }   // not while a run is in flight
-        // The core refuses a lattice job on an expanded domain BEFORE any solve, so
-        // the button that would submit one is disabled with that reason rather than
-        // inviting a configuration the run cannot honour (task
-        // 2026-08-03-variant-entry-gating-and-retention, failure B).
+        // The core refuses a GRADED lattice job on an expanded domain BEFORE any
+        // solve, so the button that would submit one is disabled with that reason
+        // rather than inviting a configuration the run cannot honour (task
+        // 2026-08-03-variant-entry-gating-and-retention, failure B; narrowed from
+        // "any lattice" to "graded" by the device-failure task, because PR 285
+        // taught core to run the uniform case).
         guard latticeDesignBoxConflict == nil else { return false }
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
@@ -4533,11 +4535,15 @@ public struct WorkspacePlaceholder: View {
         return true
     }
 
-    /// The lattice-plus-design-box conflict in the CURRENT setup, or nil. One rule,
-    /// shared by the workspace Optimize button and the lattice page's own.
+    /// The GRADED-lattice-plus-design-box conflict in the CURRENT setup, or nil.
+    /// One rule, shared by the workspace Optimize button and the lattice page's own.
+    /// A UNIFORM lattice under a design box is supported by core (PR 285) and is
+    /// not gated here — it was, until the device-failure task found the app still
+    /// refusing what core had learned to do.
     private var latticeDesignBoxConflict: String? {
         LatticeCoreCapability.liveConflict(latticeEnabled: project.lattice.enabled,
-                                           designBoxActive: project.designBox.isActive)
+                                           designBoxActive: project.designBox.isActive,
+                                           graded: project.lattice.densityMode == .auto)
     }
 
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.

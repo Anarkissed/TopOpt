@@ -1,0 +1,3 @@
+2026-08-01T19:34:41.475 meta   launch /Users/nadim/dev/TopOpt/TopOpt/core/build/topopt-cli run /Users/nadim/.topopt-worker/6ed5fba93c8240ad/job.json --out /Users/nadim/.topopt-worker/6ed5fba93c8240ad/out
+2026-08-01T19:34:41.526 stderr topopt-cli: lattice certification does not support a design box (add-material) run: the certification load case cannot be reconstructed under domain expansion. Run the lattice job without a design box.
+2026-08-01T19:34:41.527 meta   exit rc=1
