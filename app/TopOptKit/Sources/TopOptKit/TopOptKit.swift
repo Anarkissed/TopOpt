@@ -644,6 +644,17 @@ public struct OptimizeOutcome {
     /// nil unless the run armed the ranking.
     public let buildOrientationJSON: Data?
 
+    /// WHICH MACHINE SOLVED THIS RUN (task 2026-08-03-variant-entry-gating-and-
+    /// retention, bar AJ5) — the LAN worker's own name as the app selected it
+    /// ("Mac mini"), or nil.
+    ///
+    /// nil is DELIBERATELY AMBIGUOUS-FREE only in combination with
+    /// `computedRemotely`: nil + local ⇒ this device; nil + remote ⇒ a worker whose
+    /// name was not recorded (a re-attached or legacy run). The app never guesses a
+    /// name — the whole point of this field is that "re-run it on a Mac worker" must
+    /// not be told to someone who did exactly that.
+    public let solvedBy: String?
+
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
@@ -653,7 +664,8 @@ public struct OptimizeOutcome {
                 appliedFaceProtections: [AppliedFaceProtection] = [],
                 timing: RunTiming? = nil,
                 latticeReport: LatticeReport? = nil,
-                buildOrientationJSON: Data? = nil) {
+                buildOrientationJSON: Data? = nil,
+                solvedBy: String? = nil) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -670,6 +682,24 @@ public struct OptimizeOutcome {
         self.timing = timing
         self.latticeReport = latticeReport
         self.buildOrientationJSON = buildOrientationJSON
+        self.solvedBy = solvedBy
+    }
+
+    /// A copy carrying `solvedBy` — how the run flow stamps the machine it
+    /// DISPATCHED to onto an outcome the bridge/worker built without one (neither
+    /// knows where it ran). Never overwrites a name already present.
+    public func withSolvedBy(_ name: String?) -> OptimizeOutcome {
+        OptimizeOutcome(variants: variants, stoppedOnMargin: stoppedOnMargin,
+                        cancelled: cancelled, acceptedCount: acceptedCount,
+                        voxelVolumeMM3: voxelVolumeMM3,
+                        gridNx: gridNx, gridNy: gridNy, gridNz: gridNz,
+                        gridOrigin: gridOrigin, spacing: spacing,
+                        computedRemotely: computedRemotely,
+                        appliedClearances: appliedClearances,
+                        appliedFaceProtections: appliedFaceProtections,
+                        timing: timing, latticeReport: latticeReport,
+                        buildOrientationJSON: buildOrientationJSON,
+                        solvedBy: solvedBy ?? name)
     }
 
     /// A copy carrying `timing` — how the run flow stamps a LOCAL run's measured
@@ -687,7 +717,8 @@ public struct OptimizeOutcome {
                         appliedFaceProtections: appliedFaceProtections,
                         timing: timing ?? self.timing,
                         latticeReport: latticeReport,
-                        buildOrientationJSON: buildOrientationJSON)
+                        buildOrientationJSON: buildOrientationJSON,
+                        solvedBy: solvedBy)
     }
 
     /// A copy carrying `latticeReport` — how the run flow stamps the run's lattice onto
@@ -704,7 +735,8 @@ public struct OptimizeOutcome {
                         appliedFaceProtections: appliedFaceProtections,
                         timing: timing,
                         latticeReport: self.latticeReport ?? report,
-                        buildOrientationJSON: buildOrientationJSON)
+                        buildOrientationJSON: buildOrientationJSON,
+                        solvedBy: solvedBy)
     }
 }
 

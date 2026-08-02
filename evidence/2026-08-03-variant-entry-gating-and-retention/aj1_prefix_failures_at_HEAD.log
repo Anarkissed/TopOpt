@@ -1,0 +1,12 @@
+Test Case '-[TopOptFlowsTests.HeadLossReproTests testHEAD_ARefusedRunDestroysTheCompletedRunsVariants]' started.
+/tmp/topopt-head-repro/app/TopOptKit/Tests/TopOptFlowsTests/HeadLossReproTests.swift:78: error: -[TopOptFlowsTests.HeadLossReproTests testHEAD_ARefusedRunDestroysTheCompletedRunsVariants] : XCTAssertEqual failed: ("nil") is not equal to ("Optional(2)") - AJ1 MECHANISM 1: a run that produced NOTHING must not take the finished run's variants with it
+Test Case '-[TopOptFlowsTests.HeadLossReproTests testHEAD_ARefusedRunDestroysTheCompletedRunsVariants]' failed (0.702 seconds).
+Test Case '-[TopOptFlowsTests.HeadLossReproTests testHEAD_ASaveWithNoLiveOutcomeOrphansThePersistedResults]' started.
+/tmp/topopt-head-repro/app/TopOptKit/Tests/TopOptFlowsTests/HeadLossReproTests.swift:112: error: -[TopOptFlowsTests.HeadLossReproTests testHEAD_ASaveWithNoLiveOutcomeOrphansThePersistedResults] : XCTAssertEqual failed: ("Optional(false)") is not equal to ("Optional(true)") - AJ1 MECHANISM 2: the flag describes the DURABLE record. Written false over a live results.plist it orphans the file forever — restoreFromDisk only reads it when true
+Test Case '-[TopOptFlowsTests.HeadLossReproTests testHEAD_ASaveWithNoLiveOutcomeOrphansThePersistedResults]' failed (0.073 seconds).
+	 Executed 2 tests, with 2 failures (0 unexpected) in 0.775 (0.776) seconds
+Test Case '-[TopOptFlowsTests.HeadRetentionNeverProducedTests testHEAD_NothingEverCapturesTheRetentionPairFromALiveRun]' started.
+/tmp/topopt-head-repro/app/TopOptKit/Tests/TopOptFlowsTests/HeadLossReproTests.swift:148: error: -[TopOptFlowsTests.HeadRetentionNeverProducedTests testHEAD_NothingEverCapturesTheRetentionPairFromALiveRun] : XCTAssertTrue failed - MECHANISM 0: the ONLY writer of the retention pair is the restore-from-disk path in AppModel — nothing captures one from a live run, so PR 274's retention never engages. Writers found: ["AppModel.swift: pm.relatticeArtifacts = artifacts"]
+Test Case '-[TopOptFlowsTests.HeadRetentionNeverProducedTests testHEAD_NothingEverCapturesTheRetentionPairFromALiveRun]' failed (0.143 seconds).
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.918 (0.920) seconds
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.918 (0.920) seconds

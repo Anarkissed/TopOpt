@@ -201,6 +201,10 @@ public struct WorkspacePlaceholder: View {
     /// the design-box panel header. Ships off; the maintainer flips it on and a
     /// screenshot then carries the diagnosis if the drag ever misbehaves again.
     @State private var boxDragDebug = false
+    /// BAR 4: the pending "this replaces your finished variants" confirmation.
+    /// Non-nil presents it; the user either confirms (the run starts) or cancels
+    /// (nothing happens, and the variants are untouched).
+    @State private var pendingReplacement: ResultsReplacementPrompt?
     /// The live diagnostic for the in-flight box drag (nil between drags).
     @State private var boxDragDiag: BoxDragDiagnostic?
     /// The magnetic face-detent candidate the dragged box face is currently HELD on (device
@@ -524,7 +528,12 @@ public struct WorkspacePlaceholder: View {
                               onSmooth: { idx in
                                   viewOriginal = true
                                   openSmoothingPage(variantIndex: idx)
-                              })
+                              },
+                              // AJ2: the two entries are DECIDED HERE, before either
+                              // page can be reached, and each blocked one carries its
+                              // own reason on the disabled control.
+                              smoothEntry: { smoothEntry($0) },
+                              latticeEntry: { latticeEntry($0) })
                     .ignoresSafeArea()
             }
             // Returning to the saved variants from the original view.
@@ -579,6 +588,35 @@ public struct WorkspacePlaceholder: View {
         .padding(.trailing, DS.Space.s)
     }
 
+    private var replacementPromptBinding: Binding<Bool> {
+        Binding(get: { pendingReplacement != nil },
+                set: { if !$0 { pendingReplacement = nil } })
+    }
+
+    /// Say that a failed run gave the previous variants back (bar 4).
+    private func announceRestoredResults(_ restored: Bool) {
+        guard restored else { return }
+        let n = run.outcome?.variants.filter { $0.accepted }.count ?? 0
+        guard n > 0 else { return }
+        let subject = n == 1 ? "1 variant is" : "\(n) variants are"
+        model.toast = "That run produced no variants, so your previous \(subject) still here."
+    }
+
+    /// Optimize was tapped. BAR 4: when a finished run is about to be retired, the
+    /// user is TOLD what they are about to lose and CONFIRMS it. This is the only
+    /// remaining path that retires results at all — editing the setup never does,
+    /// and a run that produces nothing puts them back — so the prompt is rare and
+    /// always about a real loss. Nothing to lose ⇒ no prompt, and Optimize behaves
+    /// exactly as it always did.
+    private func requestRun() {
+        guard canOptimize else { return }
+        if let prompt = ResultsReplacementPrompt.forNewRun(existing: run.outcome) {
+            pendingReplacement = prompt
+            return
+        }
+        startRun()
+    }
+
     private func startRun() {
         guard canOptimize else { return }
         // Pre-flight (099 D3): if EVERY load group is zero-force or on a sub-voxel
@@ -610,10 +648,30 @@ public struct WorkspacePlaceholder: View {
         // otherwise the on-device bridge runs it, byte-identical to before. Always
         // set explicitly so switching back to iPad after a remote run restores local.
         let isRemote = compute.activeRemote != nil
-        run.runner = compute.activeRemote.map { RunModel.remoteRunner($0) } ?? RunModel.bridgeRunner
+        // THE RETENTION PAIR IS CAPTURED AT RUN TIME (task
+        // 2026-08-03-variant-entry-gating-and-retention). PR 274 defined
+        // `RelatticeArtifacts` and persisted them, but nothing ever produced a pair
+        // from a live run — they were only ever READ back from disk, so every run
+        // made in the app reported "kept no design file" and neither the smoothing
+        // page nor "Lattice this variant" was reachable at all. The remote runner
+        // now hands the pair back, and it lands on the project here.
+        //
+        // The pair is reported to the RUN, which adopts it only if this run goes on
+        // to produce results — so a design belonging to a different run than the
+        // results on screen can never be latticed against them. An ON-DEVICE run
+        // reports none (the bridge writes no job document and no design container,
+        // PR 274's disclosed limit), and the entry controls then say exactly that.
+        let liveRun = run
+        run.runner = compute.activeRemote.map { cfg in
+            RunModel.remoteRunner(cfg, onArtifacts: { art in
+                DispatchQueue.main.async { liveRun.noteRetainedArtifacts(art) }
+            })
+        } ?? RunModel.bridgeRunner
         // A remote run's liveness is RemoteRun's (queue- + heartbeat-aware); only a
         // LOCAL run arms RunModel's setup-stall watchdog (handoff 129).
-        run.start(request, remote: isRemote)
+        // The worker's own name rides along so the finished run can say WHICH
+        // machine solved it (bar AJ5) instead of only "on a Mac".
+        run.start(request, remote: isRemote, workerName: compute.selectedWorkerName)
     }
 
     // MARK: derived render inputs
@@ -1302,6 +1360,23 @@ public struct WorkspacePlaceholder: View {
         .onChange(of: run.outcome?.acceptedCount ?? -1) { _ in
             if showStrutPreview { buildStrutScene() }
         }
+        // BAR 4, the other half: when a run produced nothing and the previous run's
+        // variants came BACK, say so — results reappearing behind a failure sheet
+        // with no explanation is its own confusion.
+        .onChange(of: run.restoredPreviousResults) { restored in
+            announceRestoredResults(restored)
+        }
+        // BAR 4: a new run is the ONE remaining thing that retires finished
+        // variants, and it says so before it does.
+        .alert("Replace your results?", isPresented: replacementPromptBinding) {
+            Button("Optimize anyway", role: .destructive) {
+                pendingReplacement = nil
+                startRun()
+            }
+            Button("Keep my results", role: .cancel) { pendingReplacement = nil }
+        } message: {
+            Text(pendingReplacement?.message ?? "")
+        }
         .onAppear { syncLatticeProxy() }
     }
 
@@ -1331,8 +1406,64 @@ public struct WorkspacePlaceholder: View {
     /// density is available with NO sim, bar B6's second path), and the action
     /// row offers "Lattice this variant" as a job distinct from re-running the
     /// ladder (bar Z7).
+    /// The facts BOTH entry gates decide on, for one finished variant (bar AJ2/AJ4).
+    ///
+    /// Every field comes from the RUN's own record — its outcome and the job
+    /// document retained beside it — or from the compute choice. Nothing here reads
+    /// `project.designBox`, `project.force` or `project.selection`: whether a
+    /// finished variant can be worked on is a question about the run that produced
+    /// it, not about what the workspace happens to be set to now.
+    private func variantEntryFacts(_ index: Int) -> VariantEntryFacts? {
+        guard let o = run.outcome, o.variants.indices.contains(index) else { return nil }
+        let v = o.variants[index]
+        let art = project.relatticeArtifacts
+        return VariantEntryFacts(
+            hasGeometry: !v.meshVertices.isEmpty && !v.meshIndices.isEmpty,
+            machine: SolvingMachine.of(o),
+            retainedJob: art?.jobJSON, retainedDesign: art?.designBin,
+            runGeneratedLattice: o.latticeReport != nil,
+            modelPath: project.importedFile?.path,
+            workerSelected: compute.activeRemote != nil,
+            runInFlight: run.phase == .running,
+            // A RE-ATTACHED run has no submitted document to retain (the app was
+            // restarted since), and says exactly that rather than borrowing the
+            // "predates retention" sentence, which would be false.
+            reattached: run.wasReattached)
+    }
+
+    /// The Smooth entry control's verdict for a variant — what the results screen's
+    /// button renders, enabled or disabled-with-a-reason.
+    private func smoothEntry(_ index: Int) -> VariantEntryVerdict {
+        guard let f = variantEntryFacts(index) else {
+            return VariantEntryVerdict(label: "Smooth", enabled: false,
+                                       reason: "this run has no variant here",
+                                       allReasons: ["this run has no variant here"])
+        }
+        return VariantEntry.smoothing(f)
+    }
+
+    /// The Lattice entry control's verdict for a variant.
+    private func latticeEntry(_ index: Int) -> VariantEntryVerdict {
+        guard let f = variantEntryFacts(index) else {
+            return VariantEntryVerdict(label: "Lattice", enabled: false,
+                                       reason: "this run has no variant here",
+                                       allReasons: ["this run has no variant here"])
+        }
+        return VariantEntry.lattice(f)
+    }
+
     private func openLatticePage(variantIndex: Int?,
                                  smoothed: SmoothKeptResult? = nil) {
+        // AJ2: the page is UNREACHABLE when the entry is blocked, not merely
+        // apologetic once you are inside it. The button is already disabled; this is
+        // the second layer, so no other caller can open a dead end either.
+        if let idx = variantIndex {
+            let gate = latticeEntry(idx)
+            guard gate.enabled else {
+                model.toast = gate.reason ?? "This variant can’t be latticed."
+                return
+            }
+        }
         latticeVariantContext = nil
         latticeVariantMesh = nil
         if let idx = variantIndex, let o = run.outcome, o.variants.indices.contains(idx),
@@ -1359,7 +1490,8 @@ public struct WorkspacePlaceholder: View {
             let artifacts = project.relatticeArtifacts
             let why: RelatticeUnavailable? = artifacts != nil
                 ? nil
-                : (o.computedRemotely ? .runPredatesDesignStore : .computedOnDevice)
+                : (SolvingMachine.of(o).isThisDevice ? .computedOnDevice
+                                                     : .runPredatesDesignStore)
             latticeVariantContext = LatticeVariantContext(
                 runName: project.name, variantIndex: idx,
                 requestedVolumeFraction: v.requestedVolumeFraction,
@@ -1399,6 +1531,14 @@ public struct WorkspacePlaceholder: View {
     /// in this function reads either.
     private func openSmoothingPage(variantIndex: Int) {
         guard let o = run.outcome, o.variants.indices.contains(variantIndex) else { return }
+        // AJ2: never open a page that will then refuse. The button is disabled with
+        // this same reason; this is the second layer, so the dead end is unreachable
+        // even from a caller that forgot to check.
+        let gate = smoothEntry(variantIndex)
+        guard gate.enabled else {
+            model.toast = gate.reason ?? "This variant can’t be smoothed."
+            return
+        }
         let v = o.variants[variantIndex]
         let ctx = SmoothPageEntry.context(
             runName: project.name, variantIndex: variantIndex,
@@ -1667,7 +1807,7 @@ public struct WorkspacePlaceholder: View {
         run.runner = { _, _, _ in try RelatticeRun.run(inputs).outcome }
         guard let request = model.makeRunRequest() else { return }
         closeLatticePage()
-        run.start(request, remote: true)
+        run.start(request, remote: true, workerName: compute.selectedWorkerName)
     }
 
     private var latticePageOverlay: some View {
@@ -1685,7 +1825,7 @@ public struct WorkspacePlaceholder: View {
                     baseSummary: force.optimizeSummary(
                         in: selection.groups,
                         latticeRoleGroups: latticeRoleGroupIDs),
-                    onOptimize: { startRun() },
+                    onOptimize: { requestRun() },
                     onRelattice: { startRelatticeRun() },
                     onClose: { closeLatticePage() },
                     onBackToSetup: { closeLatticePage() },
@@ -4379,6 +4519,11 @@ public struct WorkspacePlaceholder: View {
     /// force load case is declared (≥1 anchor + ≥1 load — the off-with-forces case).
     private var canOptimize: Bool {
         guard run.phase != .running else { return false }   // not while a run is in flight
+        // The core refuses a lattice job on an expanded domain BEFORE any solve, so
+        // the button that would submit one is disabled with that reason rather than
+        // inviting a configuration the run cannot honour (task
+        // 2026-08-03-variant-entry-gating-and-retention, failure B).
+        guard latticeDesignBoxConflict == nil else { return false }
         guard force.canOptimize(in: selection.groups,
                                 minimizePlastic: project.minimizePlastic,
                                 latticeRoleGroups: latticeRoleGroupIDs)
@@ -4388,8 +4533,16 @@ public struct WorkspacePlaceholder: View {
         return true
     }
 
+    /// The lattice-plus-design-box conflict in the CURRENT setup, or nil. One rule,
+    /// shared by the workspace Optimize button and the lattice page's own.
+    private var latticeDesignBoxConflict: String? {
+        LatticeCoreCapability.liveConflict(latticeEnabled: project.lattice.enabled,
+                                           designBoxActive: project.designBox.isActive)
+    }
+
     /// The Optimize sub-label, reflecting the minimize-plastic mode + the load case.
     private var optimizeSummary: String {
+        if let why = latticeDesignBoxConflict { return why }
         if force.phase == .setup { return "set gravity first" }
         if force.hasPending(in: selection.groups,
                             latticeRoleGroups: latticeRoleGroupIDs) {
@@ -4424,7 +4577,7 @@ public struct WorkspacePlaceholder: View {
         let ok = canOptimize
         return Button {
             guard ok else { return }
-            startRun()
+            requestRun()
         } label: {
             VStack(spacing: 1) {
                 Text("Optimize").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)

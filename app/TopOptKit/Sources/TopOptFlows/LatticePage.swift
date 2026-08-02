@@ -158,7 +158,8 @@ public struct LatticePage: View {
             bounds: project.lattice.enabled ? bounds : nil,
             running: optimizing,
             lineWidthMM: project.printParams.wallLineWidthOuterMM,
-            cellSummary: cellSummaryText)
+            cellSummary: cellSummaryText,
+            designBoxActive: project.designBox.isActive)
     }
 
     private var clearanceCount: Int { project.clearanceSpecs().count }

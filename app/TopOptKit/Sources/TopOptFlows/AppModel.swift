@@ -835,7 +835,10 @@ public final class AppModel: ObservableObject {
             ?? RunModel.remoteReattachRunner(config, jobID: job.jobID, defaults: remoteJobDefaults)
         // A re-attach is a REMOTE run — RemoteRun owns its liveness, so it must not arm
         // the local setup-stall watchdog (handoff 129).
-        project.run.start(reattachRequest(for: job, project: project), remote: true)
+        // The persisted record names the host this job is on, so a re-attached run
+        // still says WHICH machine solved it (bar AJ5) rather than "a Mac worker".
+        project.run.start(reattachRequest(for: job, project: project), remote: true,
+                          workerName: job.host, reattached: true)
         // Anchor the elapsed clock to when the run BEGAN, not to this moment (handoff
         // 134): a re-attached run is not a new run, and a readout that restarts at
         // 0:00 understates a solve that has been going since last night exactly as
@@ -909,7 +912,22 @@ public final class AppModel: ObservableObject {
     /// snapshot) and refresh its recents entry. Failures are surfaced as a toast but
     /// never crash the flow.
     private func persist(_ project: ProjectModel) {
-        guard let snapshot = project.snapshot(savedAt: now()) else { return }
+        guard var snapshot = project.snapshot(savedAt: now()) else { return }
+        // THE `optimized` FLAG DESCRIBES THE DURABLE RECORD, NOT THE LIVE SESSION
+        // (task 2026-08-03-variant-entry-gating-and-retention, bar AJ1, second half).
+        //
+        // `ProjectModel.snapshot` derives it from `hasResults`, which is false for
+        // every moment the live run has no outcome — while a run is in flight, and
+        // after a run that failed. Any save in that window (Home, or the app going
+        // to the background) used to write `optimized: false` OVER a project whose
+        // results.plist was still sitting on disk, and `restoreFromDisk` only reads
+        // that file when the flag is true. The results survived; the flag orphaned
+        // them, permanently and silently. So: the flag is never downgraded while a
+        // results blob exists. Only an explicit replacement (a run that produced new
+        // results, which rewrites the blob) or deleting the project changes it.
+        if snapshot.optimized != true, store.hasPersistedResults(id: project.id) {
+            snapshot.optimized = true
+        }
         do {
             try store.save(snapshot, modelSource: project.modelSourceURL)
         } catch {
@@ -977,7 +995,7 @@ public final class AppModel: ObservableObject {
                     // Restored together with the results, so a reopened project
                     // can lattice its variants exactly as the live one could —
                     // and, when they did not survive, honestly cannot.
-                    pm.relatticeArtifacts = artifacts
+                    pm.run.restoreArtifacts(artifacts)
                 }
             }
         }

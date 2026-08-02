@@ -215,12 +215,18 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
     public let label: String
     public let sub: String
 
+    /// `designBoxActive` is the project's CURRENT design box. A lattice job with one
+    /// is refused by core before any solve (`run_job.cpp`), so the button that would
+    /// submit it is disabled with that reason instead of letting the user configure
+    /// a whole page and discover it at the end (task
+    /// 2026-08-03-variant-entry-gating-and-retention, failure B).
     public static func compute(baseCanOptimize: Bool, baseSummary: String,
                                latticeEnabled: Bool, densityMode: LatticeDensityMode,
                                topologyDisplayName: String, cellMM: Double,
                                bounds: LatticeBounds?, running: Bool,
                                lineWidthMM: Double = 0,
-                               cellSummary: String? = nil) -> LatticeOptimizeSurface {
+                               cellSummary: String? = nil,
+                               designBoxActive: Bool = false) -> LatticeOptimizeSurface {
         // The cell phrase the button claims. In AUTO / SWEPT cell mode there is no
         // single target cell to name — the page passes the mode's own summary
         // ("Auto 4.6 mm", "Swept 4.6–8.0 mm") so the button never states a target the
@@ -233,6 +239,11 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         guard latticeEnabled else {
             return LatticeOptimizeSurface(enabled: baseCanOptimize, label: "Optimize",
                                           sub: "topology only · \(baseSummary)")
+        }
+        // The core refusal, surfaced BEFORE the configuration rather than after it.
+        if let why = LatticeCoreCapability.liveConflict(latticeEnabled: true,
+                                                        designBoxActive: designBoxActive) {
+            return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
         }
         // AUTO density rides the optimize job now (task lattice-page-core-hookup
         // stage 4: core's run_job grades each accepted variant from that

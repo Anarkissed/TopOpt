@@ -1,0 +1,15 @@
+=== FULL APP SUITE, BEFORE (branch HEAD, pre-change) ===
+	 Executed 1030 tests, with 14 tests skipped and 8 failures (0 unexpected) in 181.257 (183.240) seconds
+	 Executed 30 tests, with 0 failures (0 unexpected) in 13.080 (13.090) seconds
+failures (pre-existing worktree lib3mf gap):
+Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (4.960 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.005 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.003 seconds).
+
+=== FULL APP SUITE, AFTER ===
+	 Executed 1061 tests, with 14 tests skipped and 8 failures (0 unexpected) in 97.913 (98.327) seconds
+	 Executed 30 tests, with 0 failures (0 unexpected) in 10.916 (10.924) seconds
+failures:
+Test Case '-[TopOptFlowsTests.AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (1.323 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.008 seconds).
+Test Case '-[TopOptFlowsTests.AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.003 seconds).
