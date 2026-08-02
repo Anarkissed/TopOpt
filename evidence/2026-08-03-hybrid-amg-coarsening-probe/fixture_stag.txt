@@ -1,0 +1,93 @@
+## STAG — does the SHIPPED configuration stagnate on this fixture?
+   fixture: PR 273's ladder32 reproduction — core/tests/fixtures/demo/l-bracket.step @ resolution 32
+   fixture_faces: 2 cylindrical r=2.5 faces matched, 32 voxels tagged FIXTURE
+   [ladder ended early: recommend_settings: worst_case_stress_margin must be finite and >= 0]
+   solved grid 48x32x40 (61440 vox, 46139 solid), 80 trajectory snapshots, develop wall 1136.8 s
+
+  iter  built  lvls   cycles  carried   build_s   cycle_s  fallbk_s   total_s  latched
+------------------------------------------------------------------------------------------
+     0      1     3       83      YES      0.36      1.05      0.00      1.41         
+     1      1     0      300       no      0.35      3.55     22.79     26.70         
+     2      1     0      300       no      0.36      4.42     12.48     17.27         
+     3      1     0      300       no      0.46      4.68     13.98     19.13  LATCHED
+     4      0     0        0       no      0.00      0.00    236.30    236.33  LATCHED
+     5      0     0        0       no      0.00      0.00     10.08     10.09  LATCHED
+     6      0     0        0       no      0.00      0.00     10.34     10.34  LATCHED
+     7      0     0        0       no      0.00      0.00      7.57      7.58  LATCHED
+     8      0     0        0       no      0.00      0.00      4.83      4.83  LATCHED
+     9      0     0        0       no      0.00      0.00    142.90    142.91  LATCHED
+    10      0     0        0       no      0.00      0.00     27.19     27.19  LATCHED
+    11      0     0        0       no      0.00      0.00     35.67     35.68  LATCHED
+    12      0     0        0       no      0.00      0.00     25.29     25.30  LATCHED
+    13      0     0        0       no      0.00      0.00     11.05     11.06  LATCHED
+    14      0     0        0       no      0.00      0.00      3.23      3.23  LATCHED
+    15      0     0        0       no      0.00      0.00      2.43      2.43  LATCHED
+    16      0     0        0       no      0.00      0.00      7.02      7.03  LATCHED
+    17      0     0        0       no      0.00      0.00     72.35     72.35  LATCHED
+    18      0     0        0       no      0.00      0.00     51.90     51.91  LATCHED
+    19      0     0        0       no      0.00      0.00     12.04     12.06  LATCHED
+    20      0     0        0       no      0.00      0.00     79.58     79.59  LATCHED
+    21      0     0        0       no      0.00      0.00     14.29     14.30  LATCHED
+    22      0     0        0       no      0.00      0.00     21.02     21.03  LATCHED
+    23      0     0        0       no      0.00      0.00      9.68      9.68  LATCHED
+    24      0     0        0       no      0.00      0.00     20.34     20.34  LATCHED
+    25      0     0        0       no      0.00      0.00      8.52      8.52  LATCHED
+    26      0     0        0       no      0.00      0.00     23.41     23.42  LATCHED
+    27      0     0        0       no      0.00      0.00      5.41      5.42  LATCHED
+    28      0     0        0       no      0.00      0.00      2.97      2.97  LATCHED
+    29      0     0        0       no      0.00      0.00      2.83      2.84  LATCHED
+    30      0     0        0       no      0.00      0.00      4.38      4.39  LATCHED
+    31      0     0        0       no      0.00      0.00      3.40      3.41  LATCHED
+    32      0     0        0       no      0.00      0.00      1.70      1.70  LATCHED
+    33      0     0        0       no      0.00      0.00     15.60     15.60  LATCHED
+    34      0     0        0       no      0.00      0.00      6.28      6.29  LATCHED
+    35      0     0        0       no      0.00      0.00     17.67     17.68  LATCHED
+    36      0     0        0       no      0.00      0.00      2.59      2.59  LATCHED
+    37      0     0        0       no      0.00      0.00     19.86     19.86  LATCHED
+    38      0     0        0       no      0.00      0.00      2.13      2.13  LATCHED
+    39      0     0        0       no      0.00      0.00     13.77     13.77  LATCHED
+    40      0     0        0       no      0.00      0.00      6.02      6.03  LATCHED
+    41      0     0        0       no      0.00      0.00     15.90     15.91  LATCHED
+    42      0     0        0       no      0.00      0.00     71.41     71.41  LATCHED
+    43      0     0        0       no      0.00      0.00     31.45     31.46  LATCHED
+    44      0     0        0       no      0.00      0.00     18.53     18.53  LATCHED
+    45      0     0        0       no      0.00      0.00      6.22      6.23  LATCHED
+    46      0     0        0       no      0.00      0.00      5.90      5.91  LATCHED
+    47      0     0        0       no      0.00      0.00      7.50      7.50  LATCHED
+    48      0     0        0       no      0.00      0.00     24.34     24.35  LATCHED
+    49      0     0        0       no      0.00      0.00     59.97     59.97  LATCHED
+    50      0     0        0       no      0.00      0.00     37.09     37.10  LATCHED
+    51      0     0        0       no      0.00      0.00     59.74     59.75  LATCHED
+    52      0     0        0       no      0.00      0.00     29.47     29.47  LATCHED
+    53      0     0        0       no      0.00      0.00     33.17     33.18  LATCHED
+    54      0     0        0       no      0.00      0.00     16.07     16.07  LATCHED
+    55      0     0        0       no      0.00      0.00     16.56     16.56  LATCHED
+    56      0     0        0       no      0.00      0.00     18.00     18.00  LATCHED
+    57      0     0        0       no      0.00      0.00     12.65     12.65  LATCHED
+    58      0     0        0       no      0.00      0.00     30.05     30.06  LATCHED
+    59      0     0        0       no      0.00      0.00     11.56     11.56  LATCHED
+    60      0     0        0       no      0.00      0.00     10.25     10.26  LATCHED
+    61      0     0        0       no      0.00      0.00      6.24      6.24  LATCHED
+    62      0     0        0       no      0.00      0.00      3.57      3.58  LATCHED
+    63      0     0        0       no      0.00      0.00      7.30      7.31  LATCHED
+    64      0     0        0       no      0.00      0.00      2.10      2.10  LATCHED
+    65      0     0        0       no      0.00      0.00     20.42     20.42  LATCHED
+    66      0     0        0       no      0.00      0.00      4.88      4.89  LATCHED
+    67      0     0        0       no      0.00      0.00     17.59     17.59  LATCHED
+    68      0     0        0       no      0.00      0.00      2.23      2.23  LATCHED
+    69      0     0        0       no      0.00      0.00     19.48     19.49  LATCHED
+    70      0     0        0       no      0.00      0.00      2.87      2.88  LATCHED
+    71      0     0        0       no      0.00      0.00     13.69     13.70  LATCHED
+    72      0     0        0       no      0.00      0.00     31.69     31.69  LATCHED
+    73      0     0        0       no      0.00      0.00     11.01     11.02  LATCHED
+    74      0     0        0       no      0.00      0.00     64.38     64.39  LATCHED
+    75      0     0        0       no      0.00      0.00     24.56     24.57  LATCHED
+    76      0     0        0       no      0.00      0.00     83.99     84.00  LATCHED
+    77      0     0        0       no      0.00      0.00     39.44     39.44  LATCHED
+    78      0     0        0       no      0.00      0.00     42.75     42.77  LATCHED
+    79      0     0        0       no      0.00      0.00     26.09     26.10  LATCHED
+
+   SHIPPED over 80 design iterations: carried 1, STAGNATED 3, latch fired at design iteration 3
+   wall: hierarchy build 1.5 s | V-cycle loop 13.7 s | Jacobi fallback 1931.0 s | TOTAL 1946.7 s
+   stagnations per 50 design iterations: 1.9
+   => STAGNATES: the shipped V-cycle burns its full budget without converging on real fields from this trajectory — the target regime

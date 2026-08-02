@@ -186,6 +186,14 @@ static_assert(fea_detail::MgTuning{}.coarse_dof_cap == kMgCoarseDofCap,
 static_assert(fea_detail::MgTuning{}.smoother == fea_detail::MgSmoother::ScalarJacobi,
               "MgTuning default smoother must be the shipped scalar damped Jacobi");
 
+// --- Coarse-space seam (task: hybrid-amg-coarsening-probe) -------------------
+// The harness-only override for how levels 2.. are built (see the long note in
+// fea_matfree.hpp). Thread-local and DEFAULT-EMPTY: production installs nothing,
+// so `g_mg_coarse_hook` is false everywhere and build_mf_hierarchy takes the
+// geometric branch it always has. The tripwire tests/unit/test_mg_coarse_hook.cpp
+// asserts that default and the bit-identity of a solve after install+clear.
+thread_local fea_detail::MgCoarseSpaceHook g_mg_coarse_hook;
+
 // The tuning RESOLVED once per solve, so the smoother's inner loop reads plain
 // locals rather than a thread-local on every sweep. Snapshotting also means a
 // single V-cycle can never see a half-changed recipe.
@@ -628,6 +636,84 @@ std::vector<Level> build_hierarchy(const SpMat& A0, int nx0, int ny0, int nz0,
   bottom.chol = std::make_shared<Eigen::SimplicialLDLT<SpMat>>();
   bottom.chol->compute(bottom.A);
   if (bottom.chol->info() != Eigen::Success) return {};  // fall back
+  return levels;
+}
+
+// The HYBRID sub-hierarchy (task: hybrid-amg-coarsening-probe): levels 1.. built
+// from A1 and a caller-supplied list of PROLONGATORS instead of by halving the
+// grid. Never reached unless a harness installed a coarse-space hook; production
+// calls build_hierarchy above, unchanged.
+//
+// Only the coarse SPACES come from outside. Every operator is still this file's
+// own Galerkin product A_c = P^T A P (the same frugal, column-blocked one the
+// matrix-free path already uses), the restriction is still R = P^T, and the
+// bottom level is still factored here — so the cycle stays symmetric positive
+// definite and remains a valid CG preconditioner whatever aggregation produced
+// the P's. Returns {} on ANY malformed input, and the caller then falls back to
+// the geometric builder: a hook cannot make the solver do something unsound, at
+// worst it declines to help.
+//
+// Algebraic levels carry no node grid. `nx/ny/nz` and `active` stay unset on
+// them, which is safe because the cycle reads only A, Dinv, P and chol —
+// `active` is consulted solely by build_block_diag, and the POINT-BLOCK smoother
+// (which needs a nodal structure a general aggregation does not have) is
+// REFUSED on this path rather than approximated.
+std::vector<Level> build_hierarchy_from_prolongators(
+    const SpMat& A1, int cnx, int cny, int cnz, std::vector<int> cactive,
+    const std::vector<fea_detail::MgCoo>& Ps) {
+  const fea_detail::MgTuning& t = g_mg_tuning;
+  if (Ps.empty()) return {};
+  if (t.smoother != fea_detail::MgSmoother::ScalarJacobi) return {};
+
+  std::vector<Level> levels;
+  Level one;
+  one.nx = cnx;
+  one.ny = cny;
+  one.nz = cnz;
+  one.n = static_cast<int>(A1.cols());
+  one.A = A1;
+  one.Dinv = inverse_diagonal(A1);
+  one.active = std::move(cactive);
+  levels.push_back(std::move(one));
+
+  for (const fea_detail::MgCoo& coo : Ps) {
+    const Level& f = levels.back();
+    // Shape and content are CHECKED, not trusted.
+    if (coo.rows != f.n || coo.cols <= 0 || coo.cols >= f.n) return {};
+    if (coo.row.size() != coo.col.size() || coo.row.size() != coo.val.size())
+      return {};
+    if (coo.val.empty()) return {};
+    std::vector<Trip> trips;
+    trips.reserve(coo.val.size());
+    for (std::size_t k = 0; k < coo.val.size(); ++k) {
+      const int r = coo.row[k], c = coo.col[k];
+      if (r < 0 || r >= coo.rows || c < 0 || c >= coo.cols) return {};
+      trips.emplace_back(r, c, coo.val[k]);
+    }
+    SpMat P(coo.rows, coo.cols);
+    P.setFromTriplets(trips.begin(), trips.end());
+    P.makeCompressed();
+
+    SpMat Ac = galerkin_pt_a_p_frugal(f.A, P);
+    Ac.makeCompressed();
+    levels.back().P = std::move(P);
+
+    Level coarse;
+    coarse.n = coo.cols;
+    coarse.A = std::move(Ac);
+    coarse.Dinv = inverse_diagonal(coarse.A);
+    levels.push_back(std::move(coarse));
+  }
+
+  // The same two acceptance rules the geometric builder applies.
+  if (static_cast<int>(levels.size()) < kMinLevels) return {};
+  if (levels.back().n > t.coarse_dof_cap) return {};
+
+  Level& bottom = levels.back();
+  bottom.coarsest = true;
+  bottom.chol = std::make_shared<Eigen::SimplicialLDLT<SpMat>>();
+  bottom.chol->compute(bottom.A);
+  if (bottom.chol->info() != Eigen::Success) return {};
   return levels;
 }
 
@@ -1549,9 +1635,38 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   // A TOTAL depth cap of N leaves N-1 levels for this sub-hierarchy (level 0 is
   // the matrix-free fine one); 0 keeps the shipped, cap-driven depth.
   const int sub_cap = tune.max_levels > 0 ? tune.max_levels - 1 : 0;
-  std::vector<Level> coarse = build_hierarchy(A1, cnx, cny, cnz, cactive,
-                                              /*frugal=*/true, sub_cap,
-                                              /*global_level0=*/1);
+  std::vector<Level> coarse;
+  // The coarse-space seam (task: hybrid-amg-coarsening-probe). A harness may
+  // supply the prolongators for levels 2.. from A1 by ALGEBRAIC aggregation
+  // instead of by halving the grid. Nothing below the `if` runs — and nothing is
+  // even copied out of the solver — unless a hook is installed, which no
+  // production path does; a hook that declines or returns a hierarchy this file
+  // rejects falls straight through to the geometric builder.
+  if (g_mg_coarse_hook) {
+    fea_detail::MgCoarseSeam seam;
+    seam.n1 = static_cast<int>(A1.cols());
+    seam.a1_outer = A1.outerIndexPtr();
+    seam.a1_inner = A1.innerIndexPtr();
+    seam.a1_val = A1.valuePtr();
+    seam.p0.rows = static_cast<int>(P0.rows());
+    seam.p0.cols = static_cast<int>(P0.cols());
+    for (int j = 0; j < P0.outerSize(); ++j)
+      for (SpMat::InnerIterator it(P0, j); it; ++it) {
+        seam.p0.row.push_back(static_cast<int>(it.row()));
+        seam.p0.col.push_back(static_cast<int>(it.col()));
+        seam.p0.val.push_back(it.value());
+      }
+    seam.cnx = cnx;
+    seam.cny = cny;
+    seam.cnz = cnz;
+    seam.cactive = &cactive;
+    coarse = build_hierarchy_from_prolongators(A1, cnx, cny, cnz, cactive,
+                                               g_mg_coarse_hook(seam));
+  }
+  if (coarse.empty())
+    coarse = build_hierarchy(A1, cnx, cny, cnz, cactive,
+                             /*frugal=*/true, sub_cap,
+                             /*global_level0=*/1);
   if (coarse.empty()) {
     // A1 alone could not seed a >=2-level sub-hierarchy. Use A1 as the sole
     // (directly factored) coarse level if small enough, giving a 2-level
@@ -1901,6 +2016,18 @@ namespace fea_detail {
 const MgTuning& mg_tuning() { return g_mg_tuning; }
 void mg_set_tuning(const MgTuning& t) { g_mg_tuning = t; }
 void mg_reset_tuning() { g_mg_tuning = MgTuning{}; }
+
+// --- Coarse-space seam accessors (task: hybrid-amg-coarsening-probe) ---------
+// Production never installs a hook, so `mg_coarse_space_hook_installed()` is
+// false and build_mf_hierarchy's seam block is never entered.
+MgCoarseSpaceHook mg_set_coarse_space_hook(MgCoarseSpaceHook hook) {
+  MgCoarseSpaceHook prev = g_mg_coarse_hook;
+  g_mg_coarse_hook = std::move(hook);
+  return prev;
+}
+bool mg_coarse_space_hook_installed() {
+  return static_cast<bool>(g_mg_coarse_hook);
+}
 
 }  // namespace fea_detail
 

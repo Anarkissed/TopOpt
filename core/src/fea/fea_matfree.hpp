@@ -446,5 +446,82 @@ const MgTuning& mg_tuning();
 void mg_set_tuning(const MgTuning& t);  // tests/harness only
 void mg_reset_tuning();                 // restore the shipped recipe
 
+// ---------------------------------------------------------------------------
+// THE COARSE-SPACE SEAM (task: hybrid-amg-coarsening-probe) — a HARNESS-ONLY
+// override for HOW the levels BELOW level 1 are built. INERT unless installed.
+//
+// WHY IT EXISTS. `build_mf_hierarchy` keeps level 0 matrix-free and forms the
+// level-1 operator A1 = P0^T A0 P0 element-locally (A0 is never assembled), then
+// hands A1 to `build_hierarchy`, which coarsens BY HALVING THE GRID —
+// coarsen.hpp's rule, purely geometric. PR 280 indicted exactly that step: on the
+// maintainer's 2-5 % dilute field, levels 2 / 3 / 4 / 5 / MAX all produced an
+// IDENTICAL 4,841 applies and none converged. Depth is the one knob that reshapes
+// a geometric coarse space, and reshaping it changed nothing — so the coarse
+// space, not the recipe around it, is the suspect. Peetz & Elbanna's hybrid
+// (SMO 63:835-853) replaces the deeper GEOMETRIC levels with ALGEBRAIC ones,
+// whose aggregates follow the structure rather than the grid, so a ligament
+// thinner than a coarse cell can still survive coarsening.
+//
+// The seam hands a harness A1 and P0 and takes back the PROLONGATORS for levels
+// 2.. ; the solver still forms every coarse operator itself, by its own Galerkin
+// product, and still factors its own bottom level. That keeps the algebraic
+// variant inside the solver's existing symmetry and exactness guarantees:
+// R = P^T and an SPD bottom solve make the cycle a valid CG preconditioner
+// whatever P is, and the outer FP64 CG's residual test remains what defines
+// convergence.
+//
+// LEVEL 0 IS NEVER ASSEMBLED, by construction: the seam is reached only AFTER A1
+// exists, and A1 is what the aggregation reads. PR 230 priced assembling the FINE
+// level at 20-35 GB on an 8.44M-DOF job; nothing here goes near it.
+//
+// PRODUCTION IS UNTOUCHED. No hook is installed in any production path, so
+// `mg_coarse_space_hook_installed()` is false, `build_mf_hierarchy` takes the
+// same branch it always has, and not one byte of the seam's data is even
+// materialised (P0 is only copied out when a hook is present).
+// `tests/unit/test_mg_coarse_hook.cpp` asserts the default-uninstalled state and
+// that a solve after install+clear is BIT-IDENTICAL to one that never saw a hook.
+
+// A sparse matrix in coordinate form, the Eigen-free currency of this seam.
+// (This header is deliberately Eigen-free — see the file header — so the
+// harness, which links Eigen, converts on both sides.)
+struct MgCoo {
+  int rows = 0;
+  int cols = 0;
+  std::vector<int> row;
+  std::vector<int> col;
+  std::vector<double> val;
+};
+
+// What the hook is shown at the seam. `a1_*` is Eigen's compressed storage for
+// the level-1 Galerkin operator, which is COLUMN-compressed; A1 is symmetric, so
+// reading it as CSR gives the same matrix. `p0` is the level-0 -> level-1
+// prolongator (fine active DOFs x n1), materialised ONLY when a hook is
+// installed — a harness needs it to express a fine-level quantity (a reference
+// displacement, a load vector) in the coarse space. `cactive` maps
+// (coarse node * 3 + component) -> level-1 DOF id, or -1.
+struct MgCoarseSeam {
+  int n1 = 0;
+  const int* a1_outer = nullptr;  // n1 + 1 column starts
+  const int* a1_inner = nullptr;  // row indices
+  const double* a1_val = nullptr;
+  MgCoo p0;
+  int cnx = 0, cny = 0, cnz = 0;
+  const std::vector<int>* cactive = nullptr;
+};
+
+// Returns the prolongators for levels 2.. , finest first: entry i maps level
+// (2+i) -> level (1+i), so entry 0 has `n1` rows. An EMPTY return means "decline"
+// and the solver builds the geometric hierarchy exactly as it always does; so
+// does any return the solver rejects (a dimension mismatch, a level that fails to
+// shrink, a bottom level over the DOF cap, a bottom operator that will not
+// factor). The solver never trusts the hook's shapes — it checks them.
+using MgCoarseSpaceHook = std::function<std::vector<MgCoo>(const MgCoarseSeam&)>;
+
+// Install (or clear, with a default-constructed hook); returns the previous one.
+// Thread-local, like mg_set_tuning and the stagnation latch: a run's solves are
+// issued on one thread. Production never calls this.
+MgCoarseSpaceHook mg_set_coarse_space_hook(MgCoarseSpaceHook hook);
+bool mg_coarse_space_hook_installed();
+
 }  // namespace fea_detail
 }  // namespace topopt
