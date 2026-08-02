@@ -1452,6 +1452,20 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME designbox_lattice_recert COMMAND test_designbox_lattice_recert)
 
+  # Task 2026-08-03-selfweight-clearance-void-crash: self-weight must never be
+  # applied to a voxel a keep-clear has voided. Drives minimize_plastic on a
+  # design box whose clearance reaches into the growth region with NO declared
+  # load (which used to throw "under-constrained system"), and reads the
+  # production sources to assert the fix stayed in the ONE definition.
+  add_executable(test_selfweight_clearance_void
+    tests/validation/test_selfweight_clearance_void.cpp)
+  target_link_libraries(test_selfweight_clearance_void PRIVATE topopt)
+  target_compile_definitions(test_selfweight_clearance_void PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    TOPOPT_SRC_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_test(NAME selfweight_clearance_void COMMAND test_selfweight_clearance_void)
+
   add_executable(test_mesh_job tests/validation/test_mesh_job.cpp)
   target_link_libraries(test_mesh_job PRIVATE topopt)
   target_compile_definitions(test_mesh_job PRIVATE

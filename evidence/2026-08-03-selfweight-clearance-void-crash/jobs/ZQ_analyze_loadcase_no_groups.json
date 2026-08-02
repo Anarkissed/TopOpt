@@ -1,0 +1,112 @@
+{
+  "model": "plate_bore.stl",
+  "material": "PLA",
+  "mode": "analyze",
+  "resolution": 32,
+  "simp": {
+    "max_iterations": 8
+  },
+  "design_box": {
+    "min": [
+      -12.0,
+      -8.0,
+      0.0
+    ],
+    "max": [
+      12.0,
+      8.0,
+      9.0
+    ]
+  },
+  "loads": {
+    "anchors": [
+      {
+        "kind": "cylindrical",
+        "radius_mm": 3.0
+      }
+    ],
+    "clearances": [
+      {
+        "kind": "bolt",
+        "geometry": {
+          "axis_point": [
+            -9.0,
+            -5.0,
+            2.0
+          ],
+          "axis_dir": [
+            0,
+            0,
+            1
+          ],
+          "radius_mm": 1.2,
+          "half_length_mm": 2.0
+        },
+        "concentric_margin_mm": 0.5,
+        "axial_clearance_mm": 0.0
+      },
+      {
+        "kind": "bolt",
+        "geometry": {
+          "axis_point": [
+            9.0,
+            -5.0,
+            2.0
+          ],
+          "axis_dir": [
+            0,
+            0,
+            1
+          ],
+          "radius_mm": 1.2,
+          "half_length_mm": 2.0
+        },
+        "concentric_margin_mm": 0.5,
+        "axial_clearance_mm": 0.0
+      },
+      {
+        "kind": "bolt",
+        "geometry": {
+          "axis_point": [
+            -9.0,
+            5.0,
+            2.0
+          ],
+          "axis_dir": [
+            0,
+            0,
+            1
+          ],
+          "radius_mm": 1.2,
+          "half_length_mm": 2.0
+        },
+        "concentric_margin_mm": 0.5,
+        "axial_clearance_mm": 0.0
+      },
+      {
+        "kind": "bolt",
+        "geometry": {
+          "axis_point": [
+            9.0,
+            5.0,
+            2.0
+          ],
+          "axis_dir": [
+            0,
+            0,
+            1
+          ],
+          "radius_mm": 1.2,
+          "half_length_mm": 2.0
+        },
+        "concentric_margin_mm": 0.5,
+        "axial_clearance_mm": 0.0
+      }
+    ]
+  },
+  "output": {
+    "report": "report.json",
+    "mesh_format": "stl",
+    "mesh_prefix": "variant"
+  }
+}

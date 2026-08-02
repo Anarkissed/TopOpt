@@ -1,0 +1,100 @@
+==============================================================================
+ FULL GATE TABLE — HEAD vs NEW   (floor: relative delta <= 1e-09)
+==============================================================================
+
+A  no design box + lattice, self-weight, NO clearance
+    HEAD   printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.8025723   ACCEPTED         34732.24587        34732.24587          0   0.001583542861  
+            0.7279743   ACCEPTED         31991.90649        31991.90649          0    0.00171918482  
+            0.5903537   ACCEPTED         28597.06713        28597.06713          0   0.001923274151  
+    NEW    printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.8025723   ACCEPTED         34732.24587        34732.24587          0   0.001583542861  
+            0.7279743   ACCEPTED         31991.90649        31991.90649          0    0.00171918482  
+            0.5903537   ACCEPTED         28597.06713        28597.06713          0   0.001923274151  
+    -> IDENTICAL    flips=0 worst_rel_delta=0  (rung-for-rung)
+
+B  design box, no lattice, self-weight, NO clearance
+    HEAD   printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.4135048   ACCEPTED         16013.15016        16013.15016          0    0.00343467709  
+            0.2334405   ACCEPTED         10180.36257        10180.36257          0   0.005402558075  
+            0.1157556   ACCEPTED         7475.920599        7475.920599          0   0.007356953471  
+    NEW    printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.4135048   ACCEPTED         16013.15016        16013.15016          0    0.00343467709  
+            0.2334405   ACCEPTED         10180.36257        10180.36257          0   0.005402558075  
+            0.1157556   ACCEPTED         7475.920599        7475.920599          0   0.007356953471  
+    -> IDENTICAL    flips=0 worst_rel_delta=0  (rung-for-rung)
+
+C  design box + 4 keep-clears + DECLARED LOAD + lattice
+    HEAD   printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.6636656   ACCEPTED         7.238580468        7.238580468        1.5      7.598174842  
+            0.6514469   ACCEPTED         8.025392377        8.025392377        1.5      6.674598377  
+            0.6514469   ACCEPTED         8.025392377        8.025392377        1.5      6.674598377  
+            0.6514469   ACCEPTED         8.025392377        8.025392377        1.5      6.674598377  
+    NEW    printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.6636656   ACCEPTED         7.238580468        7.238580468        1.5      7.598174842  
+            0.6514469   ACCEPTED         8.025392377        8.025392377        1.5      6.674598377  
+            0.6514469   ACCEPTED         8.025392377        8.025392377        1.5      6.674598377  
+            0.6514469   ACCEPTED         8.025392377        8.025392377        1.5      6.674598377  
+    -> IDENTICAL    flips=0 worst_rel_delta=0  (rung-for-rung)
+
+D  design box + self-weight + lattice, NO clearance
+    HEAD   printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.4135048   ACCEPTED         16013.15016        16013.15016          0    0.00343467709  
+            0.2334405   ACCEPTED         10180.36257        10180.36257          0   0.005402558075  
+            0.1157556   ACCEPTED         7475.920599        7475.920599          0   0.007356953471  
+    NEW    printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.4135048   ACCEPTED         16013.15016        16013.15016          0    0.00343467709  
+            0.2334405   ACCEPTED         10180.36257        10180.36257          0   0.005402558075  
+            0.1157556   ACCEPTED         7475.920599        7475.920599          0   0.007356953471  
+    -> IDENTICAL    flips=0 worst_rel_delta=0  (rung-for-rung)
+
+Y  NO box + 4 keep-clears + self-weight
+    HEAD   printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.6942122   ACCEPTED          33569.1413         33569.1413        1.5     0.0016384095  
+            0.5385852   ACCEPTED         30724.50785        30724.50785        1.5   0.001790101904  
+            0.3861736   ACCEPTED         26415.62266        26415.62266        1.5   0.002082101214  
+            0.2614148   ACCEPTED         13712.18727        13712.18727        1.5   0.004011030401  
+    NEW    printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.6942122   ACCEPTED          33569.1413         33569.1413        1.5     0.0016384095  
+            0.5385852   ACCEPTED         30724.50785        30724.50785        1.5   0.001790101904  
+            0.3861736   ACCEPTED         26415.62266        26415.62266        1.5   0.002082101214  
+            0.2614148   ACCEPTED         13712.18727        13712.18727        1.5   0.004011030401  
+    -> IDENTICAL    flips=0 worst_rel_delta=0  (rung-for-rung)
+
+X  design box + 4 keep-clears + self-weight  [THE DEFECT]
+    HEAD   (no report.json — the run REFUSED)
+    NEW    printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.4379421   ACCEPTED         13685.73152        13685.73152        1.5   0.004018784084  
+            0.2627010   ACCEPTED         7993.380597        7993.380597        1.5    0.00688069326  
+            0.2067524   ACCEPTED         1760.593161        1760.593161        1.5    0.03123947157  
+            0.1318328   ACCEPTED         947.6743811        947.6743811        1.5    0.05803681212  
+    -> FIXED        flips=0 worst_rel_delta=n/a  (HEAD REFUSED, NEW produced 4 rung(s) — THE FIX)
+
+Z  X + lattice (latticed certification)
+    HEAD   (no report.json — the run REFUSED)
+    NEW    printed_fr   verdict     margin_worst_case  margin_effective   required   max_stress_mpa
+            0.4379421   ACCEPTED         13685.73152        13685.73152        1.5   0.004018784084  
+            0.2627010   ACCEPTED         7993.380597        7993.380597        1.5    0.00688069326  
+            0.2067524   ACCEPTED         1760.593161        1760.593161        1.5    0.03123947157  
+            0.1318328   ACCEPTED         947.6743811        947.6743811        1.5    0.05803681212  
+    -> FIXED        flips=0 worst_rel_delta=n/a  (HEAD REFUSED, NEW produced 4 rung(s) — THE FIX)
+
+==============================================================================
+ SUMMARY
+==============================================================================
+  IDENTICAL    A  no design box + lattice, self-weight, NO clearance rung-for-rung
+  IDENTICAL    B  design box, no lattice, self-weight, NO clearance rung-for-rung
+  IDENTICAL    C  design box + 4 keep-clears + DECLARED LOAD + lattice rung-for-rung
+  IDENTICAL    D  design box + self-weight + lattice, NO clearance rung-for-rung
+  IDENTICAL    Y  NO box + 4 keep-clears + self-weight      rung-for-rung
+  FIXED        X  design box + 4 keep-clears + self-weight  [THE DEFECT] HEAD REFUSED, NEW produced 4 rung(s) — THE FIX
+  FIXED        Z  X + lattice (latticed certification)      HEAD REFUSED, NEW produced 4 rung(s) — THE FIX
+
+  TOTAL VERDICT FLIPS: 0
+
+==============================================================================
+ NEGATIVE CONTROL — the comparison must be able to FAIL
+==============================================================================
+  comparing two DIFFERENT jobs -- A  no design box + lattice, self-weight, NO clearance  vs  B  design box, no lattice, self-weight, NO clearance
+  -> flips=0 worst_rel_delta=0.738577  (rung-for-rung)
+  the comparator DOES detect a difference at this floor: the IDENTICAL verdicts above are real.

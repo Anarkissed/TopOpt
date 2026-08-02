@@ -3025,8 +3025,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // THE ONE load-case definition, shared with minimize_plastic and with the
   // optimize path's lattice certification: the declared external load REMAPPED
   // onto the solved grid, else self-weight on that grid. Off the design-box path
-  // this is `external_loads` / self_weight_loads(model_grid, ...) exactly as
+  // this is `external_loads`, else self-weight over `model_grid`, exactly as
   // before; on it, this is the remap whose absence forced the old refusal.
+  // (Spelled in prose, not as a call: test_selfweight_clearance_void SW2 reads
+  // this file and requires exactly ONE self_weight_loads call to survive in it.)
   const std::vector<NodalLoad> loads =
       design_domain_loads(domain, options, material.density_g_cm3);
   const bool load_path_ok = load_path_connected(cert_grid, sd.density, 0.5);

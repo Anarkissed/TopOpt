@@ -1,0 +1,11 @@
+JOB                                            HEAD               NEW                VERDICT                            RAW (nothing normalized)
+A_nobox_lattice                                e7febb75a4b736ad   e7febb75a4b736ad   BYTE-IDENTICAL                     differs (wall clocks only)
+B_box_nolattice                                93ecb17a89bea89c   93ecb17a89bea89c   BYTE-IDENTICAL                     differs (wall clocks only)
+C_box_keepclear_lattice                        b0afe51296ac9b86   b0afe51296ac9b86   BYTE-IDENTICAL                     differs (wall clocks only)
+D_box_selfweight_lattice                       16e10f21baecead9   16e10f21baecead9   BYTE-IDENTICAL                     differs (wall clocks only)
+Y_nobox_clearance_selfweight                   fc74c2b831cf81e2   fc74c2b831cf81e2   BYTE-IDENTICAL                     differs (wall clocks only)
+ZQ_analyze_loadcase_no_groups                  REFUSED            REFUSED            both REFUSED (unchanged)           identical even raw
+X_preexisting_selfweight_clearance_crash       REFUSED            2ec548287d47cd1b   HEAD REFUSED -> NEW RAN (THE FIX)  -
+Z_box_clearance_selfweight_lattice             REFUSED            c033e08ad1880de3   HEAD REFUSED -> NEW RAN (THE FIX)  -
+ZV_lattice_variant                             REFUSED            4ce840da4e501a7d   HEAD REFUSED -> NEW RAN (THE FIX)  -
+ZA_analyze_on_Z_mesh                           REFUSED            c0994bff50301844   HEAD REFUSED -> NEW RAN (THE FIX)  -
