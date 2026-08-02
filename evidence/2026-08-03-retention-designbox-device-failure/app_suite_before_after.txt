@@ -75,6 +75,23 @@ maintainer's failure reproduced headlessly from his OWN run's job document
 
 === CORE SUITE (the one CI actually runs) ===
 
+Full suite on this branch, macOS, Release, OCCT+Eigen via Homebrew:
+
+  cmake -S core -B build -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="$(brew --prefix opencascade);$(brew --prefix eigen)"
+  cmake --build build -j8 && ctest --test-dir build --output-on-failure --no-tests=error
+
+  Test #17: app_core_capability_mirror ..........   Passed   0.20 sec
+  ...
+  99/99 Test #99: mesh_job ......................   Passed   6.82 sec
+
+  100% tests passed out of 99
+  Total Test time (real) = 1263.53 sec
+
+`ctest -N` on that same build tree lists `Test #17: app_core_capability_mirror`
+among `Total Tests: 99`, so the new target ran INSIDE that green run — not only
+as the standalone invocation recorded in mirror_test_before_after.txt.
+
 New ctest target `app_core_capability_mirror` — see mirror_test_before_after.txt.
 Against the merged broken state (ce4e181): 4 checks, 3 FAILURES, exit 1.
 Against this branch:                        4 checks, 0 failures, exit 0.

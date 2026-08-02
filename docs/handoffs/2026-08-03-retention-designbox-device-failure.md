@@ -289,7 +289,8 @@ from **both** sides, so a revert in either direction is loud.
 - Full app package: only the three pre-existing 3MF tests fail, because
   `build_core.sh` in this worktree reported `lib3mf: (none) — macOS slice is
   3MF-free`. Known worktree provisioning gap; untouched by this task.
-- Core: new target passes under ctest; full-suite run recorded in the evidence dir.
+- Core: **99/99, 100% passed** (1263 s), with `Test #17: app_core_capability_mirror`
+  inside that run — full log excerpt in `evidence/…/app_suite_before_after.txt`.
 
 ---
 
