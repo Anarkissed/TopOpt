@@ -1,0 +1,13 @@
+	 Executed 11 tests, with 0 failures (0 unexpected) in 0.013 (0.016) seconds
+	 Executed 16 tests, with 0 failures (0 unexpected) in 0.014 (0.018) seconds
+	 Executed 236 tests, with 1 test skipped and 0 failures (0 unexpected) in 76.677 (76.784) seconds
+	 Executed 236 tests, with 1 test skipped and 0 failures (0 unexpected) in 76.677 (76.785) seconds
+	 Executed 25 tests, with 0 failures (0 unexpected) in 0.457 (0.466) seconds
+	 Executed 3 tests, with 0 failures (0 unexpected) in 2.049 (2.051) seconds
+	 Executed 31 tests, with 0 failures (0 unexpected) in 0.067 (0.078) seconds
+	 Executed 5 tests, with 0 failures (0 unexpected) in 0.029 (0.030) seconds
+	 Executed 51 tests, with 0 failures (0 unexpected) in 66.230 (66.250) seconds
+	 Executed 7 tests, with 1 test skipped and 0 failures (0 unexpected) in 7.702 (7.705) seconds
+	 Executed 79 tests, with 0 failures (0 unexpected) in 0.095 (0.146) seconds
+	 Executed 8 tests, with 0 failures (0 unexpected) in 0.020 (0.022) seconds
+Test Suite 'TopOptFlowsTests.xctest' passed at 2026-08-01 20:38:27.938.

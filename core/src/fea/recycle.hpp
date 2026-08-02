@@ -184,6 +184,61 @@ bool rc_metric_diagonal();
 bool rc_set_wrap_multigrid(bool enable);
 bool rc_wrap_multigrid();
 
+// ===========================================================================
+// PHASE TIMING — the instrument, not a behaviour
+// (task 2026-08-03-krylov-recycle-reassessment; the same discipline as PR 273's
+// per-iteration phase split, one level further down.)
+//
+// PR 273 split a design iteration into named phases and gave recycling ONE
+// column, `recycle_ms`. PR 278 then gated GenEO off the steady-state path and
+// that single column became the whole remaining accelerator bill. A single
+// aggregate cannot tell a maintainer whether the lever is the CADENCE (how often
+// the basis is rebuilt), the DIMENSION (how wide the correction is), or the
+// MECHANISM itself — those three live in different phases and respond to
+// different knobs. So `recycle_ms` is split here the same way, and the split is
+// EXHAUSTIVE: every line of every RecycleSession entry point lands in exactly one
+// bucket, so `sum(phases)` reconciles against the call site's own `recycle_ms`
+// rather than approximating it.
+//
+// DEFAULT OFF, and off means off: `rc_phase_timing()` is a single relaxed atomic
+// load guarding every clock read, the per-iteration guards are inlined inside
+// recycle.cpp, and the two header hooks below run O(k) times per SOLVE (never per
+// iteration). Nothing here can change an arithmetic result in either state — the
+// clock is read, never used as an input — so a phase-timed run and a shipped run
+// produce bit-identical fields. Asserted in test_recycle.
+// ===========================================================================
+struct RcPhaseTimes {
+  // Wall in each phase, summed over every solve since the last rc_phase_reset().
+  double begin_ms = 0.0;         // session begin: cycle decision, E reuse, allocs
+  double setup_matvec_ms = 0.0;  // the k exact FP64 operator applies forming E
+  double setup_other_ms = 0.0;   // promote/dot/Cholesky around those matvecs
+  double augment_ms = 0.0;       // the PER-CG-ITERATION additive correction
+  double observe_ms = 0.0;       // the decimating harvest sample
+  double commit_ms = 0.0;        // Rayleigh-Ritz rebuild of the carried basis
+  // Deterministic call counts, so a rate can be formed from the wall above.
+  long long sessions = 0;        // RecycleSession objects that ran begin()
+  long long harvest_sessions = 0;
+  long long active_sessions = 0;  // sessions whose correction actually applied
+  long long setup_matvecs = 0;
+  long long augment_calls = 0;
+  long long observe_calls = 0;
+  long long observe_stores = 0;
+  long long commit_calls = 0;
+};
+
+bool rc_set_phase_timing(bool on);  // returns the previous setting; DEFAULT false
+bool rc_phase_timing();
+RcPhaseTimes rc_phase_times();  // this thread's accumulator
+void rc_phase_reset();
+
+// Hooks for the setup matvec loop ONLY, which lives in this header because it is
+// templated on the operator. `rc_phase_mark()` returns the steady clock in ms
+// when timing is on and 0.0 when it is off; the charge calls are no-ops when it
+// is off. Called O(k) times per solve, never per CG iteration.
+enum class RcPhaseId { SetupMatvec, SetupOther };
+double rc_phase_mark();
+void rc_phase_charge(RcPhaseId id, double t0);
+
 // --- Thread-local carried state (public face: fea_reset_krylov_recycle_space) --
 void rc_reset_space();
 bool rc_space_active();             // a usable basis is currently carried
@@ -259,15 +314,22 @@ class RecycleSession {
   template <typename ApplyA>
   void setup(ApplyA&& apply_a) {
     const int n = n_, k = k_;
+    const double t_alloc = rc_phase_mark();
     std::vector<double> col(static_cast<std::size_t>(n));
     std::vector<double> aw(static_cast<std::size_t>(n));
     std::vector<double> e(static_cast<std::size_t>(k) * k, 0.0);
     if (harvesting_)
       hau_.assign(static_cast<std::size_t>(n) * static_cast<std::size_t>(k),
                   0.0f);
+    rc_phase_charge(RcPhaseId::SetupOther, t_alloc);
     for (int j = 0; j < k; ++j) {
+      const double t_other = rc_phase_mark();
       promote_column(j, col.data());
+      rc_phase_charge(RcPhaseId::SetupOther, t_other);
+      const double t_mv = rc_phase_mark();
       apply_a(col.data(), aw.data());
+      rc_phase_charge(RcPhaseId::SetupMatvec, t_mv);
+      const double t_tail = rc_phase_mark();
       ++setup_matvecs_;
       for (int i = 0; i < k; ++i)
         e[static_cast<std::size_t>(i) * k + j] = column_dot(i, aw.data());
@@ -275,6 +337,7 @@ class RecycleSession {
         float* dst = hau_.data() + static_cast<std::size_t>(j) * n;
         for (int t = 0; t < n; ++t) dst[t] = static_cast<float>(aw[t]);
       }
+      rc_phase_charge(RcPhaseId::SetupOther, t_tail);
     }
     active_ = setup_finish(e);
     if (!active_) hau_.clear();

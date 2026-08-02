@@ -823,6 +823,71 @@ public final class RunModel: ObservableObject {
     /// already-visible results screen). Drives an "optimizing more…" indicator.
     @Published public private(set) var isStreaming = false
 
+    /// THE COMPLETED RUN'S RESULTS, HELD ACROSS A NEW RUN (task
+    /// 2026-08-03-variant-entry-gating-and-retention, bar AJ1).
+    ///
+    /// `start` must clear `outcome`: streamed variants are APPENDED to it
+    /// (`appendStreamed`), so leaving the previous run's variants in place would
+    /// splice two runs' ladders into one list. But clearing it outright meant that
+    /// a run which produced NOTHING — refused at the core's pre-flight, killed by a
+    /// solver throw, cancelled before the first variant — destroyed hours of
+    /// finished work that it never replaced. That is the reported data loss: the
+    /// lattice page's "Optimize from scratch" starts a full ladder, the core
+    /// refuses it up front when a design box is present, and the finished variants
+    /// are gone before a single element was solved.
+    ///
+    /// So the completed outcome is MOVED here rather than dropped, and put back by
+    /// `restorePreservedOutcome()` on every path that ends with no outcome of its
+    /// own. A run that genuinely produced accepted variants releases it — that
+    /// replacement is the user's own explicit Optimize, and it is the only thing
+    /// that may retire a finished run.
+    private var preservedOutcome: OptimizeOutcome?
+
+    /// Whether the results currently on screen are the ones a NEW run failed to
+    /// replace — so the UI can say "your previous results are still here" instead of
+    /// letting them reappear unexplained. Cleared as soon as anything else happens.
+    @Published public private(set) var restoredPreviousResults = false
+
+    /// The machine this run was dispatched to, captured at `start` and stamped onto
+    /// the outcome in `finish` (bar AJ5). nil ⇒ this device.
+    private var dispatchedWorkerName: String?
+
+    /// Whether the results on `outcome` came from a run this app RE-ATTACHED to
+    /// rather than submitted. Such a run has no retention pair and can never gain
+    /// one: the app no longer holds the document it sent, and the worker keeps
+    /// `job.json` beside the run rather than in the served `out/`. The entry gate
+    /// reads this so it can say THAT, instead of the "predates retention" sentence,
+    /// which would be false.
+    @Published public private(set) var wasReattached = false
+
+    /// THE RETENTION PAIR FOR THE RESULTS CURRENTLY ON `outcome` — the exact job
+    /// document that produced them and that run's `design.bin` (PR 274).
+    ///
+    /// It lives HERE, beside the outcome, for one reason: it must move exactly when
+    /// the outcome moves. Held on the project instead, it drifted — a failed run
+    /// would restore the previous variants (AJ1) while their retention pair had
+    /// already been cleared, leaving reachable variants that claimed to have kept no
+    /// design. The pair and the results it describes are one fact.
+    @Published public private(set) var retainedArtifacts: RelatticeArtifacts?
+    /// The pair the IN-FLIGHT run has reported so far (see `noteRetainedArtifacts`).
+    private var pendingArtifacts: RelatticeArtifacts?
+    /// The displaced run's pair, held for the same window `preservedOutcome` is.
+    private var preservedArtifacts: RelatticeArtifacts?
+
+    /// The in-flight run reported its retention pair. Called from the runner (off
+    /// the main thread — the caller hops); it becomes `retainedArtifacts` only if
+    /// this run goes on to produce accepted variants.
+    public func noteRetainedArtifacts(_ artifacts: RelatticeArtifacts) {
+        guard phase == .running else { return }
+        pendingArtifacts = artifacts
+    }
+
+    /// Reinstate a pair loaded from disk beside restored results (persist-c).
+    public func restoreArtifacts(_ artifacts: RelatticeArtifacts?) {
+        guard phase == .idle else { return }
+        retainedArtifacts = artifacts
+    }
+
     /// Wall-clock instant the in-flight run started (set in `start`, cleared in
     /// `reset`). PRESENTATION-ONLY — it drives the progress readout's elapsed clock
     /// and the rung-rate ETA (run-progress-visibility task). It is deliberately NOT
@@ -990,13 +1055,30 @@ public final class RunModel: ObservableObject {
     /// the run fails loudly only when the worker is unreachable, i.e. heartbeats AND
     /// probes both absent). A LOCAL run begins solving immediately, so it arms the
     /// guard here with the honest ~150s grace.
-    public func start(_ request: RunRequest, remote: Bool = false) {
+    ///
+    /// `workerName` names the LAN worker this run was dispatched to (bar AJ5); nil
+    /// means this device. It is stamped onto the outcome in `finish` so a finished
+    /// run can always say which machine solved it.
+    public func start(_ request: RunRequest, remote: Bool = false,
+                      workerName: String? = nil, reattached: Bool = false) {
         guard phase != .running else { return }
         phase = .running
         progress = nil
         failure = nil
         canKeepWaiting = false
+        // AJ1: HOLD the finished run's variants rather than dropping them. `outcome`
+        // still has to be cleared (streamed variants append to it), but a run that
+        // ends up producing nothing puts these back — see `preservedOutcome`.
+        if let finished = outcome, finished.variants.contains(where: { $0.accepted }) {
+            preservedOutcome = finished
+            preservedArtifacts = retainedArtifacts
+        }
+        restoredPreviousResults = false
         outcome = nil
+        retainedArtifacts = nil
+        pendingArtifacts = nil
+        dispatchedWorkerName = remote ? workerName : nil
+        wasReattached = reattached
         isStreaming = true
         startedAt = Date()      // anchor the elapsed clock / ETA (presentation-only)
         lastProgressAt = Date() // seed the freshness cue (presentation-only)
@@ -1077,6 +1159,10 @@ public final class RunModel: ObservableObject {
         let hadDesignBox = runningRequest?.designBox != nil
         let grace = watchdog.graceSeconds
         diag("run stalled during setup — no progress within \(Int(grace))s (designBox=\(hadDesignBox)); surfacing a failure sheet with Keep-waiting")
+        // The preserved previous results are deliberately NOT put back here: this
+        // sheet offers "Keep waiting", and the still-running solve would then append
+        // its streamed variants onto them. They come back in `dismissFailure`, which
+        // is where the stalled run is actually abandoned.
         outcome = nil
         failure = .solver(hadDesignBox ? RunFailure.stalledWithDesignBox(graceSeconds: grace)
                                        : RunFailure.stalledDuringSetup(graceSeconds: grace))
@@ -1173,6 +1259,37 @@ public final class RunModel: ObservableObject {
         canKeepWaiting = false
         phase = .idle
         failure = nil
+        // The stalled run is now abandoned, so the previous completed run's variants
+        // come back (AJ1). Safe here and not in `watchdogFired`: nothing can append
+        // to `outcome` any more.
+        restorePreservedOutcome()
+    }
+
+    /// Put the last completed run's results back when a run ended without producing
+    /// any of its own (bar AJ1). A run that produced nothing — refused at pre-flight,
+    /// thrown, cancelled before the first variant — must never destroy the run that
+    /// did. No-op when this run produced its own outcome: THAT replacement is the
+    /// user's own Optimize, and it is the only thing allowed to retire a finished run.
+    private func restorePreservedOutcome() {
+        let kept = preservedOutcome, keptArtifacts = preservedArtifacts
+        preservedOutcome = nil
+        preservedArtifacts = nil
+        guard outcome == nil, let kept else { return }
+        outcome = kept
+        retainedArtifacts = keptArtifacts
+        restoredPreviousResults = true
+        diag("a run produced no variants — the previous run's \(kept.variants.count) variant(s) are kept")
+    }
+
+    /// A run has just resolved WITH results of its own: its retention pair (if the
+    /// runner reported one) is now the pair that describes them. An on-device run
+    /// reports none, which is correct — the bridge writes no design container, and
+    /// the entry controls say exactly that rather than reusing an older run's pair.
+    /// Called only from `finish`, and only before `restorePreservedOutcome`.
+    private func adoptPendingArtifacts() {
+        defer { pendingArtifacts = nil }
+        guard outcome != nil else { return }
+        retainedArtifacts = pendingArtifacts
     }
 
     /// Reset after consuming a success (e.g. once M7.8 has taken the outcome).
@@ -1184,6 +1301,12 @@ public final class RunModel: ObservableObject {
         failure = nil
         canKeepWaiting = false
         outcome = nil
+        preservedOutcome = nil
+        preservedArtifacts = nil
+        pendingArtifacts = nil
+        retainedArtifacts = nil
+        restoredPreviousResults = false
+        wasReattached = false
         isStreaming = false
         startedAt = nil
         localSolveStartedAt = nil
@@ -1227,8 +1350,13 @@ public final class RunModel: ObservableObject {
         let localTiming = localSolveStartedAt.map {
             RunTiming(solveSeconds: clock().timeIntervalSince($0))
         }
+        // AJ5: and WHICH MACHINE solved it, from what this model dispatched — the one
+        // fact the outcome could never carry on its own (the bridge and the worker
+        // both build outcomes that do not know where they ran).
+        let machine = SolvingMachine.dispatched(remote: remote, workerName: dispatchedWorkerName)
         func stamp(_ o: OptimizeOutcome) -> OptimizeOutcome {
             o.withTiming(o.timing ?? (remote ? nil : localTiming))
+             .withSolvedBy(machine.recordedName)
         }
         switch result {
         case .success(let o):
@@ -1295,6 +1423,17 @@ public final class RunModel: ObservableObject {
                 phase = .failed
             }
         }
+        // Read from THIS run's own outcome, before the AJ1 restore below can put a
+        // previous run's back in its place — the notification describes the run that
+        // just finished, never the one still on screen.
+        let observedRemoteFinish = (outcome?.computedRemotely ?? false) && phase != .cancelled
+        // AJ1. This run is over. If it produced nothing of its own, the completed run
+        // it displaced comes back — the failure sheet still explains what went wrong,
+        // and dismissing it returns the user to the variants they already had. A run
+        // that DID produce accepted variants released the hold above, so the
+        // replacement the user asked for stands.
+        adoptPendingArtifacts()
+        restorePreservedOutcome()
         isStreaming = false
         isMinimized = false   // resolved: let a failure sheet / success surface
         // Fire the completion notification when the app OBSERVED a run finish while
@@ -1304,7 +1443,6 @@ public final class RunModel: ObservableObject {
         // flagged `computedRemotely`. We skip a user-cancelled remote run (the user
         // just cancelled it themselves — a "cancelled" banner would be noise); a
         // backgrounded local run keeps its prior behaviour unchanged.
-        let observedRemoteFinish = (outcome?.computedRemotely ?? false) && phase != .cancelled
         if runningInBackground || observedRemoteFinish {
             notifier.runDidComplete(summary: completionSummary(request))
         }

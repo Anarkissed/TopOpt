@@ -1,0 +1,30 @@
+recycle_reassess — mode=dim  evidence=evidence/2026-08-03-krylov-recycle-reassessment
+host 1-min load average at start: 9.20
+shipped defaults: dim=16 cycle=1 wrap_multigrid=0 phase_timing=0
+
+===== AG3 — RECYCLE DIMENSION SWEEP (latched path) =====
+  LATCHED bracket 40x16x41 (26240 voxels, 85680 free DOFs) dil=0.25 vf=0.50, 4 clearances
+  3 round-robin repeats x 8 design iterations (order reversed on alternate repeats)
+    rep 1  k=0 (off)  wall   15.94 s  CG 6511     setup_mv 0      load 10.07
+    rep 1  k=4        wall   15.28 s  CG 5389     setup_mv 28     load 10.63
+    rep 1  k=8        wall   14.50 s  CG 4769     setup_mv 56     load 9.99
+    rep 1  k=16       wall   15.01 s  CG 4045     setup_mv 112    load 11.04
+    rep 1  k=32       wall   22.43 s  CG 3739     setup_mv 224    load 11.67
+    rep 2  k=32       wall   20.73 s  CG 3739     setup_mv 224    load 11.65
+    rep 2  k=16       wall   17.23 s  CG 4045     setup_mv 112    load 11.62
+    rep 2  k=8        wall   14.89 s  CG 4769     setup_mv 56     load 10.64
+    rep 2  k=4        wall   15.11 s  CG 5389     setup_mv 28     load 10.99
+    rep 2  k=0 (off)  wall   22.01 s  CG 6511     setup_mv 0      load 11.56
+    rep 3  k=0 (off)  wall   18.11 s  CG 6511     setup_mv 0      load 12.02
+    rep 3  k=4        wall   18.18 s  CG 5389     setup_mv 28     load 12.74
+    rep 3  k=8        wall   16.47 s  CG 4769     setup_mv 56     load 13.60
+    rep 3  k=16       wall   17.77 s  CG 4045     setup_mv 112    load 12.67
+    rep 3  k=32       wall   24.57 s  CG 3739     setup_mv 224    load 12.67
+
+  setting      CG total   setup_mv      DOF-work  vs base wall/solve    vs base   recycle rec share
+  k=0 (off)       17799          0    1.5250e+09   1.000x     1.462 s   1.000x      0.1 ms     0.0%
+  k=4             14433         84    1.2438e+09   0.816x     1.235 s   0.845x    194.5 ms    15.7%
+  k=8             12573        168    1.0916e+09   0.716x     1.218 s   0.833x    279.0 ms    23.4%
+  k=16            10401        336    9.1995e+08   0.603x     1.341 s   0.917x    482.9 ms    36.1%
+  k=32             9483        672    8.7008e+08   0.571x     1.972 s   1.349x   1254.2 ms    63.7%
+  host 1-min load average at end: 12.67

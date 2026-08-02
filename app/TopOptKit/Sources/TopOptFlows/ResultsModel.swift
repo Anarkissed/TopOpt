@@ -723,6 +723,18 @@ public final class ResultsModel: ObservableObject {
     /// there is no recorded timing.
     public var runDurationLabel: String? { runTiming?.summary }
 
+    /// WHICH MACHINE SOLVED THIS RUN (task 2026-08-03-variant-entry-gating-and-
+    /// retention, bar AJ5). Resolved from the outcome's own two recorded facts by
+    /// `SolvingMachine` — never from the compute picker's CURRENT selection, which
+    /// says where the NEXT run would go, not where this one went.
+    public private(set) var solvingMachine: SolvingMachine = .thisDevice
+
+    /// The per-variant provenance line: every variant on this screen came out of the
+    /// same run, so it carries the same machine — stated on the variant rather than
+    /// only on the run, because that is where the user is looking when a refusal
+    /// tells them to "re-run it on a Mac worker".
+    public var variantProvenanceLabel: String { solvingMachine.label }
+
     /// Handoff 100 — honest "Keep clear" notes: one line per applied clearance
     /// region (which face + kind, how much it reserved, or "outside the solved area"
     /// when the region missed the grid). Clearance affects the DESIGN (it forbids
@@ -926,6 +938,7 @@ public final class ResultsModel: ObservableObject {
         let acc = outcome.variants.filter { $0.accepted }
         accepted = acc
         computedRemotely = outcome.computedRemotely
+        solvingMachine = SolvingMachine.of(outcome)
         // Only a timing-bearing outcome updates the duration: `apply` also runs for
         // every STREAMED partial (which has no timing yet), and a partial landing
         // after the authoritative final must not erase the run's recorded duration.

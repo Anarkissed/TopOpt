@@ -237,12 +237,20 @@ public extension RunModel {
     /// Build a `Runner` that offloads the run to a LAN worker. Drop-in beside
     /// `bridgeRunner`; the run flow cannot tell the difference beyond where the
     /// compute happens.
+    /// `onArtifacts` receives the run's RETENTION PAIR — the exact job document
+    /// this app submitted and the run's `design.bin` — when both survive (task
+    /// 2026-08-03-variant-entry-gating-and-retention). PR 274 defined this pair and
+    /// persisted it, but nothing ever produced one from a live run: the app read
+    /// `run_job.json` / `run_design.bin` back from disk and never wrote them, so
+    /// every finished run reported "this run kept no design file" forever. This is
+    /// the missing producer. Called on the run thread; the caller hops to main.
     static func remoteRunner(_ config: RemoteRunnerConfig,
-                             defaults: UserDefaults = .standard) -> Runner {
+                             defaults: UserDefaults = .standard,
+                             onArtifacts: ((RelatticeArtifacts) -> Void)? = nil) -> Runner {
         return { request, progress, onVariant in
             try RemoteRun(config: config, request: request,
                           progress: progress, onVariant: onVariant,
-                          defaults: defaults).run()
+                          defaults: defaults, onArtifacts: onArtifacts).run()
         }
     }
 
@@ -251,6 +259,11 @@ public extension RunModel {
     /// the existing job's `/events` (whose replay rebuilds the streamed variants),
     /// then assembles the same final outcome. Used after the iPad slept/relaunched
     /// with a `RemoteJobStore` record.
+    /// A RE-ATTACH deliberately reports NO artifacts: the app no longer holds the
+    /// document it submitted (the worker keeps `job.json` beside the run, not in the
+    /// served `out/`), and a document rebuilt from the current request would be the
+    /// re-authored load case this whole path exists to avoid. The variant then says
+    /// so with its own reason (`RelatticeUnavailable.jobDocumentNotRecorded`).
     static func remoteReattachRunner(_ config: RemoteRunnerConfig, jobID: String,
                                      defaults: UserDefaults = .standard) -> Runner {
         return { request, progress, onVariant in
@@ -275,8 +288,13 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private let defaults: UserDefaults
     /// Non-nil → re-attach to this existing job (skip health + submit).
     private let existingJobID: String?
+    /// Where the run's retention pair is handed back (see `remoteRunner`).
+    private let onArtifacts: ((RelatticeArtifacts) -> Void)?
 
     private var jobID: String?
+    /// The EXACT bytes this run submitted, kept so the retention pair is the
+    /// document that was sent — not one rebuilt later from anything.
+    private var submittedJobJSON: Data?
 
     // MARK: shared state (run thread ⇄ delegate queue) — guarded by `lock`
     private let lock = NSLock()
@@ -388,13 +406,15 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
          progress: @escaping (Int, Int, Int) -> Bool,
          onVariant: @escaping (OptimizeOutcome) -> Void,
          defaults: UserDefaults = .standard,
-         existingJobID: String? = nil) {
+         existingJobID: String? = nil,
+         onArtifacts: ((RelatticeArtifacts) -> Void)? = nil) {
         self.config = config
         self.request = request
         self.progress = progress
         self.onVariant = onVariant
         self.defaults = defaults
         self.existingJobID = existingJobID
+        self.onArtifacts = onArtifacts
     }
 
     // MARK: run
@@ -421,6 +441,7 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
 
             // 2) SUBMIT: POST the STEP/STL + a job.json built from the request.
             let jobJSON = try buildJobJSON()
+            submittedJobJSON = jobJSON      // the retention pair's first half
             let modelData = try Data(contentsOf: URL(fileURLWithPath: request.modelPath))
             let modelName = (request.modelPath as NSString).lastPathComponent
             jobID = try postJob(model: modelData, modelName: modelName, jobJSON: jobJSON)
@@ -953,6 +974,35 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         return container
     }
 
+    /// Fetch the run's `design.bin` — the per-variant DENSITY FIELDS core writes
+    /// beside `fields.bin` (PR 274's design store), served by the SAME
+    /// `/files/{name}` route the meshes use. Returns nil on any failure, and says
+    /// WHICH failure it was: a 404 is an older worker (or a job whose CLI wrote
+    /// none), a transport error is a network story, and an empty body is neither.
+    /// A design failure never fails the run — it only makes the variant entries
+    /// honestly unavailable.
+    private func fetchDesign() -> Data? {
+        guard let id = jobID else { return nil }
+        let url = config.baseURL.appendingPathComponent("jobs")
+            .appendingPathComponent(id).appendingPathComponent("files")
+            .appendingPathComponent("design.bin")
+        guard let (data, resp) = try? syncGET(url) else {
+            diag("remote design.bin fetch failed (transport) — variants can't be smoothed/latticed")
+            return nil
+        }
+        let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            diag("remote design.bin unavailable (HTTP \(code)) — variants can't be smoothed/latticed")
+            return nil
+        }
+        guard !data.isEmpty else {
+            diag("remote design.bin was empty — variants can't be smoothed/latticed")
+            return nil
+        }
+        diag("remote design.bin fetched: \(data.count) bytes")
+        return data
+    }
+
     /// Read the WORKER's own record of when this job was created, promoted and
     /// finished (`GET /jobs/{id}`, handoff 121 timestamps) and turn it into the run's
     /// `RunTiming` (handoff 134, item 1).
@@ -1322,6 +1372,15 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // The orientation ranking this run produced — a RECOMMENDATION shown beside
         // the results, never applied and never consulted for a verdict.
         let buildOrientation = fetchBuildOrientation()
+        // THE RETENTION PAIR (task 2026-08-03-variant-entry-gating-and-retention).
+        // Best-effort, exactly like fields.bin: a run whose design.bin cannot be
+        // fetched is still a complete run, it simply cannot have its variants
+        // smoothed or re-latticed — and the entry controls then say so with the
+        // reason instead of opening a page that refuses. Reported ONLY when both
+        // halves survive, the same all-or-nothing rule the store applies.
+        if let job = submittedJobJSON, let design = fetchDesign() {
+            onArtifacts?(RelatticeArtifacts(jobJSON: job, designBin: design))
+        }
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 

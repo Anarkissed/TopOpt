@@ -40,12 +40,16 @@
 // harness as the sibling tests, public API only.
 
 #include "topopt/fea.hpp"
+#include "topopt/production.hpp"
 #include "topopt/voxel.hpp"
+
+#include "fea/recycle.hpp"  // the shipped-defaults tripwire reads the internal dials
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <vector>
 
@@ -501,10 +505,79 @@ void test_long_sequence_robust() {
               r.cg_total);
 }
 
+// --- 7: the SHIPPED-DEFAULTS TRIPWIRE ---------------------------------------
+//
+// Task 2026-08-03-krylov-recycle-reassessment re-measured the recycler in the
+// post-PR-278 posture (GenEO gated off the steady-state path, so the recycler is
+// the whole remaining accelerator bill) and reported ITS NUMBERS AGAINST THESE
+// FOUR DIALS. Every table in that handoff — the 0.603x DOF-weighted work, the
+// 0.98x wall, the k-sweep's optimum, the cadence sweep, the healthy-path
+// bit-identity — is a statement about this exact configuration. Move a dial and
+// those numbers stop describing what ships, silently.
+//
+// So they are asserted here (the PR 275 / PR 280 pattern): the tripwire does not
+// forbid a change, it forbids an UNMEASURED one. Anyone who moves a value below
+// must re-run core/tests/harness/recycle_reassess.cpp and update the handoff in
+// the same change.
+void test_shipped_defaults_tripwire() {
+  reset_all();
+  CHECK(topopt::fea_detail::kRecycleDefaultDim == 16,
+        "TRIPWIRE: the recycle dimension default is k = 16 (handoff 133's "
+        "measured optimum, re-swept by 2026-08-03-krylov-recycle-reassessment)");
+  CHECK(topopt::production_krylov_recycle_dim() == 16,
+        "TRIPWIRE: PRODUCTION arms k = 16 — the dimension every number in the "
+        "2026-08-03 reassessment was measured at");
+  CHECK(topopt::fea_krylov_recycle_dim() == 16,
+        "TRIPWIRE: the library default dimension is 16");
+  CHECK(topopt::fea_krylov_recycle_cycle() == 1,
+        "TRIPWIRE: the harvest cadence is 1 — EVERY solve rebuilds the basis. "
+        "The 2026-08-03 cadence sweep measured 2 as the near-neutral "
+        "alternative and 4+ as a loss; either way this must not move silently");
+  CHECK(topopt::fea_krylov_recycle_wrap_multigrid() == false,
+        "TRIPWIRE: wrap_multigrid stays FALSE. With it true the healthy "
+        "multigrid path pays a recycle bill it cannot see (the multigrid call "
+        "site has no phase spans) and the 2026-08-03 sweep measured 1.55x "
+        "DOF-weighted work and 1.49x wall on that path");
+  CHECK(topopt::fea_krylov_recycling_enabled() == false,
+        "TRIPWIRE: the LIBRARY default is OFF (THE ONE RULE); production arms "
+        "it explicitly");
+  CHECK(topopt::fea_detail::rc_phase_timing() == false,
+        "TRIPWIRE: the phase-timing instrument (2026-08-03) is OFF by default — "
+        "it is measurement, never behaviour, and a shipped run must read no "
+        "clock inside the recycler");
+
+  // The instrument is an instrument: arming it must not move a single bit of the
+  // answer. Proven rather than asserted, on the ill-conditioned fixture.
+  const VoxelGrid g = void_heavy_grid(12, 1.0);
+  std::vector<DirichletBC> bcs;
+  std::vector<NodalLoad> loads;
+  clamp_and_load(g, bcs, loads);
+  const SeqResult plain = run_sequence(false, true, 16, g, bcs, loads, 4);
+  topopt::fea_detail::rc_set_phase_timing(true);
+  const SeqResult timed = run_sequence(false, true, 16, g, bcs, loads, 4);
+  topopt::fea_detail::rc_set_phase_timing(false);
+  CHECK(plain.final_field.size() == timed.final_field.size() &&
+            std::memcmp(plain.final_field.data(), timed.final_field.data(),
+                        plain.final_field.size() * sizeof(double)) == 0,
+        "TRIPWIRE: phase timing ON must leave the converged field "
+        "BIT-IDENTICAL — the clock is read, never used as an input");
+  CHECK(plain.cg_total == timed.cg_total,
+        "TRIPWIRE: phase timing ON must leave the CG route unchanged");
+  const topopt::fea_detail::RcPhaseTimes off_acc =
+      (topopt::fea_detail::rc_phase_reset(), topopt::fea_detail::rc_phase_times());
+  CHECK(off_acc.augment_calls == 0 && off_acc.commit_calls == 0,
+        "TRIPWIRE: rc_phase_reset clears the accumulator");
+  std::printf("  [tripwire ] k=16 cycle=1 wrap_mg=0 enabled=0 phase_timing=0; "
+              "instrument bit-identical over 4 solves (cg=%lld)\n",
+              plain.cg_total);
+  reset_all();
+}
+
 }  // namespace
 
 int main() {
   try {
+    test_shipped_defaults_tripwire();
     test_exactness_and_parity(false, "jacobi");
     test_exactness_and_parity(true, "mgcg  ");
     test_iteration_reduction();

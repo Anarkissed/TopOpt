@@ -1,0 +1,27 @@
+recycle_reassess — mode=exact  evidence=evidence/2026-08-03-krylov-recycle-reassessment
+host 1-min load average at start: 11.45
+shipped defaults: dim=16 cycle=1 wrap_multigrid=0 phase_timing=0
+
+===== AG7 EXACTNESS + DETERMINISM — (a) LATCHED =====
+  LATCHED bracket 40x16x41 (26240 voxels, 85680 free DOFs) dil=0.25 vf=0.50, 4 clearances
+    SINGLE SOLVE, same design, warm basis:
+      CG  OFF 624    (resid 9.957e-09)   ON 658    (resid 9.793e-09)
+      worst relative displacement deviation : 2.022e-06
+      compliance relative deviation         : 1.005e-09
+    worst relative displacement deviation ON vs OFF : 2.162e-06 (CG tolerance 1e-08)
+    worst relative density deviation                : 2.379e-08
+    final compliance relative deviation             : 1.390e-10
+    determinism (same posture rerun): u BIT-IDENTICAL   x BIT-IDENTICAL
+    CG totals: OFF 4706  ON 3110  (ON-1 vs ON-2 equal)
+
+===== AG7 EXACTNESS + DETERMINISM — (b) HEALTHY-MG =====
+  HEALTHY bracket 40x16x40 (25600 voxels, 83640 free DOFs) dil=0.25 vf=0.50, 4 clearances
+    SINGLE SOLVE, same design, warm basis:
+      CG  OFF 32     (resid 6.310e-09)   ON 32     (resid 6.310e-09)
+      worst relative displacement deviation : 0.000e+00
+      compliance relative deviation         : 0.000e+00
+    worst relative displacement deviation ON vs OFF : 0.000e+00 (CG tolerance 1e-08)
+    worst relative density deviation                : 0.000e+00
+    final compliance relative deviation             : 0.000e+00
+    determinism (same posture rerun): u BIT-IDENTICAL   x BIT-IDENTICAL
+    CG totals: OFF 185  ON 185  (ON-1 vs ON-2 equal)

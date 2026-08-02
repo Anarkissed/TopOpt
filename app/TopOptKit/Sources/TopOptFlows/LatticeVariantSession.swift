@@ -57,6 +57,26 @@ public enum RelatticeUnavailable: Equatable, Sendable {
     case runPredatesDesignStore
     /// The worker served no design.bin for this job.
     case designNotTransferred
+    /// The app RE-ATTACHED to this run after a relaunch, so it no longer holds the
+    /// document it submitted. Rebuilding one from the current project state is the
+    /// re-authored load case this whole path exists to avoid, so it is refused
+    /// rather than approximated.
+    case jobDocumentNotRecorded
+    /// The rung produced no geometry (a cancelled / severed rung), so there is no
+    /// variant to lattice at all.
+    case noGeometry
+    /// THE RUN USED A DESIGN BOX. Core refuses lattice certification under domain
+    /// expansion — the certification load case cannot be reconstructed on the
+    /// expanded grid (`run_job.cpp`, both the optimize+lattice pre-flight and
+    /// `lattice_variant_job`). Read from the RETAINED job, not the project's
+    /// current design-box state: the question is what the run DID, not what the
+    /// workspace is set to now.
+    case designBoxRun
+    /// No Mac worker is selected. The certification solves run where the core
+    /// runs, and the on-device bridge has no lattice path at all.
+    case noWorkerSelected
+    /// The model file the retained load case's faces are defined on is gone.
+    case modelFileMissing
 
     public var reason: String {
         switch self {
@@ -66,6 +86,16 @@ public enum RelatticeUnavailable: Equatable, Sendable {
             return "this run finished before results kept their design file — re-run it to lattice its variants"
         case .designNotTransferred:
             return "the Mac worker didn’t send this run’s design file — re-run it to lattice its variants"
+        case .jobDocumentNotRecorded:
+            return "this app reconnected to the run after a restart, so it no longer has the job it sent — re-run it to lattice its variants"
+        case .noGeometry:
+            return "this rung produced no geometry to lattice"
+        case .designBoxRun:
+            return "this run used a design box — the certification load case can’t be rebuilt on the expanded grid, so the core refuses to lattice it. Re-run it without a design box to lattice its variants"
+        case .noWorkerSelected:
+            return "latticing a variant runs on a Mac worker — pick one in Compute first"
+        case .modelFileMissing:
+            return "the model file is missing — the run’s load case is defined on it"
         }
     }
 }

@@ -136,6 +136,14 @@ enum OutcomeCodec {
         // Handoff 2026-07-29-lattice-mode-ui — nil on pre-lattice blobs (→ no lattice
         // notes), present when the run carried a lattice.
         let latticeReport: LatticeReportDTO?
+        // Task 2026-08-03-variant-entry-gating-and-retention (AJ5) — WHICH MACHINE
+        // solved the run. Persisted for the same reason `computedRemotely` is: a
+        // reopened result that forgot where it ran would put the app right back in
+        // the position this task exists to fix — telling a user to "re-run it on a
+        // Mac worker" when they may have done exactly that. nil on pre-AJ5 blobs and
+        // on local runs; combined with `computedRemotely` by `SolvingMachine`, which
+        // is the ONLY thing allowed to interpret the pair.
+        let solvedBy: String?
     }
 
     // MARK: OptimizeOutcome → DTO (cheap: array→Data is a memcpy)
@@ -200,7 +208,8 @@ enum OutcomeCodec {
                     strutZKnockdown: r.strut?.zKnockdown,
                     strutMinCellsPerMember: r.strut.flatMap {
                         $0.minCellsPerMember.isFinite ? $0.minCellsPerMember : nil },
-                    strutOutOfRegime: r.strut?.outOfRegime) })
+                    strutOutOfRegime: r.strut?.outOfRegime) },
+            solvedBy: o.solvedBy)
     }
 
     // MARK: DTO → OptimizeOutcome
@@ -273,7 +282,8 @@ enum OutcomeCodec {
                             marginInterlayer: r.strutMarginInterlayer ?? .infinity,
                             zKnockdown: zk,
                             minCellsPerMember: r.strutMinCellsPerMember ?? .infinity,
-                            outOfRegime: r.strutOutOfRegime ?? false) }) })
+                            outOfRegime: r.strutOutOfRegime ?? false) }) },
+            solvedBy: d.solvedBy)
     }
 
     // MARK: Encode / decode (binary plist)

@@ -63,6 +63,14 @@ public struct ResultsScreen: View {
     /// affordance. Distinct from `smoothing` below, which is the older global
     /// strength control on this screen.
     var onSmooth: ((Int) -> Void)?
+    /// THE ENTRY GATES (task 2026-08-03-variant-entry-gating-and-retention, AJ2).
+    /// Given a variant index, whether "Smooth" / "Lattice" may be tapped for it and,
+    /// when it may not, the SPECIFIC reason — which the disabled control shows,
+    /// exactly as the lattice page's bottom bar already does. A page that would
+    /// refuse must never be reachable, so an absent closure means "enabled" only for
+    /// callers that have not adopted the gate (previews, the evidence captures).
+    var smoothEntry: ((Int) -> VariantEntryVerdict)?
+    var latticeEntry: ((Int) -> VariantEntryVerdict)?
     /// Constrained smoothing + re-certification (handoff 2026-07-28-constrained-
     /// smooth-ui). nil (a self-weight run, or a caller that has not wired it) hides
     /// the Smooth chip — data-gated exactly like the other viz chips. When set, the
@@ -111,6 +119,8 @@ public struct ResultsScreen: View {
                 onSeeOriginal: @escaping () -> Void = {},
                 onLattice: ((Int) -> Void)? = nil,
                 onSmooth: ((Int) -> Void)? = nil,
+                smoothEntry: ((Int) -> VariantEntryVerdict)? = nil,
+                latticeEntry: ((Int) -> VariantEntryVerdict)? = nil,
                 smoothing: SmoothingModel? = nil,
                 resultsModel: ResultsModel? = nil) {
         // `resultsModel` is a TEST SEAM (the M7 /app/ house style — the run is tested
@@ -134,6 +144,8 @@ public struct ResultsScreen: View {
         self.onSeeOriginal = onSeeOriginal
         self.onLattice = onLattice
         self.onSmooth = onSmooth
+        self.smoothEntry = smoothEntry
+        self.latticeEntry = latticeEntry
         self.smoothing = smoothing
     }
 
@@ -925,6 +937,57 @@ public struct ResultsScreen: View {
         .dsShadow(.panel)
     }
 
+    // MARK: - the variant entry controls (task variant-entry-gating-and-retention)
+
+    /// The Smooth entry's verdict for the SELECTED variant. A caller that has not
+    /// wired the gate (previews, evidence captures) gets the pre-gate behaviour.
+    private var smoothVerdict: VariantEntryVerdict {
+        smoothEntry?(model.selectedIndex)
+            ?? VariantEntryVerdict(label: "Smooth", enabled: true, reason: nil,
+                                   allReasons: [])
+    }
+    private var latticeVerdict: VariantEntryVerdict {
+        latticeEntry?(model.selectedIndex)
+            ?? VariantEntryVerdict(label: "Lattice", enabled: true, reason: nil,
+                                   allReasons: [])
+    }
+
+    /// AJ2: ONE shape for both entries — enabled it is the chip it always was;
+    /// blocked it is DISABLED and carries the specific reason underneath, which is
+    /// the shape the lattice page's bottom bar already uses. It is never a plain
+    /// greyed-out control, and it never opens a page that then apologises.
+    @ViewBuilder
+    private func entryControl(icon: String, verdict: VariantEntryVerdict,
+                              action: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Button(action: { if verdict.enabled { action() } }) {
+                HStack(spacing: DS.Space.s) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(verdict.label).dsStyle(DS.TypeScale.callout)
+                }
+                .foregroundStyle((verdict.enabled ? DS.Color.textPrimary
+                                                  : DS.Color.textQuaternary).color)
+                .fixedSize()
+                .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
+                .background(Capsule().fill(DS.Surface.bar.color)
+                    .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+            }
+            .buttonStyle(.plain)
+            .disabled(!verdict.enabled)
+            if let why = verdict.reason {
+                Text(why)
+                    .dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 260, alignment: .leading)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(verdict.accessibilityLabel)
+    }
+
     // MARK: - Top bar: back · project / Optimized ✓ · See Original · Export
 
     /// One flex row across the top: navigation + project on the left, Export on the
@@ -967,6 +1030,19 @@ public struct ResultsScreen: View {
                             .monospacedDigit()
                             .fixedSize()
                     }
+                    // WHICH MACHINE SOLVED IT (bar AJ5). Always shown — there is no
+                    // "unknown" state, because `computedRemotely` was always recorded
+                    // and `SolvingMachine` is the only thing that reads the pair.
+                    Rectangle().fill(DS.Color.textPrimary.opacity(0.15).color).frame(width: 1, height: 14)
+                    HStack(spacing: DS.Space.xs) {
+                        Image(systemName: model.solvingMachine.symbol)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(model.solvingMachine.shortLabel).dsStyle(DS.TypeScale.callout)
+                    }
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize()
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(model.solvingMachine.label)
                 }
                 .padding(.vertical, DS.Space.sm)
                 .padding(.horizontal, DS.Space.l)
@@ -1002,35 +1078,15 @@ public struct ResultsScreen: View {
                 // smooth-then-lattice: a smoothed variant may go on to the lattice
                 // page, and smoothing a latticed export would round the struts.
                 if let onSmooth {
-                    Button { onSmooth(model.selectedIndex) } label: {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "scribble.variable")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Smooth").dsStyle(DS.TypeScale.callout)
-                        }
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .fixedSize()
-                        .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
-                        .background(Capsule().fill(DS.Surface.bar.color)
-                            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-                    }
-                    .buttonStyle(.plain)
+                    entryControl(icon: "scribble.variable",
+                                 verdict: smoothVerdict,
+                                 action: { onSmooth(model.selectedIndex) })
                 }
 
                 if let onLattice {
-                    Button { onLattice(model.selectedIndex) } label: {
-                        HStack(spacing: DS.Space.s) {
-                            Image(systemName: "square.grid.3x3.fill")
-                                .font(.system(size: 12, weight: .semibold))
-                            Text("Lattice").dsStyle(DS.TypeScale.callout)
-                        }
-                        .foregroundStyle(DS.Color.textPrimary.color)
-                        .fixedSize()
-                        .padding(.vertical, DS.Space.sm).padding(.horizontal, DS.Space.l)
-                        .background(Capsule().fill(DS.Surface.bar.color)
-                            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
-                    }
-                    .buttonStyle(.plain)
+                    entryControl(icon: "square.grid.3x3.fill",
+                                 verdict: latticeVerdict,
+                                 action: { onLattice(model.selectedIndex) })
                 }
 
                 Spacer(minLength: DS.Space.m)
@@ -1222,6 +1278,22 @@ public struct ResultsScreen: View {
                             Text(tab.subLabel(active: active))
                                 .dsStyle(DS.TypeScale.footnote)
                                 .foregroundStyle(DS.Color.textSecondary.color)
+                            // WHICH MACHINE SOLVED THIS VARIANT (bar AJ5), on the
+                            // variant itself and not only on the run bar: this is
+                            // where the user is looking when an entry refusal says
+                            // "re-run it on a Mac worker", and it is the fact that
+                            // tells them whether that advice applies to them.
+                            if active {
+                                HStack(spacing: DS.Space.xs) {
+                                    Image(systemName: model.solvingMachine.symbol)
+                                        .font(.system(size: 9, weight: .semibold))
+                                    Text(model.solvingMachine.shortLabel)
+                                        .dsStyle(DS.TypeScale.caption2)
+                                }
+                                .foregroundStyle(DS.Color.textQuaternary.color)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel(model.variantProvenanceLabel)
+                            }
                         }
                         .padding(.vertical, active ? DS.Space.ml : DS.Space.m)
                         .padding(.horizontal, active ? DS.Space.xl3 : DS.Space.xl)

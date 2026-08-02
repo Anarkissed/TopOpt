@@ -164,6 +164,13 @@ public enum SmoothUnavailable: Equatable, Sendable {
     /// retention PR 274 added), so there is no load case to re-certify under and
     /// the project's current state is NOT an acceptable substitute.
     case noRetainedJob
+    /// THE RUN WAS SOLVED ON THIS DEVICE. Distinct from `noRetainedJob` on purpose
+    /// (task 2026-08-03-variant-entry-gating-and-retention): the bridge writes no
+    /// job document at all, so "re-run it on a Mac worker" is the actual fix — and
+    /// a user who DID run it on a worker must never be told that. Which of the two
+    /// they are looking at is decided by the run's own recorded machine, and the
+    /// machine is shown beside the reason.
+    case computedOnDevice
     /// The retained job declared no load case at all (a self-weight run). Under
     /// self-weight a lighter part carries less of its own weight, so smoothing can
     /// only ever RAISE the margin — the receipt would be real but vacuous, and the
@@ -180,8 +187,12 @@ public enum SmoothUnavailable: Equatable, Sendable {
     public var reason: String {
         switch self {
         case .noRetainedJob:
-            return "this run didn’t keep its job document, so there’s no load case "
-                 + "to re-certify a smoothed shape under — re-run it on a Mac worker "
+            return "this run finished before results kept their job document, so "
+                 + "there’s no load case to re-certify a smoothed shape under — "
+                 + "re-run it to smooth its variants"
+        case .computedOnDevice:
+            return "this run was solved on this device, which doesn’t write the job "
+                 + "document a re-certification needs — re-run it on a Mac worker "
                  + "to smooth its variants"
         case .selfWeightRun:
             return "this run had no declared load — under self-weight, smoothing "
@@ -273,14 +284,21 @@ public enum SmoothPageEntry {
     /// Decide entry for a variant. `latticed` is the run's own record of whether
     /// it generated a lattice (`OptimizeOutcome.latticeReport != nil`) — the run's
     /// fact, not the project's current lattice settings.
+    ///
+    /// `solvedOnDevice` separates the two ways a job document can be absent (see
+    /// `SmoothUnavailable.computedOnDevice`). It defaults to false so every
+    /// pre-existing caller and test keeps its exact previous verdict.
     public static func availability(hasGeometry: Bool, latticed: Bool,
                                     retainedJob: Data?,
-                                    modelPath: String?) -> SmoothUnavailable? {
+                                    modelPath: String?,
+                                    solvedOnDevice: Bool = false) -> SmoothUnavailable? {
         if !hasGeometry { return .noGeometry }
         if latticed { return .alreadyLatticed }
         guard let path = modelPath, !path.isEmpty else { return .modelFileMissing }
         _ = path
-        guard let job = retainedJob else { return .noRetainedJob }
+        guard let job = retainedJob else {
+            return solvedOnDevice ? .computedOnDevice : .noRetainedJob
+        }
         do {
             _ = try SmoothRecertLoadCase.fromRetainedJob(job)
             return nil

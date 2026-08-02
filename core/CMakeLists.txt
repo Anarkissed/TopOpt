@@ -596,6 +596,11 @@ if(Eigen3_FOUND)
   # the other matrix-free tests. CI configures with -DTOPOPT_REQUIRE_DEPS=ON.
   add_executable(test_recycle tests/unit/test_recycle.cpp)
   target_link_libraries(test_recycle PRIVATE topopt)
+  # src/ for fea/recycle.hpp: the SHIPPED-DEFAULTS TRIPWIRE (task 2026-08-03-
+  # krylov-recycle-reassessment) asserts the four dials that reassessment was
+  # measured against, plus that the phase-timing instrument added by that task is
+  # OFF by default — an internal knob, so it is only reachable from src/.
+  target_include_directories(test_recycle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
   add_test(NAME krylov_recycling COMMAND test_recycle)
 
   # GenEO two-level deflation guards (handoff 2026-07-29-geneo-arming): library
