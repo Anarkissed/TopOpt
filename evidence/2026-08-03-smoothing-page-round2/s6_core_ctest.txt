@@ -1,0 +1,27 @@
+[ 98%] Built target test_lattice_variant
+[100%] Built target test_mesh_job
+88/98 Test #88: cli_demo .........................   Passed  166.29 sec
+      Start 89: production_parity
+89/98 Test #89: production_parity ................   Passed   18.51 sec
+      Start 90: clearance_parity
+90/98 Test #90: clearance_parity .................   Passed   18.15 sec
+      Start 91: face_protection_parity
+91/98 Test #91: face_protection_parity ...........   Passed    3.93 sec
+      Start 92: loadcase_small_face
+92/98 Test #92: loadcase_small_face ..............   Passed    0.31 sec
+      Start 93: loadcase_resolution
+93/98 Test #93: loadcase_resolution ..............   Passed    0.43 sec
+      Start 94: loadcase_analyze
+94/98 Test #94: loadcase_analyze .................   Passed    1.27 sec
+      Start 95: lattice_hookup
+95/98 Test #95: lattice_hookup ...................   Passed   11.74 sec
+      Start 96: lattice_variant
+96/98 Test #96: lattice_variant ..................   Passed   13.56 sec
+      Start 97: designbox_lattice_recert
+97/98 Test #97: designbox_lattice_recert .........   Passed    3.39 sec
+      Start 98: mesh_job
+98/98 Test #98: mesh_job .........................   Passed    6.52 sec
+
+100% tests passed out of 98
+
+Total Test time (real) = 1259.37 sec

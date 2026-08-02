@@ -183,6 +183,13 @@ public enum SmoothUnavailable: Equatable, Sendable {
     case noGeometry
     /// The model file the load case's faces are defined on is gone.
     case modelFileMissing
+    /// CORE COULD NOT READ THE VARIANT BACK (round 2, bar S2). The page's mesh is
+    /// core's own import of the file the page wrote — that is what makes the
+    /// protected-surface map and the brush the same mesh by construction. If that
+    /// import fails there is no page mesh at all, and the honest answer is to say
+    /// so here rather than open a page whose brush is inert for a reason it
+    /// cannot name.
+    case meshUnreadable(String)
 
     public var reason: String {
         switch self {
@@ -204,6 +211,8 @@ public enum SmoothUnavailable: Equatable, Sendable {
             return "this rung produced no geometry to smooth"
         case .modelFileMissing:
             return "the model file is missing — the load case’s faces are defined on it"
+        case .meshUnreadable(let why):
+            return "this variant’s mesh could not be read back for smoothing: \(why)"
         }
     }
 }
@@ -224,9 +233,19 @@ public struct SmoothVariantContext: Equatable {
     public let reportedMargin: Double
     public let accepted: Bool
 
-    /// The variant's own geometry, flattened exactly as the results screen draws it.
-    public let meshVertices: [Float]
-    public let meshIndices: [Int32]
+    /// THE PAGE'S ONE MESH (round 2, bar S2) — core's own import of the file the
+    /// page wrote. The stage draws it, the brush paints it, `smooth_freeze_mask`
+    /// masks it and the smoother moves it, because all four read that same file.
+    ///
+    /// It is deliberately NOT `OptimizeVariant.meshVertices`: on a LAN run that
+    /// buffer is a triangle soup with 6x core's vertex count, which is exactly
+    /// the mismatch this page refused to paint through.
+    public let pageMesh: SmoothPageMesh
+
+    /// The page's geometry, flattened as the results screen draws it. Derived
+    /// from `pageMesh` so there is one definition and no second buffer to drift.
+    public var meshVertices: [Float] { pageMesh.vertices }
+    public var meshIndices: [Int32] { pageMesh.indices }
 
     /// The load case the variant was optimized under, read out of the retained job.
     public let loadCase: SmoothRecertLoadCase?
@@ -238,7 +257,7 @@ public struct SmoothVariantContext: Equatable {
     public init(runName: String, variantIndex: Int,
                 requestedVolumeFraction: Double, massGrams: Double,
                 reportedMargin: Double, accepted: Bool,
-                meshVertices: [Float], meshIndices: [Int32],
+                pageMesh: SmoothPageMesh,
                 loadCase: SmoothRecertLoadCase?,
                 unavailable: SmoothUnavailable?, modelPath: String) {
         self.runName = runName
@@ -247,11 +266,17 @@ public struct SmoothVariantContext: Equatable {
         self.massGrams = massGrams
         self.reportedMargin = reportedMargin
         self.accepted = accepted
-        self.meshVertices = meshVertices
-        self.meshIndices = meshIndices
+        self.pageMesh = pageMesh
         self.loadCase = loadCase
         self.unavailable = unavailable
         self.modelPath = modelPath
+    }
+
+    /// The request for this page's protected-surface map, or nil when there is no
+    /// load case to resolve it against. Routed through `pageMesh` so the mesh path
+    /// it names is the page mesh's own — bar S2's "by construction".
+    public var freezeMaskRequest: SmoothFreezeMaskRequest? {
+        loadCase.map { pageMesh.freezeMaskRequest(modelPath: modelPath, loadCase: $0) }
     }
 
     public var title: String {
@@ -312,15 +337,30 @@ public enum SmoothPageEntry {
     /// Build the context for a variant, resolving its load case from the retained
     /// job. Never reads the project's current editable state — there is no
     /// parameter through which it could.
+    ///
+    /// `pageMesh` is core's own import of the file the page wrote (bar S2). It is
+    /// the ONLY geometry this function accepts: there is no parameter through
+    /// which the run's own streamed buffer could reach the page, which is what
+    /// stops the page from ever holding two meshes again.
+    ///
+    /// `meshUnreadable` is the caller's report that the import failed. It is
+    /// checked FIRST, because every later verdict would be about a mesh that was
+    /// never read.
     public static func context(runName: String, variantIndex: Int,
                                requestedVolumeFraction: Double, massGrams: Double,
                                reportedMargin: Double, accepted: Bool,
-                               meshVertices: [Float], meshIndices: [Int32],
+                               pageMesh: SmoothPageMesh,
                                latticed: Bool, retainedJob: Data?,
-                               modelPath: String?) -> SmoothVariantContext {
-        let why = availability(hasGeometry: !meshVertices.isEmpty && !meshIndices.isEmpty,
+                               modelPath: String?,
+                               meshUnreadable: String? = nil) -> SmoothVariantContext {
+        let why: SmoothUnavailable?
+        if let e = meshUnreadable {
+            why = .meshUnreadable(e)
+        } else {
+            why = availability(hasGeometry: !pageMesh.isEmpty,
                                latticed: latticed, retainedJob: retainedJob,
                                modelPath: modelPath)
+        }
         let lc: SmoothRecertLoadCase? = why == nil
             ? retainedJob.flatMap { try? SmoothRecertLoadCase.fromRetainedJob($0) }
             : nil
@@ -328,7 +368,7 @@ public enum SmoothPageEntry {
             runName: runName, variantIndex: variantIndex,
             requestedVolumeFraction: requestedVolumeFraction, massGrams: massGrams,
             reportedMargin: reportedMargin, accepted: accepted,
-            meshVertices: meshVertices, meshIndices: meshIndices,
+            pageMesh: pageMesh,
             loadCase: lc, unavailable: why, modelPath: modelPath ?? "")
     }
 

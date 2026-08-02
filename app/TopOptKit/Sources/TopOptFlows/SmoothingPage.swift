@@ -9,12 +9,23 @@
 // action cluster. The maintainer's round-3 note was that "all the buttons feel
 // different" — the fix is shared constants, not a careful eye.
 //
-// SELECTIONS ARE THE SHARED LIBRARY (bar AE6). The page does not own a selection
-// UX. Its "Protected regions" row opens the SAME `selectionsPanel` the TO page and
-// the lattice page mount, over the SAME `project.selection` model. What this page
-// adds is a BRUSH, which is not a selection at all — it paints triangles of the
-// variant's own surface into smoothing regions, and it cannot touch anything the
-// freeze predicates claim.
+// THE PAGE OWNS NO SELECTION UX (bar AE6, still). What it adds is a BRUSH, which
+// is not a selection at all — it paints triangles of the variant's own surface
+// into smoothing regions, and it cannot touch anything the freeze predicates
+// claim.
+//
+// ROUND 2 (bar L1) took the EDITOR away. Round 1's "Protected regions" row
+// mounted the shared `selectionsPanel` over this page; that let a user edit the
+// very anchors and keep-clear volumes the brush's freeze mask was computed from,
+// leaving strokes on screen measured against a mask that no longer described the
+// part. The row is now a read-only readout of the same one model. AE6 is
+// unweakened — there is still exactly one `selectionsPanel` in the app, and this
+// page still authors no selection state.
+//
+// AND THE PAGE OWNS ITS BRUSH TOOLS (bar L4). Round 1 borrowed paint on/off, the
+// eraser and the disc size from the TO page's paint drawer, which is why the page
+// shipped as an OVERLAY: hiding the workspace chrome would have disarmed its own
+// brush. `SmoothBrushTools` is on this panel now, so the chrome can go.
 //
 // The page is CHROME ONLY: it renders over the workspace's live stage, which stays
 // mounted underneath and draws the variant (or its smoothed twin). One stage,
@@ -32,6 +43,11 @@ public struct SmoothingPage: View {
     /// The brush state. Owned by the host so a stroke on the stage and the panel's
     /// region list are the same value.
     @Binding var brush: SmoothBrushModel
+    /// THE BRUSH'S TOOLS (round-2 bar L4) — paint / erase / orbit and the disc
+    /// size, in the page's own panel. Round 1 borrowed the TO page's paint drawer
+    /// for these, which is the mechanical reason the page could not hide the TO
+    /// chrome: hiding it disarmed the brush.
+    @Binding var tools: SmoothBrushTools
     /// Whether the stage is showing the smoothed geometry or the original.
     @Binding var showingSmoothed: Bool
 
@@ -39,7 +55,6 @@ public struct SmoothingPage: View {
     let onKeep: () -> Void
     let onDiscard: () -> Void
     let onSendToLattice: () -> Void
-    let onOpenLibrary: () -> Void
     let onClose: () -> Void
     /// TEST SEAM for the offscreen evidence captures (the LatticePage convention):
     /// ImageRenderer does not render platform-backed containers.
@@ -47,23 +62,23 @@ public struct SmoothingPage: View {
 
     public init(project: ProjectModel, page: SmoothingPageModel,
                 brush: Binding<SmoothBrushModel>,
+                tools: Binding<SmoothBrushTools>,
                 showingSmoothed: Binding<Bool>,
                 onRecertify: @escaping () -> Void,
                 onKeep: @escaping () -> Void,
                 onDiscard: @escaping () -> Void,
                 onSendToLattice: @escaping () -> Void,
-                onOpenLibrary: @escaping () -> Void,
                 onClose: @escaping () -> Void,
                 staticRender: Bool = false) {
         self.project = project
         self.page = page
         self._brush = brush
+        self._tools = tools
         self._showingSmoothed = showingSmoothed
         self.onRecertify = onRecertify
         self.onKeep = onKeep
         self.onDiscard = onDiscard
         self.onSendToLattice = onSendToLattice
-        self.onOpenLibrary = onOpenLibrary
         self.onClose = onClose
         self.staticRender = staticRender
     }
@@ -343,6 +358,7 @@ public struct SmoothingPage: View {
         if let why = brush.unusableReason {
             noteCard(why, tint: DS.Color.warning)
         }
+        toolsSection
         regionsSection
         protectedSection
         if let r = page.receipt {
@@ -381,6 +397,94 @@ public struct SmoothingPage: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: DS.Radius.control)
                 .fill(tint.opacity(0.12).color))
+    }
+
+    // ── the brush's own tools (round-2 bar L4) ───────────────────────────────
+    //
+    // ALL OF THEM, IN THIS ONE PANEL. Round 1 had none: paint on/off, the eraser
+    // and the disc size all lived in the TO page's paint drawer, so the page only
+    // worked with the workspace chrome left on screen underneath it. That is why
+    // L1 and L4 are one change — the chrome could not be hidden until the tools
+    // moved here.
+    //
+    // Same squircle, same `PageChrome.compactButton` height, same
+    // `PageChrome.gap` spacing as the other two pages' controls.
+
+    private var toolsSection: some View {
+        VStack(alignment: .leading, spacing: DS.Space.s) {
+            sectionTitle("BRUSH")
+            HStack(spacing: 0) {
+                ForEach(SmoothBrushTools.Mode.allCases) { m in
+                    modeTab(m)
+                }
+            }
+            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                .fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            HStack(spacing: PageChrome.gap) {
+                Text("Size").dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+                sizeButton("minus", enabled: tools.canShrink) { tools.shrink() }
+                Text("\(Int(tools.radiusPoints))")
+                    .dsStyle(DS.TypeScale.callout).fontWeight(.bold)
+                    .frame(width: 34)
+                sizeButton("plus", enabled: tools.canGrow) { tools.grow() }
+                Spacer()
+                Button { brush.clearStrokes() } label: {
+                    Text("Clear strokes").dsStyle(DS.TypeScale.caption)
+                        .foregroundStyle((brush.isEmpty ? DS.Color.textDisabled
+                                                        : DS.Color.textSecondary).color)
+                }
+                .buttonStyle(.plain)
+                .disabled(brush.isEmpty)
+                .accessibilityLabel("Clear all strokes")
+            }
+            // ORBIT IS NOT A MISSING FEATURE, it is the way to look at what you
+            // brushed: the brush claims the one-finger drag, so without this the
+            // page would have no single-finger orbit at all.
+            Text(tools.mode == .orbit
+                 ? "One-finger drag orbits. Switch to Paint to brush again."
+                 : "One-finger drag \(tools.mode == .erase ? "erases" : "paints") · "
+                   + "two-finger drag orbits.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func modeTab(_ m: SmoothBrushTools.Mode) -> some View {
+        let on = tools.mode == m
+        return Button { tools.mode = m } label: {
+            HStack(spacing: 5) {
+                Image(systemName: m.icon).font(.system(size: 11, weight: .bold))
+                Text(m.label).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+            }
+            .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
+            .frame(maxWidth: .infinity).frame(height: PageChrome.compactButton)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                .fill(on ? DS.Color.fillSelected.color : Color.clear))
+        }
+        .buttonStyle(.plain)
+        .disabled(!brush.canPaint && m != .orbit)
+        .accessibilityLabel(m.label)
+    }
+
+    private func sizeButton(_ icon: String, enabled: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 12, weight: .bold))
+                .foregroundStyle((enabled ? DS.Color.textPrimary
+                                          : DS.Color.textDisabled).color)
+                .frame(width: 34, height: 34)
+                .background(Circle().fill(DS.Surface.bar.color)
+                    .overlay(Circle().strokeBorder(DS.Color.strokeSubtle.color,
+                                                   lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(icon == "plus" ? "Bigger brush" : "Smaller brush")
     }
 
     // ── regions: LOCAL strength, inspectable and reversible (item 3) ─────────
@@ -458,36 +562,75 @@ public struct SmoothingPage: View {
 
     /// AE6 — the SAME selections library, not a second one. This row opens the TO
     /// page's own panel; nothing about protected regions is authored here.
+    /// ROUND-2 BAR L1: INDICATED, NOT EDITABLE.
+    ///
+    /// Round 1 made this row a BUTTON that mounted the shared selections library
+    /// over the page. That was the right instinct about there being one selection
+    /// model, and the wrong affordance: editing an anchor or a keep-clear volume
+    /// changes the freeze predicates the brush was masked against, so the strokes
+    /// already on screen would silently be measured against a mask that no longer
+    /// describes them. The page cannot react to that, so it must not offer it.
+    ///
+    /// It is now a READ-ONLY readout of the same one model — AE6's "no second
+    /// selection UX" is unchanged, because there is still no selection UX here at
+    /// all. And the strongest indication is not this text: it is the FROZEN TINT
+    /// the brush paints onto the actual vertices, visible before a stroke is tried.
     private var protectedSection: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
             sectionTitle("PROTECTED — THE BRUSH CANNOT TOUCH THESE")
-            Button(action: onOpenLibrary) {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "lock.fill").font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(DS.Color.okGreen.color)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Selections & keep-clear")
-                            .dsStyle(DS.TypeScale.callout).fontWeight(.semibold)
-                        Text(brush.freeze.isAvailable
-                             ? "\(brush.freeze.frozenCount) of \(brush.freeze.vertexCount) "
-                               + "vertices frozen · within "
-                               + String(format: "%.2f mm", brush.freeze.toleranceMM)
-                             : "resolving…")
-                            .dsStyle(DS.TypeScale.caption2)
-                            .foregroundStyle(DS.Color.textTertiary.color)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(DS.Color.textQuaternary.color)
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "lock.fill").font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(DS.Color.okGreen.color)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(brush.freeze.isAvailable
+                         ? "\(brush.freeze.frozenCount) of \(brush.freeze.vertexCount) "
+                           + "vertices frozen · within "
+                           + String(format: "%.2f mm", brush.freeze.toleranceMM)
+                         : "resolving…")
+                        .dsStyle(DS.TypeScale.callout).fontWeight(.semibold)
+                    Text(protectedProvenance)
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textTertiary.color)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(DS.Space.m)
-                .frame(maxWidth: .infinity)
-                .background(RoundedRectangle(cornerRadius: DS.Radius.control)
-                    .fill(DS.Surface.bar.color))
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open the shared selections library")
+            .padding(DS.Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                .fill(DS.Surface.bar.color))
+            Text("Fixed for this variant. They come from the run's own job "
+                 + "document — change them on the setup page and re-run, not here: "
+                 + "editing them now would move the ground your strokes were "
+                 + "measured against.")
+                .dsStyle(DS.TypeScale.caption2)
+                .foregroundStyle(DS.Color.textQuaternary.color)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// WHICH faces are frozen, named from the retained load case rather than from
+    /// the project's current selection — the same rule the receipt's numbers obey.
+    private var protectedProvenance: String {
+        guard let lc = context.loadCase else { return "from the run's own job document" }
+        var parts: [String] = []
+        if !lc.anchorFaceIDs.isEmpty {
+            parts.append("\(lc.anchorFaceIDs.count) anchor face"
+                         + (lc.anchorFaceIDs.count == 1 ? "" : "s"))
+        }
+        let loadFaces = lc.loadGroups.reduce(0) { $0 + $1.faceIDs.count }
+        if loadFaces > 0 {
+            parts.append("\(loadFaces) load face" + (loadFaces == 1 ? "" : "s"))
+        }
+        if !lc.protectedFaceIDs.isEmpty {
+            parts.append("\(lc.protectedFaceIDs.count) protected")
+        }
+        if !lc.freeze.isEmpty {
+            parts.append("\(lc.freeze.count) keep-clear")
+        }
+        return parts.isEmpty ? "from the run's own job document"
+                             : parts.joined(separator: " · ")
     }
 
     private func sectionTitle(_ t: String) -> some View {

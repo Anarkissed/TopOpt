@@ -89,7 +89,9 @@ final class SmoothingPageTests: XCTestCase {
         SmoothPageEntry.context(
             runName: "Bracket", variantIndex: 1, requestedVolumeFraction: 0.6,
             massGrams: 41.2, reportedMargin: reportedMargin, accepted: true,
-            meshVertices: vertices, meshIndices: indices, latticed: latticed,
+            pageMesh: SmoothPageMesh(path: "/tmp/variant_1.stl",
+                                     vertices: vertices, indices: indices),
+            latticed: latticed,
             retainedJob: job ?? retainedJob(), modelPath: "/tmp/bracket.stl")
     }
 
@@ -290,8 +292,7 @@ final class SmoothingPageTests: XCTestCase {
         }
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
-        let opener = try XCTUnwrap(ws.range(of: "private func openSmoothingPage"))
-        let body = String(ws[opener.lowerBound...].prefix(2600))
+        let body = try declarationBody(ws, "private func openSmoothingPage")
         XCTAssertTrue(body.contains("relatticeArtifacts?.jobJSON"),
                       "the page's load case comes from the RETAINED job document")
         XCTAssertFalse(body.contains("project.loadCase()"),
@@ -685,8 +686,25 @@ final class SmoothingPageTests: XCTestCase {
                             encoding: .utf8)
         XCTAssertEqual(ws.components(separatedBy: "var selectionsPanel").count - 1, 1,
                        "still exactly ONE selections panel definition in the app")
-        XCTAssertTrue(ws.contains("smoothingPageModel?.libraryOpen == true"),
-                      "the smoothing page mounts THE SAME panel, like the lattice page")
+
+        // ROUND 2 (bar L1) REVERSED THE AFFORDANCE, NOT THE PRINCIPLE.
+        //
+        // This used to assert `smoothingPageModel?.libraryOpen == true` — that the
+        // page MOUNTED the shared panel. AE6's claim was "one selection model,
+        // never a second UX", and mounting the editor satisfied that reading. But
+        // the brush's freeze mask is computed FROM those selections, so editing an
+        // anchor or a keep-clear volume mid-stroke leaves every stroke on screen
+        // measured against a mask that no longer describes the part.
+        //
+        // So the page now shows a READ-ONLY readout of the same one model. AE6 is
+        // strictly more asserted than before: the page mounts no panel at all, and
+        // the three structural checks above and below are unchanged.
+        XCTAssertFalse(ws.contains("smoothingPageModel?.libraryOpen"),
+                       "the smoothing page must not mount the selections EDITOR — "
+                       + "protected regions are indicated, not editable (L1)")
+        XCTAssertFalse(try codeOnly(sourceURL("SmoothingPage.swift"))
+                        .contains("onOpenLibrary"),
+                       "and it has no route to open one")
 
         // Structural half: the page model holds no group or face collection — the
         // brush's own state is triangles and strengths, which is not a selection.
@@ -744,13 +762,41 @@ final class SmoothingPageTests: XCTestCase {
         XCTAssertTrue(lattice.contains("PageChrome.gap"),
                       "LatticeChromeLayout derives from the shared token set")
 
-        // And the gizmo is placed from ONE constant on the workspace side.
+        // ── L2: THE GIZMO IS TOP RIGHT ON EVERY PAGE ────────────────────────
+        //
+        // Round 1's version of this asserted the literal
+        // `showSmoothingPage, viewerMesh != nil { orientationGizmo }`, which was
+        // satisfied while the gizmo was HIDDEN on the lattice page — so it pinned
+        // two pages out of three and called that invariance. This asserts the
+        // structure instead: one definition, one placement, and that placement
+        // conditioned on NOTHING but having a mesh to orient.
         let ws = try String(contentsOf: sourceURL("WorkspacePlaceholder.swift"),
                             encoding: .utf8)
-        XCTAssertTrue(ws.contains("showSmoothingPage, viewerMesh != nil { orientationGizmo }"),
-                      "the smoothing page shows the gizmo in the SAME shared corner")
+        let wsCode = try codeOnly(sourceURL("WorkspacePlaceholder.swift"))
         XCTAssertEqual(ws.components(separatedBy: "private var orientationGizmo").count - 1, 1,
-                       "exactly ONE gizmo placement exists for every page to use")
+                       "exactly ONE gizmo view definition exists for every page to use")
+        let placements = wsCode.components(separatedBy: "{ orientationGizmo }").count - 1
+        XCTAssertEqual(placements, 1,
+                       "exactly ONE gizmo PLACEMENT — a second site is how a page "
+                       + "gets its own corner")
+        XCTAssertTrue(wsCode.contains("if viewerMesh != nil { orientationGizmo }"),
+                      "the gizmo is placed on having a MESH and nothing else — not "
+                      + "gated on which page is up")
+        for pageFlag in ["showLatticePage", "showSmoothingPage"] {
+            XCTAssertFalse(
+                wsCode.contains("\(pageFlag), viewerMesh != nil { orientationGizmo }"),
+                "the gizmo placement must not mention \(pageFlag) — L2 is that its "
+                + "position is IDENTICAL across the TO, lattice and smoothing pages")
+        }
+
+        // And both pages keep their own top-right chrome clear of it, so "same
+        // corner" does not mean "on top of the page's own controls" (bar L5).
+        XCTAssertTrue(smoothing.contains("PageChrome.gizmoClearance"),
+                      "the smoothing page insets its top-right column past the gizmo")
+        let latticePage = try String(contentsOf: sourceURL("LatticePage.swift"),
+                                     encoding: .utf8)
+        XCTAssertTrue(latticePage.contains("PageChrome.gizmoClearance"),
+                      "the lattice page insets its top-right column past the gizmo")
     }
 
     // MARK: - the action row reports WHY, never a mute disabled button
@@ -786,6 +832,31 @@ final class SmoothingPageTests: XCTestCase {
                 return String(line[line.startIndex..<r.lowerBound])
             }
             .joined(separator: "\n")
+    }
+
+    /// The WHOLE body of a `private func name(`/`private var name` declaration —
+    /// from its own line to the next top-level `    private ` at the same
+    /// indentation.
+    ///
+    /// Round 2 replaced a `.prefix(2600)` window with this. A byte window silently
+    /// STOPS ASSERTING when the function grows past it, which is exactly what
+    /// happened to `openSmoothingPage`: adding the page-mesh import pushed the
+    /// retained-job line out of the window, and the test failed for the right
+    /// reason but the wrong cause. Reading the real body means the assertion
+    /// covers the function however long it gets.
+    func declarationBody(_ source: String, _ declaration: String) throws -> String {
+        let start = try XCTUnwrap(source.range(of: declaration),
+                                  "no declaration '\(declaration)' in the source")
+        let rest = source[start.upperBound...]
+        // The next sibling declaration at the same (4-space) indentation.
+        var end = rest.endIndex
+        for marker in ["\n    private ", "\n    public ", "\n    @ViewBuilder ",
+                       "\n    func ", "\n    var "] {
+            if let r = rest.range(of: marker), r.lowerBound < end { end = r.lowerBound }
+        }
+        return String(source[start.lowerBound...]
+            .prefix(source.distance(from: start.lowerBound, to: start.upperBound)
+                    + rest.distance(from: rest.startIndex, to: end)))
     }
 
     private func sourceURL(_ name: String) -> URL {

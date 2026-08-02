@@ -1250,6 +1250,16 @@ if(OpenCASCADE_FOUND)
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
 
+  # S1 (handoff 2026-08-03-smoothing-page-round2): NAME the two meshes the
+  # smoothing page confused and measure the 6x. Prints a table, writes evidence.
+  #   cmake --build build --target smooth_mesh_identity_probe
+  #   ./build/smooth_mesh_identity_probe [mesh] [res] [evidence_dir]
+  add_executable(smooth_mesh_identity_probe EXCLUDE_FROM_ALL
+    tests/harness/smooth_mesh_identity_probe.cpp)
+  target_link_libraries(smooth_mesh_identity_probe PRIVATE topopt)
+  target_compile_definitions(smooth_mesh_identity_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
+
   # STEP face -> voxel tagging test (M1.6). Drives the STEP cube fixture, so it
   # needs OCCT to import the solid and read its per-face triangulation.
   add_executable(test_tag tests/unit/test_tag.cpp)

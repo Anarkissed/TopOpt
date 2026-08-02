@@ -1,0 +1,15 @@
+fixture: tests/fixtures/mesh/WallMount_ShelfBracket.stl  resolution=64
+MC surface: 20248 verts, 40516 tris
+
+A-remote (parseBinarySTL soup)   121548
+A-local  (bridge MC, float32)    20248
+B        (import_part_file)      20248
+ratio A-remote : B = 6.00296
+
+A-remote vs B: same_count=0 same_order=0
+A-local  vs B: same_count=1 same_order=1 differing=0
+page mesh vs B: same_count=1 same_order=1
+
+panel readout: 2480 of 20248 vertices frozen, within 2.43006 mm
+round 1 stage carried 121548 -> mask entries did not match -> BRUSH REFUSED
+round 2 stage carries 20248 -> mask entries match -> BRUSH PAINTS
