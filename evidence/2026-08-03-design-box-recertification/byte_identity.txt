@@ -1,0 +1,34 @@
+# AI3 — stash-rebuild checksums: HEAD vs this branch, the EXISTING paths
+# (build_orientation.json / iterations.csv / run_info.json carry deliberate
+#  wall-clock stamps and are compared column-wise below instead.)
+
+== A_nobox_lattice ==
+   design.bin                             ad02310857da4f7ccba6e6b4f2742a6e  IDENTICAL
+   fields.bin                             f938589d0ace20bcf2ada14a3f6f820d  IDENTICAL
+   loadcase.json                          42e09b5ffd2fb9e11c0d725860884b2c  IDENTICAL
+   report.json                            2a362d12713b578fccf2797038b3edd1  IDENTICAL
+   variant_060.stl                        2f2432f7f7f2a2f4bdd63a30570e7309  IDENTICAL
+   variant_060_lattice.report.json        c5a66e941be480330e7f2500e79636aa  IDENTICAL
+   variant_060_lattice.stl                908aa5eb5b111f52b88bff3bb2221f39  IDENTICAL
+   variant_070.stl                        1c7c54fdceca5348f0a2695806c1d860  IDENTICAL
+   variant_070_lattice.report.json        e28c49b2b7cbb0a1185e0d0ddc489330  IDENTICAL
+   variant_070_lattice.stl                5206f21114c51345535b01092dbdb1b1  IDENTICAL
+   variant_080.stl                        ab694a65d2dedd228d13342bab4d8926  IDENTICAL
+   variant_080_lattice.report.json        5efe7a063b33875d640b10e9afb6222e  IDENTICAL
+   variant_080_lattice.stl                f6bb0cc75130ce92824af45856c28304  IDENTICAL
+   iterations.csv (physics columns)       91cdae0caa13044e99755341b22ae961  IDENTICAL
+== B_box_nolattice ==
+   design.bin                             6159d9401a9c4577a41b222ad56e124f  IDENTICAL
+   fields.bin                             c46762a977de03eb3f4238eb5bf8567d  IDENTICAL
+   loadcase.json                          42e09b5ffd2fb9e11c0d725860884b2c  IDENTICAL
+   report.json                            4fe3fef839d9feefb9a27ce211fc01ee  IDENTICAL
+   variant_060.stl                        661179d62458c1d0414f8295935658d5  IDENTICAL
+   variant_070.stl                        e98ead97d55052d282d31e80971d4064  IDENTICAL
+   variant_080.stl                        be30a4c6686f06022a77b76d6a826a73  IDENTICAL
+   iterations.csv (physics columns)       4be2d8b3e2717a4049f1f48c8f314370  IDENTICAL
+
+== analyze --smooth, NO design box (G) ==
+   analysis_report.json                   e40b933ad2184bfb769d81cdd4e680a6  IDENTICAL
+   fields.bin                             ba973d1ce41e0c20e8dd9064205bc4e3  IDENTICAL
+   variant_080_smoothed.stl               bf9d1a29a29ca908ed74f1ae63d46529  IDENTICAL
+   analysis.json                          (differs only in the out-dir path it echoes)

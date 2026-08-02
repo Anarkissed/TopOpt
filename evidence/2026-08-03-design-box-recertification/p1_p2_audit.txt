@@ -1,0 +1,27 @@
+# P1 AUDIT — the certified cell set vs the cell set the GENERATOR emitted
+# (emitted_lattice_cells is LatticeGenStats::latticed_cells: the generator's
+#  own count of cells that passed both the predicate and the boundary test.)
+
+variant                          printed  outside kept_sol cert_cells emit_cells  both
+C keep-clear+load variant_026       2026        0        0         62         62     0
+C keep-clear+load variant_038       2026        0        0         62         62     0
+C keep-clear+load variant_052       2026        0        0         62         62     0
+C keep-clear+load variant_068       2064        0        0         62         62     0
+D self-weight variant_060            360       42       88         16         16     0
+D self-weight variant_070            726      266      394         22         22     0
+D self-weight variant_080           1286      716      892         16         16     0
+E re-lattice of D variant_080       1286      716      892         16         16     0
+
+# P2 — a design-box analyze with NO --mesh == the same analyze with NO design box
+  design box     voxel_mass 1.62691875  printed_fr 1  margin 34550.69196  design_box_block=False
+  no design box  voxel_mass 1.62691875  printed_fr 1  margin 34550.69196  design_box_block=False
+  HEAD, box      voxel_mass 1.62691875  printed_fr 1  margin 34550.69196  design_box_block=False
+
+# AI7 — determinism, re-run after the fixes
+  C_box_keepclear_lattice: 16 artifacts, 0 differ
+  D_box_selfweight_lattice: 13 artifacts, 0 differ
+  E_lattice_variant: 6 artifacts, 1 differ
+     -> lattice_variant.json only, and only in the design.bin PATH it echoes
+        back (the harness points the two runs at different output roots).
+        The in-test determinism check runs the SAME job into two directories
+        and finds 6/6 byte-identical.
