@@ -1161,4 +1161,68 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 VoxelGrid minimize_plastic_solved_grid(const VoxelGrid& grid,
                                        const MinimizePlasticOptions& options);
 
+// ---------------------------------------------------------------------------
+// THE ONE design-domain resolution (task 2026-08-03-design-box-recertification).
+//
+// WHY IT EXISTS. A design box EXPANDS the voxel grid, and every node-indexed
+// input — the mounting Dirichlet BCs, the declared external loads — is indexed
+// to the ORIGINAL part grid, so it must be REMAPPED onto the expanded grid
+// before anything is solved. minimize_plastic has always done that, inline. The
+// latticed RE-CERTIFICATION (run_job) rebuilds the same load case a SECOND time
+// and did NOT, which is why a design-box run refused to be latticed at all: two
+// reconstructions that must agree, one of which was written on the assumption
+// that the grid never expands.
+//
+// This is that derivation, ONCE. minimize_plastic calls it; run_job's lattice
+// certification, its re-lattice entry point and its fixed-design analysis call
+// it. There is no second implementation to drift from — which is the whole
+// point, and the reason this lives in core rather than in the CLI.
+//
+// With no design box (`options.design_box` unset) every field is the caller's
+// input verbatim (`expanded == false`, `mask` empty, offsets 0), so a no-box
+// caller is byte-for-byte what it was before this existed.
+struct SolvedDesignDomain {
+  bool expanded = false;  // options.design_box was set
+  VoxelGrid grid;         // the grid the run solves on (expanded, or the part's)
+  DesignMask mask;        // the effective mask; EMPTY when !expanded
+  // Voxel offset of the original part inside `grid` (0,0,0 when !expanded).
+  int offset_i = 0, offset_j = 0, offset_k = 0;
+  // Node-indexed inputs REMAPPED onto `grid` (verbatim copies when !expanded).
+  std::vector<DirichletBC> bcs;
+  std::vector<NodalLoad> external_loads;  // empty when the caller declared none
+};
+
+// Resolve the domain `minimize_plastic(part_grid, ..., options)` solves on.
+// Performs the identical expand_design_domain call the driver makes (the
+// caller's keep-outs, freeze flag and kDesignBoxCoarsenAlign), merges a caller
+// anchor pad into the expanded mask under the same rule, and remaps `bcs` +
+// `options.external_loads` through remap_node_to_domain.
+//
+// Throws std::invalid_argument on the same two design_mask conditions the
+// driver rejects: a caller mask together with a design box when
+// `freeze_imported_part` is set, and a mask whose size is not
+// part_grid.voxel_count().
+SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
+                                         const std::vector<DirichletBC>& bcs,
+                                         const MinimizePlasticOptions& options);
+
+// THE load case that domain is solved under: the caller's declared external
+// loads REMAPPED onto `domain.grid` when it declared any, else self-weight
+// computed on `domain.grid` (which, expanded, covers the part plus the Active
+// design envelope — exactly what the driver's ladder carries). ONE definition,
+// so "the load the run certified under" is the same object at every site that
+// has to reconstruct it.
+std::vector<NodalLoad> design_domain_loads(const SolvedDesignDomain& domain,
+                                           const MinimizePlasticOptions& options,
+                                           double material_density_g_cm3);
+
+// Which voxels of `domain.grid` are the ORIGINAL part — 1 where the voxel maps
+// back into `part_grid` and the part voxel there is not Empty, 0 elsewhere
+// (i.e. 0 for every voxel the expansion ADDED). Size domain.grid.voxel_count().
+// This is the envelope test for "material the optimizer grew OUTSIDE the part",
+// which the lattice path must be able to name in order to treat it explicitly.
+// With no design box every part-solid voxel is 1 and nothing was added.
+std::vector<char> original_part_voxels(const VoxelGrid& part_grid,
+                                       const SolvedDesignDomain& domain);
+
 }  // namespace topopt

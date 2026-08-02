@@ -1,0 +1,16 @@
+# PRE-EXISTING, UNRELATED TO LATTICE: design box + keep-clear reaching into
+# the add-region + SELF-WEIGHT. No lattice block anywhere in this job.
+
+--- HEAD binary ---
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+topopt-cli: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+
+--- THIS BRANCH ---
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=64 status=ok
+topopt-cli: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)

@@ -747,10 +747,17 @@ struct LatticeCertContext {
   double cert_tol = 0.0;
 };
 
+// `domain` is THE domain the run solved on (resolve_design_domain, pipeline.hpp):
+// under a design box its grid is the EXPANDED grid and its BCs/loads are already
+// remapped onto it. `part_grid` is the ORIGINAL imported part's grid — the
+// denominator minimize_plastic's ladder normalises to, which under expansion is
+// NOT the solved grid's solid count.
 LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
-                                        const VoxelGrid& sg,
+                                        const VoxelGrid& part_grid,
+                                        const SolvedDesignDomain& domain,
                                         const MinimizePlasticOptions& options,
                                         const Material& material) {
+  const VoxelGrid& sg = domain.grid;
   LatticeCertContext cx;
   cx.params.youngs_modulus = material.youngs_modulus_mpa;
   cx.params.poisson = material.poisson;
@@ -774,18 +781,25 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
   cx.build_dir = variant.build_direction_auto_applied
                      ? variant.applied_build_dir
                      : resolve_build_direction(options);
-  // The SAME load minimize_plastic certified this variant under: the declared
-  // external load, or self-weight recomputed on the solved grid. (A design box would
-  // remap BCs/loads onto an expanded grid — run_job refuses design-box + lattice, so
-  // no remap is needed here and this reconstruction is exact.)
-  cx.loads = options.external_loads.empty()
-                 ? self_weight_loads(sg, material.density_g_cm3, options.gravity,
-                                     options.gravity_direction)
-                 : options.external_loads;
+  // The SAME load minimize_plastic certified this variant under, taken from THE
+  // ONE definition (design_domain_loads, pipeline.hpp) rather than reconstructed
+  // here: the declared external load REMAPPED onto the solved grid, or
+  // self-weight recomputed on that grid. Under a design box the solved grid is
+  // the expanded one and the declared loads are node-indexed to the PART — the
+  // remap that fact demands is exactly what this site used to lack, and is why
+  // a design-box run refused to be latticed at all (task
+  // 2026-08-03-design-box-recertification). Off the box path
+  // design_domain_loads returns options.external_loads verbatim / self-weight on
+  // the caller's grid, i.e. byte-identical to what this site computed before.
+  cx.loads = design_domain_loads(domain, options, material.density_g_cm3);
   cx.load_path_ok =
       load_path_connected(sg, variant.optimization.physical_density, 0.5);
   cx.knockdown = knockdown_spec_for(options);
-  cx.part_solid = static_cast<double>(sg.solid_count());
+  // The part-relative denominator (analyze.cpp's printed_fraction) is the
+  // ORIGINAL part's solid count — the same quantity minimize_plastic's ladder
+  // normalises to (handoff 080). Without a design box part_grid IS the solved
+  // grid, so this is the identical number this site computed before.
+  cx.part_solid = static_cast<double>(part_grid.solid_count());
   // E4 — the certification runs at the run's EXACT tight tolerance, asserted (not
   // commented). options.simp.cg_tolerance is minimize_plastic's kCertTol; draft mode
   // only ever loosens the TRAJECTORY (draft_loose_tol), never this cert solve, so if
@@ -864,6 +878,54 @@ struct LatticeRoleReceipt {
   long long include_void_voxels = 0;  // include-region voxels the OPTIMIZER left
                                       // void — the H1a no-op, reported not errored
 };
+// ── ADDED MATERIAL under a design box (task 2026-08-03-design-box-recertification)
+//
+// *** THIS IS A PLACEHOLDER FOR A DECISION THE MAINTAINER HAS NOT MADE. ***
+//
+// With a design box the optimizer may grow material where the ORIGINAL part was
+// not. Nothing in the generator or the gate has an opinion about what should
+// happen to that new material when the variant is latticed, and the three
+// answers are genuinely different objects:
+//
+//   KEEP SOLID (what this constant selects, and the most conservative):
+//       the added voxels are dropped from the certification mask, so they are
+//       certified SOLID and exported as the solid companion body. The composite
+//       is stiffer and stronger than either of the alternatives at the same
+//       geometry, so no margin here is optimistic. Cost: mass — the added
+//       material is exactly the material the optimizer grew to carry load, so
+//       on a box run it can be a large fraction of the part.
+//
+//   LATTICE IT (flip this to false):
+//       the added voxels are latticed like every other voxel. Lightest, and
+//       arguably what a user who asked for a lattice meant. But the added
+//       region is new, thin, load-path material with no imported geometry
+//       behind it; a lattice cell that does not fit inside it is clipped, and
+//       the composite margin then rests on struts in a region the user never
+//       drew. Certified honestly either way — it is a design choice, not a
+//       correctness one.
+//
+//   EXCLUDE IT (deliberately NOT implemented):
+//       omitting the added material from the exported file would export an
+//       object the certification did not describe, and the design the gate
+//       accepted needs that material to carry its load. It is listed here only
+//       so the record shows it was considered and rejected.
+//
+// Flipping this constant is the whole change; the receipt reports which policy
+// ran (`added_material.policy`) and how much material it governed, so the
+// maintainer can price the decision from a real run rather than in the abstract.
+constexpr bool kDesignBoxAddedMaterialKeptSolid = true;
+
+// What the added material was and how it was treated — emitted ONLY on a
+// design-box run, so every existing receipt is byte-identical.
+struct LatticeAddedMaterialReceipt {
+  bool present = false;             // the run expanded (a design box was set)
+  long long printed_voxels = 0;     // printed voxels of THIS variant, total
+  long long inside_part = 0;        //   ... inside the ORIGINAL part envelope
+  long long outside_part = 0;       //   ... OUTSIDE it (the material grown)
+  long long outside_kept_solid = 0; // of those, dropped from the lattice mask
+  double outside_volume_mm3 = 0.0;  // voxel basis (count x spacing^3)
+};
+
 struct LatticeGradedReceipt {
   bool present = false;
   const GradedField* gf = nullptr;  // the law's full report for THIS variant
@@ -895,7 +957,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      const LatticeExportOutcome& oc,
                                      double cell_mm,
                                      const LatticeRoleReceipt& roles,
-                                     const LatticeGradedReceipt& graded) {
+                                     const LatticeGradedReceipt& graded,
+                                     const LatticeAddedMaterialReceipt& added) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -964,6 +1027,40 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     s += "    \"precedence\": \"clearance beats include and exclude (no material "
          "to lattice); exclude beats include (kept solid); solid-kept material "
          "is certified SOLID and exported as the solid companion body\"\n";
+    s += "  },\n";
+  }
+  // Added material (task 2026-08-03-design-box-recertification) — on a design-box
+  // run, HOW MUCH of this variant sits outside the original part's envelope and
+  // what was done with it. Emitted only when the run expanded, so a no-box
+  // receipt is byte-identical. The maintainer cannot judge the default without
+  // the number, so the number is here and the policy names itself.
+  if (added.present) {
+    s += "  \"added_material\": {\n";
+    s += "    \"policy\": " +
+         json_str(kDesignBoxAddedMaterialKeptSolid ? "keep_solid" : "lattice") +
+         ",\n";
+    s += "    \"printed_voxels\": " + std::to_string(added.printed_voxels) +
+         ",\n";
+    s += "    \"inside_original_part\": " + std::to_string(added.inside_part) +
+         ",\n";
+    s += "    \"outside_original_part\": " + std::to_string(added.outside_part) +
+         ",\n";
+    s += "    \"outside_fraction\": " +
+         json_num(added.printed_voxels > 0
+                      ? static_cast<double>(added.outside_part) /
+                            static_cast<double>(added.printed_voxels)
+                      : 0.0) +
+         ",\n";
+    s += "    \"outside_volume_mm3\": " + json_num(added.outside_volume_mm3) +
+         ",\n";
+    s += "    \"outside_kept_solid_voxels\": " +
+         std::to_string(added.outside_kept_solid) + ",\n";
+    s += "    \"note\": \"material the optimizer grew OUTSIDE the imported "
+         "part's envelope, under the design box. Policy \\\"keep_solid\\\" "
+         "drops it from the lattice mask, so it is certified SOLID and exported "
+         "as the solid companion body — the conservative default, and a "
+         "PLACEHOLDER: whether added material should be latticed instead is a "
+         "design decision the maintainer has not made.\"\n";
     s += "  },\n";
   }
   // Graded lattice (stage 4) — the grading law's full per-variant record with
@@ -1216,6 +1313,7 @@ struct LatticeVariantOutcome {
   GradedField gf;                 // meaningful iff `graded`
   LatticeRoleReceipt role_rcpt;
   LatticeGradedReceipt grad_rcpt;  // `gf` pointer NOT retained (see below)
+  LatticeAddedMaterialReceipt added_rcpt;  // design-box runs only
   // The DESIGN the mesh was built from and the certification solved on — one
   // number, so "the certified object is the exported one" is checkable rather
   // than merely argued (bar Z3). Both consumers read the SAME `dens` reference
@@ -1223,12 +1321,19 @@ struct LatticeVariantOutcome {
   std::uint64_t design_fingerprint = 0;
 };
 
+// `part_grid` is the ORIGINAL imported part's grid and `domain` is the domain the
+// run SOLVED on (resolve_design_domain). Without a design box they are the same
+// grid and domain.bcs are the caller's BCs verbatim, so every existing caller is
+// byte-identical; with one, domain.grid is the EXPANDED grid, domain.bcs are the
+// remapped BCs, and part_grid is what "outside the original part" means.
 LatticeVariantOutcome lattice_one_variant(
     const MinimizePlasticVariant& v, const JobDescription& job,
-    const VoxelGrid& solved_grid, const MinimizePlasticOptions& options,
-    const Material& material, const std::vector<DirichletBC>& bcs,
+    const VoxelGrid& part_grid, const SolvedDesignDomain& domain,
+    const MinimizePlasticOptions& options, const Material& material,
     const std::vector<ClearanceGeometry>& lattice_kos,
     const LatticeRoleRegions& lattice_roles, const std::string& out_dir) {
+  const VoxelGrid& solved_grid = domain.grid;
+  const std::vector<DirichletBC>& bcs = domain.bcs;
   LatticeVariantOutcome R;
   const std::vector<double>& dens = v.optimization.physical_density;
   R.design_fingerprint = design_fingerprint(dens);
@@ -1312,6 +1417,37 @@ LatticeVariantOutcome lattice_one_variant(
         ++dropped_by_overlap;
       }
     }
+  }
+
+  // ── ADDED MATERIAL (task 2026-08-03-design-box-recertification). On a design-box
+  // run, count this variant's printed voxels inside vs OUTSIDE the imported part's
+  // envelope, and apply the declared policy to the ones outside. `keep_solid`
+  // (the conservative default) clears them from the certification mask, which by
+  // construction sends them BOTH to the composite posture as solid AND to the
+  // solid companion body the export writes — one flag, so the certified object
+  // and the exported file agree here exactly as they do everywhere else (H1b).
+  // Off the box path `domain.expanded` is false and this whole block is skipped,
+  // so the mask, the geometry and the receipt are byte-identical.
+  LatticeAddedMaterialReceipt& added_rcpt = R.added_rcpt;
+  if (domain.expanded) {
+    const std::vector<char> in_part = original_part_voxels(part_grid, domain);
+    added_rcpt.present = true;
+    for (std::size_t e = 0; e < mask.size(); ++e) {
+      if (!(dens[e] >= 0.5)) continue;
+      ++added_rcpt.printed_voxels;
+      if (in_part[e]) {
+        ++added_rcpt.inside_part;
+        continue;
+      }
+      ++added_rcpt.outside_part;
+      if (kDesignBoxAddedMaterialKeptSolid && mask[e]) {
+        mask[e] = 0;
+        ++added_rcpt.outside_kept_solid;
+      }
+    }
+    added_rcpt.outside_volume_mm3 = static_cast<double>(added_rcpt.outside_part) *
+                                    solved_grid.spacing * solved_grid.spacing *
+                                    solved_grid.spacing;
   }
 
   // ── the radius field + graded cell activation.
@@ -1480,14 +1616,19 @@ LatticeVariantOutcome lattice_one_variant(
   const double tg0 = wall_seconds();
   R.oc = export_latticed_variant(
       v, out_dir, job.output, job.lattice, solved_grid, boundary, cell, G,
-      mask, graded_cells, /*emit_solid_companion=*/graded || roles_present,
+      mask, graded_cells,
+      // The companion body must also be armed when the added-material policy
+      // kept voxels solid — otherwise that material would be certified solid but
+      // never written, and the file would not be the certified object.
+      /*emit_solid_companion=*/graded || roles_present ||
+          added_rcpt.outside_kept_solid > 0,
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm);
   R.gen_seconds = wall_seconds() - tg0;
   // (b) certification of the composite — the octet tensor on the SAME mask the
   // geometry used. The band is enforced PER VOXEL inside the solve (E5/H4b).
   const LatticeCertContext cx =
-      lattice_cert_context(v, solved_grid, options, material);
+      lattice_cert_context(v, part_grid, domain, options, material);
   const LatticePosture post = build_lattice_posture(
       solved_grid, cell, mask, rho_uniform,
       graded ? &gf.posture.relative_density : nullptr);
@@ -1525,7 +1666,7 @@ LatticeVariantOutcome lattice_one_variant(
                                            v.requested_volume_fraction) +
                              ".report.json");
   R.receipt_json = lattice_cert_report_json(v, job.lattice, R.cc, R.oc, cell,
-                                            role_rcpt, grad_rcpt);
+                                            role_rcpt, grad_rcpt, added_rcpt);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null
@@ -1875,10 +2016,13 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   std::vector<DirichletBC> bcs;
   MinimizePlasticOptions options;
   const bool loadcase = job.loads.present;
-  // loadcase only: the distributed tractions from the declared force groups,
+  // loadcase only: the distributed tractions from the declared force groups are
   // computed on the model faces up front (INDEPENDENT of the fixed design's
-  // internal geometry — a substitute/smoothed design changes no external load).
-  std::vector<NodalLoad> external_loads;
+  // internal geometry — a substitute/smoothed design changes no external load)
+  // and ride on `options.external_loads`; the certification below takes them from
+  // design_domain_loads, which is also where they get remapped onto an expanded
+  // grid. They are no longer copied aside here — one place held them, one place
+  // reads them.
   // loadcase only: the LOAD faces, frozen (alongside the anchors) when smoothing so
   // the traction stays attached to bit-identical solid. Empty in self-weight mode
   // (byte-identical). Without this a smoothed load cap erodes and the traction lands
@@ -1932,7 +2076,6 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     model_grid = std::move(setup.grid);
     bcs = std::move(setup.bcs);
     options = std::move(setup.options);
-    external_loads = options.external_loads;
     for (const ProductionLoadCase::LoadGroup& g : lc.load_groups)
       for (const int fid : g.face_ids) load_freeze_face_ids.push_back(fid);
   } else {
@@ -1964,17 +2107,36 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   // 2026-08-01-build-direction-separation). AFTER the mode branch so it governs
   // both modes; absent key => byte-identical.
   apply_build_direction_options(options, job);
+  // Optional design-domain expansion. The loadcase branch already carries it on
+  // `options` (build_production_loadcase forwards the job's box); the
+  // self-weight branch did not, so it is set here — a re-analysis that dropped
+  // the box would silently certify a TRUNCATED design (task
+  // 2026-08-03-design-box-recertification, bar AI5).
+  if (job.has_design_box && !options.design_box.has_value()) {
+    options.design_box = to_design_box(job.design_box);
+    for (const JobBox& ko : job.keep_out_boxes)
+      options.keep_out_boxes.push_back(to_design_box(ko));
+  }
+  // THE domain the originating run solved on — the SAME core call it used, so a
+  // smoothed design-box variant is re-certified on the grid it was produced on
+  // and under the load case that produced it, rather than clipped back onto the
+  // part grid. Without a design box `cert_grid` IS `model_grid` and
+  // `domain.bcs` IS `bcs`, so every existing analyze run is byte-identical.
+  const SolvedDesignDomain domain = resolve_design_domain(model_grid, bcs, options);
+  const VoxelGrid& cert_grid = domain.grid;
+  // The PART's solid count — the part-relative denominator, which under
+  // expansion is NOT the solved grid's solid count (handoff 080).
   const double part_solid = static_cast<double>(model_grid.solid_count());
 
   // ── the FIXED design to analyse (its OWN occupancy grid) ─────────────────────
   // `design_grid` carries the solid tags of the geometry being certified (so the
   // stress solve's printed-voxel gate matches it and self-weight is the design's
   // own weight); `density` is that occupancy as a binary field. Same voxel geometry
-  // as `model_grid`, so the fixture node indices above stay valid.
+  // as `cert_grid`, so the fixture node indices above stay valid.
   if (smooth.enabled && analyze_mesh_path.empty())
     throw JobError("analyze: --smooth requires a --mesh input to smooth");
 
-  VoxelGrid design_grid = model_grid;
+  VoxelGrid design_grid = cert_grid;
   // The smoothed mesh, held until the applied build orientation is known (see
   // below). Empty unless --smooth ran.
   TriangleMesh pending_smoothed_mesh;
@@ -1995,7 +2157,10 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // the traction stay attached to bit-identical solid across the re-voxelization
     // (without the load faces frozen, smoothing erodes the loaded cap and the
     // traction lands on a void DOF). The min-feature constraint is evaluated against
-    // model_grid.
+    // cert_grid — the run's SOLVED grid, so under a design box it covers the
+    // material the optimizer grew outside the part instead of stopping at the
+    // part's bounding box. Same spacing and same voxel lattice either way, so a
+    // no-box run measures exactly what it measured before.
     TriangleMesh design_mesh = edited.mesh;
     if (smooth.enabled) {
       const TaubinParams params =
@@ -2006,9 +2171,9 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
                              load_freeze_face_ids.begin(),
                              load_freeze_face_ids.end());
       c.freeze_regions = freeze_regions_from_faces(
-          result.model, freeze_face_ids, model_grid.spacing);
+          result.model, freeze_face_ids, cert_grid.spacing);
       c.freeze_tol_mm = smooth.freeze_tol_mm;
-      c.min_feature_grid = &model_grid;
+      c.min_feature_grid = &cert_grid;
       c.enforce_min_feature = smooth.enforce_min_feature;
       SmoothResult sr = constrained_taubin_smooth(edited.mesh, params, c);
       design_mesh = std::move(sr.mesh);
@@ -2044,12 +2209,19 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     // cap (otherwise the solve hits a void DOF — no equilibrium). This restores
     // exactly the loaded face the traction was declared on; the load-bearing BODY
     // (the ribs) still erodes and still lowers the margin. In self-weight mode
-    // `model_grid` carries no Load tags, so this is byte-identical to carrying
+    // `cert_grid` carries no Load tags, so this is byte-identical to carrying
     // Fixture alone. The quantization gap (mesh surface vs this voxelization) is
     // disclosed below.
-    design_grid = voxelize_onto_grid(design_mesh, model_grid);
+    //
+    // The target is `cert_grid`, the run's SOLVED grid: under a design box the
+    // mesh being re-certified EXTENDS BEYOND the imported part, and voxelizing it
+    // onto the part grid would silently CLIP the material the optimizer grew and
+    // certify a smaller object than the file it describes. expand_design_domain
+    // preserves the part's Fixture/Load tags at the domain offset, so the tag
+    // carry-over below reads the same tags it always did.
+    design_grid = voxelize_onto_grid(design_mesh, cert_grid);
     for (std::size_t i = 0; i < design_grid.tags.size(); ++i) {
-      if (model_grid.tags[i] == VoxelTag::Load) {
+      if (cert_grid.tags[i] == VoxelTag::Load) {
         // When WE smoothed, the loaded cap is restored solid (see above). For a raw
         // substitute mesh (no smoothing) keep 228's contract — certify what was
         // handed in, carrying the Load tag only where the mesh has material — so the
@@ -2058,7 +2230,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
         else if (design_grid.tags[i] != VoxelTag::Empty)
           design_grid.tags[i] = VoxelTag::Load;
       } else if (design_grid.tags[i] != VoxelTag::Empty &&
-                 model_grid.tags[i] == VoxelTag::Fixture) {
+                 cert_grid.tags[i] == VoxelTag::Fixture) {
         design_grid.tags[i] = VoxelTag::Fixture;
       }
     }
@@ -2096,8 +2268,14 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
   const BuildOrientationBakePlan bake_plan = resolve_bake_plan(options);
   const bool score_orientations =
       options.build_orientation_report || bake_plan.needs_scorer;
+  // loadcase: THE ONE definition (design_domain_loads), which returns the
+  // declared tractions REMAPPED onto the solved grid — the remap this path also
+  // lacked under a design box. self-weight: DELIBERATELY the design's OWN weight
+  // on `design_grid` (a substitute/smoothed design carries its own mass), which
+  // is why this branch is not design_domain_loads — that would weigh the run's
+  // occupancy, not this design's.
   const std::vector<NodalLoad> loads =
-      loadcase ? external_loads
+      loadcase ? design_domain_loads(domain, options, material.density_g_cm3)
                : self_weight_loads(design_grid, material.density_g_cm3,
                                    options.gravity, options.gravity_direction);
   const bool load_path_ok = load_path_connected(design_grid, density, 0.5);
@@ -2110,7 +2288,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
 
   // ── THE single analysis solve — no optimization ─────────────────────────────
   result.analysis = analyze_fixed_design(
-      design_grid, params, density, bcs, loads, material, build_dir,
+      design_grid, params, density, domain.bcs, loads, material, build_dir,
       options.simp.cg_tolerance, options.simp.cg_max_iterations,
       options.simp.solver, options.margin_stop, knockdown, load_path_ok,
       part_solid, /*lattice=*/nullptr,
@@ -2304,6 +2482,30 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
           ",\n";
   prov += "  \"model\": " + json_str(job.model) + ",\n";
   prov += "  \"resolution\": " + std::to_string(job.resolution) + ",\n";
+  // Design box (task 2026-08-03-design-box-recertification) — emitted ONLY when
+  // the run expanded, so a no-box provenance is byte-identical. It says which
+  // grid this re-certification actually ran on, because "the part grid" and "the
+  // solved grid" are different objects here and a reader must not have to guess:
+  // a smoothed design-box variant is re-certified on the EXPANDED grid, so the
+  // material the optimizer grew outside the part is certified, not clipped away.
+  if (domain.expanded) {
+    prov += "  \"design_box\": {\n";
+    prov += "    \"expanded\": true,\n";
+    prov += "    \"part_grid\": [" + std::to_string(model_grid.nx) + ", " +
+            std::to_string(model_grid.ny) + ", " +
+            std::to_string(model_grid.nz) + "],\n";
+    prov += "    \"solved_grid\": [" + std::to_string(cert_grid.nx) + ", " +
+            std::to_string(cert_grid.ny) + ", " + std::to_string(cert_grid.nz) +
+            "],\n";
+    prov += "    \"part_offset\": [" + std::to_string(domain.offset_i) + ", " +
+            std::to_string(domain.offset_j) + ", " +
+            std::to_string(domain.offset_k) + "],\n";
+    prov += "    \"note\": \"the analysed geometry is voxelized onto the SOLVED "
+            "grid and the declared load case is remapped onto it, so material "
+            "grown outside the imported part is certified rather than clipped "
+            "at the part's bounding box\"\n";
+    prov += "  },\n";
+  }
   prov += "  \"voxel_mass_grams\": " + json_num(result.voxel_mass_grams) + ",\n";
   prov += "  \"mesh_mass_grams\": " +
           (result.analyzed_mesh ? json_num(result.mesh_mass_grams)
@@ -2396,15 +2598,12 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     throw JobError("lattice_variant_job: the job carries no \"variant\" block");
   if (!job.lattice.present)
     throw JobError("lattice_variant_job: the job carries no \"lattice\" block");
-  // The SAME pre-flight refusals the optimize path applies to a lattice job,
-  // for the same reasons (E5 / design box). Stated here too rather than
-  // inherited by accident: this entry point never calls run_job.
-  if (job.has_design_box)
-    throw JobError(
-        "lattice_variant_job: a design box (add-material) run cannot be "
-        "re-latticed: the certification load case would have to be remapped "
-        "onto the expanded grid, and certifying against a mismatched load case "
-        "is exactly what this job exists to prevent.");
+  // The SAME pre-flight refusal the optimize path applies to a lattice job, for
+  // the same reason (E5). Stated here too rather than inherited by accident:
+  // this entry point never calls run_job. The design-box refusal that used to
+  // sit here is gone — the remap it named now exists, ONCE, in core
+  // (resolve_design_domain), and this entry point calls it below like every
+  // other site (task 2026-08-03-design-box-recertification).
   if (!job.grading.present) {
     const double lat_rho =
         octet_relative_density(job.lattice.cell_mm, job.lattice.strut_radius_mm);
@@ -2504,8 +2703,27 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     options.gravity_direction = job.gravity.direction;
     loadcase_receipt =
         loadcase_receipt_json(job, nullptr, result.fixture_face_ids, tagged, bcs);
+    // Optional design-domain expansion (the "add material" feature) — the
+    // SELF-WEIGHT branch's counterpart of what build_production_loadcase already
+    // put on `options` in the loadcase branch. Without this the box would be
+    // silently dropped on this path and the stored design's grid check below
+    // would report a mismatch it could not explain.
+    if (job.has_design_box) {
+      options.design_box = to_design_box(job.design_box);
+      for (const JobBox& ko : job.keep_out_boxes)
+        options.keep_out_boxes.push_back(to_design_box(ko));
+    }
   }
   apply_build_direction_options(options, job);
+
+  // ── THE domain the ORIGINAL run solved on, rebuilt through the SAME core call
+  // that run used (resolve_design_domain, pipeline.hpp): the expanded grid and
+  // the BCs/loads remapped onto it under a design box, the caller's inputs
+  // verbatim without one. This is what makes a design-box run re-latticeable —
+  // the refusal this entry point used to carry existed precisely because this
+  // reconstruction had no remap (task 2026-08-03-design-box-recertification).
+  const SolvedDesignDomain domain = resolve_design_domain(model_grid, bcs, options);
+  const VoxelGrid& cert_grid = domain.grid;
 
   // ── the STORED DESIGN. Read before any solve, so a bad reference costs
   // nothing.
@@ -2521,25 +2739,33 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   if (store.variants.empty())
     throw JobError("lattice_variant: \"" + job.variant.design +
                    "\" contains no variant designs");
-  // The stored design must index to THIS job's grid, or every voxel-indexed
-  // thing below (the BCs, the tags, the mask, the field) refers to a different
-  // geometry. Compared exactly — a grid that is merely close is a different
-  // grid.
-  if (store.nx != model_grid.nx || store.ny != model_grid.ny ||
-      store.nz != model_grid.nz || store.spacing != model_grid.spacing ||
-      store.origin.x != model_grid.origin.x ||
-      store.origin.y != model_grid.origin.y ||
-      store.origin.z != model_grid.origin.z)
+  // The stored design must index to THIS job's SOLVED grid, or every
+  // voxel-indexed thing below (the BCs, the tags, the mask, the field) refers to
+  // a different geometry. Compared exactly — a grid that is merely close is a
+  // different grid. design.bin's header names the grid the run SOLVED on
+  // (write_design_file takes solved_grid), which under a design box is the
+  // EXPANDED grid — so the comparison is against `cert_grid`, rebuilt through the
+  // same expansion. Off the box path cert_grid IS model_grid, byte-identical.
+  if (store.nx != cert_grid.nx || store.ny != cert_grid.ny ||
+      store.nz != cert_grid.nz || store.spacing != cert_grid.spacing ||
+      store.origin.x != cert_grid.origin.x ||
+      store.origin.y != cert_grid.origin.y ||
+      store.origin.z != cert_grid.origin.z)
     throw JobError(
         "lattice_variant: the stored design's grid does not match this job's. "
         "Stored " + std::to_string(store.nx) + "x" + std::to_string(store.ny) +
         "x" + std::to_string(store.nz) + " @ spacing " +
         std::to_string(store.spacing) + "; this job builds " +
-        std::to_string(model_grid.nx) + "x" + std::to_string(model_grid.ny) +
-        "x" + std::to_string(model_grid.nz) + " @ spacing " +
-        std::to_string(model_grid.spacing) +
-        ". The model and resolution must be the ones the design was produced "
-        "from.");
+        std::to_string(cert_grid.nx) + "x" + std::to_string(cert_grid.ny) +
+        "x" + std::to_string(cert_grid.nz) + " @ spacing " +
+        std::to_string(cert_grid.spacing) +
+        (domain.expanded ? " (the design box's EXPANDED grid; the part grid is " +
+                               std::to_string(model_grid.nx) + "x" +
+                               std::to_string(model_grid.ny) + "x" +
+                               std::to_string(model_grid.nz) + ")"
+                         : "") +
+        ". The model, resolution and design box must be the ones the design was "
+        "produced from.");
 
   // Select the variant. NO nearest-rung matching: latticing a rung the user did
   // not name is exactly the silent surprise this whole job exists to remove.
@@ -2581,22 +2807,27 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   params.poisson = material.poisson;
   params.penalty = 3.0;  // ARCHITECTURE §4, matching the run's cert solve
 
-  // The certification grid is the MODEL grid — the same grid the run's own
-  // per-rung certification used, with the design carried entirely by the
-  // density field (analyze_fixed_design's printed set is density > 0.5). Using
-  // a re-tagged occupancy grid instead would change the part-solid denominator
-  // and the self-weight assembly, i.e. would not reproduce the run.
+  // The certification grid is the run's SOLVED grid (`cert_grid` — the model
+  // grid, or the design box's expanded grid), with the design carried entirely
+  // by the density field (analyze_fixed_design's printed set is density > 0.5).
+  // Using a re-tagged occupancy grid instead would change the part-solid
+  // denominator and the self-weight assembly, i.e. would not reproduce the run.
   //
   // The orientation is the one the run APPLIED to this variant, read from the
   // store rather than re-derived: the recorded margin is a margin AT an
   // orientation (see design_store.hpp).
   const Vec3 build_dir = sd.applied_build_dir;
+  // THE ONE load-case definition, shared with minimize_plastic and with the
+  // optimize path's lattice certification: the declared external load REMAPPED
+  // onto the solved grid, else self-weight on that grid. Off the design-box path
+  // this is `external_loads` / self_weight_loads(model_grid, ...) exactly as
+  // before; on it, this is the remap whose absence forced the old refusal.
   const std::vector<NodalLoad> loads =
-      loadcase ? external_loads
-               : self_weight_loads(model_grid, material.density_g_cm3,
-                                   options.gravity, options.gravity_direction);
-  const bool load_path_ok = load_path_connected(model_grid, sd.density, 0.5);
+      design_domain_loads(domain, options, material.density_g_cm3);
+  const bool load_path_ok = load_path_connected(cert_grid, sd.density, 0.5);
   const KnockdownSpec knockdown = knockdown_spec_for(options);
+  // The PART's solid count — minimize_plastic's ladder denominator (handoff
+  // 080), which under expansion is NOT cert_grid.solid_count().
   const double part_solid = static_cast<double>(model_grid.solid_count());
 
   {
@@ -2621,7 +2852,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   // variant, and every number after this point would describe a different
   // object. So this is ENFORCED, not reported.
   result.solid = analyze_fixed_design(
-      model_grid, params, sd.density, bcs, loads, material, build_dir,
+      cert_grid, params, sd.density, domain.bcs, loads, material, build_dir,
       options.simp.cg_tolerance, options.simp.cg_max_iterations,
       options.simp.solver, options.margin_stop, knockdown, load_path_ok,
       part_solid, /*lattice=*/nullptr, options.build_orientation_report,
@@ -2674,10 +2905,14 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   v.export_baked = sd.export_baked;
 
   const double part_dim_mm =
-      std::max({static_cast<double>(model_grid.nx),
-                static_cast<double>(model_grid.ny),
-                static_cast<double>(model_grid.nz)}) *
-      model_grid.spacing;
+      // The SOLVED grid's largest bounding-box edge — the same quantity
+      // minimize_plastic derives its settings size class from (it uses `G`, the
+      // expanded grid under a design box), so the recommended settings this job
+      // reports are the run's own. Identical to model_grid off the box path.
+      std::max({static_cast<double>(cert_grid.nx),
+                static_cast<double>(cert_grid.ny),
+                static_cast<double>(cert_grid.nz)}) *
+      cert_grid.spacing;
   VariantReport vr;
   vr.volume_fraction = result.solid.printed_fraction;
   vr.printed_fraction = result.solid.printed_fraction;
@@ -2710,7 +2945,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       lattice_keep_outs_from_job(job, result.model);
   const LatticeRoleRegions lattice_roles = lattice_role_regions_from_job(job);
   const LatticeVariantOutcome R =
-      lattice_one_variant(v, job, model_grid, options, material, bcs,
+      lattice_one_variant(v, job, model_grid, domain, options, material,
                           lattice_kos, lattice_roles, out_dir);
   // The pipeline's own solve count: the null-posture reproduction it runs as
   // its internal proof, the composite, and (when band clamping happened) the
@@ -2821,7 +3056,10 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
     // accepted_only = false, for the reason the analyze route documents: the
     // field describes the object either way, and withholding it when the
     // verdict is REJECTED blanks the overlay exactly when it matters.
-    write_fields_file(result.fields_path, fr, model_grid,
+    // Indexed to the grid the fields were SOLVED on (`cert_grid` — the expanded
+    // grid under a design box), which is also the grid design.bin and the run's
+    // own fields.bin name. model_grid would be the PART grid, a different size.
+    write_fields_file(result.fields_path, fr, cert_grid,
                       /*accepted_only=*/false);
   }
 
@@ -2955,11 +3193,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
 #endif
 
   // ──▶ Lattice pre-flight (handoff 2026-07-29-lattice-certification-e2e). Refuse
-  // BEFORE any import / voxelize / solve — nothing is written — on the two conditions
+  // BEFORE any import / voxelize / solve — nothing is written — on the condition
   // the E2E certification cannot honor:
-  //   * A design box remaps BCs/loads onto an expanded grid; the latticed
-  //     re-certification reconstructs the load case at run_job level and would need
-  //     the same remap. Rather than certify against a mismatched load case, refuse.
   //   * A density OUTSIDE the certifiable band (read from CORE — lattice_rho_min/max,
   //     not hardcoded). The band is a hard gate at certification (bar E5):
   //     analyze_fixed_design also throws LatticeDensityOutOfBand mid-run, but failing
@@ -2975,11 +3210,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         "into. Add a \"lattice\" block (without cell_mm/strut_radius_mm — the "
         "graded run derives those) or drop \"grading\".");
   if (job.lattice.present) {
-    if (job.has_design_box)
-      throw JobError(
-          "lattice certification does not support a design box (add-material) run: "
-          "the certification load case cannot be reconstructed under domain "
-          "expansion. Run the lattice job without a design box.");
+    // A DESIGN BOX no longer refuses (task 2026-08-03-design-box-recertification).
+    // The refusal existed because the latticed re-certification reconstructed the
+    // load case at run_job level with NO remap onto the expanded grid — it was
+    // protecting against a second reconstruction written on the assumption that
+    // the grid never expands, not against something impossible. There is now ONE
+    // remap (resolve_design_domain / design_domain_loads, pipeline.hpp) and both
+    // the optimize path and this certification call it, so the load case cannot
+    // be a different one. Material grown OUTSIDE the imported part is governed by
+    // kDesignBoxAddedMaterialKeptSolid and reported per variant.
+    //
     // The uniform-density band fast-fail. A GRADED run has no uniform
     // cell/radius (the schema rejects them); its per-voxel densities are
     // in-band by the grading law's construction (bar L2), and the band is
@@ -3203,9 +3443,26 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   result.loadcase_receipt_json = loadcase_receipt;
   write_text_file(result.loadcase_receipt_path, loadcase_receipt);
 
-  // The grid the run solves on (the expanded domain under a design box), needed
-  // up front so a streamed variant's mesh is resampled on the right grid.
-  const VoxelGrid solved_grid = minimize_plastic_solved_grid(grid, options);
+  // THE domain the run solves on — the expanded grid AND the BCs/loads remapped
+  // onto it under a design box (resolve_design_domain, pipeline.hpp), verbatim
+  // inputs without one. Needed up front so a streamed variant's mesh is resampled
+  // on the right grid, and so the latticed re-certification below certifies under
+  // the SAME load case minimize_plastic solves under — it is literally the same
+  // object, not a second reconstruction of it (task
+  // 2026-08-03-design-box-recertification).
+  const SolvedDesignDomain domain = resolve_design_domain(grid, bcs, options);
+  const VoxelGrid& solved_grid = domain.grid;
+#ifndef NDEBUG
+  // The two derivations agreed before this task by discipline; now they are the
+  // same call. Asserted rather than commented (pure geometry, no solve).
+  {
+    const VoxelGrid mp = minimize_plastic_solved_grid(grid, options);
+    assert(solved_grid.nx == mp.nx && solved_grid.ny == mp.ny &&
+           solved_grid.nz == mp.nz && solved_grid.spacing == mp.spacing &&
+           "the solved grid resolve_design_domain reports must be the grid "
+           "minimize_plastic solves on");
+  }
+#endif
 
   // LOUD PARITY GATE (task: multigrid-odd-axis-cliff, O1/O2). Say at RUN START
   // what geometric multigrid will do on this grid. The motivating run solved
@@ -3360,7 +3617,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // latticed later goes through the identical body. This lambda is now only
     // the run-level AGGREGATION and the streaming checkpoint line.
     const LatticeVariantOutcome R =
-        lattice_one_variant(v, job, solved_grid, options, material, bcs,
+        lattice_one_variant(v, job, grid, domain, options, material,
                             lattice_kos, lattice_roles, out_dir);
     lat_agg.wall_s += R.gen_seconds;
     const LatticeExportOutcome& oc = R.oc;
