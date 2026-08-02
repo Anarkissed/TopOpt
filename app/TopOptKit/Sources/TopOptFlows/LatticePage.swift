@@ -332,37 +332,54 @@ public struct LatticePage: View {
 
     // MARK: top-right: RUN SIM (the workspace gizmo is hidden under the page — L6)
 
-    private var topRightColumn: some View {
-        VStack(alignment: .trailing, spacing: LatticeChromeLayout.runSimColumnSpacing) {
-            Button {
-                guard !simGate.blocked, let ctx = model.makeLatticeSimContext() else { return }
-                sim.run(ctx)
-            } label: {
-                HStack(spacing: DS.Space.s) {
-                    Image(systemName: "play.fill").font(.system(size: 12, weight: .bold))
-                    Text("RUN SIM").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
-                }
-                .foregroundStyle((simGate.blocked ? DS.Color.textDisabled : DS.Color.textPrimary).color)
-                .padding(.horizontal, DS.Space.xl).frame(height: 48)
-                .background(RoundedRectangle(cornerRadius: DS.Radius.control)
-                    .fill((simGate.blocked ? DS.Color.fillDisabled : DS.Surface.panel).color)
-                    .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
-                        .strokeBorder((simGate.blocked ? DS.Color.strokeSubtle : DS.Color.strokeStrong).color,
-                                      lineWidth: 1)))
-            }
-            .buttonStyle(.plain)
-            .disabled(simGate.blocked)
-            .accessibilityLabel("Run sim")
-            if let reason = simGate.reason {
+    /// ROUND-2 BARS L2 + L3. The top-right corner belongs to the POSITION GIZMO,
+    /// on every page — so RUN SIM moved down to the bottom-right cluster with the
+    /// page's other actions, where "the simulation button" lives on the smoothing
+    /// page too (`Re-certify`) and on the TO page (`Optimize`).
+    ///
+    /// Round 1 answered the same collision by HIDING the gizmo here (its
+    /// Metal-backed glass composited over this page's pure-SwiftUI chrome, so
+    /// RUN SIM rendered behind it). That traded one invariant for another. Moving
+    /// the button and mounting the gizmo above every page keeps both.
+    ///
+    /// What is left in this corner is the gate's REASON, which is a caption, not a
+    /// control — and it is inset by `PageChrome.gizmoClearance` so it cannot land
+    /// under the gizmo either (bar L5).
+    @ViewBuilder private var topRightColumn: some View {
+        if let reason = simGate.reason {
+            VStack(alignment: .trailing, spacing: LatticeChromeLayout.runSimColumnSpacing) {
                 Text(reason)
                     .dsStyle(DS.TypeScale.caption2)
                     .foregroundStyle(DS.Color.textQuaternary.color)
                     .multilineTextAlignment(.trailing)
                     .frame(maxWidth: 236, alignment: .trailing)
             }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.trailing, LatticeChromeLayout.edge + PageChrome.gizmoClearance)
+            .padding(.top, DS.Space.xl3)
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
-        .padding(.trailing, DS.Space.xl4).padding(.top, DS.Space.xl3)
+    }
+
+    private var runSimButton: some View {
+        Button {
+            guard !simGate.blocked, let ctx = model.makeLatticeSimContext() else { return }
+            sim.run(ctx)
+        } label: {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "play.fill").font(.system(size: 12, weight: .bold))
+                Text("RUN SIM").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.bold)
+            }
+            .foregroundStyle((simGate.blocked ? DS.Color.textDisabled : DS.Color.textPrimary).color)
+            .padding(.horizontal, DS.Space.xl).frame(height: PageChrome.actionButton)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                .fill((simGate.blocked ? DS.Color.fillDisabled : DS.Surface.panel).color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
+                    .strokeBorder((simGate.blocked ? DS.Color.strokeSubtle : DS.Color.strokeStrong).color,
+                                  lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .disabled(simGate.blocked)
+        .accessibilityLabel("Run sim")
     }
 
     // MARK: top-centre: transient note (L13) + status banner
@@ -1106,11 +1123,13 @@ public struct LatticePage: View {
                 previewToggleButton
                 if previewOn { previewRefreshButton }
                 reviewButton
+                // L3: the simulation button is BOTTOM RIGHT, not top, not floating.
+                runSimButton
                 optimizeButton
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        .padding(.trailing, DS.Space.xl4).padding(.bottom, DS.Space.xl4)
+        .padding(.trailing, LatticeChromeLayout.edge).padding(.bottom, LatticeChromeLayout.edge)
     }
 
     /// L17: the ONLY preview control — a plain on/off toggle.

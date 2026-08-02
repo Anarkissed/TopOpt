@@ -1,0 +1,10 @@
+Test Suite 'LatticePageRound2Tests' passed at 2026-08-02 02:19:55.032.		 Executed 15 tests, with 0 failures (0 unexpected) in 0.178 (0.179) seconds
+Test Suite 'LatticePageTests' passed at 2026-08-02 02:19:55.416.		 Executed 25 tests, with 0 failures (0 unexpected) in 0.383 (0.384) seconds
+Test Suite 'LatticeSDFAlignmentTests' passed at 2026-08-02 02:20:03.039.		 Executed 7 tests, with 1 test skipped and 0 failures (0 unexpected) in 7.622 (7.623) seconds
+Test Suite 'LatticeVariantTests' passed at 2026-08-02 02:20:03.045.		 Executed 16 tests, with 0 failures (0 unexpected) in 0.005 (0.006) seconds
+Test Suite 'SelectionModelTests' passed at 2026-08-02 02:20:03.048.		 Executed 18 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'SmoothingModelTests' passed at 2026-08-02 02:20:03.052.		 Executed 11 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'SmoothingPageRound2Tests' passed at 2026-08-02 02:20:03.183.		 Executed 21 tests, with 0 failures (0 unexpected) in 0.130 (0.131) seconds
+Test Suite 'SmoothingPageTests' passed at 2026-08-02 02:20:03.287.		 Executed 31 tests, with 0 failures (0 unexpected) in 0.102 (0.104) seconds
+Test Suite 'TopOptKitPackageTests.xctest' passed at 2026-08-02 02:20:03.287.		 Executed 144 tests, with 1 test skipped and 0 failures (0 unexpected) in 8.424 (8.434) seconds
+Test Suite 'Selected tests' passed at 2026-08-02 02:20:03.287.		 Executed 144 tests, with 1 test skipped and 0 failures (0 unexpected) in 8.424 (8.438) seconds

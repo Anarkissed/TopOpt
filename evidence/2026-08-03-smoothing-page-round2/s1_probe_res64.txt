@@ -1,0 +1,24 @@
+[IDENTITY] fixture: tests/fixtures/mesh/WallMount_ShelfBracket.stl  resolution=64
+[IDENTITY] MC surface: 20248 verts, 40516 tris  (3 x tris = 121548)
+
+[IDENTITY] the two meshes
+[IDENTITY]   mesh                                             vertices
+[IDENTITY]   A-remote  MeshExport.parseBinarySTL (soup)         121548
+[IDENTITY]   A-local   bridge to_optimize_variant (MC)           20248
+[IDENTITY]   B         import_part_file (welded)                 20248
+[IDENTITY]   ratio A-remote : B = 6.0030
+
+[IDENTITY] does the app mesh agree with core's, INDEX FOR INDEX?
+[IDENTITY]   app mesh     same count   same order   first differs 
+[IDENTITY]   A-remote     NO           NO           0             
+[IDENTITY]   A-local      YES          YES          20248         
+
+[IDENTITY] after the fix (page mesh = import_part_file(inPath)):
+[IDENTITY]   same count = YES   same order = YES
+
+[IDENTITY] the panel's own readout
+[IDENTITY]   mask entries              20248
+[IDENTITY]   frozen                    2480
+[IDENTITY]   tolerance (mm)            2.43
+[IDENTITY]   ROUND 1 — stage carried   121548  -> mask entries DO NOT match the painted mesh: BRUSH REFUSED
+[IDENTITY]   ROUND 2 — stage carries   20248  -> mask entries match the painted mesh: BRUSH PAINTS

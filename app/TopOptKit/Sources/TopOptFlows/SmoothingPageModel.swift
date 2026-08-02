@@ -454,11 +454,6 @@ public final class SmoothingPageModel: ObservableObject {
     @Published public private(set) var kept: SmoothKeptResult?
     /// Which side of the before/after the viewport is showing.
     @Published public var showingSmoothed = true
-    /// BAR AE6 — the ONE Selections library (the TO page's own panel) shown over
-    /// this page, exactly as `LatticePageModel.libraryOpen` shows it over the
-    /// lattice page. This page authors no selection state of its own; the freeze
-    /// regions it honours are the ones that library already owns.
-    @Published public var libraryOpen = false
 
     public let context: SmoothVariantContext
     /// Where the variant's own mesh was written for the certification engine to

@@ -153,6 +153,10 @@ public struct WorkspacePlaceholder: View {
     /// are one value.
     @State private var smoothBrush = SmoothBrushModel(indices: [], vertexCount: 0,
                                                       freeze: .unavailable)
+    /// The brush's OWN tools — paint / erase / orbit and the disc size (bar L4).
+    /// Round 1 borrowed the TO page's paint drawer for these, which is why the
+    /// page could not hide the TO chrome without disarming its own brush.
+    @State private var smoothTools = SmoothBrushTools()
     /// The variant's own render mesh, and the smoothed twin once one has been
     /// certified. Built once when they change (the viewer-lag lesson).
     @State private var smoothVariantMesh: ViewerMesh?
@@ -312,6 +316,29 @@ public struct WorkspacePlaceholder: View {
         self.project = project
     }
 
+    /// TRUE while a full-screen PAGE owns the screen — the lattice page or the
+    /// smoothing page.
+    ///
+    /// ROUND-2 BAR L1. The smoothing page shipped drawing over a live TO
+    /// workspace: the Design Box panel and its buttons, Paint, the resolution
+    /// chip, Minimize plastic, Plate up, Gravity set, the Selections list, the
+    /// red clearance primitives and the design-box wireframe were all still there
+    /// and still interactive underneath it. That is an overlay, not a page.
+    ///
+    /// The lattice page already hid the chrome — but it did it by writing
+    /// `!showLatticePage` at each site, so the third page had to remember to add
+    /// itself to eight separate conditions, and it did not. ONE predicate,
+    /// gating every site, is what makes a fourth page correct by default.
+    private var fullScreenPageUp: Bool { showLatticePage || showSmoothingPage }
+
+    /// The viewer's one-finger paint gesture. The SMOOTHING PAGE OWNS IT while it
+    /// is up: its brush is the page's whole point, so it cannot depend on the TO
+    /// page's Paint toggle — which L1 now hides. The page's own three-way mode
+    /// control decides whether a drag paints, erases or orbits.
+    private var brushGestureActive: Bool {
+        showSmoothingPage ? smoothTools.paints : paintActive
+    }
+
     public var body: some View {
         ZStack(alignment: .topLeading) {
             DS.Color.background.color.ignoresSafeArea()
@@ -343,13 +370,21 @@ public struct WorkspacePlaceholder: View {
                           stressTints: showSmoothingPage ? smoothBrush.vertexTints()
                                                          : latticeProxyTints,
                           // M7.dom-app: the translucent design box + keep-outs (model
-                          // space); nil when the tool is off → nothing drawn.
+                          // space); nil when the tool is off → nothing drawn. L1: a
+                          // full-screen page draws NO design-box wireframe.
                           designBox: showDesignGizmo ? project.designBox.box : nil,
                           keepOutBoxes: showDesignGizmo ? project.designBox.keepOuts : [],
                           // Keep-clear v2 (Part 3): the true red clearance volumes, drawn
                           // whenever gravity is set (edit phase) so the user can SEE and
                           // reason about every keep-out; the selected group's volume brightens.
-                          clearanceVolumes: force.phase == .edit ? clearanceRenderItems : [],
+                          //
+                          // L1: NOT on the smoothing page. Protected regions are still
+                          // INDICATED there — better than these boxes, in fact: the brush
+                          // tints the actual FROZEN VERTICES of the mesh being painted, so
+                          // what the brush will refuse is shown on the surface itself
+                          // rather than as a red box floating near it.
+                          clearanceVolumes: (force.phase == .edit && !fullScreenPageUp)
+                              ? clearanceRenderItems : [],
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
                           // body is not drawn at all (alpha 0), it only keeps serving the
@@ -363,7 +398,7 @@ public struct WorkspacePlaceholder: View {
                           // triangles so the highlight + picker treat them as one face (live paint
                           // highlight). `onBrush` resolves the covered triangles and applies the
                           // stroke; two-finger drag still orbits.
-                          paintActive: paintActive,
+                          paintActive: brushGestureActive,
                           paintFaceIDs: project.effectivePaintFaceIDs(),
                           onBrush: handleBrush)
                 .ignoresSafeArea()
@@ -385,28 +420,37 @@ public struct WorkspacePlaceholder: View {
                     .allowsHitTesting(false)
             }
 
-            arrowsOverlay.ignoresSafeArea()                     // D6: in-scene force arrow shafts
-            // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
-            // being edited (the setup phase, below) — the persistent dim arrow + "down" tag are
-            // REMOVED as viewport clutter; the "Gravity set · <axis>" chip is the at-a-glance
-            // readout the rest of the time.
-            if showDesignGizmo { designGizmoOverlay.ignoresSafeArea() }  // dom-app resize/move handles
-            // DEFECT 2: the manual-primitive transform gizmo (translate on one axis / plane /
-            // freely, rotate, + copy) — drawn on the active group's primitives so they can be
-            // grabbed. Rendered BENEATH the clearance chips below, so the 330 pt gizmo box can
-            // never occlude a value chip (the chip/knob hit areas are small and the rest of that
-            // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
-            if force.phase == .edit { primitiveGizmoOverlay.ignoresSafeArea() }
+            // EVERY in-scene editing affordance below is gated on `!fullScreenPageUp`
+            // (bar L1): a page shows the part and its own tool, and nothing the page
+            // does not own. The design-box handles, the primitive transform gizmo and
+            // the clearance drag handles are all EDITORS — on the smoothing page they
+            // would let a user move the very geometry the freeze mask was computed
+            // against, behind a page that could not react to it.
+            if !fullScreenPageUp {
+                arrowsOverlay.ignoresSafeArea()                 // D6: in-scene force arrow shafts
+                // Gravity direction (round 2, item 4): the arrow is shown ONLY while gravity is
+                // being edited (the setup phase, below) — the persistent dim arrow + "down" tag are
+                // REMOVED as viewport clutter; the "Gravity set · <axis>" chip is the at-a-glance
+                // readout the rest of the time.
+                if showDesignGizmo { designGizmoOverlay.ignoresSafeArea() }  // dom-app resize/move handles
+                // DEFECT 2: the manual-primitive transform gizmo (translate on one axis / plane /
+                // freely, rotate, + copy) — drawn on the active group's primitives so they can be
+                // grabbed. Rendered BENEATH the clearance chips below, so the 330 pt gizmo box can
+                // never occlude a value chip (the chip/knob hit areas are small and the rest of that
+                // overlay is hit-transparent, so gizmo drags in empty box space still reach it).
+                if force.phase == .edit { primitiveGizmoOverlay.ignoresSafeArea() }
+                // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
+                // axial, face → depth) and the floating glass value pill near the selection — ON TOP
+                // of the gizmo so the values stay readable while transforming.
+                if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
+            }
             // The lattice region's transform gizmo — only while the lattice panel is open
-            // and a region exists, so it never coincides with the force gizmo (U5).
-            latticeRegionGizmoOverlay.ignoresSafeArea()
-            // Keep-clear Phase B: the draggable clearance handles (wall → margin, caps →
-            // axial, face → depth) and the floating glass value pill near the selection — ON TOP
-            // of the gizmo so the values stay readable while transforming.
-            if force.phase == .edit { clearanceHandlesOverlay.ignoresSafeArea() }
+            // and a region exists, so it never coincides with the force gizmo (U5). It is
+            // the LATTICE page's own tool, so it is not gated with the workspace's.
+            if !showSmoothingPage { latticeRegionGizmoOverlay.ignoresSafeArea() }
 
-            if !showLatticePage { chrome }
-            if force.phase == .setup {
+            if !fullScreenPageUp { chrome }
+            if force.phase == .setup, !fullScreenPageUp {
                 gravityBanner
                 // Point which way is down — the reliable route that doesn't depend on a
                 // clean single face. The tip SNAPS to the part's own face normals (item 1);
@@ -421,7 +465,7 @@ public struct WorkspacePlaceholder: View {
                     gravityBaseGizmoOverlay.ignoresSafeArea()
                     gravityDirectionOverlay.ignoresSafeArea()
                 }
-            } else if !showLatticePage {
+            } else if !fullScreenPageUp {
                 // The Design Box drawer now lives INSIDE `bottomRightControls` (item 11), so it
                 // is no longer placed separately here.
                 if force.gravityIsSet { bottomRightControls }
@@ -431,15 +475,8 @@ public struct WorkspacePlaceholder: View {
                 // position gizmo, Optimize's stature, and it SAYS what is missing.
                 if viewerMesh != nil { latticeEntryButtonOverlay }
             }
-            if !showLatticePage { loadOverlays.ignoresSafeArea() }  // D3/D4/D5: tappable pills at each arrow
-            // Round-2 L6 root cause: this was the ONE piece of workspace chrome not
-            // gated behind the lattice page, and its Metal-backed glass composited
-            // OVER the page's pure-SwiftUI chrome regardless of ZStack order — the
-            // page's RUN SIM button rendered BEHIND it. The fix is structural, not
-            // a z nudge: the page hides ALL workspace chrome (its own rule), the
-            // gizmo included.
-            if viewerMesh != nil, !showLatticePage, !showSmoothingPage { orientationGizmo }
-            if !showLatticePage, !showSmoothingPage { bottomBar }
+            if !fullScreenPageUp { loadOverlays.ignoresSafeArea() }  // D3/D4/D5: tappable pills at each arrow
+            if !fullScreenPageUp { bottomBar }
             // The full-screen lattice page (handoff 2026-07-30-lattice-page): chrome
             // over the SAME live stage — the workspace chrome above is hidden while
             // it is open, so exactly one set of controls exists at a time.
@@ -455,18 +492,35 @@ public struct WorkspacePlaceholder: View {
             // The SMOOTHING page (handoff 2026-08-02-smoothing-page) — chrome over
             // the same stage, mounted like the lattice page.
             if showSmoothingPage { smoothingPageOverlay }
-            // AE6: the SAME Selections library, over the SAME model. One view, one
-            // selection system — never a second selection UX for a third page.
-            if showSmoothingPage, smoothingPageModel?.libraryOpen == true,
-               force.phase == .edit, viewerMesh != nil {
-                selectionsPanel
-            }
-            // AE7: the position gizmo sits in the SAME corner on every page. On the
-            // lattice page it is hidden for the L6 compositing reason (its
-            // Metal-backed glass composited over that page's pure-SwiftUI chrome);
-            // here it is mounted ABOVE the page instead, so it keeps its shared
-            // `PageChrome` corner without landing under anything.
-            if showSmoothingPage, viewerMesh != nil { orientationGizmo }
+            // ROUND-2 BAR L1 — NO SELECTIONS PANEL OVER THE SMOOTHING PAGE.
+            //
+            // Round 1 mounted the shared library here, reading AE6 ("one selection
+            // model, never a second UX") as licence to show the EDITOR. But the
+            // freeze mask the brush is painting against was computed from those
+            // very selections: editing an anchor or a keep-clear volume mid-stroke
+            // would leave every stroke on screen measured against a mask that no
+            // longer describes the part, and the page has no way to react.
+            //
+            // AE6 is unweakened — the page still authors no selection state, and
+            // there is still exactly one `selectionsPanel` in the app. It simply
+            // shows a READ-ONLY readout of that one model instead of its editor,
+            // which is what L1's "indicated, not editable" asks for.
+            // ═══ THE POSITION GIZMO — ONE PLACEMENT, EVERY PAGE (round-2 bar L2) ═══
+            //
+            // This is the THIRD time the maintainer has asked for gizmo invariance:
+            // round-3 lattice feedback, again when it was REMOVED from the lattice
+            // page, and now here. Both earlier answers were local — round 1 hid it
+            // on the lattice page and drew it from a SECOND `if` site for the
+            // smoothing page — so "the same corner on every page" kept being a claim
+            // about two pages out of three.
+            //
+            // It is now mounted ONCE, LAST in the ZStack, above every page. That
+            // placement is what fixed the lattice page's L6 in the first place: the
+            // gizmo's Metal-backed glass composites over pure-SwiftUI chrome
+            // whatever the z order says, so the answer is to put it genuinely on
+            // top rather than to hide it. Each page insets its own top-right column
+            // by `PageChrome.gizmoClearance` so nothing lands under it.
+            if viewerMesh != nil { orientationGizmo }
             RunScreen(model: run,                               // M7.7: progress card + failure sheets
                       materialName: project.material,
                       resolution: runResolution,
@@ -536,8 +590,10 @@ public struct WorkspacePlaceholder: View {
                               latticeEntry: { latticeEntry($0) })
                     .ignoresSafeArea()
             }
-            // Returning to the saved variants from the original view.
-            if viewOriginal, !showLatticePage, let outcome = run.outcome,
+            // Returning to the saved variants from the original view. L5: NOT while
+            // a page is up — this chip is pinned top-centre, which is exactly where
+            // both pages put their own status banner, and the two overlapped.
+            if viewOriginal, !fullScreenPageUp, let outcome = run.outcome,
                outcome.variants.contains(where: { $0.accepted }) {
                 seeResultsChip
             }
@@ -887,16 +943,19 @@ public struct WorkspacePlaceholder: View {
         // both pages — and it hit-tests the VARIANT mesh, which is what the stage
         // is showing, so a stroke can never land on the original part's geometry.
         if showSmoothingPage {
+            // The page's OWN tools decide the mode and the disc size (bar L4) —
+            // the TO page's paint drawer is hidden here and no longer reachable.
+            guard smoothTools.paints else { return }
             guard let mesh = smoothVariantMesh, let proj = projection else { return }
             switch phase {
             case .began, .moved:
                 let tris = BrushHitTest.triangles(under: center,
-                                                  radiusPoints: brushRadiusPoints,
+                                                  radiusPoints: CGFloat(smoothTools.radiusPoints),
                                                   mesh: mesh, projection: proj,
                                                   modelRotation: settleQuat,
                                                   modelCenter: meshCenter)
                 guard !tris.isEmpty else { return }
-                smoothBrush.paint(paintErasing ? .erase : .add,
+                smoothBrush.paint(smoothTools.erases ? .erase : .add,
                                   triangles: tris.map { Int32($0) })
             case .ended:
                 break
@@ -1513,6 +1572,11 @@ public struct WorkspacePlaceholder: View {
         } else {
             latticePageVariantField = nil
         }
+        // TWO FULL-SCREEN PAGES MUST NEVER BOTH BE UP (round-2 bar L5). Each page
+        // owns the whole screen, so overlapping them is the overlay defect in its
+        // purest form. Making it structural here also lets `showLatticePage` be
+        // read as "and therefore not the smoothing page" at every placement site.
+        showSmoothingPage = false
         showLatticePage = true
     }
 
@@ -1540,22 +1604,6 @@ public struct WorkspacePlaceholder: View {
             return
         }
         let v = o.variants[variantIndex]
-        let ctx = SmoothPageEntry.context(
-            runName: project.name, variantIndex: variantIndex,
-            requestedVolumeFraction: v.requestedVolumeFraction,
-            massGrams: v.massGrams, reportedMargin: v.worstCaseMargin,
-            accepted: v.accepted, meshVertices: v.meshVertices,
-            meshIndices: v.meshIndices,
-            // The RUN's own record of whether it generated a lattice — not the
-            // project's current lattice settings (AE8, reverse).
-            latticed: o.latticeReport != nil,
-            retainedJob: project.relatticeArtifacts?.jobJSON,
-            modelPath: project.importedFile?.path)
-
-        smoothVariantMesh = ViewerMesh(vertices: v.meshVertices, indices: v.meshIndices,
-                                       faceIDs: [], faceGeometry: [],
-                                       pseudoFaces: false, smoothShaded: true)
-        smoothedVariantMesh = nil
 
         // Write the variant's own mesh out once: the certification engine reads
         // meshes from disk, and BOTH columns of the receipt are measured on this
@@ -1574,6 +1622,61 @@ public struct WorkspacePlaceholder: View {
                 triangleCount: v.meshIndices.count / 3, faceCount: 0,
                 watertight: true),
             to: inPath)
+
+        // ROUND 2, BAR S2 — THE PAGE'S ONE MESH. From here on the page does NOT
+        // use `v.meshVertices` for anything: it reads the file back through
+        // CORE's own importer, and that is the mesh the stage draws, the brush
+        // paints, `smooth_freeze_mask` masks, and the smoother moves.
+        //
+        // Why this is the fix and not a remap: those four already all read this
+        // file. The app was the only participant holding a different buffer —
+        // on a LAN run a triangle soup with 6x core's vertex count, because
+        // `MeshExport.parseBinarySTL` shares no vertices between facets while
+        // core's `import_part_file` welds by exact coordinate. Measured 6.0030
+        // on the maintainer's fixture (`smooth_mesh_identity_probe`); their
+        // screen read 105060 vs 17496. Reconciling the two would be the guess
+        // the guard refuses to make. Dropping one of them leaves nothing to
+        // reconcile.
+        var meshError: String?
+        var pageMesh = SmoothPageMesh(path: inPath, vertices: [], indices: [])
+        do {
+            pageMesh = try SmoothPageMesh.imported(from: inPath) { path in
+                let m = try TopOptKit.importMesh(path: path)
+                return (m.vertices, m.indices)
+            }
+        } catch {
+            meshError = (error as? TopOptError)?.message ?? "\(error)"
+        }
+
+        let ctx = SmoothPageEntry.context(
+            runName: project.name, variantIndex: variantIndex,
+            requestedVolumeFraction: v.requestedVolumeFraction,
+            massGrams: v.massGrams, reportedMargin: v.worstCaseMargin,
+            accepted: v.accepted, pageMesh: pageMesh,
+            // The RUN's own record of whether it generated a lattice — not the
+            // project's current lattice settings (AE8, reverse).
+            latticed: o.latticeReport != nil,
+            retainedJob: project.relatticeArtifacts?.jobJSON,
+            modelPath: project.importedFile?.path,
+            meshUnreadable: meshError)
+
+        // A `.meshUnreadable` context is the one refusal the ENTRY GATE cannot
+        // reach: it is only knowable after writing the file and asking core to
+        // read it back, which the gate must not do for every disabled button. So
+        // it takes the page's own `gateOverlay` — the full-screen "this variant
+        // can't be smoothed" card, carrying core's own words — rather than a
+        // toast that scrolls away. AJ2 is about not opening a page that will
+        // refuse SILENTLY; naming the refusal on the page is the point of that
+        // overlay existing.
+
+        // THE STAGE DRAWS THE PAGE MESH, not the run's buffer — so what is on
+        // screen is what the brush indexes and what core masks.
+        smoothVariantMesh = pageMesh.isEmpty
+            ? nil
+            : ViewerMesh(vertices: pageMesh.vertices, indices: pageMesh.indices,
+                         faceIDs: [], faceGeometry: [],
+                         pseudoFaces: false, smoothShaded: true)
+        smoothedVariantMesh = nil
 
         guard let cfg = model.certificationConfigPaths() else { return }
         let materials = cfg.materials, rules = cfg.rules
@@ -1637,26 +1740,32 @@ public struct WorkspacePlaceholder: View {
         // The freeze mask, from CORE's own predicate resolution. Until it arrives
         // the brush is inert and the page says so — it must not paint into the
         // unknown.
-        smoothBrush = SmoothBrushModel(indices: v.meshIndices,
-                                       vertexCount: v.meshVertices.count / 3,
-                                       freeze: .unavailable)
+        //
+        // BOTH the brush and the request are built BY the page mesh: `brush()`
+        // takes its indices and count from it, and `freezeMaskRequest` fills the
+        // mesh path in from it. Neither has a parameter through which a different
+        // mesh could enter — bar S2's "by construction".
+        smoothBrush = pageMesh.brush()
+        smoothTools = SmoothBrushTools()
+        // Mutually exclusive, both ways (bar L5) — see `openLatticePage`.
+        showLatticePage = false
         showSmoothingPage = true
-        if let lc = ctx.loadCase {
-            let modelPath = ctx.modelPath
+        if let req = ctx.freezeMaskRequest {
             Task {
+                let lc = req.loadCase
                 let mask = try? await Task.detached(priority: .userInitiated) {
                     try TopOptKit.smoothFreezeMask(
-                        modelPath: modelPath, meshPath: inPath,
+                        modelPath: req.modelPath, meshPath: req.meshPath,
                         resolution: lc.resolution,
                         anchorFaceIDs: lc.anchorFaceIDs, loadGroups: lc.loadGroups,
                         buildDirection: lc.buildDirection,
                         infillPercent: lc.infillPercent, freeze: lc.freeze)
                 }.value
                 guard let mask else { return }
-                smoothBrush = SmoothBrushModel(
-                    indices: v.meshIndices, vertexCount: v.meshVertices.count / 3,
+                smoothBrush = pageMesh.brush(
                     freeze: SmoothFreezeMask(frozen: mask.frozen,
-                                             toleranceMM: mask.toleranceMM))
+                                             toleranceMM: mask.toleranceMM,
+                                             meshPath: req.meshPath))
             }
         }
     }
@@ -1675,6 +1784,7 @@ public struct WorkspacePlaceholder: View {
                 SmoothingPage(
                     project: project, page: page,
                     brush: $smoothBrush,
+                    tools: $smoothTools,
                     showingSmoothed: Binding(
                         get: { page.showingSmoothed },
                         set: { page.showingSmoothed = $0 }),
@@ -1722,10 +1832,6 @@ public struct WorkspacePlaceholder: View {
                         closeSmoothingPage()
                         openLatticePage(variantIndex: idx, smoothed: kept)
                     },
-                    // AE6: open the SAME `selectionsPanel` the TO page and the
-                    // lattice page mount, over the SAME `project.selection`. This
-                    // page has no selection UX of its own to open.
-                    onOpenLibrary: { page.libraryOpen.toggle() },
                     onClose: { closeSmoothingPage() })
                     .ignoresSafeArea(.keyboard)
             }

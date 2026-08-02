@@ -46,10 +46,16 @@ public struct SmoothFreezeMask: Equatable, Sendable {
     public let frozen: [Bool]
     /// The tolerance core used (mm): 0.75 × the analysis grid spacing.
     public let toleranceMM: Double
+    /// THE MESH FILE core computed this mask from (round 2, bar S3). A vertex
+    /// count is a weak identity — two different meshes can share one. The path
+    /// is what the mask is actually ABOUT, so the brush compares it too.
+    /// Empty means "not stated", which matches a brush that states none.
+    public let meshPath: String
 
-    public init(frozen: [Bool], toleranceMM: Double) {
+    public init(frozen: [Bool], toleranceMM: Double, meshPath: String = "") {
         self.frozen = frozen
         self.toleranceMM = toleranceMM
+        self.meshPath = meshPath
     }
 
     /// The mask for a mesh whose freeze regions have not been resolved yet. NOT
@@ -66,6 +72,78 @@ public struct SmoothFreezeMask: Equatable, Sendable {
         guard v >= 0, v < frozen.count else { return false }
         return !frozen[v]
     }
+}
+
+// MARK: - the brush's own tools (round 2, bar L4)
+
+/// Paint / erase / orbit, and the brush disc's size.
+///
+/// WHY THIS EXISTS. Round 1 shipped the page with NO brush tools of its own: the
+/// on/off toggle, the eraser and the size stepper all lived in the TO page's
+/// paint drawer, so the smoothing page could only be USED with the workspace
+/// chrome left on screen underneath it. That is the mechanical reason it was an
+/// overlay rather than a page — hiding the chrome would have disarmed the brush.
+/// Moving the tools onto the page is therefore the precondition for bar L1, not
+/// a cosmetic tidy.
+///
+/// A pure value, so the mode rules are unit-tested headlessly like the rest of
+/// the brush.
+public struct SmoothBrushTools: Equatable, Sendable {
+
+    public enum Mode: String, Sendable, CaseIterable, Identifiable {
+        /// One-finger drag adds triangles to the active region.
+        case paint
+        /// One-finger drag removes triangles from their region.
+        case erase
+        /// One-finger drag orbits the part instead of painting — the way to
+        /// LOOK at what you brushed. Without it the page would have no
+        /// single-finger orbit at all, since the brush claims that gesture.
+        case orbit
+
+        public var id: String { rawValue }
+        public var label: String {
+            switch self {
+            case .paint: return "Paint"
+            case .erase: return "Erase"
+            case .orbit: return "Orbit"
+            }
+        }
+        public var icon: String {
+            switch self {
+            case .paint: return "paintbrush.pointed.fill"
+            case .erase: return "eraser.fill"
+            case .orbit: return "rotate.3d"
+            }
+        }
+    }
+
+    public var mode: Mode
+    /// The brush disc radius in screen points — the same units and the same
+    /// bounds the TO page's paint drawer used, so the gesture feels identical.
+    public var radiusPoints: Double
+
+    public static let minRadius: Double = 12
+    public static let maxRadius: Double = 64
+    public static let radiusStep: Double = 6
+
+    public init(mode: Mode = .paint, radiusPoints: Double = 26) {
+        self.mode = mode
+        self.radiusPoints = min(max(radiusPoints, Self.minRadius), Self.maxRadius)
+    }
+
+    /// Whether a one-finger drag paints at all (false in `.orbit`).
+    public var paints: Bool { mode != .orbit }
+    /// Whether a painting drag REMOVES rather than adds.
+    public var erases: Bool { mode == .erase }
+
+    public mutating func grow() {
+        radiusPoints = min(radiusPoints + Self.radiusStep, Self.maxRadius)
+    }
+    public mutating func shrink() {
+        radiusPoints = max(radiusPoints - Self.radiusStep, Self.minRadius)
+    }
+    public var canGrow: Bool { radiusPoints < Self.maxRadius }
+    public var canShrink: Bool { radiusPoints > Self.minRadius }
 }
 
 // MARK: - one painted region
@@ -139,32 +217,64 @@ public struct SmoothBrushModel: Equatable, Sendable {
     public let vertexCount: Int
     /// Core's freeze mask for this mesh.
     public let freeze: SmoothFreezeMask
+    /// The file the painted mesh was read from — stamped by
+    /// `SmoothPageMesh.brush(freeze:)`, empty when none was stated. Compared
+    /// against the mask's own path, so "same count, different mesh" is caught
+    /// rather than painted (round 2, bar S3).
+    public let meshPath: String
 
     private var nextColor: Int = 0
 
-    public init(indices: [Int32], vertexCount: Int, freeze: SmoothFreezeMask) {
+    public init(indices: [Int32], vertexCount: Int, freeze: SmoothFreezeMask,
+                meshPath: String = "") {
         self.indices = indices
         self.vertexCount = vertexCount
         self.freeze = freeze
+        self.meshPath = meshPath
     }
 
     public var isEmpty: Bool { assignments.isEmpty }
     public var activeRegion: SmoothRegion? { regions.first { $0.id == activeRegionID } }
 
+    /// Whether the mask and the painted mesh are the SAME mesh. Two conditions,
+    /// because a vertex count is a weak identity:
+    ///
+    ///   * the counts agree — one weight per vertex, or the vector core consumes
+    ///     is not even the right length;
+    ///   * and, when both sides state a file, they state the SAME file. Round 2's
+    ///     measurement is why: the on-device path's mesh matched core's on COUNT
+    ///     AND on order, while the LAN path's differed 6:1. A count check alone
+    ///     would pass a same-size mesh from a different variant and paint the
+    ///     wrong vertices in silence, which is worse than refusing.
+    ///
+    /// Either side leaving its path empty means "not stated" and does not fail
+    /// the check — the mask carries a path only when core told us one.
+    public var meshesAgree: Bool {
+        guard freeze.isAvailable, freeze.vertexCount == vertexCount else { return false }
+        if meshPath.isEmpty || freeze.meshPath.isEmpty { return true }
+        return meshPath == freeze.meshPath
+    }
+
     /// The brush can only be used once core has told us what is frozen. Until
     /// then every paint call is a no-op and the page says why.
-    public var canPaint: Bool { freeze.isAvailable && freeze.vertexCount == vertexCount }
+    public var canPaint: Bool { meshesAgree }
 
     /// The one-line reason the brush is inert, or nil when it is usable.
     public var unusableReason: String? {
-        if freeze.isAvailable && freeze.vertexCount == vertexCount { return nil }
+        if meshesAgree { return nil }
         if !freeze.isAvailable {
             return "Working out which surfaces are protected — the brush unlocks "
                  + "once the bores, mating faces and anchors are resolved."
         }
-        return "The protected-surface map describes a different mesh "
-             + "(\(freeze.vertexCount) vertices vs \(vertexCount)) — refusing to "
-             + "paint rather than guess which vertices it means."
+        if freeze.vertexCount != vertexCount {
+            return "The protected-surface map describes a different mesh "
+                 + "(\(freeze.vertexCount) vertices vs \(vertexCount)) — refusing to "
+                 + "paint rather than guess which vertices it means."
+        }
+        return "The protected-surface map was computed for a different file "
+             + "(\(freeze.meshPath) vs \(meshPath)) — the vertex counts match, "
+             + "but matching counts are not the same vertices, so this refuses "
+             + "rather than guess."
     }
 
     // MARK: - regions
@@ -365,7 +475,7 @@ public struct SmoothBrushModel: Equatable, Sendable {
     public func vertexTints(frozenTint: SIMD4<Float> =
                                 SIMD4<Float>(0.42, 0.85, 0.55, 0.34)) -> [SIMD4<Float>] {
         var out = [SIMD4<Float>](repeating: .zero, count: vertexCount)
-        guard freeze.isAvailable, freeze.vertexCount == vertexCount else { return out }
+        guard meshesAgree else { return out }
         var colorByRegion: [UUID: (RGBA, Double)] = [:]
         for r in regions { colorByRegion[r.id] = (r.color, r.strength) }
         for (t, id) in assignments {
