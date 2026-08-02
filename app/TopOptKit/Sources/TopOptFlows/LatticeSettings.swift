@@ -275,7 +275,13 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
                 minRelativeDensity: Double = 0, maxRelativeDensity: Double = 1,
                 region: ManualPrimitive? = nil,
                 includePrimitives: [ManualPrimitive] = [],
-                boundary: LatticeBoundaryTreatment = .rim,
+                // THE DEFAULT IS THE ONE THAT CAN ACTUALLY EMIT (task
+                // 2026-08-03-variant-postprocessing-fix, defect 4). It was `.rim`,
+                // which on an optimized part is provably zero geometry — see
+                // `LatticeCoreCapability.rimEmitsNothingOnVoxelParts`. Core's own job
+                // schema has always defaulted to "diagrid" (`job.hpp`); the app was
+                // the one overriding it with the choice that does nothing.
+                boundary: LatticeBoundaryTreatment = .fullSkin,
                 densityMode: LatticeDensityMode = .uniform,
                 paintedIncludeFaces: [Int] = [],
                 paintDepthMM: Double = 4,
@@ -329,6 +335,11 @@ public struct LatticeSettings: Codable, Equatable, Sendable {
         } else {
             includePrimitives = []
         }
+        // A snapshot with no `boundary` key was written when the default WAS `.rim`,
+        // so `.rim` is the faithful restore of what that project actually had — the
+        // decode fallback describes HISTORY and does not follow the new default
+        // (task 2026-08-03-variant-postprocessing-fix). Such a project opens with
+        // the "this emits nothing" warning showing, which is the honest outcome.
         boundary = try c.decodeIfPresent(LatticeBoundaryTreatment.self, forKey: .boundary) ?? .rim
         densityMode = try c.decodeIfPresent(LatticeDensityMode.self, forKey: .densityMode) ?? .uniform
         paintedIncludeFaces = try c.decodeIfPresent([Int].self, forKey: .paintedIncludeFaces) ?? []

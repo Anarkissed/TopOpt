@@ -1,0 +1,17 @@
+=== R2 · BEFORE (eager retention producers disabled — the HEAD mechanism) ===
+== E2E case=retain_dies port=63522 grace=2.0s appFingerprint=34175a5fe9fd ==
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/variant-postprocessing-reachability-852264/app/TopOptKit/Tests/TopOptFlowsTests/RemoteRunnerE2ETests.swift:210: error: -[TopOptFlowsTests.RemoteRunnerE2ETests testEndToEnd] : XCTUnwrap failed: expected non-nil value of type "RelatticeArtifacts" - the run kept its variants but no retention pair — the exact state that greyed out both entries
+Test Case '-[TopOptFlowsTests.RemoteRunnerE2ETests testEndToEnd]' failed (6.970 seconds).
+	 Executed 1 test, with 1 failure (0 unexpected) in 6.970 (6.971) seconds
+	 Executed 1 test, with 1 failure (0 unexpected) in 6.970 (6.971) seconds
+	 Executed 1 test, with 1 failure (0 unexpected) in 6.970 (6.972) seconds
+
+=== R3 · AFTER ===
+== E2E case=retain_dies port=63681 grace=2.0s appFingerprint=34175a5fe9fd ==
+  retained: job 440 B, design 1272 B, blocks [0.7, 0.5]
+  variant 0 vf=0.7: smooth=true lattice=true
+  variant 1 vf=0.5: smooth=true lattice=true
+Test Case '-[TopOptFlowsTests.RemoteRunnerE2ETests testEndToEnd]' passed (6.188 seconds).
+	 Executed 1 test, with 0 failures (0 unexpected) in 6.188 (6.189) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 6.188 (6.190) seconds
+	 Executed 1 test, with 0 failures (0 unexpected) in 6.188 (6.190) seconds

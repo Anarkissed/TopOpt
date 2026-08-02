@@ -72,6 +72,11 @@ public struct VariantEntryFacts: Equatable {
     public let modelPath: String?
     /// A Mac worker is selected in Compute.
     public let workerSelected: Bool
+    /// The rung this variant targeted — the key the re-lattice job selects the
+    /// stored design by, so it is also the key that decides whether the retained
+    /// container actually covers this variant (task
+    /// 2026-08-03-variant-postprocessing-fix).
+    public let requestedVolumeFraction: Double
     /// A job is already running.
     public let runInFlight: Bool
     /// The app RE-ATTACHED to this run rather than submitting it, so it no longer
@@ -81,7 +86,8 @@ public struct VariantEntryFacts: Equatable {
     public init(hasGeometry: Bool, machine: SolvingMachine, retainedJob: Data?,
                 retainedDesign: Data?, runGeneratedLattice: Bool,
                 modelPath: String?, workerSelected: Bool, runInFlight: Bool,
-                reattached: Bool = false) {
+                reattached: Bool = false,
+                requestedVolumeFraction: Double = 0) {
         self.hasGeometry = hasGeometry
         self.machine = machine
         self.retainedJob = retainedJob
@@ -91,6 +97,7 @@ public struct VariantEntryFacts: Equatable {
         self.workerSelected = workerSelected
         self.runInFlight = runInFlight
         self.reattached = reattached
+        self.requestedVolumeFraction = requestedVolumeFraction
     }
 
     /// The retained artifacts, when BOTH survive — the same all-or-nothing rule
@@ -103,6 +110,21 @@ public struct VariantEntryFacts: Equatable {
     }
 
     public var jobFacts: RetainedJobFacts { .parse(retainedJob) }
+
+    /// The retained job document, treating EMPTY as absent — the same rule
+    /// `artifacts` applies to both halves. A zero-byte document is not a load case.
+    public var retainedJobIfPresent: Data? {
+        guard let j = retainedJob, !j.isEmpty else { return nil }
+        return j
+    }
+
+    /// Whether the retained container holds a design for THIS rung. nil ⇒ there is
+    /// no readable container to ask (the caller has already decided that case).
+    public var designCoversThisVariant: Bool? {
+        guard let d = retainedDesign, !d.isEmpty,
+              let index = DesignContainerIndex.parse(d) else { return nil }
+        return index.holds(requestedVolumeFraction: requestedVolumeFraction)
+    }
 }
 
 // MARK: - the verdict
@@ -154,9 +176,16 @@ public enum VariantEntry {
     public static func smoothingBlocks(_ f: VariantEntryFacts) -> [String] {
         var out: [String] = []
         if f.runInFlight { out.append(runningReason) }
+        // THE JOB DOCUMENT ALONE (task 2026-08-03-variant-postprocessing-fix).
+        // Smoothing re-certifies under the run's LOAD CASE; it never opens
+        // design.bin. Reading the both-halves `artifacts` here meant a run whose
+        // design container did not arrive — a run killed mid-ladder, a worker that
+        // served no design — reported "there's no load case to re-certify a smoothed
+        // shape under" while holding the load case. Two different artifacts, two
+        // different verdicts.
         if let why = SmoothPageEntry.availability(
             hasGeometry: f.hasGeometry, latticed: f.runGeneratedLattice,
-            retainedJob: f.artifacts?.jobJSON, modelPath: f.modelPath,
+            retainedJob: f.retainedJobIfPresent, modelPath: f.modelPath,
             solvedOnDevice: f.machine.isThisDevice) {
             out.append(why.reason)
         }
@@ -178,7 +207,22 @@ public enum VariantEntry {
         if f.artifacts == nil {
             if f.machine.isThisDevice { out.append(.computedOnDevice) }
             else if f.reattached { out.append(.jobDocumentNotRecorded) }
+            // THE JOB IS HERE, THE DESIGN IS NOT (task
+            // 2026-08-03-variant-postprocessing-fix). Since the job document is
+            // retained at submit, this is now a state a CURRENT run can be in, and
+            // it has always had its own sentence — `designNotTransferred` simply had
+            // no producer, so such a run borrowed "finished before results kept
+            // their design file", which says the build is old when the build is
+            // fine and the transfer is what did not happen.
+            else if f.retainedJobIfPresent != nil { out.append(.designNotTransferred) }
             else { out.append(.runPredatesDesignStore) }
+        } else if f.designCoversThisVariant == false {
+            // THE CONTAINER IS HERE BUT THIS RUNG IS NOT IN IT (task
+            // 2026-08-03-variant-postprocessing-fix). The design is fetched after
+            // every streamed variant, so it normally covers exactly what is on
+            // screen; a fetch that failed at a later rung leaves a container that
+            // does not, and core would refuse this variant by name. Say it first.
+            out.append(.variantNotInDesign)
         } else if LatticeCoreCapability.designBoxRefused,
                   f.jobFacts.declaresDesignBox {
             // Only meaningful once there IS a retained job to read it from — and
@@ -296,5 +340,56 @@ public enum LatticeCoreCapability {
                                     graded: Bool) -> String? {
         guard latticeEnabled, designBoxActive, graded else { return nil }
         return liveConflictReason
+    }
+
+    // MARK: "Rim only" on a voxel-derived part (task
+    //       2026-08-03-variant-postprocessing-fix, defect 4)
+
+    /// CAN "RIM ONLY" EVER PRODUCE GEOMETRY ON AN OPTIMIZED PART? No — and the
+    /// reason is structural, not statistical.
+    ///
+    /// Core emits rim geometry from exactly two places, and both need an ANALYTIC
+    /// PLANE face on the `LatticeBoundary`: `emit_rim_line` dresses a plane–plane
+    /// edge, and `emit_rim_torus` dresses a plane–collar-bore pair
+    /// (`lattice_gen.cpp`'s skin pass walks `faces()` and matches those two shapes).
+    ///
+    /// A Plane face enters a boundary through `LatticeBoundary::add_half_space` (or
+    /// `add_box`, which is six of them). In the whole of `core/src`, NOTHING calls
+    /// either — the only callers are two test harnesses. The production builder,
+    /// `run_job.cpp`'s `lattice_boundary_for`, adds a VOXEL BASE (no face), keep-outs
+    /// (a Bore face for a bolt, nothing for a slab) and include/exclude regions
+    /// (no faces at all).
+    ///
+    /// So on every run the app can produce, `faces()` holds bores or nothing, no
+    /// plane–plane or plane–bore pair exists, and rim output is identically zero.
+    /// The maintainer's three receipts say `rim_elements: 0` because zero is the
+    /// only value that line can take — and "Rim only" was the app's DEFAULT.
+    ///
+    /// PR 250 built the rim to dress ANALYTIC plane/bore pairs, which is what it
+    /// does; PR 253 added the freeform diagrid precisely because a voxel-derived
+    /// surface owns no analytic face. The defect is that the app kept offering — and
+    /// defaulting to — the one of the three choices that cannot apply.
+    public static let rimEmitsNothingOnVoxelParts = true
+
+    /// The sentence the app shows when "Rim only" is chosen. It states the fact and
+    /// the remedy, and it is shown BEFORE the run, not in a receipt afterwards.
+    public static let rimOnlyProducesNothingReason =
+        "“Rim only” dresses the edges where flat faces meet, and an optimized part "
+        + "has none — its surface comes from the voxel grid. On this part it emits "
+        + "nothing at all: choose Full skin for a woven surface, or None to say so "
+        + "deliberately"
+
+    /// nil ⇒ the boundary choice can produce geometry on this part. Non-nil ⇒ it
+    /// provably cannot, with the reason.
+    ///
+    /// `voxelDerived` is the honest input: a lattice run over an OPTIMIZED design
+    /// (every run the app makes) is voxel-derived. It is a parameter rather than an
+    /// assumption so that the day core dresses analytic faces on this path, one
+    /// caller changes rather than this rule being quietly wrong.
+    public static func boundaryProducesNothing(skinJobValue: String,
+                                               voxelDerived: Bool) -> String? {
+        guard rimEmitsNothingOnVoxelParts, voxelDerived, skinJobValue == "rim"
+        else { return nil }
+        return rimOnlyProducesNothingReason
     }
 }

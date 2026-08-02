@@ -105,6 +105,52 @@ def write_fields_bin(path, variants):
                                 *[0.001 * (i % 7) for i in range(3 * nodes)]))
 
 
+def write_design_bin(path, fractions):
+    """Write a v1 `design.bin` (core/include/topopt/design_store.hpp) holding one
+    block per requested volume fraction — the container "lattice this variant" and
+    the app's retention pair are built on.
+
+    THE STUB NEVER WROTE ONE (task 2026-08-03-variant-postprocessing-fix). That is
+    a large part of why four PRs shipped a broken retention path behind a green
+    bar: every E2E case exercised the design-fetch FAILED branch, so the app's
+    "this run kept no design file" was the only outcome the harness had ever seen,
+    and nothing could tell that apart from the bug.
+
+    Written INCREMENTALLY, after every variant, exactly as the real CLI now does
+    (`run_job.cpp`'s on_variant): the whole point is that a client watching a run
+    can fetch the designs produced SO FAR. Published by rename, like core's.
+    """
+    grid = (FIELDS_NX, FIELDS_NY, FIELDS_NZ)
+    voxels = grid[0] * grid[1] * grid[2]
+    density = [0.5 + 0.01 * i for i in range(voxels)]
+    # The container's own fingerprint over the density bytes (design_store.cpp's
+    # FNV-1a over the raw doubles) — read_design_file REFUSES a block whose
+    # fingerprint does not match, so this must be the real thing.
+    blob = struct.pack("<%dd" % voxels, *density)
+    h = 1469598103934665603
+    for b in blob:
+        h = ((h ^ b) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+    body = b""
+    body += struct.pack("<B3x", 1)
+    body += struct.pack("<3i", *grid)
+    body += struct.pack("<3d", 0.0, 0.0, 0.0)
+    body += struct.pack("<d", FIELDS_SPACING)
+    body += struct.pack("<i", len(fractions))
+    body += struct.pack("<i", 0)
+    for vf in fractions:
+        body += struct.pack("<5d", vf, vf, 2.4, 2.4, 12.0)
+        body += struct.pack("<2i", 1, 30)
+        body += struct.pack("<3d", 0.0, 0.0, 1.0)
+        body += struct.pack("<2i", 0, 0)
+        body += struct.pack("<Q", h)
+        body += struct.pack("<q", voxels)
+        body += blob
+    tmp = path + ".part"
+    with open(tmp, "wb") as f:
+        f.write(body)
+    os.replace(tmp, path)
+
+
 def report_variant(vf, worst, in_plane, interlayer):
     return {
         "volume_fraction": vf,
@@ -192,19 +238,41 @@ def run(out_dir, job_path=None):
             json.dump(report, f)
         return
 
-    # normal / slow_sparse / drop / dies: two accepted rungs.
+    # normal / slow_sparse / drop / dies / retain_dies: two accepted rungs.
+    #
+    # retain_dies (task 2026-08-03-variant-postprocessing-fix) is the maintainer's
+    # own sequence: the ladder streams its variants, and then the WORKER GOES AWAY
+    # before the run reaches its terminal event — no report.json, no "done". The
+    # client keeps the variants it was shown; the question this case exists to
+    # answer is whether it also kept what those variants need to be worked on.
     rungs = [(0, 0.70, 2.40, 2.60, 2.40, "variant_070.stl"),
              (1, 0.50, 1.70, 1.90, 1.70, "variant_050.stl")]
     report_variants = []
+    fractions = []
     for rung, vf, worst, in_plane, interlayer, mesh in rungs:
         for it in range(1, 4):
             emit("PROGRESS rung=%d rungs=2 iter=%d" % (rung, it))
             paced_sleep()
         mesh_path = os.path.join(out_dir, mesh)
         write_cube_stl(mesh_path)
+        # The design container is published BEFORE the VARIANT line, exactly as the
+        # real CLI does (`on_variant` writes it, then prints): a client that fetches
+        # the moment it sees the line must find a container that already covers the
+        # variant it was just told about.
+        fractions.append(vf)
+        write_design_bin(os.path.join(out_dir, "design.bin"), fractions)
         emit("VARIANT vf=%.2f achieved=%.2f margin=%.2f accepted=1 mesh=%s"
              % (vf, vf, worst, mesh_path))
         report_variants.append(report_variant(vf, worst, in_plane, interlayer))
+    if MODE == "retain_dies":
+        import signal
+        time.sleep(1.2)   # let the worker flush the last variant to the client
+        try:
+            os.kill(os.getppid(), signal.SIGKILL)
+        except OSError:
+            pass
+        time.sleep(5)
+        return
     with open(os.path.join(out_dir, "report.json"), "w") as f:
         json.dump({"variants": report_variants}, f)
     # The real CLI writes fields.bin LAST, after the meshes + report (handoff 122);

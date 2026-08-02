@@ -877,8 +877,15 @@ public final class RunModel: ObservableObject {
     /// The in-flight run reported its retention pair. Called from the runner (off
     /// the main thread — the caller hops); it becomes `retainedArtifacts` only if
     /// this run goes on to produce accepted variants.
+    ///
+    /// REPORTED MORE THAN ONCE PER RUN (task 2026-08-03-variant-postprocessing-fix):
+    /// the job document at submit, then the full pair after every streamed variant.
+    /// A later report supersedes an earlier one — except that a JOB-ONLY report must
+    /// never displace a pair that already has a design. Nothing reports in that
+    /// order today; the guard is here so nothing can start to, silently.
     public func noteRetainedArtifacts(_ artifacts: RelatticeArtifacts) {
         guard phase == .running else { return }
+        if !artifacts.hasDesign, pendingArtifacts?.hasDesign == true { return }
         pendingArtifacts = artifacts
     }
 

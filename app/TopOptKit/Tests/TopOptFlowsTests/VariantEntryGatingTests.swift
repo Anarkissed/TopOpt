@@ -41,6 +41,35 @@ final class VariantEntryGatingTests: XCTestCase {
         return try! JSONSerialization.data(withJSONObject: j)
     }
 
+    /// A REAL v1 `design.bin` (core's `design_store.hpp` layout) holding one block
+    /// per requested volume fraction, with a one-voxel density field. Written here
+    /// rather than stubbed so the gate's index reader is exercised against the
+    /// actual format — a hand-waved blob would prove nothing about either.
+    private func designContainer(holding fractions: [Double]) -> Data {
+        var d = Data()
+        func u8(_ v: UInt8) { d.append(v) }
+        func pad(_ n: Int) { d.append(contentsOf: [UInt8](repeating: 0, count: n)) }
+        func i32(_ v: Int32) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
+        func i64(_ v: Int64) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
+        func u64(_ v: UInt64) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
+        func f64(_ v: Double) { withUnsafeBytes(of: v.bitPattern.littleEndian) { d.append(contentsOf: $0) } }
+        u8(1); pad(3)                       // version + reserved
+        i32(1); i32(1); i32(1)              // nx, ny, nz
+        f64(0); f64(0); f64(0)              // origin
+        f64(1)                              // spacing
+        i32(Int32(fractions.count)); pad(4) // block count + reserved
+        for vf in fractions {
+            f64(vf); f64(vf)                // requested, achieved
+            f64(2.0); f64(2.0); f64(1.0)    // margins + max stress
+            i32(1); i32(10)                 // accepted, iterations
+            f64(0); f64(0); f64(1)          // applied build dir
+            i32(0); i32(0)                  // auto-applied, baked
+            u64(0)                          // fingerprint
+            i64(1); f64(0.5)                // density count + the one value
+        }
+        return d
+    }
+
     /// A variant from a healthy worker run: everything green.
     private func healthy(machine: SolvingMachine = .worker(name: "Mac mini"),
                          retainedJob: Data? = nil, retainedDesign: Data? = Data([1, 2]),
@@ -48,13 +77,15 @@ final class VariantEntryGatingTests: XCTestCase {
                          modelPath: String? = "/tmp/part.stl",
                          workerSelected: Bool = true,
                          runInFlight: Bool = false,
-                         reattached: Bool = false) -> VariantEntryFacts {
+                         reattached: Bool = false,
+                         requestedVolumeFraction: Double = 0.5) -> VariantEntryFacts {
         VariantEntryFacts(hasGeometry: hasGeometry, machine: machine,
                           retainedJob: retainedJob ?? job(),
                           retainedDesign: retainedDesign,
                           runGeneratedLattice: latticed, modelPath: modelPath,
                           workerSelected: workerSelected, runInFlight: runInFlight,
-                          reattached: reattached)
+                          reattached: reattached,
+                          requestedVolumeFraction: requestedVolumeFraction)
     }
 
     // MARK: - the control that must exist at all: the healthy case is ENABLED
@@ -120,13 +151,28 @@ final class VariantEntryGatingTests: XCTestCase {
                  facts: healthy(hasGeometry: false),
                  mustSay: ["no geometry"]),
             Case(name: "the run was solved ON DEVICE",
-                 facts: healthy(machine: .thisDevice, retainedDesign: nil),
+                 facts: healthy(machine: .thisDevice, retainedJob: Data(),
+                                retainedDesign: nil),
                  mustSay: ["on this device", "design file"]),
-            Case(name: "the run predates the design store",
-                 facts: healthy(retainedDesign: nil),
+            // "PREDATES RETENTION" IS NOW A NARROWER FACT (task
+            // 2026-08-03-variant-postprocessing-fix). The job document is retained
+            // at SUBMIT, so a run that kept neither half is genuinely a run from
+            // before retention existed. A run that kept the job but not the design
+            // is a DIFFERENT fact and gets the sentence below — this case's facts
+            // now match its name, which is what it always claimed to test.
+            Case(name: "the run predates job/design retention entirely",
+                 facts: healthy(retainedJob: Data(), retainedDesign: nil),
                  mustSay: ["before results kept their design file"]),
+            Case(name: "the job was kept but the worker served no design",
+                 facts: healthy(retainedDesign: nil),
+                 mustSay: ["didn’t send", "design file"]),
+            Case(name: "the design arrived without THIS rung in it",
+                 facts: healthy(retainedDesign: designContainer(holding: [0.9]),
+                                requestedVolumeFraction: 0.5),
+                 mustSay: ["without this rung"]),
             Case(name: "the app RE-ATTACHED, so it never held the document it sent",
-                 facts: healthy(retainedDesign: nil, reattached: true),
+                 facts: healthy(retainedJob: Data(), retainedDesign: nil,
+                                reattached: true),
                  mustSay: ["reconnected", "after a restart"]),
             // A DESIGN-BOX RUN IS NO LONGER A BLOCKING PRECONDITION. PR 285 taught
             // core to certify one (resolve_design_domain), so the case moved out of
@@ -338,6 +384,65 @@ final class VariantEntryGatingTests: XCTestCase {
             + "conflict now mirrors; if core drops that too, drop the live conflict")
     }
 
+    // MARK: - DEFECT 4 · "Rim only" cannot emit on a voxel-derived part
+
+    /// THE CLAIM IS STRUCTURAL, SO IT IS CHECKED STRUCTURALLY — against core's own
+    /// source, the same discipline the design-box mirror above uses.
+    ///
+    /// Both rim emitters (`emit_rim_line`, `emit_rim_torus`) need a PLANE face on the
+    /// `LatticeBoundary`. A Plane face can only be added by `add_half_space` (or
+    /// `add_box`, which is six of them). If NOTHING in `core/src` calls either, no
+    /// boundary a job can build has a plane, and rim output is identically zero.
+    ///
+    /// The day core starts adding planes on a production path, this test goes red and
+    /// `LatticeCoreCapability.rimEmitsNothingOnVoxelParts` is the one line to change.
+    func testRimOnlyProducesNothingBecauseCoreAddsNoPlaneFaceOnAnyProductionPath() throws {
+        let src = Self.repoRoot.appendingPathComponent("core/src")
+        let files = FileManager.default.enumerator(at: src, includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "cpp" || $0.pathExtension == "hpp" } ?? []
+        XCTAssertFalse(files.isEmpty, "core/src must be readable from the package")
+
+        var callers: [String] = []
+        for f in files {
+            // The definitions themselves live in lattice_boundary.cpp; every OTHER
+            // mention in core/src would be a caller.
+            if f.lastPathComponent == "lattice_boundary.cpp" { continue }
+            guard let text = try? String(contentsOf: f, encoding: .utf8) else { continue }
+            if text.contains("add_half_space(") || text.contains("add_box(") {
+                callers.append(f.lastPathComponent)
+            }
+        }
+        XCTAssertTrue(callers.isEmpty,
+                      "core/src now adds analytic PLANE faces (\(callers)) — a rim "
+                      + "can finally have something to ride, so revisit "
+                      + "LatticeCoreCapability.rimEmitsNothingOnVoxelParts")
+        XCTAssertTrue(LatticeCoreCapability.rimEmitsNothingOnVoxelParts,
+                      "the app's constant must track what core can do")
+    }
+
+    func testChoosingRimOnlyWarnsAndIsNotTheDefault() {
+        XCTAssertEqual(LatticeSettings().boundary, .fullSkin,
+                       "the DEFAULT must be a treatment that can actually emit — "
+                       + "“Rim only” was the default and is provably zero geometry")
+        let warn = LatticeCoreCapability.boundaryProducesNothing(
+            skinJobValue: LatticeBoundaryTreatment.rim.jobSkinValue, voxelDerived: true)
+        XCTAssertNotNil(warn, "choosing “Rim only” must warn")
+        XCTAssertTrue(try! XCTUnwrap(warn).contains("emits nothing"))
+        // …and the other two do NOT warn: a blanket warning is not a warning.
+        XCTAssertNil(LatticeCoreCapability.boundaryProducesNothing(
+            skinJobValue: LatticeBoundaryTreatment.fullSkin.jobSkinValue,
+            voxelDerived: true))
+        XCTAssertNil(LatticeCoreCapability.boundaryProducesNothing(
+            skinJobValue: LatticeBoundaryTreatment.none.jobSkinValue,
+            voxelDerived: true))
+        // An ANALYTIC part (no such path today) keeps the rim: the rule is about the
+        // surface, not about disliking the option.
+        XCTAssertNil(LatticeCoreCapability.boundaryProducesNothing(
+            skinJobValue: LatticeBoundaryTreatment.rim.jobSkinValue,
+            voxelDerived: false))
+    }
+
     // MARK: - AJ5 · which machine solved it
 
     func testTheSolvingMachineIsResolvedFromTheRunsOwnRecord() {
@@ -428,15 +533,24 @@ final class VariantEntryGatingTests: XCTestCase {
 
         // The worker case gets the OTHER sentence — never "re-run it on a Mac
         // worker" to someone who did.
-        let w = VariantEntry.lattice(healthy(retainedDesign: nil))
+        let w = VariantEntry.lattice(healthy(retainedJob: Data(), retainedDesign: nil))
         XCTAssertEqual(w.reason, RelatticeUnavailable.runPredatesDesignStore.reason)
         XCTAssertFalse(try! XCTUnwrap(w.reason).contains("on this device"))
 
         // …and a RE-ATTACHED worker run gets a third, because "predates retention"
         // would be a false statement about a run that simply outlived the client.
-        let r = VariantEntry.lattice(healthy(retainedDesign: nil, reattached: true))
+        let r = VariantEntry.lattice(healthy(retainedJob: Data(), retainedDesign: nil,
+                                             reattached: true))
         XCTAssertEqual(r.reason, RelatticeUnavailable.jobDocumentNotRecorded.reason)
         XCTAssertNotEqual(r.reason, w.reason)
+
+        // …and a CURRENT worker run that kept its job but whose design did not
+        // arrive gets a FOURTH (task 2026-08-03-variant-postprocessing-fix). It used
+        // to borrow `w`'s sentence — telling the maintainer his build was too old
+        // about a build that had just been rebuilt from a new commit.
+        let t = VariantEntry.lattice(healthy(retainedDesign: nil))
+        XCTAssertEqual(t.reason, RelatticeUnavailable.designNotTransferred.reason)
+        XCTAssertNotEqual(t.reason, w.reason)
     }
 
     // MARK: - the retained-job parse the gate depends on

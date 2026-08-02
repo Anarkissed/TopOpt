@@ -1,6 +1,7 @@
 #include "topopt/design_store.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -89,10 +90,16 @@ std::uint64_t design_fingerprint(const std::vector<double>& density) {
 int write_design_file(const std::string& path,
                       const MinimizePlasticResult& result,
                       const VoxelGrid& solved_grid) {
+  return write_design_file(path, result.evaluated, solved_grid);
+}
+
+int write_design_file(const std::string& path,
+                      const std::vector<MinimizePlasticVariant>& variants,
+                      const VoxelGrid& solved_grid) {
   const std::size_t voxel_count = solved_grid.voxel_count();
 
   std::vector<const MinimizePlasticVariant*> blocks;
-  for (const MinimizePlasticVariant& v : result.evaluated)
+  for (const MinimizePlasticVariant& v : variants)
     if (!v.optimization.physical_density.empty()) blocks.push_back(&v);
 
   LEWriter w;
@@ -132,13 +139,25 @@ int write_design_file(const std::string& path,
     w.f64_array(d);
   }
 
-  std::ofstream out(path, std::ios::binary);
-  if (!out)
-    throw DesignStoreError("cannot open design file for writing: " + path);
-  out.write(reinterpret_cast<const char*>(w.bytes.data()),
-            static_cast<std::streamsize>(w.bytes.size()));
-  out.flush();
-  if (!out) throw DesignStoreError("failed writing design file: " + path);
+  // ATOMIC PUBLISH. Write the whole container beside its final name, then
+  // rename. A LAN worker serves this file over HTTP while later rungs are still
+  // rewriting it (design.bin is now flushed after every variant), and rename is
+  // what guarantees a fetch sees a complete container or the previous one —
+  // never a half-written prefix that read_design_file would reject.
+  const std::string tmp = path + ".part";
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    if (!out)
+      throw DesignStoreError("cannot open design file for writing: " + tmp);
+    out.write(reinterpret_cast<const char*>(w.bytes.data()),
+              static_cast<std::streamsize>(w.bytes.size()));
+    out.flush();
+    if (!out) throw DesignStoreError("failed writing design file: " + tmp);
+  }
+  if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+    std::remove(tmp.c_str());
+    throw DesignStoreError("failed publishing design file: " + path);
+  }
   return static_cast<int>(blocks.size());
 }
 

@@ -383,7 +383,24 @@ public struct WorkspacePlaceholder: View {
                           // tints the actual FROZEN VERTICES of the mesh being painted, so
                           // what the brush will refuse is shown on the surface itself
                           // rather than as a red box floating near it.
-                          clearanceVolumes: (force.phase == .edit && !fullScreenPageUp)
+                          //
+                          // …AND ON THE LATTICE PAGE (task
+                          // 2026-08-03-variant-postprocessing-fix, defect 3 / bar
+                          // V2). The maintainer's run reported 99,558 include-region
+                          // voxels sitting on VOID — regions covering space the
+                          // optimizer had emptied. He could not have known: this
+                          // condition read `!fullScreenPageUp`, so the moment the
+                          // lattice page opened, every region volume stopped being
+                          // drawn — and the workspace only ever drew them over the
+                          // ORIGINAL part, never over an optimized variant. The page
+                          // whose whole subject is those regions was the one page
+                          // that hid them. The stage here shows the VARIANT's own
+                          // mesh (`stageMesh`), so a region sitting in empty space is
+                          // now visibly sitting in empty space — and the forecast
+                          // puts a number on it.
+                          clearanceVolumes:
+                              (showLatticePage
+                               || (force.phase == .edit && !fullScreenPageUp))
                               ? clearanceRenderItems : [],
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
@@ -1487,7 +1504,9 @@ public struct WorkspacePlaceholder: View {
             // A RE-ATTACHED run has no submitted document to retain (the app was
             // restarted since), and says exactly that rather than borrowing the
             // "predates retention" sentence, which would be false.
-            reattached: run.wasReattached)
+            reattached: run.wasReattached,
+            // The rung the retained design container is indexed by.
+            requestedVolumeFraction: v.requestedVolumeFraction)
     }
 
     /// The Smooth entry control's verdict for a variant — what the results screen's
@@ -1546,8 +1565,13 @@ public struct WorkspacePlaceholder: View {
             // Whether this variant can actually be re-latticed is a question
             // about what the RUN kept, and it is answered here rather than at
             // the button, so the page can say WHY when the answer is no.
+            // A pair with NO DESIGN half is a real state since task
+            // 2026-08-03-variant-postprocessing-fix (the job document is retained at
+            // submit, the design only once the solver has produced one), so
+            // "artifacts != nil" is no longer the same question as "can this be
+            // latticed". The page reads the design, not the pair.
             let artifacts = project.relatticeArtifacts
-            let why: RelatticeUnavailable? = artifacts != nil
+            let why: RelatticeUnavailable? = artifacts?.hasDesign == true
                 ? nil
                 : (SolvingMachine.of(o).isThisDevice ? .computedOnDevice
                                                      : .runPredatesDesignStore)

@@ -1084,16 +1084,38 @@ public struct LatticePage: View {
     // MARK: boundary segment (B7 — three-way, inline per L15)
 
     private var treatmentSegment: some View {
-        HStack(spacing: 5) {
-            treatmentButton(.none, "None", "lattice to the edge")
-            treatmentButton(.rim, "Rim only", "closed border")
-            treatmentButton(.fullSkin, "Full skin", "rim + faces")
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: 5) {
+                treatmentButton(.none, "None", "lattice to the edge")
+                treatmentButton(.rim, "Rim only", "flat-face edges")
+                treatmentButton(.fullSkin, "Full skin", "rim + faces")
+            }
+            .padding(4)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                .fill(RGBA(0, 0, 0, 0.34).color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            // DEFECT 4 (task 2026-08-03-variant-postprocessing-fix). "Rim only"
+            // dresses ANALYTIC plane pairs, and an optimized part has none, so it is
+            // identically zero geometry. Said HERE, at the control, before the run —
+            // not as `rim_elements: 0` in a receipt afterwards.
+            if let why = boundaryEmitsNothingWarning {
+                Text(why)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(4)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
-            .fill(RGBA(0, 0, 0, 0.34).color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
-                .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+    }
+
+    /// nil ⇒ the chosen boundary treatment can produce geometry on this part.
+    var boundaryEmitsNothingWarning: String? {
+        LatticeCoreCapability.boundaryProducesNothing(
+            skinJobValue: project.lattice.boundary.jobSkinValue,
+            // Every lattice run this page can start is over a VOXEL design: either
+            // the optimizer's output (the variants entry) or a fresh ladder's. There
+            // is no analytic-face path here to be wrong about.
+            voxelDerived: true)
     }
 
     private func treatmentButton(_ t: LatticeBoundaryTreatment, _ name: String, _ hint: String) -> some View {

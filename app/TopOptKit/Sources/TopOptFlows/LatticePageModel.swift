@@ -226,7 +226,8 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                                bounds: LatticeBounds?, running: Bool,
                                lineWidthMM: Double = 0,
                                cellSummary: String? = nil,
-                               designBoxActive: Bool = false) -> LatticeOptimizeSurface {
+                               designBoxActive: Bool = false,
+                               forecast: LatticeForecast? = nil) -> LatticeOptimizeSurface {
         // The cell phrase the button claims. In AUTO / SWEPT cell mode there is no
         // single target cell to name — the page passes the mode's own summary
         // ("Auto 4.6 mm", "Swept 4.6–8.0 mm") so the button never states a target the
@@ -261,6 +262,21 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
         if let b = bounds, !b.runnableAsCertified {
             let why = b.generatableReason ?? b.topologyReason ?? b.cellReason ?? "settings not certifiable"
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
+        }
+        // THE FORECAST'S REFUSAL, BEFORE THE RUN (task
+        // 2026-08-03-variant-postprocessing-fix, bars F4 / P3). A configuration that
+        // turns most of its region solid is not a lattice, and the maintainer learned
+        // that from a receipt after an hour of Mac time. It is said HERE instead,
+        // with the measured remedy where one exists.
+        //
+        // It WARNS rather than disables, deliberately: a partial lattice can be
+        // exactly what someone wants, and the brief asks for it to be SAID, not
+        // forbidden. What must never happen again is that it is silent.
+        if let f = forecast, f.isRefused {
+            let remedy = f.adviceLines().first
+            return LatticeOptimizeSurface(
+                enabled: baseCanOptimize, label: "Optimize",
+                sub: remedy.map { "\(f.headline) \($0)" } ?? f.headline)
         }
         if densityMode == .auto {
             return LatticeOptimizeSurface(

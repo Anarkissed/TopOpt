@@ -122,6 +122,7 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
   const std::size_t ncells =
       static_cast<std::size_t>(P.nx) * P.ny * P.nz;
   P.level.assign(ncells, -1);
+  P.reject_reason.assign(ncells, 0);
 
   // ── per-base-cell aggregates over the CANDIDATE voxels it holds ─────────────────
   // rho_min binds printability (the thinnest strut in the cell) and width_min binds
@@ -306,12 +307,15 @@ CellSizePlan plan_cell_sizes(const VoxelGrid& grid,
         if (L < 0) {
           // Latticing failed here. Separate the two causes so the receipt can say
           // which limit bound: no printable cell at all vs a printable cell the
-          // ceiling forbids.
+          // ceiling forbids. Recorded PER CELL as well as counted, so grade_lattice
+          // can attribute each rejected VOXEL (bar F1).
           if (cap[c] < 0) {
             /* too thin to homogenize even at the base cell — the existing L4 case,
                counted by grade_lattice as a solid fallback, not here. */
+            P.reject_reason[c] = 1;
           } else {
             ++P.cells_dropped_unprintable;
+            P.reject_reason[c] = 2;
           }
           continue;
         }

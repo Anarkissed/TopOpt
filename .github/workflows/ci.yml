@@ -60,3 +60,55 @@ jobs:
       # registers zero tests (e.g. a misconfigured build) is now a failure.
       - name: Test
         run: ctest --test-dir build --output-on-failure --no-tests=error
+
+  # ══ THE APP PACKAGE (task 2026-08-03-variant-postprocessing-fix, bar C2) ══════
+  #
+  # WHY THIS JOB EXISTS. Until now CI had exactly ONE job, `core-linux`, and it has
+  # never built the app package. FOUR consecutive PRs shipped app-side defects
+  # behind a green check:
+  #   * PR 284 wrote a source-reading test designed to go red the day core dropped
+  #     its blanket design-box lattice refusal. PR 285 dropped that refusal the
+  #     same evening. The test DID go red and nobody saw, so the app spent two PRs
+  #     telling the maintainer "the core refuses this" about a core that certifies
+  #     it happily.
+  #   * PR 288 examined the retention path and reported it "not contradicted"; it
+  #     was contradicted on the maintainer's next run.
+  #   * PR 289 found the same shape again — tests passing against a path the
+  #     maintainer cannot reach.
+  # Every one of those was catchable by compiling and running this package.
+  #
+  # macOS is not optional: TopOptKit links the core xcframework build_core.sh
+  # produces, and the OCCT/STEP path is macOS-only in this repo. The job mirrors
+  # what a developer runs — provision the deps, build the xcframework, run the
+  # package suite.
+  #
+  # KNOWN GAP, stated rather than hidden: the E2E cases in
+  # tools/topopt-worker/e2e/run_e2e.sh are NOT run here. They stand up a live
+  # worker plus a CLI on the same host, and wiring that into a hosted runner is
+  # its own piece of work. They stay a local gate. `swift test` covers everything
+  # that does not need a worker — which is where all four defects above lived.
+  app-macos:
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # OCCT + Eigen are what the macOS core slice links. lib3mf comes from vcpkg
+      # via build_lib3mf_macos.sh, which build_core.sh invokes when it needs it.
+      - name: Install OpenCASCADE + Eigen
+        run: brew install opencascade eigen
+
+      - name: Cache the core xcframework build
+        uses: actions/cache@v4
+        with:
+          path: app/.build-core
+          key: core-xcframework-${{ hashFiles('core/src/**', 'core/include/**', 'core/CMakeLists.txt') }}
+
+      # Builds the multi-platform static-library xcframework, vendors it under
+      # app/TopOptKit/vendor and regenerates CoreFingerprint.generated.swift.
+      # Without it the package does not link at all.
+      - name: Build the core xcframework
+        run: ./app/scripts/build_core.sh
+
+      - name: Test the app package
+        run: swift test --package-path app/TopOptKit

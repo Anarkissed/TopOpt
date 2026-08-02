@@ -1,0 +1,29 @@
+{
+  "forecast": "what a lattice run on THIS variant would produce, computed before the run from the stored design and this job's lattice block. No FEA ran.",
+  "variant_volume_fraction": 0.5,
+  "topology": "octet",
+  "cell_mode": "swept",
+  "cell_size_mm": 1.095909508,
+  "printability_floor_mm": 1.095861889,
+  "cells_per_member_floor": 5,
+  "region_voxels": 7652,
+  "would_lattice_voxels": 3854,
+  "would_stay_solid_voxels": 3798,
+  "latticed_fraction_of_region": 0.5036591741,
+  "would_stay_solid_by_reason": {
+    "member_too_thin_for_cell": 3798,
+    "strut_unprintable_at_every_cell": 0,
+    "irrecoverable_by_any_cell_size": 3798,
+    "widest_rejected_member_mm": 5,
+    "member_width_needed_mm": 5.479547538
+  },
+  "include_regions": 0,
+  "exclude_regions": 0,
+  "include_region_void_voxels": 0,
+  "include_region_void_note": "include-region voxels where this variant has no material. A lattice cannot conjure material, so the include does nothing on them.",
+  "boundary": "diagrid",
+  "boundary_can_emit": true,
+  "counterfactuals": [],
+  "counterfactual_note": "every entry above was EVALUATED — the grading law was re-run with that one parameter changed and the mask it actually produced is reported. An empty list means no parameter change could help.",
+  "demand_field": "none (pre-flight) — densities are forecast at the certifiable band's LOW end, the conservative end for printability. The cells-per-member rule does not see density, so the latticed/solid split above is exact; the density DISTRIBUTION is not forecast."
+}

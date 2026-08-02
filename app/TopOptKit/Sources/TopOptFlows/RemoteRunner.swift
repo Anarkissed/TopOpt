@@ -445,6 +445,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             let modelData = try Data(contentsOf: URL(fileURLWithPath: request.modelPath))
             let modelName = (request.modelPath as NSString).lastPathComponent
             jobID = try postJob(model: modelData, modelName: modelName, jobJSON: jobJSON)
+            // THE JOB DOCUMENT IS RETAINED AT SUBMIT (task
+            // 2026-08-03-variant-postprocessing-fix). It exists NOW — these are the
+            // bytes we just posted — and smoothing needs nothing else. Reporting it
+            // only at the end tied it to the design container's fate, so a run whose
+            // design never arrived told the user it had kept no LOAD CASE either.
+            onArtifacts?(.jobOnly(jobJSON))
         }
 
         // Persist the active job so a slept/relaunched iPad can re-attach rather
@@ -1313,6 +1319,31 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         onVariant(OptimizeOutcome(variants: [v], stoppedOnMargin: false,
                                   cancelled: false, acceptedCount: 1,
                                   computedRemotely: true))
+        // THE RETENTION PAIR, AT EVERY RUNG (task
+        // 2026-08-03-variant-postprocessing-fix, defect 1). A variant is on screen
+        // and workable from THIS moment; its design must be too. Core now publishes
+        // design.bin after every variant, so there is something to fetch here — and
+        // fetching it here is what makes a run that never reaches its terminal event
+        // keep the variants it DID produce, with the design that describes them.
+        //
+        // The maintainer's run is the case this exists for: three variants streamed,
+        // the worker restarted on rung 4, no terminal event ever, no assembleFinal-
+        // Outcome, no pair. The app kept his variants and correctly reported that it
+        // had kept nothing to work on them with.
+        //
+        // Best-effort and idempotent: a failed fetch leaves the previous pair (which
+        // then covers fewer variants than are on screen — the entry gate reads the
+        // container's own index and disables the ones it does not cover).
+        reportRetentionPair()
+    }
+
+    /// Fetch `design.bin` and report the retention pair, if both halves are there.
+    /// Called after every streamed variant AND once more at final assembly, so the
+    /// last thing reported is always the most complete container.
+    private func reportRetentionPair() {
+        guard let onArtifacts, let job = submittedJobJSON else { return }
+        guard let design = fetchDesign() else { return }
+        onArtifacts(RelatticeArtifacts(jobJSON: job, designBin: design))
     }
 
     /// Abort the run with a diagnostic (used when a streamed mesh can't be fetched).
@@ -1372,15 +1403,20 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // The orientation ranking this run produced — a RECOMMENDATION shown beside
         // the results, never applied and never consulted for a verdict.
         let buildOrientation = fetchBuildOrientation()
-        // THE RETENTION PAIR (task 2026-08-03-variant-entry-gating-and-retention).
-        // Best-effort, exactly like fields.bin: a run whose design.bin cannot be
-        // fetched is still a complete run, it simply cannot have its variants
-        // smoothed or re-latticed — and the entry controls then say so with the
-        // reason instead of opening a page that refuses. Reported ONLY when both
-        // halves survive, the same all-or-nothing rule the store applies.
-        if let job = submittedJobJSON, let design = fetchDesign() {
-            onArtifacts?(RelatticeArtifacts(jobJSON: job, designBin: design))
-        }
+        // THE RETENTION PAIR (task 2026-08-03-variant-entry-gating-and-retention),
+        // one last time so the container reported is the COMPLETE one — this write
+        // holds every evaluated rung, including any that were rejected and so never
+        // streamed. Best-effort, exactly like fields.bin: a run whose design.bin
+        // cannot be fetched is still a complete run, it simply cannot have its
+        // variants re-latticed, and the entry control says so with the reason
+        // instead of opening a page that refuses.
+        //
+        // It is no longer the ONLY report (task 2026-08-03-variant-postprocessing-
+        // fix): the job document is retained at submit and the pair at every
+        // streamed variant, because this line is reached only by a run that ran all
+        // the way to its terminal event — which is precisely what the maintainer's
+        // run did not do.
+        reportRetentionPair()
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 

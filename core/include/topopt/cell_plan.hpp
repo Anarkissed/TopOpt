@@ -129,6 +129,19 @@ struct CellSizePlan {
   // aligned blocks (cell_owner below does it for you).
   std::vector<signed char> level;
 
+  // WHY a base cell got no level (task 2026-08-03-variant-postprocessing-fix,
+  // bar F1). Base-cell-indexed, same layout as `level`:
+  //   0 — latticed, or not a candidate cell at all
+  //   1 — MEMBER TOO THIN: not even the base cell spans N* of the thinnest member
+  //       here (cap < 0). A finer base cell would help; a coarser one never can.
+  //   2 — STRUT UNPRINTABLE: no level in the ladder emits a strut at this cell's
+  //       thinnest density that reaches the stated minimum width. A COARSER cell
+  //       helps — the opposite remedy.
+  // The two causes were already separated for the aggregate counters; carrying them
+  // PER CELL is what lets the voxel-level receipt say which one bound each voxel,
+  // and therefore which remedy (if any) is worth offering.
+  std::vector<signed char> reject_reason;
+
   // ── provenance: the limits READ FROM CORE ───────────────────────────────────────
   double cells_per_member_floor = 0.0;  // N*
   double printability_floor_mm = 0.0;   // smallest cell printing the rho_min strut

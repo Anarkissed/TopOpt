@@ -142,8 +142,26 @@ struct DesignStore {
 // Returns the number of blocks written. Throws DesignStoreError if the file
 // cannot be written, or if a variant's density size disagrees with the grid (a
 // bug — fail loudly rather than ship a container a reader would misindex).
+//
+// THE FILE IS PUBLISHED ATOMICALLY (task 2026-08-03-variant-postprocessing-fix):
+// bytes go to "<path>.part" and are renamed onto `path`. Before this the
+// container was written once, at the very end of the whole ladder, so nothing
+// could ever observe a partial one. It is now flushed AFTER EVERY VARIANT (see
+// the overload below and run_job's on_variant), which means a reader — the LAN
+// worker serving GET /jobs/{id}/files/design.bin — can ask for it WHILE a later
+// rung is rewriting it. A rename is the only way that reader is guaranteed a
+// whole container instead of a truncated one.
 int write_design_file(const std::string& path,
                       const MinimizePlasticResult& result,
+                      const VoxelGrid& solved_grid);
+
+// The same writer over a bare variant list, so a run can publish the designs it
+// has produced SO FAR without owning a MinimizePlasticResult (which does not
+// exist until the ladder ends). `write_design_file(path, result, grid)` is
+// exactly this called with `result.evaluated`, so an incremental flush and the
+// final write produce byte-identical containers for the same variants.
+int write_design_file(const std::string& path,
+                      const std::vector<MinimizePlasticVariant>& variants,
                       const VoxelGrid& solved_grid);
 
 // Read a design.bin. Throws DesignStoreError on an unreadable file, an

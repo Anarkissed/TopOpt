@@ -36,6 +36,17 @@ import TopOptKit
 /// Both are captured at run time and persisted beside the outcome. A run that
 /// produced neither (see `unavailableReason`) makes the re-lattice action
 /// honestly UNAVAILABLE rather than quietly falling back to a fresh ladder.
+/// THE TWO HALVES ARRIVE AT DIFFERENT TIMES, AND ONLY ONE OF THEM IS NEEDED FOR
+/// SMOOTHING (task 2026-08-03-variant-postprocessing-fix). The job document
+/// exists the instant the run is submitted; `design.bin` exists only once the
+/// solver has produced a variant. Treating them as one all-or-nothing pair meant a
+/// run whose design never arrived reported that it had kept NOTHING — and the
+/// smoothing entry, which needs only the load case, was greyed out with it.
+///
+/// So `designBin` may be EMPTY: that is a pair which can re-certify a smoothed
+/// shape but cannot lattice a variant, and the two entry gates say exactly that.
+/// `VariantEntryFacts.artifacts` is the accessor that enforces "both halves" where
+/// both halves are genuinely required.
 public struct RelatticeArtifacts: Equatable, Sendable {
     public let jobJSON: Data
     public let designBin: Data
@@ -43,6 +54,90 @@ public struct RelatticeArtifacts: Equatable, Sendable {
     public init(jobJSON: Data, designBin: Data) {
         self.jobJSON = jobJSON
         self.designBin = designBin
+    }
+
+    /// The half that exists at SUBMIT time. Smoothing needs only this.
+    public static func jobOnly(_ jobJSON: Data) -> RelatticeArtifacts {
+        RelatticeArtifacts(jobJSON: jobJSON, designBin: Data())
+    }
+
+    /// Whether the design container came too — i.e. whether a variant of this run
+    /// can be latticed, not merely smoothed.
+    public var hasDesign: Bool { !designBin.isEmpty }
+}
+
+// MARK: - what a retained design.bin actually contains
+
+/// THE VOLUME FRACTIONS A RETAINED `design.bin` HOLDS BLOCKS FOR.
+///
+/// WHY THIS EXISTS. The container is now published by core after EVERY variant and
+/// fetched by the app after every variant, so it normally covers exactly the
+/// variants on screen. "Normally" is not a gate. A fetch that fails at rung 3
+/// leaves a two-block container beside three visible variants, and "Lattice" on
+/// the third would be enabled right up until core refused it with *"no stored
+/// design at volume fraction 0.38"* — the late refusal this whole gating surface
+/// exists to remove. So the app reads the container's own index and checks.
+///
+/// It parses the HEADER and each block's PROLOGUE only (`design_store.hpp`
+/// v1: little-endian throughout), striding over the density payload rather than
+/// copying it — a 50 MB container is indexed without materialising a single field.
+public struct DesignContainerIndex: Equatable, Sendable {
+    /// `requested_volume_fraction` of every block, in file order.
+    public let requestedVolumeFractions: [Double]
+
+    public init(requestedVolumeFractions: [Double]) {
+        self.requestedVolumeFractions = requestedVolumeFractions
+    }
+
+    /// The format version this reader understands (`kDesignFormatVersion`).
+    static let formatVersion: UInt8 = 1
+    /// Bytes before the first block: version(1) + pad(3) + nx,ny,nz(3×4)
+    /// + origin(3×8) + spacing(8) + count(4) + pad(4).
+    static let headerBytes = 1 + 3 + 12 + 24 + 8 + 4 + 4
+    /// Bytes of one block BEFORE its density array: requested_vf, achieved_vf,
+    /// margin_worst, margin_effective, max_stress (5×8) + accepted, iterations
+    /// (2×4) + build_dir (3×8) + auto_applied, baked (2×4) + fingerprint(8)
+    /// + count(8).
+    static let blockPrologueBytes = 40 + 8 + 24 + 8 + 8 + 8
+
+    /// nil when the bytes are not a container this build can read — never a
+    /// half-parsed answer, and never a crash on a truncated file.
+    public static func parse(_ data: Data) -> DesignContainerIndex? {
+        func u8(_ at: Int) -> UInt8? {
+            guard at >= 0, at < data.count else { return nil }
+            return data[data.startIndex + at]
+        }
+        // The format is fixed little-endian and every Apple target is
+        // little-endian, so an unaligned load IS the decode.
+        func le<T>(_ at: Int, _ type: T.Type) -> T? {
+            guard at >= 0, at + MemoryLayout<T>.size <= data.count else { return nil }
+            return data.withUnsafeBytes { raw in
+                raw.loadUnaligned(fromByteOffset: at, as: T.self)
+            }
+        }
+        guard u8(0) == formatVersion,
+              let count = le(16 + 24 + 8, Int32.self), count >= 0
+        else { return nil }
+        var fractions: [Double] = []
+        var at = headerBytes
+        for _ in 0..<Int(count) {
+            guard let vf = le(at, Double.self),
+                  let densityCount = le(at + blockPrologueBytes - 8, Int64.self),
+                  densityCount >= 0
+            else { return nil }
+            fractions.append(vf)
+            let next = at + blockPrologueBytes + Int(densityCount) * 8
+            guard next <= data.count else { return nil }
+            at = next
+        }
+        return DesignContainerIndex(requestedVolumeFractions: fractions)
+    }
+
+    /// Whether a block for this rung is present. The re-lattice job selects by
+    /// VOLUME FRACTION (`RelatticeRunner`, `job.variant.volume_fraction`), and
+    /// core matches it exactly, so this comparison is the same one core makes.
+    public func holds(requestedVolumeFraction vf: Double) -> Bool {
+        requestedVolumeFractions.contains { $0 == vf }
     }
 }
 
@@ -77,6 +172,11 @@ public enum RelatticeUnavailable: Equatable, Sendable {
     case noWorkerSelected
     /// The model file the retained load case's faces are defined on is gone.
     case modelFileMissing
+    /// The run kept a design container, but it holds no block for THIS rung — the
+    /// design fetch that would have added it failed while later variants kept
+    /// streaming. Core selects the stored design by volume fraction and would
+    /// refuse this one by name; the button says so instead.
+    case variantNotInDesign
 
     public var reason: String {
         switch self {
@@ -96,6 +196,8 @@ public enum RelatticeUnavailable: Equatable, Sendable {
             return "latticing a variant runs on a Mac worker — pick one in Compute first"
         case .modelFileMissing:
             return "the model file is missing — the run’s load case is defined on it"
+        case .variantNotInDesign:
+            return "this run’s design file arrived without this rung in it, so there’s nothing to lattice here — a later variant’s design didn’t reach this device. Re-run it to lattice this variant"
         }
     }
 }
