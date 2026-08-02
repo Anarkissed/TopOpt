@@ -1,0 +1,4 @@
+stagnating,geometric,3636,3636,0,0,c573782fac60eb3b,c573782fac60eb3b,IDENTICAL
+stagnating,algebraic,96,96,13140,13140,8d85126b2c1c5088,8d85126b2c1c5088,IDENTICAL
+healthy,geometric,18,18,0,0,d446ffa7cc6b9ff2,d446ffa7cc6b9ff2,IDENTICAL
+healthy,algebraic,40,40,4356,4356,d81fa54fa8d38fd6,d81fa54fa8d38fd6,IDENTICAL

@@ -1,0 +1,4 @@
+posture,rungs,cg,solves,stagnating,latched,wall_s,geneo_builds,geneo_refreshes,geneo_armed,geneo_declined,recycled_solves,alg_aggregates,alg_coarse_dim,alg_levels,alg_added_mb
+control_1e-9,4,87306,250,3,1,81.046,1,0,1,167,163,0,0,0,0.000
+disarmed,4,85536,250,3,1,77.354,1,0,1,167,163,0,0,0,0.000
+armed,4,15595,255,0,0,39.953,0,0,0,0,0,279,1666,2,4.980

@@ -1,0 +1,21 @@
+loaded PR 280's cached trajectory: 48x32x40, 80 snapshots
+[load start] 1m 9.53  5m 12.67  15m 14.06  (on 10 logical cores)
+
+=== stagnating: grid 48x32x40, achieved_vf 0.0368, void-floor share 0.6511 ===
+    reduced DOFs: 150075
+    exact reference: 3537 iters, residual 9.1352e-09, max|u| 4.4905e+04, 6.8 s
+    GEOMETRIC level 1: dim  18738  capture   1.5954 %   (PR 283: 1.5954 % at dim 18738 -> agreement 1.0000x)
+    Galerkin identity check (z^T A1 z vs (P0 z)^T A0 (P0 z)): 1.347e-15 relative
+    ALGEBRAIC level 1: dim  13140  capture  56.3293 %   (PR 283: 56.3293 % at dim 13140 -> agreement 1.0000x)
+      aggregates 2190, setup 0.491 s (strength 33 ms, aggregate 0 ms, tentative 13 ms), adds 34.4 MB
+
+=== healthy: grid 32x16x32, achieved_vf 0.6000, void-floor share 0.0000 ===
+    reduced DOFs: 53856
+    exact reference: 245 iters, residual 8.7018e-09, max|u| 1.8444e-02, 0.3 s
+    GEOMETRIC level 1: dim   7344  capture  99.2959 %   (PR 283: 99.2959 % at dim 7344 -> agreement 1.0000x)
+    Galerkin identity check (z^T A1 z vs (P0 z)^T A0 (P0 z)): 2.094e-16 relative
+    ALGEBRAIC level 1: dim   4356  capture  38.7293 %   (PR 283: 0.0000 % at dim 0 -> agreement 0.0000x)
+      aggregates 726, setup 0.149 s (strength 11 ms, aggregate 0 ms, tentative 4 ms), adds 12.3 MB
+
+peak RSS 0.37 GB
+[load end] 1m 10.06  5m 12.48  15m 13.94  (on 10 logical cores)

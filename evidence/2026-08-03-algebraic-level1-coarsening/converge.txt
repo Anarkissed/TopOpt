@@ -1,0 +1,21 @@
+loaded PR 280's cached trajectory: 48x32x40, 80 snapshots
+[load start] 1m 8.34  5m 11.88  15m 13.68  (on 10 logical cores)
+
+=== stagnating: grid 48x32x40, achieved_vf 0.0368, void-floor share 0.6511 ===
+    exact reference: 3537 Jacobi-CG iters, residual 9.135e-09, max|u| 4.4905e+04
+    geometric levels 0  STAGNATES iters  3636  DOF-wtd   8180.0  build   419.8 ms  cycles   3648.7 ms  wall  12.94 s  rel dev 5.686e-10
+              level dims: 150075 18738 2364
+    ALGEBRAIC levels 3  CARRIED   iters    96  DOF-wtd    208.8  build   422.6 ms  cycles   1006.7 ms  wall   1.43 s  rel dev 2.558e-09
+              level dims: 150075 13140 1830   [aggregates 2190, adds 47.6 MB, setup 77 ms]
+    PR 283's algebraic reference on this field: 86 PCG iterations (amg_lean, Chebyshev fine smoother)
+
+=== healthy: grid 64x32x64, achieved_vf 0.6000, void-floor share 0.0000 ===
+    exact reference: 487 Jacobi-CG iters, residual 9.852e-09, max|u| 9.1995e-03
+    geometric levels 4  CARRIED   iters    18  DOF-wtd     41.3  build  1266.3 ms  cycles    410.6 ms  wall   1.69 s  rel dev 7.635e-11
+              level dims: 411840 53856 7344 1080
+    ALGEBRAIC levels 3  CARRIED   iters    52  DOF-wtd    112.1  build  1104.8 ms  cycles   1300.2 ms  wall   2.41 s  rel dev 1.017e-10
+              level dims: 411840 31944 1572   [aggregates 5324, adds 139.6 MB, setup 210 ms]
+    PR 283's algebraic reference on this field: 86 PCG iterations (amg_lean, Chebyshev fine smoother)
+
+peak RSS 0.55 GB
+[load end] 1m 9.77  5m 11.88  15m 13.62  (on 10 logical cores)

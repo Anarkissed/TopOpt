@@ -1,0 +1,9 @@
+loaded PR 280's cached trajectory: 48x32x40, 80 snapshots
+[load start] 1m 9.47  5m 11.63  15m 13.47  (on 10 logical cores)
+
+=== AH10: determinism, per posture ===
+  stagnating  geometric  iters 3636/3636  dim 0/0  fp c573782fac60eb3b / c573782fac60eb3b  -> IDENTICAL
+  stagnating  ALGEBRAIC  iters 96/96  dim 13140/13140  fp 8d85126b2c1c5088 / 8d85126b2c1c5088  -> IDENTICAL
+  healthy     geometric  iters 18/18  dim 0/0  fp d446ffa7cc6b9ff2 / d446ffa7cc6b9ff2  -> IDENTICAL
+  healthy     ALGEBRAIC  iters 40/40  dim 4356/4356  fp d81fa54fa8d38fd6 / d81fa54fa8d38fd6  -> IDENTICAL
+[load end] 1m 12.19  5m 12.13  15m 13.57  (on 10 logical cores)

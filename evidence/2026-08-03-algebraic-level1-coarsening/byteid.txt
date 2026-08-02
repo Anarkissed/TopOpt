@@ -1,0 +1,92 @@
+=== extracting the reference tree (ee5da824bb4dbd0d162f7a3852e37fff93fc918e) ===
+=== building the reference tree (Release) ===
+=== building the current tree (Release) ===
+=== running ref (/tmp/algev/byteid/ref/build/topopt-cli) ===
+=== running cur (/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/graded-cell-size-phase-0-124b12/core/build/topopt-cli) ===
+
+=== ARTIFACT COMPARISON ===
+  report.json : IDENTICAL  (acc80a089b42464d456769a5df06909f4d5db841d83b0cb969301658fe9debd6)
+  design.bin : IDENTICAL  (bed76e9c6472fbada97b30498aae9f7899308c6d50834b55a487715602eb294e)
+  fields.bin : IDENTICAL  (a5841ecf74b584bb82f8e4978509d5a06af36cdf87113f6a66b658bef7a26dcc)
+  loadcase.json : IDENTICAL  (50f0a19f0153e867e75093b4e44cf997c8767e7188b2e2cd4dd914c53768996d)
+  variant_070.stl : IDENTICAL  (88bf4e6297b415a2541e46e683be9eb611d35bf4f56cc4c3c6c3423c821171a1)
+  variant_050.stl : IDENTICAL  (c021eba3666510051882c68602c6a85480f4d5713f9dd34fe8b7d7a107f9cd87)
+  variant_030.stl : IDENTICAL  (cd93581751a1eadefc5b3aa97a7675706ed6dfb0cbc0e9e99e4ca12b14ee1ace)
+
+=== iterations.csv, column by column (non-timing columns must all match) ===
+  rows: ref 180, cur 180; header identical: True
+  analysis_ms: 172 rows differ   *** NON-TIMING ***
+  available_mb: 180 rows differ   *** NON-TIMING ***
+  compressed_mb: 179 rows differ   *** NON-TIMING ***
+  fea_ms: 180 rows differ   *** NON-TIMING ***
+  filter_ms: 180 rows differ   *** NON-TIMING ***
+  major_faults: 180 rows differ   *** NON-TIMING ***
+  mg_build_ms: 180 rows differ   *** NON-TIMING ***
+  mg_ms: 180 rows differ   *** NON-TIMING ***
+  observe_ms: 176 rows differ   *** NON-TIMING ***
+  peak_rss_mb: 180 rows differ   TIMING/MEMORY (expected)
+  project_ms: 151 rows differ   *** NON-TIMING ***
+  residual_ms: 178 rows differ   *** NON-TIMING ***
+  rss_mb: 180 rows differ   TIMING/MEMORY (expected)
+  sens_ms: 180 rows differ   *** NON-TIMING ***
+  solve_ms: 180 rows differ   *** NON-TIMING ***
+  solver_build_ms: 179 rows differ   *** NON-TIMING ***
+  swapins: 155 rows differ   *** NON-TIMING ***
+  tail_prev_ms: 139 rows differ   *** NON-TIMING ***
+  total_ms: 180 rows differ   *** NON-TIMING ***
+  update_ms: 180 rows differ   *** NON-TIMING ***
+  wall_ms: 180 rows differ   TIMING/MEMORY (expected)
+
+=== run_info.json keys that differ ===
+  keys ADDED by this task: ['mg_algebraic_added_mb', 'mg_algebraic_aggregates', 'mg_algebraic_coarse_dim', 'mg_algebraic_level1', 'mg_algebraic_level1_refused', 'mg_algebraic_levels', 'mg_algebraic_refuse_reason']
+  keys REMOVED: none
+  changed: created_wall_ms: 1785631720631 -> 1785632028446
+  changed: fingerprint: 'dev' -> 'ee5da824bb4d'
+
+artifacts compared: 7
+byte-identity STATUS=0
+
+=== CORRECTED iterations.csv classification ===
+(the first pass's TIMING set was too narrow — every column flagged
+ 'NON-TIMING' there is in fact a *_ms duration or an rss/paging counter)
+
+rows: ref 180, cur 180; header identical: True
+
+columns in file: 44
+columns differing that are CLOCK/MEMORY readings: 21
+   analysis_ms: 172 rows
+   available_mb: 180 rows
+   compressed_mb: 179 rows
+   fea_ms: 180 rows
+   filter_ms: 180 rows
+   major_faults: 180 rows
+   mg_build_ms: 180 rows
+   mg_ms: 180 rows
+   observe_ms: 176 rows
+   peak_rss_mb: 180 rows
+   project_ms: 151 rows
+   residual_ms: 178 rows
+   rss_mb: 180 rows
+   sens_ms: 180 rows
+   solve_ms: 180 rows
+   solver_build_ms: 179 rows
+   swapins: 155 rows
+   tail_prev_ms: 139 rows
+   total_ms: 180 rows
+   update_ms: 180 rows
+   wall_ms: 180 rows
+
+columns differing that are SOLVER WORK or PHYSICS: 0
+   NONE — every non-clock, non-memory column is identical on all 180 rows.
+
+explicit check of the columns that state what the solver DID:
+   cg_iters               IDENTICAL on all rows
+   cg_multigrid           IDENTICAL on all rows
+   hier_built             IDENTICAL on all rows
+   mg_cycles_attempted    IDENTICAL on all rows
+   matvecs                IDENTICAL on all rows
+   compliance             IDENTICAL on all rows
+   achieved_vf            IDENTICAL on all rows
+   volume_fraction        (not a column in this build)
+   change                 (not a column in this build)
+   mnd                    (not a column in this build)

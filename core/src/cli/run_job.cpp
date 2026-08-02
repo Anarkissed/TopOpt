@@ -174,6 +174,9 @@ RunInfo build_run_info(const JobDescription& job,
   // misdiagnosed the res-128 fallback. The finalize below records the real values.
   info.galerkin_block_cache = fea_matfree_galerkin_block_cache_enabled();
   info.mixed_precision = fea_matfree_mixed_precision_enabled();
+  // Task algebraic-level1-coarsening — the ACTUAL process state, read rather
+  // than inferred. The per-build numbers are filled in the post-run finalize.
+  info.mg_algebraic_level1 = fea_mg_algebraic_level1_enabled();
   info.matfree_threads = fea_matfree_thread_count();
   info.krylov_recycling = fea_krylov_recycling_enabled();
   info.krylov_recycle_dim = fea_krylov_recycle_dim();
@@ -3789,6 +3792,20 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     // basis builds / coarse refreshes / preconditioned fallback solves this run,
     // and the coarse dimension + stored MB held at run end. All 0 when the
     // feature is off or no solve ever reached the stagnation trigger.
+    // Task algebraic-level1-coarsening — finalize what the LAST algebraic
+    // hierarchy build produced (aggregates, level-1 dimension, depth, added
+    // bytes) and whether it REFUSED and fell back to the geometric builder.
+    // All 0 / false when the path is off, which is every reference run.
+    {
+      const MgAlgebraicLevel1Info a = fea_mg_algebraic_level1_info();
+      run_info.mg_algebraic_aggregates = a.aggregates;
+      run_info.mg_algebraic_coarse_dim = a.coarse_dim;
+      run_info.mg_algebraic_levels = a.levels;
+      run_info.mg_algebraic_added_mb =
+          static_cast<double>(a.bytes) / (1024.0 * 1024.0);
+      run_info.mg_algebraic_level1_refused = a.refused;
+      run_info.mg_algebraic_refuse_reason = a.refuse_reason;
+    }
     run_info.geneo_basis_builds = fea_geneo_basis_builds();
     run_info.geneo_coarse_refreshes = fea_geneo_coarse_refreshes();
     run_info.geneo_armed_solves = fea_geneo_armed_solves();

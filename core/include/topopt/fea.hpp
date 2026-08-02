@@ -1004,6 +1004,83 @@ void fea_set_mg_parity_pad_mode(int mode);
 int fea_mg_parity_pad_mode();
 
 // ---------------------------------------------------------------------------
+// ALGEBRAIC LEVEL-1 COARSENING (task: algebraic-level1-coarsening). OPT-IN,
+// LIBRARY DEFAULT OFF.
+//
+// WHAT IT CHANGES. The matrix-free multigrid hierarchy's LEVEL 1 — today the
+// trilinear halving of the fine grid — becomes an AGGREGATION of the fine
+// operator, whose aggregates follow the structure rather than the grid. Levels
+// 2.. are then aggregations of the assembled A1. Level 0 stays matrix-free and
+// untouched, and A0 IS STILL NEVER ASSEMBLED: the aggregation streams its
+// strength graph off the production element table, and A1 is formed by the same
+// element-local Galerkin product the geometric path uses. PR 230 priced
+// fine-level assembly at 20-35 GB at 8.44M DOF; this goes nowhere near it.
+//
+// WHY. PR 280 swept 25 configurations of the shipped V-cycle on the maintainer's
+// real dilute field with ZERO convergences. PR 283 then measured the cause: the
+// GEOMETRIC level-1 space captures 1.5954 % of the exact solution's energy there
+// (99.2959 % on a healthy control), and every space below level 1 is a subspace
+// of it — so no depth, smoothing or cycle change below level 1 can help. An
+// algebraic level 1 captures 56.3293 % at a SMALLER coarse dimension.
+//
+// EXACTNESS. This is an ACCELERATOR-CLASS change, like recycling and GenEO and
+// unlike the active-domain band. Only the coarse SPACES change: the Galerkin
+// products, R = P^T and the bottom factorisation are the solver's own, so the
+// cycle stays SPD and remains a valid CG preconditioner; and the outer FP64 CG's
+// relative-residual test still defines convergence. A different coarse space can
+// therefore change the ITERATION COUNT and the in-basin rounding of the
+// converged field — never the answer, and never any gate's verdict logic. It is
+// NOT bit-identical when it engages, so the arming evidence carries a gate table
+// against a negative-control basin floor rather than a bit-parity claim (the
+// 248 discipline).
+//
+// REFUSALS ARE FREE. Any decline — a non-scalar smoother, the coarsening control
+// rejecting a level, the memory cap, a chain that never reaches the direct-solve
+// cap — falls straight through to the geometric builder, which is unchanged.
+constexpr bool kMgAlgebraicLevel1LibraryDefaultOn = false;
+static_assert(!kMgAlgebraicLevel1LibraryDefaultOn,
+              "the algebraic level-1 coarse space must ship LIBRARY-default "
+              "OFF: reference runs never call configure_production_options and "
+              "must stay byte-identical (THE ONE RULE)");
+// Returns the previous value. Thread-local, like the parity-pad mode and the
+// stagnation latch.
+bool fea_set_mg_algebraic_level1(bool enable);
+bool fea_mg_algebraic_level1_enabled();
+
+// Observability for the LAST algebraic hierarchy build on this thread. All zero
+// when the path never ran. `refused` with a non-empty reason means the build
+// declined and the geometric hierarchy was used instead — the honest record of a
+// fall-back, which run_info.json echoes.
+struct MgAlgebraicLevel1Info {
+  int fine_dofs = 0;
+  int fine_nodes = 0;
+  int aggregates = 0;
+  int coarse_dim = 0;   // level-1 DOFs
+  int levels = 0;       // total, including the matrix-free level 0
+  double fine_nnz_per_row = 0.0;
+  unsigned long long bytes = 0;  // what the algebraic path ADDS
+  double setup_ms = 0.0;
+  bool armed = false;
+  bool refused = false;
+  // A VALUE, not a pointer into solver state, so a caller can hold the struct
+  // past the next build. Empty when nothing was refused.
+  char refuse_reason[160] = {0};
+  int level_count = 0;      // valid entries of level_dim
+  int level_dim[16] = {0};  // level 1 first
+};
+MgAlgebraicLevel1Info fea_mg_algebraic_level1_info();
+void fea_mg_reset_algebraic_level1_info();
+
+// The DOF count of every level of the LAST matrix-free hierarchy built on this
+// thread, finest first (entry 0 is the matrix-free fine level). Filled by BOTH
+// the geometric and the algebraic builder, so a caller can price a V-cycle in
+// DOF-WEIGHTED operator applies — the load-independent work currency — for
+// either shape and compare them. Writes at most `cap` entries and returns the
+// number of levels the hierarchy actually had (which may exceed `cap`).
+// Observation only; no solver decision reads it.
+int fea_mg_last_hierarchy_dims(int* out, int cap);
+
+// ---------------------------------------------------------------------------
 // KRYLOV SUBSPACE RECYCLING / DEFLATION (handoff 133). OPT-IN, DEFAULT OFF.
 //
 // WHY. Every MMA iteration solves a system that is a tiny perturbation of the

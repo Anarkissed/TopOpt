@@ -1,0 +1,23 @@
+Host load through the algebraic-level1-coarsening campaign (PR 277's discipline).
+Machine: Apple silicon, 6 performance cores / 10 logical, 16 GB RAM.
+
+The host was NOT quiet: the fixture development, the full ctest suite and the
+measurement harnesses overlapped, and other work ran alongside. Every headline
+number in the handoff is a COUNT (iterations, aggregates, coarse dimensions,
+bytes, verdicts, latch fired/quiet) or a ratio of exact solves, none of which
+changes with host load. Wall is reported and deliberately not ranked on.
+
+Load averages recorded at the start/end of each measurement:
+[load end] 1m 10.06  5m 12.48  15m 13.94  (on 10 logical cores)
+[load end] 1m 11.62  5m 13.58  15m 14.46  (on 10 logical cores)
+[load end] 1m 12.19  5m 12.13  15m 13.57  (on 10 logical cores)
+[load end] 1m 12.88  5m 12.25  15m 13.63  (on 10 logical cores)
+[load end] 1m 9.77  5m 11.88  15m 13.62  (on 10 logical cores)
+[load start] 1m 11.30  5m 11.91  15m 13.53  (on 10 logical cores)
+[load start] 1m 14.65  5m 14.52  15m 14.94  (on 10 logical cores)
+[load start] 1m 8.34  5m 11.88  15m 13.68  (on 10 logical cores)
+[load start] 1m 9.47  5m 11.63  15m 13.47  (on 10 logical cores)
+[load start] 1m 9.53  5m 12.67  15m 14.06  (on 10 logical cores)
+
+Current:
+20:49  up 23 days,  3:27, 2 users, load averages: 47.56 30.47 21.26

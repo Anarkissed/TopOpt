@@ -1,0 +1,56 @@
+[load start] 1m 14.65  5m 14.52  15m 14.94  (on 10 logical cores)
+fixture: 12x4x12 part, design box [0.0 0.0 0.0]..[48.0 16.0 48.0]
+
+===== NEGATIVE CONTROL (disarmed, cg_tolerance 1e-9) — the basin floor everything below is charged against =====
+  4 rungs, 87306 CG, 3 stagnating solves, latch FIRED, wall 81.0 s
+
+===== DISARMED (geometric level 1 — the shipped path) =====
+  4 rungs, 85536 CG, 3 stagnating solves of 250, latch FIRED, wall 77.4 s
+
+===== ARMED (algebraic level 1) =====
+  4 rungs, 15595 CG, 0 stagnating solves of 255, latch quiet, wall 40.0 s
+  aggregation: 279 aggregates, level-1 dim 1666, 2 levels, adds 5.0 MB
+
+===== AH4 — STAGNATION AND THE LATCH (the headline) =====
+  posture    | stagnating solves | of total | latch   | CG
+  disarmed   |                 3 |      250 | FIRED   | 85536
+  ARMED      |                 0 |      255 | quiet   | 15595
+
+  per-rung stagnating solves:
+    disarmed: 0/37 0/47 3/73 0/93
+    ARMED   : 0/37 0/47 0/78 0/93
+
+===== AH9 — DOWNSTREAM PREDICTIONS =====
+  GenEO      | builds | refreshes | armed solves | declined
+  disarmed   |      1 |         0 |            1 |      167
+  ARMED      |      0 |         0 |            0 |        0
+  RECYCLER   | solves with a recycled subspace | max dim
+  disarmed   |                             163 |      16
+  ARMED      |                               0 |       0
+  (PR 282: the recycler is STRUCTURALLY absent on the healthy
+   multigrid path — mf_mgpcg constructs its session with
+   allowed = rc_wrap_multigrid(), pinned false — so a run whose
+   solves all carry should show ZERO recycled solves.)
+
+===== AH7 — FULL GATE TABLE (disarmed vs ARMED) =====
+  rung |     vf | disarmed          | ARMED             | margin rel delta
+   0   | 0.6800 | ACCEPT   7.089748 | ACCEPT   7.087462 | 3.225e-04
+   1   | 0.5200 | ACCEPT   3.381657 | ACCEPT   3.381657 | 3.096e-10
+   2   | 0.3800 | ACCEPT   1.884050 | ACCEPT   1.890188 | 3.258e-03
+   3   | 0.2600 | REJECT   0.594860 | REJECT   0.642366 | 7.986e-02
+
+  VERDICT FLIPS: 0   (none — the gate is clean)
+
+  classification flips over solid voxels (grid 24x8x24):
+  rung |  solid  | NEG CONTROL 1e-9 (the floor)      | ARMED vs disarmed
+   0   |    4608 | 0.000e+00 (0) drho 2.0e-10/3.4e-08 | 0.000e+00 (0) drho 1.2e-06/4.1e-04  within floor
+   1   |    4608 | 0.000e+00 (0) drho 1.8e-10/8.3e-08 | 0.000e+00 (0) drho 1.4e-08/8.5e-06  within floor
+   2   |    4608 | 0.000e+00 (0) drho 1.1e-04/4.0e-02 | 2.170e-04 (1) drho 3.8e-04/1.2e-01  ABOVE FLOOR
+   3   |    4608 | 2.170e-04 (1) drho 9.4e-05/3.1e-02 | 2.170e-04 (1) drho 8.6e-05/2.7e-02  within floor
+
+===== AH11 — WALL (host load recorded; CG is the load-independent currency) =====
+  disarmed 77.4 s, 85536 CG   ->   ARMED 40.0 s, 15595 CG   (wall 0.516x, CG 0.182x)
+
+wrote /tmp/algev/gate.csv
+wrote /tmp/algev/gate_summary.csv
+[load end] 1m 11.62  5m 13.58  15m 14.46  (on 10 logical cores)

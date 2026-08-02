@@ -1,0 +1,34 @@
+ok:   the named library default constant says OFF
+ok:   algebraic level 1 is DISARMED in a default process
+ok:   geometric reference solve carries multigrid
+ok:   a disarmed solve reports no algebraic build at all
+      geometric: 3 levels, 18 cycles
+ok:   the setter reports the previous state (OFF)
+ok:   fea_set_mg_algebraic_level1(true) arms the path
+ok:   the armed build was not refused on this fixture
+ok:   the armed build formed aggregates
+ok:   the armed level-1 space is NOT the geometric one
+ok:   the armed hierarchy is usable (>= 2 levels)
+ok:   the armed build reports what it added, in bytes
+      algebraic: 2 levels, 39 cycles, 726 aggregates, coarse dim 4356, 16.0 MB
+      level dims: 4356
+ok:   the armed solve CARRIES multigrid
+ok:   the armed solve reaches the SAME field as the geometric one
+      worst relative field deviation: 3.066e-10
+ok:   a solve after arm+disarm is BIT-IDENTICAL to one before arming
+ok:   arm+disarm leaves the hierarchy and cycle count unchanged
+ok:   two armed setups produce the SAME aggregation
+ok:   two armed setups produce the same level dimensions
+ok:   two armed solves are BIT-IDENTICAL to each other
+ok:   two armed solves take the same cycle count
+ok:   the point-block smoother REFUSES the algebraic path
+      refusal reason: point-block smoother is not available on algebraic levels
+ok:   a refusal REPORTS its reason rather than failing silently
+ok:   a REFUSED armed solve is BIT-IDENTICAL to the disarmed one (the geometric builder ran)
+ok:   a refusal leaves the hierarchy and cycle count unchanged
+ok:   a small system yields a TWO-level algebraic cycle, not a refusal
+      small system: level-1 dim 72, 2 levels
+ok:   the small system's armed solve reaches the same field
+ok:   the path is DISARMED again at the end of the test
+
+All algebraic-level-1 tripwire checks passed.
