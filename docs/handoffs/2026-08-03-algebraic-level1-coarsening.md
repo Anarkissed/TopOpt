@@ -11,6 +11,15 @@ still open when this started. It consumes that PR's coarse-space machinery
 (`build_hierarchy_from_prolongators`) and its energy-capture instrument, and
 rebuilds neither.
 
+**Merged with main after PR 283/282/284 landed** (merge commit on the branch).
+GitHub reported PR 286 as CONFLICTING; the conflict was a CRISS-CROSS, not a
+textual one — this branch merged PR 283's branch (`99d4157`) directly while main
+merged it separately (`3debbe9`), leaving TWO merge bases (`99d4157` and
+`7bd1b13`). Git's recursive strategy resolves that with no conflict markers in
+either direction (`git merge` and `git merge-tree --write-tree` both clean); the
+merge commit collapses the criss-cross so GitHub agrees. **Every bar below was
+re-run on the merged tree** — see §14 for what moved and what did not.
+
 ---
 
 ## The answer, first
@@ -649,6 +658,110 @@ In order:
    right control — but it does not tell you what the algebraic path does in
    combination with a CHANGED setting of any of them. The four-way interaction
    sweeps PR 248 and PR 278 ran have no algebraic column yet.
+
+---
+
+## 14. THE MERGE WITH MAIN — what moved, and what did not
+
+PR 286 was reported CONFLICTING against main after PR 282, 283 and 284 landed.
+Two things had to be established: that the merge is correct, and that the
+evidence above still describes the tree, because **a baseline that moved makes
+prior evidence a description of a tree that no longer exists**.
+
+### The conflict was structural, not textual
+
+`git merge-base --all HEAD origin/main` returns TWO bases — `99d4157` (PR 283's
+tip, which this branch merged directly) and `7bd1b13` (the main this branch was
+cut from, which later absorbed PR 283 as `3debbe9`). That is a criss-cross.
+Git's recursive strategy merges the bases and resolves it cleanly; GitHub's
+mergeability check uses a simpler algorithm and reports a conflict. Both
+`git merge origin/main` and `git merge-tree --write-tree origin/main HEAD`
+complete with **no conflict markers and no manual resolution**, in both
+directions. The merge commit collapses the criss-cross.
+
+* **`core/CMakeLists.txt`** — both registrations survive, as they should:
+  `test_mg_coarse_hook` (PR 283) and `test_mg_algebraic_level1` are unrelated.
+* **`core/src/fea/multigrid.cpp`** — `g_mg_alg_level1`, its `static_assert`
+  tripwire, `g_mg_alg_stats` and `g_mg_last_level_dims` all survive alongside
+  PR 280's `MgOpts`.
+
+### On `MgOpts`: there was nothing to reconcile, and here is why
+
+`MgOpts` was introduced by `d32418e` (PR 280) and reached main as `16c55a8` —
+an ANCESTOR of this branch's base `7bd1b13`. **Main did not newly add it; this
+branch has had it since it was cut.** `git show 7bd1b13:...multigrid.cpp | grep
+-c MgOpts` and the same on current main and on this HEAD all return 11.
+
+The distinction that matters: `MgOpts` snapshots the PER-SWEEP smoother recipe
+(omega / pre / post / coarse_extra / gamma / point_block) once per solve, so
+`jacobi_sweep` reads plain locals. The algebraic builder reads `g_mg_tuning`
+**exactly once per hierarchy BUILD**, for two build-time properties `MgOpts`
+does not carry — `smoother` (to refuse the point-block case) and
+`coarse_dof_cap` (the bottom-level acceptance size) — which is the same read, in
+the same place, that `build_mf_hierarchy` has always done. Audited rather than
+asserted: every `g_mg_tuning` read in the file is in a hierarchy builder, in
+`mg_opts_now()` itself, or in a public accessor. **None is in a sweep loop, so
+no per-sweep thread-local read was reintroduced.**
+
+### What else main brought, and why it cannot move these numbers
+
+| PR | touches core solver? | effect here |
+| --- | --- | --- |
+| 283 algebraic-coarse-space-dilute | yes — the coarse-space hook | already in this branch; the merge is a no-op on it |
+| 282 krylov-recycler-cost-reassess | yes — `recycle.{hpp,cpp}` | adds `RcPhaseTimes` phase-timing instrumentation, **default OFF** (`rc_set_phase_timing` defaults false). Pure observation. |
+| 284 variant-entry-gating-retention | **no** — app/Swift only | nothing in `core/src` or `core/include` |
+
+### The re-run, on the merged tree
+
+| bar | before the merge | after the merge | moved? |
+| --- | --- | --- | --- |
+| geometric level-1 capture | 1.5954 % at dim 18,738 | **1.5954 % at dim 18,738** | no |
+| algebraic level-1 capture | 56.3293 % at dim 13,140 | **56.3293 % at dim 13,140** | no |
+| healthy geometric capture | 99.2959 % at dim 7,344 | **99.2959 % at dim 7,344** | no |
+| healthy algebraic capture | 38.7293 % at dim 4,356 | **38.7293 % at dim 4,356** | no |
+| Galerkin identity check | 1.347e-15 / 2.094e-16 | **1.347e-15 / 2.094e-16** | no |
+| aggregates (stagnating / healthy) | 2,190 / 726 | **2,190 / 726** | no |
+| stagnating: geometric | STAGNATES, 3,636 iters | **STAGNATES, 3,636 iters** | no |
+| stagnating: ALGEBRAIC | CARRIED, 96 iters | **CARRIED, 96 iters** | no |
+| DOF-weighted work (stagnating) | 8,180.0 → 208.8 | **8,180.0 → 208.8** | no |
+| healthy cycles | 18 → 52 | **18 → 52** | no |
+| DOF-weighted work (healthy) | 41.3 → 112.1 | **41.3 → 112.1** | no |
+| level dims (stagnating, algebraic) | 150,075 → 13,140 → 1,830 | **same** | no |
+| exactness, worst rel deviation | 2.558e-09 / 1.017e-10 | **2.558e-09 / 1.017e-10** | no |
+| AH1 artifacts (7, SHA-256) | all IDENTICAL | **all IDENTICAL, same hashes** | no |
+| AH1 solver-work CSV columns | 0 of 44 differ | **0 of 44 differ** | no |
+| ctest | 98/98 | **98/98** | no |
+
+**Nothing in the load-independent column moved — not one count, dimension,
+capture ratio, deviation or checksum.** That is the expected result given the
+table above (the only core change is an instrumentation hook that ships off),
+and it is reported as a verification rather than assumed from the reasoning.
+
+The AH1 re-run is against the NEW reference — `2a425d3`, i.e. main after PR
+282/283/284 — and the seven artifact SHA-256s come out **identical to the
+pre-merge run's**, which is a stronger statement than the bar asked for: the
+shipped part is unchanged not just relative to its own reference but across the
+baseline move as well. `cg_iters`, `cg_multigrid`, `hier_built`,
+`mg_cycles_attempted`, `matvecs`, `compliance` and `achieved_vf` are identical
+on all 180 rows; the 20 columns that differ are every one a `*_ms` duration or
+an RSS/paging counter.
+
+**WALL DID MOVE, in the favourable direction, and it is not evidence.** The
+stagnating geometric solve reads 10.72 s against the pre-merge 12.94 s, and the
+healthy pair 1.50 / 2.19 s against 1.69 / 2.41 s. The host was simply quieter
+(1-minute load ~9-13 against ~9-18). Nothing was made faster by the merge; this
+is exactly the reason every ranking in this report is on DOF-weighted applies
+and iteration counts rather than the stopwatch.
+
+### The tripwire, verified by making it fail
+
+A `static_assert` nobody has watched fail is an untested claim. Flipping
+`kMgAlgebraicLevel1LibraryDefaultOn` to `true` and compiling `multigrid.cpp`
+with `-fsyntax-only` fires **both** tripwires — the one in the public header
+beside the constant, and the one in `multigrid.cpp` beside the flag's
+initialiser — so a future edit that arms the LIBRARY default cannot compile. The
+constant was restored immediately and the transcript is in
+`evidence/.../tripwire_static_assert.txt`.
 
 ---
 

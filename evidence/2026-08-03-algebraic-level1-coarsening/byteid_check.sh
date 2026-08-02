@@ -10,8 +10,8 @@
 # before this task existed.
 set -u
 W=/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/graded-cell-size-phase-0-124b12
-REF=ee5da824bb4dbd0d162f7a3852e37fff93fc918e
-S=/tmp/algev/byteid
+REF=2a425d3446c5b4c79a4e597b5b5cbdb1dd4c9fb1  # origin/main after PR 282/283/284
+S=/tmp/algev/byteid2
 mkdir -p "$S/ref"
 cd "$W" || exit 1
 
