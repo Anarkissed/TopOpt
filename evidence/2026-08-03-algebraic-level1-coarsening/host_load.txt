@@ -1,23 +1,30 @@
-Host load through the algebraic-level1-coarsening campaign (PR 277's discipline).
+Host load — algebraic-level1-coarsening, including the POST-MERGE re-run.
 Machine: Apple silicon, 6 performance cores / 10 logical, 16 GB RAM.
 
-The host was NOT quiet: the fixture development, the full ctest suite and the
-measurement harnesses overlapped, and other work ran alongside. Every headline
-number in the handoff is a COUNT (iterations, aggregates, coarse dimensions,
-bytes, verdicts, latch fired/quiet) or a ratio of exact solves, none of which
-changes with host load. Wall is reported and deliberately not ranked on.
+PR 277's discipline: every headline number is a COUNT (iterations, aggregates,
+coarse dimensions, bytes, verdicts, latch fired/quiet, checksums) or a ratio of
+exact solves. Wall is reported and deliberately not ranked on.
+
+This matters concretely for the post-merge re-run: the host was QUIETER the
+second time (1m load ~9-13 vs ~9-18), so WALL improved while every
+load-independent number was bit-for-bit unchanged. Nothing was made faster by
+the merge.
 
 Load averages recorded at the start/end of each measurement:
 [load end] 1m 10.06  5m 12.48  15m 13.94  (on 10 logical cores)
+[load end] 1m 10.64  5m 13.89  15m 10.50  (on 10 logical cores)
 [load end] 1m 11.62  5m 13.58  15m 14.46  (on 10 logical cores)
 [load end] 1m 12.19  5m 12.13  15m 13.57  (on 10 logical cores)
 [load end] 1m 12.88  5m 12.25  15m 13.63  (on 10 logical cores)
+[load end] 1m 8.85  5m 13.01  15m 10.34  (on 10 logical cores)
 [load end] 1m 9.77  5m 11.88  15m 13.62  (on 10 logical cores)
 [load start] 1m 11.30  5m 11.91  15m 13.53  (on 10 logical cores)
+[load start] 1m 11.80  5m 14.34  15m 10.56  (on 10 logical cores)
 [load start] 1m 14.65  5m 14.52  15m 14.94  (on 10 logical cores)
 [load start] 1m 8.34  5m 11.88  15m 13.68  (on 10 logical cores)
+[load start] 1m 9.41  5m 13.45  15m 10.41  (on 10 logical cores)
 [load start] 1m 9.47  5m 11.63  15m 13.47  (on 10 logical cores)
 [load start] 1m 9.53  5m 12.67  15m 14.06  (on 10 logical cores)
 
-Current:
-20:49  up 23 days,  3:27, 2 users, load averages: 47.56 30.47 21.26
+At the close of the post-merge re-run:
+22:21  up 23 days,  4:59, 2 users, load averages: 4.49 5.42 6.85

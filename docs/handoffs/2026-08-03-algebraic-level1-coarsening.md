@@ -239,11 +239,11 @@ the evidence file beside the original rather than replacing it.)*
 
 ### The suite
 
-**ctest: 98 tests, 98 passed, 0 failed** (`evidence/.../ctest.txt`), including
-the new `fea_mg_algebraic_level1` at 2.01 s alongside PR 283's
-`fea_mg_coarse_hook` at 2.29 s. The suite has grown by exactly one since PR 283
+**ctest: 98 tests, 98 passed, 0 failed** (`evidence/.../ctest.txt`, re-run on
+the merged tree), including the new `fea_mg_algebraic_level1` at 2.09 s
+alongside PR 283's `fea_mg_coarse_hook` at 2.60 s. The suite has grown by exactly one since PR 283
 ran it at 97 — this task's tripwire — and no previously passing test was
-modified, skipped or relaxed. Total test time 1,165 s against PR 283's 568 s:
+modified, skipped or relaxed. Total test time 1,192 s against PR 283's 568 s:
 the machine was carrying the measurement campaign concurrently, which is a wall
 difference and not a behavioural one.
 
