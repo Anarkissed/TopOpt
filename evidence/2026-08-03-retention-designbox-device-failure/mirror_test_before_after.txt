@@ -1,0 +1,10 @@
+=== mirror test against the MERGED BROKEN state (ce4e181) ===
+FAIL (line 81): LatticeCoreCapability.designBoxRefused disagrees with run_job.cpp. Core carrying the blanket design-box refusal and the app blocking on it must be the same answer — set designBoxRefused in app/TopOptKit/Sources/TopOptFlows/VariantEntry.swift to match.
+FAIL (line 101): the grading-with-a-design-box refusal and the app's live conflict disagree. If core dropped it, drop LatticeCoreCapability's gradedDesignBoxRefusalPhrase and liveConflict with it; if core added one, the app must state it.
+FAIL (line 109): the app refuses a design-box lattice that core certifies — this is the exact regression of 2026-08-02: a disabled button citing a core rule that no longer exists
+app/core mirror: 4 checks, 3 FAILURES
+exit=1
+
+=== mirror test against the FIXED tree ===
+app/core mirror: 4 checks, 0 FAILURES
+exit=0

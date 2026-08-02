@@ -128,9 +128,11 @@ final class VariantEntryGatingTests: XCTestCase {
             Case(name: "the app RE-ATTACHED, so it never held the document it sent",
                  facts: healthy(retainedDesign: nil, reattached: true),
                  mustSay: ["reconnected", "after a restart"]),
-            Case(name: "the run used a DESIGN BOX (core refuses it)",
-                 facts: healthy(retainedJob: job(designBox: true)),
-                 mustSay: ["design box", "expanded grid"]),
+            // A DESIGN-BOX RUN IS NO LONGER A BLOCKING PRECONDITION. PR 285 taught
+            // core to certify one (resolve_design_domain), so the case moved out of
+            // this table and into `testADesignBoxRunIsLatticeableBecauseCoreCanDoIt`
+            // below, which asserts the opposite verdict. Leaving it here is what
+            // shipped the maintainer a refusal quoting a rule core had dropped.
             Case(name: "the model file is gone",
                  facts: healthy(modelPath: nil),
                  mustSay: ["model file is missing"]),
@@ -257,53 +259,83 @@ final class VariantEntryGatingTests: XCTestCase {
 
     /// The workspace and the lattice page share ONE rule, and it mirrors the core's
     /// refusal rather than restating an app policy.
-    func testALatticeRunWithADesignBoxIsRefusedAtTheBUTTON() throws {
+    /// THE VERDICT THAT REPLACED THE BLOCKED ONE (device-failure task). A run that
+    /// used a design box is latticeable, because core certifies it. This is the
+    /// positive form of the maintainer's reproduction.
+    func testADesignBoxRunIsLatticeableBecauseCoreCanDoIt() throws {
+        let v = VariantEntry.lattice(healthy(retainedJob: job(designBox: true)))
+        XCTAssertTrue(v.enabled,
+                      "a design-box run must be latticeable: " + (v.reason ?? "—"))
+        XCTAssertFalse(v.allReasons.contains(RelatticeUnavailable.designBoxRun.reason))
+    }
+
+    /// Narrowed to core's actual remaining rule (device-failure task): it is
+    /// GRADING plus a design box that is refused, not a design box plus lattice.
+    func testAGradedLatticeRunWithADesignBoxIsRefusedAtTheBUTTON() throws {
         XCTAssertNil(LatticeCoreCapability.liveConflict(latticeEnabled: false,
-                                                        designBoxActive: true),
+                                                        designBoxActive: true,
+                                                        graded: true),
                      "a design box alone is fine — it is the COMBINATION core refuses")
         XCTAssertNil(LatticeCoreCapability.liveConflict(latticeEnabled: true,
-                                                        designBoxActive: false))
+                                                        designBoxActive: false,
+                                                        graded: true))
+        XCTAssertNil(LatticeCoreCapability.liveConflict(latticeEnabled: true,
+                                                        designBoxActive: true,
+                                                        graded: false),
+                     "UNIFORM lattice under a design box is what PR 285 BUILT — "
+                     + "refusing it is the device failure this task exists for")
         let why = try XCTUnwrap(
             LatticeCoreCapability.liveConflict(latticeEnabled: true,
-                                               designBoxActive: true))
+                                               designBoxActive: true, graded: true))
         XCTAssertTrue(why.contains("design box"))
-        XCTAssertTrue(why.contains("expanded grid"), "it says WHY, not just no")
+        XCTAssertTrue(why.contains("grading law"), "it says WHY, not just no")
 
-        // The lattice page's own Optimize surface carries it, disabled.
+        // The lattice page's own Optimize surface carries it, disabled — on AUTO
+        // density, which is what ships a `grading` block.
         let surface = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
-            latticeEnabled: true, densityMode: .uniform,
+            latticeEnabled: true, densityMode: .auto,
             topologyDisplayName: "Octet", cellMM: 5, bounds: nil, running: false,
             lineWidthMM: 0.4, designBoxActive: true)
         XCTAssertFalse(surface.enabled,
                        "failure B: the button that would submit a refused job is off")
         XCTAssertEqual(surface.sub, why)
 
-        // …and turning the box off re-enables it, so the gate is not a one-way door.
+        // …and UNIFORM density under the same box is offered, because core runs it.
         let ok = LatticeOptimizeSurface.compute(
             baseCanOptimize: true, baseSummary: "1 anchor · 1 load",
             latticeEnabled: true, densityMode: .uniform,
             topologyDisplayName: "Octet", cellMM: 5, bounds: nil, running: false,
-            lineWidthMM: 0.4, designBoxActive: false)
+            lineWidthMM: 0.4, designBoxActive: true)
         XCTAssertTrue(ok.enabled)
     }
 
-    /// THE GATE MIRRORS CORE, AND SAYS SO. If core stops refusing (the concurrent
-    /// design-box-recertification task), this test goes red and the app's block is
-    /// what must change — the app can never be the last one holding a rule the
-    /// solver dropped.
-    func testTheAppBlockExistsBecauseTheCoreRefusalDoes() throws {
+    /// THE GATE MIRRORS CORE, AND SAYS SO — IN BOTH DIRECTIONS.
+    ///
+    /// This test was written by PR 284 to go red the day core dropped its blanket
+    /// design-box refusal. PR 285 dropped it hours later and the test DID go red —
+    /// but CI is `core-linux` only and has never built this package, so the red
+    /// never reached anyone and the app shipped a refusal quoting a core rule that
+    /// no longer existed. It now pins the CURRENT truth from both sides, so a
+    /// revert in either direction is loud.
+    func testTheAppBlockTracksTheCoreRefusalInBothDirections() throws {
         let runJob = Self.repoRoot.appendingPathComponent("core/src/cli/run_job.cpp")
         let src = try String(contentsOf: runJob, encoding: .utf8)
-        let coreStillRefuses = src.contains(LatticeCoreCapability.designBoxRefusalPhrase)
-        XCTAssertEqual(coreStillRefuses, LatticeCoreCapability.designBoxRefused,
-                       "the app's design-box block must track core's own refusal. "
-                       + "If core no longer carries “"
+
+        let coreRefusesEveryDesignBox =
+            src.contains(LatticeCoreCapability.designBoxRefusalPhrase)
+        XCTAssertEqual(coreRefusesEveryDesignBox,
+                       LatticeCoreCapability.designBoxRefused,
+                       "the app's design-box block must track core's own refusal, "
+                       + "in whichever direction it moved. Core carrying “"
                        + LatticeCoreCapability.designBoxRefusalPhrase
-                       + "”, drop LatticeCoreCapability.designBoxRefused.")
-        XCTAssertTrue(src.contains("lattice_variant_job: a design box"),
-                      "…and the same refusal guards the lattice_variant path, which "
-                      + "is what the variant entry gate is mirroring")
+                       + "”: \(coreRefusesEveryDesignBox); app blocking: "
+                       + "\(LatticeCoreCapability.designBoxRefused).")
+
+        XCTAssertTrue(
+            src.contains(LatticeCoreCapability.gradedDesignBoxRefusalPhrase),
+            "core's REMAINING rule — grading with a design box — is what the live "
+            + "conflict now mirrors; if core drops that too, drop the live conflict")
     }
 
     // MARK: - AJ5 · which machine solved it

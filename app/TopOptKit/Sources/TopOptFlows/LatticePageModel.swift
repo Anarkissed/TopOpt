@@ -241,8 +241,11 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                                           sub: "topology only · \(baseSummary)")
         }
         // The core refusal, surfaced BEFORE the configuration rather than after it.
-        if let why = LatticeCoreCapability.liveConflict(latticeEnabled: true,
-                                                        designBoxActive: designBoxActive) {
+        if let why = LatticeCoreCapability.liveConflict(
+            latticeEnabled: true, designBoxActive: designBoxActive,
+            // Core refuses GRADING with a design box, not the box itself; auto
+            // density is what ships a `grading` block (LatticeSettings.runSpec).
+            graded: densityMode == .auto) {
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
         }
         // AUTO density rides the optimize job now (task lattice-page-core-hookup

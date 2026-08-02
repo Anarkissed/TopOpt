@@ -363,6 +363,20 @@ target_compile_definitions(test_settings PRIVATE
   SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
 add_test(NAME settings COMMAND test_settings)
 
+# App/core capability mirror (task 2026-08-03-retention-designbox-device-failure).
+# The app restates a few core REFUSALS so a button can be disabled with the reason;
+# PR 285 removed one and the app's copy stayed, shipping a greyed-out control that
+# cited a rule the solver no longer had. PR 284's tripwire for exactly this lived in
+# the Swift package, which CI has never built — so it is restated here, in the suite
+# that gates merges. Pure text over two repo files: no OCCT, no Eigen, no Swift, so
+# it runs in every configuration. The repo root is injected because the app sources
+# live outside core/.
+add_executable(test_app_core_capability_mirror
+  tests/unit/test_app_core_capability_mirror.cpp)
+target_compile_definitions(test_app_core_capability_mirror PRIVATE
+  REPO_ROOT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/..")
+add_test(NAME app_core_capability_mirror COMMAND test_app_core_capability_mirror)
+
 # Job report (M5.2). Pure C++/std (no OCCT, no Eigen): the report data model is
 # serialized to a single JSON document and schema-validated. Runs in every
 # configuration like the other pure-C++/std tests; no fixture injection (the

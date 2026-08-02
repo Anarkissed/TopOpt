@@ -1,0 +1,99 @@
+APP SUITE — BEFORE AND AFTER
+task 2026-08-03-retention-designbox-device-failure
+
+Run with: (cd app/TopOptKit && swift test --filter <suite>)
+Requires ./app/scripts/build_core.sh first (fresh worktrees vendor no core).
+
+
+=== BEFORE (working tree at ce4e181, both PRs merged, nothing else changed) ===
+
+PR 284's own source-reading tripwire was ALREADY RED on main:
+
+  VariantEntryGatingTests.swift:299: error:
+    -[VariantEntryGatingTests testTheAppBlockExistsBecauseTheCoreRefusalDoes]
+    XCTAssertEqual failed: ("false") is not equal to ("true") - the app's
+    design-box block must track core's own refusal. If core no longer carries
+    "lattice certification does not support a design box", drop
+    LatticeCoreCapability.designBoxRefused.
+  VariantEntryGatingTests.swift:304: error:
+    XCTAssertTrue failed - ...and the same refusal guards the lattice_variant
+    path, which is what the variant entry gate is mirroring
+  Test Case 'testTheAppBlockExistsBecauseTheCoreRefusalDoes' failed (0.032s)
+
+  Executed 16 tests, with 2 failures  (VariantEntryGatingTests)
+
+It has been red since PR 285 merged (a473714, 2026-08-01 21:14) and never
+surfaced: .github/workflows/ci.yml has one job, core-linux, which builds core/
+and runs ctest. No app test has ever gated a PR.
+
+
+The new device-run gate test, against that same unmodified tree — this is the
+maintainer's failure reproduced headlessly from his OWN run's job document
+(evidence/.../device_run_job.json, worker job b56bbf4421f34212):
+
+  DeviceRunEntryGateTests.swift:97: error:
+    -[DeviceRunEntryGateTests
+      testLatticeIsAvailableOnTheDeviceRunBecauseCoreNoLongerRefusesIt]
+    XCTAssertFalse failed - the app still refuses a design-box run that core
+    now certifies
+  DeviceRunEntryGateTests.swift:100: error:
+    XCTAssertTrue failed - Lattice is blocked on a design-box run: this run
+    used a design box — the certification load case can't be rebuilt on the
+    expanded grid, so the core refuses to lattice it. Re-run it without a
+    design box to lattice its variants
+                            ^^^^ the maintainer's reported sentence, verbatim
+
+  DeviceRunEntryGateTests.swift:111: error:
+    -[DeviceRunEntryGateTests testTheGateActuallyConsultsTheCoreCapabilityConstant]
+    XCTAssertFalse failed - core dropped the refusal in PR 285; the mirror must
+    follow
+  DeviceRunEntryGateTests.swift:114: error: XCTAssertFalse failed
+
+  PASSED on the same run:
+    testSmoothIsAvailableOnTheDeviceRun            -- Smooth is NOT blocked by
+                                                      that run's retained job
+    testTheDeviceRunsRetainedJobIsCompleteAndReadable
+
+  Executed 4 tests, with 4 failures
+
+
+=== AFTER (this branch) ===
+
+  DeviceRunEntryGateTests    4 tests, 0 failures
+  VariantEntryGatingTests   16 tests, 0 failures
+  VariantRetentionTests     15 tests, 0 failures
+
+  Full package: the only remaining failures are the three pre-existing 3MF
+  tests, which fail in this worktree because build_core.sh reported
+    "==> lib3mf: (none) — macOS slice is 3MF-free"
+  (the known worktree lib3mf provisioning gap; unrelated to this task, and
+  untouched by it):
+    AppModelTests.testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance
+    AppModelTests.testReopenedThreeMFProjectReimportsTheStlWorkingCopy
+    AppModelTests.testThreeMFImportOptimisesOnDeviceEndToEnd
+
+
+=== CORE SUITE (the one CI actually runs) ===
+
+Full suite on this branch, macOS, Release, OCCT+Eigen via Homebrew:
+
+  cmake -S core -B build -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="$(brew --prefix opencascade);$(brew --prefix eigen)"
+  cmake --build build -j8 && ctest --test-dir build --output-on-failure --no-tests=error
+
+  Test #17: app_core_capability_mirror ..........   Passed   0.20 sec
+  ...
+  99/99 Test #99: mesh_job ......................   Passed   6.82 sec
+
+  100% tests passed out of 99
+  Total Test time (real) = 1263.53 sec
+
+`ctest -N` on that same build tree lists `Test #17: app_core_capability_mirror`
+among `Total Tests: 99`, so the new target ran INSIDE that green run — not only
+as the standalone invocation recorded in mirror_test_before_after.txt.
+
+New ctest target `app_core_capability_mirror` — see mirror_test_before_after.txt.
+Against the merged broken state (ce4e181): 4 checks, 3 FAILURES, exit 1.
+Against this branch:                        4 checks, 0 failures, exit 0.
+It needs no OCCT, no Eigen and no Swift toolchain, so it runs on the existing
+Linux runner and would have failed PR 285 at merge time.

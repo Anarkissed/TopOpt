@@ -179,8 +179,14 @@ public enum VariantEntry {
             if f.machine.isThisDevice { out.append(.computedOnDevice) }
             else if f.reattached { out.append(.jobDocumentNotRecorded) }
             else { out.append(.runPredatesDesignStore) }
-        } else if f.jobFacts.declaresDesignBox {
-            // Only meaningful once there IS a retained job to read it from.
+        } else if LatticeCoreCapability.designBoxRefused,
+                  f.jobFacts.declaresDesignBox {
+            // Only meaningful once there IS a retained job to read it from — and
+            // only while CORE actually refuses it. Before the device-failure task
+            // this branch did not consult the capability at all, so the constant
+            // `LatticeCoreCapability.designBoxRefused` documented a remedy ("drop
+            // it when core stops refusing") that would have changed nothing a user
+            // can see. The mirror now genuinely mirrors.
             out.append(.designBoxRun)
         }
         if f.modelPath?.isEmpty ?? true { out.append(.modelFileMissing) }
@@ -234,39 +240,61 @@ public struct ResultsReplacementPrompt: Equatable, Sendable, Identifiable {
 
 // MARK: - the core capability this gate mirrors
 
-/// WHY THE DESIGN-BOX BLOCK EXISTS, AND WHEN IT MUST GO.
+/// WHAT CORE ACTUALLY REFUSES TODAY, AND THE ONE PLACE THE APP SAYS IT.
 ///
-/// The app refuses a lattice-under-design-box configuration because the CORE
-/// refuses it: `run_job.cpp` throws on both the optimize+lattice pre-flight and in
-/// `lattice_variant_job`, because the certification load case cannot be
-/// reconstructed on a domain-expanded grid. This is a MIRROR of a core rule, not
-/// an app policy — so it is stated in one place, with the core's own words, and a
-/// test reads `core/src/cli/run_job.cpp` and fails the moment core stops refusing.
-/// When the concurrent design-box-recertification task lands the capability, that
-/// test goes red and this constant is what changes.
+/// THE FAILURE THIS TYPE NOW CARRIES THE SCAR OF (task
+/// 2026-08-03-retention-designbox-device-failure). PR 284 wrote this mirror while
+/// core still threw "lattice certification does not support a design box" from
+/// both the optimize+lattice pre-flight and `lattice_variant_job`, and armed a
+/// source-reading test to go red the day core dropped it. PR 285 dropped it the
+/// same evening. The test DID go red — and nobody saw, because CI is `core-linux`
+/// only and has never built the app package. So the app spent both PRs telling the
+/// maintainer "the core refuses to lattice it" about a core, in that same binary,
+/// that certifies it happily.
+///
+/// Core's remaining rule is much narrower, and it is about GRADING, not the design
+/// box: a graded plan picks its cell set before the added-material policy runs, so
+/// a graded design-box run could emit struts into cells the certificate calls
+/// solid (`run_job.cpp`, both the run_job pre-flight and `lattice_variant_job`).
+/// UNIFORM lattice under a design box is supported and tested — that is exactly
+/// what PR 285 built.
 public enum LatticeCoreCapability {
-    /// The core still refuses lattice work on a design-box run.
-    public static let designBoxRefused = true
+    /// Does core still refuse ALL lattice work on a design-box run? It does not —
+    /// PR 285 removed the blanket refusal (`resolve_design_domain` now does the
+    /// remap the refusal was standing in for). Kept as the switch the variant
+    /// entry gate consults, so a future core that re-refuses is one edit away.
+    public static let designBoxRefused = false
 
-    /// The distinctive phrase the core refusal carries, as the source-reading test
-    /// looks for it.
+    /// The blanket refusal's distinctive phrase. Core must NO LONGER carry it; the
+    /// source-reading test asserts that, so a revert in core turns the app red
+    /// instead of silently making this constant a lie again.
     public static let designBoxRefusalPhrase =
         "lattice certification does not support a design box"
 
-    /// The sentence the app shows when the CURRENT setup is a lattice run with a
-    /// design box — the configuration the maintainer built on the lattice page and
-    /// only discovered was impossible when Optimize came back refused.
+    /// The refusal core DOES still carry, as the source-reading test looks for it.
+    /// A RAW string: the test greps `run_job.cpp`'s SOURCE TEXT, where the quotes
+    /// around the two JSON keys are C++ escapes and appear as backslash-quote.
+    public static let gradedDesignBoxRefusalPhrase =
+        #"a \"grading\" block is not yet supported together with a \"design_box\""#
+
+    /// The sentence the app shows when the CURRENT setup is a GRADED lattice run
+    /// with a design box — the one configuration core still refuses.
     public static let liveConflictReason =
-        "a lattice run can’t use a design box — the certification load case can’t "
-        + "be rebuilt on the expanded grid, so the job is refused. Turn off the "
-        + "design box, or turn off lattice mode"
+        "a graded lattice can’t use a design box — the grading law picks its cells "
+        + "before the added-material policy runs, so the job is refused. Switch "
+        + "density to uniform, or turn off the design box"
 
     /// Whether the CURRENT project setup would be refused. Live state on purpose:
     /// this gates a job built from live state, unlike the variant entries above,
     /// which gate work on a run that already happened.
+    ///
+    /// `graded` is REQUIRED rather than defaulted: it is the fact that decides the
+    /// verdict, and a default would let a caller inherit the wrong answer in
+    /// silence — which is the shape of the failure this whole type is a scar of.
     public static func liveConflict(latticeEnabled: Bool,
-                                    designBoxActive: Bool) -> String? {
-        guard designBoxRefused, latticeEnabled, designBoxActive else { return nil }
+                                    designBoxActive: Bool,
+                                    graded: Bool) -> String? {
+        guard latticeEnabled, designBoxActive, graded else { return nil }
         return liveConflictReason
     }
 }

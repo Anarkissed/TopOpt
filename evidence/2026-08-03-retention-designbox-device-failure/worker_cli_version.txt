@@ -1,0 +1,3 @@
+topopt-cli version=0.1.0 fingerprint=ce4e181a8535
+-rwxr-xr-x@ 1 nadim  staff  2197000 Aug  2 01:08 /Users/nadim/dev/TopOpt/TopOpt/core/build/topopt-cli
+strings hits for removed refusal: 0

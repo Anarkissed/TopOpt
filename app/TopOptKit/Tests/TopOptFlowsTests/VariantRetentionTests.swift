@@ -375,12 +375,12 @@ final class VariantRetentionTests: XCTestCase {
 
     // MARK: - AJ4 · the retained job decides, never the live one
 
-    /// The design-box question is asked of the RETAINED document. Both directions
-    /// are asserted, because each failure is a different real bug:
-    ///   * live box, retained none  → the variant IS latticeable (a wrongly
-    ///     disabled button is its own failure);
-    ///   * live none, retained box  → the variant is NOT (the maintainer's exact
-    ///     sequence: removing the box does not make a boxed run latticeable).
+    /// The design-box question is still asked of the RETAINED document — that half
+    /// of AJ4 is structural and unchanged. What changed is the ANSWER: PR 285
+    /// taught core to certify a design-box run, so NEITHER retained state disables
+    /// the entry any more (device-failure task). The test keeps asserting that the
+    /// fact is read from the run's own document, and now also pins the verdict that
+    /// the app shipped wrong for two PRs.
     func testTheDesignBoxVerdictComesFromTheRetainedJobNotTheLiveSetup() {
         func facts(retainedBox: Bool) -> VariantEntryFacts {
             VariantEntryFacts(
@@ -389,13 +389,21 @@ final class VariantRetentionTests: XCTestCase {
                 retainedDesign: Data([1]), runGeneratedLattice: false,
                 modelPath: "/tmp/part.stl", workerSelected: true, runInFlight: false)
         }
+        // The FACT is read from the retained document, in both directions.
+        XCTAssertTrue(facts(retainedBox: true).jobFacts.declaresDesignBox,
+                      "AJ4: the box is read from the run's OWN document")
+        XCTAssertFalse(facts(retainedBox: false).jobFacts.declaresDesignBox)
+
+        // And neither answer blocks the entry, because core runs both.
         XCTAssertTrue(VariantEntry.lattice(facts(retainedBox: false)).enabled,
                       "AJ4: a run solved WITHOUT a box stays latticeable no matter "
                       + "what the workspace is set to now")
         let boxed = VariantEntry.lattice(facts(retainedBox: true))
-        XCTAssertFalse(boxed.enabled)
-        XCTAssertEqual(boxed.reason, RelatticeUnavailable.designBoxRun.reason)
-        XCTAssertTrue(try XCTUnwrap(boxed.reason).contains("design box"))
+        XCTAssertTrue(boxed.enabled,
+                      "core certifies a design-box run since PR 285 — the app "
+                      + "refusing it IS the device failure: " + (boxed.reason ?? "—"))
+        XCTAssertFalse(boxed.allReasons
+            .contains(RelatticeUnavailable.designBoxRun.reason))
     }
 
     /// The structural half of AJ4, in the shape PR 274's Z-bars and PR 279's AE3
