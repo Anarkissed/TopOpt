@@ -1,0 +1,62 @@
+AN END-TO-END GROWTH RUN THROUGH topopt-cli (task 2026-08-03-growth-ladder)
+
+job: l-bracket.step @ res 24, anchors = the two O5 bores, load faces 2+5 at
+     50 N -Z, loads.minimize_plastic = FALSE, and NO design box drawn.
+
+== the run log + stdout ==
+  [loadcase] load-group 0: faces=2 |F|=50N voxels_tagged=746 status=ok
+  [loadcase] warm_start_inherit=1 mode=load-case
+  [loadcase] ladder=GROWTH rungs=[1.55,1.25,1.10] anchor_pad=1 — add as little plastic as possible to reach the required margin
+  [loadcase] growth design box AUTO-DERIVED (none drawn): min=(-32.5,-22.5,-2.5) max=(32.5,22.5,62.5) mm spacing=2.5
+  model: l-bracket.step (10 B-rep faces, 2 fixture faces matched)
+  ladder: GROWTH [1.55, 1.25, 1.10 x the part] — add as little plastic as possible to reach the required margin
+  variants: 3 evaluated, 3 accepted
+    vf 1.55: margin 118, accepted
+          +22.82 g added (1178 of 3320 printed voxels outside the part = 35.5%, 1.841e+04 mm^3)
+    vf 1.25: margin 85, accepted
+          +10.11 g added (522 of 2664 printed voxels outside the part = 19.6%, 8156 mm^3)
+    vf 1.10: margin 60, accepted
+          +3.797 g added (196 of 2338 printed voxels outside the part = 8.4%, 3062 mm^3)
+  recommended: +10% (vf 1.10) — the SMALLEST addition that passes: +3.797 g, effective margin 60.03 >= 1.5
+  report: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/growth/report.json
+  mesh: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/growth/variant_155.stl
+  mesh: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/growth/variant_125.stl
+  mesh: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/growth/variant_110.stl
+  run_info: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/growth/run_info.json
+  iterations: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/growth/iterations.csv
+
+== loadcase.json — the receipt SAYS the box was derived for the user ==
+  ladder_mode                      "growth"
+  ladder_meaning                   "add as little plastic as possible to reach the required margin; the recommendation is the SMALLEST addition that passes"
+  growth_design_box_auto_derived   true
+  growth_design_box_mm             {"min": [-32.5, -22.5, -2.5], "max": [32.5, 22.5, 62.5]}
+  growth_design_box_note           "no design box was drawn, so a MINIMAL one was derived from the part's bounding box \u2014 growth needs somewhere to go. Material outside the imported part was grown into THIS volume."
+  growth_anchor_pad                true
+
+== report.json — the added-material accounting, per variant ==
+  vf 1.5500  printed  3320 =  2142 inside + 1178 outside (35.5% outside)
+             net added  +22.824 g /   +18406.2 mm^3   outside  22.824 g /   18406.2 mm^3   saturated=False
+             volume_saved_fraction -0.5500  (NEGATIVE — this run ADDS)
+  vf 1.2437  printed  2664 =  2142 inside +  522 outside (19.6% outside)
+             net added  +10.114 g /    +8156.2 mm^3   outside  10.114 g /    8156.2 mm^3   saturated=False
+             volume_saved_fraction -0.2437  (NEGATIVE — this run ADDS)
+  vf 1.0915  printed  2338 =  2142 inside +  196 outside (8.4% outside)
+             net added   +3.797 g /    +3062.5 mm^3   outside   3.797 g /    3062.5 mm^3   saturated=False
+             volume_saved_fraction -0.0915  (NEGATIVE — this run ADDS)
+
+== run_info.json ==
+  ladder          [1.55, 1.25, 1.1]
+  ladder_mode     growth
+  has_design_box  True   (DERIVED — the job declared none)
+
+== RE-CERTIFICATION of the +10% variant (the auto-derived box is reconstructed,
+   not remembered — build_production_loadcase is called by the analyze path too) ==
+  analyze: mesh /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/growth/variant_110.stl (fixed design, ONE analysis solve, no optimization)
+    peak stress: 0.7434 MPa   worst-case margin: 73.99 (required 1.5)
+    load case: declared external load
+    verdict: ACCEPTED
+    voxel mass: 47.55 g   mesh mass: 44.29 g
+    min-feature violations: 87
+  report: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/agrowth/analysis_report.json
+  provenance: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/agrowth/analysis.json
+  fields: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-material-forbidden-interval-265383/53bf8c0c-f488-46c8-8a18-b22e04982686/scratchpad/g1/agrowth/fields.bin

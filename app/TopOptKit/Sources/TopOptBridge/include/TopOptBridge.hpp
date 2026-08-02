@@ -317,6 +317,30 @@ struct OptimizeVariant {
   // recommendation inside was priced by gate_margin_effective, the expression the
   // verdict itself came from.
   std::string diagnosis_json;
+
+  // ── WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) ────────
+  // On a GROWTH run this is the HEADLINE — "how much plastic did you add, and
+  // where" is the whole answer the user unticked "minimize plastic" to get — so
+  // it crosses the bridge as data rather than being re-derived in Swift from a
+  // fraction. The core's AddedMaterialReport, verbatim.
+  //
+  // `added_material_evaluated` is false on every REDUCTION run (and every run
+  // predating this task), and then every field below is 0 and means nothing.
+  bool added_material_evaluated = false;
+  int64_t added_printed_voxels = 0;   // printed voxels of this variant, total
+  int64_t added_inside_part = 0;      //   ... inside the ORIGINAL part envelope
+  int64_t added_outside_part = 0;     //   ... OUTSIDE it: the material GROWN
+  int64_t added_part_solid_voxels = 0;  // the part's own solid count (denominator)
+  double added_outside_fraction = 0.0;  // outside / printed
+  double added_outside_volume_mm3 = 0.0;
+  double added_net_volume_mm3 = 0.0;    // printed - part (NEGATIVE if it shrank)
+  double added_outside_mass_grams = 0.0;
+  double added_net_mass_grams = 0.0;
+  // The growth rung asked for more material than the design box could hold, so it
+  // ran at "fill the box" instead of at the fraction its line requests. Not a
+  // strength verdict and it does not stop the ladder — but the UI must not read
+  // the achieved fraction as though the request had been honoured.
+  bool growth_target_saturated = false;
 };
 
 struct OptimizeResult {
@@ -330,6 +354,14 @@ struct OptimizeResult {
   // A RECOMMENDATION. `variants[i].accepted` above is each rung's verdict for the
   // orientation ACTUALLY USED, and nothing in this string can change it.
   std::string build_orientation_json;
+  // WHICH LADDER RAN (task 2026-08-03-growth-ladder). false = REDUCTION ("remove
+  // as much plastic as possible while holding the required margin", recommending
+  // the LIGHTEST rung that passes); true = GROWTH ("add as little plastic as
+  // possible to reach the required margin", recommending the SMALLEST ADDITION
+  // that passes). The two ladders optimize for opposite things and their variant
+  // tables look alike, so the results screen must NAME the mode rather than let
+  // the user infer it from the numbers.
+  bool growth_ladder = false;
   bool stopped_on_margin = false;
   bool cancelled = false;
   int32_t accepted_count = 0;  // report.variants.size()

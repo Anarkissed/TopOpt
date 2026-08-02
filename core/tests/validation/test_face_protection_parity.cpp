@@ -116,11 +116,22 @@ int main() {
   const int plane = first_plane(model);
   CHECK(plane >= 0, "l-bracket exposes a planar face to protect");
 
-  // ── (1) THE ONE RULE: no protection => empty overlay + empty reports. ─────
+  // ── (1) THE ONE RULE: no protection => no reports, and the overlay is the
+  //        ANCHOR PAD and nothing else.
+  //
+  // This used to read "no protection + no pad => the overlay is EMPTY", isolating
+  // the protection by setting minimize_plastic = false, which used to mean "no
+  // anchor pad". Task 2026-08-03-growth-ladder ended that coupling on purpose and
+  // by measurement (loadcase.hpp kGrowthPathAnchorPad): the pad is a safety
+  // feature, it is built in BOTH modes now, and there is no mode with no pad. So
+  // the rule is stated the way it is actually true — an empty protection list
+  // contributes NOTHING — and checked as a DIFFERENCE against the pad baseline
+  // below, which is a stronger statement than the old count coincidence was.
   ProductionLoadCase lc_none = make_load_case(model, /*minimize_plastic=*/false);
   ProductionRunSetup s_none = build_production_loadcase(model, resolution, lc_none);
-  CHECK(s_none.options.design_mask.empty(),
-        "no protection + no pad => design_mask overlay is empty");
+  const std::size_t pad_only = count_frozen_solid(s_none.options.design_mask);
+  CHECK(pad_only > 0,
+        "no protection => the overlay is the anchor pad alone, and it is real");
   CHECK(s_none.face_protection_reports.empty(),
         "no protection declared => no face-protection reports");
 
@@ -142,9 +153,46 @@ int main() {
           "depth_voxels == round(depth_mm / spacing), floored at 1");
     CHECK(!rep.thinner_than_depth,
           "a 5mm skin on a thicker face is NOT flagged thinner-than-depth");
-    // No pad on this path, so design_mask's FrozenSolid count IS the protection.
-    CHECK(count_frozen_solid(s_prot.options.design_mask) == rep.voxels_frozen,
-          "design_mask carries exactly the reported frozen-skin voxels");
+    // THE OVERLAY IS EXACTLY (anchor pad) ∪ (this protection's own skin) — an
+    // exact SET equality, checked voxel by voxel, not a count coincidence. The
+    // protection's own skin is rebuilt here through the SAME primitive the builder
+    // uses (mask_step_face at the reported depth), so the assertion binds on the
+    // real footprint rather than on a number the builder also produced.
+    topopt::DesignMask own = topopt::make_active_mask(s_prot.grid);
+    const std::size_t own_frozen = topopt::mask_step_face(
+        s_prot.grid, model, plane, MaskValue::FrozenSolid, rep.depth_voxels, own);
+    CHECK(own_frozen == rep.voxels_frozen,
+          "the report's count IS the face's own footprint x depth ∩ part solid");
+    CHECK(s_prot.options.design_mask.size() == s_none.options.design_mask.size() &&
+              own.size() == s_prot.options.design_mask.size(),
+          "the pad-only and protected overlays cover the same grid");
+    bool exact_union = s_prot.options.design_mask.size() == own.size() &&
+                       s_none.options.design_mask.size() == own.size();
+    if (exact_union)
+      for (std::size_t i = 0; i < own.size(); ++i) {
+        const bool want = s_none.options.design_mask[i] == MaskValue::FrozenSolid ||
+                          own[i] == MaskValue::FrozenSolid;
+        if ((s_prot.options.design_mask[i] == MaskValue::FrozenSolid) != want) {
+          exact_union = false;
+          break;
+        }
+      }
+    CHECK(exact_union,
+          "design_mask is EXACTLY the anchor pad ∪ the reported frozen skin — the "
+          "protection adds its own voxels and nothing else");
+    // The overlay grows by AT MOST the protection's own footprint, and by less
+    // when the pad already holds part of it. On THIS fixture it grows by ZERO: the
+    // load group covers every planar face, so the protected face is also a
+    // RETAINED LOAD face, whose 3-voxel pad already subsumes the 2-voxel skin. That
+    // is the correct behaviour and worth stating — the exact-union check above is
+    // what carries the content, and a "must grow" assertion here would be asserting
+    // a property of this fixture's face choice, not of the feature.
+    const std::size_t prot_total = count_frozen_solid(s_prot.options.design_mask);
+    CHECK(prot_total >= pad_only && prot_total <= pad_only + rep.voxels_frozen,
+          "the protection grows the overlay by at most its own footprint");
+    std::printf("[124] overlay: pad-only=%zu  with-protection=%zu  (+%zu of the "
+                "%zu-voxel skin; the rest was already in the pad)\n",
+                pad_only, prot_total, prot_total - pad_only, rep.voxels_frozen);
   }
   CHECK(!s_prot.options.design_mask.empty(),
         "a declared protection builds a non-empty FrozenSolid overlay");

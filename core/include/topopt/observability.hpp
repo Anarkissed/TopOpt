@@ -525,6 +525,14 @@ struct RunInfo {
   double wall_thickness_mm = 0.0;
   bool has_design_box = false;
   std::vector<double> ladder;
+  // WHICH LADDER THIS RUN WALKED (task 2026-08-03-growth-ladder): "reduction"
+  // (every rung <= 1.0 — remove as much plastic as possible while holding the
+  // required margin) or "growth" (every rung > 1.0 — add as little plastic as
+  // possible to reach it). Derived from `ladder` itself, so it can never disagree
+  // with the rungs beside it, and recorded because a run record that carries the
+  // numbers but not what they MEAN leaves the reader to infer the mode — which is
+  // exactly the silence bar G7 closes.
+  std::string ladder_mode = "reduction";
   long long created_wall_ms = 0;  // run-info write time (epoch ms)
   // Capture config echo (what observability this run captured).
   bool iteration_csv = false;

@@ -234,6 +234,12 @@ RunInfo build_run_info(const JobDescription& job,
   info.wall_thickness_mm = knockdown_spec_for(options).wall_thickness_mm;
   info.has_design_box = options.design_box.has_value();
   info.ladder = options.volume_fraction_ladder;
+  // Task 2026-08-03-growth-ladder — derived from the rungs themselves (a growth
+  // ladder is one whose rungs exceed 1.0), so the name and the numbers beside it
+  // cannot drift apart.
+  info.ladder_mode = (!info.ladder.empty() && info.ladder.front() > 1.0)
+                         ? "growth"
+                         : "reduction";
   info.created_wall_ms = wall_clock_ms();
   info.iteration_csv = obs.iteration_csv;
   info.density_snapshots = obs.density_snapshots;
@@ -2137,7 +2143,42 @@ std::string loadcase_receipt_json(const JobDescription& job,
            (f.thinner_than_depth ? "true" : "false") + "}";
       s += (i + 1 < setup->face_protection_reports.size()) ? ",\n" : "\n";
     }
-    s += "  ]\n";
+    s += "  ]";
+    // ── WHICH LADDER, AND WHAT IT NEEDED (task 2026-08-03-growth-ladder) ─────
+    // `ladder_mode` is emitted in BOTH modes, deliberately: NAMING THE MODE IS
+    // THE POINT (bar G7). Unticking "minimize plastic" used to change the search,
+    // the ladder and the anchor pad with nothing anywhere saying so, and a
+    // document that names the mode only when it is unusual is exactly the silence
+    // this closes. It costs the loadcase RECEIPT one key in reduction mode; the
+    // PRODUCT (report.json and the exported meshes) is byte-identical either way.
+    //
+    // The growth block adds the two facts that used to travel silently with the
+    // checkbox: whether a design box was DERIVED for the user (material grown
+    // into a domain they never drew), and whether the anchor pad was frozen (the
+    // safety feature the checkbox used to drop).
+    if (setup->growth_ladder) {
+      s += ",\n  \"ladder_mode\": \"growth\",\n";
+      s += "  \"ladder_meaning\": \"add as little plastic as possible to reach "
+           "the required margin; the recommendation is the SMALLEST addition "
+           "that passes\",\n";
+      s += "  \"growth_design_box_auto_derived\": " +
+           std::string(setup->growth_box_auto_derived ? "true" : "false") + ",\n";
+      if (setup->growth_box_auto_derived) {
+        const DesignBox& b = setup->growth_box;
+        s += "  \"growth_design_box_mm\": {\"min\": [" + json_num(b.min.x) +
+             ", " + json_num(b.min.y) + ", " + json_num(b.min.z) +
+             "], \"max\": [" + json_num(b.max.x) + ", " + json_num(b.max.y) +
+             ", " + json_num(b.max.z) + "]},\n";
+        s += "  \"growth_design_box_note\": \"no design box was drawn, so a "
+             "MINIMAL one was derived from the part's bounding box — growth "
+             "needs somewhere to go. Material outside the imported part was "
+             "grown into THIS volume.\",\n";
+      }
+      s += "  \"growth_anchor_pad\": " +
+           std::string(setup->growth_anchor_pad ? "true" : "false") + "\n";
+    } else {
+      s += ",\n  \"ladder_mode\": \"reduction\"\n";
+    }
   } else {
     s += "  \"load_source\": \"self_weight\",\n";
     s += "  \"fixture_face_ids\": [";
@@ -3573,6 +3614,14 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       echo.load_group_reports = setup.load_group_reports;
       echo.clearance_reports = setup.clearance_reports;
       echo.face_protection_reports = setup.face_protection_reports;
+      // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
+      // onto the echo too, or the receipt would silently report a growth run as a
+      // reduction one (the echo is a hand-copied subset, so every new setup field
+      // has to be added here as well as there).
+      echo.growth_ladder = setup.growth_ladder;
+      echo.growth_box_auto_derived = setup.growth_box_auto_derived;
+      echo.growth_box = setup.growth_box;
+      echo.growth_anchor_pad = setup.growth_anchor_pad;
       loadcase_receipt = loadcase_receipt_json(job, &echo,
                                                result.fixture_face_ids, 0, bcs);
     }

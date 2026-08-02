@@ -2356,15 +2356,19 @@ public struct WorkspacePlaceholder: View {
         .foregroundStyle(DS.Color.textPrimary.color)
     }
 
-    /// The "Minimize plastic" toggle chip (D: pursue material reduction). Off with
-    /// forces set → optimize just handles the forces; on → the reduction ladder.
+    /// The "Minimize plastic" toggle chip. ON → the REDUCTION ladder (remove as much
+    /// plastic as possible while holding the margin). OFF → the GROWTH ladder (add as
+    /// little as possible to reach it) — task 2026-08-03-growth-ladder. The chip
+    /// shows the MODE it is currently in, not just the setting's name, because off
+    /// is a mode of its own now and not the absence of one.
     private var minimizePlasticChip: some View {
-        Button { project.minimizePlastic.toggle() } label: {
+        let mode = LadderMode.of(minimizePlastic: project.minimizePlastic)
+        return Button { project.minimizePlastic.toggle() } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "circle")
+                Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle((project.minimizePlastic ? DS.Color.accent : DS.Color.textTertiary).color)
-                Text("Minimize plastic").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                Text(mode.title).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
             }
             .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
             .background(Capsule().fill(DS.Surface.bar.color)
@@ -4660,12 +4664,17 @@ public struct WorkspacePlaceholder: View {
                             latticeRoleGroups: latticeRoleGroupIDs) {
             return "finish the pending group"
         }
+        // NAME THE MODE, IN BOTH MODES (task 2026-08-03-growth-ladder, bar G7).
+        // With the box off this line used to name only the load case, so the one
+        // place the user sees before pressing Optimize said nothing about the fact
+        // that the run would GROW material rather than remove it.
+        let mode = LadderMode.of(minimizePlastic: project.minimizePlastic)
         let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
         if a > 0 && l > 0 {
             let base = "\(a) anchor\(a > 1 ? "s" : "") · \(l) load\(l > 1 ? "s" : "")"
-            return project.minimizePlastic ? "minimize plastic · " + base : base
+            return mode.summaryToken + " · " + base
         }
-        if project.minimizePlastic { return "minimize plastic · self-weight" }
+        if project.minimizePlastic { return mode.summaryToken + " · self-weight" }
         return "needs an anchor and a load"
     }
 

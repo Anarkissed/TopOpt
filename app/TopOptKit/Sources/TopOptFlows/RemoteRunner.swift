@@ -1446,7 +1446,15 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
                         computedRemotely: true,
                         timing: timing,
                         latticeReport: latticeReport,
-                        buildOrientationJSON: buildOrientationJSON)
+                        buildOrientationJSON: buildOrientationJSON,
+                        // WHICH LADDER RAN (task 2026-08-03-growth-ladder). A LAN
+                        // run's report carries the mode in the ONE place that
+                        // cannot lie about it: a variant only carries an
+                        // `added_material` block when the core measured one, and
+                        // the core measures one only on a growth ladder. Derived
+                        // from the variants rather than parsed from a separate
+                        // field so the mode and the numbers can never disagree.
+                        growthLadder: variants.contains { $0.addedMaterial != nil })
     }
 
     private func makeVariant(streamed s: StreamedVariant?,
@@ -1495,7 +1503,33 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             // WHY this rung gated as it did (handoff 2026-08-02-gate-diagnosis-
             // recommendations). The SAME object the on-device bridge returns, from
             // the same core emitter, through the same decoder.
-            diagnosis: (rv?["diagnosis"] as? [String: Any]).flatMap(GateDiagnosis.decode))
+            diagnosis: (rv?["diagnosis"] as? [String: Any]).flatMap(GateDiagnosis.decode),
+            // WHERE THIS RUNG'S PLASTIC IS (task 2026-08-03-growth-ladder) — the
+            // core's own `added_material` block off report.json, the SAME document
+            // and the same numbers the on-device bridge hands over. Absent on every
+            // reduction run (core emits it only on a growth ladder) → nil, and the
+            // results screen shows the savings headline exactly as before.
+            addedMaterial: RemoteRun.decodeAddedMaterial(rv))
+    }
+
+    /// Decode one variant's `added_material` object from report.json. nil when the
+    /// block is absent — a REDUCTION run, or any run predating the growth ladder.
+    /// Defensive on every field: a malformed block degrades to nil rather than to a
+    /// half-populated record that would render as confident wrong numbers.
+    static func decodeAddedMaterial(_ rv: [String: Any]?) -> AddedMaterial? {
+        guard let a = rv?["added_material"] as? [String: Any],
+              let printed = a["printed_voxels"] as? Int,
+              let inside = a["inside_part"] as? Int,
+              let outside = a["outside_part"] as? Int else { return nil }
+        return AddedMaterial(
+            printedVoxels: printed, insidePart: inside, outsidePart: outside,
+            partSolidVoxels: a["part_solid_voxels"] as? Int ?? 0,
+            outsideFraction: a["outside_fraction"] as? Double ?? 0,
+            outsideVolumeMM3: a["outside_volume_mm3"] as? Double ?? 0,
+            netAddedVolumeMM3: a["net_added_volume_mm3"] as? Double ?? 0,
+            outsideMassGrams: a["outside_mass_grams"] as? Double ?? 0,
+            netAddedMassGrams: a["net_added_mass_grams"] as? Double ?? 0,
+            targetSaturated: a["growth_target_saturated"] as? Bool ?? false)
     }
 
     /// Minimal binary-STL reader → (interleaved xyz floats, triangle-soup indices).

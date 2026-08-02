@@ -315,4 +315,92 @@ BuildOrientationBakePlan resolve_bake_plan(const MinimizePlasticOptions& opts);
 // headless run may want a specific sweep); the app always uses this one.
 std::vector<double> production_reduction_ladder();
 
+// Task 2026-08-03-growth-ladder — THE MIRROR LADDER, for the run that is too WEAK
+// rather than too heavy: "minimize plastic" OFF.
+//
+// WHAT IT REPLACES. OFF used to be `{0.9}` — ONE conservative variant, the code's
+// own comment called it "the single conservative variant". No search, so the run
+// could only ever answer "here is a 0.9-of-the-part design, take it or leave it".
+// When the part was too weak the app had nothing to offer but "raise infill or use
+// a stronger material"; it could never say "add 15% here and it passes".
+//
+// WHAT IT MEANS. Unticking "minimize plastic" is the user saying: you may grow MORE
+// plastic to reach the strength I asked for — but as little as possible. So the
+// rungs sit ABOVE the ORIGINAL PART's volume, and minimize_plastic's existing walk
+// (evaluate in ladder order, stop at the first rung under margin_stop, recommend the
+// LAST ACCEPTED) already means exactly "the smallest addition that passes" once the
+// rungs are ordered DESCENDING. That ordering is the whole trick: the growth ladder
+// is the reduction ladder read in the mirror, so it reuses the walk, the stop rule,
+// the recommendation rule, the streaming, the warm start and the floor UNCHANGED.
+// Nothing about the search was rebuilt (see the BLOCKED-STOP in the handoff: growth
+// IS expressible in the ladder machinery, and this is how).
+//
+// THE RUNGS — +55% / +25% / +10%, i.e. {1.55, 1.25, 1.10}. The maintainer proposed
+// +10/+25/+55 and it is adopted as proposed, because the spacing is RIGHT for this
+// direction and (measurably) not the reduction ladder's:
+//
+//   * production_reduction_ladder() is near-UNIFORM in log space away from 1.0 —
+//     ln(1/vf) = 0.386 / 0.654 / 0.968 / 1.347, steps 0.386, 0.268, 0.313, 0.379.
+//     That is right for REDUCTION, where every rung down is a win in itself, so the
+//     ladder wants a WIDE span and does not care much where between two rungs the
+//     true limit sits.
+//   * Growth has the OPPOSITE objective: not "how light can this go" but "what is
+//     the SMALLEST addition that clears the gate". The cost of a coarse rung is
+//     paid directly in plastic the user did not need. So the rungs must be FINEST
+//     where the answer most often lies — just above 1.0 — and may coarsen as the
+//     ask grows: ln(vf) = 0.095 / 0.223 / 0.438, steps 0.095, 0.128, 0.215, each
+//     ~1.4-1.7x the one before. Applying the reduction ladder's 0.33-in-log spacing
+//     here would put the first rung at +39%, which quantizes "as little as possible"
+//     into a step four times coarser than the feature is for.
+//   * THREE rungs, not four. A part that needs more than +55% more material is not
+//     a growth problem: at that point the honest answers are the ones the gate
+//     diagnosis already prices (infill, material, orientation, resolution), and a
+//     fourth rung at, say, +100% would spend a full production solve to say so
+//     less usefully. When no rung passes the run reports THAT, with every rung's
+//     numbers, rather than returning the largest — see the handoff's G2.
+//
+// A GROWTH LADDER REQUIRES A DESIGN BOX. Above 1.0 the ladder rung is a target of
+// `vf * part_solid` printed voxels, which is only REACHABLE when there is Active
+// design volume outside the part to grow into. minimize_plastic refuses a
+// >1.0 ladder without one (it would silently redistribute and call it growth);
+// build_production_loadcase derives a minimal box when the user drew none and SAYS
+// SO on ProductionRunSetup. See minimal_growth_design_box below.
+std::vector<double> production_growth_ladder();
+
+// The ladder cap itself (kMaxLadderVolumeFraction) lives in report.hpp — the one
+// header both minimize_plastic and the report schema validator can include — so the
+// optimizer's refusal and the document's range check cannot drift apart.
+
+// The safety factor minimal_growth_design_box applies when sizing an auto-derived
+// growth box: the Active add-region is sized for `headroom x` the material the top
+// rung asks for, because the optimizer must ROUTE the added material (a strut that
+// reaches an anchor is longer than the volume it displaces), not merely store it.
+// 2.0 is deliberately generous — an over-large box costs solve time, an under-large
+// one silently saturates the ladder, and only the second is a wrong ANSWER.
+inline constexpr double kGrowthBoxHeadroom = 2.0;
+
+// Hard stop on the auto-derived box's inflation, in voxels per side, so a
+// pathological part (one solid voxel in a huge grid) cannot ask for an unbounded
+// domain. Reaching it is not an error — the box is simply the largest this function
+// will derive, and the ladder then reports honestly that it saturated.
+inline constexpr int kGrowthBoxMaxInflationVoxels = 64;
+
+// Derive the MINIMAL design box a growth ladder needs (task
+// 2026-08-03-growth-ladder), for the front-end case "the user unticked minimize
+// plastic and drew no box". Growth needs somewhere to go; with no box the run can
+// only REDISTRIBUTE the part's own material, which is not growth and must never be
+// presented as it.
+//
+// The box is the part grid's own bounding box, inflated by the smallest WHOLE
+// number of voxels per side that supplies `headroom x (top_rung - 1) x part_solid`
+// voxels of add-region (expand_design_domain tags every in-box non-part voxel
+// Interior/Active, so the part bbox's own void counts). Capped at
+// kGrowthBoxMaxInflationVoxels per side.
+//
+// Deterministic and pure: same grid + same arguments -> same box, to the bit.
+// Throws std::invalid_argument on a non-positive spacing, a part with no solid
+// voxels, top_rung <= 1, or headroom < 1.
+DesignBox minimal_growth_design_box(const VoxelGrid& part_grid, double top_rung,
+                                    double headroom);
+
 }  // namespace topopt
