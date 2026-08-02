@@ -1261,6 +1261,8 @@ public struct ResultsScreen: View {
         VStack(alignment: .leading, spacing: DS.Space.sm) {
             Spacer()
             streamingChip   // "optimizing more…" sits right above the variant tabs
+            ladderModeCaption   // WHICH ladder these tabs came off (growth-ladder G7)
+            addedMaterialCaption   // the HEADLINE of a growth run: what was added
             massDetailCaption   // honest mesh-vs-voxel mass when they diverge (Open #6)
             HStack(alignment: .bottom, spacing: DS.Space.s) {
                 ForEach(model.tabs, id: \.index) { tab in
@@ -1272,7 +1274,12 @@ public struct ResultsScreen: View {
                                     .font(.system(size: 9, weight: .bold)).tracking(0.6)
                                     .foregroundStyle(DS.Color.okGreen.color)
                             }
-                            Text(tab.savingsLabel)
+                            // "−30%" on a reduction run, "+48%" on a GROWTH one
+                            // (task 2026-08-03-growth-ladder). Read on the savings
+                            // scale a growth variant renders as "−−48%", which is
+                            // both broken and backwards about the thing the user
+                            // asked for.
+                            Text(tab.headlineLabel)
                                 .font(.system(size: active ? 20 : 16, weight: .heavy))
                                 .foregroundStyle(active ? DS.Color.accent.color : DS.Color.textPrimary.opacity(0.85).color)
                             Text(tab.subLabel(active: active))
@@ -1313,6 +1320,47 @@ public struct ResultsScreen: View {
         .padding(.horizontal, DS.Space.xl4)
         .padding(.top, DS.Space.xl4)
         .padding(.bottom, 92)
+    }
+
+    /// WHICH LADDER THESE TABS CAME OFF (task 2026-08-03-growth-ladder, bar G7).
+    /// Always shown, in both modes: the reduction and growth tabs look identical
+    /// and their RECOMMENDATION means the opposite thing in each ("lightest that
+    /// passes" vs "smallest addition that passes"), so a screen that leaves the
+    /// user to infer the mode from the sign of a percentage is the silent mode
+    /// switch this bar exists to close.
+    private var ladderModeCaption: some View {
+        HStack(spacing: DS.Space.s) {
+            Image(systemName: model.ladderMode == .growth
+                  ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
+                .font(.system(size: 11, weight: .semibold))
+            Text(model.ladderModeLine).dsStyle(DS.TypeScale.caption)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundStyle(DS.Color.textSecondary.color)
+        .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+        .background(Capsule().fill(DS.Surface.bar.color)
+            .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+    }
+
+    /// THE HEADLINE OF A GROWTH RUN (task 2026-08-03-growth-ladder, item 5): how
+    /// much plastic the selected variant ADDS, and how much of the object about to
+    /// be printed was never in the model. PR 285 already computed this split for a
+    /// latticed design-box export and buried it in a receipt; on a growth run it is
+    /// the answer to the question the user unticked the box to ask, so it goes on
+    /// the screen. Hidden entirely on a reduction run — the question was never
+    /// asked there, and a zero would answer it wrongly.
+    @ViewBuilder private var addedMaterialCaption: some View {
+        if let line = model.addedMaterialLine {
+            HStack(spacing: DS.Space.s) {
+                Image(systemName: "plus.circle.fill").font(.system(size: 11, weight: .semibold))
+                Text(line).dsStyle(DS.TypeScale.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(DS.Color.textPrimary.color)
+            .padding(.vertical, DS.Space.s).padding(.horizontal, DS.Space.l)
+            .background(Capsule().fill(DS.Surface.bar.color)
+                .overlay(Capsule().strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        }
     }
 
     /// The honest mass readout (Open #6): the exported MESH's mass beside the voxel-

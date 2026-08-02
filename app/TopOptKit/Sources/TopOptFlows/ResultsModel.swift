@@ -360,13 +360,49 @@ public struct ResultVariantVM: Equatable, Sendable {
     /// M5.2b advisory min-feature data (report-only; never gates).
     public let minFeatureViolations: Int
     public let minFeatureWarning: String
-    /// The app's recommendation — the LIGHTEST variant that still clears the safety
-    /// margin for the loads (max plastic saved while safe). Default-selected.
+    /// The app's recommendation. On a REDUCTION run that is the LIGHTEST variant
+    /// that still clears the safety margin (max plastic saved while safe); on a
+    /// GROWTH run it is the SMALLEST ADDITION that clears it (min plastic added to
+    /// become safe). One rule either way — the last accepted rung. Default-selected.
     public let isRecommended: Bool
+
+    /// ── GROWTH (task 2026-08-03-growth-ladder) ─────────────────────────────
+    /// This variant PRINTS MORE than the imported part: it came off the growth
+    /// ladder ("minimize plastic" unticked). The headline then reads "+N%" ADDED
+    /// rather than "−N%" saved — the same number would otherwise render as a
+    /// negative saving, i.e. "−−48%", which is both broken and backwards.
+    public let isGrowth: Bool
+    /// Where this variant's plastic is, when the run measured it (growth only).
+    public let addedMaterial: AddedMaterial?
+    /// The HEADLINE the tab shows: "−30%" saved on a reduction run, "+48%" added on
+    /// a growth run. `headlineNoun` names which it is in one word, so no caller has
+    /// to re-derive the sign's meaning.
+    public var headlineLabel: String { isGrowth ? growthLabel : savingsLabel }
+    public var headlineNoun: String { isGrowth ? "added" : "saved" }
+    /// "+48%" — the material ADDED against the imported part, on the same printed
+    /// count basis the savings label uses.
+    public let growthLabel: String
+    /// Rounded percent of material ADDED (0 on a reduction run).
+    public let growthPercent: Int
 
     /// The tab's sub-line, e.g. "199 g · selected" / "199 g · plastic" (design).
     public func subLabel(active: Bool) -> String {
         "\(massLabel) · \(active ? "selected" : "plastic")"
+    }
+
+    /// The ONE line a growth variant's result reads as, when there is one: how much
+    /// plastic was added and how much of the printed object was never in the model.
+    /// nil on a reduction variant (the question was never asked).
+    public var addedMaterialLine: String? {
+        guard isGrowth, let a = addedMaterial else { return nil }
+        let mass = String(format: "%.1f g", a.netAddedMassGrams)
+        let outside = Int((a.outsideFraction * 100).rounded())
+        var line = "+\(mass) of plastic added · \(outside)% of what prints is "
+            + "new material, outside your model"
+        if a.targetSaturated {
+            line += " · the design box could not hold this step's full ask"
+        }
+        return line
     }
 }
 
@@ -735,6 +771,23 @@ public final class ResultsModel: ObservableObject {
     /// tells them to "re-run it on a Mac worker".
     public var variantProvenanceLabel: String { solvingMachine.label }
 
+    /// WHICH LADDER PRODUCED THESE VARIANTS (task 2026-08-03-growth-ladder).
+    /// From the run's own recorded flag — never the project's CURRENT "minimize
+    /// plastic" setting, which says what the NEXT run would do (the same rule
+    /// `solvingMachine` follows, for the same reason).
+    public private(set) var ladderMode: LadderMode = .reduction
+
+    /// The one line naming the mode, always shown above the variant tabs. The two
+    /// ladders optimize for OPPOSITE things and their tabs look alike, so a screen
+    /// that does not say which one ran leaves the user to infer it from a sign.
+    public var ladderModeLine: String { ladderMode.resultsLine }
+
+    /// THE HEADLINE OF A GROWTH RUN: how much plastic the SELECTED variant adds and
+    /// how much of the object about to be printed was never in the model. nil on a
+    /// reduction run — the question was never asked, and inventing a zero would
+    /// answer it wrongly.
+    public var addedMaterialLine: String? { selected?.addedMaterialLine }
+
     /// Handoff 100 — honest "Keep clear" notes: one line per applied clearance
     /// region (which face + kind, how much it reserved, or "outside the solved area"
     /// when the region missed the grid). Clearance affects the DESIGN (it forbids
@@ -939,6 +992,11 @@ public final class ResultsModel: ObservableObject {
         accepted = acc
         computedRemotely = outcome.computedRemotely
         solvingMachine = SolvingMachine.of(outcome)
+        // Which ladder this run walked (task 2026-08-03-growth-ladder), from the
+        // run's own flag. A STREAMED partial carries it too (the bridge derives it
+        // from the rung), so a live results view never reads a growth rung's
+        // numbers as reduction numbers mid-run.
+        ladderMode = outcome.growthLadder ? .growth : .reduction
         // Only a timing-bearing outcome updates the duration: `apply` also runs for
         // every STREAMED partial (which has no timing yet), and a partial landing
         // after the authoritative final must not erase the run's recorded duration.
@@ -1010,6 +1068,15 @@ public final class ResultsModel: ObservableObject {
     /// in the project / material names collapse to underscores. Falls back to
     /// "variant" when nothing is selected.
     public var exportFilename: String {
+        // Task 2026-08-03-growth-ladder — on a GROWTH variant the savings percent is
+        // NEGATIVE, which would name the file "…--48pct.stl". The filename carries
+        // the number the user is CHOOSING BY, so it carries the growth percent on a
+        // growth run, tagged so the two can never be confused for each other.
+        if let v = selected, v.isGrowth {
+            let proj = ResultsModel.fileToken(projectName, fallback: "part")
+            let mat = ResultsModel.fileToken(materialName, fallback: "material")
+            return "\(proj)-\(mat)-plus\(v.growthPercent)pct.stl"
+        }
         let pct = selected?.savingsPercent ?? 0
         let proj = ResultsModel.fileToken(projectName, fallback: "part")
         let mat = ResultsModel.fileToken(materialName, fallback: "material")
@@ -1019,7 +1086,8 @@ public final class ResultsModel: ObservableObject {
     /// The 80-byte STL header detail naming the variant, e.g.
     /// "MyBracket · PLA · −30% · mm". Kept short so it survives the 80-byte truncation.
     private var exportHeaderDetail: String {
-        let pct = selected?.savingsLabel ?? ""
+        // "−30%" saved, or "+48%" added (task 2026-08-03-growth-ladder).
+        let pct = selected?.headlineLabel ?? ""
         let mat = materialName.isEmpty ? "" : "\(materialName) · "
         return "\(projectName) · \(mat)\(pct) · mm"
     }
@@ -1953,6 +2021,15 @@ public final class ResultsModel: ObservableObject {
         return variants.enumerated().map { i, v in
             let savings = 1 - v.achievedVolumeFraction
             let pct = Int((savings * 100).rounded())
+            // ── GROWTH (task 2026-08-03-growth-ladder) ──────────────────────
+            // A growth rung prints MORE than the part, so `achieved` exceeds 1 and
+            // `savings` goes negative. Read on the reduction scale that renders as
+            // "−−48%": broken, and backwards about the one thing the user asked
+            // for. So the tab flips to "+48% added". The variant is growth iff the
+            // core measured added material for it — the core's own flag, not a
+            // guess from the sign of a fraction.
+            let isGrowth = v.addedMaterial != nil
+            let growthPct = Int(((v.achievedVolumeFraction - 1) * 100).rounded())
             let cm3 = Double(v.supportVolumeVoxels) * voxelVolumeMM3 / 1000.0
             // Handoff 122: mass + support now arrive over the wire (fields.bin) for a
             // remote run too. Gate their labels on the SCALAR BLOCK actually being
@@ -1986,7 +2063,11 @@ public final class ResultsModel: ObservableObject {
                 worstCaseMargin: v.worstCaseMargin * knockdown,
                 minFeatureViolations: v.minFeatureViolations,
                 minFeatureWarning: v.minFeatureWarning,
-                isRecommended: i == recommendedIndex)
+                isRecommended: i == recommendedIndex,
+                isGrowth: isGrowth,
+                addedMaterial: v.addedMaterial,
+                growthLabel: "+\(growthPct)%",
+                growthPercent: growthPct)
         }
     }
 

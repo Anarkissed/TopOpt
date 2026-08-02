@@ -1,0 +1,29 @@
+THE ANCHOR/LOAD PAD ON THE GROWTH PATH — MEASURED, NOT ARGUED
+(task 2026-08-03-growth-ladder, bar G5; kGrowthPathAnchorPad)
+The same growth ladder, same fixture, same load, same rungs: once with
+the kProductionAnchorPadDepthVoxels FrozenSolid pad frozen behind every
+anchor and load face, once without (the pre-task behaviour on this mode).
+
+G5(a) GROWTH LADDER — anchor/load pad ON (kGrowthPathAnchorPad = true)
+  rung  request  achieved   mass_g   added_g  out%   in_plane  interlayer  worst   effective  req    verdict
+  0       1.55    1.4762    1.230   +0.397  67.7   11.6917      7.9494  7.9494     1.6460  1.50  ACCEPTED
+  1       1.25    1.1905    0.992   +0.159  63.0    6.1772      4.6934  4.6934     0.9718  1.50  REJECTED — margin below required
+  part mass = 0.833 g   growth_ladder=1   stopped_on_margin=1
+  RECOMMENDED: rung at 1.55 (+55% of the part) — added +0.397 g, effective margin 1.6460 >= 1.50
+
+G5(b) GROWTH LADDER — anchor/load pad OFF (the pre-task behaviour on this mode)
+  rung  request  achieved   mass_g   added_g  out%   in_plane  interlayer  worst   effective  req    verdict
+  0       1.55    1.4881    1.240   +0.407  78.4   10.7321      5.4407  5.4407     1.1266  1.50  REJECTED — margin below required
+  part mass = 0.833 g   growth_ladder=1   stopped_on_margin=1
+  NO RUNG PASSES. The largest addition on the ladder (+55%) reached effective margin 1.1266 against a required 1.50 — short by 0.3734. Growing is not the lever for this part; the binding term is printed above.
+
+G4 GROWTH IS REAL GROWTH (pad ON) — printed mass vs the part's 0.833 g
+  rung 1.55: printed 1.230 g (+0.397 g, +47.6%), 84 of 124 printed voxels OUTSIDE the part (67.7%), outside volume 672.0 mm^3  -> GREW
+  rung 1.25: printed 0.992 g (+0.159 g, +19.0%), 63 of 100 printed voxels OUTSIDE the part (63.0%), outside volume 504.0 mm^3  -> GREW
+  every rung grew: YES
+
+G5 THE PAD DECISION, PRICED
+                                pad ON      pad OFF   
+  rungs evaluated               2           1         
+  rungs ACCEPTED                1           0         
+  rung 1.55  effective 1.6460 vs 1.1266 (+0.5195)   mass 1.230 vs 1.240 g (-0.010)   verdict ACC vs REJ
