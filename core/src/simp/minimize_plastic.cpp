@@ -49,18 +49,141 @@ Vec3 normalized(const Vec3& v) {
 
 }  // namespace
 
+// --- THE ONE design-domain resolution (pipeline.hpp) -------------------------
+// The expansion + BC/load remap minimize_plastic used to perform inline, lifted
+// so the re-certification paths in run_job call the SAME code rather than a
+// second reconstruction of it (task 2026-08-03-design-box-recertification).
+// minimize_plastic below now calls this; there is no other implementation.
+SolvedDesignDomain resolve_design_domain(const VoxelGrid& part_grid,
+                                         const std::vector<DirichletBC>& bcs,
+                                         const MinimizePlasticOptions& options) {
+  SolvedDesignDomain out;
+  out.expanded = options.design_box.has_value();
+  if (!out.expanded) {
+    // No box: the caller's inputs verbatim. The mask stays EMPTY (the driver
+    // then builds make_active_mask / uses the caller's own design_mask), so
+    // this branch cannot perturb a no-box run.
+    if (!options.design_mask.empty() &&
+        options.design_mask.size() != part_grid.voxel_count())
+      throw std::invalid_argument(
+          "resolve_design_domain: design_mask size != grid.voxel_count()");
+    out.grid = part_grid;
+    out.bcs = bcs;
+    out.external_loads = options.external_loads;
+    return out;
+  }
+
+  // M7.anchor-integrity on the box path (handoff 082): a caller `design_mask` is
+  // the anchor PAD (mask_step_face FrozenSolid, PART-grid indexed; diagnosis 064).
+  // Its validity depends on freeze_imported_part:
+  //   * freeze_imported_part == true (the "add material" feature): the WHOLE import
+  //     is already FrozenSolid and the box builds the mask itself, so a caller pad
+  //     is redundant AND ambiguous — REJECT it, exactly as the pre-082 driver did
+  //     (test_design_domain's add-material contract still throws here).
+  //   * freeze_imported_part == false (whole-domain optimize, the DEFAULT): handoff
+  //     080 made the imported part an Active/REMOVABLE region, so only the 1-voxel
+  //     Load/Fixture BC skin is pinned and the optimizer can carve an anchor boss
+  //     thin. A caller pad is now MEANINGFUL — it re-freezes that N-voxel boss — so
+  //     MERGE it into the expanded mask (below) instead of rejecting it.
+  if (!options.design_mask.empty()) {
+    if (options.freeze_imported_part)
+      throw std::invalid_argument(
+          "minimize_plastic: a caller design_mask is rejected together with a "
+          "design_box when freeze_imported_part is set (the frozen box builds "
+          "the effective mask itself)");
+    if (options.design_mask.size() != part_grid.voxel_count())
+      throw std::invalid_argument(
+          "minimize_plastic: design_mask size != part grid.voxel_count()");
+  }
+  // Align the expanded grid's element dims to a power of two (8 => >= 3
+  // multigrid levels) by appending Empty high-side voxels. The design-box
+  // system is ~1e-9-contrast and ~2M-DOF; without an even-dimensioned grid the
+  // geometric-multigrid hierarchy cannot coarsen (an odd axis makes it bail to
+  // an effectively-hung Jacobi-CG). The padding adds no physics (Empty voxels,
+  // void-gated) and leaves the BC/load remap offset unchanged. See voxel.hpp.
+  const DesignDomain domain = expand_design_domain(
+      part_grid, *options.design_box, options.keep_out_boxes,
+      options.freeze_imported_part, kDesignBoxCoarsenAlign);
+  // MERGE the caller anchor pad into the expanded mask. The pad is indexed on the
+  // PART grid; the expanded grid is LARGER and sits at a whole-voxel offset
+  // (domain.offset_*, the SAME offset remap_node_to_domain applies to the BCs and
+  // loads just below). MERGE RULE: a part voxel the caller marked FrozenSolid
+  // becomes FrozenSolid at its offset location in the expanded mask;
+  // expand_design_domain's Active / FrozenVoid / Empty classification stands
+  // everywhere else. The pad only ADDS keep-in (FrozenSolid) voxels — the sole
+  // value mask_step_face writes — so nothing else is propagated and the box's own
+  // domain is never un-frozen. A pad FrozenSolid voxel always sits on a part-solid
+  // voxel (mask_step_face walks solid layers), which the whole-domain expand left
+  // Active; the overlay pins it back to a keep-in boss.
+  out.grid = domain.grid;
+  out.mask = domain.mask;
+  out.offset_i = domain.offset_i;
+  out.offset_j = domain.offset_j;
+  out.offset_k = domain.offset_k;
+  if (!options.design_mask.empty()) {
+    for (int pk = 0; pk < part_grid.nz; ++pk)
+      for (int pj = 0; pj < part_grid.ny; ++pj)
+        for (int pi = 0; pi < part_grid.nx; ++pi) {
+          if (options.design_mask[part_grid.index(pi, pj, pk)] !=
+              MaskValue::FrozenSolid)
+            continue;
+          out.mask[domain.grid.index(pi + domain.offset_i, pj + domain.offset_j,
+                                     pk + domain.offset_k)] =
+              MaskValue::FrozenSolid;
+        }
+  }
+  out.bcs.reserve(bcs.size());
+  for (const DirichletBC& bc : bcs)
+    out.bcs.push_back({remap_node_to_domain(part_grid, domain, bc.node),
+                       bc.component, bc.value});
+  if (!options.external_loads.empty()) {
+    out.external_loads.reserve(options.external_loads.size());
+    for (const NodalLoad& nl : options.external_loads)
+      out.external_loads.push_back(
+          {remap_node_to_domain(part_grid, domain, nl.node), nl.component,
+           nl.value});
+  }
+  return out;
+}
+
+std::vector<NodalLoad> design_domain_loads(const SolvedDesignDomain& domain,
+                                           const MinimizePlasticOptions& options,
+                                           double material_density_g_cm3) {
+  // The design load (pipeline.hpp modeling note). Mode (a): a caller-supplied
+  // external load case (the user's tagged Load faces via traction_loads, already
+  // remapped onto the expanded grid by resolve_design_domain) takes precedence.
+  // Mode (b): self-weight on the effective solid grid (self_weight_loads
+  // validates density/gravity/direction and normalizes the direction
+  // internally; with a design box the weight covers the frozen part plus the
+  // Active design envelope).
+  if (!options.external_loads.empty()) return domain.external_loads;
+  return self_weight_loads(domain.grid, material_density_g_cm3, options.gravity,
+                           options.gravity_direction);
+}
+
+std::vector<char> original_part_voxels(const VoxelGrid& part_grid,
+                                       const SolvedDesignDomain& domain) {
+  std::vector<char> in_part(domain.grid.voxel_count(), 0);
+  for (int pk = 0; pk < part_grid.nz; ++pk)
+    for (int pj = 0; pj < part_grid.ny; ++pj)
+      for (int pi = 0; pi < part_grid.nx; ++pi) {
+        if (part_grid.tags[part_grid.index(pi, pj, pk)] == VoxelTag::Empty)
+          continue;
+        in_part[domain.grid.index(pi + domain.offset_i, pj + domain.offset_j,
+                                  pk + domain.offset_k)] = 1;
+      }
+  return in_part;
+}
+
 VoxelGrid minimize_plastic_solved_grid(const VoxelGrid& grid,
                                        const MinimizePlasticOptions& options) {
-  // Mirror EXACTLY the design-domain expansion minimize_plastic performs above:
-  // same expand_design_domain overload, same keep-outs, same freeze flag, same
-  // kDesignBoxCoarsenAlign. Expansion is pure geometry (no voxelization, no
-  // solve), so this returns the identical grid the driver solves on without
-  // running the ladder. With no design box the solved grid IS the caller's grid.
+  // Mirror EXACTLY the design-domain expansion minimize_plastic performs: it is
+  // now literally the same call (resolve_design_domain), so the two cannot
+  // drift. Expansion is pure geometry (no voxelization, no solve), so this
+  // returns the identical grid the driver solves on without running the ladder.
+  // With no design box the solved grid IS the caller's grid.
   if (!options.design_box.has_value()) return grid;
-  return expand_design_domain(grid, *options.design_box, options.keep_out_boxes,
-                              options.freeze_imported_part,
-                              kDesignBoxCoarsenAlign)
-      .grid;
+  return resolve_design_domain(grid, /*bcs=*/{}, options).grid;
 }
 
 MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
@@ -157,85 +280,19 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // expanded grid. When no design box is supplied, `G` / `B` alias the caller's
   // `grid` / `bcs` and every quantity derived below is byte-for-byte identical to
   // the pre-M7.dom-core driver (the design-box branch is simply skipped).
-  DesignDomain domain;                    // populated only when a design box is set
-  std::vector<DirichletBC> remapped_bcs;  // expanded-grid BCs (design-box path)
-  std::vector<NodalLoad> remapped_loads;  // expanded-grid external loads
-  const bool expanded = options.design_box.has_value();
-  if (expanded) {
-    // M7.anchor-integrity on the box path (handoff 082): a caller `design_mask` is
-    // the anchor PAD (mask_step_face FrozenSolid, PART-grid indexed; diagnosis 064).
-    // Its validity depends on freeze_imported_part:
-    //   * freeze_imported_part == true (the "add material" feature): the WHOLE import
-    //     is already FrozenSolid and the box builds the mask itself, so a caller pad
-    //     is redundant AND ambiguous — REJECT it, exactly as the pre-082 driver did
-    //     (test_design_domain's add-material contract still throws here).
-    //   * freeze_imported_part == false (whole-domain optimize, the DEFAULT): handoff
-    //     080 made the imported part an Active/REMOVABLE region, so only the 1-voxel
-    //     Load/Fixture BC skin is pinned and the optimizer can carve an anchor boss
-    //     thin. A caller pad is now MEANINGFUL — it re-freezes that N-voxel boss — so
-    //     MERGE it into the expanded mask (below) instead of rejecting it.
-    if (!options.design_mask.empty()) {
-      if (options.freeze_imported_part)
-        throw std::invalid_argument(
-            "minimize_plastic: a caller design_mask is rejected together with a "
-            "design_box when freeze_imported_part is set (the frozen box builds "
-            "the effective mask itself)");
-      if (options.design_mask.size() != grid.voxel_count())
-        throw std::invalid_argument(
-            "minimize_plastic: design_mask size != part grid.voxel_count()");
-    }
-    // Align the expanded grid's element dims to a power of two (8 => >= 3
-    // multigrid levels) by appending Empty high-side voxels. The design-box
-    // system is ~1e-9-contrast and ~2M-DOF; without an even-dimensioned grid the
-    // geometric-multigrid hierarchy cannot coarsen (an odd axis makes it bail to
-    // an effectively-hung Jacobi-CG). The padding adds no physics (Empty voxels,
-    // void-gated) and leaves the BC/load remap offset unchanged. See voxel.hpp.
-    // kDesignBoxCoarsenAlign is the public constant (pipeline.hpp) so any caller
-    // re-deriving this grid — via minimize_plastic_solved_grid — uses the same
-    // alignment and cannot drift from what is solved here.
-    domain = expand_design_domain(grid, *options.design_box,
-                                  options.keep_out_boxes,
-                                  options.freeze_imported_part,
-                                  kDesignBoxCoarsenAlign);
-    // MERGE the caller anchor pad into the expanded mask. The pad is indexed on the
-    // PART grid; the expanded grid is LARGER and sits at a whole-voxel offset
-    // (domain.offset_*, the SAME offset remap_node_to_domain applies to the BCs and
-    // loads just below). MERGE RULE: a part voxel the caller marked FrozenSolid
-    // becomes FrozenSolid at its offset location in the expanded mask;
-    // expand_design_domain's Active / FrozenVoid / Empty classification stands
-    // everywhere else. The pad only ADDS keep-in (FrozenSolid) voxels — the sole
-    // value mask_step_face writes — so nothing else is propagated and the box's own
-    // domain is never un-frozen. A pad FrozenSolid voxel always sits on a part-solid
-    // voxel (mask_step_face walks solid layers), which the whole-domain expand left
-    // Active; the overlay pins it back to a keep-in boss.
-    if (!options.design_mask.empty()) {
-      for (int pk = 0; pk < grid.nz; ++pk)
-        for (int pj = 0; pj < grid.ny; ++pj)
-          for (int pi = 0; pi < grid.nx; ++pi) {
-            if (options.design_mask[grid.index(pi, pj, pk)] !=
-                MaskValue::FrozenSolid)
-              continue;
-            domain.mask[domain.grid.index(pi + domain.offset_i,
-                                          pj + domain.offset_j,
-                                          pk + domain.offset_k)] =
-                MaskValue::FrozenSolid;
-          }
-    }
-    remapped_bcs.reserve(bcs.size());
-    for (const DirichletBC& bc : bcs)
-      remapped_bcs.push_back({remap_node_to_domain(grid, domain, bc.node),
-                              bc.component, bc.value});
-    if (!options.external_loads.empty()) {
-      remapped_loads.reserve(options.external_loads.size());
-      for (const NodalLoad& nl : options.external_loads)
-        remapped_loads.push_back({remap_node_to_domain(grid, domain, nl.node),
-                                  nl.component, nl.value});
-    }
-  }
+  //
+  // THE expansion + remap lives in resolve_design_domain (above, pipeline.hpp)
+  // so the re-certification paths call the SAME code rather than reconstruct it
+  // (task 2026-08-03-design-box-recertification). This site is unchanged in what
+  // it computes — the identical expand_design_domain call, the identical anchor-
+  // pad merge and the identical remap_node_to_domain over BCs and external loads
+  // — it simply no longer owns the only copy.
+  const SolvedDesignDomain domain = resolve_design_domain(grid, bcs, options);
+  const bool expanded = domain.expanded;
   // The effective grid + BCs the whole pipeline runs on (the expanded pair with a
   // design box, else the caller's inputs verbatim).
-  const VoxelGrid& G = expanded ? domain.grid : grid;
-  const std::vector<DirichletBC>& B = expanded ? remapped_bcs : bcs;
+  const VoxelGrid& G = domain.grid;
+  const std::vector<DirichletBC>& B = domain.bcs;
 
   // Handoff 127 (Amendment 2): start this run's multigrid stagnation latch fresh,
   // on the (single) thread that will issue every solve below — the warm-start
@@ -260,12 +317,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // is set) takes precedence. Mode (b): self-weight on the effective solid grid
   // (self_weight_loads validates density/gravity/direction and normalizes the
   // direction internally; with a design box the weight covers the frozen part
-  // plus the Active design envelope, held fixed across rungs).
+  // plus the Active design envelope, held fixed across rungs). ONE definition
+  // (design_domain_loads), shared with every re-certification site — so "the
+  // load this run certified under" is reconstructed, never re-derived.
   const std::vector<NodalLoad> loads =
-      !options.external_loads.empty()
-          ? (expanded ? remapped_loads : options.external_loads)
-          : self_weight_loads(G, material.density_g_cm3, options.gravity,
-                              options.gravity_direction);
+      design_domain_loads(domain, options, material.density_g_cm3);
 
   // The reported / analysed build direction is the build-plate normal — "which
   // way is up on the plate", a DIFFERENT question from "which way is down in
