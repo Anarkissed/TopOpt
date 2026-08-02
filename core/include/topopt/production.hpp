@@ -214,6 +214,18 @@ bool production_geneo_twolevel();
 // TRIPWIRE and the arming evidence.
 bool production_matfree_cubic_lattice();
 
+// Task algebraic-level1-coarsening — whether configure_production_options arms
+// the ALGEBRAIC LEVEL-1 multigrid coarse space (true = ARMED). false = the
+// SHIPPED default: level 1 stays the trilinear halving of the fine grid, so
+// production matches the library default on this axis and every solve takes the
+// hierarchy it always has. Exposed so the parity test asserts
+// fea_mg_algebraic_level1_enabled() against this named constant rather than a
+// bare false, and so run_info can name the posture either way. The LIBRARY
+// default is OFF (kMgAlgebraicLevel1LibraryDefaultOn in fea.hpp), so Gate-V2 and
+// every reference run are byte-identical (THE ONE RULE). See production.cpp for
+// the TRIPWIRE and the measured basis for leaving it disarmed.
+bool production_mg_algebraic_level1();
+
 // Handoff 2026-07-26-width-aware-knockdown — whether configure_production_options
 // arms the WIDTH-AWARE accept-gate knockdown. false = the SHIPPED default (the pure
 // scalar f^1.5 gate, byte-for-byte the pre-width gate); true = the SHELL+CORE

@@ -219,6 +219,70 @@ constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
 constexpr bool kProductionGeneoTwoLevel = true;  // ARMED
 
 // ===========================================================================
+// TRIPWIRE — the ALGEBRAIC LEVEL-1 multigrid coarse space. DISARMED.
+// (task algebraic-level1-coarsening; diagnosis in 2026-08-03-hybrid-amg-
+// coarsening-probe, the stagnation it targets in 2026-08-02-multigrid-
+// component-sweep.)
+// ===========================================================================
+// Do NOT arm this — and do NOT change kAlgStrengthTheta, the coarsening-control
+// rule or kAlgMaxCoarseBytes in src/fea/algebraic_coarsen.hpp — without
+// re-running BOTH:
+//   * core/tests/harness/alg_level1_probe.cpp   capture / converge / mem / det
+//   * core/tests/harness/alg_level1_gate.cpp    gate
+// and landing a new before/after gate table against the 1e-9 negative-control
+// floor, plus a fresh memory projection. The capture and convergence rows are
+// FIELD-SPECIFIC: this coarse space is built to rescue the DILUTE regime and it
+// is measurably worse on a healthy one, so a gate table on a single fixture
+// cannot decide it.
+//
+// WHAT IT IS. Multigrid's level 1 — today the trilinear halving of the fine
+// grid — built instead by AGGREGATING the fine operator, whose aggregates
+// follow the structure rather than the grid. PR 283 measured why that matters:
+// on the maintainer's dilute field the GEOMETRIC level-1 space captures
+// 1.5954 % of the exact solution's energy (99.2959 % on a healthy control), and
+// every space below level 1 is a subspace of it — so PR 280's 25 failed
+// configurations were all working inside a space that sees 1.6 % of the answer.
+// The algebraic level 1 captures 56.3293 % at a SMALLER coarse dimension.
+// A0 IS STILL NEVER ASSEMBLED (PR 230 priced that at 20-35 GB at 8.44M DOF):
+// the strength graph is streamed off the production element table and A1 comes
+// from the same element-local Galerkin product the geometric path uses.
+//
+// LIKE recycling / GenEO and UNLIKE the AD band, it is an EXACT accelerator:
+// only the coarse SPACES change, R = P^T and the SPD bottom solve keep the cycle
+// a valid CG preconditioner, and the outer FP64 CG's residual test still defines
+// convergence — so it moves ITERATION COUNTS and the in-basin rounding of the
+// converged field, never the answer or any gate's verdict logic.
+//
+// WHY IT SHIPS DISARMED. Three measured reasons, all in the task's handoff:
+//   * IT IS A LOSS ON HEALTHY FIELDS. The aggregation coarsens harder than
+//     halving does (measured 12.4x against 7.3x at level 1 on a 32x16x32
+//     block), which is exactly what makes it strong on a dilute field and weak
+//     on a well-connected one: 18 V-cycles -> 39 on that block. Geometric
+//     coarsening captures 99.3 % there and costs nothing. Anything armed here
+//     must therefore be a SWITCH, not a replacement, and this task did not
+//     establish a switching rule it was willing to ship (the handoff's AH6
+//     names the candidate signal and the third regime that is still unplaced).
+//   * THE MEMORY PROJECTION EXCEEDS THE CAP AT THE MAINTAINER'S SCALE. Measured
+//     over a 108x DOF range the added bytes grow as DOFs^1.04 at ~355 bytes/DOF,
+//     projecting to ~3.3 GB at 8.44M DOF — above kAlgMaxCoarseBytes (2048 MB,
+//     PR 248's refuse-and-fall-back precedent), which the path enforces by
+//     DECLINING and letting the geometric builder run. So on the real job an
+//     armed default would silently be the geometric path anyway, above roughly
+//     5.5M DOF.
+//   * THE MODELLING QUESTION UNDERNEATH IS UNANSWERED. PR 283 §3 measured that
+//     72 % of the energy this solver is straining to resolve is in material at
+//     the SIMP void floor, pulled by a density-INDEPENDENT self-weight load. A
+//     solver built for that field may not need to exist in this form.
+//
+// The mechanism is complete, tested (fea_mg_algebraic_level1 in CTest) and
+// library-reachable via fea_set_mg_algebraic_level1; only the production request
+// is withheld. So is the OBSERVABILITY: run_info.json carries the posture, the
+// aggregate count, the level-1 dimension, the depth, the added MB and any
+// refusal reason, so a later arming has a baseline to diff against rather than
+// starting from nothing.
+constexpr bool kProductionMgAlgebraicLevel1 = false;  // DISARMED
+
+// ===========================================================================
 // TRIPWIRE — the MATRIX-FREE CUBIC LATTICE route production arming
 // (handoff 2026-08-01-multiscale-production-wiring; kernel proven in
 // 2026-07-30-matfree-cubic-probe, formulation in
@@ -302,6 +366,7 @@ double production_draft_loose_tol() { return kProductionDraftLooseTol; }
 bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
 bool production_geneo_twolevel() { return kProductionGeneoTwoLevel; }
 bool production_matfree_cubic_lattice() { return kProductionMatfreeCubicLattice; }
+bool production_mg_algebraic_level1() { return kProductionMgAlgebraicLevel1; }
 
 KnockdownSpec knockdown_spec_for(const MinimizePlasticOptions& opts) {
   // The ONE construction (handoff 2026-07-26-post-merge-build-fix). All four fields
@@ -573,6 +638,16 @@ void configure_production_options(MinimizePlasticOptions& opts) {
   // byte-for-byte unchanged, asserted in test_production_parity before AND
   // after this call.
   fea_set_matfree_cubic_lattice(kProductionMatfreeCubicLattice);
+
+  // Task algebraic-level1-coarsening — the ALGEBRAIC LEVEL-1 coarse space,
+  // DISARMED (see the TRIPWIRE beside kProductionMgAlgebraicLevel1 for the
+  // three measured reasons). Set EXPLICITLY rather than left alone for the same
+  // reason the other process-globals are: a thread that ran a harness earlier
+  // could otherwise carry an armed solver into a production run, and
+  // "configured a production run" must never disagree with "the algebraic path
+  // is off". Setting it to the shipped false is a no-op on a fresh process, so
+  // this changes nothing about what production computes.
+  fea_set_mg_algebraic_level1(kProductionMgAlgebraicLevel1);
 
   // Handoff 2026-08-01-active-domain-disarm — ACTIVE DOMAIN, DISARMED
   // (maintainer decision, recorded in the handoff §"THE DECISION"; it reverses

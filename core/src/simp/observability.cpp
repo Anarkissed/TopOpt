@@ -481,6 +481,24 @@ std::string run_info_json(const RunInfo& info) {
           : std::string("null"));
   num("galerkin_block_cache", bool_json(info.galerkin_block_cache));
   num("mixed_precision", bool_json(info.mixed_precision));
+  // Task algebraic-level1-coarsening — the ALGEBRAIC LEVEL-1 posture and what
+  // the last build produced. Echoed even when off (the 132 discipline): a run
+  // record that only names an accelerator when it fired cannot be used to rule
+  // it OUT of a later diagnosis. `refuse_reason` is JSON null unless a build
+  // actually declined, so a clean armed run does not carry an empty string that
+  // reads like a refusal.
+  num("mg_algebraic_level1", bool_json(info.mg_algebraic_level1));
+  num("mg_algebraic_aggregates", fmt_i(info.mg_algebraic_aggregates));
+  num("mg_algebraic_coarse_dim", fmt_i(info.mg_algebraic_coarse_dim));
+  num("mg_algebraic_levels", fmt_i(info.mg_algebraic_levels));
+  num("mg_algebraic_added_mb", fmt(info.mg_algebraic_added_mb));
+  num("mg_algebraic_level1_refused",
+      bool_json(info.mg_algebraic_level1_refused));
+  num("mg_algebraic_refuse_reason",
+      info.mg_algebraic_refuse_reason.empty()
+          ? std::string("null")
+          : std::string("\"") + json_escape(info.mg_algebraic_refuse_reason) +
+                "\"");
   num("matfree_threads", fmt_i(info.matfree_threads));
   num("krylov_recycling", bool_json(info.krylov_recycling));
   num("krylov_recycle_dim", fmt_i(info.krylov_recycle_dim));

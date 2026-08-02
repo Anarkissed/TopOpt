@@ -1,0 +1,22 @@
+TRIPWIRE VERIFICATION — does the static_assert actually fire?
+(task: algebraic-level1-coarsening, re-verified on the merged tree)
+
+A static_assert nobody has watched fail is an untested claim. This flips
+kMgAlgebraicLevel1LibraryDefaultOn from false to true and compiles
+multigrid.cpp with -fsyntax-only. BOTH tripwires fire: the one in the public
+header beside the constant, and the one in multigrid.cpp beside the flag's
+initialiser. A future edit that arms the LIBRARY default cannot compile.
+
+$ c++ -std=c++17 -fsyntax-only -I core/include -I core/src -I <eigen> \
+      core/src/fea/multigrid.cpp
+
+In file included from core/src/fea/multigrid.cpp:37:
+core/include/topopt/fea.hpp:1041:15: error: static assertion failed due to requirement '!kMgAlgebraicLevel1LibraryDefaultOn': the algebraic level-1 coarse space must ship LIBRARY-default OFF: reference runs never call configure_production_options and must stay byte-identical (THE ONE RULE)
+ 1041 | static_assert(!kMgAlgebraicLevel1LibraryDefaultOn,
+      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+core/src/fea/multigrid.cpp:208:15: error: static assertion failed due to requirement '!kMgAlgebraicLevel1LibraryDefaultOn': the algebraic level-1 coarse space must ship DISARMED in the library: the reference world is byte-identical only while every solve that did not explicitly ask for it takes the geometric hierarchy
+  208 | static_assert(!kMgAlgebraicLevel1LibraryDefaultOn,
+      |               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+2 errors generated.
+The constant was restored immediately; the shipped value is:
+1040:constexpr bool kMgAlgebraicLevel1LibraryDefaultOn = false;

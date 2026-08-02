@@ -1,0 +1,20 @@
+loaded PR 280's cached trajectory: 48x32x40, 80 snapshots
+[load start] 1m 11.30  5m 11.91  15m 13.53  (on 10 logical cores)
+
+=== AH3: memory scaling of the algebraic level-1 space ===
+grid                DOFs aggregates    coarse  levels         MB    bytes/DOF  setup ms
+16x8x16             7344       108       648       2       2.17      310.159         3
+24x12x24           23400       360      2160       2       6.95      311.508         8
+32x16x32           53856       726      4356       2      16.00      311.524        24
+48x24x48          176400      2448     14688       3      59.77      355.302        72
+64x32x64          411840      5324     31944       3     139.61      355.448       123
+80x40x80          797040     10206     61236       3     269.86      355.020       246
+stagnating        150075      2190     13140       3      47.59      332.518        74   <- DILUTE (achieved_vf 0.0368, void-floor 0.6511)
+
+  FIT: bytes = 218.4 * DOFs^1.0368   (range 108x: 7344 -> 797040 DOFs)
+  PROJECTION to 8.44M DOF: 3.32 GB
+  This machine's RAM: 16.0 GB.  PR 248's refuse-and-fall-back precedent (kGeneoMaxBasisMB) is 2048 MB;
+  this path's cap kAlgMaxCoarseBytes is 2048 MB.
+
+peak RSS 0.97 GB
+[load end] 1m 12.88  5m 12.25  15m 13.63  (on 10 logical cores)

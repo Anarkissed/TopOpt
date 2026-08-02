@@ -307,6 +307,23 @@ struct RunInfo {
   bool mg_mode_observed = false;
   bool galerkin_block_cache = false;
   bool mixed_precision = false;
+  // Task algebraic-level1-coarsening — the ALGEBRAIC LEVEL-1 coarse space echo.
+  // `mg_algebraic_level1` is the ACTUAL process state the run executed under
+  // (read from fea_mg_algebraic_level1_enabled, never inferred — the 132
+  // discipline), and the rest describe the LAST hierarchy the path built:
+  // aggregate count, level-1 coarse dimension, total levels and the bytes the
+  // path ADDED. `mg_algebraic_level1_refused` with a reason is the honest record
+  // of a build that DECLINED and fell back to the geometric hierarchy — a run
+  // record that only mentioned the accelerator when it fired could not be used
+  // to rule it out of a later diagnosis. All 0 / false when the path is off
+  // (the library default), which is what every reference run records.
+  bool mg_algebraic_level1 = false;
+  int mg_algebraic_aggregates = 0;
+  int mg_algebraic_coarse_dim = 0;
+  int mg_algebraic_levels = 0;
+  double mg_algebraic_added_mb = 0.0;
+  bool mg_algebraic_level1_refused = false;
+  std::string mg_algebraic_refuse_reason;
   int matfree_threads = 0;   // resolved matrix-free thread count
   // Handoff 133 — Krylov recycling echo. `krylov_recycling` is the ACTUAL
   // process-global state the run executed under (read from

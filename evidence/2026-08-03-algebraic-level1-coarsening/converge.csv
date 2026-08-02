@@ -1,0 +1,5 @@
+field,posture,levels,carried,iters,dof_weighted,build_ms,cycle_ms,wall_s,matvecs,rel_dev,coarse_dim,aggregates,bytes
+stagnating,geometric,0,0,3636,8179.96,411.91,3114.76,10.717,4841,5.686e-10,0,0,0
+stagnating,algebraic,3,1,96,208.81,419.46,1012.77,1.435,384,2.558e-09,13140,2190,49902640
+healthy,geometric,4,1,18,41.35,1117.37,376.64,1.503,72,7.635e-11,0,0,0
+healthy,algebraic,3,1,52,112.07,1038.83,1144.11,2.191,208,1.017e-10,31944,5324,146387840

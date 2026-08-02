@@ -40,6 +40,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -52,6 +53,7 @@
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 
+#include "algebraic_coarsen.hpp"
 #include "fea_matfree.hpp"
 #include "geneo.hpp"
 #include "recycle.hpp"
@@ -193,6 +195,31 @@ static_assert(fea_detail::MgTuning{}.smoother == fea_detail::MgSmoother::ScalarJ
 // geometric branch it always has. The tripwire tests/unit/test_mg_coarse_hook.cpp
 // asserts that default and the bit-identity of a solve after install+clear.
 thread_local fea_detail::MgCoarseSpaceHook g_mg_coarse_hook;
+
+// --- Algebraic level-1 coarsening (task: algebraic-level1-coarsening) --------
+// THE ARMING FLAG, and the LIBRARY DEFAULT IS OFF (THE ONE RULE): every
+// reference run — Gate-V2, the property suite, every core test — must stay
+// byte-identical, so nothing but an explicit fea_set_mg_algebraic_level1(true)
+// can put a solve on the algebraic path. Thread-local, like mg_set_tuning, the
+// coarse-space hook and the stagnation latch: a run's solves are issued on one
+// thread. The tripwire below asserts the default, and test_mg_algebraic_level1
+// asserts a solve after arm+disarm is bit-identical to one that never armed.
+thread_local bool g_mg_alg_level1 = false;
+static_assert(!kMgAlgebraicLevel1LibraryDefaultOn,
+              "the algebraic level-1 coarse space must ship DISARMED in the "
+              "library: the reference world is byte-identical only while every "
+              "solve that did not explicitly ask for it takes the geometric "
+              "hierarchy");
+
+// The LAST algebraic build's report, for observability only. No solver decision
+// reads it; run_info.json echoes it so an armed run can be audited and a
+// disarmed one shows the honest zeros.
+thread_local fea_detail::AlgCoarsenStats g_mg_alg_stats;
+
+// The LAST matrix-free hierarchy's per-level DOF counts, finest first, written
+// by BOTH builders so a V-cycle can be priced in DOF-weighted applies whichever
+// shape ran. Pure observation.
+thread_local std::vector<int> g_mg_last_level_dims;  // defined-and-filled below
 
 // The tuning RESOLVED once per solve, so the smoother's inner loop reads plain
 // locals rather than a thread-local on every sweep. Snapshotting also means a
@@ -1235,8 +1262,43 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
 // or the coarse operator not factorable) — the caller then falls back to the
 // matrix-free Jacobi-CG. The FINE operator A0 is never assembled: A1 is formed
 // by an element-local Galerkin triple product, all coarser levels by build_hierarchy.
+// Every level's DOF count, finest first, recorded by BOTH hierarchy builders so
+// a V-cycle can be priced in DOF-weighted operator applies whichever shape ran
+// (task: algebraic-level1-coarsening, bar AH5). Pure observation.
+void record_hierarchy_dims(const MatfreeReduced& m,
+                           const std::vector<Level>& coarse) {
+  g_mg_last_level_dims.clear();
+  g_mg_last_level_dims.push_back(m.ng);  // the matrix-free fine level
+  for (const Level& L : coarse) g_mg_last_level_dims.push_back(L.n);
+}
+
+// Defined below build_mf_hierarchy; declared here because both hierarchy shapes
+// use them. See their definitions for what they do and why they are shared.
+SpMat galerkin_a1_from_prolong(
+    const MatfreeReduced& m, const std::vector<int>& active,
+    const std::vector<std::vector<std::pair<int, double>>>& prolong, int nc,
+    bool allow_color_cache);
+void mf_build_point_block_fine(const MatfreeReduced& m,
+                               const std::vector<int>& active,
+                               const fea_detail::MgTuning& tune,
+                               MfHierarchy& out);
+bool build_mf_hierarchy_algebraic(const MatfreeReduced& m, int nnx, int nny,
+                                  int nnz, MfHierarchy& out);
+
 bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
                         MfHierarchy& out) {
+  // ALGEBRAIC LEVEL-1 COARSENING (task: algebraic-level1-coarsening), DISARMED
+  // by default. When armed, level 1 is an AGGREGATION of the fine operator
+  // rather than a halving of the fine grid — the space PR 283 measured at
+  // 56.3293 % capture against the geometric 1.5954 % on the maintainer's dilute
+  // field. A refusal (aggregation declined, coarsening control rejected a level,
+  // the byte cap would be exceeded) falls straight through to the geometric
+  // builder below, which is untouched. With the flag off — the library default,
+  // and what every reference run sees — this `if` is the only added instruction
+  // and the rest of this function is byte-for-byte the shipped path.
+  if (g_mg_alg_level1 && build_mf_hierarchy_algebraic(m, nnx, nny, nnz, out))
+    return true;
+
   const fea_detail::MgTuning& tune = g_mg_tuning;
   const int fex = nnx - 1, fey = nny - 1, fez = nnz - 1;  // fine element dims
   // Parity pad (task: multigrid-odd-axis-cliff / multigrid-deep-block-pad): a
@@ -1325,12 +1387,107 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   P0.makeCompressed();
   std::vector<Trip>().swap(ptrips);  // P0 is built; free the triplet scratch
 
-  // Element-local Galerkin A1 = P0^T A0 P0, formed WITHOUT assembling A0. Per
-  // element: gather its <=24 distinct local coarse DOFs, build the 24 x mloc
-  // local prolongation W (rows of P0 for the element's kept fine DOFs), and
-  // scatter W^T (factor*Ke) W. Summing these over all elements yields exactly
-  // P0^T A0 P0 (A0 = sum_e factor_e S_e^T Ke S_e).
-  //
+  SpMat A1 = galerkin_a1_from_prolong(m, active, prolong, nc,
+                                      /*allow_color_cache=*/true);
+  std::vector<std::vector<std::pair<int, double>>>().swap(prolong);  // done with W
+
+  // Coarser levels 2.. via the shared assembled Galerkin builder, seeded at A1.
+  // Frugal (column-blocked) coarse products keep the design-box peak in budget.
+  // A TOTAL depth cap of N leaves N-1 levels for this sub-hierarchy (level 0 is
+  // the matrix-free fine one); 0 keeps the shipped, cap-driven depth.
+  const int sub_cap = tune.max_levels > 0 ? tune.max_levels - 1 : 0;
+  std::vector<Level> coarse;
+  // The coarse-space seam (task: hybrid-amg-coarsening-probe). A harness may
+  // supply the prolongators for levels 2.. from A1 by ALGEBRAIC aggregation
+  // instead of by halving the grid. Nothing below the `if` runs — and nothing is
+  // even copied out of the solver — unless a hook is installed, which no
+  // production path does; a hook that declines or returns a hierarchy this file
+  // rejects falls straight through to the geometric builder.
+  if (g_mg_coarse_hook) {
+    fea_detail::MgCoarseSeam seam;
+    seam.n1 = static_cast<int>(A1.cols());
+    seam.a1_outer = A1.outerIndexPtr();
+    seam.a1_inner = A1.innerIndexPtr();
+    seam.a1_val = A1.valuePtr();
+    seam.p0.rows = static_cast<int>(P0.rows());
+    seam.p0.cols = static_cast<int>(P0.cols());
+    for (int j = 0; j < P0.outerSize(); ++j)
+      for (SpMat::InnerIterator it(P0, j); it; ++it) {
+        seam.p0.row.push_back(static_cast<int>(it.row()));
+        seam.p0.col.push_back(static_cast<int>(it.col()));
+        seam.p0.val.push_back(it.value());
+      }
+    seam.cnx = cnx;
+    seam.cny = cny;
+    seam.cnz = cnz;
+    seam.cactive = &cactive;
+    coarse = build_hierarchy_from_prolongators(A1, cnx, cny, cnz, cactive,
+                                               g_mg_coarse_hook(seam));
+  }
+  if (coarse.empty())
+    coarse = build_hierarchy(A1, cnx, cny, cnz, cactive,
+                             /*frugal=*/true, sub_cap,
+                             /*global_level0=*/1);
+  if (coarse.empty()) {
+    // A1 alone could not seed a >=2-level sub-hierarchy. Use A1 as the sole
+    // (directly factored) coarse level if small enough, giving a 2-level
+    // matrix-free cycle (fine matrix-free + A1 direct); else no usable hierarchy.
+    if (static_cast<int>(A1.cols()) > tune.coarse_dof_cap) return false;
+    Level only;
+    only.nx = cnx;
+    only.ny = cny;
+    only.nz = cnz;
+    only.n = static_cast<int>(A1.cols());
+    only.A = A1;
+    only.Dinv = inverse_diagonal(A1);
+    only.active = cactive;
+    only.coarsest = true;
+    only.chol = std::make_shared<Eigen::SimplicialLDLT<SpMat>>();
+    only.chol->compute(only.A);
+    if (only.chol->info() != Eigen::Success) return false;
+    coarse.push_back(std::move(only));
+  }
+
+  out.m = &m;
+  out.fine_dinv = Eigen::Map<const Vec>(m.invdiag.data(),
+                                        static_cast<Eigen::Index>(m.invdiag.size()));
+  out.P0 = std::move(P0);
+  out.coarse = std::move(coarse);
+  record_hierarchy_dims(m, out.coarse);
+  mf_build_point_block_fine(m, active, tune, out);
+  return true;
+}
+
+// The ELEMENT-LOCAL Galerkin product A1 = P0^T A0 P0, formed WITHOUT assembling
+// A0 — shared by the GEOMETRIC hierarchy (whose P0 is the trilinear halving
+// stencil) and the ALGEBRAIC one (task: algebraic-level1-coarsening, whose P0 is
+// an aggregation prolongator). It reads P0 only as `prolong`, the per-kept-fine-
+// DOF list of (coarse column, weight) pairs, so it never cared HOW those rows
+// were produced; factoring it out is what lets the algebraic level-1 space reuse
+// the exact arithmetic the geometric path has always used.
+//
+// Per element: gather its distinct local coarse DOFs, build the 24 x mloc
+// local prolongation W (rows of P0 for the element's kept fine DOFs), and
+// scatter W^T (factor*Ke) W. Summing these over all elements yields exactly
+// P0^T A0 P0 (A0 = sum_e factor_e S_e^T Ke S_e).
+//
+// `allow_color_cache` MUST be false for a non-geometric P0. The colour cache
+// below is sound only because the trilinear stencil is parity-based and
+// translation-invariant, so every element of a colour has the same W; an
+// aggregation prolongator has no such property and a cached block would be
+// simply wrong. See the cache's own note.
+//
+// LOCAL BLOCK WIDTH. The geometric stencil gives every element exactly 2x2x2
+// coarse nodes = 24 coarse DOFs, so this pass historically used fixed 24x24
+// stack arrays. An aggregation can put an element's 8 nodes in up to 8 different
+// aggregates of up to 6 modes each — 48 coarse DOFs — so the scratch is sized
+// from the measured maximum `mloc` instead. The arithmetic, the loop order and
+// the summation order are UNCHANGED; only the row stride differs, so A1 is
+// bit-identical to the fixed-array version on the geometric path.
+SpMat galerkin_a1_from_prolong(
+    const MatfreeReduced& m, const std::vector<int>& active,
+    const std::vector<std::vector<std::pair<int, double>>>& prolong, int nc,
+    bool allow_color_cache) {
   // ASSEMBLY — TWO-PASS CSR (handoff 085 follow-up). Naively streaming each
   // element's <=kDof^2 = 576 (i,j,v) triplets into a single array is ~576*elements
   // ~= 359M triplets ~= 5.5 GB at the design box (the measured OOM 079 avoided). 079
@@ -1514,23 +1671,42 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
   // per-(i,j) add order are untouched — so A1, the V-cycle and the iteration count
   // are unchanged. This saves compute; it does not approximate. Nothing is skipped
   // or frozen, so growth into the void is entirely unaffected.
+  //
+  // The cache is GEOMETRY-ONLY and `allow_color_cache` is how that is enforced:
+  // an aggregation prolongator's W depends on which aggregates the element's
+  // nodes landed in, which is emphatically NOT a function of the element's
+  // parity, so on the algebraic path the caller passes false and every element
+  // takes the full per-element path.
   {
     const int* Aouter = A1.outerIndexPtr();
     const int* Ainner = A1.innerIndexPtr();
     double* Aval = A1.valuePtr();
-    double W[kDof][kDof];   // fine-local (24) x coarse-local (<=24)
-    double KW[kDof][kDof];  // Ke * W
-    double S[kDof][kDof];   // W^T Ke W (the geometric block)
+    // Coarse-local width. The geometric stencil always gives exactly kDof; an
+    // aggregation can give more (up to 8 aggregates x 6 modes), so the scratch is
+    // sized from the measured maximum rather than assumed. Row stride is `mcap`;
+    // the arithmetic below is otherwise the historical fixed-array code verbatim.
+    int mcap = 0;
+    for (int e = 0; e < nelems; ++e)
+      mcap = std::max(mcap, ecds_off[static_cast<std::size_t>(e) + 1] -
+                                ecds_off[static_cast<std::size_t>(e)]);
+    if (mcap < 1) mcap = 1;
+    std::vector<double> Wbuf(static_cast<std::size_t>(kDof) * mcap, 0.0);
+    std::vector<double> KWbuf(static_cast<std::size_t>(kDof) * mcap, 0.0);
+    std::vector<double> Sbuf(static_cast<std::size_t>(mcap) * mcap, 0.0);
+    double* const W = Wbuf.data();    // W[r * mcap + cl]
+    double* const KW = KWbuf.data();  // KW[r * mcap + cl]
+    double* const S = Sbuf.data();    // S[cl * mcap + dl]
     int kg[kDof];
 
-    const bool use_cache = fea_detail::mf_galerkin_block_cache_enabled() &&
+    const bool use_cache = allow_color_cache &&
+                           fea_detail::mf_galerkin_block_cache_enabled() &&
                            static_cast<int>(m.color_offsets.size()) ==
                                fea_detail::kNumColors + 1;
     std::vector<double> cacheS;
     std::vector<char> cache_valid;
     if (use_cache) {
-      cacheS.assign(static_cast<std::size_t>(fea_detail::kNumColors) * kDof * kDof,
-                    0.0);
+      cacheS.assign(
+          static_cast<std::size_t>(fea_detail::kNumColors) * mcap * mcap, 0.0);
       cache_valid.assign(static_cast<std::size_t>(fea_detail::kNumColors), 0);
     }
     int color = 0;  // m.elems is colour-sorted; walk the colour ranges alongside e
@@ -1563,9 +1739,10 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
       const bool hit = generic && cache_valid[static_cast<std::size_t>(color)] != 0;
       if (hit) {
         const double* src =
-            &cacheS[static_cast<std::size_t>(color) * kDof * kDof];
+            &cacheS[static_cast<std::size_t>(color) * mcap * mcap];
         for (int cl = 0; cl < mloc; ++cl)
-          for (int dl = 0; dl < mloc; ++dl) S[cl][dl] = src[cl * kDof + dl];
+          for (int dl = 0; dl < mloc; ++dl)
+            S[cl * mcap + dl] = src[cl * mcap + dl];
       } else {
         if (is_cubic) {
           const MfCubElem& cel = m.cub_elems[static_cast<std::size_t>(e - niso)];
@@ -1575,35 +1752,38 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
                             cel.c * m.KC(r, c);
         }
         for (int r = 0; r < kDof; ++r)
-          for (int cl = 0; cl < mloc; ++cl) W[r][cl] = 0.0;
+          for (int cl = 0; cl < mloc; ++cl) W[r * mcap + cl] = 0.0;
         for (int r = 0; r < kDof; ++r) {
           if (kg[r] < 0) continue;
           for (const auto& pr : prolong[static_cast<std::size_t>(kg[r])]) {
             int idx = 0;
             while (ecds[static_cast<std::size_t>(cb + idx)] != pr.first) ++idx;
-            W[r][idx] += pr.second;
+            W[r * mcap + idx] += pr.second;
           }
         }
         for (int r = 0; r < kDof; ++r)
           for (int cl = 0; cl < mloc; ++cl) {
             double s = 0.0;
             if (is_cubic) {
-              for (int c = 0; c < kDof; ++c) s += Kcomb[r][c] * W[c][cl];
+              for (int c = 0; c < kDof; ++c)
+                s += Kcomb[r][c] * W[c * mcap + cl];
             } else {
-              for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c][cl];
+              for (int c = 0; c < kDof; ++c) s += m.Ke(r, c) * W[c * mcap + cl];
             }
-            KW[r][cl] = s;
+            KW[r * mcap + cl] = s;
           }
         for (int cl = 0; cl < mloc; ++cl)
           for (int dl = 0; dl < mloc; ++dl) {
             double s = 0.0;
-            for (int r = 0; r < kDof; ++r) s += W[r][cl] * KW[r][dl];
-            S[cl][dl] = s;
+            for (int r = 0; r < kDof; ++r)
+              s += W[r * mcap + cl] * KW[r * mcap + dl];
+            S[cl * mcap + dl] = s;
           }
         if (generic) {  // first generic element of this colour seeds the cache
-          double* dst = &cacheS[static_cast<std::size_t>(color) * kDof * kDof];
+          double* dst = &cacheS[static_cast<std::size_t>(color) * mcap * mcap];
           for (int cl = 0; cl < mloc; ++cl)
-            for (int dl = 0; dl < mloc; ++dl) dst[cl * kDof + dl] = S[cl][dl];
+            for (int dl = 0; dl < mloc; ++dl)
+              dst[cl * mcap + dl] = S[cl * mcap + dl];
           cache_valid[static_cast<std::size_t>(color)] = 1;
         }
       }
@@ -1615,7 +1795,7 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
       for (int cl = 0; cl < mloc; ++cl) {
         const int i = ecds[static_cast<std::size_t>(cb + cl)];
         for (int dl = 0; dl < mloc; ++dl) {
-          const double v = factor * S[cl][dl];
+          const double v = factor * S[cl * mcap + dl];
           if (v == 0.0) continue;
           const int j = ecds[static_cast<std::size_t>(cb + dl)];
           int lo = Aouter[j], hi = Aouter[j + 1];
@@ -1628,78 +1808,182 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
       }
     }
   }
-  std::vector<std::vector<std::pair<int, double>>>().swap(prolong);  // done with W
+  return A1;
+}
 
-  // Coarser levels 2.. via the shared assembled Galerkin builder, seeded at A1.
-  // Frugal (column-blocked) coarse products keep the design-box peak in budget.
-  // A TOTAL depth cap of N leaves N-1 levels for this sub-hierarchy (level 0 is
-  // the matrix-free fine one); 0 keeps the shipped, cap-driven depth.
-  const int sub_cap = tune.max_levels > 0 ? tune.max_levels - 1 : 0;
-  std::vector<Level> coarse;
-  // The coarse-space seam (task: hybrid-amg-coarsening-probe). A harness may
-  // supply the prolongators for levels 2.. from A1 by ALGEBRAIC aggregation
-  // instead of by halving the grid. Nothing below the `if` runs — and nothing is
-  // even copied out of the solver — unless a hook is installed, which no
-  // production path does; a hook that declines or returns a hierarchy this file
-  // rejects falls straight through to the geometric builder.
-  if (g_mg_coarse_hook) {
-    fea_detail::MgCoarseSeam seam;
-    seam.n1 = static_cast<int>(A1.cols());
-    seam.a1_outer = A1.outerIndexPtr();
-    seam.a1_inner = A1.innerIndexPtr();
-    seam.a1_val = A1.valuePtr();
-    seam.p0.rows = static_cast<int>(P0.rows());
-    seam.p0.cols = static_cast<int>(P0.cols());
-    for (int j = 0; j < P0.outerSize(); ++j)
-      for (SpMat::InnerIterator it(P0, j); it; ++it) {
-        seam.p0.row.push_back(static_cast<int>(it.row()));
-        seam.p0.col.push_back(static_cast<int>(it.col()));
-        seam.p0.val.push_back(it.value());
-      }
-    seam.cnx = cnx;
-    seam.cny = cny;
-    seam.cnz = cnz;
-    seam.cactive = &cactive;
-    coarse = build_hierarchy_from_prolongators(A1, cnx, cny, cnz, cactive,
-                                               g_mg_coarse_hook(seam));
+// THE ALGEBRAIC HIERARCHY (task: algebraic-level1-coarsening). Level 0 stays
+// matrix-free and untouched; level 1 is an AGGREGATION of the fine operator
+// instead of a halving of the fine grid, and levels 2.. are aggregations of the
+// assembled A1.
+//
+// WHY THIS SHAPE. PR 283 measured that the geometric level-1 space captures
+// 1.5954 % of the exact solution's energy on the maintainer's dilute field
+// (99.2959 % on a healthy control), and that EVERY space below level 1 is a
+// subspace of it — so the fix has to be level 1 itself. Aggregating from the
+// fine operator lifts that to 56.3293 % at a SMALLER coarse dimension and
+// converges in 86 PCG iterations where the shipped V-cycle stagnates at 300.
+//
+// *** A0 IS NEVER ASSEMBLED. *** The aggregation streams the strength graph off
+// the production element table (see algebraic_coarsen.cpp) and the level-1
+// operator is formed by the SAME element-local Galerkin product the geometric
+// path uses — `galerkin_a1_from_prolong`, which reads P0 only as its rows and so
+// never cared how they were produced. PR 230 priced fine-level assembly at
+// 20-35 GB at 8.44M DOF; nothing here goes near it.
+//
+// EVERYTHING THAT MAKES THE CYCLE SOUND IS UNCHANGED. Only the coarse SPACES are
+// algebraic: the Galerkin products, R = P^T and the bottom factorisation are
+// this file's own, so the cycle stays SPD and remains a valid CG preconditioner
+// whatever the aggregation produced — and the outer FP64 CG's residual test
+// still defines convergence, so a different coarse space can only change the
+// ITERATION COUNT, never the answer.
+//
+// REFUSALS ARE FREE. Any decline — a system too small, a non-scalar smoother,
+// the coarsening control rejecting a level, the byte cap, a chain that never
+// reaches the direct-solve cap, a bottom that will not factor — returns false
+// and the caller builds the geometric hierarchy exactly as it always has.
+bool build_mf_hierarchy_algebraic(const MatfreeReduced& m, int nnx, int nny,
+                                  int nnz, MfHierarchy& out) {
+  const fea_detail::MgTuning& tune = g_mg_tuning;
+  fea_detail::AlgCoarsenStats st;
+
+  // The POINT-BLOCK smoother needs a nodal structure a general aggregation does
+  // not have below level 1, so it is REFUSED here rather than approximated —
+  // the same rule build_hierarchy_from_prolongators applies.
+  if (tune.smoother != fea_detail::MgSmoother::ScalarJacobi) {
+    st.refused = true;
+    st.refuse_reason = "point-block smoother is not available on algebraic levels";
+    g_mg_alg_stats = st;
+    return false;
   }
-  if (coarse.empty())
-    coarse = build_hierarchy(A1, cnx, cny, cnz, cactive,
-                             /*frugal=*/true, sub_cap,
-                             /*global_level0=*/1);
+  if (m.ng <= 0 || nnx <= 0 || nny <= 0 || nnz <= 0) {
+    // Publish the refusal rather than leaving the PREVIOUS build's numbers
+    // standing: an observability field that silently goes stale is worse than
+    // one that is absent, because it reads as this run's answer.
+    st.refused = true;
+    st.refuse_reason = "degenerate system or node grid";
+    g_mg_alg_stats = st;
+    return false;
+  }
+
+  // Fine active map: global DOF (node*3+comp) -> kept id, or -1. Same map the
+  // geometric path builds, and the only fine-level bookkeeping either needs.
+  std::vector<int> active(static_cast<std::size_t>(m.ndof), -1);
+  for (int kg = 0; kg < m.ng; ++kg)
+    active[static_cast<std::size_t>(m.kept_global[static_cast<std::size_t>(kg)])] =
+        kg;
+
+  std::vector<std::vector<std::pair<int, double>>> prolong;
+  int nc = 0;
+  std::vector<int> coarse_block;
+  std::vector<double> bcoarse;
+  if (!fea_detail::alg_level1_prolongator(m, active, nnx, nny, nnz, prolong, nc,
+                                          coarse_block, bcoarse, st)) {
+    g_mg_alg_stats = st;
+    return false;
+  }
+  const int naggs = st.naggregates;
+
+  // P0 from the aggregation's rows — the same object the geometric path builds,
+  // differing only in what its rows say.
+  std::vector<Trip> ptrips;
+  {
+    std::size_t nnzP = 0;
+    for (const auto& row : prolong) nnzP += row.size();
+    ptrips.reserve(nnzP);
+  }
+  for (int r = 0; r < m.ng; ++r)
+    for (const auto& pr : prolong[static_cast<std::size_t>(r)])
+      ptrips.emplace_back(r, pr.first, pr.second);
+  SpMat P0(m.ng, nc);
+  P0.setFromTriplets(ptrips.begin(), ptrips.end());
+  P0.makeCompressed();
+  std::vector<Trip>().swap(ptrips);
+
+  const double t_gal = fea_detail::mf_steady_ms();
+  // allow_color_cache=false: the colour cache is sound only for the parity-based
+  // trilinear stencil (see the cache's note); an aggregation's W is not a
+  // function of element colour and a cached block would be wrong.
+  SpMat A1 = galerkin_a1_from_prolong(m, active, prolong, nc,
+                                      /*allow_color_cache=*/false);
+  st.t_coarse_ms += fea_detail::mf_steady_ms() - t_gal;
+  std::vector<std::vector<std::pair<int, double>>>().swap(prolong);
+
+  std::vector<fea_detail::MgCoo> Ps = fea_detail::alg_coarse_prolongators(
+      static_cast<int>(A1.cols()), A1.outerIndexPtr(), A1.innerIndexPtr(),
+      A1.valuePtr(), coarse_block, naggs, bcoarse, st);
+
+  // Algebraic levels carry no node grid, so (nx,ny,nz) and `active` stay unset
+  // on them. build_hierarchy_from_prolongators (PR 283) is the consumer: it
+  // still forms every coarse operator by its OWN Galerkin product, still uses
+  // R = P^T, still factors its own bottom level, and CHECKS rather than trusts
+  // every prolongator's shape — so an aggregation cannot make the cycle unsound.
+  std::vector<Level> coarse;
+  if (!Ps.empty())
+    coarse = build_hierarchy_from_prolongators(
+        A1, /*cnx=*/0, /*cny=*/0, /*cnz=*/0, std::vector<int>(), Ps);
+
   if (coarse.empty()) {
-    // A1 alone could not seed a >=2-level sub-hierarchy. Use A1 as the sole
-    // (directly factored) coarse level if small enough, giving a 2-level
-    // matrix-free cycle (fine matrix-free + A1 direct); else no usable hierarchy.
-    if (static_cast<int>(A1.cols()) > tune.coarse_dof_cap) return false;
+    // No chain below level 1. If A1 is small enough to be factored directly,
+    // that is still a usable TWO-LEVEL cycle (matrix-free fine + A1 direct) —
+    // exactly the fallback the geometric builder takes in the same situation,
+    // and on a small grid it is the ordinary outcome rather than a failure.
+    // Otherwise there is no algebraic hierarchy and the geometric builder runs.
+    if (static_cast<int>(A1.cols()) > tune.coarse_dof_cap) {
+      st.refused = true;
+      if (st.refuse_reason.empty())
+        st.refuse_reason = "solver rejected the algebraic prolongator chain";
+      g_mg_alg_stats = st;
+      return false;
+    }
     Level only;
-    only.nx = cnx;
-    only.ny = cny;
-    only.nz = cnz;
     only.n = static_cast<int>(A1.cols());
     only.A = A1;
     only.Dinv = inverse_diagonal(A1);
-    only.active = cactive;
     only.coarsest = true;
     only.chol = std::make_shared<Eigen::SimplicialLDLT<SpMat>>();
     only.chol->compute(only.A);
-    if (only.chol->info() != Eigen::Success) return false;
+    if (only.chol->info() != Eigen::Success) {
+      st.refused = true;
+      st.refuse_reason = "algebraic level-1 operator would not factor";
+      g_mg_alg_stats = st;
+      return false;
+    }
+    st.refuse_reason.clear();  // a 2-level cycle is a RESULT, not a refusal
     coarse.push_back(std::move(only));
   }
 
+  st.levels = 1 + static_cast<int>(coarse.size());  // + the matrix-free level 0
+  st.bytes += static_cast<std::size_t>(P0.nonZeros()) *
+              (sizeof(double) + sizeof(int));
+  st.refused = false;
+  g_mg_alg_stats = st;
+
   out.m = &m;
-  out.fine_dinv = Eigen::Map<const Vec>(m.invdiag.data(),
-                                        static_cast<Eigen::Index>(m.invdiag.size()));
+  out.fine_dinv = Eigen::Map<const Vec>(
+      m.invdiag.data(), static_cast<Eigen::Index>(m.invdiag.size()));
   out.P0 = std::move(P0);
   out.coarse = std::move(coarse);
+  record_hierarchy_dims(m, out.coarse);
+  mf_build_point_block_fine(m, active, tune, out);
+  return true;
+}
 
-  // FINE-level point-block smoother data, built only when that smoother is
-  // selected (the shipped path skips this block entirely). Same element sweep
-  // mf_build_reduced runs for the scalar diagonal, but keeping the whole 3x3
-  // NODAL block instead of just Ke(r,r): a local index r carries component r%3
-  // of node edof[r]/3, so two local indices sharing a node contribute to that
-  // node's block at (r%3, c%3). Summed over elements this is exactly the 3x3
-  // diagonal block of A0 — the fine operator is never assembled to get it.
+// FINE-level point-block smoother data (and the FP32 copies), built only when
+// those options are selected — the shipped path skips both blocks entirely.
+// Factored out of build_mf_hierarchy alongside the Galerkin product so the
+// geometric and algebraic hierarchy shapes share one copy; the body is the
+// historical code verbatim, so the shipped path is byte-identical.
+//
+// The point-block data is built by the same element sweep
+// mf_build_reduced runs for the scalar diagonal, but keeping the whole 3x3
+// NODAL block instead of just Ke(r,r): a local index r carries component r%3
+// of node edof[r]/3, so two local indices sharing a node contribute to that
+// node's block at (r%3, c%3). Summed over elements this is exactly the 3x3
+// diagonal block of A0 — the fine operator is never assembled to get it.
+void mf_build_point_block_fine(const MatfreeReduced& m,
+                               const std::vector<int>& active,
+                               const fea_detail::MgTuning& tune,
+                               MfHierarchy& out) {
   if (tune.smoother == fea_detail::MgSmoother::PointBlockJacobi) {
     constexpr int kDofL = Hex8Stiffness::kDof;
     const std::size_t nnodes_full = static_cast<std::size_t>(m.ndof) / 3;
@@ -1749,7 +2033,6 @@ bool build_mf_hierarchy(const MatfreeReduced& m, int nnx, int nny, int nnz,
     out.P0f = out.P0.cast<float>();
     out.fine_dinv_f = out.fine_dinv.cast<float>();
   }
-  return true;
 }
 
 // Matrix-free MG-CG solve, falling back to the exact matrix-free Jacobi-CG when
@@ -2029,6 +2312,10 @@ bool mg_coarse_space_hook_installed() {
   return static_cast<bool>(g_mg_coarse_hook);
 }
 
+// --- Algebraic level-1 accessors (task: algebraic-level1-coarsening) ---------
+const AlgCoarsenStats& mg_algebraic_level1_stats() { return g_mg_alg_stats; }
+void mg_reset_algebraic_level1_stats() { g_mg_alg_stats = AlgCoarsenStats{}; }
+
 }  // namespace fea_detail
 
 // Per-run multigrid stagnation latch (handoff 127, Amendment 2). The driver
@@ -2053,6 +2340,58 @@ void fea_set_mg_parity_pad_mode(int mode) {
 }
 
 int fea_mg_parity_pad_mode() { return g_mg_parity_pad_mode; }
+
+// --- Algebraic level-1 coarsening: the arming dial and its report ------------
+// The LIBRARY default is OFF (g_mg_alg_level1's initialiser, tripwired by the
+// static_assert beside it), so a process that never calls this setter takes the
+// geometric hierarchy on every solve and is byte-identical to before this
+// feature existed.
+bool fea_set_mg_algebraic_level1(bool enable) {
+  const bool prev = g_mg_alg_level1;
+  g_mg_alg_level1 = enable;
+  return prev;
+}
+bool fea_mg_algebraic_level1_enabled() { return g_mg_alg_level1; }
+
+MgAlgebraicLevel1Info fea_mg_algebraic_level1_info() {
+  const fea_detail::AlgCoarsenStats& s = g_mg_alg_stats;
+  MgAlgebraicLevel1Info out;
+  out.fine_dofs = s.fine_dofs;
+  out.fine_nodes = s.fine_nodes;
+  out.aggregates = s.naggregates;
+  out.coarse_dim = s.coarse_dim;
+  out.levels = s.levels;
+  out.fine_nnz_per_row = s.fine_nnz_per_row;
+  out.bytes = static_cast<unsigned long long>(s.bytes);
+  out.setup_ms = s.t_incidence_ms + s.t_strength_ms + s.t_aggregate_ms +
+                 s.t_tentative_ms + s.t_coarse_ms;
+  out.armed = g_mg_alg_level1;
+  out.refused = s.refused;
+  // Copied as a VALUE (the header's contract) — the caller may outlive the next
+  // build, which would overwrite the solver's own string.
+  const std::size_t cap = sizeof(out.refuse_reason) - 1;
+  const std::size_t n = std::min(cap, s.refuse_reason.size());
+  std::memcpy(out.refuse_reason, s.refuse_reason.data(), n);
+  out.refuse_reason[n] = '\0';
+  out.level_count = static_cast<int>(
+      std::min(s.level_dims.size(),
+               sizeof(out.level_dim) / sizeof(out.level_dim[0])));
+  for (int i = 0; i < out.level_count; ++i)
+    out.level_dim[i] = s.level_dims[static_cast<std::size_t>(i)];
+  return out;
+}
+
+void fea_mg_reset_algebraic_level1_info() {
+  fea_detail::mg_reset_algebraic_level1_stats();
+}
+
+int fea_mg_last_hierarchy_dims(int* out, int cap) {
+  const int n = static_cast<int>(g_mg_last_level_dims.size());
+  if (out != nullptr)
+    for (int i = 0; i < n && i < cap; ++i)
+      out[i] = g_mg_last_level_dims[static_cast<std::size_t>(i)];
+  return n;
+}
 
 FeaSolution fea_solve_mgcg(const VoxelGrid& grid, double youngs_modulus,
                            double poisson, const std::vector<DirichletBC>& bcs,
