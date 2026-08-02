@@ -1,0 +1,9 @@
+    rep 3  k=32       wall   27.25 s  CG 3739     setup_mv 224    load 23.68
+
+  setting      CG total   setup_mv      DOF-work  vs base wall/solve    vs base   recycle rec share
+  k=0 (off)       17799          0    1.5250e+09   1.000x     1.814 s   1.000x      0.2 ms     0.0%
+  k=4             14433         84    1.2438e+09   0.816x     1.740 s   0.959x    267.9 ms    15.4%
+  k=8             12573        168    1.0916e+09   0.716x     1.628 s   0.897x    358.4 ms    22.1%
+  k=16            10401        336    9.1995e+08   0.603x     1.680 s   0.926x    596.4 ms    35.3%
+  k=32             9483        672    8.7008e+08   0.571x     2.400 s   1.323x   1360.0 ms    56.9%
+  host 1-min load average at end: 23.68

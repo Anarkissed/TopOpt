@@ -1,0 +1,3 @@
+class,wall_on_s,wall_off_s,dofwork_on,dofwork_off,cg_on,cg_off,recycle_ms_on,recycle_ms_off
+(a) LATCHED,1.22201,1.24344,9.199462e+08,1.525018e+09,10401,17799,460.020,0.081
+(b) HEALTHY-MG,0.47083,0.46717,5.520240e+07,5.520240e+07,660,660,0.000,0.000

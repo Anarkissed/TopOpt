@@ -1,0 +1,21 @@
+===== AG2 PHASE SPLIT — (b) HEALTHY-MG  [wrap_multigrid=1] =====
+  HEALTHY bracket 40x16x40 (25600 voxels, 83640 free DOFs) dil=0.25 vf=0.50, 4 clearances
+    it   cg        recycle |    begin setup_mv  setup_o   augment  observe   commit |      sum  close
+    1    27            0.0 |      0.0      0.0      0.0       0.0      1.0     43.2 |     44.2   0.0%
+    2    30            0.0 |      0.0     36.3     28.9      20.9      2.7    158.7 |    247.4   0.0%
+    3    33            0.0 |      0.0     19.2     20.5      20.3      1.0    158.9 |    219.9   0.0%
+    4    32            0.0 |      0.0     17.7     19.8      16.3      0.8    162.2 |    216.8   0.0%
+    5    33            0.0 |      0.0     18.9     20.1      24.7      1.0    159.9 |    224.7   0.0%
+    6    35            0.0 |      0.0     19.5     19.8      20.4      1.0    160.2 |    220.9   0.0%
+    7    34            0.0 |      0.0     19.0     19.8      19.5      0.9    159.7 |    218.9   0.0%
+    8    33            0.0 |      0.0     17.6     19.3      19.5      0.8    160.2 |    217.5   0.0%
+
+    TOTALS  recycle_ms(call site) 0.0   sum(phases) 1610.3   closure 0.00%
+      begin              0.0 ms    0.0%
+      setup matvec     148.3 ms    9.2%   (111 matvecs)
+      setup other      148.2 ms    9.2%
+      AUGMENT          141.6 ms    8.8%   (230 calls, 0.6158 ms/call)
+      observe            9.3 ms    0.6%   (195 stores)
+      commit          1162.9 ms   72.2%   (8 harvest solves)
+
+    CADENCE-ADDRESSABLE (setup+commit)  90.6%   DIMENSION-ONLY (augment)   8.8%

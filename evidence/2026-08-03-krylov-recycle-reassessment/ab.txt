@@ -1,0 +1,40 @@
+recycle_reassess — mode=ab  evidence=evidence/2026-08-03-krylov-recycle-reassessment
+host 1-min load average at start: 14.27
+shipped defaults: dim=16 cycle=1 wrap_multigrid=0 phase_timing=0
+
+===== AG1 A/B — (a) LATCHED =====
+  LATCHED bracket 40x16x41 (26240 voxels, 85680 free DOFs) dil=0.25 vf=0.50, 4 clearances
+  3 ABBA blocks x 8 design iterations, GenEO ARMED with the shipped engagement gate
+    block 1: ON  wall   14.94 s  CG 4045     setup_mv 112    load 14.98
+    block 1: OFF wall   15.05 s  CG 6511     setup_mv 0      load 14.33
+    block 2: OFF wall   14.63 s  CG 6511     setup_mv 0      load 15.46
+    block 2: ON  wall   14.96 s  CG 4045     setup_mv 112    load 16.53
+    block 3: ON  wall   15.74 s  CG 4045     setup_mv 112    load 16.45
+    block 3: OFF wall   16.45 s  CG 6511     setup_mv 0      load 14.22
+
+  (a) LATCHED — STEADY STATE, pooled:
+    ON   median/solve   1.222 s (spread 1.116..1.506)  CG median    499  CG total 10401    setup_mv 336    phases(ms) cg    750.6  recycle   460.0
+    OFF  median/solve   1.243 s (spread 1.017..1.561)  CG median    886  CG total 17799    setup_mv 0      phases(ms) cg   1238.1  recycle     0.1
+    DOF-WEIGHTED WORK  ON 9.1995e+08   OFF 1.5250e+09   = 0.603x LESS work with recycling
+    WALL per solve     ON   1.222 s  OFF   1.243 s  = 0.983x FASTER with recycling
+    recycle share of the ON solve's timed phases: 38.0%
+
+===== AG1 A/B — (b) HEALTHY-MG =====
+  HEALTHY bracket 40x16x40 (25600 voxels, 83640 free DOFs) dil=0.25 vf=0.50, 4 clearances
+  3 ABBA blocks x 8 design iterations, GenEO ARMED with the shipped engagement gate
+    block 1: ON  wall    3.75 s  CG 247      setup_mv 0      load 14.22
+    block 1: OFF wall    3.84 s  CG 247      setup_mv 0      load 13.48
+    block 2: OFF wall    3.82 s  CG 247      setup_mv 0      load 12.97
+    block 2: ON  wall    3.87 s  CG 247      setup_mv 0      load 12.65
+    block 3: ON  wall    4.05 s  CG 247      setup_mv 0      load 12.65
+    block 3: OFF wall    3.85 s  CG 247      setup_mv 0      load 12.60
+
+  (b) HEALTHY-MG — STEADY STATE, pooled:
+    ON   median/solve   0.471 s (spread 0.428..0.551)  CG median     32  CG total 660      setup_mv 0      phases(ms) cg      0.0  recycle     0.0
+    OFF  median/solve   0.467 s (spread 0.432..0.566)  CG median     32  CG total 660      setup_mv 0      phases(ms) cg      0.0  recycle     0.0
+    DOF-WEIGHTED WORK  ON 5.5202e+07   OFF 5.5202e+07   = 1.000x MORE work with recycling
+    WALL per solve     ON   0.471 s  OFF   0.467 s  = 1.008x SLOWER with recycling
+    recycle share of the ON solve's timed phases: 0.0%
+    healthy-path identity: fields BIT-IDENTICAL, CG totals equal
+
+  host 1-min load average at end: 12.60

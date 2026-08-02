@@ -1,0 +1,19 @@
+recycle_reassess — mode=cert  evidence=evidence/2026-08-03-krylov-recycle-reassessment
+host 1-min load average at start: 11.97
+shipped defaults: dim=16 cycle=1 wrap_multigrid=0 phase_timing=0
+
+===== AG1(c) CERTIFICATION SOLVES — (a) LATCHED =====
+  LATCHED bracket 40x16x41 (26240 voxels, 85680 free DOFs) dil=0.25 vf=0.50, 4 clearances
+  COLD basis : CG ON 1872   OFF 1872    setup_mv 0     recycle   49.6 ms
+              DOF-work 1.6039e+08 vs 1.6039e+08 = 1.000x   wall 13.671 s vs 14.123 s = 0.968x FASTER
+  WARM basis : CG ON 1395   OFF 2679    setup_mv 48    recycle  489.5 ms
+              DOF-work 1.2364e+08 vs 2.2954e+08 = 0.539x   wall 1.329 s vs 1.649 s = 0.806x FASTER
+
+===== AG1(c) CERTIFICATION SOLVES — (b) HEALTHY-MG =====
+  HEALTHY bracket 40x16x40 (25600 voxels, 83640 free DOFs) dil=0.25 vf=0.50, 4 clearances
+  COLD basis : CG ON 96     OFF 96      setup_mv 0     recycle    0.0 ms
+              DOF-work 8.0294e+06 vs 8.0294e+06 = 1.000x   wall 0.452 s vs 0.452 s = 1.000x FASTER
+  WARM basis : CG ON 96     OFF 96      setup_mv 0     recycle    0.0 ms
+              DOF-work 8.0294e+06 vs 8.0294e+06 = 1.000x   wall 0.443 s vs 0.459 s = 0.966x FASTER
+
+  host 1-min load average at end: 13.76

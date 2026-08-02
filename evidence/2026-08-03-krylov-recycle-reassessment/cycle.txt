@@ -1,0 +1,30 @@
+recycle_reassess — mode=cycle  evidence=evidence/2026-08-03-krylov-recycle-reassessment
+host 1-min load average at start: 11.95
+shipped defaults: dim=16 cycle=1 wrap_multigrid=0 phase_timing=0
+
+===== AG4 — HARVEST CADENCE SWEEP (latched path; cycle=1 SHIPS) =====
+  LATCHED bracket 40x16x41 (26240 voxels, 85680 free DOFs) dil=0.25 vf=0.50, 4 clearances
+  3 round-robin repeats x 8 design iterations (order reversed on alternate repeats)
+    rep 1  off        wall   20.75 s  CG 6511     setup_mv 0      load 13.12
+    rep 1  cycle=1    wall   19.77 s  CG 4045     setup_mv 112    load 13.24
+    rep 1  cycle=2    wall   19.05 s  CG 4374     setup_mv 48     load 15.30
+    rep 1  cycle=4    wall   25.04 s  CG 4552     setup_mv 16     load 15.85
+    rep 1  cycle=8    wall   25.42 s  CG 4729     setup_mv 0      load 16.54
+    rep 2  cycle=8    wall   23.85 s  CG 4729     setup_mv 0      load 16.25
+    rep 2  cycle=4    wall   20.42 s  CG 4552     setup_mv 16     load 17.46
+    rep 2  cycle=2    wall   22.83 s  CG 4374     setup_mv 48     load 16.70
+    rep 2  cycle=1    wall   21.41 s  CG 4045     setup_mv 112    load 16.25
+    rep 2  off        wall   25.03 s  CG 6511     setup_mv 0      load 17.11
+    rep 3  off        wall   26.21 s  CG 6511     setup_mv 0      load 18.61
+    rep 3  cycle=1    wall   20.24 s  CG 4045     setup_mv 112    load 20.87
+    rep 3  cycle=2    wall   21.07 s  CG 4374     setup_mv 48     load 19.43
+    rep 3  cycle=4    wall   25.18 s  CG 4552     setup_mv 16     load 17.99
+    rep 3  cycle=8    wall   20.71 s  CG 4729     setup_mv 0      load 19.23
+
+  setting      CG total   setup_mv      DOF-work  vs base wall/solve    vs base   recycle rec share
+  off             17799          0    1.5250e+09   1.000x     2.162 s   1.000x      0.1 ms     0.0%
+  cycle=1         10401        336    9.1995e+08   0.603x     1.748 s   0.809x    627.4 ms    35.3%
+  cycle=2         11388        144    9.8806e+08   0.648x     1.731 s   0.801x    457.5 ms    26.6%
+  cycle=4         11922         48    1.0256e+09   0.673x     1.993 s   0.922x    485.5 ms    24.4%
+  cycle=8         12453          0    1.0670e+09   0.700x     2.002 s   0.926x    557.0 ms    27.9%
+  host 1-min load average at end: 19.23
