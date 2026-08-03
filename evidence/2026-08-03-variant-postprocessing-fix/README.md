@@ -47,6 +47,12 @@ evaluated counterfactuals are all in the table.
 `f3_forecast_A_auto_w042.json` … `f3_forecast_E_include.json` — core's own forecast
 documents, verbatim. `LatticeForecastTests` runs against these files.
 
+**The forecast's CALL SITE was missing until the review caught it** (§10f, blocker
+1): every layer existed, every test passed, and nothing invoked it, so the user saw
+nothing. `LatticeForecastCallSiteTests` now drives the invocation itself — the tests
+above could not have caught it, because each of them calls the parser or the copy
+directly, which is exactly what production did not do.
+
 ## The boundary (bar S2)
 
 `s2_skin_rim_vs_diagrid.txt` — `none` / `rim` / `diagrid` on the same design.
@@ -54,3 +60,75 @@ documents, verbatim. `LatticeForecastTests` runs against these files.
 ## The bars that are arithmetic (P5 / P6)
 
 `p5_byte_identity.txt`, `p6_determinism.txt`.
+
+---
+
+# FOLLOW-UP · work the ladder while the ladder runs
+
+## Bar 1 — on-device re-certification at 128³
+
+`bar1_ondevice_recert_128.txt` — `topopt-cli analyze` (the same
+`topopt::analyze_fixed_design` call `bridge.cpp:1297` makes in-process) on the
+maintainer's OWN `variant_038.stl` at his 128³, under his declared load case:
+**101.2 s wall, 310 MB peak RSS / 369 MB peak footprint, ACCEPTED, converged**,
+reproducing his run's recorded margin (3291 vs 3290.86).
+
+Reproduce:
+
+```bash
+topopt-cli analyze analyze128.json --out out128 \
+  --mesh ~/.topopt-worker/95f4130119414636/out/variant_038.stl \
+  --materials core/src/materials/materials.json
+```
+
+## Bar 2 — contention · **NOT MEASURED, and the 1.09x is WITHDRAWN**
+
+`bar2_contention.txt` now records a withdrawal, not a number. The review asked for
+the control's ACTUAL value instead of an asserted 1.00x; the raw data was gone, so
+the measurement was re-run on a quiet machine, unrounded — and it does not hold up.
+
+* the two runs do **bit-identical work** (compliance / `cg_iters` / `matvecs` all
+  170/170), so the method is sound and the ratios are pure timing;
+* control **0.9919**, effect window **0.9411** — *below* the control, i.e. run B ran
+  faster while carrying the extra workload, which no contention can cause;
+* over the same 170 indices run B carried an extra 90.6 s of re-certification and
+  still finished **41.5 s faster** (B/A **0.8953**). Run-to-run offset ~10%, larger
+  than the 9% claimed and opposite in sign.
+
+One A/B pairing cannot resolve the effect. No number is claimed in its place. It
+costs nothing here: the maintainer's app and worker are different computers, so
+one-machine contention is structurally zero for him.
+
+`bar2_contention_discarded_designs.txt` records **two earlier designs that were
+wrong**, and why — kept deliberately, because silently dropping a measurement is how
+a wrong number gets published later.
+
+* **Design 1** compared iterations-per-window before vs after. A ladder's iteration
+  rate is not constant across RUNGS, so it compared ladder phases. It would have
+  reported a ~5x "speedup" from adding a second workload.
+* **Design 2** fixed that with a single-rung job and the worker's timestamped log —
+  and was still wrong, because per-iteration wall is not stationary WITHIN a rung
+  either. Its `after` window came out slower than its `during` window in **both**
+  runs, including on a quiet machine, which rules out background load and points
+  straight at the ramp.
+* **Design 3**, matched indices across two runs, is the one reported — correct in
+  construction, and the re-run confirms it compares identical arithmetic. It is
+  simply not powerful enough for a single pairing.
+
+The re-run also strengthens why 1 and 2 were hopeless: the within-rung ramp is not
+even consistently SIGNED. At res 96 it climbs (0.41 -> 2.54 s/iter); at res 64 it
+FALLS (3092 -> 2138 ms/iter, 0.69x).
+
+## Bars 3 and 4 — per-rung artifacts, and an interrupted ladder
+
+`core/tests/validation/test_design_stream.cpp` (21 checks). Run it:
+
+```bash
+cmake --build core/build --target test_design_stream && core/build/test_design_stream
+```
+
+It asserts, from OUTSIDE the process: at the instant rung N streams, `design.bin`
+AND `fields.bin` each hold a block for **rung N's own** volume fraction; the two
+containers stay in lockstep; and a ladder ABANDONED after rung 1 still leaves rung 1
+fully post-processable with no `report.json` (so it really is the interrupted case).
+With the per-rung field flush disabled, 5 of those checks fail.

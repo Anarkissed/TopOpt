@@ -1,0 +1,45 @@
+BAR 2 · CONTENTION — TWO DISCARDED DESIGNS, AND WHY
+
+Recorded deliberately. Silently dropping a measurement is how a wrong number gets
+published later, and both of these would have produced a confident wrong answer.
+
+--------------------------------------------------------------------------------
+DESIGN 1 — iterations-per-window, before vs after the re-certification
+--------------------------------------------------------------------------------
+WRONG because a ladder's iteration rate is not constant across RUNGS: rungs differ
+in cost and rung boundaries run certification solves. It compared ladder PHASES,
+not conditions. It would have reported a ~5x "speedup" from adding a second job.
+
+--------------------------------------------------------------------------------
+DESIGN 2 — per-iteration wall, before / during / after, within ONE rung
+--------------------------------------------------------------------------------
+Fixed design 1's rung confound by running a single-rung job and reading the
+worker's own timestamped PROGRESS lines. STILL WRONG, for a subtler reason:
+per-iteration wall is not stationary WITHIN a rung either. As SIMP sharpens the
+design, CG needs more iterations, so wall/iter climbs monotonically. "before" is
+early iterations, "after" is late ones — the comparison measures the ramp.
+
+Both runs of design 2 show the signature, and they are consistent with each other:
+
+  run 2a (machine also running ctest):
+    before  n=24  median 0.587 s/iter
+    during  n=90  median 1.190 s/iter
+    after   n=17  median 3.132 s/iter     <-- slower than "during"
+
+  run 2b (quiet machine):
+    before  n=24  median 0.398 s/iter
+    during  n=92  median 0.630 s/iter
+    after   n=45  median 2.656 s/iter     <-- slower than "during", again
+
+"after" slower than "during" is not explicable by contention — the second workload
+had FINISHED. The monotone ramp explains it exactly, and it survives on a quiet
+machine, which rules out background load as the cause.
+
+--------------------------------------------------------------------------------
+DESIGN 3 — the one reported (bar2_contention.txt)
+--------------------------------------------------------------------------------
+Runs the identical deterministic single-rung job TWICE — once alone, once with the
+re-certification started at the same iteration — and compares the SAME ITERATION
+INDICES between the two runs. Each index is compared against itself, so the
+difficulty ramp cancels. It also carries its own control: the indices of run B that
+came AFTER the re-cert finished should ratio ~1.0 against run A.

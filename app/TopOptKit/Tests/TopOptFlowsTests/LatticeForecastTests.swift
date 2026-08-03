@@ -146,39 +146,95 @@ final class LatticeForecastTests: XCTestCase {
             skinJobValue: "rim", voxelDerived: true))
     }
 
-    // MARK: - P3 · the Optimize button itself says it, before the run
+    // MARK: - P3 · the BUTTON THAT SPENDS THE RUN says it, before the run
+
+    private func variantContext() -> LatticeVariantContext {
+        LatticeVariantContext(
+            runName: "Bracket", variantIndex: 1, requestedVolumeFraction: 0.6,
+            massGrams: 41.2, worstCaseMargin: 2.31, accepted: true,
+            meshVertices: [0, 0, 0, 1, 0, 0, 0, 1, 0], meshIndices: [0, 1, 2],
+            field: LatticeDemandField(
+                vonMises: [1, 2, 3, 4, 5, 6, 7, 8], nx: 2, ny: 2, nz: 2,
+                origin: .zero, spacingMM: 1,
+                provenance: .variant(runName: "Bracket", variantIndex: 1, date: nil)),
+            artifacts: RelatticeArtifacts(jobJSON: Data("{}".utf8),
+                                          designBin: Data([1, 2, 3])),
+            unavailable: nil)
+    }
 
     /// The refusal has to reach the CONTROL, not just the value type. This is the
-    /// sub-line under Optimize on the lattice page.
-    func testTheOptimizeButtonStatesTheRefusalAndTheMeasuredRemedy() throws {
-        func surface(_ f: LatticeForecast?) -> LatticeOptimizeSurface {
-            LatticeOptimizeSurface.compute(
-                baseCanOptimize: true, baseSummary: "3 rungs", latticeEnabled: true,
-                densityMode: .uniform, topologyDisplayName: "Octet", cellMM: 2,
-                bounds: nil, running: false, lineWidthMM: 0.42, forecast: f)
+    /// sub-line under "Lattice this variant" — the button that spends the next run.
+    func testTheLatticeButtonStatesTheRefusalAndTheMeasuredRemedy() throws {
+        func sub(_ f: LatticeForecast?) throws -> String {
+            let a = LatticePageActions.compute(
+                variant: variantContext(),
+                optimizeSurface: LatticeOptimizeSurface(
+                    enabled: true, label: "Optimize", sub: "1 anchor · 1 load"),
+                running: false, forecast: f)
+            return try XCTUnwrap(a.relattice).sub
         }
-        let d = try forecast("D_fixed2mm")
-        let warned = surface(d)
-        XCTAssertTrue(warned.sub.contains("36% of the region"),
-                      "P3: the count reaches the button: \(warned.sub)")
-        XCTAssertTrue(warned.sub.contains("Halve the cell size"),
-                      "…with the measured remedy: \(warned.sub)")
-        XCTAssertTrue(warned.enabled,
+        let warned = try sub(try forecast("D_fixed2mm"))
+        XCTAssertTrue(warned.contains("36% of the region"),
+                      "P3: the count reaches the button: \(warned)")
+        XCTAssertTrue(warned.contains("Halve the cell size"),
+                      "…with the measured remedy: \(warned)")
+        let a = LatticePageActions.compute(
+            variant: variantContext(),
+            optimizeSurface: LatticeOptimizeSurface(enabled: true, label: "Optimize",
+                                                    sub: "1 anchor · 1 load"),
+            running: false, forecast: try forecast("D_fixed2mm"))
+        XCTAssertTrue(try XCTUnwrap(a.relattice).enabled,
                       "it WARNS, it does not forbid — a partial lattice can be what "
                       + "the user wants; what must not happen is silence")
 
         // A configuration that latticed most of its region says nothing extra…
-        let quiet = surface(try forecast("B_auto_w010"))
-        XCTAssertFalse(quiet.sub.contains("of the region"), quiet.sub)
+        let quiet = try sub(try forecast("B_auto_w010"))
+        XCTAssertFalse(quiet.contains("of the region"), quiet)
         // …and neither does one with no forecast yet.
-        XCTAssertEqual(surface(nil).sub, quiet.sub,
+        XCTAssertEqual(try sub(nil), quiet,
                        "no forecast must read exactly like a healthy one — the "
                        + "sub-line is unchanged until there is something to say")
 
         // The zero case names the cause instead of a cell size.
-        let zero = surface(try forecast("A_auto_w042"))
-        XCTAssertTrue(zero.sub.contains("NOTHING"), zero.sub)
-        XCTAssertTrue(zero.sub.contains("No cell size can lattice"), zero.sub)
+        let zero = try sub(try forecast("A_auto_w042"))
+        XCTAssertTrue(zero.contains("NOTHING"), zero)
+        XCTAssertTrue(zero.contains("No cell size can lattice"), zero)
+    }
+
+    /// PLACEMENT. The forecast describes the `lattice_variant` job — this stored
+    /// design under these settings. "Optimize from scratch" re-runs the ladder from
+    /// the ORIGINAL part and never touches that design, so a forecast must not
+    /// appear on it: that would be a prediction about a job the button does not
+    /// start. (The first cut put it exactly there.)
+    func testTheForecastNeverAppearsOnTheOptimizeFromScratchButton() throws {
+        let base = LatticeOptimizeSurface(enabled: true, label: "Optimize",
+                                          sub: "1 anchor · 1 load")
+        let refused = try forecast("A_auto_w042")   // latticees NOTHING
+        let with = LatticePageActions.compute(variant: variantContext(),
+                                              optimizeSurface: base, running: false,
+                                              forecast: refused)
+        let without = LatticePageActions.compute(variant: variantContext(),
+                                                 optimizeSurface: base, running: false)
+        XCTAssertEqual(with.optimize.sub, without.optimize.sub,
+                       "the ladder button must read identically with and without a "
+                       + "forecast — it does not run the job that was forecast")
+        XCTAssertFalse(with.optimize.sub.contains("NOTHING"), with.optimize.sub)
+        XCTAssertNotEqual(try XCTUnwrap(with.relattice).sub,
+                          try XCTUnwrap(without.relattice).sub,
+                          "…while the button that DOES run it must change")
+    }
+
+    /// A queued or unavailable action keeps its own reason. The forecast must not
+    /// overwrite "the Mac is still solving this run" with a settings warning.
+    func testAQueuedActionKeepsItsReasonOverTheForecast() throws {
+        let a = LatticePageActions.compute(
+            variant: variantContext(),
+            optimizeSurface: LatticeOptimizeSurface(enabled: true, label: "Optimize",
+                                                    sub: "1 anchor · 1 load"),
+            running: true, forecast: try forecast("A_auto_w042"))
+        let re = try XCTUnwrap(a.relattice)
+        XCTAssertEqual(re.sub, VariantEntry.latticeQueuedReason)
+        XCTAssertFalse(re.enabled)
     }
 
     // MARK: - the parse refuses what it cannot read

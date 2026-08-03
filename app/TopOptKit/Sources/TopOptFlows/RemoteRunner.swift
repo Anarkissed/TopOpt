@@ -290,6 +290,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private let existingJobID: String?
     /// Where the run's retention pair is handed back (see `remoteRunner`).
     private let onArtifacts: ((RelatticeArtifacts) -> Void)?
+    /// The most recent `fields.bin` fetched DURING the run — kept for its GRID, so
+    /// a later fetch failure cannot wipe the geometry an earlier rung established
+    /// (task 2026-08-03-variant-postprocessing-concurrency). Touched only from the
+    /// event thread, like `submittedJobJSON`.
+    private var streamedFieldsGrid: RemoteFieldsContainer?
 
     private var jobID: String?
     /// The EXACT bytes this run submitted, kept so the retention pair is the
@@ -1316,8 +1321,48 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             accepted: accepted,
             v3Passes: true,
             meshVertices: mesh.0, meshIndices: mesh.1)
-        onVariant(OptimizeOutcome(variants: [v], stoppedOnMargin: false,
+        // THIS RUNG'S OWN FIELD, NOW (task
+        // 2026-08-03-variant-postprocessing-concurrency). Core publishes
+        // `fields.bin` after every rung, so the block for the variant we are about
+        // to show exists. Without it a streamed variant arrived with mass 0 and an
+        // empty von Mises field — which is exactly what the lattice page's AUTO
+        // density grades from and what the results overlays draw. A four-rung
+        // ladder therefore left rung 1 un-gradeable for hours, for no reason but
+        // when the file was written.
+        //
+        // Matched BY VOLUME FRACTION, never by position: the container holds the
+        // rungs accepted so far and this is the rung the event just named.
+        // Best-effort — a fetch that fails leaves the variant exactly as it arrived
+        // before this change, and the page's own gates report the field as absent.
+        let container = fetchFields()
+        if let c = container { streamedFieldsGrid = c }   // remember the geometry
+        let block = container?.variants.first { $0.requestedVF == requestedVF }
+        let enriched = block.map { b in
+            OptimizeVariant(
+                requestedVolumeFraction: requestedVF,
+                achievedVolumeFraction: printedVF, printedFraction: printedVF,
+                massGrams: b.massGrams, supportVolumeVoxels: b.supportVolumeVoxels,
+                meshTriangleCount: mesh.1.count / 3, worstCaseMargin: margin,
+                accepted: accepted, v3Passes: true,
+                meshVertices: mesh.0, meshIndices: mesh.1,
+                vonMisesField: b.vonMises, displacementField: b.displacement)
+        } ?? v
+        if block != nil {
+            diag("streamed variant vf=\(requestedVF) carries its own field "
+                 + "(\(block!.vonMises.count) voxels) — post-processable now")
+        }
+        // The GRID the field is indexed to must ride along, or the app holds a
+        // field it cannot address. `appendStreamed` takes the grid from each
+        // partial, so the LAST KNOWN container's geometry is passed every time — a
+        // later fetch failure must not wipe the geometry an earlier one established.
+        let g = streamedFieldsGrid
+        onVariant(OptimizeOutcome(variants: [enriched], stoppedOnMargin: false,
                                   cancelled: false, acceptedCount: 1,
+                                  voxelVolumeMM3: g?.voxelVolumeMM3 ?? 0,
+                                  gridNx: g?.gridNx ?? 0, gridNy: g?.gridNy ?? 0,
+                                  gridNz: g?.gridNz ?? 0,
+                                  gridOrigin: g?.gridOrigin ?? .zero,
+                                  spacing: g?.spacing ?? 0,
                                   computedRemotely: true))
         // THE RETENTION PAIR, AT EVERY RUNG (task
         // 2026-08-03-variant-postprocessing-fix, defect 1). A variant is on screen

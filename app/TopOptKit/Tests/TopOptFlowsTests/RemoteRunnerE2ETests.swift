@@ -219,6 +219,30 @@ final class RemoteRunnerE2ETests: XCTestCase {
         print("  retained: job \(art.jobJSON.count) B, design \(art.designBin.count) B, "
             + "blocks \(index.requestedVolumeFractions)")
 
+        // (2b) EACH RUNG CARRIES ITS OWN FIELD (task
+        //      2026-08-03-variant-postprocessing-concurrency, bars 3+4). Core
+        //      publishes fields.bin after every rung and the client fetches that
+        //      rung's block as it streams — so a variant produced by a run that
+        //      never finished still has the von Mises the lattice page's AUTO
+        //      density grades from and the results overlays draw. Before this, a
+        //      streamed variant arrived with mass 0 and an empty field.
+        for v in outcome.variants where v.accepted {
+            XCTAssertFalse(v.vonMisesField.isEmpty,
+                           "rung vf=\(v.requestedVolumeFraction) must carry its OWN "
+                           + "field, on a run that never reached a terminal event")
+            XCTAssertGreaterThan(v.massGrams, 0,
+                                 "…and its own mass, from the same block")
+        }
+        XCTAssertGreaterThan(outcome.gridNx, 0,
+                             "the grid the fields are indexed to rides along, or the "
+                             + "app holds a field it cannot address")
+        // The fields must be the RUNGS' OWN, not one rung's copied onto all: the
+        // stub gives each rung a distinct mass, so equal masses would mean the
+        // match-by-volume-fraction had degenerated into "take the first block".
+        let masses = outcome.variants.filter { $0.accepted }.map(\.massGrams)
+        XCTAssertEqual(Set(masses).count, masses.count,
+                       "each rung got ITS OWN block, not a neighbour's: \(masses)")
+
         // (3) …and the two entry controls the user actually taps are ENABLED, for
         //     every variant on screen. A pair that is present but does not cover a
         //     rung is not a pass.

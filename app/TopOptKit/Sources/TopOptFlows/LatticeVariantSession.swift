@@ -84,9 +84,30 @@ public struct RelatticeArtifacts: Equatable, Sendable {
 public struct DesignContainerIndex: Equatable, Sendable {
     /// `requested_volume_fraction` of every block, in file order.
     public let requestedVolumeFractions: [Double]
+    /// Each block's `fingerprint` — core's hash over that rung's DENSITY FIELD
+    /// (`design_fingerprint`, design_store.cpp). Parallel to the array above.
+    ///
+    /// This is the identity of a DESIGN, not of a position: two rungs at the same
+    /// volume fraction from different runs hash differently. That is what lets a
+    /// smoothing say which design it was made from and go stale when that is no
+    /// longer the design on screen (task
+    /// 2026-08-03-variant-postprocessing-concurrency, requirement 3), and it is the
+    /// same number PR 274's Z3 uses to tie "the certified object" to "the exported
+    /// one".
+    public let fingerprints: [UInt64]
 
-    public init(requestedVolumeFractions: [Double]) {
+    public init(requestedVolumeFractions: [Double], fingerprints: [UInt64] = []) {
         self.requestedVolumeFractions = requestedVolumeFractions
+        self.fingerprints = fingerprints
+    }
+
+    /// The design fingerprint for a rung, or nil when the container has no block
+    /// for it. nil is never "0" — an absent design is not a design that hashes to
+    /// zero.
+    public func fingerprint(forRequestedVolumeFraction vf: Double) -> UInt64? {
+        guard let i = requestedVolumeFractions.firstIndex(where: { $0 == vf }),
+              i < fingerprints.count else { return nil }
+        return fingerprints[i]
     }
 
     /// The format version this reader understands (`kDesignFormatVersion`).
@@ -119,18 +140,24 @@ public struct DesignContainerIndex: Equatable, Sendable {
               let count = le(16 + 24 + 8, Int32.self), count >= 0
         else { return nil }
         var fractions: [Double] = []
+        var prints: [UInt64] = []
         var at = headerBytes
         for _ in 0..<Int(count) {
             guard let vf = le(at, Double.self),
+                  // fingerprint sits immediately before the density count (u64,
+                  // then i64) — see `blockPrologueBytes`.
+                  let fp = le(at + blockPrologueBytes - 16, UInt64.self),
                   let densityCount = le(at + blockPrologueBytes - 8, Int64.self),
                   densityCount >= 0
             else { return nil }
             fractions.append(vf)
+            prints.append(fp)
             let next = at + blockPrologueBytes + Int(densityCount) * 8
             guard next <= data.count else { return nil }
             at = next
         }
-        return DesignContainerIndex(requestedVolumeFractions: fractions)
+        return DesignContainerIndex(requestedVolumeFractions: fractions,
+                                    fingerprints: prints)
     }
 
     /// Whether a block for this rung is present. The re-lattice job selects by
@@ -305,9 +332,16 @@ public struct LatticePageActions: Equatable, Sendable {
     /// Run the ladder from the original part.
     public let optimize: Action
 
+    /// `forecast` is the PRE-FLIGHT FORECAST of the `lattice_variant` job this
+    /// page's primary button submits (task 2026-08-03-variant-postprocessing-fix,
+    /// bar F3). It belongs on THIS action and no other: it was computed from this
+    /// variant's stored design under these settings, which is exactly what
+    /// "Lattice this variant" runs and exactly what "Optimize from scratch" does
+    /// not. Absent ⇒ the button says what it always said.
     public static func compute(variant: LatticeVariantContext?,
                                optimizeSurface: LatticeOptimizeSurface,
-                               running: Bool) -> LatticePageActions {
+                               running: Bool,
+                               forecast: LatticeForecast? = nil) -> LatticePageActions {
         guard let v = variant else {
             // No variant: the pre-existing single Optimize button, verbatim.
             return LatticePageActions(
@@ -319,12 +353,34 @@ public struct LatticePageActions: Equatable, Sendable {
         let pct = Int((v.requestedVolumeFraction * 100).rounded())
         let re: Action
         if running {
+            // THE ACTION WAITS; THE PAGE DOES NOT (task
+            // 2026-08-03-variant-postprocessing-concurrency, requirement 4).
+            // Generating a lattice is the Mac's work and the worker runs one job at
+            // a time, so this never dispatches a second CLI job at a busy worker.
+            // Everything else on this page — topology, cell size, regions, boundary
+            // — is configuration, costs nothing, and stays live. "a job is already
+            // running" said the page was closed; this says what is actually true.
             re = Action(label: "Lattice this variant",
-                        sub: "a job is already running", enabled: false,
+                        sub: VariantEntry.latticeQueuedReason, enabled: false,
                         primary: true)
         } else if let why = v.unavailable {
             re = Action(label: "Lattice this variant", sub: why.reason,
                         enabled: false, primary: true)
+        } else if let f = forecast, f.isRefused {
+            // THE REFUSAL, BEFORE THE RUN IS SPENT (bars F4 / P3). A configuration
+            // that turns most of its region solid is not a lattice, and the
+            // maintainer learned that from a receipt after an hour of Mac time.
+            // It is said HERE, on the button that would spend the next one, with
+            // the measured remedy where core found one.
+            //
+            // It WARNS rather than disables, deliberately: a partial lattice can be
+            // exactly what someone wants, and the brief asks for this to be SAID,
+            // not forbidden. What must never happen again is that it is silent.
+            let remedy = f.adviceLines().first
+            re = Action(
+                label: "Lattice this variant",
+                sub: remedy.map { "\(f.headline) \($0)" } ?? f.headline,
+                enabled: true, primary: true)
         } else {
             re = Action(
                 label: "Lattice this variant",

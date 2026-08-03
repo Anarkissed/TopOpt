@@ -102,6 +102,62 @@ final class VariantEntryGatingTests: XCTestCase {
         XCTAssertNil(VariantEntry.lattice(f).reason)
     }
 
+    // MARK: - CONCURRENCY · a running ladder does not freeze what it already made
+    //         (task 2026-08-03-variant-postprocessing-concurrency, requirements 2+4)
+
+    /// THE REPLACEMENT FOR THE TWO ROWS REMOVED ABOVE, and a stronger claim than
+    /// they made: a variant that has already streamed is FULLY usable while the
+    /// ladder keeps solving later rungs.
+    ///
+    /// Smoothing is an ON-DEVICE computation — `SmoothingModel.live` →
+    /// `TopOptKit.smoothAndRecertifyLoadCase` → `smooth_and_recertify_loadcase`
+    /// (bridge.cpp) → `analyze_loadcase` → `topopt::analyze_fixed_design`
+    /// (bridge.cpp:1297), all in-process. On the maintainer's setup that is a
+    /// different computer from the worker entirely. And lattice SETUP is pure
+    /// configuration. Neither has any claim on the Mac.
+    func testAStreamedVariantIsFullyUsableWhileTheLadderIsStillRunning() {
+        let mid = healthy(runInFlight: true)
+        XCTAssertTrue(VariantEntry.smoothing(mid).enabled,
+                      "smoothing runs on THIS device and must not wait for the "
+                      + "Mac: \(VariantEntry.smoothingBlocks(mid))")
+        XCTAssertTrue(VariantEntry.lattice(mid).enabled,
+                      "lattice SETUP is zero compute and must not wait for the "
+                      + "Mac: \(VariantEntry.latticeBlocks(mid))")
+        XCTAssertNil(VariantEntry.smoothing(mid).reason)
+        XCTAssertNil(VariantEntry.lattice(mid).reason)
+
+        // …and the verdicts are IDENTICAL to the idle case, so "a run is going" is
+        // not quietly changing some other reason either.
+        XCTAssertEqual(VariantEntry.smoothingBlocks(mid),
+                       VariantEntry.smoothingBlocks(healthy()))
+        XCTAssertEqual(VariantEntry.latticeBlocks(mid),
+                       VariantEntry.latticeBlocks(healthy()))
+    }
+
+    /// The one part that IS the Mac's: dispatching a generation. It queues behind
+    /// the running job and says so — it never races a second CLI job at a busy
+    /// worker, and it never silently refuses either.
+    func testTheLatticeActionQueuesWhileTheWorkerIsBusyAndSaysSo() throws {
+        let waiting = try XCTUnwrap(
+            VariantEntry.latticeActionWaits(healthy(runInFlight: true)),
+            "requirement 4: the ACTION must say it will wait")
+        XCTAssertTrue(waiting.localizedCaseInsensitiveContains("starts when"),
+                      "it must say it WAITS and then runs, not that it is refused: "
+                      + "\(waiting)")
+        XCTAssertTrue(waiting.localizedCaseInsensitiveContains("set the lattice up now"),
+                      "…and that the page is usable meanwhile: \(waiting)")
+        // It must NOT claim a worker-side queue: the app holds one run slot, so
+        // nothing is actually queued on the Mac (see the constant's note).
+        XCTAssertFalse(waiting.localizedCaseInsensitiveContains("queue behind"),
+                       "the copy must not describe a queue the app does not create")
+        XCTAssertNil(VariantEntry.latticeActionWaits(healthy()),
+                     "with nothing running there is nothing to wait for")
+        // The waiting sentence is NOT a block: it must not appear in the entry's
+        // reasons, or the page would go dark again by another name.
+        XCTAssertFalse(VariantEntry.latticeBlocks(healthy(runInFlight: true))
+                        .contains(waiting))
+    }
+
     // MARK: - AJ2 · every blocking precondition, each with its OWN reason
 
     /// One case per precondition. Each entry names the condition, the facts that
@@ -114,11 +170,14 @@ final class VariantEntryGatingTests: XCTestCase {
         let mustSay: [String]
     }
 
+    // "a job is already running" is NOT in either table any more (task
+    // 2026-08-03-variant-postprocessing-concurrency). It used to head both, and
+    // that is what made a four-hour ladder freeze every variant it had already
+    // produced. The replacement is STRONGER, not absent: two explicit tests below
+    // assert both entries stay USABLE mid-run, and that the lattice ACTION — the
+    // only part that needs the Mac — queues with its own sentence.
     private var smoothingCases: [Case] {
         [
-            Case(name: "a job is already running",
-                 facts: healthy(runInFlight: true),
-                 mustSay: ["already running"]),
             Case(name: "the rung produced no geometry",
                  facts: healthy(hasGeometry: false),
                  mustSay: ["no geometry"]),
@@ -144,9 +203,6 @@ final class VariantEntryGatingTests: XCTestCase {
 
     private var latticeCases: [Case] {
         [
-            Case(name: "a job is already running",
-                 facts: healthy(runInFlight: true),
-                 mustSay: ["already running"]),
             Case(name: "the rung produced no geometry",
                  facts: healthy(hasGeometry: false),
                  mustSay: ["no geometry"]),

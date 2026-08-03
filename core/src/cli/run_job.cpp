@@ -4455,28 +4455,53 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   //
   // Scoped to the STREAMING path deliberately: only a run someone is watching can
   // be observed part-way, and a batch `topopt-cli run` writes exactly what it did.
+  //
+  // ── …AND THE FIELD CONTAINER WITH IT (task
+  //    2026-08-03-variant-postprocessing-concurrency, bar 3) ───────────────────
+  // A four-rung ladder takes hours. Rung 1's OWN von Mises field is what the
+  // lattice page's AUTO density grades from and what the results overlays draw,
+  // and it exists in memory the moment rung 1 finishes — but `fields.bin` was
+  // written only at final assembly, so for the whole rest of the run (and forever,
+  // if the run died) rung 1 had a design and no field. Both halves of "the
+  // artifacts a variant carries" are now published together, per rung.
+  //
+  // BORROWED, NOT COPIED — AND BORROWED ONLY WITHIN ONE CALL. A per-rung flush
+  // must serialise every rung so far, and copying them would cost ~50 MB per rung
+  // of duplication at 128³ (PR 291's first cut copied a trimmed variant per rung;
+  // adding the fields to that was not affordable). So it borrows.
+  //
+  // What it does NOT do is ACCUMULATE the borrowed pointers. An earlier cut kept a
+  // `std::vector<const MinimizePlasticVariant*>` alive across calls, which is
+  // correct exactly as long as `result.evaluated` never reallocates. It does not —
+  // minimize_plastic.cpp reserves it to the ladder length, states the invariant out
+  // loud and asserts it, and this repo -UNDEBUGs the `topopt` target so that assert
+  // survives Release. But the invariant lived in a different file from the code
+  // depending on it, and the cost of someone deleting that reserve() is
+  // use-after-free, not a wrong number. So `on_variant` now hands over the live
+  // container and the pointers are built and consumed INSIDE this lambda. They
+  // cannot outlive a reallocation because they do not outlive the call, and the
+  // reserve is an optimisation again rather than a correctness requirement.
   const std::string design_stream_path = join_path(out_dir, "design.bin");
-  std::vector<MinimizePlasticVariant> design_so_far;
-  auto publish_design_so_far = [&](const MinimizePlasticVariant& v) {
-    // A TRIMMED copy — only what design_store reads — so holding the ladder's
-    // designs alongside the pipeline's own costs one density field per rung.
-    MinimizePlasticVariant d;
-    d.requested_volume_fraction = v.requested_volume_fraction;
-    d.optimization.volume_fraction = v.optimization.volume_fraction;
-    d.optimization.physical_density = v.optimization.physical_density;
-    d.optimization.iterations = v.optimization.iterations;
-    d.report.margin.worst_case = v.report.margin.worst_case;
-    d.report.margin_effective = v.report.margin_effective;
-    d.report.max_stress_mpa = v.report.max_stress_mpa;
-    d.accepted = v.accepted;
-    d.applied_build_dir = v.applied_build_dir;
-    d.build_direction_auto_applied = v.build_direction_auto_applied;
-    d.export_baked = v.export_baked;
-    design_so_far.push_back(std::move(d));
-    // Best-effort: a design container that cannot be written must never take a
-    // run down. The final write still throws — that one is the contract.
+  const std::string fields_stream_path = join_path(out_dir, "fields.bin");
+  auto publish_artifacts_so_far =
+      [&](const std::vector<MinimizePlasticVariant>& evaluated_so_far) {
+    // ACCEPTED only, which is exactly what the accumulating version held:
+    // `on_variant` fires only for accepted rungs, so every pointer it ever pushed
+    // was an accepted one. Filtering here says so directly instead of depending on
+    // the ladder stopping at the first rejection, and keeps the streamed
+    // containers byte-identical to what they carried before.
+    std::vector<const MinimizePlasticVariant*> so_far;
+    so_far.reserve(evaluated_so_far.size());
+    for (const MinimizePlasticVariant& e : evaluated_so_far)
+      if (e.accepted) so_far.push_back(&e);
+    // Best-effort BOTH: an artifact that cannot be written must never take a run
+    // down. The final writes still throw — those are the contract.
     try {
-      write_design_file(design_stream_path, design_so_far, solved_grid);
+      write_design_file(design_stream_path, so_far, solved_grid);
+    } catch (const std::exception&) {
+    }
+    try {
+      write_fields_file(fields_stream_path, so_far, solved_grid);
     } catch (const std::exception&) {
     }
   };
@@ -4485,11 +4510,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       std::printf("PROGRESS rung=%zu rungs=%zu iter=%d\n", rung, rungs, iter);
       std::fflush(stdout);
     };
-    options.on_variant = [&](const MinimizePlasticVariant& v) {
-      // BEFORE the accepted guard: the final container holds every evaluated
-      // variant that carries a field, so the running one must too, or a rejected
-      // rung would appear and disappear depending on when you looked.
-      publish_design_so_far(v);
+    options.on_variant = [&](const MinimizePlasticVariant& v,
+                             const std::vector<MinimizePlasticVariant>&
+                                 evaluated_so_far) {
+      // `on_variant` fires ONLY for ACCEPTED rungs (minimize_plastic.cpp guards
+      // the call with `if (result.evaluated.back().accepted)`), so the running
+      // containers hold exactly the rungs that have streamed — which is exactly
+      // the set a client can see. The FINAL writes add any rejected rungs
+      // design.bin also carries, and are unchanged, so a completed run ships the
+      // identical files it always did.
+      publish_artifacts_so_far(evaluated_so_far);
       if (!v.accepted) return;
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid);

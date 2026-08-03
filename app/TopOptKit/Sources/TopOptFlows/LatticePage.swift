@@ -69,6 +69,20 @@ public struct LatticePage: View {
     /// renders the panel as a plain stack. Production always scrolls.
     let staticRender: Bool
 
+    // MARK: the pre-flight forecast (bar F3)
+
+    /// Holds the forecast and its staleness. Owned by the workspace so it survives
+    /// the page being closed and reopened.
+    @ObservedObject var forecast: LatticeForecastModel
+    /// The EXACT `lattice_variant` job "Lattice this variant" would submit — the
+    /// forecast's input AND its identity. nil when there is nothing to forecast (no
+    /// variant, no retained design, no worker). Rebuilt whenever the settings move,
+    /// so a changed configuration is a changed document is a new forecast.
+    let forecastJob: Data?
+    /// Runs the forecast. Injected because it is a worker round trip; nil in the
+    /// previews and offscreen captures, where the page renders without one.
+    let driveForecast: (@Sendable (Data) async throws -> LatticeForecast)?
+
     public init(model: AppModel, project: ProjectModel, run: RunModel,
                 sim: LatticeSimModel, page: LatticePageModel,
                 variantField: LatticeDemandField? = nil,
@@ -80,6 +94,9 @@ public struct LatticePage: View {
                 onClose: @escaping () -> Void,
                 onBackToSetup: @escaping () -> Void,
                 onRefreshPreview: @escaping () -> Void = {},
+                forecast: LatticeForecastModel = LatticeForecastModel(),
+                forecastJob: Data? = nil,
+                driveForecast: (@Sendable (Data) async throws -> LatticeForecast)? = nil,
                 staticRender: Bool = false) {
         self.model = model
         self.project = project
@@ -96,6 +113,9 @@ public struct LatticePage: View {
         self.onClose = onClose
         self.onBackToSetup = onBackToSetup
         self.onRefreshPreview = onRefreshPreview
+        self.forecast = forecast
+        self.forecastJob = forecastJob
+        self.driveForecast = driveForecast
         self.staticRender = staticRender
     }
 
@@ -198,6 +218,17 @@ public struct LatticePage: View {
                 if !gate.satisfied { gateOverlay }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // *** THE FORECAST'S CALL SITE (bar F3). *** Every layer below this
+            // line existed before it did — core computes the forecast, the worker
+            // serves it, RelatticeRun drives it, LatticeForecast parses it and the
+            // button and drawer render it — and the user saw nothing, because
+            // nothing invoked it. `id:` is the job document itself, so changing any
+            // setting that changes the job re-asks, and changing one that does not
+            // costs nothing.
+            .task(id: forecastJob) {
+                guard let drive = driveForecast else { return }
+                forecast.request(forecastJob, drive: drive)
+            }
         }
     }
 
@@ -453,7 +484,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning: return DS.Color.accent
         case .simComplete: return DS.Color.okGreen
-        case .simStale: return DS.Color.warning
+        case .simStale, .smoothingStale: return DS.Color.warning
         case .optimizing: return RGBA(hex: 0x5E5CE6)
         case .failed: return DS.Color.danger
         }
@@ -462,7 +493,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning, .optimizing: return "circle.fill"
         case .simComplete: return "checkmark"
-        case .simStale: return "exclamationmark"
+        case .simStale, .smoothingStale: return "exclamationmark"
         case .failed: return "xmark"
         }
     }
@@ -473,7 +504,10 @@ public struct LatticePage: View {
             if let ctx = model.makeLatticeSimContext() { sim.run(ctx) }
         case .optimizing: run.cancel()
         case .failed: page.go(nil)
-        case .simComplete: break
+        // The smoothing-stale banner is not a LATTICE-page state; it is derived
+        // and shown by the smoothing page. Listed for exhaustiveness so a future
+        // kind cannot be added without a decision here.
+        case .simComplete, .smoothingStale: break
         }
     }
 
@@ -1235,6 +1269,7 @@ public struct LatticePage: View {
                        warn: false)
             summaryRow("Boundary", boundaryTitle, warn: false)
             summaryRow("Job", project.lattice.enabled ? "Topology + lattice" : "Topology only", warn: false)
+            if variantContext != nil { forecastSection }
         }
         .padding(DS.Space.l)
         .frame(width: 348, alignment: .leading)
@@ -1251,6 +1286,45 @@ public struct LatticePage: View {
         case .rim: return "Rim only"
         case .fullSkin: return "Full skin · diagrid"
         }
+    }
+
+    /// The pre-flight forecast, in full: the headline, every reason with its own
+    /// count, and the remedies core MEASURED by re-running the grading law. This is
+    /// the surface the maintainer needed and did not have — the numbers were all
+    /// computable in under a second, and he got them from a receipt an hour later.
+    @ViewBuilder private var forecastSection: some View {
+        let p = forecastPanel
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Rectangle().fill(DS.Color.strokePanel.color).frame(height: 1)
+                .padding(.vertical, DS.Space.xs)
+            Text(p.title.uppercased()).font(.system(size: 11, weight: .semibold))
+                .tracking(0.7)
+                .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textQuaternary).color)
+            if let placeholder = p.placeholder {
+                Text(placeholder).dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let headline = p.headline {
+                Text(headline).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                    .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textPrimary).color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(p.reasons.enumerated()), id: \.offset) { _, line in
+                Text("• " + line).dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(p.advice.enumerated()), id: \.offset) { _, line in
+                Text("→ " + line).dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            ([p.title, p.placeholder, p.headline] + p.reasons + p.advice)
+                .compactMap { $0 }.joined(separator: ". "))
     }
 
     private func summaryRow(_ k: String, _ v: String, warn: Bool) -> some View {
@@ -1273,7 +1347,18 @@ public struct LatticePage: View {
     private var actions: LatticePageActions {
         LatticePageActions.compute(variant: variantContext,
                                    optimizeSurface: optimizeSurface,
-                                   running: optimizing)
+                                   running: optimizing,
+                                   forecast: forecast.forecast(for: forecastJob))
+    }
+
+    /// THE FORECAST, IN THE REVIEW DRAWER (bar F3). The button carries the refusal
+    /// in one line; this carries the whole answer — every reason with its count and
+    /// every remedy core actually measured — on the surface whose entire job is
+    /// "read this before you spend a run".
+    private var forecastPanel: LatticeForecastPanel {
+        LatticeForecastPanel.compute(
+            state: forecast.state,
+            describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob)
     }
 
     private var optimizeButton: some View {

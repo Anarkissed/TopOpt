@@ -53,14 +53,24 @@ final class LatticeSDFProfileTests: XCTestCase {
     /// and the skip says so out loud, naming the device. The ratio assertion, which
     /// is a property of the ALGORITHM and not of the machine, keeps running
     /// everywhere — including CI, where it passes.
-    private static func frameBudgetIsMeaningful(on device: MTLDevice) -> Bool {
-        // Opt-out for a developer deliberately profiling in a VM, and an opt-IN so
-        // a future runner with real GPU passthrough can be held to the budget
-        // without editing this file.
-        let env = ProcessInfo.processInfo.environment
-        if env["TOPOPT_ASSERT_FRAME_BUDGET"] == "1" { return true }
-        if env["TOPOPT_ASSERT_FRAME_BUDGET"] == "0" { return false }
-        return !device.name.localizedCaseInsensitiveContains("paravirtual")
+    ///
+    /// *** THE SKIP IS DRIVEN BY AN EXPLICIT ENV VAR, NOT BY THE DEVICE NAME.
+    /// A first cut tested `device.name.contains("paravirtual")`. That is a string
+    /// Apple chose and Apple can change: rename the virtual GPU and a 60 Hz budget
+    /// SILENTLY RE-ARMS on hardware it was never meant to describe — the failure
+    /// mode is a red CI nobody can explain, or worse, an amber one nobody reads.
+    /// An env var fails the other way. It lives in ci.yml where it is reviewable,
+    /// and if that line is ever lost the budget comes back ON and CI goes red
+    /// LOUDLY on the next run, which is the direction this project wants to be
+    /// wrong in. DEFAULT IS TO ASSERT: an unset variable means "hold the budget",
+    /// so a developer's machine, a new runner, and anything nobody has thought
+    /// about yet are all held to 16.6 ms until someone writes down why not. ***
+    private static func frameBudgetIsMeaningful() -> Bool {
+        switch ProcessInfo.processInfo.environment["TOPOPT_ASSERT_FRAME_BUDGET"] {
+        case "0": return false     // set deliberately — see ci.yml's reason
+        case "1": return true      // explicit opt-in (real GPU passthrough)
+        default:  return true      // unset ⇒ hold the budget
+        }
     }
 
     private func gpuMS(_ r: LatticeSDFRenderer, size: Int) -> Double? {
@@ -123,15 +133,15 @@ final class LatticeSDFProfileTests: XCTestCase {
         // Asserted ONLY on a GPU that can represent the target — see
         // `frameBudgetIsMeaningful`. Never silently: the number and the verdict are
         // printed either way, so a virtualised run still reports what it measured.
-        let budgetMeaningful = Self.frameBudgetIsMeaningful(on: device)
+        let budgetMeaningful = Self.frameBudgetIsMeaningful()
         if let m8 = ms1024[8.0] {
             if budgetMeaningful {
                 XCTAssertLessThan(m8, 16.6, "must be interactive at 1024²")
             } else {
-                print(String(format: "       NOT ASSERTED on \(device.name): %.3f ms "
-                             + "vs the 16.6 ms 60 Hz budget — a virtualised GPU "
-                             + "measures the hypervisor, not the shader. Set "
-                             + "TOPOPT_ASSERT_FRAME_BUDGET=1 to hold it anyway.", m8))
+                print(String(format: "       NOT ASSERTED (TOPOPT_ASSERT_FRAME_BUDGET=0) "
+                             + "on \(device.name): %.3f ms vs the 16.6 ms 60 Hz budget "
+                             + "— this GPU measures the hypervisor, not the shader. "
+                             + "Unset the variable, or set it to 1, to hold it anyway.", m8))
             }
         }
 

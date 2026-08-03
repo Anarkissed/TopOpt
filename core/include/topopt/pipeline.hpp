@@ -509,7 +509,20 @@ struct MinimizePlasticOptions {
   // (jump to the first optimized variant while the rest are still running)
   // instead of waiting for the whole ladder. Optional; absent by default. It
   // runs on the optimizing thread and must not throw.
-  std::function<void(const MinimizePlasticVariant&)> on_variant;
+  //
+  // TWO ARGUMENTS: the rung that just completed, and EVERY variant evaluated so
+  // far — `result.evaluated`, live, with the new rung as its back(). The second
+  // exists so a caller that needs the whole set (run_job publishes design.bin and
+  // fields.bin after every rung) can read it FRESH on each call instead of
+  // accumulating pointers across calls. Accumulated pointers are only valid while
+  // the vector never reallocates; that invariant does hold (see the reserve() in
+  // minimize_plastic.cpp) but it lives in a different file from the code that
+  // would depend on it, and the penalty for breaking it is use-after-free rather
+  // than a wrong answer. Handing over the container removes the dependency
+  // instead of documenting it. The reference is valid FOR THE DURATION OF THE
+  // CALL only — a callback that stores it is back to the same hazard.
+  std::function<void(const MinimizePlasticVariant&,
+                     const std::vector<MinimizePlasticVariant>&)> on_variant;
 
   // Optimization-history playback (app): the target number of keyframe meshes to
   // capture per variant (0 = none, the default). The driver spreads this many

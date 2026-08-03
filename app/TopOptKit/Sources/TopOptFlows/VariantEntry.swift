@@ -164,9 +164,39 @@ public struct VariantEntryVerdict: Equatable, Sendable {
 /// smoothing page or the lattice page.
 public enum VariantEntry {
 
-    /// A job is already running — checked first for both entries, because it makes
-    /// every other reason moot and is the least interesting thing to read.
+    /// A job is already running.
+    ///
+    /// NO LONGER A BLOCK ON EITHER ENTRY (task
+    /// 2026-08-03-variant-postprocessing-concurrency). It used to be the FIRST
+    /// reason on both, which meant a four-hour ladder made every variant it had
+    /// already produced untouchable for the rest of the run — the user watched a
+    /// progress bar and could do nothing with work that was already finished.
+    ///
+    /// Two facts made that wrong. SMOOTHING is an on-device computation: the bridge
+    /// calls `topopt::analyze_fixed_design` in-process (bridge.cpp:975 / :1297,
+    /// driven by `SmoothingModel.live`), so on the maintainer's setup — iPad app,
+    /// Mac worker — it runs on a different computer entirely and cannot contend
+    /// with the ladder at all. And lattice SETUP — topology, cell size, regions,
+    /// boundary — is pure configuration: zero compute, nothing to contend with.
+    ///
+    /// What DOES belong to the Mac is dispatching a lattice generation, and that is
+    /// gated separately (`latticeActionWaits`) — it queues, and says so, rather
+    /// than racing a second CLI job onto a busy worker.
     static let runningReason = "a job is already running"
+
+    /// The sentence the LATTICE ACTION shows while the worker is busy. The page is
+    /// fully usable; only the button that dispatches work waits.
+    ///
+    /// WORDED FOR WHAT ACTUALLY HAPPENS. The worker HAS a real queue
+    /// (`max_concurrency 1`), but the app holds ONE run slot — `RunModel.start`
+    /// returns immediately while a run is in flight — so nothing is queued ON the
+    /// worker; the generation simply starts when the ladder ends. Saying "this
+    /// will queue behind it" would describe a worker-side queue the app does not
+    /// create. Making it a genuine one needs a second run slot in the app, which is
+    /// stated in the handoff rather than implied here.
+    public static let latticeQueuedReason =
+        "the Mac is still solving this run — set the lattice up now; generating it "
+        + "starts when the run finishes"
 
     // MARK: smoothing
 
@@ -175,7 +205,8 @@ public enum VariantEntry {
     /// enum, not because two strings were kept in step by hand.
     public static func smoothingBlocks(_ f: VariantEntryFacts) -> [String] {
         var out: [String] = []
-        if f.runInFlight { out.append(runningReason) }
+        // `f.runInFlight` is deliberately NOT a block here — see `runningReason`.
+        // Smoothing runs on THIS device, in-process; the ladder runs on the Mac.
         // THE JOB DOCUMENT ALONE (task 2026-08-03-variant-postprocessing-fix).
         // Smoothing re-certifies under the run's LOAD CASE; it never opens
         // design.bin. Reading the both-halves `artifacts` here meant a run whose
@@ -235,13 +266,28 @@ public enum VariantEntry {
         }
         if f.modelPath?.isEmpty ?? true { out.append(.modelFileMissing) }
         if !f.workerSelected { out.append(.noWorkerSelected) }
-        var reasons = out.map { $0.reason }
-        if f.runInFlight { reasons.insert(runningReason, at: 0) }
-        return reasons
+        // `f.runInFlight` no longer inserts a block: the lattice page is SETUP, and
+        // setup is free. The dispatching action reads `latticeActionWaits` instead.
+        return out.map { $0.reason }
     }
 
     public static func lattice(_ f: VariantEntryFacts) -> VariantEntryVerdict {
         verdict(label: "Lattice", blocks: latticeBlocks(f))
+    }
+
+    /// WHY THE LATTICE **ACTION** WAITS, or nil (task
+    /// 2026-08-03-variant-postprocessing-concurrency, requirement 4).
+    ///
+    /// Generating a lattice is the Mac's work, and the worker runs one job at a
+    /// time. So while the ladder is going the action does not RACE it — the app
+    /// never dispatches a second CLI job at a busy worker — and it does not
+    /// silently refuse either. It queues, and the button says which it is doing.
+    ///
+    /// Separate from `latticeBlocks` on purpose: a BLOCK is a fact about the
+    /// variant that will not change by waiting, and this one changes the moment
+    /// the ladder ends.
+    public static func latticeActionWaits(_ f: VariantEntryFacts) -> String? {
+        f.runInFlight ? latticeQueuedReason : nil
     }
 
     private static func verdict(label: String, blocks: [String]) -> VariantEntryVerdict {

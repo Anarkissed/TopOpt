@@ -1,0 +1,89 @@
+BAR 2 · CONTENTION — NOT MEASURED. The earlier 1.09x is WITHDRAWN.
+
+Does an on-device re-certification slow down a running worker ladder?
+
+*** THE ANSWER THIS FILE NOW GIVES IS "I CANNOT TELL FROM ONE PAIRING." ***
+An earlier version of this file reported 1.09x — the ladder running ~9% slower
+while an on-device re-certification ran — on the strength of a control that
+"lands at 1.00x". Review asked for the control's ACTUAL value rather than the
+assertion, the raw per-iteration data no longer existed, so the whole
+measurement was re-run. It does not hold up. The number is withdrawn.
+
+
+WHAT WAS RE-RUN
+  The identical deterministic job, twice, on a QUIET machine:
+    run A — the ladder alone
+    run B — the same ladder + an on-device re-certification armed at iteration 25
+  Both stopped by the same rule at the same index (170 iterations). Per-iteration
+  wall compared at MATCHED (rung, iter) indices, from iterations.csv's total_ms.
+  Subject: WallMount_ShelfBracket at res 64 under a real load case; the
+  re-certification is the maintainer's own variant_038.stl at 128^3 — the same
+  analyze -> analyze_fixed_design call bridge.cpp:1297 makes on the device.
+
+THE RUNS DO IDENTICAL WORK, INDEX FOR INDEX — checked, not assumed:
+    matched indices        170
+    identical compliance   170/170
+    identical cg_iters     170/170
+    identical matvecs      170/170
+  So every ratio below compares the SAME arithmetic. The method is sound; what
+  it measures is timing alone.
+
+THE RESULT, UNROUNDED (four decimal places, as asked)
+    re-cert window: 90.64 s
+    during the re-cert   n=43    median B/A 0.9411   mean 0.9787
+                                 p25 0.9000  p75 1.0147  min 0.6402  max 1.8802
+    after it (CONTROL)   n=102   median B/A 0.9919   mean 0.9802
+                                 p25 0.9304  p75 1.0329  min 0.5879  max 1.2496
+
+  The CONTROL is 0.9919 — near 1, as it must be. But the EFFECT window is
+  0.9411: BELOW the control, and below 1. Run B was measurably FASTER while
+  carrying the extra workload.
+
+  That is not a contention effect. Adding a second job cannot speed a ladder up.
+
+AND THE WHOLE-RUN FIGURE MAKES IT UNARGUABLE
+    total wall over the SAME 170 indices:  A 395.8 s   B 354.3 s   B/A 0.8953
+
+  Run B carried an EXTRA 90.6 s of re-certification and still completed the
+  identical 170 iterations 41.5 s FASTER than run A. The run-to-run offset
+  between two processes doing bit-identical work is ~10% — LARGER than the 9%
+  effect the withdrawn number claimed, and opposite in sign.
+
+  A single A/B pairing therefore cannot resolve this effect at all. Whatever
+  drives the offset (CPU frequency and thermal state are the obvious
+  candidates; both runs are multithreaded and the machine's clocks are not
+  under this harness's control) is bigger than what is being looked for.
+
+WHAT WOULD ACTUALLY MEASURE IT
+  Many paired repetitions with the arming order alternated, pooled — enough to
+  push the standard error of the median well under the effect. That is a
+  multi-hour experiment for a number that, see below, does not change any
+  decision in this PR. It was not run, and no number is claimed in its place.
+
+WHY THE NON-ANSWER COSTS NOTHING HERE
+  On the maintainer's setup the app is on an iPad and the worker on a Mac. They
+  are DIFFERENT COMPUTERS, so one-machine contention is structurally zero for
+  him — that claim rests on the architecture, not on this measurement, and is
+  unaffected. The one-machine figure was only ever the pessimistic extra.
+
+  The design decision it might have informed — QUEUE, DO NOT RACE — is also
+  unaffected: the app holds one run slot and never dispatches a second CLI job
+  at a busy worker, whatever the contention would have been.
+
+WHAT DOES STAND FROM THE RE-RUN
+  * The re-certification itself: 90.64 s, exit 0, on a quiet machine — the same
+    order as bar 1's 79.5-101 s. Bar 1's MEMORY figure (~360-370 MB peak) is
+    unchanged and is the number that transfers between machines.
+  * The two earlier discarded designs stay discarded, and for a reason this
+    re-run strengthens (see bar2_contention_discarded_designs.txt): per-iteration
+    wall is not stationary WITHIN a rung, and the ramp is not even consistently
+    SIGNED. At res 96 it climbed (0.41 -> 2.54 s/iter). At res 64 here it FALLS:
+        A ramp: first 30 iters 3092 ms/iter   last 30 iters 2138 ms/iter  (0.69x)
+    Any before/after comparison inside one run is measuring that curve.
+
+REPRODUCE
+  The harness is not committed (it drives absolute paths into the maintainer's
+  own worker directory for the 128^3 subject). Its design is fully stated above:
+  two runs of one deterministic job, matched (rung, iter) indices from
+  iterations.csv, the re-certification armed at a fixed index, both runs stopped
+  by the same rule.

@@ -249,6 +249,7 @@ def run(out_dir, job_path=None):
              (1, 0.50, 1.70, 1.90, 1.70, "variant_050.stl")]
     report_variants = []
     fractions = []
+    streamed_field_variants = []
     for rung, vf, worst, in_plane, interlayer, mesh in rungs:
         for it in range(1, 4):
             emit("PROGRESS rung=%d rungs=2 iter=%d" % (rung, it))
@@ -261,6 +262,16 @@ def run(out_dir, job_path=None):
         # variant it was just told about.
         fractions.append(vf)
         write_design_bin(os.path.join(out_dir, "design.bin"), fractions)
+        # …AND ITS OWN FIELD, in the same breath (task
+        # 2026-08-03-variant-postprocessing-concurrency). The real CLI publishes
+        # design.bin and fields.bin together in `on_variant`, so the client can
+        # fetch the rung's von Mises the moment the VARIANT line arrives. Writing
+        # only at the end here would have left the app's new per-rung field fetch
+        # exercising its FAILURE branch in every E2E — the same blind spot that hid
+        # the retention producer for four PRs.
+        streamed_field_variants.append((vf, 41.5 - 12.0 * len(fractions), 120))
+        write_fields_bin(os.path.join(out_dir, "fields.bin"),
+                         streamed_field_variants)
         emit("VARIANT vf=%.2f achieved=%.2f margin=%.2f accepted=1 mesh=%s"
              % (vf, vf, worst, mesh_path))
         report_variants.append(report_variant(vf, worst, in_plane, interlayer))

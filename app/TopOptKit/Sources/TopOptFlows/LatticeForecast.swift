@@ -272,3 +272,173 @@ public struct LatticeForecast: Equatable, Sendable {
             remedies: remedies)
     }
 }
+
+// MARK: - THE CALL SITE (task 2026-08-03-variant-postprocessing-fix, bar F3)
+
+/// Holds the pre-flight forecast for the lattice page, and drives it.
+///
+/// *** WHY THIS TYPE EXISTS AT ALL. *** The first cut of bar F3 computed the
+/// forecast in core, transported it over the worker protocol, parsed it into
+/// `LatticeForecast` and rendered it into the action row — and NOTHING CALLED IT.
+/// Every layer was present except the one that invokes, so the handoff read
+/// "shipped" and the user saw nothing. That is the same shape as PR 284 (retention
+/// built, never called) and PR 289 (31 tests against a path the maintainer could
+/// not reach), and it is the reason the review blocked this PR. The forecast is
+/// the headline deliverable of the whole task; a headline deliverable with no
+/// call site is not a deliverable.
+///
+/// THE STALENESS RULE IS THE SAME ONE AS EVERYWHERE ELSE. A forecast describes ONE
+/// configuration. Showing it against a different one would be a prediction about a
+/// job nobody is going to run — so the model records the exact job document it
+/// describes and `forecast(for:)` returns nil on any mismatch. Identity is the
+/// DOCUMENT, not a hand-listed set of "forecast-relevant settings": two
+/// configurations that build the same job are the same forecast by construction,
+/// and there is no second list to drift out of sync with `RelatticeJobBuilder`.
+@MainActor
+public final class LatticeForecastModel: ObservableObject {
+
+    public enum State: Equatable, Sendable {
+        /// Nothing to forecast — no variant, or the run kept no design to read.
+        case idle
+        case running
+        case ready(LatticeForecast)
+        /// The forecast could not be produced. Said out loud rather than silently
+        /// leaving the page as if no configuration problem existed.
+        case failed(String)
+    }
+
+    @Published public private(set) var state: State = .idle
+    /// The job document `state` describes. nil while idle.
+    public private(set) var describes: Data?
+
+    private var inFlight: Task<Void, Never>?
+
+    /// `nonisolated` so a View's default argument can construct one: every stored
+    /// property has a default and none of them is touched here.
+    public nonisolated init() {}
+
+    /// The forecast IF it describes `job` — never otherwise.
+    public func forecast(for job: Data?) -> LatticeForecast? {
+        guard let job, describes == job, case let .ready(f) = state else { return nil }
+        return f
+    }
+
+    /// Whether a forecast for exactly `job` is being computed right now.
+    public func isRunning(for job: Data?) -> Bool {
+        guard let job, describes == job, case .running = state else { return false }
+        return true
+    }
+
+    /// Why the forecast for exactly `job` could not be produced.
+    public func failure(for job: Data?) -> String? {
+        guard let job, describes == job, case let .failed(why) = state else { return nil }
+        return why
+    }
+
+    /// Ask for a forecast of `job`.
+    ///
+    /// DEBOUNCED, because the inputs are live controls: dragging a cell-size
+    /// slider would otherwise submit a job per frame at a worker that runs one at a
+    /// time. The forecast itself is cheap (core measured 0.09–0.55 s against 4–39 s
+    /// for the run it forecasts) but the round trip is not free, so the settings
+    /// have to stop moving first.
+    ///
+    /// Re-requesting the SAME document is a no-op — a body re-evaluation must not
+    /// re-submit work. A DIFFERENT document cancels whatever is in flight: its
+    /// answer is about a configuration the user has already left.
+    ///
+    /// A FAILED forecast also stays failed for that document, rather than retrying
+    /// on every body pass at a worker that may be down. Changing any setting
+    /// re-asks, and so does closing and reopening the page (`clear()` drops the
+    /// record of what was asked), so there are two ordinary ways back without a
+    /// retry loop hammering an unreachable Mac.
+    public func request(_ job: Data?,
+                        debounceNanoseconds: UInt64 = 600_000_000,
+                        drive: @escaping @Sendable (Data) async throws -> LatticeForecast) {
+        guard let job else { clear(); return }
+        if describes == job, state != .idle { return }
+        inFlight?.cancel()
+        describes = job
+        state = .running
+        inFlight = Task { [weak self] in
+            if debounceNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: debounceNanoseconds)
+            }
+            if Task.isCancelled { return }
+            do {
+                let f = try await drive(job)
+                guard !Task.isCancelled else { return }
+                // The answer is only published if the question has not moved.
+                guard let self, self.describes == job else { return }
+                self.state = .ready(f)
+            } catch {
+                guard !Task.isCancelled, let self, self.describes == job else { return }
+                self.state = .failed("\(error)")
+            }
+        }
+    }
+
+    /// Drop everything — the page was closed, or there is no variant to forecast.
+    public func clear() {
+        inFlight?.cancel()
+        inFlight = nil
+        describes = nil
+        state = .idle
+    }
+}
+
+/// The forecast as the REVIEW DRAWER shows it: a title, the headline, the
+/// per-reason lines and the evaluated remedies — pure, so the whole surface is
+/// testable without a view.
+public struct LatticeForecastPanel: Equatable, Sendable {
+    public let title: String
+    /// One line when there is nothing to show yet (running / unavailable / no
+    /// variant); nil once there is a real forecast.
+    public let placeholder: String?
+    public let headline: String?
+    public let reasons: [String]
+    public let advice: [String]
+    /// Draw it as a warning rather than plain information.
+    public let warn: Bool
+
+    public static func compute(state: LatticeForecastModel.State,
+                               describesCurrentJob: Bool,
+                               combinedPathAvailable: Bool = false)
+        -> LatticeForecastPanel {
+        let title = "What this would produce"
+        // A forecast that describes a DIFFERENT configuration is treated exactly
+        // as no forecast: the user changed something, and the last answer is about
+        // the thing they changed away from.
+        guard describesCurrentJob else {
+            return LatticeForecastPanel(
+                title: title,
+                placeholder: "Checking what these settings would lattice…",
+                headline: nil, reasons: [], advice: [], warn: false)
+        }
+        switch state {
+        case .idle:
+            return LatticeForecastPanel(
+                title: title,
+                placeholder: "Open this page from a finished variant to see what a "
+                    + "lattice run would produce before you spend one.",
+                headline: nil, reasons: [], advice: [], warn: false)
+        case .running:
+            return LatticeForecastPanel(
+                title: title,
+                placeholder: "Checking what these settings would lattice…",
+                headline: nil, reasons: [], advice: [], warn: false)
+        case let .failed(why):
+            return LatticeForecastPanel(
+                title: title,
+                placeholder: "Couldn’t check these settings up front (\(why)). The "
+                    + "run will still tell you — afterwards.",
+                headline: nil, reasons: [], advice: [], warn: true)
+        case let .ready(f):
+            return LatticeForecastPanel(
+                title: title, placeholder: nil, headline: f.headline,
+                reasons: f.reasonLines,
+                advice: f.adviceLines(combinedPathAvailable: combinedPathAvailable),
+                warn: f.isRefused)
+        }
+    }
+}

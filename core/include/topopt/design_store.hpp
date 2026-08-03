@@ -155,13 +155,25 @@ int write_design_file(const std::string& path,
                       const MinimizePlasticResult& result,
                       const VoxelGrid& solved_grid);
 
-// The same writer over a bare variant list, so a run can publish the designs it
-// has produced SO FAR without owning a MinimizePlasticResult (which does not
+// The same writer over a BORROWED variant list, so a run can publish the designs
+// it has produced SO FAR without owning a MinimizePlasticResult (which does not
 // exist until the ladder ends). `write_design_file(path, result, grid)` is
-// exactly this called with `result.evaluated`, so an incremental flush and the
-// final write produce byte-identical containers for the same variants.
+// exactly this called with pointers into `result.evaluated`, so an incremental
+// flush and the final write produce byte-identical containers for the same
+// variants.
+//
+// POINTERS, NOT COPIES: an incremental flush costs no extra memory at all, where
+// copying each rung's fields would have doubled the largest arrays in the process
+// at 128³.
+//
+// THE POINTERS MUST NOT OUTLIVE THE CALL. They are only ever as stable as the
+// container they point into, and this writer promises nothing about that — it
+// reads them and returns. run_job builds its list inside the `on_variant`
+// callback, from the live `result.evaluated` that callback is handed, and drops
+// it again on return; an earlier cut accumulated the pointers across rungs, which
+// was correct only while that vector never reallocated. Do not reintroduce that.
 int write_design_file(const std::string& path,
-                      const std::vector<MinimizePlasticVariant>& variants,
+                      const std::vector<const MinimizePlasticVariant*>& variants,
                       const VoxelGrid& solved_grid);
 
 // Read a design.bin. Throws DesignStoreError on an unreadable file, an

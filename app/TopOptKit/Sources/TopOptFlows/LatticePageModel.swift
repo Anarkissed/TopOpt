@@ -116,6 +116,13 @@ public struct LatticePageGate: Equatable, Sendable {
 public struct LatticePageBanner: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case simRunning, simComplete, simStale, optimizing, failed
+        /// A SMOOTHING that belongs to a different rung than the one on screen
+        /// (task 2026-08-03-variant-postprocessing-concurrency, requirement 3).
+        /// Deliberately a case on THIS enum rather than a second banner type: the
+        /// brief's rule is one staleness concept, and "the thing you are looking at
+        /// was computed from inputs that have since changed" is the same state
+        /// `simStale` already names.
+        case smoothingStale
     }
     public let kind: Kind
     public let title: String
@@ -226,8 +233,7 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
                                bounds: LatticeBounds?, running: Bool,
                                lineWidthMM: Double = 0,
                                cellSummary: String? = nil,
-                               designBoxActive: Bool = false,
-                               forecast: LatticeForecast? = nil) -> LatticeOptimizeSurface {
+                               designBoxActive: Bool = false) -> LatticeOptimizeSurface {
         // The cell phrase the button claims. In AUTO / SWEPT cell mode there is no
         // single target cell to name — the page passes the mode's own summary
         // ("Auto 4.6 mm", "Swept 4.6–8.0 mm") so the button never states a target the
@@ -263,21 +269,11 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
             let why = b.generatableReason ?? b.topologyReason ?? b.cellReason ?? "settings not certifiable"
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
         }
-        // THE FORECAST'S REFUSAL, BEFORE THE RUN (task
-        // 2026-08-03-variant-postprocessing-fix, bars F4 / P3). A configuration that
-        // turns most of its region solid is not a lattice, and the maintainer learned
-        // that from a receipt after an hour of Mac time. It is said HERE instead,
-        // with the measured remedy where one exists.
-        //
-        // It WARNS rather than disables, deliberately: a partial lattice can be
-        // exactly what someone wants, and the brief asks for it to be SAID, not
-        // forbidden. What must never happen again is that it is silent.
-        if let f = forecast, f.isRefused {
-            let remedy = f.adviceLines().first
-            return LatticeOptimizeSurface(
-                enabled: baseCanOptimize, label: "Optimize",
-                sub: remedy.map { "\(f.headline) \($0)" } ?? f.headline)
-        }
+        // THE FORECAST IS NOT SHOWN HERE — see LatticePageActions. It describes the
+        // `lattice_variant` job (this stored design, these settings), and THIS
+        // button re-runs the whole ladder from the ORIGINAL part, which will not use
+        // that design at all. Putting the forecast on this button would state a
+        // prediction about a job it does not start.
         if densityMode == .auto {
             return LatticeOptimizeSurface(
                 enabled: baseCanOptimize, label: "Optimize",

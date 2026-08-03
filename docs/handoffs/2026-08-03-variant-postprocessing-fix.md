@@ -13,9 +13,15 @@ band are untouched (the concurrent `multiscale-lattice-to` task owns those).
 
 ## 0. C2 up front — THE APP PACKAGE IS NOW IN CI
 
-`.github/workflows/ci.yml` gains an `app-macos` job: `brew install opencascade
-eigen` → `./app/scripts/build_core.sh` → `swift test --package-path app/TopOptKit`.
+`.github/workflows/ci.yml` gains an `app-macos` job on **`macos-26` with Xcode 26.6
+pinned**: `brew install opencascade eigen` → provision lib3mf from vcpkg →
+`./app/scripts/build_core.sh` → `swift test --package-path app/TopOptKit`.
 It is **not** out of scope and it is done.
+
+**Its first run went red, and §10e is the write-up.** Short version: my initial
+`macos-14` pin had an SDK too old to compile the app at all, and reading past that
+error showed CI was also building a 3MF-less slice that three tests would have
+failed on. Both are fixed in the job, not in the tests.
 
 One gap, stated loudly rather than hidden: the E2E cases in
 `tools/topopt-worker/e2e/run_e2e.sh` are **not** run in CI. They stand up a live
@@ -557,18 +563,13 @@ deliberate wall-clock stamps and are excluded, as the existing determinism bars 
   covered. Forecasting the *first* ladder would mean grading the solid part as a
   ceiling, which is a different and weaker claim; I did not build it rather than
   build it half-way.
-* **The forecast is computed, carried and rendered into the Optimize sub-line —
-  but nothing on the page CALLS it yet.** `RelatticeRun.forecast(...)`,
-  `LatticeForecast` and `LatticeOptimizeSurface.compute(forecast:)` are built and
-  tested against core's real documents (`testTheOptimizeButtonStatesTheRefusalAndThe
-  MeasuredRemedy`), so a forecast handed to the page reaches the button with its
-  counts and its measured remedy. The missing link is the **trigger**: a call site
-  that runs `RelatticeRun.forecast` off-main when the configuration settles and
-  publishes the result. That is the named remaining step, and it is small — one
-  debounced call plus a `@Published` property — but it is not written, so the user
-  does not see the forecast in the app yet. I am not calling F3 fully done on the
-  app side. What IS on the page today: the "Rim only emits nothing" warning at the
-  control, and the region volumes drawn against the variant's own material.
+* ~~**The forecast is computed, carried and rendered — but nothing on the page CALLS
+  it yet.**~~ **RESOLVED — the review blocked on this, and it is now wired. See
+  §10f, blocker 1.** Kept visible rather than deleted, because the shape of the
+  defect is the point: every layer existed, the tests all passed, the handoff read
+  "shipped", and the user would have seen nothing. It is the same shape as PR 284
+  and PR 289. What the original text called "the named remaining step, and it is
+  small" was in fact the only step that made any of the rest reach a human.
 * **The forecast returns BEFORE the reproduction proof.** `lattice_variant_job`
   normally refuses outright if the restored design does not reproduce the margin the
   run recorded — the guarantee that the certificate describes the right object. The
@@ -594,6 +595,443 @@ deliberate wall-clock stamps and are excluded, as the existing determinism bars 
   that `minimize_plastic` optimizes assuming solid material and leaves tendrils
   thinner than the cells-per-member floor. That is `multiscale-lattice-to`'s. What
   this task owns is that you now learn it in under a second instead of after an hour.
+
+---
+
+## 10b. FOLLOW-UP — work the ladder while the ladder runs
+
+*Same branch, same PR series. The brief: a ladder takes hours, and the user should
+not have to shelve the app for all of it.*
+
+### The correction, verified before anything was built on it
+
+I had told the maintainer that smoothing re-certification would compete with the Mac
+worker for cores. **That was wrong, and I had not checked.** Verified end to end:
+
+```
+SmoothingModel.live
+  → TopOptKit.smoothAndRecertifyLoadCase        (Smoothing.swift:98)
+  → smooth_and_recertify_loadcase               (bridge.cpp:1382)
+  → smooth_brush_and_recertify_loadcase
+  → analyze_loadcase                            (bridge.cpp:1204)
+  → topopt::analyze_fixed_design                (bridge.cpp:1297)
+```
+
+All in-process, inside `Task.detached(priority: .userInitiated)`. No HTTP, no
+worker. On the maintainer's setup — iPad app, Mac worker — that is a **different
+computer**, so contention is structurally zero. (`analyze_selfweight` reaches the
+same call at bridge.cpp:975.)
+
+### 1 · PER-RUNG ARTIFACTS
+
+`design.bin` was already per-rung after PR 291. **`fields.bin` was not** — it was
+still written only at final assembly, so rung 1 had a design and no field for the
+rest of the run. Its von Mises field is exactly what the lattice page's AUTO density
+grades from and what the results overlays draw.
+
+Both are now published together in `on_variant`, and **by BORROWED POINTER, not by
+copy**: `minimize_plastic` reserves `result.evaluated` to the ladder length up front
+so it never reallocates — an invariant it states out loud, with an ASan
+read-after-realloc scar, precisely so streamed references stay valid. So a per-rung
+flush costs **no extra memory at all**. (This also removes the trimmed-copy-per-rung
+PR 291 introduced; adding the fields to that would have been ~50 MB per rung at
+128³.) Both writers publish by rename, because the worker serves these files while a
+later rung rewrites them.
+
+Measured on a real 3-rung run: design 590 KB → 1.18 MB → 1.77 MB and fields 1.25 MB
+→ 2.49 MB → 3.74 MB, in lockstep — and every final artifact **byte-identical** to
+the pre-change binary's (`design.bin`, `fields.bin`, `report.json`, all three
+meshes, `loadcase.json`).
+
+The app fetches that rung's block as it streams (`emitStreamedVariant`), matched **by
+volume fraction, never by position**, carrying the grid the field is indexed to. A
+failed fetch leaves the variant exactly as it arrived before this change.
+
+### 2 · UNGATED
+
+`runInFlight` was the FIRST blocking reason on BOTH entries. That is what made a
+four-hour ladder freeze every variant it had already produced. It is now a block on
+neither. The one part that is genuinely the Mac's — dispatching a generation — moved
+to its own predicate, `VariantEntry.latticeActionWaits`.
+
+**The copy is worded for what actually happens.** The worker has a real queue
+(`max_concurrency 1`), but the APP holds one run slot — `RunModel.start` returns
+immediately while a run is in flight — so nothing is queued *on the worker*; the
+generation starts when the ladder ends. Saying "this will queue behind it" would
+describe a queue the app does not create, so it says *"set the lattice up now;
+generating it starts when the run finishes"*. **Making it a genuine worker-side queue
+needs a second run slot in the app; that is not built, and is named here rather than
+implied by the copy.**
+
+### 3 · STALENESS
+
+`SmoothingRungFingerprint` — variant index, volume fraction, and the **design
+fingerprint** core hashes over that rung's density field, now parsed out of the
+retained container by `DesignContainerIndex`. Recorded at KEEP time so the identity
+travels with the geometry. The rule and the surface are PR 260's, deliberately: an
+Equatable fingerprint compared against the current one, rendered through the SAME
+`LatticePageBanner` with a new `.smoothingStale` kind — one staleness concept, not
+two.
+
+Because the identity is a DESIGN and not a position, a later run whose rung 1 lands
+at the same volume fraction is caught too.
+
+### The bars
+
+| Bar | Verdict | Evidence |
+|---|---|---|
+| **1** on-device cost, measured | MET (on a Mac, stated) | §10c |
+| **2** no contention, proven | **NOT MEASURED on one machine — the 9% is withdrawn.** Zero on iPad+Mac, which is his setup and rests on the architecture, not on a measurement | §10c |
+| **3** per-rung artifacts are the right ones | MET | `test_design_stream` (21 checks) |
+| **4** an interrupted ladder keeps every completed rung | MET | same, + the negative control |
+| **5** staleness unmissable | MET | `SmoothingRungStalenessTests` (4) |
+| **6** no regression | MET | §10d |
+| **7** determinism | MET | byte-identity above + PR 291's `p6_determinism.txt` |
+
+**Bars 3 and 4 fail without the fix.** With the per-rung field flush disabled and
+nothing else changed: 5 failures, including *"an interrupted ladder still left BOTH
+artifacts on disk"* and *"the rung that DID complete is fully post-processable"*.
+Restored: 21 checks, 0 failures.
+
+Bar 4 is the maintainer's own failure, run as a control: the harness ABANDONS the
+ladder after rung 1 (closes the pipe; the CLI takes SIGPIPE), and asserts there is no
+`report.json` — so it really is the interrupted case — while rung 1's design reads
+back at full grid size, its own field is present, and **the two name the same rung**.
+
+## 10c. Bars 1 and 2 — measured
+
+### Bar 1 · on-device re-certification at 128³
+
+`topopt-cli analyze` runs `analyze_job` → `topopt::analyze_fixed_design` — the same
+call `bridge.cpp:1297` makes in-process on the device. Subject: **the maintainer's
+own `variant_038.stl`** from job `95f4130119414636`, at his 128³, under his declared
+load case and face protection.
+
+| | |
+|---|---|
+| wall | **101.2 s** (143.6 s user — it is multithreaded) |
+| peak RSS | **310 MB** (324,681,728 B) |
+| peak footprint | **369 MB** (386,483,112 B) |
+| verdict | **ACCEPTED**, worst-case margin 3291 (required 1.5) |
+| convergence | **converged** |
+
+Bar 1 names PR 200's non-convergence risk explicitly, so: **it converged**, and the
+margin 3291 reproduces his run's own recorded solid margin for that rung (3290.86 in
+`variant_038_lattice.report.json`). Same design, certified the same way.
+
+**So the answer to "can the iPad carry 128³" is: on memory, comfortably yes.** 369 MB
+peak is the number that transfers between machines, and every iPad this app targets
+has multiple GB. Wall time scales with the iPad's lower throughput — minutes, not
+hours, and it is already how the smoothing page behaves today.
+
+**Stated, not glossed:** this is a Mac (Apple silicon), not an iPad — I cannot run on
+his device. And the machine was not idle when this was taken (other worktrees were
+solving), so 101 s is an upper bound; the same call measured later on a quiet machine
+took **79.5 s** at 359 MB peak RSS. Both are the same order, and the memory figure —
+the one that transfers between machines — is stable across both.
+
+### Bar 2 · contention — **NOT MEASURED. The 1.09× is WITHDRAWN.**
+
+An earlier version of this section reported **1.09×** — the ladder running ~9%
+slower while an on-device re-certification ran — resting on a control described as
+"lands at 1.00×". The review asked for that control's **actual value** rather than
+the assertion. The raw per-iteration data no longer existed, so the whole
+measurement was re-run on a quiet machine, unrounded. **It does not hold up.**
+
+The re-run is the same design: one deterministic job run twice — alone, and with an
+on-device re-certification armed at iteration 25 — compared at **matched
+`(rung, iter)` indices** from `iterations.csv`, both runs stopped by the same rule
+at the same index.
+
+First, the method checks out. The two runs do **bit-identical work**:
+
+| | |
+|---|---|
+| matched indices | 170 |
+| identical `compliance` | **170/170** |
+| identical `cg_iters` | **170/170** |
+| identical `matvecs` | **170/170** |
+
+So every ratio below compares the same arithmetic, and measures timing alone.
+
+| window | n | median B/A | mean | p25 | p75 |
+|---|---|---|---|---|---|
+| during the re-cert | 43 | **0.9411** | 0.9787 | 0.9000 | 1.0147 |
+| after it — **CONTROL** | 102 | **0.9919** | 0.9802 | 0.9304 | 1.0329 |
+
+The control is **0.9919** — near 1, as it must be. But the *effect* window is
+**0.9411**: below the control, and below 1. **Run B was faster while carrying the
+extra workload**, and adding a second job cannot speed a ladder up.
+
+The whole-run figure makes it unarguable:
+
+> Total wall over the **same 170 indices**: A **395.8 s**, B **354.3 s**, B/A
+> **0.8953**. Run B carried an **extra 90.6 s** of re-certification and still
+> finished the identical 170 iterations **41.5 s faster**.
+
+The run-to-run offset between two processes doing bit-identical work is **~10% —
+larger than the 9% the withdrawn number claimed, and opposite in sign.** A single
+A/B pairing cannot resolve this effect. Measuring it properly needs many paired
+repetitions with the arming order alternated; that is a multi-hour experiment, it
+was not run, and **no number is claimed in its place.**
+
+**What the non-answer costs: nothing that matters here.** On the maintainer's setup
+the app is on an iPad and the worker on a Mac — *different computers*, so
+one-machine contention is structurally zero for him, and that rests on the
+architecture rather than on this measurement. The design decision it might have
+informed — QUEUE, DO NOT RACE — is likewise unaffected: the app holds one run slot
+and never dispatches a second CLI job at a busy worker, whatever the contention
+would have been. The one-machine figure was only ever the pessimistic extra.
+
+**What does stand:** the re-certification itself took **90.64 s** (exit 0) on a
+quiet machine — the same order as bar 1's 79.5–101 s — and bar 1's memory figure
+(~360–370 MB peak), the one that transfers between machines, is untouched.
+
+**I got this wrong three times now, and the third is the instructive one.** Both
+earlier designs are kept in `bar2_contention_discarded_designs.txt`:
+
+* **Design 1** compared iterations-per-window before vs after — but a ladder's
+  iteration rate is not constant across RUNGS, so it compared ladder phases. It
+  would have reported a ~5× *speedup* from adding a second workload.
+* **Design 2** fixed that with a single-rung job and the worker's timestamped log,
+  and was still wrong: per-iteration wall is not stationary WITHIN a rung either.
+  Its `after` window came out slower than its `during` window in **both** runs —
+  including on a quiet machine, which killed the "background load" explanation and
+  left the ramp as the only one.
+* **Design 3** — matched indices across two runs — is *correct in construction*,
+  and the re-run confirms that: identical work at every index. It is simply not
+  **powerful** enough. One pairing's run-to-run noise is bigger than the effect.
+  A sound method and an unsound number are different failures, and this was the
+  second kind.
+
+The re-run also strengthens why designs 1 and 2 were hopeless: the within-rung ramp
+is not even consistently **signed**. At res 96 it climbed (0.41 → 2.54 s/iter); at
+res 64 here it **falls** — first 30 iterations 3092 ms/iter, last 30 2138 ms/iter
+(0.69×). Any before/after comparison inside one run is measuring that curve.
+
+**And the case that actually matters:** on the maintainer's setup the app is on an
+iPad and the worker on a Mac. They are different computers. The measurement above is
+the PESSIMISTIC case — one machine, both workloads — run because "it's a different
+computer" is an architecture claim, and the brief asked for a number.
+
+---
+
+## 10d. Follow-up test results
+
+**Core:** full `ctest` — **100% tests passed, 104 of 104** (1377 s), including the
+extended `design_stream` (21 checks) and `minimize_plastic`'s **599 checks** (up from
+597 — scenario N gained two on the handed-over container, §10f ruling 2).
+
+**App package:** `swift test` — **1164 tests, 13 skipped, 0 failures**, run after
+every follow-up change, and the reported run was executed with
+**`TOPOPT_ASSERT_FRAME_BUDGET=1`** so the 60 Hz budget was enforced rather than
+skipped. (PR 291 closed at 1148; the follow-up added 6, the review response another
+10.) Suites this task touched: `LatticeForecastCallSiteTests` **8 (new)**,
+`SmoothingRungStalenessTests` 4, `VariantEntryGatingTests` 21, `LatticeForecastTests`
+12, `VariantRetentionTests` 14, `SmoothingPageTests` 31, `LatticePageTests` 25 — all
+passing.
+
+**E2E:** `retain_dies` re-run with the stub now publishing `fields.bin` per rung
+(it previously wrote one only at the end, which would have left the app's new
+per-rung field fetch exercising its FAILURE branch in every E2E — the same blind
+spot that hid the retention producer for four PRs). The case now also asserts that
+each kept variant carries **its own** field and mass, and that the masses are
+DISTINCT — so a match-by-volume-fraction that degenerated into "take the first
+block" would fail.
+
+**Worker HTTP E2E:** 9/9 cases including PR 291's restart case.
+
+---
+
+## 10e. The app-macos job's FIRST RUN failed — and it was right to
+
+The job added for bar C2 went red on its first run (`5e461b7`, run 30771773092).
+Reading the log rather than the annotations: **it was a COMPILE ERROR in the
+package, not a failing test.**
+
+```
+LiquidGlass.swift:94:23: error: cannot find 'Glass' in scope   (×6)
+```
+
+**Cause: my runner pin, not the app's code.** `TopOptDesign/LiquidGlass.swift`
+renders the system Liquid Glass effect behind `if #available(iOS 26.0, macOS 26.0,
+*)`, with an iOS 16 material fallback in the `else`. That guard is a RUNTIME check —
+the `Glass` symbol must still exist at COMPILE time, so building the package at all
+requires the **macOS 26 SDK**. I had pinned `runs-on: macos-14` (macOS 14.8.7,
+image `macos-14-arm64`), whose SDK predates the API. The job could never have
+compiled this repository, on any commit.
+
+Fixed by moving to `macos-26`, whose default is **Xcode 26.6 (17F113)** — the exact
+build the app is developed against locally — and PINNING it with `xcode-select`
+rather than inheriting the image default, because that image carries seven Xcodes
+and its default moves (it already offers an Xcode 27 image). The step echoes
+`xcodebuild -version` and the SDK version so the log always states which toolchain
+produced the result.
+
+### …and reading the rest of that log found a second, worse problem
+
+The `Build the core xcframework` step had SUCCEEDED — while printing:
+
+```
+==> lib3mf: (none) — macOS slice is 3MF-free
+```
+
+lib3mf is not a Homebrew formula; it comes from vcpkg via
+`app/scripts/build_lib3mf_macos.sh`, which the job never ran. So **CI was building a
+different slice from the one developers build**, and three `AppModelTests` would
+have failed the moment the compile error was fixed — they assert a real 3MF parse
+(`XCTAssertNil(m.importRefusal, "…refusal means the slice has no lib3mf")`) rather
+than skipping.
+
+The fix is to provision lib3mf in CI, at the same vcpkg tag the `core-linux` job
+pins — **not** to teach those tests to tolerate its absence. A CI job that builds a
+different artifact from the developer's is precisely the blind spot this job exists
+to close; making the tests quieter would have rebuilt the blind spot inside the
+thing meant to remove it.
+
+The xcframework cache key now carries the runner image, the Xcode version and the
+lib3mf-ness alongside the core sources — a cached xcframework from a different
+toolchain, or without the 3MF slice, is a stale-object-file trap, and this repo has
+been bitten by that class of bug before (`make topopt-cli` silently no-oping).
+
+**This is the job doing exactly what bar C2 added it for**, on its first run, before
+merge: it caught a build that had never been reproducible on a clean machine.
+
+`app-macos` went **green on `c8b49f6`** (run 30789229890, both jobs success) with the
+CI fix pushed alone, so that signal is not entangled with the follow-up.
+
+---
+
+## 10f. REVIEW RESPONSE — what the review blocked, and what changed
+
+The review returned two merge blockers and two rulings. All four are answered here.
+
+### Blocker 1 — F3 was HALF-WIRED. Now it has a call site.
+
+The finding, verbatim in substance: *the forecast is computed, transported and
+rendered — and nothing calls it, so the user sees nothing.* That is exactly right,
+and it is the fourth occurrence of one shape: **PR 284's retention was built and
+never called; PR 289 passed 31 tests against a path the maintainer could not
+reach.** A headline deliverable present in every layer except the one that invokes
+it means the handoff reads "done" and nothing arrives.
+
+It is now invoked. The call site is `LatticePage.body`'s `.task(id: forecastJob)`
+([LatticePage.swift](../../app/TopOptKit/Sources/TopOptFlows/LatticePage.swift)),
+and three things fell out of doing it honestly:
+
+1. **The job document is the identity.** `forecastJob` is the exact
+   `lattice_variant` document the "Lattice this variant" button submits, built by
+   `relatticeJobJSON(noteSkippedFaces:)` — **one builder, used by both**, so the
+   prediction cannot drift from the job. `.task(id:)` therefore re-asks precisely
+   when a setting changes the job, and costs nothing when it does not. There is no
+   second hand-maintained list of "forecast-relevant settings" to fall out of sync
+   (the [[infill-knockdown-duplicated-app-core]] failure).
+2. **It was on the WRONG BUTTON.** The rendered-but-uncalled path put the forecast
+   on `LatticeOptimizeSurface` — which on a variant page is *"Optimize from
+   scratch"*, the button that re-runs the whole ladder from the ORIGINAL part and
+   never touches this stored design. A forecast there is a prediction about a job
+   that button does not start. It moved to `LatticePageActions.relattice`, and
+   `testTheForecastNeverAppearsOnTheOptimizeFromScratchButton` now holds it there.
+3. **The button cannot carry the whole answer.** One truncated line under a button
+   is not the per-reason breakdown the task asked for, so the Review drawer carries
+   the full forecast: headline, every reason with its count, every remedy core
+   MEASURED. `LatticeForecastPanel` is pure, so it is tested without a view.
+
+The staleness rule is the same hard rule as everywhere else: `forecast(for:)`
+returns the answer only if it describes the job on screen, and a moved setting
+supersedes an answer still in flight.
+
+**New tests — 10, all against the invocation rather than the parser:**
+[LatticeForecastCallSiteTests.swift](../../app/TopOptKit/Tests/TopOptFlowsTests/LatticeForecastCallSiteTests.swift)
+asserts the driver is actually called, that re-asking an answered question is free
+(the worker runs one job at a time — a submit per frame would queue behind the
+user's own run), that a superseded answer never lands on the new question, that a
+forecast for other settings is never displayed for these, and that a forecast which
+cannot be produced says so instead of leaving the page silent. The existing
+`LatticeForecastTests` could not have caught the original defect: every one of its
+tests calls the parser or the copy directly, which is exactly what production did
+not do.
+
+### Blocker 2 — the paravirtual STRING became an explicit env var.
+
+The ruling accepted the judgement (assert the hardware-independent ratio always,
+skip the absolute wall-clock budget on unrepresentative hardware) and rejected the
+mechanism, correctly: `device.name.contains("paravirtual")` is a string Apple chose
+and Apple can change, and if it changes a 60 Hz budget **silently re-arms** on
+hardware it was never meant to describe.
+
+`TOPOPT_ASSERT_FRAME_BUDGET` now drives it, and **the default is to ASSERT** — unset
+means "hold the budget", so a developer machine, a new runner, and anything nobody
+has thought about yet are all held to 16.6 ms until someone writes down why not.
+The only `0` in the repo is in
+[ci.yml](../../.github/workflows/ci.yml)'s "Test the app package" step, with the
+measurement and the reason beside it. Delete that line and CI goes RED, loudly,
+rather than quietly passing — the direction this project wants to be wrong in.
+
+Verified both ways on an M2 Pro: the full suite run for this handoff was executed
+with `TOPOPT_ASSERT_FRAME_BUDGET=1`, i.e. **with the budget enforced**, and passed.
+
+### Ruling 2 — borrowed pointers: fixed now, not deferred.
+
+The review called this NEEDS WORK / not blocking, with a follow-up PR acceptable.
+It is fixed here because the fix turned out to be smaller than the deferral.
+
+The suggested shape was an INDEX into `result.evaluated` dereferenced at use. An
+index alone does not help: the caller never had a handle on that container —
+`on_variant` handed over a single `const MinimizePlasticVariant&`, so there was
+nothing to index INTO. Passing the container is the same fix and strictly simpler,
+so `on_variant` now takes **two** arguments — the rung that completed, and every
+variant evaluated so far:
+
+```cpp
+std::function<void(const MinimizePlasticVariant&,
+                   const std::vector<MinimizePlasticVariant>&)> on_variant;
+```
+
+`run_job` builds its pointer list **inside** the callback from that live container
+and drops it on return. The pointers cannot outlive a reallocation because they do
+not outlive the call, and `reserve()` is an optimisation again rather than a
+correctness requirement. The reserve and its ASan scar STAY — other consumers may
+still lean on it, and removing it was never this task's call.
+
+Four call sites moved (`run_job.cpp`, `bridge.cpp`, two in
+`test_minimize_plastic.cpp`); scenario N — the deliberate read-after-realloc probe —
+keeps holding a pointer across calls AND gained two checks that the handed-over
+container is the live one with the streamed rung as its `back()`. Core: **599
+checks, 0 failures** in `test_minimize_plastic` (up from 597), `test_design_stream`
+**21 checks** unchanged.
+
+### Ruling 3 — the contention control's ACTUAL value. **The number is withdrawn.**
+
+The instruction was: print the control's actual value, and *"if it is not 1.00x,
+report 1.09x as NOT MEASURED rather than as a number."* The raw per-iteration data
+behind the committed 1.09× no longer existed, so the whole measurement was re-run on
+a quiet machine with every ratio printed to four decimals.
+
+**The control came out at 0.9919 — and the effect window at 0.9411, BELOW it.** Run
+B ran *faster* while carrying the extra workload, which cannot be a contention
+slowdown. The whole-run figure settles it: over the same 170 indices, doing
+**bit-identical work** (compliance, `cg_iters` and `matvecs` all match 170/170), run
+B carried an extra 90.6 s of re-certification and still finished **41.5 s faster**
+(B/A = 0.8953). Run-to-run offset ~10%, larger than the 9% claimed and opposite in
+sign.
+
+**So 1.09× is reported as NOT MEASURED and removed.** §10c is rewritten around the
+withdrawal. Design 3 was *correct in construction* — the re-run proves the matched
+indices compare identical arithmetic — it was simply not **powerful** enough: one
+pairing's noise exceeds the effect. A sound method with an unsound number is a
+different failure from a broken method, and this was the second kind.
+
+Nothing in the PR depends on it: the maintainer's app and worker are different
+computers, so one-machine contention is structurally zero for him, and QUEUE-DO-NOT-
+RACE holds regardless. Bar 1's memory figure is untouched.
+
+### Process
+
+The follow-up is committed as its own commit, after `app-macos` went green on
+`c8b49f6` alone. Holding it back served its purpose the moment the CI fix validated
+by itself; an uncommitted working tree is unauditable and CI never sees it, which is
+the coverage gap this PR exists to close.
 
 ---
 
@@ -690,3 +1128,71 @@ over the variant's own shape instead of vanishing when the page opens.
 
 Lastly: the app is now built and tested by CI. Four changes in a row shipped
 app-side bugs behind a green tick because CI only ever built the solver.
+
+---
+
+## 12. In plain language — the follow-up
+
+**What you asked for.** A ladder takes hours. You should not have to put the app
+down for all of it: you should be able to set up a lattice on a variant that has
+already appeared, and smooth it, while the Mac keeps grinding through later rungs.
+
+**One thing I had told you was wrong, and I checked before building on it.** I said
+smoothing would fight the Mac for cores. It doesn't. Smoothing runs on the iPad, in
+the app's own process — I traced it call by call down to the solver. On your setup
+the iPad and the Mac are different computers, so there is nothing to fight over.
+
+**What was actually blocking you.** Two things.
+
+The app treated "a run is going" as a reason to grey out both buttons on every
+variant. That is why a four-hour ladder froze work that was already finished. It no
+longer does. The only thing that still waits is the button that sends a lattice job
+to the Mac — because that IS the Mac's work, and the Mac does one job at a time. It
+now says so instead of going dark: *set the lattice up now; generating it starts
+when the run finishes.*
+
+And each finished rung was only half-saved. Its design was written as it completed,
+but its stress field — the thing the lattice page grades from and the overlays draw
+— was written only when the whole ladder ended. So rung 1 sat there un-gradeable for
+hours. Both are now written the moment a rung finishes, and it costs no extra
+memory, because the app borrows the solver's own copy rather than making one.
+
+**A rule that comes with this.** You can now smooth rung 1 and then ship rung 3. A
+smoothed shape must never quietly become the basis for a different rung's work, so
+every smoothing records which rung it came from — by name, by volume fraction, and
+by a fingerprint of that rung's actual design. Look at a different rung and the page
+says *"Smoothing is from rung 1 (68% volume)"* and refuses to present it as current.
+It catches a re-run too: a later run whose rung 1 lands at the same percentage is a
+different design and hashes differently.
+
+**Two numbers you asked for.**
+
+Re-certifying your real 128³ variant on-device: **about 80–100 seconds and 370 MB**
+of memory, and it converged — reproducing the margin your own run recorded. Memory
+is what decides whether an iPad can carry it, and 370 MB is comfortable on any iPad
+this app runs on. I measured on a Mac; I can't run on your iPad, and I say so
+wherever that number appears.
+
+Do the two jobs slow each other down on ONE machine? **I don't know, and I've taken
+the number back.** I previously told you 9%. The reviewer asked me to print the
+control's real value instead of asserting it came out at 1.00×, so I re-ran the
+whole thing — and it fell apart. The run that carried the EXTRA work finished the
+identical iterations **41 seconds faster** than the run that didn't. Adding work
+can't make something faster, so what I was measuring was never the contention; it
+was the ordinary difference between two runs on the same machine, and that
+difference is bigger than the effect I was claiming to see. **9% is withdrawn.**
+
+On your iPad-plus-Mac setup the answer is still zero, and that one doesn't depend on
+any of this: they're different computers.
+
+**I got that number wrong three times, and the third is the one worth knowing
+about.** The first two ways of measuring it compared early ladder iterations against
+late ones — and a ladder's iterations change speed as it goes, by a factor of six
+within one rung. Both would have told you something confidently false. The third way
+was actually built right: I checked that both runs do bit-for-bit identical work at
+every iteration they're compared at, and they do. It just isn't sensitive enough —
+one pair of runs is too noisy to see a 9% effect. **A correct method and a correct
+number are different things, and I published the second without earning it.**
+Measuring it properly means repeating the pairing many times over several hours, for
+a number that changes no decision here, so I haven't. All three versions are written
+up with their numbers rather than deleted.
