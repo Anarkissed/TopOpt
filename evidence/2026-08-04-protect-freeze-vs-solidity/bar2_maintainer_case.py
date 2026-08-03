@@ -29,6 +29,18 @@ def receipt(d, vf):
     return json.load(open(p)) if os.path.exists(p) else None
 
 
+def fz(c, key):
+    """A frozen_material field, tolerating the pre-rename spelling.
+
+    The receipt's frozen block was renamed to prefix every key with `frozen_`
+    after a bare `printed_voxels` shadowed `added_material`'s for the receipt's
+    substring reader (it broke `designbox_lattice_recert`). A capture taken
+    before that rename carries the old names; the NUMBERS are identical, so this
+    reads either rather than silently reporting nothing."""
+    f = c.get("frozen_material") or {}
+    return f.get(f"frozen_{key}", f.get(key))
+
+
 def main():
     base, branch = sys.argv[1], sys.argv[2]
     rb, rr = rungs(base), rungs(branch)
@@ -68,22 +80,20 @@ def main():
         if c is None or "frozen_material" not in c:
             print(f"{vr['volume_fraction']:>6.2f}  (no frozen_material block)")
             continue
-        f = c["frozen_material"]
-        print(f"{vr['volume_fraction']:>6.2f} {f['frozen_printed_voxels']:>15d} "
-              f"{f['frozen_in_include_region']:>12d} {f['frozen_latticed']:>10d} "
-              f"{f['frozen_kept_solid']:>12d} {c['lattice_voxels']:>18d}")
+        print(f"{vr['volume_fraction']:>6.2f} {fz(c,'printed_voxels'):>15d} "
+              f"{fz(c,'in_include_region'):>12d} {fz(c,'latticed'):>10d} "
+              f"{fz(c,'kept_solid'):>12d} {c['lattice_voxels']:>18d}")
 
     print()
     print("=== THE AUDIT (bar 3) on his job ===")
     for vr in rr:
         c = receipt(branch, vr["volume_fraction"])
         if c is None or "frozen_material" not in c: continue
-        f = c["frozen_material"]
         print(f"  vf {vr['volume_fraction']:.2f}: cells_not_emitted="
-              f"{f['frozen_cells_not_emitted']} strut_and_solid="
-              f"{f['frozen_voxels_strut_and_solid']} unexplained="
-              f"{f['frozen_strut_and_solid_unexplained']} "
-              f"in_exclude_latticed={f['frozen_in_exclude_region_latticed']}")
+              f"{fz(c,'cells_not_emitted')} strut_and_solid="
+              f"{fz(c,'voxels_strut_and_solid')} unexplained="
+              f"{fz(c,'strut_and_solid_unexplained')} "
+              f"in_exclude_latticed={fz(c,'in_exclude_region_latticed')}")
 
     print()
     print(f"VERDICT FLIPS: {flips}  "

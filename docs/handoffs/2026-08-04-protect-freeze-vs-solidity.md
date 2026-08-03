@@ -392,9 +392,83 @@ reports exactly 1 flip. So the zeroes above are a measurement, not a blind spot.
 
 ## 8b. BAR 2 — THE MAINTAINER'S CASE, MEASURED
 
-`bar2_maintainer_case.py` · `bar2_maintainer_case.txt`
+`bar2_maintainer_case.py` · `bar2_maintainer_case.txt`. **His** job document,
+unmodified except the model path, on `M2_verticalStand.step` at resolution 128,
+base (`main`) vs branch:
 
-_(filled from the completed runs)_
+| rung | solid base | solid branch | composite base | composite branch |
+|---:|---|---|---|---|
+| 0.68 | True 673.856173 | True 673.856173 | True 3256.5221, **472 vx** | True 3256.5221, **472 vx** |
+| 0.52 | True 701.901605 | True 701.901605 | True 3389.1462, 82 vx | True 3389.1462, 82 vx |
+| 0.38 | True 681.414619 | True 681.414619 | True 3290.8598, 0 vx | True 3290.8598, 0 vx |
+| 0.26 | True 623.947083 | True 623.947083 | True 3013.3230, 0 vx | True 3013.3230, 0 vx |
+
+**0 verdict flips.** `472 / 82 / 0 / 0` is PR 293's own `0 / 82 / 472`,
+reproduced on `main` to the voxel.
+
+### The split PR 293 could not report
+
+| rung | frozen printed | in include | latticed | kept solid | total latticed vx |
+|---:|---:|---:|---:|---:|---:|
+| 0.68 | 40216 | **10070** | 337 | 39879 | 472 |
+| 0.52 | 40216 | **10070** | 25 | 40191 | 82 |
+| 0.38 | 40216 | **10070** | 0 | 40216 | 0 |
+| 0.26 | 40216 | **10070** | 0 | 40216 | 0 |
+
+`in_include = 10070` **is** PR 293's `frozen_solid = 10070`. Same voxels, now
+named as what they are: retained material inside his declared include region.
+
+**AND HERE IS THE HONEST READING OF "THE SPLIT MUST MOVE".** The MASK does not
+move, and it should not: the optimizer's constraint is unchanged, which is what
+bar 1 and bar 5 exist to guarantee. What moves is what that frozen material is
+**allowed to become** — 10,070 voxels went from "unreachable, can never be
+lattice in any formulation" (PR 293's reading) to ordinary retained material his
+include region governs. Of them, 337 and 25 were actually latticed at the top two
+rungs; the rest stayed solid **because of the floor, not because of the freeze**
+(§5). Reporting the frozen split as a movement in the mask would have been the
+easy claim and a false one.
+
+### The audit on his job — and why the two-number design was necessary
+
+```
+  vf 0.68: cells_not_emitted=0 strut_and_solid=97 unexplained=0 in_exclude_latticed=0
+  vf 0.52: cells_not_emitted=0 strut_and_solid=39 unexplained=0 in_exclude_latticed=0
+  vf 0.38: cells_not_emitted=0 strut_and_solid=0  unexplained=0 in_exclude_latticed=0
+  vf 0.26: cells_not_emitted=0 strut_and_solid=0  unexplained=0 in_exclude_latticed=0
+```
+
+On the l-bracket the fix drove `strut_and_solid` to zero outright. **On his real
+graded part it does not, and that is correct** — 97 and 39 frozen voxels sit in
+cells that straddle a role boundary, where struts deliberately weld across into
+certified-solid material so the interface stays bonded. `unexplained = 0` on
+every rung. The naive one-number bar would have FAILED here on working geometry;
+the split is what makes it a real check rather than a fixture artifact.
+
+**And his job was never affected by the §3 fix at all** — `strut_and_solid` reads
+97 / 39 both before and after it (`maintainer_branch_before_roles_fix.log` vs
+`maintainer_ship.log`). His run is GRADED, and the graded path already derived
+its cell set from the mask; the 48 / 426 divergence the fix removed lives on the
+UNIFORM roles path. Worth stating plainly, because "the fix and the maintainer's
+case" are two separate findings that happened to surface in the same task, and
+running them together would overstate both.
+
+### The table above is the SHIPPED binary, and the earlier capture was checked against it
+
+The first branch-side capture of his job was written by a binary built minutes
+before the receipt-key rename (§13), so its `frozen_material` keys lacked the
+`frozen_` prefix. Rather than assert the rename was cosmetic — it plainly was,
+being string literals in the receipt writer — his job was **re-run on the shipped
+binary** and the two compared field by field:
+
+```
+vf 068: frozen block identical modulo key prefix: True | lattice_voxels 472 472 | margin 3256.522087 3256.522087
+vf 052: frozen block identical modulo key prefix: True | lattice_voxels  82  82 | margin 3389.146162 3389.146162
+vf 038: frozen block identical modulo key prefix: True | lattice_voxels   0   0 | margin 3290.859799 3290.859799
+vf 026: frozen block identical modulo key prefix: True | lattice_voxels   0   0 | margin 3013.323039 3013.323039
+```
+
+Every number identical; only the key spelling differs. The bar-2 table is
+generated from the shipped run (`maintainer_ship.log`).
 
 ---
 
@@ -625,7 +699,10 @@ exactly how much frozen material was latticed and how much stayed solid.
 them are inside your own Protect collar — that is the number PR 293 flagged as
 "unreachable", and we confirmed it is exactly the same set of voxels. Under the
 new rules those 10,070 are *not* unreachable: they are ordinary retained material
-and your "lattice here" marking applies to them.
+and your "lattice here" marking applies to them. We re-ran your exact job on the
+old code and the new code: every rung reaches the same verdict with the same
+margin, and the latticed voxel counts (472 / 82 / 0 / 0) are identical — this
+change does not alter a single result you already have.
 
 **But your regions still will not produce much lattice, and that part is physics.**
 Five of your eight "lattice here" regions are 4 mm-deep slabs. To hold a lattice
