@@ -1,0 +1,19 @@
+=== M1 (C) — ONE worktree, ONE cmake cache: base 34175a5 vs branch,
+             on a lattice+grading job with multiscale ABSENT ===
+
+--- /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-density-proxy-a12459/evidence/2026-08-03-multiscale-lattice-to/m1_controlled/base.sha256	2026-08-03 04:31:43
++++ /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-density-proxy-a12459/evidence/2026-08-03-multiscale-lattice-to/m1_controlled/branch.sha256	2026-08-03 04:34:17
+@@ -1,9 +1,9 @@
+-c1a0510e68f781ceb176c604ef35ee13552bed8bff7ef4c07abe14438236403b  build_orientation.json
++7aeb5ec500a4217bcb518dbebc88d8beb7ed91d92785d768079248a77287f533  build_orientation.json
+ 651a2498ab10268dae47891bc56b7031a55193c35e81e075d6b33a432f039f16  design.bin
+ dcd61751519ce350268c3a15653902e1cdfbd7aa3d0eee7d18f4f7e507b288e2  fields.bin
+ 9670f551449031d3ee98d7a49d2e30a6a0325b57bb29216723d38113f34f07f9  loadcase.json
+ bb623f8268416281695997ded7c933d4c3970f80b8eedd69904160b56c2df6e6  report.json
+-e9e5763dba77352c8798fe9d3808304cfac4510888286f707a62453b45913a71  run_info.json
++07d6d7c7c08b9577b8a5d1e838d91a2b59346ff8bf4c6b58da141869870e1f7b  run_info.json
+ 3a1a093783b37173bfd5f85c991a3a2cb521a886d0c58afd021afb3efe98b641  variant_045.stl
+ 09171270ffbce4869888be74f0d3cf3dfa85401c2ffca8b5e9e629df573e3911  variant_045_lattice.report.json
+ 75c65b275a5b9bff00e71f9f0e8886dc363f5605dd2b048d0b8539094d2b1f97  variant_045_lattice.stl
+
+DIFFERENCES REMAIN after removing the build method as a variable.
