@@ -1,0 +1,28 @@
+=== GROWTH, no design box -> PR 290 AUTO-DERIVES one ===
+[loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=1464 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=GROWTH rungs=[1.55,1.25,1.10] anchor_pad=1 — add as little plastic as possible to reach the required margin
+[loadcase] growth design box AUTO-DERIVED (none drawn): min=(-102,-198,-1.62) max=(104,12.2,22.7) mm spacing=1.62
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=120 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=370 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=3654 status=ok
+preflight: load path CONNECTED
+  1464 load voxels, 71 anchor voxels; 243618 of 278528 voxels may hold material (34910 forbidden)
+  narrowest separating cross-section: 324 voxels (850.3 mm^2) at step 1 of 54 from the anchor
+  (INFORMATION, not a verdict — connectivity is NECESSARY, not sufficient)
+  check 8.68 ms; import + setup + check 648.7 ms
+exit=0
+
+=== REDUCTION twin (minimize_plastic true), same part/loads ===
+[loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=1464 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=120 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=370 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=3710 status=ok
+preflight: load path CONNECTED
+  1464 load voxels, 71 anchor voxels; 615200 of 655360 voxels may hold material (40160 forbidden)
+  narrowest separating cross-section: 311 voxels (816.2 mm^2) at step 1 of 54 from the anchor
+  (INFORMATION, not a verdict — connectivity is NECESSARY, not sufficient)
+  check 23.72 ms; import + setup + check 674.0 ms
+exit=0

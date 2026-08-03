@@ -1078,6 +1078,137 @@ bool observe_infeasible(const SimpOptions& options,
                          options.infeasible_window);
 }
 
+// --- GUARD 2: the IMMEDIATE divergence trip (task 2026-08-03-preflight-
+// feasibility-and-divergence). One iteration, three conjuncts, no window. See
+// simp.hpp for the contract and SimpOptions::infeasible_immediate_ratio for the
+// measured calibration — including why the wall conjunct is the one that
+// carries the separation. Public + non-namespaced so the test drives THIS
+// function against the real recorded rows, not a copy of the rule.
+struct ImmediateDivergence {
+  bool fired = false;
+  double compliance_ratio = 0.0;
+  double cg_ratio = 0.0;
+  double wall_ratio = 0.0;
+};
+
+}  // namespace
+
+bool immediate_divergence(const std::vector<double>& c,
+                          const std::vector<int>& cg,
+                          const std::vector<double>& ms, double ratio,
+                          double cg_blowup, double wall_ratio,
+                          ImmediateDivergenceRatios* ratios_out) {
+  if (ratios_out) *ratios_out = ImmediateDivergenceRatios{};
+  if (!(std::isfinite(ratio) && ratio > 0.0)) return false;          // disarmed
+  if (!(std::isfinite(cg_blowup) && cg_blowup > 0.0)) return false;
+  if (!(std::isfinite(wall_ratio) && wall_ratio > 0.0)) return false;
+  const std::size_t n = c.size();
+  // Iteration 1 IS the baseline and is never judged against itself.
+  if (n < 2 || cg.size() != n || ms.size() != n) return false;
+  const double c0 = c[0], w0 = ms[0], ci = c[n - 1];
+  if (!(std::isfinite(c0) && c0 > 0.0)) return false;
+  if (!(std::isfinite(ci))) return false;
+  if (!(w0 > 0.0)) return false;  // no wall baseline -> the separator is unformable
+  // (2)'s baseline is the windowed predicate's: the CHEAPEST solve BEFORE the
+  // iteration under judgement.
+  int cg_min_prefix = cg[0];
+  for (std::size_t i = 1; i + 1 < n; ++i)
+    if (cg[i] < cg_min_prefix) cg_min_prefix = cg[i];
+  if (cg_min_prefix <= 0) return false;
+  const double rc = ci / c0;
+  const double rg = static_cast<double>(cg[n - 1]) /
+                    static_cast<double>(cg_min_prefix);
+  const double rw = ms[n - 1] / w0;
+  if (ratios_out) *ratios_out = ImmediateDivergenceRatios{rc, rg, rw};
+  return rc >= ratio && rg >= cg_blowup && rw >= wall_ratio;
+}
+
+namespace {
+
+// The verdict at the current iteration, for the loop's fast-fail — exactly the
+// predicate above, fed this run's recorded histories.
+ImmediateDivergence observe_immediate_divergence(
+    const SimpOptions& options, const std::vector<SimpIteration>& history,
+    const std::vector<int>& cg_history, const std::vector<double>& wall_history) {
+  ImmediateDivergence d;
+  std::vector<double> curve;
+  curve.reserve(history.size());
+  for (const SimpIteration& h : history) curve.push_back(h.compliance);
+  ImmediateDivergenceRatios r;
+  d.fired = immediate_divergence(curve, cg_history, wall_history,
+                                 options.infeasible_immediate_ratio,
+                                 options.infeasible_cg_blowup,
+                                 options.infeasible_immediate_wall_ratio, &r);
+  d.compliance_ratio = r.compliance;
+  d.cg_ratio = r.cg;
+  d.wall_ratio = r.wall;
+  return d;
+}
+
+// --- GUARD 3: the per-iteration TIME BUDGET. -------------------------------
+// The budget this rung runs under, from its own first iteration. 0 = disarmed
+// (or no baseline yet, which is the same thing for the first iteration).
+double iteration_time_budget_ms(const SimpOptions& options, double first_ms) {
+  if (!(options.iteration_time_ratio > 0.0)) return 0.0;
+  if (!(first_ms > 0.0)) return 0.0;
+  return std::max(options.iteration_time_ratio * first_ms,
+                  std::max(0.0, options.iteration_time_floor_ms));
+}
+
+// WHICH PHASE dominated an over-budget iteration. The named phases below are the
+// PR-273 columns; `residual_ms` is reported as "unattributed" because that is
+// exactly what it means. The solver_* fields are a SUB-SPLIT of solve_ms, so the
+// winner is chosen among the sub-split when the solve dominates — otherwise a
+// CG blow-up would only ever be reported as "solve".
+void dominant_phase(const IterationPhaseTimes& p, std::string& name_out,
+                    double& ms_out) {
+  struct Entry { const char* name; double ms; };
+  const Entry top[] = {{"solve", p.solve_ms},       {"filter", p.filter_ms},
+                       {"project", p.project_ms},   {"update", p.update_ms},
+                       {"analysis", p.analysis_ms}, {"observe", p.observe_ms},
+                       {"unattributed", p.residual_ms}};
+  const Entry* best = &top[0];
+  for (const Entry& e : top)
+    if (e.ms > best->ms) best = &e;
+  if (std::string(best->name) != "solve") {
+    name_out = best->name;
+    ms_out = best->ms;
+    return;
+  }
+  const Entry sub[] = {{"cg", p.solver_cg_ms},
+                       {"mg", p.solver_mg_ms},
+                       {"mg_build", p.solver_mg_build_ms},
+                       {"solver_build", p.solver_build_ms},
+                       {"geneo_setup", p.solver_geneo_setup_ms},
+                       {"geneo_apply", p.solver_geneo_apply_ms},
+                       {"recycle", p.solver_recycle_ms}};
+  const Entry* bs = &sub[0];
+  for (const Entry& e : sub)
+    if (e.ms > bs->ms) bs = &e;
+  if (bs->ms > 0.0) {
+    name_out = bs->name;
+    ms_out = bs->ms;
+  } else {
+    name_out = "solve";
+    ms_out = p.solve_ms;
+  }
+}
+
+// RAII arming of the solver deadline around one trajectory solve. Disarms on
+// every exit path (including the throw), so a deadline can never leak into the
+// certification solve or the next rung.
+class ScopedSolveDeadline {
+ public:
+  explicit ScopedSolveDeadline(double absolute_ms)
+      : prev_(fea_set_solve_deadline_ms(absolute_ms)) {}
+  ~ScopedSolveDeadline() { fea_set_solve_deadline_ms(prev_); }
+  ScopedSolveDeadline(const ScopedSolveDeadline&) = delete;
+  ScopedSolveDeadline& operator=(const ScopedSolveDeadline&) = delete;
+
+ private:
+  double prev_;
+};
+
 // ---------------------------------------------------------------------------
 // MMA updater (ROADMAP M7.mma.1), Svanberg, "The method of moving asymptotes -
 // a new method for structural optimization", Int. J. Numer. Methods Eng. 24
@@ -1885,6 +2016,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // result.history (one push per completed iteration, right beside it). It is the
   // second half of the rung-infeasibility signature; nothing else reads it.
   std::vector<int> cg_history;
+  // Task 2026-08-03-preflight-feasibility-and-divergence — the per-iteration
+  // WALL (IterationPhaseTimes::total_ms), index-aligned with cg_history. It is
+  // the ONE column that separates the 10-hour divergence from a live forming
+  // transient that recovers (see SimpOptions::infeasible_immediate_ratio), and
+  // it is the baseline guard 3's per-iteration budget is derived from.
+  std::vector<double> wall_history;
   cg_history.reserve(total_stage_iterations(plan));
 
   // Task 2026-08-02-iteration-phase-timing — when the previous iteration's
@@ -1952,13 +2089,40 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       double af = 1.0;
       SimpCompliance c;
       sp.mark();
+      // GUARD 3, enforcement point (1): arm the SOLVE DEADLINE at this rung's
+      // per-iteration budget, measured from the top of this iteration's body.
+      // Disarmed (0) on the first iteration of a rung — which is the baseline —
+      // and whenever the guard is off, in which case the RAII object writes back
+      // the same 0 it read and the CG poll is skipped entirely.
+      const double iter_budget_ms = iteration_time_budget_ms(
+          options, wall_history.empty() ? 0.0 : wall_history[0]);
       try {
+        ScopedSolveDeadline deadline(iter_budget_ms > 0.0 ? sp.t0 + iter_budget_ms
+                                                          : 0.0);
         c = active_domain_solve(
             active_domain, grid, traj_params, xphys, bcs, loads, traj_tol,
             options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
         sp.charge(sp.solve);
+      } catch (const SolverDeadlineExceeded& e) {
+        // GUARD 3 fired MID-SOLVE: this iteration blew the rung's per-iteration
+        // time budget and was abandoned where it stood, rather than being
+        // reported six hours later. Ended the same way an infeasible rung is —
+        // no throw out of simp_optimize, the caller rejects THIS rung, the ladder
+        // continues — but labelled as a TIME budget, not a hard operator.
+        result.time_budget_exceeded = true;
+        result.time_budget_iteration = result.iterations + 1;
+        result.time_budget_ms = iter_budget_ms;
+        result.time_budget_baseline_ms =
+            wall_history.empty() ? 0.0 : wall_history[0];
+        result.time_budget_elapsed_ms = steady_clock_ms() - sp.t0;
+        // Mid-solve, the phase breakdown does not exist yet; the solve IS the
+        // phase, and the CG count it reached is the honest detail.
+        result.time_budget_phase = "solve (abandoned mid-CG)";
+        result.time_budget_phase_ms = result.time_budget_elapsed_ms;
+        (void)e;
+        break;
       } catch (const SolverNonConvergence& e) {
         // Handoff 2026-07-27-nonconvergence-rejection — a TRAJECTORY solve did not
         // converge. End the run here, honestly labelled, WITHOUT throwing out of
@@ -2056,6 +2220,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       sp.charge(sp.observe);
       // Handoff 114 — per-iteration observability (read-only). The richer record
       // (achieved vf, CG iters, plateau verdict) the CLI iteration CSV needs.
+      IterationPhaseTimes iter_phases;
+      bool phases_measured = false;
       if (options.observe) {
         sp.mark();
         SimpIterationObservation obs;
@@ -2090,8 +2256,17 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                            ? sp.t0 - last_observe_end_ms
                                            : 0.0,
                                    c);
+        iter_phases = obs.phases;
+        phases_measured = true;
         options.observe(obs);
       }
+      // GUARD 3 needs this iteration's wall on EVERY run, not only observed
+      // ones. When an observer already built the record, that record IS the
+      // measurement (no second, later stamp), so the observed path is unchanged.
+      if (!phases_measured)
+        iter_phases = finish_phases(
+            sp, last_observe_end_ms > 0.0 ? sp.t0 - last_observe_end_ms : 0.0, c);
+      wall_history.push_back(iter_phases.total_ms);
       last_observe_end_ms = steady_clock_ms();
       // Playback keyframe: the analysis density as the shape evolves (read-only).
       if (options.keyframe && options.keyframe_stride > 0 &&
@@ -2112,6 +2287,45 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         result.infeasible = true;
         result.infeasible_iteration = result.iterations;
         break;
+      }
+      // --- GUARD 2: THE IMMEDIATE DIVERGENCE TRIP -----------------------------
+      // (task 2026-08-03-preflight-feasibility-and-divergence.) The windowed
+      // predicate above needs five consecutive FROZEN iterations; the motivating
+      // run's objective was not frozen and its iterations cost hours, so it would
+      // never have fired. This one judges a SINGLE iteration on three conjuncts,
+      // the third of which — the wall cost — is the only column measured to
+      // separate a real divergence from a forming transient that recovers. It is
+      // tested BEFORE guard 3 because it names the better cause: the objective
+      // exploded, not merely "this took a while".
+      const ImmediateDivergence divergence_now = observe_immediate_divergence(
+          options, result.history, cg_history, wall_history);
+      if (!result.infeasible && divergence_now.fired) {
+        result.diverged = true;
+        result.diverged_iteration = result.iterations;
+        result.diverged_compliance_ratio = divergence_now.compliance_ratio;
+        result.diverged_cg_ratio = divergence_now.cg_ratio;
+        result.diverged_wall_ratio = divergence_now.wall_ratio;
+        break;
+      }
+      // --- GUARD 3, enforcement point (2): the COMPLETED iteration ------------
+      // The armed CG deadline stops a runaway SOLVE mid-flight; this catches an
+      // iteration that blew the budget somewhere the deadline cannot see (the
+      // hierarchy build, the filter, the update) and names the phase that did it.
+      // `wall_history.size() >= 2` because the baseline is the rung's FIRST
+      // iteration and an iteration is never judged against itself — at this
+      // point wall_history already carries the iteration that just finished.
+      if (!result.infeasible && !result.diverged && wall_history.size() >= 2) {
+        const double budget = iteration_time_budget_ms(options, wall_history[0]);
+        if (budget > 0.0 && iter_phases.total_ms > budget) {
+          result.time_budget_exceeded = true;
+          result.time_budget_iteration = result.iterations;
+          result.time_budget_ms = budget;
+          result.time_budget_baseline_ms = wall_history[0];
+          result.time_budget_elapsed_ms = iter_phases.total_ms;
+          dominant_phase(iter_phases, result.time_budget_phase,
+                         result.time_budget_phase_ms);
+          break;
+        }
       }
 
       if (st.mma_continuation) {
@@ -2154,7 +2368,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // continuation proceeds either way. The loop is `converged` iff its LAST
     // stage was (a cancelled stage never is).
     result.converged = stage_converged;
-    if (result.cancelled || result.infeasible || result.non_convergent) break;
+    // Task 2026-08-03-preflight-feasibility-and-divergence — a rung ended by
+    // either DIVERGENCE guard stops here too. Without this the stage loop would
+    // advance the beta continuation on a design the guard just called broken.
+    if (result.cancelled || result.infeasible || result.non_convergent ||
+        result.diverged || result.time_budget_exceeded)
+      break;
   }
 
   // Report a self-consistent final state: physical_density = filter(design)
@@ -2178,7 +2397,15 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // value, the same number the final CSV row carries — rather than a fresh
   // measurement of the post-step field. With `infeasible` true and `converged`
   // false no caller can read it as an achievement.
-  if (result.infeasible || result.non_convergent) {
+  // Task 2026-08-03-preflight-feasibility-and-divergence — a DIVERGED or
+  // TIME-BUDGETED run skips the final recovery solve for the same reason, and it
+  // is the reason that matters most here: that solve is the most expensive single
+  // solve of the run, at the TIGHT certification tolerance, on the very system the
+  // guard just stopped for being ruinously slow. Measured on the motivating job:
+  // without this, stopping the trajectory at iteration 2 still handed the run a
+  // full-domain tight solve on a diverging operator — the guard saved nothing.
+  if (result.infeasible || result.non_convergent || result.diverged ||
+      result.time_budget_exceeded) {
     // Handoff 2026-07-27-nonconvergence-rejection — a non_convergent run SKIPS the
     // final recovery solve for the SAME reason 131 skips it on an infeasible run: it
     // is the most expensive single solve and the one that would THROW, and there is
@@ -2237,12 +2464,18 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 // ---------------------------------------------------------------------------
 // Passive regions: mask-aware SIMP optimization (ROADMAP M3.7).
 
-namespace {
-
 // The effective mask actually optimized: the caller's mask with every Load and
 // Fixture voxel forced to FrozenSolid (M1.6 tags are implicitly "keep-in", so
 // the §7 V3 retention gate is structural). Empty voxels are left as-is (ignored).
-DesignMask effective_mask(const VoxelGrid& grid, const DesignMask& mask) {
+//
+// PUBLIC since task 2026-08-03-preflight-feasibility-and-divergence: the
+// pre-flight load-path check must walk the SAME "may this voxel hold material?"
+// set the optimizer works on, and a second, similar rule could refuse a job this
+// one would have solved. See simp.hpp.
+DesignMask effective_design_mask(const VoxelGrid& grid, const DesignMask& mask) {
+  if (mask.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "effective_design_mask: mask size != grid.voxel_count()");
   DesignMask eff = mask;
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
@@ -2263,6 +2496,8 @@ DesignMask effective_mask(const VoxelGrid& grid, const DesignMask& mask) {
       }
   return eff;
 }
+
+namespace {
 
 // The analysis grid for FEA: FrozenVoid voxels become Empty so they contribute
 // no element (excluded from the stiffness); every other voxel keeps its tag. The
@@ -2732,7 +2967,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 
   // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
   // analysis grid (FrozenVoid removed), and the Active-voxel budget.
-  const DesignMask eff = effective_mask(grid, mask);
+  const DesignMask eff = effective_design_mask(grid, mask);
   const DensityFilter filter =
       make_density_filter(grid, options.filter_radius, eff);
   const VoxelGrid analysis = analysis_grid_for_mask(grid, eff);
@@ -2828,6 +3063,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // the unconstrained overload). This is the overload the production design-box
   // ladder runs, so this is the one the 96³ evidence was measured on.
   std::vector<int> cg_history;
+  // Task 2026-08-03-preflight-feasibility-and-divergence — the per-iteration
+  // WALL (IterationPhaseTimes::total_ms), index-aligned with cg_history. It is
+  // the ONE column that separates the 10-hour divergence from a live forming
+  // transient that recovers (see SimpOptions::infeasible_immediate_ratio), and
+  // it is the baseline guard 3's per-iteration budget is derived from.
+  std::vector<double> wall_history;
   cg_history.reserve(total_stage_iterations(plan));
 
   // Task 2026-08-02-iteration-phase-timing — when the PREVIOUS iteration's
@@ -2894,13 +3135,35 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       double af = 1.0;
       SimpCompliance c;
       sp.mark();
+      // GUARD 3, enforcement point (1): arm the SOLVE DEADLINE at this rung's
+      // per-iteration budget, measured from the top of this iteration's body.
+      // Disarmed (0) on the first iteration of a rung — which is the baseline —
+      // and whenever the guard is off, in which case the RAII object writes back
+      // the same 0 it read and the CG poll is skipped entirely.
+      const double iter_budget_ms = iteration_time_budget_ms(
+          options, wall_history.empty() ? 0.0 : wall_history[0]);
       try {
+        ScopedSolveDeadline deadline(iter_budget_ms > 0.0 ? sp.t0 + iter_budget_ms
+                                                          : 0.0);
         c = active_domain_solve(
             active_domain, analysis, traj_params, xphys, bcs, loads, traj_tol,
             options.cg_max_iterations, warm.u.empty() ? nullptr : &warm,
             use_solver ? solver.get() : nullptr, options.solver,
             result.iterations + 1, af);
         sp.charge(sp.solve);
+      } catch (const SolverDeadlineExceeded& e) {
+        // GUARD 3 fired MID-SOLVE (masked/passive-region overload). See the
+        // unconstrained overload for the rationale.
+        result.time_budget_exceeded = true;
+        result.time_budget_iteration = result.iterations + 1;
+        result.time_budget_ms = iter_budget_ms;
+        result.time_budget_baseline_ms =
+            wall_history.empty() ? 0.0 : wall_history[0];
+        result.time_budget_elapsed_ms = steady_clock_ms() - sp.t0;
+        result.time_budget_phase = "solve (abandoned mid-CG)";
+        result.time_budget_phase_ms = result.time_budget_elapsed_ms;
+        (void)e;
+        break;
       } catch (const SolverNonConvergence& e) {
         // Handoff 2026-07-27-nonconvergence-rejection — a TRAJECTORY solve did not
         // converge (masked/passive-region overload). End the run WITHOUT throwing, as
@@ -2994,6 +3257,8 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
       // Handoff 114 — per-iteration observability (read-only), as in the
       // unconstrained overload. `active_volfrac` is the achieved fraction over
       // the Active voxels — the same value recorded in history.
+      IterationPhaseTimes iter_phases;
+      bool phases_measured = false;
       if (options.observe) {
         sp.mark();
         SimpIterationObservation obs;
@@ -3031,8 +3296,16 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                            ? sp.t0 - last_observe_end_ms
                                            : 0.0,
                                    c);
+        iter_phases = obs.phases;
+        phases_measured = true;
         options.observe(obs);
       }
+      // GUARD 3 needs this iteration's wall on EVERY run (see the unconstrained
+      // overload).
+      if (!phases_measured)
+        iter_phases = finish_phases(
+            sp, last_observe_end_ms > 0.0 ? sp.t0 - last_observe_end_ms : 0.0, c);
+      wall_history.push_back(iter_phases.total_ms);
       // Close the previous-tail window here — after the observe hook, whether or
       // not one is attached — so tail_prev_ms means the same span on every run.
       last_observe_end_ms = steady_clock_ms();
@@ -3062,6 +3335,45 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
         result.infeasible = true;
         result.infeasible_iteration = result.iterations;
         break;
+      }
+      // --- GUARD 2: THE IMMEDIATE DIVERGENCE TRIP -----------------------------
+      // (task 2026-08-03-preflight-feasibility-and-divergence.) The windowed
+      // predicate above needs five consecutive FROZEN iterations; the motivating
+      // run's objective was not frozen and its iterations cost hours, so it would
+      // never have fired. This one judges a SINGLE iteration on three conjuncts,
+      // the third of which — the wall cost — is the only column measured to
+      // separate a real divergence from a forming transient that recovers. It is
+      // tested BEFORE guard 3 because it names the better cause: the objective
+      // exploded, not merely "this took a while".
+      const ImmediateDivergence divergence_now = observe_immediate_divergence(
+          options, result.history, cg_history, wall_history);
+      if (!result.infeasible && divergence_now.fired) {
+        result.diverged = true;
+        result.diverged_iteration = result.iterations;
+        result.diverged_compliance_ratio = divergence_now.compliance_ratio;
+        result.diverged_cg_ratio = divergence_now.cg_ratio;
+        result.diverged_wall_ratio = divergence_now.wall_ratio;
+        break;
+      }
+      // --- GUARD 3, enforcement point (2): the COMPLETED iteration ------------
+      // The armed CG deadline stops a runaway SOLVE mid-flight; this catches an
+      // iteration that blew the budget somewhere the deadline cannot see (the
+      // hierarchy build, the filter, the update) and names the phase that did it.
+      // `wall_history.size() >= 2` because the baseline is the rung's FIRST
+      // iteration and an iteration is never judged against itself — at this
+      // point wall_history already carries the iteration that just finished.
+      if (!result.infeasible && !result.diverged && wall_history.size() >= 2) {
+        const double budget = iteration_time_budget_ms(options, wall_history[0]);
+        if (budget > 0.0 && iter_phases.total_ms > budget) {
+          result.time_budget_exceeded = true;
+          result.time_budget_iteration = result.iterations;
+          result.time_budget_ms = budget;
+          result.time_budget_baseline_ms = wall_history[0];
+          result.time_budget_elapsed_ms = iter_phases.total_ms;
+          dominant_phase(iter_phases, result.time_budget_phase,
+                         result.time_budget_phase_ms);
+          break;
+        }
       }
 
       if (st.mma_continuation) {
@@ -3097,7 +3409,12 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
     // Continuation proceeds stage by stage; `converged` reports the LAST one
     // (a cancelled stage never is).
     result.converged = stage_converged;
-    if (result.cancelled || result.infeasible || result.non_convergent) break;
+    // Task 2026-08-03-preflight-feasibility-and-divergence — a rung ended by
+    // either DIVERGENCE guard stops here too. Without this the stage loop would
+    // advance the beta continuation on a design the guard just called broken.
+    if (result.cancelled || result.infeasible || result.non_convergent ||
+        result.diverged || result.time_budget_exceeded)
+      break;
   }
 
   // Self-consistent final state (projected at the final stage's beta when
@@ -3116,7 +3433,10 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
   // NON_CONVERGENT run skips this final recovery solve; see the unconstrained
   // overload for why (it is both the most expensive solve of the run and the one
   // that could throw instead of reporting the honest verdict).
-  if (result.infeasible || result.non_convergent) {
+  // A DIVERGED / TIME-BUDGETED run skips the final solve too — see the
+  // unconstrained overload for why that is the point of the guard, not a detail.
+  if (result.infeasible || result.non_convergent || result.diverged ||
+      result.time_budget_exceeded) {
     result.compliance =
         result.history.empty() ? 0.0 : result.history.back().compliance;
   } else {

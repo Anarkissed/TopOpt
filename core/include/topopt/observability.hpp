@@ -438,6 +438,52 @@ struct RunInfo {
   std::vector<int> rung_non_convergent;
   std::vector<int> rung_non_convergent_iteration;
   std::vector<double> rung_non_convergent_residual;
+  // Task 2026-08-03-preflight-feasibility-and-divergence — THE GUARDS ARE
+  // OBSERVABLE (bar P6). Three guards, all three recorded here with the numbers
+  // they fired on, so the next investigation of a job that stopped early does
+  // not need another instrumentation task.
+  //
+  // GUARD 1, the PRE-FLIGHT (config-free: it is a measurement, not a threshold).
+  // Written BEFORE the solve — this is the one part of run_info that is
+  // meaningful on an unfinished run, which is the point of a pre-flight.
+  // `preflight_decidable` false means the grid carried no Load or no Fixture
+  // voxels, so `preflight_connected` is vacuous and asserts nothing.
+  // `preflight_narrowest_*` are the marginality reading: the narrowest BFS level
+  // set separating the anchors from the nearest load, an UPPER BOUND on the
+  // minimum cut of the surviving path — INFORMATION, never a refusal.
+  bool preflight_ran = false;
+  bool preflight_decidable = false;
+  bool preflight_connected = false;
+  double preflight_ms = 0.0;
+  long long preflight_load_voxels = 0;
+  long long preflight_anchor_voxels = 0;
+  long long preflight_unreached_load_voxels = 0;
+  long long preflight_allowed_voxels = 0;    // may hold material
+  long long preflight_forbidden_voxels = 0;  // FrozenVoid: may never
+  int preflight_narrowest_separator_voxels = -1;
+  double preflight_narrowest_separator_mm2 = -1.0;
+  int preflight_geodesic_levels = -1;
+  // GUARDS 2 and 3 — the armed thresholds (CONFIG, up-front) and the per-rung
+  // OUTCOME (filled AFTER the run from MinimizePlasticResult, the same
+  // finalize-only discipline as rung_infeasible, so an unfinished run asserts
+  // nothing). All-false outcome vectors are the positive statement "no guard
+  // fired". See MinimizePlasticResult for the per-field meanings.
+  double infeasible_immediate_ratio = 0.0;
+  double infeasible_immediate_wall_ratio = 0.0;
+  double iteration_time_ratio = 0.0;
+  double iteration_time_floor_ms = 0.0;
+  std::vector<int> rung_diverged;
+  std::vector<int> rung_diverged_iteration;
+  std::vector<double> rung_diverged_c_ratio;
+  std::vector<double> rung_diverged_cg_ratio;
+  std::vector<double> rung_diverged_wall_ratio;
+  std::vector<int> rung_time_budget;
+  std::vector<int> rung_time_budget_iteration;
+  std::vector<double> rung_time_budget_ms;
+  std::vector<double> rung_time_budget_elapsed_ms;
+  std::vector<double> rung_time_budget_baseline_ms;
+  std::vector<std::string> rung_time_budget_phase;
+  std::vector<double> rung_time_budget_phase_ms;
   // ACTIVE DOMAIN (active-domain phase 1). `active_domain_band` is the REQUESTED
   // band (config, written up-front): 0 = off, > 0 = the explicit half-width in
   // voxels, < 0 = auto (resolved per rung from the filter radius). The two

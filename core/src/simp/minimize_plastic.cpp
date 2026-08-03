@@ -226,6 +226,39 @@ DesignMask design_domain_mask(const SolvedDesignDomain& domain,
   return mask;
 }
 
+// --- PRE-FLIGHT LOAD-PATH CONNECTIVITY (pipeline.hpp, guard 1) ---------------
+// The maximal structure this job could ever produce — density 1 wherever the
+// optimizer is ALLOWED to hold material — walked by the connectivity belt. If
+// even that field cannot carry force from the load to the anchor, no field the
+// optimizer can produce will, and no amount of solving will discover it.
+PreflightLoadPath preflight_load_path(const SolvedDesignDomain& domain,
+                                      const MinimizePlasticOptions& options) {
+  const double t0 = steady_clock_ms();
+  PreflightLoadPath pf;
+  pf.ran = true;
+  const VoxelGrid& G = domain.grid;
+  // THE optimizer's own two calls, in the optimizer's own order — the clearance
+  // overlay first (design_domain_mask), then the M1.6 tag reclassification
+  // (effective_design_mask). Nothing here re-derives what "allowed" means.
+  const DesignMask eff =
+      effective_design_mask(G, design_domain_mask(domain, options));
+  std::vector<double> allowed(G.voxel_count(), 0.0);
+  for (std::size_t idx = 0; idx < eff.size(); ++idx) {
+    if (eff[idx] == MaskValue::FrozenVoid) {
+      ++pf.forbidden_voxels;
+      continue;
+    }
+    allowed[idx] = 1.0;
+    if (eff[idx] == MaskValue::FrozenSolid)
+      ++pf.allowed_frozen_solid;
+    else
+      ++pf.allowed_active;
+  }
+  pf.walk = walk_load_path(G, allowed, 0.5);
+  pf.wall_ms = steady_clock_ms() - t0;
+  return pf;
+}
+
 std::vector<NodalLoad> design_domain_loads(const SolvedDesignDomain& domain,
                                            const MinimizePlasticOptions& options,
                                            double material_density_g_cm3) {
@@ -806,6 +839,38 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     result.rung_non_convergent.push_back(non_convergent ? 1 : 0);
     result.rung_non_convergent_iteration.push_back(iteration);
     result.rung_non_convergent_residual.push_back(residual);
+    // Task 2026-08-03-preflight-feasibility-and-divergence — the two DIVERGENCE
+    // guards' per-rung slots are pushed HERE, in the one lambda every terminal
+    // branch already calls exactly once, so they cannot fall out of alignment
+    // with `evaluated`. A branch that actually trips a guard then overwrites the
+    // entry it just pushed (record_rung_guards below).
+    result.rung_diverged.push_back(0);
+    result.rung_diverged_iteration.push_back(0);
+    result.rung_diverged_c_ratio.push_back(0.0);
+    result.rung_diverged_cg_ratio.push_back(0.0);
+    result.rung_diverged_wall_ratio.push_back(0.0);
+    result.rung_time_budget.push_back(0);
+    result.rung_time_budget_iteration.push_back(0);
+    result.rung_time_budget_ms.push_back(0.0);
+    result.rung_time_budget_elapsed_ms.push_back(0.0);
+    result.rung_time_budget_baseline_ms.push_back(0.0);
+    result.rung_time_budget_phase.push_back(std::string());
+    result.rung_time_budget_phase_ms.push_back(0.0);
+  };
+  auto record_rung_guards = [&](const SimpOptimizeResult& o) {
+    if (result.rung_diverged.empty()) return;
+    result.rung_diverged.back() = o.diverged ? 1 : 0;
+    result.rung_diverged_iteration.back() = o.diverged_iteration;
+    result.rung_diverged_c_ratio.back() = o.diverged_compliance_ratio;
+    result.rung_diverged_cg_ratio.back() = o.diverged_cg_ratio;
+    result.rung_diverged_wall_ratio.back() = o.diverged_wall_ratio;
+    result.rung_time_budget.back() = o.time_budget_exceeded ? 1 : 0;
+    result.rung_time_budget_iteration.back() = o.time_budget_iteration;
+    result.rung_time_budget_ms.back() = o.time_budget_ms;
+    result.rung_time_budget_elapsed_ms.back() = o.time_budget_elapsed_ms;
+    result.rung_time_budget_baseline_ms.back() = o.time_budget_baseline_ms;
+    result.rung_time_budget_phase.back() = o.time_budget_phase;
+    result.rung_time_budget_phase_ms.back() = o.time_budget_phase_ms;
   };
   // Phase 2 design-space trigger: ARMED only when draft is armed AND the maintainer
   // opted in (draft_use_design_trigger). The threshold draft_escalation_design_flip
@@ -1236,7 +1301,15 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // rejection_reason says why, with the measured geometry it does have
     // (achieved/printed fraction) and zero placeholders for everything the skipped
     // analysis would have filled.
-    if (variant.optimization.infeasible) {
+    // Task 2026-08-03-preflight-feasibility-and-divergence — the two DIVERGENCE
+    // guards land in the SAME branch as infeasibility, because everything that
+    // follows an infeasible rung is what a diverged / timed-out rung needs too:
+    // no analysis (a diverging or abandoned field is not something to certify),
+    // no inheritance (the next rung must not be seeded from it), no stop (the
+    // ladder gets a fresh attempt at the next carve). Only the LABEL differs,
+    // and it differs on purpose — see kRungDivergedReason.
+    if (variant.optimization.infeasible || variant.optimization.diverged ||
+        variant.optimization.time_budget_exceeded) {
       variant.infeasible = true;
       variant.accepted = false;
 
@@ -1258,9 +1331,18 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       vr.printed_fraction = report_fraction(printed_fraction);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
-      vr.rejection_reason = kRungInfeasibleReason;
+      // WHICH of the three stop conditions ended this rung. All three land in
+      // this branch (no analysis, no inheritance, no ladder stop); only the LABEL
+      // differs, and it differs on purpose — neither divergence guard claims the
+      // load path was lost. See kRungDivergedReason.
+      vr.rejection_reason =
+          variant.optimization.infeasible
+              ? kRungInfeasibleReason
+              : (variant.optimization.diverged ? kRungDivergedReason
+                                               : kRungTimeBudgetReason);
       // The geometry IS honest here (a voxel count, not an analysis), so a growth
-      // run still gets its where-is-the-plastic accounting on this line.
+      // run still gets its where-is-the-plastic accounting on this line — for a
+      // guard-stopped rung exactly as for an infeasible one.
       measure_added_material(variant.optimization.physical_density, vr,
                              growth_target_saturated);
       // Every other field stays default-constructed: zero stress, zero margin,
@@ -1268,8 +1350,9 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       // rejection_reason is the flag that says so (report.hpp).
 
       result.evaluated.push_back(std::move(variant));
-      result.rung_infeasible.push_back(1);
+      result.rung_infeasible.push_back(variant.optimization.infeasible ? 1 : 0);
       record_rung_convergence(false, 0, 0.0);  // infeasible: the solves converged
+      record_rung_guards(variant.optimization);
       record_draft_rung(draft_k, draft_gap, draft_escalated, draft_probe_flip, draft_probe_cg, draft_probe_tightmove);  // sentinel: infeasible
       result.report.rejected.push_back(result.evaluated.back().report);
       assert(result.evaluated.size() <= ladder.size() &&

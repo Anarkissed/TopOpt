@@ -1,0 +1,39 @@
+BYTE-IDENTITY (bar P5), POST-MERGE.
+baseline: /tmp/topopt-baseline built from origin/main 67c3f70 Merge pull request #290 from Anarkissed/claude/minimize-plastic-growth-ladder-7a01a3
+job:      byte_identity_job.json (l-bracket, self-weight, ladder [0.7,0.5], res 40)
+
+artifact               main               this branch        
+report.json            6ddb0bfaf9a9e529   6ddb0bfaf9a9e529   SAME
+fields.bin             c579ceedfde311eb   c579ceedfde311eb   SAME
+design.bin             6212aa529ad0449f   6212aa529ad0449f   SAME
+variant_070.stl        346dc6583c1f8b27   346dc6583c1f8b27   SAME
+variant_050.stl        311610807bddf81f   311610807bddf81f   SAME
+loadcase.json          9670f551449031d3   9670f551449031d3   SAME
+build_orientation.json 51594934e65a6ce0   4aaf31d55a112ba6   DIFFER
+
+build_orientation.json differs ONLY in wall-clock fields, and does so for
+MAIN AGAINST ITSELF as well — it is pre-existing timing nondeterminism, not
+a design difference:
+
+  main vs this branch:
+    80,81c80,81
+    <     "sweep_seconds": 0.003572167,
+    <     "strut_axis_measure_seconds": 0,
+    ---
+    >     "sweep_seconds": 0.003970583,
+    >     "strut_axis_measure_seconds": 4.2e-08,
+  main vs MAIN (same binary, two runs):
+    80,81c80,81
+    <     "sweep_seconds": 0.003572167,
+    <     "strut_axis_measure_seconds": 0,
+    ---
+    >     "sweep_seconds": 0.003193875,
+    >     "strut_axis_measure_seconds": 4.1e-08,
+
+DETERMINISM (bar P7) — this branch's binary, run twice:
+  report.json            SAME
+  fields.bin             SAME
+  design.bin             SAME
+  variant_070.stl        SAME
+  variant_050.stl        SAME
+  loadcase.json          SAME
