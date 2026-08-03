@@ -35,6 +35,7 @@
 #include "topopt/materials.hpp"
 #include "topopt/observability.hpp"
 #include "topopt/pipeline.hpp"
+#include "topopt/production.hpp"  // production_growth_ladder (PR 290)
 #include "topopt/settings.hpp"
 #include "topopt/simp.hpp"
 #include "topopt/voxel.hpp"
@@ -375,6 +376,130 @@ int main() {
                 topopt::walk_load_path(g, hollow).connected,
             "ONE flood fill: the two agree on a severed field too");
     }
+  }
+
+  // =========================================================================
+  // 1b. THE GROWTH PATH (merge with PR 290, task 2026-08-03-growth-ladder).
+  //
+  //     PR 290 changed TWO things the pre-flight depends on: it builds the
+  //     anchor/load structural PAD on the growth path too (kGrowthPathAnchorPad
+  //     — `want_pad` is no longer minimize_plastic-only), and a growth run with
+  //     no design box gets a MINIMAL one auto-derived. A pre-flight that ran
+  //     against the pre-290 mask would be testing a domain the run no longer
+  //     solves on.
+  //
+  //     It runs against the post-290 mask because it calls the optimizer's own
+  //     `design_domain_mask` + `effective_design_mask` — but "it should" is not
+  //     evidence, so this measures it. The DIRECTION also matters and is
+  //     asserted: a FrozenSolid pad can only ever ENLARGE the allowed set (a pad
+  //     voxel is always material, and it out-ranks a clearance that would
+  //     otherwise void it), so the pad can never cause a false refusal. That is
+  //     the property that makes the growth path safe, and it is checked rather
+  //     than assumed.
+  // =========================================================================
+  {
+    std::vector<DirichletBC> bcs;
+    const VoxelGrid g = cantilever_bar(bcs);
+
+    // A growth domain: a box BIGGER than the part, which the optimizer may grow
+    // into — the shape of every growth run since PR 290.
+    MinimizePlasticOptions grow;
+    {
+      MinimizePlasticOptions base = base_options(g);
+      grow = base;
+      DesignBox box;
+      box.min = Vec3{g.origin.x - 4.0 * g.spacing, g.origin.y - 4.0 * g.spacing,
+                     g.origin.z - 4.0 * g.spacing};
+      box.max = Vec3{g.origin.x + (g.nx + 4) * g.spacing,
+                     g.origin.y + (g.ny + 4) * g.spacing,
+                     g.origin.z + (g.nz + 4) * g.spacing};
+      grow.design_box = box;
+      grow.freeze_imported_part = false;  // whole-domain optimize (handoff 080)
+      grow.volume_fraction_ladder = topopt::production_growth_ladder();
+    }
+
+    // (a) A GROWTH RUN PASSES PRE-FLIGHT. The domain is larger than the part and
+    //     most of it is empty Active space the optimizer may fill; connectivity
+    //     on that domain had never been tested before this merge.
+    const SolvedDesignDomain gd = topopt::resolve_design_domain(g, bcs, grow);
+    const PreflightLoadPath gpf = topopt::preflight_load_path(gd, grow);
+    CHECK(gpf.walk.decidable, "growth: the walk is decidable");
+    CHECK(gpf.walk.connected,
+          "GROWTH RUN PASSES PRE-FLIGHT — a domain that ADDS material outside "
+          "the part is not refused");
+    CHECK(gpf.allowed_active > 0,
+          "growth: the empty growth region counts as ALLOWED (the optimizer may "
+          "fill it), not as forbidden");
+    std::printf("[growth] no pad: connected=%d, allowed=%zu (frozen %zu + active "
+                "%zu), forbidden %zu, %.3f ms\n",
+                gpf.walk.connected ? 1 : 0, gpf.walk.printed_voxels,
+                gpf.allowed_frozen_solid, gpf.allowed_active,
+                gpf.forbidden_voxels, gpf.wall_ms);
+
+    // (b) WITH THE PR-290 ANCHOR PAD. The pad is a FrozenSolid overlay on the
+    //     PART grid (mask_step_face writes only FrozenSolid), merged into the
+    //     expanded mask by resolve_design_domain. The pre-flight must SEE it.
+    MinimizePlasticOptions grow_pad = grow;
+    {
+      DesignMask pad = topopt::make_active_mask(g);
+      // Freeze a slab behind the anchor face, as kProductionAnchorPadDepthVoxels
+      // does on a real part.
+      for (int k = 0; k < g.nz; ++k)
+        for (int j = 0; j < g.ny; ++j)
+          for (int i = 0; i < topopt::kProductionAnchorPadDepthVoxels; ++i)
+            pad[g.index(i, j, k)] = MaskValue::FrozenSolid;
+      grow_pad.design_mask = std::move(pad);
+    }
+    const SolvedDesignDomain pd =
+        topopt::resolve_design_domain(g, bcs, grow_pad);
+    const PreflightLoadPath ppf = topopt::preflight_load_path(pd, grow_pad);
+    CHECK(ppf.walk.connected,
+          "growth + pad: still CONNECTED — the pad never costs a load path");
+    CHECK(ppf.allowed_frozen_solid > gpf.allowed_frozen_solid,
+          "THE PRE-FLIGHT SEES THE PAD: the frozen-solid share of the allowed "
+          "set GREW when the pad was added — it is running against the post-290 "
+          "mask, not a pre-290 one");
+    CHECK(ppf.walk.printed_voxels >= gpf.walk.printed_voxels,
+          "DIRECTION: a FrozenSolid pad can only ENLARGE the allowed set, so it "
+          "can never cause a false refusal");
+    CHECK(ppf.forbidden_voxels <= gpf.forbidden_voxels,
+          "DIRECTION: ... and can only shrink the forbidden set");
+    std::printf("[growth] with pad: connected=%d, allowed=%zu (frozen %zu + "
+                "active %zu), forbidden %zu\n",
+                ppf.walk.connected ? 1 : 0, ppf.walk.printed_voxels,
+                ppf.allowed_frozen_solid, ppf.allowed_active,
+                ppf.forbidden_voxels);
+
+    // (c) THE PAD OUT-RANKS A CLEARANCE, and the pre-flight inherits that. A
+    //     keep-clear that would void the anchor region cannot, because
+    //     design_domain_mask refuses to void a FrozenSolid base voxel. So adding
+    //     a clearance over the pad leaves the path connected where without the
+    //     pad it would be cut. This is the growth path's real safety property.
+    MinimizePlasticOptions cut_nopad = grow, cut_pad = grow_pad;
+    {
+      // Indexed through the PART's extent at the domain offset — the loop
+      // bounds are the part's, never the expanded grid's.
+      auto make_cut = [&](const SolvedDesignDomain& d) {
+        DesignMask c(d.grid.voxel_count(), MaskValue::Active);
+        for (int k = 0; k < g.nz; ++k)
+          for (int j = 0; j < g.ny; ++j)
+            for (int i = 0; i < topopt::kProductionAnchorPadDepthVoxels; ++i)
+              c[d.grid.index(i + d.offset_i, j + d.offset_j, k + d.offset_k)] =
+                  MaskValue::FrozenVoid;
+        return c;
+      };
+      cut_nopad.clearance_void = make_cut(gd);
+      cut_pad.clearance_void = make_cut(pd);
+    }
+    const PreflightLoadPath cn = topopt::preflight_load_path(gd, cut_nopad);
+    const PreflightLoadPath cp = topopt::preflight_load_path(pd, cut_pad);
+    CHECK(cp.walk.printed_voxels > cn.walk.printed_voxels,
+          "the PAD out-ranks the clearance: with the pad, the voxels the "
+          "keep-clear tried to void are still allowed to hold material");
+    std::printf("[growth] same keep-clear over the anchor: without pad allowed "
+                "%zu (connected=%d), with pad allowed %zu (connected=%d)\n",
+                cn.walk.printed_voxels, cn.walk.connected ? 1 : 0,
+                cp.walk.printed_voxels, cp.walk.connected ? 1 : 0);
   }
 
   // =========================================================================

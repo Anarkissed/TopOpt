@@ -376,6 +376,61 @@ public struct GateDiagnosis: Equatable, Sendable {
     }
 }
 
+/// WHERE ONE VARIANT'S PLASTIC IS, relative to the ORIGINAL imported part
+/// (task 2026-08-03-growth-ladder) — the core's `AddedMaterialReport`, verbatim.
+///
+/// On a GROWTH run ("minimize plastic" unticked) this is the HEADLINE, not a
+/// footnote: the user unticked the box to say "you may add plastic to reach the
+/// strength I asked for", and the answer to that is how much was added and where.
+/// `nil` on every REDUCTION run — nothing measured it, and a zeroed struct would
+/// read as "nothing was added" rather than "this was never asked".
+public struct AddedMaterial: Equatable, Sendable {
+    /// Printed voxels of this variant, and the split by whether each lies inside
+    /// the original part envelope or outside it. `insidePart + outsidePart ==
+    /// printedVoxels`, always.
+    public let printedVoxels: Int
+    public let insidePart: Int
+    public let outsidePart: Int
+    /// The original part's own solid voxel count — the denominator every fraction
+    /// here is taken against, carried so nothing has to reconstruct it.
+    public let partSolidVoxels: Int
+    /// `outsidePart / printedVoxels` — "what share of the object I am about to
+    /// print is material that was not in my model".
+    public let outsideFraction: Double
+    /// Volumes on the voxel basis (mm³) and the NET change against the part
+    /// (printed − part, so NEGATIVE if this variant prints LESS than the part —
+    /// which is what a growth rung that could not reach its target looks like, and
+    /// it must be visible rather than hidden).
+    public let outsideVolumeMM3: Double
+    public let netAddedVolumeMM3: Double
+    /// The same two on the mass basis (grams), sharing the printed voxel count the
+    /// reported mass uses, so "added" and "printed" can never disagree.
+    public let outsideMassGrams: Double
+    public let netAddedMassGrams: Double
+    /// The rung asked for more material than the design box could hold, so it ran
+    /// at "fill the box" rather than at the fraction its line requests. Not a
+    /// strength verdict — but the achieved fraction must not be read as though the
+    /// request had been honoured.
+    public let targetSaturated: Bool
+
+    public init(printedVoxels: Int, insidePart: Int, outsidePart: Int,
+                partSolidVoxels: Int, outsideFraction: Double,
+                outsideVolumeMM3: Double, netAddedVolumeMM3: Double,
+                outsideMassGrams: Double, netAddedMassGrams: Double,
+                targetSaturated: Bool = false) {
+        self.printedVoxels = printedVoxels
+        self.insidePart = insidePart
+        self.outsidePart = outsidePart
+        self.partSolidVoxels = partSolidVoxels
+        self.outsideFraction = outsideFraction
+        self.outsideVolumeMM3 = outsideVolumeMM3
+        self.netAddedVolumeMM3 = netAddedVolumeMM3
+        self.outsideMassGrams = outsideMassGrams
+        self.netAddedMassGrams = netAddedMassGrams
+        self.targetSaturated = targetSaturated
+    }
+}
+
 /// One evaluated volume-fraction rung of a minimize_plastic run.
 public struct OptimizeVariant {
     public let requestedVolumeFraction: Double
@@ -440,6 +495,10 @@ public struct OptimizeVariant {
     /// recommendations). nil when the run did not arm the diagnosis. It EXPLAINS
     /// `accepted` / `worstCaseMargin` above and never contradicts them.
     public let diagnosis: GateDiagnosis?
+    /// WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder). nil on a
+    /// REDUCTION run — the question was never asked — and the headline of a GROWTH
+    /// one. See `AddedMaterial`.
+    public let addedMaterial: AddedMaterial?
 
     public init(requestedVolumeFraction: Double, achievedVolumeFraction: Double,
                 printedFraction: Double? = nil,
@@ -452,7 +511,8 @@ public struct OptimizeVariant {
                 meshIndices: [Int32] = [], vonMisesField: [Float] = [],
                 displacementField: [Float] = [], stressTensorField: [Float] = [],
                 keyframeMeshes: [KeyframeMesh] = [],
-                diagnosis: GateDiagnosis? = nil) {
+                diagnosis: GateDiagnosis? = nil,
+                addedMaterial: AddedMaterial? = nil) {
         self.requestedVolumeFraction = requestedVolumeFraction
         self.achievedVolumeFraction = achievedVolumeFraction
         // printedFraction defaults to achievedVolumeFraction: on the app the two are
@@ -479,6 +539,7 @@ public struct OptimizeVariant {
         self.stressTensorField = stressTensorField
         self.keyframeMeshes = keyframeMeshes
         self.diagnosis = diagnosis
+        self.addedMaterial = addedMaterial
     }
 
     /// The same variant with DIFFERENT GEOMETRY — the smooth-then-lattice handoff
@@ -504,7 +565,7 @@ public struct OptimizeVariant {
             meshVertices: vertices, meshIndices: indices,
             vonMisesField: vonMisesField, displacementField: displacementField,
             stressTensorField: stressTensorField, keyframeMeshes: keyframeMeshes,
-            diagnosis: diagnosis)
+            diagnosis: diagnosis, addedMaterial: addedMaterial)
     }
 }
 
@@ -655,6 +716,23 @@ public struct OptimizeOutcome {
     /// not be told to someone who did exactly that.
     public let solvedBy: String?
 
+    /// WHICH LADDER THIS RUN WALKED (task 2026-08-03-growth-ladder).
+    ///
+    ///   false — REDUCTION: every rung ≤ 1.0 × the part. "Remove as much plastic
+    ///           as possible while holding the required margin"; the
+    ///           recommendation is the LIGHTEST variant that passes.
+    ///   true  — GROWTH: every rung > 1.0 × the part. "Add as little plastic as
+    ///           possible to reach the required margin"; the recommendation is the
+    ///           SMALLEST ADDITION that passes.
+    ///
+    /// The two ladders optimize for OPPOSITE things and their variant tables look
+    /// alike, so the results screen must NAME the mode. It comes from the core's
+    /// own flag rather than being inferred from a fraction, so a run can never be
+    /// presented as the mode it was not. Default false keeps every existing
+    /// caller, and every persisted pre-growth outcome, reading as reduction — which
+    /// is what they are.
+    public let growthLadder: Bool
+
     public init(variants: [OptimizeVariant], stoppedOnMargin: Bool,
                 cancelled: Bool, acceptedCount: Int, voxelVolumeMM3: Double = 0,
                 gridNx: Int = 0, gridNy: Int = 0, gridNz: Int = 0,
@@ -665,7 +743,8 @@ public struct OptimizeOutcome {
                 timing: RunTiming? = nil,
                 latticeReport: LatticeReport? = nil,
                 buildOrientationJSON: Data? = nil,
-                solvedBy: String? = nil) {
+                solvedBy: String? = nil,
+                growthLadder: Bool = false) {
         self.variants = variants
         self.stoppedOnMargin = stoppedOnMargin
         self.cancelled = cancelled
@@ -683,6 +762,7 @@ public struct OptimizeOutcome {
         self.latticeReport = latticeReport
         self.buildOrientationJSON = buildOrientationJSON
         self.solvedBy = solvedBy
+        self.growthLadder = growthLadder
     }
 
     /// A copy carrying `solvedBy` — how the run flow stamps the machine it
@@ -699,7 +779,8 @@ public struct OptimizeOutcome {
                         appliedFaceProtections: appliedFaceProtections,
                         timing: timing, latticeReport: latticeReport,
                         buildOrientationJSON: buildOrientationJSON,
-                        solvedBy: solvedBy ?? name)
+                        solvedBy: solvedBy ?? name,
+                        growthLadder: growthLadder)
     }
 
     /// A copy carrying `timing` — how the run flow stamps a LOCAL run's measured
@@ -718,7 +799,8 @@ public struct OptimizeOutcome {
                         timing: timing ?? self.timing,
                         latticeReport: latticeReport,
                         buildOrientationJSON: buildOrientationJSON,
-                        solvedBy: solvedBy)
+                        solvedBy: solvedBy,
+                        growthLadder: growthLadder)
     }
 
     /// A copy carrying `latticeReport` — how the run flow stamps the run's lattice onto
@@ -736,7 +818,8 @@ public struct OptimizeOutcome {
                         timing: timing,
                         latticeReport: self.latticeReport ?? report,
                         buildOrientationJSON: buildOrientationJSON,
-                        solvedBy: solvedBy)
+                        solvedBy: solvedBy,
+                        growthLadder: growthLadder)
     }
 }
 
@@ -1495,7 +1578,24 @@ public enum TopOptKit {
                 // WHY this rung gated as it did — the core's own diagnosis object
                 // (handoff 2026-08-02-gate-diagnosis-recommendations). nil when the
                 // run did not arm it, which is every pre-diagnosis run.
-                diagnosis: GateDiagnosis.decode(json: String(v.diagnosis_json))))
+                diagnosis: GateDiagnosis.decode(json: String(v.diagnosis_json)),
+                // WHERE THIS RUNG'S PLASTIC IS (task 2026-08-03-growth-ladder).
+                // nil on a reduction run — the core never measured it, and a
+                // zeroed struct would read as "nothing was added" rather than
+                // "this was never asked".
+                addedMaterial: v.added_material_evaluated
+                    ? AddedMaterial(
+                        printedVoxels: Int(v.added_printed_voxels),
+                        insidePart: Int(v.added_inside_part),
+                        outsidePart: Int(v.added_outside_part),
+                        partSolidVoxels: Int(v.added_part_solid_voxels),
+                        outsideFraction: v.added_outside_fraction,
+                        outsideVolumeMM3: v.added_outside_volume_mm3,
+                        netAddedVolumeMM3: v.added_net_volume_mm3,
+                        outsideMassGrams: v.added_outside_mass_grams,
+                        netAddedMassGrams: v.added_net_mass_grams,
+                        targetSaturated: v.growth_target_saturated)
+                    : nil))
         }
         // Handoff 100 — the clearance diagnostics (parallel arrays), for honest results.
         let cFaces = Array(raw.clearance_face_ids)
@@ -1541,7 +1641,11 @@ public enum TopOptKit {
                                buildOrientationJSON: {
                                    let s = String(raw.build_orientation_json)
                                    return s.isEmpty ? nil : Data(s.utf8)
-                               }())
+                               }(),
+                               // WHICH LADDER RAN (task 2026-08-03-growth-ladder) —
+                               // the core's own flag, so the results screen names
+                               // the mode instead of inferring it.
+                               growthLadder: raw.growth_ladder)
     }
 
     /// The M7.1 smoke summary shared by the app's smoke screen and the tests.

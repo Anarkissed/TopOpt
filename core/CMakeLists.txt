@@ -963,6 +963,21 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME designbox_reduction COMMAND test_designbox_reduction)
 
+  # "MINIMIZE PLASTIC" OFF IS A GROWTH LADDER (task 2026-08-03-growth-ladder).
+  # Pins that the recommendation is the SMALLEST ADDITION that passes (and the TOP
+  # rung when only it passes, and NOTHING when none does), that every growth rung
+  # prints more mass than the imported part with material genuinely outside its
+  # envelope, that growth with nowhere to go is refused legibly, that the derived
+  # box is minimal/deterministic/sufficient, that a growth document validates on
+  # the growth scale while a reduction document is unchanged, and that a repeat run
+  # is bit-identical. Drives minimize_plastic, so Eigen-gated like the other
+  # optimizer gates; the real settings rule table is injected.
+  add_executable(test_growth_ladder tests/validation/test_growth_ladder.cpp)
+  target_link_libraries(test_growth_ladder PRIVATE topopt)
+  target_compile_definitions(test_growth_ladder PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME growth_ladder COMMAND test_growth_ladder)
+
   # Savings % reporting-basis regression (handoff 094): the displayed
   # `savings = 1 - achieved` must be part-relative (printed_voxels/part_solid) on
   # BOTH the no-box and box paths, so the % and the voxel-count mass share one basis
@@ -1278,6 +1293,20 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(smooth_brush_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+
+  # THE GROWTH LADDER, MEASURED (task 2026-08-03-growth-ladder). Runs the growth
+  # ladder on the motivating run's CONDITION (PLA, 35% infill, margin_required
+  # 1.5) and prints the full gate table per rung, with the anchor pad on and off,
+  # plus the bit-identity negative control. A harness, not a ctest — it writes
+  # evidence for G2 / G4 / G5 / G6. Needs Eigen (the cert solves) and the real
+  # settings rule table.
+  #   cmake --build build --target growth_ladder_gate
+  #   ./build/growth_ladder_gate [evidence_dir]
+  add_executable(growth_ladder_gate EXCLUDE_FROM_ALL
+    tests/harness/growth_ladder_gate.cpp)
+  target_link_libraries(growth_ladder_gate PRIVATE topopt)
+  target_compile_definitions(growth_ladder_gate PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
 
   # S1 (handoff 2026-08-03-smoothing-page-round2): NAME the two meshes the
   # smoothing page confused and measure the 6x. Prints a table, writes evidence.

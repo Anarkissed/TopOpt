@@ -239,9 +239,17 @@ void test_loadcase_reproduction(const Material& material,
   g.face_ids = {1};                            // +X tip
   g.force = Vec3{0.0, 0.0, -1500.0};           // downward tip load (N)
   lc.load_groups.push_back(g);
-  lc.minimize_plastic = false;                 // ONE conservative {0.9} rung, no pad
+  // ONE rung, so this reproduction test stays fast. It used to get that by
+  // setting minimize_plastic = false, which meant "the single conservative {0.9}
+  // variant"; since task 2026-08-03-growth-ladder that flag means the GROWTH
+  // ladder, which expands onto a derived design box — a different seam, with its
+  // own coverage (test_growth_ladder), and NOT the one L2/L3/L4 are about. The
+  // subject here is the NO-BOX loadcase reproduction seam, so the mode stays the
+  // reduction path and the rung count is pinned directly.
+  lc.minimize_plastic = true;
 
   ProductionRunSetup setup = build_production_loadcase(model, resolution, lc);
+  setup.options.volume_fraction_ladder = {0.9};  // one rung; keep the test fast
   CHECK(!setup.options.external_loads.empty(),
         "the tip load produced a non-empty external traction set");
   CHECK(setup.options.require_external_loads,

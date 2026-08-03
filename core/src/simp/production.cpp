@@ -751,4 +751,59 @@ std::vector<double> production_reduction_ladder() {
   return {0.68, 0.52, 0.38, 0.26};
 }
 
+std::vector<double> production_growth_ladder() {
+  // +55% / +25% / +10%, DESCENDING, for the reason production.hpp states.
+  return {1.55, 1.25, 1.10};
+}
+
+DesignBox minimal_growth_design_box(const VoxelGrid& part_grid,
+                                    double top_rung, double headroom) {
+  if (!(part_grid.spacing > 0.0))
+    throw std::invalid_argument(
+        "minimal_growth_design_box: part_grid.spacing must be > 0");
+  if (!std::isfinite(top_rung) || !(top_rung > 1.0))
+    throw std::invalid_argument(
+        "minimal_growth_design_box: top_rung must be finite and > 1");
+  if (!std::isfinite(headroom) || !(headroom >= 1.0))
+    throw std::invalid_argument(
+        "minimal_growth_design_box: headroom must be finite and >= 1");
+
+  const double s = part_grid.spacing;
+  const double part_solid = static_cast<double>(part_grid.solid_count());
+  if (!(part_solid > 0.0))
+    throw std::invalid_argument(
+        "minimal_growth_design_box: the part grid has no solid voxels — there "
+        "is nothing to grow from");
+
+  // The Active add-region the box must supply: the material the TOP rung asks
+  // for over and above the part, times the headroom factor. The optimizer needs
+  // room to ROUTE that material (a strut that has to reach an anchor is longer
+  // than the volume it displaces), not merely room to hold it, which is why this
+  // is not `(top_rung - 1) * part_solid` exactly.
+  const double needed = headroom * (top_rung - 1.0) * part_solid;
+
+  // Grow the part grid's own bounding box by whole voxels on every side, the
+  // smallest t that supplies it. The added-region count is bounded below by
+  // (grid voxels at inflation t) - (part solid), because expand_design_domain
+  // tags EVERY in-box non-part voxel Interior/Active — including the part
+  // bounding box's own void, which is add-region too.
+  const double nx = static_cast<double>(part_grid.nx);
+  const double ny = static_cast<double>(part_grid.ny);
+  const double nz = static_cast<double>(part_grid.nz);
+  int t = 1;
+  for (; t < kGrowthBoxMaxInflationVoxels; ++t) {
+    const double d = static_cast<double>(2 * t);
+    if ((nx + d) * (ny + d) * (nz + d) - part_solid >= needed) break;
+  }
+
+  const double pad = static_cast<double>(t) * s;
+  DesignBox box;
+  box.min = Vec3{part_grid.origin.x - pad, part_grid.origin.y - pad,
+                 part_grid.origin.z - pad};
+  box.max = Vec3{part_grid.origin.x + nx * s + pad,
+                 part_grid.origin.y + ny * s + pad,
+                 part_grid.origin.z + nz * s + pad};
+  return box;
+}
+
 }  // namespace topopt

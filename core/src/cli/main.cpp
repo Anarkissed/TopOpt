@@ -406,6 +406,15 @@ int main(int argc, char** argv) {
     std::size_t accepted_variants = 0;
     for (const topopt::MinimizePlasticVariant& v : result.pipeline.evaluated)
       if (v.accepted) ++accepted_variants;
+    // Task 2026-08-03-growth-ladder — NAME THE MODE, before any number. The two
+    // ladders optimize for opposite things and their variant tables look alike;
+    // a reader who does not know which one ran cannot read the table.
+    std::printf("ladder: %s\n",
+                result.pipeline.growth_ladder
+                    ? "GROWTH [1.55, 1.25, 1.10 x the part] — add as little "
+                      "plastic as possible to reach the required margin"
+                    : "REDUCTION [0.68, 0.52, 0.38, 0.26 x the part] — remove "
+                      "as much plastic as possible while holding it");
     std::printf("variants: %zu evaluated, %zu accepted%s\n",
                 result.pipeline.evaluated.size(), accepted_variants,
                 result.pipeline.stopped_on_margin
@@ -432,6 +441,46 @@ int main(int argc, char** argv) {
           "  vf %.2f: margin %.3g, %s\n", v.requested_volume_fraction,
           v.report.margin.worst_case,
           v.accepted ? "accepted" : "rejected (below margin_stop)");
+      // Task 2026-08-03-growth-ladder — on a growth run the accounting IS the
+      // result: how much plastic this rung adds, and how much of the object you
+      // are about to print was never in your model.
+      const topopt::AddedMaterialReport& a = v.report.added_material;
+      if (a.evaluated)
+        std::printf(
+            "        +%.4g g added (%lld of %lld printed voxels outside the "
+            "part = %.1f%%, %.4g mm^3)%s\n",
+            a.net_added_mass_grams, a.outside_part, a.printed_voxels,
+            100.0 * a.outside_fraction, a.outside_volume_mm3,
+            v.report.growth_target_saturated
+                ? "  [SATURATED: the design box could not hold this rung's ask]"
+                : "");
+    }
+    // THE RECOMMENDATION, said out loud. The last accepted rung is the design the
+    // user prints; on a growth ladder that is the SMALLEST addition that passed,
+    // and on a run where nothing passed there is no recommendation to make — say
+    // that with the numbers rather than handing back the largest rung.
+    if (result.pipeline.growth_ladder) {
+      const topopt::MinimizePlasticVariant* rec = nullptr;
+      for (const topopt::MinimizePlasticVariant& v : result.pipeline.evaluated)
+        if (v.accepted) rec = &v;
+      if (rec != nullptr)
+        std::printf(
+            "recommended: +%.0f%% (vf %.2f) — the SMALLEST addition that "
+            "passes: +%.4g g, effective margin %.4g >= %.4g\n",
+            100.0 * (rec->requested_volume_fraction - 1.0),
+            rec->requested_volume_fraction,
+            rec->report.added_material.net_added_mass_grams,
+            rec->report.margin_effective, rec->report.margin_required);
+      else if (!result.pipeline.evaluated.empty())
+        std::printf(
+            "recommended: NONE — no rung on the growth ladder passes. The "
+            "largest (+%.0f%%) reached effective margin %.4g against a required "
+            "%.4g. Growing is not the lever for this part; see report.json's "
+            "per-variant diagnosis for the term that binds.\n",
+            100.0 * (result.pipeline.evaluated.front().requested_volume_fraction -
+                     1.0),
+            result.pipeline.evaluated.front().report.margin_effective,
+            result.pipeline.evaluated.front().report.margin_required);
     }
     std::printf("report: %s\n", result.report_path.c_str());
     for (const std::string& p : result.mesh_paths)

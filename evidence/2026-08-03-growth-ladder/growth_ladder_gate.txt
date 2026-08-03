@@ -1,0 +1,49 @@
+growth_ladder_gate — task 2026-08-03-growth-ladder
+=====================================================================
+fixture      L-bracket 8x3x8 @ 2.0 mm, 84 solid voxels, 0.833 g
+material     PLA (yield 55 MPa, z_knockdown 0.55)
+condition    infill 35%, margin_required 1.50 — the motivating run's
+knockdown    f^1.5 = 0.207063  (effective = worst_case x this)
+ladder       GROWTH [1.55, 1.25, 1.10] (production_growth_ladder)
+design box   AUTO-DERIVED min=(-2.0,-2.0,-2.0) max=(18.0,8.0,18.0) mm
+calibration  probe at 120 N -> effective 0.1177; the load that lands on the motivating run's 0.5759 is 24.5190 N
+
+BASELINE (the part as imported, no growth)
+  in_plane 5.3195  interlayer 2.7813  worst_case 2.7813  EFFECTIVE 0.5759  required 1.50  -> REJECTED
+  binding term: the INFILL KNOCKDOWN (effective << worst_case) — the motivating run's own binding term
+
+G5(a) GROWTH LADDER — anchor/load pad ON (kGrowthPathAnchorPad = true)
+  rung  request  achieved   mass_g   added_g  out%   in_plane  interlayer  worst   effective  req    verdict
+  0       1.55    1.4762    1.230   +0.397  67.7   11.6917      7.9494  7.9494     1.6460  1.50  ACCEPTED
+  1       1.25    1.1905    0.992   +0.159  63.0    6.1772      4.6934  4.6934     0.9718  1.50  REJECTED — margin below required
+  part mass = 0.833 g   growth_ladder=1   stopped_on_margin=1
+  RECOMMENDED: rung at 1.55 (+55% of the part) — added +0.397 g, effective margin 1.6460 >= 1.50
+
+G5(b) GROWTH LADDER — anchor/load pad OFF (the pre-task behaviour on this mode)
+  rung  request  achieved   mass_g   added_g  out%   in_plane  interlayer  worst   effective  req    verdict
+  0       1.55    1.4881    1.240   +0.407  78.4   10.7321      5.4407  5.4407     1.1266  1.50  REJECTED — margin below required
+  part mass = 0.833 g   growth_ladder=1   stopped_on_margin=1
+  NO RUNG PASSES. The largest addition on the ladder (+55%) reached effective margin 1.1266 against a required 1.50 — short by 0.3734. Growing is not the lever for this part; the binding term is printed above.
+
+G4 GROWTH IS REAL GROWTH (pad ON) — printed mass vs the part's 0.833 g
+  rung 1.55: printed 1.230 g (+0.397 g, +47.6%), 84 of 124 printed voxels OUTSIDE the part (67.7%), outside volume 672.0 mm^3  -> GREW
+  rung 1.25: printed 0.992 g (+0.159 g, +19.0%), 63 of 100 printed voxels OUTSIDE the part (63.0%), outside volume 504.0 mm^3  -> GREW
+  every rung grew: YES
+
+G5 THE PAD DECISION, PRICED
+                                pad ON      pad OFF   
+  rungs evaluated               2           1         
+  rungs ACCEPTED                1           0         
+  rung 1.55  effective 1.6460 vs 1.1266 (+0.5195)   mass 1.230 vs 1.240 g (-0.010)   verdict ACC vs REJ
+
+G2(b) THE SAME LADDER ON A PART ONLY SLIGHTLY UNDER THE GATE (load x0.45) — it must recommend the SMALLEST addition, not the largest
+  rung  request  achieved   mass_g   added_g  out%   in_plane  interlayer  worst   effective  req    verdict
+  0       1.55    1.4881    1.240   +0.407  78.4   23.8491     12.0903  12.0903     2.5035  1.50  ACCEPTED
+  1       1.25    1.2024    1.002   +0.169  75.2   15.9690     10.4649  10.4649     2.1669  1.50  ACCEPTED
+  2       1.10    1.0833    0.903   +0.069  74.7   14.0275      8.3074  8.3074     1.7202  1.50  ACCEPTED
+  part mass = 0.833 g   growth_ladder=1   stopped_on_margin=0
+  RECOMMENDED: rung at 1.10 (+10% of the part) — added +0.069 g, effective margin 1.7202 >= 1.50
+
+G6 NEGATIVE CONTROL (PR 248's discipline): the same growth run, twice
+  fields compared: 14   shape match: yes   WORST |difference|: 0
+  floor: 1e-9. EXACTLY ZERO — bit-identical, as a re-run must be.

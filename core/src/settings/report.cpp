@@ -142,6 +142,32 @@ void emit_variant(std::string& out, const VariantReport& v,
   // rung never reached the gate (see report.hpp: the analysis fields on such a line
   // are "not measured" placeholders).
   out += in2 + "\"rejection_reason\": " + str_json(v.rejection_reason);
+  // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) — the HEADLINE
+  // of a growth run, and the licence for the [0,1] fraction bounds to be read on
+  // the growth scale (validate_variant_object below). Emitted ONLY when the run
+  // actually measured it, i.e. only on a growth ladder, so every reduction
+  // document keeps its exact bytes and every existing reader is unaffected.
+  if (v.added_material.evaluated) {
+    const AddedMaterialReport& a = v.added_material;
+    out += ",\n" + in2 + "\"added_material\": {\n";
+    out += in2 + "  \"printed_voxels\": " + std::to_string(a.printed_voxels) + ",\n";
+    out += in2 + "  \"inside_part\": " + std::to_string(a.inside_part) + ",\n";
+    out += in2 + "  \"outside_part\": " + std::to_string(a.outside_part) + ",\n";
+    out += in2 + "  \"part_solid_voxels\": " +
+           std::to_string(a.part_solid_voxels) + ",\n";
+    out += in2 + "  \"outside_fraction\": " + num_json(a.outside_fraction) + ",\n";
+    out += in2 + "  \"outside_volume_mm3\": " +
+           num_json(a.outside_volume_mm3) + ",\n";
+    out += in2 + "  \"net_added_volume_mm3\": " +
+           num_json(a.net_added_volume_mm3) + ",\n";
+    out += in2 + "  \"outside_mass_grams\": " +
+           num_json(a.outside_mass_grams) + ",\n";
+    out += in2 + "  \"net_added_mass_grams\": " +
+           num_json(a.net_added_mass_grams) + ",\n";
+    out += in2 + "  \"growth_target_saturated\": " +
+           std::string(v.growth_target_saturated ? "true" : "false") + "\n";
+    out += in2 + "}";
+  }
   // WHY the verdict is what it is (handoff 2026-08-02-gate-diagnosis-
   // recommendations). Emitted ONLY when a diagnosis was actually run, so every
   // pre-diagnosis document keeps its exact bytes and every existing reader is
@@ -502,12 +528,29 @@ static void validate_variant_object(const JsonValue& v, const std::string& ctx) 
   if (v.type != JsonValue::Type::Object)
     throw ReportError(ctx + ": must be an object");
   {
+    // ── THE SCALE THE FRACTIONS ARE READ ON (task 2026-08-03-growth-ladder) ─────
+    // A GROWTH run targets MORE material than the imported part, so its printed /
+    // achieved fractions legitimately exceed 1 and its "volume saved" is negative.
+    // That is not a relaxation of the pre-growth rule: a growth document is exactly
+    // one that carries the `added_material` block (emit_variant writes it only when
+    // the run measured it), and EVERY document without that block is validated by
+    // the identical [0, 1] rule it always was. The growth scale is still BOUNDED —
+    // by kMaxLadderVolumeFraction, the same cap minimize_plastic refuses a ladder
+    // above — so an out-of-range number is still caught, on the right scale.
+    // The load-bearing consistency check (saved == 1 - printed) is unconditional.
+    const bool growth = find_field(v, "added_material") != nullptr;
+    const double vf_max = growth ? kMaxLadderVolumeFraction : 1.0;
+    const double vsf_min = growth ? 1.0 - kMaxLadderVolumeFraction : 0.0;
+    const std::string range =
+        growth ? std::string("[0, ") + num_json(vf_max) + "] (growth run)"
+               : std::string("[0, 1]");
     const double vf = require_number(v, "volume_fraction", ctx);
-    if (!(vf >= 0.0 && vf <= 1.0))
-      throw ReportError(ctx + ": volume_fraction must be in [0, 1]");
+    if (!(vf >= 0.0 && vf <= vf_max))
+      throw ReportError(ctx + ": volume_fraction must be in " + range);
     const double vsf = require_number(v, "volume_saved_fraction", ctx);
-    if (!(vsf >= 0.0 && vsf <= 1.0))
-      throw ReportError(ctx + ": volume_saved_fraction must be in [0, 1]");
+    if (!(vsf >= vsf_min && vsf <= 1.0))
+      throw ReportError(ctx + ": volume_saved_fraction must be in [" +
+                        num_json(vsf_min) + ", 1]");
     // Savings basis (handoff 104): `volume_saved_fraction` derives from the
     // PRINTED/count basis `printed_fraction` when present (so savings% and mass
     // share one voxel count and can never disagree — handoff 094), else from the
@@ -519,8 +562,8 @@ static void validate_variant_object(const JsonValue& v, const std::string& ctx) 
     if (pf != nullptr) {
       if (pf->type != JsonValue::Type::Number)
         throw ReportError(ctx + ": printed_fraction must be a number");
-      if (!(pf->num >= 0.0 && pf->num <= 1.0))
-        throw ReportError(ctx + ": printed_fraction must be in [0, 1]");
+      if (!(pf->num >= 0.0 && pf->num <= vf_max))
+        throw ReportError(ctx + ": printed_fraction must be in " + range);
       savings_basis = pf->num;
     }
     if (std::fabs(vsf - (1.0 - savings_basis)) > 1e-9)

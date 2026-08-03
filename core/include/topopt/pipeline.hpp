@@ -109,8 +109,22 @@ struct DensitySnapshotEvent {
 // Inputs that shape one minimize_plastic run (beyond the part, material, BCs
 // and rule table passed to minimize_plastic()).
 struct MinimizePlasticOptions {
-  // The volume-fraction ladder to walk, in the order given. Must be non-empty,
-  // every entry in (0, 1], and STRICTLY DESCENDING (heaviest/strongest first).
+  // The volume-fraction ladder to walk, in the order given. Must be non-empty and
+  // STRICTLY DESCENDING (heaviest/strongest first), and it is one of exactly two
+  // KINDS — mixing them is refused, because one run reduces plastic against the
+  // part or grows it, not both (task 2026-08-03-growth-ladder):
+  //
+  //   REDUCTION — every entry in (0, 1]. The historical and default kind. Rung
+  //       `vf` targets `vf` of the part's material; the walk recommends the
+  //       LIGHTEST rung that clears margin_stop.
+  //   GROWTH    — every entry in (1, kMaxLadderVolumeFraction] (report.hpp; 2.0 =
+  //       "at most double the part"). Rung `vf` targets `vf` of the part's
+  //       material, i.e. MORE than the part, and the SAME walk in the SAME
+  //       direction then recommends the SMALLEST ADDITION that clears margin_stop.
+  //       Requires a design box with the part left as a design region
+  //       (`design_box` set, `freeze_imported_part` false) — otherwise the target
+  //       is unreachable and the run would redistribute while calling it growth;
+  //       minimize_plastic refuses that, naming the missing condition.
   std::vector<double> volume_fraction_ladder{0.7, 0.5, 0.3};
   // Stop at the first rung whose worst-case stress margin is < margin_stop.
   // Must be finite and >= 0 (0 disables the margin stop: the whole ladder runs).
@@ -987,6 +1001,17 @@ struct MinimizePlasticResult {
   // ACCEPTED rung (report.variants[i] == evaluated[i].report for the accepted
   // prefix). validate_job_report_json(job_report_json(report)) always passes.
   JobReport report;
+  // WHICH LADDER RAN (task 2026-08-03-growth-ladder). false = REDUCTION: every
+  // rung <= 1.0, the run removes plastic against the imported part and the
+  // recommendation is the LIGHTEST rung that passes. true = GROWTH: every rung
+  // > 1.0, the run adds plastic to reach the required margin and the
+  // recommendation is the SMALLEST ADDITION that passes. It is the SAME walk
+  // either way — the rungs descend, the first rung under margin_stop stops the
+  // ladder, the last accepted rung is the recommendation — which is exactly why
+  // growth needed no second optimizer. Recorded so a front-end names the mode it
+  // ran instead of inferring it from the numbers (nothing about a run should be
+  // guessable-only; see the handoff's G7).
+  bool growth_ladder = false;
   // The grid the run ACTUALLY solved on, and to which every evaluated variant's
   // mesh, von-Mises field, displacement field and playback are indexed. With a
   // design box this is the EXPANDED domain grid (expand_design_domain, aligned to

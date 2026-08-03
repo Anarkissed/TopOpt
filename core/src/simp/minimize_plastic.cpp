@@ -321,10 +321,48 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   if (ladder.empty())
     throw std::invalid_argument(
         "minimize_plastic: volume_fraction_ladder is empty");
+  // ── REDUCTION or GROWTH (task 2026-08-03-growth-ladder) ───────────────────
+  // A ladder rung above 1.0 asks the run to print MORE material than the
+  // imported part carries — the mirror of reduction, for a part that is too WEAK
+  // rather than too heavy (production_growth_ladder). It is the SAME walk in the
+  // SAME direction: rungs descend, the first rung under margin_stop stops the
+  // ladder, and the LAST ACCEPTED rung is the recommendation — which on a growth
+  // ladder reads "the SMALLEST addition that passes".
+  //
+  // The pre-growth rule was `vf in (0, 1]` and it is UNCHANGED for every ladder
+  // that stays at or below 1.0. Above it, THREE further conditions hold, each
+  // closing a way the feature could lie:
+  //   (i)  ALL-OR-NOTHING. Either every rung is <= 1.0 (reduction) or every rung
+  //        is > 1.0 (growth). A mixed ladder would ask one run to both remove and
+  //        add against the same part reference and there is no honest way to name
+  //        its recommendation, so it is refused rather than silently ordered.
+  //   (ii) BOUNDED by kMaxLadderVolumeFraction (report.hpp), so a mistyped rung
+  //        (2.5 for 0.25) is a refusal, not an expensive silent success.
+  //   (iii) A DESIGN BOX. Checked below, where the domain is resolved: growth
+  //        needs somewhere to GO, and without it the run could only redistribute
+  //        the part's own material while calling the result growth.
+  const bool growth_ladder = ladder.front() > 1.0;
   for (std::size_t r = 0; r < ladder.size(); ++r) {
-    if (!(ladder[r] > 0.0) || !(ladder[r] <= 1.0) || !std::isfinite(ladder[r]))
+    if (!std::isfinite(ladder[r]) || !(ladder[r] > 0.0))
       throw std::invalid_argument(
           "minimize_plastic: a ladder volume fraction is not in (0, 1]");
+    if (!growth_ladder && !(ladder[r] <= 1.0))
+      throw std::invalid_argument(
+          "minimize_plastic: a ladder volume fraction is not in (0, 1]");
+    if (growth_ladder && !(ladder[r] > 1.0))
+      throw std::invalid_argument(
+          "minimize_plastic: volume_fraction_ladder mixes GROWTH rungs (> 1) "
+          "with reduction rungs (<= 1) — rung " +
+          std::to_string(r) + " is " + std::to_string(ladder[r]) +
+          ". One run reduces plastic against the part or grows it, not both: "
+          "there is no honest recommendation for a ladder that does each on "
+          "different rungs.");
+    if (growth_ladder && !(ladder[r] <= kMaxLadderVolumeFraction))
+      throw std::invalid_argument(
+          "minimize_plastic: growth rung " + std::to_string(r) + " is " +
+          std::to_string(ladder[r]) + ", above the " +
+          std::to_string(kMaxLadderVolumeFraction) +
+          " ladder cap (at most double the imported part)");
     if (r > 0 && !(ladder[r] < ladder[r - 1]))
       throw std::invalid_argument(
           "minimize_plastic: volume_fraction_ladder is not strictly "
@@ -500,6 +538,31 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   // Gated on the box path only, so the no-box run is byte-identical.
   const bool part_relative = expanded && !options.freeze_imported_part;
   const double part_solid = static_cast<double>(grid.solid_count());
+
+  // ── GROWTH NEEDS SOMEWHERE TO GO (task 2026-08-03-growth-ladder, rule (iii)) ──
+  // `part_relative` is precisely the condition under which a rung's target is
+  // "vf x the PART's worth of material" over an Active envelope that extends
+  // BEYOND the part — i.e. the only condition under which asking for vf > 1 can
+  // be answered with real added material. Without it the rung target degenerates
+  // to simp's own `vf x n_active` over the part alone, which cannot exceed the
+  // part: the run would print AT MOST the part, report a growth request it never
+  // honoured, and present redistribution as growth. Refuse instead, naming which
+  // of the two conditions is missing.
+  if (growth_ladder && !part_relative)
+    throw std::invalid_argument(
+        std::string(
+            "minimize_plastic: the volume_fraction_ladder asks to GROW material "
+            "(rungs above 1.0), but this run has no design volume to grow "
+            "into — ") +
+        (!expanded
+             ? "no design box is set, so the optimizer's domain is the imported "
+               "part itself and it can only REDISTRIBUTE that material. Draw a "
+               "design box (or let the front-end derive one) so the growth has "
+               "somewhere to go."
+             : "freeze_imported_part is set, so the part is pinned solid and "
+               "the ladder target is not part-relative. A growth run must leave "
+               "the part as a design region (whole-domain optimize).") +
+        " Refusing to redistribute and call it growth.");
   double active_effective = 0.0;   // voxels simp's volume constraint moves
   double frozen_effective = 0.0;   // voxels effective_mask pins solid (always printed)
   if (part_relative) {
@@ -545,6 +608,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
 
   MinimizePlasticResult result;
   result.report.material = material_name;
+  result.growth_ladder = growth_ladder;  // task 2026-08-03-growth-ladder
   // Record the grid every evaluated variant's fields are indexed to — the
   // expanded domain grid under a design box, else the caller's grid. This IS the
   // grid solved on (G), not a re-derivation, so a caller reporting grid metadata
@@ -577,6 +641,57 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                       std::max(params.density_min, active_target / active_effective));
     }
     return vf;
+  };
+
+  // ── THE HEADLINE OF A GROWTH RUN (task 2026-08-03-growth-ladder) ───────────
+  // "How much plastic did you add, and where." Measured ONLY on a growth ladder,
+  // so every reduction run — and every run predating this task — leaves
+  // `report.added_material.evaluated` false, the block is omitted from
+  // report.json, and those documents keep their exact bytes (THE ONE RULE).
+  //
+  // The inside/outside split is taken against original_part_voxels — THE ONE
+  // definition of "this voxel was in the imported part", the same one PR 285's
+  // design-box lattice receipt uses — so a solid growth run and a latticed one
+  // cannot disagree about what counts as added.
+  const std::vector<char> in_part =
+      growth_ladder ? original_part_voxels(grid, domain) : std::vector<char>();
+  const double voxel_mm3 = G.voxel_volume();
+  const double part_mm3 = part_solid * voxel_mm3;
+  auto measure_added_material = [&](const std::vector<double>& rho_field,
+                                    VariantReport& vr, bool saturated) {
+    if (!growth_ladder) return;
+    AddedMaterialReport& a = vr.added_material;
+    a.evaluated = true;
+    a.part_solid_voxels = static_cast<long long>(part_solid);
+    for (std::size_t idx = 0; idx < in_part.size(); ++idx) {
+      if (rho_field[idx] <= kIso) continue;
+      ++a.printed_voxels;
+      if (in_part[idx]) ++a.inside_part; else ++a.outside_part;
+    }
+    a.outside_fraction =
+        a.printed_voxels > 0
+            ? static_cast<double>(a.outside_part) /
+                  static_cast<double>(a.printed_voxels)
+            : 0.0;
+    a.outside_volume_mm3 = static_cast<double>(a.outside_part) * voxel_mm3;
+    a.net_added_volume_mm3 =
+        static_cast<double>(a.printed_voxels) * voxel_mm3 - part_mm3;
+    // Mass on the SAME voxel basis the reported mass_grams uses (density x volume
+    // / 1000), so "added mass" and "printed mass" are two views of one count.
+    a.outside_mass_grams =
+        material.density_g_cm3 * a.outside_volume_mm3 / 1000.0;
+    a.net_added_mass_grams =
+        material.density_g_cm3 * a.net_added_volume_mm3 / 1000.0;
+    vr.growth_target_saturated = saturated;
+  };
+  // The report fraction, on the scale the run is actually being read on. A
+  // reduction line is capped at 1 exactly as before; a GROWTH line is not, because
+  // a growth rung that prints 1.3x the part must SAY 1.3, not 1.0 (the cap would
+  // silently erase the very quantity the run exists to report). Only the
+  // never-analysed branches (infeasible / non-convergent) route through here — the
+  // fully analysed line has carried an uncapped printed_fraction since handoff 104.
+  auto report_fraction = [&](double f) {
+    return growth_ladder ? f : std::min(1.0, f);
   };
 
   // --- Handoff 110 (Part B): coarse-to-fine cascade ------------------------
@@ -792,11 +907,22 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // lands the TOTAL at `vf * part_solid`. Clamped to (0, 1]. Off the box path this
     // is exactly `vf` (byte-identical).
     opt.volume_fraction = vf;
+    // Task 2026-08-03-growth-ladder — the box could not hold this rung's ask. The
+    // `min(1.0, ...)` below is a CLAMP, and on a reduction ladder it can never
+    // bind (vf <= 1 and frozen_effective >= 0, so the ratio is <= 1 whenever the
+    // Active envelope covers the part). A growth rung CAN exceed it: asking for
+    // 1.55x the part inside a box with less than 0.55x the part of add-region
+    // means "fill the box completely", and the rung then runs at a fraction lower
+    // than its line requests. That is not a strength verdict and does not stop the
+    // ladder — but it must never be readable as if the request were honoured, so
+    // it is recorded on the rung's report line and surfaced in the receipt.
+    bool growth_target_saturated = false;
     if (part_relative && active_effective > 0.0) {
       const double active_target = vf * part_solid - frozen_effective;
+      const double raw = active_target / active_effective;
+      growth_target_saturated = growth_ladder && raw > 1.0;
       opt.volume_fraction =
-          std::min(1.0, std::max(params.density_min,
-                                 active_target / active_effective));
+          std::min(1.0, std::max(params.density_min, raw));
     }
     // M7.mma.4 — the switchover: the driver, not the shared SimpOptions default,
     // owns the updater. Defaults to MMA (options.updater) so real runs use MMA;
@@ -1201,15 +1327,24 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                            : 0.0;
 
       VariantReport& vr = variant.report;
-      vr.volume_fraction = std::min(1.0, printed_fraction);
-      vr.printed_fraction = std::min(1.0, printed_fraction);
+      vr.volume_fraction = report_fraction(printed_fraction);
+      vr.printed_fraction = report_fraction(printed_fraction);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
+      // WHICH of the three stop conditions ended this rung. All three land in
+      // this branch (no analysis, no inheritance, no ladder stop); only the LABEL
+      // differs, and it differs on purpose — neither divergence guard claims the
+      // load path was lost. See kRungDivergedReason.
       vr.rejection_reason =
           variant.optimization.infeasible
               ? kRungInfeasibleReason
               : (variant.optimization.diverged ? kRungDivergedReason
                                                : kRungTimeBudgetReason);
+      // The geometry IS honest here (a voxel count, not an analysis), so a growth
+      // run still gets its where-is-the-plastic accounting on this line — for a
+      // guard-stopped rung exactly as for an infeasible one.
+      measure_added_material(variant.optimization.physical_density, vr,
+                             growth_target_saturated);
       // Every other field stays default-constructed: zero stress, zero margin,
       // zero orientation, empty settings. They are NOT measurements — the
       // rejection_reason is the flag that says so (report.hpp).
@@ -1266,11 +1401,13 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
                            : 0.0;
 
       VariantReport& vr = variant.report;
-      vr.volume_fraction = std::min(1.0, printed_fraction);
-      vr.printed_fraction = std::min(1.0, printed_fraction);
+      vr.volume_fraction = report_fraction(printed_fraction);
+      vr.printed_fraction = report_fraction(printed_fraction);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
       vr.rejection_reason = kRungNonConvergentReason;
+      measure_added_material(variant.optimization.physical_density, vr,
+                             growth_target_saturated);
       // Every other field stays default-constructed — NOT measurements. The
       // rejection_reason is the flag that says so.
 
@@ -1414,11 +1551,12 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
           part_solid > 0.0
               ? static_cast<double>(printed_voxels_nc) / part_solid
               : 0.0;
-      vr.volume_fraction = std::min(1.0, printed_fraction_nc);
-      vr.printed_fraction = std::min(1.0, printed_fraction_nc);
+      vr.volume_fraction = report_fraction(printed_fraction_nc);
+      vr.printed_fraction = report_fraction(printed_fraction_nc);
       vr.accepted = false;
       vr.margin_required = options.margin_stop;
       vr.rejection_reason = kRungNonConvergentReason;
+      measure_added_material(rho, vr, growth_target_saturated);
       // No margin, stress, orientation or settings — the certification never
       // completed. The rejection_reason is the flag that says so.
 
@@ -1511,6 +1649,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     // basis that savings% and mass share (handoff 104).
     vr.volume_fraction = variant.optimization.volume_fraction;
     vr.printed_fraction = printed_fraction;
+    // Task 2026-08-03-growth-ladder — the HEADLINE on a growth run: how much
+    // plastic this rung prints, how much of it is outside the imported part, and
+    // whether the box could hold what the rung asked for. No-op on a reduction
+    // ladder (the block stays unevaluated and unemitted).
+    measure_added_material(rho, vr, growth_target_saturated);
     vr.max_stress_mpa = max_von_mises;
     vr.max_interlayer_tension_mpa = max_interlayer;
     vr.margin = margin;

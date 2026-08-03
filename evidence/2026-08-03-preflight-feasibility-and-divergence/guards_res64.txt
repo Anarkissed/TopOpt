@@ -1,0 +1,15 @@
+1785734677
+[loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=372 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=GROWTH rungs=[1.55,1.25,1.10] anchor_pad=1 — add as little plastic as possible to reach the required margin
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=11 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=31 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=478 status=ok
+[preflight] load path CONNECTED: 372 load voxels, 31 anchor voxels, 78882 of 98304 voxels allowed to hold material; narrowest separating cross-section 138 voxels (1449 mm^2) at 1/27 steps from the anchor; 3.32 ms
+PROGRESS rung=0 rungs=3 iter=1
+PROGRESS rung=0 rungs=3 iter=2
+PROGRESS rung=0 rungs=3 iter=3
+PROGRESS rung=0 rungs=3 iter=4
+PROGRESS rung=0 rungs=3 iter=5
+PROGRESS rung=0 rungs=3 iter=6
+PROGRESS rung=0 rungs=3 iter=7

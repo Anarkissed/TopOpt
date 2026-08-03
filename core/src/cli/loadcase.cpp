@@ -121,6 +121,41 @@ void validate_face_id(int fid, const StepModel& model,
       "or import than the one being analyzed.");
 }
 
+// Task 2026-08-03-growth-ladder — announce the AUTO-DERIVED growth box through the
+// same sink. A box the user did not draw must be visible in the run log as well as
+// on the setup: this is a domain the optimizer may fill, and "where did that
+// material come from" must never need archaeology to answer.
+void log_growth_box(const DesignBox& b, double spacing) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  char buf[256];
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] growth design box AUTO-DERIVED (none drawn): "
+                "min=(%.3g,%.3g,%.3g) max=(%.3g,%.3g,%.3g) mm spacing=%.4g",
+                b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z, spacing);
+  sink(std::string(buf));
+}
+
+// Task 2026-08-03-growth-ladder — name the mode the run is in, in one line, on
+// every load-case run. "minimize plastic" unticked used to change BOTH the ladder
+// and the anchor pad with nothing in the log saying either; both facts are stated
+// here now, beside the rungs they govern.
+void log_ladder_mode(bool growth, const std::vector<double>& ladder, bool pad) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  std::string rungs;
+  for (double v : ladder) {
+    char r[32];
+    std::snprintf(r, sizeof(r), "%.2f", v);
+    rungs += (rungs.empty() ? "" : ",") + std::string(r);
+  }
+  sink(std::string("[loadcase] ladder=") + (growth ? "GROWTH" : "REDUCTION") +
+       " rungs=[" + rungs + "] anchor_pad=" + (pad ? "1" : "0") + " — " +
+       (growth ? "add as little plastic as possible to reach the required margin"
+               : "remove as much plastic as possible while holding the required "
+                 "margin"));
+}
+
 // Count the voxels currently carrying `tag` in `grid`.
 std::size_t count_tagged(const VoxelGrid& grid, VoxelTag tag) {
   std::size_t n = 0;
@@ -311,8 +346,26 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     opts.build_direction = lc.plate_dir;
   opts.build_orientation_report = lc.build_orientation_report;
   opts.gravity = 9810.0 * 1e-9;  // self-weight magnitude, used only if external empty
+  // ── THE TWO LADDERS (task 2026-08-03-growth-ladder) ───────────────────────
+  // ONE line each, and they are the only two things this checkbox now means:
+  //
+  //   minimize_plastic ON  — REDUCE: walk [0.68, 0.52, 0.38, 0.26] of the part's
+  //       volume and recommend the LIGHTEST variant that still clears the margin.
+  //   minimize_plastic OFF — GROW: walk [1.55, 1.25, 1.10] of the part's volume
+  //       and recommend the SMALLEST ADDITION that clears the margin.
+  //
+  // OFF used to be `{0.9}` — one conservative variant, no search, and the code's
+  // own comment said so. That answered a question nobody asked: a user who unticks
+  // "minimize plastic" is not asking for 90% of their part, they are saying "you
+  // may grow MORE plastic to reach the strength I want — as little as possible".
+  // The growth ladder is that, and it is the SAME walk in the SAME direction, so
+  // "recommend the last accepted rung" already means "the smallest addition that
+  // passes" (see production.hpp for the rung derivation and minimize_plastic.cpp
+  // for the growth rules). The ON path is untouched, to the byte.
+  const bool growth = !lc.minimize_plastic;
   opts.volume_fraction_ladder =
-      lc.minimize_plastic ? production_reduction_ladder() : std::vector<double>{0.9};
+      growth ? production_growth_ladder() : production_reduction_ladder();
+  setup.growth_ladder = growth;
 
   // M7.anchor-integrity (FIX 1): freeze an N-voxel structural PAD behind every
   // anchor and (retained) load face, not just the 1-voxel BC skin tag_step_face
@@ -326,11 +379,33 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // both the anchor/load pad and a protected face's preserved skin are keep-in
   // (FrozenSolid) regions mask_step_face writes, and minimize_plastic merges the
   // overlay into the effective mask (design-box path) or uses it directly (no-box).
-  // The pad is minimize_plastic-only (the {0.9} conservative variant keeps material
-  // anyway); a Face protection is the user's explicit request and is honored in
-  // BOTH modes. Built whenever there is something to freeze; with neither declared
-  // the overlay stays empty and the run is byte-identical (THE ONE RULE).
-  const bool want_pad = lc.minimize_plastic;
+  // A Face protection is the user's explicit request and is honored in BOTH modes.
+  //
+  // Since this task the PAD is built in both modes too, so `want_pad` is in fact
+  // always true and the overlay is always built. It is kept as an expression, not
+  // folded to a constant, because it NAMES the decision (kGrowthPathAnchorPad) and
+  // is where a future reversal would land. The ON path is unaffected either way —
+  // it already padded unconditionally.
+  //
+  // ── THE PAD ON THE GROWTH PATH — DECIDED, AND MEASURED (task
+  // 2026-08-03-growth-ladder). The pad used to be `lc.minimize_plastic` exactly,
+  // on the reasoning that "the {0.9} conservative variant keeps material anyway".
+  // That reasoning was a hidden side effect of a checkbox that reads as an
+  // OBJECTIVE toggle, and it was at its weakest precisely here: a growth run is by
+  // definition a run whose structure is UNDER-strength, the anchors most of all,
+  // and "0.9 of the part keeps material anyway" says nothing about 1.55 of a part
+  // inside a design box several times its volume — where the optimizer is free to
+  // spend its budget in the box and carve the boss it grew away from.
+  //
+  // It is not argued here, it is MEASURED: the same growth ladder was run with the
+  // pad and without, and the difference is in
+  // evidence/2026-08-03-growth-ladder/pad_on_off.txt (and §"G5" of the handoff).
+  // kGrowthPathAnchorPad records the decision that measurement produced, so the
+  // pad's coupling to the mode is now an explicit, priced choice with a name —
+  // never again an inherited side effect.
+  const bool want_pad = lc.minimize_plastic || (growth && kGrowthPathAnchorPad);
+  setup.growth_anchor_pad = growth && want_pad;
+  log_ladder_mode(growth, opts.volume_fraction_ladder, want_pad);
   const bool want_protect = !lc.face_protection_face_ids.empty();
   if (want_pad || want_protect) {
     DesignMask pad = make_active_mask(grid);
@@ -379,6 +454,28 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   if (lc.has_design_box) {
     opts.design_box = lc.design_box;
     opts.keep_out_boxes = lc.keep_out_boxes;
+  } else if (growth) {
+    // ── GROWTH NEEDS SOMEWHERE TO GO, AND WE SAY SO (task
+    // 2026-08-03-growth-ladder). A growth ladder with no design box can only
+    // REDISTRIBUTE the part's own material: the ladder target would degenerate to
+    // simp's fraction of the part itself, the run would print at most the part,
+    // and the receipt would announce growth that never happened. minimize_plastic
+    // refuses that outright.
+    //
+    // The front-ends must not simply inherit the refusal, though: unticking a
+    // checkbox is not a promise to also draw a box, and a user who never opened
+    // the design-box tool would meet a hard error where the feature is supposed to
+    // help. So a MINIMAL box is derived here — the part's own bounding box
+    // inflated by the smallest whole number of voxels that can hold the TOP rung's
+    // ask with routing headroom (production.hpp, minimal_growth_design_box) — and
+    // the derivation is RECORDED on the setup and logged. Auto-derived is a
+    // reportable fact, never a silent one: the receipt says the box was derived
+    // and states its extents, so nobody mistakes it for a box they drew.
+    setup.growth_box_auto_derived = true;
+    setup.growth_box = minimal_growth_design_box(
+        grid, opts.volume_fraction_ladder.front(), kGrowthBoxHeadroom);
+    opts.design_box = setup.growth_box;
+    log_growth_box(setup.growth_box, grid.spacing);
   }
 
   // Infill override: only forward an actual override (>= 0); a negative value

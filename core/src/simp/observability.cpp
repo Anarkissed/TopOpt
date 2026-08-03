@@ -818,6 +818,8 @@ std::string run_info_json(const RunInfo& info) {
   }
   ladder += "]";
   num("ladder", ladder);
+  // Task 2026-08-03-growth-ladder — say what those rungs MEAN, beside them.
+  str("ladder_mode", info.ladder_mode);
 
   num("created_wall_ms", fmt_ll(info.created_wall_ms));
   num("iteration_csv", bool_json(info.iteration_csv));
