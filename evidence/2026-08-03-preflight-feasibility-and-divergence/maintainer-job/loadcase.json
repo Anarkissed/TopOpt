@@ -1,0 +1,21 @@
+{
+  "resolution": 128,
+  "model": "WallMount_ShelfBracket.stl",
+  "material": "PLA",
+  "anchor_bc_dofs": 849,
+  "load_source": "loadcase",
+  "anchor_face_ids": [8, 14, 12],
+  "external_load_nodes": 1867,
+  "declared_force_resultant_n": 155.6879425,
+  "build_dir": [0, 1, 0],
+  "groups": [
+    {"index": 0, "face_ids": [0], "force_mag_n": 155.6879425, "voxels_tagged": 1464, "status": "ok"}
+  ],
+  "clearances": [
+    {"face_id": -1, "kind": "bolt", "voxels_frozen": 120, "in_grid": true},
+    {"face_id": -1, "kind": "bolt", "voxels_frozen": 370, "in_grid": true},
+    {"face_id": -1, "kind": "bolt", "voxels_frozen": 3710, "in_grid": true}
+  ],
+  "face_protections": [
+  ]
+}

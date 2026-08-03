@@ -10,7 +10,9 @@
 #include <utility>
 #include <vector>
 
+#include "topopt/observability.hpp"  // steady_clock_ms (the counterfactual cost)
 #include "topopt/production.hpp"  // configure_production_options, production_reduction_ladder
+#include "topopt/simp.hpp"        // effective_design_mask (the pre-flight allowed set)
 
 namespace topopt {
 
@@ -509,37 +511,303 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // rasterizer's precedence guard needs that offset to protect part material. No
   // clearance → the overlay stays empty and the run is byte-identical.
   if (!lc.clearances.empty()) {
-    const VoxelGrid& solved = setup.solved_grid;
-    const double s = solved.spacing;
-    const int oi = static_cast<int>(std::lround((grid.origin.x - solved.origin.x) / s));
-    const int oj = static_cast<int>(std::lround((grid.origin.y - solved.origin.y) / s));
-    const int ok = static_cast<int>(std::lround((grid.origin.z - solved.origin.z) / s));
-    DesignMask clearance(solved.voxel_count(), MaskValue::Active);
-    setup.clearance_reports.reserve(lc.clearances.size());
-    for (const ProductionLoadCase::Clearance& c : lc.clearances) {
-      // An AUTO primitive is derived from model.faces[face_id] (skipped, exactly
-      // as before, when the id is out of range). A MANUAL primitive carries its
-      // own geometry (no B-rep face). Both resolve to the SAME predicate and take
-      // the SAME rasterizer, so the mask is identical for identical geometry
-      // (handoff group-editing, BAR B2).
-      ClearanceGeometry geom;
-      if (c.manual) {
-        geom = resolve_clearance_manual(c.manual_geom, c.params);
-      } else {
-        if (c.face_id < 0 || c.face_id >= model.face_count) continue;
-        geom = resolve_clearance_from_face(model, c.face_id, c.params);
-      }
-      const ClearanceRasterResult rr =
-          rasterize_clearance(solved, grid, oi, oj, ok, geom, clearance);
-      setup.clearance_reports.push_back(
-          {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
-      log_clearance(c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid);
-    }
-    opts.clearance_void = std::move(clearance);  // opts aliases setup.options
+    opts.clearance_void =
+        build_clearance_overlay(model, grid, setup.solved_grid, lc.clearances,
+                                -1, &setup.clearance_reports);
+    for (const ProductionRunSetup::ClearanceReport& r : setup.clearance_reports)
+      log_clearance(r.face_id, r.kind, r.voxels_frozen, r.in_grid);
   }
 
   return setup;
 }
+
+DesignMask build_clearance_overlay(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const VoxelGrid& solved_grid,
+    const std::vector<ProductionLoadCase::Clearance>& clearances,
+    int skip_index,
+    std::vector<ProductionRunSetup::ClearanceReport>* reports) {
+  // The part sits inside the solved grid at a whole-voxel offset — 0 on the
+  // no-box path (solved == part), (part.origin − solved.origin)/spacing on the
+  // design-box path (only the HIGH side of the expanded grid grows, so this
+  // offset is exact; see voxel.hpp). The rasterizer's precedence guard needs
+  // that offset to protect part material.
+  const double s = solved_grid.spacing;
+  const int oi =
+      static_cast<int>(std::lround((part_grid.origin.x - solved_grid.origin.x) / s));
+  const int oj =
+      static_cast<int>(std::lround((part_grid.origin.y - solved_grid.origin.y) / s));
+  const int ok =
+      static_cast<int>(std::lround((part_grid.origin.z - solved_grid.origin.z) / s));
+  DesignMask clearance(solved_grid.voxel_count(), MaskValue::Active);
+  if (reports) reports->reserve(clearances.size());
+  for (std::size_t ci = 0; ci < clearances.size(); ++ci) {
+    if (static_cast<int>(ci) == skip_index) continue;  // the counterfactual
+    const ProductionLoadCase::Clearance& c = clearances[ci];
+    // An AUTO primitive is derived from model.faces[face_id] (skipped, exactly
+    // as before, when the id is out of range). A MANUAL primitive carries its
+    // own geometry (no B-rep face). Both resolve to the SAME predicate and take
+    // the SAME rasterizer, so the mask is identical for identical geometry
+    // (handoff group-editing, BAR B2).
+    ClearanceGeometry geom;
+    if (c.manual) {
+      geom = resolve_clearance_manual(c.manual_geom, c.params);
+    } else {
+      if (c.face_id < 0 || c.face_id >= model.face_count) continue;
+      geom = resolve_clearance_from_face(model, c.face_id, c.params);
+    }
+    const ClearanceRasterResult rr =
+        rasterize_clearance(solved_grid, part_grid, oi, oj, ok, geom, clearance);
+    if (reports)
+      reports->push_back(
+          {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
+  }
+  return clearance;
+}
+
+// ---------------------------------------------------------------------------
+// PRE-FLIGHT DIAGNOSIS (task 2026-08-03-preflight-feasibility-and-divergence,
+// bar P2: "a refusal is actionable").
+//
+// The core check (pipeline.hpp preflight_load_path) answers YES / NO in
+// milliseconds. This is everything a person needs to ACT on a NO, and every
+// remedy it states has been MEASURED by re-running the same check on the
+// modified job — never guessed (PR 276's verified-counterfactual rule).
+
+namespace {
+
+// One clearance's counterfactual: does the load path RECONNECT with this
+// clearance removed, or with its axial clearance reduced?
+struct ClearanceCounterfactual {
+  int index = -1;
+  bool removal_reconnects = false;
+  // For a BOLT clearance whose removal reconnects: the largest whole millimetre
+  // of axial_clearance_mm that still leaves the path connected (bisected on the
+  // real rasterizer + the real belt), or -1 when even 0 mm does not reconnect
+  // (the concentric margin alone severs it) / the kind has no such knob.
+  double max_axial_clearance_mm = -1.0;
+};
+
+// Re-run the pre-flight with `clearances` overridden. Rebuilds ONLY the
+// clearance overlay + the design-domain mask — no import, no voxelize, no solve
+// — so each probe costs one rasterization and one flood fill.
+PreflightLoadPath preflight_with_clearances(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    const std::vector<ProductionLoadCase::Clearance>& clearances,
+    int skip_index) {
+  MinimizePlasticOptions probe = options;
+  probe.clearance_void = build_clearance_overlay(
+      model, part_grid, domain.grid, clearances, skip_index, nullptr);
+  return preflight_load_path(domain, probe);
+}
+
+// The largest whole-millimetre axial clearance on `ci` that keeps the path
+// connected, by bisection over [0, requested]. Returns -1 when even 0 mm leaves
+// it severed. Monotone by construction (a larger swept cylinder only ever
+// forbids MORE voxels, so connectivity can only be lost as the value grows),
+// which is what makes a bisection a valid search rather than a sample.
+double max_connected_axial_clearance_mm(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    std::vector<ProductionLoadCase::Clearance> clearances, std::size_t ci) {
+  const double requested = clearances[ci].params.axial_clearance_mm;
+  auto connected_at = [&](double mm) {
+    clearances[ci].params.axial_clearance_mm = mm;
+    return preflight_with_clearances(model, part_grid, domain, options,
+                                     clearances, -1)
+        .walk.connected;
+  };
+  if (!connected_at(0.0)) return -1.0;
+  double lo = 0.0, hi = std::max(1.0, std::ceil(requested));  // lo connects, hi does not
+  while (hi - lo > 1.0) {
+    const double mid = std::floor((lo + hi) / 2.0);
+    if (connected_at(mid)) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+// Compose the refusal. Names WHICH load groups lost their path, WHICH anchor
+// faces were walked from, WHICH clearance is the verified cause, and — when the
+// cause is a bolt clearance — the largest axial clearance that would work.
+}  // namespace
+
+std::string preflight_refusal_report(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    const ProductionLoadCase& lc, const PreflightLoadPath& pf,
+    const std::vector<int>& anchor_face_ids) {
+  std::vector<ClearanceCounterfactual> cfs_out;
+  double probe_ms_out = 0.0;
+  const LoadPathWalk& w = pf.walk;
+  std::string m =
+      "run: PRE-FLIGHT REFUSED this job before any solve — THE LOAD PATH IS "
+      "SEVERED.\n";
+  {
+    char buf[640];
+    std::snprintf(
+        buf, sizeof(buf),
+        "  %zu of %zu load-tagged voxels cannot be reached from any of the %zu "
+        "anchor-tagged voxels, EVEN IF the optimizer filled every one of the "
+        "%zu voxels it is allowed to fill (%zu voxels are forbidden: outside "
+        "the design domain, or frozen void by a keep-clear / keep-out). No "
+        "design this job can produce carries force from the load to the anchor, "
+        "so no amount of solving will find one.\n",
+        w.unreached_load_voxels, w.load_voxels, w.anchor_voxels,
+        w.printed_voxels, pf.forbidden_voxels);
+    m += buf;
+  }
+  // WHICH anchors, WHICH load groups. The grid tags do not carry the group, so
+  // re-tag each group on a scratch grid (the identical tag_step_face call
+  // build_production_loadcase makes) and intersect with the unreached set. This
+  // runs ONLY on the refusal path.
+  {
+    m += "  anchor faces: [";
+    for (std::size_t i = 0; i < anchor_face_ids.size(); ++i)
+      m += (i ? ", " : "") + std::to_string(anchor_face_ids[i]);
+    m += "]\n";
+    // Recompute the reachable set once so each group can be tested against it.
+    const DesignMask eff =
+        effective_design_mask(domain.grid, design_domain_mask(domain, options));
+    std::vector<double> allowed(domain.grid.voxel_count(), 0.0);
+    for (std::size_t i = 0; i < eff.size(); ++i)
+      if (eff[i] != MaskValue::FrozenVoid) allowed[i] = 1.0;
+    for (std::size_t gi = 0; gi < lc.load_groups.size(); ++gi) {
+      const ProductionLoadCase::LoadGroup& g = lc.load_groups[gi];
+      // Tag ONLY this group on a copy of the part grid, then carry the tags onto
+      // the solved grid at the domain offset, and walk. A group that keeps its
+      // path while another loses it is exactly the fact a user needs.
+      VoxelGrid probe_part = part_grid;
+      for (std::size_t i = 0; i < probe_part.tags.size(); ++i)
+        if (probe_part.tags[i] == VoxelTag::Load)
+          probe_part.tags[i] = VoxelTag::Interior;
+      bool ok_ids = true;
+      for (const int fid : g.face_ids) {
+        if (fid < 0 || fid >= model.face_count) { ok_ids = false; break; }
+        tag_step_face(probe_part, model, fid, VoxelTag::Load);
+      }
+      if (!ok_ids) continue;
+      VoxelGrid probe = domain.grid;
+      for (std::size_t i = 0; i < probe.tags.size(); ++i)
+        if (probe.tags[i] == VoxelTag::Load) probe.tags[i] = VoxelTag::Interior;
+      for (int pk = 0; pk < part_grid.nz; ++pk)
+        for (int pj = 0; pj < part_grid.ny; ++pj)
+          for (int pi = 0; pi < part_grid.nx; ++pi)
+            if (probe_part.tag(pi, pj, pk) == VoxelTag::Load)
+              probe.set_tag(pi + domain.offset_i, pj + domain.offset_j,
+                            pk + domain.offset_k, VoxelTag::Load);
+      const LoadPathWalk gw = walk_load_path(probe, allowed, 0.5);
+      char buf[320];
+      std::snprintf(buf, sizeof(buf),
+                    "  load group %zu (faces [", gi);
+      std::string line = buf;
+      for (std::size_t i = 0; i < g.face_ids.size(); ++i)
+        line += (i ? ", " : "") + std::to_string(g.face_ids[i]);
+      std::snprintf(buf, sizeof(buf),
+                    "]): %zu of %zu of its load voxels unreachable — %s\n",
+                    gw.unreached_load_voxels, gw.load_voxels,
+                    gw.connected ? "this group STILL has a path"
+                                 : "THIS GROUP HAS NO PATH");
+      m += line + buf;
+    }
+  }
+
+  // THE VERIFIED CAUSE. One re-check per declared clearance, with that
+  // clearance omitted. A clearance whose removal RECONNECTS the path caused the
+  // severance; anything else did not.
+  const double t0 = steady_clock_ms();
+  bool any_single = false;
+  for (std::size_t ci = 0; ci < lc.clearances.size(); ++ci) {
+    ClearanceCounterfactual cf;
+    cf.index = static_cast<int>(ci);
+    cf.removal_reconnects =
+        preflight_with_clearances(model, part_grid, domain, options,
+                                  lc.clearances, static_cast<int>(ci))
+            .walk.connected;
+    if (cf.removal_reconnects &&
+        lc.clearances[ci].params.kind == ClearanceKind::Bolt)
+      cf.max_axial_clearance_mm = max_connected_axial_clearance_mm(
+          model, part_grid, domain, options, lc.clearances, ci);
+    any_single = any_single || cf.removal_reconnects;
+    cfs_out.push_back(cf);
+  }
+  for (const ClearanceCounterfactual& cf : cfs_out) {
+    if (!cf.removal_reconnects) continue;
+    const ProductionLoadCase::Clearance& c =
+        lc.clearances[static_cast<std::size_t>(cf.index)];
+    char buf[640];
+    std::snprintf(
+        buf, sizeof(buf),
+        "  VERIFIED CAUSE: clearance #%d (%s, face %d, concentric_margin %.4g "
+        "mm, axial_clearance %.4g mm) — with THAT ONE clearance removed the "
+        "load path RECONNECTS (re-checked on the real rasterizer, not "
+        "inferred).\n",
+        cf.index, c.params.kind == ClearanceKind::Bolt ? "bolt" : "face",
+        c.face_id, c.params.concentric_margin_mm, c.params.axial_clearance_mm);
+    m += buf;
+    if (c.params.kind == ClearanceKind::Bolt) {
+      if (cf.max_axial_clearance_mm >= 0.0) {
+        std::snprintf(
+            buf, sizeof(buf),
+            "  WHAT WOULD FIX IT: at this resolution the largest "
+            "axial_clearance_mm on clearance #%d that still leaves a load path "
+            "is %.0f mm (measured by bisecting the real check); you asked for "
+            "%.4g mm. Reduce it to <= %.0f mm, or give the optimizer somewhere "
+            "else to route through — widen the design_box on the axis the bore "
+            "runs along, or move/enlarge the anchor faces so the path does not "
+            "have to pass the bore.\n",
+            cf.index, cf.max_axial_clearance_mm, c.params.axial_clearance_mm,
+            cf.max_axial_clearance_mm);
+      } else {
+        std::snprintf(
+            buf, sizeof(buf),
+            "  WHAT WOULD FIX IT: NOT the axial clearance — clearance #%d "
+            "severs the path even at axial_clearance_mm = 0 (measured), so the "
+            "concentric margin %.4g mm on a bore of this radius is already wide "
+            "enough to cut the part. Reduce concentric_margin_mm, or widen the "
+            "design_box so material can route around the bore.\n",
+            cf.index, c.params.concentric_margin_mm);
+      }
+      m += buf;
+    }
+  }
+  if (!any_single && !lc.clearances.empty()) {
+    // No single removal reconnects. Ask the only other question that separates
+    // "the clearances did it, jointly" from "the clearances are innocent":
+    // remove ALL of them (an empty clearance list => an all-Active overlay).
+    const bool none_at_all =
+        preflight_with_clearances(model, part_grid, domain, options, {}, -1)
+            .walk.connected;
+    m += none_at_all
+             ? "  VERIFIED CAUSE: no SINGLE clearance is responsible — removing "
+               "any one of them leaves the path severed, but removing ALL of "
+               "them reconnects it (measured). They sever it together; reduce "
+               "them jointly, or widen the design_box so material can route "
+               "around all of them.\n"
+             : "  VERIFIED: the clearances are NOT the cause — removing every "
+               "one of them still leaves the path severed (measured). The load "
+               "and anchor faces are not connectable inside this design domain: "
+               "check the design_box covers the region between them, that the "
+               "keep_out boxes do not cut across it, and that the anchor and "
+               "load faces are on the same body.\n";
+  }
+  if (lc.clearances.empty())
+    m += "  This job declares NO clearances, so the severance is the design "
+         "domain itself: check that the design_box covers the region between "
+         "the load and anchor faces, that no keep_out box cuts across it, and "
+         "that the two faces are on the same body.\n";
+  probe_ms_out = steady_clock_ms() - t0;
+  {
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+                  "  (pre-flight %.2f ms; counterfactuals %.2f ms — against the "
+                  "10 hours the solve would have spent proving the same thing.)",
+                  pf.wall_ms, probe_ms_out);
+    m += buf;
+  }
+  return m;
+}
+
 
 std::string no_external_load_message(const ProductionRunSetup& setup,
                                      int resolution) {

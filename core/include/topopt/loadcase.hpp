@@ -332,4 +332,52 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
                                              int resolution,
                                              const ProductionLoadCase& lc);
 
+// The "Keep clear" FrozenVoid overlay for `clearances`, rasterized onto
+// `solved_grid` (the part sits inside it at the whole-voxel offset derived from
+// the two origins). This IS the loop build_production_loadcase runs — it was
+// extracted so a COUNTERFACTUAL can be MEASURED rather than guessed.
+//
+// WHY `skip_index` EXISTS (task 2026-08-03-preflight-feasibility-and-divergence,
+// bar P2). When the pre-flight refuses a job because the load path is severed,
+// "infeasible" is not a message: the refusal has to name the clearance that did
+// it and say what would fix it. PR 276 established that a stated remedy must be
+// CHECKED. So the refusal path rebuilds this overlay once per declared
+// clearance with that clearance OMITTED (`skip_index == k`) and re-runs the
+// pre-flight: a clearance whose removal RECONNECTS the path is a verified
+// cause, not a plausible one. `skip_index < 0` includes every clearance, which
+// is what the ordinary build passes.
+//
+// `reports` (optional) receives one entry per clearance ACTUALLY rasterized, in
+// declaration order. Same rasterizer, same precedence guard, same skips (an
+// out-of-range AUTO face id contributes nothing) as the production build.
+// THE PRE-FLIGHT REFUSAL, in words a person can act on (task 2026-08-03-
+// preflight-feasibility-and-divergence, bar P2). Call it when
+// `preflight_load_path(domain, options).walk` came back DECIDABLE and NOT
+// CONNECTED; it returns the message a front-end shows and a log records.
+//
+// It names WHICH load groups lost their path and WHICH anchor faces the walk
+// started from, then MEASURES the cause: one re-check per declared clearance
+// with that clearance omitted, and — when a bolt clearance is the cause — a
+// bisection for the largest axial_clearance_mm that still leaves a path. Every
+// remedy it prints has been run through the real rasterizer and the real belt.
+// Nothing here is a guess, and nothing here refuses anything on its own: the
+// verdict is the caller's `walk.connected`, and this only explains it.
+//
+// ONE message, shared by topopt-cli and the on-device bridge, so a user who
+// hits this on the iPad and a user who hits it on the CLI read the same words.
+// Costs a handful of rasterizations and flood fills, and runs ONLY on the
+// refusal path.
+std::string preflight_refusal_report(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    const ProductionLoadCase& lc, const PreflightLoadPath& pf,
+    const std::vector<int>& anchor_face_ids);
+
+DesignMask build_clearance_overlay(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const VoxelGrid& solved_grid,
+    const std::vector<ProductionLoadCase::Clearance>& clearances,
+    int skip_index,
+    std::vector<ProductionRunSetup::ClearanceReport>* reports);
+
 }  // namespace topopt

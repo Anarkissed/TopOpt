@@ -149,6 +149,27 @@ const char* solver_name(SolverKind k) {
 // (options after configure_production_options / build_production_loadcase, plus
 // the live matrix-free thread-global state) so run_info.json is provable, not
 // inferred. Never again reconstruct "which build ran this" (the 113 lesson).
+// Copy the PRE-FLIGHT measurement into a RunInfo (bar P6). Separate from
+// build_run_info because the pre-flight runs LATER than the config echo — and
+// because the REFUSAL path has to write this same block before it throws.
+void fill_run_info_preflight(RunInfo& info, const PreflightLoadPath& pf) {
+  info.preflight_ran = pf.ran;
+  info.preflight_decidable = pf.walk.decidable;
+  info.preflight_connected = pf.walk.connected;
+  info.preflight_ms = pf.wall_ms;
+  info.preflight_load_voxels = static_cast<long long>(pf.walk.load_voxels);
+  info.preflight_anchor_voxels = static_cast<long long>(pf.walk.anchor_voxels);
+  info.preflight_unreached_load_voxels =
+      static_cast<long long>(pf.walk.unreached_load_voxels);
+  info.preflight_allowed_voxels = static_cast<long long>(pf.walk.printed_voxels);
+  info.preflight_forbidden_voxels =
+      static_cast<long long>(pf.forbidden_voxels);
+  info.preflight_narrowest_separator_voxels =
+      pf.walk.narrowest_separator_voxels;
+  info.preflight_narrowest_separator_mm2 = pf.walk.narrowest_separator_mm2;
+  info.preflight_geodesic_levels = pf.walk.geodesic_levels;
+}
+
 RunInfo build_run_info(const JobDescription& job,
                        const MinimizePlasticOptions& options,
                        const RunObservability& obs) {
@@ -206,6 +227,16 @@ RunInfo build_run_info(const JobDescription& job,
   info.infeasible_cg_blowup = options.simp.infeasible_cg_blowup;
   info.infeasible_flat_tol = options.simp.infeasible_flat_tol;
   info.infeasible_window = options.simp.infeasible_window;
+  // Task 2026-08-03-preflight-feasibility-and-divergence — the armed thresholds
+  // of the two DIVERGENCE guards (config echo). Per-rung outcomes are filled
+  // post-run in the finalize below; the pre-flight block is filled BEFORE the
+  // solve, at the call site, because that is the one part of run_info a run
+  // which never finishes still has an honest answer for.
+  info.infeasible_immediate_ratio = options.simp.infeasible_immediate_ratio;
+  info.infeasible_immediate_wall_ratio =
+      options.simp.infeasible_immediate_wall_ratio;
+  info.iteration_time_ratio = options.simp.iteration_time_ratio;
+  info.iteration_time_floor_ms = options.simp.iteration_time_floor_ms;
   // active-domain phase 1 — the REQUESTED band (config echo). The per-rung
   // latch outcome is filled post-run (finalize below), like cg_multigrid.
   info.active_domain_band = options.simp.active_domain_band;
@@ -3679,6 +3710,225 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   return result;
 }
 
+namespace {
+
+// ---------------------------------------------------------------------------
+// THE ONE job setup (task 2026-08-03-preflight-feasibility-and-divergence).
+//
+// Everything between "the model has been imported" and "the domain can be
+// resolved": the mode branch (declared load case vs self-weight), the option
+// mapping (build direction, draft, warm start) and the load-case receipt. It was
+// inline in run_job until the PRE-FLIGHT needed to reach the same state WITHOUT
+// running the ladder — and a second, similar setup could easily pre-flight a
+// different job than the one that then runs. run_job calls this; preflight_job
+// calls this; there is no second derivation.
+struct JobSetup {
+  VoxelGrid grid;                  // the PART grid, tagged
+  std::vector<DirichletBC> bcs;
+  MinimizePlasticOptions options;
+  ProductionLoadCase lc;           // empty on the self-weight path
+  std::vector<int> fixture_face_ids;
+  std::string loadcase_receipt;    // the bar-Z2 document, not yet written
+};
+
+JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
+                         bool model_is_mesh, const MaterialLibrary& materials) {
+  JobSetup S;
+  VoxelGrid& grid = S.grid;
+  std::vector<DirichletBC>& bcs = S.bcs;
+  MinimizePlasticOptions& options = S.options;
+  ProductionLoadCase& lc = S.lc;
+  std::string& loadcase_receipt = S.loadcase_receipt;
+  // Two modes, both driving the SAME production optimizer configuration as the
+  // iPad app (handoff 093): a "loads" block => the shared build_production_loadcase
+  // (anchors + declared forces, the app's mode a); otherwise the self-weight +
+  // fixture_faces path, now also carrying the production solver config + optional
+  // design box so it matches what the app produces for the same input.
+  // The load-case RECEIPT (bar Z2) — built here, where the resolution facts are
+  // still in scope, and written once the output directory exists. See
+  // loadcase_receipt_json: this is the document a later re-lattice run is
+  // compared against to prove it certified under the SAME load case.
+  // The resolved load case, hoisted out of the mode branch so the PRE-FLIGHT
+  // below can name the clearance / load group a refusal is about. Left default
+  // (no groups, no clearances) on the self-weight path.
+
+  if (job.loads.present) {
+    // ── LOADCASE mode: resolve the geometric selectors to face ids, build the
+    // front-end-neutral ProductionLoadCase, and hand it to the SAME core builder
+    // the bridge calls. The CLI and app therefore produce the same design for the
+    // same STEP + load case + resolution.
+    lc = production_loadcase_from_job(job, model);
+    S.fixture_face_ids = lc.anchor_face_ids;
+
+    ProductionRunSetup setup;
+    try {
+      setup = build_production_loadcase(model, job.resolution, lc);
+    } catch (const JobError&) {
+      throw;
+    } catch (const std::exception& e) {
+      // The builder's diagnostics name the id / count / selection (N5); add
+      // the one fact it cannot know — which mesh the ids were resolved against.
+      throw JobError(std::string("run: cannot build the declared load case "
+                                 "against model \"") +
+                     job.model + "\": " + e.what());
+    }
+    // Legible twin of minimize_plastic's require_external_loads guard (which
+    // stays in place as the hard backstop): refuse HERE, where the per-group
+    // reports can say WHICH group resolved to nothing and WHY (N4), instead of
+    // the optimizer's generic "external_loads is empty".
+    if (setup.options.require_external_loads &&
+        setup.options.external_loads.empty())
+      throw JobError(
+          "run: the declared load case produced NO external load — " +
+          no_external_load_message(setup, job.resolution) +
+          ". Refusing to silently optimize under SELF-WEIGHT instead of the "
+          "declared load.");
+    grid = std::move(setup.grid);
+    bcs = std::move(setup.bcs);
+    options = std::move(setup.options);
+    // Before `setup.options` is consumed: external_loads is still readable off
+    // the moved-to `options`, and the reports were not moved.
+    {
+      ProductionRunSetup echo;
+      echo.options.external_loads = options.external_loads;
+      echo.load_group_reports = setup.load_group_reports;
+      echo.clearance_reports = setup.clearance_reports;
+      echo.face_protection_reports = setup.face_protection_reports;
+      // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
+      // onto the echo too, or the receipt would silently report a growth run as a
+      // reduction one (the echo is a hand-copied subset, so every new setup field
+      // has to be added here as well as there).
+      echo.growth_ladder = setup.growth_ladder;
+      echo.growth_box_auto_derived = setup.growth_box_auto_derived;
+      echo.growth_box = setup.growth_box;
+      echo.growth_anchor_pad = setup.growth_anchor_pad;
+      loadcase_receipt = loadcase_receipt_json(job, &echo,
+                                               S.fixture_face_ids, 0, bcs);
+    }
+    // The CLI exports meshes, not playback: keyframe_count stays 0 (the app sets
+    // 12). This is viz only and does not change the design.
+  } else {
+    // ── SELF-WEIGHT mode: geometric fixture-face selection (locked rule,
+    // DECISIONS.md 2026-07-09).
+    S.fixture_face_ids =
+        resolve_selectors(model, job.fixture_faces, "fixture_faces");
+
+    // ──▶ voxelize + tag the fixture voxels of every matched face. The tag call
+    // is source-appropriate in NAME only (tag_mesh_face and tag_step_face run
+    // the identical scan over `triangle_face`); a mesh pseudo-face tags exactly
+    // as a B-rep face does.
+    grid = voxelize(model.mesh, job.resolution);
+    std::size_t tagged = 0;
+    for (const int f : S.fixture_face_ids)
+      tagged += model_is_mesh
+                    ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
+                    : tag_step_face(grid, model, f, VoxelTag::Fixture);
+    if (tagged == 0)
+      throw JobError("fixture faces tagged no voxels (resolution too coarse "
+                     "for the selected faces?)");
+
+    // Mounting BCs: every node of every Fixture voxel is fully clamped.
+    const std::vector<int> fixture_nodes =
+        fea_tagged_nodes(grid, VoxelTag::Fixture);
+    bcs.reserve(fixture_nodes.size() * 3);
+    for (const int n : fixture_nodes)
+      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+    loadcase_receipt = loadcase_receipt_json(
+        job, nullptr, S.fixture_face_ids, tagged, bcs);
+
+    // ──▶ FEA + SIMP ladder + report assembly (the M5.3 driver). The production
+    // solver config (matrix-free multigrid + Galerkin cache + physical
+    // min-feature) is applied here so the CLI matches the app; the job supplies
+    // the self-weight load case (ladder, margin, gravity).
+    configure_production_options(options);
+    // The material catalog the GATE DIAGNOSIS prices its material lever against
+    // (handoff 2026-08-02-gate-diagnosis-recommendations). READ ONLY — nothing
+    // downstream writes materials.json — and `materials` outlives this call, so
+    // the pointer is valid for the whole run. Without it the material lever
+    // reports itself NOT EVALUABLE instead of guessing.
+    options.material_catalog = &materials;
+    options.volume_fraction_ladder = job.ladder;
+    options.margin_stop = job.margin_stop;
+    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
+    options.gravity_direction = job.gravity.direction;
+    if (job.simp_max_iterations > 0)
+      options.simp.max_iterations = job.simp_max_iterations;
+    // Optional design-domain expansion (the "add material" feature).
+    if (job.has_design_box) {
+      options.design_box = to_design_box(job.design_box);
+      for (const JobBox& ko : job.keep_out_boxes)
+        options.keep_out_boxes.push_back(to_design_box(ko));
+    }
+  }
+  // The build-plate normal, separated from gravity (handoff
+  // 2026-08-01-build-direction-separation). AFTER the mode branch so it governs
+  // both modes; absent key => byte-identical.
+  apply_build_direction_options(options, job);
+
+  // Handoff 2026-07-25-draft-quality — map the optional "draft" block onto the
+  // production options, for BOTH front-ends (loadcase options come from
+  // build_production_loadcase; self-weight from configure_production_options). Absent
+  // (has_draft == false) => the options keep their OFF defaults, byte-identical.
+  if (job.has_draft) {
+    options.draft_quality = job.draft_quality;
+    options.draft_loose_tol = job.draft_loose_tol;
+    options.draft_escalation_c_gap = job.draft_escalation_c_gap;
+    options.draft_use_design_trigger = job.draft_use_design_trigger;
+    options.draft_escalation_design_flip = job.draft_escalation_design_flip;
+    options.draft_probe_iters = job.draft_probe_iters;
+  }
+
+  // Handoff 110 Part B — map the optional "warm_start" block onto the production
+  // options, for BOTH front-ends, exactly like the "draft" block above. Absent
+  // (has_warm_start == false, the default) => options.warm_start_coarse keeps
+  // its OFF default and the run is byte-identical. run_info already echoes the
+  // resolved value (info.warm_start_coarse), so an armed run SAYS it was armed.
+  // NOTE this arms only Part B; warm_start_inherit (Part A) is resolved by
+  // build_production_loadcase's own measured rule (handoff 113: load-case runs
+  // warm, self-weight runs cold) and is NOT touched here.
+  if (job.has_warm_start) options.warm_start_coarse = job.warm_start_coarse;
+  return S;
+}
+
+}  // namespace
+
+PreflightJobResult preflight_job(const JobDescription& job,
+                                 const std::string& job_dir,
+                                 const MaterialLibrary& materials) {
+  const double t0 = steady_clock_ms();
+  PreflightJobResult out;
+  if (job.mode != "minimize_plastic")
+    throw JobError("preflight: unsupported mode: " + job.mode);
+  if (materials.find(job.material) == materials.end())
+    throw JobError("material \"" + job.material +
+                   "\" is not in the material library");
+  const std::string model_path = join_path(job_dir, job.model);
+  const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
+  try {
+    out.model = import_part_file_resolved(model_path);
+  } catch (const PartError& e) {
+    throw JobError(std::string("cannot import model \"") + job.model +
+                   "\": " + e.what());
+  }
+  if (!check_watertight(out.model.mesh).watertight)
+    throw JobError("model tessellation is not watertight: " + job.model);
+  // THE ONE setup — the identical call run_job makes.
+  JobSetup setup = build_job_setup(job, out.model, model_is_mesh, materials);
+  out.fixture_face_ids = setup.fixture_face_ids;
+  const SolvedDesignDomain domain =
+      resolve_design_domain(setup.grid, setup.bcs, setup.options);
+  out.preflight = preflight_load_path(domain, setup.options);
+  out.would_refuse =
+      out.preflight.walk.decidable && !out.preflight.walk.connected;
+  if (out.would_refuse)
+    out.refusal = preflight_refusal_report(out.model, setup.grid, domain,
+                                           setup.options, setup.lc,
+                                           out.preflight,
+                                           out.fixture_face_ids);
+  out.wall_ms = steady_clock_ms() - t0;
+  return out;
+}
+
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
                      const MaterialLibrary& materials,
@@ -3917,155 +4167,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     throw JobError("model tessellation is not watertight: " + job.model);
 
   // Two modes, both driving the SAME production optimizer configuration as the
-  // iPad app (handoff 093): a "loads" block => the shared build_production_loadcase
-  // (anchors + declared forces, the app's mode a); otherwise the self-weight +
-  // fixture_faces path, now also carrying the production solver config + optional
-  // design box so it matches what the app produces for the same input.
-  VoxelGrid grid;
-  std::vector<DirichletBC> bcs;
-  MinimizePlasticOptions options;
-  // The load-case RECEIPT (bar Z2) — built here, where the resolution facts are
-  // still in scope, and written once the output directory exists. See
-  // loadcase_receipt_json: this is the document a later re-lattice run is
-  // compared against to prove it certified under the SAME load case.
-  std::string loadcase_receipt;
-
-  if (job.loads.present) {
-    // ── LOADCASE mode: resolve the geometric selectors to face ids, build the
-    // front-end-neutral ProductionLoadCase, and hand it to the SAME core builder
-    // the bridge calls. The CLI and app therefore produce the same design for the
-    // same STEP + load case + resolution.
-    const ProductionLoadCase lc =
-        production_loadcase_from_job(job, result.model);
-    result.fixture_face_ids = lc.anchor_face_ids;
-
-    ProductionRunSetup setup;
-    try {
-      setup = build_production_loadcase(result.model, job.resolution, lc);
-    } catch (const JobError&) {
-      throw;
-    } catch (const std::exception& e) {
-      // The builder's diagnostics name the id / count / selection (N5); add
-      // the one fact it cannot know — which mesh the ids were resolved against.
-      throw JobError(std::string("run: cannot build the declared load case "
-                                 "against model \"") +
-                     job.model + "\": " + e.what());
-    }
-    // Legible twin of minimize_plastic's require_external_loads guard (which
-    // stays in place as the hard backstop): refuse HERE, where the per-group
-    // reports can say WHICH group resolved to nothing and WHY (N4), instead of
-    // the optimizer's generic "external_loads is empty".
-    if (setup.options.require_external_loads &&
-        setup.options.external_loads.empty())
-      throw JobError(
-          "run: the declared load case produced NO external load — " +
-          no_external_load_message(setup, job.resolution) +
-          ". Refusing to silently optimize under SELF-WEIGHT instead of the "
-          "declared load.");
-    grid = std::move(setup.grid);
-    bcs = std::move(setup.bcs);
-    options = std::move(setup.options);
-    // Before `setup.options` is consumed: external_loads is still readable off
-    // the moved-to `options`, and the reports were not moved.
-    {
-      ProductionRunSetup echo;
-      echo.options.external_loads = options.external_loads;
-      echo.load_group_reports = setup.load_group_reports;
-      echo.clearance_reports = setup.clearance_reports;
-      echo.face_protection_reports = setup.face_protection_reports;
-      // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
-      // onto the echo too, or the receipt would silently report a growth run as a
-      // reduction one (the echo is a hand-copied subset, so every new setup field
-      // has to be added here as well as there).
-      echo.growth_ladder = setup.growth_ladder;
-      echo.growth_box_auto_derived = setup.growth_box_auto_derived;
-      echo.growth_box = setup.growth_box;
-      echo.growth_anchor_pad = setup.growth_anchor_pad;
-      loadcase_receipt = loadcase_receipt_json(job, &echo,
-                                               result.fixture_face_ids, 0, bcs);
-    }
-    // The CLI exports meshes, not playback: keyframe_count stays 0 (the app sets
-    // 12). This is viz only and does not change the design.
-  } else {
-    // ── SELF-WEIGHT mode: geometric fixture-face selection (locked rule,
-    // DECISIONS.md 2026-07-09).
-    result.fixture_face_ids =
-        resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
-
-    // ──▶ voxelize + tag the fixture voxels of every matched face. The tag call
-    // is source-appropriate in NAME only (tag_mesh_face and tag_step_face run
-    // the identical scan over `triangle_face`); a mesh pseudo-face tags exactly
-    // as a B-rep face does.
-    grid = voxelize(result.model.mesh, job.resolution);
-    std::size_t tagged = 0;
-    for (const int f : result.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(grid, result.model, f, VoxelTag::Fixture)
-                    : tag_step_face(grid, result.model, f, VoxelTag::Fixture);
-    if (tagged == 0)
-      throw JobError("fixture faces tagged no voxels (resolution too coarse "
-                     "for the selected faces?)");
-
-    // Mounting BCs: every node of every Fixture voxel is fully clamped.
-    const std::vector<int> fixture_nodes =
-        fea_tagged_nodes(grid, VoxelTag::Fixture);
-    bcs.reserve(fixture_nodes.size() * 3);
-    for (const int n : fixture_nodes)
-      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
-    loadcase_receipt = loadcase_receipt_json(
-        job, nullptr, result.fixture_face_ids, tagged, bcs);
-
-    // ──▶ FEA + SIMP ladder + report assembly (the M5.3 driver). The production
-    // solver config (matrix-free multigrid + Galerkin cache + physical
-    // min-feature) is applied here so the CLI matches the app; the job supplies
-    // the self-weight load case (ladder, margin, gravity).
-    configure_production_options(options);
-    // The material catalog the GATE DIAGNOSIS prices its material lever against
-    // (handoff 2026-08-02-gate-diagnosis-recommendations). READ ONLY — nothing
-    // downstream writes materials.json — and `materials` outlives this call, so
-    // the pointer is valid for the whole run. Without it the material lever
-    // reports itself NOT EVALUABLE instead of guessing.
-    options.material_catalog = &materials;
-    options.volume_fraction_ladder = job.ladder;
-    options.margin_stop = job.margin_stop;
-    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
-    options.gravity_direction = job.gravity.direction;
-    if (job.simp_max_iterations > 0)
-      options.simp.max_iterations = job.simp_max_iterations;
-    // Optional design-domain expansion (the "add material" feature).
-    if (job.has_design_box) {
-      options.design_box = to_design_box(job.design_box);
-      for (const JobBox& ko : job.keep_out_boxes)
-        options.keep_out_boxes.push_back(to_design_box(ko));
-    }
-  }
-  // The build-plate normal, separated from gravity (handoff
-  // 2026-08-01-build-direction-separation). AFTER the mode branch so it governs
-  // both modes; absent key => byte-identical.
-  apply_build_direction_options(options, job);
-
-  // Handoff 2026-07-25-draft-quality — map the optional "draft" block onto the
-  // production options, for BOTH front-ends (loadcase options come from
-  // build_production_loadcase; self-weight from configure_production_options). Absent
-  // (has_draft == false) => the options keep their OFF defaults, byte-identical.
-  if (job.has_draft) {
-    options.draft_quality = job.draft_quality;
-    options.draft_loose_tol = job.draft_loose_tol;
-    options.draft_escalation_c_gap = job.draft_escalation_c_gap;
-    options.draft_use_design_trigger = job.draft_use_design_trigger;
-    options.draft_escalation_design_flip = job.draft_escalation_design_flip;
-    options.draft_probe_iters = job.draft_probe_iters;
-  }
-
-  // Handoff 110 Part B — map the optional "warm_start" block onto the production
-  // options, for BOTH front-ends, exactly like the "draft" block above. Absent
-  // (has_warm_start == false, the default) => options.warm_start_coarse keeps
-  // its OFF default and the run is byte-identical. run_info already echoes the
-  // resolved value (info.warm_start_coarse), so an armed run SAYS it was armed.
-  // NOTE this arms only Part B; warm_start_inherit (Part A) is resolved by
-  // build_production_loadcase's own measured rule (handoff 113: load-case runs
-  // warm, self-weight runs cold) and is NOT touched here.
-  if (job.has_warm_start) options.warm_start_coarse = job.warm_start_coarse;
+  // iPad app (handoff 093). THE ONE setup: build_job_setup above — the same call
+  // preflight_job makes, so a pre-flight can never describe a different job than
+  // the one that then runs (task 2026-08-03-preflight-feasibility-and-divergence).
+  JobSetup setup = build_job_setup(job, result.model, model_is_mesh, materials);
+  VoxelGrid grid = std::move(setup.grid);
+  std::vector<DirichletBC> bcs = std::move(setup.bcs);
+  MinimizePlasticOptions options = std::move(setup.options);
+  ProductionLoadCase lc = std::move(setup.lc);
+  std::string loadcase_receipt = std::move(setup.loadcase_receipt);
+  result.fixture_face_ids = std::move(setup.fixture_face_ids);
 
   // ──▶ output dir (created before the run so streamed artifacts can land in it).
   {
@@ -4101,6 +4212,53 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
            "minimize_plastic solves on");
   }
 #endif
+
+  // ──▶ PRE-FLIGHT LOAD-PATH CONNECTIVITY (task 2026-08-03-preflight-feasibility-
+  // and-divergence, guard 1). BEFORE ANY SOLVE, with the clearances frozen and
+  // the design domain resolved: can the load-tagged voxels reach the anchors
+  // through voxels the optimizer is ALLOWED to fill? A flood fill — milliseconds
+  // against the ten hours a severed job otherwise spends discovering it.
+  //
+  // REFUSE ONLY ON DISCONNECTION. Connectivity is necessary, not sufficient; a
+  // connected-but-hopeless path still diverges, which is what guards 2 and 3 are
+  // for. The narrowest-cross-section reading is reported as INFORMATION and never
+  // refuses anything.
+  const PreflightLoadPath preflight = preflight_load_path(domain, options);
+  result.preflight = preflight;
+  if (preflight.walk.decidable) {
+    char buf[512];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[preflight] load path %s: %zu load voxels, %zu anchor voxels, %zu of "
+        "%zu voxels allowed to hold material; narrowest separating "
+        "cross-section %d voxels (%.4g mm^2) at %d/%d steps from the anchor; "
+        "%.2f ms",
+        preflight.walk.connected ? "CONNECTED" : "SEVERED",
+        preflight.walk.load_voxels, preflight.walk.anchor_voxels,
+        preflight.walk.printed_voxels, solved_grid.voxel_count(),
+        preflight.walk.narrowest_separator_voxels,
+        preflight.walk.narrowest_separator_mm2,
+        preflight.walk.narrowest_separator_level, preflight.walk.geodesic_levels,
+        preflight.wall_ms);
+    std::fprintf(stderr, "%s\n", buf);
+    std::fflush(stderr);
+  }
+  if (preflight.walk.decidable && !preflight.walk.connected) {
+    const std::string why = preflight_refusal_report(
+        result.model, grid, domain, options, lc, preflight,
+        result.fixture_face_ids);
+    // THE GUARDS ARE OBSERVABLE (bar P6) even when the guard REFUSES: write
+    // run_info.json with the pre-flight block before throwing, so the refusal
+    // leaves a machine-readable record beside the load-case receipt and not only
+    // a line in a log.
+    if (emit_progress) {
+      RunInfo refused = build_run_info(job, options, obs);
+      fill_run_info_preflight(refused, preflight);
+      result.run_info_path = join_path(out_dir, "run_info.json");
+      write_run_info(result.run_info_path, refused);
+    }
+    throw JobError(why);
+  }
 
   // LOUD PARITY GATE (task: multigrid-odd-axis-cliff, O1/O2). Say at RUN START
   // what geometric multigrid will do on this grid. The motivating run solved
@@ -4144,6 +4302,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   bool wrote_run_info = false;
   if (emit_progress) {
     run_info = build_run_info(job, options, obs);
+    fill_run_info_preflight(run_info, preflight);
     result.run_info_path = join_path(out_dir, "run_info.json");
     write_run_info(result.run_info_path, run_info);
     wrote_run_info = true;
@@ -4719,6 +4878,29 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.rung_non_convergent_residual.assign(
         result.pipeline.rung_non_convergent_residual.begin(),
         result.pipeline.rung_non_convergent_residual.end());
+    // Task 2026-08-03-preflight-feasibility-and-divergence — finalize the two
+    // DIVERGENCE guards' per-rung outcomes, each with the numbers it fired on
+    // (bar P6). All-false is the positive statement "no guard fired".
+    run_info.rung_diverged.assign(result.pipeline.rung_diverged.begin(),
+                                  result.pipeline.rung_diverged.end());
+    run_info.rung_diverged_iteration =
+        result.pipeline.rung_diverged_iteration;
+    run_info.rung_diverged_c_ratio = result.pipeline.rung_diverged_c_ratio;
+    run_info.rung_diverged_cg_ratio = result.pipeline.rung_diverged_cg_ratio;
+    run_info.rung_diverged_wall_ratio =
+        result.pipeline.rung_diverged_wall_ratio;
+    run_info.rung_time_budget.assign(result.pipeline.rung_time_budget.begin(),
+                                     result.pipeline.rung_time_budget.end());
+    run_info.rung_time_budget_iteration =
+        result.pipeline.rung_time_budget_iteration;
+    run_info.rung_time_budget_ms = result.pipeline.rung_time_budget_ms;
+    run_info.rung_time_budget_elapsed_ms =
+        result.pipeline.rung_time_budget_elapsed_ms;
+    run_info.rung_time_budget_baseline_ms =
+        result.pipeline.rung_time_budget_baseline_ms;
+    run_info.rung_time_budget_phase = result.pipeline.rung_time_budget_phase;
+    run_info.rung_time_budget_phase_ms =
+        result.pipeline.rung_time_budget_phase_ms;
     // active-domain phase 1 — finalize the per-rung latch outcome. All-false
     // (with a band > 0) is the positive statement "the band held for every
     // rung"; a true entry names the rung that fell back to the full domain and

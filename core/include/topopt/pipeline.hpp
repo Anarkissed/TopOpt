@@ -782,6 +782,30 @@ inline constexpr const char* kLoadPathNotConnectedReason =
 inline constexpr const char* kRungNonConvergentReason =
     "linear solve did not converge";
 
+// Task 2026-08-03-preflight-feasibility-and-divergence — the FIFTH and SIXTH
+// rejection_reason values, from the two DIVERGENCE guards. Both are distinct
+// from kRungInfeasibleReason on purpose: neither claims the load path was lost.
+// On the motivating 10-hour run the pre-flight measured the path INTACT, so
+// labelling its rejection "load path lost" would have been a false statement
+// about the geometry — the honest claim is about the TRAJECTORY.
+//   * kRungDivergedReason — a SINGLE iteration sat >= 1000x the rung's starting
+//     compliance, with a >= 4x CG blow-up, at >= 50x the wall of the rung's
+//     first iteration (simp.hpp SimpOptions::infeasible_immediate_ratio). Like
+//     an infeasible rung, its ANALYSIS IS NEVER RUN, so its stress / margin /
+//     settings fields are zero placeholders meaning "not measured".
+//   * kRungTimeBudgetReason — an iteration exceeded 100x the wall of the rung's
+//     first iteration and was stopped, mid-solve where possible. This is not a
+//     verdict about the design at all; it is the run refusing to spend hours
+//     proving something it can already see. run_info names the phase that blew
+//     up and the numbers the budget was formed from.
+// Neither STOPS the ladder (as with infeasibility and non-convergence, the next
+// lighter rung gets a fresh attempt from the last feasible field), and neither
+// rung is ever certified, exported or inherited from.
+inline constexpr const char* kRungDivergedReason =
+    "rung diverging (objective exploded)";
+inline constexpr const char* kRungTimeBudgetReason =
+    "iteration time budget exceeded";
+
 // One ladder rung actually evaluated by the driver.
 struct MinimizePlasticVariant {
   // The ladder rung this variant targeted (options.volume_fraction_ladder[i]).
@@ -1113,6 +1137,36 @@ struct MinimizePlasticResult {
   std::vector<char> rung_non_convergent;
   std::vector<int> rung_non_convergent_iteration;
   std::vector<double> rung_non_convergent_residual;
+  // Task 2026-08-03-preflight-feasibility-and-divergence (bar P6: THE GUARDS ARE
+  // OBSERVABLE) — the per-rung outcome of the two DIVERGENCE guards, filled with
+  // the same finalize-only discipline and always parallel to `evaluated`. Every
+  // trip carries THE NUMBERS IT FIRED ON, so the next investigation of a stopped
+  // run is a read of run_info.json rather than another instrumentation task.
+  //   rung_diverged[i]              1 iff guard 2 ended rung i
+  //   rung_diverged_iteration[i]    the 1-based iteration it fired on
+  //   rung_diverged_c_ratio[i]      c[iter]/c[0] there
+  //   rung_diverged_cg_ratio[i]     cg[iter] / the prefix-minimum CG count
+  //   rung_diverged_wall_ratio[i]   wall[iter]/wall[0] — the separating column
+  //   rung_time_budget[i]           1 iff guard 3 ended rung i
+  //   rung_time_budget_iteration[i] the 1-based iteration it fired on
+  //   rung_time_budget_ms[i]        the budget (100x iteration 1, floored)
+  //   rung_time_budget_elapsed_ms[i]what that iteration actually spent
+  //   rung_time_budget_baseline_ms[i] iteration 1 of that rung
+  //   rung_time_budget_phase[i]     WHICH PHASE dominated ("cg", "mg_build", ...)
+  //   rung_time_budget_phase_ms[i]  and how much of the iteration it was
+  // All-zero / all-empty is the positive statement "no guard fired on any rung".
+  std::vector<char> rung_diverged;
+  std::vector<int> rung_diverged_iteration;
+  std::vector<double> rung_diverged_c_ratio;
+  std::vector<double> rung_diverged_cg_ratio;
+  std::vector<double> rung_diverged_wall_ratio;
+  std::vector<char> rung_time_budget;
+  std::vector<int> rung_time_budget_iteration;
+  std::vector<double> rung_time_budget_ms;
+  std::vector<double> rung_time_budget_elapsed_ms;
+  std::vector<double> rung_time_budget_baseline_ms;
+  std::vector<std::string> rung_time_budget_phase;
+  std::vector<double> rung_time_budget_phase_ms;
 
   // Handoff 2026-07-25-draft-quality — DRAFT QUALITY outcome, one entry per
   // EVALUATED rung (same order and length as `evaluated`), filled as each rung
@@ -1294,5 +1348,56 @@ std::vector<NodalLoad> design_domain_loads(const SolvedDesignDomain& domain,
 // With no design box every part-solid voxel is 1 and nothing was added.
 std::vector<char> original_part_voxels(const VoxelGrid& part_grid,
                                        const SolvedDesignDomain& domain);
+
+// ---------------------------------------------------------------------------
+// PRE-FLIGHT LOAD-PATH CONNECTIVITY (task 2026-08-03-preflight-feasibility-and-
+// divergence, guard 1).
+//
+// WHY IT EXISTS. A real job (worker 7fbc7ee2900e425a, 2026-08-02) ran TEN HOURS
+// and completed three design iterations: 27 s, then 34 min, then 6.3 h, with the
+// objective rising 1,689x in a single step. Ten hours to learn something a flood
+// fill can answer in milliseconds — and the job was not a mistake. It carried a
+// legitimate 70 mm axial bolt clearance, because a bolt you cannot get a driver
+// onto is not a bolt hole.
+//
+// WHAT IT DECIDES. With the clearances frozen and the design domain resolved,
+// and assuming the optimizer fills EVERYTHING it is allowed to fill, can the
+// load-tagged voxels reach the anchor-tagged voxels at all? The "allowed" field
+// is density 1 on every voxel `effective_design_mask` does NOT pin FrozenVoid,
+// 0 elsewhere — the MAXIMAL structure this job could ever produce. The walk is
+// the CONNECTIVITY BELT itself (voxel.hpp walk_load_path); there is one flood
+// fill in the project and this reuses it rather than adding a second.
+//
+// WHAT IT DOES NOT DECIDE. Connectivity is NECESSARY, NOT SUFFICIENT. A
+// connected but hopeless load path — one long thin thread through a bore — still
+// diverges, and this check will pass it. So a caller may REFUSE only on
+// `connected == false`, which is a provable statement about geometry: no field
+// the optimizer can produce carries force from the load to the anchor, because
+// the material it would need is forbidden. The marginality fields
+// (`walk.narrowest_separator_*`) are INFORMATION for the operator, never grounds
+// for a refusal — they are an upper bound on a cut, not a strength claim.
+//
+// It is READ-ONLY and runs no solve, so arming it cannot change a design.
+struct PreflightLoadPath {
+  bool ran = false;  // false only if a caller skipped it
+  LoadPathWalk walk;
+  // The allowed set the walk ran over, split by why a voxel is in it. The sum
+  // allowed_frozen_solid + allowed_active == walk.printed_voxels.
+  std::size_t allowed_frozen_solid = 0;  // always material (part, pad, BC skin)
+  std::size_t allowed_active = 0;        // the optimizer MAY fill it
+  std::size_t forbidden_voxels = 0;      // FrozenVoid: it may NEVER hold material
+  double wall_ms = 0.0;  // measured, because "cheap" has to be a number (bar P4)
+};
+
+// Run the pre-flight on the domain `minimize_plastic` will solve. Uses
+// `design_domain_mask(domain, options)` (the clearance overlay included) and
+// `effective_design_mask` — the identical two calls the optimizer makes — so the
+// allowed set is the optimizer's own, not a re-derivation of it.
+//
+// `connected` is true VACUOUSLY when the grid carries no Load or no Fixture
+// voxels (a self-weight run tags no Load faces): `walk.decidable` is then false
+// and a caller must not read a verdict into it.
+PreflightLoadPath preflight_load_path(const SolvedDesignDomain& domain,
+                                      const MinimizePlasticOptions& options);
 
 }  // namespace topopt

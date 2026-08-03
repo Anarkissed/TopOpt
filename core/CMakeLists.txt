@@ -1167,6 +1167,35 @@ if(Eigen3_FOUND)
     INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible")
   add_test(NAME rung_infeasible COMMAND test_rung_infeasible)
 
+  # Task 2026-08-03-preflight-feasibility-and-divergence — THE THREE GUARDS:
+  # pre-flight load-path connectivity, the immediate divergence trip and the
+  # iteration time budget, each proven against the REAL recorded trajectory it
+  # exists for AND against the live forming transient it must not kill. Drives
+  # minimize_plastic, so Eigen-gated; the real settings table and both recorded
+  # CSV fixtures are injected by absolute path.
+  add_executable(test_preflight_divergence
+    tests/validation/test_preflight_divergence.cpp)
+  target_link_libraries(test_preflight_divergence PRIVATE topopt)
+  target_compile_definitions(test_preflight_divergence PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible"
+    DIVERGENCE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/divergence")
+  add_test(NAME preflight_divergence COMMAND test_preflight_divergence)
+
+  # CALIBRATION harness for the two divergence guards (task 2026-08-03-preflight-
+  # feasibility-and-divergence): prints the per-iteration LEVEL ratio, STEP ratio,
+  # CG count and wall ratio of the recorded corpses AND of the live forming
+  # transient, which is how the immediate-trip / time-guard constants were chosen
+  # rather than guessed. A harness, not a ctest.
+  #   cmake --build build --target divergence_guard_probe
+  #   ./build/divergence_guard_probe [extra-iterations.csv ...]
+  add_executable(divergence_guard_probe EXCLUDE_FROM_ALL
+    tests/harness/divergence_guard_probe.cpp)
+  target_link_libraries(divergence_guard_probe PRIVATE topopt)
+  target_compile_definitions(divergence_guard_probe PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible")
+
   # Handoff 2026-07-27-nonconvergence-rejection — a non-converging linear solve
   # rejects the RUNG, not the run. Drives minimize_plastic / analyze_fixed_design
   # (Eigen-gated); the real settings rule table is injected, and NONCONV_OUT_DIR is
