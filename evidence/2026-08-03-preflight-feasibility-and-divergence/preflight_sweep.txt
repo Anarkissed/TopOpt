@@ -1,0 +1,66 @@
+PRE-FLIGHT SWEEP over every archived worker job + every committed job fixture
+(no false refusals bar, P3). One line per job: verdict, cost, geometry.
+
+job                    verdict      check_ms   total_ms      res detail
+045f45fa3f7e4447       ERROR             –        –      128 
+081b526eec7e4206       CONNECTED       22.47      555.1      128 1464 load voxels, 71 anchor voxels
+0a178a5cccff4c4d       CONNECTED       22.50      557.5      128 1464 load voxels, 71 anchor voxels
+0ca24fe5267443f9       CONNECTED        4.38    13631.8      128 5165 load voxels, 3348 anchor voxels
+100ddce50b684cd3       CONNECTED       23.00      568.1      128 1464 load voxels, 71 anchor voxels
+11d82cfebd7b40c4       ERROR             –        –      128 
+1217b26987e44811       CONNECTED        8.56      507.0       96 828 load voxels, 71 anchor voxels
+193b605fb69d4eee       CONNECTED        2.41       73.5       64 372 load voxels, 31 anchor voxels
+1c15a9234fc44dd6       CONNECTED       27.70    13664.7      128 5165 load voxels, 3348 anchor voxels
+2f4d80d9d6e648c2       CONNECTED        1.93      531.8      128 1464 load voxels, 71 anchor voxels
+35f63791be294249       CONNECTED       23.50      570.3      128 1464 load voxels, 71 anchor voxels
+36356ac4c7ce4a26       CONNECTED       15.85     1242.4      128 1749 load voxels, 691 anchor voxels
+3e36894043354175       ERROR             –        –       96 
+474ffbbb6455417e       CONNECTED        0.73       43.2       64 372 load voxels, 31 anchor voxels
+4d931559f1a843ed       CONNECTED        4.18    19073.4      128 5165 load voxels, 3348 anchor voxels
+62ca07b64b684541       CONNECTED       10.25      476.7       96 3456 load voxels, 4720 anchor voxels
+6ed5fba93c8240ad       CONNECTED        2.66       78.1       64 372 load voxels, 31 anchor voxels
+6f8f25df346640fb       CONNECTED        0.75       73.2       64 372 load voxels, 31 anchor voxels
+6fde6c7685854ff9       CONNECTED       11.01      468.2       96 3456 load voxels, 4720 anchor voxels
+7225305b44f64a64       CONNECTED       22.39     2049.1      128 5250 load voxels, 71 anchor voxels
+786b3a18f4364c93       CONNECTED       24.62      567.6      128 1464 load voxels, 71 anchor voxels
+7fbc7ee2900e425a       CONNECTED       22.14      327.8      128 1464 load voxels, 71 anchor voxels
+8563e30770784c18       CONNECTED       11.19      468.0       96 3456 load voxels, 4720 anchor voxels
+8f9d62ea6cb3427a       ERROR             –        –       96 
+95f4130119414636       CONNECTED        4.29    14265.8      128 5165 load voxels, 3348 anchor voxels
+a1a5056355af4c8e       CONNECTED       21.76      562.5      128 1464 load voxels, 71 anchor voxels
+a278de8f92164e3e       CONNECTED       16.45     1733.5      128 1749 load voxels, 691 anchor voxels
+a2bab5dd973f40e5       ERROR             –        –       96 
+a693aa6aa40c4441       ERROR             –        –      128 
+ae78c24751d041f1       CONNECTED       23.05     1004.4      128 1464 load voxels, 71 anchor voxels
+b56bbf4421f34212       CONNECTED        2.74       91.3       64 372 load voxels, 31 anchor voxels
+c3f24fa6d9674501       CONNECTED       26.72      834.0      128 1464 load voxels, 71 anchor voxels
+c70c793bce7e4bbf       CONNECTED       14.57     5780.2       96 1898 load voxels, 1974 anchor voxels
+c7d171f03f1c42aa       CONNECTED       24.63      566.4      128 1464 load voxels, 71 anchor voxels
+ca366a5785024774       CONNECTED        4.51    19186.4      128 5165 load voxels, 3348 anchor voxels
+cf32b7686f504885       CONNECTED       26.21     1314.9      128 1749 load voxels, 691 anchor voxels
+cfeea92f98214cdf       CONNECTED       22.98      569.3      128 1464 load voxels, 71 anchor voxels
+d3038174cd434912       CONNECTED        2.12     2220.3      128 6018 load voxels, 71 anchor voxels
+d9d8d88373604453       CONNECTED       21.78      562.6      128 1464 load voxels, 71 anchor voxels
+d9db6715aa7245a4       CONNECTED        5.67      102.4       96 8 load voxels, 802 anchor voxels
+dd5c298530c5477f       CONNECTED        2.10      535.8      128 1464 load voxels, 71 anchor voxels
+e2a9dcb4bf924fbe       CONNECTED        1.96      532.4      128 1464 load voxels, 71 anchor voxels
+e52a9b379c0842cb       vacuous          3.02        9.4      128 
+e5ca9b258a9c4af7       CONNECTED       14.18     5846.9       96 1898 load voxels, 1974 anchor voxels
+f96beebd1e204878       vacuous          3.51        9.8      128 
+fc087bcfaa5f4b12       ERROR             –        –      128 
+
+worker jobs checked: 46   CONNECTED: 37   vacuous: 2   REFUSED: 0   unreadable: 7
+
+The 7 unreadable jobs never reach the pre-flight, and none of their causes is one:
+  045f45fa3f7e4447   run: cannot build the declared load case against model "WallMount_ShelfBracket-PLA-33pct.stl": load case anc
+  11d82cfebd7b40c4   job.json: unknown key "project" in the job
+  3e36894043354175   job.json: unknown key "project" in the job
+  8f9d62ea6cb3427a   cannot import model "model.3mf": 3MF import requires lib3mf, which is not available in this build; export th
+  a2bab5dd973f40e5   job.json: unknown key "project" in the job
+  a693aa6aa40c4441   cannot import model "model.3mf": 3MF import requires lib3mf, which is not available in this build; export th
+  fc087bcfaa5f4b12   run: cannot build the declared load case against model "WallMount_ShelfBracket-PLA-33pct.stl": load case anc
+
+  -> 3 x job-schema drift (an "project" key this CLI does not know)
+  -> 2 x model.3mf, and this build has no lib3mf
+  -> 2 x a load-case face id that no longer resolves against its model
+  All PRE-EXISTING and all upstream of the pre-flight.

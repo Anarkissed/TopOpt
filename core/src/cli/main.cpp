@@ -43,10 +43,16 @@ int usage(const char* argv0) {
                "       %s analyze <job.json> [--mesh PATH] [--smooth S] "
                "[--no-min-feature] [--out DIR]\n"
                "              [--materials PATH] [--rules PATH]\n"
+               "       %s preflight <job.json> [--materials PATH]\n"
                "       %s lattice-variant <job.json> [--out DIR] "
                "[--materials PATH] [--rules PATH]\n"
                "       %s --version\n"
                "\n"
+               "preflight\n"
+               "         the PRE-FLIGHT LOAD-PATH CHECK alone, no solve: can the\n"
+               "         load reach the anchors through material the optimizer is\n"
+               "         ALLOWED to place? Exit 0 = yes (or nothing to decide),\n"
+               "         3 = `run` would REFUSE this job, with the reason.\n"
                "run      optimize the job's ladder and export accepted variants\n"
                "         (mode \"minimize_plastic\" only — `run` REFUSES an\n"
                "         \"analyze\"-mode job).\n"
@@ -80,7 +86,7 @@ int usage(const char* argv0) {
                "--no-iteration-csv disables)\n"
                "  snapshots/*.f16    float16 density snapshots (opt-in "
                "--snapshots; ~10.8 MB each at 5.4M voxels)\n",
-               argv0, argv0, argv0);
+               argv0, argv0, argv0, argv0, argv0);
   return 2;
 }
 
@@ -160,6 +166,67 @@ int run_analyze(int argc, char** argv, const std::string& materials_default,
     std::printf("report: %s\n", r.report_path.c_str());
     std::printf("provenance: %s\n", r.provenance_path.c_str());
     std::printf("fields: %s\n", r.fields_path.c_str());
+    return 0;
+  } catch (const std::exception& e) {
+    std::fprintf(stderr, "topopt-cli: %s\n", e.what());
+    return 1;
+  }
+}
+
+// `preflight` subcommand — the PRE-FLIGHT LOAD-PATH CHECK alone (task
+// 2026-08-03-preflight-feasibility-and-divergence). Imports the model, builds
+// the identical setup `run` builds, and answers in milliseconds whether the load
+// can reach the anchors through material the optimizer is allowed to place. NO
+// solve, NO output directory, nothing written.
+//
+// Exit code 0 = a load path exists (or there is none to decide: a self-weight
+// job tags no load faces); 3 = `run` WOULD REFUSE this job, and the actionable
+// reason is printed. 1 = the job could not be read at all.
+int run_preflight(int argc, char** argv, const std::string& materials_default) {
+  if (argc < 3) return usage(argv[0]);
+  const std::string job_path = argv[2];
+  std::string materials_path = materials_default;
+  for (int i = 3; i < argc; ++i) {
+    const std::string arg = argv[i];
+    if (i + 1 >= argc) return usage(argv[0]);
+    if (arg == "--materials") materials_path = argv[++i];
+    else return usage(argv[0]);
+  }
+  try {
+    const topopt::JobDescription job = topopt::load_job_file(job_path);
+    const topopt::MaterialLibrary materials =
+        topopt::load_materials_file(materials_path);
+    const topopt::PreflightJobResult r =
+        topopt::preflight_job(job, dirname_of(job_path), materials);
+    const topopt::LoadPathWalk& w = r.preflight.walk;
+    if (!w.decidable) {
+      std::printf("preflight: VACUOUS — this job tags %zu load and %zu anchor "
+                  "voxels, so there is no load path to decide (a self-weight "
+                  "run declares no load faces). check %.2f ms, total %.1f ms\n",
+                  w.load_voxels, w.anchor_voxels, r.preflight.wall_ms,
+                  r.wall_ms);
+      return 0;
+    }
+    std::printf("preflight: load path %s\n",
+                w.connected ? "CONNECTED" : "SEVERED");
+    std::printf("  %zu load voxels, %zu anchor voxels; %zu of %zu voxels may "
+                "hold material (%zu forbidden)\n",
+                w.load_voxels, w.anchor_voxels, w.printed_voxels,
+                w.printed_voxels + r.preflight.forbidden_voxels,
+                r.preflight.forbidden_voxels);
+    if (w.connected)
+      std::printf("  narrowest separating cross-section: %d voxels (%.4g mm^2) "
+                  "at step %d of %d from the anchor\n"
+                  "  (INFORMATION, not a verdict — connectivity is NECESSARY, "
+                  "not sufficient)\n",
+                  w.narrowest_separator_voxels, w.narrowest_separator_mm2,
+                  w.narrowest_separator_level, w.geodesic_levels);
+    std::printf("  check %.2f ms; import + setup + check %.1f ms\n",
+                r.preflight.wall_ms, r.wall_ms);
+    if (r.would_refuse) {
+      std::fprintf(stderr, "%s\n", r.refusal.c_str());
+      return 3;
+    }
     return 0;
   } catch (const std::exception& e) {
     std::fprintf(stderr, "topopt-cli: %s\n", e.what());
@@ -266,6 +333,10 @@ int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "analyze")
     return run_analyze(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS,
                        TOPOPT_CLI_DEFAULT_RULES);
+  // `preflight` — the load-path connectivity check ALONE, no solve (task
+  // 2026-08-03-preflight-feasibility-and-divergence).
+  if (argc >= 2 && std::string(argv[1]) == "preflight")
+    return run_preflight(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS);
   // `lattice-variant` — lattice a FINISHED variant, no optimization at all.
   if (argc >= 2 && std::string(argv[1]) == "lattice-variant")
     return run_lattice_variant(argc, argv, TOPOPT_CLI_DEFAULT_MATERIALS,

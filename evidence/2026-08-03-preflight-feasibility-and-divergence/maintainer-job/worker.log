@@ -1,0 +1,10 @@
+2026-08-02T05:40:00.697 meta   launch /Users/nadim/dev/TopOpt/TopOpt/core/build/topopt-cli run /Users/nadim/.topopt-worker/7fbc7ee2900e425a/job.json --out /Users/nadim/.topopt-worker/7fbc7ee2900e425a/out
+2026-08-02T05:40:01.058 stderr [loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=1464 status=ok
+2026-08-02T05:40:01.059 stderr [loadcase] warm_start_inherit=1 mode=load-case
+2026-08-02T05:40:01.061 stderr [loadcase] clearance face=-1 kind=bolt voxels_frozen=120 status=ok
+2026-08-02T05:40:01.061 stderr [loadcase] clearance face=-1 kind=bolt voxels_frozen=370 status=ok
+2026-08-02T05:40:01.062 stderr [loadcase] clearance face=-1 kind=bolt voxels_frozen=3710 status=ok
+2026-08-02T05:40:27.883 stdout PROGRESS rung=0 rungs=1 iter=1
+2026-08-02T06:14:46.898 stdout PROGRESS rung=0 rungs=1 iter=2
+2026-08-02T12:32:46.341 stdout PROGRESS rung=0 rungs=1 iter=3
+2026-08-02T16:07:49.930 meta   exit rc=-9

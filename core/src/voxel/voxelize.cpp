@@ -606,69 +606,123 @@ std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
   return thickness;
 }
 
+LoadPathWalk walk_load_path(const VoxelGrid& grid,
+                            const std::vector<double>& density, double iso) {
+  if (density.size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "walk_load_path: density size != grid.voxel_count()");
+  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
+  LoadPathWalk w;
+
+  // Printed = the material that actually exists in this field (the same
+  // non-Empty + density > iso set the mesh, the mass and the stress field use).
+  auto printed_at = [&](std::size_t idx) {
+    return grid.tags[idx] != VoxelTag::Empty && density[idx] > iso;
+  };
+
+  // Endpoint census. Nothing to certify unless BOTH endpoints exist (voxel.hpp:
+  // vacuously true); counting the Load voxels also gives the stopping criterion
+  // below — the walk succeeds once it has reached all of them.
+  for (std::size_t idx = 0; idx < grid.tags.size(); ++idx) {
+    const VoxelTag t = grid.tags[idx];
+    const bool p = printed_at(idx);
+    if (p) ++w.printed_voxels;
+    if (t == VoxelTag::Load) {
+      ++w.load_voxels;
+      if (p) ++w.load_voxels_printed;
+    } else if (t == VoxelTag::Fixture) {
+      ++w.anchor_voxels;
+      if (p) ++w.anchor_voxels_printed;
+    }
+  }
+  if (w.load_voxels == 0 || w.anchor_voxels == 0) {
+    w.decidable = false;
+    w.connected = true;  // vacuous: there is no load path to certify
+    return w;
+  }
+  w.decidable = true;
+
+  // BREADTH-FIRST flood fill from every PRINTED Fixture voxel (an anchor voxel
+  // that was carved away anchors nothing) over 26-connectivity. Breadth-first so
+  // the LEVEL SETS exist: level(v) is the geodesic distance in printed voxels
+  // from the anchor set, and every level strictly between the anchors and the
+  // nearest load is a separator (a step changes the level by at most one). The
+  // reachable SET — hence the verdict — does not depend on the order, so the
+  // switch from the pre-task depth-first walk changes no answer.
+  std::vector<char> seen(grid.voxel_count(), 0);
+  std::vector<std::size_t> frontier, next;
+  auto push = [&](std::size_t idx) {
+    if (seen[idx]) return;
+    seen[idx] = 1;
+    if (grid.tags[idx] == VoxelTag::Load) ++w.reached_load_voxels;
+    ++w.reached_voxels;
+    next.push_back(idx);
+  };
+  for (std::size_t idx = 0; idx < grid.tags.size(); ++idx)
+    if (grid.tags[idx] == VoxelTag::Fixture && printed_at(idx)) push(idx);
+
+  int level = 0;
+  int load_level = -1;             // the level the first Load voxel appeared at
+  std::vector<int> level_size;     // level_size[l] = |level set l|
+  level_size.push_back(static_cast<int>(next.size()));
+  while (!next.empty()) {
+    frontier.swap(next);
+    next.clear();
+    if (load_level < 0)
+      for (const std::size_t idx : frontier)
+        if (grid.tags[idx] == VoxelTag::Load) { load_level = level; break; }
+    for (const std::size_t idx : frontier) {
+      // Decode grid.index() = (k*ny + j)*nx + i.
+      const int i = static_cast<int>(idx % static_cast<std::size_t>(nx));
+      const int j = static_cast<int>((idx / static_cast<std::size_t>(nx)) %
+                                     static_cast<std::size_t>(ny));
+      const int k = static_cast<int>(idx / (static_cast<std::size_t>(nx) *
+                                            static_cast<std::size_t>(ny)));
+      for (int dk = -1; dk <= 1; ++dk)
+        for (int dj = -1; dj <= 1; ++dj)
+          for (int di = -1; di <= 1; ++di) {
+            if (di == 0 && dj == 0 && dk == 0) continue;
+            const int ni = i + di, nj = j + dj, nk = k + dk;
+            if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz)
+              continue;
+            const std::size_t nidx = grid.index(ni, nj, nk);
+            if (!printed_at(nidx)) continue;
+            push(nidx);
+          }
+    }
+    ++level;
+    if (!next.empty()) level_size.push_back(static_cast<int>(next.size()));
+  }
+
+  w.connected = w.reached_load_voxels == w.load_voxels;
+  w.unreached_load_voxels = w.load_voxels - w.reached_load_voxels;
+
+  // MARGINALITY (information, never a refusal): the narrowest level set strictly
+  // between the anchor set and the nearest reached load — an UPPER BOUND on the
+  // minimum cut of the surviving path.
+  if (load_level >= 0) {
+    w.geodesic_levels = load_level;
+    for (int l = 1; l < load_level && l < static_cast<int>(level_size.size()); ++l) {
+      if (w.narrowest_separator_voxels < 0 ||
+          level_size[static_cast<std::size_t>(l)] < w.narrowest_separator_voxels) {
+        w.narrowest_separator_voxels = level_size[static_cast<std::size_t>(l)];
+        w.narrowest_separator_level = l;
+      }
+    }
+    if (w.narrowest_separator_voxels >= 0)
+      w.narrowest_separator_mm2 =
+          static_cast<double>(w.narrowest_separator_voxels) * grid.spacing *
+          grid.spacing;
+  }
+  return w;
+}
+
 bool load_path_connected(const VoxelGrid& grid,
                          const std::vector<double>& density, double iso) {
   if (density.size() != grid.voxel_count())
     throw std::invalid_argument(
         "load_path_connected: density size != grid.voxel_count()");
-  const int nx = grid.nx, ny = grid.ny, nz = grid.nz;
-
-  // Nothing to certify unless BOTH endpoints of a load path exist (voxel.hpp:
-  // vacuously true). Counting the Load voxels also gives the stopping criterion
-  // below: the walk succeeds once it has reached all of them.
-  std::size_t load_voxels = 0;
-  bool any_fixture = false;
-  for (const VoxelTag t : grid.tags) {
-    if (t == VoxelTag::Load) ++load_voxels;
-    else if (t == VoxelTag::Fixture) any_fixture = true;
-  }
-  if (load_voxels == 0 || !any_fixture) return true;
-
-  // Printed = the material that actually exists in this variant (the same
-  // non-Empty + density > iso set the mesh, the mass and the stress field use).
-  auto printed = [&](int i, int j, int k) {
-    return grid.solid(i, j, k) && density[grid.index(i, j, k)] > iso;
-  };
-
-  // Flood-fill from every PRINTED Fixture voxel (an anchor voxel that was carved
-  // away anchors nothing) over 26-connectivity, counting the Load voxels reached.
-  std::vector<char> seen(grid.voxel_count(), 0);
-  std::vector<std::size_t> stack;
-  std::size_t reached_loads = 0;
-  auto push = [&](int i, int j, int k) {
-    const std::size_t idx = grid.index(i, j, k);
-    if (seen[idx]) return;
-    seen[idx] = 1;
-    if (grid.tags[idx] == VoxelTag::Load) ++reached_loads;
-    stack.push_back(idx);
-  };
-  for (int k = 0; k < nz; ++k)
-    for (int j = 0; j < ny; ++j)
-      for (int i = 0; i < nx; ++i)
-        if (grid.tag(i, j, k) == VoxelTag::Fixture && printed(i, j, k))
-          push(i, j, k);
-
-  while (!stack.empty()) {
-    const std::size_t idx = stack.back();
-    stack.pop_back();
-    // Decode grid.index() = (k*ny + j)*nx + i.
-    const int i = static_cast<int>(idx % static_cast<std::size_t>(nx));
-    const int j = static_cast<int>((idx / static_cast<std::size_t>(nx)) %
-                                   static_cast<std::size_t>(ny));
-    const int k = static_cast<int>(idx / (static_cast<std::size_t>(nx) *
-                                          static_cast<std::size_t>(ny)));
-    for (int dk = -1; dk <= 1; ++dk)
-      for (int dj = -1; dj <= 1; ++dj)
-        for (int di = -1; di <= 1; ++di) {
-          if (di == 0 && dj == 0 && dk == 0) continue;
-          const int ni = i + di, nj = j + dj, nk = k + dk;
-          if (ni < 0 || nj < 0 || nk < 0 || ni >= nx || nj >= ny || nk >= nz)
-            continue;
-          if (!printed(ni, nj, nk)) continue;
-          push(ni, nj, nk);
-        }
-  }
-  return reached_loads == load_voxels;
+  return walk_load_path(grid, density, iso).connected;
 }
 
 V3Report check_v3(const VoxelGrid& grid, const std::vector<double>& density,

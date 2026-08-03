@@ -1,0 +1,79 @@
+THE MAINTAINER'S JOB, PRE-FLIGHTED (bar P1)
+===========================================
+
+job:    ~/.topopt-worker/7fbc7ee2900e425a/job.json  (copied to maintainer-job/)
+model:  WallMount_ShelfBracket.stl
+run:    2026-08-02 05:40 -> 16:07, THREE design iterations, killed at 10h27m
+
+    $ ./build/topopt-cli preflight maintainer-job/job.json
+
+    [loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=1464 status=ok
+    [loadcase] clearance face=-1 kind=bolt voxels_frozen=120  status=ok
+    [loadcase] clearance face=-1 kind=bolt voxels_frozen=370  status=ok
+    [loadcase] clearance face=-1 kind=bolt voxels_frozen=3710 status=ok
+    preflight: load path CONNECTED
+      1464 load voxels, 71 anchor voxels; 615200 of 655360 voxels may hold
+      material (40160 forbidden)
+      narrowest separating cross-section: 311 voxels (816.2 mm^2) at step 1
+      of 54 from the anchor
+      (INFORMATION, not a verdict — connectivity is NECESSARY, not sufficient)
+      check 21.20 ms; import + setup + check 321.7 ms
+    exit=0
+
+
+THE ANSWER: THE PATH IS CONNECTED. The 70 mm axial bolt clearance did NOT
+sever it. The circumstantial evidence (3,710 frozen voxels against 120 and
+370 for its two siblings; compliance exploding 1,689x) pointed at a severance
+and there is none.
+
+93.9% of the solved grid is allowed to hold material. The narrowest cut
+separating the anchors from the load is 311 voxels / 816 mm^2, and it sits at
+step 1 of 54 — i.e. immediately around the anchor set, which is what you get
+when the anchor is small (71 voxels), not when a path is pinched.
+
+Cost: 21.2 ms of flood fill on a 655,360-voxel design-box job at resolution
+128. The run it would have preceded spent 10 hours.
+
+
+AND IT COULD NOT HAVE BEEN OTHERWISE — a structural fact, not a coincidence
+---------------------------------------------------------------------------
+A "Keep clear" clearance CANNOT remove part material. `rasterize_clearance`
+(core/src/voxel/clearance.cpp:229) skips every voxel that maps back to a solid
+imported-part voxel:
+
+    // PRECEDENCE: never void PART material. A solved voxel mapping to a
+    // solid part voxel is FrozenSolid/keep-in and wins — skip it.
+
+Measured, on this same job with the same bore opened up until it forbids 80%
+of the whole domain:
+
+    concentric_margin_mm   voxels_frozen   allowed voxels   verdict
+    4.75  (as authored)          3,710          615,200     CONNECTED
+    40                          36,774          615,200     CONNECTED
+    90                          76,918          615,200     CONNECTED
+    60 on ALL THREE bores,      521,363          127,553     CONNECTED
+      axial 200 each                                        (separator 252
+                                                             voxels at step 8)
+
+The allowed-voxel count does not move with the first three because every extra
+frozen voxel is in the design box's EMPTY growth region — none of them is part
+material. The last row does move the marginality reading (311 -> 252 voxels,
+step 1 -> step 8), which is the metric responding correctly; the verdict still
+does not, because the imported bracket itself carries a path from anchor to
+load and no clearance can touch it.
+
+WHAT THIS MEANS FOR THE GUARD'S REACH. On a declared-load-case job the
+pre-flight can only refuse when the IMPORTED PART is itself disconnected
+between its anchor faces and its load faces (a multi-body import, a repair that
+split the mesh), or when the design domain is configured so the two never meet.
+A keep-clear cannot cause it, and neither can a keep_out box (voxel.hpp: "a
+keep-out box never carves into the part regardless of freeze_part"). The guard
+is therefore narrower in reach than the ten-hour run suggested — and it is
+still the right belt to hold, because it is the only thing standing between a
+disconnected import and a ladder that spends hours discovering it, and because
+it costs 21 ms.
+
+THE DIVERGENCE HAS ANOTHER CAUSE, and this task does not invent one
+(BLOCKED-STOP, as the task instructed). Guards 2 and 3 stand on their own and
+are what stop this job: see divergence_guard_probe.txt for their calibration
+and guarded_run.txt for what they do to this job in practice.

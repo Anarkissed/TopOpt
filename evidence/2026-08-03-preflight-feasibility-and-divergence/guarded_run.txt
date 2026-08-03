@@ -1,0 +1,9 @@
+START=1785708602
+[loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=1464 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=120 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=370 status=ok
+[loadcase] clearance face=-1 kind=bolt voxels_frozen=3710 status=ok
+[preflight] load path CONNECTED: 1464 load voxels, 71 anchor voxels, 615200 of 655360 voxels allowed to hold material; narrowest separating cross-section 311 voxels (816.2 mm^2) at 1/54 steps from the anchor; 21.79 ms
+PROGRESS rung=0 rungs=1 iter=1
+PROGRESS rung=0 rungs=1 iter=2

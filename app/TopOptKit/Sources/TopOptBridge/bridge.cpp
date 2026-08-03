@@ -1587,6 +1587,38 @@ OptimizeResult run_minimize_plastic_loadcase(
     setup.options.material_catalog = &lib;
 
     // The last checkpoint before the solve: if the device log stops here, the
+    // ──▶ PRE-FLIGHT LOAD-PATH CONNECTIVITY (task 2026-08-03-preflight-
+    // feasibility-and-divergence, guard 1) — the SAME check topopt-cli runs, at
+    // the same point (domain resolved, clearances frozen, before any solve), and
+    // reporting through the SAME message builder, so a refusal reads identically
+    // on the iPad and on the CLI. Milliseconds; it can only refuse a job whose
+    // load path is PROVABLY severed, never a merely marginal one.
+    {
+      const topopt::SolvedDesignDomain domain = topopt::resolve_design_domain(
+          setup.grid, setup.bcs, setup.options);
+      const topopt::PreflightLoadPath pf =
+          topopt::preflight_load_path(domain, setup.options);
+      if (pf.walk.decidable) {
+        bridge_log(std::string("loadcase: preflight load path ") +
+                   (pf.walk.connected ? "CONNECTED" : "SEVERED") +
+                   " load_voxels=" + std::to_string(pf.walk.load_voxels) +
+                   " anchor_voxels=" + std::to_string(pf.walk.anchor_voxels) +
+                   " unreached=" +
+                   std::to_string(pf.walk.unreached_load_voxels) +
+                   " narrowest_separator_voxels=" +
+                   std::to_string(pf.walk.narrowest_separator_voxels) +
+                   " ms=" + std::to_string(pf.wall_ms));
+      }
+      if (pf.walk.decidable && !pf.walk.connected) {
+        err.ok = false;
+        err.message = topopt::preflight_refusal_report(
+            model, setup.grid, domain, setup.options, lc, pf,
+            lc.anchor_face_ids);
+        bridge_log("loadcase: PRE-FLIGHT REFUSED — " + err.message);
+        return OptimizeResult{};
+      }
+    }
+
     // stall is INSIDE minimize_plastic. Report the grid the solver actually runs
     // on (the expanded domain when a design box is set) plus BC/load counts.
     bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG_Matfree)")

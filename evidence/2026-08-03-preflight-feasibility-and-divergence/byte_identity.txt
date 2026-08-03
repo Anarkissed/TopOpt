@@ -1,0 +1,20 @@
+report.json          6ddb0bfaf9a9e529  6ddb0bfaf9a9e529  SAME
+fields.bin           c579ceedfde311eb  c579ceedfde311eb  SAME
+design.bin           6212aa529ad0449f  6212aa529ad0449f  SAME
+variant_070.stl      346dc6583c1f8b27  346dc6583c1f8b27  SAME
+variant_050.stl      311610807bddf81f  311610807bddf81f  SAME
+loadcase.json        9670f551449031d3  9670f551449031d3  SAME
+
+=== DETERMINISM: the same guarded binary, run twice ===
+report.json          6ddb0bfaf9a9e529  DIFFER
+fields.bin           c579ceedfde311eb  DIFFER
+design.bin           6212aa529ad0449f  DIFFER
+variant_070.stl      346dc6583c1f8b27  DIFFER
+variant_050.stl      311610807bddf81f  DIFFER
+
+=== DETERMINISM: the same guarded binary, run twice ===
+report.json          6ddb0bfaf9a9e529  SAME
+fields.bin           c579ceedfde311eb  SAME
+design.bin           6212aa529ad0449f  SAME
+variant_070.stl      346dc6583c1f8b27  SAME
+variant_050.stl      311610807bddf81f  SAME
