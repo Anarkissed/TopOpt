@@ -420,8 +420,19 @@ final class TopOptKitTests: XCTestCase {
     // The user's declared load case drives the solve (ARCHITECTURE §1 mode (a)),
     // not self-weight: anchor one face, hang a force on another, and the run
     // returns a valid outcome computed under that force. STEP-only (l-bracket).
+    //
+    // It runs with `minimizePlastic: false`, which since task
+    // 2026-08-03-growth-ladder means the GROWTH ladder — so this is now also the
+    // end-to-end proof that the app's OFF path produces a growth ladder through the
+    // bridge: rungs above 1.0, a design box derived because none was drawn, and the
+    // per-variant added-material accounting crossing into Swift. It used to assert
+    // `variants.count == 1` because OFF meant one un-searched {0.9} variant; that
+    // number was never the subject, it was the vehicle for a fast test.
     func testMinimizePlasticLoadCaseUsesDeclaredForces() throws {
-        let res = 20
+        // Coarser than the pre-growth 20: a growth run solves on the DERIVED box's
+        // expanded grid across up to three rungs, and this test is about the forces
+        // reaching the solver, not about resolution.
+        let res = 12
         // Find two distinct faces that actually tag voxels (robust to the STEP's
         // face numbering) — one anchor, one load.
         let mesh = try TopOptKit.importMesh(path: Self.lbracketSTEP)
@@ -439,17 +450,31 @@ final class TopOptKitTests: XCTestCase {
             materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
             resolution: res, anchorFaceIDs: [taggable[0]],
             loadGroups: [.init(faceIDs: [taggable[1]], force: SIMD3(0, 0, -5))],
-            minimizePlastic: false)   // one conservative variant => fast
+            minimizePlastic: false)   // => the GROWTH ladder
 
         XCTAssertGreaterThan(outcome.gridNx, 0)
         XCTAssertGreaterThan(outcome.spacing, 0)
-        // `minimize_plastic` off => a single (conservative) variant, not the ladder.
-        XCTAssertEqual(outcome.variants.count, 1)
+        // `minimize_plastic` OFF => the GROWTH ladder, and the outcome NAMES it
+        // rather than leaving the caller to infer it from a fraction.
+        XCTAssertTrue(outcome.growthLadder,
+                      "minimizePlastic: false runs the growth ladder")
+        XCTAssertFalse(outcome.variants.isEmpty)
+        XCTAssertLessThanOrEqual(outcome.variants.count, 3,
+                                 "the growth ladder has three rungs")
         for v in outcome.variants {
             XCTAssertTrue(v.maxStressMPa.isFinite && v.worstCaseMargin.isFinite)
             XCTAssertGreaterThan(v.maxStressMPa, 0, "the declared force produces real stress")
             XCTAssertFalse(v.meshVertices.isEmpty)
             XCTAssertEqual(v.vonMisesField.count, outcome.gridNx * outcome.gridNy * outcome.gridNz)
+            // Every rung asks for MORE than the part, and says how much it added
+            // and where — the accounting crossed the bridge, not just the geometry.
+            XCTAssertGreaterThan(v.requestedVolumeFraction, 1.0)
+            let a = try XCTUnwrap(v.addedMaterial,
+                                  "a growth rung carries added-material accounting")
+            XCTAssertEqual(a.insidePart + a.outsidePart, a.printedVoxels)
+            XCTAssertGreaterThan(a.outsidePart, 0,
+                                 "material is printed OUTSIDE the imported part")
+            XCTAssertGreaterThan(a.partSolidVoxels, 0)
         }
     }
 
@@ -476,7 +501,13 @@ final class TopOptKitTests: XCTestCase {
                 materialsPath: Self.materialsPath, rulesPath: Self.rulesPath,
                 resolution: res, anchorFaceIDs: [taggable[0]],
                 loadGroups: [.init(faceIDs: [taggable[1]], force: SIMD3(0, 0, -5))],
-                minimizePlastic: false, designBox: box)
+                // REDUCTION, deliberately. Since task 2026-08-03-growth-ladder,
+                // `minimizePlastic: false` DERIVES a design box when none is drawn
+                // (growth needs somewhere to go) — so it can no longer provide the
+                // no-box baseline this test's whole comparison rests on. The
+                // subject here is "a USER-DECLARED box reaches the core and expands
+                // the grid", which is mode-independent; the ladder is not part of it.
+                minimizePlastic: true, designBox: box)
         }
 
         // No box: the run stays on the imported part grid.

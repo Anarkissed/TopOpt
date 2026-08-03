@@ -1228,6 +1228,17 @@ bool mf_mgpcg(const MfHierarchy& H, MfScratch& S, const Vec& b, double tol,
     // Wall-clock safety net (handoff 128): bail to the exact Jacobi-CG fallback
     // if this attempt has run past the guard (see mgpcg for the rationale).
     if (std::chrono::steady_clock::now() > deadline) return false;
+    // THE SOLVE DEADLINE (task 2026-08-03-preflight-feasibility-and-divergence,
+    // guard 3). Disarmed by default. Bail the SAME way the guard above does —
+    // to the exact Jacobi-CG fallback, whose own deadline poll then throws
+    // SolverDeadlineExceeded. Bailing rather than throwing here keeps this
+    // function's "false means fall back" contract intact.
+    {
+      const double sd = fea_detail::mf_solve_deadline();
+      if (sd > 0.0 && (k % fea_detail::kSolveDeadlinePollIters) == 0 &&
+          fea_detail::mf_steady_ms() >= sd)
+        return false;
+    }
     mf_fine_matvec(H, p, S.Ap);           // A p is FP64 (defines the residual)
     // Sample this direction with its already-computed image (no extra matvec).
     recycle.observe(k - 1, p.data(), S.Ap.data());

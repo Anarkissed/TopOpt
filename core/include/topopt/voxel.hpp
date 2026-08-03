@@ -359,4 +359,53 @@ std::vector<double> local_member_thickness_mm(const VoxelGrid& grid,
 bool load_path_connected(const VoxelGrid& grid,
                          const std::vector<double>& density, double iso = 0.5);
 
+// The BELT'S OWN WALK, reported rather than reduced to a bool (task
+// 2026-08-03-preflight-feasibility-and-divergence). `load_path_connected` above is
+// a one-line wrapper over this — there is ONE flood fill in the project and this is
+// it. The extra fields exist because a REFUSAL has to be actionable: "infeasible"
+// is not a message, so the caller needs to be able to say how many load voxels
+// could not be reached and how narrow the surviving path is.
+struct LoadPathWalk {
+  // False when the belt is VACUOUS — the grid has no Load voxels or no Fixture
+  // voxels, so there is no load path to decide. `connected` is then true (the
+  // belt never invents a verdict it cannot measure) and every count below is a
+  // plain fact about the grid rather than a judgement.
+  bool decidable = false;
+  bool connected = true;  // the belt's verdict (== load_path_connected)
+  std::size_t load_voxels = 0;      // Load-tagged
+  std::size_t anchor_voxels = 0;    // Fixture-tagged
+  std::size_t load_voxels_printed = 0;    // ... and above `iso`
+  std::size_t anchor_voxels_printed = 0;  // ... and above `iso`
+  std::size_t printed_voxels = 0;   // the walkable set
+  std::size_t reached_voxels = 0;   // reached from the printed anchors
+  std::size_t reached_load_voxels = 0;
+  std::size_t unreached_load_voxels = 0;  // load_voxels - reached_load_voxels
+  // MARGINALITY — INFORMATION, NEVER A REFUSAL. `geodesic_levels` is the BFS
+  // distance (in 26-connected steps) from the anchor set to the NEAREST reached
+  // Load voxel. `narrowest_separator_voxels` is the smallest BFS LEVEL SET
+  // strictly between the two (level 1 .. geodesic_levels-1), which is a genuine
+  // SEPARATOR — a path can only advance one level per step, so deleting that
+  // level disconnects the anchor from the load. It is therefore an UPPER BOUND on
+  // the true minimum cut, not the cut itself; it says "the path is at most this
+  // wide somewhere", which is exactly the honest form of a narrowness warning.
+  // Both are -1 when the walk did not reach a Load voxel, and
+  // `narrowest_separator_voxels` is additionally -1 when the load is adjacent to
+  // the anchor (geodesic_levels <= 1: there is no intermediate level to measure).
+  int geodesic_levels = -1;
+  int narrowest_separator_voxels = -1;
+  int narrowest_separator_level = -1;
+  // The separator's area at this grid's spacing: voxels * spacing^2 (mm^2), or
+  // -1 alongside a -1 separator.
+  double narrowest_separator_mm2 = -1.0;
+};
+
+// Walk the belt over `density` and REPORT it. Same set, same 26-connected
+// adjacency, same vacuity rule and same verdict as `load_path_connected` — this
+// is the function that computes it. Breadth-first (so the level sets the
+// marginality fields need exist); the reachable SET, and therefore the verdict, is
+// independent of traversal order, so the walk stays deterministic.
+// O(voxel_count). Throws std::invalid_argument on a size mismatch.
+LoadPathWalk walk_load_path(const VoxelGrid& grid,
+                            const std::vector<double>& density, double iso = 0.5);
+
 }  // namespace topopt

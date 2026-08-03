@@ -60,3 +60,121 @@ jobs:
       # registers zero tests (e.g. a misconfigured build) is now a failure.
       - name: Test
         run: ctest --test-dir build --output-on-failure --no-tests=error
+
+  # ══ THE APP PACKAGE (task 2026-08-03-variant-postprocessing-fix, bar C2) ══════
+  #
+  # WHY THIS JOB EXISTS. Until now CI had exactly ONE job, `core-linux`, and it has
+  # never built the app package. FOUR consecutive PRs shipped app-side defects
+  # behind a green check:
+  #   * PR 284 wrote a source-reading test designed to go red the day core dropped
+  #     its blanket design-box lattice refusal. PR 285 dropped that refusal the
+  #     same evening. The test DID go red and nobody saw, so the app spent two PRs
+  #     telling the maintainer "the core refuses this" about a core that certifies
+  #     it happily.
+  #   * PR 288 examined the retention path and reported it "not contradicted"; it
+  #     was contradicted on the maintainer's next run.
+  #   * PR 289 found the same shape again — tests passing against a path the
+  #     maintainer cannot reach.
+  # Every one of those was catchable by compiling and running this package.
+  #
+  # macOS is not optional: TopOptKit links the core xcframework build_core.sh
+  # produces, and the OCCT/STEP path is macOS-only in this repo. The job mirrors
+  # what a developer runs — provision the deps, build the xcframework, run the
+  # package suite.
+  #
+  # KNOWN GAP, stated rather than hidden: the E2E cases in
+  # tools/topopt-worker/e2e/run_e2e.sh are NOT run here. They stand up a live
+  # worker plus a CLI on the same host, and wiring that into a hosted runner is
+  # its own piece of work. They stay a local gate. `swift test` covers everything
+  # that does not need a worker — which is where all four defects above lived.
+  # THE RUNNER MUST CARRY XCODE 26 — this is a hard requirement, not a preference.
+  # `TopOptDesign/LiquidGlass.swift` (PR 109's design overhaul) renders the system
+  # Liquid Glass effect behind `if #available(iOS 26.0, macOS 26.0, *)`, with an
+  # iOS 16 material fallback in the else branch. That guard is a RUNTIME check: the
+  # `Glass` symbol must still exist at COMPILE time, so the macOS 26 SDK is required
+  # to build the package at all, on every OS it later runs on.
+  #
+  # The first cut of this job pinned `macos-14` and died in 27 s with six
+  # `cannot find 'Glass' in scope` errors — a job that could never have compiled
+  # this repository. `macos-26` ships Xcode 26.6 (17F113) as its default, which is
+  # the toolchain the app is developed against.
+  app-macos:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # PINNED, not defaulted. The image carries seven Xcodes and its default moves;
+      # a silent bump to one without the macOS 26 SDK would resurrect the failure
+      # above, and a bump to Xcode 27 would change the compiler under the app
+      # without anyone choosing it. `-version` is echoed so the log always says
+      # which toolchain produced the result.
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+
+      # OCCT + Eigen are what the macOS core slice links.
+      - name: Install OpenCASCADE + Eigen
+        run: brew install opencascade eigen
+
+      # lib3mf is NOT a brew formula; it comes from vcpkg at the SAME tag the
+      # core-linux job pins, via build_lib3mf_macos.sh.
+      #
+      # WITHOUT THIS STEP THE JOB IS A LIE. `build_core.sh` prints
+      # "lib3mf: (none) — macOS slice is 3MF-free" and carries on, and then three
+      # AppModelTests fail outright — they assert a real 3MF parse
+      # (`XCTAssertNil(m.importRefusal, "…refusal means the slice has no lib3mf")`)
+      # rather than skipping. A CI job that builds a DIFFERENT slice from the one
+      # developers build is exactly the blind spot this job was added to close, so
+      # CI provisions lib3mf instead of the tests being taught to tolerate its
+      # absence.
+      #
+      # Cached on the script + the pinned tag: the vcpkg bootstrap and the lib3mf
+      # build are minutes, and neither changes unless one of those two does.
+      - name: Cache vcpkg + lib3mf
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg
+          key: vcpkg-lib3mf-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/scripts/build_lib3mf_macos.sh') }}
+
+      - name: Provision lib3mf (vcpkg, CI-pinned tag)
+        run: ./app/scripts/build_lib3mf_macos.sh
+
+      # The key carries the RUNNER IMAGE, the Xcode AND whether lib3mf is present,
+      # as well as the core sources: a cached xcframework built by a different
+      # toolchain — or without the 3MF slice — is a stale-object-file trap, and this
+      # repo has been bitten by that class of bug before.
+      - name: Cache the core xcframework build
+        uses: actions/cache@v4
+        with:
+          path: app/.build-core
+          key: core-xcframework-${{ runner.os }}-${{ runner.arch }}-xcode26.6-lib3mf-${{ hashFiles('core/src/**', 'core/include/**', 'core/CMakeLists.txt') }}
+
+      # Builds the multi-platform static-library xcframework, vendors it under
+      # app/TopOptKit/vendor and regenerates CoreFingerprint.generated.swift.
+      # Without it the package does not link at all.
+      - name: Build the core xcframework
+        run: ./app/scripts/build_core.sh
+
+      # THE 60 Hz FRAME BUDGET IS NOT EVALUATED HERE, AND THIS LINE IS WHY.
+      #
+      # LatticeSDFProfileTests asserts the raymarched lattice preview stays inside
+      # 16.6 ms. GitHub's hosted macOS runners have NO GPU passthrough — they report
+      # `Apple Paravirtual device`, and on the same commit measure 27.9 ms against
+      # an M2 Pro's 12.5 ms. That number describes the hypervisor, not the shader.
+      #
+      # The budget is NOT weakened and NOT deleted: it is the same hard 16.6 ms on
+      # every developer machine, because the test DEFAULTS TO ASSERTING and only
+      # this explicit `0` turns it off. Delete this line and the budget comes back
+      # on — CI goes red rather than quietly passing, which is the safe direction.
+      # The hardware-INDEPENDENT part of the same test (8→4 mm frame-time ratio
+      # < 4.0, the property that the raymarch does not scale like mesh triangles)
+      # is asserted here as everywhere, and passes.
+      #
+      # Set this to 1 — or drop the line — on any runner with a real GPU.
+      - name: Test the app package
+        env:
+          TOPOPT_ASSERT_FRAME_BUDGET: "0"
+        run: swift test --package-path app/TopOptKit

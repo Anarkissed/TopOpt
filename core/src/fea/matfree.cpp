@@ -855,6 +855,8 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
   const int n = m.ng;
   const double tol = tolerance;
   const int maxIters = (max_iterations > 0) ? max_iterations : 2 * n;
+  // Snapshot the armed deadline once for the whole solve (0 = disarmed).
+  const double deadline = fea_detail::mf_solve_deadline();
 
   // External additive preconditioner (matrix-free GenEO two-level, phase 2). Snapshot
   // the installed hook once for the whole solve; when none is installed (the default)
@@ -980,6 +982,23 @@ void mf_cg_solve(const MatfreeReduced& m, double tolerance, int max_iterations,
 
   int i = 0;
   while (i < maxIters) {
+    // THE SOLVE DEADLINE (task 2026-08-03-preflight-feasibility-and-divergence,
+    // guard 3). Disarmed by default: `deadline <= 0` skips the clock read
+    // entirely, so an un-armed solve is byte-identical and pays nothing. Armed,
+    // one steady-clock read every kSolveDeadlinePollIters applies is
+    // unmeasurable next to the applies themselves — and it is what turns a
+    // 6.3-hour iteration into a 44-minute one.
+    if (deadline > 0.0 && (i % kSolveDeadlinePollIters) == 0 &&
+        mf_steady_ms() >= deadline) {
+      error_out = std::sqrt(residualNorm2 / rhsNorm2);
+      iters_out = i;
+      converged_out = false;
+      write_times();
+      throw SolverDeadlineExceeded(
+          "mf_cg_solve: the solve deadline passed before CG reached the "
+          "requested tolerance (the iteration blew its time budget)",
+          i, error_out);
+    }
     m.apply_kgg(p, tmp);  // tmp = K p
     // Hand CG's own direction and its ALREADY-computed operator image to the
     // recycler's decimating sample. No extra matvec; no-op off a harvest solve.
@@ -1241,6 +1260,17 @@ bool fea_set_matfree_galerkin_block_cache(bool enable) {
 bool fea_set_matfree_mixed_precision(bool enable) {
   return fea_detail::mf_set_mixed_precision(enable);
 }
+
+// THE SOLVE DEADLINE (task 2026-08-03-preflight-feasibility-and-divergence,
+// guard 3). Disarmed by default; see fea.hpp for the contract and the honest
+// determinism statement.
+double fea_set_solve_deadline_ms(double absolute_steady_ms) {
+  double& d = fea_detail::mf_solve_deadline();
+  const double prev = d;
+  d = absolute_steady_ms > 0.0 ? absolute_steady_ms : 0.0;
+  return prev;
+}
+double fea_solve_deadline_ms() { return fea_detail::mf_solve_deadline(); }
 
 // Handoff 133 — Krylov recycling / deflation. Opt-in, default OFF; see fea.hpp
 // for the contract, the exactness argument and the determinism argument.

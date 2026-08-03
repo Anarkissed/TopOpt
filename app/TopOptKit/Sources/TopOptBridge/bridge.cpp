@@ -290,6 +290,23 @@ OptimizeVariant to_optimize_variant(const topopt::MinimizePlasticVariant& v,
   // the run did not arm the diagnosis.
   if (v.report.diagnosis.evaluated)
     topopt::emit_gate_diagnosis(ov.diagnosis_json, v.report.diagnosis, "");
+  // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder) — the core's
+  // own AddedMaterialReport, carried across verbatim. Unevaluated (all zeros) on
+  // every reduction run, so nothing about the existing results screen moves.
+  {
+    const topopt::AddedMaterialReport& a = v.report.added_material;
+    ov.added_material_evaluated = a.evaluated;
+    ov.added_printed_voxels = a.printed_voxels;
+    ov.added_inside_part = a.inside_part;
+    ov.added_outside_part = a.outside_part;
+    ov.added_part_solid_voxels = a.part_solid_voxels;
+    ov.added_outside_fraction = a.outside_fraction;
+    ov.added_outside_volume_mm3 = a.outside_volume_mm3;
+    ov.added_net_volume_mm3 = a.net_added_volume_mm3;
+    ov.added_outside_mass_grams = a.outside_mass_grams;
+    ov.added_net_mass_grams = a.net_added_mass_grams;
+    ov.growth_target_saturated = v.report.growth_target_saturated;
+  }
   ov.max_stress_mpa = v.report.max_stress_mpa;
   ov.max_interlayer_tension_mpa = v.report.max_interlayer_tension_mpa;
   ov.in_plane_margin = v.report.margin.in_plane;
@@ -352,6 +369,9 @@ OptimizeResult to_optimize_result(const topopt::MinimizePlasticResult& mp,
                                   const topopt::VoxelGrid& grid) {
   OptimizeResult result;
   result.stopped_on_margin = mp.stopped_on_margin;
+  // WHICH LADDER RAN (task 2026-08-03-growth-ladder) — the core's own flag, not an
+  // inference from the rung numbers, so the results screen can NAME the mode.
+  result.growth_ladder = mp.growth_ladder;
   result.cancelled = mp.cancelled;
   result.accepted_count = static_cast<int32_t>(mp.report.variants.size());
   set_grid_metadata(result, grid);
@@ -381,10 +401,20 @@ void set_variant_stream(topopt::MinimizePlasticOptions& opts,
                         const topopt::VoxelGrid& grid, VariantFn variant_fn,
                         void* variant_ctx) {
   if (variant_fn == nullptr) return;
+  // The second parameter (every rung so far) is unused here: this callback
+  // packages the ONE variant that just completed and hands it across immediately.
   opts.on_variant = [variant_fn, variant_ctx,
-                     &grid](const topopt::MinimizePlasticVariant& v) {
+                     &grid](const topopt::MinimizePlasticVariant& v,
+                            const std::vector<topopt::MinimizePlasticVariant>&) {
     OptimizeResult one;
     one.accepted_count = 1;
+    // A streamed variant carries the ladder mode too — a live results view must
+    // not read a growth rung's numbers as reduction numbers while the run is
+    // still going (task 2026-08-03-growth-ladder). Derived from the rung itself,
+    // which is all this callback has, and equal to mp.growth_ladder by
+    // construction (the ladder is all-growth or all-reduction; minimize_plastic
+    // refuses a mixed one).
+    one.growth_ladder = v.requested_volume_fraction > 1.0;
     set_grid_metadata(one, grid);
     // `grid` is the solved grid (minimize_plastic_solved_grid, captured by ref):
     // the same grid the streamed variant's physical_density is indexed to.
@@ -1587,6 +1617,38 @@ OptimizeResult run_minimize_plastic_loadcase(
     setup.options.material_catalog = &lib;
 
     // The last checkpoint before the solve: if the device log stops here, the
+    // ──▶ PRE-FLIGHT LOAD-PATH CONNECTIVITY (task 2026-08-03-preflight-
+    // feasibility-and-divergence, guard 1) — the SAME check topopt-cli runs, at
+    // the same point (domain resolved, clearances frozen, before any solve), and
+    // reporting through the SAME message builder, so a refusal reads identically
+    // on the iPad and on the CLI. Milliseconds; it can only refuse a job whose
+    // load path is PROVABLY severed, never a merely marginal one.
+    {
+      const topopt::SolvedDesignDomain domain = topopt::resolve_design_domain(
+          setup.grid, setup.bcs, setup.options);
+      const topopt::PreflightLoadPath pf =
+          topopt::preflight_load_path(domain, setup.options);
+      if (pf.walk.decidable) {
+        bridge_log(std::string("loadcase: preflight load path ") +
+                   (pf.walk.connected ? "CONNECTED" : "SEVERED") +
+                   " load_voxels=" + std::to_string(pf.walk.load_voxels) +
+                   " anchor_voxels=" + std::to_string(pf.walk.anchor_voxels) +
+                   " unreached=" +
+                   std::to_string(pf.walk.unreached_load_voxels) +
+                   " narrowest_separator_voxels=" +
+                   std::to_string(pf.walk.narrowest_separator_voxels) +
+                   " ms=" + std::to_string(pf.wall_ms));
+      }
+      if (pf.walk.decidable && !pf.walk.connected) {
+        err.ok = false;
+        err.message = topopt::preflight_refusal_report(
+            model, setup.grid, domain, setup.options, lc, pf,
+            lc.anchor_face_ids);
+        bridge_log("loadcase: PRE-FLIGHT REFUSED — " + err.message);
+        return OptimizeResult{};
+      }
+    }
+
     // stall is INSIDE minimize_plastic. Report the grid the solver actually runs
     // on (the expanded domain when a design box is set) plus BC/load counts.
     bridge_log(std::string("loadcase: entering minimize_plastic (solver=MultigridCG_Matfree)")

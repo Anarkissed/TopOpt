@@ -974,6 +974,21 @@ if(Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
   add_test(NAME designbox_reduction COMMAND test_designbox_reduction)
 
+  # "MINIMIZE PLASTIC" OFF IS A GROWTH LADDER (task 2026-08-03-growth-ladder).
+  # Pins that the recommendation is the SMALLEST ADDITION that passes (and the TOP
+  # rung when only it passes, and NOTHING when none does), that every growth rung
+  # prints more mass than the imported part with material genuinely outside its
+  # envelope, that growth with nowhere to go is refused legibly, that the derived
+  # box is minimal/deterministic/sufficient, that a growth document validates on
+  # the growth scale while a reduction document is unchanged, and that a repeat run
+  # is bit-identical. Drives minimize_plastic, so Eigen-gated like the other
+  # optimizer gates; the real settings rule table is injected.
+  add_executable(test_growth_ladder tests/validation/test_growth_ladder.cpp)
+  target_link_libraries(test_growth_ladder PRIVATE topopt)
+  target_compile_definitions(test_growth_ladder PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+  add_test(NAME growth_ladder COMMAND test_growth_ladder)
+
   # Savings % reporting-basis regression (handoff 094): the displayed
   # `savings = 1 - achieved` must be part-relative (printed_voxels/part_solid) on
   # BOTH the no-box and box paths, so the % and the voxel-count mass share one basis
@@ -1163,6 +1178,35 @@ if(Eigen3_FOUND)
     INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible")
   add_test(NAME rung_infeasible COMMAND test_rung_infeasible)
 
+  # Task 2026-08-03-preflight-feasibility-and-divergence — THE THREE GUARDS:
+  # pre-flight load-path connectivity, the immediate divergence trip and the
+  # iteration time budget, each proven against the REAL recorded trajectory it
+  # exists for AND against the live forming transient it must not kill. Drives
+  # minimize_plastic, so Eigen-gated; the real settings table and both recorded
+  # CSV fixtures are injected by absolute path.
+  add_executable(test_preflight_divergence
+    tests/validation/test_preflight_divergence.cpp)
+  target_link_libraries(test_preflight_divergence PRIVATE topopt)
+  target_compile_definitions(test_preflight_divergence PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible"
+    DIVERGENCE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/divergence")
+  add_test(NAME preflight_divergence COMMAND test_preflight_divergence)
+
+  # CALIBRATION harness for the two divergence guards (task 2026-08-03-preflight-
+  # feasibility-and-divergence): prints the per-iteration LEVEL ratio, STEP ratio,
+  # CG count and wall ratio of the recorded corpses AND of the live forming
+  # transient, which is how the immediate-trip / time-guard constants were chosen
+  # rather than guessed. A harness, not a ctest.
+  #   cmake --build build --target divergence_guard_probe
+  #   ./build/divergence_guard_probe [extra-iterations.csv ...]
+  add_executable(divergence_guard_probe EXCLUDE_FROM_ALL
+    tests/harness/divergence_guard_probe.cpp)
+  target_link_libraries(divergence_guard_probe PRIVATE topopt)
+  target_compile_definitions(divergence_guard_probe PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    INFEASIBLE_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/infeasible")
+
   # Handoff 2026-07-27-nonconvergence-rejection — a non-converging linear solve
   # rejects the RUNG, not the run. Drives minimize_plastic / analyze_fixed_design
   # (Eigen-gated); the real settings rule table is injected, and NONCONV_OUT_DIR is
@@ -1260,6 +1304,46 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(smooth_brush_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
     MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+
+  # THE GROWTH LADDER, MEASURED (task 2026-08-03-growth-ladder). Runs the growth
+  # ladder on the motivating run's CONDITION (PLA, 35% infill, margin_required
+  # 1.5) and prints the full gate table per rung, with the anchor pad on and off,
+  # plus the bit-identity negative control. A harness, not a ctest — it writes
+  # evidence for G2 / G4 / G5 / G6. Needs Eigen (the cert solves) and the real
+  # settings rule table.
+  #   cmake --build build --target growth_ladder_gate
+  #   ./build/growth_ladder_gate [evidence_dir]
+  add_executable(growth_ladder_gate EXCLUDE_FROM_ALL
+    tests/harness/growth_ladder_gate.cpp)
+  target_link_libraries(growth_ladder_gate PRIVATE topopt)
+  target_compile_definitions(growth_ladder_gate PRIVATE
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+
+  # Item 8 (task 2026-08-04-protect-freeze-vs-solidity): SHOULD THE CELLS-PER-
+  # MEMBER FLOOR BE STRESS-CONDITIONAL? Lattices a genuinely unloaded region
+  # BELOW the floor and measures the certified-margin movement (8a) and the peak
+  # stress AND ITS ARGMAX (8b) against the same design with that region solid.
+  # Prints a table; asserts nothing — a measured NO is a valid outcome.
+  #   cmake --build build --target subfloor_lattice_probe
+  #   ./build/subfloor_lattice_probe
+  add_executable(subfloor_lattice_probe EXCLUDE_FROM_ALL
+    tests/harness/subfloor_lattice_probe.cpp)
+  target_link_libraries(subfloor_lattice_probe PRIVATE topopt)
+  target_compile_definitions(subfloor_lattice_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+
+  # Item 9 (same task): FREEZE + DESIGN BOX — DOES THE OPTIMIZER BUTTRESS?
+  # Freezes a thin wall, enables a design box beside it, and reports whether
+  # material is placed against the wall and whether the wall's own peak stress
+  # falls. Prints a table; asserts nothing.
+  #   cmake --build build --target frozen_buttress_probe
+  #   ./build/frozen_buttress_probe
+  add_executable(frozen_buttress_probe EXCLUDE_FROM_ALL
+    tests/harness/frozen_buttress_probe.cpp)
+  target_link_libraries(frozen_buttress_probe PRIVATE topopt)
+  target_compile_definitions(frozen_buttress_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
 
   # S1 (handoff 2026-08-03-smoothing-page-round2): NAME the two meshes the
   # smoothing page confused and measure the 6x. Prints a table, writes evidence.
@@ -1368,6 +1452,22 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     target_compile_definitions(test_cli PRIVATE TOPOPT_HAVE_3MF)
   endif()
   add_test(NAME cli_demo COMMAND test_cli)
+
+  # Task 2026-08-03-variant-postprocessing-fix (defect 1): design.bin is
+  # published AFTER EVERY VARIANT, not once at the end of the ladder. Runs the
+  # real topopt-cli as a subprocess and reads the container back at the moment
+  # each VARIANT line arrives — the way the LAN worker's /files route sees it —
+  # then proves the finished run's artifacts are byte-identical to a control run.
+  add_executable(test_design_stream tests/validation/test_design_stream.cpp)
+  target_link_libraries(test_design_stream PRIVATE topopt)
+  target_compile_definitions(test_design_stream PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_dependencies(test_design_stream topopt_cli)
+  add_test(NAME design_stream COMMAND test_design_stream)
 
   # STEP-0 parity gate (handoff 093): proves configure_production_options +
   # build_production_loadcase — the ONE seam the CLI and the iPad app both route
@@ -1479,6 +1579,23 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_hookup COMMAND test_lattice_hookup)
+
+  # Task 2026-08-04-protect-freeze-vs-solidity: PROTECT IS A FREEZE, NOT A
+  # SOLIDITY DECLARATION. Drives run_job on the demo l-bracket with a declared
+  # load case + a face protection + lattice ROLE regions over the protected face,
+  # and asserts both directions (include => latticed, exclude => solid), the
+  # frozen-scoped certified-equals-exported audit, that the warning fires on a
+  # clearance void and NOT on frozen material, and the pre-flight region forecast.
+  add_executable(test_protect_freeze_vs_solidity
+    tests/validation/test_protect_freeze_vs_solidity.cpp)
+  target_link_libraries(test_protect_freeze_vs_solidity PRIVATE topopt)
+  target_compile_definitions(test_protect_freeze_vs_solidity PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME protect_freeze_vs_solidity
+    COMMAND test_protect_freeze_vs_solidity)
 
   # Task 2026-08-02-lattice-a-variant: LATTICE A FINISHED VARIANT — the job that
   # did not exist. Drives run_job (which now stores each variant's design) and

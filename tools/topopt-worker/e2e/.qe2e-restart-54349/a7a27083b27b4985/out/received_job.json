@@ -1,0 +1,1 @@
+{"model": "m.step", "material": "PLA", "resolution": 32, "mode": "minimize_plastic", "loads": {"anchor_face_ids": [1]}}

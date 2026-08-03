@@ -192,6 +192,17 @@ struct JobLattice {
   //                closed); certification unchanged from "shell".
   // A non-"shell" finish requires skin == "diagrid" (the skin IS the finish).
   std::string outer_finish = "shell";
+
+  // THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix, bar F3).
+  // true => `lattice_variant_job` runs the grading law and the role accounting on
+  // the stored design, writes <out_dir>/lattice_forecast.json, and RETURNS — no
+  // certification solve, no mesh, no receipt. It is the same law on the same
+  // inputs the real run would use, so what it reports is what the run would do:
+  // which voxels would be latticed, which would stay solid AND WHY (per reason),
+  // how many include-region voxels sit on void, whether the boundary choice can
+  // emit at all, and EVALUATED counterfactuals for the remedies worth offering.
+  // Default false => every existing job is byte-identical.
+  bool forecast_only = false;
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the
@@ -564,7 +575,44 @@ struct RunJobResult {
   std::string run_info_path;           // <out_dir>/run_info.json (CLI path)
   std::string iteration_csv_path;      // <out_dir>/iterations.csv (when enabled)
   std::size_t snapshot_count = 0;      // density snapshots written (when enabled)
+  // Task 2026-08-03-preflight-feasibility-and-divergence, guard 1 — what the
+  // PRE-FLIGHT load-path check found before any solve ran. `ran` is false only
+  // for a caller that never reached it. A run that REFUSED never returns a
+  // result at all (it throws JobError with the actionable message), so on a
+  // returned result this always reads CONNECTED or VACUOUS — the value is the
+  // narrowest-cross-section reading and the measured cost (bar P4/P6).
+  PreflightLoadPath preflight;
 };
+
+// The result of PRE-FLIGHTING a job without solving it (task 2026-08-03-
+// preflight-feasibility-and-divergence).
+struct PreflightJobResult {
+  StepModel model;
+  std::vector<int> fixture_face_ids;
+  PreflightLoadPath preflight;
+  // The actionable refusal text — non-empty exactly when the load path is
+  // DECIDABLE and NOT CONNECTED, i.e. exactly when `run` would refuse this job.
+  // It is the same string, from the same builder (preflight_refusal_report), so
+  // "what would run say?" is answered without running.
+  std::string refusal;
+  bool would_refuse = false;
+  double wall_ms = 0.0;  // import + setup + check, end to end
+};
+
+// PRE-FLIGHT a job WITHOUT SOLVING IT: import the model, build the identical
+// setup `run_job` builds (build_job_setup — the same call, not a second
+// derivation), resolve the design domain, and run the load-path connectivity
+// check. No solve, no output directory, nothing written.
+//
+// It exists for two reasons. A user (or the app) can ask "will this job even
+// have a load path?" for the cost of a voxelization instead of a ladder; and a
+// SWEEP over archived jobs can prove the guard refuses none of them, which is
+// the no-false-refusals bar this feature had to clear before shipping.
+//
+// Throws JobError on the same import / mode / material conditions run_job does.
+PreflightJobResult preflight_job(const JobDescription& job,
+                                 const std::string& job_dir,
+                                 const MaterialLibrary& materials);
 
 // Run one job end-to-end (§5): import the STEP model (relative `job.model`
 // resolves against `job_dir`), select + tag the fixture faces geometrically,
@@ -771,6 +819,10 @@ struct LatticeVariantJobResult {
   std::string loadcase_receipt_json;
   std::string run_info_path;            // <out_dir>/run_info.json (grading record)
   std::string fields_path;              // <out_dir>/fields.bin
+  // FORECAST-ONLY runs (job.lattice.forecast_only): the only two fields set, and
+  // every field above is left at its default because no solve ran.
+  std::string forecast_path;            // <out_dir>/lattice_forecast.json
+  std::string forecast_json;
 };
 
 // Lattice the variant named by `job.variant`. Throws JobError for a bad

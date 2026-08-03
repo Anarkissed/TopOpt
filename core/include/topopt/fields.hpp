@@ -107,4 +107,24 @@ int write_fields_file(const std::string& path,
                       const VoxelGrid& solved_grid,
                       bool accepted_only = true);
 
+// The same writer over a BORROWED variant list, so a run can publish the fields
+// of the rungs it has produced SO FAR (task 2026-08-03-variant-postprocessing-
+// concurrency). A four-rung ladder takes hours; rung 1's von Mises field is what
+// the lattice page's AUTO density grades from and what the results overlays draw,
+// and it existed in memory the moment rung 1 finished — while the file that
+// carries it was not written until rung 4 was done, or never, if the run died.
+//
+// Pointers, not copies: a per-rung flush costs no extra memory, where at 128³ a
+// copy would have been ~33 MB of field per rung. As in design_store.hpp, THE
+// POINTERS MUST NOT OUTLIVE THE CALL — run_job builds the list inside the
+// `on_variant` callback from the live container that callback is handed, and
+// drops it on return. Nothing here keeps them alive, and nothing should.
+//
+// Publication is ATOMIC (a rename), because the LAN worker now serves this file
+// while a later rung is rewriting it.
+int write_fields_file(const std::string& path,
+                      const std::vector<const MinimizePlasticVariant*>& variants,
+                      const VoxelGrid& solved_grid,
+                      bool accepted_only = true);
+
 }  // namespace topopt

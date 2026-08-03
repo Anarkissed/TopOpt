@@ -149,6 +149,27 @@ const char* solver_name(SolverKind k) {
 // (options after configure_production_options / build_production_loadcase, plus
 // the live matrix-free thread-global state) so run_info.json is provable, not
 // inferred. Never again reconstruct "which build ran this" (the 113 lesson).
+// Copy the PRE-FLIGHT measurement into a RunInfo (bar P6). Separate from
+// build_run_info because the pre-flight runs LATER than the config echo — and
+// because the REFUSAL path has to write this same block before it throws.
+void fill_run_info_preflight(RunInfo& info, const PreflightLoadPath& pf) {
+  info.preflight_ran = pf.ran;
+  info.preflight_decidable = pf.walk.decidable;
+  info.preflight_connected = pf.walk.connected;
+  info.preflight_ms = pf.wall_ms;
+  info.preflight_load_voxels = static_cast<long long>(pf.walk.load_voxels);
+  info.preflight_anchor_voxels = static_cast<long long>(pf.walk.anchor_voxels);
+  info.preflight_unreached_load_voxels =
+      static_cast<long long>(pf.walk.unreached_load_voxels);
+  info.preflight_allowed_voxels = static_cast<long long>(pf.walk.printed_voxels);
+  info.preflight_forbidden_voxels =
+      static_cast<long long>(pf.forbidden_voxels);
+  info.preflight_narrowest_separator_voxels =
+      pf.walk.narrowest_separator_voxels;
+  info.preflight_narrowest_separator_mm2 = pf.walk.narrowest_separator_mm2;
+  info.preflight_geodesic_levels = pf.walk.geodesic_levels;
+}
+
 RunInfo build_run_info(const JobDescription& job,
                        const MinimizePlasticOptions& options,
                        const RunObservability& obs) {
@@ -206,6 +227,16 @@ RunInfo build_run_info(const JobDescription& job,
   info.infeasible_cg_blowup = options.simp.infeasible_cg_blowup;
   info.infeasible_flat_tol = options.simp.infeasible_flat_tol;
   info.infeasible_window = options.simp.infeasible_window;
+  // Task 2026-08-03-preflight-feasibility-and-divergence — the armed thresholds
+  // of the two DIVERGENCE guards (config echo). Per-rung outcomes are filled
+  // post-run in the finalize below; the pre-flight block is filled BEFORE the
+  // solve, at the call site, because that is the one part of run_info a run
+  // which never finishes still has an honest answer for.
+  info.infeasible_immediate_ratio = options.simp.infeasible_immediate_ratio;
+  info.infeasible_immediate_wall_ratio =
+      options.simp.infeasible_immediate_wall_ratio;
+  info.iteration_time_ratio = options.simp.iteration_time_ratio;
+  info.iteration_time_floor_ms = options.simp.iteration_time_floor_ms;
   // active-domain phase 1 — the REQUESTED band (config echo). The per-rung
   // latch outcome is filled post-run (finalize below), like cg_multigrid.
   info.active_domain_band = options.simp.active_domain_band;
@@ -234,6 +265,12 @@ RunInfo build_run_info(const JobDescription& job,
   info.wall_thickness_mm = knockdown_spec_for(options).wall_thickness_mm;
   info.has_design_box = options.design_box.has_value();
   info.ladder = options.volume_fraction_ladder;
+  // Task 2026-08-03-growth-ladder — derived from the rungs themselves (a growth
+  // ladder is one whose rungs exceed 1.0), so the name and the numbers beside it
+  // cannot drift apart.
+  info.ladder_mode = (!info.ladder.empty() && info.ladder.front() > 1.0)
+                         ? "growth"
+                         : "reduction";
   info.created_wall_ms = wall_clock_ms();
   info.iteration_csv = obs.iteration_csv;
   info.density_snapshots = obs.density_snapshots;
@@ -977,6 +1014,80 @@ struct LatticeRoleReceipt {
   std::size_t exclude_regions = 0;  // resolved (valid) exclude primitives
   long long include_void_voxels = 0;  // include-region voxels the OPTIMIZER left
                                       // void — the H1a no-op, reported not errored
+  // ── WHY the void (task 2026-08-04-protect-freeze-vs-solidity, item 5). The
+  // aggregate above sums two situations whose meanings are opposite:
+  //
+  //   BY CLEARANCE — the voxel is void because a declared "Keep clear" forbids
+  //     material there. Lattice on a clearance void is the genuine no-op: the
+  //     user asked to lattice a hole. NOTHING can put material there, so this is
+  //     what a warning should fire on, and it does (see the emission below).
+  //   BY THE OPTIMIZER — the voxel is void because the optimizer removed it at
+  //     this rung. That is not a conflict at all: a lighter rung carries less
+  //     material, and the same include region may be full at the next one.
+  //
+  // Split so the receipt can say which, and so the warning cannot be aimed at
+  // the wrong one.
+  long long include_void_by_clearance = 0;
+  long long include_void_by_optimizer = 0;
+};
+
+// ── FROZEN MATERIAL vs LATTICE (task 2026-08-04-protect-freeze-vs-solidity)
+//
+// "Frozen" is a constraint on the OPTIMIZER — the density of these voxels may not
+// change. It is NOT a statement that the material is solid. What the material IS
+// — solid or latticed — is decided by the lattice page's include / exclude roles,
+// exactly as it is for any other retained material, and this receipt is the proof
+// that it was: for THIS variant, how much of the run's frozen set the lattice
+// left solid and how much it latticed, plus the audit that the file and the
+// certificate agree over the frozen voxels specifically.
+//
+// The frozen set is `effective_design_mask` (simp.hpp) — the set the loop itself
+// held frozen, so this cannot be a second opinion about it. It includes the
+// face-protection collars, the anchor/load pad, and (under a design box) the
+// imported part where the box path freezes it.
+//
+// Emitted only when the run HAS frozen material and a lattice, so a run with
+// neither writes byte-identical files.
+struct LatticeFrozenReceipt {
+  bool present = false;
+  long long frozen_printed = 0;   // printed voxels the effective mask pins solid
+  long long frozen_latticed = 0;  //   ... the certification mask lattices
+  long long frozen_kept_solid = 0;  //   ... certified + exported SOLID
+  // Of `frozen_printed`, how many sit inside a declared INCLUDE region (0 when
+  // the job declares none — then the whole part is the include set by default),
+  // how many inside an EXCLUDE region, and — the item-4 bar — how many of THOSE
+  // were latticed anyway. `frozen_in_exclude_latticed` must be 0: an exclude
+  // region says "retained AND solid", and it says it about frozen material
+  // exactly as it does about any other retained material.
+  long long frozen_in_include = 0;
+  long long frozen_in_exclude = 0;
+  long long frozen_in_exclude_latticed = 0;
+  // ── THE AUDIT over the frozen voxels (bar 3). Same shape as the design-box
+  // audit below — the cell set the certification mask implies over FROZEN
+  // voxels, and how many of those cells the generator's own activation test
+  // rejects (must be 0: a certified-latticed voxel whose cell was never emitted
+  // is a certificate describing geometry the file does not contain). Plus the
+  // both-ways count: frozen voxels that got a strut AND companion solid (0).
+  long long frozen_cells_certified = 0;
+  long long frozen_cells_not_emitted = 0;
+  // Frozen voxels that are companion solid AND sit inside an emitted lattice
+  // cell. On the ROLE path this is NOT zero and MUST NOT be asserted to be —
+  // it is the deliberate bonding overlap: roles act on activation and on the
+  // certification mask but are deliberately kept OUT of the strut clip
+  // (lattice_boundary.hpp), because clipping a strut short of an exclude region
+  // would leave the lattice/solid interface unbonded. A cell straddling a role
+  // boundary therefore writes struts across it, into material the certificate
+  // calls solid — MORE material than certified, the conservative direction.
+  //
+  // What must be zero is the count below, which is the actual divergence.
+  long long frozen_voxels_strut_and_solid = 0;
+  // Of those, the ones NOT explained by a straddling cell: the voxel is
+  // companion solid, its cell was emitted, and that cell owns NO certified-
+  // latticed voxel at all. Then the cell is not bonding a lattice to a solid
+  // interface — it is writing struts into a region the certificate says is
+  // entirely solid, with no lattice there to bond to. That IS a certified-
+  // object-is-not-the-exported-object divergence and it must be 0.
+  long long frozen_strut_and_solid_unexplained = 0;
 };
 // ── ADDED MATERIAL under a design box (task 2026-08-03-design-box-recertification)
 //
@@ -1077,7 +1188,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      double cell_mm,
                                      const LatticeRoleReceipt& roles,
                                      const LatticeGradedReceipt& graded,
-                                     const LatticeAddedMaterialReceipt& added) {
+                                     const LatticeAddedMaterialReceipt& added,
+                                     const LatticeFrozenReceipt& frozen) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -1140,12 +1252,71 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     s += "    \"exclude\": " + std::to_string(roles.exclude_regions) + ",\n";
     s += "    \"include_void_voxels\": " +
          std::to_string(roles.include_void_voxels) + ",\n";
+    s += "    \"include_void_by_clearance\": " +
+         std::to_string(roles.include_void_by_clearance) + ",\n";
+    s += "    \"include_void_by_optimizer\": " +
+         std::to_string(roles.include_void_by_optimizer) + ",\n";
     s += "    \"include_void_note\": \"include-region voxels where the optimizer "
          "left no material — a lattice cannot conjure material there, so the "
-         "include is a NO-OP on them (reported, not an error)\",\n";
+         "include is a NO-OP on them (reported, not an error). Split by CAUSE: "
+         "\\\"by_clearance\\\" is a declared keep-clear, where nothing can ever "
+         "put material and the include is unsatisfiable; \\\"by_optimizer\\\" is "
+         "material this rung did not need, which a heavier rung may carry\",\n";
     s += "    \"precedence\": \"clearance beats include and exclude (no material "
          "to lattice); exclude beats include (kept solid); solid-kept material "
          "is certified SOLID and exported as the solid companion body\"\n";
+    s += "  },\n";
+  }
+  // FROZEN MATERIAL (task 2026-08-04-protect-freeze-vs-solidity). What the run
+  // held frozen, and what the lattice page decided that frozen material IS.
+  // Emitted only when the run has frozen material AND a lattice, so a job with
+  // neither writes byte-identical bytes.
+  // *** EVERY KEY IN THIS BLOCK IS PREFIXED `frozen_`, DELIBERATELY. *** The
+  // receipt is read by tests (and by front-ends) with a SUBSTRING search for
+  // `"key":`, so a bare `printed_voxels` here would shadow `added_material`'s
+  // `printed_voxels` further down and silently answer a different question. It
+  // did exactly that once, and `designbox_lattice_recert` caught it — the block
+  // is prefixed so it cannot happen again to a key added later.
+  if (frozen.present) {
+    s += "  \"frozen_material\": {\n";
+    s += "    \"frozen_printed_voxels\": " +
+         std::to_string(frozen.frozen_printed) + ",\n";
+    s += "    \"frozen_latticed\": " + std::to_string(frozen.frozen_latticed) +
+         ",\n";
+    s += "    \"frozen_kept_solid\": " +
+         std::to_string(frozen.frozen_kept_solid) + ",\n";
+    s += "    \"frozen_in_include_region\": " +
+         std::to_string(frozen.frozen_in_include) + ",\n";
+    s += "    \"frozen_in_exclude_region\": " +
+         std::to_string(frozen.frozen_in_exclude) + ",\n";
+    s += "    \"frozen_in_exclude_region_latticed\": " +
+         std::to_string(frozen.frozen_in_exclude_latticed) + ",\n";
+    s += "    \"frozen_cells_certified\": " +
+         std::to_string(frozen.frozen_cells_certified) + ",\n";
+    s += "    \"frozen_cells_not_emitted\": " +
+         std::to_string(frozen.frozen_cells_not_emitted) + ",\n";
+    s += "    \"frozen_voxels_strut_and_solid\": " +
+         std::to_string(frozen.frozen_voxels_strut_and_solid) + ",\n";
+    s += "    \"frozen_strut_and_solid_unexplained\": " +
+         std::to_string(frozen.frozen_strut_and_solid_unexplained) + ",\n";
+    s += "    \"frozen_strut_and_solid_note\": \"voxels_strut_and_solid is NOT expected "
+         "to be 0 where a lattice cell straddles a role boundary: roles act on "
+         "cell activation and on the certification mask but are deliberately "
+         "kept out of the strut clip, so struts weld across the interface into "
+         "material certified solid (more material than certified — the "
+         "conservative direction, and what bonds the lattice to the solid). "
+         "strut_and_solid_unexplained is the real divergence and IS 0: no cell "
+         "emits struts into a region the certificate calls entirely solid.\",\n";
+    s += "    \"frozen_meaning\": \"FROZEN is a constraint on the OPTIMIZER — it may not "
+         "change the density of these voxels. It is NOT a claim that the "
+         "material is solid. Whether frozen material is solid or latticed is "
+         "decided by the lattice regions (include = retained AND latticed, "
+         "exclude = retained AND solid), exactly as for any other retained "
+         "material.\",\n";
+    s += "    \"frozen_audit\": \"cells_not_emitted and voxels_strut_and_solid are both "
+         "0 on a coherent run: every cell the certificate lattices over frozen "
+         "material is a cell the file contains, and no frozen voxel receives "
+         "both a strut and companion solid.\"\n";
     s += "  },\n";
   }
   // Added material (task 2026-08-03-design-box-recertification) — on a design-box
@@ -1239,6 +1410,29 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     s += "    \"latticed_voxels\": " + std::to_string(gf.latticed_voxels) + ",\n";
     s += "    \"solid_fallback_voxels\": " +
          std::to_string(gf.solid_fallback_voxels) + ",\n";
+    // WHY, PER VOXEL, WITH COUNTS (task 2026-08-03-variant-postprocessing-fix,
+    // bar F1). The two predicates sum to solid_fallback_voxels and have OPPOSITE
+    // remedies, so an aggregate cannot be acted on. `irrecoverable_by_cell` is the
+    // subset no cell size can rescue — the honest "do not offer a bigger cell".
+    s += "    \"solid_fallback_by_reason\": {\n";
+    s += "      \"member_too_thin_for_cell\": " +
+         std::to_string(gf.fallback_member_too_thin) + ",\n";
+    s += "      \"strut_unprintable_at_every_cell\": " +
+         std::to_string(gf.fallback_strut_unprintable) + ",\n";
+    s += "      \"irrecoverable_by_any_cell_size\": " +
+         std::to_string(gf.fallback_irrecoverable_by_cell) + ",\n";
+    s += "      \"widest_rejected_member_mm\": " +
+         json_num(gf.fallback_max_member_width_mm) + ",\n";
+    s += "      \"member_width_needed_mm\": " +
+         json_num(gf.cells_per_member_floor * gf.cell_size_mm) + ",\n";
+    s += "      \"note\": \"member_too_thin_for_cell: the member cannot hold "
+         "cells_per_member_floor cells across at this cell size — a SMALLER cell "
+         "helps. strut_unprintable_at_every_cell: the strut this density emits is "
+         "under the stated minimum extrudable width at every available cell — a "
+         "BIGGER cell helps. irrecoverable_by_any_cell_size: the member is thinner "
+         "than the floor times the smallest printable cell, so no cell choice can "
+         "lattice it; the design itself is too thin here.\"\n";
+    s += "    },\n";
     s += "    \"mask_voxels_dropped_by_cell_overlap\": " +
          std::to_string(graded.mask_voxels_dropped_by_cell_overlap) + ",\n";
     s += "    \"clamped_lo_voxels\": " + std::to_string(gf.clamped_lo_voxels) +
@@ -1463,6 +1657,8 @@ struct LatticeVariantOutcome {
   LatticeRoleReceipt role_rcpt;
   LatticeGradedReceipt grad_rcpt;  // `gf` pointer NOT retained (see below)
   LatticeAddedMaterialReceipt added_rcpt;  // design-box runs only
+  LatticeFrozenReceipt frozen_rcpt;        // runs with frozen material only
+
   // The DESIGN the mesh was built from and the certification solved on — one
   // number, so "the certified object is the exported one" is checkable rather
   // than merely argued (bar Z3). Both consumers read the SAME `dens` reference
@@ -1794,7 +1990,31 @@ LatticeVariantOutcome lattice_one_variant(
     // to every pre-task run (bar AI3). It is armed on `domain.expanded` rather
     // than on "did the policy clear anything", so the design-box path has ONE
     // rule whichever way kDesignBoxAddedMaterialKeptSolid is set.
-    if (domain.expanded) {
+    //
+    // ── AND ON THE ROLE PATH TOO (task 2026-08-04-protect-freeze-vs-solidity,
+    // bar 3). The sentence above — "it stops being correct the moment [a policy]
+    // clears voxels the boundary still considers material" — describes lattice
+    // ROLES exactly: an exclude region, or anything outside the include union,
+    // clears voxels from the certification mask that the boundary's voxel base
+    // still sees as material. The uniform role path was still passing NULL, so
+    // the generator emitted every cell `cell_may_overlap` could not PROVE empty
+    // — a proof-based, conservative test — while the certification mask uses
+    // exact voxel-CENTRE membership. A cell can therefore "may-overlap" an
+    // include region while none of its voxel centres are inside it: struts
+    // written into material the certificate calls entirely solid.
+    //
+    // MEASURED, on the l-bracket gate before this line existed: 48 such voxels
+    // on the include run and 426 on the exclude run, every one of them in a cell
+    // owning NO certified-latticed voxel — i.e. all divergence, no bonding
+    // overlap. The receipt's `strut_and_solid_unexplained` is that number and it
+    // is 0 with this armed.
+    //
+    // The certification mask is NOT touched by this: the certified object and
+    // every margin it produces are unchanged, and only the exported FILE moves
+    // (strictly fewer cells — it stops writing struts the certificate never
+    // credited). So this cannot move a verdict, which is what makes it landable
+    // under this task's bar 5.
+    if (domain.expanded || roles_present) {
       uniform_cells.assign(ncells, 0);
       for (int k = 0; k < solved_grid.nz; ++k)
         for (int j = 0; j < solved_grid.ny; ++j)
@@ -1822,11 +2042,57 @@ LatticeVariantOutcome lattice_one_variant(
             const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                          solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                          solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-            if (boundary.in_include_region(c, 0.0))
-              ++role_rcpt.include_void_voxels;
+            if (!boundary.in_include_region(c, 0.0)) continue;
+            ++role_rcpt.include_void_voxels;
+            // WHICH void this is (item 5). A clearance keep-out is the one that
+            // can never be satisfied; the optimizer's own removal can.
+            if (boundary.in_keep_out(c, 0.0))
+              ++role_rcpt.include_void_by_clearance;
+            else
+              ++role_rcpt.include_void_by_optimizer;
           }
     }
   }
+
+  // ── FROZEN MATERIAL vs LATTICE (task 2026-08-04-protect-freeze-vs-solidity).
+  //
+  // The frozen set is read from `effective_design_mask` — THE mask the loop
+  // optimised under, not a reconstruction of it — so "frozen" here means exactly
+  // what it meant to the optimizer: a density it was not allowed to move. It
+  // carries no opinion about lattice, and this block is the measurement that
+  // proves it: the certification mask, built from the boundary alone, is free to
+  // lattice a frozen voxel (an include region over it) or to keep it solid (an
+  // exclude region, or simply being outside the include union).
+  //
+  // Nothing here CHANGES a decision — every count is read off masks already
+  // computed above. That is deliberate: the whole finding of this task is that
+  // the two facts were already separate on this path and only the reporting and
+  // the copy said otherwise.
+  LatticeFrozenReceipt& frozen_rcpt = R.frozen_rcpt;
+  const DesignMask frozen_eff =
+      effective_design_mask(solved_grid, design_domain_mask(domain, options));
+  auto is_frozen = [&frozen_eff, &dens, printed_iso](std::size_t e) {
+    return frozen_eff[e] == MaskValue::FrozenSolid && dens[e] >= printed_iso;
+  };
+  for (int k = 0; k < solved_grid.nz; ++k)
+    for (int j = 0; j < solved_grid.ny; ++j)
+      for (int i = 0; i < solved_grid.nx; ++i) {
+        const std::size_t e = solved_grid.index(i, j, k);
+        if (!is_frozen(e)) continue;
+        ++frozen_rcpt.frozen_printed;
+        if (mask[e]) ++frozen_rcpt.frozen_latticed;
+        else ++frozen_rcpt.frozen_kept_solid;
+        const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                     solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                     solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+        if (boundary.has_include_regions() && boundary.in_include_region(c, 0.0))
+          ++frozen_rcpt.frozen_in_include;
+        if (boundary.in_exclude_region(c, 0.0)) {
+          ++frozen_rcpt.frozen_in_exclude;
+          if (mask[e]) ++frozen_rcpt.frozen_in_exclude_latticed;
+        }
+      }
+  frozen_rcpt.present = frozen_rcpt.frozen_printed > 0;
 
   // ── SWEPT cell size: one level spec per dyadic level (handoff 2026-08-01-
   //    lattice-cell-size-sweep). Each level carries (a) its own occupancy — the
@@ -1896,6 +2162,32 @@ LatticeVariantOutcome lattice_one_variant(
   // companion solid. `emitted_lattice_cells` is the GENERATOR's own count
   // (LatticeGenStats::latticed_cells — cells that passed both the predicate and
   // the boundary-overlap test), not a re-derivation of it.
+  //
+  // ONE predicate, TWO scopes (task 2026-08-04-protect-freeze-vs-solidity, bar 3).
+  // The frozen-material audit asks the SAME two questions over the frozen voxels
+  // — reusing these lambdas rather than re-deriving the rules beside them, which
+  // is the only way the two audits cannot disagree about what "emitted" means.
+  //
+  // `cell_emitted` — does the generator lattice this cell? Exactly the generator's
+  // own activation chain: the cell predicate (null = every cell) AND the
+  // boundary-overlap proof.
+  auto cell_emitted = [&](const std::array<int, 3>& c) {
+    if (cell_latticed && !cell_latticed(c[0], c[1], c[2])) return false;
+    const Vec3 cmin{Rdims.origin.x + c[0] * cell, Rdims.origin.y + c[1] * cell,
+                    Rdims.origin.z + c[2] * cell};
+    return boundary.cell_may_overlap(cmin, cell);
+  };
+  // `is_companion_solid` — a voxel is companion solid on exactly the export's own
+  // rule: printed, NOT masked, and not inside a clearance keep-out
+  // (export_latticed_variant).
+  auto is_companion_solid = [&](int i, int j, int k) {
+    const std::size_t e = solved_grid.index(i, j, k);
+    if (!(dens[e] >= printed_iso) || mask[e]) return false;
+    const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                  solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                  solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+    return !boundary.in_keep_out(vc, 0.0);
+  };
   if (added_rcpt.present) {
     std::vector<char> certified_cells(ncells, 0);
     for (int k = 0; k < solved_grid.nz; ++k)
@@ -1906,26 +2198,60 @@ LatticeVariantOutcome lattice_one_variant(
     for (const char c : certified_cells)
       added_rcpt.certified_lattice_cells += (c ? 1 : 0);
     added_rcpt.emitted_lattice_cells = R.oc.stats.latticed_cells;
-    // A voxel is "companion solid" on exactly the export's own rule: printed,
-    // NOT masked, and not inside a clearance keep-out (export_latticed_variant).
-    // It is "inside a strut cell" iff its owning cell is one the generator
-    // emitted — the same cell_active test, asked here with the same inputs.
+    // "Inside a strut cell" iff its owning cell is one the generator emitted —
+    // the same cell_active test, asked here with the same inputs.
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i)
+          if (is_companion_solid(i, j, k) && cell_emitted(owner_ijk(i, j, k)))
+            ++added_rcpt.voxels_strut_and_solid;
+  }
+
+  // ── THE SAME AUDIT, SCOPED TO FROZEN MATERIAL (bar 3). Lattice-include over
+  // frozen material is now a legal, expressible intent, so the guarantee that
+  // held for added material has to hold here too and be CHECKABLE:
+  //
+  //   * every cell that owns a certified-latticed FROZEN voxel is a cell the
+  //     generator emitted (`frozen_cells_not_emitted` == 0). Were it not, the
+  //     certificate would describe struts through protected material that the
+  //     exported file does not contain — the certified-object-is-not-the-
+  //     exported-object failure, in the one place a user is least able to see it;
+  //   * no frozen voxel receives both a strut and companion solid
+  //     (`frozen_voxels_strut_and_solid` == 0) — PR 285's P1 failure mode.
+  //
+  // Measured against the geometry that was JUST written, like the block above.
+  if (frozen_rcpt.present) {
+    // Pass 1 — the cells the certificate lattices: over FROZEN voxels (the
+    // scoped question) and over ANY voxel (which is what tells a straddling
+    // bonding cell apart from a cell writing struts into a wholly-solid region).
+    std::vector<char> frozen_cert_cells(ncells, 0), any_cert_cells(ncells, 0);
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
-          if (!(dens[e] >= printed_iso) || mask[e]) continue;
-          const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
-                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
-                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-          if (boundary.in_keep_out(vc, 0.0)) continue;  // no companion emitted
+          if (!mask[e]) continue;
+          any_cert_cells[owner_cell(i, j, k)] = 1;
+          if (is_frozen(e)) frozen_cert_cells[owner_cell(i, j, k)] = 1;
+        }
+    // Pass 2 — the both-ways counts over frozen voxels.
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!is_frozen(e) || !is_companion_solid(i, j, k)) continue;
           const std::array<int, 3> c = owner_ijk(i, j, k);
-          if (cell_latticed && !cell_latticed(c[0], c[1], c[2])) continue;
-          const Vec3 cmin{Rdims.origin.x + c[0] * cell,
-                          Rdims.origin.y + c[1] * cell,
-                          Rdims.origin.z + c[2] * cell};
-          if (!boundary.cell_may_overlap(cmin, cell)) continue;
-          ++added_rcpt.voxels_strut_and_solid;
+          if (!cell_emitted(c)) continue;
+          ++frozen_rcpt.frozen_voxels_strut_and_solid;
+          if (!any_cert_cells[cidx(c[0], c[1], c[2])])
+            ++frozen_rcpt.frozen_strut_and_solid_unexplained;
+        }
+    // Pass 3 — the cell-set equality over frozen voxels.
+    for (int ck = 0; ck < ncz; ++ck)
+      for (int cj = 0; cj < ncy; ++cj)
+        for (int ci = 0; ci < ncx; ++ci) {
+          if (!frozen_cert_cells[cidx(ci, cj, ck)]) continue;
+          ++frozen_rcpt.frozen_cells_certified;
+          if (!cell_emitted({ci, cj, ck})) ++frozen_rcpt.frozen_cells_not_emitted;
         }
   }
   // (b) certification of the composite — the octet tensor on the SAME mask the
@@ -1969,7 +2295,8 @@ LatticeVariantOutcome lattice_one_variant(
                                            v.requested_volume_fraction) +
                              ".report.json");
   R.receipt_json = lattice_cert_report_json(v, job.lattice, R.cc, R.oc, cell,
-                                            role_rcpt, grad_rcpt, added_rcpt);
+                                            role_rcpt, grad_rcpt, added_rcpt,
+                                            frozen_rcpt);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null
@@ -2262,7 +2589,42 @@ std::string loadcase_receipt_json(const JobDescription& job,
            (f.thinner_than_depth ? "true" : "false") + "}";
       s += (i + 1 < setup->face_protection_reports.size()) ? ",\n" : "\n";
     }
-    s += "  ]\n";
+    s += "  ]";
+    // ── WHICH LADDER, AND WHAT IT NEEDED (task 2026-08-03-growth-ladder) ─────
+    // `ladder_mode` is emitted in BOTH modes, deliberately: NAMING THE MODE IS
+    // THE POINT (bar G7). Unticking "minimize plastic" used to change the search,
+    // the ladder and the anchor pad with nothing anywhere saying so, and a
+    // document that names the mode only when it is unusual is exactly the silence
+    // this closes. It costs the loadcase RECEIPT one key in reduction mode; the
+    // PRODUCT (report.json and the exported meshes) is byte-identical either way.
+    //
+    // The growth block adds the two facts that used to travel silently with the
+    // checkbox: whether a design box was DERIVED for the user (material grown
+    // into a domain they never drew), and whether the anchor pad was frozen (the
+    // safety feature the checkbox used to drop).
+    if (setup->growth_ladder) {
+      s += ",\n  \"ladder_mode\": \"growth\",\n";
+      s += "  \"ladder_meaning\": \"add as little plastic as possible to reach "
+           "the required margin; the recommendation is the SMALLEST addition "
+           "that passes\",\n";
+      s += "  \"growth_design_box_auto_derived\": " +
+           std::string(setup->growth_box_auto_derived ? "true" : "false") + ",\n";
+      if (setup->growth_box_auto_derived) {
+        const DesignBox& b = setup->growth_box;
+        s += "  \"growth_design_box_mm\": {\"min\": [" + json_num(b.min.x) +
+             ", " + json_num(b.min.y) + ", " + json_num(b.min.z) +
+             "], \"max\": [" + json_num(b.max.x) + ", " + json_num(b.max.y) +
+             ", " + json_num(b.max.z) + "]},\n";
+        s += "  \"growth_design_box_note\": \"no design box was drawn, so a "
+             "MINIMAL one was derived from the part's bounding box — growth "
+             "needs somewhere to go. Material outside the imported part was "
+             "grown into THIS volume.\",\n";
+      }
+      s += "  \"growth_anchor_pad\": " +
+           std::string(setup->growth_anchor_pad ? "true" : "false") + "\n";
+    } else {
+      s += ",\n  \"ladder_mode\": \"reduction\"\n";
+    }
   } else {
     s += "  \"load_source\": \"self_weight\",\n";
     s += "  \"fixture_face_ids\": [";
@@ -2277,6 +2639,278 @@ std::string loadcase_receipt_json(const JobDescription& job,
     s += "  \"gravity_magnitude_mm_s2\": " +
          json_num(job.gravity.magnitude_mm_s2) + "\n";
   }
+  s += "}\n";
+  return s;
+}
+
+// ═══ THE PRE-FLIGHT LATTICE FORECAST (task 2026-08-03-variant-postprocessing-fix,
+//     bars F1–F4) ══════════════════════════════════════════════════════════════
+//
+// Runs the grading law and the role accounting on a STORED design, and reports
+// what a lattice run would produce — before the run. No FEA: every number below
+// comes from the density field and the job's own lattice block.
+//
+// THE ONE APPROXIMATION, stated in the output as well as here. In AUTO density
+// the law maps a DEMAND field (the variant's von Mises) to a relative density,
+// and that field only exists after a solve. The forecast therefore grades at the
+// BAND FLOOR — the thinnest strut the band allows, which is the CONSERVATIVE end
+// for printability. It changes no cells-per-member verdict (that predicate does
+// not see density at all), so the mask forecast is exact; it means the forecast
+// does not predict the density DISTRIBUTION, only what will and will not be
+// latticed, and why.
+//
+// COUNTERFACTUALS ARE EVALUATED, NOT GUESSED (bar F4, PR 276's rule): each
+// remedy below is a real second call to grade_lattice with that one parameter
+// changed, and reports the mask it actually produces.
+struct ForecastCounterfactual {
+  std::string change;      // human-facing: what to change
+  std::string parameter;   // the job key it moves
+  double value = 0.0;
+  std::size_t latticed_voxels = 0;
+  std::size_t region_voxels = 0;
+};
+
+// The candidate set the law grades over: solid voxels, minus clearances, minus
+// exclude regions, restricted to include regions when any are declared. The SAME
+// membership `lattice_one_variant` builds — spelled once here because a forecast
+// that used a different membership would be forecasting a different job.
+std::vector<char> forecast_candidates(const VoxelGrid& grid,
+                                      const std::vector<double>& dens,
+                                      const std::vector<ClearanceGeometry>& kos,
+                                      const LatticeRoleRegions& roles,
+                                      LatticeBoundary& members) {
+  for (const ClearanceGeometry& g : kos)
+    members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+  for (const ClearanceGeometry& g : roles.includes) members.add_include_region(g);
+  for (const ClearanceGeometry& g : roles.excludes) members.add_exclude_region(g);
+  std::vector<char> cand(grid.voxel_count(), 0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        // THE M3.5 ISO, and a KNOWN GAP with multiscale (task
+        // multiscale-lattice-to). Everywhere the optimizer's own pipeline reads a
+        // design, the threshold comes from run_printed_iso: a MULTISCALE design's
+        // in-band voxels legitimately sit below 0.5, and reading one at 0.5 deletes
+        // real lattice material. This forecast runs in lattice_variant_job on a
+        // STORED design, and a StoredDesign does not record whether the run that
+        // produced it was multiscale — so the threshold cannot be resolved here.
+        //
+        // Correct for every design reachable today (multiscale designs come out of
+        // minimize_plastic, which latticed them in the same run), and stated rather
+        // than left silent: if StoredDesign ever gains that flag, this must read the
+        // same resolver the rest of the pipeline does, or the forecast will describe
+        // a different object than the run it is forecasting.
+        if (!(dens[e] >= 0.5)) continue;
+        const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
+                     grid.origin.y + (j + 0.5) * grid.spacing,
+                     grid.origin.z + (k + 0.5) * grid.spacing};
+        if (members.in_keep_out(c, 0.0)) continue;
+        if (members.in_exclude_region(c, 0.0)) continue;
+        if (members.has_include_regions() && !members.in_include_region(c, 0.0))
+          continue;
+        cand[e] = 1;
+      }
+  return cand;
+}
+
+GradingLawParams forecast_grading_params(const JobDescription& job) {
+  GradingLawParams gp;
+  gp.topology = LatticeTopology::Octet;   // the job schema restricts to octet
+  gp.target_cell_size_mm = job.grading.present ? job.grading.cell_mm
+                                               : job.lattice.cell_mm;
+  gp.min_extrudable_width_mm = job.grading.present
+                                   ? job.grading.min_extrudable_width_mm
+                                   : job.lattice.min_extrudable_width_mm;
+  gp.demand_exponent = job.grading.present ? job.grading.demand_exponent : 1.0;
+  gp.cell_mode = CellSizeMode::Fixed;
+  if (job.grading.present &&
+      !cell_size_mode_from_name(job.grading.cell_mode.c_str(), gp.cell_mode))
+    throw JobError("lattice_forecast: unknown grading cell_mode \"" +
+                   job.grading.cell_mode + "\"");
+  gp.min_cell_size_mm = job.grading.cell_min_mm;
+  gp.max_cell_size_mm = job.grading.cell_max_mm;
+  if (!(gp.target_cell_size_mm > 0.0) && gp.cell_mode == CellSizeMode::Fixed)
+    gp.cell_mode = CellSizeMode::Auto;   // no cell stated ⇒ the law picks the floor
+  if (!(gp.min_extrudable_width_mm > 0.0))
+    throw JobError("lattice_forecast: min_extrudable_width_mm must be > 0 — the "
+                   "printability floor is derived from it and there is no default "
+                   "that would be honest about a printer we were not told about");
+  return gp;
+}
+
+std::string lattice_forecast_json(const JobDescription& job,
+                                  const VoxelGrid& grid,
+                                  const StoredDesign& sd,
+                                  const std::vector<ClearanceGeometry>& kos,
+                                  const LatticeRoleRegions& roles) {
+  LatticeBoundary members;
+  const std::vector<char> cand =
+      forecast_candidates(grid, sd.density, kos, roles, members);
+  // The band-floor demand (see the header comment): zeros ⇒ rho_of == 0 ⇒ every
+  // candidate clamps to the band's low end.
+  const std::vector<double> flat_demand(grid.voxel_count(), 0.0);
+  const GradingLawParams gp = forecast_grading_params(job);
+  const GradedField gf =
+      grade_lattice(grid, sd.density, flat_demand, &cand, gp);
+
+  // INCLUDE REGIONS THAT LANDED ON VOID (defect 3 / bar V2). The optimizer left
+  // no material there, so a lattice cannot conjure any — a no-op the user could
+  // not see until the receipt. Same rule as the run's own role receipt.
+  long long include_void = 0;
+  if (members.has_include_regions())
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          const std::size_t e = grid.index(i, j, k);
+          if (sd.density[e] >= 0.5) continue;
+          const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
+                       grid.origin.y + (j + 0.5) * grid.spacing,
+                       grid.origin.z + (k + 0.5) * grid.spacing};
+          if (members.in_include_region(c, 0.0)) ++include_void;
+        }
+
+  // ── EVALUATED counterfactuals (bar F4). Only offered where they COULD help:
+  // a remedy that moves the cell is worth evaluating only if some rejected member
+  // is wide enough for a legal cell to reach it. Where every rejection is
+  // irrecoverable, NO cell remedy is offered — a wrong suggestion is worse than
+  // none, and this is the maintainer's case exactly.
+  std::vector<ForecastCounterfactual> cfs;
+  const bool cell_remedy_possible =
+      gf.fallback_member_too_thin > gf.fallback_irrecoverable_by_cell ||
+      gf.fallback_strut_unprintable > 0;
+  if (cell_remedy_possible) {
+    for (const double mult : {0.5, 2.0}) {
+      GradingLawParams alt = gp;
+      if (alt.cell_mode == CellSizeMode::Swept) {
+        alt.min_cell_size_mm *= mult;
+        alt.max_cell_size_mm *= mult;
+      } else {
+        alt.cell_mode = CellSizeMode::Fixed;
+        alt.target_cell_size_mm = gf.cell_size_mm * mult;
+      }
+      GradedField alt_gf;
+      try {
+        alt_gf = grade_lattice(grid, sd.density, flat_demand, &cand, alt);
+      } catch (const std::exception&) {
+        continue;   // an inadmissible parameter is simply not a remedy
+      }
+      ForecastCounterfactual cf;
+      cf.change = mult < 1.0 ? "halve the cell size" : "double the cell size";
+      cf.parameter = alt.cell_mode == CellSizeMode::Swept ? "grading.cell_min_mm"
+                                                          : "grading.cell_mm";
+      cf.value = alt.cell_mode == CellSizeMode::Swept ? alt.min_cell_size_mm
+                                                      : alt.target_cell_size_mm;
+      cf.latticed_voxels = alt_gf.latticed_voxels;
+      cf.region_voxels = alt_gf.region_voxels;
+      cfs.push_back(cf);
+    }
+  }
+  // THE REGION counterfactual, always evaluated when include regions exist: what
+  // the SAME design would lattice with no region restriction at all. That is the
+  // number that tells a user whether their regions are the problem.
+  ForecastCounterfactual whole;
+  bool whole_ran = false;
+  if (!roles.includes.empty()) {
+    LatticeRoleRegions none;
+    none.excludes = roles.excludes;
+    LatticeBoundary m2;
+    const std::vector<char> c2 =
+        forecast_candidates(grid, sd.density, kos, none, m2);
+    try {
+      const GradedField g2 = grade_lattice(grid, sd.density, flat_demand, &c2, gp);
+      whole.change = "drop the include regions (lattice the whole part)";
+      whole.parameter = "lattice.regions";
+      whole.latticed_voxels = g2.latticed_voxels;
+      whole.region_voxels = g2.region_voxels;
+      whole_ran = true;
+    } catch (const std::exception&) {
+    }
+  }
+
+  const double frac = gf.region_voxels > 0
+                          ? static_cast<double>(gf.latticed_voxels) /
+                                static_cast<double>(gf.region_voxels)
+                          : 0.0;
+
+  std::string s = "{\n";
+  s += "  \"forecast\": \"what a lattice run on THIS variant would produce, "
+       "computed before the run from the stored design and this job's lattice "
+       "block. No FEA ran.\",\n";
+  s += "  \"variant_volume_fraction\": " +
+       json_num(sd.requested_volume_fraction) + ",\n";
+  s += "  \"topology\": \"" + job.lattice.topology + "\",\n";
+  s += "  \"cell_mode\": \"" + std::string(cell_size_mode_name(gf.cell_mode)) +
+       "\",\n";
+  s += "  \"cell_size_mm\": " + json_num(gf.cell_size_mm) + ",\n";
+  s += "  \"printability_floor_mm\": " + json_num(gf.printability_floor_mm) +
+       ",\n";
+  s += "  \"cells_per_member_floor\": " + json_num(gf.cells_per_member_floor) +
+       ",\n";
+  s += "  \"region_voxels\": " + std::to_string(gf.region_voxels) + ",\n";
+  s += "  \"would_lattice_voxels\": " + std::to_string(gf.latticed_voxels) +
+       ",\n";
+  s += "  \"would_stay_solid_voxels\": " +
+       std::to_string(gf.solid_fallback_voxels) + ",\n";
+  s += "  \"latticed_fraction_of_region\": " + json_num(frac) + ",\n";
+  s += "  \"would_stay_solid_by_reason\": {\n";
+  s += "    \"member_too_thin_for_cell\": " +
+       std::to_string(gf.fallback_member_too_thin) + ",\n";
+  s += "    \"strut_unprintable_at_every_cell\": " +
+       std::to_string(gf.fallback_strut_unprintable) + ",\n";
+  s += "    \"irrecoverable_by_any_cell_size\": " +
+       std::to_string(gf.fallback_irrecoverable_by_cell) + ",\n";
+  s += "    \"widest_rejected_member_mm\": " +
+       json_num(gf.fallback_max_member_width_mm) + ",\n";
+  s += "    \"member_width_needed_mm\": " +
+       json_num(gf.cells_per_member_floor * gf.cell_size_mm) + "\n";
+  s += "  },\n";
+  s += "  \"include_regions\": " + std::to_string(roles.includes.size()) + ",\n";
+  s += "  \"exclude_regions\": " + std::to_string(roles.excludes.size()) + ",\n";
+  s += "  \"include_region_void_voxels\": " + std::to_string(include_void) +
+       ",\n";
+  s += "  \"include_region_void_note\": \"include-region voxels where this "
+       "variant has no material. A lattice cannot conjure material, so the "
+       "include does nothing on them.\",\n";
+  // THE BOUNDARY (defect 4 / bar S1). "rim" dresses analytic plane pairs, and an
+  // optimized part is voxel-derived, so it has none.
+  const bool rim_only = job.lattice.skin == "rim";
+  s += "  \"boundary\": \"" + job.lattice.skin + "\",\n";
+  s += "  \"boundary_can_emit\": " +
+       std::string(rim_only ? "false" : "true") + ",\n";
+  if (rim_only)
+    s += "  \"boundary_note\": \"\\\"rim\\\" dresses the edges where ANALYTIC "
+         "faces meet (plane-plane, plane-bore). An optimized variant's surface "
+         "comes from the voxel grid and owns no analytic face, so a rim emits "
+         "nothing at all here. Choose \\\"diagrid\\\" for a woven surface skin, "
+         "or \\\"none\\\" deliberately.\",\n";
+  s += "  \"counterfactuals\": [";
+  bool first = true;
+  auto emit_cf = [&](const ForecastCounterfactual& cf) {
+    if (!first) s += ",";
+    first = false;
+    const double f = cf.region_voxels > 0
+                         ? static_cast<double>(cf.latticed_voxels) /
+                               static_cast<double>(cf.region_voxels)
+                         : 0.0;
+    s += "\n    {\"change\": \"" + cf.change + "\", \"parameter\": \"" +
+         cf.parameter + "\"";
+    if (cf.value > 0.0) s += ", \"value\": " + json_num(cf.value);
+    s += ", \"would_lattice_voxels\": " + std::to_string(cf.latticed_voxels) +
+         ", \"region_voxels\": " + std::to_string(cf.region_voxels) +
+         ", \"latticed_fraction_of_region\": " + json_num(f) + "}";
+  };
+  for (const ForecastCounterfactual& cf : cfs) emit_cf(cf);
+  if (whole_ran) emit_cf(whole);
+  s += first ? "],\n" : "\n  ],\n";
+  s += "  \"counterfactual_note\": \"every entry above was EVALUATED — the "
+       "grading law was re-run with that one parameter changed and the mask it "
+       "actually produced is reported. An empty list means no parameter change "
+       "could help.\",\n";
+  s += "  \"demand_field\": \"none (pre-flight) — densities are forecast at the "
+       "certifiable band's LOW end, the conservative end for printability. The "
+       "cells-per-member rule does not see density, so the latticed/solid split "
+       "above is exact; the density DISTRIBUTION is not forecast.\"\n";
   s += "}\n";
   return s;
 }
@@ -3176,6 +3810,29 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   result.loadcase_receipt_json = loadcase_receipt;
   write_text_file(result.loadcase_receipt_path, loadcase_receipt);
 
+  // ══ THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix,
+  //    defect 2 / bar F3) ═══════════════════════════════════════════════════════
+  //
+  // Everything a user needs to decide whether latticing this variant is worth a
+  // run is computable HERE, from the stored design and the job's own lattice
+  // block, with NO FEA at all: the grading law is pure geometry over the density
+  // field. Before this task those same numbers existed only in the receipt of a
+  // run that had already happened — which is how the maintainer came to spend an
+  // hour of Mac time to be told that 10,403 of 10,485 region voxels stayed solid.
+  //
+  // `forecast_only` runs exactly the front half of this function and stops before
+  // the first solve. What it reports is what the real run WOULD report, because
+  // it is the same call on the same inputs — with ONE stated approximation, the
+  // demand field (see below).
+  if (job.lattice.forecast_only) {
+    result.forecast_json = lattice_forecast_json(
+        job, cert_grid, sd, lattice_keep_outs_from_job(job, result.model),
+        lattice_role_regions_from_job(job));
+    result.forecast_path = join_path(out_dir, "lattice_forecast.json");
+    write_text_file(result.forecast_path, result.forecast_json);
+    return result;
+  }
+
   // ── SOLVE 1: the null-posture (SOLID) certification of the restored design.
   //
   // This is the reproduction PROOF. analyze_fixed_design is the same function
@@ -3496,6 +4153,225 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   return result;
 }
 
+namespace {
+
+// ---------------------------------------------------------------------------
+// THE ONE job setup (task 2026-08-03-preflight-feasibility-and-divergence).
+//
+// Everything between "the model has been imported" and "the domain can be
+// resolved": the mode branch (declared load case vs self-weight), the option
+// mapping (build direction, draft, warm start) and the load-case receipt. It was
+// inline in run_job until the PRE-FLIGHT needed to reach the same state WITHOUT
+// running the ladder — and a second, similar setup could easily pre-flight a
+// different job than the one that then runs. run_job calls this; preflight_job
+// calls this; there is no second derivation.
+struct JobSetup {
+  VoxelGrid grid;                  // the PART grid, tagged
+  std::vector<DirichletBC> bcs;
+  MinimizePlasticOptions options;
+  ProductionLoadCase lc;           // empty on the self-weight path
+  std::vector<int> fixture_face_ids;
+  std::string loadcase_receipt;    // the bar-Z2 document, not yet written
+};
+
+JobSetup build_job_setup(const JobDescription& job, const StepModel& model,
+                         bool model_is_mesh, const MaterialLibrary& materials) {
+  JobSetup S;
+  VoxelGrid& grid = S.grid;
+  std::vector<DirichletBC>& bcs = S.bcs;
+  MinimizePlasticOptions& options = S.options;
+  ProductionLoadCase& lc = S.lc;
+  std::string& loadcase_receipt = S.loadcase_receipt;
+  // Two modes, both driving the SAME production optimizer configuration as the
+  // iPad app (handoff 093): a "loads" block => the shared build_production_loadcase
+  // (anchors + declared forces, the app's mode a); otherwise the self-weight +
+  // fixture_faces path, now also carrying the production solver config + optional
+  // design box so it matches what the app produces for the same input.
+  // The load-case RECEIPT (bar Z2) — built here, where the resolution facts are
+  // still in scope, and written once the output directory exists. See
+  // loadcase_receipt_json: this is the document a later re-lattice run is
+  // compared against to prove it certified under the SAME load case.
+  // The resolved load case, hoisted out of the mode branch so the PRE-FLIGHT
+  // below can name the clearance / load group a refusal is about. Left default
+  // (no groups, no clearances) on the self-weight path.
+
+  if (job.loads.present) {
+    // ── LOADCASE mode: resolve the geometric selectors to face ids, build the
+    // front-end-neutral ProductionLoadCase, and hand it to the SAME core builder
+    // the bridge calls. The CLI and app therefore produce the same design for the
+    // same STEP + load case + resolution.
+    lc = production_loadcase_from_job(job, model);
+    S.fixture_face_ids = lc.anchor_face_ids;
+
+    ProductionRunSetup setup;
+    try {
+      setup = build_production_loadcase(model, job.resolution, lc);
+    } catch (const JobError&) {
+      throw;
+    } catch (const std::exception& e) {
+      // The builder's diagnostics name the id / count / selection (N5); add
+      // the one fact it cannot know — which mesh the ids were resolved against.
+      throw JobError(std::string("run: cannot build the declared load case "
+                                 "against model \"") +
+                     job.model + "\": " + e.what());
+    }
+    // Legible twin of minimize_plastic's require_external_loads guard (which
+    // stays in place as the hard backstop): refuse HERE, where the per-group
+    // reports can say WHICH group resolved to nothing and WHY (N4), instead of
+    // the optimizer's generic "external_loads is empty".
+    if (setup.options.require_external_loads &&
+        setup.options.external_loads.empty())
+      throw JobError(
+          "run: the declared load case produced NO external load — " +
+          no_external_load_message(setup, job.resolution) +
+          ". Refusing to silently optimize under SELF-WEIGHT instead of the "
+          "declared load.");
+    grid = std::move(setup.grid);
+    bcs = std::move(setup.bcs);
+    options = std::move(setup.options);
+    // Before `setup.options` is consumed: external_loads is still readable off
+    // the moved-to `options`, and the reports were not moved.
+    {
+      ProductionRunSetup echo;
+      echo.options.external_loads = options.external_loads;
+      echo.load_group_reports = setup.load_group_reports;
+      echo.clearance_reports = setup.clearance_reports;
+      echo.face_protection_reports = setup.face_protection_reports;
+      // Task 2026-08-03-growth-ladder — carry the ladder mode and what it needed
+      // onto the echo too, or the receipt would silently report a growth run as a
+      // reduction one (the echo is a hand-copied subset, so every new setup field
+      // has to be added here as well as there).
+      echo.growth_ladder = setup.growth_ladder;
+      echo.growth_box_auto_derived = setup.growth_box_auto_derived;
+      echo.growth_box = setup.growth_box;
+      echo.growth_anchor_pad = setup.growth_anchor_pad;
+      loadcase_receipt = loadcase_receipt_json(job, &echo,
+                                               S.fixture_face_ids, 0, bcs);
+    }
+    // The CLI exports meshes, not playback: keyframe_count stays 0 (the app sets
+    // 12). This is viz only and does not change the design.
+  } else {
+    // ── SELF-WEIGHT mode: geometric fixture-face selection (locked rule,
+    // DECISIONS.md 2026-07-09).
+    S.fixture_face_ids =
+        resolve_selectors(model, job.fixture_faces, "fixture_faces");
+
+    // ──▶ voxelize + tag the fixture voxels of every matched face. The tag call
+    // is source-appropriate in NAME only (tag_mesh_face and tag_step_face run
+    // the identical scan over `triangle_face`); a mesh pseudo-face tags exactly
+    // as a B-rep face does.
+    grid = voxelize(model.mesh, job.resolution);
+    std::size_t tagged = 0;
+    for (const int f : S.fixture_face_ids)
+      tagged += model_is_mesh
+                    ? tag_mesh_face(grid, model, f, VoxelTag::Fixture)
+                    : tag_step_face(grid, model, f, VoxelTag::Fixture);
+    if (tagged == 0)
+      throw JobError("fixture faces tagged no voxels (resolution too coarse "
+                     "for the selected faces?)");
+
+    // Mounting BCs: every node of every Fixture voxel is fully clamped.
+    const std::vector<int> fixture_nodes =
+        fea_tagged_nodes(grid, VoxelTag::Fixture);
+    bcs.reserve(fixture_nodes.size() * 3);
+    for (const int n : fixture_nodes)
+      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
+    loadcase_receipt = loadcase_receipt_json(
+        job, nullptr, S.fixture_face_ids, tagged, bcs);
+
+    // ──▶ FEA + SIMP ladder + report assembly (the M5.3 driver). The production
+    // solver config (matrix-free multigrid + Galerkin cache + physical
+    // min-feature) is applied here so the CLI matches the app; the job supplies
+    // the self-weight load case (ladder, margin, gravity).
+    configure_production_options(options);
+    // The material catalog the GATE DIAGNOSIS prices its material lever against
+    // (handoff 2026-08-02-gate-diagnosis-recommendations). READ ONLY — nothing
+    // downstream writes materials.json — and `materials` outlives this call, so
+    // the pointer is valid for the whole run. Without it the material lever
+    // reports itself NOT EVALUABLE instead of guessing.
+    options.material_catalog = &materials;
+    options.volume_fraction_ladder = job.ladder;
+    options.margin_stop = job.margin_stop;
+    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
+    options.gravity_direction = job.gravity.direction;
+    if (job.simp_max_iterations > 0)
+      options.simp.max_iterations = job.simp_max_iterations;
+    // Optional design-domain expansion (the "add material" feature).
+    if (job.has_design_box) {
+      options.design_box = to_design_box(job.design_box);
+      for (const JobBox& ko : job.keep_out_boxes)
+        options.keep_out_boxes.push_back(to_design_box(ko));
+    }
+  }
+  // The build-plate normal, separated from gravity (handoff
+  // 2026-08-01-build-direction-separation). AFTER the mode branch so it governs
+  // both modes; absent key => byte-identical.
+  apply_build_direction_options(options, job);
+
+  // Handoff 2026-07-25-draft-quality — map the optional "draft" block onto the
+  // production options, for BOTH front-ends (loadcase options come from
+  // build_production_loadcase; self-weight from configure_production_options). Absent
+  // (has_draft == false) => the options keep their OFF defaults, byte-identical.
+  if (job.has_draft) {
+    options.draft_quality = job.draft_quality;
+    options.draft_loose_tol = job.draft_loose_tol;
+    options.draft_escalation_c_gap = job.draft_escalation_c_gap;
+    options.draft_use_design_trigger = job.draft_use_design_trigger;
+    options.draft_escalation_design_flip = job.draft_escalation_design_flip;
+    options.draft_probe_iters = job.draft_probe_iters;
+  }
+
+  // Handoff 110 Part B — map the optional "warm_start" block onto the production
+  // options, for BOTH front-ends, exactly like the "draft" block above. Absent
+  // (has_warm_start == false, the default) => options.warm_start_coarse keeps
+  // its OFF default and the run is byte-identical. run_info already echoes the
+  // resolved value (info.warm_start_coarse), so an armed run SAYS it was armed.
+  // NOTE this arms only Part B; warm_start_inherit (Part A) is resolved by
+  // build_production_loadcase's own measured rule (handoff 113: load-case runs
+  // warm, self-weight runs cold) and is NOT touched here.
+  if (job.has_warm_start) options.warm_start_coarse = job.warm_start_coarse;
+  return S;
+}
+
+}  // namespace
+
+PreflightJobResult preflight_job(const JobDescription& job,
+                                 const std::string& job_dir,
+                                 const MaterialLibrary& materials) {
+  const double t0 = steady_clock_ms();
+  PreflightJobResult out;
+  if (job.mode != "minimize_plastic")
+    throw JobError("preflight: unsupported mode: " + job.mode);
+  if (materials.find(job.material) == materials.end())
+    throw JobError("material \"" + job.material +
+                   "\" is not in the material library");
+  const std::string model_path = join_path(job_dir, job.model);
+  const bool model_is_mesh = part_format_for_path(job.model) != PartFormat::Step;
+  try {
+    out.model = import_part_file_resolved(model_path);
+  } catch (const PartError& e) {
+    throw JobError(std::string("cannot import model \"") + job.model +
+                   "\": " + e.what());
+  }
+  if (!check_watertight(out.model.mesh).watertight)
+    throw JobError("model tessellation is not watertight: " + job.model);
+  // THE ONE setup — the identical call run_job makes.
+  JobSetup setup = build_job_setup(job, out.model, model_is_mesh, materials);
+  out.fixture_face_ids = setup.fixture_face_ids;
+  const SolvedDesignDomain domain =
+      resolve_design_domain(setup.grid, setup.bcs, setup.options);
+  out.preflight = preflight_load_path(domain, setup.options);
+  out.would_refuse =
+      out.preflight.walk.decidable && !out.preflight.walk.connected;
+  if (out.would_refuse)
+    out.refusal = preflight_refusal_report(out.model, setup.grid, domain,
+                                           setup.options, setup.lc,
+                                           out.preflight,
+                                           out.fixture_face_ids);
+  out.wall_ms = steady_clock_ms() - t0;
+  return out;
+}
+
 RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                      const std::string& out_dir,
                      const MaterialLibrary& materials,
@@ -3526,6 +4402,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         "this build has no 3MF support (lib3mf was not available): "
         "output.mesh_format \"3mf\" cannot be written, use \"stl\"");
 #endif
+
+  // The pre-flight region forecast's numbers (task 2026-08-04-protect-freeze-vs-
+  // solidity, item 6), carried to run_info far below. Declared here because the
+  // forecast runs BEFORE the import — that is the whole point of it.
+  int fc_region_too_thin = 0, fc_include_regions = 0;
+  double fc_required_mm = 0.0, fc_thinnest_mm = 0.0;
 
   // ──▶ Lattice pre-flight (handoff 2026-07-29-lattice-certification-e2e). Refuse
   // BEFORE any import / voxelize / solve — nothing is written — on the condition
@@ -3594,6 +4476,92 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
             "]. The gate refuses to certify against a clamped tensor (bar E5); choose a "
             "strut radius whose density lands in the band.");
     }
+    // ── PRE-FLIGHT FORECAST: CAN THIS REGION HOLD A LATTICE AT ALL? (task
+    // 2026-08-04-protect-freeze-vs-solidity, item 6)
+    //
+    // THE SECOND REASON the maintainer's include regions produced nothing, and it
+    // is PHYSICS, not a bug: his include regions are 4 mm-deep face slabs, and
+    // the cells-per-member floor demands 5 cells × 4.6026 mm = 23.0 mm of member.
+    // Separating "frozen" from "solid" does not touch that — a 4 mm slab cannot
+    // hold a certifiable lattice at any depth he would want, and no rung, cell
+    // size or tag change alters it.
+    //
+    // He should learn it BEFORE the run, so it is stated here: before any import,
+    // voxelize or solve, from the declared geometry and the two constants alone.
+    //
+    // *** WHY THE REGION'S OWN EXTENT IS THE RIGHT THING TO MEASURE. *** The
+    // certification mask lattices ONLY voxels inside the include union; material
+    // outside it stays solid (the companion body). So the latticed body is a
+    // SUBSET of the region, and its thinnest dimension is at most the region's
+    // thinnest dimension. If that is under n* × cell, nothing inside the region
+    // can hold n* cells across.
+    //
+    // *** AND WHY THIS IS A FORECAST, NOT A GATE. *** The grading law's own
+    // too-thin test reads `local_member_thickness_mm`, which measures the
+    // DESIGN's printed solid — it does not know the region restriction. On a
+    // thick wall with a thin include slab the two disagree: the law sees the
+    // wall's width and admits the voxel, while the body actually latticed is only
+    // as deep as the slab. That is a real coherence gap (FILED, with the
+    // reproduction, in the handoff §item-7b) and closing it MOVES the latticed
+    // mask on existing paths, which this task's bar 5 makes a blocked-stop. So
+    // this states the number and changes nothing.
+    if (!job.lattice.regions.empty()) {
+      const LatticeTopology topo = LatticeTopology::Octet;
+      const double n_star = lattice_cells_per_member_min(topo);
+      // The cell this run will actually use, by the SAME rules the law applies
+      // (grading.cpp): AUTO takes the printability floor, FIXED the target raised
+      // to it, SWEPT its own minimum raised to it; a uniform job states its cell.
+      double cell_mm = job.lattice.cell_mm;
+      double floor_mm = 0.0;
+      if (job.grading.present) {
+        floor_mm = lattice_cell_printability_floor_mm(
+            topo, job.grading.min_extrudable_width_mm);
+        if (job.grading.cell_mode == "auto") cell_mm = floor_mm;
+        else if (job.grading.cell_mode == "swept")
+          cell_mm = std::max(job.grading.cell_min_mm, floor_mm);
+        else cell_mm = std::max(job.grading.cell_mm, floor_mm);
+      }
+      const double required_mm = n_star * cell_mm;
+      int thin_regions = 0, include_regions = 0;
+      double thinnest_mm = std::numeric_limits<double>::infinity();
+      for (std::size_t ri = 0; ri < job.lattice.regions.size(); ++ri) {
+        const JobLatticeRegion& r = job.lattice.regions[ri];
+        if (r.role != "include") continue;
+        ++include_regions;
+        // The region's THINNEST dimension — the one that bounds how many cells
+        // can lie across the latticed body.
+        const double extent_mm =
+            r.kind == "bolt"
+                ? std::min(2.0 * r.radius_mm, 2.0 * r.half_length_mm)
+                : std::min(r.depth_mm,
+                           std::min(2.0 * r.half_u_mm, 2.0 * r.half_w_mm));
+        if (extent_mm < thinnest_mm) thinnest_mm = extent_mm;
+        if (extent_mm >= required_mm) continue;
+        ++thin_regions;
+        std::fprintf(
+            stderr,
+            "[lattice] FORECAST region_too_thin: include region %zu (%s) is "
+            "%.3f mm across its thinnest dimension; the cells-per-member floor "
+            "needs %.1f cells x %.4f mm = %.3f mm. Nothing inside this region "
+            "can hold a certifiable lattice — it will be kept SOLID. This is a "
+            "property of the region's geometry and the printability floor "
+            "(nozzle-derived), not of the optimizer or of any Protect setting.\n",
+            ri, r.kind.c_str(), extent_mm, n_star, cell_mm, required_mm);
+      }
+      if (include_regions > 0) {
+        std::fprintf(stderr,
+                     "[lattice] FORECAST: %d of %d include regions are thinner "
+                     "than the %.3f mm the floor requires (thinnest %.3f mm; "
+                     "floor %.1f cells x %.4f mm)\n",
+                     thin_regions, include_regions, required_mm, thinnest_mm,
+                     n_star, cell_mm);
+        fc_region_too_thin = thin_regions;
+        fc_include_regions = include_regions;
+        fc_required_mm = required_mm;
+        fc_thinnest_mm = thinnest_mm;
+      }
+      std::fflush(stderr);
+    }
   }
 
   RunJobResult result;
@@ -3642,147 +4610,16 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     throw JobError("model tessellation is not watertight: " + job.model);
 
   // Two modes, both driving the SAME production optimizer configuration as the
-  // iPad app (handoff 093): a "loads" block => the shared build_production_loadcase
-  // (anchors + declared forces, the app's mode a); otherwise the self-weight +
-  // fixture_faces path, now also carrying the production solver config + optional
-  // design box so it matches what the app produces for the same input.
-  VoxelGrid grid;
-  std::vector<DirichletBC> bcs;
-  MinimizePlasticOptions options;
-  // The load-case RECEIPT (bar Z2) — built here, where the resolution facts are
-  // still in scope, and written once the output directory exists. See
-  // loadcase_receipt_json: this is the document a later re-lattice run is
-  // compared against to prove it certified under the SAME load case.
-  std::string loadcase_receipt;
-
-  if (job.loads.present) {
-    // ── LOADCASE mode: resolve the geometric selectors to face ids, build the
-    // front-end-neutral ProductionLoadCase, and hand it to the SAME core builder
-    // the bridge calls. The CLI and app therefore produce the same design for the
-    // same STEP + load case + resolution.
-    const ProductionLoadCase lc =
-        production_loadcase_from_job(job, result.model);
-    result.fixture_face_ids = lc.anchor_face_ids;
-
-    ProductionRunSetup setup;
-    try {
-      setup = build_production_loadcase(result.model, job.resolution, lc);
-    } catch (const JobError&) {
-      throw;
-    } catch (const std::exception& e) {
-      // The builder's diagnostics name the id / count / selection (N5); add
-      // the one fact it cannot know — which mesh the ids were resolved against.
-      throw JobError(std::string("run: cannot build the declared load case "
-                                 "against model \"") +
-                     job.model + "\": " + e.what());
-    }
-    // Legible twin of minimize_plastic's require_external_loads guard (which
-    // stays in place as the hard backstop): refuse HERE, where the per-group
-    // reports can say WHICH group resolved to nothing and WHY (N4), instead of
-    // the optimizer's generic "external_loads is empty".
-    if (setup.options.require_external_loads &&
-        setup.options.external_loads.empty())
-      throw JobError(
-          "run: the declared load case produced NO external load — " +
-          no_external_load_message(setup, job.resolution) +
-          ". Refusing to silently optimize under SELF-WEIGHT instead of the "
-          "declared load.");
-    grid = std::move(setup.grid);
-    bcs = std::move(setup.bcs);
-    options = std::move(setup.options);
-    // Before `setup.options` is consumed: external_loads is still readable off
-    // the moved-to `options`, and the reports were not moved.
-    {
-      ProductionRunSetup echo;
-      echo.options.external_loads = options.external_loads;
-      echo.load_group_reports = setup.load_group_reports;
-      echo.clearance_reports = setup.clearance_reports;
-      echo.face_protection_reports = setup.face_protection_reports;
-      loadcase_receipt = loadcase_receipt_json(job, &echo,
-                                               result.fixture_face_ids, 0, bcs);
-    }
-    // The CLI exports meshes, not playback: keyframe_count stays 0 (the app sets
-    // 12). This is viz only and does not change the design.
-  } else {
-    // ── SELF-WEIGHT mode: geometric fixture-face selection (locked rule,
-    // DECISIONS.md 2026-07-09).
-    result.fixture_face_ids =
-        resolve_selectors(result.model, job.fixture_faces, "fixture_faces");
-
-    // ──▶ voxelize + tag the fixture voxels of every matched face. The tag call
-    // is source-appropriate in NAME only (tag_mesh_face and tag_step_face run
-    // the identical scan over `triangle_face`); a mesh pseudo-face tags exactly
-    // as a B-rep face does.
-    grid = voxelize(result.model.mesh, job.resolution);
-    std::size_t tagged = 0;
-    for (const int f : result.fixture_face_ids)
-      tagged += model_is_mesh
-                    ? tag_mesh_face(grid, result.model, f, VoxelTag::Fixture)
-                    : tag_step_face(grid, result.model, f, VoxelTag::Fixture);
-    if (tagged == 0)
-      throw JobError("fixture faces tagged no voxels (resolution too coarse "
-                     "for the selected faces?)");
-
-    // Mounting BCs: every node of every Fixture voxel is fully clamped.
-    const std::vector<int> fixture_nodes =
-        fea_tagged_nodes(grid, VoxelTag::Fixture);
-    bcs.reserve(fixture_nodes.size() * 3);
-    for (const int n : fixture_nodes)
-      for (int c = 0; c < 3; ++c) bcs.push_back({n, c, 0.0});
-    loadcase_receipt = loadcase_receipt_json(
-        job, nullptr, result.fixture_face_ids, tagged, bcs);
-
-    // ──▶ FEA + SIMP ladder + report assembly (the M5.3 driver). The production
-    // solver config (matrix-free multigrid + Galerkin cache + physical
-    // min-feature) is applied here so the CLI matches the app; the job supplies
-    // the self-weight load case (ladder, margin, gravity).
-    configure_production_options(options);
-    // The material catalog the GATE DIAGNOSIS prices its material lever against
-    // (handoff 2026-08-02-gate-diagnosis-recommendations). READ ONLY — nothing
-    // downstream writes materials.json — and `materials` outlives this call, so
-    // the pointer is valid for the whole run. Without it the material lever
-    // reports itself NOT EVALUABLE instead of guessing.
-    options.material_catalog = &materials;
-    options.volume_fraction_ladder = job.ladder;
-    options.margin_stop = job.margin_stop;
-    options.gravity = job.gravity.magnitude_mm_s2 * kGramPerCm3ToTonnePerMm3;
-    options.gravity_direction = job.gravity.direction;
-    if (job.simp_max_iterations > 0)
-      options.simp.max_iterations = job.simp_max_iterations;
-    // Optional design-domain expansion (the "add material" feature).
-    if (job.has_design_box) {
-      options.design_box = to_design_box(job.design_box);
-      for (const JobBox& ko : job.keep_out_boxes)
-        options.keep_out_boxes.push_back(to_design_box(ko));
-    }
-  }
-  // The build-plate normal, separated from gravity (handoff
-  // 2026-08-01-build-direction-separation). AFTER the mode branch so it governs
-  // both modes; absent key => byte-identical.
-  apply_build_direction_options(options, job);
-
-  // Handoff 2026-07-25-draft-quality — map the optional "draft" block onto the
-  // production options, for BOTH front-ends (loadcase options come from
-  // build_production_loadcase; self-weight from configure_production_options). Absent
-  // (has_draft == false) => the options keep their OFF defaults, byte-identical.
-  if (job.has_draft) {
-    options.draft_quality = job.draft_quality;
-    options.draft_loose_tol = job.draft_loose_tol;
-    options.draft_escalation_c_gap = job.draft_escalation_c_gap;
-    options.draft_use_design_trigger = job.draft_use_design_trigger;
-    options.draft_escalation_design_flip = job.draft_escalation_design_flip;
-    options.draft_probe_iters = job.draft_probe_iters;
-  }
-
-  // Handoff 110 Part B — map the optional "warm_start" block onto the production
-  // options, for BOTH front-ends, exactly like the "draft" block above. Absent
-  // (has_warm_start == false, the default) => options.warm_start_coarse keeps
-  // its OFF default and the run is byte-identical. run_info already echoes the
-  // resolved value (info.warm_start_coarse), so an armed run SAYS it was armed.
-  // NOTE this arms only Part B; warm_start_inherit (Part A) is resolved by
-  // build_production_loadcase's own measured rule (handoff 113: load-case runs
-  // warm, self-weight runs cold) and is NOT touched here.
-  if (job.has_warm_start) options.warm_start_coarse = job.warm_start_coarse;
+  // iPad app (handoff 093). THE ONE setup: build_job_setup above — the same call
+  // preflight_job makes, so a pre-flight can never describe a different job than
+  // the one that then runs (task 2026-08-03-preflight-feasibility-and-divergence).
+  JobSetup setup = build_job_setup(job, result.model, model_is_mesh, materials);
+  VoxelGrid grid = std::move(setup.grid);
+  std::vector<DirichletBC> bcs = std::move(setup.bcs);
+  MinimizePlasticOptions options = std::move(setup.options);
+  ProductionLoadCase lc = std::move(setup.lc);
+  std::string loadcase_receipt = std::move(setup.loadcase_receipt);
+  result.fixture_face_ids = std::move(setup.fixture_face_ids);
 
   // ──▶ output dir (created before the run so streamed artifacts can land in it).
   {
@@ -3818,6 +4655,53 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
            "minimize_plastic solves on");
   }
 #endif
+
+  // ──▶ PRE-FLIGHT LOAD-PATH CONNECTIVITY (task 2026-08-03-preflight-feasibility-
+  // and-divergence, guard 1). BEFORE ANY SOLVE, with the clearances frozen and
+  // the design domain resolved: can the load-tagged voxels reach the anchors
+  // through voxels the optimizer is ALLOWED to fill? A flood fill — milliseconds
+  // against the ten hours a severed job otherwise spends discovering it.
+  //
+  // REFUSE ONLY ON DISCONNECTION. Connectivity is necessary, not sufficient; a
+  // connected-but-hopeless path still diverges, which is what guards 2 and 3 are
+  // for. The narrowest-cross-section reading is reported as INFORMATION and never
+  // refuses anything.
+  const PreflightLoadPath preflight = preflight_load_path(domain, options);
+  result.preflight = preflight;
+  if (preflight.walk.decidable) {
+    char buf[512];
+    std::snprintf(
+        buf, sizeof(buf),
+        "[preflight] load path %s: %zu load voxels, %zu anchor voxels, %zu of "
+        "%zu voxels allowed to hold material; narrowest separating "
+        "cross-section %d voxels (%.4g mm^2) at %d/%d steps from the anchor; "
+        "%.2f ms",
+        preflight.walk.connected ? "CONNECTED" : "SEVERED",
+        preflight.walk.load_voxels, preflight.walk.anchor_voxels,
+        preflight.walk.printed_voxels, solved_grid.voxel_count(),
+        preflight.walk.narrowest_separator_voxels,
+        preflight.walk.narrowest_separator_mm2,
+        preflight.walk.narrowest_separator_level, preflight.walk.geodesic_levels,
+        preflight.wall_ms);
+    std::fprintf(stderr, "%s\n", buf);
+    std::fflush(stderr);
+  }
+  if (preflight.walk.decidable && !preflight.walk.connected) {
+    const std::string why = preflight_refusal_report(
+        result.model, grid, domain, options, lc, preflight,
+        result.fixture_face_ids);
+    // THE GUARDS ARE OBSERVABLE (bar P6) even when the guard REFUSES: write
+    // run_info.json with the pre-flight block before throwing, so the refusal
+    // leaves a machine-readable record beside the load-case receipt and not only
+    // a line in a log.
+    if (emit_progress) {
+      RunInfo refused = build_run_info(job, options, obs);
+      fill_run_info_preflight(refused, preflight);
+      result.run_info_path = join_path(out_dir, "run_info.json");
+      write_run_info(result.run_info_path, refused);
+    }
+    throw JobError(why);
+  }
 
   // LOUD PARITY GATE (task: multigrid-odd-axis-cliff, O1/O2). Say at RUN START
   // what geometric multigrid will do on this grid. The motivating run solved
@@ -3861,6 +4745,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   bool wrote_run_info = false;
   if (emit_progress) {
     run_info = build_run_info(job, options, obs);
+    fill_run_info_preflight(run_info, preflight);
     result.run_info_path = join_path(out_dir, "run_info.json");
     write_run_info(result.run_info_path, run_info);
     wrote_run_info = true;
@@ -3928,6 +4813,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     long long include_regions = 0, exclude_regions = 0;
     long long solid_voxels = 0, solid_tris = 0, include_void = 0;
     double solid_vol = 0.0;
+    // Include-void by CAUSE, and the frozen-material split (task 2026-08-04-
+    // protect-freeze-vs-solidity). Summed over variants like everything above.
+    long long include_void_clearance = 0;
+    long long frozen_printed = 0, frozen_latticed = 0, frozen_solid = 0;
+    long long frozen_not_emitted = 0, frozen_both = 0;
+    long long frozen_unexplained = 0, frozen_excl_latticed = 0;
     // Graded run (stage 4): run_info's "grading" object records the LAST graded
     // variant's law report (each variant's own full record — including field
     // provenance and clamp counts — lives in its receipt). Scalars only.
@@ -4114,7 +5005,57 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.exclude_regions =
           static_cast<long long>(lattice_roles.excludes.size());
       lat_agg.include_void += role_rcpt.include_void_voxels;
+      lat_agg.include_void_clearance += role_rcpt.include_void_by_clearance;
     }
+    // ── FROZEN MATERIAL, PER VARIANT, ON STDERR (task 2026-08-04-protect-freeze-
+    // vs-solidity). The maintainer's whole case was invisible because nothing
+    // ever said it: 91.5 % of his declared lattice region was frozen, and the
+    // receipt he read had no word for that. This line says it at the moment it
+    // becomes true, in the same place every other per-variant fact is logged.
+    //
+    // *** IT IS NOT A WARNING, AND MUST NOT BECOME ONE. *** Lattice over frozen
+    // material is a legitimate, now-expressible intent ("do not reshape this
+    // wall, but DO lattice inside it"). Warning on it would train users away
+    // from the thing they are supposed to be able to do. The warning below
+    // fires on the case that IS unsatisfiable: an include region over a
+    // clearance void, where there is no material to lattice and never will be.
+    const LatticeFrozenReceipt& fz = R.frozen_rcpt;
+    if (fz.present) {
+      lat_agg.frozen_printed += fz.frozen_printed;
+      lat_agg.frozen_latticed += fz.frozen_latticed;
+      lat_agg.frozen_solid += fz.frozen_kept_solid;
+      lat_agg.frozen_not_emitted += fz.frozen_cells_not_emitted;
+      lat_agg.frozen_both += fz.frozen_voxels_strut_and_solid;
+      lat_agg.frozen_unexplained += fz.frozen_strut_and_solid_unexplained;
+      lat_agg.frozen_excl_latticed += fz.frozen_in_exclude_latticed;
+      std::fprintf(stderr,
+                   "[lattice] vf=%.2f frozen material: printed=%lld latticed=%lld "
+                   "solid=%lld in_include=%lld in_exclude=%lld/%lld latticed "
+                   "(audit: cells_not_emitted=%lld strut_and_solid=%lld "
+                   "unexplained=%lld)\n",
+                   v.requested_volume_fraction, fz.frozen_printed,
+                   fz.frozen_latticed, fz.frozen_kept_solid,
+                   fz.frozen_in_include, fz.frozen_in_exclude_latticed,
+                   fz.frozen_in_exclude, fz.frozen_cells_not_emitted,
+                   fz.frozen_voxels_strut_and_solid,
+                   fz.frozen_strut_and_solid_unexplained);
+    }
+    // THE WARNING, AIMED AT THE THING THAT CANNOT WORK: an include region over a
+    // declared keep-clear. There is no material there and no rung, cell size or
+    // formulation can put any there — unlike frozen material (which is material,
+    // and can be latticed) or optimizer-removed material (which a heavier rung
+    // may carry). This is the ONLY lattice-region overlap that is a real
+    // conflict, so it is the only one that warns.
+    if (role_rcpt.include_void_by_clearance > 0)
+      std::fprintf(stderr,
+                   "[lattice] WARNING: vf=%.2f — %lld voxels of the declared "
+                   "lattice INCLUDE region fall inside a declared \"Keep clear\" "
+                   "region. A keep-clear is a hole: there is no material there "
+                   "to lattice, and no rung or cell size can create any. Move "
+                   "the include region off the keep-clear, or drop the "
+                   "keep-clear.\n",
+                   v.requested_volume_fraction,
+                   role_rcpt.include_void_by_clearance);
     if (oc.solid_companion) {
       lat_agg.solid_voxels += oc.solid_region_voxels;
       lat_agg.solid_vol += oc.solid_region_volume_mm3;
@@ -4305,6 +5246,23 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.lattice_export_solid_region_volume_mm3 = lat_agg.solid_vol;
     run_info.lattice_export_solid_region_triangles = lat_agg.solid_tris;
     run_info.lattice_export_include_void_voxels = lat_agg.include_void;
+    run_info.lattice_export_include_void_by_clearance =
+        lat_agg.include_void_clearance;
+    run_info.lattice_forecast_present = fc_include_regions > 0;
+    run_info.lattice_forecast_include_regions = fc_include_regions;
+    run_info.lattice_forecast_region_too_thin = fc_region_too_thin;
+    run_info.lattice_forecast_required_mm = fc_required_mm;
+    run_info.lattice_forecast_thinnest_region_mm = fc_thinnest_mm;
+    run_info.lattice_export_frozen_present = lat_agg.frozen_printed > 0;
+    run_info.lattice_export_frozen_printed = lat_agg.frozen_printed;
+    run_info.lattice_export_frozen_latticed = lat_agg.frozen_latticed;
+    run_info.lattice_export_frozen_solid = lat_agg.frozen_solid;
+    run_info.lattice_export_frozen_cells_not_emitted = lat_agg.frozen_not_emitted;
+    run_info.lattice_export_frozen_voxels_strut_and_solid = lat_agg.frozen_both;
+    run_info.lattice_export_frozen_strut_and_solid_unexplained =
+        lat_agg.frozen_unexplained;
+    run_info.lattice_export_frozen_in_exclude_latticed =
+        lat_agg.frozen_excl_latticed;
     // Graded run (stage 4): the "grading" object — the same record the analyze
     // path writes, filled from the LAST graded variant (per-variant records live
     // in the receipts).
@@ -4377,12 +5335,91 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   };
 
   std::vector<std::string> streamed_paths;
+  // ── THE DESIGN CONTAINER, PUBLISHED AS THE LADDER GOES (task
+  //    2026-08-03-variant-postprocessing-fix, defect 1) ────────────────────────
+  // design.bin used to be written ONCE, after the whole ladder (see the write at
+  // the end of this function). A streaming client shows each variant the moment
+  // its VARIANT line arrives, so for the entire length of a run — and forever
+  // after, for a run that ends any way other than "ran to completion" — the
+  // variants on screen had no design container and could not be latticed or
+  // smoothed. That is exactly what the maintainer hit: his M2_verticalStand run
+  // streamed three variants, was killed on rung 4 of 4, and its out/ has the
+  // three meshes and NO design.bin, report.json or fields.bin at all.
+  //
+  // So the container is now flushed after EVERY variant the driver reports. The
+  // flush carries the SAME blocks the final write would for those variants (one
+  // writer, one rule: every evaluated variant with a density field), and the
+  // final write is unchanged — so a run that does complete produces the identical
+  // file it produced before. Publication is atomic (design_store.cpp renames),
+  // because the worker may serve this file mid-rewrite.
+  //
+  // Scoped to the STREAMING path deliberately: only a run someone is watching can
+  // be observed part-way, and a batch `topopt-cli run` writes exactly what it did.
+  //
+  // ── …AND THE FIELD CONTAINER WITH IT (task
+  //    2026-08-03-variant-postprocessing-concurrency, bar 3) ───────────────────
+  // A four-rung ladder takes hours. Rung 1's OWN von Mises field is what the
+  // lattice page's AUTO density grades from and what the results overlays draw,
+  // and it exists in memory the moment rung 1 finishes — but `fields.bin` was
+  // written only at final assembly, so for the whole rest of the run (and forever,
+  // if the run died) rung 1 had a design and no field. Both halves of "the
+  // artifacts a variant carries" are now published together, per rung.
+  //
+  // BORROWED, NOT COPIED — AND BORROWED ONLY WITHIN ONE CALL. A per-rung flush
+  // must serialise every rung so far, and copying them would cost ~50 MB per rung
+  // of duplication at 128³ (PR 291's first cut copied a trimmed variant per rung;
+  // adding the fields to that was not affordable). So it borrows.
+  //
+  // What it does NOT do is ACCUMULATE the borrowed pointers. An earlier cut kept a
+  // `std::vector<const MinimizePlasticVariant*>` alive across calls, which is
+  // correct exactly as long as `result.evaluated` never reallocates. It does not —
+  // minimize_plastic.cpp reserves it to the ladder length, states the invariant out
+  // loud and asserts it, and this repo -UNDEBUGs the `topopt` target so that assert
+  // survives Release. But the invariant lived in a different file from the code
+  // depending on it, and the cost of someone deleting that reserve() is
+  // use-after-free, not a wrong number. So `on_variant` now hands over the live
+  // container and the pointers are built and consumed INSIDE this lambda. They
+  // cannot outlive a reallocation because they do not outlive the call, and the
+  // reserve is an optimisation again rather than a correctness requirement.
+  const std::string design_stream_path = join_path(out_dir, "design.bin");
+  const std::string fields_stream_path = join_path(out_dir, "fields.bin");
+  auto publish_artifacts_so_far =
+      [&](const std::vector<MinimizePlasticVariant>& evaluated_so_far) {
+    // ACCEPTED only, which is exactly what the accumulating version held:
+    // `on_variant` fires only for accepted rungs, so every pointer it ever pushed
+    // was an accepted one. Filtering here says so directly instead of depending on
+    // the ladder stopping at the first rejection, and keeps the streamed
+    // containers byte-identical to what they carried before.
+    std::vector<const MinimizePlasticVariant*> so_far;
+    so_far.reserve(evaluated_so_far.size());
+    for (const MinimizePlasticVariant& e : evaluated_so_far)
+      if (e.accepted) so_far.push_back(&e);
+    // Best-effort BOTH: an artifact that cannot be written must never take a run
+    // down. The final writes still throw — those are the contract.
+    try {
+      write_design_file(design_stream_path, so_far, solved_grid);
+    } catch (const std::exception&) {
+    }
+    try {
+      write_fields_file(fields_stream_path, so_far, solved_grid);
+    } catch (const std::exception&) {
+    }
+  };
   if (emit_progress) {
     options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
       std::printf("PROGRESS rung=%zu rungs=%zu iter=%d\n", rung, rungs, iter);
       std::fflush(stdout);
     };
-    options.on_variant = [&](const MinimizePlasticVariant& v) {
+    options.on_variant = [&](const MinimizePlasticVariant& v,
+                             const std::vector<MinimizePlasticVariant>&
+                                 evaluated_so_far) {
+      // `on_variant` fires ONLY for ACCEPTED rungs (minimize_plastic.cpp guards
+      // the call with `if (result.evaluated.back().accepted)`), so the running
+      // containers hold exactly the rungs that have streamed — which is exactly
+      // the set a client can see. The FINAL writes add any rejected rungs
+      // design.bin also carries, and are unchanged, so a completed run ships the
+      // identical files it always did.
+      publish_artifacts_so_far(evaluated_so_far);
       if (!v.accepted) return;
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid,
@@ -4486,6 +5523,29 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.rung_non_convergent_residual.assign(
         result.pipeline.rung_non_convergent_residual.begin(),
         result.pipeline.rung_non_convergent_residual.end());
+    // Task 2026-08-03-preflight-feasibility-and-divergence — finalize the two
+    // DIVERGENCE guards' per-rung outcomes, each with the numbers it fired on
+    // (bar P6). All-false is the positive statement "no guard fired".
+    run_info.rung_diverged.assign(result.pipeline.rung_diverged.begin(),
+                                  result.pipeline.rung_diverged.end());
+    run_info.rung_diverged_iteration =
+        result.pipeline.rung_diverged_iteration;
+    run_info.rung_diverged_c_ratio = result.pipeline.rung_diverged_c_ratio;
+    run_info.rung_diverged_cg_ratio = result.pipeline.rung_diverged_cg_ratio;
+    run_info.rung_diverged_wall_ratio =
+        result.pipeline.rung_diverged_wall_ratio;
+    run_info.rung_time_budget.assign(result.pipeline.rung_time_budget.begin(),
+                                     result.pipeline.rung_time_budget.end());
+    run_info.rung_time_budget_iteration =
+        result.pipeline.rung_time_budget_iteration;
+    run_info.rung_time_budget_ms = result.pipeline.rung_time_budget_ms;
+    run_info.rung_time_budget_elapsed_ms =
+        result.pipeline.rung_time_budget_elapsed_ms;
+    run_info.rung_time_budget_baseline_ms =
+        result.pipeline.rung_time_budget_baseline_ms;
+    run_info.rung_time_budget_phase = result.pipeline.rung_time_budget_phase;
+    run_info.rung_time_budget_phase_ms =
+        result.pipeline.rung_time_budget_phase_ms;
     // active-domain phase 1 — finalize the per-rung latch outcome. All-false
     // (with a band > 0) is the positive statement "the band held for every
     // rung"; a true entry names the rung that fell back to the full domain and

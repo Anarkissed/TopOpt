@@ -57,6 +57,63 @@ StressMargin compute_stress_margin(double yield_strength_mpa, double z_knockdown
                                    double max_von_mises_stress,
                                    double max_interlayer_tension);
 
+// THE LARGEST VOLUME FRACTION ANY LADDER RUNG MAY REQUEST (task
+// 2026-08-03-growth-ladder). 2.0 = "you may at most double the part".
+//
+// It lives HERE, in the dependency-free report module, because it is enforced in
+// two places that must not disagree and cannot include each other: minimize_plastic
+// refuses a ladder above it, and the report schema validator reads the printed /
+// achieved / saved fractions on this scale for a GROWTH document (one carrying an
+// `added_material` block). Every non-growth document is validated on the [0, 1]
+// scale it always was — this cap widens nothing for them.
+//
+// The pre-growth rule was `vf in (0, 1]`; it is UNCHANGED for reduction ladders.
+// A ladder may exceed 1.0 only when EVERY rung does (a mixed ladder is refused)
+// and only when the run has a design box to grow into. Past 2.0 the ask is not a
+// topology-optimization question, and an unbounded field would turn a mistyped
+// ladder (2.5 meaning 0.25) into an expensive silent success instead of a refusal.
+inline constexpr double kMaxLadderVolumeFraction = 2.0;
+
+// WHERE THIS VARIANT'S PLASTIC IS, relative to the ORIGINAL imported part (task
+// 2026-08-03-growth-ladder). On a GROWTH run this is the headline result — it is
+// the answer to "how much plastic did you add, and where" — so it is a first-class
+// report field, not a footnote derived downstream.
+//
+// It generalizes PR 285's design-box `added_material` receipt, which computed the
+// same inside/outside split but only inside the CLI's LATTICE export path, so a
+// solid growth run had no accounting at all. The two agree by construction on the
+// quantities they share (printed / inside / outside / outside volume); PR 285's
+// receipt additionally carries the lattice policy's `kept_solid`, which exists only
+// when a lattice ran and is therefore NOT duplicated here.
+//
+// `evaluated == false` (the default) means the run never measured this — every
+// reduction run, and every run predating the growth ladder — and then the block is
+// omitted from report.json entirely, so those documents keep their exact bytes.
+struct AddedMaterialReport {
+  bool evaluated = false;
+  // Printed voxels of THIS variant (physical density > the 0.5 iso), and the split
+  // by whether the voxel lies inside the ORIGINAL part envelope or outside it.
+  // printed_voxels == inside_part + outside_part, always.
+  long long printed_voxels = 0;
+  long long inside_part = 0;
+  long long outside_part = 0;
+  // The original part's own solid voxel count — the denominator every fraction on
+  // this line is taken against, carried so a reader never has to reconstruct it.
+  long long part_solid_voxels = 0;
+  // outside_part / printed_voxels (0 when nothing printed): "what share of the
+  // object I am about to print is material that was not in my model".
+  double outside_fraction = 0.0;
+  // Volumes on the voxel basis (count x spacing^3), in mm^3, and the NET change in
+  // printed volume against the part (printed - part_solid, so NEGATIVE if this
+  // variant prints less than the part — which is what a growth rung that could not
+  // reach its target looks like, and it must be visible, not hidden).
+  double outside_volume_mm3 = 0.0;
+  double net_added_volume_mm3 = 0.0;
+  // The same two on the mass basis (material density x volume), in grams.
+  double outside_mass_grams = 0.0;
+  double net_added_mass_grams = 0.0;
+};
+
 // One variant's line in the job report (§5 "per variant").
 struct VariantReport {
   // TWO volume bases, each answering one question (handoff 104, resolving 102).
@@ -165,6 +222,17 @@ struct VariantReport {
   // and `margin_effective` above are the gate's, and the diagnosis is written
   // FROM them.
   GateDiagnosis diagnosis;
+  // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder). Measured only
+  // on a GROWTH run, so `evaluated == false` on every reduction run and the block
+  // is omitted from report.json — those documents keep their exact bytes.
+  AddedMaterialReport added_material;
+  // Task 2026-08-03-growth-ladder — the growth rung asked for more material than
+  // the design box could hold, so the volume target was CLAMPED to "fill the box"
+  // and this rung did not actually run at the fraction its line requests. The
+  // ladder does not stop on it (a saturated rung is a box problem, not a strength
+  // verdict), but no reader may be allowed to read the achieved fraction as if the
+  // request had been honoured. Always false on a reduction ladder.
+  bool growth_target_saturated = false;
 };
 
 // The whole run's report: the material used and one entry per requested variant.

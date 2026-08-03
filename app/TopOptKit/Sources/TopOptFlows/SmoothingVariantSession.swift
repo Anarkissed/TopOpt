@@ -389,6 +389,79 @@ public enum SmoothPageEntry {
 /// The smoothing a user chose to KEEP: the smoothed geometry plus the receipt
 /// that certified it. This is what travels onward to the lattice page and to
 /// export — geometry and its verdict together, never one without the other.
+// MARK: - WHICH RUNG A SMOOTHING BELONGS TO (task
+//         2026-08-03-variant-postprocessing-concurrency, requirement 3)
+
+/// THE DEFECT THIS EXISTS FOR. A ladder takes hours, and a user can now work on
+/// rung 1 while rung 4 is still solving. So they can smooth rung 1, watch rung 3
+/// arrive, and ship rung 3 — with a smoothed shape on screen that was computed
+/// from a DIFFERENT design and certified under a different margin. A smoothed
+/// variant must never silently become the basis for a later rung's work.
+///
+/// The rule is PR 260's, deliberately: an Equatable FINGERPRINT of everything that
+/// determines the result, recorded when it is computed and compared against the
+/// current one — same inputs ⇒ fresh, any change ⇒ stale — surfaced through the
+/// SAME `LatticePageBanner` shape (`.smoothingStale`). No second staleness concept.
+public struct SmoothingRungFingerprint: Equatable, Sendable {
+    /// The rung's position in the run's ladder — what the UI calls it.
+    public let variantIndex: Int
+    /// The rung's ladder target, the key every artifact is indexed by.
+    public let requestedVolumeFraction: Double
+    /// Core's hash over that rung's DENSITY FIELD (`design_fingerprint`), read from
+    /// the retained container. This is what makes the identity a DESIGN rather than
+    /// a position: a later run whose rung 1 lands at the same volume fraction is a
+    /// different design and hashes differently. nil when no container covers the
+    /// rung — then the index + fraction are the whole identity, which is honest
+    /// rather than pretending to a hash we do not have.
+    public let designFingerprint: UInt64?
+
+    public init(variantIndex: Int, requestedVolumeFraction: Double,
+                designFingerprint: UInt64? = nil) {
+        self.variantIndex = variantIndex
+        self.requestedVolumeFraction = requestedVolumeFraction
+        self.designFingerprint = designFingerprint
+    }
+
+    /// How the UI names this rung. One phrasing, so the banner, the card and the
+    /// receipt cannot drift.
+    public var rungLabel: String {
+        String(format: "rung %d (%.0f%% volume)", variantIndex + 1,
+               requestedVolumeFraction * 100)
+    }
+}
+
+/// The staleness verdict for a kept smoothing, against the variant on screen.
+public enum SmoothingStaleness {
+
+    /// nil ⇒ the smoothing describes the variant currently shown. Non-nil ⇒ it was
+    /// made from a different rung, and the banner says WHICH.
+    ///
+    /// `kept` is the fingerprint recorded when the smoothing was computed; `current`
+    /// is the variant the page is showing now.
+    public static func banner(kept: SmoothingRungFingerprint?,
+                              current: SmoothingRungFingerprint?)
+        -> LatticePageBanner? {
+        guard let kept, let current, kept != current else { return nil }
+        return LatticePageBanner(
+            kind: .smoothingStale,
+            title: "Smoothing is from \(kept.rungLabel)",
+            body: "You are looking at \(current.rungLabel). This smoothed shape was "
+                + "computed from \(kept.rungLabel) and certified under that rung's "
+                + "own margin — it does not describe the variant on screen. Smooth "
+                + "this rung to get a result for it.",
+            actionLabel: "Smooth this rung", showsProgress: false)
+    }
+
+    /// Whether a kept smoothing may be presented as the CURRENT geometry. The
+    /// inverse of the banner, given its own name because that is the question every
+    /// call site is actually asking, and a `banner == nil` check reads as a UI
+    /// question rather than a correctness one.
+    public static func isCurrent(kept: SmoothingRungFingerprint?,
+                                 current: SmoothingRungFingerprint?) -> Bool {
+        banner(kept: kept, current: current) == nil
+    }
+}
+
 public struct SmoothKeptResult: Equatable, Sendable {
     public let meshVertices: [Float]
     public let meshIndices: [Int32]
@@ -398,13 +471,20 @@ public struct SmoothKeptResult: Equatable, Sendable {
     public let certification: SmoothCertification
     /// Per-region strengths, for the record.
     public let regionSummary: [String]
+    /// WHICH RUNG THIS WAS MADE FROM (task
+    /// 2026-08-03-variant-postprocessing-concurrency, requirement 3). Recorded at
+    /// KEEP time, so the identity travels with the geometry rather than being
+    /// re-derived later from whatever happens to be selected.
+    public let rung: SmoothingRungFingerprint?
 
     public init(meshVertices: [Float], meshIndices: [Int32], meshPath: String,
-                certification: SmoothCertification, regionSummary: [String]) {
+                certification: SmoothCertification, regionSummary: [String],
+                rung: SmoothingRungFingerprint? = nil) {
         self.meshVertices = meshVertices
         self.meshIndices = meshIndices
         self.meshPath = meshPath
         self.certification = certification
         self.regionSummary = regionSummary
+        self.rung = rung
     }
 }

@@ -425,6 +425,49 @@ struct SolverNonConvergence : public std::runtime_error {
         residual(residual_) {}
 };
 
+// ---------------------------------------------------------------------------
+// THE SOLVE DEADLINE (task 2026-08-03-preflight-feasibility-and-divergence,
+// guard 3).
+//
+// WHY IT EXISTS. The motivating run's THIRD design iteration took 6.3 hours, of
+// which 5.75 hours was plain CG (cg_ms 20,703,353 of a 22,679,464 ms iteration).
+// A guard that only checks AFTER an iteration finishes learns that at hour 6.3.
+// The iteration has to be stoppable WHILE it runs, and the place it is spending
+// the time is the CG recurrence — so the recurrence polls a deadline.
+//
+// `fea_set_solve_deadline_ms(t)` arms an ABSOLUTE deadline on the same steady
+// clock the phase timing uses (topopt::steady_clock_ms), for the calling thread;
+// t <= 0 disarms it. It is THREAD-LOCAL and STICKY, so the driver arms it before
+// a trajectory solve and disarms it after, exactly as it resets the recycle
+// space at a rung boundary. Returns the previous value.
+//
+// DISARMED BY DEFAULT, and the poll is skipped entirely when disarmed — so every
+// library caller, every existing test and every un-armed run is byte-identical
+// and pays nothing. When armed, the poll runs once every kSolveDeadlinePollIters
+// CG iterations (a clock read per ~256 matrix applies is unmeasurable next to
+// the applies).
+//
+// DETERMINISM, stated honestly: a deadline IS wall-clock, so a solve that trips
+// it is not reproducible the way the rest of this file is. What that costs is
+// bounded by what the throw can do — it can only END a run early, never change a
+// converged field, and a run it ends is REJECTED, never certified. A run that
+// does not trip it is bit-identical to one with it disarmed.
+double fea_set_solve_deadline_ms(double absolute_steady_ms);
+double fea_solve_deadline_ms();
+
+// Thrown when an armed solve deadline passes mid-CG. It IS-A SolverNonConvergence
+// — which is the truth (the solve was abandoned short of its tolerance) and means
+// every existing catch site, including the active-domain restricted-solve
+// fallback and the driver's per-rung rejection, keeps behaving exactly as it did.
+// The distinct type only lets the driver LABEL the rejection honestly: "this
+// iteration blew its time budget", not "this operator is hard to solve".
+// `iterations` / `residual` are the CG state at the moment it gave up.
+struct SolverDeadlineExceeded : public SolverNonConvergence {
+  SolverDeadlineExceeded(const std::string& what_arg, int iterations_,
+                         double residual_)
+      : SolverNonConvergence(what_arg, iterations_, residual_) {}
+};
+
 // Solve the same global linear-elastic system as fea_solve, but with a Jacobi
 // (diagonal) preconditioned Conjugate Gradient iterative solver — ARCHITECTURE
 // §4's designated solver for voxel FEA. Intended for large grids (e.g. 64^3)

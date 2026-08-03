@@ -1,0 +1,13 @@
+APP PACKAGE — swift test (macOS), after every change in this task
+
+Test Suite 'TopOptDesignTests' passed at 2026-08-02 18:46:09.204.
+	 Executed 19 tests, with 0 failures (0 unexpected) in 0.003 (0.004) seconds
+Test Suite 'TopOptKitTests' passed at 2026-08-02 18:46:19.968.
+	 Executed 30 tests, with 0 failures (0 unexpected) in 10.761 (10.764) seconds
+
+	 Executed 1147 tests, with 13 tests skipped and 0 failures (0 unexpected) in 267.681 (267.771) seconds
+
+new/changed suites in this task:
+  LatticeForecastTests: 9 passed
+  VariantEntryGatingTests: 19 passed
+  VariantRetentionTests: 15 passed

@@ -10,7 +10,9 @@
 #include <utility>
 #include <vector>
 
+#include "topopt/observability.hpp"  // steady_clock_ms (the counterfactual cost)
 #include "topopt/production.hpp"  // configure_production_options, production_reduction_ladder
+#include "topopt/simp.hpp"        // effective_design_mask (the pre-flight allowed set)
 
 namespace topopt {
 
@@ -117,6 +119,41 @@ void validate_face_id(int fid, const StepModel& model,
       std::to_string(model.face_count - 1) +
       "). The load case appears to have been authored on a different model "
       "or import than the one being analyzed.");
+}
+
+// Task 2026-08-03-growth-ladder — announce the AUTO-DERIVED growth box through the
+// same sink. A box the user did not draw must be visible in the run log as well as
+// on the setup: this is a domain the optimizer may fill, and "where did that
+// material come from" must never need archaeology to answer.
+void log_growth_box(const DesignBox& b, double spacing) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  char buf[256];
+  std::snprintf(buf, sizeof(buf),
+                "[loadcase] growth design box AUTO-DERIVED (none drawn): "
+                "min=(%.3g,%.3g,%.3g) max=(%.3g,%.3g,%.3g) mm spacing=%.4g",
+                b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z, spacing);
+  sink(std::string(buf));
+}
+
+// Task 2026-08-03-growth-ladder — name the mode the run is in, in one line, on
+// every load-case run. "minimize plastic" unticked used to change BOTH the ladder
+// and the anchor pad with nothing in the log saying either; both facts are stated
+// here now, beside the rungs they govern.
+void log_ladder_mode(bool growth, const std::vector<double>& ladder, bool pad) {
+  const LoadcaseLogFn& sink = loadcase_sink();
+  if (!sink) return;
+  std::string rungs;
+  for (double v : ladder) {
+    char r[32];
+    std::snprintf(r, sizeof(r), "%.2f", v);
+    rungs += (rungs.empty() ? "" : ",") + std::string(r);
+  }
+  sink(std::string("[loadcase] ladder=") + (growth ? "GROWTH" : "REDUCTION") +
+       " rungs=[" + rungs + "] anchor_pad=" + (pad ? "1" : "0") + " — " +
+       (growth ? "add as little plastic as possible to reach the required margin"
+               : "remove as much plastic as possible while holding the required "
+                 "margin"));
 }
 
 // Count the voxels currently carrying `tag` in `grid`.
@@ -309,8 +346,26 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
     opts.build_direction = lc.plate_dir;
   opts.build_orientation_report = lc.build_orientation_report;
   opts.gravity = 9810.0 * 1e-9;  // self-weight magnitude, used only if external empty
+  // ── THE TWO LADDERS (task 2026-08-03-growth-ladder) ───────────────────────
+  // ONE line each, and they are the only two things this checkbox now means:
+  //
+  //   minimize_plastic ON  — REDUCE: walk [0.68, 0.52, 0.38, 0.26] of the part's
+  //       volume and recommend the LIGHTEST variant that still clears the margin.
+  //   minimize_plastic OFF — GROW: walk [1.55, 1.25, 1.10] of the part's volume
+  //       and recommend the SMALLEST ADDITION that clears the margin.
+  //
+  // OFF used to be `{0.9}` — one conservative variant, no search, and the code's
+  // own comment said so. That answered a question nobody asked: a user who unticks
+  // "minimize plastic" is not asking for 90% of their part, they are saying "you
+  // may grow MORE plastic to reach the strength I want — as little as possible".
+  // The growth ladder is that, and it is the SAME walk in the SAME direction, so
+  // "recommend the last accepted rung" already means "the smallest addition that
+  // passes" (see production.hpp for the rung derivation and minimize_plastic.cpp
+  // for the growth rules). The ON path is untouched, to the byte.
+  const bool growth = !lc.minimize_plastic;
   opts.volume_fraction_ladder =
-      lc.minimize_plastic ? production_reduction_ladder() : std::vector<double>{0.9};
+      growth ? production_growth_ladder() : production_reduction_ladder();
+  setup.growth_ladder = growth;
 
   // M7.anchor-integrity (FIX 1): freeze an N-voxel structural PAD behind every
   // anchor and (retained) load face, not just the 1-voxel BC skin tag_step_face
@@ -324,11 +379,33 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // both the anchor/load pad and a protected face's preserved skin are keep-in
   // (FrozenSolid) regions mask_step_face writes, and minimize_plastic merges the
   // overlay into the effective mask (design-box path) or uses it directly (no-box).
-  // The pad is minimize_plastic-only (the {0.9} conservative variant keeps material
-  // anyway); a Face protection is the user's explicit request and is honored in
-  // BOTH modes. Built whenever there is something to freeze; with neither declared
-  // the overlay stays empty and the run is byte-identical (THE ONE RULE).
-  const bool want_pad = lc.minimize_plastic;
+  // A Face protection is the user's explicit request and is honored in BOTH modes.
+  //
+  // Since this task the PAD is built in both modes too, so `want_pad` is in fact
+  // always true and the overlay is always built. It is kept as an expression, not
+  // folded to a constant, because it NAMES the decision (kGrowthPathAnchorPad) and
+  // is where a future reversal would land. The ON path is unaffected either way —
+  // it already padded unconditionally.
+  //
+  // ── THE PAD ON THE GROWTH PATH — DECIDED, AND MEASURED (task
+  // 2026-08-03-growth-ladder). The pad used to be `lc.minimize_plastic` exactly,
+  // on the reasoning that "the {0.9} conservative variant keeps material anyway".
+  // That reasoning was a hidden side effect of a checkbox that reads as an
+  // OBJECTIVE toggle, and it was at its weakest precisely here: a growth run is by
+  // definition a run whose structure is UNDER-strength, the anchors most of all,
+  // and "0.9 of the part keeps material anyway" says nothing about 1.55 of a part
+  // inside a design box several times its volume — where the optimizer is free to
+  // spend its budget in the box and carve the boss it grew away from.
+  //
+  // It is not argued here, it is MEASURED: the same growth ladder was run with the
+  // pad and without, and the difference is in
+  // evidence/2026-08-03-growth-ladder/pad_on_off.txt (and §"G5" of the handoff).
+  // kGrowthPathAnchorPad records the decision that measurement produced, so the
+  // pad's coupling to the mode is now an explicit, priced choice with a name —
+  // never again an inherited side effect.
+  const bool want_pad = lc.minimize_plastic || (growth && kGrowthPathAnchorPad);
+  setup.growth_anchor_pad = growth && want_pad;
+  log_ladder_mode(growth, opts.volume_fraction_ladder, want_pad);
   const bool want_protect = !lc.face_protection_face_ids.empty();
   if (want_pad || want_protect) {
     DesignMask pad = make_active_mask(grid);
@@ -377,6 +454,28 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   if (lc.has_design_box) {
     opts.design_box = lc.design_box;
     opts.keep_out_boxes = lc.keep_out_boxes;
+  } else if (growth) {
+    // ── GROWTH NEEDS SOMEWHERE TO GO, AND WE SAY SO (task
+    // 2026-08-03-growth-ladder). A growth ladder with no design box can only
+    // REDISTRIBUTE the part's own material: the ladder target would degenerate to
+    // simp's fraction of the part itself, the run would print at most the part,
+    // and the receipt would announce growth that never happened. minimize_plastic
+    // refuses that outright.
+    //
+    // The front-ends must not simply inherit the refusal, though: unticking a
+    // checkbox is not a promise to also draw a box, and a user who never opened
+    // the design-box tool would meet a hard error where the feature is supposed to
+    // help. So a MINIMAL box is derived here — the part's own bounding box
+    // inflated by the smallest whole number of voxels that can hold the TOP rung's
+    // ask with routing headroom (production.hpp, minimal_growth_design_box) — and
+    // the derivation is RECORDED on the setup and logged. Auto-derived is a
+    // reportable fact, never a silent one: the receipt says the box was derived
+    // and states its extents, so nobody mistakes it for a box they drew.
+    setup.growth_box_auto_derived = true;
+    setup.growth_box = minimal_growth_design_box(
+        grid, opts.volume_fraction_ladder.front(), kGrowthBoxHeadroom);
+    opts.design_box = setup.growth_box;
+    log_growth_box(setup.growth_box, grid.spacing);
   }
 
   // Infill override: only forward an actual override (>= 0); a negative value
@@ -412,37 +511,303 @@ ProductionRunSetup build_production_loadcase(const StepModel& model,
   // rasterizer's precedence guard needs that offset to protect part material. No
   // clearance → the overlay stays empty and the run is byte-identical.
   if (!lc.clearances.empty()) {
-    const VoxelGrid& solved = setup.solved_grid;
-    const double s = solved.spacing;
-    const int oi = static_cast<int>(std::lround((grid.origin.x - solved.origin.x) / s));
-    const int oj = static_cast<int>(std::lround((grid.origin.y - solved.origin.y) / s));
-    const int ok = static_cast<int>(std::lround((grid.origin.z - solved.origin.z) / s));
-    DesignMask clearance(solved.voxel_count(), MaskValue::Active);
-    setup.clearance_reports.reserve(lc.clearances.size());
-    for (const ProductionLoadCase::Clearance& c : lc.clearances) {
-      // An AUTO primitive is derived from model.faces[face_id] (skipped, exactly
-      // as before, when the id is out of range). A MANUAL primitive carries its
-      // own geometry (no B-rep face). Both resolve to the SAME predicate and take
-      // the SAME rasterizer, so the mask is identical for identical geometry
-      // (handoff group-editing, BAR B2).
-      ClearanceGeometry geom;
-      if (c.manual) {
-        geom = resolve_clearance_manual(c.manual_geom, c.params);
-      } else {
-        if (c.face_id < 0 || c.face_id >= model.face_count) continue;
-        geom = resolve_clearance_from_face(model, c.face_id, c.params);
-      }
-      const ClearanceRasterResult rr =
-          rasterize_clearance(solved, grid, oi, oj, ok, geom, clearance);
-      setup.clearance_reports.push_back(
-          {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
-      log_clearance(c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid);
-    }
-    opts.clearance_void = std::move(clearance);  // opts aliases setup.options
+    opts.clearance_void =
+        build_clearance_overlay(model, grid, setup.solved_grid, lc.clearances,
+                                -1, &setup.clearance_reports);
+    for (const ProductionRunSetup::ClearanceReport& r : setup.clearance_reports)
+      log_clearance(r.face_id, r.kind, r.voxels_frozen, r.in_grid);
   }
 
   return setup;
 }
+
+DesignMask build_clearance_overlay(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const VoxelGrid& solved_grid,
+    const std::vector<ProductionLoadCase::Clearance>& clearances,
+    int skip_index,
+    std::vector<ProductionRunSetup::ClearanceReport>* reports) {
+  // The part sits inside the solved grid at a whole-voxel offset — 0 on the
+  // no-box path (solved == part), (part.origin − solved.origin)/spacing on the
+  // design-box path (only the HIGH side of the expanded grid grows, so this
+  // offset is exact; see voxel.hpp). The rasterizer's precedence guard needs
+  // that offset to protect part material.
+  const double s = solved_grid.spacing;
+  const int oi =
+      static_cast<int>(std::lround((part_grid.origin.x - solved_grid.origin.x) / s));
+  const int oj =
+      static_cast<int>(std::lround((part_grid.origin.y - solved_grid.origin.y) / s));
+  const int ok =
+      static_cast<int>(std::lround((part_grid.origin.z - solved_grid.origin.z) / s));
+  DesignMask clearance(solved_grid.voxel_count(), MaskValue::Active);
+  if (reports) reports->reserve(clearances.size());
+  for (std::size_t ci = 0; ci < clearances.size(); ++ci) {
+    if (static_cast<int>(ci) == skip_index) continue;  // the counterfactual
+    const ProductionLoadCase::Clearance& c = clearances[ci];
+    // An AUTO primitive is derived from model.faces[face_id] (skipped, exactly
+    // as before, when the id is out of range). A MANUAL primitive carries its
+    // own geometry (no B-rep face). Both resolve to the SAME predicate and take
+    // the SAME rasterizer, so the mask is identical for identical geometry
+    // (handoff group-editing, BAR B2).
+    ClearanceGeometry geom;
+    if (c.manual) {
+      geom = resolve_clearance_manual(c.manual_geom, c.params);
+    } else {
+      if (c.face_id < 0 || c.face_id >= model.face_count) continue;
+      geom = resolve_clearance_from_face(model, c.face_id, c.params);
+    }
+    const ClearanceRasterResult rr =
+        rasterize_clearance(solved_grid, part_grid, oi, oj, ok, geom, clearance);
+    if (reports)
+      reports->push_back(
+          {c.face_id, c.params.kind, rr.voxels_frozen, rr.region_in_grid});
+  }
+  return clearance;
+}
+
+// ---------------------------------------------------------------------------
+// PRE-FLIGHT DIAGNOSIS (task 2026-08-03-preflight-feasibility-and-divergence,
+// bar P2: "a refusal is actionable").
+//
+// The core check (pipeline.hpp preflight_load_path) answers YES / NO in
+// milliseconds. This is everything a person needs to ACT on a NO, and every
+// remedy it states has been MEASURED by re-running the same check on the
+// modified job — never guessed (PR 276's verified-counterfactual rule).
+
+namespace {
+
+// One clearance's counterfactual: does the load path RECONNECT with this
+// clearance removed, or with its axial clearance reduced?
+struct ClearanceCounterfactual {
+  int index = -1;
+  bool removal_reconnects = false;
+  // For a BOLT clearance whose removal reconnects: the largest whole millimetre
+  // of axial_clearance_mm that still leaves the path connected (bisected on the
+  // real rasterizer + the real belt), or -1 when even 0 mm does not reconnect
+  // (the concentric margin alone severs it) / the kind has no such knob.
+  double max_axial_clearance_mm = -1.0;
+};
+
+// Re-run the pre-flight with `clearances` overridden. Rebuilds ONLY the
+// clearance overlay + the design-domain mask — no import, no voxelize, no solve
+// — so each probe costs one rasterization and one flood fill.
+PreflightLoadPath preflight_with_clearances(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    const std::vector<ProductionLoadCase::Clearance>& clearances,
+    int skip_index) {
+  MinimizePlasticOptions probe = options;
+  probe.clearance_void = build_clearance_overlay(
+      model, part_grid, domain.grid, clearances, skip_index, nullptr);
+  return preflight_load_path(domain, probe);
+}
+
+// The largest whole-millimetre axial clearance on `ci` that keeps the path
+// connected, by bisection over [0, requested]. Returns -1 when even 0 mm leaves
+// it severed. Monotone by construction (a larger swept cylinder only ever
+// forbids MORE voxels, so connectivity can only be lost as the value grows),
+// which is what makes a bisection a valid search rather than a sample.
+double max_connected_axial_clearance_mm(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    std::vector<ProductionLoadCase::Clearance> clearances, std::size_t ci) {
+  const double requested = clearances[ci].params.axial_clearance_mm;
+  auto connected_at = [&](double mm) {
+    clearances[ci].params.axial_clearance_mm = mm;
+    return preflight_with_clearances(model, part_grid, domain, options,
+                                     clearances, -1)
+        .walk.connected;
+  };
+  if (!connected_at(0.0)) return -1.0;
+  double lo = 0.0, hi = std::max(1.0, std::ceil(requested));  // lo connects, hi does not
+  while (hi - lo > 1.0) {
+    const double mid = std::floor((lo + hi) / 2.0);
+    if (connected_at(mid)) lo = mid; else hi = mid;
+  }
+  return lo;
+}
+
+// Compose the refusal. Names WHICH load groups lost their path, WHICH anchor
+// faces were walked from, WHICH clearance is the verified cause, and — when the
+// cause is a bolt clearance — the largest axial clearance that would work.
+}  // namespace
+
+std::string preflight_refusal_report(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    const ProductionLoadCase& lc, const PreflightLoadPath& pf,
+    const std::vector<int>& anchor_face_ids) {
+  std::vector<ClearanceCounterfactual> cfs_out;
+  double probe_ms_out = 0.0;
+  const LoadPathWalk& w = pf.walk;
+  std::string m =
+      "run: PRE-FLIGHT REFUSED this job before any solve — THE LOAD PATH IS "
+      "SEVERED.\n";
+  {
+    char buf[640];
+    std::snprintf(
+        buf, sizeof(buf),
+        "  %zu of %zu load-tagged voxels cannot be reached from any of the %zu "
+        "anchor-tagged voxels, EVEN IF the optimizer filled every one of the "
+        "%zu voxels it is allowed to fill (%zu voxels are forbidden: outside "
+        "the design domain, or frozen void by a keep-clear / keep-out). No "
+        "design this job can produce carries force from the load to the anchor, "
+        "so no amount of solving will find one.\n",
+        w.unreached_load_voxels, w.load_voxels, w.anchor_voxels,
+        w.printed_voxels, pf.forbidden_voxels);
+    m += buf;
+  }
+  // WHICH anchors, WHICH load groups. The grid tags do not carry the group, so
+  // re-tag each group on a scratch grid (the identical tag_step_face call
+  // build_production_loadcase makes) and intersect with the unreached set. This
+  // runs ONLY on the refusal path.
+  {
+    m += "  anchor faces: [";
+    for (std::size_t i = 0; i < anchor_face_ids.size(); ++i)
+      m += (i ? ", " : "") + std::to_string(anchor_face_ids[i]);
+    m += "]\n";
+    // Recompute the reachable set once so each group can be tested against it.
+    const DesignMask eff =
+        effective_design_mask(domain.grid, design_domain_mask(domain, options));
+    std::vector<double> allowed(domain.grid.voxel_count(), 0.0);
+    for (std::size_t i = 0; i < eff.size(); ++i)
+      if (eff[i] != MaskValue::FrozenVoid) allowed[i] = 1.0;
+    for (std::size_t gi = 0; gi < lc.load_groups.size(); ++gi) {
+      const ProductionLoadCase::LoadGroup& g = lc.load_groups[gi];
+      // Tag ONLY this group on a copy of the part grid, then carry the tags onto
+      // the solved grid at the domain offset, and walk. A group that keeps its
+      // path while another loses it is exactly the fact a user needs.
+      VoxelGrid probe_part = part_grid;
+      for (std::size_t i = 0; i < probe_part.tags.size(); ++i)
+        if (probe_part.tags[i] == VoxelTag::Load)
+          probe_part.tags[i] = VoxelTag::Interior;
+      bool ok_ids = true;
+      for (const int fid : g.face_ids) {
+        if (fid < 0 || fid >= model.face_count) { ok_ids = false; break; }
+        tag_step_face(probe_part, model, fid, VoxelTag::Load);
+      }
+      if (!ok_ids) continue;
+      VoxelGrid probe = domain.grid;
+      for (std::size_t i = 0; i < probe.tags.size(); ++i)
+        if (probe.tags[i] == VoxelTag::Load) probe.tags[i] = VoxelTag::Interior;
+      for (int pk = 0; pk < part_grid.nz; ++pk)
+        for (int pj = 0; pj < part_grid.ny; ++pj)
+          for (int pi = 0; pi < part_grid.nx; ++pi)
+            if (probe_part.tag(pi, pj, pk) == VoxelTag::Load)
+              probe.set_tag(pi + domain.offset_i, pj + domain.offset_j,
+                            pk + domain.offset_k, VoxelTag::Load);
+      const LoadPathWalk gw = walk_load_path(probe, allowed, 0.5);
+      char buf[320];
+      std::snprintf(buf, sizeof(buf),
+                    "  load group %zu (faces [", gi);
+      std::string line = buf;
+      for (std::size_t i = 0; i < g.face_ids.size(); ++i)
+        line += (i ? ", " : "") + std::to_string(g.face_ids[i]);
+      std::snprintf(buf, sizeof(buf),
+                    "]): %zu of %zu of its load voxels unreachable — %s\n",
+                    gw.unreached_load_voxels, gw.load_voxels,
+                    gw.connected ? "this group STILL has a path"
+                                 : "THIS GROUP HAS NO PATH");
+      m += line + buf;
+    }
+  }
+
+  // THE VERIFIED CAUSE. One re-check per declared clearance, with that
+  // clearance omitted. A clearance whose removal RECONNECTS the path caused the
+  // severance; anything else did not.
+  const double t0 = steady_clock_ms();
+  bool any_single = false;
+  for (std::size_t ci = 0; ci < lc.clearances.size(); ++ci) {
+    ClearanceCounterfactual cf;
+    cf.index = static_cast<int>(ci);
+    cf.removal_reconnects =
+        preflight_with_clearances(model, part_grid, domain, options,
+                                  lc.clearances, static_cast<int>(ci))
+            .walk.connected;
+    if (cf.removal_reconnects &&
+        lc.clearances[ci].params.kind == ClearanceKind::Bolt)
+      cf.max_axial_clearance_mm = max_connected_axial_clearance_mm(
+          model, part_grid, domain, options, lc.clearances, ci);
+    any_single = any_single || cf.removal_reconnects;
+    cfs_out.push_back(cf);
+  }
+  for (const ClearanceCounterfactual& cf : cfs_out) {
+    if (!cf.removal_reconnects) continue;
+    const ProductionLoadCase::Clearance& c =
+        lc.clearances[static_cast<std::size_t>(cf.index)];
+    char buf[640];
+    std::snprintf(
+        buf, sizeof(buf),
+        "  VERIFIED CAUSE: clearance #%d (%s, face %d, concentric_margin %.4g "
+        "mm, axial_clearance %.4g mm) — with THAT ONE clearance removed the "
+        "load path RECONNECTS (re-checked on the real rasterizer, not "
+        "inferred).\n",
+        cf.index, c.params.kind == ClearanceKind::Bolt ? "bolt" : "face",
+        c.face_id, c.params.concentric_margin_mm, c.params.axial_clearance_mm);
+    m += buf;
+    if (c.params.kind == ClearanceKind::Bolt) {
+      if (cf.max_axial_clearance_mm >= 0.0) {
+        std::snprintf(
+            buf, sizeof(buf),
+            "  WHAT WOULD FIX IT: at this resolution the largest "
+            "axial_clearance_mm on clearance #%d that still leaves a load path "
+            "is %.0f mm (measured by bisecting the real check); you asked for "
+            "%.4g mm. Reduce it to <= %.0f mm, or give the optimizer somewhere "
+            "else to route through — widen the design_box on the axis the bore "
+            "runs along, or move/enlarge the anchor faces so the path does not "
+            "have to pass the bore.\n",
+            cf.index, cf.max_axial_clearance_mm, c.params.axial_clearance_mm,
+            cf.max_axial_clearance_mm);
+      } else {
+        std::snprintf(
+            buf, sizeof(buf),
+            "  WHAT WOULD FIX IT: NOT the axial clearance — clearance #%d "
+            "severs the path even at axial_clearance_mm = 0 (measured), so the "
+            "concentric margin %.4g mm on a bore of this radius is already wide "
+            "enough to cut the part. Reduce concentric_margin_mm, or widen the "
+            "design_box so material can route around the bore.\n",
+            cf.index, c.params.concentric_margin_mm);
+      }
+      m += buf;
+    }
+  }
+  if (!any_single && !lc.clearances.empty()) {
+    // No single removal reconnects. Ask the only other question that separates
+    // "the clearances did it, jointly" from "the clearances are innocent":
+    // remove ALL of them (an empty clearance list => an all-Active overlay).
+    const bool none_at_all =
+        preflight_with_clearances(model, part_grid, domain, options, {}, -1)
+            .walk.connected;
+    m += none_at_all
+             ? "  VERIFIED CAUSE: no SINGLE clearance is responsible — removing "
+               "any one of them leaves the path severed, but removing ALL of "
+               "them reconnects it (measured). They sever it together; reduce "
+               "them jointly, or widen the design_box so material can route "
+               "around all of them.\n"
+             : "  VERIFIED: the clearances are NOT the cause — removing every "
+               "one of them still leaves the path severed (measured). The load "
+               "and anchor faces are not connectable inside this design domain: "
+               "check the design_box covers the region between them, that the "
+               "keep_out boxes do not cut across it, and that the anchor and "
+               "load faces are on the same body.\n";
+  }
+  if (lc.clearances.empty())
+    m += "  This job declares NO clearances, so the severance is the design "
+         "domain itself: check that the design_box covers the region between "
+         "the load and anchor faces, that no keep_out box cuts across it, and "
+         "that the two faces are on the same body.\n";
+  probe_ms_out = steady_clock_ms() - t0;
+  {
+    char buf[192];
+    std::snprintf(buf, sizeof(buf),
+                  "  (pre-flight %.2f ms; counterfactuals %.2f ms — against the "
+                  "10 hours the solve would have spent proving the same thing.)",
+                  pf.wall_ms, probe_ms_out);
+    m += buf;
+  }
+  return m;
+}
+
 
 std::string no_external_load_message(const ProductionRunSetup& setup,
                                      int resolution) {

@@ -164,18 +164,32 @@ public struct ProjectStore {
                                        id: UUID) throws {
         try fm.createDirectory(at: projectDir(id), withIntermediateDirectories: true)
         try jobJSON.write(to: runJobURL(id: id), options: .atomic)
-        try designBin.write(to: runDesignURL(id: id), options: .atomic)
+        // A DESIGN-LESS PAIR IS A REAL STATE (task
+        // 2026-08-03-variant-postprocessing-fix): a run killed mid-ladder, or one
+        // whose worker served no container, still kept the LOAD CASE, and smoothing
+        // needs only that. The stale design of a DIFFERENT run must not survive
+        // beside it, so an empty half REMOVES the file rather than writing zero
+        // bytes — the reader would then have to distinguish "empty" from "old".
+        if designBin.isEmpty {
+            try? fm.removeItem(at: runDesignURL(id: id))
+        } else {
+            try designBin.write(to: runDesignURL(id: id), options: .atomic)
+        }
     }
 
-    /// Read them back. Returns nil unless BOTH survive: a design without the job
-    /// that produced it cannot be certified under the right load case, and a job
-    /// without the design has nothing to lattice. Half an answer here would
-    /// become a run that certified under a re-authored load case, which is the
-    /// whole failure this pair exists to prevent.
+    /// Read them back. Returns nil unless the JOB survives — a design without the
+    /// job that produced it cannot be certified under the right load case, and half
+    /// an answer there would become a run certified under a re-authored load case,
+    /// which is the whole failure this pair exists to prevent.
+    ///
+    /// A missing DESIGN is not half an answer, it is a different (and common) state:
+    /// the load case is here, the density fields are not. The pair carries an empty
+    /// `designBin` and the two entry gates diverge — smoothing enabled, latticing
+    /// disabled with its own reason.
     public func loadRelatticeArtifacts(id: UUID) -> RelatticeArtifacts? {
-        guard let job = try? Data(contentsOf: runJobURL(id: id)),
-              let design = try? Data(contentsOf: runDesignURL(id: id)),
-              !job.isEmpty, !design.isEmpty else { return nil }
+        guard let job = try? Data(contentsOf: runJobURL(id: id)), !job.isEmpty
+        else { return nil }
+        let design = (try? Data(contentsOf: runDesignURL(id: id))) ?? Data()
         return RelatticeArtifacts(jobJSON: job, designBin: design)
     }
 

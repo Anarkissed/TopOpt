@@ -1,0 +1,43 @@
+G1 — MINIMIZE_PLASTIC ON IS BYTE-IDENTICAL (task 2026-08-03-growth-ladder)
+
+STASH-REBUILD CHECKSUM. The same two jobs, run by a topopt-cli built from the
+tree WITHOUT this task's changes (git stash) and WITH them. The compared
+artifacts are THE PRODUCT: report.json and every exported variant mesh.
+
+job A  self-weight, l-bracket.step @ res 32, ladder [0.7, 0.5, 0.3]
+       (never enters loadcase.cpp at all)
+job B  LOADCASE with minimize_plastic = TRUE, l-bracket.step @ res 24,
+       anchors = the two O5 bores, load faces 2+5 at 50 N -Z
+       (the reduction ladder through the shared builder: 4 rungs, 4 accepted)
+
+== job A: report.json + every mesh ==
+  BYTE-IDENTICAL (no differing lines)
+  c32cef89371c57d3fe6f9f7ff33b58ce13e2bd05392a211aba62545adb37859d  report.json
+  f1b3ed01c3c805d3e7f506dc81810a7ceafb76ba90a97e32f49d54b8d6178d95  variant_030.stl
+  3795583fb22152dcd09a4273cd03647335c6befdf5c2cd1bb5bacfb68234035e  variant_050.stl
+  70e2c604eeaac56b3c97593b4e7439305e971689756ad8ad820f70443e26f18b  variant_070.stl
+
+== job B: report.json + every mesh ==
+  BYTE-IDENTICAL (no differing lines)
+  501450a17a02df04ca8f1033182c4e32b14f2b65821dc62da662aa33995f99a0  report.json
+  15e821c60909ec342d15fdd9bea4f4cafbb8f5e57d3e82fc7f5947ffa0303aaf  variant_026.stl
+  15e821c60909ec342d15fdd9bea4f4cafbb8f5e57d3e82fc7f5947ffa0303aaf  variant_038.stl
+  15e821c60909ec342d15fdd9bea4f4cafbb8f5e57d3e82fc7f5947ffa0303aaf  variant_052.stl
+  15e821c60909ec342d15fdd9bea4f4cafbb8f5e57d3e82fc7f5947ffa0303aaf  variant_068.stl
+
+== the ONLY differences anywhere, and both are deliberate (bar G7) ==
+-- run_info.json (a provenance document, not the product):
+  87c87,88
+  <   "created_wall_ms": 1785706011558,
+  ---
+  >   "ladder_mode": "reduction",
+  >   "created_wall_ms": 1785705745661,
+-- loadcase.json (the loadcase receipt, likewise):
+  17c17,18
+  <   ]
+  ---
+  >   ],
+  >   "ladder_mode": "reduction"
+
+ONE key, ladder_mode, added in BOTH modes on purpose: NAMING THE MODE IS THE
+BAR (G7). Everything the user prints or certifies is unchanged to the byte.

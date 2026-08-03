@@ -1,0 +1,17 @@
+P5 · EXISTING ARTIFACTS BYTE-IDENTICAL
+
+Same optimize job (l-bracket demo, res 48, ladder 0.7/0.5/0.3), run with the
+PRE-change topopt-cli (out_before) and the POST-change one (out2).
+
+  design.bin           IDENTICAL  (1769816 bytes)
+  report.json          IDENTICAL  (13471 bytes)
+  fields.bin           IDENTICAL  (3737332 bytes)
+  variant_030.stl      IDENTICAL  (1710484 bytes)
+  variant_050.stl      IDENTICAL  (2710684 bytes)
+  variant_070.stl      IDENTICAL  (3018284 bytes)
+  loadcase.json        IDENTICAL  (261 bytes)
+
+  run_info.json / build_orientation.json carry deliberate wall-clock stamps and
+  are excluded, as the existing determinism bars (test_lattice_variant Z8) do.
+
+  No .part file is left behind: 0 found.

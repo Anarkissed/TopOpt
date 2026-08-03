@@ -685,6 +685,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._jobs_list()          # GET /jobs (handoff 121)
             job = self._job_from_path(parts)
             if job is None:
+                # A JOB THIS PROCESS NEVER RAN (task
+                # 2026-08-03-variant-postprocessing-fix, defect 7). The scheduler
+                # is in-memory, so a worker RESTART forgets every job it has ever
+                # run — while `<workdir>/<id>/out/` sits on disk, intact, with the
+                # meshes and design.bin of the variants the client is looking at.
+                #
+                # That is not hypothetical: the maintainer's M2_verticalStand run
+                # (job 95f4130119414636) was killed when this process exited, and
+                # every later request for its artifacts 404'd against a directory
+                # that was right there. So ARTIFACT reads fall back to disk.
+                #
+                # Deliberately artifacts ONLY. `/events` replays an in-memory event
+                # list this process never built, and a job's live STATE is a fact
+                # about a running child — inventing either from a directory listing
+                # would be a guess. Those still 404, honestly.
+                if len(parts) == 4 and parts[2] == "files":
+                    return self._file_from_disk(parts[1], parts[3])
                 return self._not_found("no such job")
             if len(parts) == 3 and parts[2] == "events":
                 return self._events(job)
@@ -918,11 +935,31 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _file_from_disk(self, job_id, name):
+        """Serve an artifact of a job THIS process never ran, from its workdir.
+
+        The id is used only as a directory name and is confined to the workdir:
+        `basename` on both components, then a realpath containment check, so no
+        request can reach outside `CFG.workdir` however it is spelled.
+        """
+        job_id = os.path.basename(job_id)
+        name = os.path.basename(name)
+        root = os.path.realpath(CFG.workdir)
+        path = os.path.realpath(os.path.join(root, job_id, "out", name))
+        if not (path == root or path.startswith(root + os.sep)):
+            return self._not_found("no such job")
+        if not os.path.isfile(path):
+            return self._not_found("no such job")
+        self._send_file(path)
+
     def _file(self, job, name):
         name = os.path.basename(name)
         path = os.path.join(job.out_dir, name)
         if not os.path.isfile(path):
             return self._not_found("no such artifact")
+        self._send_file(path)
+
+    def _send_file(self, path):
         with open(path, "rb") as f:
             data = f.read()
         self.send_response(200)

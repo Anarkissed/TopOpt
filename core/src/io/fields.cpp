@@ -1,6 +1,7 @@
 #include "topopt/fields.hpp"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -44,6 +45,16 @@ int write_fields_file(const std::string& path,
                       const MinimizePlasticResult& result,
                       const VoxelGrid& solved_grid,
                       bool accepted_only) {
+  std::vector<const MinimizePlasticVariant*> all;
+  all.reserve(result.evaluated.size());
+  for (const MinimizePlasticVariant& v : result.evaluated) all.push_back(&v);
+  return write_fields_file(path, all, solved_grid, accepted_only);
+}
+
+int write_fields_file(const std::string& path,
+                      const std::vector<const MinimizePlasticVariant*>& variants,
+                      const VoxelGrid& solved_grid,
+                      bool accepted_only) {
   const std::size_t voxel_count = solved_grid.voxel_count();
   // Node count of the structured hex grid = (nx+1)(ny+1)(nz+1), the same value
   // fea_node_count returns (assembly.cpp). Computed inline so this always-built io
@@ -58,8 +69,8 @@ int write_fields_file(const std::string& path,
   // the margin verdict, and the field must be served either way (N3 — see the
   // header comment).
   std::vector<const MinimizePlasticVariant*> accepted;
-  for (const MinimizePlasticVariant& v : result.evaluated)
-    if (v.accepted || !accepted_only) accepted.push_back(&v);
+  for (const MinimizePlasticVariant* v : variants)
+    if (v && (v->accepted || !accepted_only)) accepted.push_back(v);
 
   LEWriter w;
   // -- run header ------------------------------------------------------------
@@ -107,12 +118,22 @@ int write_fields_file(const std::string& path,
     w.f32_array(v.displacement_field);
   }
 
-  std::ofstream out(path, std::ios::binary);
-  if (!out) throw FieldsError("cannot open fields file for writing: " + path);
-  out.write(reinterpret_cast<const char*>(w.bytes.data()),
-            static_cast<std::streamsize>(w.bytes.size()));
-  out.flush();
-  if (!out) throw FieldsError("failed writing fields file: " + path);
+  // ATOMIC PUBLISH, for the same reason design.bin has one: this file is now
+  // flushed after every rung and served over HTTP while a later rung rewrites it,
+  // so a reader must see a whole container or the previous one — never a prefix.
+  const std::string tmp = path + ".part";
+  {
+    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+    if (!out) throw FieldsError("cannot open fields file for writing: " + tmp);
+    out.write(reinterpret_cast<const char*>(w.bytes.data()),
+              static_cast<std::streamsize>(w.bytes.size()));
+    out.flush();
+    if (!out) throw FieldsError("failed writing fields file: " + tmp);
+  }
+  if (std::rename(tmp.c_str(), path.c_str()) != 0) {
+    std::remove(tmp.c_str());
+    throw FieldsError("failed publishing fields file: " + path);
+  }
   return static_cast<int>(accepted.size());
 }
 

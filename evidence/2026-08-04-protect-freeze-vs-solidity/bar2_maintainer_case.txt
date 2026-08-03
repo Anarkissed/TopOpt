@@ -1,0 +1,29 @@
+=== BAR 2 / BAR 5 — the maintainer's own job, base vs branch ===
+M2_verticalStand.step, resolution 128, his job document unmodified.
+
+  rung             solid base           solid branch           composite base         composite branch
+  0.68  True     673.856173  True     673.856173  True   3256.5221   472vx  True   3256.5221   472vx
+  0.52  True     701.901605  True     701.901605  True   3389.1462    82vx  True   3389.1462    82vx
+  0.38  True     681.414619  True     681.414619  True   3290.8598     0vx  True   3290.8598     0vx
+  0.26  True     623.947083  True     623.947083  True   3013.3230     0vx  True   3013.3230     0vx
+
+=== THE SPLIT PR 293 COULD NOT REPORT ===
+PR 293 measured `region reachability: active=932 frozen_solid=10070
+(of 11002)` and read the 10070 as UNREACHABLE. Under the new semantics
+they are ordinary retained material and the include region applies to
+them. What moved is not the mask — the optimizer's constraint is
+unchanged — but what that frozen material is ALLOWED TO BECOME.
+
+  rung  frozen printed   in include   latticed   kept solid  total latticed vx
+  0.68           40216        10070        337        39879                472
+  0.52           40216        10070         25        40191                 82
+  0.38           40216        10070          0        40216                  0
+  0.26           40216        10070          0        40216                  0
+
+=== THE AUDIT (bar 3) on his job ===
+  vf 0.68: cells_not_emitted=0 strut_and_solid=97 unexplained=0 in_exclude_latticed=0
+  vf 0.52: cells_not_emitted=0 strut_and_solid=39 unexplained=0 in_exclude_latticed=0
+  vf 0.38: cells_not_emitted=0 strut_and_solid=0 unexplained=0 in_exclude_latticed=0
+  vf 0.26: cells_not_emitted=0 strut_and_solid=0 unexplained=0 in_exclude_latticed=0
+
+VERDICT FLIPS: 0  — BAR 5 PASS on the maintainer's own job.

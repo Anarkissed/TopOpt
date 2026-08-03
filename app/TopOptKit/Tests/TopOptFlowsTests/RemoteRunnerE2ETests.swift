@@ -62,6 +62,20 @@ final class RemoteRunnerE2ETests: XCTestCase {
                           anchorFaceIDs: [1, 2], loadGroups: [], minimizePlastic: true)
     }
 
+    /// The same request WITH a declared load group. Smoothing re-certifies under the
+    /// run's load; a self-weight run is legitimately blocked ("smoothing only ever
+    /// raises the margin"), so proving the Smooth entry reachable needs a load.
+    private func loadedRequest() throws -> RunRequest {
+        let base = try makeRequest()
+        return RunRequest(modelPath: base.modelPath, material: base.material,
+                          materialsPath: base.materialsPath, rulesPath: base.rulesPath,
+                          resolution: base.resolution, projectName: base.projectName,
+                          anchorFaceIDs: [1, 2],
+                          loadGroups: [TopOptKit.LoadGroupSpec(
+                              faceIDs: [7], force: SIMD3<Double>(0, 0, -500))],
+                          minimizePlastic: true)
+    }
+
     private func config(fingerprint: String? = nil, port: Int? = nil) -> RemoteRunnerConfig {
         // Liveness config (handoff 101): a SHORT inactivity grace + short control
         // timeout so the progress-based paths resolve in seconds under test; the
@@ -86,6 +100,7 @@ final class RemoteRunnerE2ETests: XCTestCase {
         case "stream_drop": try runStreamDropReconnects()
         case "worker_dies": try runWorkerDiesUnreachable()
         case "reattach":    try runReattachAfterCompletion()
+        case "retain_dies": try runRetentionSurvivesAWorkerThatDiesMidLadder()
         default: XCTFail("unknown TOPOPT_E2E_CASE \(e2eCase)")
         }
     }
@@ -141,6 +156,120 @@ final class RemoteRunnerE2ETests: XCTestCase {
         print("  RESULT: succeeded, \(outcome.variants.count) variants, "
             + "worst margins \(outcome.variants.map { String(format: "%.2f", $0.worstCaseMargin) })")
     }
+
+    // MARK: THE MAINTAINER'S SEQUENCE — a worker that dies mid-ladder
+    //       (task 2026-08-03-variant-postprocessing-fix, defect 1)
+
+    /// THE REPRODUCTION, ON THE SHIPPING PATH. The real `RemoteRun` against the real
+    /// worker over real HTTP, wired to `RunModel` exactly the way
+    /// `WorkspacePlaceholder.startRun` wires it — including the `onArtifacts` hop
+    /// that no other test had ever exercised.
+    ///
+    /// The worker streams two variants and is then KILLED before the terminal event.
+    /// That is what happened to M2_verticalStand (worker job 95f4130119414636): three
+    /// variants streamed, rung 4 of 4 still solving, worker restarted. Its out/ holds
+    /// three meshes and NO report.json, fields.bin or design.bin — because core wrote
+    /// those only at the end, and the app fetched the retention pair only at final
+    /// assembly, which such a run never reaches.
+    ///
+    /// BEFORE THIS TASK this test fails on `retainedArtifacts` being nil and on both
+    /// entry verdicts being disabled — the exact two sentences the maintainer
+    /// photographed. It is the assertion PR 284's suite did not have: every retention
+    /// test there injected a stub `runner` closure that called
+    /// `noteRetainedArtifacts` itself, so the producer side — `RemoteRun` fetching
+    /// `design.bin` and reporting it — was never run at all.
+    private func runRetentionSurvivesAWorkerThatDiesMidLadder() throws {
+        // A DECLARED LOAD CASE, unlike the other cases' self-weight request: the
+        // smoothing entry re-certifies UNDER the run's load, and a self-weight run is
+        // legitimately blocked ("smoothing only ever raises the margin"). To assert
+        // P4 — Smooth reachable — the run must have a load to be smoothed under.
+        let request = try loadedRequest()
+        let model = RunModel(runner: RunModel.remoteRunner(config(), onArtifacts: { art in
+            // The production hop, verbatim (WorkspacePlaceholder.startRun).
+            DispatchQueue.main.async { self.model0?.noteRetainedArtifacts(art) }
+        }))
+        model0 = model
+        defer { model0 = nil }
+
+        let resolved = expectation(description: "the run resolves after the worker dies")
+        let obs = Observer(model: model) { phase, _, _ in
+            if phase != .running && phase != .idle { resolved.fulfill() }
+        }
+        model.start(request, remote: true, workerName: "E2E worker")
+        wait(for: [resolved], timeout: 60)
+        obs.stop()
+
+        // (1) The variants the run DID produce are kept — PR 284's rule, unchanged.
+        let outcome = try XCTUnwrap(model.outcome,
+                                    "a worker that dies after streaming variants must "
+                                    + "not take those variants with it")
+        XCTAssertGreaterThanOrEqual(outcome.variants.filter { $0.accepted }.count, 1,
+                                    "the streamed variants survive")
+
+        // (2) …AND SO DOES WHAT THEY NEED. This is the defect.
+        let art = try XCTUnwrap(model.retainedArtifacts,
+                                "the run kept its variants but no retention pair — the "
+                                + "exact state that greyed out both entries")
+        XCTAssertFalse(art.jobJSON.isEmpty, "the submitted job document is retained")
+        XCTAssertTrue(art.hasDesign,
+                      "design.bin was fetched while the run was still streaming, so a "
+                      + "run that never reaches its terminal event still has one")
+        let index = try XCTUnwrap(DesignContainerIndex.parse(art.designBin),
+                                  "the retained container parses as a v1 design.bin")
+        print("  retained: job \(art.jobJSON.count) B, design \(art.designBin.count) B, "
+            + "blocks \(index.requestedVolumeFractions)")
+
+        // (2b) EACH RUNG CARRIES ITS OWN FIELD (task
+        //      2026-08-03-variant-postprocessing-concurrency, bars 3+4). Core
+        //      publishes fields.bin after every rung and the client fetches that
+        //      rung's block as it streams — so a variant produced by a run that
+        //      never finished still has the von Mises the lattice page's AUTO
+        //      density grades from and the results overlays draw. Before this, a
+        //      streamed variant arrived with mass 0 and an empty field.
+        for v in outcome.variants where v.accepted {
+            XCTAssertFalse(v.vonMisesField.isEmpty,
+                           "rung vf=\(v.requestedVolumeFraction) must carry its OWN "
+                           + "field, on a run that never reached a terminal event")
+            XCTAssertGreaterThan(v.massGrams, 0,
+                                 "…and its own mass, from the same block")
+        }
+        XCTAssertGreaterThan(outcome.gridNx, 0,
+                             "the grid the fields are indexed to rides along, or the "
+                             + "app holds a field it cannot address")
+        // The fields must be the RUNGS' OWN, not one rung's copied onto all: the
+        // stub gives each rung a distinct mass, so equal masses would mean the
+        // match-by-volume-fraction had degenerated into "take the first block".
+        let masses = outcome.variants.filter { $0.accepted }.map(\.massGrams)
+        XCTAssertEqual(Set(masses).count, masses.count,
+                       "each rung got ITS OWN block, not a neighbour's: \(masses)")
+
+        // (3) …and the two entry controls the user actually taps are ENABLED, for
+        //     every variant on screen. A pair that is present but does not cover a
+        //     rung is not a pass.
+        for (i, v) in outcome.variants.enumerated() where v.accepted {
+            let facts = VariantEntryFacts(
+                hasGeometry: !v.meshVertices.isEmpty && !v.meshIndices.isEmpty,
+                machine: SolvingMachine.of(outcome),
+                retainedJob: art.jobJSON, retainedDesign: art.designBin,
+                runGeneratedLattice: outcome.latticeReport != nil,
+                modelPath: request.modelPath,
+                workerSelected: true, runInFlight: false,
+                requestedVolumeFraction: v.requestedVolumeFraction)
+            let smooth = VariantEntry.smoothing(facts)
+            let lattice = VariantEntry.lattice(facts)
+            print("  variant \(i) vf=\(v.requestedVolumeFraction): "
+                + "smooth=\(smooth.enabled) lattice=\(lattice.enabled)")
+            XCTAssertTrue(smooth.enabled,
+                          "P4: Smooth must be usable — blocks: \(smooth.allReasons)")
+            XCTAssertTrue(lattice.enabled,
+                          "R3: Lattice must be usable — blocks: \(lattice.allReasons)")
+        }
+    }
+
+    /// The model the `onArtifacts` closure reports into. A closure passed to the
+    /// runner factory cannot capture the `let` it is being assigned into, and the
+    /// production site has the same shape (it captures the run model the view holds).
+    private var model0: RunModel?
 
     // MARK: re-attach to a job that finished while the app was GONE (handoff 134)
 

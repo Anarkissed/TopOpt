@@ -523,5 +523,21 @@ using MgCoarseSpaceHook = std::function<std::vector<MgCoo>(const MgCoarseSeam&)>
 MgCoarseSpaceHook mg_set_coarse_space_hook(MgCoarseSpaceHook hook);
 bool mg_coarse_space_hook_installed();
 
+// THE SOLVE DEADLINE poll cadence (fea.hpp fea_set_solve_deadline_ms): one
+// steady-clock read every this-many CG iterations. 256 applies is far more work
+// than a clock read even at the smallest production grid, and the resulting
+// granularity (a few hundred applies past the deadline) is nothing against a
+// budget measured in minutes.
+inline constexpr int kSolveDeadlinePollIters = 256;
+
+// The armed deadline for THIS thread, in absolute mf_steady_ms() milliseconds;
+// 0 = disarmed. Thread-local and sticky, like the stagnation latch and the
+// recycle space — the driver arms it around a trajectory solve and disarms it
+// after.
+inline double& mf_solve_deadline() {
+  static thread_local double deadline = 0.0;
+  return deadline;
+}
+
 }  // namespace fea_detail
 }  // namespace topopt

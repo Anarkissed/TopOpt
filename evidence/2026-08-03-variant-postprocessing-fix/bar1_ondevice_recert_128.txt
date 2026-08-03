@@ -1,0 +1,43 @@
+BAR 1 · ON-DEVICE RE-CERTIFICATION AT 128^3 — MEASURED, NOT ASSUMED
+
+The SAME call the smoothing page makes on the device: topopt-cli analyze runs
+analyze_job -> topopt::analyze_fixed_design, which is what bridge.cpp:1297 calls
+in-process. Subject: the maintainer's OWN variant_038.stl from job
+95f4130119414636 (128^3, PLA, his declared load case, his face protection).
+
+        101.18 real       143.56 user         3.30 sys
+             324681728  maximum resident set size
+             386483112  peak memory footprint
+
+  => wall            101.2 s   (143.6 s user — it is multithreaded)
+  => peak RSS        310 MB    (324,681,728 B)
+  => peak footprint  369 MB    (386,483,112 B)
+
+VERDICT AND CONVERGENCE (bar 1 names PR 200's non-convergence risk explicitly):
+    peak stress: 0.01671 MPa   worst-case margin: 3291 (required 1.5)
+    verdict: ACCEPTED
+    voxel mass: 412.9 g   mesh mass: 410.3 g
+    min-feature violations: 630
+
+  It CONVERGED. The worst-case margin 3291 reproduces his run's own recorded
+  solid margin for this rung (3290.86 in variant_038_lattice.report.json), so
+  this is the same design certified the same way — not a different object.
+
+CAVEATS, STATED:
+  * This is a MAC (Apple silicon), not an iPad. I cannot run on his iPad.
+  * The machine was NOT idle: other worktrees' solves were running, so the
+    101 s wall is an UPPER bound for this machine.
+  * The number that transfers is MEMORY: 369 MB peak. Every iPad this app
+    targets has multiple GB, so 128^3 re-certification is not memory-bound on
+    device. Wall time scales with the iPad's lower throughput — minutes, not
+    hours, and it is already how the smoothing page behaves today.
+
+FOLLOW-UP, measured later on a QUIET machine (the same call, same variant, run as
+part of the bar-2 harness):
+
+    79.53 real   123.85 user   2.35 sys
+    376913920 maximum resident set size    (359 MB)
+
+So the on-device 128^3 re-certification is ~80-101 s depending on machine load, and
+~360-370 MB peak either way. The MEMORY figure is the one that transfers between
+machines, and it is stable.

@@ -438,6 +438,52 @@ struct RunInfo {
   std::vector<int> rung_non_convergent;
   std::vector<int> rung_non_convergent_iteration;
   std::vector<double> rung_non_convergent_residual;
+  // Task 2026-08-03-preflight-feasibility-and-divergence — THE GUARDS ARE
+  // OBSERVABLE (bar P6). Three guards, all three recorded here with the numbers
+  // they fired on, so the next investigation of a job that stopped early does
+  // not need another instrumentation task.
+  //
+  // GUARD 1, the PRE-FLIGHT (config-free: it is a measurement, not a threshold).
+  // Written BEFORE the solve — this is the one part of run_info that is
+  // meaningful on an unfinished run, which is the point of a pre-flight.
+  // `preflight_decidable` false means the grid carried no Load or no Fixture
+  // voxels, so `preflight_connected` is vacuous and asserts nothing.
+  // `preflight_narrowest_*` are the marginality reading: the narrowest BFS level
+  // set separating the anchors from the nearest load, an UPPER BOUND on the
+  // minimum cut of the surviving path — INFORMATION, never a refusal.
+  bool preflight_ran = false;
+  bool preflight_decidable = false;
+  bool preflight_connected = false;
+  double preflight_ms = 0.0;
+  long long preflight_load_voxels = 0;
+  long long preflight_anchor_voxels = 0;
+  long long preflight_unreached_load_voxels = 0;
+  long long preflight_allowed_voxels = 0;    // may hold material
+  long long preflight_forbidden_voxels = 0;  // FrozenVoid: may never
+  int preflight_narrowest_separator_voxels = -1;
+  double preflight_narrowest_separator_mm2 = -1.0;
+  int preflight_geodesic_levels = -1;
+  // GUARDS 2 and 3 — the armed thresholds (CONFIG, up-front) and the per-rung
+  // OUTCOME (filled AFTER the run from MinimizePlasticResult, the same
+  // finalize-only discipline as rung_infeasible, so an unfinished run asserts
+  // nothing). All-false outcome vectors are the positive statement "no guard
+  // fired". See MinimizePlasticResult for the per-field meanings.
+  double infeasible_immediate_ratio = 0.0;
+  double infeasible_immediate_wall_ratio = 0.0;
+  double iteration_time_ratio = 0.0;
+  double iteration_time_floor_ms = 0.0;
+  std::vector<int> rung_diverged;
+  std::vector<int> rung_diverged_iteration;
+  std::vector<double> rung_diverged_c_ratio;
+  std::vector<double> rung_diverged_cg_ratio;
+  std::vector<double> rung_diverged_wall_ratio;
+  std::vector<int> rung_time_budget;
+  std::vector<int> rung_time_budget_iteration;
+  std::vector<double> rung_time_budget_ms;
+  std::vector<double> rung_time_budget_elapsed_ms;
+  std::vector<double> rung_time_budget_baseline_ms;
+  std::vector<std::string> rung_time_budget_phase;
+  std::vector<double> rung_time_budget_phase_ms;
   // ACTIVE DOMAIN (active-domain phase 1). `active_domain_band` is the REQUESTED
   // band (config, written up-front): 0 = off, > 0 = the explicit half-width in
   // voxels, < 0 = auto (resolved per rung from the filter radius). The two
@@ -525,6 +571,14 @@ struct RunInfo {
   double wall_thickness_mm = 0.0;
   bool has_design_box = false;
   std::vector<double> ladder;
+  // WHICH LADDER THIS RUN WALKED (task 2026-08-03-growth-ladder): "reduction"
+  // (every rung <= 1.0 — remove as much plastic as possible while holding the
+  // required margin) or "growth" (every rung > 1.0 — add as little plastic as
+  // possible to reach it). Derived from `ladder` itself, so it can never disagree
+  // with the rungs beside it, and recorded because a run record that carries the
+  // numbers but not what they MEAN leaves the reader to infer the mode — which is
+  // exactly the silence bar G7 closes.
+  std::string ladder_mode = "reduction";
   long long created_wall_ms = 0;  // run-info write time (epoch ms)
   // Capture config echo (what observability this run captured).
   bool iteration_csv = false;
@@ -611,6 +665,36 @@ struct RunInfo {
   long long lattice_export_solid_region_triangles = 0;
   long long lattice_export_include_void_voxels = 0;  // include over optimizer
                                                      // void: the reported no-op
+  // Of those, the ones a declared keep-clear caused (task 2026-08-04-protect-
+  // freeze-vs-solidity). Unsatisfiable by construction — the only lattice-region
+  // overlap that is a real conflict, and the one the CLI warns on.
+  long long lattice_export_include_void_by_clearance = 0;
+  // PRE-FLIGHT REGION FORECAST (same task, item 6) — computed from the DECLARED
+  // geometry before any solve: how many include regions are thinner than the
+  // cells-per-member floor requires, and the two numbers that decide it. Present
+  // only when the job declares include regions, so every other record is
+  // byte-identical.
+  bool lattice_forecast_present = false;
+  long long lattice_forecast_include_regions = 0;
+  long long lattice_forecast_region_too_thin = 0;
+  double lattice_forecast_required_mm = 0.0;
+  double lattice_forecast_thinnest_region_mm = 0.0;
+  // FROZEN MATERIAL vs LATTICE (same task). Summed over the run's variants:
+  // printed voxels the optimizer held frozen, and what the lattice page decided
+  // they ARE. `frozen_cells_not_emitted` / `frozen_voxels_strut_and_solid` are
+  // the audit (bar 3) — both 0 on a coherent run. Serialized ONLY when the run
+  // had frozen material AND a lattice, so every other record is byte-identical.
+  bool lattice_export_frozen_present = false;
+  long long lattice_export_frozen_printed = 0;
+  long long lattice_export_frozen_latticed = 0;
+  long long lattice_export_frozen_solid = 0;
+  long long lattice_export_frozen_cells_not_emitted = 0;
+  long long lattice_export_frozen_voxels_strut_and_solid = 0;
+  // The real divergence (0 on a coherent run) and the item-4 bar (0 always):
+  // struts written into a region the certificate calls entirely solid, and
+  // frozen voxels inside an EXCLUDE region that were latticed anyway.
+  long long lattice_export_frozen_strut_and_solid_unexplained = 0;
+  long long lattice_export_frozen_in_exclude_latticed = 0;
   double lattice_export_gen_seconds = 0.0;      // generation wall time
   double lattice_export_gen_fraction = 0.0;     // gen time / total job time (P6)
   // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): clip/skin

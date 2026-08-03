@@ -11,6 +11,24 @@
 
 namespace topopt {
 
+namespace {
+
+// BAR F1 — record ONE voxel rejected because its member cannot hold N* cells
+// across. `floor_mm` is the printability floor: below n_star * floor_mm no LEGAL
+// cell exists for this member at all, so the voxel is irrecoverable by any cell
+// choice and any remedy naming a cell size would be a guess.
+void note_member_too_thin(GradedField& out, double width_mm, double n_star,
+                          double floor_mm) {
+  ++out.fallback_member_too_thin;
+  if (std::isfinite(width_mm)) {
+    if (width_mm > out.fallback_max_member_width_mm)
+      out.fallback_max_member_width_mm = width_mm;
+    if (width_mm < n_star * floor_mm) ++out.fallback_irrecoverable_by_cell;
+  }
+}
+
+}  // namespace
+
 GradedField grade_lattice(const VoxelGrid& grid,
                           const std::vector<double>& density,
                           const std::vector<double>& demand,
@@ -160,6 +178,12 @@ GradedField grade_lattice(const VoxelGrid& grid,
       if (cpm < n_star) {
         // L4 — no printable cell holds the floor in this member: it STAYS SOLID.
         ++out.solid_fallback_voxels;
+        // BAR F1: the reason, per voxel. On a uniform cell there is exactly ONE
+        // predicate that can reject — this one — because the cell is at or above
+        // the printability floor by construction (`uniform_cell` above), so no
+        // voxel can be rejected for an unprintable strut. A receipt reading
+        // `unprintable: 0` on this path means "impossible here", not "none today".
+        note_member_too_thin(out, width[e], n_star, floor_mm);
         continue;
       }
 
@@ -221,6 +245,31 @@ GradedField grade_lattice(const VoxelGrid& grid,
       const double ce = voxel_cell[e];
       if (!(ce > 0.0)) {
         ++out.solid_fallback_voxels;
+        // BAR F1 — which of the plan's TWO limits bound this voxel's base cell.
+        // Both can occur in swept mode and their remedies are opposite (a finer
+        // cell for a thin member, a coarser one for an unprintable strut), so the
+        // receipt reports them separately or reports nothing useful.
+        // Voxel -> base cell, by the voxel CENTRE — the SAME convention
+        // plan_cell_sizes used to build the aggregates, so the attribution reads
+        // the reason of the cell that actually decided this voxel.
+        const int vi = static_cast<int>(e % static_cast<std::size_t>(grid.nx));
+        const int vj = static_cast<int>((e / static_cast<std::size_t>(grid.nx)) %
+                                        static_cast<std::size_t>(grid.ny));
+        const int vk = static_cast<int>(e / (static_cast<std::size_t>(grid.nx) *
+                                             static_cast<std::size_t>(grid.ny)));
+        const double S0 = out.cell_plan.base_cell_mm;
+        const int ci = std::min(out.cell_plan.nx - 1, std::max(0,
+            static_cast<int>(std::floor((vi + 0.5) * grid.spacing / S0))));
+        const int cj = std::min(out.cell_plan.ny - 1, std::max(0,
+            static_cast<int>(std::floor((vj + 0.5) * grid.spacing / S0))));
+        const int ck = std::min(out.cell_plan.nz - 1, std::max(0,
+            static_cast<int>(std::floor((vk + 0.5) * grid.spacing / S0))));
+        const std::size_t c = out.cell_plan.index(ci, cj, ck);
+        const signed char why =
+            c < out.cell_plan.reject_reason.size()
+                ? out.cell_plan.reject_reason[c] : 0;
+        if (why == 2) ++out.fallback_strut_unprintable;
+        else note_member_too_thin(out, width[e], n_star, floor_mm);
         continue;
       }
       const double rho = clamp_rho(e, rho_of(e));

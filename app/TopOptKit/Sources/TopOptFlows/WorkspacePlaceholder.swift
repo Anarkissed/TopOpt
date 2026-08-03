@@ -139,6 +139,9 @@ public struct WorkspacePlaceholder: View {
     @State private var latticeVariantMesh: ViewerMesh?
     @StateObject private var latticeSim = LatticeSimModel()
     @StateObject private var latticePageModel = LatticePageModel()
+    /// The pre-flight forecast (bar F3). Held HERE, not in the page, so closing and
+    /// reopening the lattice page does not throw away an answer that is still true.
+    @StateObject private var latticeForecast = LatticeForecastModel()
     @State private var latticeRegionDrag: PrimitiveGizmo.Drag?
     @State private var latticeRegionActiveId: Float = -1
     @State private var latticeRegionOrbiting = false
@@ -383,7 +386,24 @@ public struct WorkspacePlaceholder: View {
                           // tints the actual FROZEN VERTICES of the mesh being painted, so
                           // what the brush will refuse is shown on the surface itself
                           // rather than as a red box floating near it.
-                          clearanceVolumes: (force.phase == .edit && !fullScreenPageUp)
+                          //
+                          // …AND ON THE LATTICE PAGE (task
+                          // 2026-08-03-variant-postprocessing-fix, defect 3 / bar
+                          // V2). The maintainer's run reported 99,558 include-region
+                          // voxels sitting on VOID — regions covering space the
+                          // optimizer had emptied. He could not have known: this
+                          // condition read `!fullScreenPageUp`, so the moment the
+                          // lattice page opened, every region volume stopped being
+                          // drawn — and the workspace only ever drew them over the
+                          // ORIGINAL part, never over an optimized variant. The page
+                          // whose whole subject is those regions was the one page
+                          // that hid them. The stage here shows the VARIANT's own
+                          // mesh (`stageMesh`), so a region sitting in empty space is
+                          // now visibly sitting in empty space — and the forecast
+                          // puts a number on it.
+                          clearanceVolumes:
+                              (showLatticePage
+                               || (force.phase == .edit && !fullScreenPageUp))
                               ? clearanceRenderItems : [],
                           // Strut preview (2026-07-30 alignment handoff, bar A3): while the
                           // raymarched lattice layer is up there is ONE visible object — the
@@ -1487,7 +1507,9 @@ public struct WorkspacePlaceholder: View {
             // A RE-ATTACHED run has no submitted document to retain (the app was
             // restarted since), and says exactly that rather than borrowing the
             // "predates retention" sentence, which would be false.
-            reattached: run.wasReattached)
+            reattached: run.wasReattached,
+            // The rung the retained design container is indexed by.
+            requestedVolumeFraction: v.requestedVolumeFraction)
     }
 
     /// The Smooth entry control's verdict for a variant — what the results screen's
@@ -1546,8 +1568,13 @@ public struct WorkspacePlaceholder: View {
             // Whether this variant can actually be re-latticed is a question
             // about what the RUN kept, and it is answered here rather than at
             // the button, so the page can say WHY when the answer is no.
+            // A pair with NO DESIGN half is a real state since task
+            // 2026-08-03-variant-postprocessing-fix (the job document is retained at
+            // submit, the design only once the solver has produced one), so
+            // "artifacts != nil" is no longer the same question as "can this be
+            // latticed". The page reads the design, not the pair.
             let artifacts = project.relatticeArtifacts
-            let why: RelatticeUnavailable? = artifacts != nil
+            let why: RelatticeUnavailable? = artifacts?.hasDesign == true
                 ? nil
                 : (SolvingMachine.of(o).isThisDevice ? .computedOnDevice
                                                      : .runPredatesDesignStore)
@@ -1846,6 +1873,9 @@ public struct WorkspacePlaceholder: View {
         latticePageModel.libraryOpen = false
         latticeVariantContext = nil
         latticeVariantMesh = nil
+        // The page is gone; a forecast still in flight is about settings nobody is
+        // looking at, and the answer would describe a variant that has been left.
+        latticeForecast.clear()
     }
 
     /// LATTICE THIS VARIANT (bar Z7). Submits the `lattice_variant` job against
@@ -1853,6 +1883,74 @@ public struct WorkspacePlaceholder: View {
     /// (with the reason already on the button) when the run kept neither, and
     /// refused when there is no worker: the certification solves run where the
     /// core runs, and the on-device bridge has no lattice path at all.
+    /// THE `lattice_variant` JOB DOCUMENT — built ONCE, for both the run and the
+    /// forecast of it (bar F3).
+    ///
+    /// The forecast is only worth anything if it describes the job the button
+    /// actually submits. Two builders would be two chances to drift, which is the
+    /// [[infill-knockdown-duplicated-app-core]] failure exactly. So there is one:
+    /// `startRelatticeRun` submits what this returns, and the forecast is a
+    /// forecast OF these bytes (RelatticeRun arms `lattice.forecast_only` inside
+    /// the runner, on this same document, so the two differ in one key and no
+    /// other). `noteSkippedFaces` is off for the forecast — it must not post
+    /// transient notes on every settings change.
+    private func relatticeJobJSON(noteSkippedFaces: Bool) -> Data? {
+        guard let ctx = latticeVariantContext, let art = ctx.artifacts else { return nil }
+        // The regions the page authored, as EXPLICIT GEOMETRY PREDICATES (bar
+        // Z11): on a variant only placed primitives are emitted, because a face
+        // id would resolve against the ORIGINAL part's surface, which this design
+        // no longer has.
+        let emission = project.variantLatticeJobRegions()
+        if noteSkippedFaces, emission.skippedFaces > 0 {
+            latticePageModel.post(
+                note: "\(emission.skippedFaces) face selection(s) were not carried "
+                    + "onto this variant — an optimized surface has no faces to "
+                    + "resolve them against. Place a region instead.")
+        }
+        // The SAME spec builder the optimize request uses — only the regions
+        // differ, and they differ for the Z11 reason above.
+        let spec = project.lattice.runSpec(
+            topology: project.lattice.topologyID,
+            memberMM: project.lattice.regionMemberMM ?? 0,
+            lineWidthMM: project.printParams.wallLineWidthOuterMM,
+            regions: emission.regions)
+        return try? RelatticeJobBuilder.build(
+            original: art.jobJSON,
+            variantVolumeFraction: ctx.requestedVolumeFraction,
+            designFileName: "design.bin", lattice: spec)
+    }
+
+    /// The forecast's input and identity: the job above, but only when a forecast
+    /// can actually be produced. No worker, no retained design, no variant ⇒ nil,
+    /// and the drawer says so rather than spinning forever.
+    private var latticeForecastJob: Data? {
+        guard showLatticePage, compute.activeRemote != nil,
+              latticeVariantContext?.artifacts != nil else { return nil }
+        return relatticeJobJSON(noteSkippedFaces: false)
+    }
+
+    /// Runs the forecast on the worker: the same submit + poll as the run, with
+    /// `lattice.forecast_only` armed. Core measured it at 0.09–0.55 s against the
+    /// 4–39 s runs it forecasts.
+    private func makeForecastDriver() -> (@Sendable (Data) async throws -> LatticeForecast)? {
+        guard let config = compute.activeRemote,
+              let file = project.importedFile,
+              let art = latticeVariantContext?.artifacts,
+              let vf = latticeVariantContext?.requestedVolumeFraction else { return nil }
+        let name = project.name
+        let designBin = art.designBin
+        let path = file.path
+        return { job in
+            let inputs = RelatticeRun.Inputs(
+                config: config, modelPath: path, jobJSON: job,
+                designBin: designBin, projectName: name,
+                requestedVolumeFraction: vf)
+            return try await Task.detached(priority: .utility) {
+                try RelatticeRun.forecast(inputs)
+            }.value
+        }
+    }
+
     private func startRelatticeRun() {
         guard let ctx = latticeVariantContext, let art = ctx.artifacts else {
             if let why = latticeVariantContext?.unavailable { model.toast = why.reason }
@@ -1867,32 +1965,11 @@ public struct WorkspacePlaceholder: View {
             model.toast = "Can’t re-lattice — the model file is missing."
             return
         }
-        // The regions the page authored, as EXPLICIT GEOMETRY PREDICATES (bar
-        // Z11): on a variant only placed primitives are emitted, because a face
-        // id would resolve against the ORIGINAL part's surface, which this design
-        // no longer has.
-        let emission = project.variantLatticeJobRegions()
-        if emission.skippedFaces > 0 {
-            latticePageModel.post(
-                note: "\(emission.skippedFaces) face selection(s) were not carried "
-                    + "onto this variant — an optimized surface has no faces to "
-                    + "resolve them against. Place a region instead.")
-        }
-        // The SAME spec builder the optimize request uses — only the regions
-        // differ, and they differ for the Z11 reason above.
-        let spec = project.lattice.runSpec(
-            topology: project.lattice.topologyID,
-            memberMM: project.lattice.regionMemberMM ?? 0,
-            lineWidthMM: project.printParams.wallLineWidthOuterMM,
-            regions: emission.regions)
-        let jobJSON: Data
-        do {
-            jobJSON = try RelatticeJobBuilder.build(
-                original: art.jobJSON,
-                variantVolumeFraction: ctx.requestedVolumeFraction,
-                designFileName: "design.bin", lattice: spec)
-        } catch {
-            model.toast = "Can’t build the re-lattice job: \(error)"
+        // THE SAME DOCUMENT THE FORECAST DESCRIBED — one builder, so the prediction
+        // and the job cannot drift apart.
+        guard let jobJSON = relatticeJobJSON(noteSkippedFaces: true) else {
+            model.toast = "Can’t build the re-lattice job from this run’s retained "
+                + "job document."
             return
         }
         // BAR Z2, app side: the document about to be submitted must differ from
@@ -1940,7 +2017,14 @@ public struct WorkspacePlaceholder: View {
                     onRefreshPreview: {
                         syncLatticeProxy()
                         buildStrutScene()
-                    })
+                    },
+                    // BAR F3's CALL SITE, from this side: the model outlives the
+                    // page (close and reopen and the answer is still there), the
+                    // job document is both the input and the identity, and the
+                    // driver is nil exactly when no forecast is possible.
+                    forecast: latticeForecast,
+                    forecastJob: latticeForecastJob,
+                    driveForecast: makeForecastDriver())
             .ignoresSafeArea(.keyboard)
     }
 
@@ -2356,15 +2440,19 @@ public struct WorkspacePlaceholder: View {
         .foregroundStyle(DS.Color.textPrimary.color)
     }
 
-    /// The "Minimize plastic" toggle chip (D: pursue material reduction). Off with
-    /// forces set → optimize just handles the forces; on → the reduction ladder.
+    /// The "Minimize plastic" toggle chip. ON → the REDUCTION ladder (remove as much
+    /// plastic as possible while holding the margin). OFF → the GROWTH ladder (add as
+    /// little as possible to reach it) — task 2026-08-03-growth-ladder. The chip
+    /// shows the MODE it is currently in, not just the setting's name, because off
+    /// is a mode of its own now and not the absence of one.
     private var minimizePlasticChip: some View {
-        Button { project.minimizePlastic.toggle() } label: {
+        let mode = LadderMode.of(minimizePlastic: project.minimizePlastic)
+        return Button { project.minimizePlastic.toggle() } label: {
             HStack(spacing: DS.Space.s) {
-                Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "circle")
+                Image(systemName: project.minimizePlastic ? "checkmark.circle.fill" : "arrow.up.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle((project.minimizePlastic ? DS.Color.accent : DS.Color.textTertiary).color)
-                Text("Minimize plastic").dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                Text(mode.title).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
             }
             .padding(.vertical, 9).padding(.horizontal, DS.Space.l)
             .background(Capsule().fill(DS.Surface.bar.color)
@@ -4282,8 +4370,14 @@ public struct WorkspacePlaceholder: View {
                             on ? Color.clear : DS.Color.strokeSubtle.color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
-            .help(on ? "Protected — the optimizer preserves this face's own material. Tap to turn it off."
-                     : "Protect — freeze this face's skin so the optimizer may not touch it.")
+            // Task 2026-08-04-protect-freeze-vs-solidity: Protect is a FREEZE and
+            // nothing else. The old copy ("preserves this face's own material")
+            // read as a promise of SOLIDITY, which it never was — whether the
+            // kept material is solid or latticed is the Lattice page's decision,
+            // exactly as for any other kept material. Say the freeze, and say
+            // where the other decision lives.
+            .help(on ? "Protected — the optimizer may not change this face's shape. Solid or latticed is set on the Lattice page. Tap to turn it off."
+                     : "Protect — freeze this face's skin so the optimizer may not reshape it. It does not decide solid vs latticed.")
         }
     }
 
@@ -4484,10 +4578,15 @@ public struct WorkspacePlaceholder: View {
             // Handoff 124 — "Protect" (preserve-skin) is an ATTRIBUTE like Keep clear
             // but the OPPOSITE polarity: it freezes the face's OWN material so the
             // optimizer may not touch it. Affixes on the group; never changes its role.
+            //
+            // Task 2026-08-04-protect-freeze-vs-solidity: the toast said "will
+            // preserve this face's material", which users read as "will keep it
+            // SOLID". It never meant that and now must not say it — the material
+            // is kept, and the Lattice page decides what the kept material IS.
             Button {
                 force.setProtected(g.id, true)
                 selection.clearActive()
-                model.toast = "Protected — the optimizer will preserve this face's material"
+                model.toast = "Protected — the optimizer may not reshape this face. Solid or latticed is set on the Lattice page."
             } label: {
                 chipLabel("shield.lefthalf.filled", "Protect")
                     .foregroundStyle(Self.protectTint)
@@ -4660,12 +4759,17 @@ public struct WorkspacePlaceholder: View {
                             latticeRoleGroups: latticeRoleGroupIDs) {
             return "finish the pending group"
         }
+        // NAME THE MODE, IN BOTH MODES (task 2026-08-03-growth-ladder, bar G7).
+        // With the box off this line used to name only the load case, so the one
+        // place the user sees before pressing Optimize said nothing about the fact
+        // that the run would GROW material rather than remove it.
+        let mode = LadderMode.of(minimizePlastic: project.minimizePlastic)
         let a = force.anchorCount(in: selection.groups), l = force.loadCount(in: selection.groups)
         if a > 0 && l > 0 {
             let base = "\(a) anchor\(a > 1 ? "s" : "") · \(l) load\(l > 1 ? "s" : "")"
-            return project.minimizePlastic ? "minimize plastic · " + base : base
+            return mode.summaryToken + " · " + base
         }
-        if project.minimizePlastic { return "minimize plastic · self-weight" }
+        if project.minimizePlastic { return mode.summaryToken + " · self-weight" }
         return "needs an anchor and a load"
     }
 

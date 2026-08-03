@@ -1,0 +1,15 @@
+total 141200
+drwxr-xr-x@ 14 nadim  staff       448 Aug  2 16:46 .
+drwxr-xr-x@  6 nadim  staff       192 Aug  2 16:07 ..
+-rw-r--r--@  1 nadim  staff    104137 Aug  2 17:03 iterations.csv
+-rw-r--r--@  1 nadim  staff       613 Aug  2 16:08 loadcase.json
+-rw-r--r--@  1 nadim  staff      2743 Aug  2 16:08 run_info.json
+-rw-r--r--@  1 nadim  staff  16498484 Aug  2 16:45 variant_038.stl
+-rw-r--r--@  1 nadim  staff      2673 Aug  2 16:46 variant_038_lattice.report.json
+-rw-r--r--@  1 nadim  staff   8268884 Aug  2 16:45 variant_038_lattice.stl
+-rw-r--r--@  1 nadim  staff  14554484 Aug  2 16:25 variant_052.stl
+-rw-r--r--@  1 nadim  staff      4357 Aug  2 16:25 variant_052_lattice.report.json
+-rw-r--r--@  1 nadim  staff   8400684 Aug  2 16:25 variant_052_lattice.stl
+-rw-r--r--@  1 nadim  staff  14235284 Aug  2 16:12 variant_068.stl
+-rw-r--r--@  1 nadim  staff      4361 Aug  2 16:12 variant_068_lattice.report.json
+-rw-r--r--@  1 nadim  staff  10194684 Aug  2 16:12 variant_068_lattice.stl

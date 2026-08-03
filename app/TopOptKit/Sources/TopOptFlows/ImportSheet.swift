@@ -150,9 +150,21 @@ public struct ImportSheet: View {
                     .foregroundStyle((model.minimizePlastic ? DS.Color.accent : DS.Color.textTertiary).color)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Minimize plastic").dsStyle(DS.TypeScale.bodyStrong).fontWeight(.semibold)
-                    Text("Remove material where it isn’t needed. Turn off to just handle your forces.")
+                    // NAME THE MODE THE CHECKBOX PUTS YOU IN (task
+                    // 2026-08-03-growth-ladder, bar G7). This used to read "Turn
+                    // off to just handle your forces", which described neither
+                    // what off DID (one un-searched 0.9 variant) nor what it does
+                    // now (a growth ladder). Both modes come from LadderMode, so
+                    // this copy and the results screen's cannot drift.
+                    Text(LadderMode.of(minimizePlastic: model.minimizePlastic).oneLine)
                         .dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textSecondary.color)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(model.minimizePlastic
+                         ? "Turn off to let it ADD material instead — as little as possible."
+                         : "Turn on to REMOVE material instead — as much as safely possible.")
+                        .dsStyle(DS.TypeScale.caption2)
+                        .foregroundStyle(DS.Color.textTertiary.color)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()

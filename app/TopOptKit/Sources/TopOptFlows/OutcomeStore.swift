@@ -46,6 +46,22 @@ enum OutcomeCodec {
         // the anchor-flow sub-mode stays gated until a re-run), never failing the outcome.
         let stressTensorField: Data?
         let keyframes: [MeshDTO]
+        // WHERE THIS VARIANT'S PLASTIC IS (task 2026-08-03-growth-ladder). It MUST
+        // survive the round-trip for the same reason `computedRemotely` must: a
+        // reopened GROWTH result that lost it would show a growth variant with no
+        // idea how much was added or where — and the tab headline would fall back
+        // to the savings scale, rendering "+48% added" as "−−48% saved". Optional
+        // so pre-growth blobs still decode (→ nil → a reduction variant, which is
+        // exactly what they are).
+        let addedMaterial: AddedMaterialDTO?
+    }
+
+    // The core's per-variant added-material accounting, mirrored for persistence.
+    struct AddedMaterialDTO: Codable, Sendable {
+        let printedVoxels, insidePart, outsidePart, partSolidVoxels: Int
+        let outsideFraction, outsideVolumeMM3, netAddedVolumeMM3: Double
+        let outsideMassGrams, netAddedMassGrams: Double
+        let targetSaturated: Bool
     }
 
     // Handoff 100's per-face "Keep clear" outcome, mirrored for persistence so a
@@ -103,6 +119,13 @@ enum OutcomeCodec {
 
     struct OutcomeDTO: Codable, Sendable {
         let variants: [VariantDTO]
+        // WHICH LADDER RAN (task 2026-08-03-growth-ladder). Same discipline as
+        // `computedRemotely`: a reopened run that forgot its mode would present a
+        // growth run's tabs under the reduction ladder's meaning ("lightest that
+        // passes" instead of "smallest addition that passes") — the two are
+        // opposite claims about the same numbers. Optional so pre-growth blobs
+        // still decode (→ nil → false → reduction, which is what they are).
+        let growthLadder: Bool?
         let stoppedOnMargin, cancelled: Bool
         let acceptedCount: Int
         let voxelVolumeMM3: Double
@@ -171,8 +194,20 @@ enum OutcomeCodec {
                     vonMisesField: pack(v.vonMisesField),
                     displacementField: pack(v.displacementField),
                     stressTensorField: pack(v.stressTensorField),
-                    keyframes: v.keyframeMeshes.map { MeshDTO(v: pack($0.vertices), i: pack($0.indices)) })
+                    keyframes: v.keyframeMeshes.map { MeshDTO(v: pack($0.vertices), i: pack($0.indices)) },
+                    addedMaterial: v.addedMaterial.map {
+                        AddedMaterialDTO(printedVoxels: $0.printedVoxels,
+                                         insidePart: $0.insidePart,
+                                         outsidePart: $0.outsidePart,
+                                         partSolidVoxels: $0.partSolidVoxels,
+                                         outsideFraction: $0.outsideFraction,
+                                         outsideVolumeMM3: $0.outsideVolumeMM3,
+                                         netAddedVolumeMM3: $0.netAddedVolumeMM3,
+                                         outsideMassGrams: $0.outsideMassGrams,
+                                         netAddedMassGrams: $0.netAddedMassGrams,
+                                         targetSaturated: $0.targetSaturated) })
             },
+            growthLadder: o.growthLadder,
             stoppedOnMargin: o.stoppedOnMargin, cancelled: o.cancelled,
             acceptedCount: o.acceptedCount, voxelVolumeMM3: o.voxelVolumeMM3,
             gridNx: o.gridNx, gridNy: o.gridNy, gridNz: o.gridNz,
@@ -238,7 +273,18 @@ enum OutcomeCodec {
                     displacementField: unpackFloats(v.displacementField ?? Data()),
                     stressTensorField: unpackFloats(v.stressTensorField ?? Data()),
                     keyframeMeshes: v.keyframes.map {
-                        KeyframeMesh(vertices: unpackFloats($0.v), indices: unpackInts($0.i)) })
+                        KeyframeMesh(vertices: unpackFloats($0.v), indices: unpackInts($0.i)) },
+                    addedMaterial: v.addedMaterial.map {
+                        AddedMaterial(printedVoxels: $0.printedVoxels,
+                                                insidePart: $0.insidePart,
+                                                outsidePart: $0.outsidePart,
+                                                partSolidVoxels: $0.partSolidVoxels,
+                                                outsideFraction: $0.outsideFraction,
+                                                outsideVolumeMM3: $0.outsideVolumeMM3,
+                                                netAddedVolumeMM3: $0.netAddedVolumeMM3,
+                                                outsideMassGrams: $0.outsideMassGrams,
+                                                netAddedMassGrams: $0.netAddedMassGrams,
+                                                targetSaturated: $0.targetSaturated) })
             },
             stoppedOnMargin: d.stoppedOnMargin, cancelled: d.cancelled,
             acceptedCount: d.acceptedCount, voxelVolumeMM3: d.voxelVolumeMM3,
@@ -283,7 +329,9 @@ enum OutcomeCodec {
                             zKnockdown: zk,
                             minCellsPerMember: r.strutMinCellsPerMember ?? .infinity,
                             outOfRegime: r.strutOutOfRegime ?? false) }) },
-            solvedBy: d.solvedBy)
+            solvedBy: d.solvedBy,
+            // nil on a pre-growth blob → false → reduction, which is what it is.
+            growthLadder: d.growthLadder ?? false)
     }
 
     // MARK: Encode / decode (binary plist)

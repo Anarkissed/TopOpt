@@ -622,6 +622,73 @@ std::string run_info_json(const RunInfo& info) {
     nr += "]";
     num("rung_non_convergent_residual", nr);
   }
+  // Task 2026-08-03-preflight-feasibility-and-divergence — THE THREE GUARDS
+  // (bar P6). Guard 1's block is a MEASUREMENT written before the solve; guards
+  // 2 and 3 echo their armed thresholds up-front and their per-rung outcome
+  // after the run.
+  num("preflight_ran", bool_json(info.preflight_ran));
+  num("preflight_decidable", bool_json(info.preflight_decidable));
+  num("preflight_connected", bool_json(info.preflight_connected));
+  num("preflight_ms", fmt(info.preflight_ms));
+  num("preflight_load_voxels", fmt_ll(info.preflight_load_voxels));
+  num("preflight_anchor_voxels", fmt_ll(info.preflight_anchor_voxels));
+  num("preflight_unreached_load_voxels",
+      fmt_ll(info.preflight_unreached_load_voxels));
+  num("preflight_allowed_voxels", fmt_ll(info.preflight_allowed_voxels));
+  num("preflight_forbidden_voxels", fmt_ll(info.preflight_forbidden_voxels));
+  num("preflight_narrowest_separator_voxels",
+      fmt_i(info.preflight_narrowest_separator_voxels));
+  num("preflight_narrowest_separator_mm2",
+      fmt(info.preflight_narrowest_separator_mm2));
+  num("preflight_geodesic_levels", fmt_i(info.preflight_geodesic_levels));
+  num("infeasible_immediate_ratio", fmt(info.infeasible_immediate_ratio));
+  num("infeasible_immediate_wall_ratio",
+      fmt(info.infeasible_immediate_wall_ratio));
+  num("iteration_time_ratio", fmt(info.iteration_time_ratio));
+  num("iteration_time_floor_ms", fmt(info.iteration_time_floor_ms));
+  {
+    auto bools = [&](const char* key, const std::vector<int>& v) {
+      std::string a = "[";
+      for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) a += ", ";
+        a += v[i] ? "true" : "false";
+      }
+      num(key, a + "]");
+    };
+    auto ints = [&](const char* key, const std::vector<int>& v) {
+      std::string a = "[";
+      for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) a += ", ";
+        a += fmt_i(v[i]);
+      }
+      num(key, a + "]");
+    };
+    auto dbls = [&](const char* key, const std::vector<double>& v) {
+      std::string a = "[";
+      for (std::size_t i = 0; i < v.size(); ++i) {
+        if (i) a += ", ";
+        a += fmt(v[i]);
+      }
+      num(key, a + "]");
+    };
+    bools("rung_diverged", info.rung_diverged);
+    ints("rung_diverged_iteration", info.rung_diverged_iteration);
+    dbls("rung_diverged_c_ratio", info.rung_diverged_c_ratio);
+    dbls("rung_diverged_cg_ratio", info.rung_diverged_cg_ratio);
+    dbls("rung_diverged_wall_ratio", info.rung_diverged_wall_ratio);
+    bools("rung_time_budget", info.rung_time_budget);
+    ints("rung_time_budget_iteration", info.rung_time_budget_iteration);
+    dbls("rung_time_budget_ms", info.rung_time_budget_ms);
+    dbls("rung_time_budget_elapsed_ms", info.rung_time_budget_elapsed_ms);
+    dbls("rung_time_budget_baseline_ms", info.rung_time_budget_baseline_ms);
+    dbls("rung_time_budget_phase_ms", info.rung_time_budget_phase_ms);
+    std::string ph = "[";
+    for (std::size_t i = 0; i < info.rung_time_budget_phase.size(); ++i) {
+      if (i) ph += ", ";
+      ph += "\"" + json_escape(info.rung_time_budget_phase[i]) + "\"";
+    }
+    num("rung_time_budget_phase", ph + "]");
+  }
   // active-domain phase 1 — the requested band (config, up-front) and the
   // per-rung latch outcome (empty until the post-run finalize).
   num("active_domain_band", fmt_i(info.active_domain_band));
@@ -751,6 +818,8 @@ std::string run_info_json(const RunInfo& info) {
   }
   ladder += "]";
   num("ladder", ladder);
+  // Task 2026-08-03-growth-ladder — say what those rungs MEAN, beside them.
+  str("ladder_mode", info.ladder_mode);
 
   num("created_wall_ms", fmt_ll(info.created_wall_ms));
   num("iteration_csv", bool_json(info.iteration_csv));
@@ -876,6 +945,38 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.lattice_export_solid_region_triangles);
       le += ", \"include_void_voxels\": " +
             fmt_ll(info.lattice_export_include_void_voxels);
+      le += ", \"include_void_by_clearance\": " +
+            fmt_ll(info.lattice_export_include_void_by_clearance);
+    }
+    // The pre-flight region forecast (same task, item 6): what the job could
+    // have been told BEFORE the run, recorded so the receipt shows it was.
+    if (info.lattice_forecast_present) {
+      le += ", \"forecast_include_regions\": " +
+            fmt_ll(info.lattice_forecast_include_regions);
+      le += ", \"forecast_region_too_thin\": " +
+            fmt_ll(info.lattice_forecast_region_too_thin);
+      le += ", \"forecast_required_member_mm\": " +
+            fmt(info.lattice_forecast_required_mm);
+      le += ", \"forecast_thinnest_region_mm\": " +
+            fmt(info.lattice_forecast_thinnest_region_mm);
+    }
+    // Frozen material (task 2026-08-04-protect-freeze-vs-solidity) — an
+    // INDEPENDENT gate from the roles block above: a run can have frozen
+    // material (a face protection, an anchor pad) with no lattice.regions at
+    // all, and that is exactly the case whose silence started this task.
+    if (info.lattice_export_frozen_present) {
+      le += ", \"frozen_printed_voxels\": " +
+            fmt_ll(info.lattice_export_frozen_printed);
+      le += ", \"frozen_latticed\": " + fmt_ll(info.lattice_export_frozen_latticed);
+      le += ", \"frozen_kept_solid\": " + fmt_ll(info.lattice_export_frozen_solid);
+      le += ", \"frozen_cells_not_emitted\": " +
+            fmt_ll(info.lattice_export_frozen_cells_not_emitted);
+      le += ", \"frozen_voxels_strut_and_solid\": " +
+            fmt_ll(info.lattice_export_frozen_voxels_strut_and_solid);
+      le += ", \"frozen_strut_and_solid_unexplained\": " +
+            fmt_ll(info.lattice_export_frozen_strut_and_solid_unexplained);
+      le += ", \"frozen_in_exclude_latticed\": " +
+            fmt_ll(info.lattice_export_frozen_in_exclude_latticed);
     }
     le += "}";
     num("lattice_export", le, /*comma=*/has_grad || has_frame);

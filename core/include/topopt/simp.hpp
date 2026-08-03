@@ -370,6 +370,22 @@ double physical_filter_radius(double min_feature_mm, double spacing,
 DensityFilter make_density_filter(const VoxelGrid& grid, double radius,
                                   const DesignMask& mask);
 
+// THE effective mask the mask-aware SIMP path actually optimizes under: the
+// caller's `mask` with the M1.6 tags applied on top —
+//   * every Load / Fixture voxel forced FrozenSolid (the BC tags are implicitly
+//     "keep-in", which is what makes the §7 V3 retention gate structural; a
+//     "Keep clear" clearance can therefore never void a tagged load face), and
+//   * every Empty voxel normalized to FrozenVoid (Empty voxels are never design
+//     variables, and counting them would let volume_fraction * n_active exceed
+//     the reachable volume).
+// It was an internal detail of simp_optimize until the PRE-FLIGHT (pipeline.hpp
+// preflight_load_path) needed the same answer: "which voxels may hold material?"
+// is one question, and a pre-flight that answered it with a second, similar rule
+// could refuse a job the optimizer would have solved. This is that ONE rule, and
+// simp_optimize's mask-aware overload calls exactly this function.
+// Throws std::invalid_argument if mask.size() != grid.voxel_count().
+DesignMask effective_design_mask(const VoxelGrid& grid, const DesignMask& mask);
+
 // One Optimality-Criteria design update (ROADMAP M3.3) for the volume-constrained
 // minimum-compliance problem. Inputs (all grid-indexed; Empty voxels ignored):
 //   density       current design x_e in [density_min, 1],
@@ -678,6 +694,42 @@ bool mma_objective_plateau(const std::vector<double>& compliance_history,
 bool rung_infeasible(const std::vector<double>& compliance_history,
                      const std::vector<int>& cg_iteration_history, double ratio,
                      double cg_blowup, double flat_tol, int window);
+
+// The IMMEDIATE DIVERGENCE TRIP (task 2026-08-03-preflight-feasibility-and-
+// divergence, guard 2), as a PURE PREDICATE over the three per-iteration columns
+// a run already records. Public and non-namespaced for the same reason
+// `rung_infeasible` is: so it can be unit-tested DIRECTLY against the real
+// recorded rows of the ten-hour run, rather than against a reimplementation of
+// itself that could agree with the rule while the shipped code disagrees.
+//
+// Judges the LAST sample of the three (index-aligned, equal-length) histories.
+// True iff ALL THREE hold at that iteration:
+//   (1) compliance >= `ratio` x compliance[0] — the rung's own starting value;
+//   (2) cg >= `cg_blowup` x the MINIMUM cg over the pre-window prefix (the same
+//       baseline the windowed predicate uses, so one expensive first solve
+//       cannot hide a real blow-up);
+//   (3) wall >= `wall_ratio` x wall[0] — the separating column; see
+//       SimpOptions::infeasible_immediate_ratio for the measurement that shows
+//       (1) and (2) alone cannot tell a divergence from a forming transient.
+// `ratios_out` (optional) receives the three measured ratios whether or not it
+// fires, so a caller can RECORD the numbers it decided on.
+//
+// Returns false — never fires — whenever: `ratio`, `cg_blowup` or `wall_ratio`
+// is not finite and > 0 (any of them <= 0 DISARMS it), the three histories
+// differ in length, fewer than 2 samples exist (iteration 1 IS the baseline and
+// is never judged against itself), compliance[0] or wall[0] is not > 0, the
+// prefix CG minimum is <= 0, or the judged compliance is not finite. Pure and
+// deterministic in its inputs: same three histories in, same verdict out.
+struct ImmediateDivergenceRatios {
+  double compliance = 0.0;
+  double cg = 0.0;
+  double wall = 0.0;
+};
+bool immediate_divergence(const std::vector<double>& compliance_history,
+                          const std::vector<int>& cg_iteration_history,
+                          const std::vector<double>& wall_ms_history,
+                          double ratio, double cg_blowup, double wall_ratio,
+                          ImmediateDivergenceRatios* ratios_out = nullptr);
 
 // Whether a Heaviside projection schedule may be applied for `updater`. TEMPORARY
 // (Option B): projection is compatible ONLY with OC — the projected chain is the
@@ -1101,6 +1153,128 @@ struct SimpOptions {
   double infeasible_flat_tol = 1e-3;           // (3) max relative spread in-window
   int infeasible_window = 5;                   // (4) consecutive iters (0 disables)
 
+  // --- IMMEDIATE DIVERGENCE TRIP (task 2026-08-03-preflight-feasibility-and-
+  // divergence, guard 2) -------------------------------------------------------
+  //
+  // THE PROBLEM. The windowed detector above needs FIVE consecutive iterations.
+  // On the motivating run those iterations cost 27 s, 34 min and 6.3 h, so five
+  // of them is a day and a half — and worse, that run's objective was NOT FLAT
+  // (4.28e3 -> 7.22e6 -> 3.20e7), so conjunct (3) means the windowed detector
+  // would never have fired on it AT ALL, at any window width. It needs a
+  // different signature, not a shorter window. The windowed detector is KEPT
+  // unchanged for the gradual/frozen case it was calibrated on.
+  //
+  // WHAT THE MEASUREMENT SAID, because it refuted the obvious design. A bare
+  // "one huge jump" trip is NOT SAFE, and this is measured, not argued
+  // (evidence/2026-08-03-preflight-feasibility-and-divergence/
+  // divergence_guard_probe.txt, regenerated by tests/harness/
+  // divergence_guard_probe.cpp):
+  //
+  //     signal at the trip point      the 10-h run    the LIVE forming transient
+  //     level ratio  c[i]/c[0]              1,688x    up to 36,161x
+  //     step  ratio  c[i]/c[i-1]            1,688x    up to  3,565x
+  //     CG    ratio  cg[i]/min prefix        12.6x    up to     14.2x
+  //     WALL  ratio  ms[i]/ms[0]             77.2x    13.9-17.4x over repeats <<
+  //
+  // The transient (a 24x5x6 cantilever at vf 0.03, which recovers to 0.134x its
+  // own start by iteration 40 and must NOT be killed — handoff 131 group 3) sits
+  // ABOVE the 10-hour run on compliance level, on single-step jump AND on CG
+  // blow-up. There is no constant on any of those three that catches the one and
+  // spares the other. The ONE column that separates them is the WALL COST of the
+  // iteration — which is also the thing that actually harms the user.
+  //
+  // THE PREDICATE, therefore, at a SINGLE iteration i >= 2:
+  //   (a) c[i] >= infeasible_immediate_ratio * c[0]      — far above the window
+  //       threshold: 1000 is 10x the windowed 100, and 1,688x clears it while a
+  //       merely-noisy step never approaches it;
+  //   (b) cg[i] >= infeasible_cg_blowup * the prefix-minimum CG count — the same
+  //       solver-distress conjunct the windowed predicate uses, unchanged;
+  //   (c) wall[i] >= infeasible_immediate_wall_ratio * wall[0] — the separator.
+  //       50 sits ~2.9x above the worst legitimate excursion measured (17.4x,
+  //       the top of the transient's 13.9-17.4x spread across repeats — a wall
+  //       ratio is machine- and load-dependent, so it is quoted as a range) and
+  //       1.5x below the 10-hour run's 77.2x. It is chosen nearer the transient
+  //       than the midpoint on purpose: the evidence base for legitimate wall
+  //       ratios is ONE live fixture plus one recorded run (PR 273's per-phase
+  //       columns are recent, so almost no archived run carries total_ms at all),
+  //       and with a thin base the guard should err toward not firing. Guard 3
+  //       catches anything this misses, one iteration later.
+  //
+  // HONESTY. (c) makes this verdict WALL-CLOCK dependent, so unlike the windowed
+  // predicate it is not reproducible bit-for-bit across machines. What that can
+  // cost is bounded: the trip only ever STOPS a rung, a stopped rung is REJECTED
+  // and never certified or seeded from, and a run that does not trip is
+  // byte-identical to one with the trip disarmed. Every firing is recorded in
+  // run_info with the three numbers it fired on, so a disputed trip is a read.
+  //
+  // ── SHIPPED DISARMED (infeasible_immediate_ratio = 0), AND THAT IS A
+  // MEASUREMENT. The premise of this guard is that the motivating run was
+  // DIVERGING. That premise did not survive being tested. The SAME job.json at
+  // resolution 64 — the only resolution at which it can be run to completion in
+  // minutes rather than hours — spikes to 722x its starting compliance at
+  // iteration 2, peaks at 420x with an 8x CG blow-up and a 24.7x wall at
+  // iteration 3, and is then back BELOW its own starting compliance by iteration
+  // 6, converging to 0.0062x and being ACCEPTED with margin 11.08
+  // (evidence/2026-08-03-preflight-feasibility-and-divergence/
+  // res64_same_job_iterations.csv). That is a violent FORMING TRANSIENT — the
+  // exact phenomenon handoff 131's flatness conjunct exists to protect — not a
+  // divergence.
+  //
+  // It cannot be proven that the resolution-128 trajectory would also have
+  // recovered without spending the ten hours. But it can no longer be asserted
+  // that it would not, and arming a guard that REJECTS the rung on that evidence
+  // would risk exactly the false refusal the task's own bar forbids ("a wrongly
+  // refused job is worse than a slow one"). Guard 3 — an honest TIMEOUT that
+  // makes no claim about the design — carries this job instead, and is armed.
+  //
+  // Everything is kept and tested: the predicate (`immediate_divergence`), the
+  // loop wiring, the per-rung observability and the calibration harness. Setting
+  // `infeasible_immediate_ratio` to 1000 arms it at the calibrated thresholds
+  // measured above. A future task with a trajectory that is PROVEN not to
+  // recover can flip it on that evidence.
+  double infeasible_immediate_ratio = 0.0;    // 1000.0 arms it (see above)
+  double infeasible_immediate_wall_ratio = 50.0;
+
+  // --- ITERATION TIME GUARD (task 2026-08-03-preflight-feasibility-and-
+  // divergence, guard 3) -------------------------------------------------------
+  //
+  // Iteration 3 of the motivating run took 1,400x iteration 1. Stop when an
+  // iteration exceeds `iteration_time_ratio` times the FIRST iteration of its
+  // rung, and say WHICH PHASE blew up (PR 273's per-phase columns already carry
+  // the numbers: here cg_ms was 20,703,353 of a 22,679,464 ms iteration).
+  //
+  // THE BASELINE IS THE FIRST ITERATION, and NOT a trimmed median of the first
+  // few, which was the obvious alternative. On this run the SECOND iteration is
+  // already 77x pathological, so any statistic that includes it inflates the
+  // baseline ~77x and disarms the guard on exactly the job it exists for. The
+  // first iteration's own known failure mode — an atypically EXPENSIVE first
+  // solve, e.g. the 96³ run's rung 0 at 11,977 CG iterations against a 4,551
+  // steady state — biases the budget UP, which is the SAFE direction (a laxer
+  // guard, never a false kill). The dangerous direction, an atypically CHEAP
+  // first iteration, is covered by the absolute floor below rather than by a
+  // statistic.
+  //
+  // THE CONSTANT IS 100x, not 1000x: at iteration 1's 27 s that is a 45-minute
+  // budget, which stops the successor to the 34-minute second iteration instead
+  // of letting the 6.3-hour third one finish. The worst legitimate excursion
+  // measured is 14.1x (above), so 100x keeps 7x of headroom.
+  //
+  // THE FLOOR exists because 100x a 3 ms fixture iteration is 0.3 s, which a
+  // scheduling hiccup would trip. `iteration_time_floor_ms` is the minimum
+  // budget: 5 minutes, which no core fixture iteration approaches and which is
+  // inert on any production job (the motivating run's budget is 45 min).
+  //
+  // ENFORCED AT TWO POINTS. (1) A DEADLINE armed on the trajectory solve
+  // (fea_set_solve_deadline_ms), polled inside the CG recurrence — this is what
+  // stops a 6.3-hour iteration at 45 minutes rather than reporting it at 6.3
+  // hours. (2) A check after each completed iteration, which catches a blow-up
+  // in a phase the CG deadline cannot see (hierarchy build, filter, update).
+  //
+  // `iteration_time_ratio <= 0` DISARMS both (byte-identical to pre-task).
+  // Wall-clock, with the same honest determinism statement as guard 2 above.
+  double iteration_time_ratio = 100.0;
+  double iteration_time_floor_ms = 300000.0;  // 5 minutes
+
   // Heaviside projection + beta continuation (M6.3). EMPTY (the default)
   // disables projection entirely: the loop is the unchanged M3.4 formulation
   // above and `move` / `max_iterations` govern it. Non-empty: the loop runs
@@ -1307,6 +1481,33 @@ struct SimpOptimizeResult {
   // `infeasible_iteration` is that 1-based iteration (0 when not infeasible).
   bool infeasible = false;
   int infeasible_iteration = 0;
+  // Task 2026-08-03-preflight-feasibility-and-divergence, guard 2 — true iff the
+  // rung was ended by the IMMEDIATE divergence trip rather than the windowed
+  // signature. MUTUALLY EXCLUSIVE with the windowed one on any single run (the
+  // loop tests the immediate trip first and breaks). `infeasible` is NOT set by
+  // it: an immediate trip does not claim the load path was lost — on the
+  // motivating run the path was measurably intact — it claims the objective
+  // diverged at a cost that made continuing indefensible. The three numbers it
+  // fired on are recorded so the verdict is a read, not a claim.
+  bool diverged = false;
+  int diverged_iteration = 0;
+  double diverged_compliance_ratio = 0.0;  // c[i]/c[0] at the trip
+  double diverged_cg_ratio = 0.0;          // cg[i] / prefix-min cg
+  double diverged_wall_ratio = 0.0;        // wall[i]/wall[0]
+  // Guard 3 — true iff an iteration blew the per-iteration TIME BUDGET, either
+  // mid-solve (the armed CG deadline threw SolverDeadlineExceeded) or measured
+  // after the fact. `time_budget_phase` NAMES the phase that dominated the
+  // over-budget iteration ("cg", "mg", "mg_build", "solver_build", "geneo_setup",
+  // "geneo_apply", "recycle", "fea", "filter", "update", "analysis",
+  // "unattributed"), so the next investigation reads the cause instead of
+  // instrumenting for it. Like `diverged`, it is NOT `infeasible`.
+  bool time_budget_exceeded = false;
+  int time_budget_iteration = 0;
+  double time_budget_ms = 0.0;          // the budget this rung ran under
+  double time_budget_elapsed_ms = 0.0;  // what the offending iteration spent
+  double time_budget_baseline_ms = 0.0; // iteration 1 of this rung
+  std::string time_budget_phase;
+  double time_budget_phase_ms = 0.0;
   // Handoff 2026-07-27-nonconvergence-rejection — true iff a LINEAR SOLVE of this
   // run failed to converge (SolverNonConvergence: CG hit its iteration cap without
   // meeting the requested relative-residual tolerance) and the run was ended on
@@ -1419,6 +1620,21 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                  const std::vector<NodalLoad>& loads,
                                  const SimpOptions& options,
                                  const DesignMask& mask);
+
+// THE mask the loop above actually optimises under: the caller's `mask` with the
+// two implicit rules of the paragraph above applied — every Load / Fixture voxel
+// forced FrozenSolid, every Empty voxel normalised to FrozenVoid. Pure function
+// of (grid tags, mask); the loop calls exactly this, so it is the definition, not
+// a reconstruction of one.
+//
+// Public because "which voxels did the optimizer hold FROZEN?" is a question the
+// LATTICE path has to answer (task 2026-08-04-protect-freeze-vs-solidity): a
+// receipt that reported the caller's raw mask would under-count the frozen set by
+// every anchor/load-face voxel the loop pins on its own, and the maintainer's
+// case is precisely a run whose frozen set is dominated by a face-protection
+// collar. Answering it from THIS function is what makes the receipt's frozen set
+// the same set the run held frozen, rather than a second opinion about it.
+DesignMask effective_design_mask(const VoxelGrid& grid, const DesignMask& mask);
 
 // ---------------------------------------------------------------------------
 // Multi-variant runner (ROADMAP M3.6).

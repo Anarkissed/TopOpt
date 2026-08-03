@@ -69,6 +69,20 @@ public struct LatticePage: View {
     /// renders the panel as a plain stack. Production always scrolls.
     let staticRender: Bool
 
+    // MARK: the pre-flight forecast (bar F3)
+
+    /// Holds the forecast and its staleness. Owned by the workspace so it survives
+    /// the page being closed and reopened.
+    @ObservedObject var forecast: LatticeForecastModel
+    /// The EXACT `lattice_variant` job "Lattice this variant" would submit — the
+    /// forecast's input AND its identity. nil when there is nothing to forecast (no
+    /// variant, no retained design, no worker). Rebuilt whenever the settings move,
+    /// so a changed configuration is a changed document is a new forecast.
+    let forecastJob: Data?
+    /// Runs the forecast. Injected because it is a worker round trip; nil in the
+    /// previews and offscreen captures, where the page renders without one.
+    let driveForecast: (@Sendable (Data) async throws -> LatticeForecast)?
+
     public init(model: AppModel, project: ProjectModel, run: RunModel,
                 sim: LatticeSimModel, page: LatticePageModel,
                 variantField: LatticeDemandField? = nil,
@@ -80,6 +94,9 @@ public struct LatticePage: View {
                 onClose: @escaping () -> Void,
                 onBackToSetup: @escaping () -> Void,
                 onRefreshPreview: @escaping () -> Void = {},
+                forecast: LatticeForecastModel = LatticeForecastModel(),
+                forecastJob: Data? = nil,
+                driveForecast: (@Sendable (Data) async throws -> LatticeForecast)? = nil,
                 staticRender: Bool = false) {
         self.model = model
         self.project = project
@@ -96,6 +113,9 @@ public struct LatticePage: View {
         self.onClose = onClose
         self.onBackToSetup = onBackToSetup
         self.onRefreshPreview = onRefreshPreview
+        self.forecast = forecast
+        self.forecastJob = forecastJob
+        self.driveForecast = driveForecast
         self.staticRender = staticRender
     }
 
@@ -171,6 +191,23 @@ public struct LatticePage: View {
         project.latticeJobRegions().regions.count
     }
 
+    // ── PROTECTED REGIONS: LATTICED OR SOLID? (task 2026-08-04-protect-freeze-
+    // vs-solidity, bar 6). Protect freezes the SHAPE; this page decides what the
+    // frozen material IS. It was decided here all along and never said so, which
+    // is how the maintainer shipped a job whose declared lattice region was 91.5 %
+    // frozen collar without a single line of the app mentioning it.
+    //
+    // `anyIncludeDeclared` is read from the EMITTED regions, not from groupRoles,
+    // because standalone include primitives and non-protected groups' includes
+    // count too — an include anywhere means only the include union is latticed.
+    private var frozenRegionRows: [FrozenRegionLatticeStatus.Row] {
+        FrozenRegionLatticeStatus.rows(
+            protectedGroups: force.protectedGroups(in: groups),
+            roles: project.lattice.groupRoles,
+            anyIncludeDeclared:
+                project.latticeJobRegions().regions.contains { $0.role == .include })
+    }
+
     // MARK: body
 
     public var body: some View {
@@ -198,6 +235,17 @@ public struct LatticePage: View {
                 if !gate.satisfied { gateOverlay }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // *** THE FORECAST'S CALL SITE (bar F3). *** Every layer below this
+            // line existed before it did — core computes the forecast, the worker
+            // serves it, RelatticeRun drives it, LatticeForecast parses it and the
+            // button and drawer render it — and the user saw nothing, because
+            // nothing invoked it. `id:` is the job document itself, so changing any
+            // setting that changes the job re-asks, and changing one that does not
+            // costs nothing.
+            .task(id: forecastJob) {
+                guard let drive = driveForecast else { return }
+                forecast.request(forecastJob, drive: drive)
+            }
         }
     }
 
@@ -453,7 +501,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning: return DS.Color.accent
         case .simComplete: return DS.Color.okGreen
-        case .simStale: return DS.Color.warning
+        case .simStale, .smoothingStale: return DS.Color.warning
         case .optimizing: return RGBA(hex: 0x5E5CE6)
         case .failed: return DS.Color.danger
         }
@@ -462,7 +510,7 @@ public struct LatticePage: View {
         switch k {
         case .simRunning, .optimizing: return "circle.fill"
         case .simComplete: return "checkmark"
-        case .simStale: return "exclamationmark"
+        case .simStale, .smoothingStale: return "exclamationmark"
         case .failed: return "xmark"
         }
     }
@@ -473,7 +521,10 @@ public struct LatticePage: View {
             if let ctx = model.makeLatticeSimContext() { sim.run(ctx) }
         case .optimizing: run.cancel()
         case .failed: page.go(nil)
-        case .simComplete: break
+        // The smoothing-stale banner is not a LATTICE-page state; it is derived
+        // and shown by the smoothing page. Listed for exhaustiveness so a future
+        // kind cannot be added without a decision here.
+        case .simComplete, .smoothingStale: break
         }
     }
 
@@ -653,6 +704,10 @@ public struct LatticePage: View {
                     page.post(note: "Same Selections library as Setup — tap a group to give it a lattice role; faces of Setup groups can only be removed back on Setup.")
                 }
             }
+            // 4b · Protected regions — latticed or solid (bar 6). Hidden entirely
+            // when nothing is protected, so a part with no Protect affix sees the
+            // page exactly as before.
+            protectedRegionsSection
             // 5 · Boundary — the single three-way question, INLINE (L15).
             VStack(alignment: .leading, spacing: DS.Space.xs) {
                 Text("Boundary").font(.system(size: 11.5))
@@ -707,6 +762,52 @@ public struct LatticePage: View {
 
     private var inBand: Bool {
         bounds.densityLoReason == nil && bounds.densityHiReason == nil
+    }
+
+    /// Which PROTECTED regions this lattice declaration lattices, and which it
+    /// keeps solid (task 2026-08-04-protect-freeze-vs-solidity, bar 6). Reads
+    /// FrozenRegionLatticeStatus — the same precedence core's certification mask
+    /// applies — so the page cannot state a rule the run does not follow.
+    @ViewBuilder private var protectedRegionsSection: some View {
+        let rows = frozenRegionRows
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                Text("Protected regions").font(.system(size: 11.5))
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                Text(FrozenRegionLatticeStatus.summary(rows))
+                    .dsStyle(DS.TypeScale.bodyStrong)
+                ForEach(rows) { r in
+                    HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+                        Image(systemName: r.outcome.symbol)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(r.outcome == .latticed
+                                             ? DS.Color.accent.color
+                                             : DS.Color.textPrimary.opacity(0.42).color)
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 6) {
+                                Text(r.name).dsStyle(DS.TypeScale.body).lineLimit(1)
+                                Text(r.outcome.label)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(r.outcome == .latticed
+                                                     ? DS.Color.accent.color
+                                                     : DS.Color.textPrimary.opacity(0.42).color)
+                            }
+                            Text(r.reason).font(.system(size: 10.5))
+                                .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                Text(FrozenRegionLatticeStatus.caveat)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, DS.Space.ml).padding(.vertical, DS.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                .fill(DS.Surface.panel.color))
+        }
     }
 
     private func ladderRow<Accessory: View>(
@@ -1084,16 +1185,38 @@ public struct LatticePage: View {
     // MARK: boundary segment (B7 — three-way, inline per L15)
 
     private var treatmentSegment: some View {
-        HStack(spacing: 5) {
-            treatmentButton(.none, "None", "lattice to the edge")
-            treatmentButton(.rim, "Rim only", "closed border")
-            treatmentButton(.fullSkin, "Full skin", "rim + faces")
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            HStack(spacing: 5) {
+                treatmentButton(.none, "None", "lattice to the edge")
+                treatmentButton(.rim, "Rim only", "flat-face edges")
+                treatmentButton(.fullSkin, "Full skin", "rim + faces")
+            }
+            .padding(4)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                .fill(RGBA(0, 0, 0, 0.34).color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            // DEFECT 4 (task 2026-08-03-variant-postprocessing-fix). "Rim only"
+            // dresses ANALYTIC plane pairs, and an optimized part has none, so it is
+            // identically zero geometry. Said HERE, at the control, before the run —
+            // not as `rim_elements: 0` in a receipt afterwards.
+            if let why = boundaryEmitsNothingWarning {
+                Text(why)
+                    .dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.warning.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .padding(4)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
-            .fill(RGBA(0, 0, 0, 0.34).color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
-                .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+    }
+
+    /// nil ⇒ the chosen boundary treatment can produce geometry on this part.
+    var boundaryEmitsNothingWarning: String? {
+        LatticeCoreCapability.boundaryProducesNothing(
+            skinJobValue: project.lattice.boundary.jobSkinValue,
+            // Every lattice run this page can start is over a VOXEL design: either
+            // the optimizer's output (the variants entry) or a fresh ladder's. There
+            // is no analytic-face path here to be wrong about.
+            voxelDerived: true)
     }
 
     private func treatmentButton(_ t: LatticeBoundaryTreatment, _ name: String, _ hint: String) -> some View {
@@ -1213,6 +1336,7 @@ public struct LatticePage: View {
                        warn: false)
             summaryRow("Boundary", boundaryTitle, warn: false)
             summaryRow("Job", project.lattice.enabled ? "Topology + lattice" : "Topology only", warn: false)
+            if variantContext != nil { forecastSection }
         }
         .padding(DS.Space.l)
         .frame(width: 348, alignment: .leading)
@@ -1229,6 +1353,45 @@ public struct LatticePage: View {
         case .rim: return "Rim only"
         case .fullSkin: return "Full skin · diagrid"
         }
+    }
+
+    /// The pre-flight forecast, in full: the headline, every reason with its own
+    /// count, and the remedies core MEASURED by re-running the grading law. This is
+    /// the surface the maintainer needed and did not have — the numbers were all
+    /// computable in under a second, and he got them from a receipt an hour later.
+    @ViewBuilder private var forecastSection: some View {
+        let p = forecastPanel
+        VStack(alignment: .leading, spacing: DS.Space.xs) {
+            Rectangle().fill(DS.Color.strokePanel.color).frame(height: 1)
+                .padding(.vertical, DS.Space.xs)
+            Text(p.title.uppercased()).font(.system(size: 11, weight: .semibold))
+                .tracking(0.7)
+                .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textQuaternary).color)
+            if let placeholder = p.placeholder {
+                Text(placeholder).dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let headline = p.headline {
+                Text(headline).dsStyle(DS.TypeScale.caption).fontWeight(.semibold)
+                    .foregroundStyle((p.warn ? DS.Color.warning : DS.Color.textPrimary).color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(p.reasons.enumerated()), id: \.offset) { _, line in
+                Text("• " + line).dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textTertiary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(Array(p.advice.enumerated()), id: \.offset) { _, line in
+                Text("→ " + line).dsStyle(DS.TypeScale.caption2)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            ([p.title, p.placeholder, p.headline] + p.reasons + p.advice)
+                .compactMap { $0 }.joined(separator: ". "))
     }
 
     private func summaryRow(_ k: String, _ v: String, warn: Bool) -> some View {
@@ -1251,7 +1414,18 @@ public struct LatticePage: View {
     private var actions: LatticePageActions {
         LatticePageActions.compute(variant: variantContext,
                                    optimizeSurface: optimizeSurface,
-                                   running: optimizing)
+                                   running: optimizing,
+                                   forecast: forecast.forecast(for: forecastJob))
+    }
+
+    /// THE FORECAST, IN THE REVIEW DRAWER (bar F3). The button carries the refusal
+    /// in one line; this carries the whole answer — every reason with its count and
+    /// every remedy core actually measured — on the surface whose entire job is
+    /// "read this before you spend a run".
+    private var forecastPanel: LatticeForecastPanel {
+        LatticeForecastPanel.compute(
+            state: forecast.state,
+            describesCurrentJob: forecastJob != nil && forecast.describes == forecastJob)
     }
 
     private var optimizeButton: some View {

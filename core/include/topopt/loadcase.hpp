@@ -36,6 +36,30 @@ inline constexpr int kProductionAnchorPadDepthVoxels = 3;
 // grid spacing (rounded, floored at 1) so a protection always freezes ≥ 1 layer.
 inline constexpr double kFaceProtectionDepthDefaultMm = 5.0;
 
+// Task 2026-08-03-growth-ladder — WHETHER THE ANCHOR/LOAD STRUCTURAL PAD IS FROZEN
+// ON THE GROWTH PATH ("minimize plastic" unticked). true = built, exactly as on the
+// reduction path.
+//
+// Before this task the pad was `lc.minimize_plastic` verbatim, justified in a
+// comment as "the {0.9} conservative variant keeps material anyway". Two things
+// were wrong with that. It made a checkbox that reads as an OBJECTIVE toggle also
+// silently drop a SAFETY feature added after a real failure (diagnosis 064: an
+// unpadded anchor boss is carved to a paper-thin film, then isolated and
+// discarded). And its premise — "0.9 of the part keeps material anyway" — does not
+// transfer to a growth run at all: a growth run is BY DEFINITION a run whose
+// structure is under-strength, its anchors most of all, and its ladder targets
+// 1.10-1.55x the part inside a design box several times the part's volume, where
+// the optimizer is free to spend the budget out in the box and carve away the very
+// boss it needs.
+//
+// THE VALUE HERE IS A MEASUREMENT, NOT AN ARGUMENT. The same growth ladder was run
+// with the pad and without — same fixture, same load, same rungs — and both the
+// gate verdicts and the growth accounting are recorded in
+// evidence/2026-08-03-growth-ladder/pad_on_off.txt (handoff §G5). Flip this
+// constant to re-price the decision; the pad's coupling to the mode now has a name
+// and a number instead of an inherited side effect.
+inline constexpr bool kGrowthPathAnchorPad = true;
+
 // A front-end-neutral description of the user's declared load case (ARCHITECTURE
 // §1 mode (a)). The iPad app maps its BridgeLoadCase to this; topopt-cli maps its
 // job.json to this; both then call build_production_loadcase, so the SAME STEP +
@@ -56,10 +80,22 @@ struct ProductionLoadCase {
   };
   std::vector<LoadGroup> load_groups;
 
-  // true → walk the recommendation ladder (production_reduction_ladder) and
-  // freeze the anchor/load structural pad; false → a single conservative variant
-  // {0.9} with no pad (the mostly-solid "handle the forces, minimal removal"
-  // preview). Mirrors BridgeLoadCase::minimize_plastic.
+  // WHICH LADDER (task 2026-08-03-growth-ladder). Both modes now SEARCH, both
+  // recommend, and each is one line:
+  //
+  //   true  — REDUCE. Walk production_reduction_ladder() [0.68, 0.52, 0.38, 0.26]
+  //           of the part's volume; recommend the LIGHTEST variant that still
+  //           clears the required margin.
+  //   false — GROW. Walk production_growth_ladder() [1.55, 1.25, 1.10] of the
+  //           part's volume; recommend the SMALLEST ADDITION that clears it.
+  //
+  // The anchor/load structural pad is frozen in BOTH modes (kGrowthPathAnchorPad),
+  // and a growth run with no design box gets a minimal one derived and reported
+  // (ProductionRunSetup::growth_box_auto_derived).
+  //
+  // WAS: false meant a single conservative variant at {0.9} with NO pad — no
+  // search, no recommendation, and a safety feature silently dropped by a checkbox
+  // that reads as an objective toggle. Mirrors BridgeLoadCase::minimize_plastic.
   bool minimize_plastic = true;
 
   // The print/build direction (the interlayer-margin orientation). (0,0,0)
@@ -245,6 +281,31 @@ struct ProductionRunSetup {
   // of the per-group log line. When external_loads comes back empty these are
   // what make the refusal legible (no_external_load_message).
   std::vector<LoadGroupReport> load_group_reports;
+
+  // ── WHICH LADDER THIS RUN IS, AND WHAT IT NEEDED (task
+  // 2026-08-03-growth-ladder). Reported so a front-end NAMES the mode instead of
+  // inferring it, and so the two facts that used to travel silently with the
+  // "minimize plastic" checkbox — the pad, and now the box — arrive as data.
+  //
+  //   growth_ladder          true iff lc.minimize_plastic was false, i.e. the run
+  //                          walks production_growth_ladder() and recommends the
+  //                          SMALLEST ADDITION that clears the margin.
+  //   growth_box_auto_derived  the user drew no design box and one was DERIVED
+  //                          (minimal_growth_design_box) so the growth had
+  //                          somewhere to go. Always false when the user drew one,
+  //                          and always false on the reduction path. A receipt
+  //                          that shows growth MUST show this — material grown
+  //                          into a domain the user never drew is exactly the fact
+  //                          that must not be silent.
+  //   growth_box             that derived box (meaningless unless the flag is set).
+  //   growth_anchor_pad      the anchor/load structural pad was frozen on this
+  //                          GROWTH run (kGrowthPathAnchorPad). False on the
+  //                          reduction path, where the pad is unconditional and
+  //                          this flag would say nothing.
+  bool growth_ladder = false;
+  bool growth_box_auto_derived = false;
+  DesignBox growth_box;
+  bool growth_anchor_pad = false;
 };
 
 // Build the production run setup for `lc` from the imported `model`, voxelized at
@@ -259,14 +320,64 @@ struct ProductionRunSetup {
 //     with NO anchors, the min-x boundary is auto-clamped so the system is
 //     well-posed (mirrors the self-weight path);
 //   * configure_production_options + external loads + gravity direction (−build
-//     dir) + ladder (reduction ladder when minimize_plastic, else {0.9});
-//   * when minimize_plastic, a kProductionAnchorPadDepthVoxels FrozenSolid pad
-//     behind every anchor and retained load face (design_mask);
-//   * the design box + keep-outs and the infill override when set.
+//     dir) + ladder (the REDUCTION ladder when minimize_plastic, else the GROWTH
+//     ladder — task 2026-08-03-growth-ladder);
+//   * a kProductionAnchorPadDepthVoxels FrozenSolid pad behind every anchor and
+//     retained load face (design_mask), in BOTH modes (kGrowthPathAnchorPad);
+//   * the design box + keep-outs and the infill override when set — and, on a
+//     GROWTH run with no box drawn, a minimal derived one, flagged on the setup.
 // Degenerate fallbacks keep a run well-posed: no load groups → self-weight (empty
 // external loads); no anchors → min-x clamp. Needs OCCT (STEP face selection).
 ProductionRunSetup build_production_loadcase(const StepModel& model,
                                              int resolution,
                                              const ProductionLoadCase& lc);
+
+// The "Keep clear" FrozenVoid overlay for `clearances`, rasterized onto
+// `solved_grid` (the part sits inside it at the whole-voxel offset derived from
+// the two origins). This IS the loop build_production_loadcase runs — it was
+// extracted so a COUNTERFACTUAL can be MEASURED rather than guessed.
+//
+// WHY `skip_index` EXISTS (task 2026-08-03-preflight-feasibility-and-divergence,
+// bar P2). When the pre-flight refuses a job because the load path is severed,
+// "infeasible" is not a message: the refusal has to name the clearance that did
+// it and say what would fix it. PR 276 established that a stated remedy must be
+// CHECKED. So the refusal path rebuilds this overlay once per declared
+// clearance with that clearance OMITTED (`skip_index == k`) and re-runs the
+// pre-flight: a clearance whose removal RECONNECTS the path is a verified
+// cause, not a plausible one. `skip_index < 0` includes every clearance, which
+// is what the ordinary build passes.
+//
+// `reports` (optional) receives one entry per clearance ACTUALLY rasterized, in
+// declaration order. Same rasterizer, same precedence guard, same skips (an
+// out-of-range AUTO face id contributes nothing) as the production build.
+// THE PRE-FLIGHT REFUSAL, in words a person can act on (task 2026-08-03-
+// preflight-feasibility-and-divergence, bar P2). Call it when
+// `preflight_load_path(domain, options).walk` came back DECIDABLE and NOT
+// CONNECTED; it returns the message a front-end shows and a log records.
+//
+// It names WHICH load groups lost their path and WHICH anchor faces the walk
+// started from, then MEASURES the cause: one re-check per declared clearance
+// with that clearance omitted, and — when a bolt clearance is the cause — a
+// bisection for the largest axial_clearance_mm that still leaves a path. Every
+// remedy it prints has been run through the real rasterizer and the real belt.
+// Nothing here is a guess, and nothing here refuses anything on its own: the
+// verdict is the caller's `walk.connected`, and this only explains it.
+//
+// ONE message, shared by topopt-cli and the on-device bridge, so a user who
+// hits this on the iPad and a user who hits it on the CLI read the same words.
+// Costs a handful of rasterizations and flood fills, and runs ONLY on the
+// refusal path.
+std::string preflight_refusal_report(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const SolvedDesignDomain& domain, const MinimizePlasticOptions& options,
+    const ProductionLoadCase& lc, const PreflightLoadPath& pf,
+    const std::vector<int>& anchor_face_ids);
+
+DesignMask build_clearance_overlay(
+    const StepModel& model, const VoxelGrid& part_grid,
+    const VoxelGrid& solved_grid,
+    const std::vector<ProductionLoadCase::Clearance>& clearances,
+    int skip_index,
+    std::vector<ProductionRunSetup::ClearanceReport>* reports);
 
 }  // namespace topopt

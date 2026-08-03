@@ -1,0 +1,18 @@
+[loadcase] load-group 0: faces=1 |F|=40N voxels_tagged=384 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=5 voxels_frozen=378 depth=1 status=ok
+[lattice] vf=0.68 frozen material: printed=1618 latticed=576 solid=1042 in_include=0 in_exclude=0/1042 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+[lattice] vf=0.52 frozen material: printed=1618 latticed=576 solid=1042 in_include=0 in_exclude=0/1042 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+[lattice] vf=0.38 frozen material: printed=1618 latticed=576 solid=1042 in_include=0 in_exclude=0/1042 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+[lattice] vf=0.26 frozen material: printed=1618 latticed=576 solid=1042 in_include=0 in_exclude=0/1042 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+[lattice] FORECAST: 0 of 1 include regions are thinner than the 15.000 mm the floor requires (thinnest 30.000 mm; floor 5.0 cells x 3.0000 mm)
+[loadcase] load-group 0: faces=1 |F|=40N voxels_tagged=384 status=ok
+[loadcase] warm_start_inherit=1 mode=load-case
+[loadcase] ladder=REDUCTION rungs=[0.68,0.52,0.38,0.26] anchor_pad=1 — remove as much plastic as possible while holding the required margin
+[loadcase] face-protection face=5 voxels_frozen=378 depth=1 status=ok
+[lattice] vf=0.68 frozen material: printed=1618 latticed=1042 solid=576 in_include=1042 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+[lattice] vf=0.52 frozen material: printed=1618 latticed=1042 solid=576 in_include=1042 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+[lattice] vf=0.38 frozen material: printed=1618 latticed=1042 solid=576 in_include=1042 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+[lattice] vf=0.26 frozen material: printed=1618 latticed=1042 solid=576 in_include=1042 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+protect_freeze_vs_solidity: all 26 checks passed

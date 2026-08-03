@@ -1,0 +1,12 @@
+        Start  89: face_tag
+ 99/103 Test  #87: step_import ......................   Passed    0.67 sec
+        Start   2: stl_import
+100/103 Test  #20: fields ...........................   Passed    0.63 sec
+        Start  27: observability
+101/103 Test  #89: face_tag .........................   Passed    0.58 sec
+102/103 Test   #2: stl_import .......................   Passed    0.54 sec
+103/103 Test  #27: observability ....................   Passed    0.72 sec
+
+100% tests passed out of 103
+
+Total Test time (real) = 643.60 sec

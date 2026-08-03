@@ -104,6 +104,91 @@ final class WorkerSupervisor: ObservableObject {
     private var lastStates: [String: String] = [:]
     private var pollTimer: Timer?
 
+    // MARK: - the worker's own output, and its death (task
+    //         2026-08-03-variant-postprocessing-fix, defect 6)
+    //
+    // THE DEFECT THIS EXISTS FOR. The worker's stdout AND stderr were drained into
+    // `_ = h.availableData` and DISCARDED, and the one record of an unexpected exit
+    // — `state = .failed("Worker exited (code N)…")` — is a published UI string that
+    // `start()` overwrites with `.running` two seconds later.
+    //
+    // So when the maintainer's worker died at 17:04:18 on 2026-08-02, taking an
+    // hour-old 128³ run with it, the traceback that would have said why went into
+    // that discard, and the exit code was on screen for two seconds before the
+    // restart erased it. The honest answer to "why did it stop?" was unrecoverable —
+    // not hard to find, GONE. That is a defect in its own right, whatever the
+    // underlying cause turned out to be.
+    //
+    // Now: everything the worker prints is appended to `workerLogURL`, and every
+    // unexpected exit is recorded there AND kept in `lastUnexpectedExit`, which the
+    // restart does not clear.
+
+    /// `~/.topopt-worker/worker-app.log` — the worker process's own stdout+stderr.
+    /// Distinct from each job's `<workdir>/<job-id>/worker.log`, which is the CLI's.
+    var workerLogURL: URL { workDir.appendingPathComponent("worker-app.log") }
+
+    /// Cap, and how much is kept when it is hit. Small: this is a diagnostic tail,
+    /// not an archive, and it must never be the reason a disk fills.
+    private static let workerLogMaxBytes = 4 * 1024 * 1024
+    private static let workerLogKeepBytes = 1 * 1024 * 1024
+
+    /// The last unexpected exit, kept ACROSS the auto-restart so the window can say
+    /// "the worker restarted at 17:04:18 (code 1) — a run may have been lost"
+    /// instead of flicking back to green. Cleared only by a deliberate stop/start.
+    @Published private(set) var lastUnexpectedExit: WorkerExitRecord?
+
+    struct WorkerExitRecord: Equatable {
+        let at: Date
+        let code: Int32
+        /// The tail of what the worker printed before it went — the thing that used
+        /// to be thrown away.
+        let lastOutput: String
+    }
+
+    /// Ring of the most recent output lines, so an exit record can carry the tail
+    /// even if the log file write fails.
+    private var recentOutput: [String] = []
+    private static let recentOutputLines = 40
+
+    private func noteWorkerOutput(_ chunk: Data) {
+        guard !chunk.isEmpty else { return }
+        appendToWorkerLog(chunk)
+        guard let text = String(data: chunk, encoding: .utf8) else { return }
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            recentOutput.append(String(line))
+        }
+        if recentOutput.count > Self.recentOutputLines {
+            recentOutput.removeFirst(recentOutput.count - Self.recentOutputLines)
+        }
+    }
+
+    private func appendToWorkerLog(_ data: Data) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: workDir, withIntermediateDirectories: true)
+        if !fm.fileExists(atPath: workerLogURL.path) {
+            fm.createFile(atPath: workerLogURL.path, contents: nil)
+        }
+        guard let h = try? FileHandle(forWritingTo: workerLogURL) else { return }
+        defer { try? h.close() }
+        _ = try? h.seekToEnd()
+        try? h.write(contentsOf: data)
+        // Trim by REWRITING the tail — the file is small and this runs at most once
+        // per cap crossing, so a simple truncate-and-rewrite is honest and cheap.
+        if let size = try? h.offset(), size > UInt64(Self.workerLogMaxBytes) {
+            try? h.close()
+            if let all = try? Data(contentsOf: workerLogURL) {
+                let tail = all.suffix(Self.workerLogKeepBytes)
+                try? Data(tail).write(to: workerLogURL, options: .atomic)
+            }
+        }
+    }
+
+    /// One durable line, in the same file, so the sequence reads as a story.
+    private func recordToWorkerLog(_ note: String) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        appendToWorkerLog(Data("\(stamp) [supervisor] \(note)\n".utf8))
+    }
+
     /// The worker's scratch dir (passed explicitly as --workdir so each job's
     /// on-disk folder — <workDir>/<job-id> — is known for "Show in Finder").
     let workDir: URL =
@@ -217,12 +302,18 @@ final class WorkerSupervisor: ObservableObject {
         p.environment = env
 
         // Drain stdout/stderr so the worker never blocks on a full pipe (it prints a
-        // STATUS line per iteration). We no longer PARSE it for job state — that
-        // comes from GET /jobs — but the pipe must still be read.
+        // STATUS line per iteration) — and KEEP it (defect 6). This used to be
+        // `_ = h.availableData`: read and thrown away, which is why the worker's
+        // death on 2026-08-02 could not be explained afterwards. It now lands in
+        // `worker-app.log`, so the next one can.
         let outPipe = Pipe()
         p.standardOutput = outPipe
         p.standardError = outPipe
-        outPipe.fileHandleForReading.readabilityHandler = { h in _ = h.availableData }
+        outPipe.fileHandleForReading.readabilityHandler = { [weak self] h in
+            let chunk = h.availableData
+            guard !chunk.isEmpty else { return }
+            Task { @MainActor in self?.noteWorkerOutput(chunk) }
+        }
         p.terminationHandler = { [weak self] proc in
             Task { @MainActor in self?.workerTerminated(proc.terminationStatus) }
         }
@@ -255,6 +346,11 @@ final class WorkerSupervisor: ObservableObject {
         reachable = false
         workerStartedAt = nil
         updateKeepAwake()
+        // A DELIBERATE stop clears the crash record — the user is in charge of this
+        // one, so there is nothing outstanding to warn them about. An auto-restart
+        // does NOT clear it (that is the whole point).
+        lastUnexpectedExit = nil
+        recordToWorkerLog("worker stopped by the user")
         state = .stopped
     }
 
@@ -264,13 +360,28 @@ final class WorkerSupervisor: ObservableObject {
         process = nil
         stopPolling()
         bonjour.stop()
+        // WHAT WAS RUNNING WHEN IT DIED (defect 6). Recorded BEFORE `jobs` is
+        // cleared, because a restarted worker forgets every job and this line is
+        // then the only surviving statement of what the exit cost.
+        let lost = jobs.filter { $0.state == "running" || $0.state == "queued" }
         jobs = []
         reachable = false
         workerStartedAt = nil
         updateKeepAwake()
         guard shouldRun else { return }   // a deliberate stop
-        // Unexpected exit — surface it, then auto-restart after a short backoff so a
-        // transient crash self-heals without the user thinking about it.
+        // Unexpected exit — RECORD it durably, surface it, then auto-restart after a
+        // short backoff so a transient crash self-heals without the user thinking
+        // about it. The record is what the restart used to erase two seconds later.
+        let tail = recentOutput.joined(separator: "\n")
+        lastUnexpectedExit = WorkerExitRecord(at: Date(), code: status,
+                                              lastOutput: tail)
+        recordToWorkerLog("worker exited unexpectedly (code \(status))"
+            + (lost.isEmpty ? " with no job running"
+                            : " — LOST: " + lost.map { "\($0.id) [\($0.state)]" }
+                                                .joined(separator: ", ")))
+        if !tail.isEmpty {
+            recordToWorkerLog("last output before the exit:\n" + tail)
+        }
         state = .failed("Worker exited (code \(status)) — restarting…")
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.shouldRun, self.process == nil else { return }

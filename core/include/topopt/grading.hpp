@@ -155,6 +155,41 @@ struct GradedField {
   std::size_t region_voxels = 0;          // candidate voxels (printed AND in region)
   std::size_t latticed_voxels = 0;        // graded to lattice
   std::size_t solid_fallback_voxels = 0;  // L4: too thin for the floor -> stayed SOLID
+
+  // ── WHY EACH FALLBACK VOXEL FELL BACK (task
+  //    2026-08-03-variant-postprocessing-fix, defect 2 / bar F1) ─────────────────
+  // `solid_fallback_voxels` is an aggregate, and an aggregate is not an answer:
+  // the maintainer's variant 052 reported 10,403 of 10,485 region voxels kept
+  // solid with no way to tell which limit bound, and therefore no way to know
+  // whether a bigger cell, a different region, or nothing at all would help.
+  //
+  // There are exactly TWO predicates that can reject a candidate voxel, and they
+  // have OPPOSITE remedies — which is precisely why they must not be summed:
+  //
+  //   MEMBER TOO THIN — width/cell < cells-per-member floor. The member cannot
+  //     hold enough cells across to homogenize. A SMALLER cell helps; a bigger one
+  //     makes it worse. When the cell is already at the printability floor, NOTHING
+  //     helps: the member is simply thinner than floor × n*, and the fix is a
+  //     thicker member, i.e. a different optimizer result.
+  //   STRUT UNPRINTABLE — the strut this voxel's density would emit is under the
+  //     stated minimum extrudable width at every cell available. A BIGGER cell
+  //     helps (the strut scales with it); a smaller one makes it worse.
+  //
+  // The two sum to `solid_fallback_voxels` exactly. On the uniform paths only the
+  // first can occur, because the uniform cell is at or above the floor at which the
+  // band's lowest density still prints — stated here so a receipt reading
+  // `unprintable == 0` is read as "structurally impossible", not "we got lucky".
+  std::size_t fallback_member_too_thin = 0;
+  std::size_t fallback_strut_unprintable = 0;
+  // The member-width distribution over the REJECTED voxels, so a remedy can be
+  // sized instead of guessed: the widest member that still failed tells you how far
+  // from admissible the best of them was. +inf ⇒ every rejected member exceeded the
+  // EDT cap (impossible while any rejection is by width, so a tripwire).
+  double fallback_max_member_width_mm = 0.0;
+  // How many of `fallback_member_too_thin` could NEVER be latticed at any legal
+  // cell — width < n* × printability_floor. A remedy that changes the cell cannot
+  // touch these, and offering one would be a guess. (<= fallback_member_too_thin.)
+  std::size_t fallback_irrecoverable_by_cell = 0;
   double rho_min_used = 0.0;              // achieved rho band over latticed voxels
   double rho_max_used = 0.0;
   double min_member_width_mm = 0.0;       // thinnest LATTICED member (mm); +inf if all
