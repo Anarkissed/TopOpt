@@ -1181,8 +1181,32 @@ struct SimpOptions {
   // byte-identical to one with the trip disarmed. Every firing is recorded in
   // run_info with the three numbers it fired on, so a disputed trip is a read.
   //
-  // `infeasible_immediate_ratio <= 0` DISARMS it (the exact pre-task behaviour).
-  double infeasible_immediate_ratio = 1000.0;
+  // ── SHIPPED DISARMED (infeasible_immediate_ratio = 0), AND THAT IS A
+  // MEASUREMENT. The premise of this guard is that the motivating run was
+  // DIVERGING. That premise did not survive being tested. The SAME job.json at
+  // resolution 64 — the only resolution at which it can be run to completion in
+  // minutes rather than hours — spikes to 722x its starting compliance at
+  // iteration 2, peaks at 420x with an 8x CG blow-up and a 24.7x wall at
+  // iteration 3, and is then back BELOW its own starting compliance by iteration
+  // 6, converging to 0.0062x and being ACCEPTED with margin 11.08
+  // (evidence/2026-08-03-preflight-feasibility-and-divergence/
+  // res64_same_job_iterations.csv). That is a violent FORMING TRANSIENT — the
+  // exact phenomenon handoff 131's flatness conjunct exists to protect — not a
+  // divergence.
+  //
+  // It cannot be proven that the resolution-128 trajectory would also have
+  // recovered without spending the ten hours. But it can no longer be asserted
+  // that it would not, and arming a guard that REJECTS the rung on that evidence
+  // would risk exactly the false refusal the task's own bar forbids ("a wrongly
+  // refused job is worse than a slow one"). Guard 3 — an honest TIMEOUT that
+  // makes no claim about the design — carries this job instead, and is armed.
+  //
+  // Everything is kept and tested: the predicate (`immediate_divergence`), the
+  // loop wiring, the per-rung observability and the calibration harness. Setting
+  // `infeasible_immediate_ratio` to 1000 arms it at the calibrated thresholds
+  // measured above. A future task with a trajectory that is PROVEN not to
+  // recover can flip it on that evidence.
+  double infeasible_immediate_ratio = 0.0;    // 1000.0 arms it (see above)
   double infeasible_immediate_wall_ratio = 50.0;
 
   // --- ITERATION TIME GUARD (task 2026-08-03-preflight-feasibility-and-

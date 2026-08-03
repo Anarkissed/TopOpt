@@ -1,8 +1,13 @@
 # Refuse infeasible jobs in seconds, not hours
 
 **Slug:** `preflight-feasibility-and-divergence` ·
-**Branch:** `claude/preflight-feasibility-detection-7e4db8`, from `main` at `34175a5`.
+**Branch:** `claude/preflight-feasibility-detection-7e4db8`, from `main` at `34175a5`,
+**merged with `main` at `67c3f70` (PR 290, growth-ladder)** — see *The merge* below.
 **Evidence:** `evidence/2026-08-03-preflight-feasibility-and-divergence/`
+
+> **Guard 2 ships DISARMED.** Its premise — that the motivating run was diverging
+> — did not survive being tested: the same job at resolution 64 recovers and is
+> ACCEPTED. Part 2 has the measurement. Guards 1 and 3 ship armed.
 
 A real job ran **ten hours** and completed **three** design iterations.
 
@@ -17,8 +22,60 @@ clearance, because a bolt you cannot get a driver onto is not a bolt hole. An
 option that can produce a ten-hour diverging run is an app defect.
 
 Three guards ship. **The headline one does not fire on this job, and the
-measurement says it never could have** — that finding is Part 1. Guards 2 and 3
-stop this job at **35 minutes instead of ten hours**.
+measurement says it never could have** — that finding is Part 1. **The second
+one ships disarmed, because the job it was built for turns out to recover** —
+that finding is Part 2. The third, an honest timeout, is what stops this job.
+
+---
+
+# THE MERGE (PR 290, growth-ladder)
+
+Two real conflicts, one merge base, both resolved on the branch.
+
+| file | conflict | resolution |
+|---|---|---|
+| `minimize_plastic.cpp` | the guard-stopped rung branch | keep BOTH — this branch's three-way `rejection_reason` selector (infeasible / diverged / time-budget) **and** main's `measure_added_material`, so a guard-stopped rung on a growth run still gets its where-is-the-plastic accounting |
+| `run_job.cpp` | **structural, not textual** — this branch EXTRACTED the job setup into `build_job_setup()` so the pre-flight and the run cannot describe different jobs; main edited the same block in place | keep the extraction, port main's four `echo.growth_*` receipt fields into it (the only PR-290 change inside that block) |
+
+**The interaction that mattered.** PR 290 builds the anchor/load structural pad
+on the **growth** path too (`want_pad` is no longer `minimize_plastic`-only) and
+**auto-derives** a design box for a boxless growth run. A pre-flight running
+against the pre-290 mask would be testing a domain the run no longer solves on.
+
+It reads the post-290 mask by construction — it calls the optimizer's own
+`design_domain_mask` + `effective_design_mask`, and the pad lands in
+`options.design_mask`, which `resolve_design_domain` merges into the expanded
+mask *before* the pre-flight sees it. But "by construction" is not evidence, so
+it is now measured (`test_preflight_divergence` group 1b):
+
+```
+[growth] no pad:    connected=1, allowed=5824 (frozen  60 + active 5764), forbidden 2368
+[growth] with pad:  connected=1, allowed=5824 (frozen 120 + active 5704), forbidden 2368
+[growth] same keep-clear over the anchor:
+         without pad allowed 5764 (connected=1), with pad allowed 5824 (connected=1)
+```
+
+Three things, all asserted: a **growth run passes pre-flight**; the frozen-solid
+share **grows** when the pad is added, which is the check *seeing* it; and the
+allowed set does not shrink. That last is the property that makes the growth
+path safe — a `FrozenSolid` pad can only ever **enlarge** the allowed set (a pad
+voxel is always material, and it out-ranks a keep-clear that would otherwise
+void it), so **the pad can never cause a false refusal**. The third line shows
+the out-ranking directly: the same keep-clear over the anchor leaves 60 more
+voxels available when the pad is there.
+
+**And the maintainer's own job is now a GROWTH run.** It carries
+`loads.minimize_plastic: false`, which used to mean the single `{0.9}` variant
+and no pad. Post-290 it means the growth ladder and a pad:
+
+```
+[loadcase] ladder=GROWTH rungs=[1.55,1.25,1.10] anchor_pad=1
+```
+
+So the ten-hour trajectory is **not reproducible on the merged tree** — that
+job now walks a different ladder. The recorded `iterations.csv` remains valid as
+the committed historical artifact the guards are calibrated against, which is
+exactly what it is for.
 
 ---
 
@@ -116,17 +173,38 @@ Only on the refusal path; a handful of rasterizations and flood fills.
 
 ## Cost, measured (P4)
 
-`check 21.2 ms` on the maintainer's 655,360-voxel resolution-128 design-box job.
-Across all 46 archived worker jobs: **0.73 – 27.7 ms**. It is milliseconds.
+`check 23.2 ms` on the maintainer's 655,360-voxel resolution-128 design-box job
+(post-merge). Across all 46 archived worker jobs: **0.72 – 26.7 ms**. It is
+milliseconds.
 
 ## No false refusals (P3)
 
 `evidence/…/preflight_sweep.txt` — **every job.json in `~/.topopt-worker`**, 46 of
-them, real archived runs at resolutions 64/96/128:
+them, real archived runs at resolutions 64/96/128, **re-run post-merge**:
 
 ```
 worker jobs checked: 46   CONNECTED: 37   vacuous: 2   REFUSED: 0   unreadable: 7
+of the readable ones, GROWTH-ladder runs (post-PR-290): 4
 ```
+
+The four that PR 290 turns into **growth** runs — pad on, rungs
+`[1.55,1.25,1.10]` — are all CONNECTED:
+
+```
+36356ac4c7ce4a26  CONNECTED  GROWTH   15.98 ms   res 128   1749 load / 691 anchor voxels
+474ffbbb6455417e  CONNECTED  GROWTH    0.72 ms   res  64    372 load /  31 anchor voxels
+7fbc7ee2900e425a  CONNECTED  GROWTH   24.31 ms   res 128   1464 load /  71 anchor voxels  <- the 10-hour job
+cf32b7686f504885  CONNECTED  GROWTH   16.80 ms   res 128   1749 load / 691 anchor voxels
+```
+
+And all three domain shapes of the maintainer's own job pass
+(`preflight_growth_paths.txt`):
+
+| domain | allowed / total voxels | verdict | check |
+|---|---|---|---|
+| growth + drawn design box (as authored) | 615,200 / 655,360 | CONNECTED | 23.2 ms |
+| growth, **no box → PR 290 auto-derives one** | 243,618 / 278,528 | CONNECTED | 8.7 ms |
+| reduction twin (`minimize_plastic: true`) | 615,200 / 655,360 | CONNECTED | 23.7 ms |
 
 The 7 unreadable ones never reach the pre-flight and none of their causes is
 one: 3 × job-schema drift (a `"project"` key this CLI does not know), 2 × a
@@ -137,7 +215,56 @@ Plus the full `ctest` suite green with all three guards armed (Part 6).
 
 ---
 
-# PART 2 — THE IMMEDIATE DIVERGENCE TRIP
+# PART 2 — THE IMMEDIATE DIVERGENCE TRIP, AND WHY IT SHIPS DISARMED
+
+## The premise did not survive being tested
+
+The guard exists to catch a **divergence**. Before shipping it armed, the
+premise was checked the only way it can be checked cheaply: run the **same
+`job.json` at resolution 64**, where the whole ladder finishes in 6m52s instead
+of ten hours (`res64_same_job_iterations.csv`).
+
+```
+ iter     compliance       c/c0   cg/cg0   ms/ms0
+    1         4633.6          1        1        1
+    2    3.34572e+06      722.1     1.15     1.06
+    3    1.94534e+06      419.8     8.01     24.7
+    4         259946       56.1     1.37     1.46
+    5        22321.9      4.817     2.15     2.13
+    6        1963.24     0.4237     1.19     1.32   <- back BELOW its own start
+  200        28.6749   0.006188      0.5    0.624
+VARIANT vf=0.900000 margin=11.0781 accepted=1
+```
+
+**It recovers, and it is ACCEPTED with margin 11.1.** It spikes 722× at
+iteration 2, peaks at 420×, and is below its starting compliance by iteration 6.
+That is a violent **forming transient** — precisely the phenomenon handoff 131's
+flatness conjunct was added to protect — not a divergence.
+
+It cannot be *proven* that the resolution-128 trajectory would also have
+recovered without spending the ten hours. But it can no longer be *asserted*
+that it would not. Arming a guard that REJECTS the rung on that evidence risks
+exactly the false refusal this task's own bar forbids — *a wrongly refused job
+is worse than a slow one*. **So `infeasible_immediate_ratio` ships at 0
+(disarmed)**, and guard 3 — an honest timeout that makes no claim about the
+design — carries this job instead.
+
+Everything else is kept and tested: the predicate (`immediate_divergence`, public
+so the test drives the shipped function rather than a copy of the rule), the loop
+wiring, the per-rung observability, the forced-trip group, and the calibration
+below. Arming it is a one-line change with its evidence already in place.
+
+Two further facts sharpen this. **Post-290 the job does not even take that path
+any more** — it is a growth run now, ladder `[1.55,1.25,1.10]` with the pad, and
+at resolution 64 that ladder is completely tame (peak `c/c0` **1.16**, peak wall
+ratio **1.00**) where the old one spiked 722×. And there is one thing I could
+not explain: on a live resolution-128 run the trip did **not** fire at iteration
+2 although the shipped predicate demonstrably does on those exact rows
+(`fired=1 c=1688.49 cg=12.6007 wall=84.2585`). With the guard disarmed that is no
+longer load-bearing, but it is **unresolved**, not explained away — a future task
+arming this guard must find it first.
+
+## The calibration, which stands either way
 
 ## The obvious design is refuted by measurement
 
@@ -273,7 +400,43 @@ compliance is the last recorded objective — i.e. **the final solve was skipped
 
 # PART 4 — WHAT THE GUARDS DO TO THE MAINTAINER'S JOB
 
-<!-- GUARDED-RUN-RESULT -->
+**Guard 1 — pre-flight.** CONNECTED, **23.2 ms**, on all three domain shapes
+(drawn box / auto-derived growth box / reduction twin). Part 1.
+
+**Guard 2 — immediate divergence trip.** DISARMED. Against the *recorded*
+ten-hour trajectory the shipped predicate fires at iteration 2 —
+`fired=1 c=1688.49 cg=12.6007 wall=77.2228` on the original rows,
+`wall=84.2585` on this machine's reproduction — i.e. it would have stopped the
+run at **34 minutes instead of ten hours**. It is disarmed anyway, because the
+same job at resolution 64 **recovers and is accepted** (Part 2).
+
+**Guard 3 — iteration time budget.** Against the recorded trajectory: iteration
+1 costs 26,663 ms, so the budget is **44.4 minutes**; iteration 2 (2,058,989 ms)
+is **under** it and iteration 3 (22,679,464 ms) is **over** — stopped at 44
+minutes rather than allowed to finish at 6.3 hours. Asserted in the test against
+the committed CSV.
+
+**And on the job as it runs TODAY** (post-290 growth ladder, resolution 64,
+17m29s end to end, `res64_growth_iterations.csv` / `res64_growth_run_info.json`
+— run with guard 2 **armed** at the calibrated 1000/50, which makes this the
+stronger no-false-refusal result):
+
+```
+rung  iters   peak c/c0  peak cg/cg0  peak ms/ms0   first ms   budget ms
+   0    400       1.158         1.16         2.46     2491.4      300000
+   1     60           1         1.27         1.19     2261.9      300000
+   2     42           1         1.25          1.2     2652.9      300000
+
+variants: 3 evaluated, 3 accepted
+recommended: +10% (vf 1.10) — the SMALLEST addition that passes: +21.09 g
+rung_diverged     [False, False, False]
+rung_time_budget  [False, False, False]
+```
+
+**No guard fires, and the growth ladder is tame** — peak `c/c0` **1.16** where
+the old `{0.9}` ladder on the same part spiked **722×**. The budget floor (5 min)
+governs on every rung, exactly as designed for a fast job. The run_info block
+above is the P6 record: all-false is the positive statement *"no guard fired"*.
 
 ---
 
@@ -328,22 +491,35 @@ no ladder stop, never certified or exported — with only the label differing.
 built from `main` at `34175a5`** and through the guarded binary:
 
 ```
-report.json          6ddb0bfaf9a9e529  6ddb0bfaf9a9e529  SAME
-fields.bin           c579ceedfde311eb  c579ceedfde311eb  SAME
-design.bin           6212aa529ad0449f  6212aa529ad0449f  SAME
-variant_070.stl      346dc6583c1f8b27  346dc6583c1f8b27  SAME
-variant_050.stl      311610807bddf81f  311610807bddf81f  SAME
-loadcase.json        9670f551449031d3  9670f551449031d3  SAME
+artifact               main               this branch
+report.json            6ddb0bfaf9a9e529   6ddb0bfaf9a9e529   SAME
+fields.bin             c579ceedfde311eb   c579ceedfde311eb   SAME
+design.bin             6212aa529ad0449f   6212aa529ad0449f   SAME
+variant_070.stl        346dc6583c1f8b27   346dc6583c1f8b27   SAME
+variant_050.stl        311610807bddf81f   311610807bddf81f   SAME
+loadcase.json          9670f551449031d3   9670f551449031d3   SAME
+build_orientation.json 51594934e65a6ce0   4aaf31d55a112ba6   DIFFER
+```
+
+`build_orientation.json` differs in **two wall-clock fields only**
+(`sweep_seconds`, `strut_axis_measure_seconds`) — and **main differs from itself
+the same way** across two runs, so it is pre-existing timing nondeterminism in
+that receipt, not a design difference:
+
+```
+  main vs this branch:   sweep_seconds 0.003572167 -> 0.003970583
+  main vs MAIN (2 runs): sweep_seconds 0.003572167 -> 0.003193875
 ```
 
 `run_info.json` differs by **additions only** — 23 new keys, nothing removed or
-changed. And the same binary twice (P7 determinism): all SAME.
+changed. And the same binary twice (P7 determinism): every design-bearing
+artifact SAME.
 
 Plus the ONE RULE group in the live test: armed vs disarmed, same rungs, same
 iteration counts, `physical_density` **bit-for-bit** equal.
 
-`ctest`: **101/101 passed**, plus the new `preflight_divergence` test (**311
-checks**).
+`ctest`: **103/103 passed** post-merge (101 before, +2 from PR 290), including
+the new `preflight_divergence` test (**352 checks**).
 
 ---
 

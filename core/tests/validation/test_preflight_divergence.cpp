@@ -515,8 +515,13 @@ int main() {
   {
     // The shipped defaults, asserted rather than assumed.
     MinimizePlasticOptions probe;
-    CHECK(probe.simp.infeasible_immediate_ratio == kImmediateRatio,
-          "defaults: the immediate compliance ratio ships at 1000");
+    // SHIPPED DISARMED — see SimpOptions::infeasible_immediate_ratio for the
+    // measurement (the same job at resolution 64 RECOVERS and is accepted, so
+    // the divergence premise did not survive testing). The calibrated value is
+    // still asserted below against the real trajectories, so arming it is a
+    // one-line change with its evidence already in place.
+    CHECK(probe.simp.infeasible_immediate_ratio == 0.0,
+          "defaults: the immediate divergence trip ships DISARMED");
     CHECK(probe.simp.infeasible_immediate_wall_ratio == kImmediateWallRatio,
           "defaults: the immediate wall ratio ships at 50");
     CHECK(probe.simp.infeasible_cg_blowup == kCgBlowup,
@@ -566,6 +571,7 @@ int main() {
         if (w0 > 0.0) peak_wall = std::max(peak_wall, o.phases.total_ms / w0);
         cprev = o.compliance;
       };
+      armed.simp.infeasible_immediate_ratio = kImmediateRatio;  // ARM it here
       const MinimizePlasticResult r =
           minimize_plastic(g, mat, "PLA", bcs, rules, armed);
       std::printf("[immediate] live transient: peak level %.4gx, peak step "
@@ -715,7 +721,7 @@ int main() {
     {
       MinimizePlasticOptions o = base_options(g);
       o.volume_fraction_ladder = {0.6, 0.03, 0.02};
-      o.simp.infeasible_immediate_ratio = 10.0;      // vs the shipped 1000
+      o.simp.infeasible_immediate_ratio = 10.0;      // vs the calibrated 1000
       o.simp.infeasible_immediate_wall_ratio = 1.5;  // vs the shipped 50
       const MinimizePlasticResult r =
           minimize_plastic(g, mat, "PLA", bcs, rules, o);
