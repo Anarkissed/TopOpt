@@ -889,6 +889,80 @@ struct LatticeRoleReceipt {
   std::size_t exclude_regions = 0;  // resolved (valid) exclude primitives
   long long include_void_voxels = 0;  // include-region voxels the OPTIMIZER left
                                       // void — the H1a no-op, reported not errored
+  // ── WHY the void (task 2026-08-04-protect-freeze-vs-solidity, item 5). The
+  // aggregate above sums two situations whose meanings are opposite:
+  //
+  //   BY CLEARANCE — the voxel is void because a declared "Keep clear" forbids
+  //     material there. Lattice on a clearance void is the genuine no-op: the
+  //     user asked to lattice a hole. NOTHING can put material there, so this is
+  //     what a warning should fire on, and it does (see the emission below).
+  //   BY THE OPTIMIZER — the voxel is void because the optimizer removed it at
+  //     this rung. That is not a conflict at all: a lighter rung carries less
+  //     material, and the same include region may be full at the next one.
+  //
+  // Split so the receipt can say which, and so the warning cannot be aimed at
+  // the wrong one.
+  long long include_void_by_clearance = 0;
+  long long include_void_by_optimizer = 0;
+};
+
+// ── FROZEN MATERIAL vs LATTICE (task 2026-08-04-protect-freeze-vs-solidity)
+//
+// "Frozen" is a constraint on the OPTIMIZER — the density of these voxels may not
+// change. It is NOT a statement that the material is solid. What the material IS
+// — solid or latticed — is decided by the lattice page's include / exclude roles,
+// exactly as it is for any other retained material, and this receipt is the proof
+// that it was: for THIS variant, how much of the run's frozen set the lattice
+// left solid and how much it latticed, plus the audit that the file and the
+// certificate agree over the frozen voxels specifically.
+//
+// The frozen set is `effective_design_mask` (simp.hpp) — the set the loop itself
+// held frozen, so this cannot be a second opinion about it. It includes the
+// face-protection collars, the anchor/load pad, and (under a design box) the
+// imported part where the box path freezes it.
+//
+// Emitted only when the run HAS frozen material and a lattice, so a run with
+// neither writes byte-identical files.
+struct LatticeFrozenReceipt {
+  bool present = false;
+  long long frozen_printed = 0;   // printed voxels the effective mask pins solid
+  long long frozen_latticed = 0;  //   ... the certification mask lattices
+  long long frozen_kept_solid = 0;  //   ... certified + exported SOLID
+  // Of `frozen_printed`, how many sit inside a declared INCLUDE region (0 when
+  // the job declares none — then the whole part is the include set by default),
+  // how many inside an EXCLUDE region, and — the item-4 bar — how many of THOSE
+  // were latticed anyway. `frozen_in_exclude_latticed` must be 0: an exclude
+  // region says "retained AND solid", and it says it about frozen material
+  // exactly as it does about any other retained material.
+  long long frozen_in_include = 0;
+  long long frozen_in_exclude = 0;
+  long long frozen_in_exclude_latticed = 0;
+  // ── THE AUDIT over the frozen voxels (bar 3). Same shape as the design-box
+  // audit below — the cell set the certification mask implies over FROZEN
+  // voxels, and how many of those cells the generator's own activation test
+  // rejects (must be 0: a certified-latticed voxel whose cell was never emitted
+  // is a certificate describing geometry the file does not contain). Plus the
+  // both-ways count: frozen voxels that got a strut AND companion solid (0).
+  long long frozen_cells_certified = 0;
+  long long frozen_cells_not_emitted = 0;
+  // Frozen voxels that are companion solid AND sit inside an emitted lattice
+  // cell. On the ROLE path this is NOT zero and MUST NOT be asserted to be —
+  // it is the deliberate bonding overlap: roles act on activation and on the
+  // certification mask but are deliberately kept OUT of the strut clip
+  // (lattice_boundary.hpp), because clipping a strut short of an exclude region
+  // would leave the lattice/solid interface unbonded. A cell straddling a role
+  // boundary therefore writes struts across it, into material the certificate
+  // calls solid — MORE material than certified, the conservative direction.
+  //
+  // What must be zero is the count below, which is the actual divergence.
+  long long frozen_voxels_strut_and_solid = 0;
+  // Of those, the ones NOT explained by a straddling cell: the voxel is
+  // companion solid, its cell was emitted, and that cell owns NO certified-
+  // latticed voxel at all. Then the cell is not bonding a lattice to a solid
+  // interface — it is writing struts into a region the certificate says is
+  // entirely solid, with no lattice there to bond to. That IS a certified-
+  // object-is-not-the-exported-object divergence and it must be 0.
+  long long frozen_strut_and_solid_unexplained = 0;
 };
 // ── ADDED MATERIAL under a design box (task 2026-08-03-design-box-recertification)
 //
@@ -989,7 +1063,8 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
                                      double cell_mm,
                                      const LatticeRoleReceipt& roles,
                                      const LatticeGradedReceipt& graded,
-                                     const LatticeAddedMaterialReceipt& added) {
+                                     const LatticeAddedMaterialReceipt& added,
+                                     const LatticeFrozenReceipt& frozen) {
   const LatticeGenStats& gs = oc.stats;
   const FixedDesignAnalysis& a = c.lattice;
   std::string s = "{\n";
@@ -1052,12 +1127,71 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     s += "    \"exclude\": " + std::to_string(roles.exclude_regions) + ",\n";
     s += "    \"include_void_voxels\": " +
          std::to_string(roles.include_void_voxels) + ",\n";
+    s += "    \"include_void_by_clearance\": " +
+         std::to_string(roles.include_void_by_clearance) + ",\n";
+    s += "    \"include_void_by_optimizer\": " +
+         std::to_string(roles.include_void_by_optimizer) + ",\n";
     s += "    \"include_void_note\": \"include-region voxels where the optimizer "
          "left no material — a lattice cannot conjure material there, so the "
-         "include is a NO-OP on them (reported, not an error)\",\n";
+         "include is a NO-OP on them (reported, not an error). Split by CAUSE: "
+         "\\\"by_clearance\\\" is a declared keep-clear, where nothing can ever "
+         "put material and the include is unsatisfiable; \\\"by_optimizer\\\" is "
+         "material this rung did not need, which a heavier rung may carry\",\n";
     s += "    \"precedence\": \"clearance beats include and exclude (no material "
          "to lattice); exclude beats include (kept solid); solid-kept material "
          "is certified SOLID and exported as the solid companion body\"\n";
+    s += "  },\n";
+  }
+  // FROZEN MATERIAL (task 2026-08-04-protect-freeze-vs-solidity). What the run
+  // held frozen, and what the lattice page decided that frozen material IS.
+  // Emitted only when the run has frozen material AND a lattice, so a job with
+  // neither writes byte-identical bytes.
+  // *** EVERY KEY IN THIS BLOCK IS PREFIXED `frozen_`, DELIBERATELY. *** The
+  // receipt is read by tests (and by front-ends) with a SUBSTRING search for
+  // `"key":`, so a bare `printed_voxels` here would shadow `added_material`'s
+  // `printed_voxels` further down and silently answer a different question. It
+  // did exactly that once, and `designbox_lattice_recert` caught it — the block
+  // is prefixed so it cannot happen again to a key added later.
+  if (frozen.present) {
+    s += "  \"frozen_material\": {\n";
+    s += "    \"frozen_printed_voxels\": " +
+         std::to_string(frozen.frozen_printed) + ",\n";
+    s += "    \"frozen_latticed\": " + std::to_string(frozen.frozen_latticed) +
+         ",\n";
+    s += "    \"frozen_kept_solid\": " +
+         std::to_string(frozen.frozen_kept_solid) + ",\n";
+    s += "    \"frozen_in_include_region\": " +
+         std::to_string(frozen.frozen_in_include) + ",\n";
+    s += "    \"frozen_in_exclude_region\": " +
+         std::to_string(frozen.frozen_in_exclude) + ",\n";
+    s += "    \"frozen_in_exclude_region_latticed\": " +
+         std::to_string(frozen.frozen_in_exclude_latticed) + ",\n";
+    s += "    \"frozen_cells_certified\": " +
+         std::to_string(frozen.frozen_cells_certified) + ",\n";
+    s += "    \"frozen_cells_not_emitted\": " +
+         std::to_string(frozen.frozen_cells_not_emitted) + ",\n";
+    s += "    \"frozen_voxels_strut_and_solid\": " +
+         std::to_string(frozen.frozen_voxels_strut_and_solid) + ",\n";
+    s += "    \"frozen_strut_and_solid_unexplained\": " +
+         std::to_string(frozen.frozen_strut_and_solid_unexplained) + ",\n";
+    s += "    \"frozen_strut_and_solid_note\": \"voxels_strut_and_solid is NOT expected "
+         "to be 0 where a lattice cell straddles a role boundary: roles act on "
+         "cell activation and on the certification mask but are deliberately "
+         "kept out of the strut clip, so struts weld across the interface into "
+         "material certified solid (more material than certified — the "
+         "conservative direction, and what bonds the lattice to the solid). "
+         "strut_and_solid_unexplained is the real divergence and IS 0: no cell "
+         "emits struts into a region the certificate calls entirely solid.\",\n";
+    s += "    \"frozen_meaning\": \"FROZEN is a constraint on the OPTIMIZER — it may not "
+         "change the density of these voxels. It is NOT a claim that the "
+         "material is solid. Whether frozen material is solid or latticed is "
+         "decided by the lattice regions (include = retained AND latticed, "
+         "exclude = retained AND solid), exactly as for any other retained "
+         "material.\",\n";
+    s += "    \"frozen_audit\": \"cells_not_emitted and voxels_strut_and_solid are both "
+         "0 on a coherent run: every cell the certificate lattices over frozen "
+         "material is a cell the file contains, and no frozen voxel receives "
+         "both a strut and companion solid.\"\n";
     s += "  },\n";
   }
   // Added material (task 2026-08-03-design-box-recertification) — on a design-box
@@ -1375,6 +1509,8 @@ struct LatticeVariantOutcome {
   LatticeRoleReceipt role_rcpt;
   LatticeGradedReceipt grad_rcpt;  // `gf` pointer NOT retained (see below)
   LatticeAddedMaterialReceipt added_rcpt;  // design-box runs only
+  LatticeFrozenReceipt frozen_rcpt;        // runs with frozen material only
+
   // The DESIGN the mesh was built from and the certification solved on — one
   // number, so "the certified object is the exported one" is checkable rather
   // than merely argued (bar Z3). Both consumers read the SAME `dens` reference
@@ -1675,7 +1811,31 @@ LatticeVariantOutcome lattice_one_variant(
     // to every pre-task run (bar AI3). It is armed on `domain.expanded` rather
     // than on "did the policy clear anything", so the design-box path has ONE
     // rule whichever way kDesignBoxAddedMaterialKeptSolid is set.
-    if (domain.expanded) {
+    //
+    // ── AND ON THE ROLE PATH TOO (task 2026-08-04-protect-freeze-vs-solidity,
+    // bar 3). The sentence above — "it stops being correct the moment [a policy]
+    // clears voxels the boundary still considers material" — describes lattice
+    // ROLES exactly: an exclude region, or anything outside the include union,
+    // clears voxels from the certification mask that the boundary's voxel base
+    // still sees as material. The uniform role path was still passing NULL, so
+    // the generator emitted every cell `cell_may_overlap` could not PROVE empty
+    // — a proof-based, conservative test — while the certification mask uses
+    // exact voxel-CENTRE membership. A cell can therefore "may-overlap" an
+    // include region while none of its voxel centres are inside it: struts
+    // written into material the certificate calls entirely solid.
+    //
+    // MEASURED, on the l-bracket gate before this line existed: 48 such voxels
+    // on the include run and 426 on the exclude run, every one of them in a cell
+    // owning NO certified-latticed voxel — i.e. all divergence, no bonding
+    // overlap. The receipt's `strut_and_solid_unexplained` is that number and it
+    // is 0 with this armed.
+    //
+    // The certification mask is NOT touched by this: the certified object and
+    // every margin it produces are unchanged, and only the exported FILE moves
+    // (strictly fewer cells — it stops writing struts the certificate never
+    // credited). So this cannot move a verdict, which is what makes it landable
+    // under this task's bar 5.
+    if (domain.expanded || roles_present) {
       uniform_cells.assign(ncells, 0);
       for (int k = 0; k < solved_grid.nz; ++k)
         for (int j = 0; j < solved_grid.ny; ++j)
@@ -1703,11 +1863,57 @@ LatticeVariantOutcome lattice_one_variant(
             const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                          solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                          solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-            if (boundary.in_include_region(c, 0.0))
-              ++role_rcpt.include_void_voxels;
+            if (!boundary.in_include_region(c, 0.0)) continue;
+            ++role_rcpt.include_void_voxels;
+            // WHICH void this is (item 5). A clearance keep-out is the one that
+            // can never be satisfied; the optimizer's own removal can.
+            if (boundary.in_keep_out(c, 0.0))
+              ++role_rcpt.include_void_by_clearance;
+            else
+              ++role_rcpt.include_void_by_optimizer;
           }
     }
   }
+
+  // ── FROZEN MATERIAL vs LATTICE (task 2026-08-04-protect-freeze-vs-solidity).
+  //
+  // The frozen set is read from `effective_design_mask` — THE mask the loop
+  // optimised under, not a reconstruction of it — so "frozen" here means exactly
+  // what it meant to the optimizer: a density it was not allowed to move. It
+  // carries no opinion about lattice, and this block is the measurement that
+  // proves it: the certification mask, built from the boundary alone, is free to
+  // lattice a frozen voxel (an include region over it) or to keep it solid (an
+  // exclude region, or simply being outside the include union).
+  //
+  // Nothing here CHANGES a decision — every count is read off masks already
+  // computed above. That is deliberate: the whole finding of this task is that
+  // the two facts were already separate on this path and only the reporting and
+  // the copy said otherwise.
+  LatticeFrozenReceipt& frozen_rcpt = R.frozen_rcpt;
+  const DesignMask frozen_eff =
+      effective_design_mask(solved_grid, design_domain_mask(domain, options));
+  auto is_frozen = [&frozen_eff, &dens](std::size_t e) {
+    return frozen_eff[e] == MaskValue::FrozenSolid && dens[e] >= 0.5;
+  };
+  for (int k = 0; k < solved_grid.nz; ++k)
+    for (int j = 0; j < solved_grid.ny; ++j)
+      for (int i = 0; i < solved_grid.nx; ++i) {
+        const std::size_t e = solved_grid.index(i, j, k);
+        if (!is_frozen(e)) continue;
+        ++frozen_rcpt.frozen_printed;
+        if (mask[e]) ++frozen_rcpt.frozen_latticed;
+        else ++frozen_rcpt.frozen_kept_solid;
+        const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                     solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                     solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+        if (boundary.has_include_regions() && boundary.in_include_region(c, 0.0))
+          ++frozen_rcpt.frozen_in_include;
+        if (boundary.in_exclude_region(c, 0.0)) {
+          ++frozen_rcpt.frozen_in_exclude;
+          if (mask[e]) ++frozen_rcpt.frozen_in_exclude_latticed;
+        }
+      }
+  frozen_rcpt.present = frozen_rcpt.frozen_printed > 0;
 
   // ── SWEPT cell size: one level spec per dyadic level (handoff 2026-08-01-
   //    lattice-cell-size-sweep). Each level carries (a) its own occupancy — the
@@ -1777,6 +1983,32 @@ LatticeVariantOutcome lattice_one_variant(
   // companion solid. `emitted_lattice_cells` is the GENERATOR's own count
   // (LatticeGenStats::latticed_cells — cells that passed both the predicate and
   // the boundary-overlap test), not a re-derivation of it.
+  //
+  // ONE predicate, TWO scopes (task 2026-08-04-protect-freeze-vs-solidity, bar 3).
+  // The frozen-material audit asks the SAME two questions over the frozen voxels
+  // — reusing these lambdas rather than re-deriving the rules beside them, which
+  // is the only way the two audits cannot disagree about what "emitted" means.
+  //
+  // `cell_emitted` — does the generator lattice this cell? Exactly the generator's
+  // own activation chain: the cell predicate (null = every cell) AND the
+  // boundary-overlap proof.
+  auto cell_emitted = [&](const std::array<int, 3>& c) {
+    if (cell_latticed && !cell_latticed(c[0], c[1], c[2])) return false;
+    const Vec3 cmin{Rdims.origin.x + c[0] * cell, Rdims.origin.y + c[1] * cell,
+                    Rdims.origin.z + c[2] * cell};
+    return boundary.cell_may_overlap(cmin, cell);
+  };
+  // `is_companion_solid` — a voxel is companion solid on exactly the export's own
+  // rule: printed, NOT masked, and not inside a clearance keep-out
+  // (export_latticed_variant).
+  auto is_companion_solid = [&](int i, int j, int k) {
+    const std::size_t e = solved_grid.index(i, j, k);
+    if (!(dens[e] >= 0.5) || mask[e]) return false;
+    const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
+                  solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
+                  solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
+    return !boundary.in_keep_out(vc, 0.0);
+  };
   if (added_rcpt.present) {
     std::vector<char> certified_cells(ncells, 0);
     for (int k = 0; k < solved_grid.nz; ++k)
@@ -1787,26 +2019,60 @@ LatticeVariantOutcome lattice_one_variant(
     for (const char c : certified_cells)
       added_rcpt.certified_lattice_cells += (c ? 1 : 0);
     added_rcpt.emitted_lattice_cells = R.oc.stats.latticed_cells;
-    // A voxel is "companion solid" on exactly the export's own rule: printed,
-    // NOT masked, and not inside a clearance keep-out (export_latticed_variant).
-    // It is "inside a strut cell" iff its owning cell is one the generator
-    // emitted — the same cell_active test, asked here with the same inputs.
+    // "Inside a strut cell" iff its owning cell is one the generator emitted —
+    // the same cell_active test, asked here with the same inputs.
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i)
+          if (is_companion_solid(i, j, k) && cell_emitted(owner_ijk(i, j, k)))
+            ++added_rcpt.voxels_strut_and_solid;
+  }
+
+  // ── THE SAME AUDIT, SCOPED TO FROZEN MATERIAL (bar 3). Lattice-include over
+  // frozen material is now a legal, expressible intent, so the guarantee that
+  // held for added material has to hold here too and be CHECKABLE:
+  //
+  //   * every cell that owns a certified-latticed FROZEN voxel is a cell the
+  //     generator emitted (`frozen_cells_not_emitted` == 0). Were it not, the
+  //     certificate would describe struts through protected material that the
+  //     exported file does not contain — the certified-object-is-not-the-
+  //     exported-object failure, in the one place a user is least able to see it;
+  //   * no frozen voxel receives both a strut and companion solid
+  //     (`frozen_voxels_strut_and_solid` == 0) — PR 285's P1 failure mode.
+  //
+  // Measured against the geometry that was JUST written, like the block above.
+  if (frozen_rcpt.present) {
+    // Pass 1 — the cells the certificate lattices: over FROZEN voxels (the
+    // scoped question) and over ANY voxel (which is what tells a straddling
+    // bonding cell apart from a cell writing struts into a wholly-solid region).
+    std::vector<char> frozen_cert_cells(ncells, 0), any_cert_cells(ncells, 0);
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
-          if (!(dens[e] >= 0.5) || mask[e]) continue;
-          const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
-                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
-                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
-          if (boundary.in_keep_out(vc, 0.0)) continue;  // no companion emitted
+          if (!mask[e]) continue;
+          any_cert_cells[owner_cell(i, j, k)] = 1;
+          if (is_frozen(e)) frozen_cert_cells[owner_cell(i, j, k)] = 1;
+        }
+    // Pass 2 — the both-ways counts over frozen voxels.
+    for (int k = 0; k < solved_grid.nz; ++k)
+      for (int j = 0; j < solved_grid.ny; ++j)
+        for (int i = 0; i < solved_grid.nx; ++i) {
+          const std::size_t e = solved_grid.index(i, j, k);
+          if (!is_frozen(e) || !is_companion_solid(i, j, k)) continue;
           const std::array<int, 3> c = owner_ijk(i, j, k);
-          if (cell_latticed && !cell_latticed(c[0], c[1], c[2])) continue;
-          const Vec3 cmin{Rdims.origin.x + c[0] * cell,
-                          Rdims.origin.y + c[1] * cell,
-                          Rdims.origin.z + c[2] * cell};
-          if (!boundary.cell_may_overlap(cmin, cell)) continue;
-          ++added_rcpt.voxels_strut_and_solid;
+          if (!cell_emitted(c)) continue;
+          ++frozen_rcpt.frozen_voxels_strut_and_solid;
+          if (!any_cert_cells[cidx(c[0], c[1], c[2])])
+            ++frozen_rcpt.frozen_strut_and_solid_unexplained;
+        }
+    // Pass 3 — the cell-set equality over frozen voxels.
+    for (int ck = 0; ck < ncz; ++ck)
+      for (int cj = 0; cj < ncy; ++cj)
+        for (int ci = 0; ci < ncx; ++ci) {
+          if (!frozen_cert_cells[cidx(ci, cj, ck)]) continue;
+          ++frozen_rcpt.frozen_cells_certified;
+          if (!cell_emitted({ci, cj, ck})) ++frozen_rcpt.frozen_cells_not_emitted;
         }
   }
   // (b) certification of the composite — the octet tensor on the SAME mask the
@@ -1850,7 +2116,8 @@ LatticeVariantOutcome lattice_one_variant(
                                            v.requested_volume_fraction) +
                              ".report.json");
   R.receipt_json = lattice_cert_report_json(v, job.lattice, R.cc, R.oc, cell,
-                                            role_rcpt, grad_rcpt, added_rcpt);
+                                            role_rcpt, grad_rcpt, added_rcpt,
+                                            frozen_rcpt);
   write_text_file(R.receipt_path, R.receipt_json);
   // `grad_rcpt.gf` points at R.gf, which the caller now owns; the receipt is
   // already rendered, so nothing may follow that pointer after the return. Null
@@ -3443,6 +3710,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         "output.mesh_format \"3mf\" cannot be written, use \"stl\"");
 #endif
 
+  // The pre-flight region forecast's numbers (task 2026-08-04-protect-freeze-vs-
+  // solidity, item 6), carried to run_info far below. Declared here because the
+  // forecast runs BEFORE the import — that is the whole point of it.
+  int fc_region_too_thin = 0, fc_include_regions = 0;
+  double fc_required_mm = 0.0, fc_thinnest_mm = 0.0;
+
   // ──▶ Lattice pre-flight (handoff 2026-07-29-lattice-certification-e2e). Refuse
   // BEFORE any import / voxelize / solve — nothing is written — on the condition
   // the E2E certification cannot honor:
@@ -3509,6 +3782,92 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
             std::to_string(hi) +
             "]. The gate refuses to certify against a clamped tensor (bar E5); choose a "
             "strut radius whose density lands in the band.");
+    }
+    // ── PRE-FLIGHT FORECAST: CAN THIS REGION HOLD A LATTICE AT ALL? (task
+    // 2026-08-04-protect-freeze-vs-solidity, item 6)
+    //
+    // THE SECOND REASON the maintainer's include regions produced nothing, and it
+    // is PHYSICS, not a bug: his include regions are 4 mm-deep face slabs, and
+    // the cells-per-member floor demands 5 cells × 4.6026 mm = 23.0 mm of member.
+    // Separating "frozen" from "solid" does not touch that — a 4 mm slab cannot
+    // hold a certifiable lattice at any depth he would want, and no rung, cell
+    // size or tag change alters it.
+    //
+    // He should learn it BEFORE the run, so it is stated here: before any import,
+    // voxelize or solve, from the declared geometry and the two constants alone.
+    //
+    // *** WHY THE REGION'S OWN EXTENT IS THE RIGHT THING TO MEASURE. *** The
+    // certification mask lattices ONLY voxels inside the include union; material
+    // outside it stays solid (the companion body). So the latticed body is a
+    // SUBSET of the region, and its thinnest dimension is at most the region's
+    // thinnest dimension. If that is under n* × cell, nothing inside the region
+    // can hold n* cells across.
+    //
+    // *** AND WHY THIS IS A FORECAST, NOT A GATE. *** The grading law's own
+    // too-thin test reads `local_member_thickness_mm`, which measures the
+    // DESIGN's printed solid — it does not know the region restriction. On a
+    // thick wall with a thin include slab the two disagree: the law sees the
+    // wall's width and admits the voxel, while the body actually latticed is only
+    // as deep as the slab. That is a real coherence gap (FILED, with the
+    // reproduction, in the handoff §item-7b) and closing it MOVES the latticed
+    // mask on existing paths, which this task's bar 5 makes a blocked-stop. So
+    // this states the number and changes nothing.
+    if (!job.lattice.regions.empty()) {
+      const LatticeTopology topo = LatticeTopology::Octet;
+      const double n_star = lattice_cells_per_member_min(topo);
+      // The cell this run will actually use, by the SAME rules the law applies
+      // (grading.cpp): AUTO takes the printability floor, FIXED the target raised
+      // to it, SWEPT its own minimum raised to it; a uniform job states its cell.
+      double cell_mm = job.lattice.cell_mm;
+      double floor_mm = 0.0;
+      if (job.grading.present) {
+        floor_mm = lattice_cell_printability_floor_mm(
+            topo, job.grading.min_extrudable_width_mm);
+        if (job.grading.cell_mode == "auto") cell_mm = floor_mm;
+        else if (job.grading.cell_mode == "swept")
+          cell_mm = std::max(job.grading.cell_min_mm, floor_mm);
+        else cell_mm = std::max(job.grading.cell_mm, floor_mm);
+      }
+      const double required_mm = n_star * cell_mm;
+      int thin_regions = 0, include_regions = 0;
+      double thinnest_mm = std::numeric_limits<double>::infinity();
+      for (std::size_t ri = 0; ri < job.lattice.regions.size(); ++ri) {
+        const JobLatticeRegion& r = job.lattice.regions[ri];
+        if (r.role != "include") continue;
+        ++include_regions;
+        // The region's THINNEST dimension — the one that bounds how many cells
+        // can lie across the latticed body.
+        const double extent_mm =
+            r.kind == "bolt"
+                ? std::min(2.0 * r.radius_mm, 2.0 * r.half_length_mm)
+                : std::min(r.depth_mm,
+                           std::min(2.0 * r.half_u_mm, 2.0 * r.half_w_mm));
+        if (extent_mm < thinnest_mm) thinnest_mm = extent_mm;
+        if (extent_mm >= required_mm) continue;
+        ++thin_regions;
+        std::fprintf(
+            stderr,
+            "[lattice] FORECAST region_too_thin: include region %zu (%s) is "
+            "%.3f mm across its thinnest dimension; the cells-per-member floor "
+            "needs %.1f cells x %.4f mm = %.3f mm. Nothing inside this region "
+            "can hold a certifiable lattice — it will be kept SOLID. This is a "
+            "property of the region's geometry and the printability floor "
+            "(nozzle-derived), not of the optimizer or of any Protect setting.\n",
+            ri, r.kind.c_str(), extent_mm, n_star, cell_mm, required_mm);
+      }
+      if (include_regions > 0) {
+        std::fprintf(stderr,
+                     "[lattice] FORECAST: %d of %d include regions are thinner "
+                     "than the %.3f mm the floor requires (thinnest %.3f mm; "
+                     "floor %.1f cells x %.4f mm)\n",
+                     thin_regions, include_regions, required_mm, thinnest_mm,
+                     n_star, cell_mm);
+        fc_region_too_thin = thin_regions;
+        fc_include_regions = include_regions;
+        fc_required_mm = required_mm;
+        fc_thinnest_mm = thinnest_mm;
+      }
+      std::fflush(stderr);
     }
   }
 
@@ -3852,6 +4211,12 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     long long include_regions = 0, exclude_regions = 0;
     long long solid_voxels = 0, solid_tris = 0, include_void = 0;
     double solid_vol = 0.0;
+    // Include-void by CAUSE, and the frozen-material split (task 2026-08-04-
+    // protect-freeze-vs-solidity). Summed over variants like everything above.
+    long long include_void_clearance = 0;
+    long long frozen_printed = 0, frozen_latticed = 0, frozen_solid = 0;
+    long long frozen_not_emitted = 0, frozen_both = 0;
+    long long frozen_unexplained = 0, frozen_excl_latticed = 0;
     // Graded run (stage 4): run_info's "grading" object records the LAST graded
     // variant's law report (each variant's own full record — including field
     // provenance and clamp counts — lives in its receipt). Scalars only.
@@ -3916,7 +4281,57 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.exclude_regions =
           static_cast<long long>(lattice_roles.excludes.size());
       lat_agg.include_void += role_rcpt.include_void_voxels;
+      lat_agg.include_void_clearance += role_rcpt.include_void_by_clearance;
     }
+    // ── FROZEN MATERIAL, PER VARIANT, ON STDERR (task 2026-08-04-protect-freeze-
+    // vs-solidity). The maintainer's whole case was invisible because nothing
+    // ever said it: 91.5 % of his declared lattice region was frozen, and the
+    // receipt he read had no word for that. This line says it at the moment it
+    // becomes true, in the same place every other per-variant fact is logged.
+    //
+    // *** IT IS NOT A WARNING, AND MUST NOT BECOME ONE. *** Lattice over frozen
+    // material is a legitimate, now-expressible intent ("do not reshape this
+    // wall, but DO lattice inside it"). Warning on it would train users away
+    // from the thing they are supposed to be able to do. The warning below
+    // fires on the case that IS unsatisfiable: an include region over a
+    // clearance void, where there is no material to lattice and never will be.
+    const LatticeFrozenReceipt& fz = R.frozen_rcpt;
+    if (fz.present) {
+      lat_agg.frozen_printed += fz.frozen_printed;
+      lat_agg.frozen_latticed += fz.frozen_latticed;
+      lat_agg.frozen_solid += fz.frozen_kept_solid;
+      lat_agg.frozen_not_emitted += fz.frozen_cells_not_emitted;
+      lat_agg.frozen_both += fz.frozen_voxels_strut_and_solid;
+      lat_agg.frozen_unexplained += fz.frozen_strut_and_solid_unexplained;
+      lat_agg.frozen_excl_latticed += fz.frozen_in_exclude_latticed;
+      std::fprintf(stderr,
+                   "[lattice] vf=%.2f frozen material: printed=%lld latticed=%lld "
+                   "solid=%lld in_include=%lld in_exclude=%lld/%lld latticed "
+                   "(audit: cells_not_emitted=%lld strut_and_solid=%lld "
+                   "unexplained=%lld)\n",
+                   v.requested_volume_fraction, fz.frozen_printed,
+                   fz.frozen_latticed, fz.frozen_kept_solid,
+                   fz.frozen_in_include, fz.frozen_in_exclude_latticed,
+                   fz.frozen_in_exclude, fz.frozen_cells_not_emitted,
+                   fz.frozen_voxels_strut_and_solid,
+                   fz.frozen_strut_and_solid_unexplained);
+    }
+    // THE WARNING, AIMED AT THE THING THAT CANNOT WORK: an include region over a
+    // declared keep-clear. There is no material there and no rung, cell size or
+    // formulation can put any there — unlike frozen material (which is material,
+    // and can be latticed) or optimizer-removed material (which a heavier rung
+    // may carry). This is the ONLY lattice-region overlap that is a real
+    // conflict, so it is the only one that warns.
+    if (role_rcpt.include_void_by_clearance > 0)
+      std::fprintf(stderr,
+                   "[lattice] WARNING: vf=%.2f — %lld voxels of the declared "
+                   "lattice INCLUDE region fall inside a declared \"Keep clear\" "
+                   "region. A keep-clear is a hole: there is no material there "
+                   "to lattice, and no rung or cell size can create any. Move "
+                   "the include region off the keep-clear, or drop the "
+                   "keep-clear.\n",
+                   v.requested_volume_fraction,
+                   role_rcpt.include_void_by_clearance);
     if (oc.solid_companion) {
       lat_agg.solid_voxels += oc.solid_region_voxels;
       lat_agg.solid_vol += oc.solid_region_volume_mm3;
@@ -4107,6 +4522,23 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     run_info.lattice_export_solid_region_volume_mm3 = lat_agg.solid_vol;
     run_info.lattice_export_solid_region_triangles = lat_agg.solid_tris;
     run_info.lattice_export_include_void_voxels = lat_agg.include_void;
+    run_info.lattice_export_include_void_by_clearance =
+        lat_agg.include_void_clearance;
+    run_info.lattice_forecast_present = fc_include_regions > 0;
+    run_info.lattice_forecast_include_regions = fc_include_regions;
+    run_info.lattice_forecast_region_too_thin = fc_region_too_thin;
+    run_info.lattice_forecast_required_mm = fc_required_mm;
+    run_info.lattice_forecast_thinnest_region_mm = fc_thinnest_mm;
+    run_info.lattice_export_frozen_present = lat_agg.frozen_printed > 0;
+    run_info.lattice_export_frozen_printed = lat_agg.frozen_printed;
+    run_info.lattice_export_frozen_latticed = lat_agg.frozen_latticed;
+    run_info.lattice_export_frozen_solid = lat_agg.frozen_solid;
+    run_info.lattice_export_frozen_cells_not_emitted = lat_agg.frozen_not_emitted;
+    run_info.lattice_export_frozen_voxels_strut_and_solid = lat_agg.frozen_both;
+    run_info.lattice_export_frozen_strut_and_solid_unexplained =
+        lat_agg.frozen_unexplained;
+    run_info.lattice_export_frozen_in_exclude_latticed =
+        lat_agg.frozen_excl_latticed;
     // Graded run (stage 4): the "grading" object — the same record the analyze
     // path writes, filled from the LAST graded variant (per-variant records live
     // in the receipts).

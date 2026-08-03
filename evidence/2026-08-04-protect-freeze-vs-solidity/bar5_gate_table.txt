@@ -1,0 +1,37 @@
+cfg    rung  base verdict  branch verdict    base margin  branch margin          d
+P      0.68          True            True      10.878029      10.878029  +0.00e+00
+P      0.52          True            True      10.849132      10.849132  +0.00e+00
+P      0.38          True            True      10.771841      10.771841  +0.00e+00
+P      0.26          True            True      10.254110      10.254110  +0.00e+00
+P    voxel-classification flips: 0 / 90112   (protection, NO lattice)
+L      0.68          True            True      10.878029      10.878029  +0.00e+00
+L      0.52          True            True      10.849132      10.849132  +0.00e+00
+L      0.38          True            True      10.771841      10.771841  +0.00e+00
+L      0.26          True            True      10.254110      10.254110  +0.00e+00
+L    variant_026          True            True           null           null       +nan   [composite]
+L    variant_038          True            True           null           null       +nan   [composite]
+L    variant_052          True            True           null           null       +nan   [composite]
+L    variant_068          True            True           null           null       +nan   [composite]
+L    voxel-classification flips: 0 / 90112   (lattice, NO regions)
+R      0.68          True            True      10.878029      10.878029  +0.00e+00
+R      0.52          True            True      10.849132      10.849132  +0.00e+00
+R      0.38          True            True      10.771841      10.771841  +0.00e+00
+R      0.26          True            True      10.254110      10.254110  +0.00e+00
+R    variant_026          True            True      10.254110      10.254110  +0.00e+00   [composite]
+R    variant_038          True            True      10.771841      10.771841  +0.00e+00   [composite]
+R    variant_052          True            True      10.849132      10.849132  +0.00e+00   [composite]
+R    variant_068          True            True      10.878029      10.878029  +0.00e+00   [composite]
+R    voxel-classification flips: 0 / 90112   (lattice + include/exclude ROLES)
+G      0.68          True            True      10.878029      10.878029  +0.00e+00
+G      0.52          True            True      10.849132      10.849132  +0.00e+00
+G      0.38          True            True      10.771841      10.771841  +0.00e+00
+G      0.26          True            True      10.254110      10.254110  +0.00e+00
+G    variant_026          True            True      10.254110      10.254110  +0.00e+00   [composite]
+G    variant_038          True            True      10.771841      10.771841  +0.00e+00   [composite]
+G    variant_052          True            True      10.849132      10.849132  +0.00e+00   [composite]
+G    variant_068          True            True      10.878029      10.878029  +0.00e+00   [composite]
+G    voxel-classification flips: 0 / 90112   (graded lattice + roles)
+
+NEGATIVE CONTROL (one voxel nudged across the 0.5 iso): 1 flip(s) detected — the comparator can see a single-voxel change, so '0 flips' above is a measurement, not a blind spot.
+
+BAR 5 PASS — no verdict flipped on any existing path.

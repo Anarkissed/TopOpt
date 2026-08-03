@@ -1,0 +1,25 @@
+=== app tests (swift test, app/TopOptKit) ===
+	 Executed 1152 tests, with 14 tests skipped and 8 failures (0 unexpected) in 126.807 (126.889) seconds
+
+--- the 3 failing cases, all lib3mf-absent ---
+AppModelTests testReopenedThreeMFProjectReimportsTheStlWorkingCopy]' failed (0.294 seconds).
+AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance]' failed (0.003 seconds).
+AppModelTests testThreeMFImportOptimisesOnDeviceEndToEnd]' failed (0.001 seconds).
+
+--- the reason, from the test's own assertion message ---
+/Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/app/TopOptKit/Tests/TopOptFlowsTests/AppModelTests.swift:205: error: -[TopOptFlowsTests.AppModelTests testThreeMFImportNormalisesToStlWorkingCopyAndKeepsProvenance] : XCTAssertNil failed: "ImportRefusal(id: 0E28DE95-E65A-44C3-8956-73D6B286815D, fileName: "plate_bore.3mf", diagnostics: nil, rawMessage: "3MF import requires lib3mf, which is not available in this build; export the part as STL and import that instead")" - 3MF should parse; refusal means the slice has no lib3mf
+
+This worktree's macOS core slice is built WITHOUT lib3mf (build_core.sh reports
+'lib3mf: (none)'), so the three 3MF import cases cannot pass here. They are
+unrelated to this task — it touches no import path — and CI's app-macos job
+provisions lib3mf via vcpkg.
+
+--- the new tests for this task ---
+ProtectFreezeVsSolidityTests testExcludeOverProtectedIsSolid]' passed (0.000 seconds).
+ProtectFreezeVsSolidityTests testIncludeOverProtectedIsLatticed]' passed (0.000 seconds).
+ProtectFreezeVsSolidityTests testNothingProtectedShowsNothing]' passed (0.000 seconds).
+ProtectFreezeVsSolidityTests testPageComposesTheRowsFromRealProjectState]' passed (0.000 seconds).
+ProtectFreezeVsSolidityTests testProtectCopyDoesNotImplySolidity]' passed (0.041 seconds).
+ProtectFreezeVsSolidityTests testSummaryCountsBothWays]' passed (0.000 seconds).
+ProtectFreezeVsSolidityTests testUnroledProtectedFollowsWhetherAnyIncludeExists]' passed (0.000 seconds).
+Test Suite 'ProtectFreezeVsSolidityTests' passed at 2026-08-03 07:20:08.557.

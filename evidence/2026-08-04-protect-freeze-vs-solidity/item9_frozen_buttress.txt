@@ -1,0 +1,33 @@
+=== item 9 — does a design box let the optimizer buttress a FROZEN wall? ===
+wall 10 mm thick x 40 x 40 mm, clamped at z=0, pushed +X at the top edge
+design box adds 30 mm of empty domain on the wall's +X side
+
+config                         vf     conv  added_vox   adjacent   reach_mm wall_peak_vM
+A wall alone, no box         0.60      yes          0          0       0.00     8.035703
+B wall + box, wall FROZEN    0.60      yes      28790       8000      22.00     7.981339  (wall stress FELL)
+C wall + box, wall ACTIVE    0.60      yes      22398       8000      18.00     7.981163  (wall stress FELL)
+
+A wall alone, no box         0.30      yes          0          0       0.00     8.035703
+B wall + box, wall FROZEN    0.30      yes      14390       7472      13.00     7.981074  (wall stress FELL)
+C wall + box, wall ACTIVE    0.30      yes       7412       4786      11.00     7.984872  (wall stress FELL)
+
+A wall alone, no box         0.15      yes          0          0       0.00     8.035703
+B wall + box, wall FROZEN    0.15      yes       7168       5804       9.00     7.982177  (wall stress FELL)
+C wall + box, wall ACTIVE    0.15      yes       3250       2202       9.00    11.704434  (wall stress rose)
+
+A wall alone, no box         0.08      yes          0          0       0.00     8.035703
+B wall + box, wall FROZEN    0.08      yes       3770       3550       7.00     7.980663  (wall stress FELL)
+C wall + box, wall ACTIVE    0.08      yes       1414       1238       7.00    20.556788  (wall stress rose)
+
+READ IT LIKE THIS.
+  `adjacent` is printed voxels within 5 mm of the frozen wall's face —
+  where a buttress goes. `reach_mm` is how far the added material extends.
+  B is the question's configuration; C is the control that separates "the
+  optimizer will not buttress" from "the FREEZE stopped it": if C places
+  material beside the wall and B does not, the frozen region's zero
+  sensitivity is starving the neighbours' signal. If B places it too, the
+  freeze is exonerated — the adjoint still carries the frozen wall's own
+  compliance contribution into its neighbours' sensitivities, which is
+  what makes buttressing reachable at all.
+  At a LOOSE budget both saturate and the comparison is uninformative;
+  read the tight-budget rows.

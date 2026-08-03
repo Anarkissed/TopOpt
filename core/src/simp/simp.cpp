@@ -2237,12 +2237,14 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 // ---------------------------------------------------------------------------
 // Passive regions: mask-aware SIMP optimization (ROADMAP M3.7).
 
-namespace {
-
 // The effective mask actually optimized: the caller's mask with every Load and
 // Fixture voxel forced to FrozenSolid (M1.6 tags are implicitly "keep-in", so
 // the §7 V3 retention gate is structural). Empty voxels are left as-is (ignored).
-DesignMask effective_mask(const VoxelGrid& grid, const DesignMask& mask) {
+//
+// Declared in simp.hpp as `effective_design_mask` (task 2026-08-04-protect-freeze-
+// vs-solidity) so the lattice receipt can name the SAME frozen set the loop held,
+// rather than re-deriving one beside it. The body is unchanged.
+DesignMask effective_design_mask(const VoxelGrid& grid, const DesignMask& mask) {
   DesignMask eff = mask;
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
@@ -2263,6 +2265,8 @@ DesignMask effective_mask(const VoxelGrid& grid, const DesignMask& mask) {
       }
   return eff;
 }
+
+namespace {
 
 // The analysis grid for FEA: FrozenVoid voxels become Empty so they contribute
 // no element (excluded from the stiffness); every other voxel keeps its tag. The
@@ -2732,7 +2736,7 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 
   // Load/Fixture -> FrozenSolid, then derive the Active-only filter, the FEA
   // analysis grid (FrozenVoid removed), and the Active-voxel budget.
-  const DesignMask eff = effective_mask(grid, mask);
+  const DesignMask eff = effective_design_mask(grid, mask);
   const DensityFilter filter =
       make_density_filter(grid, options.filter_radius, eff);
   const VoxelGrid analysis = analysis_grid_for_mask(grid, eff);

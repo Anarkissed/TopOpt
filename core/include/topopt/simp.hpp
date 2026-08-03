@@ -1394,6 +1394,21 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
                                  const SimpOptions& options,
                                  const DesignMask& mask);
 
+// THE mask the loop above actually optimises under: the caller's `mask` with the
+// two implicit rules of the paragraph above applied — every Load / Fixture voxel
+// forced FrozenSolid, every Empty voxel normalised to FrozenVoid. Pure function
+// of (grid tags, mask); the loop calls exactly this, so it is the definition, not
+// a reconstruction of one.
+//
+// Public because "which voxels did the optimizer hold FROZEN?" is a question the
+// LATTICE path has to answer (task 2026-08-04-protect-freeze-vs-solidity): a
+// receipt that reported the caller's raw mask would under-count the frozen set by
+// every anchor/load-face voxel the loop pins on its own, and the maintainer's
+// case is precisely a run whose frozen set is dominated by a face-protection
+// collar. Answering it from THIS function is what makes the receipt's frozen set
+// the same set the run held frozen, rather than a second opinion about it.
+DesignMask effective_design_mask(const VoxelGrid& grid, const DesignMask& mask);
+
 // ---------------------------------------------------------------------------
 // Multi-variant runner (ROADMAP M3.6).
 //

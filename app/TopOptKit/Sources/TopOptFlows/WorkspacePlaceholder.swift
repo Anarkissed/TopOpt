@@ -4286,8 +4286,14 @@ public struct WorkspacePlaceholder: View {
                             on ? Color.clear : DS.Color.strokeSubtle.color, lineWidth: 1)))
             }
             .buttonStyle(.plain)
-            .help(on ? "Protected — the optimizer preserves this face's own material. Tap to turn it off."
-                     : "Protect — freeze this face's skin so the optimizer may not touch it.")
+            // Task 2026-08-04-protect-freeze-vs-solidity: Protect is a FREEZE and
+            // nothing else. The old copy ("preserves this face's own material")
+            // read as a promise of SOLIDITY, which it never was — whether the
+            // kept material is solid or latticed is the Lattice page's decision,
+            // exactly as for any other kept material. Say the freeze, and say
+            // where the other decision lives.
+            .help(on ? "Protected — the optimizer may not change this face's shape. Solid or latticed is set on the Lattice page. Tap to turn it off."
+                     : "Protect — freeze this face's skin so the optimizer may not reshape it. It does not decide solid vs latticed.")
         }
     }
 
@@ -4488,10 +4494,15 @@ public struct WorkspacePlaceholder: View {
             // Handoff 124 — "Protect" (preserve-skin) is an ATTRIBUTE like Keep clear
             // but the OPPOSITE polarity: it freezes the face's OWN material so the
             // optimizer may not touch it. Affixes on the group; never changes its role.
+            //
+            // Task 2026-08-04-protect-freeze-vs-solidity: the toast said "will
+            // preserve this face's material", which users read as "will keep it
+            // SOLID". It never meant that and now must not say it — the material
+            // is kept, and the Lattice page decides what the kept material IS.
             Button {
                 force.setProtected(g.id, true)
                 selection.clearActive()
-                model.toast = "Protected — the optimizer will preserve this face's material"
+                model.toast = "Protected — the optimizer may not reshape this face. Solid or latticed is set on the Lattice page."
             } label: {
                 chipLabel("shield.lefthalf.filled", "Protect")
                     .foregroundStyle(Self.protectTint)
