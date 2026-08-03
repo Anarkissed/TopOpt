@@ -107,7 +107,7 @@ preflight: load path CONNECTED
   (40160 forbidden)
   narrowest separating cross-section: 311 voxels (816.2 mm^2) at step 1 of 54
   (INFORMATION, not a verdict — connectivity is NECESSARY, not sufficient)
-  check 21.20 ms; import + setup + check 321.7 ms
+  check 23.20 ms; import + setup + check 677.1 ms
 ```
 
 **The 70 mm clearance did not sever anything.** 93.9% of the solved grid may
@@ -374,7 +374,7 @@ Disarmed by default in the library (`deadline <= 0` skips the clock read
 entirely), armed by the driver around each trajectory solve via RAII so it can
 never leak into a certification solve or the next rung.
 
-**No fixture trips it.** 101/101 ctest green; the live guard test asserts
+**No fixture trips it.** 103/103 ctest green; the live guard test asserts
 `rung_time_budget` all-zero on a healthy run.
 
 ## What a tripped rung costs AFTER the trip — the defect the acceptance run caught
@@ -519,7 +519,7 @@ Plus the ONE RULE group in the live test: armed vs disarmed, same rungs, same
 iteration counts, `physical_density` **bit-for-bit** equal.
 
 `ctest`: **103/103 passed** post-merge (101 before, +2 from PR 290), including
-the new `preflight_divergence` test (**352 checks**).
+the new `preflight_divergence` test (**606 checks**).
 
 ---
 
@@ -535,7 +535,7 @@ the new `preflight_divergence` test (**352 checks**).
 | `core/src/cli/run_job.cpp`, `job.hpp` | `build_job_setup` (THE ONE job setup, extracted so the pre-flight cannot describe a different job than the run); `preflight_job`; the pre-flight call + refusal in `run_job`; `run_info` population. |
 | `core/src/cli/main.cpp` | `topopt-cli preflight <job.json>` — exit 0 = a path exists, 3 = `run` would refuse, with the reason. |
 | `app/…/TopOptBridge/bridge.cpp` | the same pre-flight, at the same point, refusing through the same message. |
-| `core/tests/validation/test_preflight_divergence.cpp` (+ CMake) | 344 checks over all three guards, including the forced-trip group that caught the post-trip certification-solve defect. |
+| `core/tests/validation/test_preflight_divergence.cpp` (+ CMake) | 606 checks over all three guards: the growth-path group (1b), the forced-trip group that caught the post-trip certification-solve defect, and every immediate-trip assertion made against BOTH the rule and the shipped `immediate_divergence`. |
 | `core/tests/harness/divergence_guard_probe.cpp` (+ CMake) | the calibration harness the constants came from. |
 | `core/tests/fixtures/divergence/iterations_10h_designbox.csv` | the maintainer's own recorded trajectory, committed verbatim (a captured artifact, as handoff 131 did with its 96³ CSV). No existing fixture was touched. |
 
@@ -547,46 +547,53 @@ or deleted; the gate's verdict logic and tolerance are unchanged.
 
 # IN PLAIN LANGUAGE
 
-A job of yours ran for ten hours and got three steps done. We wanted to know
-whether the bolt clearance you asked for had cut the part in half without
-telling you — because if the load has no route to the mounting bolts, the
-optimizer will grind forever looking for one that does not exist.
+A job of yours ran for ten hours and finished three steps. We wanted to know
+whether the bolt clearance you asked for had quietly cut the part in half —
+because if the load has no route to the mounting bolts, the optimizer will grind
+forever looking for one that does not exist.
 
-**It had not.** We checked, and it takes 21 milliseconds: nearly 94% of the
+**It had not.** We checked, and it takes 23 milliseconds: nearly 94% of the
 space is still available for material, and the tightest point on the route from
 the bolts to the load is about 816 mm² — not a bottleneck. We also found out
-*why* it could not have been the clearance: a "keep clear" region is only ever
+*why* it could never have been the clearance: a "keep clear" region is only ever
 allowed to stop the optimizer from adding **new** material into empty space. It
 is never allowed to remove material from the part you imported. So your 70 mm
 bolt access was never in a position to cut anything. That check now runs before
-every job anyway, and if a part ever does arrive in two disconnected pieces the
-app will say so in seconds instead of hours, and will tell you which clearance
-caused it and exactly how much you would have to reduce it — a number we
-actually measure, not one we estimate.
+every job anyway — including the new "grow" mode — and if a part ever does
+arrive in two disconnected pieces, the app will say so in seconds instead of
+hours, name the clearance responsible, and tell you exactly how much smaller it
+would have to be. That last number is measured, not estimated.
 
-So the ten hours had a different cause, and we did not invent one. Instead we
-put in two stops that do not care *why* it is going wrong:
+**Then we went looking for the real cause, and found something better: the run
+was probably fine.** The ten-hour job is too slow to watch, so we ran the *same
+job* at a coarser resolution, where the whole thing finishes in seven minutes.
+It behaves alarmingly — the objective jumps to 722× where it started — and then
+it comes back down, settles, and produces an **accepted design**. That is a
+known pattern: the optimizer thrashes early while the shape is forming, then
+recovers.
 
-**A run that is clearly falling apart now gets stopped at the second step.** The
-tricky part was telling "falling apart" from "working hard". We had a known test
-case that looks *worse* than your run on every obvious measure — its objective
-goes 36,000× above where it started — and then recovers into a perfectly good
-design. Killing that would be much worse than a slow run. The one thing that
-told the two apart was **how long the step took**: the healthy one never got more
-than ~17× slower than its first step, while yours was 77× slower. So the stop
-requires all three — the objective exploding, the solver struggling, *and* the
-step costing many times what the first one did.
+That changed what we shipped. We had built a stop for "this run is clearly
+falling apart", and it would have killed your job at the second step. On this
+evidence, killing it would have been the *wrong* call — a job wrongly refused is
+worse than a job that is merely slow. **So that stop is built, tested and
+switched off.** Turning it on later is a one-line change, and the evidence
+needed to justify it is already written down.
 
-**And no single step is allowed to run away.** Each step now gets a time budget
-of 100× whatever the first step of that stage cost — 45 minutes on your job — and
-the solver watches the clock while it works, so it stops *during* a runaway step
-rather than reporting one six hours later. It also tells you which part of the
-step ate the time.
+**What we did ship is a time limit, and it makes no judgement about your
+design.** Each step gets a budget of 100× whatever the first step of that stage
+cost — 45 minutes on your job — and the solver watches the clock *while it
+works*, so it stops during a runaway step instead of reporting one six hours
+later. It also tells you which part of the step ate the time. It does not say
+"your design is broken"; it says "this is taking far longer than it should, here
+is where the time went", and hands the decision back to you.
 
-On your job, that turns ten hours into about half an hour, and instead of an
-exported result you cannot trust, you get a clear refusal that says what
-happened and what the numbers were.
+**One more thing changed underneath us.** Another change that landed while this
+was in progress means your job now runs a completely different search — it adds
+material to reach the strength you want, instead of shaving it away. We ran that
+too: three options, all accepted, recommending **+10% material**, and none of the
+new stops came anywhere near firing. On the old search the objective spiked 722×;
+on the new one it barely moves.
 
 Nothing changes for a job that is behaving normally. We proved that by running
-the same job through the old build and the new one and comparing the output
-files byte for byte: identical.
+the same job through a build of the current main branch and through this one and
+comparing the output files byte for byte: identical.

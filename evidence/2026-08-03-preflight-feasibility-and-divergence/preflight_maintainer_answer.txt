@@ -5,9 +5,10 @@ job:    ~/.topopt-worker/7fbc7ee2900e425a/job.json  (copied to maintainer-job/)
 model:  WallMount_ShelfBracket.stl
 run:    2026-08-02 05:40 -> 16:07, THREE design iterations, killed at 10h27m
 
-    $ ./build/topopt-cli preflight maintainer-job/job.json
+    $ ./build/topopt-cli preflight maintainer-job/job.json     (POST-MERGE with PR 290)
 
     [loadcase] load-group 0: faces=1 |F|=156N voxels_tagged=1464 status=ok
+    [loadcase] ladder=GROWTH rungs=[1.55,1.25,1.10] anchor_pad=1
     [loadcase] clearance face=-1 kind=bolt voxels_frozen=120  status=ok
     [loadcase] clearance face=-1 kind=bolt voxels_frozen=370  status=ok
     [loadcase] clearance face=-1 kind=bolt voxels_frozen=3710 status=ok
@@ -17,7 +18,7 @@ run:    2026-08-02 05:40 -> 16:07, THREE design iterations, killed at 10h27m
       narrowest separating cross-section: 311 voxels (816.2 mm^2) at step 1
       of 54 from the anchor
       (INFORMATION, not a verdict — connectivity is NECESSARY, not sufficient)
-      check 21.20 ms; import + setup + check 321.7 ms
+      check 23.20 ms; import + setup + check 677.1 ms
     exit=0
 
 
@@ -31,7 +32,7 @@ separating the anchors from the load is 311 voxels / 816 mm^2, and it sits at
 step 1 of 54 — i.e. immediately around the anchor set, which is what you get
 when the anchor is small (71 voxels), not when a path is pinched.
 
-Cost: 21.2 ms of flood fill on a 655,360-voxel design-box job at resolution
+Cost: 23.2 ms of flood fill on a 655,360-voxel design-box job at resolution
 128. The run it would have preceded spent 10 hours.
 
 
@@ -71,9 +72,21 @@ keep-out box never carves into the part regardless of freeze_part"). The guard
 is therefore narrower in reach than the ten-hour run suggested — and it is
 still the right belt to hold, because it is the only thing standing between a
 disconnected import and a ladder that spends hours discovering it, and because
-it costs 21 ms.
+it costs 23 ms.
+
+POST-MERGE NOTE (PR 290, growth-ladder). This job carries
+loads.minimize_plastic: false, which now selects the GROWTH ladder and builds
+the anchor pad — see the `ladder=GROWTH ... anchor_pad=1` line above. The
+pre-flight reads that post-290 mask (the pad is in options.design_mask, merged
+into the expanded mask by resolve_design_domain before the check runs) and the
+verdict is unchanged: CONNECTED, 615,200 of 655,360 voxels allowed. A
+FrozenSolid pad can only ENLARGE the allowed set, so it can never cause a false
+refusal; measured in test_preflight_divergence group 1b.
 
 THE DIVERGENCE HAS ANOTHER CAUSE, and this task does not invent one
-(BLOCKED-STOP, as the task instructed). Guards 2 and 3 stand on their own and
-are what stop this job: see divergence_guard_probe.txt for their calibration
-and guarded_run.txt for what they do to this job in practice.
+(BLOCKED-STOP, as the task instructed). See res64_same_job_iterations.csv: the
+SAME job at resolution 64 spikes 722x, then RECOVERS and is ACCEPTED at margin
+11.08 — so it is not established that this was a divergence at all, which is
+why guard 2 ships DISARMED. Guard 3, an honest timeout, is what stops this job.
+See divergence_guard_probe.txt for the calibration and guards_res64.txt /
+res64_growth_iterations.csv for what the guards do to this job as it runs today.

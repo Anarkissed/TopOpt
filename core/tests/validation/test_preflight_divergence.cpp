@@ -16,10 +16,14 @@
 //      it SEVERS on a keep-clear that provably cuts the path, PASSES a
 //      marginal but connected one (reporting the narrowness as INFORMATION), is
 //      VACUOUS when there is no load path to decide, and costs milliseconds.
-//   2. THE IMMEDIATE DIVERGENCE TRIP. Group 2 replays the real recorded
-//      trajectories through the predicate — the 10-hour run (must fire at
-//      iteration 2) and the live forming transient measured in handoff 131
-//      (must NOT fire, at any iteration) — and pins the shipped constants.
+//   2. THE IMMEDIATE DIVERGENCE TRIP, WHICH SHIPS DISARMED. Group 2 replays the
+//      real recorded trajectories through BOTH the rule and the shipped
+//      `immediate_divergence` — the 10-hour run (both fire at iteration 2) and
+//      the live forming transient of handoff 131 (neither fires, at any
+//      iteration) — and pins the CALIBRATED constants, which is what a future
+//      task arming it would arm. It is disarmed by default because the same job
+//      at resolution 64 RECOVERS and is accepted; see
+//      SimpOptions::infeasible_immediate_ratio.
 //   3. THE ITERATION TIME GUARD. Group 3 proves the budget rule, its floor and
 //      its baseline choice, and that a legitimate run never trips it.
 //
@@ -194,9 +198,13 @@ constexpr double kCgBlowup = 4.0;
 constexpr double kTimeRatio = 100.0;
 constexpr double kTimeFloorMs = 300000.0;
 
-// The IMMEDIATE trip, as an independent reimplementation of the shipped
-// predicate over a recorded trace, so this test measures the RULE rather than
-// re-running the code that implements it. `n` is the 1-based iteration judged.
+// The IMMEDIATE trip written out INDEPENDENTLY, so the test states the RULE in
+// its own terms rather than only re-running the code that implements it. It is
+// NOT a substitute for driving the shipped function: `shipped_fires` below calls
+// `topopt::immediate_divergence` on the same rows, and every assertion checks
+// BOTH. That pairing is deliberate — asserting only this reimplementation is
+// what let a live run disagree with the predicate without any test noticing.
+// `n` is the 1-based iteration judged.
 bool immediate_fires(const Trace& t, std::size_t n) {
   if (n < 2 || n > t.c.size()) return false;
   if (!(t.c[0] > 0.0) || !(t.ms[0] > 0.0)) return false;
@@ -207,6 +215,19 @@ bool immediate_fires(const Trace& t, std::size_t n) {
   const double cgr = static_cast<double>(t.cg[n - 1]) / cgmin;
   const double wr = t.ms[n - 1] / t.ms[0];
   return lvl >= kImmediateRatio && cgr >= kCgBlowup && wr >= kImmediateWallRatio;
+}
+
+// THE SHIPPED PREDICATE, on the same prefix. `topopt::immediate_divergence` is
+// public for exactly this (as `rung_infeasible` is), so what is asserted below is
+// the code that actually runs, not a description of it.
+bool shipped_fires(const Trace& t, std::size_t n,
+                   topopt::ImmediateDivergenceRatios* r = nullptr) {
+  if (n > t.c.size()) return false;
+  const std::vector<double> c(t.c.begin(), t.c.begin() + n);
+  const std::vector<int> cg(t.cg.begin(), t.cg.begin() + n);
+  const std::vector<double> ms(t.ms.begin(), t.ms.begin() + n);
+  return topopt::immediate_divergence(c, cg, ms, kImmediateRatio, kCgBlowup,
+                                      kImmediateWallRatio, r);
 }
 
 // A grid with a SEVERABLE path: a bar whose midspan can be cut by a keep-out
@@ -540,6 +561,20 @@ int main() {
             "10h: never fires on iteration 1 — it IS the baseline");
       CHECK(immediate_fires(t, 2),
             "10h: FIRES at iteration 2 — 34 minutes in, not ten hours");
+      // ... and THE SHIPPED FUNCTION agrees, row for row. Asserting only the
+      // rule above would let the two drift apart silently.
+      topopt::ImmediateDivergenceRatios sr;
+      CHECK(!shipped_fires(t, 1),
+            "10h/SHIPPED: immediate_divergence never fires on iteration 1");
+      CHECK(shipped_fires(t, 2, &sr),
+            "10h/SHIPPED: immediate_divergence FIRES at iteration 2 — the "
+            "SHIPPED code, not a description of it");
+      for (std::size_t n = 1; n <= t.c.size(); ++n)
+        CHECK(shipped_fires(t, n) == immediate_fires(t, n),
+              "SHIPPED == RULE at every iteration of the recorded trajectory");
+      std::printf("[immediate/SHIPPED] iteration 2 ratios: c=%.6g cg=%.6g "
+                  "wall=%.6g\n",
+                  sr.compliance, sr.cg, sr.wall);
       const double lvl = t.c[1] / t.c[0];
       const double wr = t.ms[1] / t.ms[0];
       std::printf("[immediate] 10-hour run iteration 2: level %.4gx, cg %.3gx, "
@@ -604,6 +639,11 @@ int main() {
           CHECK(!immediate_fires(kv.second, n),
                 "96^3: with no wall column the immediate trip DECLINES — the "
                 "windowed detector owns that trajectory");
+      for (const auto& kv : old96)
+        for (std::size_t n = 1; n <= kv.second.c.size(); ++n)
+          CHECK(!shipped_fires(kv.second, n),
+                "96^3/SHIPPED: immediate_divergence declines too — no wall "
+                "baseline, no verdict");
       // ... and the windowed detector still catches it, unchanged.
       const Trace& rung2 = old96.at(2);
       bool windowed_fired = false;
