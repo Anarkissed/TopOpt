@@ -38,7 +38,15 @@
 #include "topopt/design_store.hpp"
 #include "topopt/fields.hpp"
 
+// EVERY std:: free function this file calls gets its header named, deliberately:
+// std::nan <cmath>, std::memcpy <cstring>, std::atof <cstdlib>, std::fgets /
+// std::fprintf <cstdio>. libc++ (macOS) pulls the first three in transitively and
+// libstdc++ does NOT, so omitting them builds clean on the dev machine and fails
+// on core-linux alone — which is exactly what happened on b18d0e3.
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
