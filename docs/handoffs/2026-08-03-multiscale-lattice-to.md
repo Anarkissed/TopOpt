@@ -226,18 +226,44 @@ point of the flag is that the two-step does not work here.
 
 ## THE BARS
 
-> **STATUS: three bars are still measuring at the time of this commit** — M1
-> (byte-identity, running in a Release-matched worktree), M2/M3/M4 on the
-> maintainer's own part (the ladder is running), and the full ctest. Everything
-> below marked MEASURED is on disk in `evidence/2026-08-03-multiscale-lattice-to/`;
-> anything marked PENDING is not yet evidence and must not be read as one.
+> **STATUS: ALL BARS MEASURED.** Evidence in
+> `evidence/2026-08-03-multiscale-lattice-to/`. **ctest: 102/102 passed**
+> (`ctest.txt`, 1154 s, zero failures).
 
-### M2 — the maintainer's part, actually latticed — **PENDING (partial)**
+### M2 — the maintainer's part, actually latticed — **MEASURED**
 
-Partial results from an interrupted run of the same configuration: rung 0.68 latticed
-14 of 101 candidates; rungs 0.52 and 0.38 produced **zero candidates**. Against the
-two-step's 472 / 82 / 0. **This is far under a large majority and is reported as
-such: on this job, multiscale did not solve the problem it exists for.**
+Full ladder, multiscale with length-scale control (`m2_multiscale_final/`):
+
+| variant | region | latticed | fallback | two-step, for comparison |
+|---|---:|---:|---:|---|
+| 068 | 57 | **3 (5.3 %)** | 54 | 472 / 10,607 |
+| 052 | 29 | **0 (0.0 %)** | 29 | 82 / 10,485 |
+| 038 | 38 | **8 (21.1 %)** | 30 | 0 / 10,405 |
+| 026 | 71 | **0 (0.0 %)** | 71 | — |
+
+**This is far under a large majority. On the maintainer's job, multiscale did not
+solve the problem it exists for, and no reading of these numbers should suggest
+otherwise.**
+
+THREE MEASURED REASONS, and none of them is "the formulation does not work" — the
+control fixture reached 59.5 % (M2c):
+
+1. **91.5 % of the region is unreachable** — `active 932, frozen_solid 10070`.
+2. **The ceiling is 2,506 of 11,002 (23 %).** Even on a FULLY SOLID part, only
+   23 % of the declared region has members thick enough for a 4.6026 mm cell. A
+   design can only remove material, so this bounds every configuration.
+3. **The volume-constraint violation reaches +41 %, +82 %, +148 %, +263 %** down the
+   ladder. That is not a rounding correction. The floor-implied length scale
+   (11.507 mm, raised from 2.5) leaves ~2.3 members across a 52.9 mm-deep part, and
+   at that coarseness the design **cannot hold its volume target at all**. The
+   arithmetic predicted ~2.3 members before the run; the run turned that from a
+   tightness concern into a failure mode.
+
+**So the length-scale lever — which tripled latticeability on a fixture with room for
+it — does not apply to this part at this nozzle.** That is a scope boundary, now
+measured rather than argued. Latticing this part needs a finer cell, which means a
+finer nozzle (`min_extrudable_width_mm`, 0.42 today) or a re-measured
+cells-per-member floor. Neither is a solver change.
 
 The reason is measured, not inferred, and it is mostly not about the optimizer:
 
@@ -274,7 +300,12 @@ nothing frozen (`frozen_solid = 0`), ceiling admitting 10,002 of 10,040 voxels.
 
 At vf 0.60 alone the last row is **73.4 %** latticed.
 
-### M3 — no thin-tendril collapse — **MEASURED on the control, PENDING on the part**
+### M3 — no thin-tendril collapse — **MEASURED**
+
+On the maintainer's part the below-floor population is 10,026/10,612, 10,327/10,449,
+10,380/10,408 and 10,431/10,431 down the ladder — i.e. essentially the whole region is
+below the floor whatever the optimizer does, which is reason (2) above restated per
+rung. The mechanism is visible on the control fixture, where the floor is reachable:
 
 Member thickness in cells against the floor of 5, vf 0.60, from
 `run_info.multiscale.rungs[].floor_histogram`:
@@ -292,10 +323,13 @@ population falls from 71 % to 18 %. The residual 18 % is the density filter's bo
 ring, the same phenomenon PR 255 measured for the density gaps; it falls back to solid
 and is reported.
 
-### M4 — certification under the existing gate — **PENDING**
+### M4 — certification under the existing gate — **MEASURED**
 
-Every rung measured so far was ACCEPTED, and the gate's verdict logic and tolerance
-are untouched. The full table across both configurations awaits the running ladder.
+Every rung of the full ladder was ACCEPTED, on both the solid and the composite
+(latticed) certification, with the gate's verdict logic and tolerance untouched. No
+verdict moved on any existing path — M1 shows the non-multiscale path is byte-identical,
+which is a stronger statement than a negative-control floor: the flip count is exactly
+zero by construction, not merely below 1e-9.
 Note the honest cost already visible: a genuinely latticed part carries a far lower
 margin (87–96 vs 2600–2717) — still ~58× the required `margin_stop` of 1.5, but the
 two are not interchangeable. You are buying mass savings with margin you had in hand.
@@ -347,15 +381,26 @@ digits. Pipeline: two full runs byte-identical on every result artifact; the
 instrument files match once machine measurements (wall clock, RSS, OS paging counters,
 `gen_fraction`) are stripped — those are measurements of the host, not the design.
 
-### M1 — OFF is byte-identical — **PENDING**
+### M1 — OFF is byte-identical — **MEASURED, PASSES**
 
-Partial: on the maintainer's own part, the two artifacts an interrupted two-step run
-produced are byte-identical to the captured pre-branch run. A first stash-rebuild
-attempt reported differences that turned out to be a **build-type mismatch** — the
-comparison worktree defaulted to `-O0` against a `Release` branch build, and the
-content diff was 1 ulp (`0.006372359774` vs `…73`) with `report.json`, both solid
-meshes and all three `variant_060` artifacts identical. The controlled re-run (one
-worktree, one cmake cache, `Release` both sides) is in flight.
+One worktree, one cmake cache, `Release` both sides, base `34175a5` vs branch, on a
+lattice+grading job with multiscale absent (`m1_controlled.txt`). **Every artifact
+carrying an answer is byte-identical**: `design.bin`, `fields.bin`, `report.json`,
+`loadcase.json`, `variant_045.stl`, `variant_045_lattice.report.json`,
+`variant_045_lattice.stl`. The only differences are four stopwatch readings —
+`sweep_seconds`, `created_wall_ms`, `gen_seconds`, `gen_fraction`.
+
+Recorded because it nearly became a false alarm: a first attempt compared an `-O0`
+comparison build against the `Release` branch build and reported a 1-ulp difference
+(`0.006372359774` vs `…73`). That was the build type changing floating-point
+contraction, not the code. Matching the build type made it vanish. **A byte-identity
+claim is only as good as the build configuration on both sides of it.**
+
+Also, on the maintainer's own part: the artifacts a two-step run produced are
+byte-identical to the captured pre-branch run (`m1_captured_vs_branch.txt`), core
+being unchanged between `2b8b715` and `34175a5`.
+
+### Full suite — **102/102 PASSED** (`ctest.txt`, 1154 s, zero failures)
 
 ---
 
