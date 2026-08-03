@@ -510,6 +510,77 @@ def test_startup_identity_line():
 WORKER_VERSION_HINT = "1.1.0"
 
 
+def test_artifacts_survive_a_worker_restart():
+    """Task 2026-08-03-variant-postprocessing-fix, defect 7. THE SCHEDULER IS
+    IN-MEMORY, so a worker restart forgets every job it ever ran — while
+    <workdir>/<id>/out/ sits on disk with the meshes and design.bin of the variants
+    the client is still looking at.
+
+    That is what happened to the maintainer's M2_verticalStand run: its worker died
+    mid-ladder, and every later request for its artifacts 404'd against a directory
+    that was right there. Artifact reads now fall back to disk.
+
+    Run a job to completion, KILL the worker, start a NEW one on the same workdir,
+    and assert: /jobs is empty (it really is a new process), the artifact is still
+    served, and the things that would be GUESSES — the job's state and its event
+    replay — still 404."""
+    port = free_port()
+    workdir = os.path.join(HERE, ".qe2e-restart-%d" % port)
+    proc = start_worker(port, mode="normal", gap=0.05,
+                        extra_env={"TOPOPT_WORKER_DIR": workdir})
+    job_id = None
+    before = ""
+    try:
+        if not wait_health(port):
+            check(False, "worker (restart) came up"); return
+        job_id = submit(port)
+        state = None
+        for _ in range(200):
+            _, snap = get_json(port, "/jobs/%s" % job_id)
+            state = snap.get("state")
+            if state in ("done", "error", "cancelled"):
+                break
+            time.sleep(0.1)
+        check(state == "done", "the job finished before the restart (%s)" % state)
+        code, before = get_text(port, "/jobs/%s/files/variant_070.stl" % job_id)
+        check(code == 200 and len(before) > 0,
+              "the artifact is served by the worker that ran it")
+    finally:
+        proc.terminate()
+        proc.wait(timeout=10)
+
+    # A brand-new process on the SAME workdir — the restart.
+    port2 = free_port()
+    proc2 = start_worker(port2, mode="normal", gap=0.05,
+                         extra_env={"TOPOPT_WORKER_DIR": workdir})
+    try:
+        if not wait_health(port2):
+            check(False, "the restarted worker came up"); return
+        _, listing = get_json(port2, "/jobs")
+        check(listing.get("jobs") == [],
+              "the restarted worker genuinely knows nothing about the job")
+        code, after = get_text(port2, "/jobs/%s/files/variant_070.stl" % job_id)
+        check(code == 200 and after == before,
+              "the SAME artifact bytes are still served after the restart "
+              "(HTTP %s, %d vs %d bytes)" % (code, len(after), len(before)))
+        # …and the two things a directory listing cannot honestly answer.
+        code, _ = get_json(port2, "/jobs/%s" % job_id)
+        check(code == 404,
+              "the job's STATE still 404s — it is a fact about a running child, "
+              "not something to invent from a directory (got %s)" % code)
+        code, _ = get_text(port2, "/jobs/%s/events" % job_id)
+        check(code == 404, "the EVENT replay still 404s (got %s)" % code)
+        # Path containment: no spelling of the id or the name escapes the workdir.
+        for evil in ("/jobs/..%2f..%2fetc/files/passwd",
+                     "/jobs/..%%2f..%%2f..%%2fetc/files/passwd" % (),
+                     "/jobs/%s/files/..%%2f..%%2fjob.json" % job_id):
+            code, _ = get_text(port2, evil)
+            check(code == 404, "a path-escape attempt is refused (%s -> %s)"
+                  % (evil, code))
+    finally:
+        proc2.terminate()
+
+
 def main():
     print("== (1) GET /jobs golden + queue + reorder + queued-cancel ==")
     test_jobs_golden_and_queue()
@@ -527,6 +598,8 @@ def main():
     test_bind_failure_is_courteous()
     print("\n== (8) startup identity line (124 item 4) ==")
     test_startup_identity_line()
+    print("\n== (9) artifacts survive a worker RESTART (postprocessing-fix defect 7) ==")
+    test_artifacts_survive_a_worker_restart()
     print()
     if FAILS:
         print("FAILED: %d check(s)" % len(FAILS))
@@ -535,7 +608,8 @@ def main():
         sys.exit(1)
     print("OK: /jobs golden, queue, reorder, queued-cancel, webhook, name round-trip, "
           "live progress, multipart project + no-CLI-key, queued-survives-grace, "
-          "port-in-use courtesy, and startup identity all verified.")
+          "port-in-use courtesy, startup identity, and artifact survival across a\n"
+          "worker restart all verified.")
 
 
 if __name__ == "__main__":

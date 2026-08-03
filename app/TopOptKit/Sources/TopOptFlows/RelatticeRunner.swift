@@ -41,10 +41,17 @@ public enum RelatticeJobBuilder {
     /// precisely the mesh-job-params defect (a job.json that shipped a skeleton
     /// and got a worst-case fallback run). So the transformation is additive on
     /// a decoded copy, never a rebuild.
+    /// `forecastOnly` arms core's PRE-FLIGHT FORECAST (task
+    /// 2026-08-03-variant-postprocessing-fix, bar F3): the same job, but core
+    /// runs the grading law and the role accounting on the stored design, writes
+    /// `lattice_forecast.json`, and returns WITHOUT a single certification solve.
+    /// It is the same law on the same inputs, so what it reports is what this job
+    /// would do — for ~1% of the cost.
     public static func build(original: Data,
                              variantVolumeFraction: Double,
                              designFileName: String,
-                             lattice: LatticeSpec?) throws -> Data {
+                             lattice: LatticeSpec?,
+                             forecastOnly: Bool = false) throws -> Data {
         guard var job = (try? JSONSerialization.jsonObject(with: original))
                 as? [String: Any] else {
             throw BuildError("the retained job document is not readable JSON")
@@ -111,6 +118,9 @@ public enum RelatticeJobBuilder {
                         "geometry": geometry]
             }
         }
+        // Absent unless asked for, so a real re-lattice job is byte-identical to
+        // the one this builder has always produced.
+        if forecastOnly { block["forecast_only"] = true }
         job["lattice"] = block
         return try JSONSerialization.data(withJSONObject: job,
                                           options: [.sortedKeys])
@@ -162,6 +172,18 @@ public struct RelatticeResult {
     /// The job's own provenance record — the no-ladder facts and the
     /// reproduction proof.
     public let provenanceJSON: Data?
+    /// `lattice_forecast.json`, on a FORECAST-ONLY drive (task
+    /// 2026-08-03-variant-postprocessing-fix). nil on a real re-lattice, whose
+    /// outcome is the latticed object itself.
+    public var forecastJSON: Data?
+
+    public init(outcome: OptimizeOutcome, receiptJSON: Data?,
+                provenanceJSON: Data?, forecastJSON: Data? = nil) {
+        self.outcome = outcome
+        self.receiptJSON = receiptJSON
+        self.provenanceJSON = provenanceJSON
+        self.forecastJSON = forecastJSON
+    }
 }
 
 // MARK: - the run
@@ -207,8 +229,33 @@ public enum RelatticeRun {
         }
     }
 
+    /// THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix, bar
+    /// F3). The same submit + poll, with `lattice.forecast_only` armed: core runs
+    /// the grading law on the stored design and returns WITHOUT solving, so this
+    /// costs seconds instead of the minutes-to-hours the real job does. What comes
+    /// back is what the real job would produce, from the same law on the same
+    /// inputs — see LatticeForecast.
+    public static func forecast(_ inputs: Inputs,
+                                isCancelled: @escaping () -> Bool = { false })
+        throws -> LatticeForecast {
+        let result = try drive(inputs, forecastOnly: true, isCancelled: isCancelled)
+        guard let data = result.forecastJSON,
+              let f = LatticeForecast.parse(data) else {
+            throw RelatticeError(
+                "the worker ran the forecast but its result could not be read — "
+                + "not showing a prediction we cannot stand behind.")
+        }
+        return f
+    }
+
     public static func run(_ inputs: Inputs,
                            isCancelled: @escaping () -> Bool = { false })
+        throws -> RelatticeResult {
+        try drive(inputs, forecastOnly: false, isCancelled: isCancelled)
+    }
+
+    private static func drive(_ inputs: Inputs, forecastOnly: Bool,
+                              isCancelled: @escaping () -> Bool)
         throws -> RelatticeResult {
         let session = URLSession(configuration: {
             let c = URLSessionConfiguration.ephemeral
@@ -251,6 +298,23 @@ public enum RelatticeRun {
                 + "a different core certifies a different object.")
         }
 
+        // FORECAST-ONLY (bar F3): the same document with `lattice.forecast_only`
+        // armed. Patched HERE rather than at the caller so a forecast and the run
+        // it forecasts are provably the SAME job but for this one key — which is
+        // the whole basis for believing the prediction.
+        var jobToSubmit = inputs.jobJSON
+        if forecastOnly {
+            guard var obj = (try? JSONSerialization.jsonObject(with: inputs.jobJSON))
+                    as? [String: Any],
+                  var lat = obj["lattice"] as? [String: Any] else {
+                throw RelatticeError("the re-lattice job has no lattice block to "
+                                     + "forecast")
+            }
+            lat["forecast_only"] = true
+            obj["lattice"] = lat
+            jobToSubmit = try JSONSerialization.data(withJSONObject: obj,
+                                                     options: [.sortedKeys])
+        }
         // SUBMIT: model + job + the run's own design.bin.
         let modelData = try Data(contentsOf: URL(fileURLWithPath: inputs.modelPath))
         let modelName = (inputs.modelPath as NSString).lastPathComponent
@@ -266,7 +330,7 @@ public enum RelatticeRun {
         part("Content-Disposition: form-data; name=\"step\"; filename=\"\(modelName)\"\r\n"
              + "Content-Type: application/octet-stream", modelData)
         part("Content-Disposition: form-data; name=\"job\"; filename=\"job.json\"\r\n"
-             + "Content-Type: application/json", inputs.jobJSON)
+             + "Content-Type: application/json", jobToSubmit)
         part("Content-Disposition: form-data; name=\"design\"; filename=\"design.bin\"\r\n"
              + "Content-Type: application/octet-stream", inputs.designBin)
         part("Content-Disposition: form-data; name=\"project\"",
@@ -334,6 +398,20 @@ public enum RelatticeRun {
             }
             return d
         }
+        if forecastOnly {
+            // No mesh, no receipt, no solve — one document.
+            guard let doc = file("lattice_forecast.json") else {
+                throw RelatticeError(
+                    "the forecast finished but its result was not served — this "
+                    + "worker's core may predate the pre-flight forecast.")
+            }
+            return RelatticeResult(
+                outcome: OptimizeOutcome(variants: [], stoppedOnMargin: false,
+                                         cancelled: false, acceptedCount: 0,
+                                         computedRemotely: true),
+                receiptJSON: nil, provenanceJSON: nil, forecastJSON: doc)
+        }
+
         let vfTag = String(format: "%03d",
                            Int((inputs.requestedVolumeFraction * 100).rounded()))
         guard let meshData = file("variant_\(vfTag)_lattice.stl") else {

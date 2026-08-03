@@ -401,8 +401,11 @@ void set_variant_stream(topopt::MinimizePlasticOptions& opts,
                         const topopt::VoxelGrid& grid, VariantFn variant_fn,
                         void* variant_ctx) {
   if (variant_fn == nullptr) return;
+  // The second parameter (every rung so far) is unused here: this callback
+  // packages the ONE variant that just completed and hands it across immediately.
   opts.on_variant = [variant_fn, variant_ctx,
-                     &grid](const topopt::MinimizePlasticVariant& v) {
+                     &grid](const topopt::MinimizePlasticVariant& v,
+                            const std::vector<topopt::MinimizePlasticVariant>&) {
     OptimizeResult one;
     one.accepted_count = 1;
     // A streamed variant carries the ladder mode too — a live results view must

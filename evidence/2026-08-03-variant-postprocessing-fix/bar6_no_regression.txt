@@ -1,0 +1,28 @@
+BAR 6 · NO REGRESSION — follow-up suites
+
+CORE (ctest, full):
+  100% tests passed out of 104
+  Total Test time (real) = 1460.12 sec
+
+APP PACKAGE (swift test, after every follow-up change):
+  	 Executed 1154 tests, with 13 tests skipped and 0 failures (0 unexpected) in 238.630 (238.713) seconds
+  assertion failures: 0
+
+  suites this task touched or added:
+    SmoothingRungStalenessTests: 4 passed
+    VariantEntryGatingTests: 21 passed
+    LatticeForecastTests: 10 passed
+    VariantRetentionTests: 14 passed
+    SmoothingPageTests: 31 passed
+    LatticePageTests: 25 passed
+
+  PR 291 closed at 1148; this follow-up adds 6 (4 staleness + 2 concurrency)
+  => 1154, 13 skipped, 0 failures.
+
+E2E (local gate, not in CI):
+  retain_dies                     PASSED — now also asserts each rung carries
+                                  its OWN field + mass, with DISTINCT masses
+  queue_http_e2e.py               9/9 cases
+
+core test_design_stream:          21 checks, 0 failures
+  (5 of them FAIL with the per-rung field flush disabled — negative control)

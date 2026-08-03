@@ -1,0 +1,26 @@
+WHY THE WORKER ENDED THE RUN — what the artifacts prove, and what is unrecoverable
+
+1. The Worker APP never restarted:
+74031 Wed Jul 22 04:01:29 2026     /Applications/TopOpt Worker.app/Contents/MacOS/TopOpt Worker
+
+2. Only its Python child restarted:
+16871 74031 Sun Aug  2 17:04:20 2026    
+
+3. The keep-awake assertion for HIS job, released at the exit:
+2026-08-02 16:07:49 -0400 Assertions          	PID 74031(TopOpt Worker) Released PreventUserIdleSystemSleep "TopOpt optimize running on this Mac" 10:27:47  id:0x0x100009ded [System: PrevIdle PrevDisp DeclUser kDisp]          
+2026-08-02 17:04:18 -0400 Assertions          	PID 74031(TopOpt Worker) Released PreventUserIdleSystemSleep "TopOpt optimize running on this Mac" 00:56:28  id:0x0x100008a81 [System: PrevIdle DeclUser IntPrevDisp kDisp]          
+
+   16:07:49 (submit) + 00:56:28 (held) = 17:04:17 — that assertion WAS his job.
+   New Python child at 17:04:20 = exactly WorkerSupervisor's 2 s restart backoff.
+   A deliberate stop() sets shouldRun=false and never restarts => UNEXPECTED exit.
+
+4. No crash report for the worker or for Python. The only report anywhere near the
+   window is a CORE TEST binary (test_loadcase_analyze, 17:00:38) — a different
+   process entirely. Nothing named Python, topopt_worker or "TopOpt Worker":
+   (reports whose name matches python/topopt_worker/TopOpt Worker: 0)
+
+5. The reason it exited: UNRECOVERABLE.
+   WorkerSupervisor.start() drained the worker's stdout+stderr into
+     outPipe.fileHandleForReading.readabilityHandler = { h in _ = h.availableData }
+   and the exit code lived only in a @Published UI string that start() overwrote
+   with .running 2 seconds later. Fixed: see defect 6 in the handoff.

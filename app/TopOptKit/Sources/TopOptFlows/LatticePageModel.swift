@@ -116,6 +116,13 @@ public struct LatticePageGate: Equatable, Sendable {
 public struct LatticePageBanner: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case simRunning, simComplete, simStale, optimizing, failed
+        /// A SMOOTHING that belongs to a different rung than the one on screen
+        /// (task 2026-08-03-variant-postprocessing-concurrency, requirement 3).
+        /// Deliberately a case on THIS enum rather than a second banner type: the
+        /// brief's rule is one staleness concept, and "the thing you are looking at
+        /// was computed from inputs that have since changed" is the same state
+        /// `simStale` already names.
+        case smoothingStale
     }
     public let kind: Kind
     public let title: String
@@ -262,6 +269,11 @@ public struct LatticeOptimizeSurface: Equatable, Sendable {
             let why = b.generatableReason ?? b.topologyReason ?? b.cellReason ?? "settings not certifiable"
             return LatticeOptimizeSurface(enabled: false, label: "Optimize", sub: why)
         }
+        // THE FORECAST IS NOT SHOWN HERE — see LatticePageActions. It describes the
+        // `lattice_variant` job (this stored design, these settings), and THIS
+        // button re-runs the whole ladder from the ORIGINAL part, which will not use
+        // that design at all. Putting the forecast on this button would state a
+        // prediction about a job it does not start.
         if densityMode == .auto {
             return LatticeOptimizeSurface(
                 enabled: baseCanOptimize, label: "Optimize",

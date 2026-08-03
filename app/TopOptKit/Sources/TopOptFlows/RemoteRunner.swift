@@ -290,6 +290,11 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
     private let existingJobID: String?
     /// Where the run's retention pair is handed back (see `remoteRunner`).
     private let onArtifacts: ((RelatticeArtifacts) -> Void)?
+    /// The most recent `fields.bin` fetched DURING the run — kept for its GRID, so
+    /// a later fetch failure cannot wipe the geometry an earlier rung established
+    /// (task 2026-08-03-variant-postprocessing-concurrency). Touched only from the
+    /// event thread, like `submittedJobJSON`.
+    private var streamedFieldsGrid: RemoteFieldsContainer?
 
     private var jobID: String?
     /// The EXACT bytes this run submitted, kept so the retention pair is the
@@ -445,6 +450,12 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             let modelData = try Data(contentsOf: URL(fileURLWithPath: request.modelPath))
             let modelName = (request.modelPath as NSString).lastPathComponent
             jobID = try postJob(model: modelData, modelName: modelName, jobJSON: jobJSON)
+            // THE JOB DOCUMENT IS RETAINED AT SUBMIT (task
+            // 2026-08-03-variant-postprocessing-fix). It exists NOW — these are the
+            // bytes we just posted — and smoothing needs nothing else. Reporting it
+            // only at the end tied it to the design container's fate, so a run whose
+            // design never arrived told the user it had kept no LOAD CASE either.
+            onArtifacts?(.jobOnly(jobJSON))
         }
 
         // Persist the active job so a slept/relaunched iPad can re-attach rather
@@ -1310,9 +1321,74 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
             accepted: accepted,
             v3Passes: true,
             meshVertices: mesh.0, meshIndices: mesh.1)
-        onVariant(OptimizeOutcome(variants: [v], stoppedOnMargin: false,
+        // THIS RUNG'S OWN FIELD, NOW (task
+        // 2026-08-03-variant-postprocessing-concurrency). Core publishes
+        // `fields.bin` after every rung, so the block for the variant we are about
+        // to show exists. Without it a streamed variant arrived with mass 0 and an
+        // empty von Mises field — which is exactly what the lattice page's AUTO
+        // density grades from and what the results overlays draw. A four-rung
+        // ladder therefore left rung 1 un-gradeable for hours, for no reason but
+        // when the file was written.
+        //
+        // Matched BY VOLUME FRACTION, never by position: the container holds the
+        // rungs accepted so far and this is the rung the event just named.
+        // Best-effort — a fetch that fails leaves the variant exactly as it arrived
+        // before this change, and the page's own gates report the field as absent.
+        let container = fetchFields()
+        if let c = container { streamedFieldsGrid = c }   // remember the geometry
+        let block = container?.variants.first { $0.requestedVF == requestedVF }
+        let enriched = block.map { b in
+            OptimizeVariant(
+                requestedVolumeFraction: requestedVF,
+                achievedVolumeFraction: printedVF, printedFraction: printedVF,
+                massGrams: b.massGrams, supportVolumeVoxels: b.supportVolumeVoxels,
+                meshTriangleCount: mesh.1.count / 3, worstCaseMargin: margin,
+                accepted: accepted, v3Passes: true,
+                meshVertices: mesh.0, meshIndices: mesh.1,
+                vonMisesField: b.vonMises, displacementField: b.displacement)
+        } ?? v
+        if block != nil {
+            diag("streamed variant vf=\(requestedVF) carries its own field "
+                 + "(\(block!.vonMises.count) voxels) — post-processable now")
+        }
+        // The GRID the field is indexed to must ride along, or the app holds a
+        // field it cannot address. `appendStreamed` takes the grid from each
+        // partial, so the LAST KNOWN container's geometry is passed every time — a
+        // later fetch failure must not wipe the geometry an earlier one established.
+        let g = streamedFieldsGrid
+        onVariant(OptimizeOutcome(variants: [enriched], stoppedOnMargin: false,
                                   cancelled: false, acceptedCount: 1,
+                                  voxelVolumeMM3: g?.voxelVolumeMM3 ?? 0,
+                                  gridNx: g?.gridNx ?? 0, gridNy: g?.gridNy ?? 0,
+                                  gridNz: g?.gridNz ?? 0,
+                                  gridOrigin: g?.gridOrigin ?? .zero,
+                                  spacing: g?.spacing ?? 0,
                                   computedRemotely: true))
+        // THE RETENTION PAIR, AT EVERY RUNG (task
+        // 2026-08-03-variant-postprocessing-fix, defect 1). A variant is on screen
+        // and workable from THIS moment; its design must be too. Core now publishes
+        // design.bin after every variant, so there is something to fetch here — and
+        // fetching it here is what makes a run that never reaches its terminal event
+        // keep the variants it DID produce, with the design that describes them.
+        //
+        // The maintainer's run is the case this exists for: three variants streamed,
+        // the worker restarted on rung 4, no terminal event ever, no assembleFinal-
+        // Outcome, no pair. The app kept his variants and correctly reported that it
+        // had kept nothing to work on them with.
+        //
+        // Best-effort and idempotent: a failed fetch leaves the previous pair (which
+        // then covers fewer variants than are on screen — the entry gate reads the
+        // container's own index and disables the ones it does not cover).
+        reportRetentionPair()
+    }
+
+    /// Fetch `design.bin` and report the retention pair, if both halves are there.
+    /// Called after every streamed variant AND once more at final assembly, so the
+    /// last thing reported is always the most complete container.
+    private func reportRetentionPair() {
+        guard let onArtifacts, let job = submittedJobJSON else { return }
+        guard let design = fetchDesign() else { return }
+        onArtifacts(RelatticeArtifacts(jobJSON: job, designBin: design))
     }
 
     /// Abort the run with a diagnostic (used when a streamed mesh can't be fetched).
@@ -1372,15 +1448,20 @@ final class RemoteRun: NSObject, URLSessionDataDelegate {
         // The orientation ranking this run produced — a RECOMMENDATION shown beside
         // the results, never applied and never consulted for a verdict.
         let buildOrientation = fetchBuildOrientation()
-        // THE RETENTION PAIR (task 2026-08-03-variant-entry-gating-and-retention).
-        // Best-effort, exactly like fields.bin: a run whose design.bin cannot be
-        // fetched is still a complete run, it simply cannot have its variants
-        // smoothed or re-latticed — and the entry controls then say so with the
-        // reason instead of opening a page that refuses. Reported ONLY when both
-        // halves survive, the same all-or-nothing rule the store applies.
-        if let job = submittedJobJSON, let design = fetchDesign() {
-            onArtifacts?(RelatticeArtifacts(jobJSON: job, designBin: design))
-        }
+        // THE RETENTION PAIR (task 2026-08-03-variant-entry-gating-and-retention),
+        // one last time so the container reported is the COMPLETE one — this write
+        // holds every evaluated rung, including any that were rejected and so never
+        // streamed. Best-effort, exactly like fields.bin: a run whose design.bin
+        // cannot be fetched is still a complete run, it simply cannot have its
+        // variants re-latticed, and the entry control says so with the reason
+        // instead of opening a page that refuses.
+        //
+        // It is no longer the ONLY report (task 2026-08-03-variant-postprocessing-
+        // fix): the job document is retained at submit and the pair at every
+        // streamed variant, because this line is reached only by a run that ran all
+        // the way to its terminal event — which is precisely what the maintainer's
+        // run did not do.
+        reportRetentionPair()
 
         streamedLock.lock(); let accepted = streamed; streamedLock.unlock()
 

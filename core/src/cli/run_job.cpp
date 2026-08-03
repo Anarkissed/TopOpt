@@ -1182,6 +1182,29 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     s += "    \"latticed_voxels\": " + std::to_string(gf.latticed_voxels) + ",\n";
     s += "    \"solid_fallback_voxels\": " +
          std::to_string(gf.solid_fallback_voxels) + ",\n";
+    // WHY, PER VOXEL, WITH COUNTS (task 2026-08-03-variant-postprocessing-fix,
+    // bar F1). The two predicates sum to solid_fallback_voxels and have OPPOSITE
+    // remedies, so an aggregate cannot be acted on. `irrecoverable_by_cell` is the
+    // subset no cell size can rescue — the honest "do not offer a bigger cell".
+    s += "    \"solid_fallback_by_reason\": {\n";
+    s += "      \"member_too_thin_for_cell\": " +
+         std::to_string(gf.fallback_member_too_thin) + ",\n";
+    s += "      \"strut_unprintable_at_every_cell\": " +
+         std::to_string(gf.fallback_strut_unprintable) + ",\n";
+    s += "      \"irrecoverable_by_any_cell_size\": " +
+         std::to_string(gf.fallback_irrecoverable_by_cell) + ",\n";
+    s += "      \"widest_rejected_member_mm\": " +
+         json_num(gf.fallback_max_member_width_mm) + ",\n";
+    s += "      \"member_width_needed_mm\": " +
+         json_num(gf.cells_per_member_floor * gf.cell_size_mm) + ",\n";
+    s += "      \"note\": \"member_too_thin_for_cell: the member cannot hold "
+         "cells_per_member_floor cells across at this cell size — a SMALLER cell "
+         "helps. strut_unprintable_at_every_cell: the strut this density emits is "
+         "under the stated minimum extrudable width at every available cell — a "
+         "BIGGER cell helps. irrecoverable_by_any_cell_size: the member is thinner "
+         "than the floor times the smallest printable cell, so no cell choice can "
+         "lattice it; the design itself is too thin here.\"\n";
+    s += "    },\n";
     s += "    \"mask_voxels_dropped_by_cell_overlap\": " +
          std::to_string(graded.mask_voxels_dropped_by_cell_overlap) + ",\n";
     s += "    \"clamped_lo_voxels\": " + std::to_string(gf.clamped_lo_voxels) +
@@ -2228,6 +2251,265 @@ std::string loadcase_receipt_json(const JobDescription& job,
   return s;
 }
 
+// ═══ THE PRE-FLIGHT LATTICE FORECAST (task 2026-08-03-variant-postprocessing-fix,
+//     bars F1–F4) ══════════════════════════════════════════════════════════════
+//
+// Runs the grading law and the role accounting on a STORED design, and reports
+// what a lattice run would produce — before the run. No FEA: every number below
+// comes from the density field and the job's own lattice block.
+//
+// THE ONE APPROXIMATION, stated in the output as well as here. In AUTO density
+// the law maps a DEMAND field (the variant's von Mises) to a relative density,
+// and that field only exists after a solve. The forecast therefore grades at the
+// BAND FLOOR — the thinnest strut the band allows, which is the CONSERVATIVE end
+// for printability. It changes no cells-per-member verdict (that predicate does
+// not see density at all), so the mask forecast is exact; it means the forecast
+// does not predict the density DISTRIBUTION, only what will and will not be
+// latticed, and why.
+//
+// COUNTERFACTUALS ARE EVALUATED, NOT GUESSED (bar F4, PR 276's rule): each
+// remedy below is a real second call to grade_lattice with that one parameter
+// changed, and reports the mask it actually produces.
+struct ForecastCounterfactual {
+  std::string change;      // human-facing: what to change
+  std::string parameter;   // the job key it moves
+  double value = 0.0;
+  std::size_t latticed_voxels = 0;
+  std::size_t region_voxels = 0;
+};
+
+// The candidate set the law grades over: solid voxels, minus clearances, minus
+// exclude regions, restricted to include regions when any are declared. The SAME
+// membership `lattice_one_variant` builds — spelled once here because a forecast
+// that used a different membership would be forecasting a different job.
+std::vector<char> forecast_candidates(const VoxelGrid& grid,
+                                      const std::vector<double>& dens,
+                                      const std::vector<ClearanceGeometry>& kos,
+                                      const LatticeRoleRegions& roles,
+                                      LatticeBoundary& members) {
+  for (const ClearanceGeometry& g : kos)
+    members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+  for (const ClearanceGeometry& g : roles.includes) members.add_include_region(g);
+  for (const ClearanceGeometry& g : roles.excludes) members.add_exclude_region(g);
+  std::vector<char> cand(grid.voxel_count(), 0);
+  for (int k = 0; k < grid.nz; ++k)
+    for (int j = 0; j < grid.ny; ++j)
+      for (int i = 0; i < grid.nx; ++i) {
+        const std::size_t e = grid.index(i, j, k);
+        if (!(dens[e] >= 0.5)) continue;
+        const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
+                     grid.origin.y + (j + 0.5) * grid.spacing,
+                     grid.origin.z + (k + 0.5) * grid.spacing};
+        if (members.in_keep_out(c, 0.0)) continue;
+        if (members.in_exclude_region(c, 0.0)) continue;
+        if (members.has_include_regions() && !members.in_include_region(c, 0.0))
+          continue;
+        cand[e] = 1;
+      }
+  return cand;
+}
+
+GradingLawParams forecast_grading_params(const JobDescription& job) {
+  GradingLawParams gp;
+  gp.topology = LatticeTopology::Octet;   // the job schema restricts to octet
+  gp.target_cell_size_mm = job.grading.present ? job.grading.cell_mm
+                                               : job.lattice.cell_mm;
+  gp.min_extrudable_width_mm = job.grading.present
+                                   ? job.grading.min_extrudable_width_mm
+                                   : job.lattice.min_extrudable_width_mm;
+  gp.demand_exponent = job.grading.present ? job.grading.demand_exponent : 1.0;
+  gp.cell_mode = CellSizeMode::Fixed;
+  if (job.grading.present &&
+      !cell_size_mode_from_name(job.grading.cell_mode.c_str(), gp.cell_mode))
+    throw JobError("lattice_forecast: unknown grading cell_mode \"" +
+                   job.grading.cell_mode + "\"");
+  gp.min_cell_size_mm = job.grading.cell_min_mm;
+  gp.max_cell_size_mm = job.grading.cell_max_mm;
+  if (!(gp.target_cell_size_mm > 0.0) && gp.cell_mode == CellSizeMode::Fixed)
+    gp.cell_mode = CellSizeMode::Auto;   // no cell stated ⇒ the law picks the floor
+  if (!(gp.min_extrudable_width_mm > 0.0))
+    throw JobError("lattice_forecast: min_extrudable_width_mm must be > 0 — the "
+                   "printability floor is derived from it and there is no default "
+                   "that would be honest about a printer we were not told about");
+  return gp;
+}
+
+std::string lattice_forecast_json(const JobDescription& job,
+                                  const VoxelGrid& grid,
+                                  const StoredDesign& sd,
+                                  const std::vector<ClearanceGeometry>& kos,
+                                  const LatticeRoleRegions& roles) {
+  LatticeBoundary members;
+  const std::vector<char> cand =
+      forecast_candidates(grid, sd.density, kos, roles, members);
+  // The band-floor demand (see the header comment): zeros ⇒ rho_of == 0 ⇒ every
+  // candidate clamps to the band's low end.
+  const std::vector<double> flat_demand(grid.voxel_count(), 0.0);
+  const GradingLawParams gp = forecast_grading_params(job);
+  const GradedField gf =
+      grade_lattice(grid, sd.density, flat_demand, &cand, gp);
+
+  // INCLUDE REGIONS THAT LANDED ON VOID (defect 3 / bar V2). The optimizer left
+  // no material there, so a lattice cannot conjure any — a no-op the user could
+  // not see until the receipt. Same rule as the run's own role receipt.
+  long long include_void = 0;
+  if (members.has_include_regions())
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          const std::size_t e = grid.index(i, j, k);
+          if (sd.density[e] >= 0.5) continue;
+          const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
+                       grid.origin.y + (j + 0.5) * grid.spacing,
+                       grid.origin.z + (k + 0.5) * grid.spacing};
+          if (members.in_include_region(c, 0.0)) ++include_void;
+        }
+
+  // ── EVALUATED counterfactuals (bar F4). Only offered where they COULD help:
+  // a remedy that moves the cell is worth evaluating only if some rejected member
+  // is wide enough for a legal cell to reach it. Where every rejection is
+  // irrecoverable, NO cell remedy is offered — a wrong suggestion is worse than
+  // none, and this is the maintainer's case exactly.
+  std::vector<ForecastCounterfactual> cfs;
+  const bool cell_remedy_possible =
+      gf.fallback_member_too_thin > gf.fallback_irrecoverable_by_cell ||
+      gf.fallback_strut_unprintable > 0;
+  if (cell_remedy_possible) {
+    for (const double mult : {0.5, 2.0}) {
+      GradingLawParams alt = gp;
+      if (alt.cell_mode == CellSizeMode::Swept) {
+        alt.min_cell_size_mm *= mult;
+        alt.max_cell_size_mm *= mult;
+      } else {
+        alt.cell_mode = CellSizeMode::Fixed;
+        alt.target_cell_size_mm = gf.cell_size_mm * mult;
+      }
+      GradedField alt_gf;
+      try {
+        alt_gf = grade_lattice(grid, sd.density, flat_demand, &cand, alt);
+      } catch (const std::exception&) {
+        continue;   // an inadmissible parameter is simply not a remedy
+      }
+      ForecastCounterfactual cf;
+      cf.change = mult < 1.0 ? "halve the cell size" : "double the cell size";
+      cf.parameter = alt.cell_mode == CellSizeMode::Swept ? "grading.cell_min_mm"
+                                                          : "grading.cell_mm";
+      cf.value = alt.cell_mode == CellSizeMode::Swept ? alt.min_cell_size_mm
+                                                      : alt.target_cell_size_mm;
+      cf.latticed_voxels = alt_gf.latticed_voxels;
+      cf.region_voxels = alt_gf.region_voxels;
+      cfs.push_back(cf);
+    }
+  }
+  // THE REGION counterfactual, always evaluated when include regions exist: what
+  // the SAME design would lattice with no region restriction at all. That is the
+  // number that tells a user whether their regions are the problem.
+  ForecastCounterfactual whole;
+  bool whole_ran = false;
+  if (!roles.includes.empty()) {
+    LatticeRoleRegions none;
+    none.excludes = roles.excludes;
+    LatticeBoundary m2;
+    const std::vector<char> c2 =
+        forecast_candidates(grid, sd.density, kos, none, m2);
+    try {
+      const GradedField g2 = grade_lattice(grid, sd.density, flat_demand, &c2, gp);
+      whole.change = "drop the include regions (lattice the whole part)";
+      whole.parameter = "lattice.regions";
+      whole.latticed_voxels = g2.latticed_voxels;
+      whole.region_voxels = g2.region_voxels;
+      whole_ran = true;
+    } catch (const std::exception&) {
+    }
+  }
+
+  const double frac = gf.region_voxels > 0
+                          ? static_cast<double>(gf.latticed_voxels) /
+                                static_cast<double>(gf.region_voxels)
+                          : 0.0;
+
+  std::string s = "{\n";
+  s += "  \"forecast\": \"what a lattice run on THIS variant would produce, "
+       "computed before the run from the stored design and this job's lattice "
+       "block. No FEA ran.\",\n";
+  s += "  \"variant_volume_fraction\": " +
+       json_num(sd.requested_volume_fraction) + ",\n";
+  s += "  \"topology\": \"" + job.lattice.topology + "\",\n";
+  s += "  \"cell_mode\": \"" + std::string(cell_size_mode_name(gf.cell_mode)) +
+       "\",\n";
+  s += "  \"cell_size_mm\": " + json_num(gf.cell_size_mm) + ",\n";
+  s += "  \"printability_floor_mm\": " + json_num(gf.printability_floor_mm) +
+       ",\n";
+  s += "  \"cells_per_member_floor\": " + json_num(gf.cells_per_member_floor) +
+       ",\n";
+  s += "  \"region_voxels\": " + std::to_string(gf.region_voxels) + ",\n";
+  s += "  \"would_lattice_voxels\": " + std::to_string(gf.latticed_voxels) +
+       ",\n";
+  s += "  \"would_stay_solid_voxels\": " +
+       std::to_string(gf.solid_fallback_voxels) + ",\n";
+  s += "  \"latticed_fraction_of_region\": " + json_num(frac) + ",\n";
+  s += "  \"would_stay_solid_by_reason\": {\n";
+  s += "    \"member_too_thin_for_cell\": " +
+       std::to_string(gf.fallback_member_too_thin) + ",\n";
+  s += "    \"strut_unprintable_at_every_cell\": " +
+       std::to_string(gf.fallback_strut_unprintable) + ",\n";
+  s += "    \"irrecoverable_by_any_cell_size\": " +
+       std::to_string(gf.fallback_irrecoverable_by_cell) + ",\n";
+  s += "    \"widest_rejected_member_mm\": " +
+       json_num(gf.fallback_max_member_width_mm) + ",\n";
+  s += "    \"member_width_needed_mm\": " +
+       json_num(gf.cells_per_member_floor * gf.cell_size_mm) + "\n";
+  s += "  },\n";
+  s += "  \"include_regions\": " + std::to_string(roles.includes.size()) + ",\n";
+  s += "  \"exclude_regions\": " + std::to_string(roles.excludes.size()) + ",\n";
+  s += "  \"include_region_void_voxels\": " + std::to_string(include_void) +
+       ",\n";
+  s += "  \"include_region_void_note\": \"include-region voxels where this "
+       "variant has no material. A lattice cannot conjure material, so the "
+       "include does nothing on them.\",\n";
+  // THE BOUNDARY (defect 4 / bar S1). "rim" dresses analytic plane pairs, and an
+  // optimized part is voxel-derived, so it has none.
+  const bool rim_only = job.lattice.skin == "rim";
+  s += "  \"boundary\": \"" + job.lattice.skin + "\",\n";
+  s += "  \"boundary_can_emit\": " +
+       std::string(rim_only ? "false" : "true") + ",\n";
+  if (rim_only)
+    s += "  \"boundary_note\": \"\\\"rim\\\" dresses the edges where ANALYTIC "
+         "faces meet (plane-plane, plane-bore). An optimized variant's surface "
+         "comes from the voxel grid and owns no analytic face, so a rim emits "
+         "nothing at all here. Choose \\\"diagrid\\\" for a woven surface skin, "
+         "or \\\"none\\\" deliberately.\",\n";
+  s += "  \"counterfactuals\": [";
+  bool first = true;
+  auto emit_cf = [&](const ForecastCounterfactual& cf) {
+    if (!first) s += ",";
+    first = false;
+    const double f = cf.region_voxels > 0
+                         ? static_cast<double>(cf.latticed_voxels) /
+                               static_cast<double>(cf.region_voxels)
+                         : 0.0;
+    s += "\n    {\"change\": \"" + cf.change + "\", \"parameter\": \"" +
+         cf.parameter + "\"";
+    if (cf.value > 0.0) s += ", \"value\": " + json_num(cf.value);
+    s += ", \"would_lattice_voxels\": " + std::to_string(cf.latticed_voxels) +
+         ", \"region_voxels\": " + std::to_string(cf.region_voxels) +
+         ", \"latticed_fraction_of_region\": " + json_num(f) + "}";
+  };
+  for (const ForecastCounterfactual& cf : cfs) emit_cf(cf);
+  if (whole_ran) emit_cf(whole);
+  s += first ? "],\n" : "\n  ],\n";
+  s += "  \"counterfactual_note\": \"every entry above was EVALUATED — the "
+       "grading law was re-run with that one parameter changed and the mask it "
+       "actually produced is reported. An empty list means no parameter change "
+       "could help.\",\n";
+  s += "  \"demand_field\": \"none (pre-flight) — densities are forecast at the "
+       "certifiable band's LOW end, the conservative end for printability. The "
+       "cells-per-member rule does not see density, so the latticed/solid split "
+       "above is exact; the density DISTRIBUTION is not forecast.\"\n";
+  s += "}\n";
+  return s;
+}
+
 }  // namespace
 
 AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_dir,
@@ -3122,6 +3404,29 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
   result.loadcase_receipt_path = join_path(out_dir, "loadcase.json");
   result.loadcase_receipt_json = loadcase_receipt;
   write_text_file(result.loadcase_receipt_path, loadcase_receipt);
+
+  // ══ THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix,
+  //    defect 2 / bar F3) ═══════════════════════════════════════════════════════
+  //
+  // Everything a user needs to decide whether latticing this variant is worth a
+  // run is computable HERE, from the stored design and the job's own lattice
+  // block, with NO FEA at all: the grading law is pure geometry over the density
+  // field. Before this task those same numbers existed only in the receipt of a
+  // run that had already happened — which is how the maintainer came to spend an
+  // hour of Mac time to be told that 10,403 of 10,485 region voxels stayed solid.
+  //
+  // `forecast_only` runs exactly the front half of this function and stops before
+  // the first solve. What it reports is what the real run WOULD report, because
+  // it is the same call on the same inputs — with ONE stated approximation, the
+  // demand field (see below).
+  if (job.lattice.forecast_only) {
+    result.forecast_json = lattice_forecast_json(
+        job, cert_grid, sd, lattice_keep_outs_from_job(job, result.model),
+        lattice_role_regions_from_job(job));
+    result.forecast_path = join_path(out_dir, "lattice_forecast.json");
+    write_text_file(result.forecast_path, result.forecast_json);
+    return result;
+  }
 
   // ── SOLVE 1: the null-posture (SOLID) certification of the restored design.
   //
@@ -4338,12 +4643,91 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   };
 
   std::vector<std::string> streamed_paths;
+  // ── THE DESIGN CONTAINER, PUBLISHED AS THE LADDER GOES (task
+  //    2026-08-03-variant-postprocessing-fix, defect 1) ────────────────────────
+  // design.bin used to be written ONCE, after the whole ladder (see the write at
+  // the end of this function). A streaming client shows each variant the moment
+  // its VARIANT line arrives, so for the entire length of a run — and forever
+  // after, for a run that ends any way other than "ran to completion" — the
+  // variants on screen had no design container and could not be latticed or
+  // smoothed. That is exactly what the maintainer hit: his M2_verticalStand run
+  // streamed three variants, was killed on rung 4 of 4, and its out/ has the
+  // three meshes and NO design.bin, report.json or fields.bin at all.
+  //
+  // So the container is now flushed after EVERY variant the driver reports. The
+  // flush carries the SAME blocks the final write would for those variants (one
+  // writer, one rule: every evaluated variant with a density field), and the
+  // final write is unchanged — so a run that does complete produces the identical
+  // file it produced before. Publication is atomic (design_store.cpp renames),
+  // because the worker may serve this file mid-rewrite.
+  //
+  // Scoped to the STREAMING path deliberately: only a run someone is watching can
+  // be observed part-way, and a batch `topopt-cli run` writes exactly what it did.
+  //
+  // ── …AND THE FIELD CONTAINER WITH IT (task
+  //    2026-08-03-variant-postprocessing-concurrency, bar 3) ───────────────────
+  // A four-rung ladder takes hours. Rung 1's OWN von Mises field is what the
+  // lattice page's AUTO density grades from and what the results overlays draw,
+  // and it exists in memory the moment rung 1 finishes — but `fields.bin` was
+  // written only at final assembly, so for the whole rest of the run (and forever,
+  // if the run died) rung 1 had a design and no field. Both halves of "the
+  // artifacts a variant carries" are now published together, per rung.
+  //
+  // BORROWED, NOT COPIED — AND BORROWED ONLY WITHIN ONE CALL. A per-rung flush
+  // must serialise every rung so far, and copying them would cost ~50 MB per rung
+  // of duplication at 128³ (PR 291's first cut copied a trimmed variant per rung;
+  // adding the fields to that was not affordable). So it borrows.
+  //
+  // What it does NOT do is ACCUMULATE the borrowed pointers. An earlier cut kept a
+  // `std::vector<const MinimizePlasticVariant*>` alive across calls, which is
+  // correct exactly as long as `result.evaluated` never reallocates. It does not —
+  // minimize_plastic.cpp reserves it to the ladder length, states the invariant out
+  // loud and asserts it, and this repo -UNDEBUGs the `topopt` target so that assert
+  // survives Release. But the invariant lived in a different file from the code
+  // depending on it, and the cost of someone deleting that reserve() is
+  // use-after-free, not a wrong number. So `on_variant` now hands over the live
+  // container and the pointers are built and consumed INSIDE this lambda. They
+  // cannot outlive a reallocation because they do not outlive the call, and the
+  // reserve is an optimisation again rather than a correctness requirement.
+  const std::string design_stream_path = join_path(out_dir, "design.bin");
+  const std::string fields_stream_path = join_path(out_dir, "fields.bin");
+  auto publish_artifacts_so_far =
+      [&](const std::vector<MinimizePlasticVariant>& evaluated_so_far) {
+    // ACCEPTED only, which is exactly what the accumulating version held:
+    // `on_variant` fires only for accepted rungs, so every pointer it ever pushed
+    // was an accepted one. Filtering here says so directly instead of depending on
+    // the ladder stopping at the first rejection, and keeps the streamed
+    // containers byte-identical to what they carried before.
+    std::vector<const MinimizePlasticVariant*> so_far;
+    so_far.reserve(evaluated_so_far.size());
+    for (const MinimizePlasticVariant& e : evaluated_so_far)
+      if (e.accepted) so_far.push_back(&e);
+    // Best-effort BOTH: an artifact that cannot be written must never take a run
+    // down. The final writes still throw — those are the contract.
+    try {
+      write_design_file(design_stream_path, so_far, solved_grid);
+    } catch (const std::exception&) {
+    }
+    try {
+      write_fields_file(fields_stream_path, so_far, solved_grid);
+    } catch (const std::exception&) {
+    }
+  };
   if (emit_progress) {
     options.progress = [](std::size_t rung, std::size_t rungs, int iter) {
       std::printf("PROGRESS rung=%zu rungs=%zu iter=%d\n", rung, rungs, iter);
       std::fflush(stdout);
     };
-    options.on_variant = [&](const MinimizePlasticVariant& v) {
+    options.on_variant = [&](const MinimizePlasticVariant& v,
+                             const std::vector<MinimizePlasticVariant>&
+                                 evaluated_so_far) {
+      // `on_variant` fires ONLY for ACCEPTED rungs (minimize_plastic.cpp guards
+      // the call with `if (result.evaluated.back().accepted)`), so the running
+      // containers hold exactly the rungs that have streamed — which is exactly
+      // the set a client can see. The FINAL writes add any rejected rungs
+      // design.bin also carries, and are unchanged, so a completed run ships the
+      // identical files it always did.
+      publish_artifacts_so_far(evaluated_so_far);
       if (!v.accepted) return;
       const std::string p =
           export_variant_mesh(v, out_dir, job.output, solved_grid);

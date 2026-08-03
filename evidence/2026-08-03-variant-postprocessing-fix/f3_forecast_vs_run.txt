@@ -1,0 +1,28 @@
+FORECAST vs RUN — same design (l-bracket res 48, variant vf 0.50), five configurations
+The forecast runs BEFORE the job, with no FEA; the run is the real lattice_variant job.
+
+config         |   fc reg  fc latt fc solid |  run reg run latt run solid | verdict 
+--------------------------------------------------------------------------------------------
+A_auto_w042    |     7652        0     7652 |     7652        0     7652 | EXACT
+B_auto_w010    |     7652     3854     3798 |     7652     3854     3798 | EXACT
+C_swept_w010   |     7652     3854     3798 |     7652     3854     3798 | EXACT
+D_fixed2mm     |     7652     2742     4910 |     7652     2742     4910 | EXACT
+E_include      |     7652     2742     4910 |     7652     2742     4910 | EXACT
+
+per-reason and include-void, both sides:
+  A_auto_w042    thin fc=7652   run=7652   | unprintable fc=0    run=0    | irrecoverable=7652   | include_void fc=0      run=0     
+  B_auto_w010    thin fc=3798   run=3798   | unprintable fc=0    run=0    | irrecoverable=3798   | include_void fc=0      run=0     
+  C_swept_w010   thin fc=3798   run=3798   | unprintable fc=0    run=0    | irrecoverable=3798   | include_void fc=0      run=0     
+  D_fixed2mm     thin fc=4910   run=4910   | unprintable fc=0    run=0    | irrecoverable=1884   | include_void fc=0      run=0     
+  E_include      thin fc=4910   run=4910   | unprintable fc=0    run=0    | irrecoverable=1884   | include_void fc=59932  run=59932 
+
+EVALUATED counterfactuals (bar F4 — each is a real second grading call):
+  A_auto_w042:
+     (none offered — every rejection is irrecoverable by any cell size)
+  D_fixed2mm:
+     halve the cell size                                -> 5768/7652 latticed (75.4%)
+     double the cell size                               -> 0/7652 latticed (0.0%)
+  E_include:
+     halve the cell size                                -> 5768/7652 latticed (75.4%)
+     double the cell size                               -> 0/7652 latticed (0.0%)
+     drop the include regions (lattice the whole part)  -> 2742/7652 latticed (35.8%)

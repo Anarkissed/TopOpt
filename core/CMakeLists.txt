@@ -1416,6 +1416,22 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
   endif()
   add_test(NAME cli_demo COMMAND test_cli)
 
+  # Task 2026-08-03-variant-postprocessing-fix (defect 1): design.bin is
+  # published AFTER EVERY VARIANT, not once at the end of the ladder. Runs the
+  # real topopt-cli as a subprocess and reads the container back at the moment
+  # each VARIANT line arrives — the way the LAN worker's /files route sees it —
+  # then proves the finished run's artifacts are byte-identical to a control run.
+  add_executable(test_design_stream tests/validation/test_design_stream.cpp)
+  target_link_libraries(test_design_stream PRIVATE topopt)
+  target_compile_definitions(test_design_stream PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+    TOPOPT_CLI_EXE="$<TARGET_FILE:topopt_cli>")
+  add_dependencies(test_design_stream topopt_cli)
+  add_test(NAME design_stream COMMAND test_design_stream)
+
   # STEP-0 parity gate (handoff 093): proves configure_production_options +
   # build_production_loadcase — the ONE seam the CLI and the iPad app both route
   # through — apply the production solver config and produce a deterministic,

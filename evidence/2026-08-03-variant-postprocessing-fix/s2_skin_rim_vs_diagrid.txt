@@ -1,0 +1,18 @@
+S2 · WHAT EACH BOUNDARY TREATMENT PRODUCES
+
+lattice-variant on the l-bracket design (res 48, variant vf 0.50, AUTO cell,
+min_extrudable_width 0.42 mm — the closest available analogue of the
+maintainer's configuration). Only `lattice.skin` differs between the three.
+
+skin        rim_el skin_str  landings   clipped   interior_mm3       skin_mm3     mass_g
+none             0        0         0         0              0              0    18.5322
+rim              0        0         0         0              0              0    18.5322
+diagrid          0        0         0         0              0              0    18.5322
+
+All three are IDENTICAL because nothing was latticed at all:
+  region_voxels=7652  latticed_voxels=0  solid_fallback_voxels=7652  region_ungradeable=True
+
+A diagrid anchors at the LANDINGS of clipped interior struts. With no interior
+struts there are no landings, so there is no skin to emit — the same failure as
+the maintainer's variant 038. A rim is worse still: it needs an analytic PLANE
+face, and no production LatticeBoundary ever has one (see the handoff, S1).

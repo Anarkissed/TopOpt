@@ -822,7 +822,7 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish", "regions"},
+                         "outer_finish", "regions", "forecast_only"},
                         "lattice");
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
@@ -973,6 +973,13 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail("lattice outer_finish \"" + job.lattice.outer_finish +
                     "\" needs skin \"diagrid\" — the diagrid IS the outer "
                     "finish that replaces or dresses the shell");
+    }
+    // THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix, bar
+    // F3). Absent => false => every existing job runs exactly as it did.
+    if (const JsonValue* fo = find_key(lat, "forecast_only")) {
+      if (fo->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"forecast_only\" must be a boolean");
+      job.lattice.forecast_only = (fo->num != 0.0);
     }
   }
 

@@ -8,7 +8,8 @@
 #
 # Usage:  ./run_e2e.sh <case>        # one of: happy mismatch offline bad_mesh
 #                                     #   reject_all cancel slow_sparse
-#                                     #   stream_drop worker_dies reattach
+#                                     #   stream_drop worker_dies retain_dies
+#                                     #   reattach
 #         ./run_e2e.sh all           # every case, in sequence
 set -uo pipefail
 
@@ -128,6 +129,15 @@ run_case() {
       start_worker "$WORKER_PORT" normal 0.4 20
       wait_health "$WORKER_PORT" || { echo "worker failed"; return 1; }
       start_proxy "$CLIENT_PORT" "$WORKER_PORT" events-once "" ;;
+    retain_dies)
+      # Task 2026-08-03-variant-postprocessing-fix, defect 1 — THE MAINTAINER'S
+      # SEQUENCE. Two variants stream (each publishing design.bin), then the worker
+      # is killed before the terminal event. The client must keep the variants AND
+      # the retention pair that makes them workable. No proxy: the worker really
+      # goes away, which is what makes the post-terminal fetch impossible.
+      WORKER_PORT="$(freeport)"; CLIENT_PORT="$WORKER_PORT"; GRACE=2
+      start_worker "$WORKER_PORT" retain_dies 0.3 20
+      wait_health "$WORKER_PORT" || { echo "worker failed"; return 1; } ;;
     worker_dies)
       WORKER_PORT="$(freeport)"; CLIENT_PORT="$(freeport)"; GRACE=3
       PROXY_LOG="$HERE/.proxy-reqs-$CLIENT_PORT.log"; : >"$PROXY_LOG"
@@ -167,7 +177,7 @@ PY
   ( cd "$PKG" && xcodebuild test \
       -scheme TopOptKit-Package -destination 'platform=macOS' \
       -only-testing:TopOptFlowsTests/RemoteRunnerE2ETests/testEndToEnd 2>&1 ) \
-    | grep -E '^== E2E|^  |Test Case .*(passed|failed)|Executed .* test' \
+    | grep -E '^== E2E|^  |Test Case .*(passed|failed)|Executed .* test|error: -\[' \
     | grep -vE 'autoShortcut|Instance Registry|synchronousRemoteObjectProxy'
 
   cleanup; PIDS=()
@@ -189,7 +199,7 @@ run_queue() {
 }
 
 if [ "${1:-}" = "all" ]; then
-  for c in offline mismatch happy bad_mesh reject_all cancel slow_sparse stream_drop worker_dies reattach; do
+  for c in offline mismatch happy bad_mesh reject_all cancel slow_sparse stream_drop worker_dies retain_dies reattach; do
     run_case "$c"
   done
   run_queue

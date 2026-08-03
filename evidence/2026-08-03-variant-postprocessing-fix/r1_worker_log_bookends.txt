@@ -1,0 +1,7 @@
+2026-08-02T16:07:49.933 meta   launch /Users/nadim/dev/TopOpt/TopOpt/core/build/topopt-cli run /Users/nadim/.topopt-worker/95f4130119414636/job.json --out /Users/nadim/.topopt-worker/95f4130119414636/out
+2026-08-02T16:07:59.125 stderr [loadcase] load-group 0: faces=22 |F|=22.2N voxels_tagged=5165 status=ok
+2026-08-02T16:07:59.127 stderr [loadcase] warm_start_inherit=1 mode=load-case
+   ... (progress lines elided) ...
+2026-08-02T17:03:31.473 stdout PROGRESS rung=3 rungs=4 iter=104
+2026-08-02T17:03:37.944 stdout PROGRESS rung=3 rungs=4 iter=105
+2026-08-02T17:03:46.583 stdout PROGRESS rung=3 rungs=4 iter=106

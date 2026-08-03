@@ -170,6 +170,17 @@ struct JobLattice {
   //                closed); certification unchanged from "shell".
   // A non-"shell" finish requires skin == "diagrid" (the skin IS the finish).
   std::string outer_finish = "shell";
+
+  // THE PRE-FLIGHT FORECAST (task 2026-08-03-variant-postprocessing-fix, bar F3).
+  // true => `lattice_variant_job` runs the grading law and the role accounting on
+  // the stored design, writes <out_dir>/lattice_forecast.json, and RETURNS — no
+  // certification solve, no mesh, no receipt. It is the same law on the same
+  // inputs the real run would use, so what it reports is what the run would do:
+  // which voxels would be latticed, which would stay solid AND WHY (per reason),
+  // how many include-region voxels sit on void, whether the boundary choice can
+  // emit at all, and EVALUATED counterfactuals for the remedies worth offering.
+  // Default false => every existing job is byte-identical.
+  bool forecast_only = false;
 };
 
 // Optional "grading" block (handoff 2026-07-29-lattice-grading-law) — arms the
@@ -786,6 +797,10 @@ struct LatticeVariantJobResult {
   std::string loadcase_receipt_json;
   std::string run_info_path;            // <out_dir>/run_info.json (grading record)
   std::string fields_path;              // <out_dir>/fields.bin
+  // FORECAST-ONLY runs (job.lattice.forecast_only): the only two fields set, and
+  // every field above is left at its default because no solve ran.
+  std::string forecast_path;            // <out_dir>/lattice_forecast.json
+  std::string forecast_json;
 };
 
 // Lattice the variant named by `job.variant`. Throws JobError for a bad

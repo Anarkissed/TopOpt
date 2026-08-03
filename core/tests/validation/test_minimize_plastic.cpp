@@ -1028,7 +1028,8 @@ int main() {
     MinimizePlasticOptions o = base_options();
     o.gravity = cal_gravity;   // accept-all: the whole ladder is streamed
     std::vector<double> streamed_vfs;
-    o.on_variant = [&](const MinimizePlasticVariant& v) {
+    o.on_variant = [&](const MinimizePlasticVariant& v,
+                       const std::vector<MinimizePlasticVariant>&) {
       CHECK(v.accepted, "K: only accepted variants are streamed");
       // The variant is fully analysed when streamed (report + viz fields ready).
       CHECK(std::isfinite(v.report.margin.worst_case),
@@ -1264,11 +1265,20 @@ int main() {
     // re-reading it here (after the driver may have pushed another rung) is the
     // read-after-realloc probe — valid only because the fixed driver reserves.
     const MinimizePlasticVariant* prev = nullptr;
-    o.on_variant = [&](const MinimizePlasticVariant& v) {
+    o.on_variant = [&](const MinimizePlasticVariant& v,
+                       const std::vector<MinimizePlasticVariant>& so_far) {
       ++streamed;
       check_streamed(v);
       if (prev != nullptr) check_streamed(*prev);
       prev = &v;  // stable across callbacks iff result.evaluated never reallocates
+      // The handed-over container is the LIVE result.evaluated, with this rung as
+      // its back() and one entry per rung streamed so far. run_job serialises
+      // design.bin/fields.bin straight off it after every rung, so if this ever
+      // stopped being true the per-rung artifacts would silently lose a rung.
+      CHECK(so_far.size() == streamed,
+            "N: on_variant is handed every variant evaluated so far");
+      CHECK(&so_far.back() == &v,
+            "N: the streamed variant IS the back() of the handed-over container");
     };
 
     const MinimizePlasticResult r =

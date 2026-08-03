@@ -142,8 +142,38 @@ struct DesignStore {
 // Returns the number of blocks written. Throws DesignStoreError if the file
 // cannot be written, or if a variant's density size disagrees with the grid (a
 // bug — fail loudly rather than ship a container a reader would misindex).
+//
+// THE FILE IS PUBLISHED ATOMICALLY (task 2026-08-03-variant-postprocessing-fix):
+// bytes go to "<path>.part" and are renamed onto `path`. Before this the
+// container was written once, at the very end of the whole ladder, so nothing
+// could ever observe a partial one. It is now flushed AFTER EVERY VARIANT (see
+// the overload below and run_job's on_variant), which means a reader — the LAN
+// worker serving GET /jobs/{id}/files/design.bin — can ask for it WHILE a later
+// rung is rewriting it. A rename is the only way that reader is guaranteed a
+// whole container instead of a truncated one.
 int write_design_file(const std::string& path,
                       const MinimizePlasticResult& result,
+                      const VoxelGrid& solved_grid);
+
+// The same writer over a BORROWED variant list, so a run can publish the designs
+// it has produced SO FAR without owning a MinimizePlasticResult (which does not
+// exist until the ladder ends). `write_design_file(path, result, grid)` is
+// exactly this called with pointers into `result.evaluated`, so an incremental
+// flush and the final write produce byte-identical containers for the same
+// variants.
+//
+// POINTERS, NOT COPIES: an incremental flush costs no extra memory at all, where
+// copying each rung's fields would have doubled the largest arrays in the process
+// at 128³.
+//
+// THE POINTERS MUST NOT OUTLIVE THE CALL. They are only ever as stable as the
+// container they point into, and this writer promises nothing about that — it
+// reads them and returns. run_job builds its list inside the `on_variant`
+// callback, from the live `result.evaluated` that callback is handed, and drops
+// it again on return; an earlier cut accumulated the pointers across rungs, which
+// was correct only while that vector never reallocated. Do not reintroduce that.
+int write_design_file(const std::string& path,
+                      const std::vector<const MinimizePlasticVariant*>& variants,
                       const VoxelGrid& solved_grid);
 
 // Read a design.bin. Throws DesignStoreError on an unreadable file, an

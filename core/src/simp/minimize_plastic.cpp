@@ -1794,7 +1794,11 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       // vector past capacity would reallocate and free the block a streamed
       // reference pointed into (ASan heap-buffer-overflow, read-after-realloc),
       // surfacing downstream as empty keyframeMeshes / displacementField.
-      if (options.on_variant) options.on_variant(result.evaluated.back());
+      // The second argument is `result.evaluated` itself — the live container, so
+      // a caller needing every rung so far reads it fresh rather than holding
+      // pointers across calls (see MinimizePlasticOptions::on_variant).
+      if (options.on_variant)
+        options.on_variant(result.evaluated.back(), result.evaluated);
 
       // M7.anchor-integrity (FIX 2): the ladder FLOOR. Once an accepted rung
       // already clears the comfort floor, stop — do NOT keep stripping toward the

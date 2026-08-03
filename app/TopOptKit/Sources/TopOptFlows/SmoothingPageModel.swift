@@ -598,16 +598,42 @@ public final class SmoothingPageModel: ObservableObject {
     /// KEEP the smoothing: the smoothed geometry and the receipt that certified
     /// it travel onward together. Refused unless there is a CURRENT (non-stale)
     /// receipt — a smoothing whose verdict could not be produced is never keepable.
+    ///
+    /// `designFingerprint` is core's hash over the rung's density field, when the
+    /// caller holds the retained container. It makes the recorded identity a DESIGN
+    /// rather than a position (task 2026-08-03-variant-postprocessing-concurrency,
+    /// requirement 3) — absent, the rung index and its volume fraction are the whole
+    /// identity, which is honest rather than pretending to a hash we do not have.
     @discardableResult
-    public func keep(regionLines: [String]) -> Bool {
+    public func keep(regionLines: [String],
+                     designFingerprint: UInt64? = nil) -> Bool {
         guard let r = receipt, let out = lastSmoothedOutcome,
               !out.meshVertices.isEmpty else { return false }
         kept = SmoothKeptResult(meshVertices: out.meshVertices,
                                 meshIndices: out.meshIndices,
                                 meshPath: r.after.meshPath,
                                 certification: r.after,
-                                regionSummary: regionLines)
+                                regionSummary: regionLines,
+                                rung: rungFingerprint(designFingerprint))
         return true
+    }
+
+    /// The rung this page is working on, as an identity. Read from the page's own
+    /// immutable `context` — never from whatever the workspace has selected now,
+    /// which is exactly the confusion this fingerprint exists to prevent.
+    public func rungFingerprint(_ designFingerprint: UInt64? = nil)
+        -> SmoothingRungFingerprint {
+        SmoothingRungFingerprint(
+            variantIndex: context.variantIndex,
+            requestedVolumeFraction: context.requestedVolumeFraction,
+            designFingerprint: designFingerprint)
+    }
+
+    /// The banner to show when the kept smoothing belongs to a different rung than
+    /// the one on screen. nil ⇒ nothing to say.
+    public func stalenessBanner(currentRung: SmoothingRungFingerprint?)
+        -> LatticePageBanner? {
+        SmoothingStaleness.banner(kept: kept?.rung, current: currentRung)
     }
 
     /// DISCARD (bar AE9): every trace of the smoothing goes, and the ORIGINAL
