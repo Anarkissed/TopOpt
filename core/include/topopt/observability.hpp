@@ -697,6 +697,67 @@ struct RunInfo {
   };
   std::vector<GradingCellLevel> grading_cell_levels;
 
+  // ── MULTISCALE LATTICE TO (task multiscale-lattice-to) ─────────────────────
+  // Written ONLY when the run armed multiscale (multiscale_armed), so a run that
+  // did not is byte-for-byte the run_info.json it always wrote. One entry per
+  // EVALUATED rung, in ladder order, so the receipt says what the optimizer did
+  // on every rung rather than only the one that shipped.
+  bool multiscale_armed = false;
+  std::string multiscale_topology;        // "octet"
+  long long multiscale_region_voxels = 0; // design voxels the lattice law covered
+  long long multiscale_fit_rows = 0;      // measured rows the C(rho) fit ran through
+  double multiscale_rho_lo = 0.0, multiscale_rho_hi = 0.0;
+  double multiscale_floor_cells = 0.0;    // lattice_cells_per_member_min
+  double multiscale_floor_cell_mm = 0.0;  // the cell widths were divided by
+  int multiscale_floor_stride = 0;        // 0 = the per-iteration measure was off
+  // THE CEILING: region voxels that clear the cells-per-member floor when the part
+  // is FULLY SOLID — the most any design could lattice. Run-level, since it is a
+  // property of the part and the cell size, not of a rung.
+  // REACHABILITY of the declared lattice region under the design mask: how much
+  // of it the optimizer can actually move. FrozenSolid voxels (a declared load or
+  // fixture face, a face-protection collar) are held at density 1 all run and can
+  // never become lattice in ANY formulation — the difference between "the
+  // optimizer chose solid here" and "nothing could have been lattice here".
+  // LENGTH-SCALE CONTROL derived from the cells-per-member floor: the minimum
+  // feature size the floor implies (floor_cells * cell / 2), and the value the run
+  // actually used (the max of that and whatever the job asked for). Without it the
+  // multiscale optimizer spreads material into sub-floor webs; see production.cpp.
+  double multiscale_min_feature_implied_mm = 0.0;
+  double multiscale_min_feature_used_mm = 0.0;
+  long long multiscale_region_active = 0;
+  long long multiscale_region_frozen_solid = 0;
+  long long multiscale_region_frozen_void = 0;
+  long long multiscale_floor_ceiling_measured = 0;
+  long long multiscale_floor_ceiling_eligible = 0;
+  double multiscale_floor_ceiling_min_cells = 0.0;
+  struct MultiscaleRung {
+    double volume_fraction = 0.0;
+    // Feasible-class occupancy of the CONVERGED, PROJECTED design.
+    long long voxels_void = 0, voxels_band = 0, voxels_solid = 0;
+    long long voxels_lower_gap = 0, voxels_upper_gap = 0;  // 0 after projection
+    double band_rho_min = 0.0, band_rho_max = 0.0;
+    // THE PROJECTION CHARGE — signed, reported, never absorbed.
+    long long projected_lower = 0, projected_upper = 0;
+    double projection_volume_delta = 0.0;
+    double projection_max_density_move = 0.0;
+    double volume_fraction_before_projection = 0.0;
+    double volume_fraction_after_projection = 0.0;
+    double volume_fraction_target = 0.0;
+    double volume_constraint_violation = 0.0;
+    // THE CELLS-PER-MEMBER FLOOR on the converged design.
+    long long floor_measured_voxels = 0, floor_below_voxels = 0;
+    double floor_min_cells_per_member = 0.0;
+    std::vector<long long> floor_histogram;  // 1-cell buckets; last is [10, inf)
+    // Per-iteration floor occupancy while the design was forming.
+    struct FloorSample {
+      int iteration = 0;
+      long long measured = 0, below = 0;
+      double min_cells_per_member = 0.0;
+    };
+    std::vector<FloorSample> floor_history;
+  };
+  std::vector<MultiscaleRung> multiscale_rungs;
+
   // ── THE EXPORTED GEOMETRY'S FRAME (handoff 2026-08-01-bake-build-orientation)
   // Provenance for the one question a reader of an exported file cannot answer
   // from the file itself: is this mesh in the input model's coordinates, or has

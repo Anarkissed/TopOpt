@@ -158,6 +158,34 @@ CubicTensor lattice_cubic_tensor(LatticeTopology topo, double rho,
                                  double youngs_modulus_solid,
                                  bool* rho_clamped = nullptr);
 
+// One MEASURED row of the embedded library, at the library's own measurement basis
+// (kLibraryEs = 3500 MPa). `rho` is the row's relative density; C11/C12/C44 are the
+// homogenized constants lattice_cubic_tensor interpolates between.
+struct LatticeResolvedRow {
+  double rho = 0.0;
+  double C11 = 0.0, C12 = 0.0, C44 = 0.0;
+};
+
+// The RESOLVED rows of `topo`'s table — the contiguous validated block, i.e. exactly
+// the rows lattice_cubic_tensor interpolates and the rows the band
+// [lattice_rho_min, lattice_rho_max] spans. Returned at the LIBRARY basis
+// (Es = kLibraryEs); a caller wanting another solid modulus scales by Es/3500, which
+// is what lattice_cubic_tensor itself does (effective stiffness is exactly linear in
+// the solid modulus). Empty for a topology with no validated cubic tensor (the
+// tetragonal variants) — the same "refuse" signal lattice_topology_certifiable gives.
+//
+// WHY THIS IS PUBLIC: the multiscale material model (lattice_material.hpp) fits a
+// C1-continuous curve THROUGH these rows so the optimizer can steer on the measured
+// physics. It reads them from HERE rather than transcribing them, so a table change
+// moves the fit automatically and the two cannot drift (the probe that prototyped the
+// model, handoff 2026-07-31-multiscale-lattice-feasibility, transcribed them into a
+// harness header and needed a pinning test to catch drift; production does not).
+std::vector<LatticeResolvedRow> lattice_resolved_rows(LatticeTopology topo);
+
+// The solid Young's modulus the embedded library was measured at (PLA, materials.json).
+// Rows returned by lattice_resolved_rows are on this basis.
+double lattice_library_youngs_modulus();
+
 // The relative density (solid volume fraction) of ONE `topo` unit cell of edge
 // `cell_mm` filled with cylindrical struts of radius `strut_radius_mm` — the map
 // from the PRINTED geometry a job declares (cell size + uniform strut radius) to

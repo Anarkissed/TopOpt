@@ -1,0 +1,1 @@
+topopt-cli: job.json: "ladder" is not allowed with "loads": in loadcase mode the anchors are the fixtures, the groups are the design load, and the production ladder + margin apply

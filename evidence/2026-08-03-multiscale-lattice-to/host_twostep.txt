@@ -1,0 +1,6 @@
+=== HOST before two-step ===
+2026-08-02T23:59:48Z
+19:59  up 24 days,  2:37, 2 users, load averages: 25.61 20.08 15.64
+=== HOST after two-step ===
+2026-08-03T00:20:54Z
+20:20  up 24 days,  2:58, 2 users, load averages: 8.07 7.54 9.50

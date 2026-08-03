@@ -236,6 +236,17 @@ bool production_mg_algebraic_level1();
 // production.cpp for the TRIPWIRE and the measured justification.
 bool production_width_aware_knockdown();
 
+// Task multiscale-lattice-to — whether configure_production_options lets a JOB arm
+// MULTISCALE lattice topology optimization (true = the job's own
+// `lattice.multiscale` flag is HONOURED; false = it is refused). This is a
+// PERMISSION, not a run-wide posture: unlike every other constant here, multiscale
+// changes the answer by design, so it can only be a per-job opt-in. A job that does
+// not ask for it is byte-identical either way, and the reference world never calls
+// configure_production_options at all (THE ONE RULE). Exposed so run_job reads the
+// named constant rather than a bare true and run_info can report the posture. See
+// production.cpp for the TRIPWIRE and why the topology set is octet-only.
+bool production_multiscale_lattice_to();
+
 // THE single builder of the accept-gate KnockdownSpec from a job's options (handoff
 // 2026-07-26-post-merge-build-fix). Every certification path that gates a fixed
 // design — the optimizer's per-rung gate (minimize_plastic), the CLI standalone

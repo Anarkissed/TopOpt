@@ -1,0 +1,5 @@
+./run_m2.sh: line 10: 64623 Terminated: 15          $CLI run job_multiscale.json --out m2_multiscale > m2_multiscale.log 2>&1
+multiscale exit=143
+./run_m2.sh: line 14: 78229 Terminated: 15          $CLI run job_twostep.json --out m2_twostep > m2_twostep.log 2>&1
+twostep exit=143
+ALLDONE

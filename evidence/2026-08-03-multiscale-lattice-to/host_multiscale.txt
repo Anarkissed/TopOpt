@@ -1,0 +1,6 @@
+=== HOST before multiscale ===
+2026-08-02T22:58:46Z
+18:58  up 24 days,  1:36, 2 users, load averages: 10.70 12.13 12.27
+=== HOST after multiscale ===
+2026-08-02T23:59:48Z
+19:59  up 24 days,  2:37, 2 users, load averages: 25.61 20.08 15.64

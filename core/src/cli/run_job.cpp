@@ -274,7 +274,7 @@ std::optional<BuildFrameRotation> variant_bake_rotation(
 // and then the certificate would describe an object the slicer never produces.
 std::string export_variant_mesh(const MinimizePlasticVariant& variant,
                                 const std::string& out_dir, const JobOutput& out,
-                                const VoxelGrid& sg) {
+                                const VoxelGrid& sg, double printed_iso = 0.5) {
   const std::string path = join_path(
       out_dir, mesh_file_name(out.mesh_prefix, variant.requested_volume_fraction,
                               out.mesh_format));
@@ -283,7 +283,7 @@ std::string export_variant_mesh(const MinimizePlasticVariant& variant,
   if (sf > 1) {
     const TriangleMesh raw = marching_cubes_resampled(
         sg.nx, sg.ny, sg.nz, sg.spacing, sg.origin,
-        variant.optimization.physical_density, /*iso=*/0.5, sf,
+        variant.optimization.physical_density, printed_iso, sf,
         ResampleInterp::Tricubic);
     smooth = keep_largest_component(raw);
   }
@@ -431,15 +431,93 @@ void fill_grading_cell_plan(RunInfo& gi, const GradedField& gf) {
   }
 }
 
+// THE PRINTED-SET THRESHOLD this run reads designs at (task multiscale-lattice-to).
+// 0.5 — the M3.5 iso — on every classic run, so every existing path is byte-for-byte
+// unchanged; below the certified band's floor on a MULTISCALE run, where a voxel at
+// density 0.30 is a real 30%-dense lattice cell and not a half-empty solid voxel.
+// ONE resolver, read by the mesh export, the lattice candidate set, the boundary
+// base and the grading law, so the shape the file carries and the shape the gate
+// certified cannot disagree. See lattice_material.hpp for the derivation.
+double run_printed_iso(const MinimizePlasticOptions& o) {
+  return o.multiscale_lattice ? multiscale_printed_iso(o.multiscale_topology) : 0.5;
+}
+
+// THE MULTISCALE REGION (task multiscale-lattice-to) — which voxels the OPTIMIZER
+// treats as lattice material. This is the DESIGN-INDEPENDENT half of
+// lattice_certification_mask: the same keep-out and role membership tests, on the
+// same resolved ClearanceGeometry objects, with the density-dependent terms (the
+// printed-iso test and the cell-overlap proof) deliberately left out.
+//
+// WHY IT MUST BE DESIGN-INDEPENDENT: this mask decides each voxel's MATERIAL LAW
+// for the whole run. If it were a function of the evolving density it would flip
+// voxels between the cubic and the penalized isotropic law from iteration to
+// iteration, which is a discontinuous objective and a guaranteed oscillation. The
+// role regions and keep-outs are pure geometry, so this is well-defined before the
+// first solve and is resolved exactly once.
+//
+// The consequence is stated rather than hidden: a voxel in the region that the
+// certification mask later drops (its cell could not be proven to overlap, or the
+// grading law left its member solid) was optimized as lattice and will be printed
+// SOLID — which is CONSERVATIVE (solid is stiffer than the lattice the optimizer
+// assumed) and is exactly the direction the accept gate can absorb. The receipts
+// report both counts so the difference is visible.
+std::vector<char> multiscale_region_mask(
+    const VoxelGrid& sg, const std::vector<ClearanceGeometry>& kos,
+    const LatticeRoleRegions& roles) {
+  LatticeBoundary members;
+  for (const ClearanceGeometry& g : kos)
+    members.add_keep_out(g, g.kind == ClearanceKind::Bolt);
+  for (const ClearanceGeometry& g : roles.includes) members.add_include_region(g);
+  for (const ClearanceGeometry& g : roles.excludes) members.add_exclude_region(g);
+  std::vector<char> mask(sg.voxel_count(), 0);
+  for (int k = 0; k < sg.nz; ++k)
+    for (int j = 0; j < sg.ny; ++j)
+      for (int i = 0; i < sg.nx; ++i) {
+        if (!sg.solid(i, j, k)) continue;
+        const Vec3 c{sg.origin.x + (i + 0.5) * sg.spacing,
+                     sg.origin.y + (j + 0.5) * sg.spacing,
+                     sg.origin.z + (k + 0.5) * sg.spacing};
+        // PRECEDENCE, identical to lattice_certification_mask: clearance beats
+        // both roles; exclude beats include.
+        if (members.in_keep_out(c, 0.0)) continue;
+        if (members.in_exclude_region(c, 0.0)) continue;
+        if (members.has_include_regions() && !members.in_include_region(c, 0.0))
+          continue;
+        mask[sg.index(i, j, k)] = 1;
+      }
+  return mask;
+}
+
+// The FINEST lattice cell (mm) the grading law could grant any member on this job —
+// the most favourable cell a member could be measured against, and therefore the
+// honest denominator for the cells-per-member floor while the design is forming.
+// AUTO takes the printability floor itself; FIXED takes its target raised to that
+// floor; SWEPT's finest level is its declared minimum, likewise raised. Mirrors
+// grading.cpp's own resolution — it does not invent a second rule.
+double multiscale_floor_cell_mm(const JobDescription& job) {
+  const double floor_mm = lattice_cell_printability_floor_mm(
+      LatticeTopology::Octet, job.grading.min_extrudable_width_mm);
+  CellSizeMode mode = CellSizeMode::Fixed;
+  if (!cell_size_mode_from_name(job.grading.cell_mode.c_str(), mode))
+    return floor_mm;  // unknown mode is refused downstream; report the floor
+  switch (mode) {
+    case CellSizeMode::Auto:  return floor_mm;
+    case CellSizeMode::Swept: return std::max(job.grading.cell_min_mm, floor_mm);
+    case CellSizeMode::Fixed: break;
+  }
+  return std::max(job.grading.cell_mm, floor_mm);
+}
+
 LatticeBoundary lattice_boundary_for(const VoxelGrid& sg,
                                      const std::vector<double>& dens,
                                      double cell_mm,
                                      const std::vector<ClearanceGeometry>& kos,
-                                     const LatticeRoleRegions& roles) {
+                                     const LatticeRoleRegions& roles,
+                                     double printed_iso = 0.5) {
   LatticeBoundary B;
   // Window: clipping needs exact distances only out to one cell of slack past
   // the largest erosion; two cells is comfortably conservative.
-  B.set_voxel_base(&sg, &dens, 0.5, 2.0 * cell_mm);
+  B.set_voxel_base(&sg, &dens, printed_iso, 2.0 * cell_mm);
   for (const ClearanceGeometry& g : kos)
     B.add_keep_out(g, /*collar=*/g.kind == ClearanceKind::Bolt);
   // Lattice roles (stage 1): activation + certification-mask terms of the SAME
@@ -556,7 +634,7 @@ LatticeExportOutcome export_latticed_variant(
     // the ladder is dyadic and aligned (cell_plan.hpp states why), so no bridging
     // geometry exists to get wrong.
     const std::vector<LatticeLevelSpec>* levels = nullptr,
-    double base_cell_mm = 0.0) {
+    double base_cell_mm = 0.0, double printed_iso = 0.5) {
   // Occupancy + boundary: the shared predicate (`boundary`, built by the caller
   // from THIS variant's density + the declared clearance keep-outs + the job's
   // lattice role regions). Cells activate by OVERLAP with it; strut solids are
@@ -592,7 +670,7 @@ LatticeExportOutcome export_latticed_variant(
       for (int j = 0; j < sg.ny; ++j)
         for (int i = 0; i < sg.nx; ++i) {
           const std::size_t e = sg.index(i, j, k);
-          if (!(dens[e] >= 0.5) || cert_mask[e]) continue;
+          if (!(dens[e] >= printed_iso) || cert_mask[e]) continue;
           const Vec3 c{sg.origin.x + (i + 0.5) * sg.spacing,
                        sg.origin.y + (j + 0.5) * sg.spacing,
                        sg.origin.z + (k + 0.5) * sg.spacing};
@@ -686,7 +764,7 @@ LatticeExportOutcome export_latticed_variant(
   for (int k = 0; k < sg.nz; ++k)
     for (int j = 0; j < sg.ny; ++j)
       for (int i = 0; i < sg.nx; ++i)
-        if (dens[sg.index(i, j, k)] >= 0.5) ++oc.region_voxels;
+        if (dens[sg.index(i, j, k)] >= printed_iso) ++oc.region_voxels;
   return oc;
 }
 
@@ -751,6 +829,11 @@ struct LatticeCertContext {
   KnockdownSpec knockdown;
   double part_solid = 0.0;
   double cert_tol = 0.0;
+  // The printed-set threshold every solve built from this context reads the design
+  // at — 0.5 on a classic run, below the certified band's floor on a multiscale
+  // one. Carried on the context so the SOLID certification, the LATTICED
+  // re-certification and the clamp counterfactual cannot drift apart.
+  double printed_iso = 0.5;
 };
 
 // `domain` is THE domain the run solved on (resolve_design_domain, pipeline.hpp):
@@ -799,7 +882,8 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
   // the caller's grid, i.e. byte-identical to what this site computed before.
   cx.loads = design_domain_loads(domain, options, material.density_g_cm3);
   cx.load_path_ok =
-      load_path_connected(sg, variant.optimization.physical_density, 0.5);
+      load_path_connected(sg, variant.optimization.physical_density,
+                          run_printed_iso(options));
   cx.knockdown = knockdown_spec_for(options);
   // The part-relative denominator (analyze.cpp's printed_fraction) is the
   // ORIGINAL part's solid count — the same quantity minimize_plastic's ladder
@@ -811,6 +895,12 @@ LatticeCertContext lattice_cert_context(const MinimizePlasticVariant& variant,
   // only ever loosens the TRAJECTORY (draft_loose_tol), never this cert solve, so if
   // draft is armed the cert tolerance must be strictly tighter than the loose one.
   cx.cert_tol = options.simp.cg_tolerance;
+  // THE PRINTED-SET THRESHOLD this certification reads the design at (task
+  // multiscale-lattice-to). It MUST be the same one the optimizer, the export and
+  // the grading law used: on a multiscale design the in-band voxels below 0.5 are
+  // real lattice material, and re-certifying at 0.5 would certify an object with
+  // that material deleted — a different object than the one the file carries.
+  cx.printed_iso = run_printed_iso(options);
   assert((!options.draft_quality || cx.cert_tol < options.draft_loose_tol) &&
          "E4: latticed certification must run at the tight cert tolerance, never the "
          "draft loose tolerance");
@@ -832,7 +922,11 @@ FixedDesignAnalysis analyze_variant_with_posture(
                               // composite field — the latticed object's strut
                               // criteria (S-c/S-d/S-e) are only measurable here.
                               options.build_orientation_report,
-                              resolve_build_direction_is_inferred(options));
+                              resolve_build_direction_is_inferred(options),
+                              /*auto_apply_build_orientation=*/false,
+                              // Read the design at the SAME threshold the
+                              // optimizer, the export and the grading law used.
+                              cx.printed_iso);
 }
 
 // Re-certify one accepted variant as the LATTICED composite: once with a nullptr
@@ -1391,6 +1485,14 @@ LatticeVariantOutcome lattice_one_variant(
   const std::vector<DirichletBC>& bcs = domain.bcs;
   LatticeVariantOutcome R;
   const std::vector<double>& dens = v.optimization.physical_density;
+  // THE PRINTED-SET THRESHOLD (task multiscale-lattice-to). 0.5 on a classic run
+  // — byte-for-byte the pre-multiscale path — and below the certified band's floor
+  // on a multiscale one, where an in-band voxel at 0.30 is real lattice material
+  // and thresholding it away would delete what the optimizer placed and the gate
+  // certified. Read ONCE here so the candidate set, the boundary base, the
+  // certification mask, the grading law and the exported geometry all describe the
+  // SAME shape (bar B7's principle, extended to the threshold itself).
+  const double printed_iso = run_printed_iso(options);
   R.design_fingerprint = design_fingerprint(dens);
   const bool graded = job.grading.present;
   R.graded = graded;
@@ -1419,7 +1521,7 @@ LatticeVariantOutcome lattice_one_variant(
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
-          if (!(dens[e] >= 0.5)) continue;
+          if (!(dens[e] >= printed_iso)) continue;
           const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                        solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                        solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
@@ -1427,6 +1529,17 @@ LatticeVariantOutcome lattice_one_variant(
           if (members.in_exclude_region(c, 0.0)) continue;
           if (members.has_include_regions() &&
               !members.in_include_region(c, 0.0))
+            continue;
+          // MULTISCALE: a voxel the OPTIMIZER decided should be SOLID is not a
+          // lattice candidate. Without this the band clamp would pull its
+          // density down to the ceiling and lattice it — removing material the
+          // design deliberately kept, which is the loop/export disagreement this
+          // task exists to end, running in the opposite direction. Measured on
+          // the maintainer's part before the fix: 1,110 of 1,124 "latticed"
+          // voxels (98.8 %) were voxels the projection had made solid. They
+          // belong to the SOLID companion, and the counts below now say so.
+          if (options.multiscale_lattice &&
+              dens[e] > lattice_rho_max(options.multiscale_topology))
             continue;
           cand[e] = 1;
         }
@@ -1442,7 +1555,19 @@ LatticeVariantOutcome lattice_one_variant(
                      job.grading.cell_mode + "\"");
     gp.min_cell_size_mm = job.grading.cell_min_mm;
     gp.max_cell_size_mm = job.grading.cell_max_mm;
-    gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp);
+    // MULTISCALE (task multiscale-lattice-to): the optimizer already chose this
+    // variant's relative density per voxel, and PAID a compliance objective
+    // evaluated at the measured tensor of that density (it is also the density the
+    // certification solve ran on, after the feasible-set projection). Re-deriving
+    // rho from the stress field here would print a DIFFERENT material distribution
+    // than the one that was optimized and certified — the same loop/export
+    // disagreement the two-step pipeline's failure was made of. So the law is
+    // handed the design's own density and grades to THAT. The band clamp, the
+    // cells-per-member floor, the L4 solid fallback and the cell plan are the same
+    // code on the same terms; only the source of rho changes.
+    if (options.multiscale_lattice) gp.prescribed_relative_density = &dens;
+    gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
+                       printed_iso);
     cell = gf.cell_size_mm;
     // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
     // level the plan used, which is what the boundary window, the cell-overlap
@@ -1455,14 +1580,14 @@ LatticeVariantOutcome lattice_one_variant(
   // activation/mask terms. Geometry (a) and certification (b) below both
   // consume this ONE object (bar B7 / H1b).
   const LatticeBoundary boundary = lattice_boundary_for(
-      solved_grid, dens, cell, lattice_kos, lattice_roles);
+      solved_grid, dens, cell, lattice_kos, lattice_roles, printed_iso);
 
   // ── THE certification mask — shared by the export (companion + graded cell
   // activation) and the posture. On a graded run it is intersected with the
   // law's own mask (voxels the law kept solid drop out; law-masked voxels the
   // shared predicate's cell-overlap proof rejects are counted, not hidden).
   std::vector<char> mask = lattice_certification_mask(
-      boundary, solved_grid, dens, 0.5, solved_grid.origin, cell);
+      boundary, solved_grid, dens, printed_iso, solved_grid.origin, cell);
   long long dropped_by_overlap = 0;
   if (graded) {
     for (std::size_t e = 0; e < mask.size(); ++e) {
@@ -1537,7 +1662,7 @@ LatticeVariantOutcome lattice_one_variant(
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
-          if (!(dens[e] >= 0.5)) continue;
+          if (!(dens[e] >= printed_iso)) continue;
           ++added_rcpt.printed_voxels;
           if (in_part[e]) {
             ++added_rcpt.inside_part;
@@ -1693,7 +1818,7 @@ LatticeVariantOutcome lattice_one_variant(
         for (int j = 0; j < solved_grid.ny; ++j)
           for (int i = 0; i < solved_grid.nx; ++i) {
             const std::size_t e = solved_grid.index(i, j, k);
-            if (dens[e] >= 0.5) continue;  // material exists — not the no-op case
+            if (dens[e] >= printed_iso) continue;  // material exists — not the no-op case
             const Vec3 c{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                          solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                          solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
@@ -1761,7 +1886,7 @@ LatticeVariantOutcome lattice_one_variant(
       /*emit_solid_companion=*/graded || roles_present ||
           added_rcpt.kept_solid_voxels > 0,
       levels.empty() ? nullptr : &levels,
-      levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm);
+      levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso);
   R.gen_seconds = wall_seconds() - tg0;
 
   // ── THE AUDIT (design-box runs only, so no existing receipt changes). Measure,
@@ -1789,7 +1914,7 @@ LatticeVariantOutcome lattice_one_variant(
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
           const std::size_t e = solved_grid.index(i, j, k);
-          if (!(dens[e] >= 0.5) || mask[e]) continue;
+          if (!(dens[e] >= printed_iso) || mask[e]) continue;
           const Vec3 vc{solved_grid.origin.x + (i + 0.5) * solved_grid.spacing,
                         solved_grid.origin.y + (j + 0.5) * solved_grid.spacing,
                         solved_grid.origin.z + (k + 0.5) * solved_grid.spacing};
@@ -3838,6 +3963,128 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
   const LatticeRoleRegions lattice_roles =
       job.lattice.present ? lattice_role_regions_from_job(job)
                           : LatticeRoleRegions{};
+
+  // ── MULTISCALE LATTICE TO (task multiscale-lattice-to) ─────────────────────
+  // Arm the optimizer's lattice material law for THIS job, if the job asked and
+  // production permits. Absent `lattice.multiscale` => nothing here runs and the
+  // ladder below is the two-step pipeline, byte-for-byte.
+  //
+  // REFUSALS ARE LOUD. A job that asks for multiscale on a mode with no optimizer,
+  // or while production withholds the permission, is refused with a message that
+  // says which — it is never silently downgraded to the two-step, because the whole
+  // point of the flag is that the two-step does not work here.
+  if (job.lattice.present && job.lattice.multiscale) {
+    if (!production_multiscale_lattice_to())
+      throw JobError(
+          "run_job: lattice.multiscale was requested but this build withholds the "
+          "permission (production_multiscale_lattice_to() is false)");
+    options.multiscale_lattice = true;
+    options.multiscale_topology = LatticeTopology::Octet;  // schema restricts to octet
+    options.multiscale_region =
+        multiscale_region_mask(solved_grid, lattice_kos, lattice_roles);
+    options.multiscale_floor_cell_mm = multiscale_floor_cell_mm(job);
+    // The floor is measured every iteration: the whole reason it is reported is to
+    // make a design starving its members visible AS IT HAPPENS. The measurement is
+    // an EDT over the design; it is charged honestly in the cost table rather than
+    // hidden behind a coarse stride.
+    options.multiscale_floor_stride = 1;
+    // ── LENGTH-SCALE CONTROL FROM THE FLOOR (task multiscale-lattice-to) ─────
+    // THE MEASURED REASON THIS EXISTS. Multiscale legalizes intermediate
+    // density, and the optimizer exploits that by SPREADING material into thin
+    // diffuse webs — which is exactly what the cells-per-member floor forbids.
+    // Measured on a control fixture whose region was fully reachable and whose
+    // ceiling admitted 10,002 of 10,040 voxels: the two-step latticed 19.0 % and
+    // multiscale latticed 0.8 %, with 71 % of the multiscale design's members
+    // spanning under 5 cells. SIMP's rho^3 was accidentally PROTECTING
+    // latticeability by forcing consolidation; removing the penalization removed
+    // that protection with nothing put back.
+    //
+    // The fix is length-scale control, not a constraint fighting the objective:
+    // the density filter's radius sets the smallest member the design can
+    // EXPRESS, so a radius derived from the floor makes a sub-floor member
+    // inexpressible rather than merely unrewarded. This is standard minimum-
+    // length-scale practice and it is a reparametrization — the objective, the
+    // gate and the tolerance are untouched.
+    //
+    // THE ARITHMETIC. A member must span floor_cells * cell_mm to be latticeable.
+    // The filter's length parameter in this codebase is a RADIUS (physical_filter
+    // _radius divides min_feature_mm by the spacing), and a cone filter of radius
+    // R yields a minimum member half-width ~R, so the member width it enforces is
+    // ~2R. Hence min_feature_mm = floor_cells * cell_mm / 2.
+    //
+    // NEVER LOWERS what the job already asked for: max() with the incoming value,
+    // so a job demanding a coarser feature size keeps it.
+    {
+      const double floor_cells =
+          lattice_cells_per_member_min(options.multiscale_topology);
+      const double implied_mm =
+          0.5 * floor_cells * options.multiscale_floor_cell_mm;
+      const double was = options.min_feature_mm;
+      if (implied_mm > options.min_feature_mm) options.min_feature_mm = implied_mm;
+      run_info.multiscale_min_feature_implied_mm = implied_mm;
+      run_info.multiscale_min_feature_used_mm = options.min_feature_mm;
+      std::fprintf(stderr,
+                   "[multiscale] length scale: floor %.1f cells x %.4f mm = "
+                   "%.3f mm member => min_feature %.3f mm (was %.3f mm)%s\n",
+                   floor_cells, options.multiscale_floor_cell_mm,
+                   2.0 * implied_mm, options.min_feature_mm, was,
+                   implied_mm > was ? " RAISED" : " (job already coarser)");
+    }
+    // ── IS THE REGION EVEN OPTIMIZABLE? ──────────────────────────────────────
+    // A lattice region is only reachable by the optimizer where the design mask
+    // leaves it ACTIVE. A voxel the mask pinned FrozenSolid — a declared load or
+    // fixture face, or a face-protection collar — is held at density 1 for the
+    // whole run and can never become lattice, in ANY formulation. Counted and
+    // reported here because it is the difference between "the optimizer chose
+    // not to lattice this" and "nothing could have", and because a job that
+    // declares its lattice region ON a protected face is asking for two
+    // incompatible things and should be told so at the start rather than shown
+    // an empty receipt at the end.
+    {
+      const DesignMask dm = design_domain_mask(domain, options);
+      std::size_t active = 0, frozen_solid = 0, frozen_void = 0, empty = 0;
+      for (std::size_t e = 0; e < options.multiscale_region.size(); ++e) {
+        if (!options.multiscale_region[e]) continue;
+        switch (dm[e]) {
+          case MaskValue::Active: ++active; break;
+          case MaskValue::FrozenSolid: ++frozen_solid; break;
+          case MaskValue::FrozenVoid: ++frozen_void; break;
+          default: ++empty; break;
+        }
+      }
+      const std::size_t total = active + frozen_solid + frozen_void + empty;
+      std::fprintf(stderr,
+                   "[multiscale] region reachability: active=%zu frozen_solid=%zu "
+                   "frozen_void=%zu empty=%zu (of %zu)\n",
+                   active, frozen_solid, frozen_void, empty, total);
+      if (total > 0 && active * 2 < total)
+        std::fprintf(stderr,
+                     "[multiscale] WARNING: %.1f%% of the declared lattice region "
+                     "is NOT optimizable (pinned by the design mask — a declared "
+                     "load/fixture face or a face-protection collar). Material "
+                     "there is held SOLID for the whole run and can never become "
+                     "lattice, in this or any formulation. If a latticed interior "
+                     "is the goal, the lattice region and the protected faces are "
+                     "asking for incompatible things.\n",
+                     100.0 * static_cast<double>(total - active) /
+                         static_cast<double>(total));
+      run_info.multiscale_region_active = static_cast<long long>(active);
+      run_info.multiscale_region_frozen_solid =
+          static_cast<long long>(frozen_solid);
+      run_info.multiscale_region_frozen_void = static_cast<long long>(frozen_void);
+    }
+    std::fprintf(stderr,
+                 "[multiscale] armed: topology=octet region_voxels=%zu "
+                 "floor_cell=%.4f mm floor_cells=%.1f\n",
+                 static_cast<std::size_t>(
+                     std::count_if(options.multiscale_region.begin(),
+                                   options.multiscale_region.end(),
+                                   [](char c) { return c != 0; })),
+                 options.multiscale_floor_cell_mm,
+                 lattice_cells_per_member_min(LatticeTopology::Octet));
+    std::fflush(stderr);
+  }
+
   auto emit_lattice = [&](const MinimizePlasticVariant& v, bool stream_lines) {
     if (!job.lattice.present) return;
     const bool roles_present = !job.lattice.regions.empty();
@@ -4138,7 +4385,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     options.on_variant = [&](const MinimizePlasticVariant& v) {
       if (!v.accepted) return;
       const std::string p =
-          export_variant_mesh(v, out_dir, job.output, solved_grid);
+          export_variant_mesh(v, out_dir, job.output, solved_grid,
+                              run_printed_iso(options));
       streamed_paths.push_back(p);
       // `achieved` is the optimizer-achieved (continuous) fraction — the stream's
       // join key against the report's volume_fraction; `printed` is the printed/count
@@ -4289,6 +4537,64 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
           static_cast<double>(a.bytes) / (1024.0 * 1024.0);
       run_info.mg_algebraic_level1_refused = a.refused;
       run_info.mg_algebraic_refuse_reason = a.refuse_reason;
+    }
+    // MULTISCALE LATTICE TO (task multiscale-lattice-to) — the receipt for "the
+    // optimizer placed the lattice". Filled from the per-variant reports the
+    // driver produced, in ladder order, so every EVALUATED rung is described,
+    // not only the shipped one. Absent entirely on a non-multiscale run.
+    if (options.multiscale_lattice) {
+      run_info.multiscale_armed = true;
+      run_info.multiscale_topology =
+          lattice_topology_name(options.multiscale_topology);
+      run_info.multiscale_floor_cell_mm = options.multiscale_floor_cell_mm;
+      run_info.multiscale_floor_stride = options.multiscale_floor_stride;
+      run_info.multiscale_floor_cells =
+          lattice_cells_per_member_min(options.multiscale_topology);
+      for (const MinimizePlasticVariant& v : result.pipeline.evaluated) {
+        const MinimizePlasticVariant::MultiscaleReport& m = v.multiscale;
+        if (!m.multiscale) continue;
+        run_info.multiscale_region_voxels =
+            static_cast<long long>(m.region_voxels);
+        run_info.multiscale_fit_rows = static_cast<long long>(m.fit_rows);
+        run_info.multiscale_rho_lo = m.rho_lo;
+        run_info.multiscale_rho_hi = m.rho_hi;
+        run_info.multiscale_floor_ceiling_measured =
+            static_cast<long long>(m.floor_ceiling_measured);
+        run_info.multiscale_floor_ceiling_eligible =
+            static_cast<long long>(m.floor_ceiling_eligible);
+        run_info.multiscale_floor_ceiling_min_cells = m.floor_ceiling_min_cells;
+        RunInfo::MultiscaleRung R;
+        R.volume_fraction = v.requested_volume_fraction;
+        R.voxels_void = static_cast<long long>(m.voxels_void);
+        R.voxels_band = static_cast<long long>(m.voxels_band);
+        R.voxels_solid = static_cast<long long>(m.voxels_solid);
+        R.voxels_lower_gap = static_cast<long long>(m.voxels_lower_gap);
+        R.voxels_upper_gap = static_cast<long long>(m.voxels_upper_gap);
+        R.band_rho_min = m.band_rho_min;
+        R.band_rho_max = m.band_rho_max;
+        R.projected_lower = static_cast<long long>(m.projected_lower);
+        R.projected_upper = static_cast<long long>(m.projected_upper);
+        R.projection_volume_delta = m.projection_volume_delta;
+        R.projection_max_density_move = m.projection_max_density_move;
+        R.volume_fraction_before_projection = m.volume_fraction_before_projection;
+        R.volume_fraction_after_projection = m.volume_fraction_after_projection;
+        R.volume_fraction_target = m.volume_fraction_target;
+        R.volume_constraint_violation = m.volume_constraint_violation;
+        R.floor_measured_voxels = static_cast<long long>(m.floor_measured_voxels);
+        R.floor_below_voxels = static_cast<long long>(m.floor_below_voxels);
+        R.floor_min_cells_per_member = m.floor_min_cells_per_member;
+        for (std::size_t b : m.floor_histogram)
+          R.floor_histogram.push_back(static_cast<long long>(b));
+        for (const auto& fs : m.floor_history) {
+          RunInfo::MultiscaleRung::FloorSample S;
+          S.iteration = fs.iteration;
+          S.measured = static_cast<long long>(fs.measured);
+          S.below = static_cast<long long>(fs.below);
+          S.min_cells_per_member = fs.min_cells_per_member;
+          R.floor_history.push_back(S);
+        }
+        run_info.multiscale_rungs.push_back(std::move(R));
+      }
     }
     run_info.geneo_basis_builds = fea_geneo_basis_builds();
     run_info.geneo_coarse_refreshes = fea_geneo_coarse_refreshes();
@@ -4471,7 +4777,8 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
     for (const MinimizePlasticVariant& variant : result.pipeline.evaluated) {
       if (!variant.accepted) continue;
       result.mesh_paths.push_back(export_variant_mesh(
-          variant, out_dir, job.output, result.pipeline.solved_grid));
+          variant, out_dir, job.output, result.pipeline.solved_grid,
+          run_printed_iso(options)));
       emit_lattice(variant, /*stream_lines=*/false);  // batch: no stdout lines
     }
   }

@@ -312,7 +312,22 @@ FixedDesignAnalysis analyze_fixed_design(
     bool load_path_ok, double part_solid, const LatticePosture* lattice = nullptr,
     bool score_build_orientation = false,
     bool build_direction_inferred = false,
-    bool auto_apply_build_orientation = false);
+    bool auto_apply_build_orientation = false,
+    // THE PRINTED-SET THRESHOLD (task multiscale-lattice-to). A voxel carries
+    // material when density > this. 0.5 (the DEFAULT) is the M3.5 iso every
+    // existing caller uses and is byte-for-byte the pre-multiscale path.
+    //
+    // WHY IT IS A PARAMETER NOW. Under classic SIMP, density is penalised toward
+    // 0/1, so "is there material here" and "is this voxel more than half full"
+    // are the same question and 0.5 answers both. Under the MULTISCALE lattice
+    // material law they come apart: a voxel at density 0.30 is not a half-empty
+    // solid voxel, it is a REAL, printable, measured 30%-dense lattice cell, and
+    // thresholding it away would delete material the optimizer placed, the
+    // certification solved with, and the lattice pass is meant to build — the
+    // exact loop/export disagreement this task exists to end. A multiscale run
+    // therefore passes a threshold below the certified band's floor, so "printed"
+    // means "not void". Must be in (0, 1).
+    double printed_iso = 0.5);
 
 // THE ONE accept-gate margin expression (handoff
 // 2026-08-01-build-direction-separation). Extracted verbatim from

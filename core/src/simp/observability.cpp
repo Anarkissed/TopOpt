@@ -960,7 +960,99 @@ std::string run_info_json(const RunInfo& info) {
       gr += "]";
     }
     gr += "}";
-    num("grading", gr, /*comma=*/has_frame);
+    num("grading", gr, /*comma=*/has_frame || info.multiscale_armed);
+  }
+
+  // ── MULTISCALE LATTICE TO (task multiscale-lattice-to). Emitted ONLY on a run
+  // that armed it, so every other run's run_info.json is byte-for-byte what it
+  // was. This is the receipt for "the optimizer placed the lattice": what the
+  // material law covered, what class every region voxel converged into, what the
+  // feasible-set projection CHARGED (signed, against the volume target the
+  // optimizer was held to), and how the cells-per-member floor was doing both at
+  // the end and iteration by iteration while the design formed.
+  if (info.multiscale_armed) {
+    std::string ms = "{\"armed\": true";
+    ms += ", \"topology\": \"" + info.multiscale_topology + "\"";
+    ms += ", \"region_voxels\": " + fmt_ll(info.multiscale_region_voxels);
+    ms += ", \"fit_rows\": " + fmt_ll(info.multiscale_fit_rows);
+    ms += ", \"band\": [" + fmt(info.multiscale_rho_lo) + ", " +
+          fmt(info.multiscale_rho_hi) + "]";
+    ms += ", \"cells_per_member_floor\": " + fmt(info.multiscale_floor_cells);
+    ms += ", \"floor_cell_mm\": " + fmt(info.multiscale_floor_cell_mm);
+    ms += ", \"floor_stride\": " + std::to_string(info.multiscale_floor_stride);
+    ms += ", \"min_feature_implied_mm\": " +
+          fmt(info.multiscale_min_feature_implied_mm);
+    ms += ", \"min_feature_used_mm\": " +
+          fmt(info.multiscale_min_feature_used_mm);
+    ms += ", \"region_active\": " + fmt_ll(info.multiscale_region_active);
+    ms += ", \"region_frozen_solid\": " +
+          fmt_ll(info.multiscale_region_frozen_solid);
+    ms += ", \"region_frozen_void\": " +
+          fmt_ll(info.multiscale_region_frozen_void);
+    ms += ", \"region_reachability_note\": \"a FrozenSolid region voxel is a "
+          "declared load/fixture face or a face-protection collar: held at "
+          "density 1 for the whole run, it can never become lattice in ANY "
+          "formulation. Compare region_active against region_voxels before "
+          "reading a low latticed_voxels as an optimizer failure.\"";
+    ms += ", \"floor_ceiling_measured\": " +
+          fmt_ll(info.multiscale_floor_ceiling_measured);
+    ms += ", \"floor_ceiling_eligible\": " +
+          fmt_ll(info.multiscale_floor_ceiling_eligible);
+    ms += ", \"floor_ceiling_min_cells\": " +
+          fmt(info.multiscale_floor_ceiling_min_cells);
+    ms += ", \"floor_ceiling_note\": \"region voxels that clear the "
+          "cells-per-member floor when the part is FULLY SOLID — the most any "
+          "design could lattice. A design only removes material, and removing "
+          "material only thins members, so this is a hard upper bound on "
+          "latticed_voxels for this part at this cell size.\"";
+    ms += ", \"rungs\": [";
+    for (std::size_t i = 0; i < info.multiscale_rungs.size(); ++i) {
+      const RunInfo::MultiscaleRung& R = info.multiscale_rungs[i];
+      if (i) ms += ", ";
+      ms += "{\"volume_fraction\": " + fmt(R.volume_fraction);
+      ms += ", \"voxels_void\": " + fmt_ll(R.voxels_void);
+      ms += ", \"voxels_band\": " + fmt_ll(R.voxels_band);
+      ms += ", \"voxels_solid\": " + fmt_ll(R.voxels_solid);
+      ms += ", \"voxels_lower_gap\": " + fmt_ll(R.voxels_lower_gap);
+      ms += ", \"voxels_upper_gap\": " + fmt_ll(R.voxels_upper_gap);
+      ms += ", \"band_rho_min\": " + fmt(R.band_rho_min);
+      ms += ", \"band_rho_max\": " + fmt(R.band_rho_max);
+      ms += ", \"projected_lower\": " + fmt_ll(R.projected_lower);
+      ms += ", \"projected_upper\": " + fmt_ll(R.projected_upper);
+      ms += ", \"projection_volume_delta\": " + fmt(R.projection_volume_delta);
+      ms += ", \"projection_max_density_move\": " +
+            fmt(R.projection_max_density_move);
+      ms += ", \"volume_fraction_before_projection\": " +
+            fmt(R.volume_fraction_before_projection);
+      ms += ", \"volume_fraction_after_projection\": " +
+            fmt(R.volume_fraction_after_projection);
+      ms += ", \"volume_fraction_target\": " + fmt(R.volume_fraction_target);
+      ms += ", \"volume_constraint_violation\": " +
+            fmt(R.volume_constraint_violation);
+      ms += ", \"floor_measured_voxels\": " + fmt_ll(R.floor_measured_voxels);
+      ms += ", \"floor_below_voxels\": " + fmt_ll(R.floor_below_voxels);
+      ms += ", \"floor_min_cells_per_member\": " +
+            fmt(R.floor_min_cells_per_member);
+      ms += ", \"floor_histogram\": [";
+      for (std::size_t b = 0; b < R.floor_histogram.size(); ++b) {
+        if (b) ms += ", ";
+        ms += fmt_ll(R.floor_histogram[b]);
+      }
+      ms += "]";
+      ms += ", \"floor_history\": [";
+      for (std::size_t h = 0; h < R.floor_history.size(); ++h) {
+        const RunInfo::MultiscaleRung::FloorSample& S = R.floor_history[h];
+        if (h) ms += ", ";
+        ms += "{\"iteration\": " + std::to_string(S.iteration);
+        ms += ", \"measured\": " + fmt_ll(S.measured);
+        ms += ", \"below\": " + fmt_ll(S.below);
+        ms += ", \"min_cells_per_member\": " + fmt(S.min_cells_per_member);
+        ms += "}";
+      }
+      ms += "]}";
+    }
+    ms += "]}";
+    num("multiscale", ms, /*comma=*/has_frame);
   }
 
   if (has_frame) {

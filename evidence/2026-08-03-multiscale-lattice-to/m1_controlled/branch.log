@@ -1,0 +1,3 @@
+NOTE: solve grid 40x27x40 has odd axis(es) [y=27] - geometric multigrid pads its INDEX SPACE to 40x28x40 (up to 3 levels). The pad is inactive solver bookkeeping only: the design grid, loads, mass and margins are untouched.
+PROGRESS rung=0 rungs=2 iter=1
+PROGRESS rung=0 rungs=2 iter=2

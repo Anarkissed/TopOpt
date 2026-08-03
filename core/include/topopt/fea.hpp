@@ -85,6 +85,34 @@ Hex8Stiffness hex8_stiffness_transverse(double youngs_modulus, double poisson,
 Hex8Stiffness hex8_stiffness_cubic(double C11, double C12, double C44,
                                    double element_size);
 
+// THE THREE-BLOCK DECOMPOSITION of the cubic element (PR 252, handoff
+// 2026-07-30-matfree-cubic-probe). The element stiffness is exactly LINEAR in the
+// constitutive matrix, so a cubic element decomposes EXACTLY as
+//
+//     Ke(C11, C12, C44) = C11*K_A + C12*K_B + C44*K_C
+//
+// with K_A/K_B/K_C the three FIXED reference blocks — the same 2x2x2-Gauss
+// integrals hex8_stiffness_cubic performs, taken on the 0/1 D-matrices
+// (D_A = diag(1,1,1,0,0,0), D_B = the off-diagonal normal ones, D_C =
+// diag(0,0,0,1,1,1)). PR 252 measured the recomposition at a worst relative error
+// of 8.5e-16 over 8,696 cases: this is an identity, not an approximation.
+//
+// Made public (task multiscale-lattice-to) so the SIMP loop can form the
+// MULTISCALE compliance and its sensitivity without assembling anything:
+//     q_A = u^T K_A u,  q_B = u^T K_B u,  q_C = u^T K_C u   (one solve, three scalars)
+//     c_e      = C11*q_A + C12*q_B + C44*q_C
+//     dc/drho  = -( dC11*q_A + dC12*q_B + dC44*q_C )
+// which is the exact analogue of the isotropic loop's q_e = u^T K_unit u, and is
+// exact for the SAME reason (linearity in the constitutive matrix). Unlike routing
+// the derivative triplet through hex8_stiffness_cubic, this needs no admissibility
+// of dC/drho, so it stays correct at the band edges where a derivative component
+// may vanish. The matrix-free kernel consumes the same blocks internally.
+//
+// `element_size` must be finite and > 0 (throws std::invalid_argument otherwise).
+// The blocks are material-independent and depend only on the element size.
+void hex8_cubic_blocks(double element_size, Hex8Stiffness& KA, Hex8Stiffness& KB,
+                       Hex8Stiffness& KC);
+
 // Cauchy stress recovered at one point of a Hex8 element from its nodal
 // displacements. `sigma` is Voigt order [xx, yy, zz, xy, yz, zx] with TRUE shear
 // stresses (tau, not doubled). `von_mises` is the scalar von Mises equivalent

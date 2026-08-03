@@ -183,6 +183,43 @@ constexpr double kProductionDraftEscalationDisabled = 1e30;
 constexpr bool kProductionWidthAwareKnockdown = false;  // OFF (shipped default)
 
 // ===========================================================================
+// TRIPWIRE — MULTISCALE LATTICE TOPOLOGY OPTIMIZATION (task multiscale-lattice-to)
+// ===========================================================================
+// THE ONE NAMED CONSTANT for the multiscale posture: may a JOB ask the optimizer
+// to place lattice while it grows the shape?
+//
+// WHY IT IS A PERMISSION AND NOT AN ARMING. Every other constant in this file is
+// a run-wide posture the maintainer flips once. This one cannot be: multiscale
+// changes the ANSWER by design — it replaces rho^p*E0 with the measured C(rho)
+// inside the lattice region — so flipping it globally would re-optimize every
+// production run, latticed or not, including runs with no lattice block where it
+// would mean nothing. So it gates whether a job's own `lattice.multiscale: true`
+// is HONOURED. true here + absent in the job = every existing job byte-identical,
+// which is why arming it is safe and why the reference world (which never calls
+// configure_production_options at all) is untouched either way (THE ONE RULE).
+//
+// WHAT THE JOB FLAG THEN DOES. Inside the job's lattice ROLE region, the SIMP
+// loop's material law becomes the homogenized cubic tensor of the measured
+// lattice library at each voxel's own density, and at termination the design is
+// projected onto the feasible set {0} u [rho_lo, rho_hi] u {1} with the volume
+// charge reported. Outside the region nothing changes.
+//
+// WHY IT EXISTS AT ALL. The two-step pipeline is structurally broken: the
+// optimizer, told nothing about the lattice, drove density to the extremes and
+// left tendrils too thin to hold a cell, so the lattice pass fell back to solid on
+// 99-100% of every region (the maintainer's M2_verticalStand run: 0 / 82 / 472
+// latticed voxels out of ~10,500). That is not a bug in the lattice pass and no
+// post-process can fix it.
+//
+// DO NOT DISARM, and do not widen it to a non-octet topology, without re-running
+//   * core/tests/harness/multiscale_to_probe.cpp   (the material + sensitivity bars)
+//   * a full M2_verticalStand end-to-end with the gate table
+// The topology restriction is enforced in code (lattice_material_model_trustworthy):
+// only octet's table spans a band narrow enough at the dense end to steer a design
+// loop across. The others need ~8-11 more measured rows each first.
+constexpr bool kProductionMultiscaleLatticeTO = true;  // job flag HONOURED
+
+// ===========================================================================
 // TRIPWIRE — the GENEO TWO-LEVEL DEFLATION production arming
 // (handoff 2026-07-29-geneo-arming; measured in 2026-07-29-matrixfree-geneo-
 // phase2).
@@ -364,6 +401,8 @@ int production_active_domain_band() { return kProductionActiveDomainBand; }
 
 double production_draft_loose_tol() { return kProductionDraftLooseTol; }
 bool production_width_aware_knockdown() { return kProductionWidthAwareKnockdown; }
+
+bool production_multiscale_lattice_to() { return kProductionMultiscaleLatticeTO; }
 bool production_geneo_twolevel() { return kProductionGeneoTwoLevel; }
 bool production_matfree_cubic_lattice() { return kProductionMatfreeCubicLattice; }
 bool production_mg_algebraic_level1() { return kProductionMgAlgebraicLevel1; }

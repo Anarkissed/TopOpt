@@ -1,0 +1,12 @@
+M2b — POSITIVE CONTROL: the same fixture, the same ladder, ONE key different
+     l-bracket, 128^3-equivalent detail at resolution 40, whole part latticed,
+     min_extrudable_width 0.12 mm so the printability floor admits a 2.5 mm cell.
+
+config      variant       region   latticed latticed%   fallback    margin
+twostep     variant_045       4121        648     15.7%       3473       2717
+twostep     variant_060       5755       1231     21.4%       4524       2600
+multiscale  variant_045       3567         12      0.3%       3555      121.3
+multiscale  variant_060       2824         42      1.5%       2782      212.1
+
+twostep     TOTAL  latticed 1879 / 9876 = 19.0%
+multiscale  TOTAL  latticed 54 / 6391 = 0.8%

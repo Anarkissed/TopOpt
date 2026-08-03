@@ -822,7 +822,7 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(lat,
                         {"topology", "cell_mm", "strut_radius_mm", "emit_stl",
                          "emit_3mf", "skin", "min_extrudable_width_mm",
-                         "outer_finish", "regions"},
+                         "outer_finish", "regions", "multiscale"},
                         "lattice");
     job.lattice.present = true;
     if (const JsonValue* t = find_key(lat, "topology")) {
@@ -931,6 +931,21 @@ JobDescription parse_job(const std::string& json_text) {
         }
         job.lattice.regions.push_back(std::move(reg));
       }
+    }
+    // MULTISCALE (task multiscale-lattice-to). Absent => false => the two-step
+    // pipeline, byte-identical. It needs a "grading" block: a multiscale design is
+    // graded by construction (every latticed voxel carries its OWN density), so
+    // asking for it without one is a contradiction, refused here rather than
+    // silently ignored.
+    if (const JsonValue* m = find_key(lat, "multiscale")) {
+      if (m->type != JsonValue::Type::Bool)
+        schema_fail("lattice \"multiscale\" must be a boolean");
+      job.lattice.multiscale = (m->num != 0.0);
+      if (job.lattice.multiscale && !has_grading_block)
+        schema_fail(
+            "lattice \"multiscale\" requires a \"grading\" block: a multiscale "
+            "design is graded by construction (every latticed voxel carries its "
+            "own relative density)");
     }
     if (const JsonValue* s = find_key(lat, "emit_stl")) {
       if (s->type != JsonValue::Type::Bool)
