@@ -87,22 +87,70 @@ jobs:
   # worker plus a CLI on the same host, and wiring that into a hosted runner is
   # its own piece of work. They stay a local gate. `swift test` covers everything
   # that does not need a worker — which is where all four defects above lived.
+  # THE RUNNER MUST CARRY XCODE 26 — this is a hard requirement, not a preference.
+  # `TopOptDesign/LiquidGlass.swift` (PR 109's design overhaul) renders the system
+  # Liquid Glass effect behind `if #available(iOS 26.0, macOS 26.0, *)`, with an
+  # iOS 16 material fallback in the else branch. That guard is a RUNTIME check: the
+  # `Glass` symbol must still exist at COMPILE time, so the macOS 26 SDK is required
+  # to build the package at all, on every OS it later runs on.
+  #
+  # The first cut of this job pinned `macos-14` and died in 27 s with six
+  # `cannot find 'Glass' in scope` errors — a job that could never have compiled
+  # this repository. `macos-26` ships Xcode 26.6 (17F113) as its default, which is
+  # the toolchain the app is developed against.
   app-macos:
-    runs-on: macos-14
+    runs-on: macos-26
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
-      # OCCT + Eigen are what the macOS core slice links. lib3mf comes from vcpkg
-      # via build_lib3mf_macos.sh, which build_core.sh invokes when it needs it.
+      # PINNED, not defaulted. The image carries seven Xcodes and its default moves;
+      # a silent bump to one without the macOS 26 SDK would resurrect the failure
+      # above, and a bump to Xcode 27 would change the compiler under the app
+      # without anyone choosing it. `-version` is echoed so the log always says
+      # which toolchain produced the result.
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+
+      # OCCT + Eigen are what the macOS core slice links.
       - name: Install OpenCASCADE + Eigen
         run: brew install opencascade eigen
 
+      # lib3mf is NOT a brew formula; it comes from vcpkg at the SAME tag the
+      # core-linux job pins, via build_lib3mf_macos.sh.
+      #
+      # WITHOUT THIS STEP THE JOB IS A LIE. `build_core.sh` prints
+      # "lib3mf: (none) — macOS slice is 3MF-free" and carries on, and then three
+      # AppModelTests fail outright — they assert a real 3MF parse
+      # (`XCTAssertNil(m.importRefusal, "…refusal means the slice has no lib3mf")`)
+      # rather than skipping. A CI job that builds a DIFFERENT slice from the one
+      # developers build is exactly the blind spot this job was added to close, so
+      # CI provisions lib3mf instead of the tests being taught to tolerate its
+      # absence.
+      #
+      # Cached on the script + the pinned tag: the vcpkg bootstrap and the lib3mf
+      # build are minutes, and neither changes unless one of those two does.
+      - name: Cache vcpkg + lib3mf
+        uses: actions/cache@v4
+        with:
+          path: .vcpkg
+          key: vcpkg-lib3mf-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('app/scripts/build_lib3mf_macos.sh') }}
+
+      - name: Provision lib3mf (vcpkg, CI-pinned tag)
+        run: ./app/scripts/build_lib3mf_macos.sh
+
+      # The key carries the RUNNER IMAGE, the Xcode AND whether lib3mf is present,
+      # as well as the core sources: a cached xcframework built by a different
+      # toolchain — or without the 3MF slice — is a stale-object-file trap, and this
+      # repo has been bitten by that class of bug before.
       - name: Cache the core xcframework build
         uses: actions/cache@v4
         with:
           path: app/.build-core
-          key: core-xcframework-${{ hashFiles('core/src/**', 'core/include/**', 'core/CMakeLists.txt') }}
+          key: core-xcframework-${{ runner.os }}-${{ runner.arch }}-xcode26.6-lib3mf-${{ hashFiles('core/src/**', 'core/include/**', 'core/CMakeLists.txt') }}
 
       # Builds the multi-platform static-library xcframework, vendors it under
       # app/TopOptKit/vendor and regenerates CoreFingerprint.generated.swift.
