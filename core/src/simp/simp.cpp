@@ -2468,6 +2468,11 @@ SimpOptimizeResult simp_optimize(const VoxelGrid& grid, const SimpParams& params
 // Fixture voxel forced to FrozenSolid (M1.6 tags are implicitly "keep-in", so
 // the §7 V3 retention gate is structural). Empty voxels are left as-is (ignored).
 //
+
+// Declared in simp.hpp as `effective_design_mask` (task 2026-08-04-protect-freeze-
+// vs-solidity) so the lattice receipt can name the SAME frozen set the loop held,
+// rather than re-deriving one beside it. The body is unchanged.
+//
 // PUBLIC since task 2026-08-03-preflight-feasibility-and-divergence: the
 // pre-flight load-path check must walk the SAME "may this voxel hold material?"
 // set the optimizer works on, and a second, similar rule could refuse a job this

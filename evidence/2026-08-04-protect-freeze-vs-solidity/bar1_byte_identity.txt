@@ -1,0 +1,46 @@
+=== BAR 1 — face protection + NO lattice, base vs branch ===
+base   cli: /private/tmp/claude-501/pf-base/build/topopt-cli
+branch cli: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/active-domain-disarm-prod-30f4a5/build/topopt-cli
+
+--- base artifacts ---
+2674c9f73a70f6ab5eed027a0e3c2fdd0f856e0c6b2f8d6b0bf96237458a17e7  ./design.bin
+e4a5dc2aef59be4e43a60767f58a9719957b1a0f8c30f12468bffd984565f135  ./fields.bin
+572d9126b36999c0f6cc78d6c94dc3798438cc7da0b67e0b81724f2a03c95770  ./iterations.csv
+420361e3d49bebaa5c3c9de2942319dcad87705f3ef8db2e8b3604653d6428ab  ./loadcase.json
+27336eaf99213cff59f22d5b4b319cb1189392aa1f73175f5ee23a3cba7956ff  ./report.json
+18f094f917b2731bfda6d16e5aa999e8c4557189adac91c93a8f7c8811d5f764  ./run_info.json
+864bd0e5330067fe82880b7b11acc07e16df43a34be6c49658529d3cbda8b499  ./variant_026.stl
+ed6a22df6a8ab210cde32afda35b5df4eba67b25f7244f0c72f45d2bd7987407  ./variant_038.stl
+2429dab992e799f75a617ce524be78a4249c184d9a19968f407a59bedf8aebd4  ./variant_052.stl
+423eb9be96385b69ed628e64696210922d4666cf7a51dd1d78ea8b8353b92af7  ./variant_068.stl
+
+--- branch artifacts ---
+2674c9f73a70f6ab5eed027a0e3c2fdd0f856e0c6b2f8d6b0bf96237458a17e7  ./design.bin
+e4a5dc2aef59be4e43a60767f58a9719957b1a0f8c30f12468bffd984565f135  ./fields.bin
+1c25ea3b2077afce5676b296f41b63030fcfe2a435b6e149636aaacf5749de8d  ./iterations.csv
+420361e3d49bebaa5c3c9de2942319dcad87705f3ef8db2e8b3604653d6428ab  ./loadcase.json
+27336eaf99213cff59f22d5b4b319cb1189392aa1f73175f5ee23a3cba7956ff  ./report.json
+989463ea22f222afabb874955833356a1a0ada54cdee1229ae0d398e0c6e176a  ./run_info.json
+864bd0e5330067fe82880b7b11acc07e16df43a34be6c49658529d3cbda8b499  ./variant_026.stl
+ed6a22df6a8ab210cde32afda35b5df4eba67b25f7244f0c72f45d2bd7987407  ./variant_038.stl
+2429dab992e799f75a617ce524be78a4249c184d9a19968f407a59bedf8aebd4  ./variant_052.stl
+423eb9be96385b69ed628e64696210922d4666cf7a51dd1d78ea8b8353b92af7  ./variant_068.stl
+
+--- the bar's named artifacts ---
+IDENTICAL  report.json  27336eaf99213cff59f22d5b4b319cb1189392aa1f73175f5ee23a3cba7956ff
+IDENTICAL  fields.bin  e4a5dc2aef59be4e43a60767f58a9719957b1a0f8c30f12468bffd984565f135
+IDENTICAL  design.bin  2674c9f73a70f6ab5eed027a0e3c2fdd0f856e0c6b2f8d6b0bf96237458a17e7
+IDENTICAL  loadcase.json  420361e3d49bebaa5c3c9de2942319dcad87705f3ef8db2e8b3604653d6428ab
+IDENTICAL  variant_026.stl  864bd0e5330067fe82880b7b11acc07e16df43a34be6c49658529d3cbda8b499
+IDENTICAL  variant_038.stl  ed6a22df6a8ab210cde32afda35b5df4eba67b25f7244f0c72f45d2bd7987407
+IDENTICAL  variant_052.stl  2429dab992e799f75a617ce524be78a4249c184d9a19968f407a59bedf8aebd4
+IDENTICAL  variant_068.stl  423eb9be96385b69ed628e64696210922d4666cf7a51dd1d78ea8b8353b92af7
+
+--- clock-bearing artifacts, compared with the clock removed ---
+IDENTICAL  run_info.json (minus created_wall_ms)
+IDENTICAL  iterations.csv (physics columns; timestamps + ms timings dropped)
+
+BAR 1 PASS — report.json, fields.bin and every mesh are byte-identical;
+             the two clock-bearing artifacts are identical once the clock
+             is removed. Face protection with no lattice declaration is
+             unchanged by this task.

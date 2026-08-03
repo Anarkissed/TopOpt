@@ -191,6 +191,23 @@ public struct LatticePage: View {
         project.latticeJobRegions().regions.count
     }
 
+    // ── PROTECTED REGIONS: LATTICED OR SOLID? (task 2026-08-04-protect-freeze-
+    // vs-solidity, bar 6). Protect freezes the SHAPE; this page decides what the
+    // frozen material IS. It was decided here all along and never said so, which
+    // is how the maintainer shipped a job whose declared lattice region was 91.5 %
+    // frozen collar without a single line of the app mentioning it.
+    //
+    // `anyIncludeDeclared` is read from the EMITTED regions, not from groupRoles,
+    // because standalone include primitives and non-protected groups' includes
+    // count too — an include anywhere means only the include union is latticed.
+    private var frozenRegionRows: [FrozenRegionLatticeStatus.Row] {
+        FrozenRegionLatticeStatus.rows(
+            protectedGroups: force.protectedGroups(in: groups),
+            roles: project.lattice.groupRoles,
+            anyIncludeDeclared:
+                project.latticeJobRegions().regions.contains { $0.role == .include })
+    }
+
     // MARK: body
 
     public var body: some View {
@@ -687,6 +704,10 @@ public struct LatticePage: View {
                     page.post(note: "Same Selections library as Setup — tap a group to give it a lattice role; faces of Setup groups can only be removed back on Setup.")
                 }
             }
+            // 4b · Protected regions — latticed or solid (bar 6). Hidden entirely
+            // when nothing is protected, so a part with no Protect affix sees the
+            // page exactly as before.
+            protectedRegionsSection
             // 5 · Boundary — the single three-way question, INLINE (L15).
             VStack(alignment: .leading, spacing: DS.Space.xs) {
                 Text("Boundary").font(.system(size: 11.5))
@@ -741,6 +762,52 @@ public struct LatticePage: View {
 
     private var inBand: Bool {
         bounds.densityLoReason == nil && bounds.densityHiReason == nil
+    }
+
+    /// Which PROTECTED regions this lattice declaration lattices, and which it
+    /// keeps solid (task 2026-08-04-protect-freeze-vs-solidity, bar 6). Reads
+    /// FrozenRegionLatticeStatus — the same precedence core's certification mask
+    /// applies — so the page cannot state a rule the run does not follow.
+    @ViewBuilder private var protectedRegionsSection: some View {
+        let rows = frozenRegionRows
+        if !rows.isEmpty {
+            VStack(alignment: .leading, spacing: DS.Space.xs) {
+                Text("Protected regions").font(.system(size: 11.5))
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                Text(FrozenRegionLatticeStatus.summary(rows))
+                    .dsStyle(DS.TypeScale.bodyStrong)
+                ForEach(rows) { r in
+                    HStack(alignment: .firstTextBaseline, spacing: DS.Space.xs) {
+                        Image(systemName: r.outcome.symbol)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(r.outcome == .latticed
+                                             ? DS.Color.accent.color
+                                             : DS.Color.textPrimary.opacity(0.42).color)
+                        VStack(alignment: .leading, spacing: 1) {
+                            HStack(spacing: 6) {
+                                Text(r.name).dsStyle(DS.TypeScale.body).lineLimit(1)
+                                Text(r.outcome.label)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(r.outcome == .latticed
+                                                     ? DS.Color.accent.color
+                                                     : DS.Color.textPrimary.opacity(0.42).color)
+                            }
+                            Text(r.reason).font(.system(size: 10.5))
+                                .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                Text(FrozenRegionLatticeStatus.caveat)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(DS.Color.textPrimary.opacity(0.42).color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, DS.Space.ml).padding(.vertical, DS.Space.s)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                .fill(DS.Surface.panel.color))
+        }
     }
 
     private func ladderRow<Accessory: View>(

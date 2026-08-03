@@ -1,0 +1,30 @@
+ 97/103 Test  #68: growth_ladder ....................   Passed    4.16 sec
+        Start  99: protect_freeze_vs_solidity
+ 98/103 Test  #79: penalty_continuation .............   Passed    6.77 sec
+        Start 101: designbox_lattice_recert
+ 99/103 Test #101: designbox_lattice_recert .........***Failed    4.82 sec
+[lattice] vf=0.80 frozen material: printed=50 latticed=24 solid=26 in_include=0 in_exclude=0/0 latticed (audit: cells_not_emitted=0 strut_and_solid=0 unexplained=0)
+FAIL (line 246): AI6: inside + outside == printed (an exact partition of the printed set, not two independently counted numbers)
+=== design-box lattice re-certification ===
+[AI3] part grid 32x22x6 -> solved grid 32x24x16
+[AI6] printed 50 voxels: 570 inside the part, 716 outside (1432.0%), 892 kept solid whole-cell (1784.0%), 376.312 mm^3
+[P1] certified cells 16 == emitted cells 16; voxels with both a strut and companion solid: 0
+[AI1] recorded 16013.2 == reproduced 16013.2; composite 12044.9 on both entry points
+[AI7] 6 artifacts byte-identical on a rerun
+[AI1-neg] no-remap reconstruction threw: fea_solve_mgcg_matfree: under-constrained system (load applied to a void DOF with no stiffness — no equilibrium possible)
+[P2] no-mesh analyze: box 3110 voxels / 1.62691875 g / margin 34550.69196 == no-box 3110 voxels / 1.62691875 g / margin 34550.69196
+54 checks, 1 failures
+
+        Start 102: selfweight_clearance_void
+100/103 Test #102: selfweight_clearance_void ........   Passed    3.66 sec
+101/103 Test  #94: face_protection_parity ...........   Passed   77.18 sec
+102/103 Test  #91: cli_demo .........................   Passed  564.17 sec
+103/103 Test  #99: protect_freeze_vs_solidity .......   Passed  337.67 sec
+
+99% tests passed, 1 tests failed out of 103
+
+Total Test time (real) = 845.81 sec
+
+The following tests FAILED:
+	101 - designbox_lattice_recert (Failed)
+Errors while running CTest

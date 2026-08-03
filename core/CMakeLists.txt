@@ -1308,6 +1308,32 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(growth_ladder_gate PRIVATE
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
 
+  # Item 8 (task 2026-08-04-protect-freeze-vs-solidity): SHOULD THE CELLS-PER-
+  # MEMBER FLOOR BE STRESS-CONDITIONAL? Lattices a genuinely unloaded region
+  # BELOW the floor and measures the certified-margin movement (8a) and the peak
+  # stress AND ITS ARGMAX (8b) against the same design with that region solid.
+  # Prints a table; asserts nothing — a measured NO is a valid outcome.
+  #   cmake --build build --target subfloor_lattice_probe
+  #   ./build/subfloor_lattice_probe
+  add_executable(subfloor_lattice_probe EXCLUDE_FROM_ALL
+    tests/harness/subfloor_lattice_probe.cpp)
+  target_link_libraries(subfloor_lattice_probe PRIVATE topopt)
+  target_compile_definitions(subfloor_lattice_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+
+  # Item 9 (same task): FREEZE + DESIGN BOX — DOES THE OPTIMIZER BUTTRESS?
+  # Freezes a thin wall, enables a design box beside it, and reports whether
+  # material is placed against the wall and whether the wall's own peak stress
+  # falls. Prints a table; asserts nothing.
+  #   cmake --build build --target frozen_buttress_probe
+  #   ./build/frozen_buttress_probe
+  add_executable(frozen_buttress_probe EXCLUDE_FROM_ALL
+    tests/harness/frozen_buttress_probe.cpp)
+  target_link_libraries(frozen_buttress_probe PRIVATE topopt)
+  target_compile_definitions(frozen_buttress_probe PRIVATE
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json")
+
   # S1 (handoff 2026-08-03-smoothing-page-round2): NAME the two meshes the
   # smoothing page confused and measure the 6x. Prints a table, writes evidence.
   #   cmake --build build --target smooth_mesh_identity_probe
@@ -1542,6 +1568,23 @@ if(OpenCASCADE_FOUND AND Eigen3_FOUND)
     SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
     CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
   add_test(NAME lattice_hookup COMMAND test_lattice_hookup)
+
+  # Task 2026-08-04-protect-freeze-vs-solidity: PROTECT IS A FREEZE, NOT A
+  # SOLIDITY DECLARATION. Drives run_job on the demo l-bracket with a declared
+  # load case + a face protection + lattice ROLE regions over the protected face,
+  # and asserts both directions (include => latticed, exclude => solid), the
+  # frozen-scoped certified-equals-exported audit, that the warning fires on a
+  # clearance void and NOT on frozen material, and the pre-flight region forecast.
+  add_executable(test_protect_freeze_vs_solidity
+    tests/validation/test_protect_freeze_vs_solidity.cpp)
+  target_link_libraries(test_protect_freeze_vs_solidity PRIVATE topopt)
+  target_compile_definitions(test_protect_freeze_vs_solidity PRIVATE
+    DEMO_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/demo"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json"
+    SETTINGS_RULES_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/settings/rules.json"
+    CLI_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME protect_freeze_vs_solidity
+    COMMAND test_protect_freeze_vs_solidity)
 
   # Task 2026-08-02-lattice-a-variant: LATTICE A FINISHED VARIANT — the job that
   # did not exist. Drives run_job (which now stores each variant's design) and

@@ -1,0 +1,37 @@
+=== item 8 — sub-floor lattice on a genuinely unloaded region ===
+cantilever 60x16x16 mm, clamped at x=0, loaded -Z at x=60.
+A 4 mm-thick flange (14 mm long) is welded to the beam's +y face
+at a swept x station: near the TIP it carries almost nothing, near
+the ROOT it carries real load. floor n* = 5.0 cells per member.
+
+flange_x   region_vM%   margin_solid     margin_sub     d_margin        cpm_sub argmax
+      44      11.664%       0.752682       0.752682     +0.0001%           1.33 same
+      36      14.019%       0.752680       0.752682     +0.0002%           1.33 same
+      28      16.573%       0.752679       0.752682     +0.0003%           1.33 same
+      20      19.370%       0.752675       0.752681     +0.0008%           1.33 same
+      12      22.088%       0.752503       0.752656     +0.0203%           1.33 same
+       4      23.478%       0.751974       0.752593     +0.0823%           1.33 same
+
+CONTROL — can the gate see the CELL at all? (tip flange, rho=0.30)
+ cell_mm      cpm       margin.worst            peak_vM   regime
+    0.80     5.00       0.7526820834      73.0720196698       in
+    1.00     4.00       0.7526820834      73.0720196698      OUT
+    2.00     2.00       0.7526820834      73.0720196698      OUT
+    3.00     1.33       0.7526820834      73.0720196698      OUT
+    4.00     1.00       0.7526820834      73.0720196698      OUT
+
+READ IT LIKE THIS.
+  FIRST TABLE (8a/8b) — d_margin is how far the CERTIFIED margin moves
+  when a region carrying region_vM% of the part peak is latticed at 1.33
+  cells per member instead of left solid, and `argmax` is whether the
+  peak stress changed WHERE it is (the non-local effect, 8b).
+
+  SECOND TABLE — the margin at a FIXED rho with the cell swept across the
+  floor. The homogenized tensor C is a function of rho ALONE; cell size
+  never enters the composite solve. So if these rows are identical, the
+  certification is STRUCTURALLY BLIND to cells-per-member, and no d_margin
+  in the first table — however small — is evidence that a sub-floor
+  lattice is ACCURATE. It is only evidence that substituting C(rho) for
+  solid did not move this part's margin. The accuracy question the floor
+  exists to answer needs direct FEA of the real strut geometry, which the
+  lattice Phase-0 probe measured at a 44-276x cost ceiling.

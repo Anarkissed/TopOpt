@@ -945,6 +945,38 @@ std::string run_info_json(const RunInfo& info) {
             fmt_ll(info.lattice_export_solid_region_triangles);
       le += ", \"include_void_voxels\": " +
             fmt_ll(info.lattice_export_include_void_voxels);
+      le += ", \"include_void_by_clearance\": " +
+            fmt_ll(info.lattice_export_include_void_by_clearance);
+    }
+    // The pre-flight region forecast (same task, item 6): what the job could
+    // have been told BEFORE the run, recorded so the receipt shows it was.
+    if (info.lattice_forecast_present) {
+      le += ", \"forecast_include_regions\": " +
+            fmt_ll(info.lattice_forecast_include_regions);
+      le += ", \"forecast_region_too_thin\": " +
+            fmt_ll(info.lattice_forecast_region_too_thin);
+      le += ", \"forecast_required_member_mm\": " +
+            fmt(info.lattice_forecast_required_mm);
+      le += ", \"forecast_thinnest_region_mm\": " +
+            fmt(info.lattice_forecast_thinnest_region_mm);
+    }
+    // Frozen material (task 2026-08-04-protect-freeze-vs-solidity) — an
+    // INDEPENDENT gate from the roles block above: a run can have frozen
+    // material (a face protection, an anchor pad) with no lattice.regions at
+    // all, and that is exactly the case whose silence started this task.
+    if (info.lattice_export_frozen_present) {
+      le += ", \"frozen_printed_voxels\": " +
+            fmt_ll(info.lattice_export_frozen_printed);
+      le += ", \"frozen_latticed\": " + fmt_ll(info.lattice_export_frozen_latticed);
+      le += ", \"frozen_kept_solid\": " + fmt_ll(info.lattice_export_frozen_solid);
+      le += ", \"frozen_cells_not_emitted\": " +
+            fmt_ll(info.lattice_export_frozen_cells_not_emitted);
+      le += ", \"frozen_voxels_strut_and_solid\": " +
+            fmt_ll(info.lattice_export_frozen_voxels_strut_and_solid);
+      le += ", \"frozen_strut_and_solid_unexplained\": " +
+            fmt_ll(info.lattice_export_frozen_strut_and_solid_unexplained);
+      le += ", \"frozen_in_exclude_latticed\": " +
+            fmt_ll(info.lattice_export_frozen_in_exclude_latticed);
     }
     le += "}";
     num("lattice_export", le, /*comma=*/has_grad || has_frame);

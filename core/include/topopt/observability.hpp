@@ -665,6 +665,36 @@ struct RunInfo {
   long long lattice_export_solid_region_triangles = 0;
   long long lattice_export_include_void_voxels = 0;  // include over optimizer
                                                      // void: the reported no-op
+  // Of those, the ones a declared keep-clear caused (task 2026-08-04-protect-
+  // freeze-vs-solidity). Unsatisfiable by construction — the only lattice-region
+  // overlap that is a real conflict, and the one the CLI warns on.
+  long long lattice_export_include_void_by_clearance = 0;
+  // PRE-FLIGHT REGION FORECAST (same task, item 6) — computed from the DECLARED
+  // geometry before any solve: how many include regions are thinner than the
+  // cells-per-member floor requires, and the two numbers that decide it. Present
+  // only when the job declares include regions, so every other record is
+  // byte-identical.
+  bool lattice_forecast_present = false;
+  long long lattice_forecast_include_regions = 0;
+  long long lattice_forecast_region_too_thin = 0;
+  double lattice_forecast_required_mm = 0.0;
+  double lattice_forecast_thinnest_region_mm = 0.0;
+  // FROZEN MATERIAL vs LATTICE (same task). Summed over the run's variants:
+  // printed voxels the optimizer held frozen, and what the lattice page decided
+  // they ARE. `frozen_cells_not_emitted` / `frozen_voxels_strut_and_solid` are
+  // the audit (bar 3) — both 0 on a coherent run. Serialized ONLY when the run
+  // had frozen material AND a lattice, so every other record is byte-identical.
+  bool lattice_export_frozen_present = false;
+  long long lattice_export_frozen_printed = 0;
+  long long lattice_export_frozen_latticed = 0;
+  long long lattice_export_frozen_solid = 0;
+  long long lattice_export_frozen_cells_not_emitted = 0;
+  long long lattice_export_frozen_voxels_strut_and_solid = 0;
+  // The real divergence (0 on a coherent run) and the item-4 bar (0 always):
+  // struts written into a region the certificate calls entirely solid, and
+  // frozen voxels inside an EXCLUDE region that were latticed anyway.
+  long long lattice_export_frozen_strut_and_solid_unexplained = 0;
+  long long lattice_export_frozen_in_exclude_latticed = 0;
   double lattice_export_gen_seconds = 0.0;      // generation wall time
   double lattice_export_gen_fraction = 0.0;     // gen time / total job time (P6)
   // Boundary finish (handoff 2026-07-29-lattice-boundary-finish): clip/skin

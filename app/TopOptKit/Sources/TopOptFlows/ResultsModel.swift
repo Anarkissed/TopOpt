@@ -864,7 +864,14 @@ public final class ResultsModel: ObservableObject {
                      + "to preserve here (check the selection / resolution)."
             }
             let vox = p.voxelsFrozen == 1 ? "1 voxel" : "\(p.voxelsFrozen) voxels"
-            let base = "Protection on \(face): preserved (\(vox) of the face's skin frozen solid)."
+            // Task 2026-08-04-protect-freeze-vs-solidity: "frozen solid" was the
+            // receipt's own conflation — the tag freezes the DENSITY, it does not
+            // declare the material solid. Whether the frozen material is solid or
+            // latticed is the Lattice page's include/exclude decision, and the run
+            // reports which it was (run_info lattice_export.frozen_latticed /
+            // frozen_kept_solid). Say "frozen", not "frozen solid".
+            let base = "Protection on \(face): preserved (\(vox) of the face's skin frozen — "
+                     + "the optimizer could not reshape it)."
             if p.thinnerThanDepth {
                 return base + " The face's own material was thinner than the depth, "
                      + "so it froze what exists — no more."
