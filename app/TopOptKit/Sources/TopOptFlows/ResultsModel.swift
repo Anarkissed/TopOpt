@@ -850,6 +850,19 @@ public final class ResultsModel: ObservableObject {
                     + "\(String(format: "%.1f", s.minCellsPerMember)) cells — below the "
                     + "floor the homogenized model needs, so treat the strut numbers "
                     + "as indicative, not certified.")
+                // ★ THE BLIND SPOT, SAID TO THE USER (task 2026-08-04-subfloor-
+                // lattice-unloaded-regions). Shown on EVERY out-of-regime result,
+                // however it got there, because the tempting wrong inference is
+                // "the margin barely moved, so it must be fine". It CANNOT move:
+                // the homogenized tensor is a function of density alone, and
+                // sweeping the cell across the floor at fixed density moved the
+                // certified margin by nothing to ten decimal places.
+                lines.append("The certificate cannot see this. Cell size never "
+                    + "enters the certification maths — only relative density does "
+                    + "— so the margin above would read the same whether this "
+                    + "lattice is fine or badly wrong. A margin that did not move "
+                    + "is NOT evidence that this material is safe. Treat it as an "
+                    + "accepted unknown, not a clean bill of health.")
                 // WHY, when the run CHOSE it (task 2026-08-04-subfloor-lattice-
                 // unloaded-regions). Out-of-regime by accident and out-of-regime on
                 // purpose are different facts, and only the second one has a number

@@ -1654,11 +1654,28 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          json_num(lattice_cells_per_member_min(a.lattice_topology)) + ",\n";
     s += "    \"out_of_regime\": " +
          std::string(a.lattice_strut_out_of_regime ? "true" : "false") + ",\n";
-    if (a.lattice_strut_out_of_regime)
+    if (a.lattice_strut_out_of_regime) {
       s += "    \"regime_note\": \"the thinnest latticed member spans fewer "
            "cells than the measured homogenization floor, so the macro stress "
            "field these strut numbers amplify is itself out of the tensor's "
            "validated regime — treat them as indicative, not certified\",\n";
+      // ★ THE THING THE USER MUST SEE, not just the reviewer. Carried on EVERY
+      // out-of-regime certificate — however the run got there — because the one
+      // wrong inference available here is "the margin barely moved, so it must be
+      // fine". It cannot move: handoff 2026-08-04-protect-freeze-vs-solidity §10's
+      // control swept the cell across the floor at fixed rho and got a margin
+      // identical to TEN DECIMAL PLACES.
+      s += "    \"blind_spot\": \"THE CERTIFICATE CANNOT SEE THIS. The "
+           "homogenized tensor is a function of relative density ALONE — cell "
+           "size never enters the composite solve — so the certification is "
+           "STRUCTURALLY BLIND to cells-per-member: sweeping the cell from 5.00 "
+           "to 1.00 cells per member at fixed density moved the certified margin "
+           "by nothing, to ten decimal places. A margin that did not move is "
+           "therefore NOT evidence that this material is accurately certified. "
+           "Answering that needs direct FEA of the real strut geometry, measured "
+           "at a 44-276x cost ceiling. This is an accepted unknown, not a clean "
+           "bill of health.\",\n";
+    }
     s += "    \"resolution_note\": \"joint-peak law rows are mesh-divergent "
          "(~log in micro resolution, +10-18% per 32->48 step where measured); "
          "the band-floor row is a still-rising lower bound\"\n";
@@ -1735,6 +1752,63 @@ struct LatticeVariantOutcome {
   std::uint64_t design_fingerprint = 0;
 };
 
+// ★ THE LATTICE PIPELINE MUST NOT MOVE THE LADDER'S SOLVER STATE
+// (task 2026-08-04-subfloor-lattice-unloaded-regions, §7).
+//
+// THE DEFECT THIS EXISTS TO CLOSE. On the STREAMING path this body runs from the
+// `on_variant` callback — i.e. BETWEEN rung k and rung k+1 of the optimize ladder,
+// not after it. It performs real FEA solves (the null-posture reproduction, the
+// composite certification, and on a clamped run the clamp counterfactual). Both of
+// the solver's carried accelerators are process-global / thread-local and STICKY
+// across solves:
+//
+//   * the Krylov recycle subspace (handoff 133) — production-ARMED, and
+//     `krylov_recycle_reset_per_rung` is false by default, so it is deliberately
+//     carried from one rung into the next;
+//   * the GenEO two-level deflation basis (handoff 2026-07-29-geneo-arming) —
+//     armed by configure_production_options.
+//
+// So without this guard, rung k+1's optimize started from a subspace harvested
+// from — or DROPPED by — rung k's LATTICE solves. That made the next rung's design
+// depend on the lattice configuration of the previous rung, which is a dependency
+// between two solves that have nothing to do with each other. It was measured, not
+// theorised: arming sub-floor retention moved rungs 0.52 / 0.38 / 0.26 by 40 / 380
+// / 416 voxel classifications on the maintainer's part while rung 0.68 — the rung
+// retention actually fired on — stayed bit-identical.
+//
+// WHY SUPPRESS RATHER THAN RESET. Resetting after the fact would leave rung k+1
+// with an EMPTY space, discarding the harvest the LADDER legitimately built at
+// rung k — a different behaviour from both a no-lattice run and the batch path.
+// Disabling the two accelerators for the duration preserves the carried state
+// exactly: `RecycleSession::begin` returns on `!rc_enabled()` BEFORE its
+// resolution-change drop, and `geneo_solve_begin` returns on `!S.enabled` BEFORE
+// its structure-fingerprint drop, so a suppressed solve can neither harvest from,
+// apply, nor invalidate what the ladder is carrying. Rung k+1 therefore inherits
+// precisely what rung k left it, which is what a run with no lattice block does.
+//
+// It costs these diagnostic solves their accelerators. That is the right trade:
+// they are a post-process whose wall time is reported separately, and correctness
+// of the ladder is not negotiable against their speed.
+//
+// Applied inside THIS function rather than at the callback so the re-lattice entry
+// point (lattice_variant_job) gets it too — the two must not diverge (bar Z6).
+class ScopedLadderSolverIsolation {
+ public:
+  ScopedLadderSolverIsolation()
+      : recycling_(fea_set_krylov_recycling(false)),
+        geneo_(fea_set_geneo_twolevel(false)) {}
+  ~ScopedLadderSolverIsolation() {
+    fea_set_geneo_twolevel(geneo_);
+    fea_set_krylov_recycling(recycling_);
+  }
+  ScopedLadderSolverIsolation(const ScopedLadderSolverIsolation&) = delete;
+  ScopedLadderSolverIsolation& operator=(const ScopedLadderSolverIsolation&) = delete;
+
+ private:
+  const bool recycling_;
+  const bool geneo_;
+};
+
 // `part_grid` is the ORIGINAL imported part's grid and `domain` is the domain the
 // run SOLVED on (resolve_design_domain). Without a design box they are the same
 // grid and domain.bcs are the caller's BCs verbatim, so every existing caller is
@@ -1746,6 +1820,9 @@ LatticeVariantOutcome lattice_one_variant(
     const MinimizePlasticOptions& options, const Material& material,
     const std::vector<ClearanceGeometry>& lattice_kos,
     const LatticeRoleRegions& lattice_roles, const std::string& out_dir) {
+  // FIRST STATEMENT IN THE BODY, so every solve below is covered and the previous
+  // enable states are restored however this function returns (including by throw).
+  const ScopedLadderSolverIsolation solver_isolation;
   const VoxelGrid& solved_grid = domain.grid;
   const std::vector<DirichletBC>& bcs = domain.bcs;
   LatticeVariantOutcome R;

@@ -206,6 +206,12 @@ public struct LatticeForecast: Equatable, Sendable {
                      + "REGIME: the homogenized model is not valid that coarse, and "
                      + "the certification cannot see the difference — so this buys "
                      + "you the lattice, not a guarantee about it.")
+            // Said BEFORE the run as well as after it: cell size never enters the
+            // certification maths, so the margin cannot report on this either way.
+            out.append("Be clear about what you are accepting: the margin the run "
+                     + "reports would look the same whether that lattice is fine or "
+                     + "badly wrong, because cell size never enters the "
+                     + "certification maths. It is an accepted unknown.")
         } else if !subfloorRequested && subfloorVoxelsBelowFloor > 0 {
             out.append("\(fmt(subfloorVoxelsBelowFloor)) of these are below the "
                      + "cells-across floor. If this region carries almost no load — a "
