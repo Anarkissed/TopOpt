@@ -533,6 +533,13 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
           "simp_compliance: active_mask requires SolverKind::MultigridCG_Matfree "
           "(the active domain is a matrix-free-operator feature)");
   }
+  // MULTISCALE LATTICE MATERIAL (task multiscale-lattice-to). Null model = the
+  // whole existing world, byte-for-byte: not one branch below is taken.
+  const LatticeMaterialModel* const LM = params.lattice_material;
+  if (LM != nullptr && params.lattice_region != nullptr &&
+      params.lattice_region->size() != grid.voxel_count())
+    throw std::invalid_argument(
+        "simp_compliance: lattice_region size != voxel_count");
 
   // Split this call into LINEAR SOLVE and SENSITIVITY SWEEP (task 2026-08-02-
   // iteration-phase-timing). The per-voxel modulus fill below is charged to the
@@ -543,18 +550,68 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
   // voxels contribute no element, so their entry is ignored by fea_solve_cg; we
   // still fill it (0) to keep the vector grid-indexed.
   std::vector<double> elem_youngs(grid.voxel_count(), 0.0);
+  // MULTISCALE: the per-voxel cubic tensor of the latticed voxels. Left empty on
+  // the classic path so nothing downstream can read it.
+  std::vector<char> lat_mask;
+  std::vector<double> lat_c11, lat_c12, lat_c44;
+  if (LM != nullptr) {
+    lat_mask.assign(grid.voxel_count(), 0);
+    lat_c11.assign(grid.voxel_count(), 0.0);
+    lat_c12.assign(grid.voxel_count(), 0.0);
+    lat_c44.assign(grid.voxel_count(), 0.0);
+  }
   for (int k = 0; k < grid.nz; ++k)
     for (int j = 0; j < grid.ny; ++j)
       for (int i = 0; i < grid.nx; ++i) {
         if (!grid.solid(i, j, k)) continue;
         const std::size_t e = grid.index(i, j, k);
-        elem_youngs[e] =
-            std::pow(clamp_density(params, density[e]), params.penalty) *
-            params.youngs_modulus;
+        const double rho = clamp_density(params, density[e]);
+        // MULTISCALE: a voxel the run will lattice carries the MEASURED
+        // homogenized cubic tensor at its own density; every other voxel keeps
+        // rho^p * E0 exactly as before. This is the whole formulation change —
+        // the optimizer now steers on the stiffness the printed lattice will
+        // have, so it has no incentive to starve a member below the
+        // cells-per-member floor.
+        if (LM != nullptr &&
+            (params.lattice_region == nullptr || (*params.lattice_region)[e])) {
+          const CubicTensor C = LM->value(rho);
+          lat_mask[e] = 1;
+          lat_c11[e] = C.C11;
+          lat_c12[e] = C.C12;
+          lat_c44[e] = C.C44;
+          continue;  // youngs_per_voxel is IGNORED for a latticed voxel
+        }
+        elem_youngs[e] = std::pow(rho, params.penalty) * params.youngs_modulus;
       }
 
   SimpCompliance out;
-  if (solver_kind == SolverKind::MultigridCG_Matfree) {
+  if (LM != nullptr) {
+    // The COMPOSITE isotropic-or-cubic system (fea.hpp): a masked voxel is
+    // hex8_stiffness_cubic(C11, C12, C44), every other solid voxel is the
+    // identical graded isotropic element it has always been. Same DOF count —
+    // the lattice is a softer, anisotropic MATERIAL on the same macro element,
+    // which is exactly what the homogenization buys.
+    //
+    // ROUTE. MultigridCG_Matfree takes the matrix-free accelerator stack
+    // directly (PR 257's armed route: multigrid + GenEO deflation + Krylov
+    // recycling on the exact three-block operator), and is the only kind that
+    // can carry an active-domain mask. Everything else goes to
+    // fea_solve_cg_lattice, which itself routes to the same matrix-free path
+    // when production has armed kProductionMatfreeCubicLattice and to the
+    // assembled Jacobi-CG otherwise. The cached PenalizedSolver fast path does
+    // not apply: it rescales ONE isotropic operator, and a composite system has
+    // three independent per-voxel coefficients, so there is nothing to rescale.
+    if (solver_kind == SolverKind::MultigridCG_Matfree) {
+      out.solution = fea_solve_cg_lattice_matfree(
+          grid, elem_youngs, lat_mask, lat_c11, lat_c12, lat_c44, params.poisson,
+          bcs, loads, tolerance, max_iterations, &out.cg, active_mask);
+    } else {
+      out.solution = fea_solve_cg_lattice(grid, elem_youngs, lat_mask, lat_c11,
+                                          lat_c12, lat_c44, params.poisson, bcs,
+                                          loads, tolerance, max_iterations,
+                                          &out.cg);
+    }
+  } else if (solver_kind == SolverKind::MultigridCG_Matfree) {
     // Matrix-free multigrid (handoff 078 + design-box on-device fix): the
     // memory-lean path — the assembled fine K (which OOMs on the design box) is
     // never built. Solves the identical system to the same tolerance; stateless,
@@ -593,6 +650,20 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
   // element stiffness at modulus E is E * K_unit and its strain energy density
   // per unit modulus is q_e = u_e^T K_unit u_e.
   const Hex8Stiffness Kunit = hex8_stiffness(1.0, params.poisson, grid.spacing);
+  // MULTISCALE: the three FIXED reference blocks of the exact cubic decomposition
+  // Ke = C11*K_A + C12*K_B + C44*K_C (PR 252, worst rel err 8.5e-16). Built once
+  // per call, only when a lattice material is in play. Because Ke is exactly
+  // LINEAR in (C11, C12, C44), a latticed element's strain energy and its
+  // sensitivity both fall out of three scalars per element:
+  //     q_A = u^T K_A u,  q_B = u^T K_B u,  q_C = u^T K_C u
+  //     c_e     =  C11*q_A + C12*q_B + C44*q_C
+  //     dc/drho = -(dC11*q_A + dC12*q_B + dC44*q_C)
+  // — the same self-adjoint identity as the isotropic branch, with the scalar
+  // (E, dE/drho) pair replaced by the triplets (C, dC/drho). No approximation
+  // enters: the model's dC/drho is analytic (verified against central differences
+  // to 9.6e-9 by the probe and again by test_lattice_material_model here).
+  Hex8Stiffness KA, KB, KC;
+  if (LM != nullptr) hex8_cubic_blocks(grid.spacing, KA, KB, KC);
   out.dcompliance.assign(grid.voxel_count(), 0.0);
   double compliance = 0.0;
   for (int k = 0; k < grid.nz; ++k)
@@ -617,6 +688,35 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
             ue[static_cast<std::size_t>(3 * a + comp)] =
                 out.solution.at(en[a], comp);
 
+        const double rho = clamp_density(params, density[e]);
+
+        // MULTISCALE: a latticed element's energy and sensitivity from the three
+        // reference-block quadratic forms. Its density enters ONLY through
+        // C(rho) and dC/drho — there is no rho^p anywhere on this branch, which
+        // is the entire point: intermediate density is a REAL, printable,
+        // measured material here, not a penalised fiction.
+        if (!lat_mask.empty() && lat_mask[e] != 0) {
+          double qA = 0.0, qB = 0.0, qC = 0.0;
+          for (int r = 0; r < 24; ++r) {
+            double ka = 0.0, kb = 0.0, kc = 0.0;
+            for (int c = 0; c < 24; ++c) {
+              const double uc = ue[static_cast<std::size_t>(c)];
+              ka += KA(r, c) * uc;
+              kb += KB(r, c) * uc;
+              kc += KC(r, c) * uc;
+            }
+            const double ur = ue[static_cast<std::size_t>(r)];
+            qA += ur * ka;
+            qB += ur * kb;
+            qC += ur * kc;
+          }
+          double Cv[3], Cd[3];
+          LM->eval(rho, Cv, Cd);
+          compliance += Cv[0] * qA + Cv[1] * qB + Cv[2] * qC;
+          out.dcompliance[e] = -(Cd[0] * qA + Cd[1] * qB + Cd[2] * qC);
+          continue;
+        }
+
         // q_e = u_e^T K_unit u_e (>= 0).
         double q = 0.0;
         for (int r = 0; r < 24; ++r) {
@@ -625,7 +725,6 @@ SimpCompliance simp_compliance(const VoxelGrid& grid, const SimpParams& params,
           q += ue[static_cast<std::size_t>(r)] * kr;
         }
 
-        const double rho = clamp_density(params, density[e]);
         compliance += std::pow(rho, params.penalty) * params.youngs_modulus * q;
         out.dcompliance[e] = -params.penalty *
                              std::pow(rho, params.penalty - 1.0) *

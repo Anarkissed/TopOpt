@@ -1,0 +1,24 @@
+=== M1 (B) — base worktree (34175a5) vs branch, lattice+grading job,
+             multiscale ABSENT from the job document ===
+--- /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-density-proxy-a12459/evidence/2026-08-03-multiscale-lattice-to/m1_base/base.sha256	2026-08-03 03:49:08
++++ /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-density-proxy-a12459/evidence/2026-08-03-multiscale-lattice-to/m1_base/branch.sha256	2026-08-03 03:07:41
+@@ -1,12 +1,12 @@
+-9e1b4edd8a8c6cf4a94c41f115d473733097c748ecc087971c1932a13449e774  build_orientation.json
+-06aa9aeb285dfd7268aab7265c2c295702c1f0a1bbf8e70ad84017f72be094e7  design.bin
+-5f7ff3ec50c81690a4f37f988be09a2514401f4ae6e864a666e6a6d3d19b8450  fields.bin
++5ae7f79ef477177c8f5bbf8f843160b84ce435c5b117b1ad6c0d8fddbf7551d6  build_orientation.json
++651a2498ab10268dae47891bc56b7031a55193c35e81e075d6b33a432f039f16  design.bin
++dcd61751519ce350268c3a15653902e1cdfbd7aa3d0eee7d18f4f7e507b288e2  fields.bin
+ 9670f551449031d3ee98d7a49d2e30a6a0325b57bb29216723d38113f34f07f9  loadcase.json
+ bb623f8268416281695997ded7c933d4c3970f80b8eedd69904160b56c2df6e6  report.json
+-eb4f19bc49253b2f2f514daf9bdb2c9b600de1f2c19c1512a639fa2e257aaae0  run_info.json
++770ad4a4b2bc976c0b7e753b984b5a58181f8aae841c1b177a416ab8d7a0cfc9  run_info.json
+ 3a1a093783b37173bfd5f85c991a3a2cb521a886d0c58afd021afb3efe98b641  variant_045.stl
+-fc704c5095dd0da49a8fe71b5f7fcc9bc3a422dedce7c31cb3040f48dd41a549  variant_045_lattice.report.json
+-ea909597a9e859253ea3a76e078dffd8397ac347377e0c5ce9bb02cf28dff06f  variant_045_lattice.stl
++09171270ffbce4869888be74f0d3cf3dfa85401c2ffca8b5e9e629df573e3911  variant_045_lattice.report.json
++75c65b275a5b9bff00e71f9f0e8886dc363f5605dd2b048d0b8539094d2b1f97  variant_045_lattice.stl
+ 15c09093b4e6ef3d386691e2aa08df98f7923c4a60e72bc25e5dacd924f26c2c  variant_060.stl
+ 6333626fbf73f21341956869535cf4fc385a8d93dbf72aebb7ebc9542d1a398c  variant_060_lattice.report.json
+ 7f3332329104c4a52f1808314f0a1562d88b077e413a6810076307c94928fcd8  variant_060_lattice.stl
+DIFFERENCES FOUND (above).

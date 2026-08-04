@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -34,6 +35,65 @@ namespace {
 // The M3.5 iso threshold: a voxel is "printed" (solid material) when its
 // physical density exceeds this.
 constexpr double kIso = 0.5;
+
+// --- THE CELLS-PER-MEMBER FLOOR, MEASURED ON A LIVE DESIGN -------------------
+// (task multiscale-lattice-to, item 4.)
+//
+// A member thinner than `floor_cells` lattice cells cannot hold the homogenized
+// tensor's scale separation, so the grading law leaves it SOLID (grading.hpp bar
+// L4) — which is exactly how the two-step pipeline lost 99-100% of every lattice
+// region. Making that a differentiable in-loop CONSTRAINT is not tractable: local
+// member width is a distance transform of the THRESHOLDED design, so it is both
+// non-differentiable and discontinuous in rho. What IS tractable, and what this
+// does, is MEASURE it — on the live design, on a stride — so the failure is
+// visible while it is happening rather than at export.
+//
+// READ-ONLY by construction: it takes the density by const reference and returns
+// counts. It never moves a density, a verdict or a tolerance.
+struct FloorOccupancy {
+  std::size_t measured = 0;   // printed region voxels the EDT resolved
+  std::size_t below = 0;      // ... whose member is below the floor
+  double min_cells = 0.0;     // thinnest member in cells (0 when nothing measured)
+  std::vector<std::size_t> histogram;  // 1-cell buckets, last is [10, inf)
+};
+
+FloorOccupancy measure_floor_occupancy(const VoxelGrid& grid,
+                                       const std::vector<double>& density,
+                                       const std::vector<char>& region,
+                                       double iso, double cell_mm,
+                                       double floor_cells, bool want_histogram) {
+  FloorOccupancy out;
+  if (!(cell_mm > 0.0) || !(floor_cells > 0.0)) return out;
+  // The SAME local-member-thickness EDT the grading law and the gate use (PR 206),
+  // at the same 32-voxel radius cap they use — one definition of "how thick is the
+  // member here", never a second one.
+  constexpr int kThicknessCapVoxels = 32;
+  const std::vector<double> width_mm =
+      local_member_thickness_mm(grid, density, iso, kThicknessCapVoxels);
+  if (want_histogram) out.histogram.assign(11, 0);
+  double min_cells = std::numeric_limits<double>::infinity();
+  for (std::size_t e = 0; e < density.size(); ++e) {
+    if (!region.empty() && region[e] == 0) continue;
+    if (!(density[e] > iso)) continue;  // only PRINTED voxels have a member
+    const double w = width_mm[e];
+    // A width at or past the EDT cap is the "thicker than we measure" sentinel:
+    // counted as measured and comfortably ABOVE the floor, never as below it.
+    const double cells = std::isfinite(w) ? w / cell_mm
+                                          : std::numeric_limits<double>::infinity();
+    ++out.measured;
+    if (cells < floor_cells) ++out.below;
+    if (cells < min_cells) min_cells = cells;
+    if (want_histogram) {
+      const std::size_t b =
+          std::isfinite(cells)
+              ? std::min<std::size_t>(10, static_cast<std::size_t>(cells))
+              : 10;
+      ++out.histogram[b];
+    }
+  }
+  out.min_cells = std::isfinite(min_cells) ? min_cells : 0.0;
+  return out;
+}
 
 Vec3 normalized(const Vec3& v) {
   const double n = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
@@ -505,11 +565,90 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   const bool score_orientations =
       options.build_orientation_report || bake_plan.needs_scorer;
 
+  // THE PRINTED-SET THRESHOLD for this run. Shadows the file-scope M3.5 constant
+  // so every "is there material here" test below asks THIS run's question. 0.5 on
+  // every classic run — identical to the constant it shadows, so those paths are
+  // byte-for-byte unchanged — and, on a MULTISCALE run, a value below the
+  // certified band's floor so "printed" means "not void". See pipeline.hpp.
+  const double kIso = options.multiscale_lattice
+                          ? multiscale_printed_iso(options.multiscale_topology)
+                          : 0.5;
+  if (!(kIso > 0.0 && kIso < 1.0))
+    throw std::invalid_argument("minimize_plastic: printed_iso must be in (0, 1)");
+
   // Material -> SIMP params (penalty p = 3 per ARCHITECTURE §4).
   SimpParams params;
   params.youngs_modulus = material.youngs_modulus_mpa;
   params.poisson = material.poisson;
   params.penalty = 3.0;
+
+  // --- MULTISCALE LATTICE MATERIAL (task multiscale-lattice-to) ---------------
+  // Built ONCE per run, before the ladder, so every rung of one run optimizes
+  // against the SAME material curve and the same region. Not armed => `ms_model`
+  // stays empty, params.lattice_material stays null, and the SIMP loop below is
+  // the classic penalized isotropic one, element-for-element (THE ONE RULE).
+  std::unique_ptr<LatticeMaterialModel> ms_model;
+  std::vector<char> ms_region;  // owns the storage params.lattice_region points at
+  if (options.multiscale_lattice) {
+    // REFUSE an untrustworthy topology rather than optimize on a fiction. Only
+    // octet's table supports steering a design loop today; the other six stop at
+    // rho ~0.5-0.6 and the model spans their upper gap by pure interpolation
+    // across a 3.9-5.2x stiffness swing (handoff 2026-07-31-multiscale-lattice-
+    // feasibility, G4/G4b). This is a REFUSAL, not a downgrade: silently
+    // optimizing against an interpolated stretch is precisely the "steer on a
+    // fiction" failure the probe named.
+    std::string why;
+    if (!lattice_material_model_trustworthy(options.multiscale_topology, &why))
+      throw std::invalid_argument(
+          "minimize_plastic: multiscale_lattice cannot be armed on this "
+          "topology — " + why);
+    // The region is indexed on the SOLVED grid (G) — the expanded pair on a
+    // design-box run, the caller's grid otherwise. minimize_plastic_solved_grid
+    // is the public helper a caller uses to build it against the right one.
+    if (!options.multiscale_region.empty() &&
+        options.multiscale_region.size() != G.voxel_count())
+      throw std::invalid_argument(
+          "minimize_plastic: multiscale_region size != solved-grid voxel_count "
+          "(build it against minimize_plastic_solved_grid)");
+    ms_model.reset(new LatticeMaterialModel(build_lattice_material_model(
+        options.multiscale_topology, material.youngs_modulus_mpa,
+        material.poisson)));
+    params.lattice_material = ms_model.get();
+    if (!options.multiscale_region.empty()) {
+      ms_region = options.multiscale_region;
+      params.lattice_region = &ms_region;
+    }
+    // else: null region == every design voxel is latticed (a whole-part job).
+  }
+  // THE CEILING, measured ONCE on the FULLY SOLID part (task item 4's honest
+  // companion). A design can only REMOVE material, and removing material only
+  // thins members, so a region voxel whose member is already below the
+  // cells-per-member floor when every solid voxel is at density 1 can NEVER
+  // clear it — no optimizer, multiscale or otherwise, can lattice it. This is
+  // therefore a hard upper bound on latticed_voxels for this part at this cell
+  // size, and it is what lets a disappointing latticed fraction be told apart
+  // from "that fraction was all there ever was".
+  FloorOccupancy ms_ceiling;
+  if (ms_model != nullptr && options.multiscale_floor_cell_mm > 0.0) {
+    std::vector<double> solid_field(G.voxel_count(), 0.0);
+    for (std::size_t e = 0; e < solid_field.size(); ++e)
+      solid_field[e] = G.tags[e] == VoxelTag::Empty ? 0.0 : 1.0;
+    ms_ceiling = measure_floor_occupancy(
+        G, solid_field, ms_region, kIso, options.multiscale_floor_cell_mm,
+        lattice_cells_per_member_min(options.multiscale_topology),
+        /*want_histogram=*/false);
+  }
+
+  // The region voxel count, for the receipts (0 with no model; the whole solid
+  // set when the model is armed with no explicit region).
+  const std::size_t ms_region_voxels =
+      ms_model == nullptr
+          ? 0
+          : (ms_region.empty()
+                 ? static_cast<std::size_t>(G.solid_count())
+                 : static_cast<std::size_t>(std::count_if(
+                       ms_region.begin(), ms_region.end(),
+                       [](char c) { return c != 0; })));
 
   // The effective mask, from THE ONE definition (design_domain_mask,
   // pipeline.hpp) — the base classification plus the "Keep clear" overlay,
@@ -880,6 +1019,17 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
   const bool draft_design_trigger_armed =
       draft_armed && options.draft_use_design_trigger;
 
+  // MULTISCALE: the current rung's per-iteration floor samples, accumulated by
+  // the density observer and moved onto the variant at rung end. Declared out
+  // here (not per rung) so the observer lambda can capture it by reference;
+  // cleared at the head of every rung. Empty unless the floor stride is armed.
+  std::vector<MinimizePlasticVariant::MultiscaleReport::FloorSample>
+      rung_floor_history;
+  // The current rung's certification posture (multiscale only; null otherwise, so
+  // every classic rung passes the same nullptr it always did). Rebuilt per rung
+  // from that rung's own projected design.
+  std::unique_ptr<LatticePosture> ms_posture;
+
   // --- Walk the ladder -----------------------------------------------------
   for (std::size_t rung = 0; rung < ladder.size(); ++rung) {
     const double vf = ladder[rung];
@@ -1015,11 +1165,43 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         }
       };
     }
+    // MULTISCALE — THE FLOOR, MEASURED WHILE THE DESIGN IS FORMING (task item 4).
+    // The cells-per-member floor is not tractable as a differentiable in-loop
+    // constraint (see measure_floor_occupancy), so this is the reporting the task
+    // names as the fallback, and it is deliberately LIVE rather than post-hoc: a
+    // run whose members are starving below the floor says so per iteration,
+    // instead of only revealing it at export. Read-only — the callback takes the
+    // field by const reference and appends counts.
+    //
+    // It rides `density_observer`, which fires every iteration with the pinned
+    // PHYSICAL field, and applies its own stride because the EDT is not free.
+    // stride 0 (the default) leaves this null entirely.
+    rung_floor_history.clear();
+    const bool ms_floor_armed =
+        ms_model != nullptr && options.multiscale_floor_stride > 0 &&
+        options.multiscale_floor_cell_mm > 0.0;
+    const double ms_floor_cells =
+        ms_model != nullptr
+            ? lattice_cells_per_member_min(options.multiscale_topology)
+            : 0.0;
     opt.density_observer = nullptr;
-    if (options.on_density_snapshot) {
+    if (options.on_density_snapshot || ms_floor_armed) {
       const std::size_t rung_count = ladder.size();
-      opt.density_observer = [&options, &G, &rung_iter_base, rung, rung_count](
+      opt.density_observer = [&, rung, rung_count](
                                  int iteration, const std::vector<double>& d) {
+        if (ms_floor_armed &&
+            iteration % options.multiscale_floor_stride == 0) {
+          const FloorOccupancy fo = measure_floor_occupancy(
+              G, d, ms_region, kIso, options.multiscale_floor_cell_mm,
+              ms_floor_cells, /*want_histogram=*/false);
+          MinimizePlasticVariant::MultiscaleReport::FloorSample s;
+          s.iteration = iteration + static_cast<int>(rung_iter_base);
+          s.measured = fo.measured;
+          s.below = fo.below;
+          s.min_cells_per_member = fo.min_cells;
+          rung_floor_history.push_back(s);
+        }
+        if (!options.on_density_snapshot) return;
         DensitySnapshotEvent ev;
         ev.rung_index = rung;
         ev.rung_count = rung_count;
@@ -1047,7 +1229,7 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         total_iters = opt.max_iterations;
       opt.keyframe_stride =
           std::max(1, total_iters / std::max(1, options.keyframe_count));
-      opt.keyframe = [&variant, &G](const std::vector<double>& d) {
+      opt.keyframe = [&variant, &G, kIso](const std::vector<double>& d) {
         variant.keyframe_meshes.push_back(marching_cubes(G, d, kIso));
       };
     }
@@ -1423,6 +1605,132 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
       continue;  // (2) warm_seed untouched, (3) ladder continues
     }
 
+    // --- MULTISCALE: PROJECT ONTO THE FEASIBLE SET, AND CHARGE IT ------------
+    // (task multiscale-lattice-to, item 3.) The optimizer's converged field is
+    // continuous in rho, but a printable, certifiable voxel is void, in-band
+    // lattice, or solid: {0} u [rho_lo, rho_hi] u {1}. The probe measured that NO
+    // in-loop strategy zeroes the two gaps — 96.5-100% of gap voxels sit on the
+    // density filter's own void<->band / band<->solid transition ring, which the
+    // filter GUARANTEES is nonempty — and that snapping the survivors costs
+    // +0.13-0.18% volume for -0.4-0.5% compliance.
+    //
+    // So it is done HERE: before the connectivity belt, before the certification
+    // solve, before anything reads this rung. The design that gets certified,
+    // exported and latticed is the PROJECTED one — the same field in all three
+    // places, which is the whole reason the two-step broke.
+    //
+    // THE VOLUME CONSTRAINT IS BROKEN BY THIS, BY A LITTLE, AND THAT IS REPORTED.
+    // The optimizer satisfied `vf` on the unprojected field; the projection then
+    // moves voxels to the nearest legal density and the achieved fraction shifts.
+    // It is CHARGED (volume_constraint_violation, signed) and carried on the
+    // variant, never absorbed into a re-normalization that would hide it.
+    if (ms_model != nullptr) {
+      MinimizePlasticVariant::MultiscaleReport& msr = variant.multiscale;
+      msr.multiscale = true;
+      msr.topology = lattice_topology_name(options.multiscale_topology);
+      msr.region_voxels = ms_region_voxels;
+      msr.fit_rows = ms_model->rows;
+      msr.rho_lo = ms_model->rho_lo;
+      msr.rho_hi = ms_model->rho_hi;
+      msr.volume_fraction_target = vf;
+
+      const double solid_above = 1.0 - options.multiscale_void_below;
+      // The projection runs over the LATTICE REGION only: outside it the material
+      // law was the classic penalized isotropic one, whose intermediate densities
+      // are the ordinary SIMP grayscale the existing pipeline already handles.
+      // Snapping those too would be a silent change to the non-lattice path.
+      const std::vector<char>* proj_mask =
+          ms_region.empty() ? nullptr : &ms_region;
+      const LatticeProjectionReport pr = lattice_project_field(
+          *ms_model, variant.optimization.physical_density, proj_mask,
+          options.multiscale_void_below, solid_above,
+          /*n_counted=*/static_cast<double>(ms_region_voxels), vf);
+      msr.projected_lower = pr.projected_lower;
+      msr.projected_upper = pr.projected_upper;
+      msr.projection_volume_delta = pr.volume_delta;
+      msr.projection_max_density_move = pr.max_density_move;
+      msr.volume_fraction_before_projection = pr.volume_fraction_before;
+      msr.volume_fraction_after_projection = pr.volume_fraction_after;
+      msr.volume_constraint_violation = pr.volume_constraint_violation;
+
+      // Occupancy of the PROJECTED design, by feasible class — what the receipt
+      // states the lattice pass will find.
+      const std::vector<double>& pd = variant.optimization.physical_density;
+      double band_lo = std::numeric_limits<double>::infinity(), band_hi = 0.0;
+      for (std::size_t e = 0; e < pd.size(); ++e) {
+        if (!ms_region.empty() && ms_region[e] == 0) continue;
+        if (G.tags[e] == VoxelTag::Empty) continue;
+        switch (lattice_density_class(*ms_model, pd[e],
+                                      options.multiscale_void_below, solid_above)) {
+          case LatticeDensityClass::Void: ++msr.voxels_void; break;
+          case LatticeDensityClass::Solid: ++msr.voxels_solid; break;
+          case LatticeDensityClass::Band:
+            ++msr.voxels_band;
+            band_lo = std::min(band_lo, pd[e]);
+            band_hi = std::max(band_hi, pd[e]);
+            break;
+          case LatticeDensityClass::LowerGap: ++msr.voxels_lower_gap; break;
+          case LatticeDensityClass::UpperGap: ++msr.voxels_upper_gap; break;
+        }
+      }
+      msr.band_rho_min = std::isfinite(band_lo) ? band_lo : 0.0;
+      msr.band_rho_max = band_hi;
+      // The projection is onto the feasible set, so nothing may survive in a gap.
+      // Assert it rather than trust it — a survivor would be refused later by the
+      // E5 band gate with a far less legible message.
+      assert(msr.voxels_lower_gap == 0 && msr.voxels_upper_gap == 0 &&
+             "multiscale: projection left a voxel inside a forbidden interval");
+
+      // The cells-per-member floor on the CONVERGED design, with the histogram
+      // M3 reports. Independent of the per-iteration stride: this one always runs
+      // when a cell size is known, because it is the number the receipt needs.
+      msr.floor_cells = lattice_cells_per_member_min(options.multiscale_topology);
+      msr.floor_cell_mm = options.multiscale_floor_cell_mm;
+      const FloorOccupancy fo = measure_floor_occupancy(
+          G, pd, ms_region, kIso, options.multiscale_floor_cell_mm,
+          msr.floor_cells, /*want_histogram=*/true);
+      msr.floor_measured_voxels = fo.measured;
+      msr.floor_below_voxels = fo.below;
+      msr.floor_min_cells_per_member = fo.min_cells;
+      msr.floor_ceiling_measured = ms_ceiling.measured;
+      msr.floor_ceiling_eligible = ms_ceiling.measured - ms_ceiling.below;
+      msr.floor_ceiling_min_cells = ms_ceiling.min_cells;
+      msr.floor_histogram = fo.histogram;
+      msr.floor_history = std::move(rung_floor_history);
+      rung_floor_history.clear();
+
+      // THE CERTIFICATION POSTURE for this variant — the object the gate is
+      // about to certify, stated explicitly. A voxel joins it when it is in the
+      // lattice region, PRINTED (density > kIso, which on this path is below the
+      // band floor) and lands in the BAND after projection. Voxels projected to
+      // solid stay solid (they are not lattice); voxels projected to void are not
+      // printed. By construction every relative_density here is inside
+      // [rho_lo, rho_hi], which is what the E5 band gate demands — so the gate
+      // refusing this posture would mean the projection failed, and that is a
+      // real refusal we want, not one to dodge.
+      ms_posture.reset(new LatticePosture());
+      ms_posture->topology = options.multiscale_topology;
+      ms_posture->cell_size_mm = options.multiscale_floor_cell_mm;
+      ms_posture->mask.assign(pd.size(), 0);
+      ms_posture->relative_density.assign(pd.size(), 0.0);
+      std::size_t posture_voxels = 0;
+      for (std::size_t e = 0; e < pd.size(); ++e) {
+        if (!ms_region.empty() && ms_region[e] == 0) continue;
+        if (G.tags[e] == VoxelTag::Empty) continue;
+        if (!(pd[e] > kIso)) continue;
+        if (lattice_density_class(*ms_model, pd[e],
+                                  options.multiscale_void_below,
+                                  solid_above) != LatticeDensityClass::Band)
+          continue;
+        ms_posture->mask[e] = 1;
+        ms_posture->relative_density[e] = pd[e];
+        ++posture_voxels;
+      }
+      if (posture_voxels == 0) ms_posture.reset();  // nothing latticed: solid path
+    } else {
+      ms_posture.reset();
+    }
+
     const std::vector<double>& rho = variant.optimization.physical_density;
 
     // --- The CONNECTIVITY BELT ------------------------------------------------
@@ -1498,7 +1806,19 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
     FixedDesignAnalysis fda = analyze_fixed_design(
         G, params, rho, B, loads, material, build_dir, opt.cg_tolerance,
         opt.cg_max_iterations, opt.solver, options.margin_stop, knockdown,
-        load_path_ok, part_solid, /*lattice=*/nullptr,
+        load_path_ok, part_solid,
+        // *** THE GAP THIS TASK EXISTS TO CLOSE. *** Until now this argument was
+        // an unconditional nullptr: the per-rung CERTIFICATION solved the design
+        // as if every voxel were SOLID material, even on a job that was about to
+        // be latticed. On a multiscale run that would certify a different object
+        // than the one the optimizer built and the exporter will print — the same
+        // loop/export disagreement the two-step failed on, moved one stage later.
+        // So a multiscale variant hands the certification the posture it was
+        // actually optimized under: the projected in-band voxels, each at its OWN
+        // relative density, carrying the measured homogenized cubic tensor. The
+        // gate's verdict logic and tolerance are untouched; it is given the right
+        // object to apply them to.
+        ms_posture ? ms_posture.get() : nullptr,
         // The orientation ranking rides on THIS rung's certification solve
         // (handoff 2026-08-01-build-direction-separation). Per-rung, because
         // each rung is a different design and so has its own overhangs and its
@@ -1511,7 +1831,10 @@ MinimizePlasticResult minimize_plastic(const VoxelGrid& grid,
         // direction was declared, the recommendation BECOMES this rung's
         // certified orientation and the export below is rotated onto it. Never
         // when the user declared one — resolve_bake_plan is what guarantees that.
-        bake_plan.auto_apply);
+        bake_plan.auto_apply,
+        // The printed-set threshold this run reads designs at (0.5 on every
+        // classic run — byte-identical; below the band floor when multiscale).
+        kIso);
 
     // --- Handoff 2026-07-27-nonconvergence-rejection: CERTIFICATION NON-CONVERGENT ─
     // The trajectory converged to a connected design, but the CERTIFICATION solve —

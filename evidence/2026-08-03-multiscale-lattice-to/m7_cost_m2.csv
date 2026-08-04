@@ -1,0 +1,2 @@
+run,iterations,cg_mean,cg_min,cg_max,mg_engaged,matvecs_total,matvecs_per_iter,wall_ms_total,wall_ms_per_iter,fea_ms_per_iter,geneo_setup_ms_per_iter,peak_rss_mb
+m2_multiscale,17,793.7647058823529,681.0,1102.0,0,19067.0,1121.5882352941176,245428.93,14436.995882352941,14380.844235294118,3916.2048235294124,505.14

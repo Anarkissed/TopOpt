@@ -1,0 +1,14 @@
+=== M1 (A) — the maintainer's part: this branch vs the CAPTURED run ===
+captured at core commit 2b8b715; branch based on 34175a5;
+git diff 2b8b715 34175a5 -- core/ is EMPTY.
+
+SKIPPED    fields.bin (not produced — run was interrupted)
+SKIPPED    report.json (not produced — run was interrupted)
+IDENTICAL  variant_068.stl  5d55d40e5379628eed065506247bc9bf7cb63c66b6cb198db3e0e5be7afbb2ac
+SKIPPED    variant_052.stl (not produced — run was interrupted)
+SKIPPED    variant_038.stl (not produced — run was interrupted)
+IDENTICAL  variant_068_lattice.stl  4d325c8c515944bb3a89e2d49b6ee9752eadf6d4492061bd67ff6da611c1165d
+SKIPPED    variant_052_lattice.stl (not produced — run was interrupted)
+SKIPPED    variant_038_lattice.stl (not produced — run was interrupted)
+
+identical 2, differing 0, skipped 6

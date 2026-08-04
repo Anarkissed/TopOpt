@@ -221,6 +221,17 @@ void hex8_cubic_reference_blocks(double element_size, Hex8Stiffness& KA,
 
 }  // namespace fea_detail
 
+// The PUBLIC name of the decomposition (task multiscale-lattice-to) — ONE
+// implementation, two names: the library-internal fea_detail one the matrix-free
+// kernel and the Galerkin coarse build already use, and this, so the SIMP loop can
+// form the multiscale sensitivity without reaching into a private header. Forwarding,
+// never a second integration, so the blocks the optimizer differentiates against are
+// the SAME blocks the solver applies.
+void hex8_cubic_blocks(double element_size, Hex8Stiffness& KA, Hex8Stiffness& KB,
+                       Hex8Stiffness& KC) {
+  fea_detail::hex8_cubic_reference_blocks(element_size, KA, KB, KC);
+}
+
 Hex8Stiffness hex8_stiffness_cubic(double C11, double C12, double C44,
                                    double element_size) {
   double D[6][6];

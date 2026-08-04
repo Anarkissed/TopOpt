@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "topopt/fea.hpp"
+#include "topopt/lattice_material.hpp"
 #include "topopt/voxel.hpp"
 
 namespace topopt {
@@ -36,6 +37,31 @@ struct SimpParams {
   double poisson = 0.0;         // nu, in (-1, 0.5)
   double penalty = 3.0;         // p, penalization exponent (ARCHITECTURE §4: 3)
   double density_min = 1e-3;    // rho floor, in (0, 1]
+
+  // ── MULTISCALE LATTICE MATERIAL (task multiscale-lattice-to) ───────────────
+  // OPT-IN, and null is the ENTIRE existing world byte-for-byte.
+  //
+  // When `lattice_material` is non-null, a design voxel selected by
+  // `lattice_region` carries the homogenized cubic tensor C(rho) of the measured
+  // lattice library (lattice_material.hpp) INSTEAD of the SIMP scalar
+  // rho^p * E0 — so the optimizer steers on the stiffness the printed lattice
+  // will actually have, and stops eating the material the lattice pass needs.
+  // Every OTHER voxel (outside the region, or the whole grid when the region is
+  // null and the model is null) keeps the classic penalized isotropic law,
+  // element-for-element unchanged.
+  //
+  // `lattice_region`, when non-null, is a grid-indexed per-voxel flag of size
+  // grid.voxel_count(): non-zero = this voxel will be latticed, so use C(rho).
+  // A null region with a non-null model means EVERY design voxel is latticed.
+  // The region is design-INDEPENDENT geometry (the job's lattice role regions
+  // and keep-outs), resolved once per run — it is not a function of the density,
+  // so it cannot flicker between iterations.
+  //
+  // LIFETIME: both pointees must outlive every call that reads this params
+  // object. SimpParams is copied freely (penalty_for_iteration returns a copy),
+  // and the pointers copy with it; nothing here takes ownership.
+  const LatticeMaterialModel* lattice_material = nullptr;
+  const std::vector<char>* lattice_region = nullptr;
 };
 
 // SIMP Young's modulus for a design density: E(rho) = clamp(rho, rho_min, 1)^p

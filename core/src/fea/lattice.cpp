@@ -282,6 +282,29 @@ double lattice_rho_max(LatticeTopology topo) {
   return t.data[hi].rho;
 }
 
+std::vector<LatticeResolvedRow> lattice_resolved_rows(LatticeTopology topo) {
+  RowTable t = rows_of(topo);
+  if (t.empty()) return {};  // not certifiable — no measured rows to hand out
+  int lo, hi;
+  resolved_span(t, lo, hi);
+  std::vector<LatticeResolvedRow> out;
+  out.reserve(static_cast<std::size_t>(hi - lo + 1));
+  for (int i = lo; i <= hi; ++i) {
+    // Only the CONTIGUOUS validated block is handed out; resolved_span already
+    // trimmed the unresolved head/tail, and by construction (PR 237's verdict) the
+    // rows between lo and hi are resolved. Assert it rather than assume it — an
+    // unresolved row slipping into a fit would skew the derivative the optimizer
+    // steers on, which is exactly the failure this accessor exists to avoid.
+    if (!t.data[i].resolved)
+      throw std::logic_error(
+          "lattice_resolved_rows: unresolved row inside the validated span");
+    out.push_back({t.data[i].rho, t.data[i].C11, t.data[i].C12, t.data[i].C44});
+  }
+  return out;
+}
+
+double lattice_library_youngs_modulus() { return kLibraryEs; }
+
 double lattice_cells_per_member_min(LatticeTopology topo) {
   // MEASURED for octet (bending ceiling, handoff 2026-07-28-graded-cell-size-phase0
   // C2b): the 2.4% band is crossed between 4 and 5 cells across, so 5. For the other

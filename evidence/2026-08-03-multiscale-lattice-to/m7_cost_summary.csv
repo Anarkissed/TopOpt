@@ -1,0 +1,3 @@
+run,iterations,cg_min,cg_mean,cg_max,wall_ms_total,wall_ms_per_iter,matvecs_total,matvecs_per_iter
+multiscale,40,11,15.5500,17,22369.337,559.233,2488,62.2
+twostep,40,14,20.8500,23,19654.530,491.363,3336,83.4

@@ -1,0 +1,7 @@
+M8 — DETERMINISM (multiscale design loop, 32x16x16, 20 iterations, production stack)
+run A density FNV-1a: 85b849ecf5dd0b5c
+run B density FNV-1a: 85b849ecf5dd0b5c
+identical: YES
+cg counts identical iteration-for-iteration: YES
+compliance identical iteration-for-iteration: YES
+projection charge identical: dV 0.419289895588 vs 0.419289895588, lower 1337 vs 1337, upper 513 vs 513

@@ -1,0 +1,15 @@
+{
+  "model": "l-bracket.step",
+  "material": "PLA",
+  "mode": "minimize_plastic",
+  "resolution": 40,
+  "fixture_faces": [{ "kind": "cylindrical", "radius_mm": 2.5 }],
+  "gravity": { "direction": [0.0, 0.0, -1.0], "magnitude_mm_s2": 9810.0 },
+  "ladder": [0.6, 0.45],
+  "margin_stop": 1.5,
+  "output": { "report": "report.json", "mesh_format": "stl", "mesh_prefix": "variant" },
+  "lattice": { "topology": "octet", "min_extrudable_width_mm": 0.12,
+               "emit_stl": true, "multiscale": false },
+  "grading": { "topology": "octet", "cell_mm": 2.5,
+               "min_extrudable_width_mm": 0.12, "demand_exponent": 1.0 }
+}

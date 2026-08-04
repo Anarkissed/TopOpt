@@ -199,6 +199,50 @@ ProcessMemory process_memory() {
     }
   }
 #endif
+
+  // ── THE PEAK MUST ACTUALLY BE A PEAK ────────────────────────────────────────
+  // `peak_rss_mb` and `rss_mb` come from two DIFFERENT kernel sources, and on
+  // Linux they are not guaranteed to agree:
+  //
+  //   peak  <- getrusage(RUSAGE_SELF).ru_maxrss — the kernel's high-water mark,
+  //            refreshed LAZILY at accounting points, not on every allocation;
+  //   rss   <- /proc/self/statm resident pages — read INSTANTANEOUSLY, right now.
+  //
+  // So during rapid allocation the instantaneous read can legitimately come back
+  // ABOVE a not-yet-refreshed high-water mark, and the CSV then prints a "peak"
+  // smaller than the current value sitting next to it. That is the instrument
+  // lying about the run: peak_rss_mb against available_mb is the pair the
+  // design-box OOM diagnosis turned on (handoff: the ~7 GB std::bad_alloc), and a
+  // peak that is not a peak makes that reading silently wrong. macOS never showed
+  // it because its rss_mb is phys_footprint via task_info — a different quantity
+  // — which is why this reproduced only on core-linux.
+  //
+  // THE FIX IS A TRUE HIGH-WATER MARK OVER EVERYTHING ACTUALLY MEASURED, never a
+  // clamp of one column to the other: clamping would print a number the kernel
+  // never reported. This carries the running maximum of every rss_mb this process
+  // has sampled AND every ru_maxrss it has been told, so the reported peak is the
+  // largest value either source has ever produced — and is therefore >= the
+  // current rss by construction, on every platform.
+  //
+  // HONESTY ABOUT WHAT THIS IS. The sampled-rss term is a LOWER BOUND on the true
+  // peak (this instrument only samples at iteration boundaries, so a spike between
+  // two samples is invisible to it); ru_maxrss is the kernel's own high-water and
+  // is the stronger term wherever it is answered. The maximum of the two is never
+  // below either, never above anything genuinely observed, and never fabricated.
+  // The "not answered" sentinel is preserved: a platform that answers neither
+  // still reports a negative peak rather than a manufactured zero.
+  //
+  // Not atomic, for the same reason as the matvec and simp_compliance counters:
+  // one production run drives its solves from one thread, and the instrument must
+  // not tax what it measures.
+  {
+    static double g_peak_rss_seen = -1.0;
+    if (pm.rss_mb >= 0.0 && pm.rss_mb > g_peak_rss_seen)
+      g_peak_rss_seen = pm.rss_mb;
+    if (pm.peak_rss_mb >= 0.0 && pm.peak_rss_mb > g_peak_rss_seen)
+      g_peak_rss_seen = pm.peak_rss_mb;
+    if (g_peak_rss_seen >= 0.0) pm.peak_rss_mb = g_peak_rss_seen;
+  }
   return pm;
 }
 
@@ -1090,7 +1134,99 @@ std::string run_info_json(const RunInfo& info) {
       gr += "]";
     }
     gr += "}";
-    num("grading", gr, /*comma=*/has_frame);
+    num("grading", gr, /*comma=*/has_frame || info.multiscale_armed);
+  }
+
+  // ── MULTISCALE LATTICE TO (task multiscale-lattice-to). Emitted ONLY on a run
+  // that armed it, so every other run's run_info.json is byte-for-byte what it
+  // was. This is the receipt for "the optimizer placed the lattice": what the
+  // material law covered, what class every region voxel converged into, what the
+  // feasible-set projection CHARGED (signed, against the volume target the
+  // optimizer was held to), and how the cells-per-member floor was doing both at
+  // the end and iteration by iteration while the design formed.
+  if (info.multiscale_armed) {
+    std::string ms = "{\"armed\": true";
+    ms += ", \"topology\": \"" + info.multiscale_topology + "\"";
+    ms += ", \"region_voxels\": " + fmt_ll(info.multiscale_region_voxels);
+    ms += ", \"fit_rows\": " + fmt_ll(info.multiscale_fit_rows);
+    ms += ", \"band\": [" + fmt(info.multiscale_rho_lo) + ", " +
+          fmt(info.multiscale_rho_hi) + "]";
+    ms += ", \"cells_per_member_floor\": " + fmt(info.multiscale_floor_cells);
+    ms += ", \"floor_cell_mm\": " + fmt(info.multiscale_floor_cell_mm);
+    ms += ", \"floor_stride\": " + std::to_string(info.multiscale_floor_stride);
+    ms += ", \"min_feature_implied_mm\": " +
+          fmt(info.multiscale_min_feature_implied_mm);
+    ms += ", \"min_feature_used_mm\": " +
+          fmt(info.multiscale_min_feature_used_mm);
+    ms += ", \"region_active\": " + fmt_ll(info.multiscale_region_active);
+    ms += ", \"region_frozen_solid\": " +
+          fmt_ll(info.multiscale_region_frozen_solid);
+    ms += ", \"region_frozen_void\": " +
+          fmt_ll(info.multiscale_region_frozen_void);
+    ms += ", \"region_reachability_note\": \"a FrozenSolid region voxel is a "
+          "declared load/fixture face or a face-protection collar: held at "
+          "density 1 for the whole run, it can never become lattice in ANY "
+          "formulation. Compare region_active against region_voxels before "
+          "reading a low latticed_voxels as an optimizer failure.\"";
+    ms += ", \"floor_ceiling_measured\": " +
+          fmt_ll(info.multiscale_floor_ceiling_measured);
+    ms += ", \"floor_ceiling_eligible\": " +
+          fmt_ll(info.multiscale_floor_ceiling_eligible);
+    ms += ", \"floor_ceiling_min_cells\": " +
+          fmt(info.multiscale_floor_ceiling_min_cells);
+    ms += ", \"floor_ceiling_note\": \"region voxels that clear the "
+          "cells-per-member floor when the part is FULLY SOLID — the most any "
+          "design could lattice. A design only removes material, and removing "
+          "material only thins members, so this is a hard upper bound on "
+          "latticed_voxels for this part at this cell size.\"";
+    ms += ", \"rungs\": [";
+    for (std::size_t i = 0; i < info.multiscale_rungs.size(); ++i) {
+      const RunInfo::MultiscaleRung& R = info.multiscale_rungs[i];
+      if (i) ms += ", ";
+      ms += "{\"volume_fraction\": " + fmt(R.volume_fraction);
+      ms += ", \"voxels_void\": " + fmt_ll(R.voxels_void);
+      ms += ", \"voxels_band\": " + fmt_ll(R.voxels_band);
+      ms += ", \"voxels_solid\": " + fmt_ll(R.voxels_solid);
+      ms += ", \"voxels_lower_gap\": " + fmt_ll(R.voxels_lower_gap);
+      ms += ", \"voxels_upper_gap\": " + fmt_ll(R.voxels_upper_gap);
+      ms += ", \"band_rho_min\": " + fmt(R.band_rho_min);
+      ms += ", \"band_rho_max\": " + fmt(R.band_rho_max);
+      ms += ", \"projected_lower\": " + fmt_ll(R.projected_lower);
+      ms += ", \"projected_upper\": " + fmt_ll(R.projected_upper);
+      ms += ", \"projection_volume_delta\": " + fmt(R.projection_volume_delta);
+      ms += ", \"projection_max_density_move\": " +
+            fmt(R.projection_max_density_move);
+      ms += ", \"volume_fraction_before_projection\": " +
+            fmt(R.volume_fraction_before_projection);
+      ms += ", \"volume_fraction_after_projection\": " +
+            fmt(R.volume_fraction_after_projection);
+      ms += ", \"volume_fraction_target\": " + fmt(R.volume_fraction_target);
+      ms += ", \"volume_constraint_violation\": " +
+            fmt(R.volume_constraint_violation);
+      ms += ", \"floor_measured_voxels\": " + fmt_ll(R.floor_measured_voxels);
+      ms += ", \"floor_below_voxels\": " + fmt_ll(R.floor_below_voxels);
+      ms += ", \"floor_min_cells_per_member\": " +
+            fmt(R.floor_min_cells_per_member);
+      ms += ", \"floor_histogram\": [";
+      for (std::size_t b = 0; b < R.floor_histogram.size(); ++b) {
+        if (b) ms += ", ";
+        ms += fmt_ll(R.floor_histogram[b]);
+      }
+      ms += "]";
+      ms += ", \"floor_history\": [";
+      for (std::size_t h = 0; h < R.floor_history.size(); ++h) {
+        const RunInfo::MultiscaleRung::FloorSample& S = R.floor_history[h];
+        if (h) ms += ", ";
+        ms += "{\"iteration\": " + std::to_string(S.iteration);
+        ms += ", \"measured\": " + fmt_ll(S.measured);
+        ms += ", \"below\": " + fmt_ll(S.below);
+        ms += ", \"min_cells_per_member\": " + fmt(S.min_cells_per_member);
+        ms += "}";
+      }
+      ms += "]}";
+    }
+    ms += "]}";
+    num("multiscale", ms, /*comma=*/has_frame);
   }
 
   if (has_frame) {
