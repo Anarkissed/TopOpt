@@ -468,6 +468,26 @@ void fill_grading_cell_plan(RunInfo& gi, const GradedField& gf) {
   }
 }
 
+// Copy the SUB-FLOOR RETENTION record into run_info — ONE filler for both call sites,
+// for the same reason the cell plan has one (handoff 2026-08-04-subfloor-lattice-
+// unloaded-regions). Every field stays at its zero default when a job did not opt in,
+// and the serializer emits no block at all then, so a run that did not arm retention
+// is byte-identical (bar S1).
+void fill_grading_subfloor(RunInfo& gi, const GradedField& gf) {
+  gi.grading_subfloor_armed = gf.subfloor_retention_armed;
+  gi.grading_subfloor_stress_fraction_ceiling = gf.subfloor_stress_fraction_max;
+  gi.grading_subfloor_region_stress_fraction = gf.region_stress_fraction;
+  gi.grading_subfloor_region_qualified = gf.region_qualified_unloaded;
+  gi.grading_subfloor_candidate_voxels =
+      static_cast<long long>(gf.subfloor_candidate_voxels);
+  gi.grading_subfloor_retained_voxels =
+      static_cast<long long>(gf.subfloor_retained_voxels);
+  gi.grading_subfloor_recovered_voxels =
+      static_cast<long long>(gf.subfloor_recovered_in_regime_voxels);
+  gi.grading_subfloor_min_cells_per_member = gf.subfloor_min_cells_per_member;
+  gi.grading_subfloor_max_cells_per_member = gf.subfloor_max_cells_per_member;
+}
+
 LatticeBoundary lattice_boundary_for(const VoxelGrid& sg,
                                      const std::vector<double>& dens,
                                      double cell_mm,
@@ -1339,6 +1359,55 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          "than the floor times the smallest printable cell, so no cell choice can "
          "lattice it; the design itself is too thin here.\"\n";
     s += "    },\n";
+    // ── SUB-FLOOR RETENTION — THE ACCEPTED INACCURACY, NAMED (handoff
+    //    2026-08-04-subfloor-lattice-unloaded-regions, bar S2) ───────────────────
+    // Retaining below-the-floor material is a decision to accept an error nothing
+    // here can size. A receipt that only flipped `lattice_strut_out_of_regime`
+    // would bury that decision in a boolean; this block says WHICH voxels, at what
+    // cells-per-member, and at what measured fraction of the part's peak stress.
+    // EMITTED ONLY WHEN ARMED. A run that did not opt in gets no block at all,
+    // which is what keeps its receipt byte-identical to a pre-task one (bar S1) —
+    // and it loses nothing, because the below-floor population it would report is
+    // already in `solid_fallback_by_reason.member_too_thin_for_cell` above.
+    if (gf.subfloor_retention_armed) {
+    s += "    \"subfloor_retention\": {\n";
+    s += "      \"armed\": true,\n";
+    s += "      \"stress_fraction_ceiling\": " +
+         json_num(gf.subfloor_stress_fraction_max) + ",\n";
+    s += "      \"region_stress_fraction_measured\": " +
+         json_num(gf.region_stress_fraction) + ",\n";
+    s += "      \"region_qualified\": " +
+         std::string(gf.region_qualified_unloaded ? "true" : "false") + ",\n";
+    s += "      \"voxels_below_floor\": " +
+         std::to_string(gf.subfloor_candidate_voxels) + ",\n";
+    s += "      \"voxels_retained\": " +
+         std::to_string(gf.subfloor_retained_voxels) + ",\n";
+    s += "      \"voxels_recovered_in_regime\": " +
+         std::to_string(gf.subfloor_recovered_in_regime_voxels) + ",\n";
+    s += "      \"retained_cells_per_member\": [" +
+         json_num(gf.subfloor_min_cells_per_member) + ", " +
+         json_num(gf.subfloor_max_cells_per_member) + "],\n";
+    s += "      \"retained_strut_diameter_mm\": [" +
+         json_num(gf.subfloor_min_strut_diameter_mm) + ", " +
+         json_num(gf.subfloor_max_strut_diameter_mm) + "],\n";
+    s += "      \"cells_per_member_floor\": " +
+         json_num(gf.cells_per_member_floor) + ",\n";
+    s += "      \"note\": \"region_stress_fraction_measured is this region's PEAK "
+         "von Mises over the PART's peak, measured from the variant's own field — "
+         "never declared by the job. voxels_retained were kept as lattice below "
+         "the cells-per-member floor because that fraction cleared the ceiling; "
+         "they are the reason lattice_strut_out_of_regime is raised. The "
+         "certification is STRUCTURALLY BLIND to cells-per-member (the homogenized "
+         "tensor is a function of relative density alone), so a margin that did not "
+         "move is NOT evidence this material is accurately certified — it is an "
+         "accepted, unquantified inaccuracy. armed=false leaves every number here "
+         "at zero and the run bit-identical. voxels_recovered_in_regime were "
+         "latticed because retention was armed but CLEAR the floor at their own "
+         "cell, so they are certified in regime and carry no accuracy claim; "
+         "they are separated out precisely so voxels_retained stays the exact "
+         "count of out-of-regime material.\"\n";
+    s += "    },\n";
+    }
     s += "    \"mask_voxels_dropped_by_cell_overlap\": " +
          std::to_string(graded.mask_voxels_dropped_by_cell_overlap) + ",\n";
     s += "    \"clamped_lo_voxels\": " + std::to_string(gf.clamped_lo_voxels) +
@@ -1638,6 +1707,13 @@ LatticeVariantOutcome lattice_one_variant(
                      job.grading.cell_mode + "\"");
     gp.min_cell_size_mm = job.grading.cell_min_mm;
     gp.max_cell_size_mm = job.grading.cell_max_mm;
+    // SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+    // Absent => false => this call is bit-identical to the pre-task one. The demand
+    // handed in below is the variant's OWN von Mises field, which is what makes the
+    // region stress fraction a MEASUREMENT rather than an assertion.
+    gp.retain_subfloor_in_unloaded_regions =
+        job.grading.retain_subfloor_in_unloaded_regions;
+    gp.subfloor_stress_fraction_max = job.grading.subfloor_stress_fraction;
     gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp);
     cell = gf.cell_size_mm;
     // The law's cell. In Fixed/Auto this is THE cell; in Swept it is the COARSEST
@@ -2727,6 +2803,68 @@ std::string lattice_forecast_json(const JobDescription& job,
   s += "    \"member_width_needed_mm\": " +
        json_num(gf.cells_per_member_floor * gf.cell_size_mm) + "\n";
   s += "  },\n";
+  // ── SUB-FLOOR RETENTION, FORECAST AS A NAMED OUTCOME (handoff 2026-08-04-
+  //    subfloor-lattice-unloaded-regions, bar S7) ────────────────────────────────
+  // The user must learn BEFORE the run that a region below the cells-per-member
+  // floor will be latticed anyway — not from the receipt afterwards.
+  //
+  // WHAT THIS FORECAST CAN AND CANNOT SAY, stated in the output too. The count of
+  // voxels below the floor is exact on the uniform paths: that predicate is
+  // width/cell and never sees density, so the band-floor approximation this whole
+  // forecast runs under cannot move it. The PREDICATE that decides whether they are
+  // retained — the region's peak von Mises as a fraction of the part's — is NOT
+  // computable here, because no solve has run and there is no stress field to
+  // measure. So this reports the population and the rule, and says plainly that the
+  // decision needs the run. It never guesses the fraction: `grade_lattice` DISARMS
+  // retention when handed a demand-less field precisely so nothing downstream can
+  // read 0.0 as "unloaded".
+  const bool want_subfloor = job.grading.retain_subfloor_in_unloaded_regions;
+  const double subfloor_ceiling =
+      job.grading.subfloor_stress_fraction > 0.0
+          ? job.grading.subfloor_stress_fraction
+          : lattice_subfloor_retention_stress_fraction();
+  s += "  \"subfloor_retention\": {\n";
+  s += "    \"requested\": " + std::string(want_subfloor ? "true" : "false") + ",\n";
+  s += "    \"stress_fraction_ceiling\": " +
+       json_num(want_subfloor ? subfloor_ceiling : 0.0) + ",\n";
+  s += "    \"voxels_below_floor\": " +
+       std::to_string(gf.subfloor_candidate_voxels) + ",\n";
+  s += "    \"outcome\": \"";
+  if (!want_subfloor) {
+    s += gf.subfloor_candidate_voxels > 0
+             ? "NOT REQUESTED. " +
+                   std::to_string(gf.subfloor_candidate_voxels) +
+                   " of this region's voxels are below the cells-per-member floor "
+                   "and will stay SOLID. Setting grading."
+                   "retain_subfloor_in_unloaded_regions would lattice them if this "
+                   "region measures at or under the stress-fraction ceiling — and "
+                   "would put the certificate over them out of regime."
+             : std::string(
+                   "NOT REQUESTED, and nothing here is below the cells-per-member "
+                   "floor, so it would change nothing on this variant.");
+  } else if (gf.subfloor_candidate_voxels == 0) {
+    s += "REQUESTED, but nothing in this region is below the cells-per-member "
+         "floor, so retention will lattice no extra material.";
+  } else {
+    s += "REQUESTED. " + std::to_string(gf.subfloor_candidate_voxels) +
+         " of this region's voxels are below the cells-per-member floor. They will "
+         "be latticed ANYWAY — at " + json_num(gf.cells_per_member_floor) +
+         " cells per member or fewer, below the floor homogenization needs — IF "
+         "this region's peak von Mises measures at or under " +
+         json_num(subfloor_ceiling) +
+         " of the part's peak. If it measures above that, they stay solid. This "
+         "pre-flight CANNOT tell you which: it runs before any solve, so there is "
+         "no stress field to measure. The run's receipt reports the measured "
+         "fraction and every retained voxel.";
+  }
+  s += "\",\n";
+  s += "    \"accuracy_note\": \"retaining sub-floor material is a decision to "
+       "accept an inaccuracy this codebase cannot currently quantify. The "
+       "certification is STRUCTURALLY BLIND to cells-per-member — the homogenized "
+       "tensor is a function of relative density alone — so a certified margin that "
+       "does not move is NOT evidence that a sub-floor lattice is accurate. "
+       "lattice_strut_out_of_regime is raised over retained material.\"\n";
+  s += "  },\n";
   s += "  \"include_regions\": " + std::to_string(roles.includes.size()) + ",\n";
   s += "  \"exclude_regions\": " + std::to_string(roles.excludes.size()) + ",\n";
   s += "  \"include_region_void_voxels\": " + std::to_string(include_void) +
@@ -3189,6 +3327,7 @@ AnalyzeJobResult analyze_job(const JobDescription& job, const std::string& job_d
     gi.grading_any_strut_below_min = gf.any_strut_below_min;
     gi.grading_region_ungradeable = gf.region_ungradeable;
     fill_grading_cell_plan(gi, gf);
+    fill_grading_subfloor(gi, gf);
 
     result.grading_run_info_path = join_path(out_dir, "run_info.json");
     write_run_info(result.grading_run_info_path, gi);
@@ -3860,6 +3999,7 @@ LatticeVariantJobResult lattice_variant_job(const JobDescription& job,
       gi.grading_any_strut_below_min = R.gf.any_strut_below_min;
       gi.grading_region_ungradeable = R.gf.region_ungradeable;
       fill_grading_cell_plan(gi, R.gf);
+      fill_grading_subfloor(gi, R.gf);
     }
     result.run_info_path = join_path(out_dir, "run_info.json");
     write_run_info(result.run_info_path, gi);
@@ -4821,6 +4961,7 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       lat_agg.g_below_min = gf.any_strut_below_min;
       lat_agg.g_ungradeable = gf.region_ungradeable;
       fill_grading_cell_plan(lat_agg.g_cell_ri, gf);
+      fill_grading_subfloor(lat_agg.g_cell_ri, gf);
     }
     lat_agg.cells += oc.stats.latticed_cells;
     lat_agg.voxels += oc.region_voxels;
@@ -5028,6 +5169,27 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       run_info.grading_max_strut_diameter_mm = lat_agg.g_max_d;
       run_info.grading_any_strut_below_min = lat_agg.g_below_min;
       run_info.grading_region_ungradeable = lat_agg.g_ungradeable;
+      // SUB-FLOOR RETENTION carried through the same aggregate carrier the cell
+      // plan uses, so the optimize-path receipt cannot disagree with the
+      // lattice-variant one about what was retained (handoff 2026-08-04-subfloor-
+      // lattice-unloaded-regions).
+      run_info.grading_subfloor_armed = lat_agg.g_cell_ri.grading_subfloor_armed;
+      run_info.grading_subfloor_stress_fraction_ceiling =
+          lat_agg.g_cell_ri.grading_subfloor_stress_fraction_ceiling;
+      run_info.grading_subfloor_region_stress_fraction =
+          lat_agg.g_cell_ri.grading_subfloor_region_stress_fraction;
+      run_info.grading_subfloor_region_qualified =
+          lat_agg.g_cell_ri.grading_subfloor_region_qualified;
+      run_info.grading_subfloor_candidate_voxels =
+          lat_agg.g_cell_ri.grading_subfloor_candidate_voxels;
+      run_info.grading_subfloor_retained_voxels =
+          lat_agg.g_cell_ri.grading_subfloor_retained_voxels;
+      run_info.grading_subfloor_recovered_voxels =
+          lat_agg.g_cell_ri.grading_subfloor_recovered_voxels;
+      run_info.grading_subfloor_min_cells_per_member =
+          lat_agg.g_cell_ri.grading_subfloor_min_cells_per_member;
+      run_info.grading_subfloor_max_cells_per_member =
+          lat_agg.g_cell_ri.grading_subfloor_max_cells_per_member;
       run_info.grading_cell_mode = lat_agg.g_cell_ri.grading_cell_mode;
       run_info.grading_cell_base_mm = lat_agg.g_cell_ri.grading_cell_base_mm;
       run_info.grading_cell_max_level = lat_agg.g_cell_ri.grading_cell_max_level;

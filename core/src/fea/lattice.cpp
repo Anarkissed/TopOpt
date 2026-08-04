@@ -297,6 +297,18 @@ double lattice_cells_per_member_min(LatticeTopology topo) {
   return 5.0;
 }
 
+double lattice_subfloor_retention_stress_fraction() {
+  // MEASURED — handoff 2026-08-04-protect-freeze-vs-solidity §10, the six-station
+  // flange sweep in `item8_subfloor_floor.txt`. The certified-margin movement from
+  // latticing a region at 1.33 cells per member stays within +0.0008 % up to a region
+  // carrying 19.37 % of the part's peak von Mises, then jumps 25x to +0.0203 % at
+  // 22.09 %. 0.20 is the threshold in that knee: it admits every station measured flat
+  // and excludes every station measured steep. The full derivation, and the CONTROL
+  // that says what this number is NOT evidence for, are in lattice.hpp above the
+  // declaration — read them before moving it.
+  return 0.20;
+}
+
 namespace {
 
 // The printed octet strut DIAMETER at cell edge 4 mm, per relative density, measured

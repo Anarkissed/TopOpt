@@ -860,14 +860,27 @@ public struct LatticeReport: Equatable, Sendable {
         /// below the floor the numbers are indicative, not certified.
         public let minCellsPerMember: Double
         public let outOfRegime: Bool
+        /// SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+        /// How many voxels were DELIBERATELY kept as lattice below the floor because
+        /// the region measured as carrying almost no load, and what that region's peak
+        /// stress measured as a fraction of the part's peak. 0 / 0 means the run did
+        /// not opt in — and then an `outOfRegime` flag means something else entirely
+        /// (a member that came out thinner than the cell could hold), which is why the
+        /// two are reported apart rather than collapsed into one reason.
+        public let subfloorRetainedVoxels: Int
+        public let subfloorRegionStressFraction: Double
         public init(marginInPlane: Double, marginInterlayer: Double,
                     zKnockdown: Double, minCellsPerMember: Double,
-                    outOfRegime: Bool) {
+                    outOfRegime: Bool,
+                    subfloorRetainedVoxels: Int = 0,
+                    subfloorRegionStressFraction: Double = 0) {
             self.marginInPlane = marginInPlane
             self.marginInterlayer = marginInterlayer
             self.zKnockdown = zKnockdown
             self.minCellsPerMember = minCellsPerMember
             self.outOfRegime = outOfRegime
+            self.subfloorRetainedVoxels = subfloorRetainedVoxels
+            self.subfloorRegionStressFraction = subfloorRegionStressFraction
         }
     }
 

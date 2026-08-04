@@ -850,6 +850,22 @@ public final class ResultsModel: ObservableObject {
                     + "\(String(format: "%.1f", s.minCellsPerMember)) cells — below the "
                     + "floor the homogenized model needs, so treat the strut numbers "
                     + "as indicative, not certified.")
+                // WHY, when the run CHOSE it (task 2026-08-04-subfloor-lattice-
+                // unloaded-regions). Out-of-regime by accident and out-of-regime on
+                // purpose are different facts, and only the second one has a number
+                // the user picked. Saying "out of regime" alone would hide which of
+                // the two this was.
+                if s.subfloorRetainedVoxels > 0 {
+                    let pct = String(format: "%.1f",
+                                     s.subfloorRegionStressFraction * 100)
+                    lines.append("That was ASKED FOR, not an accident: "
+                        + "\(s.subfloorRetainedVoxels) voxels were kept as lattice "
+                        + "below the floor because this region measured \(pct)% of "
+                        + "the part's peak stress. The trade you accepted is real — "
+                        + "the certification cannot see cells-per-member at all, so "
+                        + "an unmoved margin is not evidence this material is "
+                        + "accurately certified. It is an accepted unknown.")
+                }
             }
         }
         return lines

@@ -1,0 +1,39 @@
+=== S2 / S3 / S4 — the maintainer's own job, retention OFF vs ON ===
+M2_verticalStand.step, resolution 128, his job document unmodified
+except a single added key: grading.retain_subfloor_in_unloaded_regions.
+
+--- S4: the certified margin, priced ---
+  rung  verdict off     margin off   verdict on      margin on     d margin
+  0.68       ACCEPT    3254.356637       ACCEPT    3254.356637     +0.0000%
+  0.52       ACCEPT    3389.800731       ACCEPT    3389.800731     +0.0000%
+  0.38       ACCEPT    3290.859799       ACCEPT    3290.859799     +0.0000%
+  0.26       ACCEPT    3013.323039       ACCEPT    3013.323039     +0.0000%
+
+largest |d margin| = 0.0000% (rung None); accepted bound = 0.10%
+S4 MET
+verdict flips: none
+
+--- S2: the maintainer's case ---
+  rung  region vox  latticed off  latticed on  frac off   frac on  retained  min cpm         strut mm
+  0.68       10607           472          472     4.4%     4.4%         0     0.00   0.000-0.000   
+  0.52       10485            82           82     0.8%     0.8%         0     0.00   0.000-0.000   
+  0.38       10405             0            0     0.0%     0.0%         0     0.00   0.000-0.000   
+  0.26       10364             0            0     0.0%     0.0%         0     0.00   0.000-0.000   
+
+the retention predicate, as the run measured it:
+  region peak vM / part peak vM = 0.910231
+  ceiling                       = 0.200000
+  region qualified              = False
+  voxels below the floor        = 10135
+  voxels retained               = 0
+  cells-per-member floor        = 5
+
+--- S3: does the argmax move on a REAL part? ---
+grid 128x31x118; comparing the COMPOSITE solve's own von Mises field, variant by variant.
+  rung      peak off         argmax off       peak on          argmax on        
+  0.68      0.016900       (126, 6, 16)      0.016900       (126, 6, 16)  same
+  0.52      0.016225       (17, 14, 61)      0.016225       (17, 14, 61)  same
+  0.38      0.016713       (17, 16, 61)      0.016713       (17, 16, 61)  same
+  0.26      0.018252       (17, 17, 60)      0.018252       (17, 17, 60)  same
+
+S3 MET — the peak von Mises stayed at the same voxel on every variant compared.

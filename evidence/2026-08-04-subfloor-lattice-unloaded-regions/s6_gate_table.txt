@@ -1,0 +1,64 @@
+=== S6 — gate table, every rung ===
+base   cli: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-base/topopt-cli
+branch cli: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/core/build/topopt-cli
+
+cfg     rung   L verdict   R verdict        L margin        R margin           d
+----------------------------------------------------------------------------------
+[P] protection, NO lattice   (base vs branch)
+P       0.68        True        True       10.878029       10.878029   +0.00e+00
+P       0.52        True        True       10.849132       10.849132   +0.00e+00
+P       0.38        True        True       10.771841       10.771841   +0.00e+00
+P       0.26        True        True       10.254110       10.254110   +0.00e+00
+P    design.bin  voxel-classification flips: 0 of 90112
+
+[L] lattice, NO grading   (base vs branch)
+L       0.68        True        True       10.878029       10.878029   +0.00e+00
+L       0.52        True        True       10.849132       10.849132   +0.00e+00
+L       0.38        True        True       10.771841       10.771841   +0.00e+00
+L       0.26        True        True       10.254110       10.254110   +0.00e+00
+L    variant_026        True        True            null            null        +nan   [composite]
+L    variant_038        True        True            null            null        +nan   [composite]
+L    variant_052        True        True            null            null        +nan   [composite]
+L    variant_068        True        True            null            null        +nan   [composite]
+L    design.bin  voxel-classification flips: 0 of 90112
+
+[G] graded lattice, uniform cell   (base vs branch)
+G       0.68        True        True       10.878029       10.878029   +0.00e+00
+G       0.52        True        True       10.849132       10.849132   +0.00e+00
+G       0.38        True        True       10.771841       10.771841   +0.00e+00
+G       0.26        True        True       10.254110       10.254110   +0.00e+00
+G    variant_026        True        True       10.254110       10.254110   +0.00e+00   [composite]
+G    variant_038        True        True       10.771841       10.771841   +0.00e+00   [composite]
+G    variant_052        True        True       10.849132       10.849132   +0.00e+00   [composite]
+G    variant_068        True        True       10.878029       10.878029   +0.00e+00   [composite]
+G    design.bin  voxel-classification flips: 0 of 90112
+
+[W] graded lattice, SWEPT + roles   (base vs branch)
+W       0.68        True        True       10.878029       10.878029   +0.00e+00
+W       0.52        True        True       10.849132       10.849132   +0.00e+00
+W       0.38        True        True       10.771841       10.771841   +0.00e+00
+W       0.26        True        True       10.254110       10.254110   +0.00e+00
+W    variant_026        True        True        9.482059        9.482059   +0.00e+00   [composite]
+W    variant_038        True        True       10.109199       10.109199   +0.00e+00   [composite]
+W    variant_052        True        True       10.343689       10.343689   +0.00e+00   [composite]
+W    variant_068        True        True       10.374649       10.374649   +0.00e+00   [composite]
+W    design.bin  voxel-classification flips: 0 of 90112
+
+[S] QUIET region, retention ARMED vs not   (offarm vs onarm)
+S       0.68        True        True       10.878029       10.878029   +0.00e+00
+S       0.52        True        True       10.849132       10.849132   +0.00e+00
+S       0.38        True        True       10.771841       10.771841   +0.00e+00
+S       0.26        True        True       10.254110       10.254110   +0.00e+00
+S    variant_026        True        True       10.254110       10.254006   -1.04e-04   [composite]   [region 252 vox, latticed 252, retained 252 of 252 below-floor, region frac 0.0206]
+S    variant_038        True        True       10.771841       10.771707   -1.35e-04   [composite]   [region 252 vox, latticed 252, retained 252 of 252 below-floor, region frac 0.0219]
+S    variant_052        True        True       10.849132       10.849317   +1.85e-04   [composite]   [region 252 vox, latticed 252, retained 252 of 252 below-floor, region frac 0.0225]
+S    variant_068        True        True       10.878029       10.878203   +1.74e-04   [composite]   [region 252 vox, latticed 252, retained 252 of 252 below-floor, region frac 0.0219]
+S    design.bin  voxel-classification flips: 0 of 90112
+
+--- negative control: the comparator must be able to SEE one voxel ---
+one voxel moved by 1e-9 across the iso -> comparator reports 1 flip(s); expected 1: PASS
+
+S6 PASS — no verdict flip on any rung of any configuration, solid or
+          composite; no voxel-classification flip on any existing path;
+          and the negative control proves the comparator can see a
+          single-voxel difference.

@@ -1,0 +1,79 @@
+=== S1 — graded lattice run, retention NOT opted in, base vs branch ===
+branch build: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/core/build
+base   build: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-base
+
+--- stashing the branch and rebuilding BASE (target: topopt_cli) ---
+--- restoring the branch and rebuilding it (target: topopt_cli) ---
+
+base   cli sha256: d4318b6087763ef1fa496e29c7c429fcbe83be18c4403033e417bbc68fafdef1
+branch cli sha256: 80dd820d1ed90ec67085c96f5fd8b61fc27ec2352a562422b613a93e3f57c200
+the two binaries differ, as they must for this bar to mean anything.
+
+
+--- base artifacts ---
+09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061  ./design.bin
+499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354  ./fields.bin
+380665af2fb584aaee9dde5828b28f50271caaa9ebdb33f307bfdeda0374d409  ./iterations.csv
+bf7bbf02c63789631bd2582247cb4f2bb955ec4eff2eda19d598491d6f8d1811  ./loadcase.json
+1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb  ./report.json
+93c7dbe23b7ffbecf8283a0d91f5e4f5478b921f223a87fd7dcadbffa013e11c  ./run_info.json
+4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76  ./variant_026.stl
+a13e0b7a29ee2287007092a1aedfacaf5410e59fa41a54516c7233b0f57a74b0  ./variant_026_lattice.report.json
+767bf95769c60e26794272393c58df33ea801cb50ae804abd331fb6588bbd217  ./variant_026_lattice.stl
+e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901  ./variant_038.stl
+0d40c803b199cc0154b1743ab36700a818ec422f9d64acc21d55931213369c2b  ./variant_038_lattice.report.json
+c6c1f53c7a6e3ff8ebc386082868ce25cf8e2fdd17754cfbfb6b02059809f947  ./variant_038_lattice.stl
+6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c  ./variant_052.stl
+1afdec8e44c8d90c0f6b7a6c645f9d9572752a90fb5dd8882dab4e9b5a2c8016  ./variant_052_lattice.report.json
+d67563cd3dad2913dd13d76bd91dfd7d53f25ba96803c56413c14bfcf8085115  ./variant_052_lattice.stl
+271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e  ./variant_068.stl
+666c3a9f73235da45dd54adab282a02cfe8b08328e9d188b09b94ddffa3f6b42  ./variant_068_lattice.report.json
+8444caac65321a68b935052e4875ccfdf93fab6c7bfa6e65af5273a1026cef3b  ./variant_068_lattice.stl
+
+--- branch artifacts ---
+09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061  ./design.bin
+499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354  ./fields.bin
+2ce53610dad1d86cd1924765e20f72c0d9f84714265d3ad07a35b6f34de18398  ./iterations.csv
+bf7bbf02c63789631bd2582247cb4f2bb955ec4eff2eda19d598491d6f8d1811  ./loadcase.json
+1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb  ./report.json
+712ee226cf751d2edad658ce34a134fa638292d34881a87437aa89e61e293fed  ./run_info.json
+4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76  ./variant_026.stl
+a13e0b7a29ee2287007092a1aedfacaf5410e59fa41a54516c7233b0f57a74b0  ./variant_026_lattice.report.json
+767bf95769c60e26794272393c58df33ea801cb50ae804abd331fb6588bbd217  ./variant_026_lattice.stl
+e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901  ./variant_038.stl
+0d40c803b199cc0154b1743ab36700a818ec422f9d64acc21d55931213369c2b  ./variant_038_lattice.report.json
+c6c1f53c7a6e3ff8ebc386082868ce25cf8e2fdd17754cfbfb6b02059809f947  ./variant_038_lattice.stl
+6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c  ./variant_052.stl
+1afdec8e44c8d90c0f6b7a6c645f9d9572752a90fb5dd8882dab4e9b5a2c8016  ./variant_052_lattice.report.json
+d67563cd3dad2913dd13d76bd91dfd7d53f25ba96803c56413c14bfcf8085115  ./variant_052_lattice.stl
+271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e  ./variant_068.stl
+666c3a9f73235da45dd54adab282a02cfe8b08328e9d188b09b94ddffa3f6b42  ./variant_068_lattice.report.json
+8444caac65321a68b935052e4875ccfdf93fab6c7bfa6e65af5273a1026cef3b  ./variant_068_lattice.stl
+
+--- the bar's named artifacts ---
+IDENTICAL  report.json  1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb
+IDENTICAL  fields.bin  499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354
+IDENTICAL  design.bin  09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061
+IDENTICAL  variant_026.stl  4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76
+IDENTICAL  variant_026_lattice.stl  767bf95769c60e26794272393c58df33ea801cb50ae804abd331fb6588bbd217
+IDENTICAL  variant_038.stl  e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901
+IDENTICAL  variant_038_lattice.stl  c6c1f53c7a6e3ff8ebc386082868ce25cf8e2fdd17754cfbfb6b02059809f947
+IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c
+IDENTICAL  variant_052_lattice.stl  d67563cd3dad2913dd13d76bd91dfd7d53f25ba96803c56413c14bfcf8085115
+IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
+IDENTICAL  variant_068_lattice.stl  8444caac65321a68b935052e4875ccfdf93fab6c7bfa6e65af5273a1026cef3b
+
+--- clock-bearing artifacts, compared with the clock removed ---
+IDENTICAL  run_info.json (minus the four named wall-clock keys)
+IDENTICAL  iterations.csv (physics columns; timestamps + ms timings dropped)
+
+--- per-variant lattice receipts ---
+IDENTICAL  variant_026_lattice.report.json  a13e0b7a29ee2287007092a1aedfacaf5410e59fa41a54516c7233b0f57a74b0
+IDENTICAL  variant_038_lattice.report.json  0d40c803b199cc0154b1743ab36700a818ec422f9d64acc21d55931213369c2b
+IDENTICAL  variant_052_lattice.report.json  1afdec8e44c8d90c0f6b7a6c645f9d9572752a90fb5dd8882dab4e9b5a2c8016
+IDENTICAL  variant_068_lattice.report.json  666c3a9f73235da45dd54adab282a02cfe8b08328e9d188b09b94ddffa3f6b42
+
+S1 PASS — a graded lattice run that does not opt in to sub-floor retention
+          is byte-identical: report.json, fields.bin, design.bin, every
+          mesh and every lattice receipt match, and the two clock-bearing
+          artifacts match once the clock is removed.

@@ -991,7 +991,8 @@ JobDescription parse_job(const std::string& json_text) {
     const JsonValue& gr = require_object(*gradv, "grading");
     reject_unknown_keys(
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
-             "cell_mode", "cell_min_mm", "cell_max_mm"},
+             "cell_mode", "cell_min_mm", "cell_max_mm",
+             "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1054,6 +1055,30 @@ JobDescription parse_job(const std::string& json_text) {
       job.grading.demand_exponent = require_number(*e, "grading.demand_exponent");
       if (!(job.grading.demand_exponent > 0.0))
         schema_fail("grading \"demand_exponent\" must be > 0");
+    }
+    // SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+    // Absent => false => bit-identical (bar S1).
+    if (const JsonValue* r =
+            find_key(gr, "retain_subfloor_in_unloaded_regions")) {
+      if (r->type != JsonValue::Type::Bool)
+        schema_fail(
+            "grading \"retain_subfloor_in_unloaded_regions\" must be a boolean");
+      job.grading.retain_subfloor_in_unloaded_regions = (r->num != 0.0);
+    }
+    if (const JsonValue* f = find_key(gr, "subfloor_stress_fraction")) {
+      // A threshold stated WITHOUT arming retention is a job that means one thing and
+      // says another — refuse it rather than silently ignore the number.
+      if (!job.grading.retain_subfloor_in_unloaded_regions)
+        schema_fail(
+            "grading \"subfloor_stress_fraction\" is only allowed with "
+            "\"retain_subfloor_in_unloaded_regions\": true");
+      job.grading.subfloor_stress_fraction =
+          require_number(*f, "grading.subfloor_stress_fraction");
+      if (!(job.grading.subfloor_stress_fraction > 0.0 &&
+            job.grading.subfloor_stress_fraction <= 1.0))
+        schema_fail(
+            "grading \"subfloor_stress_fraction\" must be > 0 and <= 1 (a fraction "
+            "of the part's PEAK von Mises, not a percentage)");
     }
   }
 

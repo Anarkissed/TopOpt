@@ -20,7 +20,13 @@
 //      certifiable by construction (bar L2).
 //   2. CELL SIZE is clamped so cells-per-member (member_width / cell) stays at or
 //      above the floor, using the real local member width. A member too thin to hold
-//      the floor at a printable cell STAYS SOLID (bar L4) — never a sub-floor lattice.
+//      the floor at a printable cell STAYS SOLID (bar L4) — never a sub-floor lattice,
+//      UNLESS the caller explicitly arms sub-floor retention for a region measured to
+//      be carrying almost no load (see GradingLawParams below, handoff
+//      2026-08-04-subfloor-lattice-unloaded-regions). That opt-in is OFF by default;
+//      when it is off this law is bit-identical to the pre-task one. When it is on,
+//      the retained voxels are individually flagged, counted and reported, and the
+//      certificate over them is out of regime.
 //   3. STRUT DIAMETER is checked against the stated minimum extrudable width and
 //      REPORTED (min_strut_diameter_mm, any_strut_below_min) — never silently violated.
 //
@@ -97,6 +103,41 @@ struct GradingLawParams {
   // kWidthAwareThicknessCapVoxels. A member thicker than 2*cap*spacing reads the +inf
   // "thicker than measured" sentinel and always clears the ceiling. Must be >= 1.
   int thickness_cap_voxels = 32;
+
+  // ── SUB-FLOOR RETENTION IN UNLOADED REGIONS ─────────────────────────────────────
+  // (handoff 2026-08-04-subfloor-lattice-unloaded-regions)
+  //
+  // OFF BY DEFAULT, and a job that does not opt in is bit-identical (bar S1). When
+  // ARMED, requirement 2's fallback is conditioned rather than removed: a candidate
+  // whose member cannot hold the cells-per-member floor is kept as LATTICE — instead
+  // of falling back to solid — provided the REGION it belongs to is carrying almost
+  // no load. The maintainer's case is a back wall that exists for geometry: it should
+  // be latticeable two cells thick, and today it is silently left solid.
+  //
+  // THE PREDICATE IS REGION-SCOPED AND MEASURED, NEVER DECLARED. The law computes
+  //   region peak demand / PART peak demand
+  // over the demand field it was handed — the region's peak across the candidate set,
+  // the part's peak across every printed voxel, region or not — and arms retention for
+  // the whole region only when that ratio is <= `subfloor_stress_fraction_max`. It is
+  // measured from the field, so a user cannot assert a region is unloaded; and it is
+  // region-scoped, not per-voxel, because that is the shape §10 measured (a REGION at
+  // N % of part peak), and a per-voxel test would lattice quiet voxels sitting inside
+  // a loaded region, which nothing has measured.
+  //
+  // WHAT RETENTION NEVER DOES. It never emits a strut under the stated minimum
+  // extrudable width (printability is a fact about the printer, not about load), and
+  // it never emits a density outside the certifiable band. Both invariants below are
+  // asserted for retained voxels exactly as for every other latticed voxel.
+  //
+  // WHAT IT COSTS. The certificate over retained material is OUT OF REGIME:
+  // `analyze_fixed_design` raises `lattice_strut_out_of_regime`, and the GradedField
+  // below names WHICH voxels, at what cells-per-member, and at what fraction of peak
+  // stress. See lattice.hpp's declaration of the fraction for why the observed
+  // margin movement is NOT evidence of accuracy.
+  bool retain_subfloor_in_unloaded_regions = false;
+  // The ceiling, defaulted to the measured constant. Must be > 0 and <= 1 when armed.
+  double subfloor_stress_fraction_max =
+      0.0;  // 0 => take lattice_subfloor_retention_stress_fraction() at call time
 };
 
 // The law's output: the posture the certification engine consumes, plus a full report
@@ -169,9 +210,53 @@ struct GradedField {
   double rho_max_used = 0.0;
   double min_member_width_mm = 0.0;       // thinnest LATTICED member (mm); +inf if all
                                           //   latticed members exceed the EDT cap
-  double min_cells_per_member = 0.0;      // at that thinnest member (>= floor always)
+  double min_cells_per_member = 0.0;      // at that thinnest member. >= floor ALWAYS,
+                                          //   except over voxels sub-floor retention
+                                          //   deliberately kept — which is exactly the
+                                          //   number that makes analyze_fixed_design
+                                          //   raise lattice_strut_out_of_regime.
   double min_strut_diameter_mm = 0.0;     // thinnest emitted strut
   double max_strut_diameter_mm = 0.0;     // fattest emitted strut
+
+  // ── SUB-FLOOR RETENTION — the accepted inaccuracy, NAMED (handoff
+  //    2026-08-04-subfloor-lattice-unloaded-regions, bar S2) ────────────────────────
+  // Retaining a below-the-floor voxel is a decision to accept an inaccuracy nothing in
+  // this codebase can currently quantify (lattice.hpp, ★★). A receipt that only said
+  // "out of regime" would bury that; these fields name it. Every one of them is 0 /
+  // false / empty when retention is disarmed, which is the default.
+  bool subfloor_retention_armed = false;    // the job opted in
+  double subfloor_stress_fraction_max = 0.0;  // the ceiling that was in force
+  // The MEASURED predicate: this region's peak demand over the PART's peak demand.
+  // 1.0 when the candidate set is the whole printed part (there is no "region" to be
+  // unloaded relative to), 0.0 when the part carries no demand at all.
+  double region_stress_fraction = 0.0;
+  bool region_qualified_unloaded = false;   // region_stress_fraction <= the ceiling
+  // Candidates whose member could not hold the floor, REGARDLESS of arming — i.e. the
+  // voxels retention is about. Reported even when disarmed, so the forecast can say
+  // how much is at stake before anyone opts in.
+  std::size_t subfloor_candidate_voxels = 0;
+  std::size_t subfloor_retained_voxels = 0;  // ...and how many were actually kept
+  // Voxels latticed BECAUSE retention was armed but which turned out to clear the
+  // floor at their own cell, so they are NOT out of regime and carry no accuracy
+  // claim. They exist only on the SWEPT path, where the plan rejects a whole base
+  // cell using the thinnest member anywhere inside it: dropping that ceiling for a
+  // qualified region lets individual voxels on wider material through legitimately.
+  // Reported separately precisely so `subfloor_retained_voxels` stays the exact
+  // count of material the certificate is out of regime over.
+  std::size_t subfloor_recovered_in_regime_voxels = 0;
+  // The regime the retained material actually landed in. min/max over RETAINED voxels
+  // only; 0 when none were retained. `subfloor_min_cells_per_member` is the headline
+  // number — it is below `cells_per_member_floor` by construction, and how far below
+  // is the size of the claim being accepted.
+  double subfloor_min_cells_per_member = 0.0;
+  double subfloor_max_cells_per_member = 0.0;
+  double subfloor_min_strut_diameter_mm = 0.0;
+  double subfloor_max_strut_diameter_mm = 0.0;
+  // WHICH voxels (bar S2). Grid-indexed, grid.voxel_count(): 1 = this voxel is latticed
+  // AND sits below the cells-per-member floor. EMPTY when nothing was retained — which
+  // is what keeps a disarmed run byte-identical. This is also what the certifiability
+  // invariant below reads: a sub-floor voxel is admissible ONLY if it is flagged here.
+  std::vector<char> subfloor_flags;
 
   // ── honesty flags ───────────────────────────────────────────────────────────────
   bool any_strut_below_min = false;    // requirement 3: some strut under the min width
@@ -214,6 +299,17 @@ struct GradedField {
 // member_width / cell_size >= cells_per_member_floor. A point the gate cannot certify
 // is never emitted. Throws std::invalid_argument on a size mismatch or a non-positive
 // param, std::logic_error if the internal certifiability invariant is ever violated.
+//
+// THE ONE EXCEPTION TO THE FLOOR HALF OF THAT INVARIANT, and it is not a loosening.
+// When `retain_subfloor_in_unloaded_regions` is armed, a latticed voxel may sit below
+// the cells-per-member floor — but ONLY if it is individually flagged in
+// `subfloor_flags`, only in a region whose MEASURED stress fraction cleared the
+// ceiling, and the assertion additionally requires that the flagged set and
+// `subfloor_retained_voxels` agree exactly and that the region qualified. So the
+// invariant is not weakened: an unflagged sub-floor voxel still throws, and the
+// admissible set is now stated exactly rather than approximately. The BAND half and
+// the printability half are unconditional and untouched — retention never widens
+// either.
 GradedField grade_lattice(const VoxelGrid& grid,
                           const std::vector<double>& density,
                           const std::vector<double>& demand,

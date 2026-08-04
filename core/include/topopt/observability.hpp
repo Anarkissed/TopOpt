@@ -747,11 +747,31 @@ struct RunInfo {
   long long grading_latticed_voxels = 0;    // graded to lattice
   long long grading_solid_fallback_voxels = 0;  // L4: too thin -> stayed solid
   double grading_min_member_width_mm = 0.0; // thinnest latticed member (mm)
-  double grading_min_cells_per_member = 0.0;    // at that member (>= floor)
+  double grading_min_cells_per_member = 0.0;    // at that member (>= floor, EXCEPT
+                                                //   over sub-floor-retained material)
   double grading_min_strut_diameter_mm = 0.0;
   double grading_max_strut_diameter_mm = 0.0;
   bool grading_any_strut_below_min = false; // requirement 3 honesty flag
   bool grading_region_ungradeable = false;  // L4 at region scale
+
+  // ── SUB-FLOOR RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions).
+  // Lattice deliberately kept BELOW the cells-per-member floor in a region measured
+  // to carry almost no load. All zero / false unless a job opted in, which is what
+  // keeps a run that did not bit-identical. `grading_subfloor_retained_voxels > 0` is
+  // the reason `lattice_strut_out_of_regime` is raised, and the material it names is
+  // certified OUT OF REGIME — an accepted, unquantified inaccuracy, never a claim of
+  // accuracy (see lattice.hpp: the certification is blind to cells-per-member).
+  bool grading_subfloor_armed = false;
+  double grading_subfloor_stress_fraction_ceiling = 0.0;
+  double grading_subfloor_region_stress_fraction = 0.0;  // MEASURED, not declared
+  bool grading_subfloor_region_qualified = false;
+  long long grading_subfloor_candidate_voxels = 0;  // below the floor, armed or not
+  long long grading_subfloor_retained_voxels = 0;   // ...and kept as lattice
+  long long grading_subfloor_recovered_voxels = 0;  // armed-path voxels that CLEAR
+                                                    //   the floor: in regime, no
+                                                    //   accuracy claim attached
+  double grading_subfloor_min_cells_per_member = 0.0;  // over RETAINED voxels only
+  double grading_subfloor_max_cells_per_member = 0.0;
 
   // ── CELL-SIZE MODE + the swept plan (handoff 2026-08-01-lattice-cell-size-sweep).
   // On a Fixed / Auto run this is a one-entry record of the uniform cell, so a reader

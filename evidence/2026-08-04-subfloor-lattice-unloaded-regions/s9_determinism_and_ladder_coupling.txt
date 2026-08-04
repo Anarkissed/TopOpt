@@ -1,0 +1,40 @@
+=== S9 — DETERMINISM, and the LADDER COUPLING it was run to attribute ===
+(task 2026-08-04-subfloor-lattice-unloaded-regions)
+
+THE OBSERVATION THAT FORCED THIS CONTROL. On the maintainer's part with the
+lattice scoped to his one qualifying wall, arming retention changed the
+SOLID margin of rungs BELOW the one where retention fired — rungs at which
+nothing was retained at all. Retention is a lattice post-process and cannot
+touch the solid ladder, so either the pipeline is not run-to-run
+deterministic on this part, or arming retention perturbs later rungs
+through something shared. This control decides which.
+
+--- CONTROL: the SAME job (retention OFF) run TWICE ---
+  rung 0.68: densities bit-identical=True  classification flips=0
+  rung 0.52: densities bit-identical=True  classification flips=0
+  rung 0.38: densities bit-identical=True  classification flips=0
+  rung 0.26: densities bit-identical=True  classification flips=0
+  report.json  run1=992fe935be51352a  run2=992fe935be51352a  IDENTICAL
+  fields.bin   run1=5002bab24ecd0909  run2=5002bab24ecd0909  IDENTICAL
+  design.bin   run1=9535f13859e8cfe5  run2=9535f13859e8cfe5  IDENTICAL
+
+  S9: MET — two runs of the same job are byte-identical, so the pipeline
+       is deterministic on this part and any difference below is CAUSED.
+
+--- THE EFFECT: retention OFF vs ON, same job otherwise ---
+  rung 0.68: densities bit-identical=True  classification flips=0
+  rung 0.52: densities bit-identical=False  classification flips=40
+  rung 0.38: densities bit-identical=False  classification flips=380
+  rung 0.26: densities bit-identical=False  classification flips=416
+
+READ IT LIKE THIS. Rung 0.68 — the rung where retention actually fired — is
+BIT-IDENTICAL in its density: retention is a post-process and it did not
+touch the design it was applied to. The rungs BELOW it diverge. Since the
+control above shows the pipeline is deterministic, that divergence is caused
+by arming retention, and the only channel between a finished rung's lattice
+work and the next rung's optimize is solver state carried across solves
+(the warm start, handoff 110). The composite margin moved by at most
+0.0853%, no verdict flipped on any rung, and the argmax did not move — so
+this is not a blocked-stop by any criterion this task set. It is, however, a
+real coupling that nothing in the codebase documents, and it is filed as
+such rather than left for someone to rediscover.
