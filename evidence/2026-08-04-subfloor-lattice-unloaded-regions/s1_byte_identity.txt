@@ -1,22 +1,21 @@
 === S1 — graded lattice run, retention NOT opted in, base vs branch ===
 branch build: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/core/build
-base   build: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-base
+base   build: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-main-s1
 
---- stashing the branch and rebuilding BASE (target: topopt_cli) ---
---- restoring the branch and rebuilding it (target: topopt_cli) ---
+--- tree is clean: building BASE from origin/main in a detached worktree ---
 
-base   cli sha256: d4318b6087763ef1fa496e29c7c429fcbe83be18c4403033e417bbc68fafdef1
-branch cli sha256: 80dd820d1ed90ec67085c96f5fd8b61fc27ec2352a562422b613a93e3f57c200
+base   cli sha256: 1b41cb8722c3749276429471e5509d728fc6301ba5df295230e4d881abe97b1d
+branch cli sha256: 5d4a434dfabd3639f093582d674c08969dcec1b66d27141013720beb4b3c702f
 the two binaries differ, as they must for this bar to mean anything.
 
 
 --- base artifacts ---
 09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061  ./design.bin
 499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354  ./fields.bin
-380665af2fb584aaee9dde5828b28f50271caaa9ebdb33f307bfdeda0374d409  ./iterations.csv
+6c5be6d81387a95f39ec053109ffbd288ddec3015a15caa2444a027eda0f422d  ./iterations.csv
 bf7bbf02c63789631bd2582247cb4f2bb955ec4eff2eda19d598491d6f8d1811  ./loadcase.json
 1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb  ./report.json
-93c7dbe23b7ffbecf8283a0d91f5e4f5478b921f223a87fd7dcadbffa013e11c  ./run_info.json
+2186c961d1d8044b6c6a19b01a41f2a6d797356d61de499bd313b868585fb913  ./run_info.json
 4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76  ./variant_026.stl
 a13e0b7a29ee2287007092a1aedfacaf5410e59fa41a54516c7233b0f57a74b0  ./variant_026_lattice.report.json
 767bf95769c60e26794272393c58df33ea801cb50ae804abd331fb6588bbd217  ./variant_026_lattice.stl
@@ -33,10 +32,10 @@ d67563cd3dad2913dd13d76bd91dfd7d53f25ba96803c56413c14bfcf8085115  ./variant_052_
 --- branch artifacts ---
 09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061  ./design.bin
 499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354  ./fields.bin
-2ce53610dad1d86cd1924765e20f72c0d9f84714265d3ad07a35b6f34de18398  ./iterations.csv
+87bc1dd980400792bb58734ca63b74e87a64938c534a199e75e3336afd663cf6  ./iterations.csv
 bf7bbf02c63789631bd2582247cb4f2bb955ec4eff2eda19d598491d6f8d1811  ./loadcase.json
 1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb  ./report.json
-712ee226cf751d2edad658ce34a134fa638292d34881a87437aa89e61e293fed  ./run_info.json
+dbd8004d6d3a59c04b4d05ceca0e85cc4250b2f5ec2024b6a1378a6dd443af4b  ./run_info.json
 4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76  ./variant_026.stl
 a13e0b7a29ee2287007092a1aedfacaf5410e59fa41a54516c7233b0f57a74b0  ./variant_026_lattice.report.json
 767bf95769c60e26794272393c58df33ea801cb50ae804abd331fb6588bbd217  ./variant_026_lattice.stl
@@ -64,7 +63,7 @@ IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586
 IDENTICAL  variant_068_lattice.stl  8444caac65321a68b935052e4875ccfdf93fab6c7bfa6e65af5273a1026cef3b
 
 --- clock-bearing artifacts, compared with the clock removed ---
-IDENTICAL  run_info.json (minus the four named wall-clock keys)
+IDENTICAL  run_info.json (minus the four wall-clock keys + fingerprint)
 IDENTICAL  iterations.csv (physics columns; timestamps + ms timings dropped)
 
 --- per-variant lattice receipts ---

@@ -380,7 +380,56 @@ was not moved to fit any measurement.**
 
 ---
 
-## 11. IN PLAIN LANGUAGE
+## 11. MERGED WITH main AFTER PR 293 (multiscale-lattice-to)
+
+`origin/main` moved six commits while this was in flight, and PR 293 touched the
+same files. Two real conflicts, both resolved by **keeping both sides**:
+
+* **`GradingLawParams`** — main added `prescribed_relative_density` (multiscale
+  prescribes rho instead of deriving it from demand); this task added the two
+  retention fields. Purely additive.
+* **`run_job.cpp`** — both sides appended a new function at the same point, and
+  both bodies shared the closing brace. Kept all four functions. At the
+  `grade_lattice` call site both parameter blocks are kept and the call takes
+  main's new explicit `printed_iso` argument.
+
+**The one interaction worth stating, because git could not have caught it.**
+Multiscale prescribes the density and stops using `demand` *for the density* —
+but it still hands in the variant's real von Mises field, and that is what the
+retention predicate measures. So retention remains a MEASUREMENT on a multiscale
+run. Main implemented the prescribed density inside `rho_of`, which the retention
+code already calls, so retained voxels take the prescribed density automatically.
+Both facts are now stated in `grading.hpp` above the two fields.
+
+**Re-verified against the new base**, since the merge changed what "base" means:
+
+| | |
+|---|---|
+| core ctest | **106/106** (main's suite grew by one) |
+| app suite | **1180 executed, 13 skipped, 0 failures** |
+| S1 byte-identity vs `origin/main` | **PASS** |
+| S6 gate table vs `origin/main` | **PASS**, numbers unchanged |
+| retention smoke test | unchanged — 252/252 retained, fraction 0.0219, out-of-regime raised |
+
+★ **S1 needed two fixes to stay honest across the merge.**
+
+1. Its stash-rebuild assumed uncommitted work. Once this task's work was
+   committed, `git stash` had nothing to take and the script would have built the
+   *branch* twice and passed vacuously — the same failure mode as the
+   `topopt-cli` target trap. It now detects a clean tree and builds the base from
+   `origin/main` in a detached worktree instead. (That worktree must outlive the
+   runs: `topopt-cli` bakes its materials.json path in at compile time, and
+   deleting it early made the base run fail outright.)
+2. `run_info.json` then differed in exactly one key: `fingerprint`, the git commit
+   the binary was built from. It is excluded, and the reason is stronger than the
+   clock exclusions rather than weaker — this bar *begins* by asserting the two
+   binaries differ, so a build-provenance stamp is guaranteed to differ on every
+   correct run. Comparing it would make the bar impossible to pass rather than
+   meaningful to fail. It was the ONLY difference in the whole document.
+
+---
+
+## 12. IN PLAIN LANGUAGE
 
 The maintainer wanted to put a lattice inside a back wall that holds nothing up.
 The software refused, silently, and left the wall solid plastic.

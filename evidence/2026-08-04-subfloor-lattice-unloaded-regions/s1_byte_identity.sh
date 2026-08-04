@@ -80,19 +80,50 @@ echo "branch build: $BUILD"
 echo "base   build: $BASE_BUILD"
 echo
 
-# ── THE STASH-REBUILD. Only TRACKED paths are stashed, so the untracked evidence
-# directory this script lives in survives. The target is `topopt_cli` — see the
-# trap note at the top of this file.
-echo "--- stashing the branch and rebuilding BASE (target: topopt_cli) ---"
-git -C "$REPO" stash push --quiet --message "s1-byte-identity" \
-  -- core app || { echo "nothing to stash — is the tree already clean?"; exit 1; }
-trap 'echo "restoring branch..."; git -C "$REPO" stash pop --quiet || true' EXIT
+# ── PRODUCING THE BASE BINARY. Two ways, because the branch's state decides which
+# is honest:
+#
+#   UNCOMMITTED work  -> STASH-REBUILD, the form the bar names: stash the tracked
+#     tree, build into a SEPARATE build dir, restore. Only tracked paths are
+#     stashed, so the untracked evidence directory this script lives in survives.
+#
+#   COMMITTED work    -> `git stash` has nothing to take, and stashing a clean
+#     tree would build the BRANCH twice and "pass" vacuously. So the base is built
+#     from a detached worktree at the merge base instead. Set BASE_REF (default
+#     origin/main) and the script does it.
+#
+# Either way the target is `topopt_cli` — see the trap note at the top of this
+# file — and either way the two binaries are compared before anything else is.
+BASE_REF="${BASE_REF:-origin/main}"
+if git -C "$REPO" diff --quiet -- core app && \
+   git -C "$REPO" diff --cached --quiet -- core app; then
+  echo "--- tree is clean: building BASE from $BASE_REF in a detached worktree ---"
+  WT="$OUT/.base-worktree"
+  rm -rf "$WT"
+  git -C "$REPO" worktree add --detach "$WT" "$BASE_REF" > "$OUT/base_worktree.log" 2>&1 \
+    || { echo "WORKTREE FAILED"; cat "$OUT/base_worktree.log"; exit 1; }
+  trap 'git -C "$REPO" worktree remove --force "$WT" 2>/dev/null || true' EXIT
+  BASE_WT="$WT"
+  cmake -S "$WT/core" -B "$BASE_BUILD" -DCMAKE_BUILD_TYPE=Release \
+    > "$OUT/base_cfg.log" 2>&1 || { echo "BASE CONFIGURE FAILED"; tail -20 "$OUT/base_cfg.log"; exit 1; }
+  git -C "$REPO" rev-parse "$BASE_REF" > "$OUT/base_commit.txt"
+else
+  echo "--- stashing the branch and rebuilding BASE (target: topopt_cli) ---"
+  git -C "$REPO" stash push --quiet --message "s1-byte-identity" -- core app
+  trap 'echo "restoring branch..."; git -C "$REPO" stash pop --quiet || true' EXIT
+  git -C "$REPO" rev-parse HEAD > "$OUT/base_commit.txt"
+fi
 cmake --build "$BASE_BUILD" --target topopt_cli -j8 > "$OUT/base_build.log" 2>&1 \
   || { echo "BASE BUILD FAILED"; tail -30 "$OUT/base_build.log"; exit 1; }
-git -C "$REPO" rev-parse HEAD > "$OUT/base_commit.txt"
-echo "--- restoring the branch and rebuilding it (target: topopt_cli) ---"
-git -C "$REPO" stash pop --quiet
-trap - EXIT
+if ! git -C "$REPO" diff --quiet -- core app; then
+  echo "--- restoring the branch ---"
+  git -C "$REPO" stash pop --quiet || true
+fi
+# The base worktree STAYS until the runs are done. topopt-cli bakes its default
+# materials.json path in at compile time (TOPOPT_CLI_DEFAULT_MATERIALS), so a
+# binary built from the worktree cannot run once the worktree is gone — deleting
+# it here made the base run fail with "cannot open materials file". The EXIT trap
+# set above removes it whichever way the script leaves.
 cmake --build "$BUILD" --target topopt_cli -j8 > "$OUT/branch_build.log" 2>&1 \
   || { echo "BRANCH BUILD FAILED"; tail -30 "$OUT/branch_build.log"; exit 1; }
 
@@ -150,13 +181,23 @@ echo "--- clock-bearing artifacts, compared with the clock removed ---"
 #   gen_fraction     — gen_seconds / total job wall time (observability.hpp:699)
 #   preflight_ms     — pre-flight reachability wall time
 # PR 294's version of this script named only the first; this job additionally runs
-# the lattice GENERATOR and the pre-flight, so it has three more clocks. Every
-# other key in the document — every count, every margin, every voxel figure — is
-# compared verbatim.
+# the lattice GENERATOR and the pre-flight, so it has three more clocks.
+#
+# AND ONE KEY THAT IS NOT A CLOCK, excluded for a different and stronger reason:
+#   fingerprint      — the GIT COMMIT the binary was built from.
+# This bar begins by asserting the two binaries DIFFER. A build-provenance stamp
+# is therefore GUARANTEED to differ, by construction, on every correct run of this
+# script — comparing it would make the bar impossible to pass rather than
+# meaningful to fail. It records which source produced the run, not what the run
+# computed. (Measured, not assumed: base a70bca05 vs branch 6572eabd was the ONLY
+# difference in the whole document.)
+#
+# Every other key — every count, every margin, every voxel figure — is compared
+# verbatim.
 strip_run_info() {
   python3 -c "
 import json,sys
-CLOCKS={'created_wall_ms','gen_seconds','gen_fraction','preflight_ms'}
+CLOCKS={'created_wall_ms','gen_seconds','gen_fraction','preflight_ms','fingerprint'}
 def scrub(x):
     if isinstance(x, dict):
         return {k: scrub(v) for k, v in x.items() if k not in CLOCKS}
@@ -168,7 +209,7 @@ print(json.dumps(scrub(json.load(open(sys.argv[1]))), sort_keys=True, indent=1))
 if diff -u <(strip_run_info "$OUT/base/run_info.json") \
            <(strip_run_info "$OUT/branch/run_info.json") \
            > "$OUT/run_info.stripped.diff"; then
-  echo "IDENTICAL  run_info.json (minus the four named wall-clock keys)"
+  echo "IDENTICAL  run_info.json (minus the four wall-clock keys + fingerprint)"
 else
   echo "DIFFERS    run_info.json beyond the timestamp:"
   cat "$OUT/run_info.stripped.diff"; fail=1
