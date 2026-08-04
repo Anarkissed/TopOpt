@@ -429,6 +429,16 @@ int main() {
     wp.target_cell_size_mm = 2.0;
     wp.min_extrudable_width_mm = 0.4;
     wp.demand_exponent = 1.0;
+    // THE AGGREGATE CAP IS LIFTED FOR THE THRESHOLD TESTS BELOW, deliberately and
+    // with the number stated. This fixture is a 30 mm block with a 4 mm wall bolted
+    // to it, and that wall is 1,704 of the block's 30,600 printed voxels — 5.57 %,
+    // well over the 3.0 % production cap. That ratio is an artefact of keeping the
+    // fixture small, not a property of any real part (the maintainer's own wall is
+    // 0.930 % of his). Left at the default, the cap would refuse retention here and
+    // every threshold assertion below would pass for the WRONG REASON — they would
+    // be measuring the cap, not the stress predicate. So it is lifted here and
+    // tested on its own in 13j.
+    wp.subfloor_aggregate_cap_fraction = 1.0;
 
     // --- 13a. DEFAULT IS OFF, AND OFF IS THE OLD BEHAVIOUR (bar S1) --------------
     {
@@ -661,6 +671,136 @@ int main() {
       if (r.subfloor_retained_voxels > 0)
         CHECK(r.subfloor_min_cells_per_member < floor_n,
               "swept: the retained material is below the floor, as reported");
+    }
+
+    // --- 13j. THE AGGREGATE EXPOSURE CAP (lattice.hpp ★★★) --------------------
+    // Per-region evaluation is a WIDENING: eight regions can qualify independently
+    // and the material under an unpriceable accuracy claim multiplies. The cap is
+    // the only thing that bounds the total, because the certification is blind to
+    // cells-per-member and cannot price any of it. These assertions are what stop
+    // the cap from being decorative.
+    {
+      GradingLawParams cap = wp;
+      cap.retain_subfloor_in_unloaded_regions = true;
+      // The cap is OPT-IN (0 = no cap), so ask for the core constant explicitly —
+      // which is also what a caller that wants the production ceiling must do.
+      cap.subfloor_aggregate_cap_fraction =
+          lattice_subfloor_aggregate_cap_fraction();
+      const std::vector<double> d = demand_with_wall(1.0);
+
+      GradedField over = grade_lattice(g, gd, d, &wall, cap);
+      CHECK(over.subfloor_aggregate_cap_fraction ==
+                lattice_subfloor_aggregate_cap_fraction(),
+            "the cap in force is READ FROM CORE, not hardcoded in the law");
+      CHECK(over.subfloor_would_retain_voxels > 0,
+            "the dry run counted what retention would have kept");
+      CHECK(static_cast<double>(over.subfloor_would_retain_voxels) >
+                over.subfloor_aggregate_cap_fraction *
+                    static_cast<double>(over.part_printed_voxels),
+            "this fixture really is over the production cap (5.57% of the block)");
+      CHECK(over.subfloor_over_budget, "over the cap is REPORTED, not silent");
+      CHECK(over.subfloor_retained_voxels == 0,
+            "over the cap retains NOTHING — never 'as much as fits', because "
+            "choosing which regions to sacrifice is a judgement nothing measures");
+      CHECK(over.subfloor_retained_fraction_of_part == 0.0,
+            "and the reported exposure is zero, because none was taken");
+
+      // THE OVER-BUDGET RESULT IS THE DISARMED RESULT, exactly. A refusal that
+      // still perturbed the posture would be a third behaviour nobody asked for.
+      // AND THE DEFAULT IS NO CAP AT ALL: same job, cap left at 0, retains freely.
+      GradingLawParams uncapped = cap;
+      uncapped.subfloor_aggregate_cap_fraction = 0.0;
+      const GradedField unc = grade_lattice(g, gd, d, &wall, uncapped);
+      CHECK(!unc.subfloor_over_budget && unc.subfloor_retained_voxels > 0,
+            "cap 0 means NO CAP — the ceiling is opt-in, not defaulted on");
+
+      GradedField off = grade_lattice(g, gd, d, &wall, wp);   // wp: armed=false
+      CHECK(over.posture.mask == off.posture.mask &&
+            over.posture.relative_density == off.posture.relative_density &&
+            over.latticed_voxels == off.latticed_voxels &&
+            over.solid_fallback_voxels == off.solid_fallback_voxels,
+            "an over-budget refusal leaves the posture byte-identical to disarmed");
+
+      // AND THE CAP BINDS AT ITS EDGE, not merely somewhere. Set the cap just above
+      // and just below the fraction this fixture actually needs.
+      const double need = static_cast<double>(over.subfloor_would_retain_voxels) /
+                          static_cast<double>(over.part_printed_voxels);
+      GradingLawParams just_under = cap;
+      just_under.subfloor_aggregate_cap_fraction = need * 0.99;
+      CHECK(grade_lattice(g, gd, d, &wall, just_under).subfloor_over_budget,
+            "a cap just BELOW what the job needs refuses");
+      GradingLawParams just_over = cap;
+      just_over.subfloor_aggregate_cap_fraction = need * 1.01;
+      const GradedField ok = grade_lattice(g, gd, d, &wall, just_over);
+      CHECK(!ok.subfloor_over_budget, "a cap just ABOVE what the job needs admits");
+      CHECK(ok.subfloor_retained_voxels == over.subfloor_would_retain_voxels,
+            "and admits EXACTLY what the dry run said it would — the count the cap "
+            "bounded is the count that got emitted");
+    }
+
+    // --- 13k. PER-REGION EVALUATION (the widening this task adds) --------------
+    // Two regions, one quiet and one loaded. Under the shipped UNION reading the
+    // loud one vetoes both. Per region, the quiet one is retained and the loud one
+    // is not — which is the whole point, and also strictly more material under the
+    // accuracy claim, which is why 13j exists.
+    {
+      // Split the wall in two along z: the LOW half stays quiet, the HIGH half is
+      // driven to the part's peak.
+      std::vector<int> ids(Ng, 0);
+      std::vector<char> both(Ng, 0);
+      for (int k = 0; k < 30; ++k)
+        for (int j = 0; j < 30; ++j)
+          for (int i = 30; i < 34; ++i) {
+            const std::size_t e = g.index(i + pad, j + pad, k + pad);
+            both[e] = 1;
+            ids[e] = (k < 15) ? 1 : 2;      // 1 = quiet half, 2 = loud half
+          }
+      std::vector<double> d(Ng, 0.0);
+      for (int k = 0; k < 30; ++k)
+        for (int j = 0; j < 30; ++j)
+          for (int i = 0; i < 34; ++i) {
+            const std::size_t e = g.index(i + pad, j + pad, k + pad);
+            d[e] = (i < 30) ? 100.0 : (k < 15 ? 1.0 : 100.0);
+          }
+
+      GradingLawParams uni = wp;
+      uni.retain_subfloor_in_unloaded_regions = true;
+      const GradedField u = grade_lattice(g, gd, d, &both, uni);
+      CHECK(!u.region_qualified_unloaded && u.subfloor_retained_voxels == 0,
+            "UNION: the loud half vetoes the quiet one — nothing retained");
+
+      GradingLawParams per = uni;
+      per.region_ids = &ids;
+      const GradedField r = grade_lattice(g, gd, d, &both, per);
+      CHECK(r.subfloor_regions.size() == 2, "both declared regions are reported");
+      const GradedField::SubfloorRegion* q = nullptr;
+      const GradedField::SubfloorRegion* l = nullptr;
+      for (const GradedField::SubfloorRegion& x : r.subfloor_regions) {
+        if (x.region_id == 1) q = &x;
+        if (x.region_id == 2) l = &x;
+      }
+      CHECK(q != nullptr && l != nullptr, "the report is keyed by the caller's ids");
+      CHECK(q->qualified && !l->qualified,
+            "PER REGION: the quiet half qualifies and the loud half does not — the "
+            "predicate is answered per region, not for their union");
+      CHECK(std::fabs(q->stress_fraction - 0.01) < 1e-12,
+            "the quiet half's fraction is MEASURED (1 of 100), not declared");
+      CHECK(std::fabs(l->stress_fraction - 1.0) < 1e-12,
+            "the loud half measures at the part's peak");
+      CHECK(r.subfloor_retained_voxels > 0 && r.subfloor_retained_voxels == q->retained_voxels,
+            "everything retained came from the QUALIFYING region");
+      CHECK(l->retained_voxels == 0, "and nothing from the loud one");
+      CHECK(r.subfloor_retained_voxels < u.subfloor_candidate_voxels,
+            "per region retains a strict SUBSET of the union's below-floor set");
+      for (std::size_t e = 0; e < Ng; ++e)
+        if (e < r.subfloor_flags.size() && r.subfloor_flags[e])
+          CHECK(ids[e] == 1, "no retained voxel came from the loud region");
+      // The aggregate is reported, and it is the number the cap bounds.
+      CHECK(r.part_printed_voxels > 0 &&
+            std::fabs(r.subfloor_retained_fraction_of_part -
+                      static_cast<double>(r.subfloor_retained_voxels) /
+                          static_cast<double>(r.part_printed_voxels)) < 1e-12,
+            "the aggregate exposure is reported as a fraction of the PRINTED set");
     }
   }
 

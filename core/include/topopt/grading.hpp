@@ -170,6 +170,29 @@ struct GradingLawParams {
   // The ceiling, defaulted to the measured constant. Must be > 0 and <= 1 when armed.
   double subfloor_stress_fraction_max =
       0.0;  // 0 => take lattice_subfloor_retention_stress_fraction() at call time
+
+  // ── PER-REGION EVALUATION (optional; null = the shipped union behaviour) ────────
+  // Grid-indexed region identity (size grid.voxel_count()) for the candidate set.
+  // A candidate voxel's id names WHICH declared region it belongs to; 0 means "no
+  // id" and every such voxel is treated as one anonymous group, which is exactly
+  // the union reading. NULL (the DEFAULT) is the union reading for everything —
+  // byte-for-byte the shipped law.
+  //
+  // WHY IT IS OPTIONAL AND OFF BY DEFAULT. Union is the CONSERVATIVE reading: one
+  // loud region vetoes the whole candidate set, so it refuses more than it admits.
+  // Per region is a WIDENING — a part with eight include regions can have eight of
+  // them qualify independently. That is the right answer for a user whose quiet
+  // back wall is being vetoed by a bolt hole, and it is also strictly more material
+  // held under an accuracy claim the certification cannot check, which is why it
+  // arrives with an aggregate cap below rather than on its own.
+  const std::vector<int>* region_ids = nullptr;
+
+  // The AGGREGATE exposure cap (fraction of the printed set), defaulted to the core
+  // constant lattice_subfloor_aggregate_cap_fraction(). If the total retained across
+  // EVERY region would exceed it, the law retains NOTHING and says so — never "as
+  // much as fits", because choosing which regions to sacrifice is a judgement
+  // nothing measures. Must be > 0 and <= 1 when armed.
+  double subfloor_aggregate_cap_fraction = 0.0;  // 0 => take the core constant
 };
 
 // The law's output: the posture the certification engine consumes, plus a full report
@@ -256,6 +279,33 @@ struct GradedField {
   // this codebase can currently quantify (lattice.hpp, ★★). A receipt that only said
   // "out of regime" would bury that; these fields name it. Every one of them is 0 /
   // false / empty when retention is disarmed, which is the default.
+  // ── PER-REGION BREAKDOWN. One entry per distinct region id in the candidate set
+  // (a single entry with id 0 on the union path). A lone aggregate would hide WHICH
+  // region carries the exposure, which is the first thing a user needs in order to
+  // narrow it. Empty when retention is disarmed.
+  struct SubfloorRegion {
+    int region_id = 0;
+    std::size_t candidate_voxels = 0;   // printed candidates carrying this id
+    std::size_t below_floor_voxels = 0; // ...that the cells-per-member ceiling rejects
+    double stress_fraction = 0.0;       // MEASURED: this region's peak / PART's peak
+    bool qualified = false;             // stress_fraction <= the ceiling
+    std::size_t retained_voxels = 0;    // ...and actually kept (0 if over budget)
+  };
+  std::vector<SubfloorRegion> subfloor_regions;
+
+  // ── THE AGGREGATE, which is the number the per-region breakdown does NOT give you.
+  // `subfloor_retained_fraction_of_part` is the total retained over the PRINTED set —
+  // the quantity the cap bounds. `subfloor_over_budget` is true when the total would
+  // have exceeded the cap and retention was therefore refused WHOLESALE; when it is
+  // true every region's `retained_voxels` is 0 and `subfloor_retained_voxels` is 0,
+  // while `below_floor_voxels` still reports what WOULD have been retained, so the
+  // receipt can say how far over the job was.
+  double subfloor_aggregate_cap_fraction = 0.0;   // the cap in force
+  double subfloor_retained_fraction_of_part = 0.0;
+  std::size_t subfloor_would_retain_voxels = 0;   // before the cap was applied
+  std::size_t part_printed_voxels = 0;            // the cap's denominator
+  bool subfloor_over_budget = false;
+
   bool subfloor_retention_armed = false;    // the job opted in
   double subfloor_stress_fraction_max = 0.0;  // the ceiling that was in force
   // The MEASURED predicate: this region's peak demand over the PART's peak demand.

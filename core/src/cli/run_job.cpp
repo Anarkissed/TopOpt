@@ -1486,6 +1486,47 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
          json_num(gf.subfloor_max_strut_diameter_mm) + "],\n";
     s += "      \"cells_per_member_floor\": " +
          json_num(gf.cells_per_member_floor) + ",\n";
+    // ── THE AGGREGATE, and the per-region breakdown that a single total hides.
+    // "Each region qualified individually" and "the part is fine" are DIFFERENT
+    // STATEMENTS: nothing in the certificate adds the regions up, so the receipt
+    // does. `exposure_fraction_of_part` is the quantity the cap bounds.
+    s += "      \"aggregate_cap_fraction\": " +
+         json_num(gf.subfloor_aggregate_cap_fraction) + ",\n";
+    s += "      \"part_printed_voxels\": " +
+         std::to_string(gf.part_printed_voxels) + ",\n";
+    s += "      \"exposure_fraction_of_part\": " +
+         json_num(gf.subfloor_retained_fraction_of_part) + ",\n";
+    s += "      \"would_retain_voxels\": " +
+         std::to_string(gf.subfloor_would_retain_voxels) + ",\n";
+    s += "      \"over_budget\": " +
+         std::string(gf.subfloor_over_budget ? "true" : "false") + ",\n";
+    if (gf.subfloor_over_budget)
+      s += "      \"over_budget_note\": \"the total sub-floor material this job "
+           "would retain across ALL regions exceeds the aggregate exposure cap, so "
+           "NOTHING was retained and this run is the un-armed run exactly. It is "
+           "not trimmed to fit: choosing which regions to sacrifice is a judgement "
+           "nothing measures. Narrow the lattice regions, or raise "
+           "grading.subfloor_aggregate_cap deliberately and own the exposure.\",\n";
+    s += "      \"regions\": [\n";
+    for (std::size_t ri = 0; ri < gf.subfloor_regions.size(); ++ri) {
+      const GradedField::SubfloorRegion& r = gf.subfloor_regions[ri];
+      s += "        {\"region_id\": " + std::to_string(r.region_id) +
+           ", \"candidate_voxels\": " + std::to_string(r.candidate_voxels) +
+           ", \"below_floor_voxels\": " + std::to_string(r.below_floor_voxels) +
+           ", \"stress_fraction_measured\": " + json_num(r.stress_fraction) +
+           ", \"qualified\": " + std::string(r.qualified ? "true" : "false") +
+           ", \"retained_voxels\": " + std::to_string(r.retained_voxels) + "}";
+      if (ri + 1 < gf.subfloor_regions.size()) s += ",";
+      s += "\n";
+    }
+    s += "      ],\n";
+    s += "      \"regions_note\": \"region_id is 1-based in the job's own "
+         "lattice.regions declaration order (0 = no include regions declared, i.e. "
+         "the whole printed set as one group). Each row's stress_fraction_measured "
+         "is that region's OWN peak von Mises over the PART's peak. A region "
+         "qualifying here is a statement about THAT region only — the part-level "
+         "question is exposure_fraction_of_part against aggregate_cap_fraction, and "
+         "the two can disagree.\",\n";
     s += "      \"note\": \"region_stress_fraction_measured is this region's PEAK "
          "von Mises over the PART's peak, measured from the variant's own field — "
          "never declared by the job. voxels_retained were kept as lattice below "
@@ -1859,6 +1900,7 @@ LatticeVariantOutcome lattice_one_variant(
     for (const ClearanceGeometry& g : lattice_roles.excludes)
       members.add_exclude_region(g);
     std::vector<char> cand(solved_grid.voxel_count(), 0);
+    std::vector<int> region_ids(solved_grid.voxel_count(), 0);
     for (int k = 0; k < solved_grid.nz; ++k)
       for (int j = 0; j < solved_grid.ny; ++j)
         for (int i = 0; i < solved_grid.nx; ++i) {
@@ -1884,6 +1926,17 @@ LatticeVariantOutcome lattice_one_variant(
               dens[e] > lattice_rho_max(options.multiscale_topology))
             continue;
           cand[e] = 1;
+          // WHICH declared include region this voxel belongs to (task per-region
+          // retention). 1-based, in the job's own declaration order, so a receipt
+          // row maps back to the region the user selected; FIRST match wins, which
+          // is the same precedence `in_include_region` applies when it short-
+          // circuits. 0 means "no include regions declared" — the whole printed set
+          // is one anonymous group, which is the union reading exactly.
+          for (std::size_t ri = 0; ri < lattice_roles.includes.size(); ++ri)
+            if (point_in_clearance_region(lattice_roles.includes[ri], c, 0.0)) {
+              region_ids[e] = static_cast<int>(ri) + 1;
+              break;
+            }
         }
     GradingLawParams gp;
     gp.topology = LatticeTopology::Octet;  // job schema restricts to octet
@@ -1915,6 +1968,39 @@ LatticeVariantOutcome lattice_one_variant(
     gp.retain_subfloor_in_unloaded_regions =
         job.grading.retain_subfloor_in_unloaded_regions;
     gp.subfloor_stress_fraction_max = job.grading.subfloor_stress_fraction;
+    // ★ PER-REGION EVALUATION — BUILT, TESTED, AND DISARMED. IT DID NOT PASS ITS BAR.
+    //
+    // Handing the ids in makes the predicate answer once per DECLARED region instead
+    // of once for their union, which is what the maintainer's job wants: his quiet
+    // back wall stops being vetoed by a bolt hole sharing the candidate set. The
+    // implementation is complete and unit-tested (test_grading 13j/13k) and the
+    // aggregate exposure cap that must accompany it is implemented too.
+    //
+    // IT IS NOT WIRED ON, because the measurement said no. Pre-registered in
+    // evidence/…/r0_preregistration.md BEFORE any of it was written: an aggregate
+    // exposure cap of 3.0 % of the printed set, and a certified-margin bound of
+    // 0.10 %. Measured afterwards (r2_additivity.txt), those two numbers are
+    // MUTUALLY INCONSISTENT on a real part — a single region at 2.889 % exposure,
+    // INSIDE the cap, moved the composite margin +0.1801 %, which is 1.8x the bound.
+    // At 31 % exposure it moved +0.5479 %.
+    //
+    // The rule for that situation was stated in advance and is not negotiable after
+    // the fact: report the number, do not adjust the threshold until it fits. So the
+    // widening stays off and the shipped predicate remains the UNION reading — which
+    // is the conservative one, refuses more than it admits, and is what every bar in
+    // this task was measured against.
+    //
+    // WHAT WOULD UNBLOCK IT: an exposure cap derived from the margin evidence rather
+    // than from a multiple of one verified case. The one configuration with a full
+    // verified chain sits at 0.930 % exposure and +0.0853 % margin; 2.889 % gives
+    // +0.1801 %. A cap near 1 % is what the evidence currently supports, and that is
+    // a judgement about how much of the feature to give up — the maintainer's call,
+    // not something to quietly pick here.
+    //
+    // (void) is deliberate: the ids are still BUILT above so the code path stays
+    // compiled and exercised, and turning this on is one line.
+    (void)region_ids;
+    gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
     gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
                        printed_iso);
     cell = gf.cell_size_mm;

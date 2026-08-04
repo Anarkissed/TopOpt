@@ -281,11 +281,78 @@ int main(int argc, char** argv) {
       inc_refs.push_back(&r);
     }
 
-  measure("ALL of them (his job as written)", all_includes);
+  measure("ALL, UNION predicate (what shipped)", all_includes);
   for (std::size_t i = 0; i < all_includes.size(); ++i) {
     char lbl[128];
     std::snprintf(lbl, sizeof lbl, "%zu: %s", i, describe(*inc_refs[i]).c_str());
     measure(lbl, {all_includes[i]});
+  }
+
+  // ── THE WIDENING, AND WHAT IT TOTALS TO ────────────────────────────────────
+  // All regions at once with the PER-REGION predicate armed. This is the number
+  // the aggregate cap bounds, and the one a per-region breakdown alone would not
+  // give you: "each region qualified individually" and "the part is fine" are
+  // different statements, and only this line answers the second.
+  {
+    LatticeBoundary members;
+    for (const ClearanceGeometry& g : all_includes) members.add_include_region(g);
+    for (const ClearanceGeometry& g : excludes) members.add_exclude_region(g);
+    std::vector<char> cand(nvox, 0);
+    std::vector<int> ids(nvox, 0);
+    for (int k = 0; k < grid.nz; ++k)
+      for (int j = 0; j < grid.ny; ++j)
+        for (int i = 0; i < grid.nx; ++i) {
+          const std::size_t e = grid.index(i, j, k);
+          if (!(sd->density[e] > 0.5)) continue;
+          const Vec3 c{grid.origin.x + (i + 0.5) * grid.spacing,
+                       grid.origin.y + (j + 0.5) * grid.spacing,
+                       grid.origin.z + (k + 0.5) * grid.spacing};
+          if (members.in_exclude_region(c, 0.0)) continue;
+          if (members.has_include_regions() && !members.in_include_region(c, 0.0))
+            continue;
+          cand[e] = 1;
+          for (std::size_t ri = 0; ri < all_includes.size(); ++ri)
+            if (point_in_clearance_region(all_includes[ri], c, 0.0)) {
+              ids[e] = static_cast<int>(ri) + 1;
+              break;
+            }
+        }
+    GradingLawParams pr = gp;
+    pr.region_ids = &ids;
+    GradedField r = grade_lattice(grid, sd->density, vm, &cand, pr);
+    std::printf("\n=== PER-REGION PREDICATE, all regions at once ===\n");
+    std::printf("%-4s %10s %10s %12s %6s %10s\n", "id", "candidate", "below flr",
+                "stressfrac", "qual", "retained");
+    for (const GradedField::SubfloorRegion& x : r.subfloor_regions)
+      std::printf("%-4d %10zu %10zu %12.4f %6s %10zu\n", x.region_id,
+                  x.candidate_voxels, x.below_floor_voxels, x.stress_fraction,
+                  x.qualified ? "YES" : "no", x.retained_voxels);
+    std::printf("\nTHE AGGREGATE — the number the cap bounds:\n");
+    std::printf("  part printed voxels            : %zu\n", r.part_printed_voxels);
+    std::printf("  would retain (before the cap)  : %zu\n",
+                r.subfloor_would_retain_voxels);
+    std::printf("  RETAINED, all regions summed   : %zu\n",
+                r.subfloor_retained_voxels);
+    std::printf("  exposure, fraction of the part : %.5f  (%.3f %%)\n",
+                r.subfloor_retained_fraction_of_part,
+                100.0 * r.subfloor_retained_fraction_of_part);
+    std::printf("  aggregate cap in force         : %.5f  (%.3f %%)\n",
+                r.subfloor_aggregate_cap_fraction,
+                100.0 * r.subfloor_aggregate_cap_fraction);
+    std::printf("  OVER BUDGET                    : %s\n",
+                r.subfloor_over_budget ? "YES — nothing retained" : "no");
+    std::size_t qualified = 0;
+    for (const GradedField::SubfloorRegion& x : r.subfloor_regions)
+      if (x.qualified) ++qualified;
+    std::printf("\n  regions qualifying individually: %zu of %zu\n", qualified,
+                r.subfloor_regions.size());
+    std::printf("  DO THE TWO READINGS AGREE? %s\n",
+                r.subfloor_over_budget
+                    ? "NO — every retained region passed its own test, and the "
+                      "TOTAL still\n     exceeded what this task is willing to "
+                      "hold under an unpriceable claim."
+                    : "yes — the per-region verdicts and the part-level exposure "
+                      "point the same way.");
   }
 
   std::printf("\nREAD IT LIKE THIS.\n");

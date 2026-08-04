@@ -152,6 +152,35 @@ double lattice_cells_per_member_min(LatticeTopology topo);
 // not move", because the margin CANNOT move.
 double lattice_subfloor_retention_stress_fraction();
 
+// ★ THE AGGREGATE SUB-FLOOR EXPOSURE CAP — the ceiling on how much of a part may be
+// held under the accuracy claim above, SUMMED ACROSS EVERY REGION, as a fraction of
+// the printed set. Read this; do NOT hardcode it.
+//
+// WHY IT EXISTS, and it is not the same question the fraction above answers. That
+// one asks "is THIS region quiet enough?". Once retention is evaluated PER REGION, a
+// part with eight include regions can have eight of them answer yes independently,
+// and the material under the claim multiplies. "Each region qualified individually"
+// and "the part is fine" are DIFFERENT STATEMENTS, and nothing in the certificate
+// adds them up — see ★★ above: the certification is structurally blind to
+// cells-per-member, so no margin measurement, on any number of regions, can show the
+// total is safe. A quantity that cannot be bounded by measurement must be bounded by
+// POLICY, and this is that bound.
+//
+// WHERE 0.03 COMES FROM. It is a stated multiple of the ONLY configuration ever
+// verified end to end — the maintainer's wall at resolution 128, rung 0.68, where
+// the argmax held and the composite margin moved +0.0853 % against a pre-stated
+// 0.10 % bound. That run retained 822 of 88,424 printed voxels = 0.930 % of the
+// part. 3.0 % is ~3.2x it: room for a part with several genuinely quiet regions,
+// far short of "unlimited because every region passed".
+//
+// ★★★ THIS IS A CEILING ON EXPOSURE, NOT A SAFETY THRESHOLD. No measurement
+// supports 3.0 % as safe, and by the blindness above none could. It does not make
+// the retained material accurate; it bounds how much of the part is held under a
+// claim nothing can check. Over the cap the law retains NOTHING rather than
+// retaining as much as fits — partial retention would mean choosing which regions
+// to sacrifice, and nothing measures that choice.
+double lattice_subfloor_aggregate_cap_fraction();
+
 // The printed octet strut DIAMETER (mm) at relative density `rho` and cell edge
 // `cell_size_mm`. For the printability CHECK of the grading law (bar L3 / requirement
 // 3) — NOT the certification math (that is the tensor above; diameter never enters a

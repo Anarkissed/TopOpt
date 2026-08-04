@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <stdexcept>
 
 #include "topopt/lattice.hpp"  // lattice_rho_min/max, lattice_cells_per_member_min,
@@ -75,6 +76,22 @@ GradedField grade_lattice(const VoxelGrid& grid,
       !(subfloor_frac_max > 0.0 && subfloor_frac_max <= 1.0))
     throw std::invalid_argument(
         "grade_lattice: subfloor_stress_fraction_max must be in (0, 1]");
+  if (params.region_ids != nullptr && params.region_ids->size() != n)
+    throw std::invalid_argument("grade_lattice: region_ids->size() != voxel_count");
+  // THE AGGREGATE EXPOSURE CAP. 0 (the DEFAULT) means NO CAP — the caller must ask
+  // for one, and `lattice_subfloor_aggregate_cap_fraction()` is what it should ask
+  // for. It is opt-in rather than defaulted because the cap DID NOT PASS ITS BAR:
+  // measured on a real part, a single region at 2.889 % exposure (inside the 3.0 %
+  // constant) moved the certified margin 1.8x further than the 0.10 % bound
+  // pre-registered alongside it. Defaulting an unsound refusal ON would change
+  // already-verified behaviour on the strength of a number now known to be wrong.
+  // See evidence/2026-08-04-subfloor-lattice-unloaded-regions/r3_verdict.md.
+  const double subfloor_cap = params.subfloor_aggregate_cap_fraction;
+  if (params.retain_subfloor_in_unloaded_regions && subfloor_cap != 0.0 &&
+      !(subfloor_cap > 0.0 && subfloor_cap <= 1.0))
+    throw std::invalid_argument(
+        "grade_lattice: subfloor_aggregate_cap_fraction must be 0 (no cap) or in "
+        "(0, 1]");
 
   const LatticeTopology topo = params.topology;
 
@@ -131,34 +148,72 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // there is no region the two are equal, the fraction is 1.0, and retention can never
   // arm: latticing the whole part below the floor is not "an unloaded region".
   double part_demand_max = 0.0;
+  std::size_t part_printed = 0;   // the aggregate cap's denominator
   for (std::size_t e = 0; e < n; ++e) {
-    if (density[e] > iso && std::isfinite(demand[e]) && demand[e] > part_demand_max)
+    if (!(density[e] > iso)) continue;
+    ++part_printed;
+    if (std::isfinite(demand[e]) && demand[e] > part_demand_max)
       part_demand_max = demand[e];
   }
   out.subfloor_retention_armed = params.retain_subfloor_in_unloaded_regions;
   out.subfloor_stress_fraction_max =
       params.retain_subfloor_in_unloaded_regions ? subfloor_frac_max : 0.0;
+  out.subfloor_aggregate_cap_fraction =
+      params.retain_subfloor_in_unloaded_regions ? subfloor_cap : 0.0;
+  out.part_printed_voxels = part_printed;
   out.region_stress_fraction =
       part_demand_max > 0.0 ? std::min(1.0, demand_max / part_demand_max) : 0.0;
-  // NO DEMAND FIELD, NO RETENTION. An all-zero demand — which is exactly what the
-  // pre-flight forecast passes, because no solve has run — makes the fraction 0.0,
-  // and 0.0 reads as "carries nothing" when what it actually means is "nothing was
-  // measured". Retention is a measurement-backed relaxation or it is nothing, so the
-  // absence of a field DISARMS it rather than satisfying it. (A region genuinely at
-  // zero stress inside a part that does carry load still qualifies: there
-  // part_demand_max > 0 and the ratio is a real measurement.)
-  out.region_qualified_unloaded =
-      params.retain_subfloor_in_unloaded_regions && part_demand_max > 0.0 &&
-      out.region_stress_fraction <= subfloor_frac_max;
-  // Retention is a REGION-scoped decision, taken once, before any voxel is graded.
-  const bool retain_subfloor = out.region_qualified_unloaded;
-  // Allocated ONLY when retention can actually fire. An empty vector is what keeps a
-  // disarmed run byte-identical, and it is the flag the invariant below reads.
-  if (retain_subfloor) out.subfloor_flags.assign(n, 0);
-  const double kInfinity = std::numeric_limits<double>::infinity();
-  double sub_min_cpm = kInfinity, sub_max_cpm = 0.0;
-  double sub_min_d = kInfinity, sub_max_d = 0.0;
 
+  // ── PER-REGION QUALIFICATION ────────────────────────────────────────────────────
+  // The predicate is evaluated once per DECLARED region rather than once for their
+  // union. `region_of` is the voxel's group: its id when the caller supplied one,
+  // else 0 — and with no ids at all every candidate lands in group 0, which IS the
+  // union reading, so the null default is the shipped law exactly.
+  //
+  // Each group's peak is taken over its OWN candidates; the denominator stays the
+  // PART's peak, because "quiet" only means anything relative to the whole part.
+  auto region_of = [&](std::size_t e) -> int {
+    return params.region_ids ? (*params.region_ids)[e] : 0;
+  };
+  std::vector<int> region_order;             // first-seen order => deterministic
+  std::map<int, std::size_t> region_slot;
+  if (params.retain_subfloor_in_unloaded_regions) {
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
+      const int id = region_of(e);
+      auto it = region_slot.find(id);
+      if (it == region_slot.end()) {
+        region_slot.emplace(id, out.subfloor_regions.size());
+        region_order.push_back(id);
+        GradedField::SubfloorRegion r;
+        r.region_id = id;
+        out.subfloor_regions.push_back(r);
+        it = region_slot.find(id);
+      }
+      GradedField::SubfloorRegion& r = out.subfloor_regions[it->second];
+      ++r.candidate_voxels;
+      if (std::isfinite(demand[e]) && demand[e] > r.stress_fraction)
+        r.stress_fraction = demand[e];   // holds the raw PEAK until normalised below
+    }
+    for (GradedField::SubfloorRegion& r : out.subfloor_regions) {
+      r.stress_fraction =
+          part_demand_max > 0.0 ? std::min(1.0, r.stress_fraction / part_demand_max)
+                                : 0.0;
+      // NO DEMAND FIELD, NO RETENTION — the same guard the union path applies, per
+      // region: an all-zero demand makes every fraction 0.0, which READS as "carries
+      // nothing" and MEANS "nothing was measured".
+      r.qualified = part_demand_max > 0.0 && r.stress_fraction <= subfloor_frac_max;
+    }
+  }
+  auto region_qualified = [&](std::size_t e) -> bool {
+    if (!params.retain_subfloor_in_unloaded_regions) return false;
+    const auto it = region_slot.find(region_of(e));
+    return it != region_slot.end() && out.subfloor_regions[it->second].qualified;
+  };
+  auto region_record = [&](std::size_t e) -> GradedField::SubfloorRegion* {
+    const auto it = region_slot.find(region_of(e));
+    return it == region_slot.end() ? nullptr : &out.subfloor_regions[it->second];
+  };
   // ── grade ───────────────────────────────────────────────────────────────────────
   LatticePosture& post = out.posture;
   post.topology = topo;
@@ -212,7 +267,78 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // keeps the posture byte-identical to a pre-sweep run (bar R1).
   std::vector<double> voxel_cell;
 
+  // NO DEMAND FIELD, NO RETENTION. An all-zero demand — which is exactly what the
+  // pre-flight forecast passes, because no solve has run — makes the fraction 0.0,
+  // and 0.0 reads as "carries nothing" when what it actually means is "nothing was
+  // measured". Retention is a measurement-backed relaxation or it is nothing, so the
+  // absence of a field DISARMS it rather than satisfying it. (A region genuinely at
+  // zero stress inside a part that does carry load still qualifies: there
+  // part_demand_max > 0 and the ratio is a real measurement.)
+  // The UNION summary, kept because every existing consumer reads it: true when the
+  // candidate set as a whole would have qualified. With per-region ids armed it is no
+  // longer the thing that decides retention — `subfloor_regions[].qualified` is —
+  // so it is reported as "any region qualified" to stay honest about what happened.
+  out.region_qualified_unloaded =
+      params.retain_subfloor_in_unloaded_regions && part_demand_max > 0.0 &&
+      (params.region_ids
+           ? std::any_of(out.subfloor_regions.begin(), out.subfloor_regions.end(),
+                         [](const GradedField::SubfloorRegion& r) { return r.qualified; })
+           : out.region_stress_fraction <= subfloor_frac_max);
+  // Retention is a REGION-scoped decision, taken per region before any voxel is
+  // graded. `retain_subfloor` is now "SOME region qualified"; whether a given voxel
+  // is retained is `region_qualified(e)`.
+  const bool retain_subfloor = out.region_qualified_unloaded;
+
+  // SWEPT retention's cell choice, in ONE place. The dry-run that applies the
+  // aggregate cap and the assignment that acts on it must agree exactly about which
+  // voxels would be retained; two copies of this search would put the cap one edit
+  // away from bounding a different set than the one actually emitted.
+  auto finest_printable_cell = [&](std::size_t e) -> double {
+    const double rho_r = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
+    for (int L = 0; L <= out.cell_plan.max_level; ++L) {
+      const double S = out.cell_plan.cell_mm_at_level(L);
+      if (octet_strut_diameter_mm(rho_r, S) >= params.min_extrudable_width_mm)
+        return S;
+    }
+    return 0.0;
+  };
+  // ── THE AGGREGATE EXPOSURE CAP (lattice.hpp ★★★), applied as a DRY RUN before a
+  // single voxel is committed. Counts what retention WOULD keep across every
+  // qualifying region and, if that exceeds the cap, disarms retention WHOLESALE.
+  //
+  // Wholesale, not "as much as fits": trimming to the cap would mean choosing which
+  // regions to sacrifice, and nothing measures that choice. Refusing everything is
+  // the only outcome that needs no unmeasured judgement — and it leaves the user a
+  // clear action (narrow the regions) instead of a silently truncated result.
+  auto apply_aggregate_cap = [&](bool swept_mode) {
+    if (!retain_subfloor) return;
+    std::size_t would = 0;
+    for (std::size_t e = 0; e < n; ++e) {
+      if (!(density[e] > iso && (!region || (*region)[e] != 0))) continue;
+      if (!region_qualified(e)) continue;
+      if (swept_mode) {
+        if (voxel_cell[e] > 0.0) continue;          // the plan already latticed it
+        const double ce_r = finest_printable_cell(e);
+        if (!(ce_r > 0.0)) continue;                // unprintable: never retained
+        if (width[e] / ce_r < n_star) ++would;      // genuinely sub-floor
+      } else {
+        if (width[e] / cell < n_star) ++would;
+      }
+    }
+    out.subfloor_would_retain_voxels = would;
+    if (subfloor_cap <= 0.0) return;      // no cap asked for => nothing to enforce
+    const double allowed = subfloor_cap * static_cast<double>(part_printed);
+    out.subfloor_over_budget = static_cast<double>(would) > allowed;
+  };
+  // Allocated ONLY when retention can actually fire. An empty vector is what keeps a
+  // disarmed run byte-identical, and it is the flag the invariant below reads.
+  if (retain_subfloor) out.subfloor_flags.assign(n, 0);
+  const double kInfinity = std::numeric_limits<double>::infinity();
+  double sub_min_cpm = kInfinity, sub_max_cpm = 0.0;
+  double sub_min_d = kInfinity, sub_max_d = 0.0;
+
   if (!swept) {
+    apply_aggregate_cap(/*swept_mode=*/false);
     // ── FIXED / AUTO: ONE cell for the part. Unchanged from the pre-sweep law. ────
     for (std::size_t e = 0; e < n; ++e) {
       const bool candidate =
@@ -227,6 +353,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // THE VOXELS SUB-FLOOR RETENTION IS ABOUT. Counted whether or not retention
         // is armed, so a forecast can say how much is at stake before anyone opts in.
         ++out.subfloor_candidate_voxels;
+        if (GradedField::SubfloorRegion* rr = region_record(e)) ++rr->below_floor_voxels;
         // RETENTION (handoff 2026-08-04-subfloor-lattice-unloaded-regions). The region
         // was MEASURED to carry at most `subfloor_frac_max` of the part's peak demand,
         // so this voxel is kept as lattice at the part's own cell rather than falling
@@ -237,13 +364,14 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // Printability is NOT relaxed with it: on this path `cell >= floor_mm` by
         // construction, so the strut at any density in the band prints at or above the
         // stated minimum width, and the unconditional assertion at the end re-proves it.
-        if (retain_subfloor) {
+        if (retain_subfloor && region_qualified(e) && !out.subfloor_over_budget) {
           const double rho_r = clamp_rho(e, rho_of(e));
           post.mask[e] = 1;
           post.relative_density[e] = rho_r;
           ++out.latticed_voxels;
           out.subfloor_flags[e] = 1;
           ++out.subfloor_retained_voxels;
+          if (GradedField::SubfloorRegion* rr = region_record(e)) ++rr->retained_voxels;
           const double d_r = octet_strut_diameter_mm(rho_r, cell);
           if (rho_r < rho_min_used) rho_min_used = rho_r;
           if (rho_r > rho_max_used) rho_max_used = rho_r;
@@ -318,6 +446,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
     pp.thickness_cap_voxels = params.thickness_cap_voxels;
     out.cell_plan = plan_cell_sizes(grid, rho_raw, cand, width, pp);
     voxel_cell = cell_size_field(grid, out.cell_plan);
+    apply_aggregate_cap(/*swept_mode=*/true);
 
     // Pass 2 — assign. A candidate whose base cell got no admissible level STAYS
     // SOLID: the per-cell form of the L4 fallback the uniform law applies per part.
@@ -361,6 +490,7 @@ GradedField grade_lattice(const VoxelGrid& grid,
           continue;
         }
         ++out.subfloor_candidate_voxels;
+        if (GradedField::SubfloorRegion* rr = region_record(e)) ++rr->below_floor_voxels;
         // RETENTION, SWEPT FORM. The plan rejected this voxel's base cell because no
         // level cleared the cells-per-member CEILING. Retention drops that ceiling for
         // a measured-unloaded region — and nothing else: the voxel takes the FINEST
@@ -369,16 +499,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
         // level with the MOST cells per member, so it minimises the inaccuracy being
         // accepted, and it is a real level of the ladder, so the retained material
         // still meets its neighbours at shared dyadic nodes.
-        if (retain_subfloor) {
-          const double rho_r = std::min(rho_hi, std::max(rho_lo, rho_of(e)));
-          double ce_r = 0.0;
-          for (int L = 0; L <= out.cell_plan.max_level; ++L) {
-            const double S = out.cell_plan.cell_mm_at_level(L);
-            if (octet_strut_diameter_mm(rho_r, S) >= params.min_extrudable_width_mm) {
-              ce_r = S;
-              break;
-            }
-          }
+        if (retain_subfloor && region_qualified(e) && !out.subfloor_over_budget) {
+          const double ce_r = finest_printable_cell(e);
           if (ce_r > 0.0) {
             const double rho_c = clamp_rho(e, rho_of(e));
             voxel_cell[e] = ce_r;
@@ -401,6 +523,8 @@ GradedField grade_lattice(const VoxelGrid& grid,
             if (cpm_r < n_star) {
               out.subfloor_flags[e] = 1;
               ++out.subfloor_retained_voxels;
+              if (GradedField::SubfloorRegion* rr = region_record(e))
+                ++rr->retained_voxels;
             } else {
               ++out.subfloor_recovered_in_regime_voxels;
             }
@@ -477,6 +601,10 @@ GradedField grade_lattice(const VoxelGrid& grid,
     // no-op arming byte-identical to a disarmed run in everything a consumer reads.
     out.subfloor_flags.clear();
   }
+  out.subfloor_retained_fraction_of_part =
+      part_printed > 0 ? static_cast<double>(out.subfloor_retained_voxels) /
+                             static_cast<double>(part_printed)
+                       : 0.0;
   // L4 at region scale: candidates existed but the law could grade none of them.
   out.region_ungradeable =
       out.region_voxels > 0 && out.latticed_voxels == 0;

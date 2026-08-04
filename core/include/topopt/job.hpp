@@ -264,6 +264,14 @@ struct JobGrading {
   // (lattice_subfloor_retention_stress_fraction(), 0.20). 0 / absent = take the
   // core constant. Finite, > 0 and <= 1 when retention is on.
   double subfloor_stress_fraction = 0.0;
+  // "subfloor_aggregate_cap" — optional override of the AGGREGATE exposure cap
+  // (lattice_subfloor_aggregate_cap_fraction(), 0.03): the ceiling on total
+  // sub-floor material retained across ALL regions, as a fraction of the printed
+  // set. 0 / absent = take the core constant. Finite, > 0 and <= 1 when retention
+  // is on. Over the cap the run retains NOTHING and the receipt says so — see
+  // lattice.hpp's ★★★ note for why this is a policy ceiling on exposure and not a
+  // safety threshold.
+  double subfloor_aggregate_cap = 0.0;
 };
 
 // One load group of a declared load case (handoff 093): its faces are chosen

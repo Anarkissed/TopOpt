@@ -1008,7 +1008,8 @@ JobDescription parse_job(const std::string& json_text) {
     reject_unknown_keys(
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
              "cell_mode", "cell_min_mm", "cell_max_mm",
-             "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction"},
+             "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction",
+             "subfloor_aggregate_cap"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1095,6 +1096,21 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail(
             "grading \"subfloor_stress_fraction\" must be > 0 and <= 1 (a fraction "
             "of the part's PEAK von Mises, not a percentage)");
+    }
+    if (const JsonValue* c = find_key(gr, "subfloor_aggregate_cap")) {
+      // Same rule as the stress fraction: a cap stated WITHOUT arming retention is
+      // a job that means one thing and says another.
+      if (!job.grading.retain_subfloor_in_unloaded_regions)
+        schema_fail(
+            "grading \"subfloor_aggregate_cap\" is only allowed with "
+            "\"retain_subfloor_in_unloaded_regions\": true");
+      job.grading.subfloor_aggregate_cap =
+          require_number(*c, "grading.subfloor_aggregate_cap");
+      if (!(job.grading.subfloor_aggregate_cap > 0.0 &&
+            job.grading.subfloor_aggregate_cap <= 1.0))
+        schema_fail(
+            "grading \"subfloor_aggregate_cap\" must be > 0 and <= 1 (a fraction of "
+            "the PRINTED set, not a percentage)");
     }
   }
 

@@ -332,6 +332,16 @@ double lattice_subfloor_retention_stress_fraction() {
   return 0.20;
 }
 
+double lattice_subfloor_aggregate_cap_fraction() {
+  // POLICY, not a measurement — see lattice.hpp's ★★★ note. A stated ~3.2x multiple
+  // of the one end-to-end verified configuration (822 of 88,424 printed voxels =
+  // 0.930 % of the part). Bounding exposure is all it does; it makes no claim that
+  // the retained material is accurate, and the certification cannot check whether it
+  // is. Revisit the moment a direct-FEA strut measurement exists (currently a
+  // 44-276x cost ceiling).
+  return 0.03;
+}
+
 namespace {
 
 // The printed octet strut DIAMETER at cell edge 4 mm, per relative density, measured
