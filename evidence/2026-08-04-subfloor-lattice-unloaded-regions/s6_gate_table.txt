@@ -1,5 +1,5 @@
 === S6 — gate table, every rung ===
-base   cli: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-main2/topopt-cli
+base   cli: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-m3/topopt-cli
 branch cli: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/core/build/topopt-cli
 
 cfg     rung   L verdict   R verdict        L margin        R margin           d

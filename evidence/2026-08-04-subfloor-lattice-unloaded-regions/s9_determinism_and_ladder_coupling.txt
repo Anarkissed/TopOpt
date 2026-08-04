@@ -1,40 +1,54 @@
-=== S9 — DETERMINISM, and the LADDER COUPLING it was run to attribute ===
+=== S9 — DETERMINISM, THE LADDER LEAK, AND ITS FIX ===
 (task 2026-08-04-subfloor-lattice-unloaded-regions)
 
-THE OBSERVATION THAT FORCED THIS CONTROL. On the maintainer's part with the
-lattice scoped to his one qualifying wall, arming retention changed the
-SOLID margin of rungs BELOW the one where retention fired — rungs at which
-nothing was retained at all. Retention is a lattice post-process and cannot
-touch the solid ladder, so either the pipeline is not run-to-run
-deterministic on this part, or arming retention perturbs later rungs
-through something shared. This control decides which.
+M2_verticalStand.step, resolution 128, the maintainer's job with the lattice
+scoped to his one qualifying wall. Retention OFF vs ON is the only difference.
 
---- CONTROL: the SAME job (retention OFF) run TWICE ---
-  rung 0.68: densities bit-identical=True  classification flips=0
-  rung 0.52: densities bit-identical=True  classification flips=0
-  rung 0.38: densities bit-identical=True  classification flips=0
-  rung 0.26: densities bit-identical=True  classification flips=0
-  report.json  run1=992fe935be51352a  run2=992fe935be51352a  IDENTICAL
-  fields.bin   run1=5002bab24ecd0909  run2=5002bab24ecd0909  IDENTICAL
-  design.bin   run1=9535f13859e8cfe5  run2=9535f13859e8cfe5  IDENTICAL
+--- 1. THE CONTROL: is the pipeline deterministic on this part? ---
+  same job (retention OFF) run TWICE:
+    rung 0.68: identical=True  classification flips=0
+    rung 0.52: identical=True  classification flips=0
+    rung 0.38: identical=True  classification flips=0
+    rung 0.26: identical=True  classification flips=0
+    report.json  run1=992fe935be51352a run2=992fe935be51352a  IDENTICAL
+    fields.bin   run1=5002bab24ecd0909 run2=5002bab24ecd0909  IDENTICAL
+    design.bin   run1=9535f13859e8cfe5 run2=9535f13859e8cfe5  IDENTICAL
 
-  S9: MET — two runs of the same job are byte-identical, so the pipeline
-       is deterministic on this part and any difference below is CAUSED.
+  S9: MET — byte-identical, so the pipeline is deterministic here and
+       any difference below is CAUSED, not noise.
 
---- THE EFFECT: retention OFF vs ON, same job otherwise ---
-  rung 0.68: densities bit-identical=True  classification flips=0
-  rung 0.52: densities bit-identical=False  classification flips=40
-  rung 0.38: densities bit-identical=False  classification flips=380
-  rung 0.26: densities bit-identical=False  classification flips=416
+--- 2. THE DEFECT, before the fix ---
+  retention OFF vs ON (pre-fix binary):
+    rung 0.68: identical=True  classification flips=0
+    rung 0.52: identical=False  classification flips=40
+    rung 0.38: identical=False  classification flips=380
+    rung 0.26: identical=False  classification flips=416
 
-READ IT LIKE THIS. Rung 0.68 — the rung where retention actually fired — is
-BIT-IDENTICAL in its density: retention is a post-process and it did not
-touch the design it was applied to. The rungs BELOW it diverge. Since the
-control above shows the pipeline is deterministic, that divergence is caused
-by arming retention, and the only channel between a finished rung's lattice
-work and the next rung's optimize is solver state carried across solves
-(the warm start, handoff 110). The composite margin moved by at most
-0.0853%, no verdict flipped on any rung, and the argmax did not move — so
-this is not a blocked-stop by any criterion this task set. It is, however, a
-real coupling that nothing in the codebase documents, and it is filed as
-such rather than left for someone to rediscover.
+  Rung 0.68 — the rung retention actually FIRED on — is bit-identical: the
+  lattice is a post-process and it did not touch its own design. The rungs
+  AFTER it diverge. Cause: lattice_one_variant runs from run_job's on_variant
+  callback, i.e. BETWEEN rungs, and its FEA solves were harvesting into and
+  dropping the Krylov recycle subspace (krylov_recycling=true, dim 16,
+  reset_per_rung=false) and the GenEO basis (basis_dim 1674) that rung k+1's
+  optimize consumes.
+
+--- 3. AFTER THE FIX (ScopedLadderSolverIsolation) ---
+  retention OFF vs ON (fixed binary):
+    rung 0.68: identical=True  classification flips=0
+    rung 0.52: identical=True  classification flips=0
+    rung 0.38: identical=True  classification flips=0
+    rung 0.26: identical=True  classification flips=0
+
+  LEAK CLOSED — arming the flag changes NO design at any rung.
+
+--- 4. WHAT THE FIX COSTS: it moves the OFF baseline too ---
+  same job, retention OFF, pre-fix binary vs fixed binary:
+    rung 0.68: identical=True  classification flips=0
+    rung 0.52: identical=False  classification flips=32
+    rung 0.38: identical=False  classification flips=207
+    rung 0.26: identical=False  classification flips=282
+
+  Expected and correct: rung k+1 no longer consumes lattice-polluted solver
+  state. Margins moved within +0.0736% and NO verdict flipped (see S1 part C).
+  Reported rather than hidden — it is a behaviour change on the streaming
+  lattice path, and it is the defect being corrected.

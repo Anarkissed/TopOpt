@@ -27,11 +27,14 @@ Three things came back that the brief asked about and one that it did not:
   predicted, and that is stated here rather than averaged away.
 * **His job as written retains NOTHING**, and that is not the filter being too
   tight. It is the shape of his job — §5.
-* **★ ARMING RETENTION CHANGED THE DESIGNS OF LATER RUNGS.** Not a blocked-stop
-  by any criterion this task set, and not physics in the wall: it is solver
-  state leaking between a finished rung's lattice work and the next rung's
-  optimize. Measured, controlled, attributed, and filed — §7. **This is the
-  finding a reader should carry away.**
+* **★ ARMING RETENTION CHANGED THE DESIGNS OF LATER RUNGS — and that is now
+  FIXED, not filed.** It was solver state leaking from a finished rung's lattice
+  work into the next rung's optimize: on the streaming path the lattice pipeline
+  runs FEA solves BETWEEN rungs, and they were harvesting into and dropping the
+  Krylov recycle subspace and GenEO basis that rung k+1 consumes. A scoped guard
+  now suppresses both for the duration. **After the fix, arming the flag changes
+  no design at any rung** (40/380/416 flips → 0/0/0). §7. **This is the finding a
+  reader should carry away.**
 
 And the thing that must not be lost, because it governs how much any of the
 above is worth: **the certification is structurally blind to cells-per-member.**
@@ -89,11 +92,21 @@ says "out of regime" without saying why or how much is not a receipt.
 
 ### The default is inert, and that is measured, not asserted.
 
-**S1 PASS.** Same graded lattice job — swept grading, roles, lattice export — run
-by a CLI built from the stashed base tree and by one built from this branch:
-`report.json`, `fields.bin`, `design.bin`, all four meshes, all four lattice
-meshes and all four lattice receipts **byte-identical**; `run_info.json` and
-`iterations.csv` identical once four named wall-clock keys are removed.
+**S1 PASS, in four parts** — because this PR contains two changes with different
+byte-identity properties and collapsing them would hide the second (§7):
+
+* **A** a run with NO lattice, base vs branch: **byte-identical**. The blast
+  radius stops at lattice runs.
+* **B1** lattice, ARMED but inert, same binary: identical in every artifact except
+  the `subfloor_retention` block the receipt gains — which MUST differ, or the
+  user could not tell the option was on — and that block reports zero retention.
+* **B2** lattice, ARMED and FIRING, same binary: the lattice artifacts change
+  (that is the feature); **`report.json`, `design.bin`, `fields.bin` and every
+  solid mesh are bit-identical**. This is the flag's real bar and the property
+  §7's leak broke.
+* **C** lattice, base vs branch: **deliberately different** — the leak fix moves
+  designs on streaming lattice runs. Reported, not asserted away; what IS asserted
+  is that no verdict flips.
 
 ★ The script now **asserts the two binaries differ before it compares anything.**
 The first run of this bar passed vacuously: the CMake target is `topopt_cli` but
@@ -269,43 +282,82 @@ unconditional.
 
 ---
 
-## 7. ★ THE FINDING NOBODY ASKED FOR: RETENTION PERTURBS LATER RUNGS
+## 7. ★ THE LEAK — FOUND, ROOT-CAUSED, AND CLOSED
 
 On the wall pair, arming retention changed the **solid** margin of rungs *below*
-the one where retention fired — rungs at which nothing was retained. Retention is
-a lattice post-process and cannot touch the solid ladder, so either the pipeline
-is not deterministic on this part or arming retention leaks into later rungs.
+the one where retention fired — rungs at which nothing was retained.
 
-**The control decides it.** Same job, retention off, run twice:
-`report.json`, `fields.bin` and `design.bin` **byte-identical**, 0 classification
-flips on every rung. The pipeline is deterministic on this part (this is also S9).
+**The control decides it.** Same job, retention off, run twice: `report.json`,
+`fields.bin` and `design.bin` byte-identical, 0 classification flips on every rung
+(this is also S9). The pipeline is deterministic on this part, so the difference
+was **caused**.
 
-So the difference is **caused**:
+### The root cause, read off the call graph rather than guessed
 
-| rung | densities bit-identical? | classification flips |
-|---|---|---:|
-| 0.68 — where retention fired | **YES** | 0 |
-| 0.52 | no | **40** |
-| 0.38 | no | **380** |
-| 0.26 | no | **416** |
+`lattice_one_variant` runs from `run_job`'s `on_variant` callback — i.e. **between
+rung k and rung k+1 of the optimize ladder**, not after it (run_job.cpp, the
+streaming path). It performs real FEA solves: the null-posture reproduction, the
+composite certification, and on a clamped run the clamp counterfactual.
 
-The rung retention was applied to is untouched — it is a post-process and it did
-not disturb its own design. The rungs *after* it diverge. The only channel between
-a finished rung's lattice work and the next rung's optimize is solver state
-carried across solves (the warm start, handoff 110).
+Both of the solver's carried accelerators are sticky, and both were live on this
+job (straight out of its own `run_info.json`):
 
-**Why this is not a blocked-stop:** the argmax did not move, the composite margin
-moved 0.0853 % against a 0.10 % bound stated in advance, and no verdict flipped on
-any rung of any configuration. Every criterion this task set is met.
+* the **Krylov recycle subspace** — `krylov_recycling: true`, `dim 16`, and
+  `krylov_recycle_reset_per_rung` is **false** by default, so it is deliberately
+  carried from one rung into the next;
+* the **GenEO deflation basis** — `geneo_armed_solves: 1`, `geneo_basis_dim: 1674`.
 
-**Why it is reported this loudly anyway:** it means *any* change to a rung's
-lattice posture can move later rungs' designs, which nothing in the codebase
-documents, and it is not specific to this feature — this feature is merely the
-first user-facing option that exposes it. On the l-bracket (S6 config S) the same
-comparison shows **0 flips**, so it is part-dependent and will not reproduce on a
-small fixture. Filed as follow-up work, not fixed here: fixing it means touching
-warm-start plumbing, which is outside this task's scope and would put the
-byte-identity bar at risk.
+So rung k+1's optimize was starting from a subspace **harvested from — or dropped
+by — rung k's LATTICE solves**. A rung's design depended on the lattice
+configuration of the previous rung. Those are separate solves and must not be
+coupled.
+
+**This was pre-existing.** Any change to a rung's lattice posture — cell size,
+region, topology, skin — could move later rungs on the streaming path. Sub-floor
+retention is simply the first *user-facing option* that exposes it.
+
+### The fix: suppress, don't reset
+
+A scoped guard (`ScopedLadderSolverIsolation`) disables both accelerators for the
+duration of the lattice pipeline and restores the previous enable states on the
+way out, however the function returns.
+
+**Why suppression and not a reset.** Resetting afterwards would leave rung k+1
+with an *empty* space — a third behaviour, different from both a no-lattice run
+and the batch path. Suppression preserves the carried state exactly, because both
+gates sit **before** the invalidation:
+`RecycleSession::begin` returns on `!rc_enabled()` before its resolution-change
+drop (recycle.cpp), and `geneo_solve_begin` returns on `!S.enabled` before its
+structure-fingerprint drop (geneo.cpp). A suppressed solve can neither harvest
+from, apply, nor invalidate what the ladder is carrying. Rung k+1 therefore
+inherits precisely what rung k left it — which is what a run with no lattice block
+does.
+
+It costs the diagnostic solves their accelerators. That is the right trade: their
+wall time is reported separately, and the ladder's correctness is not negotiable
+against their speed. The guard lives inside `lattice_one_variant` so the
+re-lattice entry point gets it too.
+
+### Measured, on the maintainer's part, all four rungs
+
+| rung | before the fix | after the fix |
+|---|---|---|
+| 0.68 — retention fired here | identical, 0 flips | identical, 0 flips |
+| 0.52 | **40 flips** | **0 — identical** |
+| 0.38 | **380 flips** | **0 — identical** |
+| 0.26 | **416 flips** | **0 — identical** |
+
+**Arming the flag now changes no design at any rung.** Retention still fires
+exactly as before: 822 retained, measured fraction 0.170748, out-of-regime raised.
+
+### What the fix costs, stated plainly
+
+Closing the leak necessarily **moves the OFF baseline** on streaming lattice runs
+— rung k+1 no longer consumes lattice-polluted solver state. Measured against the
+pre-fix binary on the same job: 32 / 207 / 282 classification flips on rungs
+0.52 / 0.38 / 0.26, margins within **+0.0736 %**, **no verdict flips**. That is
+the defect being corrected, not a regression, and S1 now reports it as its own
+result (part C) instead of folding it into the flag's bar.
 
 ---
 
@@ -346,14 +398,14 @@ Every run artifact S1 names is byte-identical.
 
 | bar | verdict | where |
 |---|---|---|
-| **S1** byte-identical when off | **PASS** — 12 artifacts + 4 receipts identical, two binaries proven different first | §1, `s1_byte_identity.txt` |
+| **S1** byte-identity, four parts | **PASS** — A no-lattice run byte-identical; B1 armed-but-inert identical but for its own reporting block; **B2 armed AND FIRING leaves the solid ladder bit-identical**; C the leak fix's deliberate movement flips no verdict | §1, §7, `s1_byte_identity.txt` |
 | **S2** the maintainer's case | **MET** — 25.8 % → 100 %, 822 retained at 0.74–4.45 cpm; his job as written retains 0 and §5 says why | §5, `s2s4_wall_case.txt`, `s2_per_region.txt` |
 | **S3** argmax does not move | **MET** — same voxel on every rung, on a real part, with material retained | §0, `s2s4_wall_case.txt` |
 | **S4** margin priced | **MET** — 0.0853 % vs the 0.10 % bound stated first; 3 rungs moved NEGATIVE, which §10 did not predict | §2 |
 | **S5** threshold tested at its edge | **MET** — 19/20/21 % straddle, above-ceiling posture byte-identical to disarmed | §3 |
 | **S6** full gate table + 1e-9 control | **PASS** — no verdict flip anywhere, 0 classification flips on existing paths, control sees 1 voxel | §4 |
 | **S7** forecast says so | **MET** — F3 did NOT cover it; added, and exact on the population | §8 |
-| **S8** ctest + app tests | **core 105/105**; **app 1180 executed, 13 skipped, 0 failures** | `ctest.txt`, `app_tests.txt` |
+| **S8** ctest + app tests | **core 106/106**; **app 1180 executed, 13 skipped, 0 failures** | `ctest.txt`, `app_tests.txt` |
 | **S9** determinism | **MET** — same job twice, byte-identical | §7 |
 
 Both blocked-stops were checked and neither fired. The argmax held; the margin
@@ -373,7 +425,10 @@ was not moved to fit any measurement.**
   regions and one hot one gets nothing. Making the predicate per-region needs the
   region decomposition plumbed into the law, and §10 measured a single region.
   **Filed, not fixed.**
-* **The warm-start coupling of §7.** Filed, not fixed.
+* ~~The solver-state coupling of §7.~~ **FIXED in this PR**, not filed — see §7.
+  What remains filed is the broader question it raises: the same leak meant ANY
+  lattice-setting change could move later rungs on the streaming path, so it is
+  worth auditing whether other post-processes run inside the ladder callback.
 * **The blindness itself.** Answering whether a sub-floor lattice is *accurate*
   needs direct FEA of real strut geometry, measured at a **44–276× cost ceiling**.
   Nothing here closes that, and nothing here pretends to.
@@ -461,9 +516,17 @@ sits at 91 % of peak stress, because it includes the bolt holes, and bolt holes
 are where the load goes. He has to pick the wall on its own. The software now
 tells him this instead of leaving him to guess.
 
-And one thing turned up that nobody asked about: switching this on slightly
-changed the *other* designs in the same run — the lighter versions the software
-tries after the first. Not because the wall affected them physically; the rungs
-share some solver bookkeeping and it carries over. Nothing failed, no verdict
-changed, and it does not happen on every part. It is written down so the next
-person does not spend a day rediscovering it.
+And one thing turned up that nobody asked about — and it turned out to be a real
+bug, so it was fixed rather than noted. Switching this on slightly changed the
+*other* designs in the same run: the lighter versions the software tries after the
+first one. Not because the wall affected them physically. The software reuses some
+solver scratch work between attempts to go faster, and the lattice calculation was
+quietly leaving its own scratch work behind for the next attempt to pick up. So
+the next design depended on what the lattice had done to the previous one, which
+it never should. That is now sealed off, and switching the option on changes no
+other design at all.
+
+It was worth chasing for a reason beyond this feature: the same leak meant that
+*any* change to a lattice setting — cell size, region, topology — could quietly
+shift the other designs in the run. This option was just the first one visible
+enough to catch it.
