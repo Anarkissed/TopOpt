@@ -435,6 +435,76 @@ struct MinimizePlasticOptions {
   // read when width_aware_knockdown is armed AND wall_loops > 0. Must be finite.
   double wall_line_width_outer_mm = -1.0;
 
+  // --- MULTISCALE LATTICE TOPOLOGY OPTIMIZATION (task multiscale-lattice-to) --
+  //
+  // THE PROBLEM THIS SOLVES. Until now the pipeline was a TWO-STEP: minimize_plastic
+  // optimized the shape assuming SOLID material with penalty 3.0 driving density to
+  // the extremes, and a lattice pass afterwards tried to fill what survived. What
+  // survives is thin tendrils, and a member thinner than the cells-per-member floor
+  // cannot hold a lattice cell, so it falls back to solid. On the maintainer's
+  // M2_verticalStand run (128^3, ladder 0.68/0.52/0.38/0.26) that was 99–100% of
+  // every lattice region: 0, 82 and 472 latticed voxels out of ~10,500. THE
+  // OPTIMIZER ATE THE MATERIAL THE LATTICE NEEDED, because nothing told it a lattice
+  // was coming. No post-process can undo that; the design has to be optimized
+  // KNOWING the interior will be lattice.
+  //
+  // WHAT ARMING DOES. Inside the lattice region, the SIMP loop's material law
+  // becomes the MEASURED homogenized cubic tensor C(rho) of the lattice library
+  // (lattice_material.hpp) instead of rho^p * E0 — intermediate density stops being
+  // a penalised fiction and becomes a real, printable, measured material. Outside
+  // the region (and everywhere on a job with no lattice block) nothing changes.
+  // At termination the design is PROJECTED onto the feasible set
+  // {0} u [rho_lo, rho_hi] u {1}, and the volume-constraint violation that
+  // projection causes is CHARGED and REPORTED, never absorbed.
+  //
+  // false (the DEFAULT) is THE ONE RULE: not one branch of the multiscale path is
+  // taken, the SIMP loop is the classic penalized isotropic one element-for-element,
+  // and every existing run/fixture/golden document is byte-for-byte what it was.
+  // The named production constant is kProductionMultiscaleLatticeTO
+  // (production.cpp); it is a PER-JOB posture, not a global arming, because unlike
+  // the accelerators this changes the ANSWER by design.
+  bool multiscale_lattice = false;
+  // The lattice topology the material curve is fitted from. Must be certifiable AND
+  // pass lattice_material_model_trustworthy — only OCTET does today: the other six
+  // certifiable topologies stop at rho ~0.5-0.6, leaving a 0.41-0.50-wide upper gap
+  // the model spans by pure interpolation across a 3.9-5.2x stiffness swing, which
+  // is not something to steer a design loop across. minimize_plastic REFUSES an
+  // untrustworthy topology rather than optimize on a fiction.
+  LatticeTopology multiscale_topology = LatticeTopology::Octet;
+  // The voxels that will be latticed — the job's lattice ROLE regions and keep-outs
+  // resolved to a grid-indexed flag (non-zero = latticed), design-INDEPENDENT so it
+  // cannot flicker between iterations. EMPTY means "every design voxel", which is
+  // what a whole-part lattice job wants. Size must be 0 or the analysis grid's
+  // voxel_count(). Only read when multiscale_lattice is true.
+  std::vector<char> multiscale_region;
+  // Occupancy classifiers for the feasible-set projection: a density <= this is
+  // VOID, >= (1 - this) is SOLID. The probe measured on 1e-3; the value is exposed
+  // rather than hardcoded so the receipt can state what it classified against.
+  double multiscale_void_below = 1e-3;
+  // How often (in design iterations) to measure the CELLS-PER-MEMBER FLOOR occupancy
+  // of the live design — the local-member-thickness EDT is not free, so it runs on a
+  // stride. 0 (the DEFAULT) disables the measurement entirely; 1 measures every
+  // iteration. The measurement is READ-ONLY observability: it never moves a density,
+  // a verdict or a tolerance. See MinimizePlasticVariant::floor_history.
+  int multiscale_floor_stride = 0;
+  // The lattice CELL SIZE (mm) the floor occupancy is measured against — a member is
+  // "below the floor" when local_member_thickness_mm / cell < the topology's
+  // lattice_cells_per_member_min. <= 0 disables the measurement (there is no cell to
+  // measure against). This is the same cell the grading law will use at export; a
+  // SWEPT plan's FINEST cell is the right one to report against, because that is the
+  // most favourable cell any member could be granted.
+  double multiscale_floor_cell_mm = 0.0;
+  // THE PRINTED-SET THRESHOLD this run's designs are read at (see analyze.hpp for
+  // the full rationale). 0.5 (the DEFAULT) is the M3.5 iso and is byte-for-byte
+  // every existing run. A multiscale run lowers it BELOW the certified band's
+  // floor, so "printed" means "not void": a voxel at density 0.30 is a real,
+  // printable, measured 30%-dense lattice cell, and thresholding it away would
+  // delete material the optimizer placed and the certification solved with.
+  // minimize_plastic resolves it to multiscale_printed_iso() when
+  // multiscale_lattice is armed and to 0.5 otherwise; it is not a free knob.
+  // Must be in (0, 1).
+  double printed_iso = 0.5;
+
   // --- GATE DIAGNOSIS (handoff 2026-08-02-gate-diagnosis-recommendations) ------
   // Arm the per-rung explanation of the acceptance verdict: which term BINDS, its
   // value against the value it had to reach, and recommendations EACH VERIFIED by
@@ -922,6 +992,75 @@ struct MinimizePlasticVariant {
   // (d) Printed mass in grams = material density (g/cm^3) * printed volume,
   // spacing-aware: (# printed voxels) * grid.voxel_volume() (mm^3) / 1000.
   double mass_grams = 0.0;
+
+  // --- MULTISCALE LATTICE TO (task multiscale-lattice-to) ---------------------
+  // Default-constructed (multiscale == false) on every run that did not arm
+  // options.multiscale_lattice, so a non-multiscale variant carries exactly the
+  // fields it always did.
+  struct MultiscaleReport {
+    bool multiscale = false;          // this variant was optimized multiscale
+    std::string topology;             // the fitted topology's name
+    std::size_t region_voxels = 0;    // design voxels the lattice material covered
+    std::size_t fit_rows = 0;         // measured rows the C(rho) fit ran through
+    double rho_lo = 0.0, rho_hi = 0.0;  // the certified band, read from core
+
+    // The occupancy of the CONVERGED, PROJECTED design over the region, by
+    // feasible class. band + void + solid == region_voxels after projection;
+    // gap_* are what the projection had to move and are 0 afterwards by
+    // construction (kept so the receipt can state that it is 0 because it was
+    // projected, not because nothing was ever there).
+    std::size_t voxels_void = 0, voxels_band = 0, voxels_solid = 0;
+    std::size_t voxels_lower_gap = 0, voxels_upper_gap = 0;
+    double band_rho_min = 0.0, band_rho_max = 0.0;  // observed in-band span
+
+    // THE PROJECTION CHARGE — reported, never absorbed. `volume_constraint_
+    // violation` is (achieved - target)/target after projection: the optimizer
+    // satisfied the volume constraint and the projection then broke it by this
+    // much, signed.
+    std::size_t projected_lower = 0, projected_upper = 0;
+    double projection_volume_delta = 0.0;         // signed, in voxel-fraction units
+    double projection_max_density_move = 0.0;
+    double volume_fraction_before_projection = 0.0;
+    double volume_fraction_after_projection = 0.0;
+    double volume_fraction_target = 0.0;
+    double volume_constraint_violation = 0.0;
+
+    // THE CELLS-PER-MEMBER FLOOR, measured on the converged design (and, when
+    // options.multiscale_floor_stride > 0, per iteration in floor_history).
+    // `floor_cells` is lattice_cells_per_member_min for the topology;
+    // `floor_cell_mm` the cell the widths were divided by.
+    double floor_cells = 0.0;
+    double floor_cell_mm = 0.0;
+    std::size_t floor_measured_voxels = 0;   // region voxels that were printed
+    std::size_t floor_below_voxels = 0;      // ... whose member is below the floor
+    double floor_min_cells_per_member = 0.0; // thinnest member, in cells
+    // THE CEILING — how many region voxels could EVER be latticed, by ANY design.
+    // Measured once per run on the FULLY SOLID part: a design can only remove
+    // material, and removing material only thins members, so a region voxel whose
+    // member is below the cells-per-member floor when the part is solid can never
+    // clear it. This is the number that says whether a disappointing latticed
+    // fraction is the optimizer's fault or the part's geometry — without it, "we
+    // only latticed X%" cannot be told apart from "X% is all there was".
+    std::size_t floor_ceiling_measured = 0;  // region voxels in the solid part
+    std::size_t floor_ceiling_eligible = 0;  // ... whose member clears the floor
+    double floor_ceiling_min_cells = 0.0;
+    // Histogram of member thickness IN CELLS over the printed region voxels,
+    // bucketed at 1-cell width: [0,1), [1,2), ... [9,10), [10,inf). Empty when
+    // the floor measurement did not run.
+    std::vector<std::size_t> floor_histogram;
+
+    // Per-iteration floor occupancy while the design was forming — so a design
+    // starving its members below the floor is visible AS IT HAPPENS rather than
+    // at export. One entry per MEASURED iteration (stride-sampled).
+    struct FloorSample {
+      int iteration = 0;
+      std::size_t measured = 0;
+      std::size_t below = 0;
+      double min_cells_per_member = 0.0;
+    };
+    std::vector<FloorSample> floor_history;
+  };
+  MultiscaleReport multiscale;
 
   // M7.disp — the per-node displacement field (the sibling of von_mises_field
   // that M7.viz.3's flex animation needs to move mesh vertices; the scalar

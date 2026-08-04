@@ -41,6 +41,10 @@ GradedField grade_lattice(const VoxelGrid& grid,
     throw std::invalid_argument("grade_lattice: demand.size() != voxel_count");
   if (region && region->size() != n)
     throw std::invalid_argument("grade_lattice: region->size() != voxel_count");
+  if (params.prescribed_relative_density != nullptr &&
+      params.prescribed_relative_density->size() != n)
+    throw std::invalid_argument(
+        "grade_lattice: prescribed_relative_density->size() != voxel_count");
   const bool swept = params.cell_mode == CellSizeMode::Swept;
   if (params.cell_mode == CellSizeMode::Fixed && !(params.target_cell_size_mm > 0.0))
     throw std::invalid_argument("grade_lattice: target_cell_size_mm must be > 0");
@@ -125,6 +129,14 @@ GradedField grade_lattice(const VoxelGrid& grid,
   // density depends on DEMAND alone, never on cell size. That is exactly what lets
   // the cell-size plan consume it without circularity.
   auto rho_of = [&](std::size_t e) {
+    // MULTISCALE (task multiscale-lattice-to): the optimizer already chose this
+    // voxel's relative density and paid a compliance objective evaluated at the
+    // measured tensor of it. Use THAT, not a second derivation from stress —
+    // otherwise the printed material distribution is not the one that was
+    // optimized and certified. Everything after this point (clamp, floor, plan,
+    // L2 assertion) is unchanged.
+    if (params.prescribed_relative_density != nullptr)
+      return (*params.prescribed_relative_density)[e];
     const double frac =
         demand_max > 0.0 ? std::min(1.0, std::max(0.0, demand[e] / demand_max))
                          : 0.0;

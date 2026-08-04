@@ -1,0 +1,26 @@
+M2c - DOES LENGTH-SCALE CONTROL RESCUE MULTISCALE?
+     l-bracket res 40, spacing 1.500 mm, cell 2.500 mm, floor 5 cells
+     => floor member width 12.50 mm => min_feature 6.25 mm = 4.17 voxels
+
+config           variant        region  latticed  latticed%   fallback    margin
+twostep          variant_045      4121       648      15.7%       3473      2717
+twostep          variant_060      5755      1231      21.4%       4524      2600
+multiscale       variant_045      3567        12       0.3%       3555     121.3
+multiscale       variant_060      2824        42       1.5%       2782     212.1
+multiscale_ls    variant_045      6752      3230      47.8%       3522     87.45
+multiscale_ls    variant_060      5639      4138      73.4%       1501      96.1
+
+twostep          TOTAL  latticed   1879 /   9876 =  19.0%
+multiscale       TOTAL  latticed     54 /   6391 =   0.8%
+multiscale_ls    TOTAL  latticed   7368 /  12391 =  59.5%
+
+multiscale: min_feature used 0.000 mm (implied 0.000)
+   vf 0.60  void 1665 band 2824 solid 5551 | below-floor 5978/8375 min_cells 1.20
+      histogram: [0, 2813, 1787, 1297, 81, 0, 2397, 0, 0, 0, 0]
+   vf 0.45  void 2408 band 3567 solid 4065 | below-floor 6360/7632 min_cells 1.20
+      histogram: [0, 4267, 1641, 307, 145, 0, 1272, 0, 0, 0, 0]
+multiscale_ls: min_feature used 6.250 mm (implied 6.250)
+   vf 0.60  void 265 band 5639 solid 4136 | below-floor 1720/9775 min_cells 1.20
+      histogram: [0, 30, 104, 792, 794, 0, 8055, 0, 0, 0, 0]
+   vf 0.45  void 751 band 6752 solid 2537 | below-floor 4126/9289 min_cells 1.20
+      histogram: [0, 93, 852, 1822, 1359, 0, 5163, 0, 0, 0, 0]

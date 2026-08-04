@@ -97,6 +97,31 @@ struct GradingLawParams {
   // kWidthAwareThicknessCapVoxels. A member thicker than 2*cap*spacing reads the +inf
   // "thicker than measured" sentinel and always clears the ceiling. Must be >= 1.
   int thickness_cap_voxels = 32;
+
+  // ── MULTISCALE (task multiscale-lattice-to) ────────────────────────────────
+  // When non-null, THIS per-voxel field (size grid.voxel_count()) is the relative
+  // density the law grades to, INSTEAD of the demand -> density map above.
+  // `demand` and `demand_exponent` are then unused for the density; everything
+  // else — the band clamp, the cells-per-member floor, the L4 solid fallback, the
+  // printability check, the cell plan and the L2 certifiability assertion — is the
+  // SAME code on the same terms.
+  //
+  // WHY IT EXISTS. Under the two-step pipeline the optimizer knew nothing about
+  // the lattice, so deriving the lattice density from the stress field afterwards
+  // was the only information available. Under MULTISCALE the optimizer has already
+  // chosen a relative density per voxel and PAID a compliance objective evaluated
+  // at the measured tensor of that density. Re-deriving rho from stress would throw
+  // that away and print a different material distribution than the one that was
+  // optimized and certified — the same disagreement between the loop and the export
+  // that the two-step's failure was made of. So a multiscale run prescribes.
+  //
+  // The field is used VERBATIM up to the band clamp: a value outside
+  // [rho_min, rho_max] is clamped and COUNTED exactly like a demand-derived one
+  // (clamped_lo_voxels / clamped_hi_voxels / clamp_flags), never silently accepted.
+  // A caller that has already projected onto the feasible set will see zero clamps
+  // on the in-band voxels, which is the honest way to show the projection worked.
+  // Null (the DEFAULT) is the demand map, byte-for-byte.
+  const std::vector<double>* prescribed_relative_density = nullptr;
 };
 
 // The law's output: the posture the certification engine consumes, plus a full report

@@ -53,6 +53,7 @@ add_library(topopt
   src/simp/observability.cpp
   src/fea/hex_element.cpp
   src/fea/lattice.cpp
+  src/fea/lattice_material.cpp
   src/fea/strut_strength.cpp
   src/orient/orient.cpp
   src/orient/build_orientation.cpp
@@ -271,6 +272,16 @@ add_executable(test_lattice_material_model
                tests/unit/test_lattice_material_model.cpp)
 target_link_libraries(test_lattice_material_model PRIVATE topopt)
 add_test(NAME lattice_material_model COMMAND test_lattice_material_model)
+
+# The PRODUCTION multiscale lattice material model (task multiscale-lattice-to):
+# the C(rho) curve the SIMP loop's material law becomes, its analytic
+# sensitivities against central differences, the exact three-block element
+# decomposition the multiscale compliance leans on, and the feasible-set
+# projection with its volume charge. Sibling of lattice_material_model above,
+# which pins the harness prototype this was promoted from.
+add_executable(test_multiscale_material tests/unit/test_multiscale_material.cpp)
+target_link_libraries(test_multiscale_material PRIVATE topopt)
+add_test(NAME multiscale_material COMMAND test_multiscale_material)
 
 # De-homogenization probe instrument (lattice-dehomogenization probe,
 # 2026-07-31). The probe itself (tests/harness/lattice_dehomog_probe.cpp,

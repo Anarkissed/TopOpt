@@ -130,7 +130,17 @@ FixedDesignAnalysis analyze_fixed_design(
     SolverKind solver_kind, double margin_stop, const KnockdownSpec& knockdown,
     bool load_path_ok, double part_solid, const LatticePosture* lattice,
     bool score_build_orientation, bool build_direction_inferred,
-    bool auto_apply_build_orientation) {
+    bool auto_apply_build_orientation, double printed_iso) {
+  // THE PRINTED-SET THRESHOLD for this analysis. Shadows the file-scope M3.5
+  // constant so every "is there material here" test in this function asks the
+  // caller's question — 0.5 for every classic run (identical to the constant it
+  // shadows, so those paths are byte-for-byte unchanged), below the band floor
+  // for a MULTISCALE one, where a 30%-dense voxel is real printable lattice and
+  // not a half-empty solid voxel. See analyze.hpp for the full rationale.
+  if (!(printed_iso > 0.0 && printed_iso < 1.0))
+    throw std::invalid_argument(
+        "analyze_fixed_design: printed_iso must be in (0, 1)");
+  const double kIso = printed_iso;
   FixedDesignAnalysis out;
   // The orientation this analysis describes. Reassigned at the very end IF the
   // caller armed auto-apply and the scorer chose a different direction; until

@@ -1,0 +1,22 @@
+M8 — MULTISCALE PIPELINE DETERMINISM (two identical runs of the same job)
+
+--- RESULT artifacts (design.bin, fields.bin, report.json, meshes, receipts) ---
+IDENTICAL — every result artifact matches byte for byte.
+  dd3feaded166fc48c000243e8da55fdc8573aeb16a5b67c5d87249456ca6a115  design.bin
+  84bb33885aa92834fb73b5c4a30452c6976cc84272b8d5f633cd3e02f0004cc1  fields.bin
+  9670f551449031d3ee98d7a49d2e30a6a0325b57bb29216723d38113f34f07f9  loadcase.json
+  f3c7ac0b07f301a6c5a5b51db01e4d27204da2e92cd7a280d702459cb095d2c7  report.json
+  52176c04b8f426053c52cfeed7c2013271f6cb5740ba7343b764f6fded01426a  variant_045.stl
+  d7596601a2ba29fb1515207ed73c08ab6340ae76fd0e0e9ee7fcd119570b8c9b  variant_045_lattice.report.json
+  450db1cb239ca0820a0f2ff45ec83f5e35f90c0e1027683ef9a07c27254a0e12  variant_045_lattice.stl
+  bf7e7b80fa0921cfdffa406514d649daa8f4c91b8c42a0bd788b3bca90a53a1a  variant_060.stl
+  98be528518aa606a61ad8c077ec1bd8c50a4d2d9659c21eafebe3169af9aae56  variant_060_lattice.report.json
+  474f89aed7e3e41fabbccbdea6259698a6baca0fff50815798cd2596e976cf90  variant_060_lattice.stl
+
+--- INSTRUMENT artifacts (iterations.csv, run_info.json, build_orientation.json), timings stripped ---
+    stripped: every *_ms / *_mb / rss* / *_seconds field, plus the OS paging
+    counters major_faults / swapins and gen_fraction (a ratio of two wall
+    clocks) — measurements of the machine, not of
+    the design, and not reproducible by construction.
+IDENTICAL — CG counts, GenEO actions, compliance history, the projection
+charge, the per-iteration floor history and every verdict all match exactly.

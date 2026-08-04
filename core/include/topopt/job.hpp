@@ -140,6 +140,28 @@ struct JobLattice {
   // Lattice role regions (see JobLatticeRegion). Empty => whole-part lattice,
   // byte-identical to the pre-regions schema.
   std::vector<JobLatticeRegion> regions;
+  // MULTISCALE LATTICE TO (task multiscale-lattice-to). false (the DEFAULT) is the
+  // TWO-STEP pipeline every existing job runs: optimize assuming solid, then try to
+  // lattice what survived. true asks the OPTIMIZER to place the lattice while it
+  // grows the shape — inside this block's role region, the SIMP loop's material law
+  // becomes the measured homogenized cubic tensor C(rho) of the lattice library
+  // instead of rho^p*E0, and the converged design is projected onto the feasible
+  // set {0} u [rho_lo, rho_hi] u {1} with the volume charge reported.
+  //
+  // WHY YOU WOULD WANT IT: under the two-step, the optimizer (told nothing about the
+  // lattice, penalty 3.0 driving density to the extremes) leaves thin tendrils, and
+  // a member thinner than the cells-per-member floor cannot hold a cell — so the
+  // lattice pass falls back to SOLID. On the maintainer's M2_verticalStand run that
+  // was 99-100% of every lattice region. It is not a bug in the lattice pass, and no
+  // post-process can fix it.
+  //
+  // REQUIRES the "grading" block (a multiscale design is graded by construction:
+  // every latticed voxel carries its own density) and mode "minimize_plastic" (there
+  // is no optimizer to change on the analyze / lattice_variant paths). Honoured only
+  // when production permits it (production_multiscale_lattice_to) and only for a
+  // topology whose measured table can steer a design loop (octet today) — refused,
+  // never silently downgraded.
+  bool multiscale = false;
   bool emit_stl = true;            // write <prefix>_<vf>_lattice.stl
   bool emit_3mf = false;           // write <prefix>_<vf>_lattice.3mf (streaming)
 
