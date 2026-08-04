@@ -1,3 +1,7 @@
+error: patch failed: core/src/cli/job.cpp:822
+error: core/src/cli/job.cpp: patch does not apply
+error: patch failed: core/src/cli/run_job.cpp:1789
+error: core/src/cli/run_job.cpp: patch does not apply
 === M1 (C) — ONE worktree, ONE cmake cache: base 297e039 vs branch,
              on a lattice+grading job with multiscale ABSENT ===
 

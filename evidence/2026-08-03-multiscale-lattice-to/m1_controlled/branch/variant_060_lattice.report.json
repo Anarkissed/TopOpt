@@ -14,6 +14,21 @@
   "solid_region_voxels": 3388,
   "solid_region_volume_mm3": 11434.5,
   "solid_region_triangles": 9832,
+  "frozen_material": {
+    "frozen_printed_voxels": 50,
+    "frozen_latticed": 15,
+    "frozen_kept_solid": 35,
+    "frozen_in_include_region": 0,
+    "frozen_in_exclude_region": 0,
+    "frozen_in_exclude_region_latticed": 0,
+    "frozen_cells_certified": 8,
+    "frozen_cells_not_emitted": 0,
+    "frozen_voxels_strut_and_solid": 3,
+    "frozen_strut_and_solid_unexplained": 0,
+    "frozen_strut_and_solid_note": "voxels_strut_and_solid is NOT expected to be 0 where a lattice cell straddles a role boundary: roles act on cell activation and on the certification mask but are deliberately kept out of the strut clip, so struts weld across the interface into material certified solid (more material than certified — the conservative direction, and what bonds the lattice to the solid). strut_and_solid_unexplained is the real divergence and IS 0: no cell emits struts into a region the certificate calls entirely solid.",
+    "frozen_meaning": "FROZEN is a constraint on the OPTIMIZER — it may not change the density of these voxels. It is NOT a claim that the material is solid. Whether frozen material is solid or latticed is decided by the lattice regions (include = retained AND latticed, exclude = retained AND solid), exactly as for any other retained material.",
+    "frozen_audit": "cells_not_emitted and voxels_strut_and_solid are both 0 on a coherent run: every cell the certificate lattices over frozen material is a cell the file contains, and no frozen voxel receives both a strut and companion solid."
+  },
   "grading": {
     "graded_from": {
       "variant_vf": 0.6,
@@ -30,6 +45,14 @@
     "region_voxels": 5621,
     "latticed_voxels": 2233,
     "solid_fallback_voxels": 3388,
+    "solid_fallback_by_reason": {
+      "member_too_thin_for_cell": 3388,
+      "strut_unprintable_at_every_cell": 0,
+      "irrecoverable_by_any_cell_size": 2623,
+      "widest_rejected_member_mm": 12,
+      "member_width_needed_mm": 12.5,
+      "note": "member_too_thin_for_cell: the member cannot hold cells_per_member_floor cells across at this cell size — a SMALLER cell helps. strut_unprintable_at_every_cell: the strut this density emits is under the stated minimum extrudable width at every available cell — a BIGGER cell helps. irrecoverable_by_any_cell_size: the member is thinner than the floor times the smallest printable cell, so no cell choice can lattice it; the design itself is too thin here."
+    },
     "mask_voxels_dropped_by_cell_overlap": 0,
     "clamped_lo_voxels": 156,
     "clamped_hi_voxels": 0,

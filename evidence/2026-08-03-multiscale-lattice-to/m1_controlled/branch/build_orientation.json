@@ -43,7 +43,7 @@
   "verdict_would_change": false,
   "statement": "the build direction was CHOSEN AUTOMATICALLY (none was declared); this run certified and exported it, with the verdict ACCEPTED. See auto_applied above for what the assumed orientation would have given.",
   "self_checks": {"strut_in_plane_invariant": true, "cube_axes_strut_interlayer_identical": true, "cube_axes_scored": 6},
-  "sweep_seconds": 0.004276875, "strut_axis_measure_seconds": 4.2e-08,
+  "sweep_seconds": 0.003067875, "strut_axis_measure_seconds": 0,
   "criteria": ["S-a support_voxels", "S-b macro interlayer margin", "S-c strut in-plane margin", "S-d strut interlayer margin", "S-e horizontal strut fraction", "S-f printability (layers, footprint, min-feature)"],
   "candidates": [
     {"build_direction": [-0, -0, 1], "on_cube_axis": true, "is_as_built": true, "is_recommended": true, "is_as_inferred": true, "support_voxels": 16, "macro_interlayer_tension_mpa": 0.005866493321, "macro_interlayer_margin": 5156.402359, "macro_worst_case_margin": 3250.83632, "margin_effective": 3250.83632, "would_be_accepted": true, "strut_evaluated": false, "min_feature_violations": 728, "build_height_layers": 36, "first_layer_footprint_voxels": 1023},

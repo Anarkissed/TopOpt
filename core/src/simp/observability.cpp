@@ -199,6 +199,50 @@ ProcessMemory process_memory() {
     }
   }
 #endif
+
+  // ── THE PEAK MUST ACTUALLY BE A PEAK ────────────────────────────────────────
+  // `peak_rss_mb` and `rss_mb` come from two DIFFERENT kernel sources, and on
+  // Linux they are not guaranteed to agree:
+  //
+  //   peak  <- getrusage(RUSAGE_SELF).ru_maxrss — the kernel's high-water mark,
+  //            refreshed LAZILY at accounting points, not on every allocation;
+  //   rss   <- /proc/self/statm resident pages — read INSTANTANEOUSLY, right now.
+  //
+  // So during rapid allocation the instantaneous read can legitimately come back
+  // ABOVE a not-yet-refreshed high-water mark, and the CSV then prints a "peak"
+  // smaller than the current value sitting next to it. That is the instrument
+  // lying about the run: peak_rss_mb against available_mb is the pair the
+  // design-box OOM diagnosis turned on (handoff: the ~7 GB std::bad_alloc), and a
+  // peak that is not a peak makes that reading silently wrong. macOS never showed
+  // it because its rss_mb is phys_footprint via task_info — a different quantity
+  // — which is why this reproduced only on core-linux.
+  //
+  // THE FIX IS A TRUE HIGH-WATER MARK OVER EVERYTHING ACTUALLY MEASURED, never a
+  // clamp of one column to the other: clamping would print a number the kernel
+  // never reported. This carries the running maximum of every rss_mb this process
+  // has sampled AND every ru_maxrss it has been told, so the reported peak is the
+  // largest value either source has ever produced — and is therefore >= the
+  // current rss by construction, on every platform.
+  //
+  // HONESTY ABOUT WHAT THIS IS. The sampled-rss term is a LOWER BOUND on the true
+  // peak (this instrument only samples at iteration boundaries, so a spike between
+  // two samples is invisible to it); ru_maxrss is the kernel's own high-water and
+  // is the stronger term wherever it is answered. The maximum of the two is never
+  // below either, never above anything genuinely observed, and never fabricated.
+  // The "not answered" sentinel is preserved: a platform that answers neither
+  // still reports a negative peak rather than a manufactured zero.
+  //
+  // Not atomic, for the same reason as the matvec and simp_compliance counters:
+  // one production run drives its solves from one thread, and the instrument must
+  // not tax what it measures.
+  {
+    static double g_peak_rss_seen = -1.0;
+    if (pm.rss_mb >= 0.0 && pm.rss_mb > g_peak_rss_seen)
+      g_peak_rss_seen = pm.rss_mb;
+    if (pm.peak_rss_mb >= 0.0 && pm.peak_rss_mb > g_peak_rss_seen)
+      g_peak_rss_seen = pm.peak_rss_mb;
+    if (g_peak_rss_seen >= 0.0) pm.peak_rss_mb = g_peak_rss_seen;
+  }
   return pm;
 }
 

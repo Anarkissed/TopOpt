@@ -25,7 +25,7 @@ sum() { find "$1" -type f \( -name '*.bin' -o -name '*.stl' -o -name '*.json' \)
           | sed "s|$1/||" | sort | while read -r f; do
             printf '%s  %s\n' "$(shasum -a 256 "$1/$f" | cut -d' ' -f1)" "$f"; done; }
 
-git worktree add --detach "$WT" 34175a5 >/dev/null 2>&1
+git worktree add --detach "$WT" 297e039 >/dev/null 2>&1
 cmake -S "$WT/core" -B "$BLD" -DCMAKE_BUILD_TYPE=Release >/dev/null 2>&1
 
 # --- BASE ---
@@ -45,7 +45,7 @@ sum "$W/branch" > "$W/branch.sha256"
 git worktree remove --force "$WT" >/dev/null 2>&1; rm -rf "$BLD"
 
 {
-  echo "=== M1 (C) — ONE worktree, ONE cmake cache: base 34175a5 vs branch,"
+  echo "=== M1 (C) — ONE worktree, ONE cmake cache: base 297e039 vs branch,"
   echo "             on a lattice+grading job with multiscale ABSENT ==="
   echo
   if diff -u "$W/base.sha256" "$W/branch.sha256"; then
