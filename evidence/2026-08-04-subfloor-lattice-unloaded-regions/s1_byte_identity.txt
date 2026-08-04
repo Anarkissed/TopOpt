@@ -2,7 +2,106 @@
 branch build: /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/smoothing-brush-mesh-mismatch-6b4ccf/core/build
 base   build: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-main-s1
 
---- stashing the branch and rebuilding BASE (target: topopt_cli) ---
-BASE BUILD FAILED
-Error: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-smoothing-brush-mesh-mismatch-6b4ccf/8d7a896f-55a6-40bb-90e3-a53f11a952be/scratchpad/build-main-s1 is not a directory
-restoring branch...
+--- tree is clean: building BASE from origin/main in a detached worktree ---
+base   cli sha256: 3eb899e877815c6d33b6e469d51f64e192c15839a37ef18291eb06441d036ec2
+branch cli sha256: 1767b4f6742de752ce85fc4facdf6134f023f9d6be84f77b6e7dcfc5f074c8ce
+the two binaries differ, as they must for this bar to mean anything.
+
+########## A — NO LATTICE, base vs branch. MUST be identical. ##########
+IDENTICAL  report.json  1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb
+IDENTICAL  fields.bin  499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354
+IDENTICAL  design.bin  09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061
+IDENTICAL  variant_026.stl  4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76
+IDENTICAL  variant_038.stl  e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901
+IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c
+IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
+IDENTICAL  run_info.json (minus the named clock keys)
+IDENTICAL  iterations.csv (physics columns)
+
+A PASS
+
+########## B1 — LATTICE, ARMED but INERT, same binary. ##########
+No qualifying region, so retention is armed and retains nothing. Everything
+must match EXCEPT the subfloor_retention block the receipt gains — which MUST
+differ, or the user could not tell the option was on.
+IDENTICAL  report.json  1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb
+IDENTICAL  fields.bin  499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354
+IDENTICAL  design.bin  09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061
+IDENTICAL  variant_026.stl  4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76
+IDENTICAL  variant_026_lattice.stl  767bf95769c60e26794272393c58df33ea801cb50ae804abd331fb6588bbd217
+IDENTICAL  variant_038.stl  e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901
+IDENTICAL  variant_038_lattice.stl  c6c1f53c7a6e3ff8ebc386082868ce25cf8e2fdd17754cfbfb6b02059809f947
+IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c
+IDENTICAL  variant_052_lattice.stl  d67563cd3dad2913dd13d76bd91dfd7d53f25ba96803c56413c14bfcf8085115
+IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
+IDENTICAL  variant_068_lattice.stl  8444caac65321a68b935052e4875ccfdf93fab6c7bfa6e65af5273a1026cef3b
+IDENTICAL  variant_026_lattice.report.json (minus the subfloor_retention block)
+IDENTICAL  variant_038_lattice.report.json (minus the subfloor_retention block)
+IDENTICAL  variant_052_lattice.report.json (minus the subfloor_retention block)
+IDENTICAL  variant_068_lattice.report.json (minus the subfloor_retention block)
+IDENTICAL  run_info.json (minus the named clock keys)
+IDENTICAL  iterations.csv (physics columns)
+
+B1 PASS
+  variant_026_lattice.report.json: armed=True qualified=False measured=1 retained=0  ok
+  variant_038_lattice.report.json: armed=True qualified=False measured=1 retained=0  ok
+  variant_052_lattice.report.json: armed=True qualified=False measured=1 retained=0  ok
+  variant_068_lattice.report.json: armed=True qualified=False measured=1 retained=0  ok
+  the block is present and reports ZERO retention, as it must here.
+
+########## B2 — LATTICE, ARMED and FIRING, same binary. ##########
+A qualifying region with genuinely sub-floor material, so retention fires.
+The LATTICE artifacts should change — that is the feature. The SOLID LADDER
+must NOT: a rung's optimize may not depend on whether the previous rung's
+lattice was retained. This is exactly what the §7 leak broke.
+IDENTICAL  report.json  1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb
+IDENTICAL  design.bin  09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061
+IDENTICAL  fields.bin  499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354
+IDENTICAL  variant_026.stl  4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76
+IDENTICAL  variant_038.stl  e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901
+IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c
+IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
+  variant_026_lattice.report.json: measured=0.0219 qualified=True retained=576 of 576
+  variant_038_lattice.report.json: measured=0.0230 qualified=True retained=576 of 576
+  variant_052_lattice.report.json: measured=0.0241 qualified=True retained=576 of 576
+  variant_068_lattice.report.json: measured=0.0224 qualified=True retained=596 of 596
+  total retained across the run: 2324
+
+B2 PASS — retention fired and the solid ladder did not move.
+
+########## C — LATTICE, base vs branch. DELIBERATELY DIFFERENT. ##########
+The PR closes a solver-state leak: on the streaming path the lattice
+pipeline's FEA solves were polluting the Krylov recycle subspace and the
+GenEO basis the NEXT rung's optimize consumes. Closing it moves the designs
+of rungs after the first latticed one. Reported, not asserted away.
+WHAT IS ASSERTED: no verdict may flip.
+IDENTICAL  report.json  1548b04f888b65e7bbf34020b8b39e750b878ce0828a0cc0e5ed29b2ac709ceb
+IDENTICAL  fields.bin  499386692fd9f8c9a354271c936b68ce4c1e93052d9652376b905362ea5cc354
+IDENTICAL  design.bin  09e6e5e5a3399d110e145cff13413afa0d6bbd642c4028bcbfe79fd89a277061
+IDENTICAL  variant_026.stl  4491785b058af494b107129ee8f269301b6e99858ac50380d1494bd28a9a3a76
+IDENTICAL  variant_026_lattice.stl  767bf95769c60e26794272393c58df33ea801cb50ae804abd331fb6588bbd217
+IDENTICAL  variant_038.stl  e6dd28b96d8088cdfc6f0ba104e0a0c4900932bf85cf986ebeca2f1a65435901
+IDENTICAL  variant_038_lattice.stl  c6c1f53c7a6e3ff8ebc386082868ce25cf8e2fdd17754cfbfb6b02059809f947
+IDENTICAL  variant_052.stl  6b5ff7cbca86cc44ebb19735dd4e4bebec14aa4a09ad1cf6185887c22673846c
+IDENTICAL  variant_052_lattice.stl  d67563cd3dad2913dd13d76bd91dfd7d53f25ba96803c56413c14bfcf8085115
+IDENTICAL  variant_068.stl  271baad94a038a05a00398dd2b6ec7f1f93b92a8fa778d2ff586f99b3630b87e
+IDENTICAL  variant_068_lattice.stl  8444caac65321a68b935052e4875ccfdf93fab6c7bfa6e65af5273a1026cef3b
+IDENTICAL  variant_026_lattice.report.json  a13e0b7a29ee2287007092a1aedfacaf5410e59fa41a54516c7233b0f57a74b0
+IDENTICAL  variant_038_lattice.report.json  0d40c803b199cc0154b1743ab36700a818ec422f9d64acc21d55931213369c2b
+IDENTICAL  variant_052_lattice.report.json  1afdec8e44c8d90c0f6b7a6c645f9d9572752a90fb5dd8882dab4e9b5a2c8016
+IDENTICAL  variant_068_lattice.report.json  666c3a9f73235da45dd54adab282a02cfe8b08328e9d188b09b94ddffa3f6b42
+IDENTICAL  run_info.json (minus the named clock keys)
+IDENTICAL  iterations.csv (physics columns)
+
+   rung     margin base   margin branch           d  verdict
+   0.68        8.398165        8.398165    +0.0000%  True->True
+   0.52        8.334213        8.334213    +0.0000%  True->True
+   0.38        8.058366        8.058366    +0.0000%  True->True
+   0.26        7.503571        7.503571    +0.0000%  True->True
+
+C PASS — designs moved (that is the leak fix), NO verdict flipped.
+
+S1 PASS — a run with no lattice is byte-identical (A); arming retention
+          changes nothing but its own reporting block when inert (B1) and
+          does not move the solid ladder when it FIRES (B2); and the leak
+          fix's deliberate movement on lattice runs flips no verdict (C).
