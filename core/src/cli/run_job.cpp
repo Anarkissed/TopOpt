@@ -1179,6 +1179,59 @@ struct LatticeAddedMaterialReceipt {
 struct LatticeGradedReceipt {
   bool present = false;
   const GradedField* gf = nullptr;  // the law's full report for THIS variant
+
+  // ── PER-REGION CELL DERIVATION (task 2026-08-05-lattice-cell-size-adaptation,
+  // Stage E). One entry per DECLARED lattice include region, in the job's own
+  // declaration order, or a single anonymous entry (region_id 0) covering the whole
+  // candidate set when no include regions are declared. EMPTY unless the job asked
+  // for it (`grading.report_region_cells`), which is what keeps every other run
+  // byte-identical.
+  //
+  // It REPORTS, it never DECIDES. Nothing in this struct feeds a mask, a cell, a
+  // density or a verdict; it is read off measurements the run already made and
+  // arithmetic core already owns. In particular it never substitutes a skin for a
+  // lattice the user asked for — that is offered in the options text and chosen by
+  // the user, per the maintainer's explicit ruling.
+  struct RegionCellReport {
+    int region_id = 0;              // 1-based declaration order; 0 = anonymous union
+    long long candidate_voxels = 0; // printed candidates carrying this id
+    long long latticed_voxels = 0;  // ...the law actually latticed
+    long long solid_voxels = 0;     // ...it kept solid
+
+    // ── MEASURED, not declared ────────────────────────────────────────────────
+    // The member-thickness range over this region's candidates (mm), from the same
+    // local_member_thickness_mm the law itself reads. +inf means "thicker than the
+    // EDT cap", the honest sentinel, not an error.
+    double min_member_width_mm = 0.0;
+    double max_member_width_mm = 0.0;
+    // This region's peak von Mises over the PART's peak, on the variant's own
+    // recovery field — the same quantity the retention predicate measures, reported
+    // whether or not retention is armed so a user can see it before opting in.
+    double stress_fraction = 0.0;
+
+    // ── DERIVED at run time from lattice_derive_cell_for_member ────────────────
+    // Evaluated at BOTH ends of the measured thickness range, because a region is
+    // not one member: the thickest member may be latticeable while the thinnest is
+    // not, and reporting one number would hide that. `at_thinnest` is the binding
+    // one for whether the WHOLE region lattices.
+    LatticeCellDerivation at_thinnest;
+    LatticeCellDerivation at_thickest;
+
+    // One of the four §2 outcomes, resolved from the measurements above:
+    //   "certified"       — latticed, and the certificate covers it
+    //   "out_of_regime"   — can be latticed, certificate does NOT cover it (the
+    //                       sub-floor retention case); `exposure_fraction` sizes it
+    //   "solid_load"      — kept solid because it is carrying load
+    //   "no_pair"         — no (cell, rho) in the band fits this thickness at this
+    //                       nozzle; `at_thinnest.min_member_width_mm` is the width
+    //                       that would change the answer
+    std::string verdict;
+    double exposure_fraction = 0.0;  // retained sub-floor voxels / printed set
+    // The nozzle at or below which the THINNEST member would become latticeable —
+    // the other lever besides thickening. 0 when the region already lattices.
+    double nozzle_needed_mm = 0.0;
+  };
+  std::vector<RegionCellReport> region_cells;
   // Field provenance (H4a): the demand field is THIS variant's own final
   // certification-recovery von Mises field — which variant, how many optimizer
   // iterations produced its converged design.
@@ -1409,6 +1462,90 @@ std::string lattice_cert_report_json(const MinimizePlasticVariant& variant,
     const GradedField& gf = *graded.gf;
     const double latticed = static_cast<double>(gf.latticed_voxels);
     s += "  \"grading\": {\n";
+    // ── STAGE E: the per-region cell derivation. Emitted ONLY when the job asked
+    // for it, so every other receipt is byte-identical. Every number here is
+    // measured on this run or derived at run time from core's own constants —
+    // there is no literal in this block and no number that came from the app.
+    if (!graded.region_cells.empty()) {
+      auto num_or_null = [](double x) {
+        // +inf is voxel.hpp's "thicker than the EDT cap" sentinel and JSON has no
+        // infinity. `null` is the honest encoding: not "zero", not "unmeasured" —
+        // it means the member exceeded what was measured, which is what a reader
+        // must not confuse with a thin one.
+        return std::isfinite(x) ? json_num(x) : std::string("null");
+      };
+      auto emit_derivation = [&](const std::string& in,
+                                 const LatticeCellDerivation& d) {
+        std::string t = in + "{\n";
+        t += in + "  \"feasible\": " + (d.feasible ? "true" : "false") + ",\n";
+        t += in + "  \"min_printable_cell_mm\": " +
+             json_num(d.min_printable_cell_mm) + ",\n";
+        t += in + "  \"max_homogenizable_cell_mm\": " +
+             num_or_null(d.max_homogenizable_cell_mm) + ",\n";
+        t += in + "  \"min_member_width_mm\": " +
+             json_num(d.min_member_width_mm) + ",\n";
+        if (d.feasible) {
+          t += in + "  \"finest\": {\"cell_mm\": " +
+               json_num(d.densest_cell_size_mm) + ", \"relative_density\": " +
+               json_num(d.densest_relative_density) +
+               ", \"strut_diameter_mm\": " +
+               json_num(d.densest_strut_diameter_mm) +
+               ", \"cells_per_member\": " +
+               num_or_null(d.densest_cells_per_member) + "},\n";
+          t += in + "  \"coarsest\": {\"cell_mm\": " +
+               json_num(d.lightest_cell_size_mm) + ", \"relative_density\": " +
+               json_num(d.lightest_relative_density) +
+               ", \"strut_diameter_mm\": " +
+               json_num(d.lightest_strut_diameter_mm) +
+               ", \"cells_per_member\": " +
+               num_or_null(d.lightest_cells_per_member) + "}\n";
+        } else {
+          t += in +
+               "  \"why_not\": \"the two bounds CROSS: no cell is both printable "
+               "at this nozzle and coarse enough to homogenize across this "
+               "member. Thicken the member to min_member_width_mm, or use a "
+               "nozzle at or under nozzle_needed_mm.\"\n";
+        }
+        t += in + "}";
+        return t;
+      };
+      s += "    \"regions\": [\n";
+      for (std::size_t i = 0; i < graded.region_cells.size(); ++i) {
+        const LatticeGradedReceipt::RegionCellReport& rc = graded.region_cells[i];
+        s += "      {\n";
+        s += "        \"region_id\": " + std::to_string(rc.region_id) + ",\n";
+        s += "        \"candidate_voxels\": " +
+             std::to_string(rc.candidate_voxels) + ",\n";
+        s += "        \"latticed_voxels\": " +
+             std::to_string(rc.latticed_voxels) + ",\n";
+        s += "        \"solid_voxels\": " + std::to_string(rc.solid_voxels) +
+             ",\n";
+        s += "        \"member_width_mm\": {\"min\": " +
+             num_or_null(rc.min_member_width_mm) + ", \"max\": " +
+             num_or_null(rc.max_member_width_mm) + "},\n";
+        s += "        \"stress_fraction\": " + json_num(rc.stress_fraction) +
+             ",\n";
+        s += "        \"verdict\": " + json_str(rc.verdict) + ",\n";
+        s += "        \"exposure_fraction\": " +
+             json_num(rc.exposure_fraction) + ",\n";
+        s += "        \"nozzle_needed_mm\": " + json_num(rc.nozzle_needed_mm) +
+             ",\n";
+        s += "        \"at_thinnest_member\": " +
+             emit_derivation("        ", rc.at_thinnest) + ",\n";
+        s += "        \"at_thickest_member\": " +
+             emit_derivation("        ", rc.at_thickest) + "\n";
+        s += std::string("      }") +
+             (i + 1 < graded.region_cells.size() ? "," : "") + "\n";
+      }
+      s += "    ],\n";
+      s += "    \"regions_note\": \"MEASURED per declared include region, DERIVED "
+           "from core's own band, cells-per-member floor and measured strut-"
+           "diameter table at run time. The verdict states what happened; it does "
+           "not choose. A region reported \\\"no_pair\\\" is not un-latticeable in "
+           "principle — it names the member width and the nozzle that would make "
+           "the pair exist, and a skin is an alternative the user may pick, never "
+           "one this pipeline substitutes.\",\n";
+    }
     s += "    \"graded_from\": {\n";
     s += "      \"variant_vf\": " + json_num(graded.requested_vf) + ",\n";
     s += "      \"achieved_vf\": " + json_num(graded.achieved_vf) + ",\n";
@@ -2012,12 +2149,137 @@ LatticeVariantOutcome lattice_one_variant(
     // a judgement about how much of the feature to give up — the maintainer's call,
     // not something to quietly pick here.
     //
-    // (void) is deliberate: the ids are still BUILT above so the code path stays
-    // compiled and exercised, and turning this on is one line.
+    // WHAT CHANGED (task 2026-08-05-lattice-cell-size-adaptation, Stage B). The
+    // measurement above still stands and has NOT been re-run, so the widening is
+    // still off by default and every shipped retention run is byte-identical. What
+    // was wrong was not the verdict but the REACHABILITY: the ids were built,
+    // populated and then dropped on the floor by a `(void)`, so a maintainer who
+    // read the exposure and the margin in his own receipt and decided he wanted it
+    // had no way to ask for it. `grading.subfloor_per_region` is that way. It is
+    // gated on retention being armed (job.cpp refuses it otherwise), it is off
+    // unless asked for, and the receipt reports the aggregate exposure the cap
+    // bounds so the decision is made against numbers rather than in the abstract.
+    //
+    // The ids are still built unconditionally so the path stays compiled and
+    // exercised on every graded run, which is what the `(void)` was preserving.
+    if (job.grading.subfloor_per_region) gp.region_ids = &region_ids;
     (void)region_ids;
     gp.subfloor_aggregate_cap_fraction = job.grading.subfloor_aggregate_cap;
     gf = grade_lattice(solved_grid, dens, v.von_mises_field, &cand, gp,
                        printed_iso);
+
+    // ── STAGE E: THE PER-REGION REPORT (task 2026-08-05-lattice-cell-size-
+    // adaptation). Everything below is READ-ONLY: it consumes `cand`, `region_ids`,
+    // the law's own posture and the variant's own von Mises field, and writes only
+    // into the receipt. No mask, cell, density or verdict depends on it, which is
+    // why arming it cannot move a gate result — and why it is safe to compute after
+    // the law has already decided.
+    //
+    // It exists because the pipeline could always say "this region stays solid" and
+    // could never say AT WHAT CELL AND DENSITY it would not have to. That gap is how
+    // a conditional figure — N* x the printability floor at the band's LIGHTEST
+    // density, 23.0131 mm at a 0.42 mm nozzle — reached the maintainer as an
+    // unconditional requirement.
+    if (job.grading.report_region_cells) {
+      // The SAME thickness measure the law reads, at the law's own cap, so a number
+      // in this report and a decision inside the law can never disagree about how
+      // thick a member is.
+      const std::vector<double> tau = local_member_thickness_mm(
+          solved_grid, dens, printed_iso, gp.thickness_cap_voxels);
+      const std::vector<double>& vm = v.von_mises_field;
+
+      // The PART's peak demand — over every printed voxel, region or not. This is
+      // the denominator the retention predicate uses, and it is recomputed here
+      // rather than read off the law so the report stands on its own.
+      double part_peak = 0.0;
+      long long part_printed = 0;
+      for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e)
+        if (dens[e] >= printed_iso) {
+          ++part_printed;
+          if (e < vm.size() && vm[e] > part_peak) part_peak = vm[e];
+        }
+
+      // WHICH region ids to report. With include regions declared, one row per
+      // DECLARED region in the user's own order — including any that ended up with
+      // no candidates at all, because "your region caught nothing" is an answer a
+      // user needs and an absent row is not. With none declared, one anonymous row
+      // (id 0) for the whole candidate set, which is the union reading named.
+      std::vector<int> ids_to_report;
+      if (!lattice_roles.includes.empty())
+        for (std::size_t ri = 0; ri < lattice_roles.includes.size(); ++ri)
+          ids_to_report.push_back(static_cast<int>(ri) + 1);
+      else
+        ids_to_report.push_back(0);
+
+      const double w_min = job.grading.min_extrudable_width_mm;
+      const double n_star = lattice_cells_per_member_min(LatticeTopology::Octet);
+      const double phi_hi = octet_strut_diameter_mm(
+          lattice_rho_max(LatticeTopology::Octet), 1.0);
+
+      for (int want : ids_to_report) {
+        LatticeGradedReceipt::RegionCellReport rc;
+        rc.region_id = want;
+        double tmin = std::numeric_limits<double>::infinity();
+        double tmax = 0.0;
+        double peak = 0.0;
+        for (std::size_t e = 0; e < solved_grid.voxel_count(); ++e) {
+          if (!cand[e] || region_ids[e] != want) continue;
+          ++rc.candidate_voxels;
+          if (!gf.posture.mask.empty() && gf.posture.mask[e])
+            ++rc.latticed_voxels;
+          else
+            ++rc.solid_voxels;
+          if (tau[e] < tmin) tmin = tau[e];
+          if (tau[e] > tmax) tmax = tau[e];
+          if (e < vm.size() && vm[e] > peak) peak = vm[e];
+        }
+        if (rc.candidate_voxels == 0) {
+          // No candidates carried this id. Report the row with its counts at zero
+          // rather than dropping it — see the note above on absent rows.
+          rc.verdict = "no_candidates";
+          R.grad_rcpt.region_cells.push_back(std::move(rc));
+          continue;
+        }
+        rc.min_member_width_mm = tmin;
+        rc.max_member_width_mm = tmax;
+        // 0 when the part carries no demand at all — the same convention the law
+        // uses, and the reason retention disarms itself in that case.
+        rc.stress_fraction = part_peak > 0.0 ? peak / part_peak : 0.0;
+        rc.at_thinnest =
+            lattice_derive_cell_for_member(LatticeTopology::Octet, tmin, w_min);
+        rc.at_thickest =
+            lattice_derive_cell_for_member(LatticeTopology::Octet, tmax, w_min);
+
+        // ── THE VERDICT, resolved from measurements only, in the order §2 states.
+        // A region carrying load is kept solid by the law regardless of geometry,
+        // so that is tested first; then whether the geometry admits a pair at all;
+        // then whether what was latticed is inside the certified regime.
+        const double ceiling =
+            job.grading.subfloor_stress_fraction > 0.0
+                ? job.grading.subfloor_stress_fraction
+                : lattice_subfloor_retention_stress_fraction();
+        if (rc.latticed_voxels == 0 && !rc.at_thinnest.feasible) {
+          rc.verdict = "no_pair";
+          // The OTHER lever: the largest bead this member could still homogenize
+          // around. cell <= W/N* and strut = cell x phi(rho_max), so any nozzle at
+          // or under (W/N*) x phi(rho_max) makes the pair exist.
+          if (std::isfinite(tmin))
+            rc.nozzle_needed_mm = (tmin / n_star) * phi_hi;
+        } else if (rc.latticed_voxels == 0) {
+          // Geometry admits a pair, so what kept it solid was not thickness. On
+          // this path that is the load-carrying fallback.
+          rc.verdict = "solid_load";
+        } else if (gf.subfloor_retained_voxels > 0 &&
+                   rc.stress_fraction <= ceiling) {
+          rc.verdict = "out_of_regime";
+          rc.exposure_fraction = gf.subfloor_retained_fraction_of_part;
+        } else {
+          rc.verdict = "certified";
+        }
+        R.grad_rcpt.region_cells.push_back(std::move(rc));
+      }
+      (void)part_printed;
+    }
     // ── NO SILENT DEGENERATE OUTPUT (task
     // 2026-08-04-variant-volume-fraction-mismatch, bar B3 / L3).
     //
@@ -5192,6 +5454,108 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         fc_thinnest_mm = thinnest_mm;
       }
       std::fflush(stderr);
+
+      // ── THE REFUSAL (task 2026-08-05-lattice-cell-size-adaptation, B1).
+      //
+      // WHAT WAS WRONG. Everything above is a FORECAST: it computes the exact
+      // arithmetic, prints it, records it in run_info — and returns. Nothing
+      // consumes it as a stop. The maintainer's overnight run (fingerprint
+      // b3abcf880554) declared seven include regions, every one 4 mm across its
+      // thinnest dimension, against an 8 mm cell whose floor needs 5 x 8 = 40 mm.
+      // It forecast `7 of 7 include regions are thinner than the 40.000 mm the
+      // floor requires`, then solved four rungs overnight, marked all four
+      // lattice_accepted, and shipped a part with 1131 lattice cells — none of them
+      // able to be where he asked. A forecast that says NOTHING you declared can
+      // hold a lattice is not a warning; it is a description of a useless run.
+      //
+      // WHY *ALL* AND NOT *ANY*. Refusing when SOME region is too thin would break
+      // every legitimate mixed job — a user may knowingly declare a thin rib
+      // alongside a thick boss and want the boss latticed. When EVERY declared
+      // region fails there is no such reading left: the run cannot honour a single
+      // thing the user asked for. So the condition is exactly `thin == include`,
+      // and a job with one admissible region is untouched (bar R3 — this cannot
+      // flip a verdict on a path that produces usable lattice, because it does not
+      // fire on one).
+      //
+      // WHAT IT SAYS. Per §2's rule, a region is never reported un-latticeable
+      // without the cell and density at which it WOULD be latticeable, or the
+      // statement that no such pair exists WITH the arithmetic. Both come from
+      // lattice_derive_cell_for_member (lattice.hpp), evaluated at the thinnest
+      // declared extent — the same core law, read at run time, no literal here.
+      if (include_regions > 0 && thin_regions == include_regions) {
+        // The stated bead width governs the derivation. A uniform job carries it on
+        // the lattice block; a graded job on the grading block.
+        const double w_min = job.grading.present
+                                 ? job.grading.min_extrudable_width_mm
+                                 : job.lattice.min_extrudable_width_mm;
+        std::string msg =
+            "every declared lattice include region is too thin to hold a "
+            "certifiable lattice at this cell size, so this run cannot put "
+            "lattice anywhere you asked for it — refusing before spending a "
+            "solve.\n";
+        msg += "  regions declared (include): " + std::to_string(include_regions) +
+               ", all of them too thin\n";
+        msg += "  planned cell: " + json_num(cell_mm) + " mm; cells-per-member "
+               "floor " + json_num(n_star) + " => required member " +
+               json_num(required_mm) + " mm\n";
+        msg += "  thinnest declared region: " + json_num(thinnest_mm) + " mm\n";
+        if (w_min > 0.0) {
+          const LatticeCellDerivation d =
+              lattice_derive_cell_for_member(topo, thinnest_mm, w_min);
+          if (d.feasible) {
+            // A SMALLER cell rescues it. Name the window's two ends: the coarsest
+            // (lightest) cell that still homogenizes, and the finest that still
+            // prints.
+            msg += "  A SMALLER CELL WOULD WORK. At a " + json_num(w_min) +
+                   " mm extrudable width this region admits cells from " +
+                   json_num(d.min_printable_cell_mm) + " mm to " +
+                   json_num(d.max_homogenizable_cell_mm) + " mm.\n";
+            msg += "    lightest: cell " + json_num(d.lightest_cell_size_mm) +
+                   " mm at relative density " +
+                   json_num(d.lightest_relative_density) + " (strut " +
+                   json_num(d.lightest_strut_diameter_mm) + " mm, " +
+                   json_num(d.lightest_cells_per_member) + " cells per member)\n";
+            msg += "    finest:   cell " + json_num(d.densest_cell_size_mm) +
+                   " mm at relative density " +
+                   json_num(d.densest_relative_density) + " (strut " +
+                   json_num(d.densest_strut_diameter_mm) + " mm, " +
+                   json_num(d.densest_cells_per_member) + " cells per member)\n";
+            msg += "    Set \"cell_mm\" in the lattice block to a value in that "
+                   "range, or use \"cell_mode\": \"auto\" on a grading block and "
+                   "let core choose it.\n";
+          } else {
+            // NO pair exists. Show the two bounds that cross, and both levers.
+            msg += "  NO (cell, density) PAIR IN THE CERTIFIABLE BAND FITS THIS "
+                   "THICKNESS AT THIS NOZZLE.\n";
+            msg += "    smallest cell any certifiable strut prints at (" +
+                   json_num(w_min) + " mm bead): " +
+                   json_num(d.min_printable_cell_mm) + " mm\n";
+            msg += "    largest cell a " + json_num(thinnest_mm) +
+                   " mm member can homogenize: " +
+                   json_num(d.max_homogenizable_cell_mm) + " mm\n";
+            msg += "    the two bounds cross, so no cell satisfies both.\n";
+            msg += "  WHAT WOULD CHANGE THE ANSWER (your call, not this "
+                   "pipeline's):\n";
+            msg += "    * thicken the region to at least " +
+                   json_num(d.min_member_width_mm) + " mm; or\n";
+            msg += "    * use a nozzle/bead of at most " +
+                   json_num((thinnest_mm / n_star) *
+                            octet_strut_diameter_mm(lattice_rho_max(topo), 1.0)) +
+                   " mm; or\n";
+            msg += "    * dress the region with a SKIN instead of a lattice — an "
+                   "option offered here, never substituted automatically.\n";
+          }
+        } else {
+          msg += "  (no minimum extrudable width was stated, so the admissible "
+                 "cell range cannot be derived; state "
+                 "\"min_extrudable_width_mm\" to get it)\n";
+        }
+        msg += "  To proceed anyway with lattice OUTSIDE your declared regions, "
+               "remove the include regions from the lattice block — but read the "
+               "receipt first: this run would have put every cell in material you "
+               "did not select.";
+        throw JobError(msg);
+      }
     }
   }
 

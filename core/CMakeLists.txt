@@ -1291,6 +1291,13 @@ if(OpenCASCADE_FOUND)
   add_executable(repair_evidence EXCLUDE_FROM_ALL tests/tools/repair_evidence.cpp)
   target_link_libraries(repair_evidence PRIVATE topopt)
 
+  # R2 probe (task lattice-cell-size-adaptation): which wall thicknesses the grading
+  # law can lattice at a stated nozzle, and the (cell, rho) arithmetic behind it.
+  #   cmake --build core/build --target probe_cell_adaptation
+  add_executable(probe_cell_adaptation EXCLUDE_FROM_ALL
+                 tests/tools/probe_cell_adaptation.cpp)
+  target_link_libraries(probe_cell_adaptation PRIVATE topopt)
+
   # Bar AE4 (handoff 2026-08-02-smoothing-page): does aggressive smoothing move a
   # verdict on the maintainer's WallMount bracket, and what does brushing LOCALLY
   # cost against brushing everything? A harness, not a ctest — it prints a table
