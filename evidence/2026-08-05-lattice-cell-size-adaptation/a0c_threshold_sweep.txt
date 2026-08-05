@@ -1,0 +1,22 @@
+fragments: 843   strut radius: 1.095372083 mm
+  threshold_mm  isolated  (isolated = touches neither body within threshold, ignoring containment)
+      0.000000       843
+      0.010000       839
+      0.050000       821
+      0.100000       814
+      0.250000       414
+      0.500000       111
+      0.750000        28
+      1.000000         9
+      1.095372         9
+      1.500000         8
+      2.000000         7
+
+of the strict-threshold isolated set, 576 are actually INSIDE the solid companion (share space, touch nothing)
+threshold 0.40 mm -> isolated 143
+threshold 0.42 mm -> isolated 140
+threshold 0.44 mm -> isolated 132
+threshold 0.45 mm -> isolated 128
+threshold 0.46 mm -> isolated 125
+threshold 0.48 mm -> isolated 118
+threshold 0.50 mm -> isolated 111

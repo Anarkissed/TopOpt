@@ -1009,7 +1009,8 @@ JobDescription parse_job(const std::string& json_text) {
         gr, {"topology", "cell_mm", "min_extrudable_width_mm", "demand_exponent",
              "cell_mode", "cell_min_mm", "cell_max_mm",
              "retain_subfloor_in_unloaded_regions", "subfloor_stress_fraction",
-             "subfloor_aggregate_cap"},
+             "subfloor_aggregate_cap", "report_region_cells",
+             "subfloor_per_region"},
         "grading");
     job.grading.present = true;
     if (const JsonValue* t = find_key(gr, "topology")) {
@@ -1111,6 +1112,28 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail(
             "grading \"subfloor_aggregate_cap\" must be > 0 and <= 1 (a fraction of "
             "the PRINTED set, not a percentage)");
+    }
+    // ── Stage A/E: the per-region cell derivation REPORT. Additive and decision-
+    // free, so unlike the retention keys it carries no companion requirement.
+    if (const JsonValue* r = find_key(gr, "report_region_cells")) {
+      if (r->type != JsonValue::Type::Bool)
+        schema_fail("grading \"report_region_cells\" must be a boolean");
+      job.grading.report_region_cells = (r->num != 0.0);
+    }
+    // ── Stage B: per-region evaluation of the retention predicate. It only means
+    // anything with retention armed, and a job that asks for it WITHOUT arming
+    // retention means one thing and says another — the same rule the two keys
+    // above already apply, for the same reason.
+    if (const JsonValue* p = find_key(gr, "subfloor_per_region")) {
+      if (p->type != JsonValue::Type::Bool)
+        schema_fail("grading \"subfloor_per_region\" must be a boolean");
+      if ((p->num != 0.0) && !job.grading.retain_subfloor_in_unloaded_regions)
+        schema_fail(
+            "grading \"subfloor_per_region\" is only allowed with "
+            "\"retain_subfloor_in_unloaded_regions\": true — it changes HOW the "
+            "unloaded-region predicate is evaluated, and there is no predicate to "
+            "evaluate without retention");
+      job.grading.subfloor_per_region = (p->num != 0.0);
     }
   }
 

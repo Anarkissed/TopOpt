@@ -804,6 +804,164 @@ int main() {
     }
   }
 
+  // ---- 14. THE PER-MEMBER CELL DERIVATION (task lattice-cell-size-adaptation,
+  //          Stage A) ----------------------------------------------------------
+  // The shipped printability floor is evaluated at rho_min, so N* x it is the
+  // "23 mm member" the maintainer was told he needed. The derivation answers the
+  // same question per MEMBER, at the density that member can actually carry.
+  {
+    const double w = 0.42;  // the maintainer's nozzle
+    const double phi_lo = octet_strut_diameter_mm(rho_lo, 1.0);
+    const double phi_hi = octet_strut_diameter_mm(rho_hi, 1.0);
+
+    // The number that was quoted, and the number that is true — both derived here
+    // from core's own constants, so a change to the band or the table moves both.
+    const double quoted_floor_mm = n_star * (w / phi_lo);
+    const double real_floor_mm = n_star * (w / phi_hi);
+    CHECK(std::fabs(quoted_floor_mm - 23.0131) < 1e-3,
+          "the QUOTED requirement reproduces: N* x floor(rho_min) = 23.0131 mm");
+    CHECK(std::fabs(real_floor_mm - 5.4748) < 1e-3,
+          "the REAL requirement is N* x floor(rho_max) = 5.4748 mm");
+    CHECK(real_floor_mm < quoted_floor_mm,
+          "deriving per member is a WIDENING — it never demands a thicker member");
+
+    // (a) A member ABOVE the frontier: the window exists and both ends are legal.
+    {
+      const LatticeCellDerivation d =
+          lattice_derive_cell_for_member(topo, 8.0, w);
+      CHECK(d.feasible, "an 8 mm member IS latticeable at a 0.42 mm nozzle");
+      CHECK(std::fabs(d.min_member_width_mm - real_floor_mm) < 1e-9,
+            "min_member_width_mm is N* x the smallest printable cell");
+      CHECK(std::fabs(d.max_homogenizable_cell_mm - 8.0 / n_star) < 1e-12,
+            "the coarse bound is exactly W / N*");
+      // BOTH ends must satisfy BOTH constraints — this is the whole contract.
+      CHECK(d.densest_strut_diameter_mm >= w - 1e-9,
+            "finest end: the strut still prints");
+      CHECK(d.lightest_strut_diameter_mm >= w - 1e-9,
+            "coarsest end: the strut still prints");
+      CHECK(d.densest_cells_per_member >= n_star - 1e-9,
+            "finest end: at or above the cells-per-member floor");
+      CHECK(std::fabs(d.lightest_cells_per_member - n_star) < 1e-9,
+            "coarsest end sits EXACTLY on the floor, by construction");
+      CHECK(d.densest_relative_density >= rho_lo - 1e-12 &&
+            d.densest_relative_density <= rho_hi + 1e-12,
+            "finest end's density is inside the certifiable band");
+      CHECK(d.lightest_relative_density >= rho_lo - 1e-12 &&
+            d.lightest_relative_density <= rho_hi + 1e-12,
+            "coarsest end's density is inside the certifiable band");
+      CHECK(d.lightest_relative_density <= d.densest_relative_density + 1e-12,
+            "the coarse end is the LIGHTER of the two — that is why it is offered");
+      CHECK(d.lightest_cell_size_mm >= d.densest_cell_size_mm - 1e-12,
+            "and the coarser of the two");
+      // 8 mm at N* = 5 gives a 1.6 mm cell; the lightest strut that prints there
+      // needs phi >= 0.42/1.6 = 0.2625, which the measured table reaches near
+      // rho 0.32 — well inside the band, i.e. a genuinely LIGHT lattice.
+      CHECK(std::fabs(d.lightest_cell_size_mm - 1.6) < 1e-12,
+            "8 mm / 5 = a 1.6 mm cell");
+      CHECK(d.lightest_relative_density < 0.40,
+            "and it certifies at under rho 0.40 — not a near-solid lattice");
+    }
+
+    // (b) THE MAINTAINER'S BACK WALL: 4 mm. Below the frontier, so the honest
+    // answer is that NO pair fits — with the number he must reach to change that.
+    {
+      const LatticeCellDerivation d =
+          lattice_derive_cell_for_member(topo, 4.0, w);
+      CHECK(!d.feasible,
+            "a 4 mm wall does NOT hold a certified lattice at a 0.42 mm nozzle");
+      CHECK(d.min_member_width_mm > 4.0,
+            "and the report says so by naming a floor above the measured width");
+      CHECK(std::fabs(d.min_member_width_mm - 5.4748) < 1e-3,
+            "the thinnest wall that WOULD work is 5.4748 mm — the actionable number");
+      CHECK(d.max_homogenizable_cell_mm < d.min_printable_cell_mm,
+            "the two bounds CROSS, which is the arithmetic that rules it out");
+      CHECK(d.densest_cell_size_mm == 0.0 && d.lightest_cell_size_mm == 0.0,
+            "no window is reported when none exists — never a fabricated pair");
+    }
+
+    // (c) EXACTLY ON the frontier: feasible, and the two ends coincide. This is the
+    // floating-point edge where the frontier cell's strut is w to the last ULP.
+    {
+      const LatticeCellDerivation d =
+          lattice_derive_cell_for_member(topo, real_floor_mm, w);
+      CHECK(d.feasible, "the frontier width itself is feasible, not off-by-one");
+      CHECK(d.densest_relative_density > 0.0 && d.lightest_relative_density > 0.0,
+            "and neither end leaks the negative no-answer sentinel");
+      CHECK(std::fabs(d.densest_cell_size_mm - d.lightest_cell_size_mm) < 1e-9,
+            "at the frontier the window collapses to a point");
+    }
+
+    // (d) The "thicker than the EDT cap" sentinel is not a crash and not a refusal.
+    {
+      const LatticeCellDerivation d = lattice_derive_cell_for_member(
+          topo, std::numeric_limits<double>::infinity(), w);
+      CHECK(d.feasible, "an infinitely thick member is trivially latticeable");
+      CHECK(std::isinf(d.max_homogenizable_cell_mm),
+            "nothing bounds its cell from above, and the report says so");
+      CHECK(std::isfinite(d.lightest_cell_size_mm) &&
+            std::fabs(d.lightest_cell_size_mm - d.densest_cell_size_mm) < 1e-12,
+            "so both ends collapse onto the printability frontier, finite");
+    }
+
+    // (e) MONOTONICITY — a thicker member is never harder to lattice, and its
+    // minimum-mass density never rises. The property the whole widening rests on.
+    {
+      double prev_rho = 2.0;
+      for (double W = 5.5; W <= 40.0; W += 0.5) {
+        const LatticeCellDerivation d = lattice_derive_cell_for_member(topo, W, w);
+        CHECK(d.feasible, "every member above the frontier is feasible");
+        CHECK(d.lightest_relative_density <= prev_rho + 1e-9,
+              "a thicker member never needs a HEAVIER minimum-mass lattice");
+        prev_rho = d.lightest_relative_density;
+        CHECK(d.lightest_strut_diameter_mm >= w - 1e-9,
+              "and its strut prints at every width on the ladder");
+      }
+    }
+
+    // (f) The floor is READ, never assumed: pass a what-if N* and the frontier moves
+    // with it, proportionally. (A what-if, not a relaxation — nothing certified
+    // calls this with a floor below the shipped one.)
+    {
+      const LatticeCellDerivation a = lattice_derive_cell_for_member(topo, 8.0, w);
+      const LatticeCellDerivation b =
+          lattice_derive_cell_for_member(topo, 8.0, w, 2.0 * n_star);
+      CHECK(std::fabs(b.min_member_width_mm - 2.0 * a.min_member_width_mm) < 1e-9,
+            "doubling the cells-per-member floor doubles the required width");
+      CHECK(std::fabs(a.cells_per_member_floor - n_star) < 1e-12,
+            "and the default is core's own floor, not a literal");
+    }
+
+    // (g) The strut-diameter inverse is a true inverse where it answers, and refuses
+    // where it cannot — the property `feasible` is built on.
+    {
+      for (double cell : {0.5, 1.0, 1.0950, 2.0, 4.0, 8.0}) {
+        const double r = lattice_min_density_for_strut(topo, cell, w);
+        if (r < 0.0) {
+          CHECK(octet_strut_diameter_mm(rho_hi, cell) < w,
+                "a negative answer means even the band ceiling cannot print here");
+        } else {
+          CHECK(r >= rho_lo - 1e-12 && r <= rho_hi + 1e-12,
+                "an answer is always inside the certifiable band");
+          CHECK(octet_strut_diameter_mm(r, cell) >= w - 1e-9,
+                "and the density it names really does print at that cell");
+          if (r > rho_lo + 1e-6)
+            CHECK(octet_strut_diameter_mm(r - 1e-4, cell) < w,
+                  "it is the LIGHTEST such density — one notch down fails");
+        }
+      }
+      bool threw = false;
+      try { lattice_derive_cell_for_member(topo, -1.0, w); }
+      catch (const std::invalid_argument&) { threw = true; }
+      CHECK(threw, "a non-positive member width is refused, not defaulted");
+      threw = false;
+      try {
+        lattice_derive_cell_for_member(
+            topo, std::numeric_limits<double>::quiet_NaN(), w);
+      } catch (const std::invalid_argument&) { threw = true; }
+      CHECK(threw, "a NaN member width is refused, never read as 'thick enough'");
+    }
+  }
+
   std::fprintf(stderr, "grading: %d checks, %d failures\n", g_checks, g_failures);
   return g_failures == 0 ? 0 : 1;
 }

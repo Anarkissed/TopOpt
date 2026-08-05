@@ -1,0 +1,23 @@
+file       : /Users/nadim/.topopt-worker/7ba2442960a24050/out/variant_068_lattice.stl
+triangles  : 315036
+welded vertices: 114593
+connected components: 845
+
+largest components (triangles):
+  #0: 161632
+  #1: 130472
+  #2: 1856
+  #3: 620
+  #4: 520
+  #5: 488
+
+body 0: 161632 tris  bbox min [ 11.035 -48.589  14.905]  max [198.82    3.633 197.722]
+body 1: 130472 tris  bbox min [-18.276 -48.91    0.   ]  max [200.      3.954 199.518]
+
+components under 100 triangles: 837, 18936 triangles total
+of 843 fragments: 843 share space with a real body, 0 FULLY ISOLATED IN AIR
+
+mesh envelope  min [-18.276 -48.91    0.   ]  max [200.      3.954 199.518]
+mesh size mm   [218.3  52.9 199.5]
+body 0 inset from -X face: 29.3 mm, above bottom (-Z): 14.9 mm
+body 1 inset from -X face: 0.0 mm, above bottom (-Z): 0.0 mm
