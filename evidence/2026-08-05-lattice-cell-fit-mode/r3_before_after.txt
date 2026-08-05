@@ -1,0 +1,61 @@
+base   cli sha256: cec21fe7ca12bebdbf5d1f88b03c8c1b9b7552d2d564b5853365e1901de677f7
+branch cli sha256: 7a0c04ca1e3788bdc23af776f8acc0550d803cb582987cdb7b4ff3ca512526e9
+
+########## A — BASE binary, cell_mode auto ##########
+exit code: 1
+[lattice] FORECAST region_too_thin: include region 0 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 1 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 2 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 3 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 4 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 5 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 6 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST: 7 of 7 include regions are thinner than the 23.013 mm the floor requires (thinnest 4.000 mm; floor 5.0 cells x 4.6026 mm)
+    (no run_info.json — the run did not get that far)
+
+########## B — BRANCH binary, cell_mode auto (must match A) ##########
+exit code: 1
+[lattice] FORECAST region_too_thin: include region 0 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 1 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 2 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 3 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 4 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 5 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST region_too_thin: include region 6 (face) is 4.000 mm across its thinnest dimension; the cells-per-member floor needs 5.0 cells x 4.6026 mm = 23.013 mm. Nothing inside this region can hold a certifiable lattice — it will be kept SOLID. This is a property of the region's geometry and the printability floor (nozzle-derived), not of the optimizer or of any Protect setting.
+[lattice] FORECAST: 7 of 7 include regions are thinner than the 23.013 mm the floor requires (thinnest 4.000 mm; floor 5.0 cells x 4.6026 mm)
+    (no run_info.json — the run did not get that far)
+
+########## C — BRANCH binary, cell_mode fit ##########
+exit code: 0
+[lattice] FIT region 0 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 1 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 2 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 3 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 4 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 5 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 6 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT: 7 of 7 include regions cannot reach the 5.0-cell accuracy floor at their derived cell (thinnest region 4.000 mm; finest derived cell 1.0950 mm). Those are BUILDABLE and their certificate is OUT OF REGIME; the rest certify.
+    cell_mode          : fit
+    cell_size_mm       : 1.094961872
+    printability_floor : 4.602619932
+    region_voxels      : 2302
+    latticed_voxels    : 2302
+    solid_fallback     : 0
+    fit.min_printable_cell_mm      : 1.094961872
+    fit.distinct_cells             : 1
+    fit.out_of_regime_voxels       : 28
+    fit.density_raised_for_print   : 1971
+      region 0: extent 4 mm -> cell 1.094961872 mm @ rho 0.6 (strut 0.42 mm), 3.653095238 cells, out_of_regime=True
+      region 1: extent 4 mm -> cell 1.094961872 mm @ rho 0.6 (strut 0.42 mm), 3.653095238 cells, out_of_regime=True
+      region 2: extent 4 mm -> cell 1.094961872 mm @ rho 0.6 (strut 0.42 mm), 3.653095238 cells, out_of_regime=True
+      region 3: extent 4 mm -> cell 1.094961872 mm @ rho 0.6 (strut 0.42 mm), 3.653095238 cells, out_of_regime=True
+      region 4: extent 4 mm -> cell 1.094961872 mm @ rho 0.6 (strut 0.42 mm), 3.653095238 cells, out_of_regime=True
+      region 5: extent 4 mm -> cell 1.094961872 mm @ rho 0.6 (strut 0.42 mm), 3.653095238 cells, out_of_regime=True
+      region 6: extent 4 mm -> cell 1.094961872 mm @ rho 0.6 (strut 0.42 mm), 3.653095238 cells, out_of_regime=True
+    variant_026_lattice.report.json: cell_mm=1.094961872 latticed_cells=None
+    variant_038_lattice.report.json: cell_mm=1.094961872 latticed_cells=None
+    variant_052_lattice.report.json: cell_mm=1.094961872 latticed_cells=None
+    variant_068_lattice.report.json: cell_mm=1.094961872 latticed_cells=None
+
+A exit=1  B exit=1  C exit=0
+R3 PASS — auto is unchanged and fit runs.

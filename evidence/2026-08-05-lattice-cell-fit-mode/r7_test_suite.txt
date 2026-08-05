@@ -1,0 +1,51 @@
+R7 / regression — the full core suite on this branch.
+
+First full run (before the lattice_hookup fixture pin landed):
+103/106 Test #106: mesh_job .........................   Passed    6.76 sec
+104/106 Test #103: lattice_variant ..................   Passed   45.21 sec
+105/106 Test  #93: cli_demo .........................   Passed  247.83 sec
+106/106 Test #102: protect_freeze_vs_solidity .......   Passed  332.27 sec
+
+99% tests passed, 1 tests failed out of 106
+
+Total Test time (real) = 704.47 sec
+
+The following tests FAILED:
+	101 - lattice_hookup (Failed)
+Errors while running CTest
+
+The one failure was test_lattice_hookup, whose graded fixture stated a Fixed
+target BELOW the rho_min printability floor and was therefore measuring the
+RAISED cell. Pinned to that floor (read from core) and its assertion retargeted;
+see the handoff section 4.3/4.4. Re-run after the fix:
+
+Test project /Users/nadim/dev/TopOpt/TopOpt/.claude/worktrees/lattice-cell-fit-mode-2c28f1/core/build
+    Start   6: grading
+1/2 Test   #6: grading ..........................   Passed    2.16 sec
+    Start 101: lattice_hookup
+2/2 Test #101: lattice_hookup ...................   Passed   12.07 sec
+
+100% tests passed out of 2
+
+Total Test time (real) =  14.23 sec
+
+After the final code change (the S2 raise moved to AFTER the band clamp — see
+the handoff §5.6), the tests touching the grading law, the lattice paths and the
+receipts were re-run:
+
+      Start  66: strut_report_j6
+ 6/11 Test  #66: strut_report_j6 ..................   Passed    2.77 sec
+      Start  77: designbox_grid_report
+ 7/11 Test  #77: designbox_grid_report ............   Passed    0.34 sec
+      Start 100: loadcase_analyze
+ 8/11 Test #100: loadcase_analyze .................   Passed    1.42 sec
+      Start 101: lattice_hookup
+ 9/11 Test #101: lattice_hookup ...................   Passed   11.90 sec
+      Start 103: lattice_variant
+10/11 Test #103: lattice_variant ..................   Passed   47.57 sec
+      Start 104: designbox_lattice_recert
+11/11 Test #104: designbox_lattice_recert .........   Passed    3.69 sec
+
+100% tests passed out of 11
+
+Total Test time (real) =  76.13 sec

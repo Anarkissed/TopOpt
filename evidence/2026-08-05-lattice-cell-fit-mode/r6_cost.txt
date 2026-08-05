@@ -1,0 +1,54 @@
+R6 — ITERATIONS AND WALL, ALWAYS BOTH, SEPARATELY. And the file size, which is the
+cost this mode actually incurs.
+
+WHAT ISOLATES WHAT. On a graded two-step run the cell law runs AFTER the solve, so the
+optimizer's trajectory cannot depend on the cell mode. The SOLVER ITERATIONS must
+therefore be identical between two runs that differ only in the cell, and only the
+lattice GENERATION and the emitted file may move. That control is asserted below; it
+is what makes the wall-clock number mean "generation" rather than "a different design".
+
+=== FIXTURE 1: one 12 mm include region, l-bracket, resolution 40, one rung ===
+Chosen so BOTH modes could run: at a 0.42 mm bead `auto` plans 4.6026 mm (2.61 cells
+across a 12 mm region — it percolates, so the pre-flight reports rather than refuses)
+and `fit` derives 12/5 = 2.4000 mm.
+
+auto (4.6026 mm)       cell None     latticed None   iters   40  gen_s 0              tris         0  bytes           0
+fit  (2.4000 mm)       cell 2.4      latticed 635    iters   40  gen_s 0.09599854192  tris    168124  bytes     8406284
+
+SOLVER ITERATIONS IDENTICAL: True  (40 vs 40)
+AUTO EMITTED NOTHING: 12 mm / 4.6026 mm = 2.61 cells, under the 5-cell accuracy
+floor, so every candidate fell back to solid and no lattice mesh exists. There is
+no generation cost to compare against, and that IS the comparison: at a region
+size where fit lattices 635 of 635 candidate voxels, auto lattices none.
+
+=== FIXTURE 2: the SAME job at two hand-set cells (R1 cases C and D, res 24) ===
+Both emit, so the cost ratio is measurable with the design held fixed.
+
+fixed 2.5 mm           cell 2.5      latticed 550    iters   24  gen_s 0.1424933751   tris    437212  bytes    21860684
+fixed 1.0 mm           cell 1        latticed 1168   iters   24  gen_s 0.3886541664   tris   1675088  bytes    83754484
+
+SOLVER ITERATIONS IDENTICAL: True  (24 vs 24)
+cell            2.5000 -> 1.0000 mm   (2.50x finer per axis)
+triangles       437212 -> 1675088   (3.83x)
+bytes           21860684 -> 83754484   (3.83x)
+generation wall 0.142 s -> 0.389 s   (2.73x)
+
+=== THE COST, STATED PLAINLY ===
+A 2.50x finer cell cost 3.83x the triangles and 2.73x the generation wall on this
+fixture. It is not the cube of the cell ratio because the latticed VOLUME also changes
+(a finer cell clears the cells-per-member floor in more members, so more of the part is
+latticed: 550 -> 1168 voxels here).
+
+At the finest printable cell the absolute numbers get large. Measured on this branch:
+  * 1.0950 mm on the seam fixture (l-bracket, res 40): 1,416,356 triangles, 70.8 MB
+  * 1.0950 mm on the seven-4-mm-region job (l-bracket, res 48): 152.3 MB for the
+    heaviest rung's lattice mesh (variant_068_lattice.stl)
+That is arithmetic, not a defect — an octet cell carries ~24 struts and a 4.2x finer
+cell puts ~4.2x more of them along every axis — but it is the practical cost of asking
+for a cell that fits a 4 mm wall.
+
+NOTE ON THE WALL NUMBERS. This machine was heavily loaded by other work while these ran
+(load average above 40 on 8 cores), so the ABSOLUTE seconds are not a clean benchmark.
+The RATIOS are between two runs measured under the same conditions minutes apart, and
+the iteration counts — which are load-independent — are identical, which is the control
+this bar actually needs.

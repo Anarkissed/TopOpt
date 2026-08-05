@@ -1298,6 +1298,13 @@ if(OpenCASCADE_FOUND)
                  tests/tools/probe_cell_adaptation.cpp)
   target_link_libraries(probe_cell_adaptation PRIVATE topopt)
 
+  # R2 flip table (task lattice-cell-fit-mode): the cell law's own before/after on
+  # the same inputs, including the three shipped fixtures whose Fixed target this
+  # task PINNED — so what the unpinned value now does is reported, not concealed.
+  #   cmake --build core/build --target probe_fit_flips
+  add_executable(probe_fit_flips EXCLUDE_FROM_ALL tests/tools/probe_fit_flips.cpp)
+  target_link_libraries(probe_fit_flips PRIVATE topopt)
+
   # Bar AE4 (handoff 2026-08-02-smoothing-page): does aggressive smoothing move a
   # verdict on the maintainer's WallMount bracket, and what does brushing LOCALLY
   # cost against brushing everything? A harness, not a ctest — it prints a table

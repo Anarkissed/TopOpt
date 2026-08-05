@@ -1026,11 +1026,15 @@ JobDescription parse_job(const std::string& json_text) {
       CellSizeMode parsed;
       if (!cell_size_mode_from_name(job.grading.cell_mode.c_str(), parsed))
         schema_fail(
-            "grading \"cell_mode\" must be \"fixed\", \"auto\" or \"swept\" (got \"" +
-            job.grading.cell_mode + "\")");
+            "grading \"cell_mode\" must be \"fixed\", \"auto\", \"swept\" or "
+            "\"fit\" (got \"" + job.grading.cell_mode + "\")");
     }
     const bool swept = job.grading.cell_mode == "swept";
     const bool auto_cell = job.grading.cell_mode == "auto";
+    // FIT (task 2026-08-05-lattice-cell-fit-mode). The cell is DERIVED per declared
+    // include region, so like "auto" it takes no target — and unlike any other mode it
+    // needs somewhere to derive FROM.
+    const bool fit_cell = job.grading.cell_mode == "fit";
     if (swept) {
       // A target cell alongside a ladder is a CONFLICT, not a hint: refuse it rather
       // than silently ignore one of the two.
@@ -1051,12 +1055,16 @@ JobDescription parse_job(const std::string& json_text) {
         schema_fail(
             "grading \"cell_min_mm\" / \"cell_max_mm\" are only allowed with "
             "\"cell_mode\": \"swept\"");
-      if (auto_cell) {
+      if (auto_cell || fit_cell) {
         // Core picks the cell; a stated target would be ignored, so refuse it.
         if (find_key(gr, "cell_mm"))
           schema_fail(
-              "grading \"cell_mm\" is not allowed with \"cell_mode\": \"auto\" — "
-              "core chooses the cell from the printability floor");
+              std::string("grading \"cell_mm\" is not allowed with "
+                          "\"cell_mode\": \"") +
+              (fit_cell ? "fit\" — core derives the cell from each declared include "
+                          "region's own extent"
+                        : "auto\" — core chooses the cell from the printability "
+                          "floor"));
       } else {
         job.grading.cell_mm =
             require_number(require_key(gr, "cell_mm", "grading"), "grading.cell_mm");
@@ -1226,6 +1234,32 @@ JobDescription parse_job(const std::string& json_text) {
     schema_fail(
         "\"mode\": \"lattice_variant\" requires a \"lattice\" block — there is "
         "nothing to lattice without one");
+
+  // ── FIT's two cross-field requirements (task 2026-08-05-lattice-cell-fit-mode).
+  // Checked here rather than in the grading block because both are about the LATTICE
+  // block, which parses after it.
+  if (job.grading.present && job.grading.cell_mode == "fit") {
+    // (1) FIT DERIVES THE CELL FROM A DECLARED REGION, so there must be one. Without
+    // an include region there is no stated requirement to fit — and the design's own
+    // measured member width is NOT a substitute: it is what the optimizer produced,
+    // not what the user asked to lattice.
+    std::size_t includes = 0;
+    for (const JobLatticeRegion& r : job.lattice.regions)
+      if (r.role == "include") ++includes;
+    if (includes == 0)
+      schema_fail(
+          "grading \"cell_mode\": \"fit\" needs at least one lattice region with "
+          "\"role\": \"include\" — fit derives the cell from what each declared "
+          "region has to fit into, and a job that declares none states no "
+          "requirement to fit. Use \"auto\" or \"fixed\" for a whole-part lattice.");
+    // (2) Two mechanisms for the same voxel, with two receipts. See grade_lattice.
+    if (job.grading.retain_subfloor_in_unloaded_regions)
+      schema_fail(
+          "grading \"cell_mode\": \"fit\" and "
+          "\"retain_subfloor_in_unloaded_regions\" are mutually exclusive — fit "
+          "already derives a cell per region and reports the out-of-regime material "
+          "it emits");
+  }
 
   return job;
 }

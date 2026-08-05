@@ -1,0 +1,67 @@
+exit code: 0
+[lattice] FIT region 0 (face): 4.000 mm across => cell 1.0950 mm at relative density 0.6000 (strut 0.4200 mm), 3.65 cells across — BUILDABLE but UNDER the accuracy floor, so the certificate over it is OUT OF REGIME.
+[lattice] FIT region 1 (face): 24.000 mm across => cell 4.8000 mm at relative density 0.0505 (strut 0.4380 mm), 5.00 cells across — certifiable.
+[lattice] FIT: 1 of 2 include regions cannot reach the 5.0-cell accuracy floor at their derived cell (thinnest region 4.000 mm; finest derived cell 1.0950 mm). Those are BUILDABLE and their certificate is OUT OF REGIME; the rest certify.
+
+cell_base_mm  1.094961872   max_level 2
+cells split by the 2:1 balance: 0
+  level 0: cell 1.094961872 mm, 1365 cells, 1365 voxels, min cells/member 2.739821429, out_of_regime True
+  level 1: cell 2.189923744 mm, 9 cells, 72 voxels, min cells/member 2.739821429, out_of_regime True
+  region 0: extent 4 -> derived cell 1.094961872 @ rho 0.6
+  region 1: extent 24 -> derived cell 4.8 @ rho 0.05047
+
+=== the seam, measured on the emitted mesh ===
+/private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-cell-fit-mode-2c28f1/62ba5e20-5756-4e80-af26-8681821fcce2/scratchpad/s3e/run/variant_060_lattice.stl
+  triangles            : 1416356
+  connected components : 8928   (sizes: 20716, 17056, 17024, 16992, 16800, 16512 ...)
+  weld threshold       : 0.45 mm (the job's wall_line_width_mm)
+  isolated components  : 1   sizes 16
+
+R5 FAIL — 1 isolated component(s).
+
+=== the seam census (run separately: r5_percolation exits non-zero on an
+    isolated component, which under set -e was killing the script before
+    this ran; the script now guards it) ===
+triangles 1416356
+wholly below the seam (z<=12): 312413
+wholly above the seam (z>=12): 1078443
+STRADDLING the seam plane   : 25500
+within 0.5 mm below / above the seam: 4720 / 16082
+within 1.0 mm below / above the seam: 41353 / 51816
+within 2.0 mm below / above the seam: 71067 / 83084
+ISOLATED component: 16 triangles, 10 verts
+  bbox min [-6.  1.  3.]  max [-4.5  2.5  6. ]
+  the seam plane is z = 12.0
+
+=== WHAT THIS MEASURES, AND WHAT IT DOES NOT ===
+
+THE SEAM IS CONTINUOUS. Two regions with different derived cells (1.0950 mm and,
+after the ladder snap, 2.1899 mm) abut at z = 12. Across that plane:
+  * 25,500 triangles STRADDLE it — geometry crosses the boundary, it is not two
+    bodies meeting at a face;
+  * there is material within 0.5 mm on BOTH sides (4,720 below / 16,082 above), so
+    there is no gap band at the transition;
+  * `cells split by the 2:1 balance: 0` — the plan needed no splitting, because the
+    two levels are already one apart.
+No bridging geometry was emitted and none was needed: the levels are dyadic and
+aligned, so the coarse cell's nodes are also fine-grid node positions.
+
+ONE ISOLATED COMPONENT, AND IT IS NOT AT THE SEAM. 16 triangles (one strut), bbox
+[-6.0, 1.0, 3.0] to [-4.5, 2.5, 6.0]. The seam plane is z = 12.0 and both declared
+regions live at z >= 8, so this fragment is ~6 mm below the nearer of them — outside
+every declared include region. That is the CELL-OVERHANG behaviour PR #298 diagnosed
+and did not fix (the certification mask is include-scoped per VOXEL while cell
+activation is whole-cell from any masked voxel, so an activated cell reaches past the
+region), showing up here as one clipped strut with nothing to weld to.
+
+SO: bar R5's "isolated fragments must be zero" is NOT met — the count is 1, not 0 —
+and the cause is named and located rather than left silent. It is not a seam defect
+and it is not new to fit; a finer cell simply makes the overhang produce a smaller,
+lonelier piece of geometry. Reported, not fixed: fixing it means making cell
+activation region-aware, which moves the emitted mask on every existing graded path.
+
+THE COMPONENT COUNT (8,928) IS NOT A FRAGMENT COUNT. The generator emits each strut
+as its own capsule mesh and does not weld them, so two struts that interpenetrate are
+still two components by shared-vertex connectivity. That is why the isolated test is
+proximity-based at the job's own line width, and why the count of components is not
+by itself evidence of anything.

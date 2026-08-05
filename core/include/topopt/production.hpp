@@ -247,6 +247,15 @@ bool production_width_aware_knockdown();
 // production.cpp for the TRIPWIRE and why the topology set is octet-only.
 bool production_multiscale_lattice_to();
 
+// ★ Task 2026-08-05-lattice-cell-fit-mode (S4) — what `"cell_mode": "auto"` MEANS.
+// false (the shipped default) = the printability floor, exactly as it always has;
+// true = it resolves to `"fit"`, the cell derived per declared include region. ONE
+// constant in ONE place, read by run_job's single `resolve_cell_mode`, so a job
+// asking for "fit" by name is unaffected either way and no past AUTO run changes
+// while it is false. See production.cpp for why it is a constant rather than a
+// redefinition, and the flip table it must be read against before flipping.
+bool production_lattice_auto_is_fit();
+
 // THE single builder of the accept-gate KnockdownSpec from a job's options (handoff
 // 2026-07-26-post-merge-build-fix). Every certification path that gates a fixed
 // design — the optimizer's per-rung gate (minimize_plastic), the CLI standalone

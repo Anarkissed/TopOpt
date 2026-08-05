@@ -1,0 +1,43 @@
+THE ANALYZE PATH UNDER FIT (`topopt-cli analyze`), his part, resolution 64.
+
+Why this is here: fit touches THREE call sites that build GradingLawParams —
+the per-variant optimize path, the pre-flight forecast, and analyze_job. A unit
+test on grade_lattice exercises none of them. This is the analyze one, run end
+to end on WallMount_ShelfBracket.stl (his job_nobox.json + seven 4 mm include
+regions + "cell_mode": "fit").
+
+job: /private/tmp/claude-501/-Users-nadim-dev-TopOpt-TopOpt--claude-worktrees-lattice-cell-fit-mode-2c28f1/62ba5e20-5756-4e80-af26-8681821fcce2/scratchpad/an/analyze_fit.json
+
+cell_mode           : fit
+cell_size_mm        : 1.094961872
+printability_floor  : 4.602619932  (the rho_min bound — NOT selected)
+region_voxels       : 5710
+latticed_voxels     : 456
+solid_fallback      : 5254
+fit.min_printable_cell_mm       : 1.094961872
+fit.distinct_cells              : 1
+fit.out_of_regime_voxels        : 0
+fit.no_derivation_voxels        : 5254
+fit.density_raised_for_print    : 454
+
+region | extent mm | cell mm      | rho | strut mm | cells/member | out of regime
+     0 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+     1 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+     2 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+     3 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+     4 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+     5 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+     6 |         4 |  1.094961872 | 0.6 |     0.42 |       3.6531 | True
+
+READ THE TWO 'out of regime' NUMBERS CAREFULLY — they answer different questions
+and they are both right:
+  * the PER-REGION flag is judged on the region's DECLARED extent (4 mm), which
+    is what the cell was derived from and is the conservative reading.
+  * fit.out_of_regime_voxels is judged per voxel on the DESIGN's own measured
+    local member width. A 4 mm include slab cut into a thicker wall sits on
+    material wider than 4 mm, so those voxels clear the accuracy floor at the
+    derived cell even though the region as declared does not.
+  * no_derivation_voxels is large here because the analyze path grades the WHOLE
+    printed design (it passes no region mask), so every voxel outside the seven
+    declared regions has no derived cell and stays solid, counted rather than
+    guessed at.
