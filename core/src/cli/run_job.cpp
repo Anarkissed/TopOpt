@@ -5674,17 +5674,60 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                  json_num(d.min_printable_cell_mm) + " mm (printability) up to " +
                  json_num(thinnest_mm / perc_floor) +
                  " mm (percolation).\n";
-          msg += "    Set \"cell_mm\" in the lattice block to a value in that "
-                 "range.\n";
+          // ── N1/N2 again, one level deeper: on a GRADED job "set cell_mm" does
+          // NOT work. grading.hpp's Fixed mode takes max(target, printability
+          // floor), and that floor is lattice_cell_printability_floor_mm —
+          // evaluated at rho_MIN. So a target of 1.2 mm is silently RAISED to
+          // 4.6026 mm at a 0.42 bead and lands straight back in this refusal.
+          // Measured: his own geometry, graded, cell_mm 1.2 -> "planned cell
+          // 4.602619932 mm gives 0.8690702381 cells across". Naming a remedy
+          // that the same code path then overrides is the exact defect the M2
+          // audit exists to catch.
+          if (job.grading.present) {
+            msg += "    ★ ON THIS GRADED RUN, SETTING \"cell_mm\" WILL NOT DO "
+                   "IT. A grading block raises your target cell to the "
+                   "printability floor, which is evaluated at the band's "
+                   "LIGHTEST density and is " +
+                   json_num(lattice_cell_printability_floor_mm(topo, w_min_fc)) +
+                   " mm here — so a smaller target is raised straight back to "
+                   "it and you return to this message.\n";
+            msg += "      To use a cell in the range above, run this as a "
+                   "UNIFORM lattice instead: drop the \"grading\" block and set "
+                   "\"cell_mm\" plus \"strut_radius_mm\" on the \"lattice\" "
+                   "block. The uniform path applies no cells-per-member floor, "
+                   "so the lattice is built and its certificate is out of "
+                   "regime.\n";
+          } else {
+            msg += "    Set \"cell_mm\" in the lattice block to a value in that "
+                   "range.\n";
+          }
           if (thinnest_mm < d.min_member_width_certifiable_mm) {
-            msg += "  NOTE — a lattice in that range will be CONNECTED but NOT "
-                   "CERTIFIED: this region needs " +
+            // ── N1/N2: say what the region will actually DO on this path, and
+            // lead with the remedy the user can actually reach.
+            msg += "  NOTE — this region needs " +
                    json_num(d.min_member_width_certifiable_mm) +
-                   " mm to clear the cells-per-member accuracy floor and has " +
-                   json_num(thinnest_mm) +
-                   " mm. The margin over it is out of regime. That is what "
-                   "\"retain_subfloor_in_unloaded_regions\" is for — read the "
-                   "exposure it reports before arming it.\n";
+                   " mm to clear the cells-per-member ACCURACY floor and has " +
+                   json_num(thinnest_mm) + " mm. What that means here:\n";
+            if (job.grading.present) {
+              msg += "    * GRADED run: the grading law falls sub-floor "
+                     "candidates back to SOLID, so setting the cell alone will "
+                     "get you past this refusal and STILL leave this region "
+                     "solid with no lattice in it.\n";
+              msg += "    * To lattice it anyway, arm "
+                     "\"retain_subfloor_in_unloaded_regions\" in the job JSON. "
+                     "The lattice is then built and the certificate over it is "
+                     "OUT OF REGIME — read the exposure the receipt reports "
+                     "before arming it.\n";
+              msg += "    * ★ THAT SWITCH IS NOT EXPOSED IN THE APP. It is a "
+                     "job-JSON key only, so from the iPad this region cannot be "
+                     "latticed at all today. The cell size IS sent by the app, "
+                     "which is why it is named first above.\n";
+            } else {
+              msg += "    * UNIFORM run: no cells-per-member floor is applied on "
+                     "this path, so a lattice in the range above WILL be built "
+                     "here — CONNECTED but NOT CERTIFIED. The margin over it is "
+                     "out of regime and lattice_strut_out_of_regime is raised.\n";
+            }
           }
         } else {
           // (C) — percolates. Not a refusal. Report and continue.
@@ -5717,17 +5760,61 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
                 d.lightest_relative_density, d.lightest_strut_diameter_mm,
                 d.lightest_cells_per_member, cell_mm);
           }
-          if (thinnest_mm < d.min_member_width_certifiable_mm)
-            std::fprintf(
-                stderr,
-                "[lattice] NOTE: the thinnest declared include region (%.3f mm) "
-                "percolates at the planned %.4f mm cell (%.2f cells across, floor "
-                "%.2f) but is BELOW the %.2f-cell accuracy floor, which needs "
-                "%.3f mm. The lattice will be built and the certificate over it "
-                "will be OUT OF REGIME. This is reported, not refused — see "
-                "\"retain_subfloor_in_unloaded_regions\".\n",
-                thinnest_mm, cell_mm, planned_cpm, perc_floor, n_star,
-                d.min_member_width_certifiable_mm);
+          if (thinnest_mm < d.min_member_width_certifiable_mm) {
+            // ── N1: WHAT ACTUALLY HAPPENS HERE DEPENDS ON THE PATH, and an
+            // earlier version of this note said "the lattice will be built"
+            // unconditionally. That is FALSE on a graded run and it set up
+            // exactly the failure this branch exists to stop: clear pre-flight,
+            // spend the solve, get a solid wall.
+            //
+            // GRADED — grade_lattice enforces the accuracy floor
+            // (src/simp/grading.cpp:102 reads lattice_cells_per_member_min, and
+            // note_member_too_thin at :20-28 records the fallback). A sub-floor
+            // candidate is graded back to SOLID. That is the DEFAULT, and
+            // flipping it is the entire purpose of
+            // retain_subfloor_in_unloaded_regions.
+            //
+            // UNIFORM — no cells-per-member floor is applied anywhere on this
+            // path. Every `cells_per_member` reference in this file outside the
+            // grading receipt and this pre-flight is reporting only, and
+            // lattice_strut_out_of_regime (src/simp/analyze.cpp:458-460) is a
+            // FLAG, not a gate. That is why the maintainer's own uniform run
+            // emitted 1131 cells at 0.4263 cells per member with
+            // strut_out_of_regime true and strut_gated false.
+            if (job.grading.present)
+              std::fprintf(
+                  stderr,
+                  "[lattice] NOTE (GRADED run): the thinnest declared include "
+                  "region (%.3f mm) percolates at the planned %.4f mm cell "
+                  "(%.2f cells across, percolation floor %.2f) but is BELOW the "
+                  "%.2f-cell accuracy floor, which needs %.3f mm.\n"
+                  "[lattice]       SO THIS REGION WILL COME BACK SOLID. The "
+                  "grading law falls sub-floor candidates back to solid, and no "
+                  "lattice will be emitted here, unless "
+                  "\"retain_subfloor_in_unloaded_regions\" is armed in the job "
+                  "JSON — in which case it is latticed and the certificate over "
+                  "it is OUT OF REGIME.\n"
+                  "[lattice]       That switch is a job-JSON key and is NOT "
+                  "exposed in the app today, so on the iPad this region cannot "
+                  "be latticed at all. The remedy the app CAN send is the cell "
+                  "size itself.\n",
+                  thinnest_mm, cell_mm, planned_cpm, perc_floor, n_star,
+                  d.min_member_width_certifiable_mm);
+            else
+              std::fprintf(
+                  stderr,
+                  "[lattice] NOTE (UNIFORM run): the thinnest declared include "
+                  "region (%.3f mm) percolates at the planned %.4f mm cell "
+                  "(%.2f cells across, percolation floor %.2f) but is BELOW the "
+                  "%.2f-cell accuracy floor, which needs %.3f mm.\n"
+                  "[lattice]       The uniform path applies NO cells-per-member "
+                  "floor, so the lattice WILL be built here and the certificate "
+                  "over it will be OUT OF REGIME "
+                  "(lattice_strut_out_of_regime is raised; it is a flag, not a "
+                  "gate). This is reported, not refused.\n",
+                  thinnest_mm, cell_mm, planned_cpm, perc_floor, n_star,
+                  d.min_member_width_certifiable_mm);
+          }
           std::fflush(stderr);
         }
         if (!msg.empty()) {

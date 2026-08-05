@@ -64,6 +64,21 @@ lightest density. Evaluated at the density a member can actually carry, the same
 arithmetic gives **5.47 mm**, not 23 mm. Both numbers now come out of one core
 function instead of one of them being folded into a floor nobody could see into.
 
+**★ WHAT YOUR 4 mm WALL ACTUALLY DOES TODAY, BY PATH.** (N1.) This is the
+correction that matters most, and an earlier version of this branch got it wrong
+in a way that would have cost you another run:
+
+| Your job is… | At a 1.2 mm cell your 4 mm wall… | Result |
+|---|---|---|
+| **GRADED** (a `grading` block) | cannot even *get* a 1.2 mm cell — a grading block raises your target to the rho_min printability floor, **4.6026 mm** — and at that cell the wall does not percolate | **refused at pre-flight** |
+| **GRADED**, cell somehow honoured | is below the 5-cell accuracy floor, so `grade_lattice` falls it back to **SOLID** | **no lattice, unless `retain_subfloor_in_unloaded_regions` is armed — which the app cannot send** |
+| **UNIFORM** (`cell_mm` + `strut_radius_mm`, no `grading`) | sits at **3.33 cells across**, above percolation (1.0), below accuracy (5.0). The uniform path applies **no** accuracy floor | **lattice IS built; its certificate is out of regime** |
+
+So the honest answer is: **a uniform lattice job at a ~1.2 mm cell is the one
+route that puts lattice in your 4 mm wall today**, and what you get is
+uncertified. The graded route is doubly blocked — the cell is raised out from
+under you, and the switch that would unblock it is not on the iPad.
+
 **★ THE DERIVATION REPORTS. IT DOES NOT YET PLAN.** (M3.) This is the most
 important caveat on this branch and it was missing from the first version of this
 handoff. `lattice_derive_cell_for_member` is called in exactly three places
@@ -822,6 +837,77 @@ unmeasured is the failure mode this whole branch is about.
 The Python reference implementation is `a0b_isolated_fragments.py` and it is
 already validated against that file.
 
+### N1 — case C's note was FALSE on the graded path, and the fix uncovered a second false remedy
+
+**The defect.** Case C's note said *"The lattice will be built and the certificate
+over it will be OUT OF REGIME"* unconditionally. On a **graded** job that is
+false: the accuracy floor is exactly what makes `grade_lattice` fall sub-floor
+candidates back to **SOLID**. Two notes twelve lines apart in the same branch
+contradicted each other, and neither was guarded on `job.grading.present`.
+
+**Why it was the worst thing in the PR.** His 4 mm wall *is* case C. The sequence
+it set up was: set the cell, clear pre-flight, spend the solve, get a solid wall —
+the fourth time this project has promised him something and delivered nothing.
+
+**(b) The uniform claim, verified rather than assumed.**
+
+- **GRADED enforces the floor.** `core/src/simp/grading.cpp:102` reads
+  `lattice_cells_per_member_min`; `note_member_too_thin` (`:20-28`) records the
+  fallback to solid.
+- **UNIFORM applies no floor at all.** Every `cells_per_member` reference in
+  `run_job.cpp` outside the grading receipt and this pre-flight is reporting only,
+  and `lattice_strut_out_of_regime` (`core/src/simp/analyze.cpp:458-460`) is a
+  **flag, not a gate**. His own uniform run is the proof: 1131 cells emitted at
+  **0.4263** cells per member, `strut_out_of_regime` true, `strut_gated` false.
+
+So both sub-cases were wrong in opposite directions. Both are now split on
+`job.grading.present` and name the path the reader is on.
+
+**(c) The measurement, and it found a SECOND false remedy.** Running his own
+geometry as a graded case-C job at `cell_mm` 1.2 did not produce a case-C run at
+all — it was **refused as case B**:
+
+```
+planned cell 4.602619932 mm gives 0.8690702381 cells across that region;
+a connected network needs at least 1.
+```
+
+**A grading block RAISES the target cell to the printability floor**
+(`grading.hpp` Fixed mode: `max(target, floor)`), and that floor is evaluated at
+**rho_min** — 4.6026 mm at a 0.42 bead. So "set `cell_mm`" is itself an
+ineffective remedy on a graded run: the same code path overrides it and returns
+you to the refusal. That is precisely the class of defect M2's audit exists to
+catch, and my own earlier `m2_remedy_audit` verified the remedy only on a
+**uniform** job (where it works: 7,757 cells).
+
+The message now says so and points at the path where the cell is honoured. **Net
+effect for his 4 mm wall on a GRADED run: doubly blocked** — the cell cannot be
+lowered, and retention cannot be armed from the app (N2).
+
+### N2 — the message pointed at a switch the app cannot send
+
+**Verified in the shipped tree.** `RemoteRunner.swift`'s grading dictionary
+(`app/TopOptKit/Sources/TopOptFlows/RemoteRunner.swift:677-703`) emits exactly
+`topology`, `min_extrudable_width_mm`, `cell_mode`, `cell_min_mm`, `cell_max_mm`,
+`cell_mm`. `subfloor` appears in `app/` **only** in `LatticeForecast.swift`
+(lines 88-116) as read-only display fields. `RelatticeRunner` does not send it.
+
+Both new messages now state that the switch is a **job-JSON key not exposed in
+the app**, and lead with the remedy the app can actually send.
+
+**★ FOUR CORE OPTIONS ARE UNREACHABLE FROM THE APP.** This list is the brief for
+a separate app task and should not have to be rediscovered:
+
+| Core option | Where it lives | App can send it? |
+|---|---|---|
+| `retain_subfloor_in_unloaded_regions` | `grading` | **No** |
+| `subfloor_stress_fraction` | `grading` | **No** |
+| `subfloor_per_region` (new, this PR) | `grading` | **No** |
+| `report_region_cells` (new, this PR) | `grading` | **No** |
+
+No app code was added to this branch. M5's identity story is built on core-only,
+and the app work needs its own failing-test-first treatment against `app-macos`.
+
 ### M8b — the percolation floor now exists in core
 
 `lattice_percolation_cells_per_member_min` (`core/src/fea/lattice.cpp`, declared
@@ -952,8 +1038,23 @@ certificate *does* cover, you need about 5.9 mm of material, or a 0.31 mm nozzle
 was using the very "lightest-density" number this work exists to expose, so it
 would have refused a 6 mm wall that is genuinely fine. And its advice told you to
 switch the cell size to "automatic" — which picks the old number and lands you
-straight back in the same refusal. Both are gone, and every remaining piece of
-advice has been checked to make sure it actually changes the outcome.
+straight back in the same refusal. Both are gone.
+
+**And two more found in the second review, which would have cost you another
+night.** The message said your wall's lattice "will be built". That is only true
+if you run a *uniform* lattice job. If you use a **graded** job — the one with
+automatic density — the software deliberately turns thin walls back to solid, so
+you would have set the cell, waited out the solve, and got a solid wall again.
+Worse, on a graded job you cannot even set the cell you want: it quietly raises
+your number back up to the old one, so that advice did not work either.
+
+**So, concretely, for your 4 mm wall:** run it as a **plain lattice job** — set
+the cell size and strut radius yourself, no automatic-density block. That is the
+one route that actually puts lattice in that wall today, and what you get is a
+lattice the strength certificate does not cover. On a graded job the wall stays
+solid, and the switch that would change that is not available on the iPad yet.
+Every piece of advice the software now prints has been checked against the
+question "does following this actually change the outcome?".
 
 **Three things I found and did not fix, which you should know before your next
 run:**
