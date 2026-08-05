@@ -262,6 +262,67 @@ public struct FlatMesh {
     }
 }
 
+/// WHAT MESH THIS IS — the value the renderer compares to decide whether to
+/// re-upload its GPU buffers (task 2026-08-04-smoothing-viewer-and-ui, bar V1).
+///
+/// THE DEFECT THIS REPLACES. The renderer used to compare
+/// `(vertexCount, triangleCount, bounds.min, bounds.max)`. That tuple cannot see
+/// a mesh whose vertices MOVED — which is exactly what smoothing does: Taubin
+/// preserves the welded topology vertex-for-vertex and triangle-for-triangle, and
+/// a LOCAL brush moves only the painted patch, so the bounding box is decided by
+/// vertices that never moved. `smooth_viewer_identity_probe` measured it on the
+/// maintainer's own bracket: brushing the middle of the part left counts AND all
+/// six bounds planes bit-identical at every strength, while 23 vertices had moved
+/// by up to 0.59 mm. The renderer skipped the upload and kept drawing the
+/// ORIGINAL — so "Original" and "Smoothed" rendered identically, not because the
+/// smoothed mesh was missing but because it was never sent to the GPU.
+///
+/// The bounding box only separated them when the painted patch happened to
+/// contain the part's own extreme, which made the whole thing a coin flip on
+/// WHERE you brushed. A signature that answers "is this a different mesh?" has to
+/// read the mesh.
+///
+/// DETERMINISTIC BY CONSTRUCTION (bar B6). FNV-1a over the float32 bit patterns
+/// of every position and then every index: a fixed basis, a fixed prime, a fixed
+/// traversal order. Deliberately NOT Swift's `Hasher`, whose seed is randomised
+/// per process — the same mesh would sign differently on every launch, which is
+/// the opposite of what a cache key needs.
+///
+/// The counts ride along so a collision has to agree on all three, and so a
+/// degenerate all-zero mesh still compares by size.
+public struct ViewerMeshSignature: Equatable, Sendable {
+    public let vertexCount: Int
+    public let triangleCount: Int
+    /// FNV-1a over positions then indices.
+    public let contentHash: UInt64
+
+    private static let offsetBasis: UInt64 = 1469598103934665603
+    private static let prime: UInt64 = 1099511628211
+
+    public init(vertices: [Float], indices: [Int32]) {
+        var h = Self.offsetBasis
+        // `&*`, not `*`: FNV is defined on wrapping arithmetic, and an overflow
+        // trap here would be a crash in the render path.
+        func mix(_ word: UInt32) {
+            var w = word
+            for _ in 0..<4 {
+                h ^= UInt64(w & 0xFF)
+                h = h &* Self.prime
+                w >>= 8
+            }
+        }
+        for p in vertices { mix(p.bitPattern) }
+        for i in indices { mix(UInt32(bitPattern: i)) }
+        self.vertexCount = vertices.count / 3
+        self.triangleCount = indices.count / 3
+        self.contentHash = h
+    }
+
+    /// The empty mesh's signature — an explicit value rather than an optional, so
+    /// "no mesh" and "a mesh" compare through the same path.
+    public static let empty = ViewerMeshSignature(vertices: [], indices: [])
+}
+
 /// Render-ready mesh: positions + derived normals + indices (+ optional per-
 /// triangle face ids, unused until M7.5 selection) and the precomputed bounds.
 public struct ViewerMesh {
@@ -293,6 +354,10 @@ public struct ViewerMesh {
     /// the walk anyway unions the whole connected curved run — the over-selection
     /// fixed in handoff 2026-07-25-tap-overselect).
     public let pseudoFaces: Bool
+    /// WHAT THIS MESH IS, as one comparable value — see `ViewerMeshSignature`.
+    /// Computed ONCE here, so the renderer's per-update-pass comparison stays a
+    /// scalar compare no matter how large the mesh is.
+    public let signature: ViewerMeshSignature
 
     public var vertexCount: Int { positions.count / 3 }
     public var triangleCount: Int { indices.count / 3 }
@@ -324,6 +389,7 @@ public struct ViewerMesh {
         self.flat = smoothShaded
             ? MeshGeometry.flatShadedSmooth(vertices: vertices, indices: indices)
             : MeshGeometry.flatShaded(vertices: vertices, indices: indices)
+        self.signature = ViewerMeshSignature(vertices: vertices, indices: indices)
     }
 
     /// Positions and normals interleaved as `[px,py,pz,nx,ny,nz]` per vertex — the

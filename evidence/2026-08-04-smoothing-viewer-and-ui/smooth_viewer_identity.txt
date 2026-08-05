@@ -1,0 +1,20 @@
+mesh core/tests/fixtures/mesh/WallMount_ShelfBracket.stl
+resolution 96
+subject marching_cubes_isosurface
+vertices 11556
+triangles 23132
+base_mesh_mass_g 245.65
+base_voxel_mass_g 248.146
+base_content_hash 1958019674213212868
+
+patch strength painted moved max_shift_mm count_bounds_signature content_hash mesh_mass_g voxel_mass_g
+corner 0.25 1692 1692 0.431972 differs differs 245.686 248.146
+corner 0.5 1692 1692 0.622065 differs differs 245.721 248.146
+corner 1 1692 1692 0.831428 differs differs 245.79 248.146
+interior 0.25 23 23 0.398641 IDENTICAL differs 245.65 248.146
+interior 0.5 23 23 0.537834 IDENTICAL differs 245.65 248.146
+interior 1 23 23 0.592714 IDENTICAL differs 245.65 248.146
+
+genuinely_changed_rows 6
+count_bounds_blind_rows 3
+content_hash_blind_rows 0

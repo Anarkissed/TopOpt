@@ -18,9 +18,8 @@
 // mounted the shared `selectionsPanel` over this page; that let a user edit the
 // very anchors and keep-clear volumes the brush's freeze mask was computed from,
 // leaving strokes on screen measured against a mask that no longer described the
-// part. The row is now a read-only readout of the same one model. AE6 is
-// unweakened — there is still exactly one `selectionsPanel` in the app, and this
-// page still authors no selection state.
+// part. AE6 is unweakened — there is still exactly one `selectionsPanel` in the
+// app, and this page still authors no selection state.
 //
 // AND THE PAGE OWNS ITS BRUSH TOOLS (bar L4). Round 1 borrowed paint on/off, the
 // eraser and the disc size from the TO page's paint drawer, which is why the page
@@ -30,6 +29,30 @@
 // The page is CHROME ONLY: it renders over the workspace's live stage, which stays
 // mounted underneath and draws the variant (or its smoothed twin). One stage,
 // never two.
+//
+// ── ROUND 3 (task 2026-08-04) CUT IT DOWN ────────────────────────────────────
+//
+// The maintainer's note was "there is soooooo much text", and he was counting:
+// a five-line sell card, a region list with a slider and up to three explanatory
+// lines per row, a protected-vertex readout with a four-line paragraph under it,
+// the whole receipt, and three notices stacked at the top of the screen at once.
+//
+// What is left, and why:
+//
+//   U1  THE REGION CONCEPT IS GONE FROM THE UI. No list, no per-region slider.
+//       The model is the interface: brushing an area again deepens it and the
+//       tint darkens to match (`SmoothBrushModel.levels`). The region model is
+//       kept INTERNALLY, one region per rung, so every downstream seam — the
+//       weight vector, the freeze guarantee, the receipt's own region lines —
+//       is unchanged code.
+//   U2  THE PANEL IS BRUSH CONTROLS AND NOTHING ELSE: paint/erase, the size with
+//       a disc drawn at the ACTUAL footprint, and Pencil only.
+//   U3  Discard and Lattice this sit ABOVE Re-certify. "Keep smoothing" is
+//       deleted; re-certifying is what keeps.
+//   U4  The receipt is a DRAWER above Re-certify.
+//   U5  ONE note, top-centre, auto-dismissing — `page.topNote`, one value, so
+//       two cannot be on screen at once.
+//   U6  ONE dismissible notice on entry, and then nothing standing.
 
 import SwiftUI
 import simd
@@ -52,7 +75,6 @@ public struct SmoothingPage: View {
     @Binding var showingSmoothed: Bool
 
     let onRecertify: () -> Void
-    let onKeep: () -> Void
     let onDiscard: () -> Void
     let onSendToLattice: () -> Void
     let onClose: () -> Void
@@ -65,7 +87,6 @@ public struct SmoothingPage: View {
                 tools: Binding<SmoothBrushTools>,
                 showingSmoothed: Binding<Bool>,
                 onRecertify: @escaping () -> Void,
-                onKeep: @escaping () -> Void,
                 onDiscard: @escaping () -> Void,
                 onSendToLattice: @escaping () -> Void,
                 onClose: @escaping () -> Void,
@@ -76,7 +97,6 @@ public struct SmoothingPage: View {
         self._tools = tools
         self._showingSmoothed = showingSmoothed
         self.onRecertify = onRecertify
-        self.onKeep = onKeep
         self.onDiscard = onDiscard
         self.onSendToLattice = onSendToLattice
         self.onClose = onClose
@@ -100,20 +120,39 @@ public struct SmoothingPage: View {
             ZStack(alignment: .topLeading) {
                 topLeftColumn
                 topRightColumn
-                topCentreColumn
-                if portrait {
+                topCentreColumn(width: geo.size.width)
+                // IN PORTRAIT THE PANEL AND THE DRAWER ARE ALTERNATIVES, not
+                // neighbours (bar B4). Landscape has a left column and a free
+                // right-hand side, so both fit with room between them. Portrait
+                // has neither: the panel is a full-width strip along the bottom
+                // and the drawer opens upward from the same corner, so drawing
+                // both would put one on top of the other — exactly the overlap
+                // the maintainer has been reporting. Reading the receipt and
+                // brushing are not simultaneous activities, so the panel yields
+                // while the drawer is open and comes straight back when it
+                // closes. `SmoothingRound3Tests` computes both rects from the
+                // tokens and asserts they cannot intersect in either orientation.
+                if portrait, !page.receiptOpen {
                     panelView(maxHeight: geo.size.height * 0.46)
                         .frame(maxWidth: .infinity)
                         .padding(.horizontal, DS.Space.l)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                        .padding(.bottom, PageChrome.panelBottomClearance)
-                } else {
+                        // TWO rows of actions (U3), so the clearance is the
+                        // two-row one. The one-row constant is what left the
+                        // panel running under Discard/Lattice this.
+                        .padding(.bottom, PageChrome.panelBottomClearance(
+                            actionRows: Self.actionRows))
+                } else if !portrait {
                     panelView(maxHeight: geo.size.height - 200)
                         .frame(width: PageChrome.panelWidth)
                         .frame(maxHeight: .infinity, alignment: .center)
                         .padding(.leading, PageChrome.edge)
                 }
-                bottomRightCluster
+                bottomRightCluster(
+                    maxDrawerHeight: geo.size.height - PageChrome.noteTop
+                        - PageChrome.panelBottomClearance(actionRows: Self.actionRows)
+                        - PageChrome.gap)
+                if page.showsEntryNotice { entryNotice() }
                 if let why = context.unavailable { gateOverlay(why) }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -219,9 +258,19 @@ public struct SmoothingPage: View {
 
     private var topRightColumn: some View {
         VStack(alignment: .trailing, spacing: PageChrome.gap) {
+            // BAR U6. Round 2 explained the empty state in a sentence —
+            // "Nothing smoothed yet — both show the variant as the run made it."
+            // — which is a permanent block of prose saying what a disabled
+            // control says by itself. There is nothing smoothed to show, so the
+            // Smoothed tab is simply off until there is.
             HStack(spacing: 0) {
-                stageTab("Original", on: !showingSmoothed) { showingSmoothed = false }
-                stageTab("Smoothed", on: showingSmoothed) { showingSmoothed = true }
+                stageTab("Original", on: !showingSmoothed, enabled: true) {
+                    showingSmoothed = false
+                }
+                stageTab("Smoothed", on: showingSmoothed && hasSmoothed,
+                         enabled: hasSmoothed) {
+                    showingSmoothed = true
+                }
             }
             .background(RoundedRectangle(cornerRadius: DS.Radius.control)
                 .fill(DS.Surface.panel.color)
@@ -243,46 +292,100 @@ public struct SmoothingPage: View {
         .padding(.top, PageChrome.topInset)
     }
 
-    private func stageTab(_ title: String, on: Bool,
+    /// Whether there is a smoothed shape to look at at all.
+    private var hasSmoothed: Bool { page.receipt != nil || page.kept != nil }
+
+    private func stageTab(_ title: String, on: Bool, enabled: Bool,
                           action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title).dsStyle(DS.TypeScale.bodyStrong)
-                .foregroundStyle((on ? DS.Color.textPrimary : DS.Color.textTertiary).color)
+                .foregroundStyle((on ? DS.Color.textPrimary
+                                     : (enabled ? DS.Color.textTertiary
+                                                : DS.Color.textDisabled)).color)
                 .padding(.horizontal, DS.Space.xl).frame(height: PageChrome.compactButton)
                 .background(RoundedRectangle(cornerRadius: DS.Radius.control)
                     .fill(on ? DS.Color.fillSelected.color : Color.clear))
         }
         .buttonStyle(.plain)
+        .disabled(!enabled)
         .accessibilityLabel("Show \(title)")
+        .accessibilityHint(enabled ? "" : "nothing smoothed yet")
     }
 
-    // MARK: top-centre — status, and the H1 STALE banner
+    // MARK: top-centre — ONE note, never two (bar U5)
+    //
+    // Round 2 drew a status banner and, under it, a failure banner, while the
+    // panel drew a third warning card — the three overlapping notices the
+    // maintainer counted. There is now ONE renderer for ONE value: whatever
+    // `page.topNote` says, or nothing. Two cannot appear because there is only
+    // one thing to draw, and at rest there is nothing.
+    //
+    // TOP-CENTRE AND CLEAR OF THE PANEL. The column is centred in the page's full
+    // width and capped at `noteMaxWidth`, which `SmoothingRound3Tests` checks
+    // against the panel's own right edge in BOTH orientations — so the note can
+    // never come up behind the left modal.
 
-    private var topCentreColumn: some View {
-        VStack(spacing: PageChrome.gap) {
-            statusBanner
-            if let f = page.failure { failureBanner(f) }
+    /// The widest a note may be. Derived from the tokens rather than picked, so
+    /// the clearance assertion has something to check against.
+    static let noteMaxWidth: CGFloat = 620
+
+    /// How many rows the bottom-right action cluster occupies (bar U3: Discard +
+    /// Lattice this, then Receipt + Re-certify). Named so the panel's clearance
+    /// is derived from it rather than assuming one.
+    static let actionRows = 2
+
+    @ViewBuilder private func topCentreColumn(width: CGFloat) -> some View {
+        if let n = page.topNote {
+            noteView(n, width: PageChrome.noteWidth(for: width,
+                                                    cap: Self.noteMaxWidth))
+                .frame(maxWidth: .infinity, alignment: .top)
+                .padding(.top, PageChrome.noteTop)
+                // The 60 s ceiling, ticked while the page is up. `tick` is a pure
+                // clock read, so tests drive it directly.
+                .onReceive(Timer.publish(every: 1, on: .main, in: .common)
+                    .autoconnect()) { _ in page.tick() }
         }
-        .frame(maxWidth: .infinity, alignment: .top)
-        .padding(.top, PageChrome.topInset)
     }
 
-    private var statusBanner: some View {
-        HStack(spacing: DS.Space.m) {
-            if page.isWorking {
+    @ViewBuilder private func noteView(_ n: SmoothingPageModel.TopNote,
+                                       width: CGFloat) -> some View {
+        switch n {
+        case .failure(let f):
+            failureBanner(f).frame(maxWidth: width)
+        case .transient(let t):
+            noteBanner(t.text, warn: false, width: width)
+                .onTapGesture { page.dismissNote() }
+        case .working(let s):
+            HStack(spacing: DS.Space.m) {
                 ProgressView().tint(DS.Color.accent.color)
+                Text(s).dsStyle(DS.TypeScale.callout)
+                    .foregroundStyle(DS.Color.textSecondary.color)
+                    .lineLimit(2).multilineTextAlignment(.center)
             }
-            Text(page.statusLine).dsStyle(DS.TypeScale.callout)
-                .foregroundStyle(DS.Color.textSecondary.color)
-                .lineLimit(3).multilineTextAlignment(.center)
+            .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                .fill(DS.Surface.sheet.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            .frame(maxWidth: width)
+            .dsShadow(DS.Shadow.panel)
         }
-        .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
-            .fill(DS.Surface.sheet.color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
-                .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
-        .frame(maxWidth: 620)
-        .dsShadow(DS.Shadow.panel)
+    }
+
+    private func noteBanner(_ text: String, warn: Bool,
+                            width: CGFloat) -> some View {
+        Text(text).dsStyle(DS.TypeScale.callout)
+            .foregroundStyle(DS.Color.textSecondary.color)
+            .lineLimit(3).multilineTextAlignment(.center)
+            .padding(.horizontal, DS.Space.l).padding(.vertical, DS.Space.m)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                .fill(DS.Surface.sheet.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
+                    .strokeBorder((warn ? DS.Color.warning.opacity(0.5)
+                                        : DS.Color.strokeSubtle).color,
+                                  lineWidth: 1)))
+            .frame(maxWidth: width)
+            .dsShadow(DS.Shadow.panel)
     }
 
     /// H1 / AE5 on screen: the failure NAMED, its cause explained, and what to do.
@@ -308,7 +411,6 @@ public struct SmoothingPage: View {
             .fill(DS.Surface.sheet.color)
             .overlay(RoundedRectangle(cornerRadius: DS.Radius.valuePill)
                 .strokeBorder(DS.Color.warning.opacity(0.5).color, lineWidth: 1)))
-        .frame(maxWidth: 620)
         .dsShadow(DS.Shadow.panel)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(f.title). \(f.detail)")
@@ -340,66 +442,22 @@ public struct SmoothingPage: View {
 
     private var panelHeader: some View {
         HStack(spacing: DS.Space.sm) {
-            Text("Smoothing").dsStyle(DS.TypeScale.title)
+            Text("Brush").dsStyle(DS.TypeScale.title)
             Spacer()
-            Button { brush.addRegion() } label: {
-                Image(systemName: "plus").font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(DS.Color.textPrimary.color)
-                    .frame(width: 34, height: 34)
-                    .background(Circle().fill(DS.Color.fillSelected.color))
-            }
-            .buttonStyle(.plain)
-            .disabled(!brush.canPaint)
-            .accessibilityLabel("Add smoothing region")
         }
         .padding(.horizontal, DS.Space.l).padding(.top, DS.Space.l)
         .padding(.bottom, DS.Space.m)
     }
 
+    /// BRUSH CONTROLS, AND NOTHING ELSE (bar U2). Round 2's panel also carried a
+    /// five-line "WHAT THIS BUYS YOU" card, a region list with a strength slider
+    /// per row, a protected-vertex readout with a four-line "fixed for this
+    /// variant" paragraph, and the whole receipt. All of it is gone from here:
+    /// the regions are the model's own tint now (U1), the receipt is a drawer
+    /// (U4), and the protected-areas fact is the one dismissible entry notice
+    /// (U6).
     @ViewBuilder private var paneContent: some View {
-        sellCard
-        if let why = brush.unusableReason {
-            noteCard(why, tint: DS.Color.warning)
-        }
         toolsSection
-        regionsSection
-        protectedSection
-        if let r = page.receipt {
-            receiptCard(r)
-        } else if let s = page.staleReceipt {
-            receiptCard(s)
-        }
-    }
-
-    /// The SELL, and it is not the melt. PR 200's own conclusion was that a plain
-    /// global smooth buys most of the cosmetic win with none of the honesty.
-    private var sellCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("WHAT THIS BUYS YOU").font(.system(size: 11, weight: .semibold))
-                .tracking(0.7).foregroundStyle(DS.Color.textQuaternary.color)
-            Text("Brush smoothing only where it's needed, then RE-CERTIFY. Bolt "
-                 + "bores, mating faces, anchors and load faces are held "
-                 + "bit-identical — the brush cannot touch them. Min feature width "
-                 + "is a hard wall. The margins below are measured on the smoothed "
-                 + "shape and on the original, both by the same solver.")
-                .dsStyle(DS.TypeScale.caption)
-                .foregroundStyle(DS.Color.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(DS.Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.control)
-            .fill(DS.Color.accent.opacity(0.10).color))
-    }
-
-    private func noteCard(_ text: String, tint: RGBA) -> some View {
-        Text(text).dsStyle(DS.TypeScale.caption)
-            .foregroundStyle(DS.Color.textSecondary.color)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(DS.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
-                .fill(tint.opacity(0.12).color))
     }
 
     // ── the brush's own tools (round-2 bar L4) ───────────────────────────────
@@ -415,7 +473,6 @@ public struct SmoothingPage: View {
 
     private var toolsSection: some View {
         VStack(alignment: .leading, spacing: DS.Space.s) {
-            sectionTitle("BRUSH")
             HStack(spacing: 0) {
                 ForEach(SmoothBrushTools.Mode.allCases) { m in
                     modeTab(m)
@@ -426,35 +483,77 @@ public struct SmoothingPage: View {
                 .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
                     .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
             HStack(spacing: PageChrome.gap) {
-                Text("Size").dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
                 sizeButton("minus", enabled: tools.canShrink) { tools.shrink() }
-                Text("\(Int(tools.radiusPoints))")
-                    .dsStyle(DS.TypeScale.callout).fontWeight(.bold)
-                    .frame(width: 34)
+                brushFootprint
                 sizeButton("plus", enabled: tools.canGrow) { tools.grow() }
-                Spacer()
-                Button { brush.clearStrokes() } label: {
-                    Text("Clear strokes").dsStyle(DS.TypeScale.caption)
-                        .foregroundStyle((brush.isEmpty ? DS.Color.textDisabled
-                                                        : DS.Color.textSecondary).color)
-                }
-                .buttonStyle(.plain)
-                .disabled(brush.isEmpty)
-                .accessibilityLabel("Clear all strokes")
             }
-            // ORBIT IS NOT A MISSING FEATURE, it is the way to look at what you
-            // brushed: the brush claims the one-finger drag, so without this the
-            // page would have no single-finger orbit at all.
-            Text(tools.mode == .orbit
-                 ? "One-finger drag orbits. Switch to Paint to brush again."
-                 : "One-finger drag \(tools.mode == .erase ? "erases" : "paints") · "
-                   + "two-finger drag orbits.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textQuaternary.color)
-                .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            pencilOnlyRow
+            Button { brush.clearStrokes() } label: {
+                Text("Clear strokes").dsStyle(DS.TypeScale.caption)
+                    .foregroundStyle((brush.isEmpty ? DS.Color.textDisabled
+                                                    : DS.Color.textSecondary).color)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: PageChrome.compactButton)
+                    .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                        .fill(DS.Surface.bar.color))
+            }
+            .buttonStyle(.plain)
+            .disabled(brush.isEmpty)
+            .accessibilityLabel("Clear all strokes")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// THE ACTUAL FOOTPRINT (bar U2), not a number standing in for one. The disc
+    /// is drawn at `tools.radiusPoints` in the same screen points the hit test
+    /// uses, so what the panel shows is the size of the thing that will land on
+    /// the model — `SmoothingRound3Tests` pins the two to the same value.
+    private var brushFootprint: some View {
+        ZStack {
+            Circle()
+                .fill(DS.Color.accent.opacity(0.22).color)
+                .overlay(Circle().strokeBorder(DS.Color.accent.color, lineWidth: 1.5))
+                .frame(width: CGFloat(tools.radiusPoints) * 2,
+                       height: CGFloat(tools.radiusPoints) * 2)
+            Text("\(Int(tools.radiusPoints))")
+                .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
+                .foregroundStyle(DS.Color.textPrimary.color)
+        }
+        .frame(height: CGFloat(SmoothBrushTools.maxRadius) * 2)
+        .frame(maxWidth: .infinity)
+        .accessibilityLabel("Brush size \(Int(tools.radiusPoints)) points")
+    }
+
+    /// PENCIL ONLY (bar U2). With it on, a one-finger drag ALWAYS orbits and the
+    /// pencil always paints — so turning the part around never costs a mode
+    /// switch, which is what round 2's Orbit tab made it cost.
+    private var pencilOnlyRow: some View {
+        Button { tools.pencilOnly.toggle() } label: {
+            HStack(spacing: DS.Space.sm) {
+                Image(systemName: tools.pencilOnly
+                      ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle((tools.pencilOnly ? DS.Color.accent
+                                                       : DS.Color.textTertiary).color)
+                Text("Pencil only").dsStyle(DS.TypeScale.callout)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                Spacer()
+                Image(systemName: "hand.draw")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(DS.Color.textQuaternary.color)
+            }
+            .padding(.horizontal, DS.Space.m)
+            .frame(height: PageChrome.compactButton)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                .fill(DS.Surface.bar.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Pencil only")
+        .accessibilityValue(tools.pencilOnly ? "on" : "off")
+        .accessibilityHint("One-finger drag orbits; the pencil paints")
     }
 
     private func modeTab(_ m: SmoothBrushTools.Mode) -> some View {
@@ -470,7 +569,7 @@ public struct SmoothingPage: View {
                 .fill(on ? DS.Color.fillSelected.color : Color.clear))
         }
         .buttonStyle(.plain)
-        .disabled(!brush.canPaint && m != .orbit)
+        .disabled(!brush.canPaint)
         .accessibilityLabel(m.label)
     }
 
@@ -490,151 +589,6 @@ public struct SmoothingPage: View {
         .accessibilityLabel(icon == "plus" ? "Bigger brush" : "Smaller brush")
     }
 
-    // ── regions: LOCAL strength, inspectable and reversible (item 3) ─────────
-
-    private var regionsSection: some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            sectionTitle("BRUSH REGIONS")
-            if brush.regions.isEmpty {
-                Text("No regions yet. Add one, then brush the areas that need "
-                     + "smoothing. Each region carries its own strength.")
-                    .dsStyle(DS.TypeScale.caption)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            ForEach(brush.summaries(), id: \.id) { s in
-                regionRow(s)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func regionRow(_ s: SmoothBrushModel.RegionSummary) -> some View {
-        let active = brush.activeRegionID == s.id
-        let color = brush.regions.first { $0.id == s.id }?.color ?? DS.Color.accent
-        return VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: DS.Space.s) {
-                RoundedRectangle(cornerRadius: 3).fill(color.color)
-                    .frame(width: 12, height: 12)
-                Text(s.name).dsStyle(DS.TypeScale.callout).fontWeight(.semibold)
-                Spacer()
-                Text("\(s.triangles) tri · \(s.vertices) vtx")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                Button { brush.removeRegion(s.id) } label: {
-                    Image(systemName: "trash").font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Remove \(s.name)")
-            }
-            HStack(spacing: DS.Space.s) {
-                Text("Strength").dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-                Slider(value: Binding(
-                    get: { brush.regions.first { $0.id == s.id }?.strength ?? 0 },
-                    set: { brush.setStrength(s.id, $0) }), in: 0...1)
-                Text(String(format: "%.2f", s.strength))
-                    .dsStyle(DS.TypeScale.caption).fontWeight(.bold)
-                    .frame(width: 38, alignment: .trailing)
-            }
-            // The brush stopping at a frozen surface is REPORTED, not inferred.
-            if s.frozenTouched > 0 {
-                Text("\(s.frozenTouched) vertices in this stroke are frozen "
-                     + "(bore / mating face / anchor) — the brush stopped at them.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.warning.color)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if s.inert {
-                Text(s.strength <= 0 ? "Strength 0 — this region is off."
-                                     : "Nothing brushed into this region yet.")
-                    .dsStyle(DS.TypeScale.caption2)
-                    .foregroundStyle(DS.Color.textQuaternary.color)
-            }
-        }
-        .padding(DS.Space.m)
-        .background(RoundedRectangle(cornerRadius: DS.Radius.control)
-            .fill((active ? DS.Color.fillSelected : DS.Surface.bar).color)
-            .overlay(RoundedRectangle(cornerRadius: DS.Radius.control)
-                .strokeBorder((active ? color.opacity(0.7) : DS.Color.strokeSubtle).color,
-                              lineWidth: 1)))
-        .contentShape(Rectangle())
-        .onTapGesture { brush.setActive(s.id) }
-    }
-
-    /// AE6 — the SAME selections library, not a second one. This row opens the TO
-    /// page's own panel; nothing about protected regions is authored here.
-    /// ROUND-2 BAR L1: INDICATED, NOT EDITABLE.
-    ///
-    /// Round 1 made this row a BUTTON that mounted the shared selections library
-    /// over the page. That was the right instinct about there being one selection
-    /// model, and the wrong affordance: editing an anchor or a keep-clear volume
-    /// changes the freeze predicates the brush was masked against, so the strokes
-    /// already on screen would silently be measured against a mask that no longer
-    /// describes them. The page cannot react to that, so it must not offer it.
-    ///
-    /// It is now a READ-ONLY readout of the same one model — AE6's "no second
-    /// selection UX" is unchanged, because there is still no selection UX here at
-    /// all. And the strongest indication is not this text: it is the FROZEN TINT
-    /// the brush paints onto the actual vertices, visible before a stroke is tried.
-    private var protectedSection: some View {
-        VStack(alignment: .leading, spacing: DS.Space.s) {
-            sectionTitle("PROTECTED — THE BRUSH CANNOT TOUCH THESE")
-            HStack(spacing: DS.Space.s) {
-                Image(systemName: "lock.fill").font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(DS.Color.okGreen.color)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(brush.freeze.isAvailable
-                         ? "\(brush.freeze.frozenCount) of \(brush.freeze.vertexCount) "
-                           + "vertices frozen · within "
-                           + String(format: "%.2f mm", brush.freeze.toleranceMM)
-                         : "resolving…")
-                        .dsStyle(DS.TypeScale.callout).fontWeight(.semibold)
-                    Text(protectedProvenance)
-                        .dsStyle(DS.TypeScale.caption2)
-                        .foregroundStyle(DS.Color.textTertiary.color)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(DS.Space.m)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: DS.Radius.control)
-                .fill(DS.Surface.bar.color))
-            Text("Fixed for this variant. They come from the run's own job "
-                 + "document — change them on the setup page and re-run, not here: "
-                 + "editing them now would move the ground your strokes were "
-                 + "measured against.")
-                .dsStyle(DS.TypeScale.caption2)
-                .foregroundStyle(DS.Color.textQuaternary.color)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// WHICH faces are frozen, named from the retained load case rather than from
-    /// the project's current selection — the same rule the receipt's numbers obey.
-    private var protectedProvenance: String {
-        guard let lc = context.loadCase else { return "from the run's own job document" }
-        var parts: [String] = []
-        if !lc.anchorFaceIDs.isEmpty {
-            parts.append("\(lc.anchorFaceIDs.count) anchor face"
-                         + (lc.anchorFaceIDs.count == 1 ? "" : "s"))
-        }
-        let loadFaces = lc.loadGroups.reduce(0) { $0 + $1.faceIDs.count }
-        if loadFaces > 0 {
-            parts.append("\(loadFaces) load face" + (loadFaces == 1 ? "" : "s"))
-        }
-        if !lc.protectedFaceIDs.isEmpty {
-            parts.append("\(lc.protectedFaceIDs.count) protected")
-        }
-        if !lc.freeze.isEmpty {
-            parts.append("\(lc.freeze.count) keep-clear")
-        }
-        return parts.isEmpty ? "from the run's own job document"
-                             : parts.joined(separator: " · ")
-    }
 
     private func sectionTitle(_ t: String) -> some View {
         Text(t).font(.system(size: 11, weight: .semibold)).tracking(0.7)
@@ -666,10 +620,10 @@ public struct SmoothingPage: View {
                 Text("").frame(maxWidth: .infinity, alignment: .leading)
                 Text("BEFORE").font(.system(size: 10, weight: .bold))
                     .foregroundStyle(DS.Color.textQuaternary.color)
-                    .frame(width: 72, alignment: .trailing)
+                    .frame(width: 88, alignment: .trailing)
                 Text("AFTER").font(.system(size: 10, weight: .bold))
                     .foregroundStyle(DS.Color.textQuaternary.color)
-                    .frame(width: 72, alignment: .trailing)
+                    .frame(width: 88, alignment: .trailing)
             }
             ForEach(r.rows, id: \.label) { row in
                 HStack {
@@ -678,10 +632,10 @@ public struct SmoothingPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Text(row.beforeText).dsStyle(DS.TypeScale.caption)
                         .foregroundStyle(DS.Color.textTertiary.color)
-                        .frame(width: 72, alignment: .trailing)
+                        .frame(width: 88, alignment: .trailing)
                     Text(row.afterText).dsStyle(DS.TypeScale.callout).fontWeight(.semibold)
                         .foregroundStyle(rowTint(row).color)
-                        .frame(width: 72, alignment: .trailing)
+                        .frame(width: 88, alignment: .trailing)
                 }
                 .frame(minHeight: 26)
             }
@@ -718,17 +672,110 @@ public struct SmoothingPage: View {
     }
 
     // MARK: bottom-right cluster — the same button shapes as the other two pages
+    //
+    // BAR U3, VERBATIM: "Discard" and "Lattice this" go ABOVE "Re-certify", and
+    // "Keep smoothing" is deleted — "that's stupid. They just keep smoothing if
+    // they want to keep smoothing." A successful re-certification now IS the
+    // keep (`SmoothingPageModel.recertify`), so nothing about what travels
+    // downstream changed; only the second press is gone.
+    //
+    // BAR U4: the receipt is a DRAWER above Re-certify, not a permanent panel.
+    // It sits in this same column so it opens over the page's own dead space
+    // rather than over the model or the brush panel.
 
-    private var bottomRightCluster: some View {
+    private func bottomRightCluster(maxDrawerHeight: CGFloat) -> some View {
         let a = actions
-        return HStack(spacing: PageChrome.gap) {
-            actionButton(a.discard, action: onDiscard)
-            actionButton(a.sendToLattice, action: onSendToLattice)
-            actionButton(a.keep, action: onKeep)
-            actionButton(a.recertify, action: onRecertify)
+        return VStack(alignment: .trailing, spacing: PageChrome.gap) {
+            if page.receiptOpen, let r = page.receipt ?? page.staleReceipt {
+                // CAPPED AND SCROLLABLE. The receipt grows with its footnotes,
+                // and a drawer that grows past the top of the screen would push
+                // the buttons off the bottom — which is the overlap this drawer
+                // exists to avoid, arriving from the other direction.
+                Group {
+                    if staticRender {
+                        receiptCard(r)
+                    } else {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            receiptCard(r)
+                        }
+                        .frame(maxHeight: max(maxDrawerHeight, 1))
+                    }
+                }
+                .frame(width: PageChrome.receiptDrawerWidth)
+            }
+            HStack(spacing: PageChrome.gap) {
+                actionButton(a.discard, action: onDiscard)
+                actionButton(a.sendToLattice, action: onSendToLattice)
+            }
+            HStack(spacing: PageChrome.gap) {
+                receiptToggle
+                actionButton(a.recertify, action: onRecertify)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
         .padding(.trailing, PageChrome.edge).padding(.bottom, PageChrome.edge)
+    }
+
+    /// The drawer's handle. Disabled with a reason when there is no receipt to
+    /// open — the page's own rule for every other control.
+    private var receiptToggle: some View {
+        let has = page.receipt != nil || page.staleReceipt != nil
+        return Button {
+            guard has else { return }
+            page.receiptOpen.toggle()
+        } label: {
+            VStack(spacing: 2) {
+                Text("Receipt").dsStyle(DS.TypeScale.headline)
+                Text(has ? (page.receiptOpen ? "hide the numbers"
+                                             : "before and after, both measured")
+                         : "re-certify to get one")
+                    .font(.system(size: 11.5, weight: .semibold)).opacity(0.72)
+                    .lineLimit(2).multilineTextAlignment(.center)
+            }
+            .foregroundStyle((has ? DS.Color.textPrimary : DS.Color.textDisabled).color)
+            .padding(.horizontal, DS.Space.xl4).frame(height: PageChrome.actionButton)
+            .background(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                .fill(has ? DS.Surface.panel.color : DS.Color.fillDisabled.color)
+                .overlay(RoundedRectangle(cornerRadius: DS.Radius.panelSmall)
+                    .strokeBorder(DS.Color.strokeSubtle.color, lineWidth: 1)))
+            .dsShadow(DS.Shadow.panel)
+        }
+        .buttonStyle(.plain)
+        .disabled(!has)
+        .accessibilityLabel("Receipt")
+        .accessibilityValue(page.receiptOpen ? "open" : "closed")
+    }
+
+    /// THE ONE STANDING NOTICE (bar U6). Shown on entry, dismissed with OK, and
+    /// then the page has no explanatory text standing at all.
+    private func entryNotice() -> some View {
+        VStack(alignment: .leading, spacing: DS.Space.ml) {
+            HStack(spacing: DS.Space.m) {
+                Image(systemName: "lock.fill").font(.system(size: 15, weight: .bold))
+                    .foregroundStyle(DS.Color.okGreen.color)
+                Text(SmoothingPageModel.entryNotice).dsStyle(DS.TypeScale.body)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button { page.dismissEntryNotice() } label: {
+                Text("OK").dsStyle(DS.TypeScale.headline)
+                    .foregroundStyle(DS.Color.textPrimary.color)
+                    .padding(.horizontal, DS.Space.xl4)
+                    .frame(height: PageChrome.compactButton)
+                    .background(RoundedRectangle(cornerRadius: DS.Radius.control)
+                        .fill(DS.Color.accent.color))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("OK")
+        }
+        .padding(DS.Space.xl)
+        .frame(maxWidth: 460, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: DS.Radius.panel)
+            .fill(DS.Surface.sheet.color)
+            .overlay(RoundedRectangle(cornerRadius: DS.Radius.panel)
+                .strokeBorder(DS.Color.strokePanel.color, lineWidth: 1)))
+        .dsShadow(DS.Shadow.panel)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func actionButton(_ a: SmoothPageActions.Action,

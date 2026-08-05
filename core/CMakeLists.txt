@@ -1367,6 +1367,19 @@ if(OpenCASCADE_FOUND)
   target_compile_definitions(smooth_mesh_identity_probe PRIVATE
     MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh")
 
+  # V1/V2 (task 2026-08-04-smoothing-viewer-and-ui): does the app's mesh-upload
+  # signature (counts + bounds) separate a brushed-smoothed mesh from its input,
+  # and is mesh mass computed from the smoothed mesh? Prints a table, writes
+  # evidence. A harness, not a ctest.
+  #   cmake --build build --target smooth_viewer_identity_probe
+  #   ./build/smooth_viewer_identity_probe [mesh] [res] [evidence_dir]
+  add_executable(smooth_viewer_identity_probe EXCLUDE_FROM_ALL
+    tests/harness/smooth_viewer_identity_probe.cpp)
+  target_link_libraries(smooth_viewer_identity_probe PRIVATE topopt)
+  target_compile_definitions(smooth_viewer_identity_probe PRIVATE
+    MESH_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mesh"
+    MATERIALS_JSON_PATH="${CMAKE_CURRENT_SOURCE_DIR}/src/materials/materials.json")
+
   # STEP face -> voxel tagging test (M1.6). Drives the STEP cube fixture, so it
   # needs OCCT to import the solid and read its per-face triangulation.
   add_executable(test_tag tests/unit/test_tag.cpp)

@@ -453,10 +453,15 @@ private let idBackground: UInt32 = .max
 
 /// A lightweight signature so the representable re-uploads/re-frames only when a
 /// genuinely different mesh arrives (ViewerMesh is a big value type).
-private func meshSignature(_ mesh: ViewerMesh) -> [Float] {
-    [Float(mesh.vertexCount), Float(mesh.triangleCount),
-     mesh.bounds.min.x, mesh.bounds.min.y, mesh.bounds.min.z,
-     mesh.bounds.max.x, mesh.bounds.max.y, mesh.bounds.max.z]
+///
+/// This USED to be `(vertexCount, triangleCount, bounds)`, and that is the bug
+/// task 2026-08-04-smoothing-viewer-and-ui was opened on: a smoothed mesh has the
+/// same counts and — unless the brush happened to reach the part's outermost
+/// corner — the same bounding box, so the upload was skipped and the viewer went
+/// on drawing the unsmoothed shape. `ViewerMesh.signature` reads the mesh's own
+/// contents and is computed once at construction, so this stays a scalar compare.
+private func meshSignature(_ mesh: ViewerMesh) -> ViewerMeshSignature {
+    mesh.signature
 }
 
 // ---------------------------------------------------------------------------
@@ -2152,12 +2157,25 @@ struct MeshViewInputs {
     /// Paint mode: a brush sample at `centerPoint` (view points, top-left, y-down) with its phase.
     /// The workspace resolves the covered triangles (`BrushHitTest`) and applies the stroke; on
     /// `.ended` it persists the sidecar. nil disables painting.
-    var onBrush: ((CGPoint, BrushPhase) -> Void)? = nil
+    var onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)? = nil
+    /// The brush has been given to the PENCIL (bar U2): a finger drag orbits
+    /// instead of painting. The pencil is unaffected.
+    var brushRequiresPencil: Bool = false
 }
 
 /// The phase of a paint brush sample (handoff 2026-07-25): a stroke runs `.began` → `.moved`* →
 /// `.ended`; a single tap in paint mode is a `.began` immediately followed by `.ended`.
 public enum BrushPhase: Sendable { case began, moved, ended }
+
+/// WHICH KIND OF CONTACT a brush sample came from (task 2026-08-04, bar U2).
+///
+/// The smoothing page's "Pencil only" needs to tell a finger from a pencil, and
+/// guessing from touch counts cannot: a pencil is always one contact. So the view
+/// mounts a SEPARATE pan recognizer per `UITouch.TouchType` — the two allowed-type
+/// sets are disjoint, so exactly one of them can claim any given drag — and each
+/// reports which one it is. On macOS there is no pencil, so every sample is
+/// `.finger` and the smoothing page's toggle simply never withholds anything.
+public enum BrushInput: Sendable { case finger, pencil }
 
 /// A pending detent face-highlight pulse (item 2): which part face to flash, and a token that
 /// advances on every fresh snap so the coordinator can tell a NEW snap from an unchanged input.
@@ -2190,7 +2208,8 @@ public struct MetalMeshView: UIViewRepresentable {
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
                 detentPulse: DetentPulse? = nil,
                 paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
-                onBrush: ((CGPoint, BrushPhase) -> Void)? = nil) {
+                onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)? = nil,
+                brushRequiresPencil: Bool = false) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
@@ -2202,7 +2221,8 @@ public struct MetalMeshView: UIViewRepresentable {
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
-            paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush)
+            paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush,
+            brushRequiresPencil: brushRequiresPencil)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -2212,6 +2232,16 @@ public struct MetalMeshView: UIViewRepresentable {
         configure(view, context: context)
         let pan = UIPanGestureRecognizer(target: context.coordinator,
                                          action: #selector(Coordinator.handlePan(_:)))
+        // ONE RECOGNIZER PER CONTACT KIND (bar U2). The allowed-type sets are
+        // disjoint and exhaustive over what an iPad can produce, so every drag is
+        // claimed by exactly one of these two and each knows what it is.
+        pan.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue),
+                                 NSNumber(value: UITouch.TouchType.indirect.rawValue)]
+        let pencilPan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePencilPan(_:)))
+        pencilPan.allowedTouchTypes =
+            [NSNumber(value: UITouch.TouchType.pencil.rawValue)]
         let pinch = UIPinchGestureRecognizer(target: context.coordinator,
                                              action: #selector(Coordinator.handlePinch(_:)))
         let tap = UITapGestureRecognizer(target: context.coordinator,
@@ -2236,6 +2266,7 @@ public struct MetalMeshView: UIViewRepresentable {
         undoTap.delegate = context.coordinator
         redoTap.delegate = context.coordinator
         view.addGestureRecognizer(pan)
+        view.addGestureRecognizer(pencilPan)
         view.addGestureRecognizer(pinch)
         view.addGestureRecognizer(tap)
         view.addGestureRecognizer(undoTap)
@@ -2267,7 +2298,8 @@ public struct MetalMeshView: NSViewRepresentable {
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
                 detentPulse: DetentPulse? = nil,
                 paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
-                onBrush: ((CGPoint, BrushPhase) -> Void)? = nil) {
+                onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)? = nil,
+                brushRequiresPencil: Bool = false) {
         inputs = MeshViewInputs(mesh: mesh, camera: camera, selection: selection, faceTints: faceTints,
             settleRotation: settleRotation, settleAnimated: settleAnimated, showGround: showGround,
             faceToolActive: faceToolActive, onPickFace: onPickFace, onMiss: onMiss,
@@ -2279,7 +2311,8 @@ public struct MetalMeshView: NSViewRepresentable {
             clearanceVolumes: clearanceVolumes,
             loadFlowVertices: loadFlowVertices, loadFlowKey: loadFlowKey,
             loadFlowGuides: loadFlowGuides, bodyAlpha: bodyAlpha, detentPulse: detentPulse,
-            paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush)
+            paintActive: paintActive, paintFaceIDs: paintFaceIDs, onBrush: onBrush,
+            brushRequiresPencil: brushRequiresPencil)
     }
 
     public func makeCoordinator() -> Coordinator { Coordinator() }
@@ -2337,7 +2370,7 @@ extension MetalMeshView {
         private var cameraModel: OrbitCameraModel?
         private var cameraCancellable: AnyCancellable?
         private weak var boundView: MTKView?
-        private var appliedSignature: [Float]?
+        private var appliedSignature: ViewerMeshSignature?
         private var appliedTint: TintKey?
         private var lastSettleVector: SIMD4<Float>?
         /// M7.8: whether a stress overlay is currently uploaded, and the last reveal.
@@ -2376,7 +2409,8 @@ extension MetalMeshView {
         private var onRedo: (() -> Void)?
         /// Paint mode (handoff 2026-07-25): when on, a one-finger drag paints; two fingers orbit.
         private var paintActive = false
-        private var onBrush: ((CGPoint, BrushPhase) -> Void)?
+        private var onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)?
+        private var brushRequiresPencil = false
         /// The effective face ids last uploaded (native + painted overrides), so the id/tint buffers
         /// rebuild only when the paint overlay actually changes.
         private var appliedPaintFaceIDs: [Int32]?
@@ -2395,6 +2429,7 @@ extension MetalMeshView {
             onRedo = inputs.onRedo
             paintActive = inputs.paintActive
             onBrush = inputs.onBrush
+            brushRequiresPencil = inputs.brushRequiresPencil
 
             var dirty = false
             let sig = inputs.mesh.map(meshSignature)
@@ -2685,19 +2720,45 @@ extension MetalMeshView {
         }
 
         #if os(iOS)
+        /// THE PENCIL'S OWN PAN (bar U2). Mounted with
+        /// `allowedTouchTypes = [.pencil]`, so it is the only recognizer a pencil
+        /// drag can drive and the finger pan is the only one a finger can — the
+        /// two sets are disjoint, which is what makes "which contact was this?" a
+        /// fact rather than an inference from touch counts (a pencil is always
+        /// exactly one contact, so counting could never have answered it).
+        ///
+        /// A pencil ALWAYS paints while the brush is armed, whatever
+        /// `brushRequiresPencil` says — that toggle withholds the FINGER, never
+        /// the pencil.
+        @objc func handlePencilPan(_ g: UIPanGestureRecognizer) {
+            guard let view = g.view as? MTKView, paintActive else { return }
+            let loc = g.location(in: view)
+            switch g.state {
+            case .began: onBrush?(loc, .began, .pencil)
+            case .changed: onBrush?(loc, .moved, .pencil)
+            default: onBrush?(loc, .ended, .pencil)
+            }
+        }
+
         @objc func handlePan(_ g: UIPanGestureRecognizer) {
             guard let view = g.view as? MTKView else { return }
 
             // Paint mode (handoff 2026-07-25): a ONE-finger drag PAINTS (the brush follows the
             // finger); TWO fingers ORBIT so the camera stays drivable mid-paint. Outside paint mode
             // the gestures are unchanged (one finger orbits, two fingers pan).
-            if paintActive {
+            //
+            // …UNLESS THE BRUSH HAS BEEN GIVEN TO THE PENCIL (task 2026-08-04,
+            // bar U2). Then a finger never brushes and this whole branch is
+            // skipped, so the drag falls through to the ordinary camera gestures
+            // below — one finger orbits. That fall-through IS the guarantee: the
+            // page always has a single-finger orbit without a mode to switch.
+            if paintActive, !brushRequiresPencil {
                 if g.numberOfTouches <= 1 {
                     let loc = g.location(in: view)
                     switch g.state {
-                    case .began: onBrush?(loc, .began)
-                    case .changed: onBrush?(loc, .moved)
-                    default: onBrush?(loc, .ended)   // ended / cancelled / failed close the stroke
+                    case .began: onBrush?(loc, .began, .finger)
+                    case .changed: onBrush?(loc, .moved, .finger)
+                    default: onBrush?(loc, .ended, .finger)   // ended / cancelled / failed close the stroke
                     }
                     return
                 }
@@ -2749,8 +2810,8 @@ extension MetalMeshView {
             // Paint mode: a single tap paints a dab (a began→ended stroke at one point). Outside
             // paint mode a tap picks a face (tap-select is unchanged).
             if paintActive {
-                onBrush?(loc, .began)
-                onBrush?(loc, .ended)
+                onBrush?(loc, .began, .finger)
+                onBrush?(loc, .ended, .finger)
                 return
             }
             pick(at: loc, in: view)
@@ -2841,12 +2902,23 @@ public struct MetalMeshView: View {
                 loadFlowGuides: [Float]? = nil, bodyAlpha: Float = 1,
                 detentPulse: DetentPulse? = nil,
                 paintActive: Bool = false, paintFaceIDs: [Int32]? = nil,
-                onBrush: ((CGPoint, BrushPhase) -> Void)? = nil) {}
+                onBrush: ((CGPoint, BrushPhase, BrushInput) -> Void)? = nil,
+                brushRequiresPencil: Bool = false) {}
     public var body: some View { DS.Color.background.color }
 }
 
 /// The paint brush phase — the non-Metal stub mirror so call sites compile on every platform.
 public enum BrushPhase: Sendable { case began, moved, ended }
+
+/// WHICH KIND OF CONTACT a brush sample came from (task 2026-08-04, bar U2).
+///
+/// The smoothing page's "Pencil only" needs to tell a finger from a pencil, and
+/// guessing from touch counts cannot: a pencil is always one contact. So the view
+/// mounts a SEPARATE pan recognizer per `UITouch.TouchType` — the two allowed-type
+/// sets are disjoint, so exactly one of them can claim any given drag — and each
+/// reports which one it is. On macOS there is no pencil, so every sample is
+/// `.finger` and the smoothing page's toggle simply never withholds anything.
+public enum BrushInput: Sendable { case finger, pencil }
 
 /// A pending detent face-highlight pulse (item 2) — the non-Metal stub mirror of the MetalKit
 /// declaration so call sites compile on every platform.

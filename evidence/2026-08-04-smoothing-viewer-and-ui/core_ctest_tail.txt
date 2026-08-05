@@ -1,0 +1,28 @@
+2 warnings generated.
+[100%] Linking CXX executable test_designbox_lattice_recert
+[100%] Built target test_designbox_lattice_recert
+ 96/106 Test  #96: clearance_parity .................   Passed   19.09 sec
+        Start  97: face_protection_parity
+ 97/106 Test  #97: face_protection_parity ...........   Passed   31.05 sec
+        Start  98: loadcase_small_face
+ 98/106 Test  #98: loadcase_small_face ..............   Passed    0.53 sec
+        Start  99: loadcase_resolution
+ 99/106 Test  #99: loadcase_resolution ..............   Passed    0.46 sec
+        Start 100: loadcase_analyze
+100/106 Test #100: loadcase_analyze .................   Passed    1.43 sec
+        Start 101: lattice_hookup
+101/106 Test #101: lattice_hookup ...................   Passed   12.01 sec
+        Start 102: protect_freeze_vs_solidity
+102/106 Test #102: protect_freeze_vs_solidity .......   Passed  323.98 sec
+        Start 103: lattice_variant
+103/106 Test #103: lattice_variant ..................   Passed   12.71 sec
+        Start 104: designbox_lattice_recert
+104/106 Test #104: designbox_lattice_recert .........   Passed    3.57 sec
+        Start 105: selfweight_clearance_void
+105/106 Test #105: selfweight_clearance_void ........   Passed    3.50 sec
+        Start 106: mesh_job
+106/106 Test #106: mesh_job .........................   Passed    6.52 sec
+
+100% tests passed out of 106
+
+Total Test time (real) = 1697.01 sec

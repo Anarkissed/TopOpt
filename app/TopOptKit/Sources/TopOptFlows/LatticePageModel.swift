@@ -426,17 +426,11 @@ public enum LatticeChromeLayout {
 /// a DIFFERENT note replacing it, or after `lifetime` seconds — never a caption
 /// that persists until something else overwrites it. Pure value + a tiny clock
 /// seam so the timeout rule is headlessly testable.
-public struct LatticeTransientNote: Equatable, Sendable {
-    public let text: String
-    public let postedAt: Date
-    public init(text: String, postedAt: Date) {
-        self.text = text
-        self.postedAt = postedAt
-    }
-    /// How long a note lives without interaction (task: 60 s).
-    public static let lifetime: TimeInterval = 60
-    public func expired(now: Date) -> Bool { now.timeIntervalSince(postedAt) >= Self.lifetime }
-}
+/// The lattice page's name for the ONE transient-note type every full-screen page
+/// now shares — `PageTransientNote` in `PageChrome.swift`. Kept as an alias so
+/// this page and its tests are untouched by the move (task 2026-08-04, bar U5:
+/// the maintainer's third ask for this rule, answered once instead of per page).
+public typealias LatticeTransientNote = PageTransientNote
 
 /// The page's live state: which pane, whether the shared Selections library /
 /// review drawer are up, the transient note. Pure navigation — every derived

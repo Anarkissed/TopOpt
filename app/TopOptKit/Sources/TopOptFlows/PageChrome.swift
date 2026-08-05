@@ -17,7 +17,65 @@
 // lattice page already use; this file only gives them one home.
 
 import CoreGraphics
+import Foundation
 import TopOptDesign
+
+/// THE TRANSIENT TOP-CENTRE NOTE, for every full-screen page (task
+/// 2026-08-04-smoothing-viewer-and-ui, bar U5).
+///
+/// THE THIRD ASK. The maintainer has now asked three times for the same thing:
+/// round-3 lattice feedback, then the lattice page (which got `LatticeTransientNote`),
+/// and now the smoothing page, which had drifted into THREE overlapping notices
+/// stacked at the top of the screen at once. The first two answers were local, so
+/// the third page had nothing to inherit and invented its own.
+///
+/// The rule, in one place, so a fourth page inherits it:
+///
+///   1. ONE AT A TIME. Posting replaces whatever is up; there is no stack.
+///   2. TOP-CENTRE, and never underneath the left panel — `SmoothingPage` and
+///      `LatticePage` both mount it in their top-centre column, which the panel
+///      does not reach into in either orientation (asserted from the tokens).
+///   3. AUTO-DISMISSING after at most `lifetime`, and dismissible by tap before
+///      that.
+///
+/// `LatticeTransientNote` is an alias, so the lattice page and its tests keep
+/// their exact names and behaviour while there is only one definition.
+public struct PageTransientNote: Equatable, Sendable {
+    public let text: String
+    public let postedAt: Date
+    public init(text: String, postedAt: Date) {
+        self.text = text
+        self.postedAt = postedAt
+    }
+    /// How long a note lives without interaction. The maintainer's ceiling is 60 s
+    /// ("auto-dismissing after at most 60 seconds"), and this is that number for
+    /// every page at once.
+    public static let lifetime: TimeInterval = 60
+    public func expired(now: Date) -> Bool {
+        now.timeIntervalSince(postedAt) >= Self.lifetime
+    }
+}
+
+/// One note, posted / dismissed / expired by the same three calls on every page.
+/// A `struct` the page models hold, rather than three copies of the same three
+/// methods.
+public struct PageNoteBox: Equatable, Sendable {
+    public private(set) var note: PageTransientNote?
+    public init() {}
+
+    /// Post a note. A different note REPLACES the current one (rule 1); posting
+    /// the same text refreshes its clock.
+    public mutating func post(_ text: String, now: Date = Date()) {
+        note = PageTransientNote(text: text, postedAt: now)
+    }
+    /// Tap-to-dismiss (rule 3).
+    public mutating func dismiss() { note = nil }
+    /// Expire after the lifetime (rule 3). The view calls this on a timer; tests
+    /// call it with an explicit clock.
+    public mutating func tick(now: Date = Date()) {
+        if let n = note, n.expired(now: now) { note = nil }
+    }
+}
 
 public enum PageChrome {
 
@@ -50,6 +108,10 @@ public enum PageChrome {
     public static let infoBar: CGFloat = 40
     /// The side panel's width.
     public static let panelWidth: CGFloat = 348
+    /// The bottom-right receipt drawer's width (bar U4). Wider than the side
+    /// panel because the receipt is a three-column table, and it opens over the
+    /// page's own empty right-hand space rather than over the model.
+    public static let receiptDrawerWidth: CGFloat = 420
 
     // MARK: - the position gizmo (AE7's "always in the same place")
 
@@ -67,7 +129,53 @@ public enum PageChrome {
 
     // MARK: - derived
 
-    /// Clearance a bottom-anchored panel needs above the bottom-right action
-    /// cluster — DERIVED from the tokens above rather than a magic number.
-    public static var panelBottomClearance: CGFloat { edge + actionButton + gap }
+    /// Clearance a bottom-anchored panel needs above a bottom-right action
+    /// cluster of `actionRows` rows — DERIVED from the tokens above rather than a
+    /// magic number.
+    ///
+    /// THE ROW COUNT IS A PARAMETER because the smoothing page's cluster became
+    /// TWO rows (bar U3 put Discard and Lattice this above Re-certify), and the
+    /// one-row constant left its portrait panel running underneath them. A
+    /// clearance that silently assumes one row is a clearance that stops being
+    /// one the moment a page adds a button.
+    public static func panelBottomClearance(actionRows: Int) -> CGFloat {
+        edge + (actionButton + gap) * CGFloat(max(actionRows, 1))
+    }
+
+    /// The one-row case — the lattice page's cluster, and this token's original
+    /// value, unchanged.
+    public static var panelBottomClearance: CGFloat {
+        panelBottomClearance(actionRows: 1)
+    }
+
+    /// The height of a page's top-left identity stack: the title bar, then the
+    /// "working on" bar, then the load-case bar, with a gap between each.
+    public static var topRowsHeight: CGFloat {
+        barHeight + gap + infoBar + gap + infoBar
+    }
+
+    /// WHERE THE TOP-CENTRE NOTE SITS (task 2026-08-04, bars U5/B4).
+    ///
+    /// Not at `topInset`. A note centred in the FULL width shares that row with
+    /// the top-left identity stack and the top-right tabs, and on a portrait iPad
+    /// — 1024 pt wide, with a 620 pt note — the three do not fit: the note lands
+    /// on top of the title bar and the tabs, which is one of the overlaps the
+    /// maintainer has been reporting.
+    ///
+    /// Dropping it BELOW those rows makes the clearance a property of the layout
+    /// rather than of the canvas width: there is nothing else on that band at any
+    /// size, in either orientation, so no width can make them collide.
+    public static var noteTop: CGFloat { topInset + topRowsHeight + gap }
+
+    /// How wide a top-centre note may be on a canvas `width` points across.
+    ///
+    /// The gizmo is 210 pt square and sits in the absolute top-right corner, so a
+    /// note centred in the full width has to stop short of `gizmoClearance` on
+    /// BOTH sides to stay centred and stay clear. On a portrait iPad that binds
+    /// (1024 − 2 × 226 = 572, under the 620 cap); on a landscape one it does not.
+    /// Derived rather than picked, so a different gizmo size cannot silently
+    /// reintroduce the overlap.
+    public static func noteWidth(for width: CGFloat, cap: CGFloat) -> CGFloat {
+        max(min(cap, width - gizmoClearance * 2), 0)
+    }
 }
