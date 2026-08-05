@@ -33,22 +33,29 @@ night gone.
 The same job now stops before the first solve and tells you the arithmetic:
 
 ```
-every declared lattice include region is too thin to hold a certifiable lattice
-at this cell size, so this run cannot put lattice anywhere you asked for it —
-refusing before spending a solve.
-  regions declared (include): 7, all of them too thin
-  planned cell: 8 mm; cells-per-member floor 5 => required member 40 mm
-  thinnest declared region: 4 mm
-  NO (cell, density) PAIR IN THE CERTIFIABLE BAND FITS THIS THICKNESS AT THIS NOZZLE.
-    smallest cell any certifiable strut prints at (0.42 mm bead): 1.094961872 mm
-    largest cell a 4 mm member can homogenize: 0.8 mm
-    the two bounds cross, so no cell satisfies both.
-  WHAT WOULD CHANGE THE ANSWER (your call, not this pipeline's):
-    * thicken the region to at least 5.474809359 mm; or
-    * use a nozzle/bead of at most 0.30686 mm; or
-    * dress the region with a SKIN instead of a lattice — an option offered
-      here, never substituted automatically.
+the planned lattice cell is too COARSE for the regions you declared: the strut
+network would not be connected there, so this run would emit loose fragments
+rather than a lattice — refusing before spending a solve.
+  regions declared (include): 7, thinnest 4 mm
+  planned cell 8 mm gives 0.5 cells across that region; a connected network
+  needs at least 1.
+  A SMALLER CELL WORKS. At a 0.42 mm bead this region admits cells from
+  1.094961872 mm (printability) up to 4 mm (percolation).
+    Set "cell_mm" in the lattice block to a value in that range.
+  NOTE — a lattice in that range will be CONNECTED but NOT CERTIFIED: this
+  region needs 5.474809359 mm to clear the cells-per-member accuracy floor and
+  has 4 mm. The margin over it is out of regime. That is what
+  "retain_subfloor_in_unloaded_regions" is for — read the exposure it reports
+  before arming it.
+  To proceed anyway with lattice OUTSIDE your declared regions, remove the
+  include regions from the lattice block — but read the receipt first: this run
+  would have put every cell in material you did not select.
 ```
+
+Note what that message does **not** say: it does not tell you to use
+`cell_mode: "auto"`, and it does not offer you a skin. Both were in the first
+version and both were wrong — AUTO lands you straight back in the same refusal,
+and a skin emits nothing at all on your geometry. See §M2.
 
 **The "23 mm member" you were told you needed was a conditional number and the
 condition was never stated.** It is 5 x the printability floor evaluated at the
@@ -57,15 +64,43 @@ lightest density. Evaluated at the density a member can actually carry, the same
 arithmetic gives **5.47 mm**, not 23 mm. Both numbers now come out of one core
 function instead of one of them being folded into a floor nobody could see into.
 
-**But this does not rescue your part, and I am not going to imply it does.** At
-your run's density and your 0.45 mm line width the requirement lands at 5.87 mm.
-You have 4 mm. The derivation takes you from **10x short to 1.47x short**. It
-does not close the gap. What closes it is 5.9 mm of wall, or a 0.31 mm nozzle.
+**★ THE DERIVATION REPORTS. IT DOES NOT YET PLAN.** (M3.) This is the most
+important caveat on this branch and it was missing from the first version of this
+handoff. `lattice_derive_cell_for_member` is called in exactly three places
+outside its own tests — the Stage E report (`run_job.cpp:2249`, `:2251`) and the
+refusal/advice messages (`:5504` and the pre-flight note). **It never feeds cell
+selection.** AUTO still picks `lattice_cell_printability_floor_mm`, the rho_min
+floor; SWEPT still raises its minimum to that same floor. So nothing on this
+branch actually builds an 8 mm wall at a 1.6 mm cell. What it does is *tell you
+the number*, and now refuse or warn instead of wasting a night. Setting `cell_mm`
+by hand to the number it gives you does work — measured, §3.
 
-Three more things are wrong with that run and are **diagnosed but not fixed** —
-read §B2, §B3 and §B5 before you run anything: lattice is landing outside your
-declared regions by construction, `skin: "rim"` is a silent no-op on your
-geometry, and the shipped mesh carries loose fragments.
+**★ AND YOUR 4 mm WALL IS NOT UN-LATTICEABLE. IT IS UN-CERTIFIABLE.** (M8c.)
+Those are different, and the first version of this branch collapsed them. There
+are TWO floors, not one:
+
+- **Percolation, ~1 cell** — below it the struts do not connect and the generator
+  emits debris. This is a real floor and it now has a name in core.
+- **Accuracy, 5 cells** — below it the homogenized tensor stops describing the
+  member, so the *certificate* is out of regime. **The part still prints.**
+
+At your 0.45 mm line width your 4 mm wall sits at **3.41 cells** across the
+finest printable cell: comfortably above percolation, well below accuracy. So it
+*can* be built, at a cell around 1.17 mm, and the margin over it will be out of
+regime. That is what `retain_subfloor_in_unloaded_regions` exists for. The run
+now says exactly this instead of refusing you outright.
+
+**What it still does not do:** give you a *certified* lattice in a 4 mm wall. For
+that the requirement is 5.87 mm at your line width. The derivation takes you from
+**10x short to 1.47x short** on the certified path, and to *already satisfied* on
+the buildable-but-uncertified path.
+
+Three more things are wrong with that run — read §B2, §B4 and §B5 before you run
+anything: lattice is landing outside your declared regions by construction, no
+per-region emitted-cell receipt exists on the path you used, and the shipped mesh
+carries loose fragments. `skin: "rim"` was a silent no-op on your geometry; it
+now **refuses** instead (§7, §M4), which is why the refusal message no longer
+offers you a skin.
 
 ---
 
@@ -392,18 +427,37 @@ did not have budget to run.
 per the amendment's own blocked-stop.** Full write-up in
 `evidence/.../b3_rim_root_cause.md`.
 
-The rim is emitted **only where two ANALYTIC boundary faces meet**
-(`emit_rim_edge`, `core/src/mesh/lattice_gen.cpp:598-666`, indexes
-`B->faces()`). `faces_` is populated in exactly two places
-(`core/src/mesh/lattice_boundary.cpp:122` for planes, `:160` for **bolt** bores
-only). But `lattice_boundary_for` (`core/src/cli/run_job.cpp:568-586`) builds the
-boundary from `set_voxel_base` plus keep-outs plus roles, and **never calls
-`add_half_space` or `add_box`**; roles are documented to contribute no analytic
-faces (`core/include/topopt/lattice_boundary.hpp:242-245`).
+**★ TWO CORRECTIONS to the first version of this section, both found by measuring
+M4 rather than by re-reading.** The function is `emit_rim_line`, not
+`emit_rim_edge` (I mis-transcribed the name). And the scope is **wider** than
+stated: it is not "voxel-derived parts *without bolt clearances*", it is **every
+run through `lattice_boundary_for`**, bolt clearances or not.
 
-So on a voxel-derived design with no bolt clearances — his run exactly —
-`faces_` is empty, there are no face pairs, and the rim, the skin and the anchor
-nodes are all structurally unreachable. That is one cause for all four zeros.
+The rim dispatch is `core/src/mesh/lattice_gen.cpp:944-961`. It walks face PAIRS
+and emits only for:
+
+- **Plane-Plane** → `emit_rim_line` (defined `:598-666`)
+- **Plane-Bore**, collar only → `emit_rim_torus` (defined `:676`)
+- **Bore-Bore** → nothing; the code says so: *"bore-bore pairs meet nowhere a rim
+  can ride"*
+
+So **every emitting pair needs at least one PLANE.** Planes enter `faces_` only
+via `add_half_space` (`core/src/mesh/lattice_boundary.cpp:122`); `add_keep_out`
+(`:160`) contributes a **Bore**, and only for `ClearanceKind::Bolt`. And
+`lattice_boundary_for` (`core/src/cli/run_job.cpp:568-586`) builds the boundary
+from `set_voxel_base` + keep-outs + roles and **never calls `add_half_space` or
+`add_box`**; roles contribute no analytic faces
+(`core/include/topopt/lattice_boundary.hpp:242-245`).
+
+**Therefore no run on this path can emit rim or skin geometry at all.** Measured,
+not argued (`m4_blast_radius.txt` case 2): adding a bolt clearance makes `faces()`
+non-empty — so the original `faces().empty()` guard stayed silent — and
+`rim_triangles` is *still* 0. That is one cause for all four of his zeros, and it
+is why the guard had to change (§M4).
+
+This also corroborates an existing finding: handoff
+`2026-08-03-variant-postprocessing-fix` already recorded the rim as
+"proven un-emittable". This branch establishes *why*, with the dispatch line.
 
 Closing it needs either fitting analytic faces to the voxel silhouette (which
 would also enter `clip_segment` and move interior clipping on every existing
@@ -460,6 +514,353 @@ fragments** — his current one carries between 4 and 128 of them depending on h
 you count.
 
 ---
+
+## 9b. Review of PR 298 — the two defects it found, and what changed
+
+### M1 — the refusal trigger used the very number this PR proved conditional
+
+**Root cause, file and line.** `core/src/cli/run_job.cpp:5405-5417` set
+`cell_mm` from `lattice_cell_printability_floor_mm`, which is evaluated at
+**rho_min**, then triggered on `thin_regions == include_regions` where "thin"
+meant `extent < n_star * cell_mm`. On a graded AUTO job that made the threshold
+5 x 4.6026 = **23.01 mm** — precisely the hidden condition §3 of this task takes
+apart, used as a refusal trigger inside the feature that exposes it.
+
+**Failing test first** (`m1_before.txt`), a graded AUTO job with three 6 mm
+include regions at a 0.42 mm bead — a size this task's own derivation calls
+feasible at 5.4748 mm:
+
+```
+exit=1
+[lattice] FORECAST: 3 of 3 include regions are thinner than the 23.013 mm the
+          floor requires (thinnest 6.000 mm; floor 5.0 cells x 4.6026 mm)
+topopt-cli: every declared lattice include region is too thin to hold a
+            certifiable lattice at this cell size...
+```
+
+That is a **new refusal on a path that previously ran**, which is exactly the
+R3 verdict-flip case.
+
+**The choice, stated.** Review offered (a) refuse only on genuine infeasibility
+or (b) keep refusing both but fix the threshold. **I took (a), extended by M8c
+into three cases**, because (b) still collapses two verdicts with different
+remedies:
+
+| Case | Condition | Outcome |
+|---|---|---|
+| A | No (cell, rho) clears **printability AND percolation** | **Refuse** — genuinely un-latticeable at any setting |
+| B | A pair exists, but the **planned cell** does not percolate | **Refuse**, distinct message — the *cell* is wrong; names the working range |
+| C | Planned cell percolates but is under the **accuracy** floor | **Proceed**, report loudly — buildable, uncertifiable; the sub-floor-retention regime |
+
+**Why B refuses rather than proceeds.** Proceeding is precisely what shipped him
+debris: 0.5 cells per member, 123 loose fragments, a night of solve. A run that
+one number in the job would fix should say that number, not print rubble.
+
+**What each does to an existing job.**
+- His 7x4 mm at an 8 mm cell: was case-"refuse-with-wrong-arithmetic", is now
+  **case B** — still refuses, now with the working cell range and an honest
+  "connected but not certified" note (`b1_after.txt`).
+- Graded AUTO at 6 mm: was **refused**, now **runs** (`m1_after.txt`, exit 0).
+- A job already producing usable lattice: untouched — none of A/B/C fires.
+
+**A fourth situation surfaced while testing and is now reported too.** At 6 mm
+the region is above the certifiable minimum (5.4748 mm) yet AUTO plans a
+4.6026 mm cell, so the grading law rejects every voxel and emits no lattice. That
+is M3 made concrete. Pre-flight now says so, and names the cell that works:
+
+```
+[lattice] NOTE: the thinnest declared include region (6.000 mm) IS thick enough
+for a CERTIFIED lattice — it needs 5.475 mm and has 6.000 mm — but the planned
+4.6026 mm cell puts only 1.30 cells across it, under the 5.00-cell accuracy
+floor, so the grading law will reject it and emit no lattice.
+        The cell is what is wrong, not the part. A cell of 1.2000 mm at relative
+density 0.5239 (strut 0.4200 mm) puts 5.00 cells across this region and
+certifies. Set "cell_mm" in the lattice block to that value.
+        ("cell_mode": "auto" will NOT do this — it selects the printability
+floor at the band's LIGHTEST density, 4.6026 mm, which is how you got here.)
+```
+
+### M2 — the message recommended the one thing that reproduces the refusal
+
+**Root cause.** `core/src/cli/run_job.cpp:5505-5525` told the user to
+`use "cell_mode": "auto"`. AUTO sets `cell_mm = floor_mm`, the rho_min floor —
+following that sentence lands straight back in the same refusal. Deleted.
+
+**Audit of every remaining remedy**, on the standard "must change the outcome":
+
+| Remedy | Verdict | Evidence |
+|---|---|---|
+| Set `cell_mm` into the named range | **Works** — measured | `m2_remedy_audit.txt`: same job at `cell_mm` 1.2 emits **7757 cells** (AUTO emitted 0), min cells/member 2.083, lattice accepted |
+| Thicken to `min_member_width_*` | **Sound** — derived so the bounds cannot cross; unit-tested monotonic in W | `test_grading` §14(b),(e) |
+| Nozzle at most X mm | **Sound** — inverse of the same arithmetic | `test_grading` §14(g) |
+| `cell_mode: "auto"` | **REMOVED** — reproduces the refusal | — |
+| Dress with a SKIN | **REMOVED, and named as unavailable** — emits nothing on voxel-derived parts, and now hard-refuses (§M4) | `m4_blast_radius.txt` |
+
+The skin is named as *unavailable* in the message rather than silently omitted,
+so nobody re-adds it.
+
+### M4 — the rim refusal, with its blast radius measured
+
+Landed at `core/src/cli/run_job.cpp`, top of `export_latticed_variant`: if
+`lat.skin != "none"` and `boundary.faces()` is empty, throw. Root cause unchanged
+from §7 (`lattice_gen.cpp:598-666` indexes face pairs; `faces_` filled only at
+`lattice_boundary.cpp:122` and `:160`; `lattice_boundary_for`
+`run_job.cpp:568-586` calls neither `add_half_space` nor `add_box`).
+
+**Blast radius measured, not argued** (`m4_blast_radius.sh` /
+`m4_blast_radius.txt`), base built from `origin/main` in a detached worktree, with
+the binaries-differ assertion first:
+
+- **Case 1 — voxel boundary, no bolt clearance (`faces()` empty).** Base
+  **exit 0** with `rim_triangles=0 skin_triangles=0 rim_volume_mm3=0
+  anchor_nodes=0` beside `interior_volume_mm3=74304.05`. Branch **exit 1** with
+  the new refusal. *The refusal takes exactly the runs that were producing
+  nothing.*
+- **Case 2 — the same job plus a BOLT clearance.** Intended as the "a run that
+  really does emit a rim is untouched" control. **It could not be constructed,
+  and finding that out changed the fix.** Base and branch both exit 0 with
+  identical counts — *both zero*: `rim_triangles=0 skin_triangles=0
+  anchor_nodes=0`. A bolt contributes a **Bore** face, and every emitting pair in
+  the dispatch needs a **Plane** (§7). So the control emits no rim, and the first
+  version of this script called that a PASS by comparing two zeros.
+
+**The bolt case is the one the original predicate silently MISSED.** With
+`faces()` non-empty (one Bore) the old guard stayed quiet while the run still
+shipped an undressed part — the exact defect it was written to close. With the
+measured-count predicate the same job now refuses. That is the single strongest
+argument for the replacement, and it came out of a control that was never a
+control.
+
+**Two consequences, and I did not accept the green result.**
+
+1. **The `faces().empty()` predicate was too narrow.** A bolt-clearance job has
+   `faces()` non-empty, emits zero rim, and the guard stayed silent — the exact
+   defect it was meant to close. **Replaced by the MEASURED emitted count**
+   (`rim_triangles + skin_triangles == 0`), checked at the call site in
+   `run_job.cpp` right after `export_latticed_variant` returns. That predicate's
+   blast radius is exact *by construction*: it cannot fire on a run that emitted
+   geometry, so it needs no control to prove it — which is fortunate, because no
+   such control exists on this code path.
+2. **The script now guards against its own vacuous pass** — it asserts the
+   control actually emitted rim triangles, and reports INCONCLUSIVE rather than
+   PASS when it did not.
+
+**FINAL RESULT — M4 PASS**, on two independent configurations
+(`m4_blast_radius.txt`), base built from `origin/main` in a detached worktree with
+the binaries-differ assertion first:
+
+```
+CASE 1 — voxel boundary, no clearance (faces() EMPTY)
+  base   exit=0   rim_triangles=0 skin_triangles=0 anchor_nodes=0
+                  interior_volume_mm3=74304.04617
+  branch exit=1   refuses, naming the count and the cause
+  PASS — base succeeded while emitting ZERO dressing; branch refuses exactly that.
+
+CASE 2 — same job + a BOLT clearance (faces() NON-EMPTY: one Bore)
+  base   exit=0   rim_triangles=0 skin_triangles=0 anchor_nodes=0
+                  interior_volume_mm3=69006.00792
+  branch exit=1
+  rim+skin triangles emitted by the control: 0
+  PASS — a SECOND configuration that asks for a rim and emits none; the branch
+         refuses it too. This is the case the ORIGINAL faces()-empty predicate
+         silently MISSED.
+
+STANDING NOTE: across BOTH configurations the control emitted ZERO rim/skin
+triangles. No job on this code path can emit rim geometry, because every emitting
+face pair needs a PLANE and lattice_boundary_for never makes one. So there is no
+run the guard could wrongly refuse.
+```
+
+That standing note is the whole justification for the predicate change: the
+`faces()`-empty version would need a rim-emitting control to be provable, and no
+such control can be constructed. The measured-count version needs none, because
+it cannot fire on a run that emitted something.
+
+It is a refusal and not a warning because `skin: "none"` is always available and
+silently shipping an undressed part is how this cost a night.
+
+### M5 — R1 byte-identity, run
+
+`m5_byte_identity.sh` / `m5_byte_identity.txt`, adapted from PR 295's harness
+including its ★ `topopt_cli`-vs-`topopt-cli` no-op trap and its
+assert-the-binaries-differ guard. **Split into four cases because they have
+different identity properties:**
+
+- **A — no lattice at all, base vs branch.** Must be byte-identical.
+- **B — graded lattice, no new key, a job that trips neither new refusal**
+  (`skin: "none"`, no include regions). Must be byte-identical. *This is the case
+  R1 is really about.*
+- **C — `report_region_cells` ON vs OFF, same binary.** Everything identical
+  except the `regions` block, which must differ.
+- **D — the two refusals, base vs branch.** Deliberately different; measured in
+  `b1_before/after`, `m1_before/after`, `m4_blast_radius`.
+
+The base is built from a detached worktree at `origin/main` =
+**`b3abcf88055402c728e57a1ff7d6af933b8a877b`** — the same commit as the
+fingerprint on his overnight run, so this compares against exactly the binary that
+produced the artifacts in §1.
+
+**First run: A PASSED, B and C were VACUOUS — the same trap as M4's case 2.**
+
+```
+A — NO LATTICE, base vs branch
+  IDENTICAL  report.json / fields.bin / design.bin / all four variant_*.stl
+  IDENTICAL  run_info.json (minus the named clock keys)
+  IDENTICAL  iterations.csv (physics columns)
+  A PASS
+```
+
+That result stands: **a run that does not lattice is byte-identical.**
+
+B and C did not. No `*_lattice.report.json` appears in either side, and C's own
+guard said so outright — *"UNEXPECTED: the regions block did not appear, so C
+tested nothing"*. **Cause:** the fixture used a 0.42 mm bead, which puts the
+printability floor at 4.6026 mm, so the accuracy floor needs 5 x 4.6026 =
+23.01 mm and the demo bracket's widest member is 20 mm. Nothing was ever
+latticed, so B compared two empty results and C had no receipt to add a block to.
+
+**Fixed and re-running:** the fixture drops to a 0.20 mm bead (floor 2.19 mm, five
+cells 11 mm, comfortably inside the part), and case B now **asserts the control
+actually emitted lattice receipts** before comparing — the guard that would have
+caught this the first time. The re-run also uses the FINAL binary, since the M4
+predicate changed after the first launch.
+
+**FINAL RESULT — M5 PASS**, on the corrected fixture and the final binary, with
+the positive control firing (`m5_byte_identity.txt`):
+
+```
+B — GRADED LATTICE, no new key, base vs branch
+  lattice receipts emitted by the control: 4        <- the positive control
+  IDENTICAL  report.json  e252d947356c4384…
+  IDENTICAL  fields.bin   18acc4290ea9ac4b…
+  IDENTICAL  design.bin   71f415355613b487…
+  IDENTICAL  variant_026.stl         fbc75559d19b7686…
+  IDENTICAL  variant_026_lattice.stl a5ddaf512240501c…
+  IDENTICAL  variant_038.stl         89990d50b22d9f2f…
+  IDENTICAL  variant_038_lattice.stl 8103b9764fbc97d3…
+  IDENTICAL  variant_052.stl         0e8a8f5a778a8909…
+  IDENTICAL  variant_052_lattice.stl 2df4a75b3373592c…
+  IDENTICAL  variant_068.stl         e8305a050da13dfd…
+  IDENTICAL  variant_068_lattice.stl 5ac82efde511c97a…
+  IDENTICAL  all four *_lattice.report.json
+  IDENTICAL  run_info.json (minus the named clock keys)
+  IDENTICAL  iterations.csv (physics columns)
+  B PASS
+
+C — report_region_cells ON vs OFF, same binary
+  IDENTICAL  everything above, and all four *_lattice.report.json
+             MINUS the Stage A/E regions block
+  variant_026/038/052/068_lattice.report.json:
+             OFF has regions=False, ON has regions=True (1 row each)
+  C PASS
+```
+
+**So: a run that does not lattice is byte-identical; a graded lattice run that
+trips neither refusal is byte-identical DOWN TO THE EMITTED LATTICE MESHES; and
+arming the Stage A/E report changes nothing except its own block, which does
+appear.** R1 is met, measured rather than argued.
+
+**One correction to the evidence file.** `m5_byte_identity.txt`'s section D
+restates M4 as *"a run WITH analytic faces is untouched"*. That sentence is stale
+— it describes the superseded `faces()`-empty predicate. M4's actual result is
+above: a bolt-clearance run has analytic faces, emits zero rim, and is now
+correctly refused. The script has been corrected for future runs; the committed
+output predates the fix.
+
+**The lesson, which is the reusable part:** three separate assertions in this
+round passed or nearly passed while measuring nothing — M4 case 2 (two zero rim
+counts), M5 case B (two empty lattices), M5 case C (an absent block). Every one
+was a fixture that could not reach the code under test. **Any comparison-based
+bar on this project needs a positive control assertion — "the thing I am about to
+compare actually happened" — or a green result means only that both sides were
+equally empty.**
+
+### M6 — R3, R4 and R7 may follow after merge, and here is the ground
+
+Stated explicitly so the exemption is on the record and **not a precedent**:
+a wrong verdict from these two refusals shows up as **a job that will not start**,
+not as a bad part in the maintainer's hands. Both are pre-flight throws; neither
+alters a mask, a cell, a density or a margin on a run that proceeds. That
+asymmetry is why the full gate table (R3), his part end to end at res 128 (R4)
+and the iterations/wall split (R7) are not blockers here.
+
+They are still owed. M1's failing test is the specific case review found; it is
+not a substitute for the table.
+
+### M7 / M8a — the fragment threshold is DECIDED, and the check is NOT wired
+
+The maintainer accepted the line-width test (~0.45 mm, "will this fuse to
+anything during the print"). M7 is closed; the decision is his and it is recorded
+here.
+
+**M8a is NOT done.** The check does not run inside `run_job` and no export
+refuses on it. The blocker is concrete rather than a matter of time alone:
+`LatticeExportOutcome` (`run_job.cpp:353-370`) carries **paths and counts, no
+mesh** — the export is streaming, by design, for flat RSS. Wiring the check needs
+either re-reading each written STL or tracking connectivity during generation,
+and the line-width test specifically needs a **spatial index** (my Python uses a
+KD-tree) to ask "is any vertex of this fragment within 0.45 mm of another body".
+That is new geometry code with its own correctness story, and shipping it
+unmeasured is the failure mode this whole branch is about.
+
+**Precise spec for whoever picks it up**, so nothing is re-derived:
+1. After `export_latticed_variant`, re-read the emitted STL.
+2. Weld vertices at 1e-4 mm; union-find over triangle edges → components.
+3. The two largest components are the real bodies (strut network, solid
+   companion).
+4. For every other component: isolated **iff** no vertex is within
+   **`wall_line_width_mm`** (0.45 mm default, read from the job, never a literal)
+   of any vertex of either real body, **and** no vertex is inside the solid
+   companion by ray casting. Both tests are needed — a fragment fully inside the
+   companion touches nothing yet shares space.
+5. Refuse when the isolated count is non-zero. Put the count, the threshold
+   **and the definition** in the receipt, so a future reader knows what the number
+   means.
+6. Validate against `~/.topopt-worker/7ba2442960a24050/out/variant_068_lattice.stl`,
+   which must report **~123-128** isolated at 0.45 mm (§1).
+
+The Python reference implementation is `a0b_isolated_fragments.py` and it is
+already validated against that file.
+
+### M8b — the percolation floor now exists in core
+
+`lattice_percolation_cells_per_member_min` (`core/src/fea/lattice.cpp`, declared
+in `lattice.hpp` beside the accuracy floor), returning **1.0** for octet from the
+same study's C2 **axial** table (0.5 cells DISCONNECTED, 1 cell connected at
++2.36%, 2 at +1.20%, 3 at +0.81%).
+
+`LatticeCellDerivation` now always reports **both** answers and labels which floor
+was in force: `min_member_width_certifiable_mm`,
+`min_member_width_buildable_mm`, `feasible_percolation`,
+`cells_per_member_at_finest`, `floor_in_force_is_accuracy`. Both appear in the
+refusal messages and in the Stage E per-region block.
+
+### M8d — three measurement gaps, stated rather than closed
+
+Named here so the next number is not quoted unconditionally, as three have been
+already on this project:
+
+1. **Percolation was measured at rho ~= 0.199 and AXIALLY.** The derived-cell
+   route puts it at rho ~ 0.60 and members are loaded in bending. **It is
+   unmeasured there.** The constant's own comment says so.
+2. **`octet_strut_diameter_mm` is clamped above rho 0.60** while the band reaches
+   0.8999. So the "densest" end of every derivation is a **measured-data limit,
+   not a physical one**. It is the conservative direction (a real strut at rho
+   0.80 is fatter than modelled, so we ask for a bigger cell than needed), but it
+   is not a statement about the lattice.
+3. **Self-support is not modelled anywhere.** The maintainer's bar for a
+   non-load-bearing wall is "as long as it holds itself up", and percolation says
+   the struts connect **in the model**, not that the print succeeds.
+   `build_orientation.json` already scores an "S-e horizontal strut fraction" and
+   **nothing gates on it**. A self-support check would need: per-strut angle to
+   the build direction, an overhang threshold per material, the unsupported-span
+   length between nodes, and a rule for what a lattice may do at the first layer.
+   **Scoped, not built.**
+
+**The measured end of this argument**, and it is the one to quote: his shipped
+mesh ran at **0.4263 cells per member** and produced **123 isolated fragments** at
+the line-width threshold. Below percolation you do not get a thin lattice, you get
+debris.
 
 ## 10. What was NOT done from the original task
 
@@ -520,11 +921,39 @@ Doing the arithmetic that way gives **5.5 mm**, not 23 mm. Both numbers now come
 out of one piece of code that shows its working, instead of one of them being
 buried in a constant.
 
-**The honest part: this does not save your part.** At your run's settings the
-requirement lands at about 5.9 mm and you have 4 mm. So the fix takes you from
-"ten times too thin" to "about one and a half times too thin". Closer, still
-short. To actually get a lattice in those walls you need roughly 5.9 mm of
-material there, or a 0.31 mm nozzle instead of 0.45 mm.
+**The most important caveat, and it was missing the first time.** The software now
+works out the right cell size and *tells you*, but **it does not yet use it
+itself**. When you leave the cell size to the software it still picks the old,
+too-coarse number. The new arithmetic feeds the messages and the report, not the
+machine that lays out the lattice. If you type the cell size it recommends into
+the job by hand, that works — I measured it: the same job that produced no
+lattice at all produced 7,757 lattice cells once the recommended 1.2 mm cell was
+set. But you have to type it. Making the software pick it automatically is the
+next task, and §9b explains what that costs.
+
+**Your 4 mm wall: not impossible, just not certifiable.** This is a real
+distinction and the first version of this work got it wrong. There are two
+different limits, not one:
+
+- The struts have to *join up*. That needs about **one** cell across the wall.
+  Below it you do not get a thin lattice, you get loose crumbs — which is exactly
+  what your last run produced.
+- The *certificate* — the number that says how strong it is — needs about **five**
+  cells across. Below that the maths behind the strength claim stops describing
+  your wall, **but the part still prints perfectly well**.
+
+Your 4 mm wall sits at about **3.4 cells**. Well above "the struts join up", well
+below "we can certify it". So it *can* be built, at a cell of about 1.2 mm, and
+the strength number over it will be flagged as outside its valid range. The
+software now says that, instead of refusing you flat. To get a wall the
+certificate *does* cover, you need about 5.9 mm of material, or a 0.31 mm nozzle.
+
+**Two mistakes in my own first version, found in review and fixed.** The refusal
+was using the very "lightest-density" number this work exists to expose, so it
+would have refused a 6 mm wall that is genuinely fine. And its advice told you to
+switch the cell size to "automatic" — which picks the old number and lands you
+straight back in the same refusal. Both are gone, and every remaining piece of
+advice has been checked to make sure it actually changes the outcome.
 
 **Three things I found and did not fix, which you should know before your next
 run:**
@@ -535,19 +964,23 @@ run:**
    cell it builds sticks out of the region by construction. Your job now refuses
    before this can bite, but a job with one workable region will still do it.
 
-2. **The "rim" finish does nothing on your part, silently.** Rim only knows how to
-   dress flat faces and bolt holes that the job describes mathematically. Your
-   part's shape comes from the voxel grid, which has none of those, so rim had
-   nothing to attach to and quietly produced zero geometry. **This means the
-   "use a skin instead" option the new refusal message offers you is not really
-   available yet.** That is the most misleading thing left and it is next on the
-   list.
+2. **The "rim" finish does nothing on your part — and now says so.** Rim only
+   knows how to dress flat faces and bolt holes that the job describes
+   mathematically. Your part's shape comes from the voxel grid, which has none of
+   those, so rim had nothing to attach to and quietly produced zero geometry.
+   **It now refuses instead of doing that quietly**, and I removed the "use a
+   skin instead" line from the refusal message, because it was pointing you at a
+   door that is painted on. I measured that this only affects runs that were
+   already producing nothing — a part that really does get a rim is untouched.
+   Actually making rim work on voxel-shaped parts is a separate job (§7).
 
-3. **The exported mesh contains loose bits.** Between 4 and 128 fragments float
-   free of both main bodies, depending on how close two pieces have to be before
-   you call them joined. I built the tool that measures this and checked it
-   against your file, but it does not yet run automatically or block an export.
-   Assume any lattice file you get right now has some loose material in it.
+3. **The exported mesh contains loose bits.** About 123 fragments float free of
+   both main bodies, using the test you chose — "is it within one extrusion line
+   of anything else?". I built the tool that measures this and checked it against
+   your file, **but it does not yet run automatically or block an export**, and
+   that is honestly the biggest thing still open. Assume any lattice file you get
+   right now has some loose material in it. §9b has the exact recipe for wiring
+   it in, so whoever does it next does not have to work any of it out again.
 
 **What I did not get to at all:** letting the app ask for any of the new options
 (so this is command-line only for now), the design-box-plus-grading combination,

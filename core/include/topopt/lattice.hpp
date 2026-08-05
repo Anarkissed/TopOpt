@@ -113,6 +113,27 @@ double lattice_rho_max(LatticeTopology topo);
 // that no emitted point sits below the floor (bar L2) is what catches a stale value.
 double lattice_cells_per_member_min(LatticeTopology topo);
 
+// ★ THE OTHER FLOOR, AND IT IS NOT THE ONE ABOVE. The minimum cells across a member
+// for the strut network to PERCOLATE — to be connected geometry at all. Measured for
+// octet in the same study as the accuracy floor (0.5 cells is DISCONNECTED, 1 cell is
+// connected at +2.36 % axial error), so it returns 1.0.
+//
+// WHY BOTH EXIST. They answer different questions and have different remedies:
+//   * lattice_cells_per_member_min (5) protects the CERTIFICATE. Below it the
+//     homogenized tensor stops describing the member, so the margin is not
+//     trustworthy — but the part still prints.
+//   * this one (1) protects the OBJECT. Below it there is no connected strut network
+//     to print, and what comes out of the generator is debris.
+// A member between them is BUILDABLE AND UNCERTIFIABLE. That is the regime sub-floor
+// retention exists for; it is emphatically NOT the same as un-latticeable, and a
+// pipeline that refuses both with one message is collapsing two verdicts that need
+// different answers.
+//
+// See the definition for its measurement conditions (rho ~= 0.199, AXIAL, octet only)
+// — they do not cover the top of the band or bending, and this must not be quoted
+// unconditionally.
+double lattice_percolation_cells_per_member_min(LatticeTopology topo);
+
 // ★ THE SUB-FLOOR RETENTION STRESS FRACTION — the ceiling on a REGION's macro stress,
 // as a fraction of the PART's peak von Mises, under which the grading law is permitted
 // to keep a below-the-floor voxel as lattice instead of falling back to solid
@@ -267,11 +288,38 @@ struct LatticeCellDerivation {
   double min_printable_cell_mm = 0.0;
   // The largest cell this member can homogenize: W / N*.
   double max_homogenizable_cell_mm = 0.0;
-  // ★ THE NUMBER A USER ACTS ON WHEN INFEASIBLE: N* x min_printable_cell_mm — the
-  // THINNEST member that can hold a certified lattice at this nozzle. A member below
-  // it is not latticeable at any (cell, rho) in the band, and the remedy is a thicker
-  // member (or a finer nozzle), not a different cell.
+  // ★ THE NUMBER A USER ACTS ON WHEN INFEASIBLE: `cells_per_member_floor` x
+  // min_printable_cell_mm — the THINNEST member that clears the floor IN FORCE at
+  // this nozzle. A member below it cannot meet that floor at any (cell, rho) in the
+  // band, and the remedy is a thicker member (or a finer nozzle), not a different
+  // cell.
   double min_member_width_mm = 0.0;
+
+  // ── THE TWO FLOORS, ANSWERED SEPARATELY (M8b). `min_member_width_mm` above uses
+  // whichever floor the caller put in force; these two are always both reported, so
+  // a caller never has to know which question it asked to read the answer.
+  //
+  //   CERTIFIABLE — lattice_cells_per_member_min x the smallest printable cell. The
+  //     thinnest member whose certificate the homogenized tensor can describe.
+  //   BUILDABLE   — lattice_percolation_cells_per_member_min x the same cell. The
+  //     thinnest member whose strut network is CONNECTED GEOMETRY at all.
+  //
+  // A member between them is BUILDABLE AND UNCERTIFIABLE: it prints, and the margin
+  // over it is out of regime. Reporting only the first collapses that case into
+  // "un-latticeable", which it is not — see `feasible_percolation` below.
+  double min_member_width_certifiable_mm = 0.0;
+  double min_member_width_buildable_mm = 0.0;
+  // Which floor produced `feasible` and `min_member_width_mm` — so a message can name
+  // the question it answered instead of leaving the reader to guess.
+  bool floor_in_force_is_accuracy = true;
+  // Does ANY (cell, rho) pair in the band clear PRINTABILITY and PERCOLATION? This is
+  // the genuine un-latticeability test. When it is false nothing can be built here at
+  // any setting; when it is true but `feasible` is false, the member is buildable and
+  // uncertifiable, which is a different verdict with a different remedy.
+  bool feasible_percolation = false;
+  // The member's span in cells at the smallest printable cell, against each floor.
+  // (Same number, two comparisons — reported so a receipt can show the margin.)
+  double cells_per_member_at_finest = 0.0;
 
   // ── THE ADMISSIBLE WINDOW, both ends (zero when infeasible) ────────────────────
   // DENSEST/FINEST end: the smallest admissible cell, at the lightest density that

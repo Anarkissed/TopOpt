@@ -320,6 +320,34 @@ double lattice_cells_per_member_min(LatticeTopology topo) {
   return 5.0;
 }
 
+double lattice_percolation_cells_per_member_min(LatticeTopology topo) {
+  // MEASURED for octet, from the SAME study as the accuracy floor above
+  // (handoff 2026-07-28-graded-cell-size-phase0, the C2 AXIAL table):
+  //   0.5 cells across -> DISCONNECTED: the member does not percolate at all
+  //   1   cell         -> +2.36 % axial error, CONNECTED
+  //   2   cells        -> +1.20 %
+  //   3   cells        -> +0.81 %
+  // So one cell is where the geometry first holds together. This is a DIFFERENT
+  // FLOOR FROM A DIFFERENT FAILURE MODE and the two must not be confused: the
+  // accuracy floor above protects the CERTIFICATE (a homogenized tensor stops
+  // describing the member), while this protects the OBJECT (below it there is no
+  // connected strut network to print). A member between the two is buildable and
+  // uncertifiable — that is exactly the regime sub-floor retention exists for, and
+  // it is not the same thing as un-latticeable.
+  //
+  // ★ PLACEHOLDER STATUS, stated because three numbers on this project have already
+  // been quoted without their conditions. This is measured for OCTET, at rho ~= 0.199
+  // and AXIALLY. It is NOT measured at the top of the band (rho ~ 0.60), where the
+  // derived-cell route puts it, and NOT in bending. It is forwarded for the other
+  // topologies with no independent measurement at all. Re-measure before treating a
+  // near-1.0 result as safe; and note the empirical end of the argument, which IS
+  // measured: the maintainer's shipped mesh ran at 0.4263 cells per member and
+  // produced 123 isolated fragments at the line-width threshold. Below percolation
+  // you do not get a thin lattice, you get debris.
+  (void)topo;
+  return 1.0;
+}
+
 double lattice_subfloor_retention_stress_fraction() {
   // MEASURED — handoff 2026-08-04-protect-freeze-vs-solidity §10, the six-station
   // flange sweep in `item8_subfloor_floor.txt`. The certified-margin movement from
@@ -474,12 +502,28 @@ LatticeCellDerivation lattice_derive_cell_for_member(
   d.cells_per_member_floor = cells_per_member_floor > 0.0
                                  ? cells_per_member_floor
                                  : lattice_cells_per_member_min(topo);
+  d.floor_in_force_is_accuracy =
+      !(cells_per_member_floor > 0.0) ||
+      cells_per_member_floor == lattice_cells_per_member_min(topo);
 
   // The two bounds. phi is monotone in rho, so the band's top gives the smallest
   // printable cell; N* against the measured width gives the largest homogenizable one.
   const double phi_hi = octet_strut_diameter_mm(d.band_rho_max, 1.0);
   d.min_printable_cell_mm = min_extrudable_width_mm / phi_hi;
   d.min_member_width_mm = d.cells_per_member_floor * d.min_printable_cell_mm;
+  // BOTH floors, always — see the declaration. The caller must never have to know
+  // which question it asked in order to read the answer.
+  d.min_member_width_certifiable_mm =
+      lattice_cells_per_member_min(topo) * d.min_printable_cell_mm;
+  d.min_member_width_buildable_mm =
+      lattice_percolation_cells_per_member_min(topo) * d.min_printable_cell_mm;
+  d.cells_per_member_at_finest = member_width_mm / d.min_printable_cell_mm;
+  // GENUINE un-latticeability: does any pair clear printability AND percolation? A
+  // member that fails THIS cannot be built at any setting. A member that clears it
+  // but fails `feasible` below is buildable and uncertifiable, which is a different
+  // verdict with a different remedy (M8c).
+  d.feasible_percolation =
+      member_width_mm >= d.min_member_width_buildable_mm;
   // +inf member width (voxel.hpp's "thicker than the EDT cap" sentinel) propagates to
   // +inf here, which is the honest reading: nothing bounds the cell from above.
   d.max_homogenizable_cell_mm = member_width_mm / d.cells_per_member_floor;

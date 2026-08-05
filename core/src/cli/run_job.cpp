@@ -692,6 +692,68 @@ LatticeExportOutcome export_latticed_variant(
     // geometry exists to get wrong.
     const std::vector<LatticeLevelSpec>* levels = nullptr,
     double base_cell_mm = 0.0, double printed_iso = 0.5) {
+  // ── M4: A SKIN MODE THAT PRODUCES NO GEOMETRY MUST SAY SO, NOT RETURN ZERO.
+  //
+  // ★ THE PREDICATE IS THE MEASURED COUNT, NOT A PREDICTION — and the first version
+  // of this guard got that wrong, in a way its own blast-radius test passed
+  // vacuously. It tested `boundary.faces().empty()`, reasoning that no faces means
+  // no face pairs means no rim. True but TOO NARROW: a job with a BOLT clearance has
+  // faces() = {one Bore} — non-empty, so the guard stayed silent — and still emits
+  // zero rim, because the dispatch at lattice_gen.cpp:944-961 pairs faces and only
+  // Plane-Plane (emit_rim_line) or Plane-Bore (emit_rim_torus) produce anything;
+  // "bore-bore pairs meet nowhere a rim can ride". Measured: m4_blast_radius.txt
+  // case 2, base and branch both rim_triangles=0, and the guard did not fire.
+  //
+  // Checking the count the generator ACTUALLY produced makes the blast radius exact
+  // by construction rather than by argument: it fires on precisely the set of runs
+  // that emitted nothing, which cannot include any run that emitted something.
+  //
+  // ROOT CAUSE OF THE ZERO ITSELF (handoff §7, evidence b3_rim_root_cause.md), and
+  // it is broader than that section first said. Rim geometry needs at least one
+  // PLANE face. Planes enter faces_ only via LatticeBoundary::add_half_space
+  // (lattice_boundary.cpp:122); add_keep_out (:160) contributes a Bore, and only for
+  // ClearanceKind::Bolt. lattice_boundary_for (this file, ~:568-586) builds every
+  // optimize/lattice run's boundary from set_voxel_base + keep-outs + roles and
+  // NEVER calls add_half_space or add_box, and roles contribute no analytic faces
+  // (lattice_boundary.hpp:242-245). So on THIS path there is never a Plane, and rim
+  // and skin geometry are structurally unreachable on EVERY such run — not merely
+  // on voxel-derived parts without bolt clearances.
+  //
+  // The maintainer's overnight run asked for skin "rim" and got rim_triangles 0,
+  // skin_triangles 0, rim_volume_mm3 0, anchor_nodes 0 beside a non-zero interior
+  // volume, silently. This branch's own pre-flight refusal used to offer a skin as
+  // the alternative when a lattice would not fit, so it was recommending a door that
+  // is painted on. That offer is gone (M2) and this is the backstop.
+  //
+  // ROOT CAUSE (handoff §7, evidence b3_rim_root_cause.md). The rim and the skin
+  // are emitted ONLY where ANALYTIC boundary faces meet: emit_rim_edge
+  // (lattice_gen.cpp:598-666) indexes `B->faces()`, and emit_rim_torus dresses a
+  // PLANE against a BORE. `faces_` is filled in exactly two places —
+  // lattice_boundary.cpp:122 (add_half_space) and :160 (add_keep_out, and ONLY for
+  // ClearanceKind::Bolt; a slab keep-out records -1, "no wall to dress"). But
+  // lattice_boundary_for (this file, ~:568-586) builds the boundary from
+  // set_voxel_base + keep-outs + roles and NEVER calls add_half_space or add_box,
+  // and roles are documented to contribute no analytic faces
+  // (lattice_boundary.hpp:242-245).
+  //
+  // So on a voxel-derived design with no BOLT clearance, `faces()` is empty and the
+  // rim, the skin and the anchor nodes are all structurally unreachable. The
+  // maintainer's overnight run asked for skin "rim" and got rim_triangles 0,
+  // skin_triangles 0, rim_volume_mm3 0, anchor_nodes 0 — silently, beside a
+  // non-zero interior volume. Worse, this branch's own pre-flight refusal offers a
+  // skin as the alternative when a lattice will not fit, so it was recommending a
+  // door that is painted on.
+  //
+  // BLAST RADIUS, measured rather than argued (evidence m4_blast_radius.txt): this
+  // fires if and only if `faces()` is empty, and a boundary with no faces cannot
+  // execute a single line of rim or skin emission — both generators iterate face
+  // PAIRS. So the set of runs it refuses is exactly the set that produces zero rim
+  // and zero skin geometry today. No run that currently emits a rim can reach it.
+  //
+  // It is a REFUSAL and not a warning because the shell finish is always available
+  // and silently shipping an undressed part is how this cost a night in the first
+  // place. `skin: "none"` is the explicit way to ask for no dressing.
+
   // Occupancy + boundary: the shared predicate (`boundary`, built by the caller
   // from THIS variant's density + the declared clearance keep-outs + the job's
   // lattice role regions). Cells activate by OVERLAP with it; strut solids are
@@ -2713,6 +2775,32 @@ LatticeVariantOutcome lattice_one_variant(
       levels.empty() ? nullptr : &levels,
       levels.empty() ? 0.0 : gf.cell_plan.base_cell_mm, printed_iso);
   R.gen_seconds = wall_seconds() - tg0;
+
+  // ── M4: A SKIN MODE THAT PRODUCED NOTHING MUST SAY SO. The full root cause and
+  // why the predicate is the MEASURED count rather than a prediction are on
+  // export_latticed_variant. In short: the first version tested
+  // `boundary.faces().empty()`, which is too narrow — a BOLT clearance makes
+  // faces() non-empty while still emitting zero rim, because the dispatch
+  // (lattice_gen.cpp:944-961) needs a PLANE and lattice_boundary_for never makes
+  // one. Testing what the generator actually wrote makes the blast radius exact by
+  // construction: it cannot fire on a run that emitted geometry.
+  if (job.lattice.skin != "none" &&
+      R.oc.stats.rim_triangles + R.oc.stats.skin_triangles == 0)
+    throw JobError(
+        "lattice \"skin\": \"" + job.lattice.skin +
+        "\" produced NO geometry on this part (rim_triangles 0, skin_triangles "
+        "0), so refusing rather than silently exporting an undressed lattice "
+        "under a finish the job asked for.\n"
+        "  The rim/skin finish rides pairs of ANALYTIC boundary faces, and at "
+        "least one of each pair must be a PLANE. This run's lattice boundary is "
+        "built from the voxel silhouette plus clearances and lattice roles, none "
+        "of which contribute a plane, so there was nothing for the finish to ride "
+        "and every rim/skin/anchor count came out 0.\n"
+        "  This is a known gap, not a bad job: dressing a voxel silhouette needs "
+        "either analytic faces fitted to it or a voxel-native rim law, and "
+        "neither exists yet (handoff 2026-08-05-lattice-cell-size-adaptation §7).\n"
+        "  Set \"skin\": \"none\" to export the lattice undressed, which is what "
+        "this job actually produced.");
 
   // ── THE AUDIT (design-box runs only, so no existing receipt changes). Measure,
   // against the geometry that was just written, the two things the whole H1b
@@ -5415,6 +5503,13 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
         else cell_mm = std::max(job.grading.cell_mm, floor_mm);
       }
       const double required_mm = n_star * cell_mm;
+      // The stated bead width the derivation is evaluated at. A uniform job carries
+      // it on the lattice block; a graded job on the grading block. 0 means the job
+      // never stated one, and then no derivation is possible — the refusal below
+      // does not fire and the forecast is all that is reported.
+      const double w_min_fc = job.grading.present
+                                  ? job.grading.min_extrudable_width_mm
+                                  : job.lattice.min_extrudable_width_mm;
       int thin_regions = 0, include_regions = 0;
       double thinnest_mm = std::numeric_limits<double>::infinity();
       for (std::size_t ri = 0; ri < job.lattice.regions.size(); ++ri) {
@@ -5482,79 +5577,166 @@ RunJobResult run_job(const JobDescription& job, const std::string& job_dir,
       // statement that no such pair exists WITH the arithmetic. Both come from
       // lattice_derive_cell_for_member (lattice.hpp), evaluated at the thinnest
       // declared extent — the same core law, read at run time, no literal here.
-      if (include_regions > 0 && thin_regions == include_regions) {
-        // The stated bead width governs the derivation. A uniform job carries it on
-        // the lattice block; a graded job on the grading block.
-        const double w_min = job.grading.present
-                                 ? job.grading.min_extrudable_width_mm
-                                 : job.lattice.min_extrudable_width_mm;
-        std::string msg =
-            "every declared lattice include region is too thin to hold a "
-            "certifiable lattice at this cell size, so this run cannot put "
-            "lattice anywhere you asked for it — refusing before spending a "
-            "solve.\n";
-        msg += "  regions declared (include): " + std::to_string(include_regions) +
-               ", all of them too thin\n";
-        msg += "  planned cell: " + json_num(cell_mm) + " mm; cells-per-member "
-               "floor " + json_num(n_star) + " => required member " +
-               json_num(required_mm) + " mm\n";
-        msg += "  thinnest declared region: " + json_num(thinnest_mm) + " mm\n";
-        if (w_min > 0.0) {
-          const LatticeCellDerivation d =
-              lattice_derive_cell_for_member(topo, thinnest_mm, w_min);
-          if (d.feasible) {
-            // A SMALLER cell rescues it. Name the window's two ends: the coarsest
-            // (lightest) cell that still homogenizes, and the finest that still
-            // prints.
-            msg += "  A SMALLER CELL WOULD WORK. At a " + json_num(w_min) +
-                   " mm extrudable width this region admits cells from " +
-                   json_num(d.min_printable_cell_mm) + " mm to " +
-                   json_num(d.max_homogenizable_cell_mm) + " mm.\n";
-            msg += "    lightest: cell " + json_num(d.lightest_cell_size_mm) +
-                   " mm at relative density " +
-                   json_num(d.lightest_relative_density) + " (strut " +
-                   json_num(d.lightest_strut_diameter_mm) + " mm, " +
-                   json_num(d.lightest_cells_per_member) + " cells per member)\n";
-            msg += "    finest:   cell " + json_num(d.densest_cell_size_mm) +
-                   " mm at relative density " +
-                   json_num(d.densest_relative_density) + " (strut " +
-                   json_num(d.densest_strut_diameter_mm) + " mm, " +
-                   json_num(d.densest_cells_per_member) + " cells per member)\n";
-            msg += "    Set \"cell_mm\" in the lattice block to a value in that "
-                   "range, or use \"cell_mode\": \"auto\" on a grading block and "
-                   "let core choose it.\n";
-          } else {
-            // NO pair exists. Show the two bounds that cross, and both levers.
-            msg += "  NO (cell, density) PAIR IN THE CERTIFIABLE BAND FITS THIS "
-                   "THICKNESS AT THIS NOZZLE.\n";
-            msg += "    smallest cell any certifiable strut prints at (" +
-                   json_num(w_min) + " mm bead): " +
-                   json_num(d.min_printable_cell_mm) + " mm\n";
-            msg += "    largest cell a " + json_num(thinnest_mm) +
-                   " mm member can homogenize: " +
-                   json_num(d.max_homogenizable_cell_mm) + " mm\n";
-            msg += "    the two bounds cross, so no cell satisfies both.\n";
-            msg += "  WHAT WOULD CHANGE THE ANSWER (your call, not this "
-                   "pipeline's):\n";
-            msg += "    * thicken the region to at least " +
-                   json_num(d.min_member_width_mm) + " mm; or\n";
-            msg += "    * use a nozzle/bead of at most " +
-                   json_num((thinnest_mm / n_star) *
-                            octet_strut_diameter_mm(lattice_rho_max(topo), 1.0)) +
-                   " mm; or\n";
-            msg += "    * dress the region with a SKIN instead of a lattice — an "
-                   "option offered here, never substituted automatically.\n";
+      //
+      // ── WHAT REVIEW CHANGED (M1 / M8c). The trigger above USED TO BE
+      // `thin_regions == include_regions`, where `thin` meant "thinner than N* x
+      // the planned cell" and the planned cell on a graded AUTO job is
+      // lattice_cell_printability_floor_mm — evaluated at rho_MIN. That is exactly
+      // the hidden condition §3 of this task took apart, used as a refusal trigger.
+      // It refused a graded AUTO job whose regions were 6 mm while this task's own
+      // derivation says 5.4748 mm is feasible: a NEW refusal, on a path that
+      // previously ran, on a job Stage A calls fine.
+      //
+      // THE TRIGGER IS NOW THE DERIVATION, and it distinguishes THREE cases that
+      // the single test collapsed. Two floors govern, and they are different
+      // failure modes with different remedies (lattice.hpp):
+      //   PERCOLATION (~1 cell) — below it there is no connected strut network.
+      //     The generator emits debris. His shipped mesh ran at 0.4263 cells per
+      //     member and carried 123 isolated fragments.
+      //   ACCURACY (5 cells)    — below it the homogenized tensor stops describing
+      //     the member. The part still PRINTS; the certificate is out of regime.
+      //
+      //   (A) No (cell, rho) pair clears PRINTABILITY and PERCOLATION.
+      //       Genuinely un-latticeable at any setting -> REFUSE.
+      //   (B) A pair exists, but the PLANNED cell does not percolate in these
+      //       regions -> REFUSE, with a DISTINCT message: the cell is wrong, not
+      //       the part. Chosen over proceeding because proceeding is precisely
+      //       what shipped him debris — 0.5 cells per member, 123 loose
+      //       fragments, a night of solve. A run that can be fixed by one number
+      //       in the job should say that number, not print rubble.
+      //   (C) The planned cell percolates but sits below the ACCURACY floor.
+      //       Buildable and uncertifiable — the regime sub-floor retention exists
+      //       for. NOT refused: reported loudly and left to the opt-in. This is
+      //       the case that was wrongly refused, and it is where his 4 mm back
+      //       wall actually sits.
+      if (include_regions > 0 && w_min_fc > 0.0) {
+        const double perc_floor = lattice_percolation_cells_per_member_min(topo);
+        const LatticeCellDerivation d =
+            lattice_derive_cell_for_member(topo, thinnest_mm, w_min_fc);
+        // Does the PLANNED cell percolate across the thinnest declared region?
+        const double planned_cpm = thinnest_mm / cell_mm;
+        const bool planned_percolates = planned_cpm >= perc_floor;
+
+        std::string msg;
+        if (!d.feasible_percolation) {
+          // (A) — nothing can be built here at any setting.
+          msg = "every declared lattice include region is too thin to hold a "
+                "CONNECTED lattice at any cell size or density this library "
+                "carries, so nothing printable can go where you asked — refusing "
+                "before spending a solve.\n";
+          msg += "  regions declared (include): " +
+                 std::to_string(include_regions) + ", thinnest " +
+                 json_num(thinnest_mm) + " mm\n";
+          msg += "  smallest cell any certifiable strut prints at (" +
+                 json_num(w_min_fc) + " mm bead): " +
+                 json_num(d.min_printable_cell_mm) + " mm\n";
+          msg += "  a connected strut network needs " + json_num(perc_floor) +
+                 " cell(s) across => at least " +
+                 json_num(d.min_member_width_buildable_mm) + " mm of material; "
+                 "your thinnest region has " + json_num(thinnest_mm) + " mm.\n";
+          msg += "  WHAT WOULD CHANGE THE ANSWER (your call, not this "
+                 "pipeline's):\n";
+          msg += "    * thicken the region to at least " +
+                 json_num(d.min_member_width_buildable_mm) +
+                 " mm to get a connected lattice, or " +
+                 json_num(d.min_member_width_certifiable_mm) +
+                 " mm to get a CERTIFIED one; or\n";
+          msg += "    * use a nozzle/bead of at most " +
+                 json_num((thinnest_mm / perc_floor) *
+                          octet_strut_diameter_mm(lattice_rho_max(topo), 1.0)) +
+                 " mm.\n";
+          // ── M2: EVERY REMEDY A REFUSAL NAMES MUST CHANGE THE OUTCOME.
+          // A SKIN is deliberately NOT offered here. It was, and it should not
+          // have been: the rim/skin finish dresses only ANALYTIC boundary faces,
+          // and a voxel-derived part with no bolt clearance has none, so a skin
+          // produces exactly zero geometry there (handoff §7). Recommending it
+          // sent the user to a door that is painted on. It is named as
+          // UNAVAILABLE rather than omitted, so nobody re-adds it.
+          msg += "  NOT AVAILABLE as an alternative on this part: a SKIN / RIM "
+                 "finish. It dresses analytic faces (flat planes, bolt bores) "
+                 "and this part's boundary comes from the voxel grid, so it "
+                 "would emit nothing at all. The export refuses it rather than "
+                 "producing an undressed part silently.\n";
+        } else if (!planned_percolates) {
+          // (B) — the CELL is wrong, and a working range exists. Name it.
+          msg = "the planned lattice cell is too COARSE for the regions you "
+                "declared: the strut network would not be connected there, so "
+                "this run would emit loose fragments rather than a lattice — "
+                "refusing before spending a solve.\n";
+          msg += "  regions declared (include): " +
+                 std::to_string(include_regions) + ", thinnest " +
+                 json_num(thinnest_mm) + " mm\n";
+          msg += "  planned cell " + json_num(cell_mm) + " mm gives " +
+                 json_num(planned_cpm) + " cells across that region; a connected "
+                 "network needs at least " + json_num(perc_floor) + ".\n";
+          msg += "  A SMALLER CELL WORKS. At a " + json_num(w_min_fc) +
+                 " mm bead this region admits cells from " +
+                 json_num(d.min_printable_cell_mm) + " mm (printability) up to " +
+                 json_num(thinnest_mm / perc_floor) +
+                 " mm (percolation).\n";
+          msg += "    Set \"cell_mm\" in the lattice block to a value in that "
+                 "range.\n";
+          if (thinnest_mm < d.min_member_width_certifiable_mm) {
+            msg += "  NOTE — a lattice in that range will be CONNECTED but NOT "
+                   "CERTIFIED: this region needs " +
+                   json_num(d.min_member_width_certifiable_mm) +
+                   " mm to clear the cells-per-member accuracy floor and has " +
+                   json_num(thinnest_mm) +
+                   " mm. The margin over it is out of regime. That is what "
+                   "\"retain_subfloor_in_unloaded_regions\" is for — read the "
+                   "exposure it reports before arming it.\n";
           }
         } else {
-          msg += "  (no minimum extrudable width was stated, so the admissible "
-                 "cell range cannot be derived; state "
-                 "\"min_extrudable_width_mm\" to get it)\n";
+          // (C) — percolates. Not a refusal. Report and continue.
+          //
+          // TWO SUB-CASES, and the second is the one M3 is about. The planned cell
+          // still comes from lattice_cell_printability_floor_mm (rho_MIN); the
+          // derivation is REPORTING-ONLY and feeds no cell selection. So a region
+          // can be comfortably above the certifiable minimum and STILL have every
+          // voxel rejected, because the planned cell is far coarser than the one
+          // the derivation would pick. Saying so here costs a printf and saves a
+          // whole solve — which is the entire point of a pre-flight.
+          if (thinnest_mm >= d.min_member_width_certifiable_mm &&
+              planned_cpm < n_star) {
+            std::fprintf(
+                stderr,
+                "[lattice] NOTE: the thinnest declared include region (%.3f mm) IS "
+                "thick enough for a CERTIFIED lattice — it needs %.3f mm and has "
+                "%.3f mm — but the planned %.4f mm cell puts only %.2f cells across "
+                "it, under the %.2f-cell accuracy floor, so the grading law will "
+                "reject it and emit no lattice.\n"
+                "[lattice]       The cell is what is wrong, not the part. A cell of "
+                "%.4f mm at relative density %.4f (strut %.4f mm) puts %.2f cells "
+                "across this region and certifies. Set \"cell_mm\" in the lattice "
+                "block to that value.\n"
+                "[lattice]       (\"cell_mode\": \"auto\" will NOT do this — it "
+                "selects the printability floor at the band's LIGHTEST density, "
+                "%.4f mm, which is how you got here.)\n",
+                thinnest_mm, d.min_member_width_certifiable_mm, thinnest_mm,
+                cell_mm, planned_cpm, n_star, d.lightest_cell_size_mm,
+                d.lightest_relative_density, d.lightest_strut_diameter_mm,
+                d.lightest_cells_per_member, cell_mm);
+          }
+          if (thinnest_mm < d.min_member_width_certifiable_mm)
+            std::fprintf(
+                stderr,
+                "[lattice] NOTE: the thinnest declared include region (%.3f mm) "
+                "percolates at the planned %.4f mm cell (%.2f cells across, floor "
+                "%.2f) but is BELOW the %.2f-cell accuracy floor, which needs "
+                "%.3f mm. The lattice will be built and the certificate over it "
+                "will be OUT OF REGIME. This is reported, not refused — see "
+                "\"retain_subfloor_in_unloaded_regions\".\n",
+                thinnest_mm, cell_mm, planned_cpm, perc_floor, n_star,
+                d.min_member_width_certifiable_mm);
+          std::fflush(stderr);
         }
-        msg += "  To proceed anyway with lattice OUTSIDE your declared regions, "
-               "remove the include regions from the lattice block — but read the "
-               "receipt first: this run would have put every cell in material you "
-               "did not select.";
-        throw JobError(msg);
+        if (!msg.empty()) {
+          msg += "  To proceed anyway with lattice OUTSIDE your declared regions, "
+                 "remove the include regions from the lattice block — but read "
+                 "the receipt first: this run would have put every cell in "
+                 "material you did not select.";
+          throw JobError(msg);
+        }
       }
     }
   }
